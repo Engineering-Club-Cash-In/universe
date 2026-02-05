@@ -25,6 +25,8 @@ interface InspectionContextType {
   setPhotos: (photos: PhotoData[]) => void;
   sectionTimes: SectionTimes;
   setSectionTimes: (times: SectionTimes | ((prev: SectionTimes) => SectionTimes)) => void;
+  rejectionEvidenceUrl?: string;
+  setRejectionEvidenceUrl: (url: string | undefined) => void;
   currentStep: number;
   setCurrentStep: (step: number) => void;
   resetInspection: () => void;
@@ -36,6 +38,7 @@ interface StoredData {
   items360: Inspection360Item[];
   photos: PhotoData[];
   sectionTimes: SectionTimes;
+  rejectionEvidenceUrl?: string; // Add to stored data
   currentStep: number;
   savedAt: string;
 }
@@ -47,6 +50,7 @@ const serializeForStorage = (
   items360: Inspection360Item[],
   photos: PhotoData[],
   sectionTimes: SectionTimes,
+  rejectionEvidenceUrl: string | undefined, // Add arg
   currentStep: number
 ): StoredData => {
   return {
@@ -67,6 +71,7 @@ const serializeForStorage = (
       noCommentsChecked: p.noCommentsChecked,
     })),
     sectionTimes,
+    rejectionEvidenceUrl,
     currentStep,
     savedAt: new Date().toISOString(),
   };
@@ -85,6 +90,7 @@ const deserializeFromStorage = (stored: StoredData) => {
     items360: stored.items360 || [],
     photos: stored.photos || [],
     sectionTimes: stored.sectionTimes || {},
+    rejectionEvidenceUrl: stored.rejectionEvidenceUrl,
     currentStep: stored.currentStep || 0,
   };
 };
@@ -114,17 +120,18 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [items360, setItems360] = useState<Inspection360Item[]>(initialData.items360 || []);
   const [photos, setPhotos] = useState<PhotoData[]>(initialData.photos);
   const [sectionTimes, setSectionTimes] = useState<SectionTimes>(initialData.sectionTimes);
+  const [rejectionEvidenceUrl, setRejectionEvidenceUrl] = useState<string | undefined>(initialData.rejectionEvidenceUrl);
   const [currentStep, setCurrentStep] = useState<number>(initialData.currentStep);
 
   // Guardar automáticamente cuando cambian los datos
   useEffect(() => {
-    const dataToSave = serializeForStorage(formData, checklistItems, items360, photos, sectionTimes, currentStep);
+    const dataToSave = serializeForStorage(formData, checklistItems, items360, photos, sectionTimes, rejectionEvidenceUrl, currentStep);
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
     } catch (e) {
       console.error('Error saving inspection draft:', e);
     }
-  }, [formData, checklistItems, items360, photos, sectionTimes, currentStep]);
+  }, [formData, checklistItems, items360, photos, sectionTimes, rejectionEvidenceUrl, currentStep]);
 
   const resetInspection = () => {
     setFormData({});
@@ -132,6 +139,7 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     setItems360([]);
     setPhotos([]);
     setSectionTimes({});
+    setRejectionEvidenceUrl(undefined);
     setCurrentStep(0);
     localStorage.removeItem(STORAGE_KEY);
   };
@@ -149,6 +157,8 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         setPhotos,
         sectionTimes,
         setSectionTimes,
+        rejectionEvidenceUrl,
+        setRejectionEvidenceUrl,
         currentStep,
         setCurrentStep,
         resetInspection,

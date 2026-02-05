@@ -18,6 +18,8 @@ export interface VehicleData {
   fuelType: 'Gasolina' | 'Diesel' | 'Eléctrico' | 'Híbrido';
   transmission: 'Automático' | 'Manual';
   companyId?: string | null;
+  trim?: string;
+  traction?: string;
 }
 
 export interface InspectionData {
@@ -35,6 +37,7 @@ export interface InspectionData {
   testDrive: boolean;
   noTestDriveReason?: string;
   sectionTimes?: Record<string, number>;
+  rejectionEvidenceUrl?: string;
 }
 
 export interface ChecklistItem {
@@ -68,7 +71,7 @@ export const createFullInspection = async (
       checklistItems,
       photos
     });
-    
+
     return {
       success: true,
       data: response
@@ -83,7 +86,7 @@ export const createFullInspection = async (
 };
 
 // Helper function to convert form data to API format
-export const prepareInspectionData = (formData: any, sectionTimes?: Record<string, number>) => {
+export const prepareInspectionData = (formData: any, sectionTimes?: Record<string, number>, rejectionEvidenceUrl?: string) => {
   const vehicleData: VehicleData = {
     make: formData.vehicleMake,
     model: formData.vehicleModel,
@@ -100,6 +103,8 @@ export const prepareInspectionData = (formData: any, sectionTimes?: Record<strin
     engineCC: formData.engineCC,
     fuelType: formData.fuelType,
     transmission: formData.transmission,
+    trim: formData.trim,
+    traction: formData.traction,
   };
 
   const inspectionData: InspectionData = {
@@ -117,6 +122,7 @@ export const prepareInspectionData = (formData: any, sectionTimes?: Record<strin
     testDrive: formData.testDrive === 'Sí',
     noTestDriveReason: formData.noTestDriveReason,
     sectionTimes: sectionTimes || {},
+    rejectionEvidenceUrl: rejectionEvidenceUrl,
   };
 
   return { vehicleData, inspectionData };

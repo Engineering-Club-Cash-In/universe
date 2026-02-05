@@ -56,7 +56,7 @@ const STEPS = [
 ];
 
 export default function VehicleInspectionWizard() {
-  const { formData, checklistItems, photos, sectionTimes, resetInspection, currentStep, setCurrentStep, items360 } = useInspection();
+  const { formData, checklistItems, photos, sectionTimes, resetInspection, currentStep, setCurrentStep, items360, rejectionEvidenceUrl } = useInspection();
   const [basicInfoCompleted, setBasicInfoCompleted] = useState(false);
   const vehicleFormRef = useRef<VehicleInspectionFormRef>(null);
   const [checklistCompleted, setChecklistCompleted] = useState(false);
@@ -120,7 +120,7 @@ export default function VehicleInspectionWizard() {
 
     try {
       // Prepare data for submission
-      const { vehicleData, inspectionData } = prepareInspectionData(dataToUse, sectionTimes);
+      const { vehicleData, inspectionData } = prepareInspectionData(dataToUse, sectionTimes, rejectionEvidenceUrl);
 
       // Call the API to create the full inspection
       const result = await createFullInspection(

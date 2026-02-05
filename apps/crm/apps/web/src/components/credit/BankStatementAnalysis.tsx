@@ -51,8 +51,7 @@ export function BankStatementAnalysis({
 	const hasSuccessfulAnalysis =
 		existingAnalysis != null && existingAnalysis.analyzedAt != null;
 	const attemptCount = existingAnalysis?.attemptCount ?? 0;
-	const canAnalyze =
-		!hasSuccessfulAnalysis && attemptCount < MAX_AI_ATTEMPTS;
+	const canAnalyze = !hasSuccessfulAnalysis && attemptCount < MAX_AI_ATTEMPTS;
 
 	const analyzeMutation = useMutation({
 		mutationFn: async () => {
@@ -288,12 +287,12 @@ export function BankStatementAnalysis({
 					)}
 				</Button>
 				{hasSuccessfulAnalysis && (
-					<p className="text-center text-xs text-green-600">
+					<p className="text-center text-green-600 text-xs">
 						Análisis completado exitosamente.
 					</p>
 				)}
 				{!hasSuccessfulAnalysis && attemptCount >= MAX_AI_ATTEMPTS && (
-					<p className="text-center text-xs text-muted-foreground">
+					<p className="text-center text-muted-foreground text-xs">
 						Se alcanzó el límite de {MAX_AI_ATTEMPTS} intentos. Contacte al
 						administrador.
 					</p>

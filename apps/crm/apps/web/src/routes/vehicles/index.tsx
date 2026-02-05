@@ -341,7 +341,12 @@ function VehiclesDashboard() {
 		transmission: "",
 		kmMileage: 0,
 		isNew: false,
-		status: "pending" as "pending" | "available" | "sold" | "maintenance" | "auction",
+		status: "pending" as
+			| "pending"
+			| "available"
+			| "sold"
+			| "maintenance"
+			| "auction",
 		// Campos para contratos legales
 		seats: null as number | null,
 		doors: null as number | null,
@@ -600,7 +605,9 @@ function VehiclesDashboard() {
 														<TableCell>
 															<div className="flex flex-col gap-1">
 																{renderNewVehicleBadges(vehicle)}
-																{renderVehicleStatusBadge(vehicle.status || "pending")}
+																{renderVehicleStatusBadge(
+																	vehicle.status || "pending",
+																)}
 																{latestInspection && (
 																	<span className="text-muted-foreground text-xs">
 																		Inspección:{" "}
@@ -1858,7 +1865,14 @@ function VehiclesDashboard() {
 								<Label htmlFor="edit-status">Estado *</Label>
 								<Select
 									value={editVehicleForm.status}
-									onValueChange={(value: "pending" | "available" | "sold" | "maintenance" | "auction") =>
+									onValueChange={(
+										value:
+											| "pending"
+											| "available"
+											| "sold"
+											| "maintenance"
+											| "auction",
+									) =>
 										setEditVehicleForm({
 											...editVehicleForm,
 											status: value,
@@ -1872,31 +1886,41 @@ function VehiclesDashboard() {
 										<SelectItem value="pending">
 											<div className="flex flex-col">
 												<span className="font-medium">Pendiente</span>
-												<span className="text-muted-foreground text-xs">En espera o Próximo a la venta</span>
+												<span className="text-muted-foreground text-xs">
+													En espera o Próximo a la venta
+												</span>
 											</div>
 										</SelectItem>
 										<SelectItem value="available">
 											<div className="flex flex-col">
 												<span className="font-medium">Disponible</span>
-												<span className="text-muted-foreground text-xs">Listo para venta o financiamiento</span>
+												<span className="text-muted-foreground text-xs">
+													Listo para venta o financiamiento
+												</span>
 											</div>
 										</SelectItem>
 										<SelectItem value="sold">
 											<div className="flex flex-col">
 												<span className="font-medium">Vendido</span>
-												<span className="text-muted-foreground text-xs">Vehículo ya fue vendido/financiado</span>
+												<span className="text-muted-foreground text-xs">
+													Vehículo ya fue vendido/financiado
+												</span>
 											</div>
 										</SelectItem>
 										<SelectItem value="maintenance">
 											<div className="flex flex-col">
 												<span className="font-medium">En Mantenimiento</span>
-												<span className="text-muted-foreground text-xs">En reparación o servicio técnico</span>
+												<span className="text-muted-foreground text-xs">
+													En reparación o servicio técnico
+												</span>
 											</div>
 										</SelectItem>
 										<SelectItem value="auction">
 											<div className="flex flex-col">
 												<span className="font-medium">En Remate</span>
-												<span className="text-muted-foreground text-xs">Disponible para subasta/remate</span>
+												<span className="text-muted-foreground text-xs">
+													Disponible para subasta/remate
+												</span>
 											</div>
 										</SelectItem>
 									</SelectContent>

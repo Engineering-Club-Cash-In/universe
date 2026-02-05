@@ -13,8 +13,12 @@ import {
 } from '../types/contract';
 import { GenderTranslator, Gender, MaritalStatus } from './GenderTranslator';
 import { documensoService } from './DocumensoService';
+import { WeeTrustService } from './WeeTrustService';
 import { getRequiredEmailCount } from '../config/docusealConfig';
 import { crmApiService } from './CrmApiService';
+
+// Instancia de WeeTrust (servicio principal de firma)
+const weeTrustService = new WeeTrustService();
 
 /**
  * Servicio genérico para generación de contratos desde templates DOCX
@@ -562,7 +566,7 @@ export class ContractGeneratorService {
         }
       }
 
-      // 12. Integración con Documenso (si se proporcionaron emails y se generó PDF)
+      // 12. Integración con firma electrónica (WeeTrust principal, Documenso fallback)
       let signing: {
         signs: string[];
         linkDocument: string;
@@ -570,19 +574,20 @@ export class ContractGeneratorService {
        } | undefined;
       let signingLinks: string[] | undefined;
       let shouldCleanupFiles = false;
+      let signingProvider: 'weetrust' | 'documenso' | undefined;
 
       if (options.emails && options.emails.length > 0 && pdfBuffer) {
+        // Validar número de emails
+        const requiredEmails = getRequiredEmailCount(contractType);
+        if (options.emails.length !== requiredEmails) {
+          console.warn(`⚠ Se esperaban ${requiredEmails} email(s) pero se recibieron ${options.emails.length}`);
+        }
+
+        // Intentar primero con WeeTrust
         try {
-          console.log(`🔗 Creando documento en Documenso para firma...`);
+          console.log(`🔗 Creando documento en WeeTrust para firma...`);
 
-          // Validar número de emails
-          const requiredEmails = getRequiredEmailCount(contractType);
-          if (options.emails.length !== requiredEmails) {
-            console.warn(`⚠ Se esperaban ${requiredEmails} email(s) pero se recibieron ${options.emails.length}`);
-          }
-
-          // Crear documento y obtener links de firma (detección automática de posiciones)
-          signing = await documensoService.createDocumentAndGetSigningLinks(
+          signing = await weeTrustService.createDocumentForSigning(
             baseFilename,
             pdfBuffer,
             contractType,
@@ -590,14 +595,35 @@ export class ContractGeneratorService {
           );
 
           signingLinks = signing.signs ?? [];
+          signingProvider = 'weetrust';
 
-          console.log(`✓ ${signingLinks.length} link(s) de firma generados`);
-
-          // Marcar para limpieza: archivo subido exitosamente a Documenso/R2
+          console.log(`✓ WeeTrust: ${signingLinks.length} link(s) de firma generados`);
           shouldCleanupFiles = true;
-        } catch (documensoError) {
-          console.error('⚠ Error al crear documento en Documenso:', documensoError);
-          // No fallar si Documenso falla, los archivos ya están generados
+
+        } catch (weeTrustError) {
+          console.error('⚠ Error con WeeTrust, intentando Documenso como fallback:', weeTrustError);
+
+          // Fallback a Documenso
+          try {
+            console.log(`🔗 Creando documento en Documenso (fallback)...`);
+
+            signing = await documensoService.createDocumentAndGetSigningLinks(
+              baseFilename,
+              pdfBuffer,
+              contractType,
+              options.emails
+            );
+
+            signingLinks = signing.signs ?? [];
+            signingProvider = 'documenso';
+
+            console.log(`✓ Documenso: ${signingLinks.length} link(s) de firma generados`);
+            shouldCleanupFiles = true;
+
+          } catch (documensoError) {
+            console.error('⚠ Error al crear documento en Documenso:', documensoError);
+            // No fallar si ambos servicios fallan, los archivos ya están generados
+          }
         }
       }
 
@@ -659,6 +685,7 @@ export class ContractGeneratorService {
           data: submissionData,
           signing_links: signingLinks,
           linkDocument: signing?.linkDocument || '',
+          signingProvider,
           contractType,
           docx_path: docxPath,
           pdf_path: pdfPath,
@@ -694,6 +721,7 @@ export class ContractGeneratorService {
         data: submissionData,
         signing_links: signingLinks,
         linkDocument: signing?.linkDocument || '',
+        signingProvider,
         r2Key: signing?.r2Key,
         // Campos adicionales para backward compatibility
         contractType,

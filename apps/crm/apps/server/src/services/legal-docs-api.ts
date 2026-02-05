@@ -114,6 +114,7 @@ export interface DocumentResult {
 	nameDocument: DocumentType[];
 	data: unknown[];
 	linkDocument: string;
+	r2Key?: string;
 	signing_links?: string[];
 }
 

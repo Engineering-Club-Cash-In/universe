@@ -113,6 +113,24 @@ export async function getFileUrl(key: string): Promise<string> {
 	return await getSignedUrl(r2Client, command, { expiresIn: 3600 });
 }
 
+// obtener URL firmada para un archivo que tiene el bucket al inicio de la key
+export async function getFileUrlWithBucketInKey(
+	fullKey: string,
+): Promise<string> {
+	// fullKey tiene el formato "bucket-name/path/to/file.ext"
+	const parts = fullKey.split("/");
+	const bucket = parts.shift() || R2_BUCKET_NAME;
+	const key = parts.join("/");
+
+	const command = new GetObjectCommand({
+		Bucket: bucket,
+		Key: key,
+	});
+
+	// Generar URL firmada válida por 1 hora
+	return await getSignedUrl(r2Client, command, { expiresIn: 3600 });
+}
+
 // Eliminar archivo de R2
 export async function deleteFileFromR2(key: string): Promise<void> {
 	const command = new DeleteObjectCommand({

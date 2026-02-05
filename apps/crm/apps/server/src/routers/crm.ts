@@ -979,6 +979,41 @@ export const crmRouter = {
 				);
 			}
 
+			// Solo mostrar oportunidades al 100% que llegaron ahí este mes
+			const now = new Date();
+			const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+			const fullStages = await db
+				.select({ id: salesStages.id })
+				.from(salesStages)
+				.where(eq(salesStages.closurePercentage, 100));
+			const fullStageIds = fullStages.map((s) => s.id);
+
+			if (fullStageIds.length > 0) {
+				const thisMonthFullOpps = await db
+					.select({ opportunityId: opportunityStageHistory.opportunityId })
+					.from(opportunityStageHistory)
+					.where(
+						and(
+							inArray(opportunityStageHistory.toStageId, fullStageIds),
+							gte(opportunityStageHistory.changedAt, startOfMonth),
+						),
+					);
+
+				const thisMonthOppIds = thisMonthFullOpps.map(
+					(o) => o.opportunityId,
+				);
+
+				conditions.push(
+					or(
+						not(inArray(opportunities.stageId, fullStageIds)),
+						...(thisMonthOppIds.length > 0
+							? [inArray(opportunities.id, thisMonthOppIds)]
+							: []),
+					),
+				);
+			}
+
 			// Role-based filter: admin and sales_supervisor can see all, others only their own
 			if (
 				context.userRole !== "admin" &&
@@ -5147,4 +5182,123 @@ export const crmRouter = {
 				hasAnyAnalysis: leadData.hasAnalysis || coDebtorsTotals.count > 0,
 			};
 		}),
+
+	// Dashboard chart data — optimized aggregations for graphs
+	getDashboardChartData: crmProcedure.handler(async ({ context }) => {
+		const PLACED_STAGE_THRESHOLD = 90;
+
+		// Only admin and sales_supervisor see global charts
+		const isGlobal =
+			context.userRole === "admin" ||
+			context.userRole === "sales_supervisor";
+		const userFilter = isGlobal ? undefined : context.userId;
+
+		// 1) Pipeline por Etapa: count + sum(value) grouped by stage
+		const pipelineRows = await db
+			.select({
+				stageId: salesStages.id,
+				stageName: salesStages.name,
+				stageColor: salesStages.color,
+				stageOrder: salesStages.order,
+				cantidad: count(),
+				valor: sql<string>`coalesce(sum(${opportunities.value}), 0)`,
+			})
+			.from(opportunities)
+			.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+			.where(
+				and(
+					eq(opportunities.status, "open"),
+					userFilter
+						? eq(opportunities.assignedTo, userFilter)
+						: undefined,
+				),
+			)
+			.groupBy(
+				salesStages.id,
+				salesStages.name,
+				salesStages.color,
+				salesStages.order,
+			)
+			.orderBy(salesStages.order);
+
+		const pipeline = pipelineRows.map((r) => ({
+			name: r.stageName,
+			cantidad: r.cantidad,
+			valor: Number.parseFloat(r.valor) || 0,
+			color: r.stageColor,
+		}));
+
+		// 2) Ranking vendedores por monto colocado (stage >= threshold)
+		const placedStages = await db
+			.select({ id: salesStages.id })
+			.from(salesStages)
+			.where(gte(salesStages.closurePercentage, PLACED_STAGE_THRESHOLD));
+		const placedStageIds = placedStages.map((s) => s.id);
+
+		let ranking: { name: string; monto: number }[] = [];
+		if (placedStageIds.length > 0) {
+			const rankingRows = await db
+				.select({
+					userName: user.name,
+					monto: sql<string>`coalesce(sum(${opportunities.value}), 0)`,
+				})
+				.from(opportunities)
+				.innerJoin(user, eq(opportunities.assignedTo, user.id))
+				.where(
+					and(
+						inArray(opportunities.stageId, placedStageIds),
+						userFilter
+							? eq(opportunities.assignedTo, userFilter)
+							: undefined,
+					),
+				)
+				.groupBy(user.id, user.name)
+				.orderBy(desc(sql`sum(${opportunities.value})`));
+
+			ranking = rankingRows.map((r) => ({
+				name: r.userName || "Sin asignar",
+				monto: Number.parseFloat(r.monto) || 0,
+			}));
+		}
+
+		// 3) Actividad por vendedor: open vs cerradas (won + lost)
+		const activityRows = await db
+			.select({
+				userName: user.name,
+				status: opportunities.status,
+				cantidad: count(),
+			})
+			.from(opportunities)
+			.innerJoin(user, eq(opportunities.assignedTo, user.id))
+			.where(
+				and(
+					inArray(opportunities.status, ["open", "won", "lost"]),
+					userFilter
+						? eq(opportunities.assignedTo, userFilter)
+						: undefined,
+				),
+			)
+			.groupBy(user.id, user.name, opportunities.status);
+
+		const activityMap = new Map<
+			string,
+			{ name: string; abiertas: number; cerradas: number }
+		>();
+		for (const row of activityRows) {
+			const name = row.userName || "Sin asignar";
+			const curr = activityMap.get(name) || {
+				name,
+				abiertas: 0,
+				cerradas: 0,
+			};
+			if (row.status === "open") curr.abiertas += row.cantidad;
+			else curr.cerradas += row.cantidad;
+			activityMap.set(name, curr);
+		}
+		const activity = [...activityMap.values()].sort(
+			(a, b) => b.abiertas + b.cerradas - (a.abiertas + a.cerradas),
+		);
+
+		return { pipeline, ranking, activity };
+	}),
 };

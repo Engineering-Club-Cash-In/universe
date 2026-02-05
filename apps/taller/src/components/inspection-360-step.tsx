@@ -42,7 +42,36 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
         setOpenSections({});
     };
 
-    const handleStatusChange = (category: string, itemLabel: string, status: 'ok' | 'fail') => {
+    const fillWithDummyData = () => {
+        const newItems: any[] = [];
+        const failureMessages = [
+            "Desgaste excesivo visible",
+            "Fuga de fluidos detectada",
+            "Ruido anormal al operar",
+            "Componente flojo o vibrando",
+            "Corrosión avanzada",
+            "Pieza faltante",
+            "Daño físico evidente"
+        ];
+
+        INSPECTION_AREAS.forEach(area => {
+            area.points.forEach(point => {
+                // 10% chance of failure
+                const isBad = Math.random() < 0.1;
+                newItems.push({
+                    category: area.id,
+                    item: point.label,
+                    status: isBad ? 'bad' : 'ok',
+                    notes: isBad ? failureMessages[Math.floor(Math.random() * failureMessages.length)] : undefined
+                });
+            });
+        });
+        setItems360(newItems);
+        const allOpen = INSPECTION_AREAS.reduce((acc, area) => ({ ...acc, [area.id]: true }), {});
+        setOpenSections(allOpen);
+    };
+
+    const handleStatusChange = (category: string, itemLabel: string, status: 'ok' | 'bad') => {
         setItems360(prev => {
             const existingIndex = prev.findIndex(i => i.item === itemLabel && i.category === category);
 
@@ -51,7 +80,7 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
                 newItems[existingIndex] = {
                     ...newItems[existingIndex],
                     status,
-                    observation: status === 'ok' ? undefined : newItems[existingIndex].observation
+                    notes: status === 'ok' ? undefined : newItems[existingIndex].notes
                 };
                 return newItems;
             } else {
@@ -60,12 +89,12 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
         });
     };
 
-    const handleObservationChange = (category: string, itemLabel: string, observation: string) => {
+    const handleObservationChange = (category: string, itemLabel: string, notes: string) => {
         setItems360(prev => {
             const existingIndex = prev.findIndex(i => i.item === itemLabel && i.category === category);
             if (existingIndex >= 0) {
                 const newItems = [...prev];
-                newItems[existingIndex] = { ...newItems[existingIndex], observation };
+                newItems[existingIndex] = { ...newItems[existingIndex], notes };
                 return newItems;
             }
             return prev;
@@ -80,7 +109,7 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
     const completedPoints = items360.length;
     const progressPercentage = Math.round((completedPoints / totalPoints) * 100);
     const isComplete = completedPoints === totalPoints;
-    const failedItemsCount = items360.filter(i => i.status === 'fail').length;
+    const failedItemsCount = items360.filter(i => i.status === 'bad').length;
 
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
@@ -130,6 +159,12 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
 
             {/* Controles de Expansión */}
             <div className="flex justify-end gap-2">
+                {import.meta.env.VITE_DEV_MODE === 'TRUE' && (
+                    <Button variant="ghost" size="sm" onClick={fillWithDummyData} className="text-xs h-8 text-amber-600">
+                        <Activity className="h-3 w-3 mr-1" />
+                        Fill Dummy
+                    </Button>
+                )}
                 <Button variant="outline" size="sm" onClick={expandAll} className="text-xs h-8">
                     Expandir todos
                 </Button>
@@ -144,7 +179,7 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
                     const areaItems = items360.filter(i => i.category === area.id);
                     const areaTotal = area.points.length;
                     const areaCompleted = areaItems.length;
-                    const areaFails = areaItems.filter(i => i.status === 'fail').length;
+                    const areaFails = areaItems.filter(i => i.status === 'bad').length;
                     const isOpen = openSections[area.id];
 
                     return (
@@ -187,7 +222,7 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
                                     {area.points.map((point) => {
                                         const state = getItemState(area.id, point.label);
                                         const isOk = state?.status === 'ok';
-                                        const isFail = state?.status === 'fail';
+                                        const isFail = state?.status === 'bad';
 
                                         return (
                                             <div key={point.id} className={cn(
@@ -218,7 +253,7 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
                                                         <Button
                                                             variant={isFail ? "destructive" : "outline"}
                                                             size="sm"
-                                                            onClick={() => handleStatusChange(area.id, point.label, 'fail')}
+                                                            onClick={() => handleStatusChange(area.id, point.label, 'bad')}
                                                             className={cn(
                                                                 "h-8 px-3 gap-1.5 min-w-[80px]",
                                                                 isFail ? "" : "text-red-700 border-red-200 hover:bg-red-50"
@@ -234,7 +269,7 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
                                                     <div className="mt-3 pl-0 sm:pl-3 border-l-0 sm:border-l-2 border-red-200 animate-in slide-in-from-top-1 fade-in duration-200">
                                                         <Textarea
                                                             placeholder="Describa el problema encontrado (ej. Fuga visible, pieza rota)..."
-                                                            value={state?.observation || ''}
+                                                            value={state?.notes || ''}
                                                             onChange={(e) => handleObservationChange(area.id, point.label, e.target.value)}
                                                             className="min-h-[60px] bg-white border-red-200 focus-visible:ring-red-500 text-sm resize-none"
                                                         />

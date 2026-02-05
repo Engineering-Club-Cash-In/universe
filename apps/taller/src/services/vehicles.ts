@@ -38,6 +38,9 @@ export interface InspectionData {
   noTestDriveReason?: string;
   sectionTimes?: Record<string, number>;
   rejectionEvidenceUrl?: string;
+  tiresCondition?: number;
+  paintCondition?: number;
+  hasAgencyHistory?: boolean;
 }
 
 export interface ChecklistItem {
@@ -57,19 +60,33 @@ export interface PhotoData {
   noCommentsChecked?: boolean;
 }
 
+export interface Inspection360Item {
+  category: string;
+  item: string;
+  status: 'ok' | 'bad';
+  notes?: string;
+}
+
 // Main function to create a full vehicle inspection
 export const createFullInspection = async (
   vehicleData: VehicleData,
   inspectionData: InspectionData,
   checklistItems: ChecklistItem[],
-  photos?: PhotoData[]
+  photos?: PhotoData[],
+  items360?: Inspection360Item[]
 ) => {
   try {
     const response = await client.createFullVehicleInspection({
       vehicle: vehicleData,
       inspection: inspectionData,
       checklistItems,
-      photos
+      photos,
+      inspection360Items: items360?.map(item => ({
+        area: item.category,
+        checkpoint: item.item,
+        status: item.status,
+        comment: item.notes
+      }))
     });
 
     return {
@@ -123,6 +140,9 @@ export const prepareInspectionData = (formData: any, sectionTimes?: Record<strin
     noTestDriveReason: formData.noTestDriveReason,
     sectionTimes: sectionTimes || {},
     rejectionEvidenceUrl: rejectionEvidenceUrl,
+    tiresCondition: formData.tiresCondition ? parseInt(formData.tiresCondition) : 0,
+    paintCondition: formData.paintCondition ? parseInt(formData.paintCondition) : 0,
+    hasAgencyHistory: formData.agencyServices === 'Sí',
   };
 
   return { vehicleData, inspectionData };

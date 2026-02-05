@@ -100,7 +100,8 @@ export function InvestmentAssignmentSection() {
 		const dayOfMonth = today.getDate();
 		return dayOfMonth <= 20 ? 15 : 31;
 	};
-	const [editDiaPagoMensual, setEditDiaPagoMensual] = useState<number>(getDefaultDiaPago);
+	const [editDiaPagoMensual, setEditDiaPagoMensual] =
+		useState<number>(getDefaultDiaPago);
 
 	// Función para calcular la categoría automáticamente basándose en creditType y vehicle.isNew
 	const getAutomaticCategoria = (
@@ -187,7 +188,9 @@ export function InvestmentAssignmentSection() {
 			// NIT: usar el de la oportunidad si existe
 			setEditNit(selectedOpportunity.nit || "");
 			// Día de pago: usar el de la oportunidad o calcular default según fecha actual
-			setEditDiaPagoMensual(selectedOpportunity.diaPagoMensual || getDefaultDiaPago());
+			setEditDiaPagoMensual(
+				selectedOpportunity.diaPagoMensual || getDefaultDiaPago(),
+			);
 			// Limpiar inversionistas seleccionados
 			setSelectedInversionistas([]);
 		}
@@ -977,8 +980,9 @@ export function InvestmentAssignmentSection() {
 											</div>
 											{Math.abs(totalMonto - creditAmount) >= 0.01 && (
 												<p className="mt-1 text-orange-600 text-xs">
-													La suma de aportes debe ser exactamente igual al capital del
-													crédito (diferencia: {formatCurrency(Math.abs(totalMonto - creditAmount))})
+													La suma de aportes debe ser exactamente igual al
+													capital del crédito (diferencia:{" "}
+													{formatCurrency(Math.abs(totalMonto - creditAmount))})
 												</p>
 											)}
 										</div>

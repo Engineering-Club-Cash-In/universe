@@ -313,10 +313,12 @@ export class DocumensoService {
         },
       });
 
+      // @ts-ignore - SDK types are outdated
       console.log(`✓ Documento creado con ID: ${response.createDocumentV0Response?.documentId}`);
 
       // Extraer uploadUrl de la respuesta
-      const uploadUrl = (response.createDocumentV0Response as any)?.uploadUrl;
+      // @ts-ignore - SDK types are outdated
+      const uploadUrl = response.createDocumentV0Response?.uploadUrl;
 
       if (!uploadUrl) {
         throw new Error('No se recibió uploadUrl de Documenso');
@@ -355,6 +357,7 @@ export class DocumensoService {
 
       console.log(`ℹ️ Documento creado pero NO distribuido (emails no enviados en desarrollo)`);
 
+      // @ts-ignore - SDK types are outdated
       return response.createDocumentV0Response;
     } catch (error: any) {
       // Si el error es de validación pero contiene los datos en rawValue, usarlos
@@ -536,6 +539,7 @@ export class DocumensoService {
   async checkHealth(): Promise<boolean> {
     try {
       // Intentamos listar documentos para verificar conectividad usando el SDK
+      // @ts-ignore - SDK types are outdated
       await this.client.documents.list({
         page: 1,
         perPage: 1,

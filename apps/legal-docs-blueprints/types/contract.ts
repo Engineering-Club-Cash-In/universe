@@ -693,6 +693,8 @@ export interface ContractGenerationResponse {
   docx_url?: string;
   pdf_url?: string;
   signing_links?: string[];
+  /** Proveedor de firma electrónica usado (weetrust | documenso) */
+  signingProvider?: 'weetrust' | 'documenso';
   message: string;
   error?: string;
   generatedAt?: string;

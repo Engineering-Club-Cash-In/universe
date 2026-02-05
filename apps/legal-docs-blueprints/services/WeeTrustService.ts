@@ -265,13 +265,15 @@ export class WeeTrustService {
 		pdfBuffer: Buffer,
 		fileName: string,
 	): Promise<WeeTrustDocumentResponse["responseData"]> {
-		console.log(`[WeeTrust] Subiendo documento desde buffer: ${fileName}`);
+		// Asegurar que el filename tenga extensión .pdf
+		const pdfFileName = fileName.endsWith(".pdf") ? fileName : `${fileName}.pdf`;
+		console.log(`[WeeTrust] Subiendo documento desde buffer: ${pdfFileName}`);
 
 		const headers = await this.getAuthHeaders();
 		const formData = new FormData();
 
 		formData.append("document", pdfBuffer, {
-			filename: fileName,
+			filename: pdfFileName,
 			contentType: "application/pdf",
 		});
 
@@ -651,10 +653,18 @@ export class WeeTrustService {
 		console.log(`\n🔄 [WeeTrust] Iniciando flujo completo para: ${title}`);
 
 		// Construir lista de firmantes
-		const signatory: WeeTrustSignatory[] = emails.map((email) => ({
-			emailID: email,
-			name: email.split("@")[0], // Nombre básico del email
-		}));
+		// WeeTrust requiere nombres de 4-100 caracteres
+		const signatory: WeeTrustSignatory[] = emails.map((email, index) => {
+			let name = email.split("@")[0];
+			// Asegurar mínimo 4 caracteres
+			if (name.length < 4) {
+				name = `Firmante ${index + 1}`;
+			}
+			return {
+				emailID: email,
+				name,
+			};
+		});
 
 		// Llamar al método principal con auto-detección
 		const result = await this.createDocumentAndGetSigningLinks(pdfBuffer, title, {

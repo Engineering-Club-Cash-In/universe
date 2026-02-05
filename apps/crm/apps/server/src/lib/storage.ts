@@ -270,15 +270,15 @@ export async function uploadVehicleVideoToR2(
 
 	await r2Client.send(command);
 
-	// Si tienes un dominio personalizado configurado en R2, úsalo:
-	const R2_PUBLIC_DOMAIN = process.env.R2_PUBLIC_DOMAIN;
+	// Generar URL firmada para acceso temporal (24 horas)
+	const url = await getSignedUrl(
+		r2Client,
+		new GetObjectCommand({
+			Bucket: R2_BUCKET_NAME,
+			Key: key,
+		}),
+		{ expiresIn: 86400 },
+	);
 
-	if (R2_PUBLIC_DOMAIN) {
-		// URL pública permanente con dominio personalizado
-		const publicUrl = `https://${R2_PUBLIC_DOMAIN}/${key}`;
-		return { key, url: publicUrl };
-	}
-	// Fallback: URL pública directa de R2
-	const publicUrl = `https://${R2_BUCKET_NAME}.${R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${key}`;
-	return { key, url: publicUrl };
+	return { key, url };
 }

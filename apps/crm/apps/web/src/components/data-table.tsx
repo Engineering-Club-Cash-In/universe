@@ -43,6 +43,7 @@ interface DataTableProps<TData, TValue> {
 	};
 	setGlobalFilterParam?: (filter: string) => void;
 	onRowClick?: (row: TData) => void;
+	hideSearch?: boolean;
 }
 
 export function DataTable<TData, TValue>({
@@ -55,6 +56,7 @@ export function DataTable<TData, TValue>({
 	serverPagination,
 	setGlobalFilterParam,
 	onRowClick,
+	hideSearch,
 }: DataTableProps<TData, TValue>) {
 	const [sorting, setSorting] = useState<SortingState>([]);
 	const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -100,22 +102,26 @@ export function DataTable<TData, TValue>({
 
 	return (
 		<div className="space-y-4">
-			<div className="flex flex-col gap-4">
-				<Input
-					placeholder={searchPlaceholder}
-					value={globalFilter ?? ""}
-					onChange={(event) => {
-						if (setGlobalFilterParam) {
-							setGlobalFilterParam(event.target.value);
-						}
-						setGlobalFilter(event.target.value);
-					}}
-					className="max-w-sm"
-				/>
-				{filterContent && (
-					<div className="flex flex-wrap gap-2">{filterContent}</div>
-				)}
-			</div>
+			{(!hideSearch || filterContent) && (
+				<div className="flex flex-col gap-4">
+					{!hideSearch && (
+						<Input
+							placeholder={searchPlaceholder}
+							value={globalFilter ?? ""}
+							onChange={(event) => {
+								if (setGlobalFilterParam) {
+									setGlobalFilterParam(event.target.value);
+								}
+								setGlobalFilter(event.target.value);
+							}}
+							className="max-w-sm"
+						/>
+					)}
+					{filterContent && (
+						<div className="flex flex-wrap gap-2">{filterContent}</div>
+					)}
+				</div>
+			)}
 
 			<div className="overflow-hidden rounded-md border">
 				<Table>

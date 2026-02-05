@@ -27,6 +27,8 @@ import {
 import { closeOpportunity } from "../services/close-opportunity";
 import { checkDocumensoSigningStatus } from "../services/documenso-signing";
 
+const R2_LEGAL_DOCS_BUCKET_NAME = process.env.R2_BUCKET_NAME_LEGAL_DOCS || "legal-documents";
+
 export const legalContractsRouter = {
 	// Crear nuevo contrato legal
 	createLegalContract: juridicoProcedure
@@ -368,7 +370,7 @@ export const legalContractsRouter = {
 						// Si es una key (no empieza con http), generar URL firmada
 						if (!updatedContract.pdfLink.startsWith("http")) {
 							try {
-								if(updatedContract.pdfLink.includes("legal-documents")){
+								if(updatedContract.pdfLink.includes(R2_LEGAL_DOCS_BUCKET_NAME)){
 									pdfLinkUrl = await getFileUrlWithBucketInKey(updatedContract.pdfLink);
 								} else {
 									pdfLinkUrl = await getFileUrl(updatedContract.pdfLink);

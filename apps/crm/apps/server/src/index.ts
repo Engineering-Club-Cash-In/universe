@@ -189,6 +189,11 @@ app.post("/api/upload-vehicle-video", async (c) => {
 		// Get the context (optional for this endpoint)
 		const context = await createContext({ context: c });
 
+		// Video endpoint authentication
+		if (!context.session?.user?.id) {
+			return c.json({ error: "No autorizado" }, 401);
+		}
+
 		// Parse multipart form data
 		const formData = await c.req.formData();
 		const file = formData.get("file") as File;
@@ -606,104 +611,7 @@ app.post("/info/validate-otp", async (c) => {
 	return c.json(result, result.status);
 });
 
-app.post("/info/validate-otp", async (c) => {
-	const body = await c.req.json();
-	const { code, dpi } = body as { code?: string; dpi?: string };
 
-	// Validaciones de formato
-	if (!code) {
-		return c.json({ success: false, message: "Code is required" }, 400);
-	}
-
-	if (!dpi) {
-		return c.json({ success: false, message: "DPI is required" }, 400);
-	}
-
-	if (!/^\d{13}$/.test(dpi)) {
-		return c.json(
-			{
-				success: false,
-				message: "DPI debe tener 13 dígitos",
-			},
-			400,
-		);
-	}
-
-	if (!/^\d{4}$/.test(code)) {
-		return c.json(
-			{
-				success: false,
-				message: "Código debe tener 4 dígitos",
-			},
-			400,
-		);
-	}
-
-	// Llamar al controller para validar
-	const result = await otpController.validateOTP(dpi, code);
-
-	// Si es exitoso, consultar Infornet
-	if (result.success && result.data) {
-		console.log(`🔍 OTP válido, consultando Infornet para DPI: ${dpi}`);
-
-		const estudioResult = await infornetController.obtenerEstudioPorDPI(dpi);
-
-		if (!estudioResult.success) {
-			return c.json(
-				{
-					success: false,
-					message:
-						estudioResult.error || "Error al obtener información de Infornet",
-					tokenValidated: true,
-					infornetError: true,
-				},
-				404,
-			);
-		}
-
-		// Análisis de riesgo
-		const analisisRiesgo = await infornetController.analizarRiesgo(dpi);
-
-		// 🔥 Determinar si pasó el buró
-		const pasoBuro =
-			!analisisRiesgo?.detalles.tieneDelitosPenales &&
-			!analisisRiesgo?.detalles.tieneMorosidad;
-
-		// 🔥 Mensaje descriptivo del resultado
-		let mensajeBuro = "Aprobado";
-		const motivosRechazo: string[] = [];
-
-		if (analisisRiesgo?.detalles.tieneDelitosPenales) {
-			motivosRechazo.push("Tiene antecedentes penales");
-		}
-		if (analisisRiesgo?.detalles.tieneMorosidad) {
-			motivosRechazo.push("Tiene historial de morosidad");
-		}
-
-		if (!pasoBuro) {
-			mensajeBuro = `Rechazado: ${motivosRechazo.join(", ")}`;
-		}
-
-		return c.json(
-			{
-				success: true,
-				message: "OTP validated successfully",
-				tokenValidated: true,
-				pasoBuro: pasoBuro,
-				mensajeBuro: mensajeBuro,
-				data: {
-					estudio: estudioResult.data,
-					fromCache: estudioResult.fromCache,
-					analisisRiesgo: analisisRiesgo,
-				},
-			},
-			200,
-		);
-	}
-
-	// Si falló la validación, retornar el error
-	return c.json(result, result.status);
-});
 app.post("/info/check-liveness", async (c) => {
 	const body = await c.req.json();
 	const { dpi, phoneNumber } = body as {

@@ -1299,52 +1299,37 @@ function RouteComponent() {
 
 			{/* Oportunidades por Etapa */}
 			{salesStagesQuery.data && salesStagesQuery.data.length > 0 && (
-				<Card>
-					<CardHeader className="pb-3">
-						<CardTitle className="flex items-center gap-2 text-base">
-							<TrendingUp className="h-4 w-4" />
-							Oportunidades por Etapa
-						</CardTitle>
-					</CardHeader>
-					<CardContent>
-						<div className="flex flex-wrap gap-3">
-							{salesStagesQuery.data.map((stage) => {
-								const stageCount =
-									opportunitiesQuery.data?.filter(
-										(opp) => opp.stage?.id === stage.id,
-									).length || 0;
-								const stageValue =
-									opportunitiesQuery.data
-										?.filter((opp) => opp.stage?.id === stage.id)
-										.reduce(
-											(sum, opp) =>
-												sum + (Number.parseFloat(opp.value || "0") || 0),
-											0,
-										) || 0;
-								return (
-									<div
-										key={stage.id}
-										className="flex items-center gap-3 rounded-lg border p-3"
-									>
-										<Badge
-											style={{ backgroundColor: stage.color, color: "white" }}
-											className="min-w-[50px] justify-center text-xs"
-										>
-											{stage.closurePercentage}%
-										</Badge>
-										<div>
-											<p className="font-medium text-sm">{stage.name}</p>
-											<p className="text-muted-foreground text-xs">
-												{stageCount} oportunidades &middot; Q
-												{stageValue.toLocaleString()}
-											</p>
-										</div>
-									</div>
-								);
-							})}
-						</div>
-					</CardContent>
-				</Card>
+				<div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+					{salesStagesQuery.data.map((stage) => {
+						const stageOpps = opportunitiesQuery.data?.filter(
+							(opp) => opp.stage?.id === stage.id,
+						) || [];
+						const stageValue = stageOpps.reduce(
+							(sum, opp) =>
+								sum + (Number.parseFloat(opp.value || "0") || 0),
+							0,
+						);
+						return (
+							<Card key={stage.id} className="relative overflow-hidden">
+								<div
+									className="absolute inset-x-0 top-0 h-1"
+									style={{ backgroundColor: stage.color }}
+								/>
+								<CardContent className="pt-4 pb-3">
+									<p className="truncate font-medium text-muted-foreground text-xs">
+										{stage.name}
+									</p>
+									<p className="mt-1 font-bold text-2xl" style={{ fontVariantNumeric: "tabular-nums" }}>
+										{stageOpps.length}
+									</p>
+									<p className="mt-0.5 text-muted-foreground text-sm" style={{ fontVariantNumeric: "tabular-nums" }}>
+										Q{stageValue.toLocaleString()}
+									</p>
+								</CardContent>
+							</Card>
+						);
+					})}
+				</div>
 			)}
 
 			{/* Actions Bar */}

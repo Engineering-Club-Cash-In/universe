@@ -42,6 +42,7 @@ export function CreatePaymentAgreementForm() {
   // Form state
   const [selectedInstallments, setSelectedInstallments] = useState<number[]>([]);
   const [numberOfMonths, setNumberOfMonths] = useState<number>(1);
+  const [montoManual, setMontoManual] = useState<number | null>(null);
   const [reason, setReason] = useState<string>("");
   const [observations, setObservations] = useState<string>("");
   const [showAllInstallments, setShowAllInstallments] = useState(false);
@@ -62,7 +63,7 @@ export function CreatePaymentAgreementForm() {
  
   const hasActiveAgreement = activoData?.credito?.statusCredit === "EN_CONVENIO";
 
-  // 🔥 ACTUALIZADO: Ahora usa activoData que TypeScript sabe que es GetCreditoByNumeroActivoResponse
+  // 🔥 ACTUALIZADO: Agrupa por cuota_id pero guarda TODOS los pago_ids
   const cuotasParaConvenio = useMemo(() => {
     if (!activoData) return [];
 
@@ -75,20 +76,41 @@ export function CreatePaymentAgreementForm() {
       estado: "pendiente" as const,
     }));
 
-    // Usa un Map para evitar duplicados por cuota_id
-    const cuotasMap = new Map();
+    // Agrupa por cuota_id, guardando TODOS los pago_ids de cada cuota
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const cuotasMap = new Map<number, { cuota: any; pago_ids: number[] }>();
 
     // Prioriza atrasadas sobre pendientes
     [...atrasadas, ...pendientes].forEach((cuota) => {
-      if (!cuotasMap.has(cuota.cuota_id)) {
-        cuotasMap.set(cuota.cuota_id, cuota);
+      // El API devuelve cuota_id aunque TypeScript no lo reconozca
+      const cuotaAny = cuota as any;
+      const cuotaId = cuotaAny.cuota_id as number | undefined;
+
+      if (!cuotaId) return;
+
+      if (cuotasMap.has(cuotaId)) {
+        // Ya existe la cuota, agregar el pago_id si no está
+        const existing = cuotasMap.get(cuotaId)!;
+        if (cuota.pago_id && !existing.pago_ids.includes(cuota.pago_id)) {
+          existing.pago_ids.push(cuota.pago_id);
+        }
+      } else {
+        // Nueva cuota
+        cuotasMap.set(cuotaId, {
+          cuota: cuotaAny,
+          pago_ids: cuota.pago_id ? [cuota.pago_id] : [],
+        });
       }
     });
 
-    // Convierte de vuelta a array y ordena por numero_cuota
-    return Array.from(cuotasMap.values()).sort(
-      (a, b) => a.numero_cuota - b.numero_cuota
-    );
+    // Convierte de vuelta a array con los pago_ids agregados
+    return Array.from(cuotasMap.values())
+      .map(({ cuota, pago_ids }) => ({
+        ...cuota,
+        all_pago_ids: pago_ids, // Todos los pago_ids de esta cuota
+      }))
+      .sort((a, b) => a.numero_cuota - b.numero_cuota);
+    /* eslint-enable @typescript-eslint/no-explicit-any */
   }, [activoData]);
 
   // Cuotas a mostrar (solo primeras 10 o todas si está expandido)
@@ -98,7 +120,7 @@ export function CreatePaymentAgreementForm() {
   }, [cuotasParaConvenio, showAllInstallments]);
 
   // Calculate total amount based on selected installments
-  const totalAmount = useMemo(() => {
+  const totalAmountCalculado = useMemo(() => {
     if (!activoData || selectedInstallments.length === 0) return 0;
 
     const cuotaMensual = parseFloat(activoData.credito?.cuota || "0");
@@ -106,6 +128,8 @@ export function CreatePaymentAgreementForm() {
 
     return cuotaMensual * selectedInstallments.length + mora;
   }, [activoData, selectedInstallments]);
+
+  const totalAmount = montoManual !== null ? montoManual : totalAmountCalculado;
 
   // Calculate monthly installment of the agreement
   const monthlyInstallment = useMemo(() => {
@@ -118,16 +142,18 @@ export function CreatePaymentAgreementForm() {
     // Reset form when credit changes
     setSelectedInstallments([]);
     setNumberOfMonths(1);
+    setMontoManual(null);
     setReason("");
     setObservations("");
     setShowAllInstallments(false);
   };
 
-  const handleInstallmentToggle = (pagoId: number) => {
+  // Ahora selectedInstallments guarda cuota_ids (no pago_ids)
+  const handleInstallmentToggle = (cuotaId: number) => {
     setSelectedInstallments((prev) =>
-      prev.includes(pagoId)
-        ? prev.filter((id) => id !== pagoId)
-        : [...prev, pagoId]
+      prev.includes(cuotaId)
+        ? prev.filter((id) => id !== cuotaId)
+        : [...prev, cuotaId]
     );
   };
 
@@ -135,7 +161,7 @@ export function CreatePaymentAgreementForm() {
     if (selectedInstallments.length === cuotasParaConvenio.length) {
       setSelectedInstallments([]);
     } else {
-      setSelectedInstallments(cuotasParaConvenio.map((c) => c.pago_id!));
+      setSelectedInstallments(cuotasParaConvenio.map((c) => c.cuota_id));
     }
   };
 
@@ -145,19 +171,26 @@ export function CreatePaymentAgreementForm() {
         const atrasadas = cuotasParaConvenio.filter(
           (c) => c.estado === "atrasada"
         );
-        setSelectedInstallments(atrasadas.map((c) => c.pago_id!));
+        setSelectedInstallments(atrasadas.map((c) => c.cuota_id));
         break;
       }
       case "primeras10": {
         const primeras = cuotasParaConvenio.slice(0, 10);
-        setSelectedInstallments(primeras.map((c) => c.pago_id!));
+        setSelectedInstallments(primeras.map((c) => c.cuota_id));
         break;
       }
       case "todas":
-        setSelectedInstallments(cuotasParaConvenio.map((c) => c.pago_id!));
+        setSelectedInstallments(cuotasParaConvenio.map((c) => c.cuota_id));
         break;
     }
   };
+
+  // Obtener todos los pago_ids de las cuotas seleccionadas
+  const allSelectedPagoIds = useMemo(() => {
+    return cuotasParaConvenio
+      .filter((c) => selectedInstallments.includes(c.cuota_id))
+      .flatMap((c) => c.all_pago_ids || []);
+  }, [cuotasParaConvenio, selectedInstallments]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -177,7 +210,7 @@ export function CreatePaymentAgreementForm() {
     createAgreement(
       {
         credit_id: activoData.credito.credito_id,
-        payment_ids: selectedInstallments,
+        payment_ids: allSelectedPagoIds, // Envía TODOS los pago_ids de las cuotas seleccionadas
         total_agreement_amount: totalAmount,
         number_of_months: numberOfMonths,
         reason,
@@ -187,13 +220,14 @@ export function CreatePaymentAgreementForm() {
       {
         onSuccess: () => {
           alert(
-            `¡Convenio creado exitosamente!\n\nSe creó el convenio para ${selectedInstallments.length} cuota(s)\nMonto total: Q${totalAmount.toLocaleString("es-GT", { minimumFractionDigits: 2 })}\nPlazo: ${numberOfMonths} meses`
+            `¡Convenio creado exitosamente!\n\nSe creó el convenio para ${selectedInstallments.length} cuota(s) (${allSelectedPagoIds.length} pagos)\nMonto total: Q${totalAmount.toLocaleString("es-GT", { minimumFractionDigits: 2 })}\nPlazo: ${numberOfMonths} meses`
           );
           // Reset form
           setSifcoSeleccionado("");
           setResetBuscador(true);
           setSelectedInstallments([]);
           setNumberOfMonths(1);
+          setMontoManual(null);
           setReason("");
           setObservations("");
           setShowAllInstallments(false);
@@ -212,7 +246,8 @@ console.log("🔍 DEBUG:", {
   canceladoData: !!canceladoData,
   hasActiveAgreement,
 });
-  return (<div className="flex justify-center bg-gradient-to-br from-blue-50 to-white overflow-auto px-4 py-2">
+  return (  <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-4 sm:px-6 lg:px-8 overflow-auto pt-8 pb-8">
+   
       <div className="w-full max-w-4xl">
         <h1 className="text-3xl font-bold text-blue-900 mb-6 text-center">
           Crear Convenio de Pago
@@ -337,7 +372,7 @@ console.log("🔍 DEBUG:", {
                   </span>
                   <div className="flex items-center gap-2">
                     <span className="text-gray-900 text-xl font-bold">
-                      #{activoData.cuotaActual ?? "N/A"}
+                      #{activoData.cuotaActual?.numero_cuota ?? "N/A"}
                     </span>
                     {activoData.cuotaActualPagada ? (
                       <CheckCircle className="w-5 h-5 text-green-600" />
@@ -693,12 +728,12 @@ console.log("🔍 DEBUG:", {
                         {cuotasVisibles.map((installment) => {
                           const isAtrasada = installment.estado === "atrasada";
                           const isSelected = selectedInstallments.includes(
-                            installment.pago_id!
+                            installment.cuota_id
                           );
 
                           return (
                             <div
-                              key={installment.pago_id}
+                              key={installment.cuota_id}
                               className={`flex items-center justify-between p-3 rounded-lg border-2 transition cursor-pointer ${
                                 isSelected
                                   ? "border-blue-500 bg-blue-50"
@@ -707,7 +742,7 @@ console.log("🔍 DEBUG:", {
                                     : "border-gray-200 bg-white hover:border-blue-300"
                               }`}
                               onClick={() =>
-                                handleInstallmentToggle(installment.pago_id!)
+                                handleInstallmentToggle(installment.cuota_id)
                               }
                             >
                               <div className="flex items-center gap-3">
@@ -715,7 +750,7 @@ console.log("🔍 DEBUG:", {
                                   type="checkbox"
                                   checked={isSelected}
                                   onChange={() =>
-                                    handleInstallmentToggle(installment.pago_id!)
+                                    handleInstallmentToggle(installment.cuota_id)
                                   }
                                   className="w-5 h-5 cursor-pointer"
                                 />
@@ -723,6 +758,11 @@ console.log("🔍 DEBUG:", {
                                   <span className="font-bold text-blue-900">
                                     Cuota #{installment.numero_cuota}
                                   </span>
+                                  {installment.all_pago_ids?.length > 1 && (
+                                    <span className="text-xs text-gray-500 ml-1">
+                                      ({installment.all_pago_ids.length} pagos)
+                                    </span>
+                                  )}
                                   <div
                                     className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full ml-2 ${
                                       isAtrasada
@@ -818,17 +858,31 @@ console.log("🔍 DEBUG:", {
                       />
                     </div>
 
-                    {/* Total amount (readonly) */}
+                    {/* Total amount (editable) */}
                     <div>
                       <Label className="text-blue-900 font-bold text-base mb-2 block">
                         Monto Total del Convenio
                       </Label>
-                      <div className="p-3 bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg font-bold text-xl text-green-700 flex items-center gap-2 border-2 border-green-200">
-                        <DollarSign className="w-5 h-5" />Q
-                        {totalAmount.toLocaleString("es-GT", {
-                          minimumFractionDigits: 2,
-                        })}
+                      <div className="relative">
+                        <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-green-600" />
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={montoManual !== null ? montoManual : totalAmountCalculado}
+                          onChange={(e) => setMontoManual(Number(e.target.value))}
+                          className="pl-10 text-lg font-bold text-green-700 border-2 border-green-200 bg-gradient-to-br from-green-50 to-emerald-50"
+                        />
                       </div>
+                      {montoManual !== null && montoManual !== totalAmountCalculado && (
+                        <button
+                          type="button"
+                          onClick={() => setMontoManual(null)}
+                          className="text-xs text-blue-600 hover:underline mt-1"
+                        >
+                          Restablecer al calculado (Q{totalAmountCalculado.toLocaleString("es-GT", { minimumFractionDigits: 2 })})
+                        </button>
+                      )}
                     </div>
 
                     {/* Monthly installment (readonly) */}

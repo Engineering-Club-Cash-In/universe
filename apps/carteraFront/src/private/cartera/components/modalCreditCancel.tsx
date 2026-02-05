@@ -45,6 +45,9 @@ export function ModalCancelCredit({
   const [monto, setMonto] = useState("");
   const [motivoCancel, setMotivoCancel] = useState("");
   const [observaciones, setObservaciones] = useState("");
+  const [traspaso, setTraspaso] = useState("");
+  const [garantiaMobiliaria, setGarantiaMobiliaria] = useState("");
+  const [otros, setOtros] = useState("");
 
   useEffect(() => {
     if (open && creditId) {
@@ -78,7 +81,8 @@ export function ModalCancelCredit({
   ].reduce((acc, v) => acc + v, 0);
 
   const totalMotivos = motivos.reduce((acc, curr) => acc + curr.monto, 0);
-  const total = totalBase + totalMotivos;
+  const totalCamposExtra = Number(traspaso || 0) + Number(garantiaMobiliaria || 0) + Number(otros || 0);
+  const total = totalBase + totalMotivos + totalCamposExtra;
 
   const handleClose = () => {
     setMotivos([]);
@@ -86,6 +90,9 @@ export function ModalCancelCredit({
     setMonto("");
     setMotivoCancel("");
     setObservaciones("");
+    setTraspaso("");
+    setGarantiaMobiliaria("");
+    setOtros("");
     onClose();
   };
 
@@ -100,6 +107,9 @@ export function ModalCancelCredit({
       motivo: motivoCancel.trim(),
       observaciones: observaciones?.trim() || undefined,
       monto_cancelacion: total,
+      traspaso: Number(traspaso || 0),
+      garantia_mobiliaria: Number(garantiaMobiliaria || 0),
+      otros: Number(otros || 0),
       montosAdicionales: motivos.map((m) => ({
         concepto: m.motivo,
         monto: m.monto,
@@ -281,6 +291,50 @@ export function ModalCancelCredit({
             >
               Agregar Monto
             </Button>
+          </div>
+
+          {/* Campos adicionales fijos */}
+          <div className="grid gap-2 mb-2 bg-blue-50 border border-blue-200 rounded-xl p-3 shadow">
+            <Label className="font-bold text-blue-700 flex items-center gap-1">
+              <Banknote className="w-4 h-4" />
+              Costos adicionales
+            </Label>
+            <div className="grid gap-1">
+              <Label className="text-sm text-slate-600">Traspaso</Label>
+              <Input
+                placeholder="0.00"
+                type="number"
+                value={traspaso}
+                step="0.01"
+                onChange={(e) => setTraspaso(e.target.value)}
+                onKeyDown={(e) => { if (["e", "E", "+"].includes(e.key)) e.preventDefault(); }}
+                className="bg-white/90 border-blue-300 focus:border-blue-500 focus:ring-blue-500 text-slate-800"
+              />
+            </div>
+            <div className="grid gap-1">
+              <Label className="text-sm text-slate-600">Garantía mobiliaria</Label>
+              <Input
+                placeholder="0.00"
+                type="number"
+                value={garantiaMobiliaria}
+                step="0.01"
+                onChange={(e) => setGarantiaMobiliaria(e.target.value)}
+                onKeyDown={(e) => { if (["e", "E", "+"].includes(e.key)) e.preventDefault(); }}
+                className="bg-white/90 border-blue-300 focus:border-blue-500 focus:ring-blue-500 text-slate-800"
+              />
+            </div>
+            <div className="grid gap-1">
+              <Label className="text-sm text-slate-600">Otros</Label>
+              <Input
+                placeholder="0.00"
+                type="number"
+                value={otros}
+                step="0.01"
+                onChange={(e) => setOtros(e.target.value)}
+                onKeyDown={(e) => { if (["e", "E", "+"].includes(e.key)) e.preventDefault(); }}
+                className="bg-white/90 border-blue-300 focus:border-blue-500 focus:ring-blue-500 text-slate-800"
+              />
+            </div>
           </div>
 
           {/* Motivo principal + observaciones */}

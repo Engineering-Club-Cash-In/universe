@@ -577,13 +577,13 @@ function RouteComponent() {
 										</TableRow>
 									</TableHeader>
 									<TableBody>
-										{filteredLeads.map((lead) => (
+										{filteredLeads.map((opp) => (
 											<TableRow
-												key={lead.id}
+												key={opp.id}
 												className="cursor-pointer hover:bg-muted/50"
 												onClick={() =>
 													navigate({
-														to: `/juridico/${lead.lead.id}?opportunityId=${lead.id}`,
+														to: `/juridico/${opp.lead.id}?opportunityId=${opp.id}`,
 													})
 												}
 											>
@@ -593,38 +593,38 @@ function RouteComponent() {
 														className="cursor-pointer text-left font-medium text-primary hover:underline"
 														onClick={(e) => {
 															e.stopPropagation();
-															handleOpenOpportunityModal(lead.id);
+															handleOpenOpportunityModal(opp.id);
 														}}
 													>
-														{lead.lead.firstName} {lead.lead.lastName}
+														{opp.lead.firstName} {opp.lead.lastName}
 													</button>
 												</TableCell>
 												<TableCell className="font-mono text-sm">
-													{lead.lead.dpi || "N/A"}
+													{opp.lead.dpi || "N/A"}
 												</TableCell>
 												<TableCell>
 													<div className="text-sm">
-														<div>{lead.lead.email || "Sin email"}</div>
+														<div>{opp.lead.email || "Sin email"}</div>
 														<div className="text-muted-foreground">
-															{lead.lead.phone || "Sin teléfono"}
+															{opp.lead.phone || "Sin teléfono"}
 														</div>
 													</div>
 												</TableCell>
 												<TableCell className="text-center">
-													<Badge variant="outline">{lead.contractCount}</Badge>
+													<Badge variant="outline">{opp.contractCount}</Badge>
 												</TableCell>
 												<TableCell>
-													{lead.latestContractDate ? (
+													{opp.latestContractDate ? (
 														<div className="text-sm">
 															<div>
 																{format(
-																	new Date(lead.latestContractDate),
+																	new Date(opp.latestContractDate),
 																	"dd MMM yyyy",
 																	{ locale: es },
 																)}
 															</div>
 															<div className="text-muted-foreground">
-																{lead.latestContractName}
+																{opp.latestContractName}
 															</div>
 														</div>
 													) : (
@@ -636,8 +636,8 @@ function RouteComponent() {
 												<TableCell className="text-right">
 													<Link
 														to="/juridico/$leadId"
-														params={{ leadId: lead.id }}
-														search={{ opportunityId: lead.lead.id }}
+														params={{ leadId: opp.lead.id }}
+														search={{ opportunityId: opp.id }}
 														className="font-medium text-primary text-sm hover:underline"
 														onClick={(e) => e.stopPropagation()}
 													>

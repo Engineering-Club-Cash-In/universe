@@ -35,6 +35,8 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import invariant from "tiny-invariant";
 import { z } from "zod";
+import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
+import { ConsolidatedCreditSummary } from "@/components/credit/ConsolidatedCreditSummary";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
 import { DataTable } from "@/components/data-table";
 import { NotesTimeline } from "@/components/notes-timeline";
@@ -1862,9 +1864,10 @@ function RouteComponent() {
 									}
 								}}
 							>
-								<TabsList className="grid w-full grid-cols-4">
+								<TabsList className="grid w-full grid-cols-5">
 									<TabsTrigger value="details">Detalles</TabsTrigger>
 									<TabsTrigger value="documents">Documentos</TabsTrigger>
+									<TabsTrigger value="coDebtors">Co-firmantes</TabsTrigger>
 									<TabsTrigger value="credit">Credito</TabsTrigger>
 									<TabsTrigger value="history">Historial</TabsTrigger>
 								</TabsList>
@@ -2120,6 +2123,11 @@ function RouteComponent() {
 											</span>
 										</div>
 									</div>
+
+									{/* Consolidated Credit Analysis Summary */}
+									<ConsolidatedCreditSummary
+										opportunityId={selectedOpportunity.id}
+									/>
 
 									{/* Contracts Section */}
 									{userProfile.data?.role &&
@@ -2412,6 +2420,13 @@ function RouteComponent() {
 
 								<TabsContent value="documents" className="mt-6 space-y-4">
 									<DocumentsManager opportunityId={selectedOpportunity.id} />
+								</TabsContent>
+
+								<TabsContent value="coDebtors" className="mt-6 space-y-4">
+									<CoDebtorsView
+										opportunityId={selectedOpportunity.id}
+										opportunity={selectedOpportunity}
+									/>
 								</TabsContent>
 
 								<TabsContent value="credit" className="mt-6 space-y-4">
@@ -3274,6 +3289,47 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 			value: "enganche",
 			label: "Comprobante de enganche",
 		},
+		// === Verificaciones de Cliente ===
+		{ value: "rtu_cliente", label: "RTU (Cliente)" },
+		{
+			value: "omisos_incumplimientos_cliente",
+			label: "Omisos e Incumplimientos (Cliente)",
+		},
+		{ value: "infornet", label: "Infornet" },
+		{ value: "confirmacion_referencias", label: "Confirmación de Referencias" },
+		{ value: "visita_domiciliar", label: "Visita Domiciliar" },
+		{ value: "redes_sociales_internet", label: "Redes Sociales - Internet" },
+		// === Verificaciones de Vehículo / Propietario ===
+		{ value: "rtu_propietario", label: "RTU (Propietario)" },
+		{
+			value: "omisos_incumplimientos_propietario",
+			label: "Omisos e Incumplimientos (Propietario)",
+		},
+		{ value: "garantia_mobiliaria_sat", label: "Garantía Mobiliaria (SAT)" },
+		{
+			value: "garantia_mobiliaria_dpi",
+			label: "Garantía Mobiliaria (DPI Propietario)",
+		},
+		{
+			value: "garantia_mobiliaria_nit",
+			label: "Garantía Mobiliaria (NIT Propietario)",
+		},
+		{ value: "garantia_mobiliaria_serie", label: "Garantía Mobiliaria (SERIE)" },
+		{ value: "multas_vehiculo", label: "Multas del Vehículo" },
+		// === Documentos Etapa 90% (Cierre) ===
+		{ value: "seguro_vehiculo", label: "Seguro del Vehículo" },
+		{
+			value: "inscripcion_garantia_mobiliaria",
+			label: "Inscripción Garantía Mobiliaria",
+		},
+		{ value: "traspaso", label: "Traspaso" },
+		{
+			value: "documentos_firmados_vendedor",
+			label: "Documentos Firmados por Vendedor",
+		},
+		{ value: "copia_llave", label: "Copia de Llave" },
+		{ value: "confirmacion_enganche", label: "Confirmación de Enganche" },
+		{ value: "desembolso", label: "Desembolso" },
 		// Otro
 		{ value: "other", label: "Otro" },
 	];

@@ -21,7 +21,7 @@ const monthShortEs = (d: string | Date) => {
 };
 
 type ClosureInfo =
-  | { kind: "CANCELACION"; id: number; motivo: string; observaciones: string | null; fecha: Date | string | null; monto: string }
+  | { kind: "CANCELACION"; id: number; motivo: string; observaciones: string | null; fecha: Date | string | null; monto: string; traspaso: string; garantia_mobiliaria: string; otros: string }
   | { kind: "INCOBRABLE"; id: number; motivo: string; observaciones: string | null; fecha: Date | string | null; monto: string }
   | null;
 
@@ -35,6 +35,8 @@ type  CuotaExcelRow = {
   capital_pendiente: string;
   total_cancelar: string;
   fecha_vencimiento: string;
+  seguro: string;
+  membresias: string;
 };
 
 type GetCreditDTO = {
@@ -42,11 +44,10 @@ type GetCreditDTO = {
     usuario: string;
     numero_credito_sifco: string;
     moneda: "Quetzal";
-    tipo_credito: string;
-    observaciones: string;
     saldo_total: string;
     // NUEVO:
     extras_total: string;
+    restantes_cuota_actual: string;
     saldo_total_con_extras: string;
   };
   closure: ClosureInfo;
@@ -104,6 +105,9 @@ export async function getCreditWithCancellationDetails(
           observaciones: credit_cancelations.observaciones,
           fecha_cancelacion: credit_cancelations.fecha_cancelacion,
           monto_cancelacion: credit_cancelations.monto_cancelacion,
+          traspaso: credit_cancelations.traspaso,
+          garantia_mobiliaria: credit_cancelations.garantia_mobiliaria,
+          otros: credit_cancelations.otros,
         },
         badDebt: {
           id: bad_debts.id,
@@ -123,7 +127,7 @@ export async function getCreditWithCancellationDetails(
 
     // 2) Closure unificado
     let closure: ClosureInfo = null;
-    if (r.credit.status === "CANCELADO" && r.cancelation?.id != null) {
+    if (r.cancelation?.id != null) {
       closure = {
         kind: "CANCELACION",
         id: r.cancelation.id,
@@ -131,6 +135,9 @@ export async function getCreditWithCancellationDetails(
         observaciones: r.cancelation.observaciones ?? null,
         fecha: r.cancelation.fecha_cancelacion ?? null,
         monto: r.cancelation.monto_cancelacion!,
+        traspaso: r.cancelation.traspaso ?? "0",
+        garantia_mobiliaria: r.cancelation.garantia_mobiliaria ?? "0",
+        otros: r.cancelation.otros ?? "0",
       };
     } else if (r.credit.status === "INCOBRABLE" && r.badDebt?.id != null) {
       closure = {
@@ -166,7 +173,80 @@ export async function getCreditWithCancellationDetails(
       )
       .orderBy(asc(cuotas_credito.numero_cuota));
 
-    // 4) NUEVO: montos adicionales del crédito
+    // 4) Cuota actual: restantes de lo ya abonado
+    const cuotaActualResult = await db
+      .select({
+        cuota_id: cuotas_credito.cuota_id,
+        numero_cuota: cuotas_credito.numero_cuota,
+        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+        pagado: cuotas_credito.pagado,
+        // Restantes
+        capital_restante: pagos_credito.capital_restante,
+        interes_restante: pagos_credito.interes_restante,
+        iva_12_restante: pagos_credito.iva_12_restante,
+        seguro_restante: pagos_credito.seguro_restante,
+        gps_restante: pagos_credito.gps_restante,
+        membresias_restante: pagos_credito.membresias,
+        pago_mora: pagos_credito.mora,
+        pago_otros: pagos_credito.otros,
+      })
+      .from(cuotas_credito)
+      .innerJoin(pagos_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
+      .where(
+        and(
+          eq(cuotas_credito.credito_id, r.credit.id),
+          eq(cuotas_credito.pagado, false),
+          // cuota actual = fecha_vencimiento >= hoy (la próxima que no ha vencido)
+          // pero distinta a las atrasadas
+        )
+      )
+      .orderBy(asc(cuotas_credito.fecha_vencimiento))
+      .limit(1);
+
+    // Calcular seguro proporcional según fecha de cancelación
+    const fechaCancelacion = r.cancelation?.fecha_cancelacion
+      ? new Date(r.cancelation.fecha_cancelacion as unknown as string)
+      : hoy;
+    const diaDelMes = fechaCancelacion.getDate();
+    const diasEnMes = new Date(fechaCancelacion.getFullYear(), fechaCancelacion.getMonth() + 1, 0).getDate();
+    const proporcionSeguro = new Big(diaDelMes).div(diasEnMes);
+    const seguroMensual = new Big(r.credit.seguro_10_cuotas ?? "0");
+    const seguroProporcional = seguroMensual.times(proporcionSeguro).round(2);
+
+    // Sumar restantes de la cuota actual
+    let restantesCuotaActual = {
+      interes_restante: new Big(0),
+      iva_12_restante: new Big(0),
+      seguro_restante: new Big(0),
+      gps_restante: new Big(0),
+      membresias_restante: new Big(0),
+      mora_restante: new Big(0),
+      otros_restante: new Big(0),
+      total_restante: new Big(0),
+    };
+
+    if (cuotaActualResult.length > 0) {
+      const ca = cuotaActualResult[0];
+      const safeBig = (v: unknown) => new Big(String(v ?? "0") || "0");
+      restantesCuotaActual.interes_restante = safeBig(ca.interes_restante);
+      restantesCuotaActual.iva_12_restante = safeBig(ca.iva_12_restante);
+      restantesCuotaActual.gps_restante = safeBig(ca.gps_restante);
+      restantesCuotaActual.membresias_restante = safeBig(ca.membresias_restante);
+      restantesCuotaActual.mora_restante = safeBig(ca.pago_mora);
+      restantesCuotaActual.otros_restante = safeBig(ca.pago_otros);
+      // Seguro proporcional en vez del restante completo
+      restantesCuotaActual.seguro_restante = seguroProporcional;
+
+      restantesCuotaActual.total_restante = restantesCuotaActual.interes_restante
+        .plus(restantesCuotaActual.iva_12_restante)
+        .plus(restantesCuotaActual.seguro_restante)
+        .plus(restantesCuotaActual.gps_restante)
+        .plus(restantesCuotaActual.membresias_restante)
+        .plus(restantesCuotaActual.mora_restante)
+        .plus(restantesCuotaActual.otros_restante);
+    }
+
+    // 5) NUEVO: montos adicionales del crédito
     const extrasRows = await db
       .select({
         id: montos_adicionales.id,
@@ -216,6 +296,70 @@ export async function getCreditWithCancellationDetails(
     
     const items: CuotaExcelRow[] = await Promise.all(itemsPromises);
 
+    // Agregar cuota actual como fila en la tabla (si existe)
+    if (cuotaActualResult.length > 0) {
+      const ca = cuotaActualResult[0];
+      const seguroEntero = seguroMensual; // seguro mensual completo para el cliente
+      const interesCA = restantesCuotaActual.interes_restante.plus(restantesCuotaActual.iva_12_restante);
+      const serviciosCA = seguroEntero.plus(restantesCuotaActual.gps_restante).plus(restantesCuotaActual.membresias_restante);
+      const moraCA = restantesCuotaActual.mora_restante;
+      const totalCA = interesCA.plus(serviciosCA).plus(moraCA);
+
+      const fvCA = typeof ca.fecha_vencimiento === "string"
+        ? ca.fecha_vencimiento
+        : (ca.fecha_vencimiento as Date).toISOString().slice(0, 10);
+
+      items.push({
+        no: ca.numero_cuota,
+        mes: `${ca.numero_cuota}-${monthShortEs(fvCA)} (actual)`,
+        interes: interesCA.toFixed(2),
+        servicios: serviciosCA.toFixed(2),
+        mora: moraCA.toFixed(2),
+        otros: "0.00",
+        capital_pendiente: "0.00",
+        total_cancelar: totalCA.toFixed(2),
+        fecha_vencimiento: fvCA,
+        seguro: seguroEntero.toFixed(2),
+        membresias: restantesCuotaActual.membresias_restante.toFixed(2),
+      });
+    }
+
+    // Sumatoria de cuotas atrasadas por concepto
+    const sumAtrasadas = items.reduce(
+      (acc, item) => {
+        acc.interes = acc.interes.plus(item.interes);
+        acc.seguro = acc.seguro.plus(item.seguro);
+        acc.membresias = acc.membresias.plus(item.membresias);
+        acc.mora = acc.mora.plus(item.mora);
+        acc.otros = acc.otros.plus(item.otros);
+        acc.servicios = acc.servicios.plus(item.servicios);
+        acc.total = acc.total.plus(item.total_cancelar);
+        return acc;
+      },
+      {
+        interes: new Big(0),
+        seguro: new Big(0),
+        membresias: new Big(0),
+        mora: new Big(0),
+        otros: new Big(0),
+        servicios: new Big(0),
+        total: new Big(0),
+      }
+    );
+
+    // Totales generales = cuotas atrasadas + restantes cuota actual
+    const totales = {
+      total_interes: sumAtrasadas.interes.plus(restantesCuotaActual.interes_restante).plus(restantesCuotaActual.iva_12_restante).toFixed(2),
+      total_seguro: sumAtrasadas.seguro.plus(restantesCuotaActual.seguro_restante).toFixed(2),
+      total_membresias: sumAtrasadas.membresias.plus(restantesCuotaActual.membresias_restante).toFixed(2),
+      total_mora: sumAtrasadas.mora.plus(restantesCuotaActual.mora_restante).toFixed(2),
+      total_otros: sumAtrasadas.otros.plus(restantesCuotaActual.otros_restante).toFixed(2),
+      total_gps: new Big(0).plus(restantesCuotaActual.gps_restante).toFixed(2),
+      total_cuotas_atrasadas: sumAtrasadas.total.toFixed(2),
+      total_restantes_cuota_actual: restantesCuotaActual.total_restante.toFixed(2),
+      gran_total: sumAtrasadas.total.plus(restantesCuotaActual.total_restante).toFixed(2),
+    };
+
     // 6) DTO final con extras
     const saldo_total = new Big(r.credit.capital);
     const data: GetCreditDTO = {
@@ -223,14 +367,34 @@ export async function getCreditWithCancellationDetails(
         usuario: r.user?.name ?? "—",
         numero_credito_sifco: r.credit.numero_sifco,
         moneda: "Quetzal",
-        tipo_credito: r.credit.tipo_credito,
-        observaciones: r.credit.observaciones,
         saldo_total: saldo_total.toFixed(2),
         // NUEVO:
         extras_total: extras_total.toFixed(2),
-        saldo_total_con_extras: saldo_total.plus(extras_total).toFixed(2),
+        restantes_cuota_actual: restantesCuotaActual.total_restante.toFixed(2),
+        saldo_total_con_extras: saldo_total.plus(extras_total).plus(restantesCuotaActual.total_restante).toFixed(2),
       },
       closure,
+      cuota_actual: cuotaActualResult.length > 0 ? {
+        cuota_id: cuotaActualResult[0].cuota_id,
+        numero_cuota: cuotaActualResult[0].numero_cuota,
+        fecha_vencimiento: cuotaActualResult[0].fecha_vencimiento,
+        interes_restante: restantesCuotaActual.interes_restante.toFixed(2),
+        iva_12_restante: restantesCuotaActual.iva_12_restante.toFixed(2),
+        seguro_proporcional: restantesCuotaActual.seguro_restante.toFixed(2),
+        gps_restante: restantesCuotaActual.gps_restante.toFixed(2),
+        membresias_restante: restantesCuotaActual.membresias_restante.toFixed(2),
+        mora_restante: restantesCuotaActual.mora_restante.toFixed(2),
+        otros_restante: restantesCuotaActual.otros_restante.toFixed(2),
+        total_restante: restantesCuotaActual.total_restante.toFixed(2),
+        seguro_info: {
+          dia_cancelacion: diaDelMes,
+          dias_en_mes: diasEnMes,
+          proporcion: proporcionSeguro.toFixed(4),
+          seguro_mensual: seguroMensual.toFixed(2),
+          seguro_proporcional: seguroProporcional.toFixed(2),
+        },
+      } : null,
+      totales,
       cuotas_atrasadas: {
         total: items.length,
         items,

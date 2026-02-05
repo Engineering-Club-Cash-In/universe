@@ -725,16 +725,33 @@ export interface ContractTemplateConfig {
   /** Tipo de contrato */
   type: ContractType;
 
-  /** Nombre del archivo template en /templates */
+  /** Nombre del archivo template en /templates (masculino singular) */
   templateFilename: string;
 
+  /** Template femenino singular */
   templateFilenameFemale: string;
+
+  /** Template masculino plural (múltiples deudores) */
+  templateFilenamePlural?: string;
+
+  /** Template femenino plural (múltiples deudores) */
+  templateFilenameFemalePlural?: string;
 
   /** Descripción del contrato */
   description: string;
 
   /** Campos requeridos para validación */
   requiredFields: string[];
+}
+
+/**
+ * Interfaz para deudores adicionales (múltiples firmantes)
+ */
+export interface DeudorAdicional {
+  nombreCompleto: string;
+  dpiTexto: string;
+  dpi: string;
+  [key: string]: any;
 }
 
 /**
@@ -755,5 +772,7 @@ export interface GenerateContractRequest {
     generatePdf?: boolean;
     filenamePrefix?: string;
     gender?: "male" | "female";
+    /** Si hay múltiples deudores, usar template plural */
+    isPlural?: boolean;
   };
 }

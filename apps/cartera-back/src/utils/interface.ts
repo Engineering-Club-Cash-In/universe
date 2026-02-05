@@ -112,7 +112,10 @@ export type ClosureInfo =
       motivo: string;
       observaciones: string | null;
       fecha: Date | string | null;
-      monto: string; // numeric de PG -> string
+      monto: string;
+      traspaso: string;
+      garantia_mobiliaria: string;
+      otros: string;
     }
   | {
       kind: "INCOBRABLE";
@@ -120,7 +123,7 @@ export type ClosureInfo =
       motivo: string;
       observaciones: string | null;
       fecha: Date | string | null;
-      monto: string; // numeric de PG -> string
+      monto: string;
     }
   | null;
 
@@ -142,11 +145,10 @@ export interface GetCreditDTO {
     usuario: string;
     numero_credito_sifco: string;
     moneda: "Quetzal";
-    tipo_credito: string;
-    observaciones: string;
-    saldo_total: string; // numeric -> string
-    extras_total: string; // NUEVO
-    saldo_total_con_extras: string; // NUEVO
+    saldo_total: string;
+    extras_total: string;
+    restantes_cuota_actual: string;
+    saldo_total_con_extras: string;
   };
   closure: ClosureInfo;
   cuotas_atrasadas: {

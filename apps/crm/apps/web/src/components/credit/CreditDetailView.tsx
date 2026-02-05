@@ -520,21 +520,10 @@ export function CreditDetailView({
 	// Mutation para aprobar detalle de crédito
 	const approveCreditDetailMutation = useMutation({
 		mutationFn: async () => {
-			const cuotaMensual = quotation?.monthlyPayment || "0";
-			const tasaMensualValue = quotation?.interestRate || "0";
-			const numeroCuotasValue = quotation?.termMonths || 0;
-			const totalFinanced = quotation?.totalFinanced || "0";
+			// Primero guardar todos los datos del crédito usando la misma lógica de saveCreditDetailsMutation
+			await saveCreditDetailsMutation.mutateAsync();
 
-			// Actualizar el value de la oportunidad con el totalFinanced de la cotización
-
-			await client.updateOpportunity({
-				id: opportunityId,
-				numeroCuotas: numeroCuotasValue,
-				tasaInteres: tasaMensualValue,
-				cuotaMensual: cuotaMensual,
-				value: totalFinanced,
-			});
-
+			// Luego aprobar el detalle de crédito
 			return client.approveCreditDetail({ opportunityId });
 		},
 		onSuccess: () => {

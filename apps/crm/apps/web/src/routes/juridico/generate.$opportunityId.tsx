@@ -63,6 +63,13 @@ function RouteComponent() {
 			canViewLegal && !!opportunityId && validationQuery.data?.isValid === true,
 	});
 
+	// Get co-debtors for this opportunity
+	const coDebtorsQuery = useQuery({
+		queryKey: ["coDebtors", opportunityId],
+		queryFn: () => client.getCoDebtorsByOpportunity({ opportunityId }),
+		enabled: canViewLegal && !!opportunityId,
+	});
+
 	// Get opportunities to find the current one
 	const opportunitiesQuery = useQuery({
 		...orpc.getOpportunitiesForContracts.queryOptions(),
@@ -95,6 +102,7 @@ function RouteComponent() {
 				options: {
 					gender: "male" | "female";
 					generatePdf: boolean;
+					isPlural?: boolean;
 					filenamePrefix: string;
 				};
 			}>;
@@ -209,6 +217,17 @@ function RouteComponent() {
 					cuotaMensual: previewQuery.data.credito?.cuotaMensual,
 					porcentajeInteres: previewQuery.data.credito?.tasaInteres,
 				},
+				coDebtors: coDebtorsQuery.data?.map((cd) => ({
+					id: cd.id,
+					fullName: cd.fullName,
+					dpi: cd.dpi,
+					age: cd.age,
+					gender: cd.gender,
+					maritalStatus: cd.maritalStatus,
+					profession: cd.profession,
+					nationality: cd.nationality,
+					email: cd.email,
+				})),
 			}
 		: {
 				cliente: {},
@@ -282,6 +301,7 @@ function RouteComponent() {
 			options: {
 				gender: "male" | "female";
 				generatePdf: boolean;
+				isPlural?: boolean;
 				filenamePrefix: string;
 			};
 		}>;
@@ -309,6 +329,7 @@ function RouteComponent() {
 			options: {
 				gender: "male" | "female";
 				generatePdf: boolean;
+				isPlural?: boolean;
 				filenamePrefix: string;
 			};
 		}>;

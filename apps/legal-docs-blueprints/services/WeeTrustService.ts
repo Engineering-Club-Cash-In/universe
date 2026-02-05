@@ -149,7 +149,7 @@ export class WeeTrustService {
 
 		if (!this.config.userId || !this.config.apiKey) {
 			throw new Error(
-				"WeeTrust: Se requiere WEETRUST_USER_ID y WEETRUST_API_KEY",
+				"WeeTrust: Missing required authentication credentials",
 			);
 		}
 
@@ -265,13 +265,15 @@ export class WeeTrustService {
 		pdfBuffer: Buffer,
 		fileName: string,
 	): Promise<WeeTrustDocumentResponse["responseData"]> {
-		console.log(`[WeeTrust] Subiendo documento desde buffer: ${fileName}`);
+		// Asegurar que el filename tenga extensión .pdf
+		const pdfFileName = fileName.endsWith(".pdf") ? fileName : `${fileName}.pdf`;
+		console.log(`[WeeTrust] Subiendo documento desde buffer: ${pdfFileName}`);
 
 		const headers = await this.getAuthHeaders();
 		const formData = new FormData();
 
 		formData.append("document", pdfBuffer, {
-			filename: fileName,
+			filename: pdfFileName,
 			contentType: "application/pdf",
 		});
 
@@ -622,6 +624,63 @@ export class WeeTrustService {
 			signingLinks,
 			documentUrl: signResult.documentFileObj.url,
 			status: signResult.status,
+		};
+	}
+
+	// ==========================================================================
+	// ADAPTER: Interfaz compatible con Documenso
+	// ==========================================================================
+
+	/**
+	 * Wrapper que usa la misma firma que DocumensoService.createDocumentAndGetSigningLinks
+	 * para facilitar el reemplazo gradual.
+	 *
+	 * @param title - Nombre del documento
+	 * @param pdfBuffer - Buffer del PDF
+	 * @param contractType - Tipo de contrato (para auto-detección de firmas)
+	 * @param emails - Lista de emails de los firmantes
+	 * @returns { signs: string[], linkDocument: string }
+	 */
+	async createDocumentForSigning(
+		title: string,
+		pdfBuffer: Buffer,
+		contractType: ContractType,
+		emails: string[],
+	): Promise<{
+		signs: string[];
+		linkDocument: string;
+	}> {
+		console.log(`\n🔄 [WeeTrust] Iniciando flujo completo para: ${title}`);
+
+		// Construir lista de firmantes
+		// WeeTrust requiere nombres de 4-100 caracteres
+		const signatory: WeeTrustSignatory[] = emails.map((email, index) => {
+			let name = email.split("@")[0];
+			// Asegurar mínimo 4 caracteres
+			if (name.length < 4) {
+				name = `Firmante ${index + 1}`;
+			}
+			return {
+				emailID: email,
+				name,
+			};
+		});
+
+		// Llamar al método principal con auto-detección
+		const result = await this.createDocumentAndGetSigningLinks(pdfBuffer, title, {
+			title,
+			message: `Por favor firme el documento: ${title}`,
+			signatory,
+			contractType,
+			positioningMode: "auto",
+		});
+
+		console.log(`✓ [WeeTrust] ${result.signingLinks.length} link(s) de firma generados`);
+
+		// Retornar en formato compatible con Documenso
+		return {
+			signs: result.signingLinks,
+			linkDocument: result.documentUrl,
 		};
 	}
 

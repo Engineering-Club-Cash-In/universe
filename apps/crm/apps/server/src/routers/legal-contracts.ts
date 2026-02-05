@@ -27,7 +27,8 @@ import {
 import { closeOpportunity } from "../services/close-opportunity";
 import { checkDocumensoSigningStatus } from "../services/documenso-signing";
 
-const R2_LEGAL_DOCS_BUCKET_NAME = process.env.R2_BUCKET_NAME_LEGAL_DOCS || "legal-documents";
+// Standardized env var naming: R2_BUCKET_* pattern
+const R2_LEGAL_DOCS_BUCKET_NAME = process.env.R2_BUCKET_LEGAL_DOCS || process.env.R2_BUCKET_NAME_LEGAL_DOCS || "legal-documents";
 
 export const legalContractsRouter = {
 	// Crear nuevo contrato legal
@@ -335,7 +336,7 @@ export const legalContractsRouter = {
 			// Verificar estado de firma en Documenso y generar URLs firmadas para PDFs
 			const contractsWithUpdatedStatus = await Promise.all(
 				contracts.map(async (contractData) => {
-					let updatedContract = contractData.contract;
+					const updatedContract = contractData.contract;
 					// TODO: Aun nadie usa Documenso, deshabilitado por ahora
 					// Solo verificar si el contrato está pendiente y tiene link de firma del cliente
 					/*if (

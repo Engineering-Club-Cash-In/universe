@@ -440,7 +440,7 @@ export const contractGenerationRouter = {
 								contractName:
 									contractResult.nameDocument?.[0]?.label || "Contrato",
 								success: true,
-								documentLink: contractResult.linkDocument,
+								documentLink:  contractResult.r2Key || contractResult.linkDocument,
 								signingLinks: contractResult.signing_links,
 								templateId: contractResult.templateId,
 								apiResponse: contractResult,
@@ -828,7 +828,7 @@ export const contractGenerationRouter = {
 									contractResult.signing_links?.slice(2) || null,
 								templateId: contractResult.templateId,
 								apiResponse: contractResult,
-								pdfLink: contractResult.linkDocument || null,
+								pdfLink: contractResult.r2Key || contractResult.linkDocument || null,
 								status: "pending",
 								generatedBy: context.userId,
 								generatedAt: new Date(),

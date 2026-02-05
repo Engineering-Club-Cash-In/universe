@@ -149,7 +149,7 @@ export class WeeTrustService {
 
 		if (!this.config.userId || !this.config.apiKey) {
 			throw new Error(
-				"WeeTrust: Se requiere WEETRUST_USER_ID y WEETRUST_API_KEY",
+				"WeeTrust: Missing required authentication credentials",
 			);
 		}
 

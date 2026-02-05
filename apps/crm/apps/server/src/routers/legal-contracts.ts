@@ -20,6 +20,7 @@ import { PERMISSIONS } from "../lib/roles";
 import {
 	generateUniqueFilename,
 	getFileUrl,
+	getFileUrlWithBucketInKey,
 	uploadFileToR2,
 	validateFile,
 } from "../lib/storage";
@@ -367,7 +368,11 @@ export const legalContractsRouter = {
 						// Si es una key (no empieza con http), generar URL firmada
 						if (!updatedContract.pdfLink.startsWith("http")) {
 							try {
-								pdfLinkUrl = await getFileUrl(updatedContract.pdfLink);
+								if(updatedContract.pdfLink.includes("legal-documents")){
+									pdfLinkUrl = await getFileUrlWithBucketInKey(updatedContract.pdfLink);
+								} else {
+									pdfLinkUrl = await getFileUrl(updatedContract.pdfLink);
+								}
 							} catch (error) {
 								console.error(
 									`Error generando URL para contrato ${updatedContract.id}:`,

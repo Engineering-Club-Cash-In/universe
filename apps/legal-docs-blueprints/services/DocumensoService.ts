@@ -322,7 +322,15 @@ export class DocumensoService {
         throw new Error('No se recibió uploadUrl de Documenso');
       }
 
+      // Extraer la key del archivo desde la URL pre-firmada
+      const urlObj = new URL(uploadUrl);
+      const r2Key = urlObj.pathname.replace(/^\//, ''); // Remover slash inicial
+      const r2Bucket = urlObj.hostname.split('.')[0]; // Primer segmento del hostname
+      
       console.log(`📤 Subiendo PDF a R2...`);
+      console.log(`   → Bucket: ${r2Bucket}`);
+      console.log(`   → Key: ${r2Key}`);
+      console.log(`   → URL: ${uploadUrl.substring(0, 100)}...`);
 
       // Paso 2: Subir el PDF a la URL pre-firmada de R2
       const uploadResponse = await fetch(uploadUrl, {
@@ -334,10 +342,16 @@ export class DocumensoService {
       });
 
       if (!uploadResponse.ok) {
-        throw new Error(`Upload falló con status: ${uploadResponse.status}`);
+        const errorText = await uploadResponse.text();
+        throw new Error(`Upload falló con status: ${uploadResponse.status} - ${errorText}`);
       }
 
+      // R2 devuelve ETag en headers que confirma el upload
+      const etag = uploadResponse.headers.get('etag');
       console.log(`✓ PDF subido exitosamente a R2`);
+      console.log(`   → Key: ${r2Key}`);
+      console.log(`   → ETag: ${etag || 'N/A'}`);
+      console.log(`   → Status: ${uploadResponse.status}`);
 
       // Paso 3: Distribuir el documento para activar los links de firma
       // ⚠️ COMENTADO en desarrollo para evitar envío automático de emails
@@ -355,7 +369,10 @@ export class DocumensoService {
 
       console.log(`ℹ️ Documento creado pero NO distribuido (emails no enviados en desarrollo)`);
 
-      return response.createDocumentV0Response;
+      return {
+        ...response.createDocumentV0Response,
+        r2Key,
+      };
     } catch (error: any) {
       // Si el error es de validación pero contiene los datos en rawValue, usarlos
       if (error.name === 'ResponseValidationError' && error.rawValue) {
@@ -364,9 +381,17 @@ export class DocumensoService {
 
         // Extraer uploadUrl de rawValue
         const uploadUrl = error.rawValue.uploadUrl;
+        let r2Key: string | undefined;
 
         if (uploadUrl) {
+          // Extraer la key del archivo desde la URL pre-firmada
+          const urlObj = new URL(uploadUrl);
+          r2Key = urlObj.pathname.replace(/^\//, '');
+          const r2Bucket = urlObj.hostname.split('.')[0];
+          
           console.log(`📤 Subiendo PDF a R2...`);
+          console.log(`   → Bucket: ${r2Bucket}`);
+          console.log(`   → Key: ${r2Key}`);
 
           // Subir el PDF a la URL pre-firmada
           const uploadResponse = await fetch(uploadUrl, {
@@ -378,10 +403,14 @@ export class DocumensoService {
           });
 
           if (!uploadResponse.ok) {
-            throw new Error(`Upload falló con status: ${uploadResponse.status}`);
+            const errorText = await uploadResponse.text();
+            throw new Error(`Upload falló con status: ${uploadResponse.status} - ${errorText}`);
           }
 
+          const etag = uploadResponse.headers.get('etag');
           console.log(`✓ PDF subido exitosamente a R2`);
+          console.log(`   → Key: ${r2Key}`);
+          console.log(`   → ETag: ${etag || 'N/A'}`);
         }
 
         // Paso 3: Distribuir el documento para activar los links de firma
@@ -398,7 +427,10 @@ export class DocumensoService {
         }
 
         // Devolver los datos crudos que sí funcionan
-        return error.rawValue.document;
+        return {
+          ...error.rawValue.document,
+          r2Key,
+        };
       }
 
       console.error('❌ Error creando documento en Documenso:', error.message);
@@ -462,6 +494,7 @@ export class DocumensoService {
   ): Promise<{
     signs: string[];
     linkDocument: string;
+    r2Key?: string;
   }> {
     try {
       console.log(`\n🔄 Iniciando flujo completo en Documenso para: ${title}`);
@@ -518,12 +551,14 @@ export class DocumensoService {
       console.log(`✅ ${signingLinks.length} link(s) de firma generados`);
       console.log(`📋 Links:`, signingLinks);
 
-      const idDocument = documentResponse?.documentId || documentResponse.id || '';
+      const idDocument = documentResponse?.documentId || documentResponse?.id || '';
+      const r2Key = documentResponse?.r2Key;
 
       return {
         signs: signingLinks,
-        linkDocument: `${baseUrl}/t/${this.team}/documents/${idDocument}`
-      }
+        linkDocument: `${baseUrl}/t/${this.team}/documents/${idDocument}`,
+        r2Key,
+      };
     } catch (error: any) {
       console.error('❌ Error en flujo completo de Documenso:', error.message);
       throw error;

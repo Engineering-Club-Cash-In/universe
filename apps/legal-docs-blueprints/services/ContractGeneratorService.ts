@@ -666,25 +666,17 @@ export class ContractGeneratorService {
           generatedAt: new Date().toISOString()
         };
 
-        // Llamar al CRM de manera no-bloqueante
-        crmApiService.saveContractSilently({
-          dpi: data.dpi,
-          contractType,
-          contractName: config.description,
-          signingLinks,
-          templateId,
-          apiResponse: fullApiResponse,
-        }).catch(err => {
-          console.error('[ContractGeneratorService] Error al guardar en CRM:', err);
-          // No bloquear la respuesta si falla el guardado en CRM
-        });
-      } else {
-        if (!data.dpi) {
-          console.warn('[ContractGeneratorService] No se guardará en CRM: falta DPI en los datos');
-        }
-        if (!signingLinks || signingLinks.length === 0) {
-          console.warn('[ContractGeneratorService] No se guardará en CRM: no hay signing links');
-        }
+        // NOTA: Llamada al CRM deshabilitada temporalmente para agilizar el proceso
+        // crmApiService.saveContractSilently({
+        //   dpi: data.dpi,
+        //   contractType,
+        //   contractName: config.description,
+        //   signingLinks,
+        //   templateId,
+        //   apiResponse: fullApiResponse,
+        // }).catch(err => {
+        //   console.error('[ContractGeneratorService] Error al guardar en CRM:', err);
+        // });
       }
 
       return {

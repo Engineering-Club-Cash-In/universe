@@ -16,8 +16,10 @@ import {
 	History,
 	Mail,
 	Target,
+	UserPlus,
 	Users,
 } from "lucide-react";
+import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
 import { useState } from "react";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
 import { OpportunityDocumentUpload } from "@/components/opportunity-document-upload";
@@ -201,10 +203,11 @@ export function OpportunityDetailModal({
 					}}
 				>
 					<TabsList
-						className={`grid w-full ${readOnly ? "grid-cols-3" : "grid-cols-4"}`}
+						className={`grid w-full ${readOnly ? "grid-cols-4" : "grid-cols-5"}`}
 					>
 						<TabsTrigger value="details">Detalles</TabsTrigger>
 						<TabsTrigger value="documents">Documentos</TabsTrigger>
+						<TabsTrigger value="coDebtors">Co-firmantes</TabsTrigger>
 						<TabsTrigger value="credit">Crédito</TabsTrigger>
 						{!readOnly && <TabsTrigger value="history">Historial</TabsTrigger>}
 					</TabsList>
@@ -660,6 +663,13 @@ export function OpportunityDetailModal({
 							isLoading={opportunityDocumentsQuery.isLoading}
 							onRefresh={() => opportunityDocumentsQuery.refetch()}
 							hasVehicle={!!opportunity.vehicle}
+						/>
+					</TabsContent>
+
+					<TabsContent value="coDebtors" className="mt-6 space-y-4">
+						<CoDebtorsView
+							opportunityId={opportunity.id}
+							opportunity={opportunity as any}
 						/>
 					</TabsContent>
 

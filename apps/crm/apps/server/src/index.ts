@@ -183,6 +183,82 @@ app.post("/api/upload-vehicle-photo", async (c) => {
 	}
 });
 
+// Vehicle video upload endpoint
+app.post("/api/upload-vehicle-video", async (c) => {
+	try {
+		// Get the context (optional for this endpoint)
+		const context = await createContext({ context: c });
+
+		// Parse multipart form data
+		const formData = await c.req.formData();
+		const file = formData.get("file") as File;
+		const vehicleId = formData.get("vehicleId") as string;
+		const category = formData.get("category") as string;
+		const videoType = formData.get("videoType") as string;
+		const title = formData.get("title") as string;
+		const description = formData.get("description") as string | null;
+
+		if (!file || !vehicleId || !category) {
+			return c.json(
+				{ error: "Faltan campos requeridos (file, vehicleId, category)" },
+				400,
+			);
+		}
+
+		// Import necessary modules
+		const { validateVideo, generateUniqueFilename, uploadVehicleVideoToR2 } =
+			await import("./lib/storage");
+
+		// Validate video
+		const validation = validateVideo(file);
+		if (!validation.valid) {
+			console.error("Video validation failed:", {
+				fileName: file.name,
+				fileType: file.type,
+				fileSize: file.size,
+				error: validation.error,
+			});
+			return c.json({ error: validation.error }, 400);
+		}
+
+		// Generate unique filename
+		const uniqueFilename = generateUniqueFilename(file.name);
+
+		// Upload to R2
+		console.log("Uploading video:", {
+			fileName: uniqueFilename,
+			vehicleId,
+			category,
+			fileSize: file.size,
+		});
+
+		const { key, url } = await uploadVehicleVideoToR2(
+			file,
+			uniqueFilename,
+			vehicleId,
+			category,
+		);
+
+		console.log("Video upload successful:", { key, url });
+
+		return c.json({
+			success: true,
+			data: {
+				key,
+				url,
+				vehicleId,
+				category,
+				videoType: videoType || "video",
+				title: title || "Video Evidence",
+				description,
+			},
+		});
+	} catch (error) {
+		console.error("Error uploading vehicle video:", error);
+		return c.json({ error: "Error al subir el video" }, 500);
+	}
+});
+
 // File upload endpoint
 app.post("/api/upload-opportunity-document", async (c) => {
 	try {

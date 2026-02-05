@@ -78,11 +78,13 @@ interface ContractCardProps {
 const statusConfig = {
 	pending: {
 		label: "Pendiente",
-		color: "bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 border-yellow-500/50",
+		color:
+			"bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 border-yellow-500/50",
 	},
 	signed: {
 		label: "Firmado",
-		color: "bg-green-500/20 text-green-700 dark:text-green-400 border-green-500/50",
+		color:
+			"bg-green-500/20 text-green-700 dark:text-green-400 border-green-500/50",
 	},
 	cancelled: {
 		label: "Cancelado",
@@ -201,7 +203,7 @@ export function ContractCard({
 						{/* Link del cliente */}
 						{contract.clientSigningLink && (
 							<div className="flex items-center justify-between gap-2 rounded border-blue-500 border-l-2 bg-blue-500/10 px-2 py-1.5">
-								<p className="shrink-0 font-medium text-blue-600 dark:text-blue-400 text-xs">
+								<p className="shrink-0 font-medium text-blue-600 text-xs dark:text-blue-400">
 									👤 Cliente
 								</p>
 								<div className="flex gap-1">
@@ -233,7 +235,7 @@ export function ContractCard({
 						{/* Link del representante */}
 						{contract.representativeSigningLink && (
 							<div className="flex items-center justify-between gap-2 rounded border-green-500 border-l-2 bg-green-500/10 px-2 py-1.5">
-								<p className="shrink-0 font-medium text-green-600 dark:text-green-400 text-xs">
+								<p className="shrink-0 font-medium text-green-600 text-xs dark:text-green-400">
 									🏢 Representante
 								</p>
 								<div className="flex gap-1">
@@ -272,7 +274,7 @@ export function ContractCard({
 									key={index}
 									className="flex items-center justify-between gap-2 rounded border-purple-500 border-l-2 bg-purple-500/10 px-2 py-1.5"
 								>
-									<p className="shrink-0 font-medium text-purple-600 dark:text-purple-400 text-xs">
+									<p className="shrink-0 font-medium text-purple-600 text-xs dark:text-purple-400">
 										👥 Adicional {index + 1}
 									</p>
 									<div className="flex gap-1">
@@ -304,7 +306,7 @@ export function ContractCard({
 				{contract.pdfLink && (
 					<div className="rounded-lg border border-border bg-amber-500/10 p-3">
 						<div className="flex items-center justify-between gap-2">
-							<p className="font-medium text-amber-600 dark:text-amber-400 text-sm">
+							<p className="font-medium text-amber-600 text-sm dark:text-amber-400">
 								📄 Documento PDF
 							</p>
 							<div className="flex gap-1">

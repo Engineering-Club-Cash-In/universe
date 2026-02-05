@@ -217,14 +217,20 @@ export function OpportunityDocumentUpload({
 				"estados_cuenta_2",
 				"estados_cuenta_3",
 			];
-			Promise.all(
+			Promise.allSettled(
 				types.map((type) =>
 					uploadMutation.mutateAsync({
 						file: selectedFile,
 						documentType: type,
 					}),
 				),
-			).then(() => {
+			).then((results) => {
+				const failed = results.filter((r) => r.status === "rejected");
+				if (failed.length > 0) {
+					toast.error(
+						`${failed.length} de 3 estados de cuenta fallaron al subir`,
+					);
+				}
 				setIncludeAll3Months(false);
 			});
 		} else {

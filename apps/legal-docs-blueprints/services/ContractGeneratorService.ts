@@ -112,11 +112,11 @@ export class ContractGeneratorService {
     // Registrar cobertura INREXSA (no tiene género, solo singular y plural)
     this.registerTemplate({
       type: ContractType.COBERTURA_INREXSA,
-      templateFilename: 'cobertura_inrexsa/cobertura_inrexsa.docx',
-      templateFilenameFemale: 'cobertura_inrexsa/cobertura_inrexsa.docx',
-      templateFilenamePlural: 'cobertura_inrexsa/cobertura_inrexsa-plural.docx',
-      templateFilenameFemalePlural: 'cobertura_inrexsa/cobertura_inrexsa-plural.docx',
-      description: 'Carta de cobertura INREXSA',
+      templateFilename: 'cobertura_inrexsa/cobertura_cci.docx',
+      templateFilenameFemale: 'cobertura_inrexsa/cobertura_cci.docx',
+      templateFilenamePlural: 'cobertura_inrexsa/cobertura_cci-plural.docx',
+      templateFilenameFemalePlural: 'cobertura_inrexsa/cobertura_cci-plural.docx',
+      description: 'Carta de cobertura CCI',
       requiredFields: [
         'nombreCompleto',
       ]
@@ -566,6 +566,7 @@ export class ContractGeneratorService {
       let signing: {
         signs: string[];
         linkDocument: string;
+        r2Key?: string;
        } | undefined;
       let signingLinks: string[] | undefined;
       let shouldCleanupFiles = false;
@@ -693,6 +694,7 @@ export class ContractGeneratorService {
         data: submissionData,
         signing_links: signingLinks,
         linkDocument: signing?.linkDocument || '',
+        r2Key: signing?.r2Key,
         // Campos adicionales para backward compatibility
         contractType,
         docx_path: docxPath,

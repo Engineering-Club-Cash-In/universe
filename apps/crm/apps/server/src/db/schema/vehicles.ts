@@ -32,6 +32,12 @@ export const inspectionStatusEnum = pgEnum("inspection_status", [
 	"auction", // vehículo enviado a remate
 ]);
 
+// Enum for 360 inspection items status
+export const inspection360StatusEnum = pgEnum("inspection_360_status", [
+	"ok",
+	"bad",
+]);
+
 // Vehicle owner type - determines document requirements
 export const vehicleOwnerTypeEnum = pgEnum("vehicle_owner_type", [
 	"individual", // Persona individual
@@ -101,6 +107,8 @@ export const vehicles = pgTable("vehicles", {
 	engineCC: text("engine_cc"), // Opcional para nuevos
 	fuelType: text("fuel_type"), // Opcional para nuevos
 	transmission: text("transmission"), // Opcional para nuevos
+	trim: text("trim"), // Versión o Equipamiento (ej. Touring)
+	traction: text("traction"), // FWD, 4x4
 
 	// Status
 	status: vehicleStatusEnum("status").notNull().default("pending"),
@@ -166,6 +174,11 @@ export const vehicleInspections = pgTable("vehicle_inspections", {
 		scale: 2,
 	}).notNull(),
 
+	// Detailed Conditions (Resumen final de la inspección)
+	tiresCondition: integer("tires_condition"), // Vida útil neumáticos %
+	paintCondition: integer("paint_condition"), // Estado pintura %
+	hasAgencyHistory: boolean("has_agency_history").default(false), // Historial agencia
+
 	// Equipment and considerations
 	vehicleEquipment: text("vehicle_equipment").notNull(),
 	importantConsiderations: text("important_considerations"),
@@ -185,6 +198,9 @@ export const vehicleInspections = pgTable("vehicle_inspections", {
 
 	// Alerts (stored as JSON array)
 	alerts: json("alerts").$type<string[]>().default([]),
+
+	// Evidence for rejection (New Feature)
+	rejectionEvidenceUrl: text("rejection_evidence_url"), // Foto/Video general del rechazo
 
 	// Section times (tiempo en segundos por sección del checklist)
 	sectionTimes: json("section_times")
@@ -259,6 +275,23 @@ export const vehicleDocuments = pgTable("vehicle_documents", {
 	uploadedAt: timestamp("uploaded_at").defaultNow().notNull(),
 });
 
+// New Table for 360 Inspection Items (Excel Detailed List)
+export const vehicleInspection360Items = pgTable("vehicle_inspection_360_items", {
+	id: uuid("id").defaultRandom().primaryKey(),
+	inspectionId: uuid("inspection_id")
+		.references(() => vehicleInspections.id)
+		.notNull(),
+
+	area: text("area").notNull(), // "Motor y Transmisión", "Frenos"...
+	checkpoint: text("checkpoint").notNull(), // "Verificar fugas...", "Nivel de aceite..."
+
+	status: inspection360StatusEnum("status").notNull(), // "ok", "bad"
+	comment: text("comment"), // Obligatorio si status="bad"
+
+	createdAt: timestamp("created_at").defaultNow().notNull(),
+	updatedAt: timestamp("updated_at"),
+});
+
 // Vehicle Document Requirements table - Defines which documents are required per owner type
 export const vehicleDocumentRequirements = pgTable(
 	"vehicle_document_requirements",
@@ -313,6 +346,7 @@ export const vehicleInspectionsRelations = relations(
 		}),
 		photos: many(vehiclePhotos),
 		checklistItems: many(inspectionChecklistItems),
+		inspection360Items: many(vehicleInspection360Items),
 	}),
 );
 
@@ -347,6 +381,16 @@ export const vehicleDocumentsRelations = relations(
 	}),
 );
 
+export const vehicleInspection360ItemsRelations = relations(
+	vehicleInspection360Items,
+	({ one }) => ({
+		inspection: one(vehicleInspections, {
+			fields: [vehicleInspection360Items.inspectionId],
+			references: [vehicleInspections.id],
+		}),
+	}),
+);
+
 // Export types for TypeScript
 export type VehicleVendor = typeof vehicleVendors.$inferSelect;
 export type NewVehicleVendor = typeof vehicleVendors.$inferInsert;
@@ -364,6 +408,11 @@ export type InspectionChecklistItem =
 	typeof inspectionChecklistItems.$inferSelect;
 export type NewInspectionChecklistItem =
 	typeof inspectionChecklistItems.$inferInsert;
+
+export type VehicleInspection360Item =
+	typeof vehicleInspection360Items.$inferSelect;
+export type NewVehicleInspection360Item =
+	typeof vehicleInspection360Items.$inferInsert;
 
 export type VehicleDocument = typeof vehicleDocuments.$inferSelect;
 export type NewVehicleDocument = typeof vehicleDocuments.$inferInsert;

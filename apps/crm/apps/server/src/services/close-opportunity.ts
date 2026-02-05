@@ -529,7 +529,7 @@ function buildInvoices(
 		if (extraInsuranceCost > 0) {
 			seguroGastosItems.push({
 				monto: extraInsuranceCost,
-				rubro: "Gastos varios"
+				rubro: "Gastos varios",
 			});
 		}
 		if (extraAdminCost > 0) {
@@ -999,15 +999,17 @@ export async function closeOpportunity(
 			};
 		}
 
-		let vehicleData: {
-			isNew: boolean;
-			vinNumber: string | null;
-			licensePlate: string | null;
-			origin: string | null;
-			fuelType: string | null;
-			transmission: string | null;
-			companyId: string | null;
-		} | undefined;
+		let vehicleData:
+			| {
+					isNew: boolean;
+					vinNumber: string | null;
+					licensePlate: string | null;
+					origin: string | null;
+					fuelType: string | null;
+					transmission: string | null;
+					companyId: string | null;
+			  }
+			| undefined;
 
 		// Validate vehicle data completeness for new vehicles
 		if (opportunity.vehicleId) {
@@ -1101,7 +1103,7 @@ export async function closeOpportunity(
 		// This runs asynchronously after the credit is created
 		// Skip invoice generation if the vehicle belongs to a company (has companyId)
 		const vehicleHasCompany = opportunity.vehicleId && vehicleData?.companyId;
-		
+
 		if (isCarteraBackEnabled() && !vehicleHasCompany) {
 			const royalti = opportunity.royalti
 				? Number.parseFloat(opportunity.royalti)
@@ -1116,7 +1118,9 @@ export async function closeOpportunity(
 			});
 			console.log("[CloseOpportunity] Invoice generation queued in background");
 		} else if (vehicleHasCompany) {
-			console.log("[CloseOpportunity] Skipping invoice generation - vehicle belongs to a company");
+			console.log(
+				"[CloseOpportunity] Skipping invoice generation - vehicle belongs to a company",
+			);
 		}
 
 		// 4. Complete local operations in a transaction for atomicity

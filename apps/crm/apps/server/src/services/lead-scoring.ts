@@ -210,12 +210,21 @@ export async function scoreLead(leadId: string, opportunityId?: string) {
 				.limit(1);
 			loanPurpose = opp?.loanPurpose ?? null;
 			creditType = opp?.creditType ?? null;
-			console.log("[scoreLead] loanPurpose:", loanPurpose, "creditType:", creditType);
+			console.log(
+				"[scoreLead] loanPurpose:",
+				loanPurpose,
+				"creditType:",
+				creditType,
+			);
 		}
 
 		// 3. Map to ML input
 		console.log("[scoreLead] Step 3: Mapping to ML input...");
-		const { data, missingFields } = mapLeadToScoringInput(lead, loanPurpose, creditType);
+		const { data, missingFields } = mapLeadToScoringInput(
+			lead,
+			loanPurpose,
+			creditType,
+		);
 		console.log("[scoreLead] Mapped data:", { hasData: !!data, missingFields });
 
 		if (!data) {

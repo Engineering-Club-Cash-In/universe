@@ -10,7 +10,8 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
 const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
-const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || "crm-documents";
+// R2 Bucket names - standardized naming convention
+const R2_BUCKET_NAME = process.env.R2_BUCKET_CRM || process.env.R2_BUCKET_NAME || "crm-documents";
 
 // Verificar que las variables de entorno estén configuradas
 if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) {
@@ -113,14 +114,40 @@ export async function getFileUrl(key: string): Promise<string> {
 	return await getSignedUrl(r2Client, command, { expiresIn: 3600 });
 }
 
+// Validar formato de R2 key con bucket incluido
+function validateR2KeyFormat(fullKey: string): { bucket: string; key: string } {
+	if (!fullKey || typeof fullKey !== "string") {
+		throw new Error("R2 key is required and must be a string");
+	}
+
+	// fullKey debe tener formato "bucket-name/path/to/file.ext"
+	const parts = fullKey.split("/");
+
+	if (parts.length < 2) {
+		throw new Error(`Invalid R2 key format: "${fullKey}". Expected "bucket/path/to/file"`);
+	}
+
+	const bucket = parts.shift()!;
+	const key = parts.join("/");
+
+	// Validar que bucket no esté vacío y tenga caracteres válidos
+	if (!bucket || !/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(bucket)) {
+		throw new Error(`Invalid bucket name: "${bucket}". Must be 3-63 lowercase alphanumeric characters or hyphens`);
+	}
+
+	// Validar que key no esté vacío
+	if (!key) {
+		throw new Error("R2 key path cannot be empty");
+	}
+
+	return { bucket, key };
+}
+
 // obtener URL firmada para un archivo que tiene el bucket al inicio de la key
 export async function getFileUrlWithBucketInKey(
 	fullKey: string,
 ): Promise<string> {
-	// fullKey tiene el formato "bucket-name/path/to/file.ext"
-	const parts = fullKey.split("/");
-	const bucket = parts.shift() || R2_BUCKET_NAME;
-	const key = parts.join("/");
+	const { bucket, key } = validateR2KeyFormat(fullKey);
 
 	const command = new GetObjectCommand({
 		Bucket: bucket,

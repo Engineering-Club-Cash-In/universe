@@ -86,6 +86,12 @@ export function prepareValuationContext(
 		comment: string;
 	}>;
 	hasPhotoComments: boolean;
+	// New fields for enhanced valuation
+	trim: string;
+	traction: string;
+	tiresCondition: string;
+	paintCondition: string;
+	hasAgencyHistory: string;
 } {
 	const today = new Date().toLocaleDateString("es-GT");
 
@@ -138,6 +144,7 @@ export function prepareValuationContext(
 		make: vehicleData.vehicleMake || "No especificado",
 		model: vehicleData.vehicleModel || "No especificado",
 		year: vehicleData.vehicleYear || "No especificado",
+		trim: vehicleData.trim || "No especificado", // New Field
 		age: vehicleAge,
 		licensePlate: vehicleData.licensePlate || "No especificado",
 		vin: vehicleData.vinNumber || "No especificado",
@@ -150,6 +157,7 @@ export function prepareValuationContext(
 		fuelType: vehicleData.fuelType || "No especificado",
 		transmission: vehicleData.transmission || "No especificado",
 		origin: vehicleData.origin || "No especificado",
+		traction: vehicleData.traction || "No especificado", // New Field
 
 		// Mileage
 		kmMileage: vehicleData.kmMileage || "No especificado",
@@ -161,6 +169,11 @@ export function prepareValuationContext(
 			? new Date(vehicleData.inspectionDate).toLocaleDateString("es-GT")
 			: today,
 		inspectionResult: vehicleData.inspectionResult || "No especificado",
+
+		// New Condition details
+		tiresCondition: vehicleData.tiresCondition ? `${vehicleData.tiresCondition}%` : "No especificado",
+		paintCondition: vehicleData.paintCondition ? `${vehicleData.paintCondition}%` : "No especificado",
+		hasAgencyHistory: vehicleData.hasAgencyHistory ? "Sí" : "No",
 
 		// Issues and condition
 		criticalIssues: criticalIssues.map((item) => item.item),

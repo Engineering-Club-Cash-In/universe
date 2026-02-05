@@ -756,9 +756,7 @@ export const crmRouter = {
 					context.userRole === "sales" &&
 					lead[0].assignedTo !== context.userId
 				) {
-					throw new Error(
-						"You don't have permission to update this analysis",
-					);
+					throw new Error("You don't have permission to update this analysis");
 				}
 
 				// Check if analysis already exists
@@ -773,6 +771,7 @@ export const crmRouter = {
 						.update(creditAnalysis)
 						.set({
 							...dataForDb,
+							analyzedAt: existing[0].analyzedAt ?? new Date(),
 							updatedAt: new Date(),
 						})
 						.where(eq(creditAnalysis.leadId, leadId))
@@ -816,6 +815,7 @@ export const crmRouter = {
 						.update(creditAnalysis)
 						.set({
 							...dataForDb,
+							analyzedAt: existing[0].analyzedAt ?? new Date(),
 							updatedAt: new Date(),
 						})
 						.where(eq(creditAnalysis.coDebtorId, coDebtorId))
@@ -4863,7 +4863,10 @@ export const crmRouter = {
 		.input(
 			z.object({
 				id: z.string().uuid(),
-				fullName: z.string().min(1, "El nombre completo es requerido").optional(),
+				fullName: z
+					.string()
+					.min(1, "El nombre completo es requerido")
+					.optional(),
 				dpi: z.string().min(1, "El DPI es requerido").optional(),
 				age: z.number().int().positive().nullable().optional(),
 				gender: z.enum(["male", "female"]).nullable().optional(),
@@ -4990,9 +4993,13 @@ export const crmRouter = {
 			// Datos del lead
 			const leadData = {
 				monthlyFixedIncome: parseDecimal(leadAnalysis?.monthlyFixedIncome),
-				monthlyVariableIncome: parseDecimal(leadAnalysis?.monthlyVariableIncome),
+				monthlyVariableIncome: parseDecimal(
+					leadAnalysis?.monthlyVariableIncome,
+				),
 				monthlyFixedExpenses: parseDecimal(leadAnalysis?.monthlyFixedExpenses),
-				monthlyVariableExpenses: parseDecimal(leadAnalysis?.monthlyVariableExpenses),
+				monthlyVariableExpenses: parseDecimal(
+					leadAnalysis?.monthlyVariableExpenses,
+				),
 				economicAvailability: parseDecimal(leadAnalysis?.economicAvailability),
 				minPayment: parseDecimal(leadAnalysis?.minPayment),
 				maxPayment: parseDecimal(leadAnalysis?.maxPayment),
@@ -5006,10 +5013,18 @@ export const crmRouter = {
 				(acc, { analysis }) => {
 					if (analysis?.analyzedAt) {
 						acc.monthlyFixedIncome += parseDecimal(analysis.monthlyFixedIncome);
-						acc.monthlyVariableIncome += parseDecimal(analysis.monthlyVariableIncome);
-						acc.monthlyFixedExpenses += parseDecimal(analysis.monthlyFixedExpenses);
-						acc.monthlyVariableExpenses += parseDecimal(analysis.monthlyVariableExpenses);
-						acc.economicAvailability += parseDecimal(analysis.economicAvailability);
+						acc.monthlyVariableIncome += parseDecimal(
+							analysis.monthlyVariableIncome,
+						);
+						acc.monthlyFixedExpenses += parseDecimal(
+							analysis.monthlyFixedExpenses,
+						);
+						acc.monthlyVariableExpenses += parseDecimal(
+							analysis.monthlyVariableExpenses,
+						);
+						acc.economicAvailability += parseDecimal(
+							analysis.economicAvailability,
+						);
 						acc.minPayment += parseDecimal(analysis.minPayment);
 						acc.maxPayment += parseDecimal(analysis.maxPayment);
 						acc.adjustedPayment += parseDecimal(analysis.adjustedPayment);
@@ -5034,15 +5049,24 @@ export const crmRouter = {
 
 			// Totales consolidados (lead + co-deudores)
 			const consolidated = {
-				monthlyFixedIncome: leadData.monthlyFixedIncome + coDebtorsTotals.monthlyFixedIncome,
-				monthlyVariableIncome: leadData.monthlyVariableIncome + coDebtorsTotals.monthlyVariableIncome,
-				monthlyFixedExpenses: leadData.monthlyFixedExpenses + coDebtorsTotals.monthlyFixedExpenses,
-				monthlyVariableExpenses: leadData.monthlyVariableExpenses + coDebtorsTotals.monthlyVariableExpenses,
-				economicAvailability: leadData.economicAvailability + coDebtorsTotals.economicAvailability,
+				monthlyFixedIncome:
+					leadData.monthlyFixedIncome + coDebtorsTotals.monthlyFixedIncome,
+				monthlyVariableIncome:
+					leadData.monthlyVariableIncome +
+					coDebtorsTotals.monthlyVariableIncome,
+				monthlyFixedExpenses:
+					leadData.monthlyFixedExpenses + coDebtorsTotals.monthlyFixedExpenses,
+				monthlyVariableExpenses:
+					leadData.monthlyVariableExpenses +
+					coDebtorsTotals.monthlyVariableExpenses,
+				economicAvailability:
+					leadData.economicAvailability + coDebtorsTotals.economicAvailability,
 				minPayment: leadData.minPayment + coDebtorsTotals.minPayment,
 				maxPayment: leadData.maxPayment + coDebtorsTotals.maxPayment,
-				adjustedPayment: leadData.adjustedPayment + coDebtorsTotals.adjustedPayment,
-				maxCreditAmount: leadData.maxCreditAmount + coDebtorsTotals.maxCreditAmount,
+				adjustedPayment:
+					leadData.adjustedPayment + coDebtorsTotals.adjustedPayment,
+				maxCreditAmount:
+					leadData.maxCreditAmount + coDebtorsTotals.maxCreditAmount,
 				totalIncome:
 					leadData.monthlyFixedIncome +
 					leadData.monthlyVariableIncome +
@@ -5067,7 +5091,9 @@ export const crmRouter = {
 					monthlyFixedIncome: parseDecimal(analysis?.monthlyFixedIncome),
 					monthlyVariableIncome: parseDecimal(analysis?.monthlyVariableIncome),
 					monthlyFixedExpenses: parseDecimal(analysis?.monthlyFixedExpenses),
-					monthlyVariableExpenses: parseDecimal(analysis?.monthlyVariableExpenses),
+					monthlyVariableExpenses: parseDecimal(
+						analysis?.monthlyVariableExpenses,
+					),
 					economicAvailability: parseDecimal(analysis?.economicAvailability),
 					minPayment: parseDecimal(analysis?.minPayment),
 					maxPayment: parseDecimal(analysis?.maxPayment),

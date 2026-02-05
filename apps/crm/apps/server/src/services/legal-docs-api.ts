@@ -79,13 +79,27 @@ export interface DocumentByDpiResponse {
 	campos: Field[];
 }
 
+// Datos de deudor adicional para contratos con múltiples deudores
+export interface DeudorAdicional {
+	nombreCompleto: string;
+	dpi: string;
+	dpiTexto: string;
+	edadTexto?: string;
+	estadoCivil?: string;
+	profesion?: string;
+	nacionalidad?: string;
+}
+
 export interface GenerateContractPayload {
 	contractType: string;
-	data: Record<string, string>;
+	data: Record<string, unknown> & {
+		deudoresAdicionales?: DeudorAdicional[];
+	};
 	emails?: string[];
 	options: {
 		gender: "male" | "female";
 		generatePdf: boolean;
+		isPlural?: boolean;
 		filenamePrefix: string;
 	};
 }

@@ -4,13 +4,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { toast } from 'sonner'; // o tu librería de toast
-import { 
-  anularFactura, 
-  facturarPagoCompleto, 
-  obtenerFacturaPorUUID, 
-  obtenerFacturasPorCredito, 
+import {
+  anularFactura,
+  facturarPagoCompleto,
+  obtenerFacturaPorUUID,
+  obtenerFacturasPorCredito,
   obtenerFacturasPorPago,
-  getPagoCompleto // ← 🔥 NUEVO
+  getPagoCompleto,
+  facturarGenerico,
+  getFacturasGenericas,
+  type FacturarGenericoRequest,
+  type GetFacturasGenericasParams
 } from '../services/services';
 
 export const useFacturarPagoCompleto = () => {
@@ -73,8 +77,9 @@ export const useAnularFactura = () => {
         toast.success(data.mensaje || 'Factura anulada exitosamente');
         // Invalidar cache
         queryClient.invalidateQueries({ queryKey: ['facturas-pago'] });
-        queryClient.invalidateQueries({ queryKey: ['pago-completo'] }); // ← 🔥 NUEVO
+        queryClient.invalidateQueries({ queryKey: ['pago-completo'] });
         queryClient.invalidateQueries({ queryKey: ['factura'] });
+        queryClient.invalidateQueries({ queryKey: ['facturas-genericas'] });
       } else {
         toast.error(data.mensaje || 'Error al anular factura');
       }
@@ -111,6 +116,57 @@ export const usePagoCompleto = (pagoId: number | null) => {
     queryKey: ['pago-completo', pagoId],
     queryFn: () => getPagoCompleto(pagoId!),
     enabled: !!pagoId,
+    staleTime: 1000 * 60 * 5 // 5 minutos
+  });
+};
+
+// 🔥 Hook para facturar genérico (sin pago asociado)
+export const useFacturarGenerico = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: FacturarGenericoRequest) => facturarGenerico(data),
+    onSuccess: (data) => {
+      if (data.success && data.data) {
+        const serie = data.data.serie;
+        const numero = data.data.numero;
+        const receptor = data.data.receptor.nombreReceptor;
+
+        toast.success(
+          `✅ Factura ${serie}-${numero} generada para ${receptor}`,
+          {
+            duration: 5000,
+          }
+        );
+
+        // Invalidar cache relevante
+        queryClient.invalidateQueries({ queryKey: ['facturas-electronicas'] });
+        queryClient.invalidateQueries({ queryKey: ['facturas-genericas'] });
+      } else {
+        toast.error(data.error || 'Error al generar factura genérica');
+      }
+    },
+    onError: (error: any) => {
+      const errorMsg = error?.response?.data?.error
+        || error?.message
+        || 'Error al generar factura genérica';
+
+      toast.error(errorMsg);
+
+      console.error('Error facturando genérico:', error);
+    }
+  });
+};
+
+// 🔥 Hook para obtener facturas genéricas (por created_by y/o nit) con paginación
+export const useFacturasGenericas = (params: GetFacturasGenericasParams) => {
+  return useQuery({
+    queryKey: ['facturas-genericas', params],
+    queryFn: () => getFacturasGenericas({
+      ...params,
+      page: params.page || 1,
+      limit: params.limit || 10,
+    }),
     staleTime: 1000 * 60 * 5 // 5 minutos
   });
 };

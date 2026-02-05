@@ -23,7 +23,8 @@ export default function CreditosPorAsesorManager() {
   const [openCredito, setOpenCredito] = useState<number | null>(null);
   const { data, isLoading, error, refetch } = useCreditosPorAsesor(search);
 
-  return (<div className="flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto py-2 text-gray-900">
+  return (  <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-4 sm:px-6 lg:px-8 overflow-auto pt-8 pb-8">
+   
       <h2 className="text-2xl font-bold text-blue-700 mb-4 text-center">
         Créditos por Asesor
       </h2>

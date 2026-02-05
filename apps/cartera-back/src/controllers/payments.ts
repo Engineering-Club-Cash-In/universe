@@ -68,7 +68,7 @@ export async function getAllPagosWithCreditAndInversionistas(
         total_restante: pagos_credito.total_restante,
         llamada: pagos_credito.llamada,
         fecha_pago: pagos_credito.fecha_pago,
-        fecha_vencimiento: pagos_credito.fecha_vencimiento,
+        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
         renuevo_o_nuevo: pagos_credito.renuevo_o_nuevo,
         membresias: pagos_credito.membresias,
         membresias_pago: pagos_credito.membresias_pago,
@@ -1121,7 +1121,13 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         ce.nombre_cuenta AS "cuentaEmpresaNombre",
         ce.banco AS "cuentaEmpresaBanco",
         ce.numero_cuenta AS "cuentaEmpresaNumero",
-        
+
+        -- 📅 Fecha boleta en zona Guatemala
+        TO_CHAR(p.fecha_boleta::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD') AS "fechaBoleta",
+
+        -- 👤 Nombre del asesor que registró
+        ase.nombre AS "registerByNombre",
+
         -- 💰 Abonos del pago
         p.abono_capital AS "abono_capital",
         p.abono_interes AS "abono_interes",
@@ -1200,7 +1206,8 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       LEFT JOIN cartera.creditos c ON c.credito_id = p.credito_id
       LEFT JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
       LEFT JOIN cartera.bancos b ON b.banco_id = p.banco_id
-      LEFT JOIN cartera.cuentas_empresa ce ON ce.cuenta_id = p.cuenta_empresa_id -- 👈 NUEVO JOIN
+      LEFT JOIN cartera.cuentas_empresa ce ON ce.cuenta_id = p.cuenta_empresa_id
+      LEFT JOIN cartera.asesores ase ON ase.email_cash_in = p.registerby
       ${sql.raw(whereSQL)}
       ORDER BY p.fecha_pago DESC
       LIMIT ${pageSize} OFFSET ${offset};
@@ -1224,7 +1231,9 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       bancoNombre: r.bancoNombre,
       cuentaEmpresaNombre: r.cuentaEmpresaNombre, // 👈 NUEVO
       cuentaEmpresaBanco: r.cuentaEmpresaBanco, // 👈 NUEVO
-      cuentaEmpresaNumero: r.cuentaEmpresaNumero, // 👈 NUEVO
+      cuentaEmpresaNumero: r.cuentaEmpresaNumero,
+      fechaBoleta: r.fechaBoleta,
+      registerByNombre: r.registerByNombre,
       observaciones: r.observaciones,
       abono_capital: r.abono_capital,
       abono_interes: r.abono_interes,

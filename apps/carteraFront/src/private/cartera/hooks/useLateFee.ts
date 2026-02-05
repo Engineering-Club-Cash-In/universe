@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   condonarMoraService,
   createMoraService,
@@ -87,17 +88,19 @@ export const useMorasMasivo = () => {
     mutationFn: (data: CondonarMasivaRequest) => morasService.condonarMorasMasivo(data),
     onSuccess: (data) => {
       if (data.success) {
-        alert(`✅ ${data.message}\n\n${data.condonados} créditos afectados`);
+        toast.success(data.message, {
+          description: `${data.condonados} créditos afectados`,
+        });
         // Invalida queries relacionadas para refetch automático
         queryClient.invalidateQueries({ queryKey: ['creditos'] });
         queryClient.invalidateQueries({ queryKey: ['moras'] });
         queryClient.invalidateQueries({ queryKey: ['condonaciones'] });
       } else {
-        alert(`❌ ${data.message}`);
+        toast.error(data.message);
       }
     },
     onError: (error: any) => {
-      alert(`❌ ${error?.response?.data?.message || 'Error en condonación masiva'}`);
+      toast.error(error?.response?.data?.message || 'Error en condonación masiva');
     },
   });
 

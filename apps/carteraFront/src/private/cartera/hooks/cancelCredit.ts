@@ -10,6 +10,9 @@ import {
   type CancelCreditPayload,
   type BadDebtCreditPayload,
   type PendingCancelCreditPayload, // Si lo quieres importar individualmente
+  toggleCancelacionActivoService,
+  type ToggleCancelacionActivoPayload,
+  type ToggleCancelacionActivoResponse,
 } from "../services/services";
 
 // Hook específico para cancelar crédito (puedes dejarlo si lo usas en un lugar aparte)
@@ -52,4 +55,11 @@ export function usePendingCancelCredit() {
 }
 export function openReportInNewTab(url: string): void {
   window.open(url, "_blank", "noopener,noreferrer");
+}
+
+// Hook para toggle de cancelación activo
+export function useToggleCancelacionActivo() {
+  return useMutation<ToggleCancelacionActivoResponse, Error, ToggleCancelacionActivoPayload>({
+    mutationFn: toggleCancelacionActivoService,
+  });
 }

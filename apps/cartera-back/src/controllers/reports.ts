@@ -356,6 +356,18 @@ export async function exportPagosConInversionistasExcel(
     { header: "Reserva", key: "reserva", width: 15 },
     { header: "Membresías", key: "membresias", width: 15 },
     { header: "Categoría", key: "categoria", width: 15 },
+    { header: "Pago Convenio", key: "pagoConvenio", width: 15 },
+    { header: "Observaciones", key: "observaciones", width: 30 },
+    { header: "Banco", key: "bancoNombre", width: 20 },
+    { header: "Cuenta Empresa", key: "cuentaEmpresaNombre", width: 20 },
+    { header: "Banco Empresa", key: "cuentaEmpresaBanco", width: 20 },
+    { header: "Número Cuenta Empresa", key: "cuentaEmpresaNumero", width: 20 },
+    { header: "Fecha Boleta", key: "fechaBoleta", width: 15 },
+    { header: "Registrado Por", key: "registerByNombre", width: 25 },
+    { header: "Registrado Por (Email)", key: "registerBy", width: 30 },
+    { header: "Estado Validación", key: "validationStatus", width: 18 },
+    { header: "Estado Crédito", key: "statusCredit", width: 18 },
+    { header: "NIT", key: "nit", width: 15 },
   ];
 
   // 4️⃣ Determinar máximo de inversionistas por pago
@@ -406,6 +418,18 @@ export async function exportPagosConInversionistasExcel(
       otros: item.otros,
       reserva: item.reserva,
       membresias: item.membresias,
+      pagoConvenio: item.pagoConvenio,
+      observaciones: item.observaciones,
+      bancoNombre: item.bancoNombre,
+      cuentaEmpresaNombre: item.cuentaEmpresaNombre,
+      cuentaEmpresaBanco: item.cuentaEmpresaBanco,
+      cuentaEmpresaNumero: item.cuentaEmpresaNumero,
+      fechaBoleta: item.fechaBoleta,
+      registerByNombre: item.registerByNombre,
+      registerBy: item.registerBy,
+      validationStatus: item.validationStatus,
+      statusCredit: item.credito?.statusCredit ?? "",
+      nit: item.usuario?.nit ?? "",
     };
 
     // Agregar inversionistas dinámicos
@@ -454,6 +478,7 @@ export async function exportPagosConInversionistasExcel(
     otros: result.totales?.totalOtros ?? 0,
     reserva: result.totales?.totalReserva ?? 0,
     membresias: result.totales?.totalMembresias ?? 0,
+    pagoConvenio: result.totales?.totalConvenio ?? 0,
   });
 
   // 🎨 Formatear fila de totales (negrita + fondo amarillo)
@@ -493,6 +518,177 @@ export async function exportPagosConInversionistasExcel(
 
   const excelUrl = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
   console.log("✅ Reporte de pagos con inversionistas subido:", excelUrl);
+
+  return {
+    success: true,
+    total: result.data.length,
+    excelUrl,
+  };
+}
+
+// ============================================
+// 📊 REPORTE EXCEL PARA ASESORES (SIN INVERSIONISTAS)
+// ============================================
+export async function exportPagosAdvisorExcel(
+  options: {
+    page?: number;
+    pageSize?: number;
+    numeroCredito?: string;
+    dia?: number;
+    mes?: number;
+    anio?: number;
+    inversionistaId?: number;
+    usuarioNombre?: string;
+    validationStatus?: string;
+  }
+) {
+  const result = await getPagosConInversionistas({
+    ...options,
+    pageSize: 99999,
+  });
+
+  if (!result.data || result.data.length === 0) {
+    throw new Error("No se encontraron pagos para generar el Excel.");
+  }
+
+  console.log(`📊 Generando Excel de asesores con ${result.data.length} pagos...`);
+
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Reporte Asesores");
+
+  const columns: any[] = [
+    { header: "Pago ID", key: "pagoId", width: 12 },
+    { header: "Número Crédito", key: "numeroCredito", width: 20 },
+    { header: "Crédito ID", key: "creditoId", width: 15 },
+    { header: "Capital Crédito", key: "capital", width: 15 },
+    { header: "Deuda Total", key: "deudaTotal", width: 15 },
+    { header: "Estado Crédito", key: "statusCredit", width: 18 },
+    { header: "Cliente", key: "usuarioNombre", width: 25 },
+    { header: "NIT", key: "nit", width: 15 },
+    { header: "Categoría", key: "categoria", width: 15 },
+    { header: "Monto Boleta", key: "montoBoleta", width: 15 },
+    { header: "Número Autorización", key: "numeroAutorizacion", width: 20 },
+    { header: "Fecha Pago", key: "fechaPago", width: 20 },
+    { header: "Fecha Boleta", key: "fechaBoleta", width: 15 },
+    { header: "Cuota ID", key: "cuotaId", width: 12 },
+    { header: "Número Cuota", key: "numeroCuota", width: 12 },
+    { header: "Fecha Vencimiento", key: "fechaVencimiento", width: 20 },
+    { header: "Banco", key: "bancoNombre", width: 20 },
+    { header: "Cuenta Empresa", key: "cuentaEmpresaNombre", width: 20 },
+    { header: "Banco Empresa", key: "cuentaEmpresaBanco", width: 20 },
+    { header: "Número Cuenta Empresa", key: "cuentaEmpresaNumero", width: 20 },
+    { header: "Abono Capital", key: "abono_capital", width: 15 },
+    { header: "Abono Interés", key: "abono_interes", width: 15 },
+    { header: "Abono IVA 12%", key: "abono_iva_12", width: 15 },
+    { header: "Abono Seguro", key: "abono_seguro", width: 15 },
+    { header: "Abono GPS", key: "abono_gps", width: 15 },
+    { header: "Mora", key: "mora", width: 15 },
+    { header: "Pago Convenio", key: "pagoConvenio", width: 15 },
+    { header: "Otros", key: "otros", width: 15 },
+    { header: "Reserva", key: "reserva", width: 15 },
+    { header: "Membresías", key: "membresias", width: 15 },
+    { header: "Observaciones", key: "observaciones", width: 30 },
+    { header: "Estado Validación", key: "validationStatus", width: 18 },
+    { header: "Registrado Por", key: "registerByNombre", width: 25 },
+    { header: "Registrado Por (Email)", key: "registerBy", width: 30 },
+    { header: "Boleta ID", key: "boletaId", width: 12 },
+    { header: "URL Boleta", key: "urlBoleta", width: 50 },
+  ];
+
+  sheet.columns = columns;
+
+  result.data.forEach((item: any) => {
+    sheet.addRow({
+      pagoId: item.pagoId,
+      numeroCredito: item.credito?.numeroCreditoSifco ?? "",
+      creditoId: item.credito?.creditoId ?? "",
+      capital: item.credito?.capital ?? "",
+      deudaTotal: item.credito?.deudaTotal ?? "",
+      statusCredit: item.credito?.statusCredit ?? "",
+      usuarioNombre: item.usuario?.nombre ?? "",
+      nit: item.usuario?.nit ?? "",
+      categoria: item.usuario?.categoria ?? "",
+      montoBoleta: item.montoBoleta,
+      numeroAutorizacion: item.numeroAutorizacion,
+      fechaPago: item.fechaPago,
+      fechaBoleta: item.fechaBoleta,
+      cuotaId: item.cuota?.cuotaId ?? "",
+      numeroCuota: item.cuota?.numeroCuota ?? "",
+      fechaVencimiento: item.cuota?.fechaVencimiento ?? "",
+      bancoNombre: item.bancoNombre,
+      cuentaEmpresaNombre: item.cuentaEmpresaNombre,
+      cuentaEmpresaBanco: item.cuentaEmpresaBanco,
+      cuentaEmpresaNumero: item.cuentaEmpresaNumero,
+      abono_capital: item.abono_capital,
+      abono_interes: item.abono_interes,
+      abono_iva_12: item.abono_iva_12,
+      abono_seguro: item.abono_seguro,
+      abono_gps: item.abono_gps,
+      mora: item.mora,
+      pagoConvenio: item.pagoConvenio,
+      otros: item.otros,
+      reserva: item.reserva,
+      membresias: item.membresias,
+      observaciones: item.observaciones,
+      validationStatus: item.validationStatus,
+      registerByNombre: item.registerByNombre,
+      registerBy: item.registerBy,
+      boletaId: item.boleta?.boletaId ?? "",
+      urlBoleta: item.boleta?.urlBoleta ?? "",
+    });
+  });
+
+  // Fila vacía + totales
+  sheet.addRow({});
+
+  const totalRow = sheet.addRow({
+    pagoId: "TOTALES",
+    abono_capital: result.totales?.totalAbonoCapital ?? 0,
+    abono_interes: result.totales?.totalAbonoInteres ?? 0,
+    abono_iva_12: result.totales?.totalAbonoIva ?? 0,
+    abono_seguro: result.totales?.totalAbonoSeguro ?? 0,
+    abono_gps: result.totales?.totalAbonoGps ?? 0,
+    mora: result.totales?.totalMora ?? 0,
+    pagoConvenio: result.totales?.totalConvenio ?? 0,
+    otros: result.totales?.totalOtros ?? 0,
+    reserva: result.totales?.totalReserva ?? 0,
+    membresias: result.totales?.totalMembresias ?? 0,
+  });
+
+  totalRow.eachCell((cell) => {
+    cell.font = { bold: true };
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FFFF00" },
+    };
+  });
+
+  const arrayBuffer = await workbook.xlsx.writeBuffer();
+  const uint8Array = new Uint8Array(arrayBuffer);
+
+  const s3 = new S3Client({
+    endpoint: process.env.BUCKET_REPORTS_URL,
+    region: "auto",
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+    },
+  });
+
+  const filename = `reportes/pagos_asesores_${Date.now()}.xlsx`;
+
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: process.env.BUCKET_REPORTS!,
+      Key: filename,
+      Body: uint8Array,
+      ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    })
+  );
+
+  const excelUrl = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
+  console.log("✅ Reporte de asesores subido:", excelUrl);
 
   return {
     success: true,

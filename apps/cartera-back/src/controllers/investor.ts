@@ -436,8 +436,8 @@ export async function processAndReplaceCreditInvestors(
       ...inv, // trae el id necesario para el update
       credito_id,
       monto_aportado: montoAportado.toFixed(2),
-      porcentaje_cash_in: porcentajeCashIn.toFixed(2),
-      porcentaje_participacion_inversionista: porcentajeInversion.toFixed(2),
+      porcentaje_cash_in: porcentajeCashIn.toString(),
+      porcentaje_participacion_inversionista: porcentajeInversion.toString(),
       monto_inversionista: montoInversionista.toFixed(2),
       monto_cash_in: montoCashIn.toFixed(2),
       iva_inversionista: ivaInversionista.toFixed(2),
@@ -542,8 +542,8 @@ export async function processAndReplaceCreditInvestorsReverse(
       ...inv, // trae el id necesario para el update
       credito_id,
       monto_aportado: montoAportado.toFixed(2),
-      porcentaje_cash_in: porcentajeCashIn.toFixed(2),
-      porcentaje_participacion_inversionista: porcentajeInversion.toFixed(2),
+      porcentaje_cash_in: porcentajeCashIn.toString(),
+      porcentaje_participacion_inversionista: porcentajeInversion.toString(),
       monto_inversionista: montoInversionista.toFixed(2),
       monto_cash_in: montoCashIn.toFixed(2),
       iva_inversionista: ivaInversionista.toFixed(2),

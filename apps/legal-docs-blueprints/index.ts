@@ -333,7 +333,7 @@ const app = new Elysia()
       generateBatch: 'POST /contracts/batch',
       generateByType: 'POST /contracts/:type',
       webhooks: {
-        receive: 'POST /webhooks/weetrust',
+        receive: 'POST /webhooks/weetrust/:secret',
         status: 'GET /webhooks/weetrust/status',
         register: 'POST /webhooks/weetrust/register'
       }
@@ -371,15 +371,33 @@ const app = new Elysia()
   // ===== WEBHOOKS =====
 
   /**
-   * POST /webhooks/weetrust - Recibe notificaciones de WeeTrust
+   * POST /webhooks/weetrust/:secret - Recibe notificaciones de WeeTrust
    *
    * Tipos de eventos:
    * - sendDocument: Documento enviado a firma
    * - signDocument: Un firmante firmó
    * - completedDocument: Todos los firmantes completaron
+   *
+   * Security: Secret token validated via URL path parameter
+   * Register webhook with: https://your-domain.com/webhooks/weetrust/{WEETRUST_WEBHOOK_SECRET}
    */
-  .post('/webhooks/weetrust', async ({ body, set }) => {
+  .post('/webhooks/weetrust/:secret', async ({ params, body, set }) => {
     try {
+      // Validate webhook secret from URL
+      const expectedSecret = process.env.WEETRUST_WEBHOOK_SECRET;
+
+      if (!expectedSecret) {
+        console.error('[WeeTrust Webhook] WEETRUST_WEBHOOK_SECRET not configured');
+        set.status = 500;
+        return { success: false, error: 'Webhook not configured' };
+      }
+
+      if (params.secret !== expectedSecret) {
+        console.warn('[WeeTrust Webhook] Invalid webhook secret');
+        set.status = 401;
+        return { success: false, error: 'Unauthorized' };
+      }
+
       const payload = body as {
         event?: string;
         type?: string;
@@ -396,7 +414,8 @@ const app = new Elysia()
         timestamp?: string;
       };
 
-      console.log('\n📥 [WeeTrust Webhook] Evento recibido:', JSON.stringify(payload, null, 2));
+      // Log event without sensitive data
+      console.log(`\n📥 [WeeTrust Webhook] Event: ${payload.event || payload.type}, DocumentID: ${payload.documentID || payload.document?.documentID}`);
 
       // Determinar tipo de evento
       const eventType = payload.event || payload.type || 'unknown';
@@ -518,7 +537,7 @@ console.log(`
 ║  • POST /contracts/:type       - Genera por tipo          ║
 ║                                                           ║
 ║  Webhooks:                                                ║
-║  • POST /webhooks/weetrust          - Recibe eventos      ║
+║  • POST /webhooks/weetrust/:secret  - Recibe eventos      ║
 ║  • GET  /webhooks/weetrust/status   - Ver registrados     ║
 ║  • POST /webhooks/weetrust/register - Registrar webhook   ║
 ╚═══════════════════════════════════════════════════════════╝

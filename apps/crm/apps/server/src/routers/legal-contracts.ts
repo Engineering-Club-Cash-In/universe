@@ -113,7 +113,8 @@ export const legalContractsRouter = {
 					`legal-contracts/${input.opportunityId || input.leadId}`,
 				);
 
-				pdfLink = await getFileUrl(key);
+				// Guardar solo la key, no la URL firmada temporal
+				pdfLink = key;
 			}
 
 			// Crear el contrato (sin incluir pdfFile en los valores)
@@ -193,10 +194,11 @@ export const legalContractsRouter = {
 				const { key } = await uploadFileToR2(
 					fileBlob,
 					uniqueFilename,
-					`legal-contracts/${existingContract.leadId}`,
+					`legal-contracts/${existingContract.opportunityId || existingContract.leadId}`,
 				);
 
-				pdfLink = await getFileUrl(key);
+				// Guardar solo la key, no la URL firmada temporal
+				pdfLink = key;
 			}
 
 			// Actualizar el contrato
@@ -327,11 +329,13 @@ export const legalContractsRouter = {
 				.where(eq(generatedLegalContracts.opportunityId, input.opportunityId))
 				.orderBy(generatedLegalContracts.generatedAt);
 
-			// Verificar estado de firma en Documenso para contratos pendientes
+			// Verificar estado de firma en Documenso y generar URLs firmadas para PDFs
 			const contractsWithUpdatedStatus = await Promise.all(
 				contracts.map(async (contractData) => {
+					let updatedContract = contractData.contract;
+					// TODO: Aun nadie usa Documenso, deshabilitado por ahora
 					// Solo verificar si el contrato está pendiente y tiene link de firma del cliente
-					if (
+					/*if (
 						contractData.contract.status === "pending" &&
 						contractData.contract.clientSigningLink
 					) {
@@ -341,7 +345,7 @@ export const legalContractsRouter = {
 
 						// Si está firmado, actualizar en la base de datos
 						if (signingStatus.isSigned) {
-							const [updatedContract] = await db
+							const [dbUpdatedContract] = await db
 								.update(generatedLegalContracts)
 								.set({
 									status: "signed",
@@ -350,14 +354,37 @@ export const legalContractsRouter = {
 								.where(eq(generatedLegalContracts.id, contractData.contract.id))
 								.returning();
 
-							return {
-								...contractData,
-								contract: updatedContract,
-							};
+							updatedContract = dbUpdatedContract;
+						}
+					}*/
+
+					// Generar URL firmada fresca si pdfLink es una key (no es URL de documenso)
+					let pdfLinkUrl = updatedContract.pdfLink;
+					if (
+						updatedContract.pdfLink &&
+						!updatedContract.pdfLink.includes("documenso")
+					) {
+						// Si es una key (no empieza con http), generar URL firmada
+						if (!updatedContract.pdfLink.startsWith("http")) {
+							try {
+								pdfLinkUrl = await getFileUrl(updatedContract.pdfLink);
+							} catch (error) {
+								console.error(
+									`Error generando URL para contrato ${updatedContract.id}:`,
+									error,
+								);
+								// Mantener el valor original si hay error
+							}
 						}
 					}
 
-					return contractData;
+					return {
+						...contractData,
+						contract: {
+							...updatedContract,
+							pdfLink: pdfLinkUrl,
+						},
+					};
 				}),
 			);
 

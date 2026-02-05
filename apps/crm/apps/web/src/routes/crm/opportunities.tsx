@@ -50,6 +50,7 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
 import {
 	Dialog,
@@ -3012,6 +3013,7 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
 	const [description, setDescription] = useState("");
 	const [documentType, setDocumentType] = useState<string>("");
+	const [includeAll3Months, setIncludeAll3Months] = useState(false);
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const { data: session } = authClient.useSession();
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
@@ -3023,41 +3025,59 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 		enabled: !!opportunityId,
 	});
 
+	// Upload a single document with a specific type
+	const uploadSingleDocument = async (docType: string) => {
+		if (!selectedFile) return;
+
+		const formData = new FormData();
+		formData.append("file", selectedFile);
+		formData.append("opportunityId", opportunityId);
+		formData.append("documentType", docType);
+		if (description) {
+			formData.append("description", description);
+		}
+
+		const response = await fetch(
+			`${import.meta.env.VITE_SERVER_URL}/api/upload-opportunity-document`,
+			{
+				method: "POST",
+				body: formData,
+				credentials: "include",
+			},
+		);
+
+		if (!response.ok) {
+			const error = await response.json();
+			throw new Error(error.message || "Error al subir el archivo");
+		}
+
+		return response.json();
+	};
+
 	// Upload mutation
 	const uploadMutation = useMutation({
 		mutationFn: async () => {
-			if (!selectedFile) return;
-
-			const formData = new FormData();
-			formData.append("file", selectedFile);
-			formData.append("opportunityId", opportunityId);
-			formData.append("documentType", documentType);
-			if (description) {
-				formData.append("description", description);
+			if (
+				includeAll3Months &&
+				["estados_cuenta_1", "estados_cuenta_2", "estados_cuenta_3"].includes(
+					documentType,
+				)
+			) {
+				await Promise.all([
+					uploadSingleDocument("estados_cuenta_1"),
+					uploadSingleDocument("estados_cuenta_2"),
+					uploadSingleDocument("estados_cuenta_3"),
+				]);
+				return;
 			}
-
-			// Use fetch directly for file upload
-			const response = await fetch(
-				`${import.meta.env.VITE_SERVER_URL}/api/upload-opportunity-document`,
-				{
-					method: "POST",
-					body: formData,
-					credentials: "include",
-				},
-			);
-
-			if (!response.ok) {
-				const error = await response.json();
-				throw new Error(error.message || "Error al subir el archivo");
-			}
-
-			return response.json();
+			return uploadSingleDocument(documentType);
 		},
 		onSuccess: () => {
 			toast.success("Documento subido exitosamente");
 			setSelectedFile(null);
 			setDescription("");
-			setDocumentType("identification");
+			setDocumentType("");
+			setIncludeAll3Months(false);
 			if (fileInputRef.current) {
 				fileInputRef.current.value = "";
 			}
@@ -3367,6 +3387,27 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 							isInModal={true}
 						/>
 					</div>
+
+					{["estados_cuenta_1", "estados_cuenta_2", "estados_cuenta_3"].includes(
+						documentType,
+					) && (
+						<div className="flex items-center gap-2">
+							<Checkbox
+								id="include-all-months-dm"
+								checked={includeAll3Months}
+								onCheckedChange={(checked) =>
+									setIncludeAll3Months(checked as boolean)
+								}
+								className="cursor-pointer"
+							/>
+							<Label
+								htmlFor="include-all-months-dm"
+								className="cursor-pointer text-sm"
+							>
+								Este PDF incluye los 3 meses de estados de cuenta
+							</Label>
+						</div>
+					)}
 
 					<div className="space-y-2">
 						<Label htmlFor="description">

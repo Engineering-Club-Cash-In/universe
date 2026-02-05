@@ -687,6 +687,8 @@ export interface ContractGenerationResponse {
     [key: string]: any;
   }[];
   linkDocument?: string;
+  /** Key del archivo PDF en R2 (Cloudflare) */
+  r2Key?: string;
   contractType: ContractType;
   docx_path?: string;
   pdf_path?: string;

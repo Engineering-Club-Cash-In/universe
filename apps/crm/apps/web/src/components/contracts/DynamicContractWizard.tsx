@@ -596,7 +596,9 @@ export function DynamicContractWizard({
 		useState<GenerationResultWithData | null>(null);
 
 	// State for editable co-debtor fields
-	const [coDebtorFields, setCoDebtorFields] = useState<EditableCoDebtorFields[]>([]);
+	const [coDebtorFields, setCoDebtorFields] = useState<
+		EditableCoDebtorFields[]
+	>([]);
 
 	// Store generation data for snapshot using ref to avoid state timing issues
 	const generationDataRef = useRef<
@@ -1930,7 +1932,8 @@ export function DynamicContractWizard({
 												Deudores Adicionales ({coDebtorFields.length})
 											</CardTitle>
 											<p className="text-muted-foreground text-sm">
-												Estos datos se incluirán en los contratos como co-deudores
+												Estos datos se incluirán en los contratos como
+												co-deudores
 											</p>
 										</CardHeader>
 										<CardContent className="space-y-6">
@@ -1940,11 +1943,14 @@ export function DynamicContractWizard({
 													className="rounded-lg border bg-white p-4"
 												>
 													<h4 className="mb-4 font-semibold text-purple-700">
-														Co-deudor {index + 1}: {coDebtor.nombreCompleto || "Sin nombre"}
+														Co-deudor {index + 1}:{" "}
+														{coDebtor.nombreCompleto || "Sin nombre"}
 													</h4>
 													<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
 														<div className="space-y-2">
-															<Label htmlFor={`cd-dpi-${coDebtor.id}`}>DPI</Label>
+															<Label htmlFor={`cd-dpi-${coDebtor.id}`}>
+																DPI
+															</Label>
 															<Input
 																id={`cd-dpi-${coDebtor.id}`}
 																value={coDebtor.dpi}
@@ -2055,7 +2061,10 @@ export function DynamicContractWizard({
 																	setCoDebtorFields((prev) =>
 																		prev.map((cd) =>
 																			cd.id === coDebtor.id
-																				? { ...cd, nacionalidad: e.target.value }
+																				? {
+																						...cd,
+																						nacionalidad: e.target.value,
+																					}
 																				: cd,
 																		),
 																	);
@@ -2076,7 +2085,10 @@ export function DynamicContractWizard({
 																	setCoDebtorFields((prev) =>
 																		prev.map((cd) =>
 																			cd.id === coDebtor.id
-																				? { ...cd, correoElectronico: e.target.value }
+																				? {
+																						...cd,
+																						correoElectronico: e.target.value,
+																					}
 																				: cd,
 																		),
 																	);

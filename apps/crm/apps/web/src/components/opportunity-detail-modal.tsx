@@ -413,23 +413,6 @@ export function OpportunityDetailModal({
 							)}
 						</div>
 
-						{/* Weighted Value */}
-						<div className="rounded-lg border bg-muted/50 p-6">
-							<div className="flex items-center justify-between">
-								<span className="font-semibold text-base">Valor Ponderado</span>
-								<span className="font-bold text-2xl text-blue-600">
-									Q
-									{(
-										(Number.parseFloat(opportunity.value || "0") *
-											(opportunity.probability ||
-												opportunity.stage?.closurePercentage ||
-												0)) /
-										100
-									).toLocaleString()}
-								</span>
-							</div>
-						</div>
-
 						{/* Contracts Section */}
 						{canViewContracts && (
 							<div className="space-y-3 rounded-lg border bg-muted/30 p-4">

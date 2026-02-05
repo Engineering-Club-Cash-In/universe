@@ -2728,12 +2728,14 @@ export const crmRouter = {
 
 	// Dashboard stats
 	getDashboardStats: crmProcedure.handler(async ({ context }) => {
-		// Helper: get placed credits stats (stage >= 90%) with optional user filter
+		const PLACED_STAGE_THRESHOLD = 90;
+
+		// Helper: get placed credits stats (stage >= threshold) with optional user filter
 		const getPlacedCreditsStats = async (userId?: string) => {
 			const placedStages = await db
 				.select({ id: salesStages.id })
 				.from(salesStages)
-				.where(gte(salesStages.closurePercentage, 90));
+				.where(gte(salesStages.closurePercentage, PLACED_STAGE_THRESHOLD));
 
 			const placedStageIds = placedStages.map((s) => s.id);
 
@@ -2756,7 +2758,7 @@ export const crmRouter = {
 
 			return {
 				placedCount: result?.placedCount || 0,
-				placedAmount: Number.parseFloat(result?.placedAmount || "0") || 0,
+				placedAmount: Number.parseFloat(result?.placedAmount ?? "0"),
 			};
 		};
 

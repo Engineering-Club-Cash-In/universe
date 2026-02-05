@@ -12,8 +12,8 @@ import {
 	HandshakeIcon,
 	Scale,
 	Target,
-	Trophy,
 	TrendingUp,
+	Trophy,
 	Users,
 } from "lucide-react";
 import { useEffect } from "react";

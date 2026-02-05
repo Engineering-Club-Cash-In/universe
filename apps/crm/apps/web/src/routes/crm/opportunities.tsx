@@ -207,7 +207,7 @@ function DraggableOpportunityCard({
 						{formatGuatemalaDate(opportunity.createdAt)}
 					</span>
 				</div>
-					<div className="border-t pt-1">
+				<div className="border-t pt-1">
 					<span className="font-mono text-[10px] text-muted-foreground/60">
 						ID: {opportunity.id.slice(0, 8)}
 					</span>
@@ -581,6 +581,8 @@ function RouteComponent() {
 		}
 
 		if (openEditModal) {
+			setLeadsSearch("");
+			setDebouncedLeadsSearch("");
 			setIsDetailsDialogOpen(false);
 			setIsEditDialogOpen(true);
 		}
@@ -1219,10 +1221,10 @@ function RouteComponent() {
 			? Math.round((wonOpportunities / closedOpportunities) * 100)
 			: 0;
 
-	// Calculate placed credits (stage >= 90%)
+	const PLACED_STAGE_THRESHOLD = 90;
 	const placedOpportunities =
 		opportunitiesQuery.data?.filter(
-			(opp) => (opp.stage?.closurePercentage || 0) >= 90,
+			(opp) => (opp.stage?.closurePercentage || 0) >= PLACED_STAGE_THRESHOLD,
 		) || [];
 	const placedCount = placedOpportunities.length;
 	const placedAmount = placedOpportunities.reduce(
@@ -1249,9 +1251,7 @@ function RouteComponent() {
 						<Target className="h-4 w-4 text-muted-foreground" />
 					</CardHeader>
 					<CardContent>
-						<div className="font-bold text-2xl">
-							{totalOpportunities}
-						</div>
+						<div className="font-bold text-2xl">{totalOpportunities}</div>
 						<p className="text-muted-foreground text-xs">
 							Q{totalValue.toLocaleString()} en pipeline
 						</p>
@@ -1335,7 +1335,8 @@ function RouteComponent() {
 										<div>
 											<p className="font-medium text-sm">{stage.name}</p>
 											<p className="text-muted-foreground text-xs">
-												{stageCount} oportunidades &middot; Q{stageValue.toLocaleString()}
+												{stageCount} oportunidades &middot; Q
+												{stageValue.toLocaleString()}
 											</p>
 										</div>
 									</div>
@@ -1416,6 +1417,8 @@ function RouteComponent() {
 					open={isCreateDialogOpen}
 					onOpenChange={(open) => {
 						setIsCreateDialogOpen(open);
+						setLeadsSearch("");
+						setDebouncedLeadsSearch("");
 						if (open) {
 							// Inicializar con la etapa de menor porcentaje (1%)
 							const initialStage = salesStagesQuery.data?.find(
@@ -1560,7 +1563,7 @@ function RouteComponent() {
 												<Combobox
 													options={[
 														{ value: "none", label: "Sin lead" },
-														...(leadsQuery.data?.data?.map((lead: any) => ({
+														...(leadsQuery.data?.data?.map((lead) => ({
 															value: lead.id,
 															label: `${lead.firstName} ${lead.lastName}`,
 														})) || []),
@@ -2423,7 +2426,13 @@ function RouteComponent() {
 				</Dialog>
 
 				{/* Edit Opportunity Dialog */}
-				<Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+				<Dialog open={isEditDialogOpen} onOpenChange={(open) => {
+						setIsEditDialogOpen(open);
+						if (!open) {
+							setLeadsSearch("");
+							setDebouncedLeadsSearch("");
+						}
+					}}>
 					<DialogContent className="scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent dark:scrollbar-thumb-gray-700 max-h-[90vh] min-w-[56rem] max-w-5xl overflow-y-auto">
 						<DialogHeader>
 							<DialogTitle>Editar Oportunidad</DialogTitle>
@@ -2480,16 +2489,23 @@ function RouteComponent() {
 							<div className="grid grid-cols-2 gap-4">
 								<div>
 									<editOpportunityForm.Field name="leadId">
-										{(field) => (
+										{(field) => {
+											const queryLeads = leadsQuery.data?.data?.map((lead) => ({
+												value: lead.id,
+												label: `${lead.firstName} ${lead.lastName}`,
+											})) || [];
+											const currentLead = selectedOpportunity?.lead;
+											const hasCurrentInResults = currentLead && queryLeads.some((o) => o.value === currentLead.id);
+											const leadOptions = currentLead && !hasCurrentInResults
+												? [{ value: currentLead.id, label: `${currentLead.firstName} ${currentLead.lastName}` }, ...queryLeads]
+												: queryLeads;
+											return (
 											<div className="space-y-2">
 												<Label htmlFor={field.name}>Lead</Label>
 												<Combobox
 													options={[
 														{ value: "none", label: "Sin lead" },
-														...(leadsQuery.data?.data?.map((lead: any) => ({
-															value: lead.id,
-															label: `${lead.firstName} ${lead.lastName}`,
-														})) || []),
+														...leadOptions,
 													]}
 													value={field.state.value ?? null}
 													onChange={(value) => field.handleChange(value)}
@@ -2499,7 +2515,8 @@ function RouteComponent() {
 													width="full"
 												/>
 											</div>
-										)}
+											);
+										}}
 									</editOpportunityForm.Field>
 								</div>
 								<div>
@@ -2959,7 +2976,7 @@ function RouteComponent() {
 						) ?? []
 					}
 					isLoading={opportunitiesQuery.isLoading}
-					searchPlaceholder="Buscar oportunidades..."
+					hideSearch
 					onRowClick={handleOpportunityClick}
 					filterContent={
 						<div className="flex flex-wrap items-center gap-2">
@@ -3063,11 +3080,17 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 					documentType,
 				)
 			) {
-				await Promise.all([
+				const results = await Promise.allSettled([
 					uploadSingleDocument("estados_cuenta_1"),
 					uploadSingleDocument("estados_cuenta_2"),
 					uploadSingleDocument("estados_cuenta_3"),
 				]);
+				const failed = results.filter((r) => r.status === "rejected");
+				if (failed.length > 0) {
+					throw new Error(
+						`${failed.length} de 3 estados de cuenta fallaron al subir`,
+					);
+				}
 				return;
 			}
 			return uploadSingleDocument(documentType);
@@ -3388,9 +3411,11 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 						/>
 					</div>
 
-					{["estados_cuenta_1", "estados_cuenta_2", "estados_cuenta_3"].includes(
-						documentType,
-					) && (
+					{[
+						"estados_cuenta_1",
+						"estados_cuenta_2",
+						"estados_cuenta_3",
+					].includes(documentType) && (
 						<div className="flex items-center gap-2">
 							<Checkbox
 								id="include-all-months-dm"

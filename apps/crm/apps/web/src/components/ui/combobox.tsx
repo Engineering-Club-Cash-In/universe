@@ -137,7 +137,9 @@ export function Combobox({
 											value={option.label}
 											onSelect={(selectedLabel) => {
 												const selectedOption = options.find(
-													(opt) => opt.label === selectedLabel,
+													(opt) =>
+													opt.label.toLowerCase() ===
+													selectedLabel.toLowerCase(),
 												);
 												const actualValue = selectedOption
 													? selectedOption.value

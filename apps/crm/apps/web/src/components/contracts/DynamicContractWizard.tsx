@@ -909,7 +909,7 @@ export function DynamicContractWizard({
 					case "profesion":
 						if (cliente.profesion) {
 							initialValues[field.key] =
-								cliente.profesion.toLowerCase() ||
+								cliente?.profesion.toLowerCase() ||
 								renapInfo?.ocupation.toLowerCase() ||
 								"";
 							return;

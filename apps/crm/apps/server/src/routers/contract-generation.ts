@@ -24,6 +24,7 @@ import {
 	getDocumentsByDpi,
 	getDocumentTypes,
 } from "../services/legal-docs-api";
+import { getFileUrlWithBucketInKey } from "@/lib/storage";
 
 // URL de la API de generación de contratos (legal-docs-blueprints)
 const LEGAL_DOCS_API_URL =
@@ -440,8 +441,7 @@ export const contractGenerationRouter = {
 								contractName:
 									contractResult.nameDocument?.[0]?.label || "Contrato",
 								success: true,
-								documentLink:
-									contractResult.r2Key || contractResult.linkDocument,
+								documentLink: contractResult.r2Key ? await getFileUrlWithBucketInKey(contractResult.r2Key) : contractResult.linkDocument,
 								signingLinks: contractResult.signing_links,
 								templateId: contractResult.templateId,
 								apiResponse: contractResult,
@@ -506,7 +506,23 @@ export const contractGenerationRouter = {
 					.array(
 						z.object({
 							contractType: z.string(),
-							data: z.record(z.string(), z.string()),
+							data: z.record(z.string(), z.unknown()).and(
+								z.object({
+									deudoresAdicionales: z
+										.array(
+											z.object({
+												nombreCompleto: z.string(),
+												dpi: z.string(),
+												dpiTexto: z.string(),
+												edadTexto: z.string().optional(),
+												estadoCivil: z.string().optional(),
+												profesion: z.string().optional(),
+												nacionalidad: z.string().optional(),
+											}),
+										)
+										.optional(),
+								}),
+							),
 							emails: z.array(z.string()).optional(),
 							options: z.object({
 								gender: z.enum(["male", "female"]),

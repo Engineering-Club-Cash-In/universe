@@ -127,7 +127,8 @@ export default function VehicleInspectionWizard() {
         vehicleData,
         inspectionData,
         checklistItems,
-        photosToUse
+        photosToUse,
+        items360
       );
 
       if (result.success) {

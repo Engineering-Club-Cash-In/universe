@@ -138,7 +138,6 @@ export function Combobox({
 											onSelect={() => {
 												onChange?.(option.value === value ? "" : option.value);
 												setSearchValue("");
-												onSearchChange?.("");
 												setOpen(false);
 											}}
 										>

@@ -199,6 +199,9 @@ export const vehicleInspections = pgTable("vehicle_inspections", {
 	// Alerts (stored as JSON array)
 	alerts: json("alerts").$type<string[]>().default([]),
 
+	// Evidence for rejection (New Feature)
+	rejectionEvidenceUrl: text("rejection_evidence_url"), // Foto/Video general del rechazo
+
 	// Section times (tiempo en segundos por sección del checklist)
 	sectionTimes: json("section_times")
 		.$type<Record<string, number>>()

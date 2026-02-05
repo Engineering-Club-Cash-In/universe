@@ -27,6 +27,7 @@ import {
 	Target,
 	Trash2,
 	TrendingUp,
+	Trophy,
 	Upload,
 	Users,
 	XCircle,
@@ -49,6 +50,7 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
 import {
 	Dialog,
@@ -205,23 +207,6 @@ function DraggableOpportunityCard({
 						{formatGuatemalaDate(opportunity.createdAt)}
 					</span>
 				</div>
-				{opportunity.value && (
-					<div className="border-t pt-1">
-						<div className="flex justify-between text-xs">
-							<span className="text-muted-foreground">Ponderado:</span>
-							<span className="font-medium text-blue-600">
-								Q
-								{(
-									(Number.parseFloat(opportunity.value) *
-										(opportunity.probability ||
-											opportunity.stage?.closurePercentage ||
-											0)) /
-									100
-								).toLocaleString()}
-							</span>
-						</div>
-					</div>
-				)}
 				<div className="border-t pt-1">
 					<span className="font-mono text-[10px] text-muted-foreground/60">
 						ID: {opportunity.id.slice(0, 8)}
@@ -275,14 +260,6 @@ function DroppableStageColumn({
 		});
 	}, [stage.id, onDropOpportunity]);
 
-	const stageWeightedValue = opportunities.reduce((sum, opp) => {
-		const value = Number.parseFloat(opp.value || "0") || 0;
-		const probability = opp.probability || stage.closurePercentage || 0;
-		return sum + (value * probability) / 100;
-	}, 0);
-
-	const stageAvgDeal = count > 0 ? totalValue / count : 0;
-
 	return (
 		<Card
 			className={`flex max-h-[75vh] min-w-80 shrink-0 flex-col ${
@@ -302,17 +279,9 @@ function DroppableStageColumn({
 					</span>
 				</div>
 				<CardTitle className="font-medium text-sm">{stage.name}</CardTitle>
-				<div className="space-y-1">
-					<CardDescription className="text-xs">
-						Q{totalValue.toLocaleString()} valor total
-					</CardDescription>
-					<CardDescription className="text-blue-600 text-xs">
-						Q{stageWeightedValue.toLocaleString()} ponderado
-					</CardDescription>
-					<CardDescription className="text-muted-foreground text-xs">
-						Q{stageAvgDeal.toLocaleString()} promedio/negocio
-					</CardDescription>
-				</div>
+				<CardDescription className="text-xs">
+					Q{totalValue.toLocaleString()} valor total
+				</CardDescription>
 			</CardHeader>
 			<CardContent className="min-h-0 space-y-3 overflow-y-auto" ref={ref}>
 				{opportunities.length === 0 ? (
@@ -612,6 +581,8 @@ function RouteComponent() {
 		}
 
 		if (openEditModal) {
+			setLeadsSearch("");
+			setDebouncedLeadsSearch("");
 			setIsDetailsDialogOpen(false);
 			setIsEditDialogOpen(true);
 		}
@@ -1250,46 +1221,16 @@ function RouteComponent() {
 			? Math.round((wonOpportunities / closedOpportunities) * 100)
 			: 0;
 
-	// Calculate weighted opportunities value (value * probability / 100)
-	const weightedValue =
-		opportunitiesQuery.data?.reduce((sum, opp) => {
-			const value = Number.parseFloat(opp.value || "0") || 0;
-			const probability = opp.probability || opp.stage?.closurePercentage || 0;
-			return sum + (value * probability) / 100;
-		}, 0) || 0;
-
-	// Calculate average deal size
-	const avgDealSize =
-		totalOpportunities > 0 ? totalValue / totalOpportunities : 0;
-
-	// Calculate conversion rate by stage
-	const stageConversions =
-		salesStagesQuery.data?.map((stage) => {
-			const stageOpportunities =
-				opportunitiesQuery.data?.filter((opp) => opp.stage?.id === stage.id) ||
-				[];
-			const nextStageOpportunities = salesStagesQuery.data?.find(
-				(s) => s.order === stage.order + 1,
-			);
-			const nextStageCount = nextStageOpportunities
-				? opportunitiesQuery.data?.filter(
-						(opp) =>
-							opp.stage?.order &&
-							opp.stage.order >= nextStageOpportunities.order,
-					).length || 0
-				: wonOpportunities;
-
-			const conversionRate =
-				stageOpportunities.length > 0
-					? Math.round((nextStageCount / stageOpportunities.length) * 100)
-					: 0;
-
-			return {
-				stage: stage.name,
-				conversionRate,
-				count: stageOpportunities.length,
-			};
-		}) || [];
+	const PLACED_STAGE_THRESHOLD = 90;
+	const placedOpportunities =
+		opportunitiesQuery.data?.filter(
+			(opp) => (opp.stage?.closurePercentage || 0) >= PLACED_STAGE_THRESHOLD,
+		) || [];
+	const placedCount = placedOpportunities.length;
+	const placedAmount = placedOpportunities.reduce(
+		(sum, opp) => sum + (Number.parseFloat(opp.value || "0") || 0),
+		0,
+	);
 
 	return (
 		<div className="container mx-auto space-y-6 p-6">
@@ -1300,37 +1241,19 @@ function RouteComponent() {
 				</p>
 			</div>
 
-			{/* Enhanced Stats Cards */}
+			{/* Stats Cards */}
 			<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
 				<Card>
 					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
 						<CardTitle className="font-medium text-sm">
-							Valor de Oportunidades
+							Total Oportunidades
 						</CardTitle>
-						<Banknote className="h-4 w-4 text-muted-foreground" />
+						<Target className="h-4 w-4 text-muted-foreground" />
 					</CardHeader>
 					<CardContent>
-						<div className="font-bold text-2xl">
-							Q{totalValue.toLocaleString()}
-						</div>
+						<div className="font-bold text-2xl">{totalOpportunities}</div>
 						<p className="text-muted-foreground text-xs">
-							{totalOpportunities} oportunidades
-						</p>
-					</CardContent>
-				</Card>
-				<Card>
-					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-						<CardTitle className="font-medium text-sm">
-							Valor Ponderado
-						</CardTitle>
-						<Banknote className="h-4 w-4 text-blue-500" />
-					</CardHeader>
-					<CardContent>
-						<div className="font-bold text-2xl">
-							Q{weightedValue.toLocaleString()}
-						</div>
-						<p className="text-muted-foreground text-xs">
-							Ajustado por probabilidad
+							Q{totalValue.toLocaleString()} en pipeline
 						</p>
 					</CardContent>
 				</Card>
@@ -1342,73 +1265,87 @@ function RouteComponent() {
 					<CardContent>
 						<div className="font-bold text-2xl">{winRate}%</div>
 						<p className="text-muted-foreground text-xs">
-							{wonOpportunities}/{closedOpportunities} negocios cerrados
+							{wonOpportunities}/{closedOpportunities} cerrados
 						</p>
 					</CardContent>
 				</Card>
-				<Card>
+				<Card className="border-green-200 bg-green-50/50">
 					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
 						<CardTitle className="font-medium text-sm">
-							Valor Promedio
+							Créditos Colocados
 						</CardTitle>
-						<Target className="h-4 w-4 text-purple-500" />
+						<Trophy className="h-4 w-4 text-green-600" />
 					</CardHeader>
 					<CardContent>
-						<div className="font-bold text-2xl">
-							Q{avgDealSize.toLocaleString()}
+						<div className="font-bold text-2xl text-green-700">
+							{placedCount}
 						</div>
-						<p className="text-muted-foreground text-xs">Por oportunidad</p>
+					</CardContent>
+				</Card>
+				<Card className="border-green-200 bg-green-50/50">
+					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+						<CardTitle className="font-medium text-sm">
+							Monto Colocado
+						</CardTitle>
+						<Banknote className="h-4 w-4 text-green-600" />
+					</CardHeader>
+					<CardContent>
+						<div className="font-bold text-2xl text-green-700">
+							Q{placedAmount.toLocaleString()}
+						</div>
 					</CardContent>
 				</Card>
 			</div>
 
-			{/* Conversion Metrics */}
-			<Card>
-				<CardHeader>
-					<CardTitle className="flex items-center gap-2">
-						<TrendingUp className="h-5 w-5" />
-						Análisis de Conversión por Etapa
-					</CardTitle>
-					<CardDescription>
-						Rastrea cómo se mueven las oportunidades a través de tu proceso de
-						ventas
-					</CardDescription>
-				</CardHeader>
-				<CardContent>
-					<div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-						{stageConversions.map((conversion, index) => (
-							<div
-								key={index}
-								className="flex items-center justify-between rounded-lg border p-3"
-							>
-								<div>
-									<p className="font-medium text-sm">{conversion.stage}</p>
-									<p className="text-muted-foreground text-xs">
-										{conversion.count} oportunidades
-									</p>
-								</div>
-								<div className="text-right">
-									<Badge
-										variant="outline"
-										className={
-											conversion.conversionRate >= 70
-												? "bg-green-100 text-green-800"
-												: conversion.conversionRate >= 40
-													? "bg-yellow-100 text-yellow-800"
-													: "bg-red-100 text-red-800"
-										}
+			{/* Oportunidades por Etapa */}
+			{salesStagesQuery.data && salesStagesQuery.data.length > 0 && (
+				<Card>
+					<CardHeader className="pb-3">
+						<CardTitle className="flex items-center gap-2 text-base">
+							<TrendingUp className="h-4 w-4" />
+							Oportunidades por Etapa
+						</CardTitle>
+					</CardHeader>
+					<CardContent>
+						<div className="flex flex-wrap gap-3">
+							{salesStagesQuery.data.map((stage) => {
+								const stageCount =
+									opportunitiesQuery.data?.filter(
+										(opp) => opp.stage?.id === stage.id,
+									).length || 0;
+								const stageValue =
+									opportunitiesQuery.data
+										?.filter((opp) => opp.stage?.id === stage.id)
+										.reduce(
+											(sum, opp) =>
+												sum + (Number.parseFloat(opp.value || "0") || 0),
+											0,
+										) || 0;
+								return (
+									<div
+										key={stage.id}
+										className="flex items-center gap-3 rounded-lg border p-3"
 									>
-										{conversion.conversionRate}%
-									</Badge>
-									<p className="mt-1 text-muted-foreground text-xs">
-										conversión
-									</p>
-								</div>
-							</div>
-						))}
-					</div>
-				</CardContent>
-			</Card>
+										<Badge
+											style={{ backgroundColor: stage.color, color: "white" }}
+											className="min-w-[50px] justify-center text-xs"
+										>
+											{stage.closurePercentage}%
+										</Badge>
+										<div>
+											<p className="font-medium text-sm">{stage.name}</p>
+											<p className="text-muted-foreground text-xs">
+												{stageCount} oportunidades &middot; Q
+												{stageValue.toLocaleString()}
+											</p>
+										</div>
+									</div>
+								);
+							})}
+						</div>
+					</CardContent>
+				</Card>
+			)}
 
 			{/* Actions Bar */}
 			<div className="flex items-center justify-between">
@@ -1480,6 +1417,8 @@ function RouteComponent() {
 					open={isCreateDialogOpen}
 					onOpenChange={(open) => {
 						setIsCreateDialogOpen(open);
+						setLeadsSearch("");
+						setDebouncedLeadsSearch("");
 						if (open) {
 							// Inicializar con la etapa de menor porcentaje (1%)
 							const initialStage = salesStagesQuery.data?.find(
@@ -1624,7 +1563,7 @@ function RouteComponent() {
 												<Combobox
 													options={[
 														{ value: "none", label: "Sin lead" },
-														...(leadsQuery.data?.data?.map((lead: any) => ({
+														...(leadsQuery.data?.data?.map((lead) => ({
 															value: lead.id,
 															label: `${lead.firstName} ${lead.lastName}`,
 														})) || []),
@@ -2105,25 +2044,6 @@ function RouteComponent() {
 										)}
 									</div>
 
-									{/* Weighted Value */}
-									<div className="rounded-lg border bg-muted/50 p-6">
-										<div className="flex items-center justify-between">
-											<span className="font-semibold text-base">
-												Valor Ponderado
-											</span>
-											<span className="font-bold text-2xl text-blue-600">
-												Q
-												{(
-													(Number.parseFloat(selectedOpportunity.value || "0") *
-														(selectedOpportunity.probability ||
-															selectedOpportunity.stage?.closurePercentage ||
-															0)) /
-													100
-												).toLocaleString()}
-											</span>
-										</div>
-									</div>
-
 									{/* Consolidated Credit Analysis Summary */}
 									<ConsolidatedCreditSummary
 										opportunityId={selectedOpportunity.id}
@@ -2506,7 +2426,13 @@ function RouteComponent() {
 				</Dialog>
 
 				{/* Edit Opportunity Dialog */}
-				<Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+				<Dialog open={isEditDialogOpen} onOpenChange={(open) => {
+						setIsEditDialogOpen(open);
+						if (!open) {
+							setLeadsSearch("");
+							setDebouncedLeadsSearch("");
+						}
+					}}>
 					<DialogContent className="scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent dark:scrollbar-thumb-gray-700 max-h-[90vh] min-w-[56rem] max-w-5xl overflow-y-auto">
 						<DialogHeader>
 							<DialogTitle>Editar Oportunidad</DialogTitle>
@@ -2563,16 +2489,23 @@ function RouteComponent() {
 							<div className="grid grid-cols-2 gap-4">
 								<div>
 									<editOpportunityForm.Field name="leadId">
-										{(field) => (
+										{(field) => {
+											const queryLeads = leadsQuery.data?.data?.map((lead) => ({
+												value: lead.id,
+												label: `${lead.firstName} ${lead.lastName}`,
+											})) || [];
+											const currentLead = selectedOpportunity?.lead;
+											const hasCurrentInResults = currentLead && queryLeads.some((o) => o.value === currentLead.id);
+											const leadOptions = currentLead && !hasCurrentInResults
+												? [{ value: currentLead.id, label: `${currentLead.firstName} ${currentLead.lastName}` }, ...queryLeads]
+												: queryLeads;
+											return (
 											<div className="space-y-2">
 												<Label htmlFor={field.name}>Lead</Label>
 												<Combobox
 													options={[
 														{ value: "none", label: "Sin lead" },
-														...(leadsQuery.data?.data?.map((lead: any) => ({
-															value: lead.id,
-															label: `${lead.firstName} ${lead.lastName}`,
-														})) || []),
+														...leadOptions,
 													]}
 													value={field.state.value ?? null}
 													onChange={(value) => field.handleChange(value)}
@@ -2582,7 +2515,8 @@ function RouteComponent() {
 													width="full"
 												/>
 											</div>
-										)}
+											);
+										}}
 									</editOpportunityForm.Field>
 								</div>
 								<div>
@@ -3042,7 +2976,7 @@ function RouteComponent() {
 						) ?? []
 					}
 					isLoading={opportunitiesQuery.isLoading}
-					searchPlaceholder="Buscar oportunidades..."
+					hideSearch
 					onRowClick={handleOpportunityClick}
 					filterContent={
 						<div className="flex flex-wrap items-center gap-2">
@@ -3096,6 +3030,7 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
 	const [description, setDescription] = useState("");
 	const [documentType, setDocumentType] = useState<string>("");
+	const [includeAll3Months, setIncludeAll3Months] = useState(false);
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const { data: session } = authClient.useSession();
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
@@ -3107,41 +3042,65 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 		enabled: !!opportunityId,
 	});
 
+	// Upload a single document with a specific type
+	const uploadSingleDocument = async (docType: string) => {
+		if (!selectedFile) return;
+
+		const formData = new FormData();
+		formData.append("file", selectedFile);
+		formData.append("opportunityId", opportunityId);
+		formData.append("documentType", docType);
+		if (description) {
+			formData.append("description", description);
+		}
+
+		const response = await fetch(
+			`${import.meta.env.VITE_SERVER_URL}/api/upload-opportunity-document`,
+			{
+				method: "POST",
+				body: formData,
+				credentials: "include",
+			},
+		);
+
+		if (!response.ok) {
+			const error = await response.json();
+			throw new Error(error.message || "Error al subir el archivo");
+		}
+
+		return response.json();
+	};
+
 	// Upload mutation
 	const uploadMutation = useMutation({
 		mutationFn: async () => {
-			if (!selectedFile) return;
-
-			const formData = new FormData();
-			formData.append("file", selectedFile);
-			formData.append("opportunityId", opportunityId);
-			formData.append("documentType", documentType);
-			if (description) {
-				formData.append("description", description);
+			if (
+				includeAll3Months &&
+				["estados_cuenta_1", "estados_cuenta_2", "estados_cuenta_3"].includes(
+					documentType,
+				)
+			) {
+				const results = await Promise.allSettled([
+					uploadSingleDocument("estados_cuenta_1"),
+					uploadSingleDocument("estados_cuenta_2"),
+					uploadSingleDocument("estados_cuenta_3"),
+				]);
+				const failed = results.filter((r) => r.status === "rejected");
+				if (failed.length > 0) {
+					throw new Error(
+						`${failed.length} de 3 estados de cuenta fallaron al subir`,
+					);
+				}
+				return;
 			}
-
-			// Use fetch directly for file upload
-			const response = await fetch(
-				`${import.meta.env.VITE_SERVER_URL}/api/upload-opportunity-document`,
-				{
-					method: "POST",
-					body: formData,
-					credentials: "include",
-				},
-			);
-
-			if (!response.ok) {
-				const error = await response.json();
-				throw new Error(error.message || "Error al subir el archivo");
-			}
-
-			return response.json();
+			return uploadSingleDocument(documentType);
 		},
 		onSuccess: () => {
 			toast.success("Documento subido exitosamente");
 			setSelectedFile(null);
 			setDescription("");
-			setDocumentType("identification");
+			setDocumentType("");
+			setIncludeAll3Months(false);
 			if (fileInputRef.current) {
 				fileInputRef.current.value = "";
 			}
@@ -3314,7 +3273,10 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 			value: "garantia_mobiliaria_nit",
 			label: "Garantía Mobiliaria (NIT Propietario)",
 		},
-		{ value: "garantia_mobiliaria_serie", label: "Garantía Mobiliaria (SERIE)" },
+		{
+			value: "garantia_mobiliaria_serie",
+			label: "Garantía Mobiliaria (SERIE)",
+		},
 		{ value: "multas_vehiculo", label: "Multas del Vehículo" },
 		// === Documentos Etapa 90% (Cierre) ===
 		{ value: "seguro_vehiculo", label: "Seguro del Vehículo" },
@@ -3448,6 +3410,29 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 							isInModal={true}
 						/>
 					</div>
+
+					{[
+						"estados_cuenta_1",
+						"estados_cuenta_2",
+						"estados_cuenta_3",
+					].includes(documentType) && (
+						<div className="flex items-center gap-2">
+							<Checkbox
+								id="include-all-months-dm"
+								checked={includeAll3Months}
+								onCheckedChange={(checked) =>
+									setIncludeAll3Months(checked as boolean)
+								}
+								className="cursor-pointer"
+							/>
+							<Label
+								htmlFor="include-all-months-dm"
+								className="cursor-pointer text-sm"
+							>
+								Este PDF incluye los 3 meses de estados de cuenta
+							</Label>
+						</div>
+					)}
 
 					<div className="space-y-2">
 						<Label htmlFor="description">

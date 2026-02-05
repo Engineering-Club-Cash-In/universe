@@ -150,7 +150,8 @@ function CoDebtorCard({
 	// Query para obtener análisis de crédito del co-deudor
 	const creditAnalysisQuery = useQuery({
 		queryKey: ["creditAnalysis", "coDebtor", coDebtor.id],
-		queryFn: () => client.getCreditAnalysisByLeadId({ coDebtorId: coDebtor.id }),
+		queryFn: () =>
+			client.getCreditAnalysisByLeadId({ coDebtorId: coDebtor.id }),
 	});
 
 	// Mutation para guardar análisis
@@ -277,7 +278,8 @@ function CoDebtorCard({
 					)}
 					{coDebtor.age && (
 						<div>
-							<span className="text-muted-foreground">Edad:</span> {coDebtor.age} años
+							<span className="text-muted-foreground">Edad:</span>{" "}
+							{coDebtor.age} años
 						</div>
 					)}
 					{coDebtor.gender && (
@@ -346,7 +348,11 @@ function CoDebtorCard({
 							<div className="mb-3 flex items-center justify-between">
 								<h4 className="font-medium text-sm">Datos del Análisis</h4>
 								{!isEditingAnalysis ? (
-									<Button variant="outline" size="sm" onClick={handleEditAnalysis}>
+									<Button
+										variant="outline"
+										size="sm"
+										onClick={handleEditAnalysis}
+									>
 										<Pencil className="mr-2 h-3 w-3" />
 										{hasAnalysis ? "Editar" : "Agregar manual"}
 									</Button>
@@ -367,7 +373,7 @@ function CoDebtorCard({
 									{/* Ingresos y Gastos */}
 									<div className="grid grid-cols-2 gap-4">
 										<div className="space-y-3">
-											<h5 className="font-medium text-xs text-muted-foreground">
+											<h5 className="font-medium text-muted-foreground text-xs">
 												Ingresos Mensuales
 											</h5>
 											<div className="space-y-2">
@@ -404,7 +410,7 @@ function CoDebtorCard({
 											</div>
 										</div>
 										<div className="space-y-3">
-											<h5 className="font-medium text-xs text-muted-foreground">
+											<h5 className="font-medium text-muted-foreground text-xs">
 												Gastos Mensuales
 											</h5>
 											<div className="space-y-2">
@@ -569,8 +575,8 @@ function CoDebtorCard({
 														creditAnalysisQuery.data?.monthlyFixedExpenses || 0,
 													) +
 														Number(
-															creditAnalysisQuery.data?.monthlyVariableExpenses ||
-																0,
+															creditAnalysisQuery.data
+																?.monthlyVariableExpenses || 0,
 														),
 												)}
 											</p>
@@ -622,7 +628,8 @@ function CoDebtorCard({
 									</div>
 
 									<p className="text-right text-muted-foreground text-xs">
-										Analizado: {formatDate(creditAnalysisQuery.data?.analyzedAt)}
+										Analizado:{" "}
+										{formatDate(creditAnalysisQuery.data?.analyzedAt)}
 									</p>
 								</div>
 							) : (
@@ -763,8 +770,7 @@ export function CoDebtorsView({ opportunityId }: CoDebtorsViewProps) {
 			nationality: coDebtor.nationality || "",
 			email: coDebtor.email || "",
 			phone: coDebtor.phone || "",
-			occupation: (coDebtor.occupation ||
-				"") as CoDebtorFormData["occupation"],
+			occupation: (coDebtor.occupation || "") as CoDebtorFormData["occupation"],
 			notes: coDebtor.notes || "",
 		});
 		setIsEditDialogOpen(true);
@@ -865,7 +871,6 @@ export function CoDebtorsView({ opportunityId }: CoDebtorsViewProps) {
 						</SelectContent>
 					</Select>
 				</div>
-				
 			</div>
 
 			<div className="grid grid-cols-3 gap-4">

@@ -156,8 +156,16 @@ export const bankAnalysisRouter = {
 				if (existing.length === 0) {
 					// No existe, crear nuevo registro
 					const insertValues = isForLead
-						? { leadId: input.leadId!, attemptCount: 1, createdBy: context.userId }
-						: { coDebtorId: input.coDebtorId!, attemptCount: 1, createdBy: context.userId };
+						? {
+								leadId: input.leadId!,
+								attemptCount: 1,
+								createdBy: context.userId,
+							}
+						: {
+								coDebtorId: input.coDebtorId!,
+								attemptCount: 1,
+								createdBy: context.userId,
+							};
 
 					const insertResult = await db
 						.insert(creditAnalysis)

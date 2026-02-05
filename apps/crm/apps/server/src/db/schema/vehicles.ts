@@ -276,21 +276,24 @@ export const vehicleDocuments = pgTable("vehicle_documents", {
 });
 
 // New Table for 360 Inspection Items (Excel Detailed List)
-export const vehicleInspection360Items = pgTable("vehicle_inspection_360_items", {
-	id: uuid("id").defaultRandom().primaryKey(),
-	inspectionId: uuid("inspection_id")
-		.references(() => vehicleInspections.id)
-		.notNull(),
+export const vehicleInspection360Items = pgTable(
+	"vehicle_inspection_360_items",
+	{
+		id: uuid("id").defaultRandom().primaryKey(),
+		inspectionId: uuid("inspection_id")
+			.references(() => vehicleInspections.id)
+			.notNull(),
 
-	area: text("area").notNull(), // "Motor y Transmisión", "Frenos"...
-	checkpoint: text("checkpoint").notNull(), // "Verificar fugas...", "Nivel de aceite..."
+		area: text("area").notNull(), // "Motor y Transmisión", "Frenos"...
+		checkpoint: text("checkpoint").notNull(), // "Verificar fugas...", "Nivel de aceite..."
 
-	status: inspection360StatusEnum("status").notNull(), // "ok", "bad"
-	comment: text("comment"), // Obligatorio si status="bad"
+		status: inspection360StatusEnum("status").notNull(), // "ok", "bad"
+		comment: text("comment"), // Obligatorio si status="bad"
 
-	createdAt: timestamp("created_at").defaultNow().notNull(),
-	updatedAt: timestamp("updated_at"),
-});
+		createdAt: timestamp("created_at").defaultNow().notNull(),
+		updatedAt: timestamp("updated_at"),
+	},
+);
 
 // Vehicle Document Requirements table - Defines which documents are required per owner type
 export const vehicleDocumentRequirements = pgTable(

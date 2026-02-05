@@ -803,7 +803,6 @@ app.delete("/api/migrate/cleanup", async (c) => {
 	}
 });
 
-
 export default {
 	port: process.env.PORT || 3000,
 	fetch: app.fetch,

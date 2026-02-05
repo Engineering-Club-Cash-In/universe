@@ -4913,6 +4913,11 @@ export const crmRouter = {
 			}),
 		)
 		.handler(async ({ input }) => {
+			// Eliminar el credit analysis asociado al co-deudor si existe
+			await db
+				.delete(creditAnalysis)
+				.where(eq(creditAnalysis.coDebtorId, input.id));
+
 			const [deletedCoDebtor] = await db
 				.delete(coDebtors)
 				.where(eq(coDebtors.id, input.id))

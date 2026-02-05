@@ -306,3 +306,65 @@ export function validateFile(file: File): { valid: boolean; error?: string } {
 
 	return { valid: true };
 }
+
+// Tipos de videos permitidos
+export const ALLOWED_VIDEO_TYPES = [
+	"video/mp4",
+	"video/quicktime",
+	"video/webm",
+];
+
+// Tamaño máximo del video (50MB)
+export const MAX_VIDEO_SIZE = 50 * 1024 * 1024;
+
+// Validar video
+export function validateVideo(file: File): { valid: boolean; error?: string } {
+	if (!ALLOWED_VIDEO_TYPES.includes(file.type)) {
+		return {
+			valid: false,
+			error:
+				"Tipo de archivo no permitido. Solo se permiten videos (MP4, MOV, WebM).",
+		};
+	}
+
+	if (file.size > MAX_VIDEO_SIZE) {
+		return {
+			valid: false,
+			error:
+				"El video es demasiado grande. El tamaño máximo permitido es 50MB.",
+		};
+	}
+
+	return { valid: true };
+}
+
+// Subir video de vehículo a R2
+export async function uploadVehicleVideoToR2(
+	file: File | Blob,
+	filename: string,
+	vehicleId: string,
+	category: string,
+): Promise<{ key: string; url: string }> {
+	const key = `vehicles/${vehicleId}/videos/${category}/${filename}`;
+
+	const command = new PutObjectCommand({
+		Bucket: R2_BUCKET_NAME,
+		Key: key,
+		Body: Buffer.from(await file.arrayBuffer()),
+		ContentType: file.type,
+	});
+
+	await r2Client.send(command);
+
+	// Si tienes un dominio personalizado configurado en R2, úsalo:
+	const R2_PUBLIC_DOMAIN = process.env.R2_PUBLIC_DOMAIN;
+
+	if (R2_PUBLIC_DOMAIN) {
+		// URL pública permanente con dominio personalizado
+		const publicUrl = `https://${R2_PUBLIC_DOMAIN}/${key}`;
+		return { key, url: publicUrl };
+	}
+	// Fallback: URL pública directa de R2
+	const publicUrl = `https://${R2_BUCKET_NAME}.${R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${key}`;
+	return { key, url: publicUrl };
+}

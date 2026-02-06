@@ -3510,8 +3510,8 @@ export const crmRouter = {
 			// Calculate vehicle section completion
 			checklistData.sections.vehiculo.verificaciones.completed =
 				checklistData.sections.vehiculo.verificaciones.items
-					.filter((i: any) => i.required)
-					.every((i: any) => i.completed);
+					.filter((i) => i.required)
+					.every((i) => i.completed);
 
 			checklistData.sections.vehiculo.completed =
 				vehicleInspected &&
@@ -3526,12 +3526,12 @@ export const crmRouter = {
 				(opportunity.vehicleId ? 1 : 0) + // vehicle inspection
 				(opportunity.vehicleId
 					? checklistData.sections.vehiculo.documentos.items.filter(
-							(i: any) => i.required,
+							(i) => i.required,
 						).length
 					: 0) + // vehicle docs (required only)
 				(opportunity.vehicleId
 					? checklistData.sections.vehiculo.verificaciones.items.filter(
-							(i: any) => i.required,
+							(i) => i.required,
 						).length
 					: 0); // vehicle verifications
 
@@ -3545,12 +3545,12 @@ export const crmRouter = {
 				(vehicleInspected ? 1 : 0) + // vehicle inspection
 				(opportunity.vehicleId
 					? checklistData.sections.vehiculo.documentos.items.filter(
-							(i: any) => i.required && i.uploaded,
+							(i) => i.required && i.uploaded,
 						).length
 					: 0) + // vehicle docs uploaded (required only)
 				(opportunity.vehicleId
 					? checklistData.sections.vehiculo.verificaciones.items.filter(
-							(i: any) => i.required && i.completed,
+							(i) => i.required && i.completed,
 						).length
 					: 0); // vehicle verifications completed
 

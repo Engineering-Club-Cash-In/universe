@@ -18,6 +18,8 @@ export interface VehicleData {
   fuelType: 'Gasolina' | 'Diesel' | 'Eléctrico' | 'Híbrido';
   transmission: 'Automático' | 'Manual';
   companyId?: string | null;
+  trim?: string;
+  traction?: string;
 }
 
 export interface InspectionData {
@@ -35,6 +37,10 @@ export interface InspectionData {
   testDrive: boolean;
   noTestDriveReason?: string;
   sectionTimes?: Record<string, number>;
+  rejectionEvidenceUrl?: string;
+  tiresCondition?: number;
+  paintCondition?: number;
+  hasAgencyHistory?: boolean;
 }
 
 export interface ChecklistItem {
@@ -54,21 +60,35 @@ export interface PhotoData {
   noCommentsChecked?: boolean;
 }
 
+export interface Inspection360Item {
+  category: string;
+  item: string;
+  status: 'ok' | 'bad';
+  notes?: string;
+}
+
 // Main function to create a full vehicle inspection
 export const createFullInspection = async (
   vehicleData: VehicleData,
   inspectionData: InspectionData,
   checklistItems: ChecklistItem[],
-  photos?: PhotoData[]
+  photos?: PhotoData[],
+  items360?: Inspection360Item[]
 ) => {
   try {
     const response = await client.createFullVehicleInspection({
       vehicle: vehicleData,
       inspection: inspectionData,
       checklistItems,
-      photos
+      photos,
+      inspection360Items: items360?.map(item => ({
+        area: item.category,
+        checkpoint: item.item,
+        status: item.status,
+        comment: item.notes
+      }))
     });
-    
+
     return {
       success: true,
       data: response
@@ -83,7 +103,7 @@ export const createFullInspection = async (
 };
 
 // Helper function to convert form data to API format
-export const prepareInspectionData = (formData: any, sectionTimes?: Record<string, number>) => {
+export const prepareInspectionData = (formData: any, sectionTimes?: Record<string, number>, rejectionEvidenceUrl?: string) => {
   const vehicleData: VehicleData = {
     make: formData.vehicleMake,
     model: formData.vehicleModel,
@@ -100,6 +120,8 @@ export const prepareInspectionData = (formData: any, sectionTimes?: Record<strin
     engineCC: formData.engineCC,
     fuelType: formData.fuelType,
     transmission: formData.transmission,
+    trim: formData.trim,
+    traction: formData.traction,
   };
 
   const inspectionData: InspectionData = {
@@ -117,6 +139,10 @@ export const prepareInspectionData = (formData: any, sectionTimes?: Record<strin
     testDrive: formData.testDrive === 'Sí',
     noTestDriveReason: formData.noTestDriveReason,
     sectionTimes: sectionTimes || {},
+    rejectionEvidenceUrl: rejectionEvidenceUrl,
+    tiresCondition: formData.tiresCondition ? parseInt(formData.tiresCondition) : 0,
+    paintCondition: formData.paintCondition ? parseInt(formData.paintCondition) : 0,
+    hasAgencyHistory: formData.agencyServices === 'Sí',
   };
 
   return { vehicleData, inspectionData };

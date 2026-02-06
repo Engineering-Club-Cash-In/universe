@@ -171,8 +171,12 @@ export function prepareValuationContext(
 		inspectionResult: vehicleData.inspectionResult || "No especificado",
 
 		// New Condition details
-		tiresCondition: vehicleData.tiresCondition ? `${vehicleData.tiresCondition}%` : "No especificado",
-		paintCondition: vehicleData.paintCondition ? `${vehicleData.paintCondition}%` : "No especificado",
+		tiresCondition: vehicleData.tiresCondition
+			? `${vehicleData.tiresCondition}%`
+			: "No especificado",
+		paintCondition: vehicleData.paintCondition
+			? `${vehicleData.paintCondition}%`
+			: "No especificado",
 		hasAgencyHistory: vehicleData.hasAgencyHistory ? "Sí" : "No",
 
 		// Issues and condition

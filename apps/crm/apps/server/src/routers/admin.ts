@@ -49,6 +49,7 @@ export const adminRouter = {
 					"cobros",
 					"cobros_supervisor",
 					"juridico",
+					"account",
 				]),
 			}),
 		)
@@ -142,6 +143,7 @@ export const adminRouter = {
 						"cobros",
 						"cobros_supervisor",
 						"juridico",
+						"account",
 					])
 					.default("sales"),
 			}),

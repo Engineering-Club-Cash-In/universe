@@ -9,6 +9,7 @@ export const ROLES = {
 	COBROS: "cobros",
 	COBROS_SUPERVISOR: "cobros_supervisor",
 	JURIDICO: "juridico",
+	ACCOUNT: "account",
 } as const;
 
 export type UserRole = (typeof ROLES)[keyof typeof ROLES];
@@ -49,6 +50,11 @@ export const ROLE_CONFIG = {
 		label: "Jurídico",
 		color: "bg-amber-100 text-amber-800",
 		icon: "Scale" as const,
+	},
+	[ROLES.ACCOUNT]: {
+		label: "Contabilidad",
+		color: "bg-teal-100 text-teal-800",
+		icon: "Calculator" as const,
 	},
 } as const;
 

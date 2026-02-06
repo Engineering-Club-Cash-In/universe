@@ -10,6 +10,7 @@ export * from "./legal-contracts";
 export * from "./locations";
 export * from "./miniagent-credentials";
 export * from "./notes";
+export * from "./notifications";
 export * from "./quotations";
 export * from "./renap";
 export * from "./vehicles";

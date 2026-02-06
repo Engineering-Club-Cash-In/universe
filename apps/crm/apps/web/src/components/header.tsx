@@ -3,6 +3,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import {
 	Banknote,
 	BarChart3,
+	Bell,
 	Briefcase,
 	Building2,
 	Calculator,
@@ -231,6 +232,20 @@ export default function Header() {
 								<Link to="/juridico">
 									<Scale className="mr-2 h-4 w-4" />
 									Jurídico
+								</Link>
+							</Button>
+						)}
+
+						{/* Notificaciones */}
+						{session && (
+							<Button
+								variant={isActive("/notifications") ? "secondary" : "ghost"}
+								size="sm"
+								asChild
+							>
+								<Link to="/notifications">
+									<Bell className="mr-2 h-4 w-4" />
+									Notificaciones
 								</Link>
 							</Button>
 						)}

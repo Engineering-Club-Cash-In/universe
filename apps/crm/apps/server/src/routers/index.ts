@@ -14,6 +14,7 @@ import { legalContractsRouter } from "./legal-contracts";
 import { locationsRouter } from "./locations";
 import { miniagentRouter } from "./miniagent";
 import { notesRouter } from "./notes";
+import { notificationsRouter } from "./notifications";
 import { quotationsRouter } from "./quotations";
 import { reportesCarteraRouter } from "./reportes-cartera";
 import * as reportsRouter from "./reports";
@@ -195,6 +196,13 @@ export const appRouter = {
 	updateNote: notesRouter.updateNote,
 	togglePinNote: notesRouter.togglePinNote,
 	deleteNote: notesRouter.deleteNote,
+
+	// Notifications routes
+	getAllNotifications: notificationsRouter.getAllNotifications,
+	getNotificationsByRole: notificationsRouter.getNotificationsByRole,
+	getNotificationsByAssign: notificationsRouter.getNotificationsByAssign,
+	changeNotificationStatus: notificationsRouter.changeNotificationStatus,
+	addDocumentToNotification: notificationsRouter.addDocumentToNotification,
 
 	// Quotations routes
 	createQuotation: quotationsRouter.createQuotation,

@@ -17,6 +17,7 @@ import {
 	viewOpportunityContractsProcedure,
 } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
+import { createNotification } from "./notifications";
 import {
 	generateUniqueFilename,
 	getFileUrl,
@@ -855,6 +856,18 @@ export const legalContractsRouter = {
 					changedBy: context.userId,
 					reason: "Aprobación legal - Contratos adjuntados",
 				});
+			});
+
+			// Notificar a análisis que los contratos fueron creados y está lista para desembolso
+			await createNotification({
+				titulo: `Contratos listos - ${opportunity.title}`,
+				descripcion: `Los contratos legales de la oportunidad "${opportunity.title}" fueron adjuntados. La oportunidad pasó a la etapa del 90% y está lista para revisión de desembolso.`,
+				type: "aviso",
+				createdBy: context.userId,
+				createdByRole: context.userRole,
+				assignedToRole: "analyst",
+				relatedEntityType: "opportunity",
+				relatedEntityId: input.opportunityId,
 			});
 
 			return {

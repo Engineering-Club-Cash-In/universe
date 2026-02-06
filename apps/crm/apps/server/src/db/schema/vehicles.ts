@@ -177,7 +177,7 @@ export const vehicleInspections = pgTable("vehicle_inspections", {
 	// Detailed Conditions (Resumen final de la inspección)
 	tiresCondition: integer("tires_condition"), // Vida útil neumáticos %
 	paintCondition: integer("paint_condition"), // Estado pintura %
-	hasAgencyHistory: boolean("has_agency_history").default(false), // Historial agencia
+	hasAgencyHistory: boolean("has_agency_history"), // Historial agencia
 
 	// Equipment and considerations
 	vehicleEquipment: text("vehicle_equipment").notNull(),

@@ -140,9 +140,9 @@ export const prepareInspectionData = (formData: any, sectionTimes?: Record<strin
     noTestDriveReason: formData.noTestDriveReason,
     sectionTimes: sectionTimes || {},
     rejectionEvidenceUrl: rejectionEvidenceUrl,
-    tiresCondition: formData.tiresCondition ? parseInt(formData.tiresCondition) : 0,
-    paintCondition: formData.paintCondition ? parseInt(formData.paintCondition) : 0,
-    hasAgencyHistory: formData.agencyServices === 'Sí',
+    tiresCondition: formData.tiresCondition ? parseInt(formData.tiresCondition) : undefined,
+    paintCondition: formData.paintCondition ? parseInt(formData.paintCondition) : undefined,
+    hasAgencyHistory: formData.hasAgencyHistory === 'Sí' ? true : (formData.hasAgencyHistory === 'No' ? false : undefined),
   };
 
   return { vehicleData, inspectionData };

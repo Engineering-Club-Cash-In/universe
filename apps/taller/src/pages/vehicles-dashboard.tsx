@@ -21,16 +21,20 @@ import {
   Fuel,
   Palette,
   Hash,
+  ExternalLink,
 } from "lucide-react";
 import { getVehicleStatistics, getVehicleById } from "../services/vehicles";
 import { vehiclesApi, client } from "../utils/orpc";
 import { toast } from "sonner";
-import type { Vehicle, VehicleInspection, VehiclePhoto, InspectionChecklistItem } from "../../../crm/apps/server/src/db/schema/vehicles";
+import { INSPECTION_AREAS } from "../lib/inspection-data";
+import { ImagePreviewDialog } from "@/components/ImagePreviewDialog";
+import type { Vehicle, VehicleInspection, VehiclePhoto, InspectionChecklistItem, VehicleInspection360Item } from "../../../crm/apps/server/src/db/schema/vehicles";
 
 // Type for what the getAll endpoint returns
 type VehicleWithRelations = Vehicle & {
   inspections: (VehicleInspection & {
     checklistItems: InspectionChecklistItem[];
+    inspection360Items?: VehicleInspection360Item[];
   })[];
   photos: VehiclePhoto[];
 };
@@ -61,6 +65,13 @@ interface DashboardVehicle {
   photos: number;
   hasScanner: boolean;
   alerts: string[];
+  trim: string;
+  traction: string;
+  tiresCondition: number | null;
+  paintCondition: number | null;
+  hasAgencyHistory: boolean | null;
+  failedChecks: { area: string; checkpoint: string; comment?: string | null }[];
+  rejectionEvidenceUrl?: string | null;
 }
 
 import { Button } from "@/components/ui/button";
@@ -112,6 +123,8 @@ const sampleVehicles = [
     vehicleYear: "2020",
     licensePlate: "P-789ABC",
     vinNumber: "1HGCM82633A123456",
+    trim: "LE",
+    traction: "FWD",
     kmMileage: "45000",
     origin: "Agencia",
     vehicleType: "Sedan",
@@ -139,6 +152,8 @@ const sampleVehicles = [
     vehicleYear: "2018",
     licensePlate: "P-456DEF",
     vinNumber: "2HKRW7H8XJH123456",
+    trim: "Touring",
+    traction: "FWD",
     kmMileage: "72000",
     origin: "Rodado",
     vehicleType: "SUV",
@@ -166,6 +181,8 @@ const sampleVehicles = [
     vehicleYear: "2017",
     licensePlate: "P-123GHI",
     vinNumber: "3N1AB7AP7HY123456",
+    trim: "Advance",
+    traction: "FWD",
     kmMileage: "95000",
     origin: "Rodado",
     vehicleType: "Sedan",
@@ -193,6 +210,8 @@ const sampleVehicles = [
     vehicleYear: "2019",
     licensePlate: "P-789JKL",
     vinNumber: "1FMCU0F73KUA12345",
+    trim: "Titanium",
+    traction: "AWD",
     kmMileage: "55000",
     origin: "Agencia",
     vehicleType: "SUV",
@@ -220,6 +239,8 @@ const sampleVehicles = [
     vehicleYear: "2020",
     licensePlate: "P-456MNO",
     vinNumber: "JM3KFBDL9L0123456",
+    trim: "Grand Touring",
+    traction: "AWD",
     kmMileage: "32000",
     origin: "Agencia",
     vehicleType: "SUV",
@@ -294,6 +315,7 @@ export default function VehiclesDashboard() {
   const [totalVehicles, setTotalVehicles] = useState(0);
   const [isModalLoading, setIsModalLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   // Edit form state
   const [editForm, setEditForm] = useState({
@@ -354,6 +376,21 @@ export default function VehiclesDashboard() {
       photos: vehicle.photos?.length || 0,
       hasScanner: latestInspection?.scannerUsed || false,
       alerts: (latestInspection?.alerts as string[]) || [],
+      trim: vehicle.trim || '',
+      traction: vehicle.traction || '',
+      tiresCondition: latestInspection?.tiresCondition ?? null,
+      paintCondition: latestInspection?.paintCondition ?? null,
+      hasAgencyHistory: latestInspection?.hasAgencyHistory ?? null,
+      failedChecks: latestInspection?.inspection360Items
+        ? latestInspection.inspection360Items
+          .filter(item => item.status === 'bad')
+          .map(item => ({
+            area: item.area,
+            checkpoint: item.checkpoint,
+            comment: item.comment
+          }))
+        : [],
+      rejectionEvidenceUrl: latestInspection?.rejectionEvidenceUrl,
     };
   };
 
@@ -546,6 +583,15 @@ export default function VehiclesDashboard() {
     commercial: statistics?.commercialVehicles || 0,
     nonCommercial: statistics?.nonCommercialVehicles || 0,
     withAlerts: statistics?.vehiclesWithAlerts || 0,
+  };
+
+  const getAreaLabel = (rawArea: string) => {
+    // Try to find by exact title match first (case insensitive)
+    const found = INSPECTION_AREAS.find(a =>
+      a.title.toLowerCase() === rawArea.toLowerCase() ||
+      a.id === rawArea
+    );
+    return found ? found.title : rawArea; // Fallback to raw if not found
   };
 
 
@@ -1240,6 +1286,21 @@ export default function VehiclesDashboard() {
                           {selectedVehicle.alerts.length} {selectedVehicle.alerts.length === 1 ? "alerta" : "alertas"}
                         </Badge>
                       )}
+
+                      {/* Botón de Evidencia (Si existe) */}
+                      {selectedVehicle.rejectionEvidenceUrl && (
+                        <div className="ml-auto">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-red-700 border-red-200 hover:bg-red-50 h-7 text-xs"
+                            onClick={() => setPreviewUrl(selectedVehicle.rejectionEvidenceUrl || null)}
+                          >
+                            <ExternalLink className="h-3 w-3 mr-1.5" />
+                            Ver Evidencia
+                          </Button>
+                        </div>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -1259,11 +1320,17 @@ export default function VehiclesDashboard() {
                             <div className="text-muted-foreground">Modelo</div>
                             <div className="font-medium">{selectedVehicle.vehicleModel}</div>
 
+                            <div className="text-muted-foreground">Versión/Trim</div>
+                            <div className="font-medium">{selectedVehicle.trim || "N/A"}</div>
+
                             <div className="text-muted-foreground">Año</div>
                             <div className="font-medium">{selectedVehicle.vehicleYear}</div>
 
                             <div className="text-muted-foreground">Tipo</div>
                             <div className="font-medium">{selectedVehicle.vehicleType}</div>
+
+                            <div className="text-muted-foreground">Tracción</div>
+                            <div className="font-medium">{selectedVehicle.traction || "N/A"}</div>
                           </div>
 
                           <div className="pt-2 border-t space-y-2">
@@ -1343,6 +1410,61 @@ export default function VehiclesDashboard() {
                             <div className="font-medium">{selectedVehicle.photos}</div>
                           </div>
 
+                          <div className="pt-3 border-t grid grid-cols-3 gap-3 text-center">
+                            <div className="flex flex-col gap-1.5">
+                              <div className="flex justify-between items-end px-1">
+                                <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Llantas</span>
+                                <span className={cn("text-sm font-bold", selectedVehicle.tiresCondition === null && "text-muted-foreground font-normal")}>
+                                  {selectedVehicle.tiresCondition !== null ? `${selectedVehicle.tiresCondition}%` : "N/A"}
+                                </span>
+                              </div>
+                              <div className="w-full bg-secondary/50 h-2 rounded-full overflow-hidden">
+                                <div
+                                  className={cn("h-full rounded-full transition-all duration-500 ease-out",
+                                    selectedVehicle.tiresCondition === null ? "bg-muted" :
+                                      selectedVehicle.tiresCondition >= 70 ? "bg-green-500" :
+                                        selectedVehicle.tiresCondition >= 40 ? "bg-yellow-500" : "bg-red-500"
+                                  )}
+                                  style={{ width: selectedVehicle.tiresCondition !== null ? `${selectedVehicle.tiresCondition}%` : "100%" }}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="flex flex-col gap-1.5">
+                              <div className="flex justify-between items-end px-1">
+                                <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Pintura</span>
+                                <span className={cn("text-sm font-bold", selectedVehicle.paintCondition === null && "text-muted-foreground font-normal")}>
+                                  {selectedVehicle.paintCondition !== null ? `${selectedVehicle.paintCondition}%` : "N/A"}
+                                </span>
+                              </div>
+                              <div className="w-full bg-secondary/50 h-2 rounded-full overflow-hidden">
+                                <div
+                                  className={cn("h-full rounded-full transition-all duration-500 ease-out",
+                                    selectedVehicle.paintCondition === null ? "bg-muted" :
+                                      selectedVehicle.paintCondition >= 70 ? "bg-green-500" :
+                                        selectedVehicle.paintCondition >= 40 ? "bg-yellow-500" : "bg-red-500"
+                                  )}
+                                  style={{ width: selectedVehicle.paintCondition !== null ? `${selectedVehicle.paintCondition}%` : "100%" }}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="flex flex-col items-center justify-center gap-1">
+                              <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-0.5">De Agencia</span>
+                              <Badge
+                                variant={selectedVehicle.hasAgencyHistory === true ? "default" : selectedVehicle.hasAgencyHistory === false ? "secondary" : "outline"}
+                                className={cn(
+                                  "text-xs px-2.5 py-0.5",
+                                  selectedVehicle.hasAgencyHistory === true ? "bg-green-600 hover:bg-green-700" :
+                                    selectedVehicle.hasAgencyHistory === false ? "text-muted-foreground bg-muted" :
+                                      "text-yellow-600 border-yellow-200 bg-yellow-50"
+                                )}
+                              >
+                                {selectedVehicle.hasAgencyHistory === true ? "Sí" : selectedVehicle.hasAgencyHistory === false ? "No" : "N/A"}
+                              </Badge>
+                            </div>
+                          </div>
+
                           {selectedVehicle.alerts && selectedVehicle.alerts.length > 0 && (
                             <div className="pt-3 border-t">
                               <p className="text-sm text-muted-foreground mb-2">Alertas detectadas:</p>
@@ -1409,6 +1531,46 @@ export default function VehiclesDashboard() {
                         </CardContent>
                       </Card>
                     </div>
+
+                    {/* Hallazgos Críticos (Check 360) */}
+                    {selectedVehicle.failedChecks && selectedVehicle.failedChecks.length > 0 && (
+                      <Card className="border-red-200 bg-red-50/30">
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-base flex items-center gap-2 text-red-700">
+                            <AlertTriangle className="h-4 w-4" />
+                            Hallazgos del Check 360
+                            <Badge variant="destructive" className="ml-2 h-5 text-[10px] px-1.5">
+                              {selectedVehicle.failedChecks.length}
+                            </Badge>
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="max-h-[300px] overflow-y-auto pr-2 space-y-2">
+                            {selectedVehicle.failedChecks.map((check, idx) => (
+                              <div
+                                key={idx}
+                                className="flex gap-3 p-3 rounded-md border border-red-100 bg-white shadow-sm"
+                              >
+                                <div className="mt-0.5">
+                                  <XCircle className="h-4 w-4 text-red-500" />
+                                </div>
+                                <div className="flex-1 space-y-1">
+                                  <div className="font-medium text-sm text-foreground">
+                                    <span className="text-muted-foreground mr-1">{getAreaLabel(check.area)}:</span>
+                                    {check.checkpoint}
+                                  </div>
+                                  {check.comment && (
+                                    <p className="text-sm text-muted-foreground">
+                                      {check.comment}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
 
                     {/* Resultado de Inspección */}
                     <Card>
@@ -1621,6 +1783,13 @@ export default function VehiclesDashboard() {
           )}
         </DialogContent>
       </Dialog>
+
+      <ImagePreviewDialog
+        open={!!previewUrl}
+        onOpenChange={(open) => !open && setPreviewUrl(null)}
+        imageUrl={previewUrl}
+        title="Evidencia de Rechazo / Daño"
+      />
     </div>
   );
 }

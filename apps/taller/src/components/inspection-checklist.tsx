@@ -14,6 +14,7 @@ import {
   Sparkles,
   FileText,
   Camera,
+  Upload,
 } from "lucide-react";
 import { useInspection, type SectionTimes } from "../contexts/InspectionContext";
 import { cn } from "@/lib/utils";
@@ -405,6 +406,7 @@ export default function InspectionChecklist({
   // Local state for evidence upload
   const [isUploadingEvidence, setIsUploadingEvidence] = useState(false);
   const evidenceInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
   const [expandedCategories, setExpandedCategories] = useState<
@@ -930,26 +932,46 @@ export default function InspectionChecklist({
                           <input
                             type="file"
                             accept="image/*"
+                            capture="environment"
+                            className="hidden"
+                            ref={cameraInputRef}
+                            onChange={handleEvidenceUpload}
+                          />
+                          <input
+                            type="file"
+                            accept="image/*"
                             className="hidden"
                             ref={evidenceInputRef}
                             onChange={handleEvidenceUpload}
                           />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800 w-full max-w-xs"
-                            onClick={() => evidenceInputRef.current?.click()}
-                            disabled={isUploadingEvidence}
-                          >
-                            {isUploadingEvidence ? (
-                              <>Subiendo...</>
-                            ) : (
-                              <>
-                                <Camera className="mr-2 h-4 w-4" />
-                                Adjuntar Foto de Evidencia
-                              </>
-                            )}
-                          </Button>
+                          <div className="grid grid-cols-2 gap-3 w-full max-w-sm">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-20 flex flex-col gap-2 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                              onClick={() => cameraInputRef.current?.click()}
+                              disabled={isUploadingEvidence}
+                            >
+                              <Camera className="h-6 w-6" />
+                              <span>Tomar Foto</span>
+                            </Button>
+
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-20 flex flex-col gap-2 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                              onClick={() => evidenceInputRef.current?.click()}
+                              disabled={isUploadingEvidence}
+                            >
+                              <Upload className="h-6 w-6" />
+                              <span>Galería</span>
+                            </Button>
+                          </div>
+                          {isUploadingEvidence && (
+                            <p className="text-xs text-red-600 animate-pulse mt-1">
+                              Subiendo evidencia...
+                            </p>
+                          )}
                         </>
                       )}
                     </div>

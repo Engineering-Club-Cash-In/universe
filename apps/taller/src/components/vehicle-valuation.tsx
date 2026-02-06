@@ -246,9 +246,8 @@ export default function VehicleValuation({
                       <SelectValue placeholder="¿Tiene récord?" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Sí">Sí, completo</SelectItem>
-                      <SelectItem value="Parcial">Sí, parcial</SelectItem>
-                      <SelectItem value="No">No tiene</SelectItem>
+                      <SelectItem value="Sí">Sí</SelectItem>
+                      <SelectItem value="No">No</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

@@ -14,6 +14,7 @@ import {
   Sparkles,
   FileText,
   Camera,
+  Upload,
 } from "lucide-react";
 import { useInspection, type SectionTimes } from "../contexts/InspectionContext";
 import { cn } from "@/lib/utils";
@@ -33,6 +34,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { toast } from "sonner";
 
 // ==========================================
 // CRITERIOS DE RECHAZO (Causales de rechazo)
@@ -405,6 +407,7 @@ export default function InspectionChecklist({
   // Local state for evidence upload
   const [isUploadingEvidence, setIsUploadingEvidence] = useState(false);
   const evidenceInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
   const [expandedCategories, setExpandedCategories] = useState<
@@ -498,6 +501,24 @@ export default function InspectionChecklist({
     const file = event.target.files?.[0];
     if (!file) return;
 
+    // Validación de seguridad
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+
+    if (file.size > maxSize) {
+      toast.error("Archivo demasiado grande. El máximo permitido es 10MB.");
+      if (evidenceInputRef.current) evidenceInputRef.current.value = '';
+      if (cameraInputRef.current) cameraInputRef.current.value = '';
+      return;
+    }
+
+    if (!allowedTypes.includes(file.type)) {
+      toast.error("Tipo de archivo no válido. Use JPG, PNG o WebP.");
+      if (evidenceInputRef.current) evidenceInputRef.current.value = '';
+      if (cameraInputRef.current) cameraInputRef.current.value = '';
+      return;
+    }
+
     setIsUploadingEvidence(true);
     const formData = new FormData();
     formData.append("file", file);
@@ -530,7 +551,15 @@ export default function InspectionChecklist({
       }
     } catch (error) {
       console.error("Error uploading evidence:", error);
-      toast.error("Error al subir la evidencia");
+      const errorMsg = error instanceof Error ? error.message : 'Error desconocido';
+
+      if (errorMsg.includes('size')) {
+        toast.error("El archivo excede el límite permitido por el servidor.");
+      } else if (errorMsg.includes('network') || errorMsg.includes('fetch')) {
+        toast.error("Error de conexión. Verifique su internet e intente de nuevo.");
+      } else {
+        toast.error("Error al subir la evidencia. Intente nuevamente.");
+      }
     } finally {
       setIsUploadingEvidence(false);
     }
@@ -930,26 +959,46 @@ export default function InspectionChecklist({
                           <input
                             type="file"
                             accept="image/*"
+                            capture="environment"
+                            className="hidden"
+                            ref={cameraInputRef}
+                            onChange={handleEvidenceUpload}
+                          />
+                          <input
+                            type="file"
+                            accept="image/*"
                             className="hidden"
                             ref={evidenceInputRef}
                             onChange={handleEvidenceUpload}
                           />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800 w-full max-w-xs"
-                            onClick={() => evidenceInputRef.current?.click()}
-                            disabled={isUploadingEvidence}
-                          >
-                            {isUploadingEvidence ? (
-                              <>Subiendo...</>
-                            ) : (
-                              <>
-                                <Camera className="mr-2 h-4 w-4" />
-                                Adjuntar Foto de Evidencia
-                              </>
-                            )}
-                          </Button>
+                          <div className="grid grid-cols-2 gap-3 w-full max-w-sm">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-20 flex flex-col gap-2 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                              onClick={() => cameraInputRef.current?.click()}
+                              disabled={isUploadingEvidence}
+                            >
+                              <Camera className="h-6 w-6" />
+                              <span>Tomar Foto</span>
+                            </Button>
+
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-20 flex flex-col gap-2 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                              onClick={() => evidenceInputRef.current?.click()}
+                              disabled={isUploadingEvidence}
+                            >
+                              <Upload className="h-6 w-6" />
+                              <span>Galería</span>
+                            </Button>
+                          </div>
+                          {isUploadingEvidence && (
+                            <p className="text-xs text-red-600 animate-pulse mt-1">
+                              Subiendo evidencia...
+                            </p>
+                          )}
                         </>
                       )}
                     </div>

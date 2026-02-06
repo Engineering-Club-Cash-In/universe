@@ -205,7 +205,7 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
 
                                 <div className="flex items-center gap-3">
                                     {areaFails > 0 && (
-                                        <Badge variant="destructive" className="gap-1 flex items-center">
+                                        <Badge variant="secondary" className="gap-1 flex items-center bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200">
                                             <AlertCircle className="h-3 w-3" /> {areaFails}
                                         </Badge>
                                     )}
@@ -227,8 +227,7 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
                                         return (
                                             <div key={point.id} className={cn(
                                                 "p-3 rounded-md border transition-all duration-200",
-                                                isFail ? "bg-red-50 border-red-200" :
-                                                    isOk ? "bg-green-50 border-green-200" : "bg-slate-50/50 border-slate-100"
+                                                "bg-white border-slate-200 hover:border-slate-300"
                                             )}>
                                                 <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
                                                     <div className="flex-1">
@@ -239,39 +238,43 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
 
                                                     <div className="flex items-center gap-2 shrink-0">
                                                         <Button
-                                                            variant={isOk ? "default" : "outline"}
+                                                            variant="outline"
                                                             size="sm"
                                                             onClick={() => handleStatusChange(area.id, point.label, 'ok')}
                                                             className={cn(
-                                                                "h-8 px-3 gap-1.5 min-w-[80px]",
-                                                                isOk ? "bg-green-600 hover:bg-green-700 text-white" : "text-green-700 border-green-200 hover:bg-green-50"
+                                                                "h-8 px-3 gap-1.5 min-w-[80px] transition-all",
+                                                                isOk
+                                                                    ? "bg-slate-200 text-slate-900 border-slate-400 font-medium hover:bg-slate-300"
+                                                                    : "text-slate-700 border-slate-400 hover:bg-slate-100 hover:text-slate-900"
                                                             )}
                                                         >
-                                                            <CheckCircle2 className="h-3.5 w-3.5" />
+                                                            <CheckCircle2 className={cn("h-3.5 w-3.5", isOk ? "text-green-600" : "text-slate-500")} />
                                                             OK
                                                         </Button>
                                                         <Button
-                                                            variant={isFail ? "destructive" : "outline"}
+                                                            variant="outline"
                                                             size="sm"
                                                             onClick={() => handleStatusChange(area.id, point.label, 'bad')}
                                                             className={cn(
-                                                                "h-8 px-3 gap-1.5 min-w-[80px]",
-                                                                isFail ? "" : "text-red-700 border-red-200 hover:bg-red-50"
+                                                                "h-8 px-3 gap-1.5 min-w-[80px] transition-all",
+                                                                isFail
+                                                                    ? "bg-slate-200 text-slate-900 border-slate-400 font-medium hover:bg-slate-300"
+                                                                    : "text-slate-700 border-slate-400 hover:bg-slate-100 hover:text-slate-900"
                                                             )}
                                                         >
-                                                            <XCircle className="h-3.5 w-3.5" />
+                                                            <XCircle className={cn("h-3.5 w-3.5", isFail ? "text-red-600" : "text-slate-500")} />
                                                             Fallo
                                                         </Button>
                                                     </div>
                                                 </div>
 
                                                 {isFail && (
-                                                    <div className="mt-3 pl-0 sm:pl-3 border-l-0 sm:border-l-2 border-red-200 animate-in slide-in-from-top-1 fade-in duration-200">
+                                                    <div className="mt-3 pl-0 sm:pl-3 border-l-0 sm:border-l-2 border-slate-200 animate-in slide-in-from-top-1 fade-in duration-200">
                                                         <Textarea
-                                                            placeholder="Describa el problema encontrado (ej. Fuga visible, pieza rota)..."
+                                                            placeholder="Describa el problema encontrado..."
                                                             value={state?.notes || ''}
                                                             onChange={(e) => handleObservationChange(area.id, point.label, e.target.value)}
-                                                            className="min-h-[60px] bg-white border-red-200 focus-visible:ring-red-500 text-sm resize-none"
+                                                            className="min-h-[60px] bg-slate-50 border-slate-200 focus-visible:ring-slate-400 text-sm resize-none"
                                                         />
                                                     </div>
                                                 )}
@@ -285,15 +288,15 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
                 })}
             </div>
 
-            <div className="flex justify-end pt-6">
+            <div className="flex justify-center pt-8">
                 <Button
                     size="lg"
                     onClick={onComplete}
                     disabled={!isComplete}
-                    className="w-full sm:w-auto gap-2"
+                    className="w-full sm:w-auto gap-2 px-8 min-w-[200px]"
                 >
-                    Continuar a Checklist
-                    <ChevronDown className="h-4 w-4 rotate-270" style={{ transform: 'rotate(-90deg)' }} />
+                    <CheckCircle2 className="h-5 w-5" />
+                    Confirmar y Continuar
                 </Button>
             </div>
         </div>

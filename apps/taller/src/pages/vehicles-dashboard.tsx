@@ -27,7 +27,7 @@ import { getVehicleStatistics, getVehicleById } from "../services/vehicles";
 import { vehiclesApi, client } from "../utils/orpc";
 import { toast } from "sonner";
 import { INSPECTION_AREAS } from "../lib/inspection-data";
-import { ImagePreviewDialog } from "@/components/ImagePreviewDialog";
+import ImagePreviewDialog from "@/components/ImagePreviewDialog";
 import type { Vehicle, VehicleInspection, VehiclePhoto, InspectionChecklistItem, VehicleInspection360Item } from "../../../crm/apps/server/src/db/schema/vehicles";
 
 // Type for what the getAll endpoint returns
@@ -1785,8 +1785,8 @@ export default function VehiclesDashboard() {
       </Dialog>
 
       <ImagePreviewDialog
-        open={!!previewUrl}
-        onOpenChange={(open) => !open && setPreviewUrl(null)}
+        isOpen={!!previewUrl}
+        onClose={() => setPreviewUrl(null)}
         imageUrl={previewUrl}
         title="Evidencia de Rechazo / Daño"
       />

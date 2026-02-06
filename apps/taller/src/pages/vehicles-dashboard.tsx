@@ -1249,13 +1249,13 @@ export default function VehiclesDashboard() {
           ) : (
 
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full pt-4">
-              <TabsList>
-                <TabsTrigger value="details">Detalles</TabsTrigger>
-                <TabsTrigger value="photos">Fotos ({selectedVehicle?.photos || 0})</TabsTrigger>
+              <TabsList className="w-full">
+                <TabsTrigger value="details" className="flex-1">Detalles</TabsTrigger>
+                <TabsTrigger value="photos" className="flex-1">Fotos ({selectedVehicle?.photos || 0})</TabsTrigger>
                 {selectedVehicle?.hasScanner && (
-                  <TabsTrigger value="scanner">Scanner</TabsTrigger>
+                  <TabsTrigger value="scanner" className="flex-1">Scanner</TabsTrigger>
                 )}
-                <TabsTrigger value="edit">Editar</TabsTrigger>
+                <TabsTrigger value="edit" className="flex-1">Editar</TabsTrigger>
               </TabsList>
 
               <TabsContent value="details" className="mt-4">
@@ -1288,19 +1288,7 @@ export default function VehiclesDashboard() {
                       )}
 
                       {/* Botón de Evidencia (Si existe) */}
-                      {selectedVehicle.rejectionEvidenceUrl && (
-                        <div className="ml-auto">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="text-red-700 border-red-200 hover:bg-red-50 h-7 text-xs"
-                            onClick={() => setPreviewUrl(selectedVehicle.rejectionEvidenceUrl || null)}
-                          >
-                            <ExternalLink className="h-3 w-3 mr-1.5" />
-                            Ver Evidencia
-                          </Button>
-                        </div>
-                      )}
+
                     </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -1366,9 +1354,22 @@ export default function VehiclesDashboard() {
                       {/* Datos de Inspección */}
                       <Card>
                         <CardHeader className="pb-3">
-                          <CardTitle className="text-base flex items-center gap-2">
-                            <ClipboardCheck className="h-4 w-4" />
-                            Datos de Inspección
+                          <CardTitle className="text-base flex justify-between items-center w-full">
+                            <div className="flex items-center gap-2">
+                              <ClipboardCheck className="h-4 w-4" />
+                              Datos de Inspección
+                            </div>
+                            {selectedVehicle.rejectionEvidenceUrl && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-xs px-2 text-red-600 border-red-300 hover:bg-red-50 hover:text-red-700"
+                                onClick={() => setPreviewUrl(selectedVehicle.rejectionEvidenceUrl || null)}
+                              >
+                                <ExternalLink className="h-3 w-3 mr-1.5" />
+                                Ver evidencia
+                              </Button>
+                            )}
                           </CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-3">
@@ -1408,6 +1409,8 @@ export default function VehiclesDashboard() {
 
                             <div className="text-muted-foreground">Fotos</div>
                             <div className="font-medium">{selectedVehicle.photos}</div>
+
+
                           </div>
 
                           <div className="pt-3 border-t grid grid-cols-3 gap-3 text-center">

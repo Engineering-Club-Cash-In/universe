@@ -3375,8 +3375,10 @@ export const crmRouter = {
 				sections: {
 					documentos: {
 						completed:
-							requiredDocs.length > 0 &&
-							requiredDocs.every((doc) => uploadedTypes.has(doc.documentType)),
+							requiredDocs.filter((doc) => doc.required).length > 0 &&
+							requiredDocs
+								.filter((doc) => doc.required)
+								.every((doc) => uploadedTypes.has(doc.documentType)),
 						items: requiredDocs.map((doc) => ({
 							documentType: doc.documentType,
 							required: doc.required,
@@ -3456,10 +3458,10 @@ export const crmRouter = {
 						// Vehicle documents subsection
 						documentos: {
 							completed:
-								requiredVehicleDocs.length === 0 ||
-								requiredVehicleDocs.every((doc) =>
-									uploadedVehicleTypes.has(doc.documentType),
-								),
+								requiredVehicleDocs.filter((doc) => doc.required).length === 0 ||
+								requiredVehicleDocs
+									.filter((doc) => doc.required)
+									.every((doc) => uploadedVehicleTypes.has(doc.documentType)),
 							items: requiredVehicleDocs.map((doc) => ({
 								documentType: doc.documentType,
 								required: doc.required,
@@ -3516,15 +3518,17 @@ export const crmRouter = {
 				checklistData.sections.vehiculo.documentos.completed &&
 				checklistData.sections.vehiculo.verificaciones.completed;
 
-			// Calculate overall progress
+			// Calculate overall progress (only count required items)
 			const totalItems =
-				checklistData.sections.documentos.items.length + // client docs
+				checklistData.sections.documentos.items.filter((i) => i.required).length + // client docs (required only)
 				checklistData.sections.verificaciones.items.filter((i) => i.required)
 					.length + // client verifications
 				(opportunity.vehicleId ? 1 : 0) + // vehicle inspection
 				(opportunity.vehicleId
-					? checklistData.sections.vehiculo.documentos.items.length
-					: 0) + // vehicle docs
+					? checklistData.sections.vehiculo.documentos.items.filter(
+							(i: any) => i.required,
+						).length
+					: 0) + // vehicle docs (required only)
 				(opportunity.vehicleId
 					? checklistData.sections.vehiculo.verificaciones.items.filter(
 							(i: any) => i.required,
@@ -3532,17 +3536,18 @@ export const crmRouter = {
 					: 0); // vehicle verifications
 
 			const completedItems =
-				checklistData.sections.documentos.items.filter((i) => i.uploaded)
-					.length + // client docs uploaded
+				checklistData.sections.documentos.items.filter(
+					(i) => i.required && i.uploaded,
+				).length + // client docs uploaded (required only)
 				checklistData.sections.verificaciones.items.filter(
 					(i) => i.required && i.completed,
 				).length + // client verifications completed
 				(vehicleInspected ? 1 : 0) + // vehicle inspection
 				(opportunity.vehicleId
 					? checklistData.sections.vehiculo.documentos.items.filter(
-							(i: any) => i.uploaded,
+							(i: any) => i.required && i.uploaded,
 						).length
-					: 0) + // vehicle docs uploaded
+					: 0) + // vehicle docs uploaded (required only)
 				(opportunity.vehicleId
 					? checklistData.sections.vehiculo.verificaciones.items.filter(
 							(i: any) => i.required && i.completed,

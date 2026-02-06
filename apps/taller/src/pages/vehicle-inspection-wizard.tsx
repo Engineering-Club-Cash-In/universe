@@ -58,6 +58,7 @@ const STEPS = [
 export default function VehicleInspectionWizard() {
   const { formData, checklistItems, photos, sectionTimes, resetInspection, currentStep, setCurrentStep, items360, rejectionEvidenceUrl } = useInspection();
   const [basicInfoCompleted, setBasicInfoCompleted] = useState(false);
+  const [inspection360Completed, setInspection360Completed] = useState(false);
   const vehicleFormRef = useRef<VehicleInspectionFormRef>(null);
   const [checklistCompleted, setChecklistCompleted] = useState(false);
   const [photosCompleted, setPhotosCompleted] = useState(false);
@@ -82,7 +83,11 @@ export default function VehicleInspectionWizard() {
       }
     }
 
-    // Paso 1: 360 (La validación estricta la hace el botón interno del componente)
+    // Paso 1: 360 (Validación explícita)
+    if (currentStep === 1 && !inspection360Completed) {
+      toast.error("Por favor confirme la inspección 360 antes de continuar");
+      return;
+    }
 
     if (currentStep === 2 && !checklistCompleted) {
       toast.error("Por favor complete la evaluación de criterios antes de continuar");
@@ -186,7 +191,7 @@ export default function VehicleInspectionWizard() {
                 // Lógica de completado actualizada para 5 pasos
                 const isCompleted =
                   (index === 0 && basicInfoCompleted) ||
-                  (index === 1 && (items360.length > 0)) ||
+                  (index === 1 && inspection360Completed) ||
                   (index === 2 && checklistCompleted) ||
                   (index === 3 && photosCompleted) ||
                   (index === 4 && valuationCompleted);
@@ -281,6 +286,7 @@ export default function VehicleInspectionWizard() {
               <div className="animate-in fade-in slide-in-from-right-4 duration-300">
                 <Inspection360Step
                   onComplete={() => {
+                    setInspection360Completed(true);
                     setCurrentStep(2);
                     window.scrollTo({ top: 0, behavior: "smooth" });
                   }}

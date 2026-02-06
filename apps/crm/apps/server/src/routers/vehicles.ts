@@ -14,6 +14,8 @@ import {
 	type NewVehicleInspection,
 	type NewVehiclePhoto,
 	vehicleDocuments,
+	type NewVehicleInspection360Item,
+	vehicleInspection360Items,
 	vehicleInspections,
 	vehiclePhotos,
 	vehicles,
@@ -115,16 +117,16 @@ export const vehiclesRouter = {
 
 			const idsQuery = needsJoin
 				? idsQueryBase.innerJoin(
-						vehicleInspections,
-						eq(vehicles.id, vehicleInspections.vehicleId),
-					)
+					vehicleInspections,
+					eq(vehicles.id, vehicleInspections.vehicleId),
+				)
 				: idsQueryBase;
 
 			const countQuery = needsJoin
 				? countQueryBase.innerJoin(
-						vehicleInspections,
-						eq(vehicles.id, vehicleInspections.vehicleId),
-					)
+					vehicleInspections,
+					eq(vehicles.id, vehicleInspections.vehicleId),
+				)
 				: countQueryBase;
 
 			const whereClause =
@@ -187,16 +189,16 @@ export const vehiclesRouter = {
 			const allChecklistItems =
 				allInspectionIds.length > 0
 					? await db
-							.select()
-							.from(inspectionChecklistItems)
-							.where(
-								or(
-									...allInspectionIds.map((id) =>
-										eq(inspectionChecklistItems.inspectionId, id),
-									),
+						.select()
+						.from(inspectionChecklistItems)
+						.where(
+							or(
+								...allInspectionIds.map((id) =>
+									eq(inspectionChecklistItems.inspectionId, id),
 								),
-							)
-							.orderBy(inspectionChecklistItems.category)
+							),
+						)
+						.orderBy(inspectionChecklistItems.category)
 					: [];
 
 			// Group checklist items by inspection ID
@@ -243,29 +245,29 @@ export const vehiclesRouter = {
 			const vehicleConvenios =
 				vehicleIdsArray.length > 0
 					? await db
-							.select({
-								vehicleId: contratosFinanciamiento.vehicleId,
-								hasActiveConvenio: conveniosPago.activo,
-							})
-							.from(contratosFinanciamiento)
-							.leftJoin(
-								casosCobros,
-								eq(contratosFinanciamiento.id, casosCobros.contratoId),
-							)
-							.leftJoin(
-								conveniosPago,
-								eq(casosCobros.id, conveniosPago.casoCobroId),
-							)
-							.where(
-								and(
-									or(
-										...vehicleIdsArray.map((id) =>
-											eq(contratosFinanciamiento.vehicleId, id),
-										),
+						.select({
+							vehicleId: contratosFinanciamiento.vehicleId,
+							hasActiveConvenio: conveniosPago.activo,
+						})
+						.from(contratosFinanciamiento)
+						.leftJoin(
+							casosCobros,
+							eq(contratosFinanciamiento.id, casosCobros.contratoId),
+						)
+						.leftJoin(
+							conveniosPago,
+							eq(casosCobros.id, conveniosPago.casoCobroId),
+						)
+						.where(
+							and(
+								or(
+									...vehicleIdsArray.map((id) =>
+										eq(contratosFinanciamiento.vehicleId, id),
 									),
-									eq(conveniosPago.activo, true),
 								),
-							)
+								eq(conveniosPago.activo, true),
+							),
+						)
 					: [];
 
 			// Add convenio info to vehicles and sort by the original paginated order
@@ -307,7 +309,7 @@ export const vehiclesRouter = {
 				.where(eq(vehicleInspections.vehicleId, input.id))
 				.orderBy(desc(vehicleInspections.createdAt));
 
-			// Get checklist items for each inspection
+			// Get checklist items and 360 items for each inspection
 			const inspectionsWithChecklist = await Promise.all(
 				inspections.map(async (inspection) => {
 					const checklistItems = await db
@@ -316,9 +318,16 @@ export const vehiclesRouter = {
 						.where(eq(inspectionChecklistItems.inspectionId, inspection.id))
 						.orderBy(inspectionChecklistItems.category);
 
+					const inspection360ItemsData = await db
+						.select()
+						.from(vehicleInspection360Items)
+						.where(eq(vehicleInspection360Items.inspectionId, inspection.id))
+						.orderBy(vehicleInspection360Items.area);
+
 					return {
 						...inspection,
 						checklistItems,
+						inspection360Items: inspection360ItemsData,
 					};
 				}),
 			);
@@ -761,6 +770,8 @@ export const vehiclesRouter = {
 					vehicleUse: z.string().nullable().optional(),
 					series: z.string().nullable().optional(),
 					iscvCode: z.string().nullable().optional(),
+					trim: z.string().optional(),
+					traction: z.string().optional(),
 				}),
 				// Inspection data
 				inspection: z.object({
@@ -781,6 +792,10 @@ export const vehiclesRouter = {
 					testDrive: z.boolean(),
 					noTestDriveReason: z.string().optional(),
 					sectionTimes: z.record(z.string(), z.number()).optional().default({}),
+					tiresCondition: z.number().optional(),
+					paintCondition: z.number().optional(),
+					hasAgencyHistory: z.boolean().optional(),
+					rejectionEvidenceUrl: z.string().optional(),
 				}),
 				// Checklist items
 				checklistItems: z.array(
@@ -791,6 +806,15 @@ export const vehiclesRouter = {
 						severity: z.string().optional().default("critical"),
 					}),
 				),
+				// 360 Inspection Items
+				inspection360Items: z.array(
+					z.object({
+						area: z.string(),
+						checkpoint: z.string(),
+						status: z.enum(["ok", "bad"]),
+						comment: z.string().optional(),
+					})
+				).optional().default([]),
 				// Photo URLs (optional, can be added later)
 				photos: z
 					.array(
@@ -887,7 +911,19 @@ export const vehiclesRouter = {
 						);
 					}
 
-					// 4. Create photos if provided
+					// 4. Create 360 Inspection Items
+					if (input.inspection360Items && input.inspection360Items.length > 0) {
+						await tx.insert(vehicleInspection360Items).values(
+							input.inspection360Items.map(
+								(item) => ({
+									inspectionId: newInspection.id,
+									...item,
+								}) as NewVehicleInspection360Item
+							)
+						);
+					}
+
+					// 5. Create photos if provided
 					if (input.photos && input.photos.length > 0) {
 						await tx.insert(vehiclePhotos).values(
 							input.photos.map(
@@ -1007,16 +1043,16 @@ REGLAS IMPORTANTES:
 								},
 								isPDF
 									? {
-											type: "file",
-											data: fileBuffer,
-											mediaType: "application/pdf",
-											filename: "tarjeta_circulacion.pdf",
-										}
+										type: "file",
+										data: fileBuffer,
+										mediaType: "application/pdf",
+										filename: "tarjeta_circulacion.pdf",
+									}
 									: {
-											type: "image",
-											image: fileBuffer,
-											mediaType: input.mimeType,
-										},
+										type: "image",
+										image: fileBuffer,
+										mediaType: input.mimeType,
+									},
 							],
 						},
 					],
@@ -1111,8 +1147,8 @@ CONTEXTO DEL MERCADO GUATEMALTECO:
 
 METODOLOGÍA DE VALORACIÓN:
 1. Analizar marca, modelo, año y depreciación
-2. Evaluar condición técnica y estética
-3. Considerar kilometraje y mantenimiento
+2. Evaluar condición técnica y estética (especialmente estado de pintura y vida útil de neumáticos)
+3. Considerar kilometraje, mantenimiento y si cuenta con historial de agencia
 4. Revisar equipamiento y características especiales
 5. Aplicar ajustes por problemas detectados
 6. Comparar con mercado local
@@ -1136,6 +1172,7 @@ Proporciona una valoración conservadora pero realista para el mercado guatemalt
 INFORMACIÓN BÁSICA:
 - Marca: ${context.make}
 - Modelo/Línea: ${context.model}
+- Versión o Equipamiento: ${context.trim}
 - Año: ${context.year} (${context.age} años de antigüedad)
 - Tipo: ${context.vehicleType}
 - Color: ${context.color}
@@ -1145,12 +1182,16 @@ ESPECIFICACIONES TÉCNICAS:
 - Motor: ${context.engineCC} CC, ${context.cylinders} cilindros
 - Combustible: ${context.fuelType}
 - Transmisión: ${context.transmission}
+- Tracción: ${context.traction}
 - Kilometraje: ${context.kmMileage} km
 
 CONDICIÓN Y ESTADO:
 - Fecha de inspección: ${context.inspectionDate}
 - Técnico: ${context.technicianName}
 - Observaciones generales: ${context.inspectionResult}
+- Vida útil de neumáticos: ${context.tiresCondition}
+- Estado general de la pintura: ${context.paintCondition}
+- ¿Tiene historial de agencia?: ${context.hasAgencyHistory}
 - Problemas críticos encontrados: ${context.criticalIssueCount} (${context.criticalIssues.join(", ") || "Ninguno"})
 - Problemas menores: ${context.warningIssueCount} (${context.warningIssues.join(", ") || "Ninguno"})
 
@@ -1169,16 +1210,15 @@ DOCUMENTACIÓN:
 - Fotos del motor: ${context.hasEnginePhotos ? "Sí" : "No"}
 
 OBSERVACIONES DEL VALUADOR EN FOTOS:
-${
-	context.hasPhotoComments
-		? context.photoComments
-				.map(
-					(comment: { category: string; photoType: string; comment: string }) =>
-						`- ${comment.category} (${comment.photoType}): ${comment.comment}`,
-				)
-				.join("\n")
-		: "Sin observaciones especiales en las fotografías"
-}
+${context.hasPhotoComments
+									? context.photoComments
+										.map(
+											(comment: { category: string; photoType: string; comment: string }) =>
+												`- ${comment.category} (${comment.photoType}): ${comment.comment}`,
+										)
+										.join("\n")
+									: "Sin observaciones especiales en las fotografías"
+								}
 
 CONSIDERACIONES ESPECIALES:
 ${context.importantConsiderations}

@@ -11,7 +11,8 @@ const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
 const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
 // R2 Bucket names - standardized naming convention
-const R2_BUCKET_NAME = process.env.R2_BUCKET_CRM || process.env.R2_BUCKET_NAME || "crm-documents";
+const R2_BUCKET_NAME =
+	process.env.R2_BUCKET_CRM || process.env.R2_BUCKET_NAME || "crm-documents";
 
 // Verificar que las variables de entorno estén configuradas
 if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) {
@@ -57,14 +58,19 @@ setInterval(() => {
 		}
 	}
 	if (cleaned > 0) {
-		console.log(`[R2 Cache] Cleaned ${cleaned} expired signed URLs. Cache size: ${signedUrlCache.size}`);
+		console.log(
+			`[R2 Cache] Cleaned ${cleaned} expired signed URLs. Cache size: ${signedUrlCache.size}`,
+		);
 	}
 }, CACHE_CLEANUP_INTERVAL);
 
 /**
  * Get a cached signed URL or generate a new one
  */
-async function getCachedSignedUrl(bucket: string, key: string): Promise<string> {
+async function getCachedSignedUrl(
+	bucket: string,
+	key: string,
+): Promise<string> {
 	const cacheKey = `${bucket}/${key}`;
 	const cached = signedUrlCache.get(cacheKey);
 	const now = Date.now();
@@ -79,7 +85,9 @@ async function getCachedSignedUrl(bucket: string, key: string): Promise<string> 
 		Bucket: bucket,
 		Key: key,
 	});
-	const url = await getSignedUrl(r2Client, command, { expiresIn: SIGNED_URL_EXPIRY });
+	const url = await getSignedUrl(r2Client, command, {
+		expiresIn: SIGNED_URL_EXPIRY,
+	});
 
 	// Cache the URL
 	signedUrlCache.set(cacheKey, {
@@ -178,7 +186,9 @@ function validateR2KeyFormat(fullKey: string): { bucket: string; key: string } {
 	const parts = fullKey.split("/");
 
 	if (parts.length < 2) {
-		throw new Error(`Invalid R2 key format: "${fullKey}". Expected "bucket/path/to/file"`);
+		throw new Error(
+			`Invalid R2 key format: "${fullKey}". Expected "bucket/path/to/file"`,
+		);
 	}
 
 	const bucket = parts.shift()!;
@@ -186,7 +196,9 @@ function validateR2KeyFormat(fullKey: string): { bucket: string; key: string } {
 
 	// Validar que bucket no esté vacío y tenga caracteres válidos
 	if (!bucket || !/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(bucket)) {
-		throw new Error(`Invalid bucket name: "${bucket}". Must be 3-63 lowercase alphanumeric characters or hyphens`);
+		throw new Error(
+			`Invalid bucket name: "${bucket}". Must be 3-63 lowercase alphanumeric characters or hyphens`,
+		);
 	}
 
 	// Validar que key no esté vacío
@@ -293,4 +305,66 @@ export function validateFile(file: File): { valid: boolean; error?: string } {
 	}
 
 	return { valid: true };
+}
+
+// Tipos de videos permitidos
+export const ALLOWED_VIDEO_TYPES = [
+	"video/mp4",
+	"video/quicktime",
+	"video/webm",
+];
+
+// Tamaño máximo del video (50MB)
+export const MAX_VIDEO_SIZE = 50 * 1024 * 1024;
+
+// Validar video
+export function validateVideo(file: File): { valid: boolean; error?: string } {
+	if (!ALLOWED_VIDEO_TYPES.includes(file.type)) {
+		return {
+			valid: false,
+			error:
+				"Tipo de archivo no permitido. Solo se permiten videos (MP4, MOV, WebM).",
+		};
+	}
+
+	if (file.size > MAX_VIDEO_SIZE) {
+		return {
+			valid: false,
+			error:
+				"El video es demasiado grande. El tamaño máximo permitido es 50MB.",
+		};
+	}
+
+	return { valid: true };
+}
+
+// Subir video de vehículo a R2
+export async function uploadVehicleVideoToR2(
+	file: File | Blob,
+	filename: string,
+	vehicleId: string,
+	category: string,
+): Promise<{ key: string; url: string }> {
+	const key = `vehicles/${vehicleId}/videos/${category}/${filename}`;
+
+	const command = new PutObjectCommand({
+		Bucket: R2_BUCKET_NAME,
+		Key: key,
+		Body: Buffer.from(await file.arrayBuffer()),
+		ContentType: file.type,
+	});
+
+	await r2Client.send(command);
+
+	// Si tienes un dominio personalizado configurado en R2, úsalo:
+	const R2_PUBLIC_DOMAIN = process.env.R2_PUBLIC_DOMAIN;
+
+	if (R2_PUBLIC_DOMAIN) {
+		// URL pública permanente con dominio personalizado
+		const publicUrl = `https://${R2_PUBLIC_DOMAIN}/${key}`;
+		return { key, url: publicUrl };
+	}
+	// Fallback: URL pública directa de R2
+	const publicUrl = `https://${R2_BUCKET_NAME}.${R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${key}`;
+	return { key, url: publicUrl };
 }

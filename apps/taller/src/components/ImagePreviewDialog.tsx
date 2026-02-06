@@ -4,35 +4,90 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import { X, Loader2, AlertCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { useState, useEffect } from "react";
+import { cn } from "@/lib/utils";
 
 interface ImagePreviewDialogProps {
-    open: boolean;
-    onOpenChange: (open: boolean) => void;
+    isOpen: boolean;
+    onClose: () => void;
     imageUrl: string | null;
     title?: string;
 }
 
-export function ImagePreviewDialog({
-    open,
-    onOpenChange,
+export default function ImagePreviewDialog({
+    isOpen,
+    onClose,
     imageUrl,
-    title = "Vista previa de imagen",
+    title = "Evidencia de Rechazo",
 }: ImagePreviewDialogProps) {
+    const [isLoading, setIsLoading] = useState(true);
+    const [hasError, setHasError] = useState(false);
+
+    // Reset states when dialog opens or URL changes
+    useEffect(() => {
+        if (isOpen) {
+            setIsLoading(true);
+            setHasError(false);
+        }
+    }, [isOpen, imageUrl]);
+
     if (!imageUrl) return null;
 
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-4xl p-0 overflow-hidden bg-black/5 border-none shadow-none sm:rounded-lg">
-                <div className="relative w-full h-full flex flex-col bg-background rounded-lg shadow-lg overflow-hidden">
-                    <DialogHeader className="p-4 border-b shrink-0 flex flex-row items-center justify-between bg-white z-10">
-                        <DialogTitle>{title}</DialogTitle>
-                    </DialogHeader>
-                    <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-muted/20 min-h-[50vh] max-h-[80vh]">
+        <Dialog open={isOpen} onOpenChange={onClose}>
+            <DialogContent className="max-w-4xl w-full h-[80vh] flex flex-col p-0 gap-0 bg-transparent border-none shadow-none z-50">
+                <DialogHeader className="absolute top-2 right-2 z-10 flex-row justify-end p-0 space-y-0">
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={onClose}
+                        className="rounded-full bg-black/50 hover:bg-black/70 text-white w-10 h-10 border border-white/20 transition-transform hover:scale-105"
+                    >
+                        <X className="h-6 w-6" />
+                    </Button>
+                </DialogHeader>
+
+                {/* Contenedor de Imagen con Loader */}
+                <div className="flex-1 flex items-center justify-center w-full h-full bg-black/90 rounded-lg overflow-hidden relative">
+
+                    {/* Loader */}
+                    {isLoading && !hasError && (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center text-white/70 gap-3">
+                            <Loader2 className="h-10 w-10 animate-spin text-white" />
+                            <p className="text-sm font-medium">Cargando evidencia...</p>
+                        </div>
+                    )}
+
+                    {/* Error State */}
+                    {hasError && (
+                        <div className="flex flex-col items-center justify-center text-red-400 gap-3">
+                            <AlertCircle className="h-12 w-12" />
+                            <p className="font-medium">No se pudo cargar la imagen</p>
+                        </div>
+                    )}
+
+                    {/* Imagen */}
+                    {!hasError && (
                         <img
                             src={imageUrl}
                             alt={title}
-                            className="max-w-full max-h-full object-contain rounded-md shadow-sm"
+                            className={cn(
+                                "max-w-full max-h-full object-contain transition-opacity duration-300",
+                                isLoading ? "opacity-0" : "opacity-100"
+                            )}
+                            onLoad={() => setIsLoading(false)}
+                            onError={() => {
+                                setHasError(true);
+                                setIsLoading(false);
+                            }}
                         />
+                    )}
+
+                    {/* Título en la parte inferior */}
+                    <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent text-white">
+                        <h3 className="text-lg font-semibold text-center">{title}</h3>
                     </div>
                 </div>
             </DialogContent>

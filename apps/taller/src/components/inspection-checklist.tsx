@@ -34,6 +34,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { toast } from "sonner";
 
 // ==========================================
 // CRITERIOS DE RECHAZO (Causales de rechazo)
@@ -500,6 +501,24 @@ export default function InspectionChecklist({
     const file = event.target.files?.[0];
     if (!file) return;
 
+    // Validación de seguridad
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+
+    if (file.size > maxSize) {
+      toast.error("Archivo demasiado grande. El máximo permitido es 10MB.");
+      if (evidenceInputRef.current) evidenceInputRef.current.value = '';
+      if (cameraInputRef.current) cameraInputRef.current.value = '';
+      return;
+    }
+
+    if (!allowedTypes.includes(file.type)) {
+      toast.error("Tipo de archivo no válido. Use JPG, PNG o WebP.");
+      if (evidenceInputRef.current) evidenceInputRef.current.value = '';
+      if (cameraInputRef.current) cameraInputRef.current.value = '';
+      return;
+    }
+
     setIsUploadingEvidence(true);
     const formData = new FormData();
     formData.append("file", file);
@@ -532,7 +551,15 @@ export default function InspectionChecklist({
       }
     } catch (error) {
       console.error("Error uploading evidence:", error);
-      toast.error("Error al subir la evidencia");
+      const errorMsg = error instanceof Error ? error.message : 'Error desconocido';
+
+      if (errorMsg.includes('size')) {
+        toast.error("El archivo excede el límite permitido por el servidor.");
+      } else if (errorMsg.includes('network') || errorMsg.includes('fetch')) {
+        toast.error("Error de conexión. Verifique su internet e intente de nuevo.");
+      } else {
+        toast.error("Error al subir la evidencia. Intente nuevamente.");
+      }
     } finally {
       setIsUploadingEvidence(false);
     }

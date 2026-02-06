@@ -206,6 +206,8 @@ export const appRouter = {
 	changeNotificationStatus: notificationsRouter.changeNotificationStatus,
 	getNotificationDocuments: notificationsRouter.getNotificationDocuments,
 	addDocumentToNotification: notificationsRouter.addDocumentToNotification,
+	getAccountDocumentsByOpportunities:
+		notificationsRouter.getAccountDocumentsByOpportunities,
 
 	// Quotations routes
 	createQuotation: quotationsRouter.createQuotation,

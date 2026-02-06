@@ -51,7 +51,13 @@ export function ConsolidatedCreditSummary({
 		);
 	}
 
-	const { lead, coDebtors, consolidated, coDebtorsCount, coDebtorsWithAnalysisCount } = data;
+	const {
+		lead,
+		coDebtors,
+		consolidated,
+		coDebtorsCount,
+		coDebtorsWithAnalysisCount,
+	} = data;
 
 	return (
 		<div className="space-y-4 rounded-lg border bg-gradient-to-br from-blue-50 to-green-50 p-4">

@@ -135,14 +135,9 @@ export function Combobox({
 										<CommandItem
 											key={option.value}
 											value={option.label}
-											onSelect={(selectedLabel) => {
-												const selectedOption = options.find(
-													(opt) => opt.label === selectedLabel,
-												);
-												const actualValue = selectedOption
-													? selectedOption.value
-													: "";
-												onChange?.(actualValue === value ? "" : actualValue);
+											onSelect={() => {
+												onChange?.(option.value === value ? "" : option.value);
+												setSearchValue("");
 												setOpen(false);
 											}}
 										>

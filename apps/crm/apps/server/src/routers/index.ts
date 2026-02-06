@@ -198,10 +198,13 @@ export const appRouter = {
 	deleteNote: notesRouter.deleteNote,
 
 	// Notifications routes
+	getUnreadNotificationCount: notificationsRouter.getUnreadNotificationCount,
 	getAllNotifications: notificationsRouter.getAllNotifications,
 	getNotificationsByRole: notificationsRouter.getNotificationsByRole,
 	getNotificationsByAssign: notificationsRouter.getNotificationsByAssign,
+	getNotificationsByRoles: notificationsRouter.getNotificationsByRoles,
 	changeNotificationStatus: notificationsRouter.changeNotificationStatus,
+	getNotificationDocuments: notificationsRouter.getNotificationDocuments,
 	addDocumentToNotification: notificationsRouter.addDocumentToNotification,
 
 	// Quotations routes

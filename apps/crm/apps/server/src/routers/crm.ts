@@ -64,6 +64,7 @@ import {
 	getMissingFieldsForCompletion,
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
+import { createNotification } from "./notifications";
 import { scoreLead } from "../services/lead-scoring";
 
 /**
@@ -1994,6 +1995,7 @@ export const crmRouter = {
 			const [opportunity] = await db
 				.select({
 					id: opportunities.id,
+					title: opportunities.title,
 					stageId: opportunities.stageId,
 					creditDetailApproved: opportunities.creditDetailApproved,
 				})
@@ -2063,6 +2065,17 @@ export const crmRouter = {
 						"Aprobación de detalle cancelada - Regresado a Cierre de propuesta (40%)",
 					isOverride: false,
 				});
+			});
+
+			await createNotification({
+				titulo: `Detalle de crédito rechazado - ${opportunity.title}`,
+				descripcion: `El detalle de crédito de la oportunidad "${opportunity.title}" fue rechazado y regresado a la etapa de Cierre de propuesta (40%).`,
+				type: "aviso",
+				createdBy: context.userId,
+				createdByRole: context.userRole,
+				assignedToRole: "sales",
+				relatedEntityType: "opportunity",
+				relatedEntityId: input.opportunityId,
 			});
 
 			return { success: true };
@@ -4167,6 +4180,18 @@ export const crmRouter = {
 				reason: "Desembolso aprobado - Checklist completado",
 			});
 
+			// Notificar a contabilidad para que realice el desembolso
+			await createNotification({
+				titulo: `Desembolso aprobado - ${opportunity.title}`,
+				descripcion: `La oportunidad "${opportunity.title}" fue aprobada para desembolso. Por favor suba las boletas correspondientes.`,
+				type: "action_upload_files",
+				createdBy: context.userId,
+				createdByRole: context.userRole,
+				assignedToRole: "account",
+				relatedEntityType: "opportunity",
+				relatedEntityId: input.opportunityId,
+			});
+
 			return {
 				success: true,
 			};
@@ -4810,6 +4835,18 @@ export const crmRouter = {
 					changedBy: context.userId,
 					reason: "Inversión asignada - Avance a etapa jurídica",
 				});
+			});
+
+			// Notificar a jurídico que hay una nueva oportunidad para contratos
+			await createNotification({
+				titulo: `Nueva oportunidad para contratos - ${opportunity.title}`,
+				descripcion: `La oportunidad "${opportunity.title}" avanzó a la etapa del 80% y está lista para la creación o carga de contratos legales.`,
+				type: "aviso",
+				createdBy: context.userId,
+				createdByRole: context.userRole,
+				assignedToRole: "juridico",
+				relatedEntityType: "opportunity",
+				relatedEntityId: input.opportunityId,
 			});
 
 			return {

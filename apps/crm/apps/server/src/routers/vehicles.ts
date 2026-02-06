@@ -12,9 +12,9 @@ import {
 	type NewInspectionChecklistItem,
 	type NewVehicle,
 	type NewVehicleInspection,
+	type NewVehicleInspection360Item,
 	type NewVehiclePhoto,
 	vehicleDocuments,
-	type NewVehicleInspection360Item,
 	vehicleInspection360Items,
 	vehicleInspections,
 	vehiclePhotos,
@@ -117,16 +117,16 @@ export const vehiclesRouter = {
 
 			const idsQuery = needsJoin
 				? idsQueryBase.innerJoin(
-					vehicleInspections,
-					eq(vehicles.id, vehicleInspections.vehicleId),
-				)
+						vehicleInspections,
+						eq(vehicles.id, vehicleInspections.vehicleId),
+					)
 				: idsQueryBase;
 
 			const countQuery = needsJoin
 				? countQueryBase.innerJoin(
-					vehicleInspections,
-					eq(vehicles.id, vehicleInspections.vehicleId),
-				)
+						vehicleInspections,
+						eq(vehicles.id, vehicleInspections.vehicleId),
+					)
 				: countQueryBase;
 
 			const whereClause =
@@ -189,16 +189,16 @@ export const vehiclesRouter = {
 			const allChecklistItems =
 				allInspectionIds.length > 0
 					? await db
-						.select()
-						.from(inspectionChecklistItems)
-						.where(
-							or(
-								...allInspectionIds.map((id) =>
-									eq(inspectionChecklistItems.inspectionId, id),
+							.select()
+							.from(inspectionChecklistItems)
+							.where(
+								or(
+									...allInspectionIds.map((id) =>
+										eq(inspectionChecklistItems.inspectionId, id),
+									),
 								),
-							),
-						)
-						.orderBy(inspectionChecklistItems.category)
+							)
+							.orderBy(inspectionChecklistItems.category)
 					: [];
 
 			// Group checklist items by inspection ID
@@ -245,29 +245,29 @@ export const vehiclesRouter = {
 			const vehicleConvenios =
 				vehicleIdsArray.length > 0
 					? await db
-						.select({
-							vehicleId: contratosFinanciamiento.vehicleId,
-							hasActiveConvenio: conveniosPago.activo,
-						})
-						.from(contratosFinanciamiento)
-						.leftJoin(
-							casosCobros,
-							eq(contratosFinanciamiento.id, casosCobros.contratoId),
-						)
-						.leftJoin(
-							conveniosPago,
-							eq(casosCobros.id, conveniosPago.casoCobroId),
-						)
-						.where(
-							and(
-								or(
-									...vehicleIdsArray.map((id) =>
-										eq(contratosFinanciamiento.vehicleId, id),
+							.select({
+								vehicleId: contratosFinanciamiento.vehicleId,
+								hasActiveConvenio: conveniosPago.activo,
+							})
+							.from(contratosFinanciamiento)
+							.leftJoin(
+								casosCobros,
+								eq(contratosFinanciamiento.id, casosCobros.contratoId),
+							)
+							.leftJoin(
+								conveniosPago,
+								eq(casosCobros.id, conveniosPago.casoCobroId),
+							)
+							.where(
+								and(
+									or(
+										...vehicleIdsArray.map((id) =>
+											eq(contratosFinanciamiento.vehicleId, id),
+										),
 									),
+									eq(conveniosPago.activo, true),
 								),
-								eq(conveniosPago.activo, true),
-							),
-						)
+							)
 					: [];
 
 			// Add convenio info to vehicles and sort by the original paginated order
@@ -807,14 +807,17 @@ export const vehiclesRouter = {
 					}),
 				),
 				// 360 Inspection Items
-				inspection360Items: z.array(
-					z.object({
-						area: z.string(),
-						checkpoint: z.string(),
-						status: z.enum(["ok", "bad"]),
-						comment: z.string().optional(),
-					})
-				).optional().default([]),
+				inspection360Items: z
+					.array(
+						z.object({
+							area: z.string(),
+							checkpoint: z.string(),
+							status: z.enum(["ok", "bad"]),
+							comment: z.string().optional(),
+						}),
+					)
+					.optional()
+					.default([]),
 				// Photo URLs (optional, can be added later)
 				photos: z
 					.array(
@@ -915,11 +918,12 @@ export const vehiclesRouter = {
 					if (input.inspection360Items && input.inspection360Items.length > 0) {
 						await tx.insert(vehicleInspection360Items).values(
 							input.inspection360Items.map(
-								(item) => ({
-									inspectionId: newInspection.id,
-									...item,
-								}) as NewVehicleInspection360Item
-							)
+								(item) =>
+									({
+										inspectionId: newInspection.id,
+										...item,
+									}) as NewVehicleInspection360Item,
+							),
 						);
 					}
 
@@ -1043,16 +1047,16 @@ REGLAS IMPORTANTES:
 								},
 								isPDF
 									? {
-										type: "file",
-										data: fileBuffer,
-										mediaType: "application/pdf",
-										filename: "tarjeta_circulacion.pdf",
-									}
+											type: "file",
+											data: fileBuffer,
+											mediaType: "application/pdf",
+											filename: "tarjeta_circulacion.pdf",
+										}
 									: {
-										type: "image",
-										image: fileBuffer,
-										mediaType: input.mimeType,
-									},
+											type: "image",
+											image: fileBuffer,
+											mediaType: input.mimeType,
+										},
 							],
 						},
 					],
@@ -1210,15 +1214,16 @@ DOCUMENTACIÓN:
 - Fotos del motor: ${context.hasEnginePhotos ? "Sí" : "No"}
 
 OBSERVACIONES DEL VALUADOR EN FOTOS:
-${context.hasPhotoComments
-									? context.photoComments
-										.map(
-											(comment: { category: string; photoType: string; comment: string }) =>
-												`- ${comment.category} (${comment.photoType}): ${comment.comment}`,
-										)
-										.join("\n")
-									: "Sin observaciones especiales en las fotografías"
-								}
+${
+	context.hasPhotoComments
+		? context.photoComments
+				.map(
+					(comment: { category: string; photoType: string; comment: string }) =>
+						`- ${comment.category} (${comment.photoType}): ${comment.comment}`,
+				)
+				.join("\n")
+		: "Sin observaciones especiales en las fotografías"
+}
 
 CONSIDERACIONES ESPECIALES:
 ${context.importantConsiderations}

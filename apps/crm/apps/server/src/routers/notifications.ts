@@ -269,6 +269,65 @@ export const notificationsRouter = {
 			return docsWithUrls;
 		}),
 
+	// Obtener documentos de contabilidad por oportunidades
+	getAccountDocumentsByOpportunities: protectedProcedure
+		.input(
+			z.object({
+				opportunityIds: z.array(z.string().uuid()).min(1),
+			}),
+		)
+		.handler(async ({ input }) => {
+			// Buscar notificaciones de contabilidad relacionadas a oportunidades
+			const notifs = await db
+				.select({
+					id: notifications.id,
+					titulo: notifications.titulo,
+					relatedEntityId: notifications.relatedEntityId,
+					status: notifications.status,
+					createdAt: notifications.createdAt,
+				})
+				.from(notifications)
+				.where(
+					and(
+						eq(notifications.assignedToRole, "account"),
+						eq(notifications.relatedEntityType, "opportunity"),
+						inArray(notifications.relatedEntityId, input.opportunityIds),
+					),
+				);
+
+			if (notifs.length === 0) {
+				return [];
+			}
+
+			const notifIds = notifs.map((n) => n.id);
+
+			// Obtener documentos de esas notificaciones
+			const docs = await db
+				.select()
+				.from(notificationDocuments)
+				.where(inArray(notificationDocuments.notificationId, notifIds))
+				.orderBy(desc(notificationDocuments.uploadedAt));
+
+			if (docs.length === 0) {
+				return [];
+			}
+
+			// Generar URLs firmadas
+			const docsWithUrls = await Promise.all(
+				docs.map(async (doc) => {
+					const notif = notifs.find((n) => n.id === doc.notificationId);
+					return {
+						...doc,
+						url: await getFileUrl(doc.filePath),
+						notificationTitulo: notif?.titulo ?? null,
+						opportunityId: notif?.relatedEntityId ?? null,
+					};
+				}),
+			);
+
+			return docsWithUrls;
+		}),
+
 	// Agregar documento a una notificación (sube a R2)
 	addDocumentToNotification: protectedProcedure
 		.input(

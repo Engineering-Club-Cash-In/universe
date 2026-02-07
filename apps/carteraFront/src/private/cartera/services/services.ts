@@ -2375,10 +2375,13 @@ export interface FacturarGenericoItem {
   rubro: string;
 }
 
+export type EmisorKey = "CUBE" | "SE_PRESTA" | "AMJK" | "CREACION_IMAGEN" | "GRUPO_BATRO" | "AUTOCASH";
+
 export interface FacturarGenericoRequest {
   nit: string;
   items: FacturarGenericoItem[];
   created_by: number;
+  emisor: EmisorKey;
 }
 
 export interface FacturarGenericoResponse {
@@ -2396,6 +2399,11 @@ export interface FacturarGenericoResponse {
       nombreReceptor: string;
     };
     items_facturados: number;
+    emisor: {
+      key: EmisorKey;
+      nombre: string;
+      nit: string;
+    };
   };
   mensaje?: string;
   error?: string;

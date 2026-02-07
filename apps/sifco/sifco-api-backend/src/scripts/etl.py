@@ -64,19 +64,19 @@ def cargar_hoja(xlsx, nombre_hoja):
         return None
 
 
-def obtener_creditos_diciembre_2025(xlsx):
+def obtener_creditos_enero_2026(xlsx):
     """
-    Obtiene todos los créditos de Diciembre 2025 que tienen Plazo válido (no vacío y no 0)
+    Obtiene todos los créditos de Enero 2026 que tienen Plazo válido (no vacío y no 0)
     """
     print(f"\n{'='*60}")
-    print("PASO 1: Obteniendo créditos válidos de Diciembre 2025")
+    print("PASO 1: Obteniendo créditos válidos de Enero 2026")
     print(f"{'='*60}")
 
-    df = cargar_hoja(xlsx, "Diciembre 2025")
+    df = cargar_hoja(xlsx, "Enero 2026")
     if df is None:
-        raise Exception("No se pudo cargar la hoja 'Diciembre 2025'")
+        raise Exception("No se pudo cargar la hoja 'Enero 2026'")
 
-    print(f"  Registros totales en Diciembre 2025: {len(df)}")
+    print(f"  Registros totales en Enero 2026: {len(df)}")
 
     # Mostrar columnas disponibles
     print(f"\n  Columnas disponibles:")
@@ -105,7 +105,7 @@ def obtener_creditos_diciembre_2025(xlsx):
     print(f"  Registros con Plazo válido: {len(df_validos)}")
 
     # Guardar créditos válidos en Excel separado
-    archivo_creditos_validos = "creditos_validos_diciembre_2025.xlsx"
+    archivo_creditos_validos = "creditos_validos_enero_2026.xlsx"
     df_validos.to_excel(archivo_creditos_validos, index=False)
     print(f"  Guardado en: {archivo_creditos_validos}")
 
@@ -292,7 +292,9 @@ def extraer_info_pago(fila, columnas, hoja, pagado):
         "cuota": "",
         "montoBoleta": "",
         "pagado": pagado,
-        "capitalRestante": ""
+        "capitalRestante": "",
+        "inversionista": "",
+        "pago": ""
     }
 
     # Buscar por nombre exacto de columna
@@ -308,6 +310,8 @@ def extraer_info_pago(fila, columnas, hoja, pagado):
     # Usar índices específicos para evitar duplicados
     # # (índice 2) → numeroCuota
     # Capital restante (índice 25) → capitalRestante
+    # Pago (índice 32) → pago
+    # Inversionista (índice 35) → inversionista
     # Cuota (índice 37) → cuota
     # Monto boleta (índice 38) → montoBoleta
     columnas_lista = list(columnas)
@@ -327,6 +331,18 @@ def extraer_info_pago(fila, columnas, hoja, pagado):
         val = fila.iloc[25] if hasattr(fila, 'iloc') else fila[columnas_lista[25]]
         if pd.notna(val):
             info["capitalRestante"] = str(val)
+
+    # pago - columna 'Pago' índice 32
+    if len(columnas_lista) > 32 and columnas_lista[32] == 'Pago':
+        val = fila.iloc[32] if hasattr(fila, 'iloc') else fila[columnas_lista[32]]
+        if pd.notna(val):
+            info["pago"] = str(val)
+
+    # inversionista - columna 'Inversionista' índice 35
+    if len(columnas_lista) > 35 and columnas_lista[35] == 'Inversionista':
+        val = fila.iloc[35] if hasattr(fila, 'iloc') else fila[columnas_lista[35]]
+        if pd.notna(val):
+            info["inversionista"] = str(val)
 
     # cuota - columna 'Cuota' índice 37
     if len(columnas_lista) > 37 and columnas_lista[37] == 'Cuota':
@@ -585,8 +601,8 @@ def main():
         # 1. Cargar Excel
         xlsx, hojas_disponibles = cargar_excel(ruta_archivo)
 
-        # 2. Obtener créditos válidos de Diciembre 2025
-        df_creditos = obtener_creditos_diciembre_2025(xlsx)
+        # 2. Obtener créditos válidos de Enero 2026
+        df_creditos = obtener_creditos_enero_2026(xlsx)
 
         # 3. Agrupar por padre (Pool)
         grupos_creditos, _ = agrupar_creditos_por_padre(df_creditos)

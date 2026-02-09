@@ -116,12 +116,7 @@ export default function Header() {
 											Oportunidades
 										</Link>
 									</DropdownMenuItem>
-									<DropdownMenuItem asChild>
-										<Link to="/crm/clients" className="cursor-pointer">
-											<Users className="mr-2 h-4 w-4" />
-											Clientes
-										</Link>
-									</DropdownMenuItem>
+
 									<DropdownMenuItem asChild>
 										<Link to="/crm/companies" className="cursor-pointer">
 											<Building2 className="mr-2 h-4 w-4" />
@@ -154,6 +149,20 @@ export default function Header() {
 									)}
 								</DropdownMenuContent>
 							</DropdownMenu>
+						)}
+
+						{/* Clientes */}
+						{session && userRole && PERMISSIONS.canAccessClients(userRole) && (
+							<Button
+								variant={isActive("/crm/clients") ? "secondary" : "ghost"}
+								size="sm"
+								asChild
+							>
+								<Link to="/crm/clients">
+									<Users className="mr-2 h-4 w-4" />
+									Clientes
+								</Link>
+							</Button>
 						)}
 
 						{/* Vehículos Dropdown - Visible para todos los roles */}
@@ -193,6 +202,8 @@ export default function Header() {
 								</DropdownMenuContent>
 							</DropdownMenu>
 						)}
+
+						
 
 						{/* Cobros */}
 						{session && userRole && PERMISSIONS.canAccessCobros(userRole) && (
@@ -302,7 +313,10 @@ function NotificationBell() {
 	const navigate = useNavigate();
 	const { data } = useQuery({
 		...orpc.getUnreadNotificationCount.queryOptions(),
-		refetchInterval: 30000,
+		refetchInterval: (query) => {
+			const count = query.state.data?.count ?? 0;
+			return count > 0 ? false : 40000;
+		},
 	});
 
 	const count = data?.count ?? 0;

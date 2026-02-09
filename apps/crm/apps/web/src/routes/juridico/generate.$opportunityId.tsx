@@ -70,10 +70,12 @@ function RouteComponent() {
 		enabled: canViewLegal && !!opportunityId,
 	});
 
-	// Get opportunities to find the current one
-	const opportunitiesQuery = useQuery({
-		...orpc.getOpportunitiesForContracts.queryOptions(),
-		enabled: canViewLegal,
+	// Get opportunity directly by ID
+	const opportunityQuery = useQuery({
+		...orpc.getOpportunities.queryOptions({
+			input: { opportunityId },
+		}),
+		enabled: canViewLegal && !!opportunityId,
 	});
 
 	// Mutation to get documents by DPI
@@ -160,7 +162,7 @@ function RouteComponent() {
 		isLoadingPermissions ||
 		contractTypesQuery.isLoading ||
 		validationQuery.isLoading ||
-		opportunitiesQuery.isLoading
+		opportunityQuery.isLoading
 	) {
 		return (
 			<div className="container mx-auto flex h-[60vh] items-center justify-center">
@@ -172,10 +174,8 @@ function RouteComponent() {
 		);
 	}
 
-	// Find the opportunity from the list
-	const opportunity = opportunitiesQuery.data?.find(
-		(opp) => opp.id === opportunityId,
-	);
+	// Get the opportunity directly (first result from filtered query)
+	const opportunity = opportunityQuery.data?.[0];
 	const validation = validationQuery.data;
 	const contractTypes = contractTypesQuery.data?.data || [];
 

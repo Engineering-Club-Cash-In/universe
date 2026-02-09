@@ -50,7 +50,7 @@ import {
 	formatMissingLeadFields,
 	getMissingLeadFieldsForContracts,
 } from "../lib/lead-helpers";
-import { analystProcedure, crmProcedure } from "../lib/orpc";
+import { analystProcedure,  crmProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
 	deleteFileFromR2,
@@ -413,7 +413,7 @@ export const crmRouter = {
 	getLeadsStats: crmProcedure.handler(async ({ context }) => {
 		// Build role-based condition
 		const roleCondition =
-			context.userRole !== "admin" && context.userRole !== "sales_supervisor"
+			context.userRole === "sales"
 				? eq(leads.assignedTo, context.userId)
 				: undefined;
 
@@ -982,10 +982,7 @@ export const crmRouter = {
 
 			// Role-based filter: admin and sales_supervisor can see all, others only their own
 			if (
-				context.userRole !== "admin" &&
-				context.userRole !== "sales_supervisor" &&
-				context.userRole !== "juridico" &&
-				context.userRole !== "analyst"
+				context.userRole === "sales"
 			) {
 				conditions.push(eq(opportunities.assignedTo, context.userId));
 			}
@@ -1957,6 +1954,18 @@ export const crmRouter = {
 							relatedEntityId: input.opportunityId,
 						});
 					}
+
+					// Notificación para la supervisora de ventas
+					await createNotification({
+						titulo: `Análisis aprobado - ${opportunity[0].title}`,
+						descripcion: `La oportunidad "${opportunity[0].title}" fue aprobada en análisis. Ya puede revisar el detalle de crédito.`,
+						type: "aviso",
+						createdBy: context.userId,
+						createdByRole: context.userRole,
+						assignedToRole: "sales_supervisor",
+						relatedEntityType: "opportunity",
+						relatedEntityId: input.opportunityId,
+					});
 				} else {
 					// Notificación para el vendedor asignado de rechazo
 					if (opportunity[0].assignedTo) {
@@ -2310,8 +2319,7 @@ export const crmRouter = {
 
 			// Filter by user if not admin/sales_supervisor
 			if (
-				context.userRole !== "admin" &&
-				context.userRole !== "sales_supervisor"
+				context.userRole === "sales"
 			) {
 				conditions.push(eq(clients.assignedTo, context.userId));
 			}
@@ -2386,8 +2394,7 @@ export const crmRouter = {
 
 		// Filter by user if not admin/sales_supervisor
 		if (
-			context.userRole !== "admin" &&
-			context.userRole !== "sales_supervisor"
+			context.userRole === "sales"
 		) {
 			conditions.push(eq(clients.assignedTo, context.userId));
 		}
@@ -2486,8 +2493,7 @@ export const crmRouter = {
 
 			// Filter by user if not admin/sales_supervisor
 			if (
-				context.userRole !== "admin" &&
-				context.userRole !== "sales_supervisor"
+				context.userRole === "sales"
 			) {
 				conditions.push(eq(leads.assignedTo, context.userId));
 			}
@@ -2710,7 +2716,7 @@ export const crmRouter = {
 			.from(opportunities)
 			.leftJoin(leads, eq(opportunities.leadId, leads.id))
 			.where(
-				context.userRole !== "admin" && context.userRole !== "sales_supervisor"
+				context.userRole === "sales"
 					? and(
 							closedOpportunityCondition,
 							eq(leads.assignedTo, context.userId),
@@ -4276,7 +4282,7 @@ export const crmRouter = {
 				createdBy: context.userId,
 				createdByRole: context.userRole,
 				assignedToRole: "accounting",
-				relatedEntityType: "opportunity",
+				relatedEntityType: "opportunity_client",
 				relatedEntityId: input.opportunityId,
 			});
 

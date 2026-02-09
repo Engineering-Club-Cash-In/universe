@@ -157,7 +157,7 @@ export const notificationsRouter = {
 							"cobros",
 							"cobros_supervisor",
 							"juridico",
-							"account",
+							"accounting",
 						]),
 					)
 					.min(1),
@@ -289,7 +289,7 @@ export const notificationsRouter = {
 				.from(notifications)
 				.where(
 					and(
-						eq(notifications.assignedToRole, "account"),
+						eq(notifications.assignedToRole, "accounting"),
 						eq(notifications.relatedEntityType, "opportunity"),
 						inArray(notifications.relatedEntityId, input.opportunityIds),
 					),

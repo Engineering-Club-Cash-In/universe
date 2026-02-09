@@ -1943,17 +1943,6 @@ export const crmRouter = {
 				});
 
 				if (input.approved) {
-					// Notificación para supervisora de ventas
-					await createNotification({
-						titulo: `Análisis aprobado - ${opportunity[0].title}`,
-						descripcion: `La oportunidad "${opportunity[0].title}" fue aprobada en análisis y avanzó a Cierre de propuesta (40%).`,
-						type: "aviso",
-						createdBy: context.userId,
-						createdByRole: context.userRole,
-						assignedToRole: "sales_supervisor",
-						relatedEntityType: "opportunity",
-						relatedEntityId: input.opportunityId,
-					});
 					// Notificación para el vendedor asignado
 					if (opportunity[0].assignedTo) {
 						await createNotification({
@@ -4286,7 +4275,7 @@ export const crmRouter = {
 				type: "action_upload_files",
 				createdBy: context.userId,
 				createdByRole: context.userRole,
-				assignedToRole: "account",
+				assignedToRole: "accounting",
 				relatedEntityType: "opportunity",
 				relatedEntityId: input.opportunityId,
 			});

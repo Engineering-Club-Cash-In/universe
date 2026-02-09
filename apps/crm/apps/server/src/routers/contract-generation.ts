@@ -25,6 +25,7 @@ import {
 	getDocumentsByDpi,
 	getDocumentTypes,
 } from "../services/legal-docs-api";
+import { getFileUrlWithBucketInKey } from "../lib/storage";
 
 // URL de la API de generación de contratos (legal-docs-blueprints)
 const LEGAL_DOCS_API_URL =

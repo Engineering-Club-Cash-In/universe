@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useInspection } from '../contexts/InspectionContext';
 import { INSPECTION_AREAS } from '../lib/inspection-data';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
@@ -72,33 +72,28 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
     };
 
     const handleStatusChange = (category: string, itemLabel: string, status: 'ok' | 'bad') => {
-        setItems360(prev => {
-            const existingIndex = prev.findIndex(i => i.item === itemLabel && i.category === category);
+        const existing = items360.slice();
+        const existingIndex = existing.findIndex(i => i.item === itemLabel && i.category === category);
 
-            if (existingIndex >= 0) {
-                const newItems = [...prev];
-                newItems[existingIndex] = {
-                    ...newItems[existingIndex],
-                    status,
-                    notes: status === 'ok' ? undefined : newItems[existingIndex].notes
-                };
-                return newItems;
-            } else {
-                return [...prev, { category, item: itemLabel, status }];
-            }
-        });
+        if (existingIndex >= 0) {
+            existing[existingIndex] = {
+                ...existing[existingIndex],
+                status,
+                notes: status === 'ok' ? undefined : existing[existingIndex].notes
+            };
+            setItems360(existing);
+        } else {
+            setItems360([...existing, { category, item: itemLabel, status }]);
+        }
     };
 
     const handleObservationChange = (category: string, itemLabel: string, notes: string) => {
-        setItems360(prev => {
-            const existingIndex = prev.findIndex(i => i.item === itemLabel && i.category === category);
-            if (existingIndex >= 0) {
-                const newItems = [...prev];
-                newItems[existingIndex] = { ...newItems[existingIndex], notes };
-                return newItems;
-            }
-            return prev;
-        });
+        const existing = items360.slice();
+        const existingIndex = existing.findIndex(i => i.item === itemLabel && i.category === category);
+        if (existingIndex >= 0) {
+            existing[existingIndex] = { ...existing[existingIndex], notes };
+            setItems360(existing);
+        }
     };
 
     const getItemState = (category: string, itemLabel: string) => {

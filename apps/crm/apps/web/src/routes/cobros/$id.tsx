@@ -13,6 +13,7 @@ import {
 	Mail,
 	MapPin,
 	MessageCircle,
+	Pencil,
 	Phone,
 	Shield,
 	User,
@@ -374,11 +375,22 @@ function RouteComponent() {
 
 					{/* Información de Contacto */}
 					<Card>
-						<CardHeader>
+						<CardHeader className="flex flex-row items-center justify-between">
 							<CardTitle className="flex items-center gap-2">
 								<Phone className="h-5 w-5" />
 								Información de Contacto
 							</CardTitle>
+							{matchingOpportunity?.lead?.id && (caso.telefonoPrincipal || caso.emailContacto || caso.direccionContacto) && (
+								<Link
+									to="/crm/clients"
+									search={{ idLead: matchingOpportunity.lead.id }}
+								>
+									<Button variant="outline" size="sm">
+										<Pencil className="mr-2 h-4 w-4" />
+										Editar
+									</Button>
+								</Link>
+							)}
 						</CardHeader>
 						<CardContent className="space-y-4">
 							<div className="grid grid-cols-2 gap-4">

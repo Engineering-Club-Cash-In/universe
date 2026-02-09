@@ -101,7 +101,7 @@ function RouteComponent() {
 			| "cobros"
 			| "cobros_supervisor"
 			| "juridico"
-			| "account";
+			| "accounting";
 		banned: boolean | null;
 		emailVerified: boolean;
 		createdAt: Date;

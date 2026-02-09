@@ -16,7 +16,7 @@ export type UserRole =
 	| "analyst"
 	| "cobros"
 	| "juridico"
-	| "account";
+	| "accounting";
 
 /**
  * Mapeo de permisos por rol

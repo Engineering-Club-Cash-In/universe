@@ -78,7 +78,7 @@ export const auth = betterAuth({
 				cobros: cobrosRole,
 				cobros_supervisor: cobrosSupervisorRole,
 				juridico: juridicoRole,
-				account: accountRole,
+				accounting: accountRole,
 			},
 			schema: {
 				user: {

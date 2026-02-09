@@ -775,6 +775,7 @@ export const legalContractsRouter = {
 					stageId: opportunities.stageId,
 					leadId: opportunities.leadId,
 					title: opportunities.title,
+					assignedTo: opportunities.assignedTo,
 				})
 				.from(opportunities)
 				.where(eq(opportunities.id, input.opportunityId))
@@ -869,6 +870,21 @@ export const legalContractsRouter = {
 				relatedEntityType: "opportunity",
 				relatedEntityId: input.opportunityId,
 			});
+
+			// Notificar al asesor de ventas asignado que el crédito está ganado
+			if (opportunity.assignedTo) {
+				await createNotification({
+					titulo: `Crédito ganado - ${opportunity.title}`,
+					descripcion: `Los contratos de la oportunidad "${opportunity.title}" fueron cargados y avanzó al 90%. El crédito está ganado.`,
+					type: "aviso",
+					createdBy: context.userId,
+					createdByRole: context.userRole,
+					assignedToRole: "sales",
+					assignedTo: opportunity.assignedTo,
+					relatedEntityType: "opportunity",
+					relatedEntityId: input.opportunityId,
+				});
+			}
 
 			return {
 				success: true,

@@ -17,6 +17,7 @@ import {
 	viewOpportunityContractsProcedure,
 } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
+import { createNotification } from "./notifications";
 import {
 	generateUniqueFilename,
 	getFileUrl,
@@ -774,6 +775,7 @@ export const legalContractsRouter = {
 					stageId: opportunities.stageId,
 					leadId: opportunities.leadId,
 					title: opportunities.title,
+					assignedTo: opportunities.assignedTo,
 				})
 				.from(opportunities)
 				.where(eq(opportunities.id, input.opportunityId))
@@ -812,7 +814,7 @@ export const legalContractsRouter = {
 			}
 
 			// Close the opportunity (create credit, client, contract)
-			const closeResult = await closeOpportunity({
+			/*const closeResult = await closeOpportunity({
 				opportunityId: input.opportunityId,
 				userId: context.userId,
 			});
@@ -821,7 +823,7 @@ export const legalContractsRouter = {
 				throw new ORPCError("BAD_REQUEST", {
 					message: closeResult.error || "Error al cerrar la oportunidad",
 				});
-			}
+			}*/
 
 			// Obtener la etapa del 90%
 			const [targetStage] = await db
@@ -856,6 +858,33 @@ export const legalContractsRouter = {
 					reason: "Aprobación legal - Contratos adjuntados",
 				});
 			});
+
+			// Notificar a análisis que los contratos fueron creados y está lista para desembolso
+			await createNotification({
+				titulo: `Contratos listos - ${opportunity.title}`,
+				descripcion: `Los contratos legales de la oportunidad "${opportunity.title}" fueron adjuntados. La oportunidad pasó a la etapa del 90% y está lista para revisión de desembolso.`,
+				type: "aviso",
+				createdBy: context.userId,
+				createdByRole: context.userRole,
+				assignedToRole: "analyst",
+				relatedEntityType: "opportunity",
+				relatedEntityId: input.opportunityId,
+			});
+
+			// Notificar al asesor de ventas asignado que el crédito está ganado
+			if (opportunity.assignedTo) {
+				await createNotification({
+					titulo: `Crédito ganado - ${opportunity.title}`,
+					descripcion: `Los contratos de la oportunidad "${opportunity.title}" fueron cargados y avanzó al 90%. El crédito está ganado.`,
+					type: "aviso",
+					createdBy: context.userId,
+					createdByRole: context.userRole,
+					assignedToRole: "sales",
+					assignedTo: opportunity.assignedTo,
+					relatedEntityType: "opportunity",
+					relatedEntityId: input.opportunityId,
+				});
+			}
 
 			return {
 				success: true,

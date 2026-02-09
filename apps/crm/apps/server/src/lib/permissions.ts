@@ -10,7 +10,13 @@ export type Permission =
 	| "legal:assign" // Asignar contratos a oportunidades
 	| "legal:delete"; // Eliminar contratos
 
-export type UserRole = "admin" | "sales" | "analyst" | "cobros" | "juridico";
+export type UserRole =
+	| "admin"
+	| "sales"
+	| "analyst"
+	| "cobros"
+	| "juridico"
+	| "accounting";
 
 /**
  * Mapeo de permisos por rol

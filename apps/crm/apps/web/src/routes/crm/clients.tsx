@@ -9,11 +9,13 @@ import {
 	ChevronLeft,
 	ChevronRight,
 	CreditCard,
+	Download,
 	Eye,
 	FileText,
 	HandshakeIcon,
 	Home,
 	Mail,
+	Paperclip,
 	Phone,
 	Search,
 	User,
@@ -216,6 +218,16 @@ function RouteComponent() {
 	}, [searchTerm]);
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
+
+	// Documentos de contabilidad para las oportunidades del cliente seleccionado
+	const opportunityIds =
+		selectedClient?.opportunities.map((opp) => opp.id) ?? [];
+	const accountDocsQuery = useQuery({
+		...orpc.getAccountDocumentsByOpportunities.queryOptions({
+			input: { opportunityIds },
+		}),
+		enabled: isDetailsDialogOpen && opportunityIds.length > 0,
+	});
 
 	const clientsQuery = useQuery({
 		...orpc.getLeadsAsClients.queryOptions({
@@ -1031,6 +1043,48 @@ function RouteComponent() {
 									</p>
 								</div>
 							</div>
+
+							{/* Documentos de Contabilidad */}
+							{accountDocsQuery.data && accountDocsQuery.data.length > 0 && (
+								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+									<h3 className="flex items-center gap-2 font-semibold text-base">
+										<Paperclip className="h-4 w-4" />
+										Documentos de Contabilidad
+									</h3>
+									<div className="space-y-2">
+										{accountDocsQuery.data.map((doc) => (
+											<div
+												key={doc.id}
+												className="flex items-center justify-between rounded-md border bg-background px-3 py-2"
+											>
+												<div className="flex items-center gap-3 min-w-0">
+													<FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+													<div className="min-w-0">
+														<p className="truncate font-medium text-sm">
+															{doc.originalName}
+														</p>
+														<p className="text-muted-foreground text-xs">
+															{doc.notificationTitulo}
+															{" · "}
+															{(doc.size / 1024).toFixed(1)} KB
+														</p>
+													</div>
+												</div>
+												<a
+													href={doc.url}
+													target="_blank"
+													rel="noopener noreferrer"
+													onClick={(e) => e.stopPropagation()}
+												>
+													<Button variant="ghost" size="icon" className="shrink-0">
+														<Download className="h-4 w-4" />
+													</Button>
+												</a>
+											</div>
+										))}
+									</div>
+								</div>
+							)}
 
 							{/* Oportunidades del Cliente */}
 							<div className="space-y-4">

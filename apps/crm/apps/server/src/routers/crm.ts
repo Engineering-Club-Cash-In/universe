@@ -64,6 +64,7 @@ import {
 	getMissingFieldsForCompletion,
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
+import { createNotification } from "./notifications";
 import { scoreLead } from "../services/lead-scoring";
 
 /**
@@ -1349,6 +1350,7 @@ export const crmRouter = {
 
 			// Calculate new analysisStatus based on stage transition
 			let newAnalysisStatus = currentOpportunity[0].analysisStatus;
+			let movedToAnalysis = false;
 
 			if (input.stageId && input.stageId !== currentOpportunity[0].stageId) {
 				const targetStage = await db
@@ -1368,6 +1370,7 @@ export const crmRouter = {
 
 				// If moving TO stage 30% (analysis stage)
 				if (toPercentage === 30 && fromPercentage !== 30) {
+					movedToAnalysis = true;
 					if (currentOpportunity[0].analysisStatus === "not_applicable") {
 						newAnalysisStatus = "pending";
 					} else if (currentOpportunity[0].analysisStatus === "rejected") {
@@ -1506,6 +1509,38 @@ export const crmRouter = {
 							: "Cambio de etapa"),
 					isOverride,
 				});
+
+				// Notificar al vendedor asignado si alguien más movió su oportunidad de etapa
+				if (
+					currentOpportunity[0].assignedTo &&
+					currentOpportunity[0].assignedTo !== context.userId
+				) {
+					await createNotification({
+						titulo: `Oportunidad movida de etapa - ${currentOpportunity[0].title}`,
+						descripcion: `Tu oportunidad "${currentOpportunity[0].title}" fue movida de etapa por otro usuario.`,
+						type: "aviso",
+						createdBy: context.userId,
+						createdByRole: context.userRole,
+						assignedToRole: "sales",
+						assignedTo: currentOpportunity[0].assignedTo,
+						relatedEntityType: "opportunity",
+						relatedEntityId: id,
+					});
+				}
+
+				// Notificar a analistas cuando una oportunidad llega a análisis (30%)
+				if (movedToAnalysis) {
+					await createNotification({
+						titulo: `Nueva oportunidad para análisis - ${currentOpportunity[0].title}`,
+						descripcion: `La oportunidad "${currentOpportunity[0].title}" fue enviada a análisis y está pendiente de revisión.`,
+						type: "aviso",
+						createdBy: context.userId,
+						createdByRole: context.userRole,
+						assignedToRole: "analyst",
+						relatedEntityType: "opportunity",
+						relatedEntityId: id,
+					});
+				}
 			}
 
 			return updatedOpportunity[0];
@@ -1656,6 +1691,8 @@ export const crmRouter = {
 			const opportunity = await db
 				.select({
 					id: opportunities.id,
+					title: opportunities.title,
+					assignedTo: opportunities.assignedTo,
 					updatedAt: opportunities.updatedAt,
 					vehicleId: opportunities.vehicleId,
 					creditType: opportunities.creditType,
@@ -1904,6 +1941,38 @@ export const crmRouter = {
 							: "Documentación rechazada - movida a etapa 20%"),
 					isOverride: false,
 				});
+
+				if (input.approved) {
+					// Notificación para el vendedor asignado
+					if (opportunity[0].assignedTo) {
+						await createNotification({
+							titulo: `Análisis aprobado - ${opportunity[0].title}`,
+							descripcion: `Tu oportunidad "${opportunity[0].title}" fue aprobada en análisis y avanzó a Cierre de propuesta (40%).`,
+							type: "aviso",
+							createdBy: context.userId,
+							createdByRole: context.userRole,
+							assignedToRole: "sales",
+							assignedTo: opportunity[0].assignedTo,
+							relatedEntityType: "opportunity",
+							relatedEntityId: input.opportunityId,
+						});
+					}
+				} else {
+					// Notificación para el vendedor asignado de rechazo
+					if (opportunity[0].assignedTo) {
+						await createNotification({
+							titulo: `Análisis rechazado - ${opportunity[0].title}`,
+							descripcion: `Tu oportunidad "${opportunity[0].title}" fue rechazada en análisis y regresó a Solución y propuesta (20%).${input.reason ? ` Razón: ${input.reason}` : ""}`,
+							type: "aviso",
+							createdBy: context.userId,
+							createdByRole: context.userRole,
+							assignedToRole: "sales",
+							assignedTo: opportunity[0].assignedTo,
+							relatedEntityType: "opportunity",
+							relatedEntityId: input.opportunityId,
+						});
+					}
+				}
 			}
 
 			return { success: true, approved: input.approved };
@@ -1972,6 +2041,17 @@ export const crmRouter = {
 				isOverride: false,
 			});
 
+			await createNotification({
+				titulo: `Detalle de crédito aprobado - ${opportunity.title}`,
+				descripcion: `El detalle de crédito de la oportunidad "${opportunity.title}" fue aprobado y avanzó a Formalización (50%). Está lista para la asignación de inversión.`,
+				type: "aviso",
+				createdBy: context.userId,
+				createdByRole: context.userRole,
+				assignedToRole: "analyst",
+				relatedEntityType: "opportunity",
+				relatedEntityId: input.opportunityId,
+			});
+
 			return { success: true };
 		}),
 
@@ -1994,6 +2074,8 @@ export const crmRouter = {
 			const [opportunity] = await db
 				.select({
 					id: opportunities.id,
+					title: opportunities.title,
+					assignedTo: opportunities.assignedTo,
 					stageId: opportunities.stageId,
 					creditDetailApproved: opportunities.creditDetailApproved,
 				})
@@ -2064,6 +2146,20 @@ export const crmRouter = {
 					isOverride: false,
 				});
 			});
+
+			if (opportunity.assignedTo) {
+				await createNotification({
+					titulo: `Detalle de crédito rechazado - ${opportunity.title}`,
+					descripcion: `El detalle de crédito de la oportunidad "${opportunity.title}" fue rechazado y regresado a la etapa de Cierre de propuesta (40%).`,
+					type: "aviso",
+					createdBy: context.userId,
+					createdByRole: context.userRole,
+					assignedToRole: "sales",
+					assignedTo: opportunity.assignedTo,
+					relatedEntityType: "opportunity",
+					relatedEntityId: input.opportunityId,
+				});
+			}
 
 			return { success: true };
 		}),
@@ -4172,6 +4268,18 @@ export const crmRouter = {
 				reason: "Desembolso aprobado - Checklist completado",
 			});
 
+			// Notificar a contabilidad para que realice el desembolso
+			await createNotification({
+				titulo: `Desembolso aprobado - ${opportunity.title}`,
+				descripcion: `La oportunidad "${opportunity.title}" fue aprobada para desembolso. Por favor suba las boletas correspondientes.`,
+				type: "action_upload_files",
+				createdBy: context.userId,
+				createdByRole: context.userRole,
+				assignedToRole: "accounting",
+				relatedEntityType: "opportunity",
+				relatedEntityId: input.opportunityId,
+			});
+
 			return {
 				success: true,
 			};
@@ -4817,6 +4925,18 @@ export const crmRouter = {
 				});
 			});
 
+			// Notificar a jurídico que hay una nueva oportunidad para contratos
+			await createNotification({
+				titulo: `Nueva oportunidad para contratos - ${opportunity.title}`,
+				descripcion: `La oportunidad "${opportunity.title}" avanzó a la etapa del 80% y está lista para la creación o carga de contratos legales.`,
+				type: "aviso",
+				createdBy: context.userId,
+				createdByRole: context.userRole,
+				assignedToRole: "juridico",
+				relatedEntityType: "opportunity",
+				relatedEntityId: input.opportunityId,
+			});
+
 			return {
 				success: true,
 				message: "Inversionista asignado y oportunidad avanzada a 80%",
@@ -4960,6 +5080,11 @@ export const crmRouter = {
 			}),
 		)
 		.handler(async ({ input }) => {
+			// Eliminar el credit analysis asociado al co-deudor si existe
+			await db
+				.delete(creditAnalysis)
+				.where(eq(creditAnalysis.coDebtorId, input.id));
+
 			const [deletedCoDebtor] = await db
 				.delete(coDebtors)
 				.where(eq(coDebtors.id, input.id))

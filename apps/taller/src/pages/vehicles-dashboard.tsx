@@ -142,6 +142,10 @@ const sampleVehicles = [
     photos: 8,
     hasScanner: true,
     alerts: [],
+    tiresCondition: 85,
+    paintCondition: 90,
+    hasAgencyHistory: true,
+    failedChecks: [],
   },
   {
     id: "V002",
@@ -171,6 +175,10 @@ const sampleVehicles = [
     photos: 6,
     hasScanner: true,
     alerts: ["Frenos"],
+    tiresCondition: 60,
+    paintCondition: 75,
+    hasAgencyHistory: false,
+    failedChecks: [{ area: "Frenos", checkpoint: "Pastillas de freno", comment: "Desgaste avanzado" }],
   },
   {
     id: "V003",
@@ -200,6 +208,13 @@ const sampleVehicles = [
     photos: 10,
     hasScanner: true,
     alerts: ["Airbag", "Transmisión", "Sistema eléctrico", "Óxido"],
+    tiresCondition: 30,
+    paintCondition: 25,
+    hasAgencyHistory: false,
+    failedChecks: [
+      { area: "Transmisión", checkpoint: "Caja de cambios", comment: "Fallos al cambiar" },
+      { area: "Eléctrico", checkpoint: "Sistema eléctrico", comment: "Requiere revisión" },
+    ],
   },
   {
     id: "V004",
@@ -229,6 +244,10 @@ const sampleVehicles = [
     photos: 9,
     hasScanner: true,
     alerts: [],
+    tiresCondition: 80,
+    paintCondition: 85,
+    hasAgencyHistory: true,
+    failedChecks: [],
   },
   {
     id: "V005",
@@ -258,6 +277,10 @@ const sampleVehicles = [
     photos: 7,
     hasScanner: true,
     alerts: [],
+    tiresCondition: 95,
+    paintCondition: 92,
+    hasAgencyHistory: true,
+    failedChecks: [],
   },
 ];
 

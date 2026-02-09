@@ -2,7 +2,6 @@ import {
     Dialog,
     DialogContent,
     DialogHeader,
-    DialogTitle,
 } from "@/components/ui/dialog";
 import { X, Loader2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";

@@ -10,8 +10,8 @@ export interface SectionTimes {
 export interface Inspection360Item {
   category: string;
   item: string;
-  status: 'ok' | 'fail';
-  observation?: string;
+  status: 'ok' | 'bad';
+  notes?: string;
 }
 
 interface InspectionContextType {
@@ -106,7 +106,7 @@ const loadSavedData = () => {
   } catch (e) {
     console.error('Error loading saved inspection:', e);
   }
-  return { formData: {}, checklistItems: [], items360: [], photos: [], sectionTimes: {}, currentStep: 0 };
+  return { formData: {}, checklistItems: [], items360: [], photos: [], sectionTimes: {}, rejectionEvidenceUrl: undefined, currentStep: 0 };
 };
 
 const InspectionContext = createContext<InspectionContextType | undefined>(undefined);

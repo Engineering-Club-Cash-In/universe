@@ -32,6 +32,7 @@ export const notificationEntityTypeEnum = pgEnum("notification_entity_type", [
 	"vehicle",
 	"contract",
 	"collection_case",
+	"opportunity_client",
 ]);
 
 // Notifications table

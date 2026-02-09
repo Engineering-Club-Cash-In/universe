@@ -1,4 +1,4 @@
-import { and, count, desc, eq, inArray, or } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -123,7 +123,12 @@ export const notificationsRouter = {
 			.select(notificationWithCreator)
 			.from(notifications)
 			.leftJoin(user, eq(notifications.createdBy, user.id))
-			.where(eq(notifications.assignedToRole, userData.role))
+			.where(
+				and(
+					eq(notifications.assignedToRole, userData.role),
+					isNull(notifications.assignedTo),
+				),
+			)
 			.orderBy(desc(notifications.createdAt));
 
 		return result;

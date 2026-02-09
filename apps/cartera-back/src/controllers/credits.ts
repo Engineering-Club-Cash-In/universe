@@ -535,7 +535,9 @@ function calcularProximidad(fechaVencimiento: string): ProximidadPago {
   );
   hoy.setHours(0, 0, 0, 0);
 
-  const vencimiento = new Date(fechaVencimiento);
+  // 🔥 Parsear fecha como local, no UTC (evita desfase de timezone)
+  const [year, month, day] = fechaVencimiento.slice(0, 10).split("-").map(Number);
+  const vencimiento = new Date(year, month - 1, day);
   vencimiento.setHours(0, 0, 0, 0);
 
   const diffDays = Math.floor(
@@ -546,7 +548,6 @@ function calcularProximidad(fechaVencimiento: string): ProximidadPago {
   if (diffDays > 0 && diffDays <= 7) return "WEEK";
   if (diffDays > 7 && diffDays <= 14) return "TWO_WEEKS";
   if (diffDays > 14 && diffDays <= 30) return "MONTH";
-  if (diffDays > 30) return "DUEMONTH";
 
   return "DUEMONTH";
 }
@@ -644,12 +645,59 @@ export async function getCreditosWithUserByMesAnio(
     throw new Error("Error building filters");
   }
 
+  // 🔥 Filtro de proximidad_pago - se aplica ANTES de la paginación
+  const needsProximidadJoin = !!proximidad_pago;
+  if (proximidad_pago) {
+    console.log(`🔎 Filtrando por proximidad de pago: ${proximidad_pago}`);
+
+    // Calcular rangos de fecha según proximidad
+    const hoy = new Date(hoyGuatemala);
+    hoy.setHours(0, 0, 0, 0);
+
+    if (proximidad_pago === "TODAY") {
+      conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date = ${hoyStr}::date`);
+    } else if (proximidad_pago === "WEEK") {
+      const fin = new Date(hoy);
+      fin.setDate(fin.getDate() + 7);
+      const finStr = fin.toISOString().slice(0, 10);
+      conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date > ${hoyStr}::date`);
+      conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date <= ${finStr}::date`);
+    } else if (proximidad_pago === "TWO_WEEKS") {
+      const inicio = new Date(hoy);
+      inicio.setDate(inicio.getDate() + 8);
+      const inicioStr = inicio.toISOString().slice(0, 10);
+      const fin = new Date(hoy);
+      fin.setDate(fin.getDate() + 14);
+      const finStr = fin.toISOString().slice(0, 10);
+      conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date >= ${inicioStr}::date`);
+      conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date <= ${finStr}::date`);
+    } else if (proximidad_pago === "MONTH") {
+      const inicio = new Date(hoy);
+      inicio.setDate(inicio.getDate() + 15);
+      const inicioStr = inicio.toISOString().slice(0, 10);
+      const fin = new Date(hoy);
+      fin.setDate(fin.getDate() + 30);
+      const finStr = fin.toISOString().slice(0, 10);
+      conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date >= ${inicioStr}::date`);
+      conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date <= ${finStr}::date`);
+    } else if (proximidad_pago === "DUEMONTH") {
+      const inicio = new Date(hoy);
+      inicio.setDate(inicio.getDate() + 31);
+      const inicioStr = inicio.toISOString().slice(0, 10);
+      conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date >= ${inicioStr}::date`);
+    }
+
+    // Solo cuotas no pagadas y con numero > 0
+    conditions.push(eq(cuotas_credito.pagado, false));
+    conditions.push(gt(cuotas_credito.numero_cuota, 0));
+  }
+
   const whereCondition = conditions.length > 0 ? and(...conditions) : undefined;
 
   let rows: any[] = [];
   try {
     // 1️⃣ 🔥 QUERY OPTIMIZADO - Buscar créditos únicos
-    rows = await db
+    let query = db
       .select({
         creditos,
         usuarios,
@@ -665,7 +713,17 @@ export async function getCreditosWithUserByMesAnio(
           eq(creditos.credito_id, moras_credito.credito_id),
           eq(moras_credito.activa, true) // 🔥 Solo moras activas
         )
-      )
+      );
+
+    // 🔥 JOIN con cuotas_credito si filtramos por proximidad
+    if (needsProximidadJoin) {
+      query = query.innerJoin(
+        cuotas_credito,
+        eq(creditos.credito_id, cuotas_credito.credito_id)
+      ) as any;
+    }
+
+    rows = await query
       .where(whereCondition)
       .limit(perPage)
       .offset(offset)
@@ -959,19 +1017,12 @@ export async function getCreditosWithUserByMesAnio(
     throw new Error("Error mapping credits");
   }
 
-  // 8️⃣ Filtro de proximidad (si aplica)
-  if (proximidad_pago) {
-    console.log(`🔎 Filtrando por proximidad de pago: ${proximidad_pago}`);
-    data = data.filter(
-      (credito) => credito.proxima_cuota?.proximidad === proximidad_pago
-    );
-    console.log(`✅ Créditos filtrados por proximidad: ${data.length}`);
-  }
+  // 8️⃣ Filtro de proximidad - YA SE APLICA EN LA QUERY PRINCIPAL (antes de paginación)
 
   // 9️⃣ Paginación - Count total
   let count = 0;
   try {
-    const [{ count: total }] = await db
+    let countQuery = db
       .select({ count: sql<number>`COUNT(DISTINCT ${creditos.credito_id})` }) // 🔥 DISTINCT
       .from(creditos)
       .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
@@ -986,9 +1037,18 @@ export async function getCreditosWithUserByMesAnio(
           eq(creditos.credito_id, moras_credito.credito_id),
           eq(moras_credito.activa, true)
         )
-      )
-      .where(whereCondition);
-      
+      );
+
+    // 🔥 JOIN con cuotas_credito si filtramos por proximidad
+    if (needsProximidadJoin) {
+      countQuery = countQuery.innerJoin(
+        cuotas_credito,
+        eq(creditos.credito_id, cuotas_credito.credito_id)
+      ) as any;
+    }
+
+    const [{ count: total }] = await countQuery.where(whereCondition);
+
     count = Number(total);
     console.log(`📊 Total créditos únicos: ${count}`);
   } catch (err) {
@@ -1831,7 +1891,12 @@ export async function syncScheduleOnTermsChange({
         .round(2)
         .toString();
 
-      const pagosToInsert = insertedCuotas.map((c) => ({
+      const pagosToInsert = insertedCuotas.map((c) => {
+        // 🔥 Parsear fecha como local, no UTC (evita desfase de timezone)
+        const [year, month, day] = c.fecha_vencimiento.slice(0, 10).split("-").map(Number);
+        const fechaPagoLocal = new Date(year, month - 1, day);
+
+        return {
         credito_id: creditoId,
         cuota: cuotaStr,
         // keep interest per your credit row (unchanged here)
@@ -1840,7 +1905,7 @@ export async function syncScheduleOnTermsChange({
           .round(2)
           .toString(), // same formula you used on create (capital * rate%)
         cuota_id: c.cuota_id,
-        fecha_pago: new Date(c.fecha_vencimiento),
+        fecha_pago: fechaPagoLocal,
         abono_capital: "0",
         abono_interes: "0",
         abono_iva_12: "0",
@@ -1883,7 +1948,8 @@ export async function syncScheduleOnTermsChange({
         paymentFalse: false,
         registerBy: "system_reset",
         pagoConvenio: "0",
-      }));
+      };
+      });
 
       await tx.insert(pagos_credito).values(pagosToInsert);
     } else if (newPlazo < oldPlazoNum) {

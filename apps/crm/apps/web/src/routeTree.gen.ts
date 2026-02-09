@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
@@ -35,6 +36,11 @@ import { Route as JuridicoGenerateOpportunityIdRouteImport } from './routes/juri
 import { Route as CrmAnalysisOpportunityIdRouteImport } from './routes/crm/analysis/$opportunityId'
 import { Route as CrmAdminMiniagentRouteImport } from './routes/crm/admin/miniagent'
 
+const NotificationsRoute = NotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
@@ -167,6 +173,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
+  '/notifications': typeof NotificationsRoute
   '/admin/import': typeof AdminImportRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
@@ -181,19 +188,20 @@ export interface FileRoutesByFullPath {
   '/juridico/$leadId': typeof JuridicoLeadIdRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
-  '/cobros': typeof CobrosIndexRoute
-  '/juridico': typeof JuridicoIndexRoute
-  '/vehicles': typeof VehiclesIndexRoute
+  '/cobros/': typeof CobrosIndexRoute
+  '/juridico/': typeof JuridicoIndexRoute
+  '/vehicles/': typeof VehiclesIndexRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
-  '/admin/reports': typeof AdminReportsIndexRoute
-  '/crm/analysis': typeof CrmAnalysisIndexRoute
+  '/admin/reports/': typeof AdminReportsIndexRoute
+  '/crm/analysis/': typeof CrmAnalysisIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
+  '/notifications': typeof NotificationsRoute
   '/admin/import': typeof AdminImportRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
@@ -222,6 +230,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
+  '/notifications': typeof NotificationsRoute
   '/admin/import': typeof AdminImportRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
@@ -251,6 +260,7 @@ export interface FileRouteTypes {
     | '/'
     | '/dashboard'
     | '/login'
+    | '/notifications'
     | '/admin/import'
     | '/admin/settings'
     | '/admin/users'
@@ -265,19 +275,20 @@ export interface FileRouteTypes {
     | '/juridico/$leadId'
     | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
-    | '/cobros'
-    | '/juridico'
-    | '/vehicles'
+    | '/cobros/'
+    | '/juridico/'
+    | '/vehicles/'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
     | '/juridico/generate/$opportunityId'
-    | '/admin/reports'
-    | '/crm/analysis'
+    | '/admin/reports/'
+    | '/crm/analysis/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/dashboard'
     | '/login'
+    | '/notifications'
     | '/admin/import'
     | '/admin/settings'
     | '/admin/users'
@@ -305,6 +316,7 @@ export interface FileRouteTypes {
     | '/'
     | '/dashboard'
     | '/login'
+    | '/notifications'
     | '/admin/import'
     | '/admin/settings'
     | '/admin/users'
@@ -333,6 +345,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DashboardRoute: typeof DashboardRoute
   LoginRoute: typeof LoginRoute
+  NotificationsRoute: typeof NotificationsRoute
   AdminImportRoute: typeof AdminImportRoute
   AdminSettingsRoute: typeof AdminSettingsRoute
   AdminUsersRoute: typeof AdminUsersRoute
@@ -359,6 +372,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/notifications': {
+      id: '/notifications'
+      path: '/notifications'
+      fullPath: '/notifications'
+      preLoaderRoute: typeof NotificationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/login': {
       id: '/login'
       path: '/login'
@@ -383,21 +403,21 @@ declare module '@tanstack/react-router' {
     '/vehicles/': {
       id: '/vehicles/'
       path: '/vehicles'
-      fullPath: '/vehicles'
+      fullPath: '/vehicles/'
       preLoaderRoute: typeof VehiclesIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/juridico/': {
       id: '/juridico/'
       path: '/juridico'
-      fullPath: '/juridico'
+      fullPath: '/juridico/'
       preLoaderRoute: typeof JuridicoIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/cobros/': {
       id: '/cobros/'
       path: '/cobros'
-      fullPath: '/cobros'
+      fullPath: '/cobros/'
       preLoaderRoute: typeof CobrosIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
@@ -502,14 +522,14 @@ declare module '@tanstack/react-router' {
     '/crm/analysis/': {
       id: '/crm/analysis/'
       path: '/crm/analysis'
-      fullPath: '/crm/analysis'
+      fullPath: '/crm/analysis/'
       preLoaderRoute: typeof CrmAnalysisIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/reports/': {
       id: '/admin/reports/'
       path: '/admin/reports'
-      fullPath: '/admin/reports'
+      fullPath: '/admin/reports/'
       preLoaderRoute: typeof AdminReportsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
@@ -541,6 +561,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DashboardRoute: DashboardRoute,
   LoginRoute: LoginRoute,
+  NotificationsRoute: NotificationsRoute,
   AdminImportRoute: AdminImportRoute,
   AdminSettingsRoute: AdminSettingsRoute,
   AdminUsersRoute: AdminUsersRoute,

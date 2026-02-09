@@ -109,7 +109,9 @@ interface OpportunityData {
 interface LeadData {
 	id: string;
 	firstName: string;
+	middleName: string | null;
 	lastName: string;
+	secondLastName: string | null;
 	dpi: string | null;
 	companyId: string | null;
 	direccion: string | null;
@@ -760,7 +762,7 @@ async function createCredit(
 		const creditoResult = await createCreditoInCarteraBack({
 			opportunityId: opportunity.id,
 			userId,
-			usuario_id: `${lead.firstName} ${lead.lastName}`,
+			usuario_id: `${lead.firstName} ${lead.middleName ?? ""} ${lead.lastName} ${lead.secondLastName ?? ""}`,
 			asesor_id: opportunity.asesorId ?? 1,
 			numero_credito_sifco: numeroSifco,
 			direccion: lead.direccion ?? undefined,
@@ -1067,6 +1069,8 @@ export async function closeOpportunity(
 			.select({
 				id: leads.id,
 				firstName: leads.firstName,
+				middleName: leads.middleName,
+				secondLastName: leads.secondLastName,
 				lastName: leads.lastName,
 				dpi: leads.dpi,
 				companyId: leads.companyId,

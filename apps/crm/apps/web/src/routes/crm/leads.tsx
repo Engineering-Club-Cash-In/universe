@@ -20,10 +20,12 @@ import {
 	X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { DateRange } from "react-day-picker";
 import { toast } from "sonner";
 import { z } from "zod";
 import { BankStatementAnalysis } from "@/components/credit/BankStatementAnalysis";
 import { NotesTimeline } from "@/components/notes-timeline";
+import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -113,6 +115,7 @@ function RouteComponent() {
 	const [editingLead, setEditingLead] = useState<Lead | null>(null);
 	const [searchTerm, setSearchTerm] = useState("");
 	const [debouncedSearch, setDebouncedSearch] = useState("");
+	const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
 	const [statusFilter, setStatusFilter] = useState<string>("all");
 	const [page, setPage] = useState(0);
 	const [isEditingCreditAnalysis, setIsEditingCreditAnalysis] = useState(false);
@@ -182,6 +185,8 @@ function RouteComponent() {
 								| "converted"
 								| "unqualified")
 						: undefined,
+				dateFrom: dateRange?.from?.toISOString(),
+				dateTo: dateRange?.to?.toISOString(),
 			},
 		}),
 		enabled:
@@ -196,6 +201,8 @@ function RouteComponent() {
 			pageSize,
 			debouncedSearch,
 			statusFilter,
+			dateRange?.from?.toISOString(),
+			dateRange?.to?.toISOString(),
 		],
 	});
 
@@ -1934,7 +1941,7 @@ function RouteComponent() {
 				</CardHeader>
 				<CardContent>
 					{/* Filters */}
-					<div className="mb-6 flex gap-4">
+					<div className="mb-6 flex flex-wrap gap-4">
 						<div className="flex-1">
 							<div className="relative">
 								<Search className="absolute top-2.5 left-2 h-4 w-4 text-muted-foreground" />
@@ -1946,6 +1953,13 @@ function RouteComponent() {
 								/>
 							</div>
 						</div>
+						<DateRangeFilter
+							dateRange={dateRange}
+							onDateRangeChange={(range) => {
+								setDateRange(range);
+								setPage(0);
+							}}
+						/>
 						<Select value={statusFilter} onValueChange={setStatusFilter}>
 							<SelectTrigger className="w-[180px]">
 								<Filter className="mr-2 h-4 w-4" />

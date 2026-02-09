@@ -6,6 +6,7 @@ import {
 	eq,
 	gte,
 	ilike,
+	lte,
 	inArray,
 	isNotNull,
 	not,
@@ -227,6 +228,8 @@ export const crmRouter = {
 						.enum(["new", "contacted", "qualified", "converted", "unqualified"])
 						.optional(),
 					id: z.string().uuid().optional(),
+					dateFrom: z.string().optional(),
+					dateTo: z.string().optional(),
 				})
 				.optional(),
 		)
@@ -284,6 +287,16 @@ export const crmRouter = {
 
 			// Excluir leads migrados (solo se muestran en la sección de clientes migrados)
 			conditions.push(not(eq(leads.status, "migrate")));
+
+			// Date range filter on createdAt
+			if (input?.dateFrom) {
+				conditions.push(gte(leads.createdAt, new Date(input.dateFrom)));
+			}
+			if (input?.dateTo) {
+				const toDate = new Date(input.dateTo);
+				toDate.setHours(23, 59, 59, 999);
+				conditions.push(lte(leads.createdAt, toDate));
+			}
 
 			const whereClause =
 				conditions.length > 0 ? and(...conditions) : undefined;
@@ -2436,6 +2449,9 @@ export const crmRouter = {
 				limit: z.number().min(1).max(100).default(20),
 				offset: z.number().min(0).default(0),
 				search: z.string().optional(),
+				leadId: z.string().uuid().optional(),
+				dateFrom: z.string().optional(),
+				dateTo: z.string().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -2498,6 +2514,11 @@ export const crmRouter = {
 				conditions.push(eq(leads.assignedTo, context.userId));
 			}
 
+			// Filter by specific lead ID
+			if (input.leadId) {
+				conditions.push(eq(leads.id, input.leadId));
+			}
+
 			// Search filter
 			if (search && search.trim() !== "") {
 				const searchPattern = `%${search.trim()}%`;
@@ -2510,6 +2531,16 @@ export const crmRouter = {
 						ilike(leads.dpi, searchPattern),
 					),
 				);
+			}
+
+			// Date range filter on createdAt
+			if (input.dateFrom) {
+				conditions.push(gte(leads.createdAt, new Date(input.dateFrom)));
+			}
+			if (input.dateTo) {
+				const toDate = new Date(input.dateTo);
+				toDate.setHours(23, 59, 59, 999);
+				conditions.push(lte(leads.createdAt, toDate));
 			}
 
 			const whereClause = and(...conditions);
@@ -2544,6 +2575,10 @@ export const crmRouter = {
 					ownsVehicle: leads.ownsVehicle,
 					hasCreditCard: leads.hasCreditCard,
 					jobTitle: leads.jobTitle,
+					direccion: leads.direccion,
+					departamento: leads.departamento,
+					municipio: leads.municipio,
+					zona: leads.zona,
 					assignedTo: leads.assignedTo,
 					createdAt: leads.createdAt,
 					updatedAt: leads.updatedAt,

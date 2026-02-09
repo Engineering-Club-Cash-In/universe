@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
 	Banknote,
@@ -14,18 +14,26 @@ import {
 	FileText,
 	HandshakeIcon,
 	Home,
+	Loader2,
 	Mail,
+	MapPin,
 	Paperclip,
+	Pencil,
 	Phone,
+	Save,
 	Search,
 	User,
+	X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { DateRange } from "react-day-picker";
 import { toast } from "sonner";
+import { z } from "zod";
 import {
 	OpportunityDetailModal,
 	type OpportunityForModal,
 } from "@/components/opportunity-detail-modal";
+import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -61,10 +69,14 @@ import {
 import { authClient } from "@/lib/auth-client";
 import { formatGuatemalaDate } from "@/lib/crm-formatters";
 import { PERMISSIONS } from "@/lib/roles";
-import { orpc } from "@/utils/orpc";
+import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/crm/clients")({
 	component: RouteComponent,
+	validateSearch: z.object({
+		opportunityId: z.string().optional(),
+		idLead: z.string().optional(),
+	}).parse,
 });
 
 // Helper functions
@@ -166,6 +178,10 @@ type ClientData = {
 	ownsVehicle: boolean | null;
 	hasCreditCard: boolean | null;
 	jobTitle: string | null;
+	direccion: string | null;
+	departamento: string | null;
+	municipio: string | null;
+	zona: string | null;
 	assignedTo: string;
 	createdAt: Date;
 	updatedAt: Date;
@@ -194,19 +210,104 @@ type ClientData = {
 function RouteComponent() {
 	const { data: session, isPending } = authClient.useSession();
 	const navigate = Route.useNavigate();
+	const search = Route.useSearch();
 	const [searchTerm, setSearchTerm] = useState("");
 	const [debouncedSearch, setDebouncedSearch] = useState("");
+	const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
 	const [page, setPage] = useState(0);
 	const pageSize = 20;
+
+	const queryClient = useQueryClient();
 
 	// Modal state
 	const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
 	const [selectedClient, setSelectedClient] = useState<ClientData | null>(null);
 
+	// Edit contact info state
+	const [isEditingContact, setIsEditingContact] = useState(false);
+	const [editForm, setEditForm] = useState({
+		phone: "",
+		email: "",
+		direccion: "",
+		departamento: "",
+		municipio: "",
+		zona: "",
+	});
+
 	// Opportunity modal state
 	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
-	const [selectedOpportunityForModal, setSelectedOpportunityForModal] =
-		useState<OpportunityForModal | null>(null);
+	const [activeOpportunityId, setActiveOpportunityId] = useState<string | null>(
+		null,
+	);
+
+	// The effective opportunity ID: from URL param or from click
+	const effectiveOpportunityId = search.opportunityId || activeOpportunityId;
+
+	// Fetch full opportunity data (used for both URL param and click)
+	const fullOpportunityQuery = useQuery({
+		...orpc.getOpportunities.queryOptions({
+			input: { opportunityId: effectiveOpportunityId ?? undefined },
+		}),
+		enabled: !!effectiveOpportunityId,
+	});
+
+	// Map query result to OpportunityForModal
+	const selectedOpportunityForModal: OpportunityForModal | null =
+		useMemo(() => {
+			const opp = fullOpportunityQuery.data?.[0];
+			if (!opp) return null;
+			return {
+				id: opp.id,
+				title: opp.title,
+				value: opp.value,
+				creditType: opp.creditType,
+				status: opp.status,
+				expectedCloseDate: opp.expectedCloseDate ?? null,
+				createdAt: opp.createdAt,
+				lead: opp.lead?.id
+					? {
+							id: opp.lead.id,
+							firstName: opp.lead.firstName,
+							lastName: opp.lead.lastName,
+							email: opp.lead.email,
+							age: opp.lead.age,
+							direccion: opp.lead.direccion,
+							departamento: opp.lead.departamento,
+							municipio: opp.lead.municipio,
+							zona: opp.lead.zona,
+						}
+					: undefined,
+				stage: opp.stage?.id
+					? {
+							id: opp.stage.id,
+							name: opp.stage.name,
+							closurePercentage: opp.stage.closurePercentage,
+							color: opp.stage.color || "#888",
+						}
+					: undefined,
+				vehicle: opp.vehicle?.id
+					? {
+							id: opp.vehicle.id,
+							make: opp.vehicle.make,
+							model: opp.vehicle.model,
+							year: opp.vehicle.year,
+							licensePlate: opp.vehicle.licensePlate,
+							color: opp.vehicle.color,
+							isNew: opp.vehicle.isNew,
+						}
+					: undefined,
+				assignedUser: opp.assignedUser?.id
+					? { id: opp.assignedUser.id, name: opp.assignedUser.name }
+					: undefined,
+			};
+		}, [fullOpportunityQuery.data]);
+
+	// Auto-open modal from URL param when data is ready
+	useEffect(() => {
+		if (search.opportunityId && selectedOpportunityForModal) {
+			setIsOpportunityModalOpen(true);
+		}
+	}, [search.opportunityId, selectedOpportunityForModal]);
 
 	// Debounce search
 	useEffect(() => {
@@ -218,6 +319,31 @@ function RouteComponent() {
 	}, [searchTerm]);
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
+
+	// Query para obtener un cliente específico por idLead
+	const specificClientQuery = useQuery({
+		...orpc.getLeadsAsClients.queryOptions({
+			input: {
+				limit: 1,
+				offset: 0,
+				leadId: search.idLead,
+			},
+		}),
+		enabled:
+			!!search.idLead &&
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessClients(userProfile.data.role) &&
+			!!session?.user?.id,
+	});
+
+	// Auto-open client detail modal when idLead is in URL
+	useEffect(() => {
+		if (search.idLead && specificClientQuery.data?.data?.[0]) {
+			const client = specificClientQuery.data.data[0] as unknown as ClientData;
+			setSelectedClient(client);
+			setIsDetailsDialogOpen(true);
+		}
+	}, [search.idLead, specificClientQuery.data]);
 
 	// Documentos de contabilidad para las oportunidades del cliente seleccionado
 	const opportunityIds =
@@ -235,11 +361,13 @@ function RouteComponent() {
 				limit: pageSize,
 				offset: page * pageSize,
 				search: debouncedSearch || undefined,
+				dateFrom: dateRange?.from?.toISOString(),
+				dateTo: dateRange?.to?.toISOString(),
 			},
 		}),
 		enabled:
 			!!userProfile.data?.role &&
-			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
+			PERMISSIONS.canAccessClients(userProfile.data.role) &&
 			!!session?.user?.id,
 		queryKey: [
 			"getLeadsAsClients",
@@ -248,6 +376,8 @@ function RouteComponent() {
 			page,
 			pageSize,
 			debouncedSearch,
+			dateRange?.from?.toISOString(),
+			dateRange?.to?.toISOString(),
 		],
 	});
 
@@ -256,7 +386,7 @@ function RouteComponent() {
 		...orpc.getLeadsAsClientsStats.queryOptions(),
 		enabled:
 			!!userProfile.data?.role &&
-			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
+			PERMISSIONS.canAccessClients(userProfile.data.role) &&
 			!!session?.user?.id,
 		queryKey: [
 			"getLeadsAsClientsStats",
@@ -271,15 +401,70 @@ function RouteComponent() {
 		} else if (
 			session &&
 			userProfile.data?.role &&
-			!PERMISSIONS.canAccessCRM(userProfile.data.role)
+			!PERMISSIONS.canAccessClients(userProfile.data.role)
 		) {
 			navigate({ to: "/dashboard" });
 			toast.error("Acceso denegado: Se requiere acceso al CRM");
 		}
 	}, [session, isPending, userProfile.data?.role, navigate]);
 
-	const handleViewDetails = (client: ClientData) => {
-		setSelectedClient(client);
+	const updateLeadMutation = useMutation({
+		mutationFn: (input: { id: string; phone?: string; email?: string; direccion?: string; departamento?: string; municipio?: string; zona?: string }) =>
+			client.updateLead(input),
+		onSuccess: () => {
+			queryClient.invalidateQueries({
+				predicate: (query) =>
+					query.queryKey[0] === "getLeadsAsClients" ||
+					query.queryKey[0] === "getLeadsAsClientsStats",
+			});
+			toast.success("Información de contacto actualizada");
+			setIsEditingContact(false);
+			if (selectedClient) {
+				setSelectedClient({
+					...selectedClient,
+					phone: editForm.phone || null,
+					email: editForm.email,
+					direccion: editForm.direccion || null,
+					departamento: editForm.departamento || null,
+					municipio: editForm.municipio || null,
+					zona: editForm.zona || null,
+				});
+			}
+		},
+		onError: (error: any) => {
+			toast.error(error.message || "Error al actualizar la información");
+		},
+	});
+
+	const handleStartEditContact = () => {
+		if (!selectedClient) return;
+		setEditForm({
+			phone: selectedClient.phone || "",
+			email: selectedClient.email || "",
+			direccion: selectedClient.direccion || "",
+			departamento: selectedClient.departamento || "",
+			municipio: selectedClient.municipio || "",
+			zona: selectedClient.zona || "",
+		});
+		setIsEditingContact(true);
+	};
+
+	const handleSaveContact = () => {
+		if (!selectedClient) return;
+		updateLeadMutation.mutate({
+			id: selectedClient.id,
+			phone: editForm.phone || undefined,
+			email: editForm.email || undefined,
+			direccion: editForm.direccion || undefined,
+			departamento: editForm.departamento || undefined,
+			municipio: editForm.municipio || undefined,
+			zona: editForm.zona || undefined,
+		});
+	};
+
+	const handleViewDetails = (clientData: ClientData) => {
+		setSelectedClient(clientData);
+		setIsEditingContact(false);
 		setIsDetailsDialogOpen(true);
 	};
 
@@ -291,12 +476,12 @@ function RouteComponent() {
 
 	if (
 		!userProfile.data?.role ||
-		!PERMISSIONS.canAccessCRM(userProfile.data.role)
+		!PERMISSIONS.canAccessClients(userProfile.data.role)
 	) {
 		return null;
 	}
 
-	const clients = (clientsQuery.data?.data || []) as ClientData[];
+	const clients = (clientsQuery.data?.data || []) as unknown as ClientData[];
 	const totalRecords = clientsQuery.data?.total || 0;
 	const totalPages = Math.ceil(totalRecords / pageSize);
 
@@ -372,8 +557,8 @@ function RouteComponent() {
 				</CardHeader>
 				<CardContent>
 					{/* Search Filter */}
-					<div className="mb-6">
-						<div className="relative max-w-md">
+					<div className="mb-6 flex flex-wrap items-center gap-4">
+						<div className="relative max-w-md flex-1">
 							<Search className="absolute top-2.5 left-2 h-4 w-4 text-muted-foreground" />
 							<Input
 								placeholder="Buscar por nombre, email, teléfono o DPI..."
@@ -382,6 +567,13 @@ function RouteComponent() {
 								className="pl-8"
 							/>
 						</div>
+						<DateRangeFilter
+							dateRange={dateRange}
+							onDateRangeChange={(range) => {
+								setDateRange(range);
+								setPage(0);
+							}}
+						/>
 					</div>
 
 					{clientsQuery.isPending ? (
@@ -490,14 +682,6 @@ function RouteComponent() {
 																			<FileText className="h-3 w-3 text-muted-foreground" />
 																		)}
 																		<span>{opp.title}</span>
-																		{opp.numeroSifco && (
-																			<Badge
-																				variant="outline"
-																				className="text-xs"
-																			>
-																				Crédito: {opp.numeroSifco}
-																			</Badge>
-																		)}
 																	</div>
 																))}
 															</div>
@@ -575,472 +759,168 @@ function RouteComponent() {
 			</Card>
 
 			{/* Details Dialog */}
-			<Dialog open={isDetailsDialogOpen} onOpenChange={setIsDetailsDialogOpen}>
+			<Dialog
+				open={isDetailsDialogOpen}
+				onOpenChange={(open) => {
+					setIsDetailsDialogOpen(open);
+					if (!open && search.idLead) {
+						navigate({ to: "/crm/clients", search: { ...search, idLead: undefined }, replace: true });
+					}
+				}}
+			>
 				<DialogContent className="max-h-[85vh] min-w-[900px] max-w-6xl overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle>Detalles del Cliente</DialogTitle>
 					</DialogHeader>
 					{selectedClient && (
 						<div className="space-y-6">
-							{/* Header con nombre y badges */}
-							<div className="flex items-start justify-between">
-								<div>
-									<h3 className="font-semibold text-xl">
-										{selectedClient.firstName} {selectedClient.lastName}
-									</h3>
-									<p className="text-muted-foreground">
-										{selectedClient.email}
-									</p>
+							{/* Header con nombre, badges y resumen */}
+							<div className="flex items-center gap-4 rounded-lg border bg-linear-to-r from-primary/5 to-transparent p-4">
+								<div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-primary/10 font-bold text-lg text-primary">
+									{selectedClient.firstName?.[0]}
+									{selectedClient.lastName?.[0]}
 								</div>
-								<div className="flex items-center gap-2">
-									<Badge variant="outline" className="text-sm">
-										{getClientTypeLabel(selectedClient.clientType)}
-									</Badge>
-									<Badge className="bg-green-500 hover:bg-green-600">
-										Cliente Activo
-									</Badge>
-								</div>
-							</div>
-
-							{/* Información Personal y de Contacto */}
-							<div className="grid grid-cols-2 gap-6">
-								{/* Información Personal */}
-								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-									<h3 className="flex items-center gap-2 font-semibold text-base">
-										<User className="h-4 w-4" />
-										Información Personal
-									</h3>
-									<div className="grid grid-cols-2 gap-4">
-										<div>
-											<Label className="font-medium text-muted-foreground text-sm">
-												Nombre Completo
-											</Label>
-											<p className="font-medium text-sm">
-												{selectedClient.firstName} {selectedClient.lastName}
-											</p>
-										</div>
-										<div>
-											<Label className="font-medium text-muted-foreground text-sm">
-												DPI
-											</Label>
-											<p className="text-sm">
-												{selectedClient.dpi || "No especificado"}
-											</p>
-										</div>
-										<div>
-											<Label className="font-medium text-muted-foreground text-sm">
-												Edad
-											</Label>
-											<p className="text-sm">
-												{selectedClient.age || "No especificado"}
-											</p>
-										</div>
-										<div>
-											<Label className="font-medium text-muted-foreground text-sm">
-												Estado Civil
-											</Label>
-											<p className="text-sm">
-												{getMaritalStatusLabel(selectedClient.maritalStatus)}
-											</p>
-										</div>
-										<div>
-											<Label className="font-medium text-muted-foreground text-sm">
-												Dependientes
-											</Label>
-											<p className="text-sm">
-												{selectedClient.dependents || 0}
-											</p>
-										</div>
-										<div>
-											<Label className="font-medium text-muted-foreground text-sm">
-												Cargo
-											</Label>
-											<p className="text-sm">
-												{selectedClient.jobTitle || "No especificado"}
-											</p>
-										</div>
-									</div>
-								</div>
-
-								{/* Información de Contacto */}
-								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-									<h3 className="flex items-center gap-2 font-semibold text-base">
-										<Phone className="h-4 w-4" />
-										Información de Contacto
-									</h3>
-									<div className="space-y-3">
-										<div>
-											<Label className="font-medium text-muted-foreground text-sm">
-												Correo Electrónico
-											</Label>
-											<div className="flex items-center gap-2">
-												<Mail className="h-4 w-4 text-muted-foreground" />
-												<p className="text-sm">{selectedClient.email}</p>
-											</div>
-										</div>
-										<div>
-											<Label className="font-medium text-muted-foreground text-sm">
-												Teléfono
-											</Label>
-											<div className="flex items-center gap-2">
-												<Phone className="h-4 w-4 text-muted-foreground" />
-												<p className="text-sm">
-													{selectedClient.phone || "No especificado"}
-												</p>
-											</div>
-										</div>
-										{selectedClient.assignedUser && (
-											<div>
-												<Label className="font-medium text-muted-foreground text-sm">
-													Asesor Asignado
-												</Label>
-												<div className="flex items-center gap-2">
-													<Briefcase className="h-4 w-4 text-muted-foreground" />
-													<p className="text-sm">
-														{selectedClient.assignedUser.name}
-													</p>
-												</div>
-											</div>
-										)}
-									</div>
-								</div>
-							</div>
-
-							{/* Información Financiera y Laboral */}
-							<div className="grid grid-cols-2 gap-6">
-								{/* Información Financiera */}
-								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-									<h3 className="flex items-center gap-2 font-semibold text-base">
-										<Banknote className="h-4 w-4" />
-										Información Financiera
-									</h3>
-									<div className="grid grid-cols-2 gap-4">
-										<div>
-											<Label className="font-medium text-muted-foreground text-sm">
-												Ingreso Mensual
-											</Label>
-											<p className="font-medium text-sm">
-												{selectedClient.monthlyIncome
-													? formatCurrency(selectedClient.monthlyIncome)
-													: "No especificado"}
-											</p>
-										</div>
-										<div>
-											<Label className="font-medium text-muted-foreground text-sm">
-												Monto a Financiar
-											</Label>
-											<p className="font-medium text-sm">
-												{selectedClient.loanAmount
-													? formatCurrency(selectedClient.loanAmount)
-													: "No especificado"}
-											</p>
-										</div>
-									</div>
-								</div>
-
-								{/* Información Laboral */}
-								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-									<h3 className="flex items-center gap-2 font-semibold text-base">
-										<Briefcase className="h-4 w-4" />
-										Información Laboral
-									</h3>
-									<div className="grid grid-cols-2 gap-4">
-										<div>
-											<Label className="font-medium text-muted-foreground text-sm">
-												Ocupación
-											</Label>
-											<p className="text-sm">
-												{getOccupationLabel(selectedClient.occupation)}
-											</p>
-										</div>
-										<div>
-											<Label className="font-medium text-muted-foreground text-sm">
-												Tiempo en el Trabajo
-											</Label>
-											<p className="text-sm">
-												{getWorkTimeLabel(selectedClient.workTime)}
-											</p>
-										</div>
-									</div>
-								</div>
-							</div>
-
-							{/* Activos */}
-							<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-								<h3 className="flex items-center gap-2 font-semibold text-base">
-									<Home className="h-4 w-4" />
-									Activos
-								</h3>
-								<div className="flex flex-wrap gap-6">
+								<div className="min-w-0 flex-1">
 									<div className="flex items-center gap-2">
-										<Checkbox
-											checked={selectedClient.ownsHome ?? false}
-											disabled
-										/>
-										<Label className="text-sm">Posee Casa Propia</Label>
+										<h3 className="truncate font-semibold text-xl">
+											{selectedClient.firstName} {selectedClient.lastName}
+										</h3>
+										<Badge variant="outline" className="shrink-0 text-xs">
+											{getClientTypeLabel(selectedClient.clientType)}
+										</Badge>
+										<Badge className="shrink-0 bg-green-500 text-xs hover:bg-green-600">
+											Activo
+										</Badge>
 									</div>
-									<div className="flex items-center gap-2">
-										<Checkbox
-											checked={selectedClient.ownsVehicle ?? false}
-											disabled
-										/>
-										<Label className="text-sm">Posee Vehículo Propio</Label>
-									</div>
-									<div className="flex items-center gap-2">
-										<Checkbox
-											checked={selectedClient.hasCreditCard ?? false}
-											disabled
-										/>
-										<Label className="text-sm">Tiene Tarjeta de Crédito</Label>
-									</div>
-								</div>
-							</div>
-
-							{/* Capacidad de Pago */}
-							{selectedClient.creditAnalysis ? (
-								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-									<h3 className="flex items-center gap-2 font-semibold text-base">
-										<CreditCard className="h-4 w-4" />
-										Análisis de Capacidad de Pago
-									</h3>
-									{/* Income and Expenses Summary */}
-									<div className="grid grid-cols-2 gap-6">
-										<div className="space-y-4">
-											<h4 className="font-medium text-base">
-												Ingresos Mensuales
-											</h4>
-											<div className="space-y-3 rounded-lg bg-green-50 p-4">
-												<div className="flex justify-between">
-													<span className="text-muted-foreground text-sm">
-														Ingresos Fijos:
-													</span>
-													<span className="font-medium">
-														{selectedClient.creditAnalysis.monthlyFixedIncome
-															? formatCurrency(
-																	selectedClient.creditAnalysis
-																		.monthlyFixedIncome,
-																)
-															: "-"}
-													</span>
-												</div>
-												<div className="flex justify-between">
-													<span className="text-muted-foreground text-sm">
-														Ingresos Variables:
-													</span>
-													<span className="font-medium">
-														{selectedClient.creditAnalysis.monthlyVariableIncome
-															? formatCurrency(
-																	selectedClient.creditAnalysis
-																		.monthlyVariableIncome,
-																)
-															: "-"}
-													</span>
-												</div>
-												<div className="border-t pt-2">
-													<div className="flex justify-between">
-														<span className="font-medium">Total Ingresos:</span>
-														<span className="font-bold text-green-600">
-															{selectedClient.creditAnalysis
-																.monthlyFixedIncome ||
-															selectedClient.creditAnalysis
-																.monthlyVariableIncome
-																? formatCurrency(
-																		Number(
-																			selectedClient.creditAnalysis
-																				.monthlyFixedIncome || 0,
-																		) +
-																			Number(
-																				selectedClient.creditAnalysis
-																					.monthlyVariableIncome || 0,
-																			),
-																	)
-																: "-"}
-														</span>
-													</div>
-												</div>
-											</div>
-										</div>
-
-										<div className="space-y-4">
-											<h4 className="font-medium text-base">
-												Gastos Mensuales
-											</h4>
-											<div className="space-y-3 rounded-lg bg-red-50 p-4">
-												<div className="flex justify-between">
-													<span className="text-muted-foreground text-sm">
-														Gastos Fijos:
-													</span>
-													<span className="font-medium">
-														{selectedClient.creditAnalysis.monthlyFixedExpenses
-															? formatCurrency(
-																	selectedClient.creditAnalysis
-																		.monthlyFixedExpenses,
-																)
-															: "-"}
-													</span>
-												</div>
-												<div className="flex justify-between">
-													<span className="text-muted-foreground text-sm">
-														Gastos Variables:
-													</span>
-													<span className="font-medium">
-														{selectedClient.creditAnalysis
-															.monthlyVariableExpenses
-															? formatCurrency(
-																	selectedClient.creditAnalysis
-																		.monthlyVariableExpenses,
-																)
-															: "-"}
-													</span>
-												</div>
-												<div className="border-t pt-2">
-													<div className="flex justify-between">
-														<span className="font-medium">Total Gastos:</span>
-														<span className="font-bold text-red-600">
-															{selectedClient.creditAnalysis
-																.monthlyFixedExpenses ||
-															selectedClient.creditAnalysis
-																.monthlyVariableExpenses
-																? formatCurrency(
-																		Number(
-																			selectedClient.creditAnalysis
-																				.monthlyFixedExpenses || 0,
-																		) +
-																			Number(
-																				selectedClient.creditAnalysis
-																					.monthlyVariableExpenses || 0,
-																			),
-																	)
-																: "-"}
-														</span>
-													</div>
-												</div>
-											</div>
-										</div>
-									</div>
-
-									{/* Economic Availability */}
-									<div className="rounded-lg bg-blue-50 p-4">
-										<div className="flex items-center justify-between">
-											<div>
-												<Label className="font-medium text-muted-foreground text-sm">
-													Disponibilidad Económica
-												</Label>
-												<p className="text-muted-foreground text-sm">
-													Capacidad de ahorro mensual
-												</p>
-											</div>
-											<span className="font-bold text-2xl text-blue-600">
-												{selectedClient.creditAnalysis.economicAvailability
-													? formatCurrency(
-															selectedClient.creditAnalysis
-																.economicAvailability,
-														)
-													: "-"}
+									<div className="mt-1 flex items-center gap-4 text-muted-foreground text-sm">
+										{selectedClient.email && (
+											<span className="flex items-center gap-1">
+												<Mail className="h-3.5 w-3.5" />
+												{selectedClient.email}
 											</span>
-										</div>
-									</div>
-
-									{/* Payment Capacity */}
-									<div className="space-y-4">
-										<h4 className="font-medium text-base">Capacidad de Pago</h4>
-										<div className="grid grid-cols-4 gap-4">
-											<div className="rounded-lg border p-4 text-center">
-												<Label className="text-muted-foreground text-xs">
-													Pago Mínimo
-												</Label>
-												<p className="mt-1 font-bold text-lg text-orange-600">
-													{selectedClient.creditAnalysis.minPayment
-														? formatCurrency(
-																selectedClient.creditAnalysis.minPayment,
-															)
-														: "-"}
-												</p>
-											</div>
-											<div className="rounded-lg border p-4 text-center">
-												<Label className="text-muted-foreground text-xs">
-													Pago Ajustado
-												</Label>
-												<p className="mt-1 font-bold text-blue-600 text-lg">
-													{selectedClient.creditAnalysis.adjustedPayment
-														? formatCurrency(
-																selectedClient.creditAnalysis.adjustedPayment,
-															)
-														: "-"}
-												</p>
-											</div>
-											<div className="rounded-lg border p-4 text-center">
-												<Label className="text-muted-foreground text-xs">
-													Pago Máximo
-												</Label>
-												<p className="mt-1 font-bold text-green-600 text-lg">
-													{selectedClient.creditAnalysis.maxPayment
-														? formatCurrency(
-																selectedClient.creditAnalysis.maxPayment,
-															)
-														: "-"}
-												</p>
-											</div>
-											<div className="rounded-lg border bg-primary/5 p-4 text-center">
-												<Label className="text-muted-foreground text-xs">
-													Crédito Máximo
-												</Label>
-												<p className="mt-1 font-bold text-lg text-primary">
-													{selectedClient.creditAnalysis.maxCreditAmount
-														? formatCurrency(
-																selectedClient.creditAnalysis.maxCreditAmount,
-															)
-														: "-"}
-												</p>
-											</div>
-										</div>
-									</div>
-
-									{/* Analysis Date */}
-									<div className="text-right text-muted-foreground text-sm">
-										Análisis realizado:{" "}
-										{formatGuatemalaDate(
-											selectedClient.creditAnalysis.analyzedAt,
+										)}
+										{selectedClient.phone && (
+											<span className="flex items-center gap-1">
+												<Phone className="h-3.5 w-3.5" />
+												{selectedClient.phone}
+											</span>
+										)}
+										{selectedClient.dpi && (
+											<span className="flex items-center gap-1">
+												<User className="h-3.5 w-3.5" />
+												DPI: {selectedClient.dpi}
+											</span>
 										)}
 									</div>
 								</div>
-							) : (
-								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-									<h3 className="flex items-center gap-2 font-semibold text-base">
-										<CreditCard className="h-4 w-4" />
-										Análisis de Capacidad de Pago
-									</h3>
-									<p className="py-2 text-center text-muted-foreground">
-										No hay análisis de capacidad de pago registrado.
-									</p>
+								<div className="flex shrink-0 items-center gap-3">
+									<div className="text-center">
+										<p className="font-bold text-green-600 text-xl">
+											{selectedClient.closedOpportunitiesCount}
+										</p>
+										<p className="text-[11px] text-muted-foreground">
+											Cerradas
+										</p>
+									</div>
+									<div className="h-8 w-px bg-border" />
+									<div className="text-center">
+										<p className="font-bold text-blue-600 text-xl">
+											{selectedClient.opportunities.length}
+										</p>
+										<p className="text-[11px] text-muted-foreground">Total</p>
+									</div>
+									<div className="h-8 w-px bg-border" />
+									<div className="text-center">
+										<p className="font-bold text-lg text-purple-600">
+											{formatCurrency(selectedClient.totalClosedValue)}
+										</p>
+										<p className="text-[11px] text-muted-foreground">
+											Valor cerrado
+										</p>
+									</div>
 								</div>
-							)}
+							</div>
 
-							{/* Resumen Financiero */}
-							<div className="grid grid-cols-3 gap-4">
-								<div className="rounded-lg border bg-green-50 p-4 text-center">
-									<Label className="text-muted-foreground text-xs">
-										Oportunidades Cerradas
-									</Label>
-									<p className="mt-1 font-bold text-2xl text-green-600">
-										{selectedClient.closedOpportunitiesCount}
-									</p>
-								</div>
-								<div className="rounded-lg border bg-blue-50 p-4 text-center">
-									<Label className="text-muted-foreground text-xs">
-										Total Oportunidades
-									</Label>
-									<p className="mt-1 font-bold text-2xl text-blue-600">
+							{/* Oportunidades del Cliente - PRIMERO */}
+							<div className="space-y-3">
+								<h3 className="flex items-center gap-2 font-semibold text-base">
+									<HandshakeIcon className="h-4 w-4" />
+									Oportunidades
+									<Badge variant="secondary" className="ml-1 text-xs">
 										{selectedClient.opportunities.length}
-									</p>
-								</div>
-								<div className="rounded-lg border bg-purple-50 p-4 text-center">
-									<Label className="text-muted-foreground text-xs">
-										Valor Total Cerrado
-									</Label>
-									<p className="mt-1 font-bold text-purple-600 text-xl">
-										{formatCurrency(selectedClient.totalClosedValue)}
-									</p>
+									</Badge>
+								</h3>
+								<div className="space-y-2">
+									{selectedClient.opportunities.map((opp) => (
+										<div
+											key={opp.id}
+											className={`group flex items-center gap-3 rounded-lg border p-3 transition-all hover:shadow-sm ${
+												opp.isClosed
+													? "border-green-200 bg-green-50/50"
+													: "bg-card hover:bg-muted/40"
+											}`}
+										>
+											{opp.isClosed ? (
+												<CheckCircle2 className="h-5 w-5 shrink-0 text-green-500" />
+											) : (
+												<Car className="h-5 w-5 shrink-0 text-muted-foreground" />
+											)}
+											<div className="min-w-0 flex-1">
+												<div className="flex items-center gap-2">
+													<span className="truncate font-medium text-sm">
+														{opp.title}
+													</span>
+													{opp.stage && (
+														<Badge
+															className="shrink-0 text-[10px]"
+															style={{
+																backgroundColor: opp.stage.color || "#888",
+																color: "#fff",
+															}}
+														>
+															{opp.stage.name} ({opp.stage.closurePercentage}%)
+														</Badge>
+													)}
+													{opp.isClosed && (
+														<Badge className="shrink-0 bg-green-500 text-[10px]">
+															Cerrada
+														</Badge>
+													)}
+												</div>
+												<div className="mt-0.5 flex items-center gap-3 text-muted-foreground text-xs">
+													<span className="font-medium text-foreground">
+														{formatCurrency(opp.value)}
+													</span>
+													<span>
+														{opp.creditType === "autocompra"
+															? "Autocompra"
+															: "Sobre Vehículo"}
+													</span>
+													{opp.numeroSifco && (
+														<span className="text-blue-600">
+															#{opp.numeroSifco}
+														</span>
+													)}
+													<span className="flex items-center gap-1">
+														<Calendar className="h-3 w-3" />
+														{formatGuatemalaDate(opp.createdAt)}
+													</span>
+												</div>
+											</div>
+											<Button
+												variant="ghost"
+												size="sm"
+												className="shrink-0 opacity-60 group-hover:opacity-100"
+												onClick={() => {
+													setActiveOpportunityId(opp.id);
+													setIsOpportunityModalOpen(true);
+												}}
+											>
+												<Eye className="mr-1 h-4 w-4" />
+												Ver detalle
+											</Button>
+										</div>
+									))}
 								</div>
 							</div>
 
@@ -1050,6 +930,9 @@ function RouteComponent() {
 									<h3 className="flex items-center gap-2 font-semibold text-base">
 										<Paperclip className="h-4 w-4" />
 										Documentos de Contabilidad
+										<Badge variant="secondary" className="ml-1 text-xs">
+											{accountDocsQuery.data.length}
+										</Badge>
 									</h3>
 									<div className="space-y-2">
 										{accountDocsQuery.data.map((doc) => (
@@ -1057,7 +940,7 @@ function RouteComponent() {
 												key={doc.id}
 												className="flex items-center justify-between rounded-md border bg-background px-3 py-2"
 											>
-												<div className="flex items-center gap-3 min-w-0">
+												<div className="flex min-w-0 items-center gap-3">
 													<FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
 													<div className="min-w-0">
 														<p className="truncate font-medium text-sm">
@@ -1076,7 +959,11 @@ function RouteComponent() {
 													rel="noopener noreferrer"
 													onClick={(e) => e.stopPropagation()}
 												>
-													<Button variant="ghost" size="icon" className="shrink-0">
+													<Button
+														variant="ghost"
+														size="icon"
+														className="shrink-0"
+													>
 														<Download className="h-4 w-4" />
 													</Button>
 												</a>
@@ -1086,122 +973,473 @@ function RouteComponent() {
 								</div>
 							)}
 
-							{/* Oportunidades del Cliente */}
+							{/* Información del Cliente */}
 							<div className="space-y-4">
 								<h3 className="flex items-center gap-2 font-semibold text-base">
-									<FileText className="h-4 w-4" />
-									Oportunidades
+									<User className="h-4 w-4" />
+									Información del Cliente
 								</h3>
-								<div className="space-y-3">
-									{selectedClient.opportunities.map((opp) => (
-										<div
-											key={opp.id}
-											className={`rounded-lg border p-4 transition-colors ${
-												opp.isClosed
-													? "border-green-200 bg-green-50/50"
-													: "bg-muted/30"
-											}`}
-										>
-											<div className="flex items-start justify-between">
-												<div className="flex-1 space-y-2">
-													<div className="flex items-center gap-3">
-														{opp.isClosed ? (
-															<CheckCircle2 className="h-5 w-5 text-green-500" />
+
+								{/* Personal + Contacto */}
+								<div className="grid grid-cols-2 gap-4">
+									<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+										<h4 className="font-medium text-muted-foreground text-sm">
+											Información Personal
+										</h4>
+										<div className="grid grid-cols-2 gap-3">
+											<div>
+												<p className="text-muted-foreground text-xs">
+													Nombre Completo
+												</p>
+												<p className="font-medium text-sm">
+													{selectedClient.firstName} {selectedClient.lastName}
+												</p>
+											</div>
+											<div>
+												<p className="text-muted-foreground text-xs">DPI</p>
+												<p className="text-sm">
+													{selectedClient.dpi || "No especificado"}
+												</p>
+											</div>
+											<div>
+												<p className="text-muted-foreground text-xs">Edad</p>
+												<p className="text-sm">
+													{selectedClient.age || "No especificado"}
+												</p>
+											</div>
+											<div>
+												<p className="text-muted-foreground text-xs">
+													Estado Civil
+												</p>
+												<p className="text-sm">
+													{getMaritalStatusLabel(selectedClient.maritalStatus)}
+												</p>
+											</div>
+											<div>
+												<p className="text-muted-foreground text-xs">
+													Dependientes
+												</p>
+												<p className="text-sm">
+													{selectedClient.dependents || 0}
+												</p>
+											</div>
+											<div>
+												<p className="text-muted-foreground text-xs">Cargo</p>
+												<p className="text-sm">
+													{selectedClient.jobTitle || "No especificado"}
+												</p>
+											</div>
+										</div>
+									</div>
+
+									<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+										<div className="flex items-center justify-between">
+											<h4 className="font-medium text-muted-foreground text-sm">
+												Contacto y Laboral
+											</h4>
+											{isEditingContact ? (
+												<div className="flex items-center gap-1">
+													<Button
+														variant="ghost"
+														size="sm"
+														className="h-7 px-2 text-xs"
+														onClick={() => setIsEditingContact(false)}
+														disabled={updateLeadMutation.isPending}
+													>
+														<X className="mr-1 h-3 w-3" />
+														Cancelar
+													</Button>
+													<Button
+														variant="default"
+														size="sm"
+														className="h-7 px-2 text-xs"
+														onClick={handleSaveContact}
+														disabled={updateLeadMutation.isPending}
+													>
+														{updateLeadMutation.isPending ? (
+															<Loader2 className="mr-1 h-3 w-3 animate-spin" />
 														) : (
-															<FileText className="h-5 w-5 text-muted-foreground" />
+															<Save className="mr-1 h-3 w-3" />
 														)}
-														<span className="font-semibold">{opp.title}</span>
-														{opp.stage && (
-															<Badge
-																style={{
-																	backgroundColor: opp.stage.color || "#888",
-																	color: "#fff",
-																}}
-															>
-																{opp.stage.name} ({opp.stage.closurePercentage}
-																%)
-															</Badge>
-														)}
-														{opp.isClosed && (
-															<Badge className="bg-green-500">Cerrada</Badge>
-														)}
+														Guardar
+													</Button>
+												</div>
+											) : (
+												<Button
+													variant="ghost"
+													size="sm"
+													className="h-7 px-2 text-xs"
+													onClick={handleStartEditContact}
+												>
+													<Pencil className="mr-1 h-3 w-3" />
+													Editar
+												</Button>
+											)}
+										</div>
+										{isEditingContact ? (
+											<div className="space-y-3">
+												<div className="grid grid-cols-2 gap-3">
+													<div>
+														<Label className="text-xs">Correo</Label>
+														<Input
+															value={editForm.email}
+															onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+															className="h-8 text-sm"
+														/>
 													</div>
-													<div className="ml-8 flex flex-wrap items-center gap-4 text-sm">
-														<div className="flex items-center gap-1">
-															<Banknote className="h-4 w-4 text-muted-foreground" />
-															<span className="font-medium">
-																{formatCurrency(opp.value)}
-															</span>
+													<div>
+														<Label className="text-xs">Teléfono</Label>
+														<Input
+															value={editForm.phone}
+															onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+															className="h-8 text-sm"
+														/>
+													</div>
+												</div>
+												<div>
+													<Label className="text-xs">Dirección</Label>
+													<Input
+														value={editForm.direccion}
+														onChange={(e) => setEditForm({ ...editForm, direccion: e.target.value })}
+														className="h-8 text-sm"
+													/>
+												</div>
+												<div className="grid grid-cols-3 gap-3">
+													<div>
+														<Label className="text-xs">Departamento</Label>
+														<Input
+															value={editForm.departamento}
+															onChange={(e) => setEditForm({ ...editForm, departamento: e.target.value })}
+															className="h-8 text-sm"
+														/>
+													</div>
+													<div>
+														<Label className="text-xs">Municipio</Label>
+														<Input
+															value={editForm.municipio}
+															onChange={(e) => setEditForm({ ...editForm, municipio: e.target.value })}
+															className="h-8 text-sm"
+														/>
+													</div>
+													<div>
+														<Label className="text-xs">Zona</Label>
+														<Input
+															value={editForm.zona}
+															onChange={(e) => setEditForm({ ...editForm, zona: e.target.value })}
+															className="h-8 text-sm"
+														/>
+													</div>
+												</div>
+											</div>
+										) : (
+											<div className="space-y-3">
+												<div className="flex items-center gap-2">
+													<Mail className="h-4 w-4 text-muted-foreground" />
+													<p className="text-sm">{selectedClient.email}</p>
+												</div>
+												<div className="flex items-center gap-2">
+													<Phone className="h-4 w-4 text-muted-foreground" />
+													<p className="text-sm">
+														{selectedClient.phone || "No especificado"}
+													</p>
+												</div>
+												{(selectedClient.direccion || selectedClient.departamento || selectedClient.municipio || selectedClient.zona) && (
+													<div className="flex items-center gap-2">
+														<MapPin className="h-4 w-4 text-muted-foreground" />
+														<p className="text-sm">
+															{[selectedClient.direccion, selectedClient.zona ? `Zona ${selectedClient.zona}` : null, selectedClient.municipio, selectedClient.departamento].filter(Boolean).join(", ")}
+														</p>
+													</div>
+												)}
+												{selectedClient.assignedUser && (
+													<div className="flex items-center gap-2">
+														<Briefcase className="h-4 w-4 text-muted-foreground" />
+														<p className="text-sm">
+															{selectedClient.assignedUser.name}
+														</p>
+													</div>
+												)}
+												<div className="mt-2 border-t pt-2">
+													<div className="grid grid-cols-2 gap-3">
+														<div>
+															<p className="text-muted-foreground text-xs">
+																Ocupación
+															</p>
+															<p className="text-sm">
+																{getOccupationLabel(selectedClient.occupation)}
+															</p>
 														</div>
-														<div className="flex items-center gap-1">
-															<Badge variant="outline">
-																{opp.creditType === "autocompra"
-																	? "Autocompra"
-																	: "Sobre Vehículo"}
-															</Badge>
-														</div>
-														{opp.numeroSifco && (
-															<div className="flex items-center gap-1">
-																<Badge
-																	variant="secondary"
-																	className="bg-blue-100 text-blue-800"
-																>
-																	Crédito: {opp.numeroSifco}
-																</Badge>
-															</div>
-														)}
-														<div className="flex items-center gap-1 text-muted-foreground">
-															<Calendar className="h-3 w-3" />
-															{formatGuatemalaDate(opp.createdAt)}
+														<div>
+															<p className="text-muted-foreground text-xs">
+																Tiempo en el Trabajo
+															</p>
+															<p className="text-sm">
+																{getWorkTimeLabel(selectedClient.workTime)}
+															</p>
 														</div>
 													</div>
 												</div>
-												<Button
-													variant="outline"
-													size="sm"
-													onClick={() => {
-														// Convertir la oportunidad al tipo esperado por el modal
-														const opportunityForModal: OpportunityForModal = {
-															id: opp.id,
-															title: opp.title,
-															value: opp.value,
-															creditType: opp.creditType,
-															status: opp.status,
-															expectedCloseDate: null,
-															createdAt: opp.createdAt,
-															lead: selectedClient
-																? {
-																		id: selectedClient.id,
-																		firstName: selectedClient.firstName,
-																		lastName: selectedClient.lastName,
-																		email: selectedClient.email,
-																		phone: selectedClient.phone,
-																		dpi: selectedClient.dpi,
-																	}
-																: null,
-															stage: opp.stage
-																? {
-																		id: opp.stage.id,
-																		name: opp.stage.name,
-																		closurePercentage:
-																			opp.stage.closurePercentage,
-																		color: opp.stage.color || "#888",
-																	}
-																: null,
-														};
-														setSelectedOpportunityForModal(opportunityForModal);
-														setIsOpportunityModalOpen(true);
-													}}
-													className="ml-4 shrink-0"
-												>
-													<Eye className="mr-1 h-4 w-4" />
-													Ver Oportunidad
-												</Button>
+											</div>
+										)}
+									</div>
+								</div>
+
+								{/* Financiera + Activos */}
+								<div className="grid grid-cols-2 gap-4">
+									<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+										<h4 className="font-medium text-muted-foreground text-sm">
+											Información Financiera
+										</h4>
+										<div className="grid grid-cols-2 gap-3">
+											<div>
+												<p className="text-muted-foreground text-xs">
+													Ingreso Mensual
+												</p>
+												<p className="font-medium text-sm">
+													{selectedClient.monthlyIncome
+														? formatCurrency(selectedClient.monthlyIncome)
+														: "No especificado"}
+												</p>
+											</div>
+											<div>
+												<p className="text-muted-foreground text-xs">
+													Monto a Financiar
+												</p>
+												<p className="font-medium text-sm">
+													{selectedClient.loanAmount
+														? formatCurrency(selectedClient.loanAmount)
+														: "No especificado"}
+												</p>
 											</div>
 										</div>
-									))}
+									</div>
+
+									<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+										<h4 className="font-medium text-muted-foreground text-sm">
+											Activos
+										</h4>
+										<div className="flex flex-wrap gap-4">
+											<div className="flex items-center gap-2">
+												<Checkbox
+													checked={selectedClient.ownsHome ?? false}
+													disabled
+												/>
+												<Label className="text-sm">Casa Propia</Label>
+											</div>
+											<div className="flex items-center gap-2">
+												<Checkbox
+													checked={selectedClient.ownsVehicle ?? false}
+													disabled
+												/>
+												<Label className="text-sm">Vehículo Propio</Label>
+											</div>
+											<div className="flex items-center gap-2">
+												<Checkbox
+													checked={selectedClient.hasCreditCard ?? false}
+													disabled
+												/>
+												<Label className="text-sm">Tarjeta de Crédito</Label>
+											</div>
+										</div>
+									</div>
 								</div>
 							</div>
+
+							{/* Capacidad de Pago */}
+							{selectedClient.creditAnalysis ? (
+								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+									<h3 className="flex items-center gap-2 font-semibold text-base">
+										<CreditCard className="h-4 w-4" />
+										Análisis de Capacidad de Pago
+									</h3>
+									<div className="grid grid-cols-2 gap-4">
+										<div className="space-y-3 rounded-lg bg-green-50 p-3">
+											<h4 className="font-medium text-sm">
+												Ingresos Mensuales
+											</h4>
+											<div className="flex justify-between text-sm">
+												<span className="text-muted-foreground">Fijos:</span>
+												<span className="font-medium">
+													{selectedClient.creditAnalysis.monthlyFixedIncome
+														? formatCurrency(
+																selectedClient.creditAnalysis
+																	.monthlyFixedIncome,
+															)
+														: "-"}
+												</span>
+											</div>
+											<div className="flex justify-between text-sm">
+												<span className="text-muted-foreground">
+													Variables:
+												</span>
+												<span className="font-medium">
+													{selectedClient.creditAnalysis.monthlyVariableIncome
+														? formatCurrency(
+																selectedClient.creditAnalysis
+																	.monthlyVariableIncome,
+															)
+														: "-"}
+												</span>
+											</div>
+											<div className="flex justify-between border-t pt-2">
+												<span className="font-medium text-sm">Total:</span>
+												<span className="font-bold text-green-600">
+													{selectedClient.creditAnalysis.monthlyFixedIncome ||
+													selectedClient.creditAnalysis.monthlyVariableIncome
+														? formatCurrency(
+																Number(
+																	selectedClient.creditAnalysis
+																		.monthlyFixedIncome || 0,
+																) +
+																	Number(
+																		selectedClient.creditAnalysis
+																			.monthlyVariableIncome || 0,
+																	),
+															)
+														: "-"}
+												</span>
+											</div>
+										</div>
+
+										<div className="space-y-3 rounded-lg bg-red-50 p-3">
+											<h4 className="font-medium text-sm">Gastos Mensuales</h4>
+											<div className="flex justify-between text-sm">
+												<span className="text-muted-foreground">Fijos:</span>
+												<span className="font-medium">
+													{selectedClient.creditAnalysis.monthlyFixedExpenses
+														? formatCurrency(
+																selectedClient.creditAnalysis
+																	.monthlyFixedExpenses,
+															)
+														: "-"}
+												</span>
+											</div>
+											<div className="flex justify-between text-sm">
+												<span className="text-muted-foreground">
+													Variables:
+												</span>
+												<span className="font-medium">
+													{selectedClient.creditAnalysis.monthlyVariableExpenses
+														? formatCurrency(
+																selectedClient.creditAnalysis
+																	.monthlyVariableExpenses,
+															)
+														: "-"}
+												</span>
+											</div>
+											<div className="flex justify-between border-t pt-2">
+												<span className="font-medium text-sm">Total:</span>
+												<span className="font-bold text-red-600">
+													{selectedClient.creditAnalysis.monthlyFixedExpenses ||
+													selectedClient.creditAnalysis.monthlyVariableExpenses
+														? formatCurrency(
+																Number(
+																	selectedClient.creditAnalysis
+																		.monthlyFixedExpenses || 0,
+																) +
+																	Number(
+																		selectedClient.creditAnalysis
+																			.monthlyVariableExpenses || 0,
+																	),
+															)
+														: "-"}
+												</span>
+											</div>
+										</div>
+									</div>
+
+									{/* Disponibilidad Económica */}
+									<div className="rounded-lg bg-blue-50 p-3">
+										<div className="flex items-center justify-between">
+											<div>
+												<p className="font-medium text-sm">
+													Disponibilidad Económica
+												</p>
+												<p className="text-muted-foreground text-xs">
+													Capacidad de ahorro mensual
+												</p>
+											</div>
+											<span className="font-bold text-blue-600 text-xl">
+												{selectedClient.creditAnalysis.economicAvailability
+													? formatCurrency(
+															selectedClient.creditAnalysis
+																.economicAvailability,
+														)
+													: "-"}
+											</span>
+										</div>
+									</div>
+
+									{/* Capacidad de Pago */}
+									<div className="grid grid-cols-4 gap-3">
+										<div className="rounded-lg border p-3 text-center">
+											<p className="text-muted-foreground text-xs">
+												Pago Mínimo
+											</p>
+											<p className="mt-1 font-bold text-orange-600">
+												{selectedClient.creditAnalysis.minPayment
+													? formatCurrency(
+															selectedClient.creditAnalysis.minPayment,
+														)
+													: "-"}
+											</p>
+										</div>
+										<div className="rounded-lg border p-3 text-center">
+											<p className="text-muted-foreground text-xs">
+												Pago Ajustado
+											</p>
+											<p className="mt-1 font-bold text-blue-600">
+												{selectedClient.creditAnalysis.adjustedPayment
+													? formatCurrency(
+															selectedClient.creditAnalysis.adjustedPayment,
+														)
+													: "-"}
+											</p>
+										</div>
+										<div className="rounded-lg border p-3 text-center">
+											<p className="text-muted-foreground text-xs">
+												Pago Máximo
+											</p>
+											<p className="mt-1 font-bold text-green-600">
+												{selectedClient.creditAnalysis.maxPayment
+													? formatCurrency(
+															selectedClient.creditAnalysis.maxPayment,
+														)
+													: "-"}
+											</p>
+										</div>
+										<div className="rounded-lg border bg-primary/5 p-3 text-center">
+											<p className="text-muted-foreground text-xs">
+												Crédito Máximo
+											</p>
+											<p className="mt-1 font-bold text-primary">
+												{selectedClient.creditAnalysis.maxCreditAmount
+													? formatCurrency(
+															selectedClient.creditAnalysis.maxCreditAmount,
+														)
+													: "-"}
+											</p>
+										</div>
+									</div>
+
+									<p className="text-right text-muted-foreground text-xs">
+										Análisis realizado:{" "}
+										{formatGuatemalaDate(
+											selectedClient.creditAnalysis.analyzedAt,
+										)}
+									</p>
+								</div>
+							) : (
+								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+									<h3 className="flex items-center gap-2 font-semibold text-base">
+										<CreditCard className="h-4 w-4" />
+										Análisis de Capacidad de Pago
+									</h3>
+									<p className="py-2 text-center text-muted-foreground">
+										No hay análisis de capacidad de pago registrado.
+									</p>
+								</div>
+							)}
 						</div>
 					)}
 				</DialogContent>
@@ -1210,7 +1448,15 @@ function RouteComponent() {
 			{/* Opportunity Detail Modal */}
 			<OpportunityDetailModal
 				open={isOpportunityModalOpen}
-				onOpenChange={setIsOpportunityModalOpen}
+				onOpenChange={(open) => {
+					setIsOpportunityModalOpen(open);
+					if (!open) {
+						setActiveOpportunityId(null);
+						if (search.opportunityId) {
+							navigate({ to: "/crm/clients", search: {}, replace: true });
+						}
+					}
+				}}
 				opportunity={selectedOpportunityForModal}
 				userRole={userProfile.data?.role}
 				readOnly

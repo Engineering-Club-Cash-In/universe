@@ -17,13 +17,14 @@ import {
   User,
   Download,
   AlertTriangle,
+  Building2,
 } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/Provider/authProvider";
 import { useFacturarGenerico, useFacturasGenericas, useAnularFactura } from "../hooks/cofidi";
-import type { FacturaGenericaItem } from "../services/services";
+import type { FacturaGenericaItem, EmisorKey } from "../services/services";
 
 // --- Utilidades ---
 const formatCurrency = (val?: string | number | null) =>
@@ -62,6 +63,16 @@ const validarNIT = (nit: string): boolean => {
   return nitLimpio.length >= 5;
 };
 
+// --- Opciones de emisor ---
+const EMISORES_OPTIONS: { value: EmisorKey; label: string }[] = [
+  { value: "CUBE", label: "CUBE" },
+  { value: "SE_PRESTA", label: "Se Presta" },
+  { value: "AMJK", label: "AMJK" },
+  { value: "CREACION_IMAGEN", label: "Creación Imagen" },
+  { value: "GRUPO_BATRO", label: "Grupo Batro" },
+  { value: "AUTOCASH", label: "AutoCash" },
+];
+
 // --- Schema de validación con Yup ---
 const validationSchema = Yup.object({
   nit: Yup.string()
@@ -69,6 +80,9 @@ const validationSchema = Yup.object({
     .test("nit-valido", "NIT inválido (mínimo 5 dígitos o CF)", (value) =>
       validarNIT(value || "")
     ),
+  emisor: Yup.string()
+    .required("El emisor es requerido")
+    .oneOf(EMISORES_OPTIONS.map((e) => e.value), "Emisor inválido"),
   items: Yup.array()
     .of(
       Yup.object({
@@ -151,6 +165,7 @@ export function FacturasGenericas() {
   const formik = useFormik({
     initialValues: {
       nit: "",
+      emisor: "" as EmisorKey | "",
       items: [{ rubro: "", monto: 0 }],
     },
     validationSchema,
@@ -168,6 +183,7 @@ export function FacturasGenericas() {
             monto: Number(item.monto),
           })),
           created_by: user.id,
+          emisor: values.emisor as EmisorKey,
         },
         {
           onSuccess: (response) => {
@@ -532,6 +548,37 @@ export function FacturasGenericas() {
                   <p className="text-purple-500 text-xs mt-1">
                     Ingresa mínimo 5 dígitos o "CF" para consumidor final
                   </p>
+                </div>
+
+                {/* Emisor */}
+                <div>
+                  <label className="block text-purple-900 font-semibold mb-2">
+                    <Building2 className="w-4 h-4 inline-block mr-1 -mt-0.5" />
+                    Emisor *
+                  </label>
+                  <select
+                    name="emisor"
+                    value={formik.values.emisor}
+                    onChange={formik.handleChange}
+                    onBlur={formik.handleBlur}
+                    className={`w-full rounded-md px-3 py-2 border-2 text-gray-900 bg-white ${
+                      formik.touched.emisor && formik.errors.emisor
+                        ? "border-red-400 bg-red-50"
+                        : "border-purple-300 focus:border-purple-500"
+                    }`}
+                  >
+                    <option value="">Selecciona un emisor...</option>
+                    {EMISORES_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                  {formik.touched.emisor && formik.errors.emisor && (
+                    <p className="text-red-500 text-sm mt-1 font-medium">
+                      {formik.errors.emisor}
+                    </p>
+                  )}
                 </div>
 
                 {/* Items */}

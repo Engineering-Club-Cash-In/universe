@@ -1,10 +1,11 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
 	Bell,
 	CheckCircle,
 	Clock,
 	Download,
+	ExternalLink,
 	Eye,
 	FileUp,
 	Info,
@@ -107,11 +108,11 @@ function NotificationsPage() {
 		enabled: !!session && isAdmin,
 	});
 
-	// Supervisor de ventas: notificaciones de su rol + analyst + juridico
+	// Supervisor de ventas: notificaciones de su rol + analyst
 	const supervisorNotifications = useQuery({
 		...orpc.getNotificationsByRoles.queryOptions({
 			input: {
-				roles: ["sales_supervisor", "analyst", "juridico"],
+				roles: ["sales_supervisor", "analyst"],
 			},
 		}),
 		enabled: !!session && isSalesSupervisor,
@@ -187,9 +188,10 @@ function NotificationsPage() {
 		byAssignNotifications.data,
 	]);
 
-	// Filtro por status
+	// Filtro por status (descartadas ocultas por defecto)
 	const filtered = useMemo(() => {
-		if (statusFilter === "all") return notifications;
+		if (statusFilter === "all")
+			return notifications.filter((n) => n.status !== "dismissed");
 		return notifications.filter((n) => n.status === statusFilter);
 	}, [notifications, statusFilter]);
 
@@ -224,6 +226,12 @@ function NotificationsPage() {
 	const resolvedCount = notifications.filter(
 		(n) => n.status === "resolved",
 	).length;
+	const readCount = notifications.filter(
+		(n) => n.status === "read",
+	).length;
+	const dismissedCount = notifications.filter(
+		(n) => n.status === "dismissed",
+	).length;
 
 	return (
 		<div className="container mx-auto space-y-6 p-6">
@@ -248,6 +256,14 @@ function NotificationsPage() {
 				</div>
 				<div className="h-4 w-px bg-border" />
 				<div className="flex items-center gap-2">
+					<div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/30">
+						<Eye className="h-3 w-3 text-blue-600 dark:text-blue-400" />
+					</div>
+					<span className="font-semibold text-sm">{readCount}</span>
+					<span className="text-muted-foreground text-xs">leídas</span>
+				</div>
+				<div className="h-4 w-px bg-border" />
+				<div className="flex items-center gap-2">
 					<div className="flex h-6 w-6 items-center justify-center rounded-full bg-purple-100 dark:bg-purple-900/30">
 						<Loader2 className="h-3 w-3 text-purple-600 dark:text-purple-400" />
 					</div>
@@ -261,6 +277,14 @@ function NotificationsPage() {
 					</div>
 					<span className="font-semibold text-sm">{resolvedCount}</span>
 					<span className="text-muted-foreground text-xs">resueltas</span>
+				</div>
+				<div className="h-4 w-px bg-border" />
+				<div className="flex items-center gap-2">
+					<div className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800/30">
+						<XCircle className="h-3 w-3 text-gray-600 dark:text-gray-400" />
+					</div>
+					<span className="font-semibold text-sm">{dismissedCount}</span>
+					<span className="text-muted-foreground text-xs">descartadas</span>
 				</div>
 			</div>
 
@@ -330,12 +354,68 @@ function NotificationCard({
 		createdByRole: string;
 		assignedToRole: string;
 		assignedTo: string | null;
+		relatedEntityType: string | null;
+		relatedEntityId: string | null;
 		createdAt: Date;
 	};
 	onChangeStatus: (status: NotificationStatus) => void;
 	isChanging: boolean;
 }) {
 	const [uploadOpen, setUploadOpen] = useState(false);
+	const navigate = useNavigate();
+
+	const getEntityLink = () => {
+		if (!notification.relatedEntityType || !notification.relatedEntityId)
+			return null;
+
+		const id = notification.relatedEntityId!;
+		const role = notification.assignedToRole;
+
+		switch (notification.relatedEntityType) {
+			case "opportunity":
+				if (role === "analyst") {
+					return {
+						label: "Ver análisis",
+						action: () =>
+							navigate({
+								to: "/crm/analysis/$opportunityId",
+								params: { opportunityId: id },
+							}),
+					};
+				}
+				if (role === "juridico") {
+					return {
+						label: "Generar contratos",
+						action: () =>
+							navigate({
+								to: "/juridico/generate/$opportunityId",
+								params: { opportunityId: id },
+							}),
+					};
+				}
+				return {
+					label: "Ver oportunidad",
+					action: () =>
+						navigate({
+							to: "/crm/opportunities",
+							search: { opportunityId: id },
+						}),
+				};
+			case "opportunity_client":
+				return {
+					label: "Ver cliente",
+					action: () =>
+						navigate({
+							to: "/crm/clients",
+							search: { opportunityId: id },
+						}),
+				};
+			default:
+				return null;
+		}
+	};
+
+	const entityLink = getEntityLink();
 
 	const statusInfo =
 		STATUS_CONFIG[notification.status as NotificationStatus] ??
@@ -403,6 +483,22 @@ function NotificationCard({
 						</div>
 					</div>
 					<div className="flex shrink-0 items-center gap-1.5">
+						{entityLink && (
+							<Button
+								size="sm"
+								variant="outline"
+								className="h-6 gap-1 text-[11px]"
+								onClick={() => {
+								if (isPending) {
+									onChangeStatus("read");
+								}
+								entityLink.action();
+							}}
+							>
+								<ExternalLink className="h-3 w-3" />
+								{entityLink.label}
+							</Button>
+						)}
 						<Badge
 							variant="outline"
 							className={`text-[11px] ${statusInfo.color}`}

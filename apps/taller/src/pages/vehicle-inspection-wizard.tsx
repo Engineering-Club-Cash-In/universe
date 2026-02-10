@@ -7,6 +7,7 @@ import {
   Camera,
   CheckCircle,
   DollarSign,
+  Activity
 } from "lucide-react";
 import { useInspection } from "../contexts/InspectionContext";
 import { prepareInspectionData, createFullInspection } from "../services/vehicles";
@@ -17,6 +18,7 @@ import VehicleInspectionForm, { type VehicleInspectionFormRef } from "./vehicle-
 import InspectionChecklist from "../components/inspection-checklist";
 import VehiclePictures from "./vehicle-pictures";
 import VehicleValuation from "../components/vehicle-valuation";
+import Inspection360Step from "../components/inspection-360-step";
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -26,6 +28,12 @@ const STEPS = [
     title: "Información Básica",
     description: "Datos del vehículo y técnico",
     icon: Car,
+  },
+  {
+    id: "inspection-360",
+    title: "Inspección 360°",
+    description: "Revisión técnica detallada",
+    icon: Activity,
   },
   {
     id: "checklist",
@@ -48,8 +56,9 @@ const STEPS = [
 ];
 
 export default function VehicleInspectionWizard() {
-  const { formData, checklistItems, photos, sectionTimes, resetInspection, currentStep, setCurrentStep } = useInspection();
+  const { formData, checklistItems, photos, sectionTimes, resetInspection, currentStep, setCurrentStep, items360, rejectionEvidenceUrl } = useInspection();
   const [basicInfoCompleted, setBasicInfoCompleted] = useState(false);
+  const [inspection360Completed, setInspection360Completed] = useState(false);
   const vehicleFormRef = useRef<VehicleInspectionFormRef>(null);
   const [checklistCompleted, setChecklistCompleted] = useState(false);
   const [photosCompleted, setPhotosCompleted] = useState(false);
@@ -68,16 +77,22 @@ export default function VehicleInspectionWizard() {
           toast.error("Por favor complete los campos marcados en rojo");
           return;
         }
+      } else {
+        toast.error("Por favor complete la información básica antes de continuar");
+        return;
       }
-      toast.error("Por favor complete la información básica antes de continuar");
+    }
+
+    // Paso 1: 360 (Validación explícita)
+    if (currentStep === 1 && !inspection360Completed) {
+      toast.error("Por favor confirme la inspección 360 antes de continuar");
       return;
     }
-    if (currentStep === 1 && !checklistCompleted) {
+
+    if (currentStep === 2 && !checklistCompleted) {
       toast.error("Por favor complete la evaluación de criterios antes de continuar");
       return;
     }
-    // Nota: El paso 2 (fotos) y paso 3 (valoración) no muestran el botón "Siguiente"
-    // Estos pasos manejan su propia navegación con botones internos
 
     if (currentStep < STEPS.length - 1) {
       setCurrentStep(currentStep + 1);
@@ -97,7 +112,7 @@ export default function VehicleInspectionWizard() {
     const photosToUse = photosFromPictures || photos;
     // Use dataOverride if provided (from valuation step), otherwise use formData from context
     const dataToUse = dataOverride || formData;
-    
+
     // Verificar que las fotos estén disponibles
     if (!photosToUse || photosToUse.length === 0) {
       console.error("No hay fotos disponibles");
@@ -110,22 +125,23 @@ export default function VehicleInspectionWizard() {
 
     try {
       // Prepare data for submission
-      const { vehicleData, inspectionData } = prepareInspectionData(dataToUse, sectionTimes);
-      
+      const { vehicleData, inspectionData } = prepareInspectionData(dataToUse, sectionTimes, rejectionEvidenceUrl);
+
       // Call the API to create the full inspection
       const result = await createFullInspection(
         vehicleData,
         inspectionData,
         checklistItems,
-        photosToUse
+        photosToUse,
+        items360
       );
-      
+
       if (result.success) {
         toast.success("¡Inspección completada exitosamente!");
-        
+
         // Reset the inspection context
         resetInspection();
-        
+
         // Redirect to dashboard after a brief delay
         setTimeout(() => {
           window.location.href = "/vehicles";
@@ -147,7 +163,7 @@ export default function VehicleInspectionWizard() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Toaster />
-      
+
       {/* Header */}
       <div className="bg-white border-b">
         <div className="container mx-auto px-2 sm:px-4 py-1">
@@ -165,17 +181,21 @@ export default function VehicleInspectionWizard() {
         <div className="container mx-auto px-2 sm:px-4 py-1 sm:py-2">
           <div className="space-y-4">
             <Progress value={progress} className="h-2" />
-            
+
             {/* Steps Indicator */}
             <div className="flex justify-between">
               {STEPS.map((step, index) => {
                 const StepIconComponent = step.icon;
                 const isActive = index === currentStep;
-                const isCompleted = 
+
+                // Lógica de completado actualizada para 5 pasos
+                const isCompleted =
                   (index === 0 && basicInfoCompleted) ||
-                  (index === 1 && checklistCompleted) ||
-                  (index === 2 && photosCompleted) ||
-                  (index === 3 && valuationCompleted);
+                  (index === 1 && inspection360Completed) ||
+                  (index === 2 && checklistCompleted) ||
+                  (index === 3 && photosCompleted) ||
+                  (index === 4 && valuationCompleted);
+
                 const isPast = index < currentStep;
 
                 return (
@@ -261,15 +281,27 @@ export default function VehicleInspectionWizard() {
               </div>
             )}
 
+            {/* Step 1: Inspección 360 (NUEVO) */}
             {currentStep === 1 && (
+              <div className="animate-in fade-in slide-in-from-right-4 duration-300">
+                <Inspection360Step
+                  onComplete={() => {
+                    setInspection360Completed(true);
+                    setCurrentStep(2);
+                    window.scrollTo({ top: 0, behavior: "smooth" });
+                  }}
+                />
+              </div>
+            )}
+
+            {currentStep === 2 && (
               <div>
-                <InspectionChecklist 
+                <InspectionChecklist
                   onComplete={() => {
                     setChecklistCompleted(true);
-                    // Avanzar automáticamente al siguiente paso
+                    // Avanzar automáticamente
                     if (currentStep < STEPS.length - 1) {
                       setCurrentStep(currentStep + 1);
-                      // Usar setTimeout para asegurar que el DOM se actualice primero
                       setTimeout(() => {
                         window.scrollTo({ top: 0, behavior: "smooth" });
                       }, 100);
@@ -280,13 +312,13 @@ export default function VehicleInspectionWizard() {
               </div>
             )}
 
-            {currentStep === 2 && (
+            {currentStep === 3 && (
               <div>
                 <VehiclePictures
                   onComplete={() => {
                     setPhotosCompleted(true);
                     // Avanzar al paso de valuación
-                    setCurrentStep(3);
+                    setCurrentStep(4);
                     window.scrollTo({ top: 0, behavior: "smooth" });
                   }}
                   isWizardMode={true}
@@ -294,7 +326,7 @@ export default function VehicleInspectionWizard() {
               </div>
             )}
 
-            {currentStep === 3 && (
+            {currentStep === 4 && (
               <div>
                 <VehicleValuation
                   vehicleData={formData}
@@ -332,9 +364,8 @@ export default function VehicleInspectionWizard() {
                 Paso {currentStep + 1} de {STEPS.length}
               </div>
 
-              {currentStep === 2 || currentStep === STEPS.length - 1 ? (
-                // No mostrar botón "Siguiente" en el paso de fotos (2) ni en valoración (3)
-                // Estos pasos manejan su propia navegación con sus botones internos
+              {(currentStep === 3 || currentStep === 4) ? (
+                // No mostrar botón "Siguiente" en fotos (3) ni valuación (4)
                 null
               ) : (
                 <Button

@@ -6,6 +6,7 @@ import {
 	eq,
 	gte,
 	ilike,
+	lte,
 	inArray,
 	isNotNull,
 	not,
@@ -50,7 +51,7 @@ import {
 	formatMissingLeadFields,
 	getMissingLeadFieldsForContracts,
 } from "../lib/lead-helpers";
-import { analystProcedure, crmProcedure } from "../lib/orpc";
+import { analystProcedure,  crmProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
 	deleteFileFromR2,
@@ -64,6 +65,7 @@ import {
 	getMissingFieldsForCompletion,
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
+import { createNotification } from "./notifications";
 import { scoreLead } from "../services/lead-scoring";
 
 /**
@@ -226,6 +228,8 @@ export const crmRouter = {
 						.enum(["new", "contacted", "qualified", "converted", "unqualified"])
 						.optional(),
 					id: z.string().uuid().optional(),
+					dateFrom: z.string().optional(),
+					dateTo: z.string().optional(),
 				})
 				.optional(),
 		)
@@ -283,6 +287,16 @@ export const crmRouter = {
 
 			// Excluir leads migrados (solo se muestran en la sección de clientes migrados)
 			conditions.push(not(eq(leads.status, "migrate")));
+
+			// Date range filter on createdAt
+			if (input?.dateFrom) {
+				conditions.push(gte(leads.createdAt, new Date(input.dateFrom)));
+			}
+			if (input?.dateTo) {
+				const toDate = new Date(input.dateTo);
+				toDate.setHours(23, 59, 59, 999);
+				conditions.push(lte(leads.createdAt, toDate));
+			}
 
 			const whereClause =
 				conditions.length > 0 ? and(...conditions) : undefined;
@@ -412,7 +426,7 @@ export const crmRouter = {
 	getLeadsStats: crmProcedure.handler(async ({ context }) => {
 		// Build role-based condition
 		const roleCondition =
-			context.userRole !== "admin" && context.userRole !== "sales_supervisor"
+			context.userRole === "sales"
 				? eq(leads.assignedTo, context.userId)
 				: undefined;
 
@@ -1016,10 +1030,7 @@ export const crmRouter = {
 
 			// Role-based filter: admin and sales_supervisor can see all, others only their own
 			if (
-				context.userRole !== "admin" &&
-				context.userRole !== "sales_supervisor" &&
-				context.userRole !== "juridico" &&
-				context.userRole !== "analyst"
+				context.userRole === "sales"
 			) {
 				conditions.push(eq(opportunities.assignedTo, context.userId));
 			}
@@ -1384,6 +1395,7 @@ export const crmRouter = {
 
 			// Calculate new analysisStatus based on stage transition
 			let newAnalysisStatus = currentOpportunity[0].analysisStatus;
+			let movedToAnalysis = false;
 
 			if (input.stageId && input.stageId !== currentOpportunity[0].stageId) {
 				const targetStage = await db
@@ -1403,6 +1415,7 @@ export const crmRouter = {
 
 				// If moving TO stage 30% (analysis stage)
 				if (toPercentage === 30 && fromPercentage !== 30) {
+					movedToAnalysis = true;
 					if (currentOpportunity[0].analysisStatus === "not_applicable") {
 						newAnalysisStatus = "pending";
 					} else if (currentOpportunity[0].analysisStatus === "rejected") {
@@ -1541,6 +1554,40 @@ export const crmRouter = {
 							: "Cambio de etapa"),
 					isOverride,
 				});
+
+				// Notificar al vendedor asignado si alguien más movió su oportunidad de etapa
+				if (
+					currentOpportunity[0].assignedTo &&
+					currentOpportunity[0].assignedTo !== context.userId
+				) {
+					await createNotification({
+						titulo: `Oportunidad movida de etapa - ${currentOpportunity[0].title}`,
+						descripcion: `Tu oportunidad "${currentOpportunity[0].title}" fue movida de etapa por otro usuario.`,
+						type: "aviso",
+						createdBy: context.userId,
+						createdByRole: context.userRole,
+						assignedToRole: "sales",
+						redirectPage: "opportunity_details",
+						assignedTo: currentOpportunity[0].assignedTo,
+						relatedEntityType: "opportunity",
+						relatedEntityId: id,
+					});
+				}
+
+				// Notificar a analistas cuando una oportunidad llega a análisis (30%)
+				if (movedToAnalysis) {
+					await createNotification({
+						titulo: `Nueva oportunidad para análisis - ${currentOpportunity[0].title}`,
+						descripcion: `La oportunidad "${currentOpportunity[0].title}" fue enviada a análisis y está pendiente de revisión.`,
+						type: "aviso",
+						createdBy: context.userId,
+						createdByRole: context.userRole,
+						assignedToRole: "analyst",
+						redirectPage: "analysis_details",
+						relatedEntityType: "opportunity",
+						relatedEntityId: id,
+					});
+				}
 			}
 
 			return updatedOpportunity[0];
@@ -1691,6 +1738,8 @@ export const crmRouter = {
 			const opportunity = await db
 				.select({
 					id: opportunities.id,
+					title: opportunities.title,
+					assignedTo: opportunities.assignedTo,
 					updatedAt: opportunities.updatedAt,
 					vehicleId: opportunities.vehicleId,
 					creditType: opportunities.creditType,
@@ -1939,6 +1988,53 @@ export const crmRouter = {
 							: "Documentación rechazada - movida a etapa 20%"),
 					isOverride: false,
 				});
+
+				if (input.approved) {
+					// Notificación para el vendedor asignado
+					if (opportunity[0].assignedTo) {
+						await createNotification({
+							titulo: `Análisis aprobado - ${opportunity[0].title}`,
+							descripcion: `Tu oportunidad "${opportunity[0].title}" fue aprobada en análisis y avanzó a Cierre de propuesta (40%).`,
+							type: "aviso",
+							createdBy: context.userId,
+							createdByRole: context.userRole,
+							assignedToRole: "sales",
+							assignedTo: opportunity[0].assignedTo,
+							redirectPage: "opportunity_details",
+							relatedEntityType: "opportunity",
+							relatedEntityId: input.opportunityId,
+						});
+					}
+
+					// Notificación para la supervisora de ventas
+					await createNotification({
+						titulo: `Análisis aprobado - ${opportunity[0].title}`,
+						descripcion: `La oportunidad "${opportunity[0].title}" fue aprobada en análisis. Ya puede revisar el detalle de crédito.`,
+						type: "aviso",
+						createdBy: context.userId,
+						createdByRole: context.userRole,
+						assignedToRole: "sales_supervisor",
+						redirectPage: "opportunity_details",
+						relatedEntityType: "opportunity",
+						relatedEntityId: input.opportunityId,
+					});
+				} else {
+					// Notificación para el vendedor asignado de rechazo
+					if (opportunity[0].assignedTo) {
+						await createNotification({
+							titulo: `Análisis rechazado - ${opportunity[0].title}`,
+							descripcion: `Tu oportunidad "${opportunity[0].title}" fue rechazada en análisis y regresó a Solución y propuesta (20%).${input.reason ? ` Razón: ${input.reason}` : ""}`,
+							type: "aviso",
+							createdBy: context.userId,
+							createdByRole: context.userRole,
+							assignedToRole: "sales",
+							redirectPage: "opportunity_details",
+							assignedTo: opportunity[0].assignedTo,
+							relatedEntityType: "opportunity",
+							relatedEntityId: input.opportunityId,
+						});
+					}
+				}
 			}
 
 			return { success: true, approved: input.approved };
@@ -2007,6 +2103,18 @@ export const crmRouter = {
 				isOverride: false,
 			});
 
+			await createNotification({
+				titulo: `Detalle de crédito aprobado - ${opportunity.title}`,
+				descripcion: `El detalle de crédito de la oportunidad "${opportunity.title}" fue aprobado y avanzó a Formalización (50%). Está lista para la asignación de inversión.`,
+				type: "aviso",
+				createdBy: context.userId,
+				createdByRole: context.userRole,
+				assignedToRole: "analyst",
+				redirectPage: "analysis_50_details",
+				relatedEntityType: "opportunity",
+				relatedEntityId: input.opportunityId,
+			});
+
 			return { success: true };
 		}),
 
@@ -2029,6 +2137,8 @@ export const crmRouter = {
 			const [opportunity] = await db
 				.select({
 					id: opportunities.id,
+					title: opportunities.title,
+					assignedTo: opportunities.assignedTo,
 					stageId: opportunities.stageId,
 					creditDetailApproved: opportunities.creditDetailApproved,
 				})
@@ -2099,6 +2209,21 @@ export const crmRouter = {
 					isOverride: false,
 				});
 			});
+
+			if (opportunity.assignedTo) {
+				await createNotification({
+					titulo: `Detalle de crédito rechazado - ${opportunity.title}`,
+					descripcion: `El detalle de crédito de la oportunidad "${opportunity.title}" fue rechazado y regresado a la etapa de Cierre de propuesta (40%).`,
+					type: "aviso",
+					createdBy: context.userId,
+					createdByRole: context.userRole,
+					assignedToRole: "sales",
+					redirectPage: "opportunity_details",
+					assignedTo: opportunity.assignedTo,
+					relatedEntityType: "opportunity",
+					relatedEntityId: input.opportunityId,
+				});
+			}
 
 			return { success: true };
 		}),
@@ -2249,8 +2374,7 @@ export const crmRouter = {
 
 			// Filter by user if not admin/sales_supervisor
 			if (
-				context.userRole !== "admin" &&
-				context.userRole !== "sales_supervisor"
+				context.userRole === "sales"
 			) {
 				conditions.push(eq(clients.assignedTo, context.userId));
 			}
@@ -2325,8 +2449,7 @@ export const crmRouter = {
 
 		// Filter by user if not admin/sales_supervisor
 		if (
-			context.userRole !== "admin" &&
-			context.userRole !== "sales_supervisor"
+			context.userRole === "sales"
 		) {
 			conditions.push(eq(clients.assignedTo, context.userId));
 		}
@@ -2368,6 +2491,9 @@ export const crmRouter = {
 				limit: z.number().min(1).max(100).default(20),
 				offset: z.number().min(0).default(0),
 				search: z.string().optional(),
+				leadId: z.string().uuid().optional(),
+				dateFrom: z.string().optional(),
+				dateTo: z.string().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -2425,10 +2551,14 @@ export const crmRouter = {
 
 			// Filter by user if not admin/sales_supervisor
 			if (
-				context.userRole !== "admin" &&
-				context.userRole !== "sales_supervisor"
+				context.userRole === "sales"
 			) {
 				conditions.push(eq(leads.assignedTo, context.userId));
+			}
+
+			// Filter by specific lead ID
+			if (input.leadId) {
+				conditions.push(eq(leads.id, input.leadId));
 			}
 
 			// Search filter
@@ -2443,6 +2573,16 @@ export const crmRouter = {
 						ilike(leads.dpi, searchPattern),
 					),
 				);
+			}
+
+			// Date range filter on createdAt
+			if (input.dateFrom) {
+				conditions.push(gte(leads.createdAt, new Date(input.dateFrom)));
+			}
+			if (input.dateTo) {
+				const toDate = new Date(input.dateTo);
+				toDate.setHours(23, 59, 59, 999);
+				conditions.push(lte(leads.createdAt, toDate));
 			}
 
 			const whereClause = and(...conditions);
@@ -2477,6 +2617,10 @@ export const crmRouter = {
 					ownsVehicle: leads.ownsVehicle,
 					hasCreditCard: leads.hasCreditCard,
 					jobTitle: leads.jobTitle,
+					direccion: leads.direccion,
+					departamento: leads.departamento,
+					municipio: leads.municipio,
+					zona: leads.zona,
 					assignedTo: leads.assignedTo,
 					createdAt: leads.createdAt,
 					updatedAt: leads.updatedAt,
@@ -2649,7 +2793,7 @@ export const crmRouter = {
 			.from(opportunities)
 			.leftJoin(leads, eq(opportunities.leadId, leads.id))
 			.where(
-				context.userRole !== "admin" && context.userRole !== "sales_supervisor"
+				context.userRole === "sales"
 					? and(
 							closedOpportunityCondition,
 							eq(leads.assignedTo, context.userId),
@@ -3410,8 +3554,10 @@ export const crmRouter = {
 				sections: {
 					documentos: {
 						completed:
-							requiredDocs.length > 0 &&
-							requiredDocs.every((doc) => uploadedTypes.has(doc.documentType)),
+							requiredDocs.filter((doc) => doc.required).length > 0 &&
+							requiredDocs
+								.filter((doc) => doc.required)
+								.every((doc) => uploadedTypes.has(doc.documentType)),
 						items: requiredDocs.map((doc) => ({
 							documentType: doc.documentType,
 							required: doc.required,
@@ -3491,10 +3637,10 @@ export const crmRouter = {
 						// Vehicle documents subsection
 						documentos: {
 							completed:
-								requiredVehicleDocs.length === 0 ||
-								requiredVehicleDocs.every((doc) =>
-									uploadedVehicleTypes.has(doc.documentType),
-								),
+								requiredVehicleDocs.filter((doc) => doc.required).length === 0 ||
+								requiredVehicleDocs
+									.filter((doc) => doc.required)
+									.every((doc) => uploadedVehicleTypes.has(doc.documentType)),
 							items: requiredVehicleDocs.map((doc) => ({
 								documentType: doc.documentType,
 								required: doc.required,
@@ -3543,44 +3689,47 @@ export const crmRouter = {
 			// Calculate vehicle section completion
 			checklistData.sections.vehiculo.verificaciones.completed =
 				checklistData.sections.vehiculo.verificaciones.items
-					.filter((i: any) => i.required)
-					.every((i: any) => i.completed);
+					.filter((i) => i.required)
+					.every((i) => i.completed);
 
 			checklistData.sections.vehiculo.completed =
 				vehicleInspected &&
 				checklistData.sections.vehiculo.documentos.completed &&
 				checklistData.sections.vehiculo.verificaciones.completed;
 
-			// Calculate overall progress
+			// Calculate overall progress (only count required items)
 			const totalItems =
-				checklistData.sections.documentos.items.length + // client docs
+				checklistData.sections.documentos.items.filter((i) => i.required).length + // client docs (required only)
 				checklistData.sections.verificaciones.items.filter((i) => i.required)
 					.length + // client verifications
 				(opportunity.vehicleId ? 1 : 0) + // vehicle inspection
 				(opportunity.vehicleId
-					? checklistData.sections.vehiculo.documentos.items.length
-					: 0) + // vehicle docs
+					? checklistData.sections.vehiculo.documentos.items.filter(
+							(i) => i.required,
+						).length
+					: 0) + // vehicle docs (required only)
 				(opportunity.vehicleId
 					? checklistData.sections.vehiculo.verificaciones.items.filter(
-							(i: any) => i.required,
+							(i) => i.required,
 						).length
 					: 0); // vehicle verifications
 
 			const completedItems =
-				checklistData.sections.documentos.items.filter((i) => i.uploaded)
-					.length + // client docs uploaded
+				checklistData.sections.documentos.items.filter(
+					(i) => i.required && i.uploaded,
+				).length + // client docs uploaded (required only)
 				checklistData.sections.verificaciones.items.filter(
 					(i) => i.required && i.completed,
 				).length + // client verifications completed
 				(vehicleInspected ? 1 : 0) + // vehicle inspection
 				(opportunity.vehicleId
 					? checklistData.sections.vehiculo.documentos.items.filter(
-							(i: any) => i.uploaded,
+							(i) => i.required && i.uploaded,
 						).length
-					: 0) + // vehicle docs uploaded
+					: 0) + // vehicle docs uploaded (required only)
 				(opportunity.vehicleId
 					? checklistData.sections.vehiculo.verificaciones.items.filter(
-							(i: any) => i.required && i.completed,
+							(i) => i.required && i.completed,
 						).length
 					: 0); // vehicle verifications completed
 
@@ -4200,6 +4349,19 @@ export const crmRouter = {
 				toStageId: targetStage.id,
 				changedBy: context.userId,
 				reason: "Desembolso aprobado - Checklist completado",
+			});
+
+			// Notificar a contabilidad para que realice el desembolso
+			await createNotification({
+				titulo: `Desembolso aprobado - ${opportunity.title}`,
+				descripcion: `La oportunidad "${opportunity.title}" fue aprobada para desembolso. Por favor suba las boletas correspondientes.`,
+				type: "action_upload_files",
+				createdBy: context.userId,
+				createdByRole: context.userRole,
+				assignedToRole: "accounting",
+				relatedEntityType: "opportunity_client",
+				relatedEntityId: input.opportunityId,
+				redirectPage: "client_details",
 			});
 
 			return {
@@ -4847,6 +5009,19 @@ export const crmRouter = {
 				});
 			});
 
+			// Notificar a jurídico que hay una nueva oportunidad para contratos
+			await createNotification({
+				titulo: `Nueva oportunidad para contratos - ${opportunity.title}`,
+				descripcion: `La oportunidad "${opportunity.title}" avanzó a la etapa del 80% y está lista para la creación o carga de contratos legales.`,
+				type: "aviso",
+				createdBy: context.userId,
+				createdByRole: context.userRole,
+				assignedToRole: "juridico",
+				relatedEntityType: "opportunity",
+				relatedEntityId: input.opportunityId,
+				redirectPage: "contract_details",
+			});
+
 			return {
 				success: true,
 				message: "Inversionista asignado y oportunidad avanzada a 80%",
@@ -4990,6 +5165,11 @@ export const crmRouter = {
 			}),
 		)
 		.handler(async ({ input }) => {
+			// Eliminar el credit analysis asociado al co-deudor si existe
+			await db
+				.delete(creditAnalysis)
+				.where(eq(creditAnalysis.coDebtorId, input.id));
+
 			const [deletedCoDebtor] = await db
 				.delete(coDebtors)
 				.where(eq(coDebtors.id, input.id))

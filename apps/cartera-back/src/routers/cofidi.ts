@@ -8,6 +8,7 @@ import { generarHTMLFacturaPro } from "../cofidi/functions";
 import { db } from "../database";
 import {
   creditos,
+  creditos_inversionistas,
   facturas_electronicas,
   inversionistas,
   pagos_credito,
@@ -16,7 +17,34 @@ import {
 } from "../database/db";
 import { eq, desc, and, sql } from "drizzle-orm";
 import { NITSoapClient } from "../cofidi/nitGenerator";
-import { SAT_CONFIG, CLUB_CASHIN_CONFIG, COFIDI_CONFIG } from "../utils/functions/const";
+import {
+  SAT_CONFIG,
+  CLUB_CASHIN_CONFIG,
+  COFIDI_CONFIG,
+  getInversionistaFacturadorConfig,
+  SE_PRESTA_CONFIG,
+  SE_PRESTA_SAT_CONFIG,
+  AMJK_CONFIG,
+  AMJK_SAT_CONFIG,
+  CREACION_IMAGEN_CONFIG,
+  CREACION_IMAGEN_SAT_CONFIG,
+  GRUPO_BATRO_CONFIG,
+  GRUPO_BATRO_SAT_CONFIG,
+  AUTOCASH_CONFIG,
+  AUTOCASH_SAT_CONFIG,
+} from "../utils/functions/const";
+
+// 🔥 Mapa de emisores disponibles para facturar
+const EMISORES_CONFIG = {
+  CUBE: { config: CLUB_CASHIN_CONFIG, satConfig: SAT_CONFIG },
+  SE_PRESTA: { config: SE_PRESTA_CONFIG, satConfig: SE_PRESTA_SAT_CONFIG },
+  AMJK: { config: AMJK_CONFIG, satConfig: AMJK_SAT_CONFIG },
+  CREACION_IMAGEN: { config: CREACION_IMAGEN_CONFIG, satConfig: CREACION_IMAGEN_SAT_CONFIG },
+  GRUPO_BATRO: { config: GRUPO_BATRO_CONFIG, satConfig: GRUPO_BATRO_SAT_CONFIG },
+  AUTOCASH: { config: AUTOCASH_CONFIG, satConfig: AUTOCASH_SAT_CONFIG },
+} as const;
+
+type EmisorKey = keyof typeof EMISORES_CONFIG;
 
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
 
@@ -129,36 +157,66 @@ if (facturasExistentes.length > 0) {
       console.log(`✅ Pago VALIDADO - Cliente: ${pagoData.nombre}`);
 
       // ============================================
-      // 2️⃣ OBTENER INVERSIONISTAS DEL PAGO
+      // 2️⃣ OBTENER INVERSIONISTAS DEL CRÉDITO
       // ============================================
-      const inversionistasDelPago = await db
+      const BigJs = (await import("big.js")).default;
+      BigJs.DP = 20;
+      BigJs.RM = BigJs.roundHalfUp;
+
+      const inversionistasDelCredito = await db
         .select({
           inversionista_id: inversionistas.inversionista_id,
           nombre: inversionistas.nombre,
           emite_factura: inversionistas.emite_factura,
-          abono_capital: pagos_credito_inversionistas.abono_capital,
-          abono_interes: pagos_credito_inversionistas.abono_interes,
-          abono_iva_12: pagos_credito_inversionistas.abono_iva_12,
+          porcentaje_participacion: creditos_inversionistas.porcentaje_participacion_inversionista,
+          cuota_inversionista: creditos_inversionistas.cuota_inversionista,
+          monto_inversionista: creditos_inversionistas.monto_inversionista,
+          iva_inversionista: creditos_inversionistas.iva_inversionista,
         })
-        .from(pagos_credito_inversionistas)
+        .from(creditos_inversionistas)
         .innerJoin(
           inversionistas,
           eq(
-            pagos_credito_inversionistas.inversionista_id,
+            creditos_inversionistas.inversionista_id,
             inversionistas.inversionista_id
           )
         )
-        .where(eq(pagos_credito_inversionistas.pago_id, pago_id));
+        .where(eq(creditos_inversionistas.credito_id, pagoData.credito_id!));
+
+      // 🔥 Calcular abonos proporcionales basados en el porcentaje de participación
+      const totalInteresPagoCalc = new BigJs(pagoData.abono_interes || "0");
+      const totalIvaPagoCalc = new BigJs(pagoData.abono_iva_12 || "0");
+
+      const inversionistasDelPago = inversionistasDelCredito.map((inv) => {
+        const porcentaje = new BigJs(inv.porcentaje_participacion || "0").div(100);
+        const abonoInteres = totalInteresPagoCalc.times(porcentaje).round(2).toString();
+        const abonoIva = totalIvaPagoCalc.times(porcentaje).round(2).toString();
+
+        return {
+          ...inv,
+          abono_interes: abonoInteres,
+          abono_iva_12: abonoIva,
+          abono_capital: "0", // No se usa aquí
+        };
+      });
 
       console.log(
-        `📊 ${inversionistasDelPago.length} inversionistas encontrados`
+        `📊 ${inversionistasDelPago.length} inversionistas encontrados para crédito ${pagoData.credito_id}`
       );
 
       // ============================================
       // 3️⃣ CONSTRUIR RECEPTOR
       // ============================================
+      // 🔥 Normalizar país a código ISO (GT) - SAT no acepta "GUATEMALA"
+      const normalizarPais = (pais: string | null | undefined): string => {
+        if (!pais) return "GT";
+        const paisUpper = pais.trim().toUpperCase();
+        if (paisUpper === "GUATEMALA" || paisUpper === "GTM") return "GT";
+        return pais;
+      };
+
       const receptor = {
-        idReceptor: pagoData.nit 
+        idReceptor: pagoData.nit
           ? pagoData.nit.split('/')[0].trim() // 🔥 Tomar solo el primer NIT
           : "CF",
         nombreReceptor: pagoData.nombre
@@ -170,7 +228,7 @@ if (facturasExistentes.length > 0) {
               codigoPostal: pagoData.codigo_postal || "01001",
               municipio: pagoData.municipio || "Guatemala",
               departamento: pagoData.departamento || "Guatemala",
-              pais: pagoData.pais || "GT",
+              pais: normalizarPais(pagoData.pais),
             }
           : undefined,
       };
@@ -564,8 +622,10 @@ if (facturasExistentes.length > 0) {
         let interesesFacturados = new Big(0);
         let ivaFacturado = new Big(0);
 
-        // PASO 1: Facturas individuales SOLO para inversionistas que NO emiten factura Y NO son CUBE
+        // PASO 1: Facturas individuales para inversionistas
         for (const inv of inversionistasDelPago) {
+          console.log(`\n   🔍 Procesando inversionista: "${inv.nombre}" (emite_factura: ${inv.emite_factura})`);
+
           const esCube = inv.nombre
             .trim()
             .toUpperCase()
@@ -577,8 +637,12 @@ if (facturasExistentes.length > 0) {
             continue;
           }
 
-          // 🔥 SI EMITE FACTURA → NO generamos factura (él factura por su cuenta)
-          if (inv.emite_factura) {
+          // 🔥 DETECTAR SI EL INVERSIONISTA TIENE CONFIGURACIÓN PROPIA PARA FACTURAR
+          const inversionistaConfig = getInversionistaFacturadorConfig(inv.nombre);
+          console.log(`   🔍 Match con facturador: ${inversionistaConfig ? inversionistaConfig.config.emisor.nombreEmisor : 'NO MATCH'}`);
+
+          // 🔥 SI EMITE FACTURA Y NO está en la lista de facturadores → NO generamos factura
+          if (inv.emite_factura && !inversionistaConfig) {
             console.log(
               `   ⏭️  ${inv.nombre} - Emite su propia factura (NO va en RESTANTE)`
             );
@@ -593,7 +657,7 @@ if (facturasExistentes.length > 0) {
             continue;
           }
 
-          // 🔥 SOLO llegamos aquí si: NO es CUBE Y NO emite factura
+          // 🔥 SI está en la lista de facturadores → GENERAMOS factura con SU config (ignora emite_factura)
           const abonoInteres = new Big(inv.abono_interes || "0");
           const abonoIva = new Big(inv.abono_iva_12 || "0");
           const totalInteres = abonoInteres.plus(abonoIva);
@@ -603,9 +667,15 @@ if (facturasExistentes.length > 0) {
             continue;
           }
 
-          console.log(
-            `   💼 ${inv.nombre}: Q${totalInteres.toFixed(2)} (GENERAMOS factura individual)`
-          );
+          if (inversionistaConfig) {
+            console.log(
+              `   💼 ${inv.nombre}: Q${totalInteres.toFixed(2)} (FACTURA A NOMBRE DE ${inversionistaConfig.config.emisor.nombreEmisor})`
+            );
+          } else {
+            console.log(
+              `   💼 ${inv.nombre}: Q${totalInteres.toFixed(2)} (GENERAMOS factura individual - CUBE)`
+            );
+          }
 
           // 🔥 USAR calcularIvaExacto para obtener los valores correctos
           const calc = calcularIvaExacto(parseFloat(totalInteres.toFixed(2)));
@@ -652,23 +722,27 @@ if (facturasExistentes.length > 0) {
           ];
 
           try {
+            // 🔥 USAR CONFIG PERSONALIZADA SI EL INVERSIONISTA HACE MATCH
             const facturaIntereses = await certificarFacturaHelper({
               pago_id,
               receptor,
               items: itemsIntereses,
               complementos: complementosInteres,
               created_by,
+              customConfig: inversionistaConfig?.config,
+              customSatConfig: inversionistaConfig?.satConfig,
             });
 
             facturasGeneradas.push({
               tipo: "INTERESES",
               inversionista: inv.nombre,
               inversionista_id: inv.inversionista_id,
+              emisor: inversionistaConfig?.config.emisor.nombreEmisor || "CUBE INVESTMENTS",
               ...facturaIntereses,
             });
 
             console.log(
-              `      ✅ ${facturaIntereses.serie}-${facturaIntereses.numero}`
+              `      ✅ ${facturaIntereses.serie}-${facturaIntereses.numero} (Emisor: ${inversionistaConfig?.config.emisor.nombreEmisor || "CUBE"})`
             );
 
             interesesFacturados = interesesFacturados.plus(calc.montoGravable);
@@ -1906,7 +1980,7 @@ if (facturasExistentes.length > 0) {
     "/facturar-generico",
     async ({ body, set, request }) => {
       try {
-        const { nit, items: itemsInput, created_by: bodyCreatedBy } = body;
+        const { nit, items: itemsInput, created_by: bodyCreatedBy, emisor } = body;
 
         // Si no viene created_by en el body, extraerlo del token
         let created_by = bodyCreatedBy;
@@ -1925,7 +1999,13 @@ if (facturasExistentes.length > 0) {
         }
 
         console.log("🔥 ========== FACTURANDO GENÉRICO ==========");
+
+        // 🔥 Obtener configuración del emisor
+        const emisorKey = emisor.toUpperCase() as keyof typeof EMISORES_CONFIG;
+        const emisorConfig = EMISORES_CONFIG[emisorKey];
+
         console.log(`📝 NIT: ${nit} | Items: ${itemsInput.length} | Usuario: ${created_by || "N/A"}`);
+        console.log(`🏢 Emisor: ${emisorKey} (${emisorConfig.config.emisor.nombreEmisor})`);
 
         // ============================================
         // 1️⃣ CONSULTAR NIT EN COFIDI PARA OBTENER NOMBRE
@@ -2040,7 +2120,7 @@ if (facturasExistentes.length > 0) {
         ];
 
         // ============================================
-        // 5️⃣ CERTIFICAR FACTURA
+        // 5️⃣ CERTIFICAR FACTURA (con emisor seleccionado)
         // ============================================
         const resultado = await certificarFacturaHelper({
           pago_id: null,
@@ -2048,6 +2128,8 @@ if (facturasExistentes.length > 0) {
           items: itemsFactura,
           complementos,
           created_by,
+          customConfig: emisorKey !== "CUBE" ? emisorConfig.config : undefined,
+          customSatConfig: emisorKey !== "CUBE" ? emisorConfig.satConfig : undefined,
         });
 
         console.log("🎉 ========== FACTURA GENÉRICA GENERADA ==========");
@@ -2066,8 +2148,13 @@ if (facturasExistentes.length > 0) {
             pdf_url: resultado.pdfUrl,
             receptor: resultado.receptor,
             items_facturados: itemsInput.length,
+            emisor: {
+              key: emisorKey,
+              nombre: emisorConfig.config.emisor.nombreEmisor,
+              nit: emisorConfig.config.emisor.nit,
+            },
           },
-          mensaje: `Factura ${resultado.serie}-${resultado.numero} generada exitosamente`,
+          mensaje: `Factura ${resultado.serie}-${resultado.numero} generada exitosamente por ${emisorConfig.config.emisor.nombreEmisor}`,
         };
 
       } catch (error) {
@@ -2090,6 +2177,14 @@ if (facturasExistentes.length > 0) {
           })
         ),
         created_by: t.Optional(t.Number()),
+        emisor: t.Union([
+          t.Literal("CUBE"),
+          t.Literal("SE_PRESTA"),
+          t.Literal("AMJK"),
+          t.Literal("CREACION_IMAGEN"),
+          t.Literal("GRUPO_BATRO"),
+          t.Literal("AUTOCASH"),
+        ]),
       }),
     }
   )
@@ -2218,15 +2313,30 @@ async function certificarFacturaHelper({
   items,
   complementos,
   created_by,
+  customConfig,
+  customSatConfig,
 }: {
   pago_id?: number | null;
   receptor: any;
   items: any[];
   complementos: any[];
   created_by?: number;
+  customConfig?: typeof CLUB_CASHIN_CONFIG;
+  customSatConfig?: {
+    requestor: string;
+    user: string;
+    userName: string;
+    endpointUrl: string;
+    nit?: string;
+    entity?: string;
+  };
 }) {
   try {
     console.log(`\n📄 ========== CERTIFICANDO FACTURA ==========`);
+
+    // 🔥 Usar config personalizada o default (CUBE)
+    const emisorConfig = customConfig || CLUB_CASHIN_CONFIG;
+    const satConfig = customSatConfig || SAT_CONFIG;
 
     // ============================================
     // 1️⃣ AUTO-GENERAR CAMPOS
@@ -2246,11 +2356,11 @@ const fechaHoraEmision = fechaGuatemala.toISOString().substring(0, 19);
       idInterno,
       fechaHoraEmision,
 
-      // 👇 USAR CONSTANTES DE CONFIGURACIÓN
-      tipoDocumento: CLUB_CASHIN_CONFIG.tipoDocumento,
-      codigoMoneda: CLUB_CASHIN_CONFIG.codigoMoneda,
-      emisor: CLUB_CASHIN_CONFIG.emisor,
-      frases: CLUB_CASHIN_CONFIG.frases,
+      // 👇 USAR CONSTANTES DE CONFIGURACIÓN (personalizada o default)
+      tipoDocumento: emisorConfig.tipoDocumento,
+      codigoMoneda: emisorConfig.codigoMoneda,
+      emisor: emisorConfig.emisor,
+      frases: emisorConfig.frases,
 
       receptor,
       items,
@@ -2259,19 +2369,20 @@ const fechaHoraEmision = fechaGuatemala.toISOString().substring(0, 19);
 
     console.log(`   📦 Items: ${items.length}`);
     console.log(`   📝 ID Interno: ${idInterno}`);
-    console.log(`   🏢 Emisor NIT: ${CLUB_CASHIN_CONFIG.emisor.nit}`);
+    console.log(`   🏢 Emisor NIT: ${emisorConfig.emisor.nit}`);
+    console.log(`   🏢 Emisor: ${emisorConfig.emisor.nombreEmisor}`);
 
     // ============================================
     // 3️⃣ CERTIFICAR EN SAT
     // ============================================
     const satClient = new SATClientService(
       {
-        requestor: SAT_CONFIG.requestor,
-        user: SAT_CONFIG.user,
-        userName: SAT_CONFIG.userName,
-        entity: CLUB_CASHIN_CONFIG.emisor.nit,
+        requestor: satConfig.requestor,
+        user: satConfig.user,
+        userName: satConfig.userName,
+        entity: emisorConfig.emisor.nit,
       },
-      SAT_CONFIG.endpointUrl
+      satConfig.endpointUrl
     );
 
     const dteService = new DTEService(satClient);

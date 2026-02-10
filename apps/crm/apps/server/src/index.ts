@@ -614,7 +614,6 @@ app.post("/info/validate-otp", async (c) => {
 	return c.json(result, result.status);
 });
 
-
 app.post("/info/check-liveness", async (c) => {
 	const body = await c.req.json();
 	const { dpi, phoneNumber } = body as {

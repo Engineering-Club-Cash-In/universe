@@ -19,8 +19,8 @@ import {
 	UserPlus,
 	Users,
 } from "lucide-react";
-import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
 import { useState } from "react";
+import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
 import { OpportunityDocumentUpload } from "@/components/opportunity-document-upload";
 import { Badge } from "@/components/ui/badge";

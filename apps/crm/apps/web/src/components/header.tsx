@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
 	Banknote,
 	BarChart3,
+	Bell,
 	Briefcase,
 	Building2,
 	Calculator,
@@ -115,12 +116,7 @@ export default function Header() {
 											Oportunidades
 										</Link>
 									</DropdownMenuItem>
-									<DropdownMenuItem asChild>
-										<Link to="/crm/clients" className="cursor-pointer">
-											<Users className="mr-2 h-4 w-4" />
-											Clientes
-										</Link>
-									</DropdownMenuItem>
+
 									<DropdownMenuItem asChild>
 										<Link to="/crm/companies" className="cursor-pointer">
 											<Building2 className="mr-2 h-4 w-4" />
@@ -153,6 +149,20 @@ export default function Header() {
 									)}
 								</DropdownMenuContent>
 							</DropdownMenu>
+						)}
+
+						{/* Clientes */}
+						{session && userRole && PERMISSIONS.canAccessClients(userRole) && (
+							<Button
+								variant={isActive("/crm/clients") ? "secondary" : "ghost"}
+								size="sm"
+								asChild
+							>
+								<Link to="/crm/clients">
+									<Users className="mr-2 h-4 w-4" />
+									Clientes
+								</Link>
+							</Button>
 						)}
 
 						{/* Vehículos Dropdown - Visible para todos los roles */}
@@ -192,6 +202,8 @@ export default function Header() {
 								</DropdownMenuContent>
 							</DropdownMenu>
 						)}
+
+						
 
 						{/* Cobros */}
 						{session && userRole && PERMISSIONS.canAccessCobros(userRole) && (
@@ -235,7 +247,7 @@ export default function Header() {
 							</Button>
 						)}
 
-						{/* Admin Dropdown */}
+							{/* Admin Dropdown */}
 						{session && userRole && PERMISSIONS.canAccessAdmin(userRole) && (
 							<DropdownMenu>
 								<DropdownMenuTrigger asChild>
@@ -288,10 +300,40 @@ export default function Header() {
 
 				{/* Right side */}
 				<div className="ml-auto flex items-center gap-2">
+					{session && <NotificationBell />}
 					<ModeToggle />
 					<UserMenu />
 				</div>
 			</div>
 		</div>
+	);
+}
+
+function NotificationBell() {
+	const navigate = useNavigate();
+	const { data } = useQuery({
+		...orpc.getUnreadNotificationCount.queryOptions(),
+		refetchInterval: (query) => {
+			const count = query.state.data?.count ?? 0;
+			return count > 0 ? false : 40000;
+		},
+	});
+
+	const count = data?.count ?? 0;
+
+	return (
+		<Button
+			variant="ghost"
+			size="icon"
+			className="relative"
+			onClick={() => navigate({ to: "/notifications" })}
+		>
+			<Bell className="h-5 w-5" />
+			{count > 0 && (
+				<span className="absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 font-bold text-[10px] text-white">
+					{count > 99 ? "99+" : count}
+				</span>
+			)}
+		</Button>
 	);
 }

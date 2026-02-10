@@ -22,8 +22,6 @@ export const getSourceLabel = (source: string) => {
 			return "Instagram";
 		case "google":
 			return "Google";
-		case "tiktok":
-			return "TikTok";
 		default:
 			return source;
 	}

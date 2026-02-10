@@ -1460,6 +1460,16 @@ function RouteComponent() {
 				opportunity={selectedOpportunityForModal}
 				userRole={userProfile.data?.role}
 				readOnly
+				onNavigateToLead={
+					(id: string) => {
+						//borrar los search params de oportunidad y agregar el id del lead a la pagina actual de clients
+						navigate({ 
+							to: "/crm/clients", 
+							search: { ...search, idLead: id, opportunityId: undefined }, 
+							replace: true 
+						});
+					}
+				}
 			/>
 		</div>
 	);

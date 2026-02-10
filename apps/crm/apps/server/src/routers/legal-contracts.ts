@@ -869,6 +869,7 @@ export const legalContractsRouter = {
 				assignedToRole: "analyst",
 				relatedEntityType: "opportunity",
 				relatedEntityId: input.opportunityId,
+				redirectPage: "analysis_90_details",
 			});
 
 			// Notificar al asesor de ventas asignado que el crédito está ganado
@@ -882,6 +883,7 @@ export const legalContractsRouter = {
 					assignedToRole: "sales",
 					assignedTo: opportunity.assignedTo,
 					relatedEntityType: "opportunity",
+					redirectPage: "client_details",
 					relatedEntityId: input.opportunityId,
 				});
 			}

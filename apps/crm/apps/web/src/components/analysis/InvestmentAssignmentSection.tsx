@@ -82,11 +82,11 @@ type InvestmentOpportunity = Awaited<
 	existingInvestors?: ExistingInvestor[];
 };
 
-export function InvestmentAssignmentSection() {
+export function InvestmentAssignmentSection({ initialOpportunityId }: { initialOpportunityId?: string } = {}) {
 	const queryClient = useQueryClient();
 	const [selectedOpportunityId, setSelectedOpportunityId] = useState<
 		string | null
-	>(null);
+	>(initialOpportunityId ?? null);
 	const [selectedInversionistas, setSelectedInversionistas] = useState<
 		SelectedInversionista[]
 	>([]);

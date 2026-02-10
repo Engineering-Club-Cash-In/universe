@@ -356,6 +356,7 @@ function NotificationCard({
 		assignedTo: string | null;
 		relatedEntityType: string | null;
 		relatedEntityId: string | null;
+		redirectPage?: string | null;
 		createdAt: Date;
 	};
 	onChangeStatus: (status: NotificationStatus) => void;
@@ -365,34 +366,13 @@ function NotificationCard({
 	const navigate = useNavigate();
 
 	const getEntityLink = () => {
-		if (!notification.relatedEntityType || !notification.relatedEntityId)
+		if (!notification.redirectPage || !notification.relatedEntityId)
 			return null;
 
-		const id = notification.relatedEntityId!;
-		const role = notification.assignedToRole;
+		const id = notification.relatedEntityId;
 
-		switch (notification.relatedEntityType) {
-			case "opportunity":
-				if (role === "analyst") {
-					return {
-						label: "Ver análisis",
-						action: () =>
-							navigate({
-								to: "/crm/analysis/$opportunityId",
-								params: { opportunityId: id },
-							}),
-					};
-				}
-				if (role === "juridico") {
-					return {
-						label: "Generar contratos",
-						action: () =>
-							navigate({
-								to: "/juridico/generate/$opportunityId",
-								params: { opportunityId: id },
-							}),
-					};
-				}
+		switch (notification.redirectPage) {
+			case "opportunity_details":
 				return {
 					label: "Ver oportunidad",
 					action: () =>
@@ -401,13 +381,49 @@ function NotificationCard({
 							search: { opportunityId: id },
 						}),
 				};
-			case "opportunity_client":
+			case "client_details":
 				return {
 					label: "Ver cliente",
 					action: () =>
 						navigate({
 							to: "/crm/clients",
 							search: { opportunityId: id },
+						}),
+				};
+			case "contract_details":
+				return {
+					label: "Generar contratos",
+					action: () =>
+						navigate({
+							to: "/juridico/generate/$opportunityId",
+							params: { opportunityId: id },
+						}),
+				};
+			case "analysis_details":
+				return {
+					label: "Ver análisis",
+					action: () =>
+						navigate({
+							to: "/crm/analysis/$opportunityId",
+							params: { opportunityId: id },
+						}),
+				};
+			case "analysis_50_details":
+				return {
+					label: "Ver análisis 50%",
+					action: () =>
+						navigate({
+							to: "/crm/analysis",
+							search: { opportunityId: id, stage: "investment" },
+						}),
+				};
+			case "analysis_90_details":
+				return {
+					label: "Ver análisis 90%",
+					action: () =>
+						navigate({
+							to: "/crm/analysis",
+							search: { opportunityId: id, stage: "disbursement" },
 						}),
 				};
 			default:

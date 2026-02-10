@@ -429,7 +429,7 @@ export function ModalEditCredit({
                           );
                           formik.setFieldValue(
                             `investors.${index}.porcentaje_inversion`,
-                            100 - val
+                            parseFloat((100 - val).toFixed(10))
                           );
                         }}
                         min={0}
@@ -450,7 +450,7 @@ export function ModalEditCredit({
                           );
                           formik.setFieldValue(
                             `investors.${index}.porcentaje_cash_in`,
-                            100 - val
+                            parseFloat((100 - val).toFixed(10))
                           );
                         }}
                         min={0}

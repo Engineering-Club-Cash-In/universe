@@ -88,6 +88,36 @@ const TYPE_CONFIG: Record<string, { label: string; icon: typeof Bell }> = {
 	system: { label: "Sistema", icon: Bell },
 };
 
+const REDIRECT_CONFIG: Record<
+	string,
+	{ label: string; getRoute: (id: string) => { to: string; params?: Record<string, string>; search?: Record<string, string> } }
+> = {
+	opportunity_details: {
+		label: "Ver oportunidad",
+		getRoute: (id) => ({ to: "/crm/opportunities", search: { opportunityId: id } }),
+	},
+	client_details: {
+		label: "Ver cliente",
+		getRoute: (id) => ({ to: "/crm/clients", search: { opportunityId: id } }),
+	},
+	contract_details: {
+		label: "Generar contratos",
+		getRoute: (id) => ({ to: "/juridico/generate/$opportunityId", params: { opportunityId: id } }),
+	},
+	analysis_details: {
+		label: "Ver análisis",
+		getRoute: (id) => ({ to: "/crm/analysis/$opportunityId", params: { opportunityId: id } }),
+	},
+	analysis_50_details: {
+		label: "Ver análisis 50%",
+		getRoute: (id) => ({ to: "/crm/analysis", search: { opportunityId: id, stage: "investment" } }),
+	},
+	analysis_90_details: {
+		label: "Ver análisis 90%",
+		getRoute: (id) => ({ to: "/crm/analysis", search: { opportunityId: id, stage: "disbursement" } }),
+	},
+};
+
 function NotificationsPage() {
 	const { data: session, isPending: isSessionPending } =
 		authClient.useSession();
@@ -369,66 +399,14 @@ function NotificationCard({
 		if (!notification.redirectPage || !notification.relatedEntityId)
 			return null;
 
-		const id = notification.relatedEntityId;
+		const config = REDIRECT_CONFIG[notification.redirectPage];
+		if (!config) return null;
 
-		switch (notification.redirectPage) {
-			case "opportunity_details":
-				return {
-					label: "Ver oportunidad",
-					action: () =>
-						navigate({
-							to: "/crm/opportunities",
-							search: { opportunityId: id },
-						}),
-				};
-			case "client_details":
-				return {
-					label: "Ver cliente",
-					action: () =>
-						navigate({
-							to: "/crm/clients",
-							search: { opportunityId: id },
-						}),
-				};
-			case "contract_details":
-				return {
-					label: "Generar contratos",
-					action: () =>
-						navigate({
-							to: "/juridico/generate/$opportunityId",
-							params: { opportunityId: id },
-						}),
-				};
-			case "analysis_details":
-				return {
-					label: "Ver análisis",
-					action: () =>
-						navigate({
-							to: "/crm/analysis/$opportunityId",
-							params: { opportunityId: id },
-						}),
-				};
-			case "analysis_50_details":
-				return {
-					label: "Ver análisis 50%",
-					action: () =>
-						navigate({
-							to: "/crm/analysis",
-							search: { opportunityId: id, stage: "investment" },
-						}),
-				};
-			case "analysis_90_details":
-				return {
-					label: "Ver análisis 90%",
-					action: () =>
-						navigate({
-							to: "/crm/analysis",
-							search: { opportunityId: id, stage: "disbursement" },
-						}),
-				};
-			default:
-				return null;
-		}
+		const route = config.getRoute(notification.relatedEntityId);
+		return {
+			label: config.label,
+			action: () => navigate(route as any),
+		};
 	};
 
 	const entityLink = getEntityLink();

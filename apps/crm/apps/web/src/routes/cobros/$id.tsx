@@ -914,10 +914,6 @@ function RouteComponent() {
 								</p>
 							</div>
 							<div>
-								<p className="text-muted-foreground text-sm">Cuotas Totales</p>
-								<p className="font-medium">{caso.numeroCuotas}</p>
-							</div>
-							<div>
 								<p className="text-muted-foreground text-sm">Día de Pago</p>
 								<p className="font-medium">
 									Día {caso.diaPagoMensual || 15} de cada mes

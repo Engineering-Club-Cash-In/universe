@@ -13,7 +13,7 @@ import {
 	metodoContactoEnum,
 	recuperacionesVehiculo,
 } from "../db/schema/cobros";
-import { clients, leads, opportunities } from "../db/schema/crm";
+import { clients, leads, opportunities, salesStages } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
 import {
 	cobrosProcedure,
@@ -131,6 +131,157 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 		perPage: response.perPage,
 		totalCount: response.totalCount,
 		totalPages: response.totalPages,
+	};
+}
+
+/**
+ * Verifica si la auto-creación de datos migrate está habilitada
+ */
+function isAutoMigrateEnabled(): boolean {
+	return process.env.ENABLE_AUTO_MIGRATE_OPPORTUNITIES === "true";
+}
+
+/**
+ * Parsea nombre completo en componentes (firstName, middleName, lastName, secondLastName)
+ */
+function parseNombreCompleto(nombreCompleto: string | null | undefined): {
+	firstName: string;
+	middleName: string | null;
+	lastName: string;
+	secondLastName: string | null;
+} {
+	if (!nombreCompleto) {
+		return { firstName: "N/A", middleName: null, lastName: "N/A", secondLastName: null };
+	}
+	const partes = nombreCompleto.trim().split(/\s+/);
+	if (partes.length === 1) return { firstName: partes[0], middleName: null, lastName: "N/A", secondLastName: null };
+	if (partes.length === 2) return { firstName: partes[0], middleName: null, lastName: partes[1], secondLastName: null };
+	if (partes.length === 3) return { firstName: partes[0], middleName: null, lastName: partes[1], secondLastName: partes[2] };
+	return { firstName: partes[0], middleName: partes[1], lastName: partes[2], secondLastName: partes.slice(3).join(" ") };
+}
+
+/**
+ * Auto-crea lead, vehículo y oportunidad cuando no se encuentra la oportunidad por número SIFCO.
+ * Solo se ejecuta si ENABLE_AUTO_MIGRATE_OPPORTUNITIES=true.
+ * Retorna los datos creados para que el endpoint los use, o null si no aplica.
+ */
+async function autoCrearDatosMigrate({
+	numeroSifco,
+	nombreCliente,
+	deudaTotal,
+	cuotaMensual,
+	diaPagoMensual,
+	tipoCredito,
+	userId,
+}: {
+	numeroSifco: string;
+	nombreCliente: string;
+	deudaTotal: string;
+	cuotaMensual: string;
+	diaPagoMensual: number | null;
+	tipoCredito: string | null;
+	userId: string;
+}) {
+	if (!isAutoMigrateEnabled()) return null;
+
+	console.log(`[AutoMigrate] Creando datos migrate para crédito ${numeroSifco}`);
+
+	const nombre = parseNombreCompleto(nombreCliente);
+
+	// 1. Crear Lead con solo el nombre, status "migrate"
+	const [nuevoLead] = await db
+		.insert(leads)
+		.values({
+			firstName: nombre.firstName,
+			middleName: nombre.middleName,
+			lastName: nombre.lastName,
+			secondLastName: nombre.secondLastName,
+			email: `migrado_${Date.now()}@placeholder.com`,
+			source: "other",
+			status: "migrate",
+			assignedTo: userId,
+			createdBy: userId,
+			notes: `Creado automáticamente desde Cartera-Back. Crédito SIFCO: ${numeroSifco}`,
+		})
+		.returning({ id: leads.id });
+
+	// 2. Crear Vehículo con datos nulos, status "sold"
+	const [nuevoVehiculo] = await db
+		.insert(vehicles)
+		.values({
+			make: "N/A",
+			model: "N/A",
+			year: 2000,
+			color: "N/A",
+			vehicleType: "N/A",
+			status: "sold",
+		})
+		.returning({ id: vehicles.id });
+
+	// 3. Obtener ultimo stage para la oportunidad
+	const [defaultStage] = await db
+		.select({ id: salesStages.id })
+		.from(salesStages)
+		.orderBy(desc(salesStages.order))
+		.limit(1);
+
+	if (!defaultStage) {
+		console.error("[AutoMigrate] No hay etapas de venta configuradas");
+		return null;
+	}
+
+	// 4. Crear Oportunidad enlazando lead y vehículo
+	const creditType = tipoCredito?.toLowerCase().includes("autocompra")
+		? ("autocompra" as const)
+		: ("sobre_vehiculo" as const);
+
+	await db.insert(opportunities).values({
+		title: `Crédito ${numeroSifco}`,
+		leadId: nuevoLead.id,
+		vehicleId: nuevoVehiculo.id,
+		creditType,
+		stageId: defaultStage.id,
+		assignedTo: userId,
+		createdBy: userId,
+		status: "migrate",
+		numeroSifco,
+		diaPagoMensual: diaPagoMensual,
+		cuotaMensual: cuotaMensual,
+		value: deudaTotal,
+		notes: `Crédito migrado automáticamente desde Cartera-Back.`,
+	});
+
+	console.log(`[AutoMigrate] Datos creados exitosamente para crédito ${numeroSifco} (lead: ${nuevoLead.id}, vehiculo: ${nuevoVehiculo.id})`);
+
+	return {
+		leadId: nuevoLead.id,
+		vehiculoId: nuevoVehiculo.id,
+		leadInfo: {
+			nombre: `${nombre.firstName} ${nombre.lastName}`.trim(),
+			email: null as string | null,
+			telefono: null as string | null,
+		},
+		vehiculo: {
+			make: "N/A" as string | null,
+			model: "N/A" as string | null,
+			year: 2000 as number | null,
+			licensePlate: null as string | null,
+			tipo: null as string | null,
+			motor: null as string | null,
+			chasis: null as string | null,
+			asientos: null as number | null,
+			uso: null as string | null,
+			numeroPoliza: null as string | null,
+			fechaInicioSeguro: null as Date | null,
+			fechaVencimientoSeguro: null as Date | null,
+			montoAsegurado: null as string | null,
+		},
+		oportunidadData: {
+			notes: null as string | null,
+			cuotaMensual: cuotaMensual,
+			diaPago: diaPagoMensual,
+			creditType: creditType as string | null,
+		},
 	};
 }
 
@@ -1499,6 +1650,23 @@ export const cobrosRouter = {
 						diaPago: opp.oportunidadDiaPago,
 						creditType: opp.oportunidadCreditType,
 					};
+				} else {
+					// No se encontró oportunidad: auto-crear datos migrate si está habilitado
+					const datosMigrate = await autoCrearDatosMigrate({
+						numeroSifco,
+						nombreCliente: creditoCompleto.usuario.nombre,
+						deudaTotal: creditoCompleto.credito.deudatotal,
+						cuotaMensual: creditoCompleto.credito.cuota,
+						diaPagoMensual: null,
+						tipoCredito: creditoCompleto.credito.tipoCredito,
+						userId: context.user.id,
+					});
+
+					if (datosMigrate) {
+						vehiculo = datosMigrate.vehiculo;
+						leadInfo = datosMigrate.leadInfo;
+						oportunidadData = datosMigrate.oportunidadData;
+					}
 				}
 
 				// 4. Buscar o crear caso de cobros automáticamente

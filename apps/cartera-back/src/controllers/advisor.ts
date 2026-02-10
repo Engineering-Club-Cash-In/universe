@@ -435,10 +435,15 @@ export async function getAsesorConMenorCarga(): Promise<number> {
     const asesoresActivos = await db
       .select({
         asesor_id: asesores.asesor_id,
-        nombre: asesores.nombre, 
+        nombre: asesores.nombre,
       })
       .from(asesores)
-      .where(eq(asesores.activo, true));
+      .where(
+        and(
+          eq(asesores.activo, true),
+          sql`${asesores.nombre} != 'Gerencia'`
+        )
+      );
 
     if (asesoresActivos.length === 0) {
       throw new Error("No hay asesores activos disponibles");

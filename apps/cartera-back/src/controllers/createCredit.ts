@@ -546,14 +546,14 @@ const generatePaymentDates = (plazo: number): string[] => {
   fechas.push(fechaHoyGuate);
 
   for (let i = 0; i < plazo; i++) {
-    const baseDate = new Date(startDate);
-    baseDate.setMonth(baseDate.getMonth() + i + 1);
+    const anioBase = startDate.getFullYear();
+    const mesBase = startDate.getMonth() + i + 1; // JS maneja overflow de meses
 
-    const mes = baseDate.getMonth();
-    const anio = baseDate.getFullYear();
-    const ultimoDiaMes = new Date(anio, mes + 1, 0).getDate();
-    const diaPago = ultimoDiaMes < 30 ? ultimoDiaMes : 30;
-    const fechaLocal = new Date(anio, mes, diaPago, 12, 0, 0);
+    // Último día del mes destino (ej: Feb → 28/29)
+    const ultimoDiaMes = new Date(anioBase, mesBase + 1, 0).getDate();
+    const diaPago = Math.min(30, ultimoDiaMes);
+
+    const fechaLocal = new Date(anioBase, mesBase, diaPago, 12, 0, 0);
     const fechaGuateStr = fechaLocal.toLocaleDateString("sv-SE", {
       timeZone: "America/Guatemala",
     });

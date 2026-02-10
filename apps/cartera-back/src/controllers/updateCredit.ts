@@ -110,13 +110,17 @@ const updateInstallments = async ({
       datos: {
         cuota: cuotaMensual.toString(),
         cuota_interes: cuotaInteresCredito,
-        capital_restante: capitalEnMemoria.round(2).toString(),
+        capital_restante: abonoCapital.round(2).toString(),
         interes_restante: interesMes.round(2).toString(),
         iva_12_restante: ivaMes.round(2).toString(),
         seguro_restante: seguroFijoPorMes.toString(),
         gps_restante: gpsFijoPorMes.toString(),
         total_restante: capitalEnMemoria.round(2).toString(),
         membresias: membresiasFijoPorMes.toString(),
+        membresias_pago: pago.validationStatus ==="pending"  ? pago.membresias_pago : "0",
+        membresias_mes: pago.validationStatus ==="pending"  ? pago.membresias_mes : "0",
+
+
         
       },
     };

@@ -32,6 +32,7 @@ import {
 	opportunities,
 	opportunityStageHistory,
 	salesStages,
+	leadSourceEnum,
 } from "../db/schema/crm";
 import {
 	analysisChecklists,
@@ -506,15 +507,7 @@ export const crmRouter = {
 				hasCreditCard: z.boolean().default(false),
 				jobTitle: z.string().optional(),
 				companyId: z.string().uuid().optional(),
-				source: z.enum([
-					"website",
-					"referral",
-					"cold_call",
-					"email",
-					"social_media",
-					"event",
-					"other",
-				]),
+				source: z.enum(leadSourceEnum.enumValues),
 				assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
 				notes: z.string().optional(),
 			}),
@@ -579,15 +572,7 @@ export const crmRouter = {
 				jobTitle: z.string().optional(),
 				companyId: z.string().uuid().optional(),
 				source: z
-					.enum([
-						"website",
-						"referral",
-						"cold_call",
-						"email",
-						"social_media",
-						"event",
-						"other",
-					])
+					.enum(leadSourceEnum.enumValues)
 					.optional(),
 				status: z
 					.enum(["new", "contacted", "qualified", "unqualified", "converted"])
@@ -1018,15 +1003,7 @@ export const crmRouter = {
 				vehicleId: z.string().uuid().optional(),
 				creditType: z.enum(["autocompra", "sobre_vehiculo"]),
 				source: z
-					.enum([
-						"website",
-						"referral",
-						"cold_call",
-						"email",
-						"social_media",
-						"event",
-						"other",
-					])
+					.enum(leadSourceEnum.enumValues)
 					.optional(),
 				loanPurpose: z.enum(["personal", "business"]).optional(),
 				value: z.string().optional(), // Will be converted to decimal

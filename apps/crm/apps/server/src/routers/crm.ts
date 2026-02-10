@@ -1532,6 +1532,7 @@ export const crmRouter = {
 						createdBy: context.userId,
 						createdByRole: context.userRole,
 						assignedToRole: "sales",
+						redirectPage: "opportunity_details",
 						assignedTo: currentOpportunity[0].assignedTo,
 						relatedEntityType: "opportunity",
 						relatedEntityId: id,
@@ -1547,6 +1548,7 @@ export const crmRouter = {
 						createdBy: context.userId,
 						createdByRole: context.userRole,
 						assignedToRole: "analyst",
+						redirectPage: "analysis_details",
 						relatedEntityType: "opportunity",
 						relatedEntityId: id,
 					});
@@ -1963,6 +1965,7 @@ export const crmRouter = {
 							createdByRole: context.userRole,
 							assignedToRole: "sales",
 							assignedTo: opportunity[0].assignedTo,
+							redirectPage: "opportunity_details",
 							relatedEntityType: "opportunity",
 							relatedEntityId: input.opportunityId,
 						});
@@ -1976,6 +1979,7 @@ export const crmRouter = {
 						createdBy: context.userId,
 						createdByRole: context.userRole,
 						assignedToRole: "sales_supervisor",
+						redirectPage: "opportunity_details",
 						relatedEntityType: "opportunity",
 						relatedEntityId: input.opportunityId,
 					});
@@ -1989,6 +1993,7 @@ export const crmRouter = {
 							createdBy: context.userId,
 							createdByRole: context.userRole,
 							assignedToRole: "sales",
+							redirectPage: "opportunity_details",
 							assignedTo: opportunity[0].assignedTo,
 							relatedEntityType: "opportunity",
 							relatedEntityId: input.opportunityId,
@@ -2070,6 +2075,7 @@ export const crmRouter = {
 				createdBy: context.userId,
 				createdByRole: context.userRole,
 				assignedToRole: "analyst",
+				redirectPage: "analysis_50_details",
 				relatedEntityType: "opportunity",
 				relatedEntityId: input.opportunityId,
 			});
@@ -2177,6 +2183,7 @@ export const crmRouter = {
 					createdBy: context.userId,
 					createdByRole: context.userRole,
 					assignedToRole: "sales",
+					redirectPage: "opportunity_details",
 					assignedTo: opportunity.assignedTo,
 					relatedEntityType: "opportunity",
 					relatedEntityId: input.opportunityId,
@@ -4319,6 +4326,7 @@ export const crmRouter = {
 				assignedToRole: "accounting",
 				relatedEntityType: "opportunity_client",
 				relatedEntityId: input.opportunityId,
+				redirectPage: "client_details",
 			});
 
 			return {
@@ -4976,6 +4984,7 @@ export const crmRouter = {
 				assignedToRole: "juridico",
 				relatedEntityType: "opportunity",
 				relatedEntityId: input.opportunityId,
+				redirectPage: "contract_details",
 			});
 
 			return {

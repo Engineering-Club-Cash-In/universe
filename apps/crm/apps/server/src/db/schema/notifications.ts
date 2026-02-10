@@ -35,6 +35,16 @@ export const notificationEntityTypeEnum = pgEnum("notification_entity_type", [
 	"opportunity_client",
 ]);
 
+export const notificationRedirectPageEnum = pgEnum("notification_redirect_page", [
+	"opportunity_details",
+	"client_details",
+	"vehicle_details",
+	"contract_details",
+	"analysis_details",
+	"analysis_50_details",
+	"analysis_90_details",
+]);
+
 // Notifications table
 export const notifications = pgTable("notifications", {
 	id: uuid("id").primaryKey().defaultRandom(),
@@ -58,6 +68,9 @@ export const notifications = pgTable("notifications", {
 	// Entidad relacionada (polimórfica)
 	relatedEntityType: notificationEntityTypeEnum("related_entity_type"),
 	relatedEntityId: uuid("related_entity_id"),
+
+	// Redirect URL
+	redirectPage: notificationRedirectPageEnum("redirect_page"),
 
 	// Timestamps de estado
 	readAt: timestamp("read_at"),

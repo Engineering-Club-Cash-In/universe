@@ -16,6 +16,14 @@ export const getSourceLabel = (source: string) => {
 			return "Evento";
 		case "other":
 			return "Otro";
+		case "facebook":
+			return "Facebook";
+		case "instagram":
+			return "Instagram";
+		case "google":
+			return "Google";
+		case "tiktok":
+			return "TikTok";
 		default:
 			return source;
 	}

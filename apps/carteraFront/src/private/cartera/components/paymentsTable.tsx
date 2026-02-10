@@ -282,6 +282,12 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
         bgColor: "bg-green-100",
         icon: <Check className="w-4 h-4" />,
       },
+      capital: {
+        label: "Capital",
+        color: "text-blue-700",
+        bgColor: "bg-blue-100",
+        icon: <DollarSign className="w-4 h-4" />,
+      },
     };
 
     return configs[status] || configs.no_required;

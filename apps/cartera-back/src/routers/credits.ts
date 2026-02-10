@@ -10,6 +10,7 @@ import {
   resetCredit,
   getCreditStats,
   toggleCancelacionActivo,
+  actualizarNitCredito,
 } from "../controllers/credits";
 import { getCuotasPorDiaYAsesor, upsertEfectividadAsesores, getEfectividadAsesores } from "../controllers/paymentsByAdvisor";
 import { z } from "zod";
@@ -39,7 +40,7 @@ import { authMiddleware } from "./midleware";
 import { getCreditosWithUserByMesAnioExcel } from "../controllers/reports";
 import { insertCredit } from "../controllers/createCredit";
 import {  updateAllInstallments, updateCredit, recalculateQuota } from "../controllers/updateCredit";
-import { updateDueDates, updateSingleDueDate, fixCreditosWithoutFebruary } from "../controllers/updateDueDate";
+import { updateDueDates, updateSingleDueDate, fixCreditosWithoutFebruary, updateDueDatesFromJson } from "../controllers/updateDueDate";
 import { creditos, cuotas_credito } from "../database/db";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../database"; 
@@ -1119,6 +1120,18 @@ export const creditRouter = new Elysia()
     },
   })
   // ========================================
+  // ENDPOINT: ACTUALIZAR FECHAS DESDE JSON
+  // ========================================
+  .post("/update-due-dates-from-json", async ({ set }) => {
+    return updateDueDatesFromJson({ set });
+  }, {
+    detail: {
+      summary: "Actualizar fechas de vencimiento desde JSON",
+      description: "Lee resultado_ultimos_pagos.json, extrae el día del campo 'pago' y actualiza fecha_vencimiento de TODAS las cuotas. También actualiza fecha_pago solo si ya tiene valor.",
+      tags: ["Créditos", "Cuotas"],
+    },
+  })
+  // ========================================
   // ENDPOINT: CUOTAS POR DÍA Y ASESOR
   // ========================================
   .get("/cuotas-por-dia", async ({ query, set }) => {
@@ -1241,3 +1254,26 @@ export const creditRouter = new Elysia()
       return { message: "Error consultando efectividad", error: String(error) };
     }
   })
+  .post(
+    "/actualizar-nit",
+    async ({ body, set }) => {
+      try {
+        const result = await actualizarNitCredito(body);
+        if (!result.success) set.status = 404;
+        return result;
+      } catch (error) {
+        set.status = 500;
+        return { success: false, message: "Error actualizando NIT", error: String(error) };
+      }
+    },
+    {
+      body: t.Object({
+        numero_credito_sifco: t.String(),
+        nit: t.String(),
+      }),
+      detail: {
+        tags: ["Créditos"],
+        summary: "Actualizar NIT del usuario de un crédito",
+      },
+    }
+  )

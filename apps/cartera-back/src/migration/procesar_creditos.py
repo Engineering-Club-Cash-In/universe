@@ -13,11 +13,9 @@ CARPETA_EXCELS = r"C:\Users\Kelvin Palacios\Documents\analis de datos"
 ARCHIVO_EXCEL = "Cartera Préstamos (Cash-In) NUEVA 3.0.xlsx"
 # 📅 Hojas a procesar (orden cronológico inverso - más reciente primero)
 HOJAS_A_PROCESAR = [   
-     
-    "Diciembre 2025",
     "Enero 2026",
     "Febrero 2026",
-    "Marzo 2026",
+    "Marzo 2026"
 ]
 
 # 🔥 MODO PRUEBA
@@ -443,7 +441,7 @@ def validar_porcentajes(fila: Dict[str, Any], credito_sifco: str) -> Dict[str, A
 def leer_hoja_excel(
     archivo_path: str,
     nombre_hoja: str,
-    solo_pools_raros: bool = True
+    solo_pools_raros: bool = False  # 🔥 False = procesa TODO, True = solo pools raros
 ) -> Dict[str, Dict[str, Any]]:
     """
     Lee una hoja específica del Excel y agrupa filas por crédito.

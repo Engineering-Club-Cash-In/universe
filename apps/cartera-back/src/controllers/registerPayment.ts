@@ -13,7 +13,7 @@ import {
   pagos_credito_inversionistas,
   cuentasEmpresa,
 } from "../database/db";
-import { eq, and, lte, asc, sql, gt, gte, or, ne, inArray } from "drizzle-orm";
+import { eq, and, lte, asc, desc, sql, gt, gte, or, ne, inArray } from "drizzle-orm";
 import { updateMora } from "./latefee";
 import { insertPagosCreditoInversionistas } from "./payments";
 import { processAndReplaceCreditInvestors } from "./investor";
@@ -1027,7 +1027,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           abono_seguro: abono_seguro.toString(),
           abono_gps: abono_gps.toString(),
           pago_del_mes: pago_del_mesBig.toString(),
-          monto_boleta: montoBoleta.toString(),
+          monto_boleta: totalPagado.toString(),
           capital_restante: nuevo_capital_restante.toString(),
           interes_restante: nuevo_interes_restante.toString(),
           iva_12_restante: nuevo_iva_restante.toString(),
@@ -1043,7 +1043,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           membresias_mes: abono_membresias.toString(),
           otros: otrosBig?.toString() ?? "0",
           mora: moraBig.toString(),
-          monto_boleta_cuota: montoBoleta.toString(),
+          monto_boleta_cuota: totalPagado.toString(),
           seguro_total: credito.seguro_10_cuotas?.toString() ?? "0",
           pagado: cuota_pagada,
           facturacion: "si",
@@ -1249,21 +1249,37 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
 
       // 7. Procesar abono directo a capital (si aplica)
     }
-    const hoy = new Date();
-    const [cuotaActualData] = await db
-      .select()
+    // Jalar la primera cuota realmente sin pagar (cuota.pagado=false Y pago.pagado!=true)
+    const hoy = new Date().toISOString().slice(0, 10);
+    const [primeraCuotaSinPagar] = await db
+      .select({
+        cuota_id: cuotas_credito.cuota_id,
+        numero_cuota: cuotas_credito.numero_cuota,
+        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+        pago_pagado: pagos_credito.pagado,
+      })
       .from(cuotas_credito)
+      .leftJoin(pagos_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
       .where(
         and(
           eq(cuotas_credito.credito_id, credito_id),
           gt(cuotas_credito.numero_cuota, 0),
-          gte(cuotas_credito.fecha_vencimiento, hoy.toISOString().slice(0, 10))
+          eq(cuotas_credito.pagado, false),
+          or(
+            eq(pagos_credito.pagado, false),
+            sql`${pagos_credito.pagado} IS NULL`
+          )
         )
       )
-      .orderBy(cuotas_credito.fecha_vencimiento)
+      .orderBy(asc(cuotas_credito.numero_cuota))
       .limit(1);
+
     const abonoCapital = new Big(abono_directo_capital ?? 0);
-    if (cuotaActualData.pagado && abonoCapital.gt(0)) {
+    // Si la primera cuota realmente sin pagar aún no vence → al día → capital
+    const fechaVenc = primeraCuotaSinPagar?.fecha_vencimiento ?? null;
+    const estaAlDia = !primeraCuotaSinPagar || (fechaVenc && fechaVenc >= hoy);
+
+    if (estaAlDia && abonoCapital.gt(0)) {
       console.log("\n💰 ========== ABONO DIRECTO A CAPITAL ==========");
       console.log(`💵 Monto: Q${abonoCapital.toString()}`);
 
@@ -1304,8 +1320,8 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         .insert(cuotas_credito)
         .values({
           credito_id: credito_id,
-          numero_cuota: cuotaActualData.numero_cuota,
-          fecha_vencimiento: cuotaActualData.fecha_vencimiento,
+          numero_cuota: primeraCuotaSinPagar.numero_cuota,
+          fecha_vencimiento: primeraCuotaSinPagar.fecha_vencimiento,
           pagado: true,
         })
         .returning();
@@ -1812,6 +1828,9 @@ export async function aplicarPagoAlCredito(pago_id: number) {
     for (const p of todosPagosCuota) {
       abono_capital_total = abono_capital_total.plus(p.abono_capital ?? 0);
     }
+
+    // Incluir el abono del pago actual (aún no está "validated")
+    abono_capital_total = abono_capital_total.plus(pago.abono_capital ?? 0);
 
     console.log(`💰 Total capital: ${abono_capital_total.toString()}`);
     const nuevo_capital = capital_actual.minus(abono_capital_total);

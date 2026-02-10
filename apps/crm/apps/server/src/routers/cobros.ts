@@ -188,37 +188,7 @@ async function autoCrearDatosMigrate({
 
 	const nombre = parseNombreCompleto(nombreCliente);
 
-	// 1. Crear Lead con solo el nombre, status "migrate"
-	const [nuevoLead] = await db
-		.insert(leads)
-		.values({
-			firstName: nombre.firstName,
-			middleName: nombre.middleName,
-			lastName: nombre.lastName,
-			secondLastName: nombre.secondLastName,
-			email: `migrado_${Date.now()}@placeholder.com`,
-			source: "other",
-			status: "migrate",
-			assignedTo: userId,
-			createdBy: userId,
-			notes: `Creado automáticamente desde Cartera-Back. Crédito SIFCO: ${numeroSifco}`,
-		})
-		.returning({ id: leads.id });
-
-	// 2. Crear Vehículo con datos nulos, status "sold"
-	const [nuevoVehiculo] = await db
-		.insert(vehicles)
-		.values({
-			make: "N/A",
-			model: "N/A",
-			year: 2000,
-			color: "N/A",
-			vehicleType: "N/A",
-			status: "sold",
-		})
-		.returning({ id: vehicles.id });
-
-	// 3. Obtener ultimo stage para la oportunidad
+	// Obtener stage antes de la transacción (solo lectura)
 	const [defaultStage] = await db
 		.select({ id: salesStages.id })
 		.from(salesStages)
@@ -230,32 +200,67 @@ async function autoCrearDatosMigrate({
 		return null;
 	}
 
-	// 4. Crear Oportunidad enlazando lead y vehículo
 	const creditType = tipoCredito?.toLowerCase().includes("autocompra")
 		? ("autocompra" as const)
 		: ("sobre_vehiculo" as const);
 
-	await db.insert(opportunities).values({
-		title: `Crédito ${numeroSifco}`,
-		leadId: nuevoLead.id,
-		vehicleId: nuevoVehiculo.id,
-		creditType,
-		stageId: defaultStage.id,
-		assignedTo: userId,
-		createdBy: userId,
-		status: "migrate",
-		numeroSifco,
-		diaPagoMensual: diaPagoMensual,
-		cuotaMensual: cuotaMensual,
-		value: deudaTotal,
-		notes: `Crédito migrado automáticamente desde Cartera-Back.`,
+	// Transacción atómica: si algo falla, se revierte todo
+	const result = await db.transaction(async (tx) => {
+		// 1. Crear Lead con solo el nombre, status "migrate"
+		const [nuevoLead] = await tx
+			.insert(leads)
+			.values({
+				firstName: nombre.firstName,
+				middleName: nombre.middleName,
+				lastName: nombre.lastName,
+				secondLastName: nombre.secondLastName,
+				email: `migrado_${Date.now()}@placeholder.com`,
+				source: "other",
+				status: "migrate",
+				assignedTo: userId,
+				createdBy: userId,
+				notes: `Creado automáticamente desde Cartera-Back. Crédito SIFCO: ${numeroSifco}`,
+			})
+			.returning({ id: leads.id });
+
+		// 2. Crear Vehículo con datos nulos, status "sold"
+		const [nuevoVehiculo] = await tx
+			.insert(vehicles)
+			.values({
+				make: "N/A",
+				model: "N/A",
+				year: 2000,
+				color: "N/A",
+				vehicleType: "N/A",
+				status: "sold",
+			})
+			.returning({ id: vehicles.id });
+
+		// 3. Crear Oportunidad enlazando lead y vehículo
+		await tx.insert(opportunities).values({
+			title: `Crédito ${numeroSifco}`,
+			leadId: nuevoLead.id,
+			vehicleId: nuevoVehiculo.id,
+			creditType,
+			stageId: defaultStage.id,
+			assignedTo: userId,
+			createdBy: userId,
+			status: "migrate",
+			numeroSifco,
+			diaPagoMensual: diaPagoMensual,
+			cuotaMensual: cuotaMensual,
+			value: deudaTotal,
+			notes: `Crédito migrado automáticamente desde Cartera-Back.`,
+		});
+
+		return { leadId: nuevoLead.id, vehiculoId: nuevoVehiculo.id };
 	});
 
-	console.log(`[AutoMigrate] Datos creados exitosamente para crédito ${numeroSifco} (lead: ${nuevoLead.id}, vehiculo: ${nuevoVehiculo.id})`);
+	console.log(`[AutoMigrate] Datos creados exitosamente para crédito ${numeroSifco} (lead: ${result.leadId}, vehiculo: ${result.vehiculoId})`);
 
 	return {
-		leadId: nuevoLead.id,
-		vehiculoId: nuevoVehiculo.id,
+		leadId: result.leadId,
+		vehiculoId: result.vehiculoId,
 		leadInfo: {
 			nombre: `${nombre.firstName} ${nombre.lastName}`.trim(),
 			email: null as string | null,

@@ -8,7 +8,7 @@ import {
 } from "../controllers/payments"; 
 import { z } from "zod";
 import { promises as fs } from "fs";
-import { mapPagosPorCreditos } from "../migration/migration";
+import { mapPagosPorCreditos, mapPagosDesdeJson } from "../migration/migration";
 import { authMiddleware } from "./midleware";
 import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagosToExcel } from "../controllers/reports";
 import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment } from "../controllers/registerPayment";
@@ -17,7 +17,7 @@ import { db } from "../database";
 import { creditos, pagos_credito } from "../database/db";
 import { reversePayment } from "../controllers/reversePayment";
 import { ajustarCuotasConSIFCO, marcarCuotasPagadasHastaNumero, procesarPagosSIFCODesdeJSON } from "../controllers/migratePayments";
-import { updateInstallments } from "../controllers/updateCredit";
+import { updateInstallments, updateAllInstallments } from "../controllers/updateCredit";
 
 export const liquidatePaymentsSchema = z.object({
   pago_id: z.number().int().positive(),
@@ -514,7 +514,6 @@ export const paymentRouter = new Elysia()
 })
 
 
-  // 🔍 Endpoint para probar UN SOLO crédito (por si acaso)
   .post(
     "/ajustar-credito",
     async ({ body }) => {
@@ -877,6 +876,7 @@ export const paymentRouter = new Elysia()
           const registroPago = jsonPagos.find((p: any) => p.numeroCredito === numeroSifco);
           
           let hastaCuota = 0;
+          let fechaPagoJson: string | undefined;
 
           if (!registroPago || !registroPago.creditos || registroPago.creditos.length === 0) {
             console.log(`⚠️ Crédito ${numeroSifco} no encontrado en archivo de pagos`);
@@ -885,24 +885,17 @@ export const paymentRouter = new Elysia()
             // El primer elemento del array "creditos" tiene la info del último pago
             const ultimoPago = registroPago.creditos[0];
             hastaCuota = parseInt(ultimoPago.numeroCuota, 10);
-            
-            console.log(`🔍 Crédito ${numeroSifco} encontrado - Último pago: ${ultimoPago.fechaUltimoPago}, Hasta cuota: ${hastaCuota}`);
+            fechaPagoJson = ultimoPago.pago; // ej: "2026-01-30 00:00:00"
+
+            console.log(`🔍 Crédito ${numeroSifco} encontrado - Último pago: ${ultimoPago.fechaUltimoPago}, Hasta cuota: ${hastaCuota}, Fecha pago: ${fechaPagoJson}`);
           }
 
-          // 8️⃣ PASO 1: Mapear pagos desde SIFCO
-          console.log(`📥 Mapeando pagos desde SIFCO para ${numeroSifco}...`);
-          await mapPagosPorCreditos(numeroSifco);
-          console.log(`✅ Pagos mapeados para ${numeroSifco}`);
+          // 8️⃣ PASO 1: Crear cuotas y pagos desde JSON (sin SIFCO)
+          console.log(`📥 Creando cuotas y pagos desde JSON para ${numeroSifco} (hasta cuota ${hastaCuota})...`);
+          await mapPagosDesdeJson(numeroSifco, hastaCuota, fechaPagoJson);
+          console.log(`✅ Cuotas y pagos creados para ${numeroSifco}`);
 
-          // 9️⃣ PASO 2: Marcar cuotas como pagadas
-          console.log(`✏️ Marcando cuotas como pagadas hasta ${hastaCuota} para ${numeroSifco}...`);
-          await marcarCuotasPagadasHastaNumero({
-            numero_credito_sifco: numeroSifco,
-            hasta_cuota: hastaCuota,
-          });
-          console.log(`✅ Cuotas marcadas para ${numeroSifco}`);
-
-          // 🔟 PASO 3: Recalcular todas las cuotas con LA CUOTA DEL CRÉDITO
+          // 9️⃣ PASO 2: Recalcular todas las cuotas con LA CUOTA DEL CRÉDITO
           console.log(`🔧 Recalculando todas las cuotas con Q${cuota}...`);
           await updateInstallments({
             numero_credito_sifco: numeroSifco,
@@ -1041,5 +1034,88 @@ export const paymentRouter = new Elysia()
     tags: ["Utilidades"],
     summary: "Reparar JSON de créditos corrupto",
     description: "Lee, valida y repara el JSON de créditos sin pagos",
+  },
+})
+
+// ========================================
+// MARCAR CUOTAS PAGADAS DESDE JSON
+// ========================================
+.post("/marcar-cuotas-desde-json", async ({ set }) => {
+  const rutaArchivoPagos =
+    "C:\\Users\\Kelvin Palacios\\Documents\\analis de datos\\resultado_ultimos_pagos.json";
+
+  try {
+    console.log(`\n${"=".repeat(60)}`);
+    console.log(`MARCANDO CUOTAS PAGADAS DESDE JSON`);
+    console.log(`${"=".repeat(60)}`);
+
+    // 1. Leer JSON
+    const contenido = await fs.readFile(rutaArchivoPagos, "utf-8");
+    const jsonPagos = JSON.parse(contenido);
+    console.log(`Total registros en JSON: ${jsonPagos.length}\n`);
+
+    let ok = 0;
+    let fail = 0;
+    let sinPago = 0;
+
+    // 2. Para cada crédito, extraer numeroCuota y llamar marcarCuotasPagadasHastaNumero
+    for (const registro of jsonPagos) {
+      const numeroCredito = registro.numeroCredito;
+      const creditoInfo = registro.creditos?.[0];
+
+      if (!creditoInfo?.numeroCuota) {
+        sinPago++;
+        continue;
+      }
+
+      const hastaCuota = parseInt(creditoInfo.numeroCuota, 10);
+
+      try {
+        const fechaPago = creditoInfo.pago ?? null;
+        console.log(`  ${numeroCredito}: marcando hasta cuota ${hastaCuota} (día pago: ${fechaPago})...`);
+        await marcarCuotasPagadasHastaNumero({
+          numero_credito_sifco: numeroCredito,
+          hasta_cuota: hastaCuota,
+          fecha_primer_pago: fechaPago,
+        });
+        ok++;
+      } catch (error: any) {
+        fail++;
+        console.error(`  ERROR ${numeroCredito}: ${error.message}`);
+      }
+    }
+
+    // 3. Al final, recalcular todas las cuotas
+    console.log(`\nRecalculando todas las cuotas...`);
+   await updateAllInstallments();
+    console.log(`Cuotas recalculadas.`);
+
+    console.log(`\n${"=".repeat(60)}`);
+    console.log(`RESUMEN`);
+    console.log(`${"=".repeat(60)}`);
+    console.log(`Exitosos: ${ok}`);
+    console.log(`Fallidos: ${fail}`);
+    console.log(`Sin numeroCuota: ${sinPago}`);
+    console.log(`Total JSON: ${jsonPagos.length}`);
+
+    set.status = 200;
+    return {
+      success: true,
+      total_json: jsonPagos.length,
+      exitosos: ok,
+      fallidos: fail,
+      sin_cuota: sinPago,
+    };
+  } catch (error: any) {
+    console.error("Error en marcar-cuotas-desde-json:", error);
+    set.status = 500;
+    return { success: false, message: error.message };
+  }
+},
+{
+  detail: {
+    tags: ["Créditos"],
+    summary: "Marcar cuotas pagadas desde JSON",
+    description: "Lee resultado_ultimos_pagos.json, marca cuotas pagadas con marcarCuotasPagadasHastaNumero y recalcula con updateAllInstallments",
   },
 })

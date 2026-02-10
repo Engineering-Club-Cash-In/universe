@@ -1301,12 +1301,12 @@ function RouteComponent() {
 			{salesStagesQuery.data && salesStagesQuery.data.length > 0 && (
 				<div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
 					{salesStagesQuery.data.map((stage) => {
-						const stageOpps = opportunitiesQuery.data?.filter(
-							(opp) => opp.stage?.id === stage.id,
-						) || [];
+						const stageOpps =
+							opportunitiesQuery.data?.filter(
+								(opp) => opp.stage?.id === stage.id,
+							) || [];
 						const stageValue = stageOpps.reduce(
-							(sum, opp) =>
-								sum + (Number.parseFloat(opp.value || "0") || 0),
+							(sum, opp) => sum + (Number.parseFloat(opp.value || "0") || 0),
 							0,
 						);
 						return (
@@ -1319,10 +1319,16 @@ function RouteComponent() {
 									<p className="truncate font-medium text-muted-foreground text-xs">
 										{stage.name}
 									</p>
-									<p className="mt-1 font-bold text-2xl" style={{ fontVariantNumeric: "tabular-nums" }}>
+									<p
+										className="mt-1 font-bold text-2xl"
+										style={{ fontVariantNumeric: "tabular-nums" }}
+									>
 										{stageOpps.length}
 									</p>
-									<p className="mt-0.5 text-muted-foreground text-sm" style={{ fontVariantNumeric: "tabular-nums" }}>
+									<p
+										className="mt-0.5 text-muted-foreground text-sm"
+										style={{ fontVariantNumeric: "tabular-nums" }}
+									>
 										Q{stageValue.toLocaleString()}
 									</p>
 								</CardContent>
@@ -2411,13 +2417,16 @@ function RouteComponent() {
 				</Dialog>
 
 				{/* Edit Opportunity Dialog */}
-				<Dialog open={isEditDialogOpen} onOpenChange={(open) => {
+				<Dialog
+					open={isEditDialogOpen}
+					onOpenChange={(open) => {
 						setIsEditDialogOpen(open);
 						if (!open) {
 							setLeadsSearch("");
 							setDebouncedLeadsSearch("");
 						}
-					}}>
+					}}
+				>
 					<DialogContent className="scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent dark:scrollbar-thumb-gray-700 max-h-[90vh] min-w-[56rem] max-w-5xl overflow-y-auto">
 						<DialogHeader>
 							<DialogTitle>Editar Oportunidad</DialogTitle>
@@ -2475,31 +2484,41 @@ function RouteComponent() {
 								<div>
 									<editOpportunityForm.Field name="leadId">
 										{(field) => {
-											const queryLeads = leadsQuery.data?.data?.map((lead) => ({
-												value: lead.id,
-												label: `${lead.firstName} ${lead.lastName}`,
-											})) || [];
+											const queryLeads =
+												leadsQuery.data?.data?.map((lead) => ({
+													value: lead.id,
+													label: `${lead.firstName} ${lead.lastName}`,
+												})) || [];
 											const currentLead = selectedOpportunity?.lead;
-											const hasCurrentInResults = currentLead && queryLeads.some((o) => o.value === currentLead.id);
-											const leadOptions = currentLead && !hasCurrentInResults
-												? [{ value: currentLead.id, label: `${currentLead.firstName} ${currentLead.lastName}` }, ...queryLeads]
-												: queryLeads;
+											const hasCurrentInResults =
+												currentLead &&
+												queryLeads.some((o) => o.value === currentLead.id);
+											const leadOptions =
+												currentLead && !hasCurrentInResults
+													? [
+															{
+																value: currentLead.id,
+																label: `${currentLead.firstName} ${currentLead.lastName}`,
+															},
+															...queryLeads,
+														]
+													: queryLeads;
 											return (
-											<div className="space-y-2">
-												<Label htmlFor={field.name}>Lead</Label>
-												<Combobox
-													options={[
-														{ value: "none", label: "Sin lead" },
-														...leadOptions,
-													]}
-													value={field.state.value ?? null}
-													onChange={(value) => field.handleChange(value)}
-													onSearchChange={setLeadsSearch}
-													isLoading={leadsQuery.isFetching}
-													placeholder="Buscar lead..."
-													width="full"
-												/>
-											</div>
+												<div className="space-y-2">
+													<Label htmlFor={field.name}>Lead</Label>
+													<Combobox
+														options={[
+															{ value: "none", label: "Sin lead" },
+															...leadOptions,
+														]}
+														value={field.state.value ?? null}
+														onChange={(value) => field.handleChange(value)}
+														onSearchChange={setLeadsSearch}
+														isLoading={leadsQuery.isFetching}
+														placeholder="Buscar lead..."
+														width="full"
+													/>
+												</div>
 											);
 										}}
 									</editOpportunityForm.Field>

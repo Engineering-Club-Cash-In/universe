@@ -8,6 +8,7 @@ import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { RadioGroup, RadioGroupItem } from './ui/radio-group';
+import { Label } from './ui/label';
 import { Alert, AlertDescription } from './ui/alert';
 import {
   Form,
@@ -18,6 +19,13 @@ import {
   FormLabel,
   FormMessage,
 } from './ui/form';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
 import { formatCurrency, handleCurrencyInput } from '../utils/currency';
 import { toast } from 'sonner';
 import { client } from '../utils/orpc';
@@ -42,6 +50,9 @@ const valuationSchema = z.object({
     message: "Esta información es requerida",
   }),
   missingAirbag: z.string().optional(),
+  tiresCondition: z.string().optional(),
+  paintCondition: z.string().optional(),
+  hasAgencyHistory: z.string().optional(),
 });
 
 interface VehicleValuationProps {
@@ -74,6 +85,11 @@ export default function VehicleValuation({
   const [aiFailed, setAiFailed] = useState(false);
   const [scannerFile, setScannerFile] = useState<File | null>(null);
 
+  // New states for AI Context
+  const [tiresCondition, setTiresCondition] = useState<string>("");
+  const [paintCondition, setPaintCondition] = useState<string>("");
+  const [hasAgencyHistory, setHasAgencyHistory] = useState<string>("");
+
   const form = useForm<z.infer<typeof valuationSchema>>({
     resolver: zodResolver(valuationSchema),
     defaultValues: {
@@ -83,6 +99,9 @@ export default function VehicleValuation({
       importantConsiderations: "",
       scannerUsed: undefined,
       airbagWarning: undefined,
+      tiresCondition: "",
+      paintCondition: "",
+      hasAgencyHistory: "",
     },
   });
 
@@ -104,13 +123,18 @@ export default function VehicleValuation({
     setAiFailed(false);
 
     try {
-      // Call AI valuation endpoint with complete context
+      // Call AI valuation endpoint with complete context (optional fields included if set)
       const result = await client.getAIVehicleValuation({
-        vehicleData,
+        vehicleData: {
+          ...vehicleData,
+          tiresCondition,
+          paintCondition,
+          hasAgencyHistory
+        },
         checklistItems,
         photos
       });
-      
+
       const aiResult: AIValuationResult = {
         suggestedValue: result.valuation.suggestedValue,
         reasoning: result.valuation.reasoning,
@@ -130,7 +154,7 @@ export default function VehicleValuation({
       if (aiResult.commercialClassification) {
         form.setValue("vehicleRating", aiResult.commercialClassification);
       }
-      
+
       toast.success("Valoración por IA completada");
     } catch (error) {
       setAiFailed(true);
@@ -158,7 +182,79 @@ export default function VehicleValuation({
             Obtenga una valoración estimada del vehículo basada en IA
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-white rounded-lg border border-blue-100">
+            <FormField
+              control={form.control}
+              name="tiresCondition"
+              render={({ field }) => (
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">Condición de Llantas</Label>
+                  <Select value={field.value} onValueChange={(val) => {
+                    field.onChange(val);
+                    setTiresCondition(val); // Keep local state for AI context
+                  }}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Seleccione estado" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="100">Nuevas (100%)</SelectItem>
+                      <SelectItem value="75">Buenas (75%)</SelectItem>
+                      <SelectItem value="50">Media Vida (50%)</SelectItem>
+                      <SelectItem value="25">Desgastadas (25%)</SelectItem>
+                      <SelectItem value="0">Para cambio (0%)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="paintCondition"
+              render={({ field }) => (
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">Estado de Pintura</Label>
+                  <Select value={field.value} onValueChange={(val) => {
+                    field.onChange(val);
+                    setPaintCondition(val); // Keep local state for AI context
+                  }}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Seleccione estado" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="100">Excelente (Sin detalles)</SelectItem>
+                      <SelectItem value="75">Bueno (Detalles menores)</SelectItem>
+                      <SelectItem value="50">Regular (Rayones visibles)</SelectItem>
+                      <SelectItem value="25">Malo (Requiere pintura)</SelectItem>
+                      <SelectItem value="0">Pésimo (Daño mayor)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="hasAgencyHistory"
+              render={({ field }) => (
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">Historial de Agencia</Label>
+                  <Select value={field.value} onValueChange={(val) => {
+                    field.onChange(val);
+                    setHasAgencyHistory(val); // Keep local state for AI context
+                  }}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="¿Tiene récord?" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Sí">Sí</SelectItem>
+                      <SelectItem value="No">No</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            />
+          </div>
+
           {!aiValuation ? (
             <>
               <Button
@@ -232,11 +328,10 @@ export default function VehicleValuation({
                     <FormLabel className="flex items-center gap-2">
                       Calificación del vehículo
                       {aiValuation?.commercialClassification && (
-                        <span className={`text-xs px-2 py-1 rounded ${
-                          aiValuation.commercialClassification === "Comercial"
-                            ? "bg-green-100 text-green-700"
-                            : "bg-orange-100 text-orange-700"
-                        }`}>
+                        <span className={`text-xs px-2 py-1 rounded ${aiValuation.commercialClassification === "Comercial"
+                          ? "bg-green-100 text-green-700"
+                          : "bg-orange-100 text-orange-700"
+                          }`}>
                           IA: {aiValuation.commercialClassification}
                         </span>
                       )}

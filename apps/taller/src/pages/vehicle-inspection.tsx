@@ -43,6 +43,7 @@ const formSchema = z.object({
   // Section 2: Vehicle Info
   vehicleMake: z.string({ message: "La marca es requerida" }).min(1, { message: "La marca es requerida" }),
   vehicleModel: z.string({ message: "La línea es requerida" }).min(1, { message: "La línea es requerida" }),
+  trim: z.string({ message: "La versión/equipamiento es requerida" }).min(1, { message: "La versión es requerida" }),
   vehicleYear: z.string({ message: "El año es requerido" }).min(1, { message: "El año es requerido" }),
   licensePlate: z.string({ message: "El número de placa es requerido" }).min(1, { message: "El número de placa es requerido" }),
   vinNumber: z.string({ message: "El número VIN/Chasis es requerido" }).min(1, { message: "El número VIN/Chasis es requerido" }),
@@ -56,6 +57,7 @@ const formSchema = z.object({
   engineCC: z.string({ message: "El motor (CC) es requerido" }).min(1, { message: "El motor (CC) es requerido" }),
   fuelType: z.enum(["Gasolina", "Diesel", "Eléctrico", "Híbrido"], { message: "El tipo de combustible es requerido" }),
   transmission: z.enum(["Automático", "Manual"], { message: "La transmisión es requerida" }),
+  traction: z.enum(["FWD (Delantera)", "RWD (Trasera)", "AWD (Integral)", "4x4"], { message: "La tracción es requerida" }),
   inspectionResult: z.string({ message: "Las observaciones son requeridas" }).min(1, { message: "Las observaciones son requeridas" }),
 
   // Section 3: Test Drive
@@ -90,6 +92,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       inspectionDate: undefined,
       vehicleMake: "",
       vehicleModel: "",
+      trim: "",
       vehicleYear: "",
       licensePlate: "",
       vinNumber: "",
@@ -103,6 +106,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       engineCC: "",
       fuelType: undefined,
       transmission: undefined,
+      traction: undefined,
       inspectionResult: "",
       testDrive: undefined,
       noTestDriveReason: "",
@@ -154,6 +158,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       inspectionDate: undefined,
       vehicleMake: "",
       vehicleModel: "",
+      trim: "",
       vehicleYear: "",
       licensePlate: "",
       vinNumber: "",
@@ -167,6 +172,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       engineCC: "",
       fuelType: undefined,
       transmission: undefined,
+      traction: undefined,
       inspectionResult: "",
       testDrive: undefined,
       noTestDriveReason: "",
@@ -195,7 +201,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
     // Clear validation errors for fields that OCR cannot fill
     const nonOCRFields: Array<keyof z.infer<typeof formSchema>> = [
       'technicianName', 'inspectionDate', 'milesMileage', 'kmMileage',
-      'fuelType', 'transmission', 'inspectionResult', 'testDrive', 'noTestDriveReason'
+      'fuelType', 'transmission', 'traction', 'inspectionResult', 'testDrive', 'noTestDriveReason'
     ];
 
     for (const field of nonOCRFields) {
@@ -217,6 +223,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       inspectionDate: new Date(),
       vehicleMake: "Toyota",
       vehicleModel: "Corolla Cross",
+      trim: "XLE Hybrid",
       vehicleYear: "2023",
       licensePlate: "P-123ABC",
       vinNumber: "JTMB34FV2ND123456",
@@ -230,6 +237,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       engineCC: "2000",
       fuelType: "Gasolina" as const,
       transmission: "Automático" as const,
+      traction: "FWD (Delantera)" as const,
       inspectionResult: "Vehículo en excelentes condiciones generales. Motor sin ruidos anormales, transmisión automática funcionando suavemente. Carrocería sin golpes mayores, pintura en buen estado. Interior bien conservado sin desgaste excesivo.",
       testDrive: "Sí" as const,
     };
@@ -356,6 +364,20 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
                 <FormField
                   control={form.control}
+                  name="trim"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Versión / Equipamiento</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Ej. LE, XSE, Limited" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
                   name="vehicleYear"
                   render={({ field }) => (
                     <FormItem>
@@ -367,7 +389,9 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                     </FormItem>
                   )}
                 />
+              </div>
 
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
                 <FormField
                   control={form.control}
                   name="licensePlate"
@@ -381,9 +405,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                     </FormItem>
                   )}
                 />
-              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
                 <FormField
                   control={form.control}
                   name="vinNumber"
@@ -400,7 +422,9 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                     </FormItem>
                   )}
                 />
+              </div>
 
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
                 <FormField
                   control={form.control}
                   name="motorNumber"
@@ -412,6 +436,20 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                           placeholder="Número de motor del vehículo"
                           {...field}
                         />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="color"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Color</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Ej. Blanco" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -531,22 +569,6 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
 
                 <FormField
                   control={form.control}
-                  name="color"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Color</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Ej. Blanco" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
-                <FormField
-                  control={form.control}
                   name="cylinders"
                   render={({ field }) => (
                     <FormItem>
@@ -558,7 +580,9 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                     </FormItem>
                   )}
                 />
+              </div>
 
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
                 <FormField
                   control={form.control}
                   name="engineCC"
@@ -572,9 +596,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                     </FormItem>
                   )}
                 />
-              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
                 <FormField
                   control={form.control}
                   name="fuelType"
@@ -601,7 +623,9 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                     </FormItem>
                   )}
                 />
+              </div>
 
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
                 <FormField
                   control={form.control}
                   name="transmission"
@@ -620,6 +644,33 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                         <SelectContent>
                           <SelectItem value="Automático">Automático</SelectItem>
                           <SelectItem value="Manual">Manual</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="traction"
+                  render={({ field, fieldState }) => (
+                    <FormItem>
+                      <FormLabel>Tracción</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        value={field.value}
+                      >
+                        <FormControl>
+                          <SelectTrigger className={cn("w-full", fieldState.error && "border-red-500")}>
+                            <SelectValue placeholder="Seleccione la tracción" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="FWD (Delantera)">FWD (Delantera)</SelectItem>
+                          <SelectItem value="RWD (Trasera)">RWD (Trasera)</SelectItem>
+                          <SelectItem value="AWD (Integral)">AWD (Integral)</SelectItem>
+                          <SelectItem value="4x4">4x4</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />

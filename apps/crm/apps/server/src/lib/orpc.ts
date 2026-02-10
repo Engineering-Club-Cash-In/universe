@@ -58,7 +58,7 @@ const requireCrmAccess = o.middleware(async ({ context, next }) => {
 		.limit(1);
 	const userRole = userData[0]?.role;
 
-	if (!PERMISSIONS.canAccessCRM(userRole)) {
+	if (!PERMISSIONS.canAccessClients(userRole)) {
 		throw new ORPCError("FORBIDDEN", { message: "CRM access role required" });
 	}
 

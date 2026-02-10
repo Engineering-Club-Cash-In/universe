@@ -24,7 +24,7 @@ import {
 	getDocumentsByDpi,
 	getDocumentTypes,
 } from "../services/legal-docs-api";
-import { getFileUrlWithBucketInKey } from "@/lib/storage";
+import { getFileUrlWithBucketInKey } from "../lib/storage";
 
 // URL de la API de generación de contratos (legal-docs-blueprints)
 const LEGAL_DOCS_API_URL =
@@ -441,7 +441,9 @@ export const contractGenerationRouter = {
 								contractName:
 									contractResult.nameDocument?.[0]?.label || "Contrato",
 								success: true,
-								documentLink: contractResult.r2Key ? await getFileUrlWithBucketInKey(contractResult.r2Key) : contractResult.linkDocument,
+								documentLink: contractResult.r2Key
+									? await getFileUrlWithBucketInKey(contractResult.r2Key)
+									: contractResult.linkDocument,
 								signingLinks: contractResult.signing_links,
 								templateId: contractResult.templateId,
 								apiResponse: contractResult,

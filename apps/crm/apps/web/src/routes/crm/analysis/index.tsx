@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { z } from "zod";
 import {
 	AlertCircle,
 	CheckCircle,
@@ -67,6 +68,10 @@ import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/crm/analysis/")({
 	component: AnalysisPage,
+	validateSearch: z.object({
+		opportunityId: z.string().optional(),
+		stage: z.enum(["analysis", "investment", "disbursement"]).optional(),
+	}).parse,
 });
 
 type OpportunityForAnalysis = Awaited<
@@ -173,6 +178,7 @@ function OpportunityActions({
 function AnalysisPage() {
 	const { data: session } = authClient.useSession();
 	const navigate = Route.useNavigate();
+	const search = Route.useSearch();
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 
 	// Search and pagination states
@@ -214,6 +220,16 @@ function AnalysisPage() {
 			navigate({ to: "/dashboard" });
 		}
 	}, [userProfile.data, navigate]);
+
+	// Auto-navigate to opportunity detail when opportunityId is in URL and stage is analysis
+	useEffect(() => {
+		if (search.opportunityId && (!search.stage || search.stage === "analysis")) {
+			navigate({
+				to: "/crm/analysis/$opportunityId",
+				params: { opportunityId: search.opportunityId },
+			});
+		}
+	}, [search.opportunityId, search.stage, navigate]);
 
 	// Query with pagination
 	const {
@@ -367,7 +383,7 @@ function AnalysisPage() {
 				</p>
 			</div>
 
-			<Tabs defaultValue="analysis" className="w-full">
+			<Tabs defaultValue={search.stage || "analysis"} className="w-full">
 				<TabsList className="mb-6">
 					<TabsTrigger value="analysis" className="flex items-center gap-2">
 						<FileText className="h-4 w-4" />
@@ -401,7 +417,7 @@ function AnalysisPage() {
 							{/* Buscador */}
 							<div className="mb-4 flex items-center gap-4">
 								<div className="relative max-w-sm flex-1">
-									<Search className="-translate-y-1/2 absolute top-1/2 left-3 h-4 w-4 text-muted-foreground" />
+									<Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
 									<Input
 										placeholder="Buscar por nombre, placa..."
 										value={searchTerm}
@@ -595,11 +611,11 @@ function AnalysisPage() {
 				</TabsContent>
 
 				<TabsContent value="investment">
-					<InvestmentAssignmentSection />
+					<InvestmentAssignmentSection initialOpportunityId={search.stage === "investment" ? search.opportunityId : undefined} />
 				</TabsContent>
 
 				<TabsContent value="disbursement">
-					<DisbursementSection />
+					<DisbursementSection initialOpportunityId={search.stage === "disbursement" ? search.opportunityId : undefined} />
 				</TabsContent>
 			</Tabs>
 
@@ -689,9 +705,9 @@ function AnalysisPage() {
 }
 
 // Component for disbursement section (90% → 100%)
-function DisbursementSection() {
+function DisbursementSection({ initialOpportunityId }: { initialOpportunityId?: string }) {
 	const [selectedOpportunity, setSelectedOpportunity] = useState<string | null>(
-		null,
+		initialOpportunityId ?? null,
 	);
 	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
 	const [selectedOpportunityForModal, setSelectedOpportunityForModal] =
@@ -834,7 +850,7 @@ function DisbursementSection() {
 					{/* Buscador */}
 					<div className="mb-4 flex items-center gap-4">
 						<div className="relative flex-1">
-							<Search className="-translate-y-1/2 absolute top-1/2 left-3 h-4 w-4 text-muted-foreground" />
+							<Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
 							<Input
 								placeholder="Buscar por nombre, placa..."
 								value={searchTerm}

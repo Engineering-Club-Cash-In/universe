@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	keepPreviousData,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import {
 	createFileRoute,
 	useNavigate,
@@ -156,7 +161,11 @@ function VehiclesDashboard() {
 	}, [filterStatus]);
 
 	// Fetch vehicles with pagination
-	const { data: vehicles, isLoading } = useQuery({
+	const {
+		data: vehicles,
+		isLoading,
+		isFetching,
+	} = useQuery({
 		...orpc.getVehicles.queryOptions({
 			input: {
 				limit: pageSize,
@@ -166,6 +175,7 @@ function VehiclesDashboard() {
 			},
 		}),
 		queryKey: ["getVehicles", page, pageSize, debouncedSearch, filterStatus],
+		placeholderData: keepPreviousData,
 	});
 	const { data: statistics } = useQuery(
 		orpc.getVehicleStatistics.queryOptions(),
@@ -394,7 +404,7 @@ function VehiclesDashboard() {
 		},
 	});
 
-	if (isLoading) {
+	if (isLoading && !vehicles) {
 		return (
 			<div className="flex flex-col gap-4 p-6">
 				<Skeleton className="h-10 w-64" />
@@ -527,7 +537,7 @@ function VehiclesDashboard() {
 								</div>
 							</div>
 
-							<div className="rounded-md border">
+							<div className={`rounded-md border transition-opacity ${isFetching ? "opacity-50" : ""}`}>
 								<Table>
 									<TableHeader>
 										<TableRow>

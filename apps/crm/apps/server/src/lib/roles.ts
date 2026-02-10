@@ -9,6 +9,7 @@ export const ROLES = {
 	COBROS: "cobros",
 	COBROS_SUPERVISOR: "cobros_supervisor",
 	JURIDICO: "juridico",
+	ACCOUNTING: "accounting",
 } as const;
 
 export type UserRole = (typeof ROLES)[keyof typeof ROLES];
@@ -49,6 +50,11 @@ export const ROLE_CONFIG = {
 		label: "Jurídico",
 		color: "bg-amber-100 text-amber-800",
 		icon: "Scale" as const,
+	},
+	[ROLES.ACCOUNTING]: {
+		label: "Contabilidad",
+		color: "bg-teal-100 text-teal-800",
+		icon: "Calculator" as const,
 	},
 } as const;
 
@@ -160,6 +166,18 @@ export const PERMISSIONS = {
 
 	canApproveLegalStage: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.JURIDICO,
+
+	// Clients Module Access
+	canAccessClients: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.COBROS_SUPERVISOR ||
+		role === ROLES.COBROS ||
+		role === ROLES.ACCOUNTING ||
+		role === ROLES.JURIDICO || 
+		role === ROLES.SALES ||
+		role === ROLES.SALES_SUPERVISOR ||
+		role === ROLES.ANALYST,
+		
 
 	// Vehicles Module Access - All roles can access
 	canAccessVehicles: (_role: UserRole | string): boolean => true,

@@ -1563,7 +1563,24 @@ export const cobrosRouter = {
 
 				console.log(`COBROSCREDITOSDETALLES ${JSON.stringify(casoCobro)}`);
 
-				// 5. Mapear datos correctamente
+				// 5. Calcular fecha de inicio (cuota 0) y cuotas restantes
+				const todasLasCuotas = [
+					...(creditoCompleto.cuotasPagadas || []),
+					...(creditoCompleto.cuotasPendientes || []),
+					...(creditoCompleto.cuotasAtrasadas || []),
+				];
+				const cuota0 = todasLasCuotas.find((c) => c.numero_cuota === 0);
+				const fechaInicioCuota0 = cuota0?.fecha_vencimiento || null;
+				const cuotasPagadasCount = creditoCompleto.cuotasPagadas?.length || 0;
+				const totalCuotas = creditoCompleto.credito.plazo || 0;
+				let cuotasRestantes = totalCuotas;
+				if (cuota0?.pagado) {
+					cuotasRestantes = (totalCuotas - cuotasPagadasCount) + 1;
+				}  else {
+					cuotasRestantes = totalCuotas - cuotasPagadasCount;
+				}
+
+				// 6. Mapear datos correctamente
 				const cuotasAtrasadas = creditoCompleto.cuotasAtrasadas?.length || 0;
 				const cuotaMensual = Number(creditoCompleto.credito.cuota ?? 0);
 				// Calcular días de mora exactos usando la fecha de vencimiento
@@ -1642,6 +1659,10 @@ export const cobrosRouter = {
 					// Notas de la oportunidad
 					oportunidadNotes: oportunidadData?.notes || null,
 					creditType: oportunidadData?.creditType || null,
+
+					// Campos calculados
+					fechaInicioCuota0,
+					cuotasRestantes,
 				};
 			} catch (error) {
 				console.error("[Cobros] Error obteniendo detalles de crédito:", error);

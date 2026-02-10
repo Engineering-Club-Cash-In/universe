@@ -151,13 +151,41 @@ function parseNombreCompleto(nombreCompleto: string | null | undefined): {
 	secondLastName: string | null;
 } {
 	if (!nombreCompleto) {
-		return { firstName: "N/A", middleName: null, lastName: "N/A", secondLastName: null };
+		return {
+			firstName: "N/A",
+			middleName: null,
+			lastName: "N/A",
+			secondLastName: null,
+		};
 	}
 	const partes = nombreCompleto.trim().split(/\s+/);
-	if (partes.length === 1) return { firstName: partes[0], middleName: null, lastName: "N/A", secondLastName: null };
-	if (partes.length === 2) return { firstName: partes[0], middleName: null, lastName: partes[1], secondLastName: null };
-	if (partes.length === 3) return { firstName: partes[0], middleName: null, lastName: partes[1], secondLastName: partes[2] };
-	return { firstName: partes[0], middleName: partes[1], lastName: partes[2], secondLastName: partes.slice(3).join(" ") };
+	if (partes.length === 1)
+		return {
+			firstName: partes[0],
+			middleName: null,
+			lastName: "N/A",
+			secondLastName: null,
+		};
+	if (partes.length === 2)
+		return {
+			firstName: partes[0],
+			middleName: null,
+			lastName: partes[1],
+			secondLastName: null,
+		};
+	if (partes.length === 3)
+		return {
+			firstName: partes[0],
+			middleName: null,
+			lastName: partes[1],
+			secondLastName: partes[2],
+		};
+	return {
+		firstName: partes[0],
+		middleName: partes[1],
+		lastName: partes[2],
+		secondLastName: partes.slice(3).join(" "),
+	};
 }
 
 /**
@@ -184,7 +212,9 @@ async function autoCrearDatosMigrate({
 }) {
 	if (!isAutoMigrateEnabled()) return null;
 
-	console.log(`[AutoMigrate] Creando datos migrate para crédito ${numeroSifco}`);
+	console.log(
+		`[AutoMigrate] Creando datos migrate para crédito ${numeroSifco}`,
+	);
 
 	const nombre = parseNombreCompleto(nombreCliente);
 
@@ -1624,8 +1654,11 @@ export const cobrosRouter = {
 					creditType: string | null;
 				} | null = null;
 
+				let vehicleId: string | null = null;
+
 				if (oportunidadResult.length > 0) {
 					const opp = oportunidadResult[0];
+					vehicleId = opp.vehicleId;
 					vehiculo = {
 						make: opp.vehiculoMarca,
 						model: opp.vehiculoModelo,
@@ -1668,6 +1701,7 @@ export const cobrosRouter = {
 					});
 
 					if (datosMigrate) {
+						vehicleId = datosMigrate.vehiculoId;
 						vehiculo = datosMigrate.vehiculo;
 						leadInfo = datosMigrate.leadInfo;
 						oportunidadData = datosMigrate.oportunidadData;
@@ -1748,8 +1782,8 @@ export const cobrosRouter = {
 				const totalCuotas = creditoCompleto.credito.plazo || 0;
 				let cuotasRestantes = totalCuotas;
 				if (cuota0?.pagado) {
-					cuotasRestantes = (totalCuotas - cuotasPagadasCount) + 1;
-				}  else {
+					cuotasRestantes = totalCuotas - cuotasPagadasCount + 1;
+				} else {
 					cuotasRestantes = totalCuotas - cuotasPagadasCount;
 				}
 
@@ -1808,6 +1842,7 @@ export const cobrosRouter = {
 					clienteNit: creditoCompleto.usuario.nit,
 
 					// Datos del vehículo (de la oportunidad)
+					vehicleId,
 					vehiculoMarca: vehiculo?.make || "-",
 					vehiculoModelo: vehiculo?.model || "-",
 					vehiculoYear: vehiculo?.year || null,

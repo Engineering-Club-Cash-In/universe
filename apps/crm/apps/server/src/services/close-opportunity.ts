@@ -607,6 +607,7 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 					const requestBody = {
 						nit: nit || "CF", // CF = Consumidor Final si no hay NIT
 						items: invoice.items,
+						emisor: "CUBE",
 						created_by: FACTURACION_CREATED_BY,
 					};
 

@@ -628,7 +628,7 @@ function RouteComponent() {
 																		?.toUpperCase()}
 																</Badge>
 																{pagoConMora && (
-																	<Badge className="bg-orange-100 text-orange-800 text-xs">
+																	<Badge className="bg-orange-100 text-orange-800 dark:bg-orange-950/40 dark:text-orange-300 text-xs">
 																		Pagado con Mora
 																	</Badge>
 																)}
@@ -712,8 +712,8 @@ function RouteComponent() {
 														{esPagada && cuota.detallesPago && (
 															<>
 																<div className="my-2 border-t" />
-																<div className="grid grid-cols-2 gap-2 rounded bg-green-50 p-2 text-xs">
-																	<div className="col-span-2 mb-1 font-medium text-green-900">
+																<div className="grid grid-cols-2 gap-2 rounded bg-green-50 p-2 text-xs dark:bg-green-950/40">
+																	<div className="col-span-2 mb-1 font-medium text-green-900 dark:text-green-100">
 																		Desglose del Pago:
 																	</div>
 																	{Number(cuota.detallesPago.abonoCapital) >
@@ -800,10 +800,10 @@ function RouteComponent() {
 																	)}
 																	{Number(cuota.detallesPago.pagoMora) > 0 && (
 																		<div className="col-span-2 border-t pt-1">
-																			<span className="text-orange-700">
+																			<span className="text-orange-700 dark:text-orange-400">
 																				Mora pagada:
 																			</span>
-																			<span className="float-right font-medium text-orange-700">
+																			<span className="float-right font-medium text-orange-700 dark:text-orange-400">
 																				Q
 																				{Number(
 																					cuota.detallesPago.pagoMora,
@@ -827,7 +827,7 @@ function RouteComponent() {
 																			</div>
 																		)}
 																	<div className="col-span-2 mt-2 border-t pt-2">
-																		<div className="flex justify-between text-blue-900">
+																		<div className="flex justify-between text-blue-900 dark:text-blue-200">
 																			<span>Capital restante:</span>
 																			<span className="font-bold">
 																				Q
@@ -836,7 +836,7 @@ function RouteComponent() {
 																				).toLocaleString()}
 																			</span>
 																		</div>
-																		<div className="flex justify-between text-blue-700 text-xs">
+																		<div className="flex justify-between text-blue-700 dark:text-blue-300 text-xs">
 																			<span>Interés restante:</span>
 																			<span className="font-medium">
 																				Q
@@ -926,9 +926,19 @@ function RouteComponent() {
 							<div>
 								<p className="text-muted-foreground text-sm">Fecha de Inicio</p>
 								<p className="font-medium">
-									{caso.fechaInicio
-										? new Date(caso.fechaInicio).toLocaleDateString("es-GT")
-										: "Sin fecha"}
+									{caso.fechaInicioCuota0
+										? new Date(caso.fechaInicioCuota0).toLocaleDateString("es-GT")
+										: caso.fechaInicio
+											? new Date(caso.fechaInicio).toLocaleDateString("es-GT")
+											: "Sin fecha"}
+								</p>
+							</div>
+							<div>
+								<p className="text-muted-foreground text-sm">Cuotas Restantes</p>
+								<p className="font-medium">
+									{caso.cuotasRestantes != null
+										? `${caso.cuotasRestantes} de ${caso.numeroCuotas}`
+										: "—"}
 								</p>
 							</div>
 							{caso.creditType && (

@@ -1,0 +1,919 @@
+[
+  {
+    "nombre": "Adan Gabriel del Cid Valenzuela",
+    "numeroCuota": "17",
+    "numeroCredito": "01010214111460",
+    "creditos": [
+      {
+        "numeroCredito": "01010214111460",
+        "fechaUltimoPago": "Enero 2026",
+        "numeroCuota": "17",
+        "cuota": "1667.68",
+        "montoBoleta": "1687.01",
+        "pagado": "No",
+        "capitalRestante": "27776.532584989698",
+        "inversionista": "Javier Arzu Perez",
+        "pago": "2026-01-30 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214111460_2",
+        "fechaUltimoPago": "Enero 2026",
+        "numeroCuota": "17",
+        "cuota": "414.25",
+        "montoBoleta": "414.25",
+        "pagado": "No",
+        "capitalRestante": "12612.450319908043",
+        "inversionista": "Alexander Kachler Simons (AMJK)",
+        "pago": "2026-01-30 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214111540",
+        "fechaUltimoPago": "Enero 2026",
+        "numeroCuota": "17",
+        "cuota": "398.74",
+        "montoBoleta": "398.74",
+        "pagado": "No",
+        "capitalRestante": "12140.254835552449",
+        "inversionista": "Guillermo Ivan Hernandez Luna",
+        "pago": "2026-01-30 00:00:00",
+        "pagosParciales": []
+      }
+    ]
+  },
+  {
+    "nombre": "Brenda Liseth Vasquez Tista de Calvillo",
+    "numeroCuota": "21",
+    "numeroCredito": "01010214113070",
+    "creditos": [
+      {
+        "numeroCredito": "01010214113070",
+        "fechaUltimoPago": "Enero 2026",
+        "numeroCuota": "21",
+        "cuota": "1505.28",
+        "montoBoleta": "1505.28",
+        "pagado": "No",
+        "capitalRestante": "24091.4451985311",
+        "inversionista": "Carlos René Estuardo Matheu González",
+        "pago": "2026-01-30 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214113080",
+        "fechaUltimoPago": "Enero 2026",
+        "numeroCuota": "21",
+        "cuota": "531.66",
+        "montoBoleta": "531.66",
+        "pagado": "No",
+        "capitalRestante": "15121.515615596001",
+        "inversionista": "Ana Lucia Salvatierra Mayen",
+        "pago": "2026-01-30 00:00:00",
+        "pagosParciales": []
+      }
+    ]
+  },
+  {
+    "nombre": "Carlos Ramiro Diaz de Leon",
+    "numeroCuota": "24",
+    "numeroCredito": "01010214115120",
+    "creditos": [
+      {
+        "numeroCredito": "01010214115120",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "23",
+        "cuota": "2358.54",
+        "montoBoleta": "2373.42",
+        "pagado": "No",
+        "capitalRestante": "33759.57067162163",
+        "inversionista": "Juan José Luna Duraes",
+        "pago": "2026-01-09 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214115130",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "23",
+        "cuota": "226.58",
+        "montoBoleta": "226.58",
+        "pagado": "Si",
+        "capitalRestante": "4594.505405076318",
+        "inversionista": "Central de Carga S.A.",
+        "pago": "2026-01-09 00:00:00",
+        "pagosParciales": []
+      }
+    ]
+  },
+  {
+    "nombre": "Carlos Roberto Sandoval / Bruno Roberto Hahmman Sandoval",
+    "numeroCuota": "36",
+    "numeroCredito": "01010214104850",
+    "creditos": [
+      {
+        "numeroCredito": "01010214104850",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "35",
+        "cuota": "3484.95",
+        "montoBoleta": "3484.96",
+        "pagado": "No",
+        "capitalRestante": "53572.91206985829",
+        "inversionista": "Javier Arzu Perez",
+        "pago": "2026-01-14 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214104860",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "35",
+        "cuota": "398.74",
+        "montoBoleta": "398.74",
+        "pagado": "No",
+        "capitalRestante": "8085.636733402569",
+        "inversionista": "Josue Mente",
+        "pago": "2026-01-14 00:00:00",
+        "pagosParciales": []
+      }
+    ]
+  },
+  {
+    "nombre": "Dora Maria Raguay Godinez",
+    "numeroCuota": "30",
+    "numeroCredito": "01010214106600",
+    "creditos": [
+      {
+        "numeroCredito": "01010214106600",
+        "fechaUltimoPago": "Enero 2025",
+        "numeroCuota": "18",
+        "cuota": "1860.81",
+        "montoBoleta": "1860.81",
+        "pagado": "Si",
+        "capitalRestante": "62610.301348226996",
+        "inversionista": "Carlos René Estuardo Matheu González",
+        "pago": "2025-01-30 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214106490",
+        "fechaUltimoPago": "Enero 2024",
+        "numeroCuota": "6 de 12 / 6 de 60",
+        "cuota": "",
+        "montoBoleta": "",
+        "pagado": "Si",
+        "capitalRestante": "175543.75",
+        "inversionista": "Cube Investments S.A.",
+        "pago": "2024-03-15 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214106490_2",
+        "fechaUltimoPago": "Abril 2024",
+        "numeroCuota": "9 de 12 / 9 de 60",
+        "cuota": "",
+        "montoBoleta": "",
+        "pagado": "Si",
+        "capitalRestante": "90579.81919158458",
+        "inversionista": "Autocash S.A.",
+        "pago": "2024-06-15 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214106600_2",
+        "fechaUltimoPago": "Abril 2024",
+        "numeroCuota": "9 de 12 / 9 de 60",
+        "cuota": "",
+        "montoBoleta": "",
+        "pagado": "Si",
+        "capitalRestante": "37137.761722383526",
+        "inversionista": "Richard Kachler Ortega",
+        "pago": "2024-06-15 00:00:00",
+        "pagosParciales": []
+      }
+    ]
+  },
+  {
+    "nombre": "Edmon Hernan Robinson Cubillo",
+    "numeroCuota": "34",
+    "numeroCredito": "01010214105310",
+    "creditos": [
+      {
+        "numeroCredito": "01010214105310",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "33",
+        "cuota": "4459.86",
+        "montoBoleta": "4459.86",
+        "pagado": "No",
+        "capitalRestante": "68213.84323908102",
+        "inversionista": "Javier Arzu Perez",
+        "pago": "2026-01-13 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214105300",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "33",
+        "cuota": "2126.64",
+        "montoBoleta": "2126.64",
+        "pagado": "No",
+        "capitalRestante": "45857.46759712859",
+        "inversionista": "Diego Eduardo Furlan de la Vega",
+        "pago": "2026-01-13 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214105290",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "33",
+        "cuota": "1232.28",
+        "montoBoleta": "1232.28",
+        "pagado": "Si",
+        "capitalRestante": "26572.27977033727",
+        "inversionista": "Autocash S.A.",
+        "pago": "2026-01-13 00:00:00",
+        "pagosParciales": []
+      }
+    ]
+  },
+  {
+    "nombre": "Guillermo Gutierrez Alfonzo",
+    "numeroCuota": "20",
+    "numeroCredito": "01010214113000",
+    "creditos": [
+      {
+        "numeroCredito": "01010214113000",
+        "fechaUltimoPago": "Enero 2026",
+        "numeroCuota": "20",
+        "cuota": "2378.07",
+        "montoBoleta": "2378.07",
+        "pagado": "Si",
+        "capitalRestante": "29928.10652815302",
+        "inversionista": "Cube Investments S.A.",
+        "pago": "2026-01-30 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214113000_2",
+        "fechaUltimoPago": "Enero 2026",
+        "numeroCuota": "20",
+        "cuota": "1176.14",
+        "montoBoleta": "1176.14",
+        "pagado": "No",
+        "capitalRestante": "26098.989420681035",
+        "inversionista": "Richard Kachler Ortega",
+        "pago": "2026-01-30 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214112970",
+        "fechaUltimoPago": "Enero 2026",
+        "numeroCuota": "20",
+        "cuota": "1313.64",
+        "montoBoleta": "1313.64",
+        "pagado": "No",
+        "capitalRestante": "29150.37179748437",
+        "inversionista": "Post Net Guatemala S.A.",
+        "pago": "2026-01-30 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214112970_2",
+        "fechaUltimoPago": "Enero 2026",
+        "numeroCuota": "20",
+        "cuota": "213.61",
+        "montoBoleta": "213.61",
+        "pagado": "No",
+        "capitalRestante": "4740.123097812311",
+        "inversionista": "Anna Lisseth Lorenzo Rodas",
+        "pago": "2026-01-30 00:00:00",
+        "pagosParciales": []
+      }
+    ]
+  },
+  {
+    "nombre": "Industria de Bebida Vida Sociedad Anónima",
+    "numeroCuota": "5",
+    "numeroCredito": "01010214119120",
+    "creditos": [
+      {
+        "numeroCredito": "01010214119120",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "4",
+        "cuota": "3227.4",
+        "montoBoleta": "3234.31",
+        "pagado": "Si",
+        "capitalRestante": "78164.8852553136",
+        "inversionista": "Cube Investments S.A.",
+        "pago": "2025-12-30 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214119120_2",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "4",
+        "cuota": "53.69",
+        "montoBoleta": "53.69",
+        "pagado": "Falso pago",
+        "capitalRestante": "1959.482488",
+        "inversionista": "Felipe Gonzalez",
+        "pago": "2025-12-30 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214119130",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "4",
+        "cuota": "3037.41",
+        "montoBoleta": "3297.3199999999997",
+        "pagado": "Si",
+        "capitalRestante": "70086.11480838676",
+        "inversionista": "Cube Investments S.A.",
+        "pago": "2025-12-30 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214119130_2",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "4",
+        "cuota": "402.68",
+        "montoBoleta": "402.68",
+        "pagado": "Falso pago",
+        "capitalRestante": "14540.3232000768",
+        "inversionista": "Marines Overall Salazar",
+        "pago": "2025-12-30 00:00:00",
+        "pagosParciales": []
+      }
+    ]
+  },
+  {
+    "nombre": "Jhony Alfredo Carrillo Corado / Mayra Elizabeth Rosales / Pablo Roberto Batz Gudiel",
+    "numeroCuota": "24",
+    "numeroCredito": "01010214108810",
+    "creditos": [
+      {
+        "numeroCredito": "01010214108810",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "23",
+        "cuota": "2029.36",
+        "montoBoleta": "2030.1699999999998",
+        "pagado": "No",
+        "capitalRestante": "35312.06504435734",
+        "inversionista": "Javier Arzu Perez",
+        "pago": "2026-01-16 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214115390",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "23",
+        "cuota": "265.83",
+        "montoBoleta": "265.83",
+        "pagado": "Si",
+        "capitalRestante": "7280.826967759468",
+        "inversionista": "Cube Investments S.A.",
+        "pago": "2026-01-16 00:00:00",
+        "pagosParciales": []
+      }
+    ]
+  },
+  {
+    "nombre": "Jorge Humberto Estrada Morales",
+    "numeroCuota": "20",
+    "numeroCredito": "01010214110150",
+    "creditos": [
+      {
+        "numeroCredito": "01010214110150",
+        "fechaUltimoPago": "Enero 2026",
+        "numeroCuota": "20",
+        "cuota": "2609.71",
+        "montoBoleta": "2611.26",
+        "pagado": "Si",
+        "capitalRestante": "63494.297092084555",
+        "inversionista": "Cube Investments S.A.",
+        "pago": "2026-01-30 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214110160",
+        "fechaUltimoPago": "Enero 2026",
+        "numeroCuota": "20",
+        "cuota": "398.74",
+        "montoBoleta": "398.74",
+        "pagado": "No",
+        "capitalRestante": "11546.025168676291",
+        "inversionista": "Anna Lisseth Lorenzo Rodas",
+        "pago": "2026-01-30 00:00:00",
+        "pagosParciales": []
+      }
+    ]
+  },
+  {
+    "nombre": "Jose Angel Peralta Soma",
+    "numeroCuota": "21",
+    "numeroCredito": "01010214109450",
+    "creditos": [
+      {
+        "numeroCredito": "01010214109450",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "20",
+        "cuota": "1514.93",
+        "montoBoleta": "1515.18",
+        "pagado": "Si",
+        "capitalRestante": "21552.47061338183",
+        "inversionista": "Autocash S.A.",
+        "pago": "2025-12-30 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214109470",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "20",
+        "cuota": "451.91",
+        "montoBoleta": "451.91",
+        "pagado": "Si",
+        "capitalRestante": "13085.40453854752",
+        "inversionista": "Anna Lisseth Lorenzo Rodas",
+        "pago": "2025-12-30 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214109450_2",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "20",
+        "cuota": "132.91",
+        "montoBoleta": "132.91",
+        "pagado": "Si",
+        "capitalRestante": "3848.7541592632215",
+        "inversionista": "Aura Floridalma Rodriguez Mejicanos de Garavito",
+        "pago": "2025-12-30 00:00:00",
+        "pagosParciales": []
+      }
+    ]
+  },
+  {
+    "nombre": "Juan Ramiro Morales Pineda",
+    "numeroCuota": "3",
+    "numeroCredito": "01010202119900",
+    "creditos": [
+      {
+        "numeroCredito": "01010202119900",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "2",
+        "cuota": "4244.4",
+        "montoBoleta": "4417.83",
+        "pagado": "Si",
+        "capitalRestante": "68642.91844595334",
+        "inversionista": "Richard Kachler Ortega",
+        "pago": "2025-12-15 00:00:00",
+        "pagosParciales": [
+          {
+            "fecha": "Enero 2026",
+            "numeroCuota": "3",
+            "montoBoleta": "3000.0"
+          }
+        ]
+      },
+      {
+        "numeroCredito": "01010202119900:2",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "2",
+        "cuota": "1348.17",
+        "montoBoleta": "1348.17",
+        "pagado": "Si",
+        "capitalRestante": "34222.543504",
+        "inversionista": "Cube Investments S.A.",
+        "pago": "2025-12-15 00:00:00",
+        "pagosParciales": []
+      }
+    ]
+  },
+  {
+    "nombre": "Kevin Antonio García Véliz",
+    "numeroCuota": "1",
+    "numeroCredito": "01010214121670",
+    "creditos": [
+      {
+        "numeroCredito": "01010214121670",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "0",
+        "cuota": "4329.21",
+        "montoBoleta": "",
+        "pagado": "Si",
+        "capitalRestante": "133905.76",
+        "inversionista": "Cube Investments S.A.",
+        "pago": "2025-12-30 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214121670_2",
+        "fechaUltimoPago": "Enero 2026",
+        "numeroCuota": "1",
+        "cuota": "28.92",
+        "montoBoleta": "",
+        "pagado": "No",
+        "capitalRestante": "1296.375465748021",
+        "inversionista": "Rodrigo Rodas",
+        "pago": "2026-01-30 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214121680",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "0",
+        "cuota": "4329.21",
+        "montoBoleta": "",
+        "pagado": "Si",
+        "capitalRestante": "133905.76",
+        "inversionista": "Cube Investments S.A.",
+        "pago": "2025-12-30 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214121680_2",
+        "fechaUltimoPago": "Enero 2026",
+        "numeroCuota": "1",
+        "cuota": "27.13",
+        "montoBoleta": "",
+        "pagado": "No",
+        "capitalRestante": "1216.4892407009397",
+        "inversionista": "Jhairo Najera",
+        "pago": "2026-01-30 00:00:00",
+        "pagosParciales": []
+      }
+    ]
+  },
+  {
+    "nombre": "Leonardo Jose Carrasco Aguilera",
+    "numeroCuota": "18",
+    "numeroCredito": "01010214111280",
+    "creditos": [
+      {
+        "numeroCredito": "01010214111280",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "17",
+        "cuota": "1632.98",
+        "montoBoleta": "2091.29",
+        "pagado": "Si",
+        "capitalRestante": "29676.32484435288",
+        "inversionista": "Cube Investments S.A.",
+        "pago": "2025-12-30 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214111240",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "17",
+        "cuota": "196.71",
+        "montoBoleta": "196.71",
+        "pagado": "Si",
+        "capitalRestante": "5989.2261656374685",
+        "inversionista": "Anna Lisseth Lorenzo Rodas",
+        "pago": "2025-12-30 00:00:00",
+        "pagosParciales": []
+      }
+    ]
+  },
+  {
+    "nombre": "Lindsey Pamela Sanchez Moreno",
+    "numeroCuota": "22",
+    "numeroCredito": "01010214109380",
+    "creditos": [
+      {
+        "numeroCredito": "01010214109380",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "21",
+        "cuota": "3075.41",
+        "montoBoleta": "3075.41",
+        "pagado": "Si",
+        "capitalRestante": "61086.16138274925",
+        "inversionista": "Cube Investments S.A.",
+        "pago": "2026-01-05 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214109390",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "21",
+        "cuota": "1070.03",
+        "montoBoleta": "1070.03",
+        "pagado": "Falso pago",
+        "capitalRestante": "30433.72711610118",
+        "inversionista": "Diego Alejandro Mendieta Avila (Rodrigo Mendieta)",
+        "pago": "2026-01-05 00:00:00",
+        "pagosParciales": []
+      }
+    ]
+  },
+  {
+    "nombre": "Maria Marta Flores Mazariegos de Brid",
+    "numeroCuota": "26",
+    "numeroCredito": "01010214108210",
+    "creditos": [
+      {
+        "numeroCredito": "01010214108210",
+        "fechaUltimoPago": "Octubre 2025",
+        "numeroCuota": "23",
+        "cuota": "1089.91",
+        "montoBoleta": "1454.65",
+        "pagado": "Falso pago",
+        "capitalRestante": "14561.615315355015",
+        "inversionista": "Manuel Carrera Mayen",
+        "pago": "2025-11-21 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214108190",
+        "fechaUltimoPago": "Octubre 2025",
+        "numeroCuota": "23",
+        "cuota": "345.58",
+        "montoBoleta": "345.58",
+        "pagado": "Falso pago",
+        "capitalRestante": "9465.022784599083",
+        "inversionista": "Aura Floridalma Rodriguez Mejicanos de Garavito",
+        "pago": "2025-11-21 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214108190_2",
+        "fechaUltimoPago": "Octubre 2025",
+        "numeroCuota": "23",
+        "cuota": "289.17",
+        "montoBoleta": "289.17",
+        "pagado": "Si",
+        "capitalRestante": "7920.066952699011",
+        "inversionista": "RDBE S.A.",
+        "pago": "2025-11-21 00:00:00",
+        "pagosParciales": []
+      }
+    ]
+  },
+  {
+    "nombre": "Oliver Rodolfo Barrientos Ricco / Lisbeth Alejandra Hernandez Lopez",
+    "numeroCuota": "19",
+    "numeroCredito": "01010214110980",
+    "creditos": [
+      {
+        "numeroCredito": "01010214110980",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "18",
+        "cuota": "1651.22",
+        "montoBoleta": "1651.91",
+        "pagado": "Falso pago",
+        "capitalRestante": "21333.41762144536",
+        "inversionista": "Javier Arzu Perez",
+        "pago": "2026-01-07 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214111110",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "18",
+        "cuota": "166.09",
+        "montoBoleta": "166.09",
+        "pagado": "Si",
+        "capitalRestante": "3888.8660420548636",
+        "inversionista": "Cube Investments S.A.",
+        "pago": "2026-01-07 00:00:00",
+        "pagosParciales": []
+      }
+    ]
+  },
+  {
+    "nombre": "Roberto Estuardo Folgar Alvarez",
+    "numeroCuota": "24",
+    "numeroCredito": "01010214108780",
+    "creditos": [
+      {
+        "numeroCredito": "01010214108780",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "23",
+        "cuota": "2561.82",
+        "montoBoleta": "2561.82",
+        "pagado": "Si",
+        "capitalRestante": "47302.07789727017",
+        "inversionista": "Cube Investments S.A.",
+        "pago": "2026-01-13 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214108880",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "23",
+        "cuota": "531.66",
+        "montoBoleta": "531.66",
+        "pagado": "No",
+        "capitalRestante": "14561.612537197136",
+        "inversionista": "Manuel Carrera Mayen",
+        "pago": "2026-01-13 00:00:00",
+        "pagosParciales": []
+      }
+    ]
+  },
+  {
+    "nombre": "Rolando José Cedeño Morales",
+    "numeroCuota": "1",
+    "numeroCredito": "01010214121690",
+    "creditos": [
+      {
+        "numeroCredito": "01010214121690",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "0",
+        "cuota": "5994.63",
+        "montoBoleta": "",
+        "pagado": "Si",
+        "capitalRestante": "209981.49",
+        "inversionista": "Cube Investments S.A.",
+        "pago": "2025-12-30 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214121690_2",
+        "fechaUltimoPago": "Enero 2026",
+        "numeroCuota": "1",
+        "cuota": "294.66",
+        "montoBoleta": "",
+        "pagado": "Si",
+        "capitalRestante": "13211.848207260986",
+        "inversionista": "Werner Oswaldo Osoy Trejo",
+        "pago": "2026-01-30 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214121700",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "0",
+        "cuota": "4402.27",
+        "montoBoleta": "",
+        "pagado": "Si",
+        "capitalRestante": "136208.46",
+        "inversionista": "Cube Investments S.A.",
+        "pago": "2025-12-30 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214121700_2",
+        "fechaUltimoPago": "Enero 2026",
+        "numeroCuota": "1",
+        "cuota": "109.64",
+        "montoBoleta": "",
+        "pagado": "No",
+        "capitalRestante": "4915.898805578387",
+        "inversionista": "Boris Gilberto Lemus Villatoro",
+        "pago": "2026-01-30 00:00:00",
+        "pagosParciales": []
+      }
+    ]
+  },
+  {
+    "nombre": "Ruth Eunice Guerra Lopez",
+    "numeroCuota": "25",
+    "numeroCredito": "01010214108470",
+    "creditos": [
+      {
+        "numeroCredito": "01010214108470",
+        "fechaUltimoPago": "Noviembre 2025",
+        "numeroCuota": "23",
+        "cuota": "4048.22",
+        "montoBoleta": "4048.22",
+        "pagado": "Si",
+        "capitalRestante": "84681.7811858697",
+        "inversionista": "Cube Investments S.A.",
+        "pago": "2025-12-25 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214108500",
+        "fechaUltimoPago": "Noviembre 2025",
+        "numeroCuota": "23",
+        "cuota": "531.66",
+        "montoBoleta": "531.66",
+        "pagado": "Si",
+        "capitalRestante": "14561.61221343931",
+        "inversionista": "Diego Arturo Bracamonte Mendez",
+        "pago": "2025-12-25 00:00:00",
+        "pagosParciales": []
+      }
+    ]
+  },
+  {
+    "nombre": "Solesco Centroamerica S.A.",
+    "numeroCuota": "3",
+    "numeroCredito": "01010214120300",
+    "creditos": [
+      {
+        "numeroCredito": "01010214120300",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "2",
+        "cuota": "2941.51",
+        "montoBoleta": "2941.51",
+        "pagado": "Si",
+        "capitalRestante": "86852.06257397762",
+        "inversionista": "Cube Investments S.A.",
+        "pago": "2025-12-30 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214120300_2",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "2",
+        "cuota": "713.68",
+        "montoBoleta": "713.68",
+        "pagado": "Si",
+        "capitalRestante": "31644.881856",
+        "inversionista": "Blokfund S.A.",
+        "pago": "2025-12-30 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214120310",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "2",
+        "cuota": "2543.92",
+        "montoBoleta": "2543.92",
+        "pagado": "Si",
+        "capitalRestante": "69223.17220288",
+        "inversionista": "Alexander Kachler Simons (AMJK)",
+        "pago": "2025-12-30 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214120310_2",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "2",
+        "cuota": "1101.95",
+        "montoBoleta": "1101.95",
+        "pagado": "Si",
+        "capitalRestante": "48860.4060267776",
+        "inversionista": "Cube Investments S.A.",
+        "pago": "2025-12-30 00:00:00",
+        "pagosParciales": []
+      }
+    ]
+  },
+  {
+    "nombre": "Textiles Pralin S.A.",
+    "numeroCuota": "24",
+    "numeroCredito": "01010202109080",
+    "creditos": [
+      {
+        "numeroCredito": "01010202109080",
+        "fechaUltimoPago": "Julio 2025",
+        "numeroCuota": "18",
+        "cuota": "4146.58",
+        "montoBoleta": "5664.83",
+        "pagado": "Si",
+        "capitalRestante": "48825.24404934812",
+        "inversionista": "Cube Investments S.A.",
+        "pago": "2025-08-28 00:00:00",
+        "pagosParciales": [
+          {
+            "fecha": "Agosto 2025",
+            "numeroCuota": "19",
+            "montoBoleta": "2077.72"
+          }
+        ]
+      },
+      {
+        "numeroCredito": "01010202109070",
+        "fechaUltimoPago": "Julio 2025",
+        "numeroCuota": "18",
+        "cuota": "558.68",
+        "montoBoleta": "558.68",
+        "pagado": "Falso pago",
+        "capitalRestante": "8616.179917064677",
+        "inversionista": "Aura Floridalma Rodriguez Mejicanos de Garavito",
+        "pago": "2025-08-28 00:00:00",
+        "pagosParciales": []
+      }
+    ]
+  },
+  {
+    "nombre": "William Alejandro Pinzon Reyes",
+    "numeroCuota": "47",
+    "numeroCredito": "01010214112950",
+    "creditos": [
+      {
+        "numeroCredito": "01010214112950",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "46",
+        "cuota": "2345.45",
+        "montoBoleta": "2345.45",
+        "pagado": "No",
+        "capitalRestante": "21195.820598249415",
+        "inversionista": "Post Net Guatemala S.A.",
+        "pago": "2026-01-18 00:00:00",
+        "pagosParciales": []
+      },
+      {
+        "numeroCredito": "01010214112940",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "46",
+        "cuota": "527.78",
+        "montoBoleta": "527.78",
+        "pagado": "No",
+        "capitalRestante": "6535.788467475101",
+        "inversionista": "Diana Lowenthal",
+        "pago": "2026-01-18 00:00:00",
+        "pagosParciales": []
+      }
+    ]
+  }
+]

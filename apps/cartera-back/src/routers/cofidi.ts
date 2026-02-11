@@ -119,6 +119,8 @@ if (facturasExistentes.length > 0) {
           abono_interes: pagos_credito.abono_interes,
           abono_iva_12: pagos_credito.abono_iva_12,
 
+          capital_credito: creditos.capital,
+
           usuario_id: usuarios.usuario_id,
           nombre: usuarios.nombre,
           nit: usuarios.nit,
@@ -169,7 +171,9 @@ if (facturasExistentes.length > 0) {
           nombre: inversionistas.nombre,
           emite_factura: inversionistas.emite_factura,
           porcentaje_participacion: creditos_inversionistas.porcentaje_participacion_inversionista,
+          porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
           cuota_inversionista: creditos_inversionistas.cuota_inversionista,
+          monto_aportado: creditos_inversionistas.monto_aportado,
           monto_inversionista: creditos_inversionistas.monto_inversionista,
           iva_inversionista: creditos_inversionistas.iva_inversionista,
         })
@@ -183,20 +187,31 @@ if (facturasExistentes.length > 0) {
         )
         .where(eq(creditos_inversionistas.credito_id, pagoData.credito_id!));
 
-      // 🔥 Calcular abonos proporcionales basados en el porcentaje de participación
-      const totalInteresPagoCalc = new BigJs(pagoData.abono_interes || "0");
-      const totalIvaPagoCalc = new BigJs(pagoData.abono_iva_12 || "0");
+      // 🔥 Calcular participación real: monto_aportado / suma_total_aportes
+      const totalInteresesConIva = new BigJs(pagoData.abono_interes || "0")
+        .plus(new BigJs(pagoData.abono_iva_12 || "0"));
+
+      const totalAportado = inversionistasDelCredito.reduce(
+        (sum, inv) => sum.plus(new BigJs(inv.monto_aportado || "0")),
+        new BigJs(0)
+      );
+
+      console.log(`   💰 Suma total aportes inversionistas: Q${totalAportado.toFixed(2)}`);
+      console.log(`   💰 Total intereses + IVA del pago: Q${totalInteresesConIva.toFixed(2)}`);
 
       const inversionistasDelPago = inversionistasDelCredito.map((inv) => {
-        const porcentaje = new BigJs(inv.porcentaje_participacion || "0").div(100);
-        const abonoInteres = totalInteresPagoCalc.times(porcentaje).round(2).toString();
-        const abonoIva = totalIvaPagoCalc.times(porcentaje).round(2).toString();
+        const montoAportado = new BigJs(inv.monto_aportado || "0");
+        const participacion = totalAportado.gt(0)
+          ? montoAportado.div(totalAportado)
+          : new BigJs(0);
+        const interesProporcional = totalInteresesConIva.times(participacion).round(2).toString();
+
+        console.log(`   📊 ${inv.nombre}: aportó Q${montoAportado.toFixed(2)} / Q${totalAportado.toFixed(2)} = ${participacion.times(100).toFixed(2)}% → interés Q${interesProporcional}`);
 
         return {
           ...inv,
-          abono_interes: abonoInteres,
-          abono_iva_12: abonoIva,
-          abono_capital: "0", // No se usa aquí
+          participacion_real: participacion.toString(),
+          interes_proporcional: interesProporcional,
         };
       });
 
@@ -217,7 +232,7 @@ if (facturasExistentes.length > 0) {
 
       const receptor = {
         idReceptor: pagoData.nit
-          ? pagoData.nit.split('/')[0].trim() // 🔥 Tomar solo el primer NIT
+          ? pagoData.nit.split('/')[0].trim().replace(/[kK]/g, '').replace(/-$/, '') // 🔥 Tomar primer NIT, quitar K y guión final
           : "CF",
         nombreReceptor: pagoData.nombre
           ? pagoData.nombre.split('/')[0].trim() // 🔥 Tomar solo el primer nombre
@@ -606,79 +621,76 @@ if (facturasExistentes.length > 0) {
       }
 
       // ============================================
-      // 6️⃣ FACTURAS DE INTERESES
+      // 6️⃣ FACTURAS DE INTERESES (monto_aportado / capital)
       // ============================================
       const totalInteresesPago = new Big(pagoData.abono_interes || "0");
       const totalIvaPago = new Big(pagoData.abono_iva_12 || "0");
+      const totalInteresesConIvaPago = totalInteresesPago.plus(totalIvaPago);
 
-      // 🔥 SI NO HAY INTERESES EN EL PAGO, NO GENERAMOS NADA
       if (totalInteresesPago.lte(0)) {
         console.log("\n⏭️  NO hay intereses en este pago - Saltando facturas de intereses");
       } else {
         console.log(
-          `\n💰 Procesando INTERESES (Total: Q${totalInteresesPago.toFixed(2)} + IVA: Q${totalIvaPago.toFixed(2)})`
+          `\n💰 Procesando INTERESES (Total con IVA: Q${totalInteresesConIvaPago.toFixed(2)})`
         );
 
-        let interesesFacturados = new Big(0);
-        let ivaFacturado = new Big(0);
+        let cashInAcumulado = new Big(0);
+        let totalInteresesNoCube = new Big(0);
 
-        // PASO 1: Facturas individuales para inversionistas
+        // PASO 1: Facturas individuales para inversionistas NO-CUBE
         for (const inv of inversionistasDelPago) {
-          console.log(`\n   🔍 Procesando inversionista: "${inv.nombre}" (emite_factura: ${inv.emite_factura})`);
+          console.log(`\n   🔍 Procesando: "${inv.nombre}" (emite_factura: ${inv.emite_factura})`);
 
           const esCube = inv.nombre
             .trim()
             .toUpperCase()
             .includes("CUBE INVESTMENTS");
 
-          // 🔥 SI ES CUBE → va directo al RESTANTE
+          // 🔥 SI ES CUBE → se acumula al final
           if (esCube) {
-            console.log(`   ⏭️  ${inv.nombre} - Es CUBE (va en RESTANTE)`);
+            console.log(`   ⏭️  ${inv.nombre} - Es CUBE (se suma al final)`);
             continue;
           }
 
-          // 🔥 DETECTAR SI EL INVERSIONISTA TIENE CONFIGURACIÓN PROPIA PARA FACTURAR
-          const inversionistaConfig = getInversionistaFacturadorConfig(inv.nombre);
-          console.log(`   🔍 Match con facturador: ${inversionistaConfig ? inversionistaConfig.config.emisor.nombreEmisor : 'NO MATCH'}`);
-
-          // 🔥 SI EMITE FACTURA Y NO está en la lista de facturadores → NO generamos factura
-          if (inv.emite_factura && !inversionistaConfig) {
-            console.log(
-              `   ⏭️  ${inv.nombre} - Emite su propia factura (NO va en RESTANTE)`
-            );
-
-            // 🔥 SUMAMOS porque NO va en RESTANTE
-            const abonoInteres = new Big(inv.abono_interes || "0");
-            const abonoIva = new Big(inv.abono_iva_12 || "0");
-
-            interesesFacturados = interesesFacturados.plus(abonoInteres);
-            ivaFacturado = ivaFacturado.plus(abonoIva);
-
-            continue;
-          }
-
-          // 🔥 SI está en la lista de facturadores → GENERAMOS factura con SU config (ignora emite_factura)
-          const abonoInteres = new Big(inv.abono_interes || "0");
-          const abonoIva = new Big(inv.abono_iva_12 || "0");
-          const totalInteres = abonoInteres.plus(abonoIva);
-
-          if (totalInteres.lte(0)) {
+          const interesProporcional = new Big(inv.interes_proporcional || "0");
+          totalInteresesNoCube = totalInteresesNoCube.plus(interesProporcional);
+          if (interesProporcional.lte(0)) {
             console.log(`   ⏭️  ${inv.nombre} - Sin intereses`);
             continue;
           }
 
-          if (inversionistaConfig) {
-            console.log(
-              `   💼 ${inv.nombre}: Q${totalInteres.toFixed(2)} (FACTURA A NOMBRE DE ${inversionistaConfig.config.emisor.nombreEmisor})`
-            );
-          } else {
-            console.log(
-              `   💼 ${inv.nombre}: Q${totalInteres.toFixed(2)} (GENERAMOS factura individual - CUBE)`
-            );
+          // 🔥 Separar parte del inversionista y parte cash_in
+          const pctInversion = new Big(inv.porcentaje_participacion || "0").div(100);
+          const pctCashIn = new Big(inv.porcentaje_cash_in || "0").div(100);
+
+          const parteInversionista = interesProporcional.times(pctInversion).round(2);
+          const parteCashIn = interesProporcional.times(pctCashIn).round(2);
+
+          console.log(`   📊 Interés proporcional: Q${interesProporcional.toFixed(2)}`);
+          console.log(`      → Parte inversionista (${inv.porcentaje_participacion}%): Q${parteInversionista.toFixed(2)}`);
+          console.log(`      → Parte cash_in (${inv.porcentaje_cash_in}%): Q${parteCashIn.toFixed(2)}`);
+
+          // 🔥 Acumular cash_in para Cube
+          cashInAcumulado = cashInAcumulado.plus(parteCashIn);
+
+          // 🔥 DETECTAR CONFIG DEL INVERSIONISTA
+          const inversionistaConfig = getInversionistaFacturadorConfig(inv.nombre);
+          console.log(`   🔍 Match con facturador: ${inversionistaConfig ? inversionistaConfig.config.emisor.nombreEmisor : 'NO MATCH'}`);
+
+          // 🔥 SI EMITE FACTURA Y NO tiene config → NO generamos (ellos emiten)
+          if (inv.emite_factura && !inversionistaConfig) {
+            console.log(`   ⏭️  ${inv.nombre} - Emite su propia factura`);
+            continue;
           }
 
-          // 🔥 USAR calcularIvaExacto para obtener los valores correctos
-          const calc = calcularIvaExacto(parseFloat(totalInteres.toFixed(2)));
+          // 🔥 Facturar la parte del inversionista
+          if (parteInversionista.lte(0)) {
+            console.log(`   ⏭️  ${inv.nombre} - Parte inversionista es 0`);
+            continue;
+          }
+
+          const calc = calcularIvaExacto(parseFloat(parteInversionista.toFixed(2)));
+          console.log(`   💼 Factura ${inv.nombre}: Q${parteInversionista.toFixed(2)} (Base: Q${calc.montoGravable}, IVA: Q${calc.montoImpuesto})`);
 
           const itemsIntereses = [
             {
@@ -686,7 +698,7 @@ if (facturasExistentes.length > 0) {
               bienOServicio: "B",
               cantidad: 1,
               unidadMedida: "UND",
-              descripcion: `CARGO POR SERVICIOS`,
+              descripcion: "CARGO POR SERVICIOS",
               precioUnitario: calc.precioUnitario,
               precio: calc.precio,
               descuento: 0,
@@ -722,7 +734,6 @@ if (facturasExistentes.length > 0) {
           ];
 
           try {
-            // 🔥 USAR CONFIG PERSONALIZADA SI EL INVERSIONISTA HACE MATCH
             const facturaIntereses = await certificarFacturaHelper({
               pago_id,
               receptor,
@@ -744,12 +755,8 @@ if (facturasExistentes.length > 0) {
             console.log(
               `      ✅ ${facturaIntereses.serie}-${facturaIntereses.numero} (Emisor: ${inversionistaConfig?.config.emisor.nombreEmisor || "CUBE"})`
             );
-
-            interesesFacturados = interesesFacturados.plus(calc.montoGravable);
-            ivaFacturado = ivaFacturado.plus(calc.montoImpuesto);
           } catch (error: any) {
             console.error(`      ❌ Error: ${error.message}`);
-
             facturasGeneradas.push({
               tipo: "ERROR",
               inversionista: inv.nombre,
@@ -758,39 +765,40 @@ if (facturasExistentes.length > 0) {
           }
         }
 
-        // PASO 2: Calcular RESTANTE (SOLO CUBE)
-        const interesesRestantes = totalInteresesPago.minus(interesesFacturados);
-        const ivaRestante = totalIvaPago.minus(ivaFacturado);
-        const totalRestante = interesesRestantes.plus(ivaRestante);
+        // PASO 2: Calcular parte de CUBE como RESIDUO (total - lo que les tocó a los demás)
+        const cubePropio = totalInteresesConIvaPago.minus(totalInteresesNoCube);
+        console.log(`\n   📊 CUBE propio (residuo): Q${cubePropio.toFixed(2)} (total Q${totalInteresesConIvaPago.toFixed(2)} - otros Q${totalInteresesNoCube.toFixed(2)})`);
 
-        console.log(`\n   💵 Intereses RESTANTES: Q${totalRestante.toFixed(2)}`);
-        console.log(`       (Incluye SOLO: CUBE INVESTMENTS)`);
+        const totalCube = cubePropio.plus(cashInAcumulado);
 
-        // PASO 3: Factura RESTANTE (SOLO CUBE)
-        if (totalRestante.gt(0)) {
-          console.log(`   💼 Generando factura RESTANTE (CUBE)...`);
+        console.log(`   📊 Cash-in acumulado de otros: Q${cashInAcumulado.toFixed(2)}`);
+        console.log(`   💵 Total CUBE: Q${totalCube.toFixed(2)} (residuo + cash_in)`);
 
-          const calcRestante = calcularIvaExacto(parseFloat(totalRestante.toFixed(2)));
+        // PASO 3: Factura CUBE
+        if (totalCube.gt(0)) {
+          console.log(`   💼 Generando factura CUBE...`);
 
-          const itemsRestante = [
+          const calcCube = calcularIvaExacto(parseFloat(totalCube.toFixed(2)));
+
+          const itemsCube = [
             {
               numeroLinea: 1,
               bienOServicio: "B",
               cantidad: 1,
               unidadMedida: "UND",
               descripcion: "CARGO POR SERVICIOS",
-              precioUnitario: calcRestante.precioUnitario,
-              precio: calcRestante.precio,
+              precioUnitario: calcCube.precioUnitario,
+              precio: calcCube.precio,
               descuento: 0,
               impuestos: [
                 {
                   nombreCorto: "IVA",
                   codigoUnidadGravable: 1,
-                  montoGravable: calcRestante.montoGravable,
-                  montoImpuesto: calcRestante.montoImpuesto,
+                  montoGravable: calcCube.montoGravable,
+                  montoImpuesto: calcCube.montoImpuesto,
                 },
               ],
-              total: calcRestante.total,
+              total: calcCube.total,
             },
           ];
 
@@ -800,43 +808,42 @@ if (facturasExistentes.length > 0) {
               ? new Date(pagoData.fecha_pago).toISOString().split("T")[0]
               : new Date().toISOString().split("T")[0];
 
-          const complementosRestante = [
+          const complementosCube = [
             {
               tipo: "cambiario",
               abonos: [
                 {
                   numeroAbono: 1,
                   fechaVencimiento: fechaVencimiento,
-                  montoAbono: calcRestante.total,
+                  montoAbono: calcCube.total,
                 },
               ],
             },
           ];
 
           try {
-            const facturaRestante = await certificarFacturaHelper({
+            const facturaCube = await certificarFacturaHelper({
               pago_id,
               receptor,
-              items: itemsRestante,
-              complementos: complementosRestante,
+              items: itemsCube,
+              complementos: complementosCube,
               created_by,
             });
 
             facturasGeneradas.push({
-              tipo: "INTERESES_RESTANTE",
-              descripcion: "CARGO POR SERVICIOS",
-              ...facturaRestante,
+              tipo: "INTERESES_CUBE",
+              descripcion: "CARGO POR SERVICIOS (CUBE + CASH_IN)",
+              ...facturaCube,
             });
 
             console.log(
-              `      ✅ ${facturaRestante.serie}-${facturaRestante.numero}`
+              `      ✅ ${facturaCube.serie}-${facturaCube.numero} (CUBE)`
             );
           } catch (error: any) {
-            console.error(`      ❌ Error: ${error.message}`);
-
+            console.error(`      ❌ Error factura CUBE: ${error.message}`);
             facturasGeneradas.push({
               tipo: "ERROR",
-              inversionista: "RESTANTE",
+              inversionista: "CUBE",
               error: error.message,
             });
           }

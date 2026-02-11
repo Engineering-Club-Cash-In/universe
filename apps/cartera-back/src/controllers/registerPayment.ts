@@ -1027,7 +1027,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           abono_seguro: abono_seguro.toString(),
           abono_gps: abono_gps.toString(),
           pago_del_mes: pago_del_mesBig.toString(),
-          monto_boleta: totalPagado.toString(),
+          monto_boleta: montoBoleta.toString(),
           capital_restante: nuevo_capital_restante.toString(),
           interes_restante: nuevo_interes_restante.toString(),
           iva_12_restante: nuevo_iva_restante.toString(),
@@ -1043,7 +1043,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           membresias_mes: abono_membresias.toString(),
           otros: otrosBig?.toString() ?? "0",
           mora: moraBig.toString(),
-          monto_boleta_cuota: totalPagado.toString(),
+          monto_boleta_cuota: montoBoleta.toString(),
           seguro_total: credito.seguro_10_cuotas?.toString() ?? "0",
           pagado: cuota_pagada,
           facturacion: "si",
@@ -1203,8 +1203,8 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
                   llamada: pagoData.llamada || "",
                   otros: pagoData.otros,
                   mora: pagoData.mora,
-                  monto_boleta_cuota:totalPagado.toString(),
-                  monto_boleta: totalPagado.toString(),
+                  monto_boleta_cuota: cuotas_completas > 0 ? "0" : montoBoleta.toString(),
+                  monto_boleta: cuotas_completas > 0 ? "0" : montoBoleta.toString(),
                   observaciones: pagoData.observaciones,
 
                   // Seguros y GPS

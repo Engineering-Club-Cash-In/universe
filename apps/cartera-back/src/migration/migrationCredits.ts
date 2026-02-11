@@ -330,13 +330,28 @@ const membresias_pago = toBigExcel(obtenerMembresias(excelRow), 0);
       };
     });
 
-    // ✅ Insertar inversionistas nuevos
+    // ✅ Insertar/actualizar inversionistas (upsert)
     if (creditosInversionistasData.length > 0) {
-      await db
-        .insert(creditos_inversionistas)
-        .values(creditosInversionistasData);
+      for (const invData of creditosInversionistasData) {
+        await db
+          .insert(creditos_inversionistas)
+          .values(invData)
+          .onConflictDoUpdate({
+            target: [creditos_inversionistas.credito_id, creditos_inversionistas.inversionista_id],
+            set: {
+              monto_aportado: invData.monto_aportado,
+              porcentaje_cash_in: invData.porcentaje_cash_in,
+              porcentaje_participacion_inversionista: invData.porcentaje_participacion_inversionista,
+              monto_inversionista: invData.monto_inversionista,
+              monto_cash_in: invData.monto_cash_in,
+              iva_inversionista: invData.iva_inversionista,
+              iva_cash_in: invData.iva_cash_in,
+              cuota_inversionista: invData.cuota_inversionista,
+            },
+          });
+      }
       console.log(
-        `✅ ${creditosInversionistasData.length} inversionistas insertados`
+        `✅ ${creditosInversionistasData.length} inversionistas insertados/actualizados`
       );
     }
 

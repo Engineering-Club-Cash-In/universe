@@ -3309,10 +3309,10 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 		return "📎";
 	};
 
-	// Find the detalle_analisis document if exists
-	const detalleDocument = documentsQuery.data?.find(
+	// Find all detalle_analisis documents
+	const detalleDocuments = documentsQuery.data?.filter(
 		(doc) => (doc.documentType as string) === "detalle_analisis",
-	);
+	) ?? [];
 	const otherDocuments = documentsQuery.data?.filter(
 		(doc) => (doc.documentType as string) !== "detalle_analisis",
 	);
@@ -3321,14 +3321,14 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 		<div className="space-y-6">
 			{/* Detalle de Análisis Section - Special highlighted section */}
 			<Card
-				className={`border-2 ${detalleDocument ? "border-green-500 bg-green-50/50" : "border-amber-500 bg-amber-50/50"}`}
+				className={`border-2 ${detalleDocuments.length > 0 ? "border-green-500 bg-green-50/50" : "border-amber-500 bg-amber-50/50"}`}
 			>
 				<CardHeader className="pb-3">
 					<CardTitle className="flex items-center gap-2 text-lg">
 						<FileSpreadsheet className="h-5 w-5" />
 						Detalle de Análisis
-						{detalleDocument ? (
-							<Badge className="bg-green-600">Subido</Badge>
+						{detalleDocuments.length > 0 ? (
+							<Badge className="bg-green-600">{detalleDocuments.length} subido{detalleDocuments.length > 1 ? "s" : ""}</Badge>
 						) : (
 							<Badge
 								variant="outline"
@@ -3344,40 +3344,44 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 					</p>
 				</CardHeader>
 				<CardContent>
-					{detalleDocument ? (
-						<div className="flex items-center justify-between rounded-lg border border-green-200 bg-white p-4">
-							<div className="flex items-center gap-3">
-								<span className="text-3xl">📊</span>
-								<div>
-									<p className="font-medium">{detalleDocument.originalName}</p>
-									<p className="text-muted-foreground text-xs">
-										Subido el{" "}
-										{new Date(detalleDocument.uploadedAt).toLocaleString(
-											"es-GT",
-										)}{" "}
-										• {(detalleDocument.size / 1024 / 1024).toFixed(2)} MB
-									</p>
+					{detalleDocuments.length > 0 ? (
+						<div className="space-y-3">
+							{detalleDocuments.map((detalleDoc) => (
+								<div key={detalleDoc.id} className="flex items-center justify-between rounded-lg border border-green-200 bg-white p-4">
+									<div className="flex items-center gap-3">
+										<span className="text-3xl">📊</span>
+										<div>
+											<p className="font-medium">{detalleDoc.originalName}</p>
+											<p className="text-muted-foreground text-xs">
+												Subido el{" "}
+												{new Date(detalleDoc.uploadedAt).toLocaleString(
+													"es-GT",
+												)}{" "}
+												• {(detalleDoc.size / 1024 / 1024).toFixed(2)} MB
+											</p>
+										</div>
+									</div>
+									<div className="flex items-center gap-2">
+										<Button
+											size="sm"
+											variant="outline"
+											onClick={() => window.open(detalleDoc.url, "_blank")}
+										>
+											<FileText className="mr-1 h-4 w-4" />
+											Ver
+										</Button>
+										<Button
+											size="sm"
+											variant="ghost"
+											className="text-red-600 hover:bg-red-50 hover:text-red-700"
+											onClick={() => deleteMutation.mutate(detalleDoc.id)}
+											disabled={deleteMutation.isPending}
+										>
+											<Trash2 className="h-4 w-4" />
+										</Button>
+									</div>
 								</div>
-							</div>
-							<div className="flex items-center gap-2">
-								<Button
-									size="sm"
-									variant="outline"
-									onClick={() => window.open(detalleDocument.url, "_blank")}
-								>
-									<FileText className="mr-1 h-4 w-4" />
-									Ver
-								</Button>
-								<Button
-									size="sm"
-									variant="ghost"
-									className="text-red-600 hover:bg-red-50 hover:text-red-700"
-									onClick={() => deleteMutation.mutate(detalleDocument.id)}
-									disabled={deleteMutation.isPending}
-								>
-									<Trash2 className="h-4 w-4" />
-								</Button>
-							</div>
+							))}
 						</div>
 					) : (
 						<div className="rounded-lg border-2 border-amber-300 border-dashed bg-amber-50/50 p-6 text-center">

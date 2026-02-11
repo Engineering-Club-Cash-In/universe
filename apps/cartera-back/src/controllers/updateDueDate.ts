@@ -429,3 +429,143 @@ export const updateSingleDueDate = async ({
     set,
   });
 };
+
+// ============================================
+// ACTUALIZAR FECHAS DESDE JSON (TODAS LAS CUOTAS)
+// ============================================
+
+/**
+ * Lee resultado_ultimos_pagos.json, extrae el día del campo "pago" de cada crédito,
+ * y actualiza fecha_vencimiento de TODAS las cuotas (pagadas y no pagadas).
+ * También actualiza fecha_pago y fecha_boleta SOLO si ya tienen valor.
+ */
+export const updateDueDatesFromJson = async ({
+  set,
+}: {
+  set: { status: number };
+}) => {
+  const { promises: fs } = await import("fs");
+  const rutaArchivoPagos =
+    "C:\\Users\\Kelvin Palacios\\Documents\\analis de datos\\resultado_ultimos_pagos.json";
+
+  try {
+    console.log(`\n${"=".repeat(60)}`);
+    console.log(`ACTUALIZANDO FECHAS DESDE JSON (OPTIMIZADO)`);
+    console.log(`${"=".repeat(60)}`);
+
+    // 1. Leer JSON
+    const contenido = await fs.readFile(rutaArchivoPagos, "utf-8");
+    const jsonPagos = JSON.parse(contenido);
+    console.log(`Total registros en JSON: ${jsonPagos.length}\n`);
+
+    // 2. Agrupar créditos por diaPago
+    const gruposPorDia: Map<number, string[]> = new Map();
+    let sinPago = 0;
+
+    for (const registro of jsonPagos) {
+      const creditoInfo = registro.creditos?.[0];
+      if (!creditoInfo?.pago) {
+        sinPago++;
+        continue;
+      }
+      const diaPago = new Date(creditoInfo.pago).getDate();
+      if (!gruposPorDia.has(diaPago)) gruposPorDia.set(diaPago, []);
+      gruposPorDia.get(diaPago)!.push(registro.numeroCredito);
+    }
+
+    console.log(`Grupos por día: ${gruposPorDia.size}`);
+    for (const [dia, creds] of gruposPorDia) {
+      console.log(`  Día ${dia}: ${creds.length} créditos`);
+    }
+    console.log(`Sin campo pago: ${sinPago}\n`);
+
+    // Helper SQL: último día del mes = EXTRACT(DAY FROM (DATE_TRUNC('month', fecha) + INTERVAL '1 month' - INTERVAL '1 day'))
+    const ultimoDia = (col: string) =>
+      `EXTRACT(DAY FROM (DATE_TRUNC('month', ${col}) + INTERVAL '1 month' - INTERVAL '1 day'))::int`;
+
+    // 3. Por cada grupo de día, ejecutar 2 queries masivos
+    const resultados: { dia: number; creditos: number; cuotas: number; pagos: number }[] = [];
+
+    for (const [diaPago, creditNumbers] of gruposPorDia) {
+      const inClause = creditNumbers.map((n) => `'${n}'`).join(", ");
+      console.log(`Procesando día ${diaPago} (${creditNumbers.length} créditos)...`);
+
+      // 3a. UPDATE cuotas_credito: solo cambiar el día de fecha_vencimiento
+      const cuotasResult = await db.execute(
+        `UPDATE cartera.cuotas_credito cc
+         SET fecha_vencimiento = MAKE_DATE(
+             EXTRACT(YEAR FROM cc.fecha_vencimiento)::int,
+             EXTRACT(MONTH FROM cc.fecha_vencimiento)::int,
+             LEAST(${diaPago}, ${ultimoDia("cc.fecha_vencimiento")})
+           )
+         WHERE cc.credito_id IN (
+           SELECT credito_id FROM cartera.creditos
+           WHERE numero_credito_sifco IN (${inClause})
+         )
+         AND cc.numero_cuota > 0`
+      );
+
+      // 3b. UPDATE pagos_credito: fecha_vencimiento siempre,
+      //     fecha_pago + fecha_boleta SOLO donde fecha_pago ya tiene valor
+      const pagosResult = await db.execute(
+        `UPDATE cartera.pagos_credito pc
+         SET
+           fecha_vencimiento = MAKE_DATE(
+               EXTRACT(YEAR FROM pc.fecha_vencimiento)::int,
+               EXTRACT(MONTH FROM pc.fecha_vencimiento)::int,
+               LEAST(${diaPago}, ${ultimoDia("pc.fecha_vencimiento")})
+             ),
+           fecha_pago = CASE WHEN pc.fecha_pago IS NOT NULL THEN
+             MAKE_DATE(
+               EXTRACT(YEAR FROM pc.fecha_pago)::int,
+               EXTRACT(MONTH FROM pc.fecha_pago)::int,
+               LEAST(${diaPago}, ${ultimoDia("pc.fecha_pago")})
+             )
+             ELSE pc.fecha_pago END,
+           fecha_boleta = CASE WHEN pc.fecha_pago IS NOT NULL THEN
+             MAKE_DATE(
+                 EXTRACT(YEAR FROM pc.fecha_vencimiento)::int,
+                 EXTRACT(MONTH FROM pc.fecha_vencimiento)::int,
+                 LEAST(${diaPago}, ${ultimoDia("pc.fecha_vencimiento")})
+               )
+             ELSE pc.fecha_boleta END
+         WHERE pc.cuota_id IN (
+           SELECT cc.cuota_id FROM cartera.cuotas_credito cc
+           INNER JOIN cartera.creditos c ON cc.credito_id = c.credito_id
+           WHERE c.numero_credito_sifco IN (${inClause})
+             AND cc.numero_cuota > 0
+         )`
+      );
+
+      const cuotasCount = (cuotasResult as any).rowCount ?? 0;
+      const pagosCount = (pagosResult as any).rowCount ?? 0;
+
+      console.log(`  Día ${diaPago}: ${cuotasCount} cuotas, ${pagosCount} pagos actualizados`);
+      resultados.push({ dia: diaPago, creditos: creditNumbers.length, cuotas: cuotasCount, pagos: pagosCount });
+    }
+
+    console.log(`\n${"=".repeat(60)}`);
+    console.log(`RESUMEN`);
+    console.log(`${"=".repeat(60)}`);
+    console.log(`Total créditos procesados: ${jsonPagos.length - sinPago}`);
+    console.log(`Sin campo pago: ${sinPago}`);
+    console.log(`Queries ejecutados: ${gruposPorDia.size * 2}`);
+
+    set.status = 200;
+    return {
+      success: true,
+      total_json: jsonPagos.length,
+      sin_pago: sinPago,
+      procesados: jsonPagos.length - sinPago,
+      queries_ejecutados: gruposPorDia.size * 2,
+      resultados,
+    };
+  } catch (error: any) {
+    console.error("Error en updateDueDatesFromJson:", error);
+    set.status = 500;
+    return {
+      message: "Error interno del servidor",
+      error: error.message,
+    };
+  }
+};

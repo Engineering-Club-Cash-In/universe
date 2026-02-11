@@ -1,3 +1,4 @@
+import { ORPCError } from "@orpc/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
@@ -27,7 +28,9 @@ export const miniagentRouter = {
 				.limit(1);
 
 			if (!credentials) {
-				throw new Error("No hay credenciales configuradas para este usuario");
+				throw new ORPCError("BAD_REQUEST", {
+					message: "No hay credenciales configuradas para este usuario",
+				});
 			}
 
 			// Descifrar y retornar

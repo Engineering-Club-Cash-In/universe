@@ -31,7 +31,9 @@ export const vendorsRouter = {
 				.limit(1);
 
 			if (!vendor) {
-				throw new Error("Vendedor no encontrado");
+				throw new ORPCError("NOT_FOUND", {
+					message: "Vendedor no encontrado",
+				});
 			}
 
 			return vendor;

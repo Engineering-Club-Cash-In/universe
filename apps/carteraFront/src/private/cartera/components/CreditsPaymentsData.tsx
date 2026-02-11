@@ -88,6 +88,7 @@ export function ListaCreditosPagos() {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [creditToEdit, setCreditToEdit] = useState<any | null>(null);
   const [investorsToEdit, setInvestorsToEdit] = useState<any[]>([]);
+  const [investorsMirrorToEdit, setInvestorsMirrorToEdit] = useState<any[]>([]);
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
 
@@ -189,6 +190,19 @@ export function ListaCreditosPagos() {
 
     setInvestorsToEdit(
       inversionistas.map((inv: any) => ({
+        inversionista_id: inv.inversionista_id,
+        porcentaje_participacion: inv.porcentaje_participacion,
+        monto_aportado: inv.monto_aportado,
+        porcentaje_cash_in: inv.porcentaje_cash_in,
+        porcentaje_inversion: inv.porcentaje_participacion_inversionista,
+        cuota_inversionista: inv.cuota_inversionista ?? 0,
+      }))
+    );
+
+    // Mapeo seguro de espejo
+    const mirrorData = credit.creditos_inversionistas_espejo || [];
+    setInvestorsMirrorToEdit(
+      mirrorData.map((inv: any) => ({
         inversionista_id: inv.inversionista_id,
         porcentaje_participacion: inv.porcentaje_participacion,
         monto_aportado: inv.monto_aportado,
@@ -630,6 +644,7 @@ export function ListaCreditosPagos() {
         onClose={() => setEditModalOpen(false)}
         initialValues={creditToEdit}
         investorsInitial={investorsToEdit}
+        investorsMirrorInitial={investorsMirrorToEdit}
         onSuccess={() => {
           setEditModalOpen(false);
           queryClient.invalidateQueries({

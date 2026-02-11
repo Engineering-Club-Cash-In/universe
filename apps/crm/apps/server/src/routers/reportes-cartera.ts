@@ -3,6 +3,7 @@
  * Combina datos de CRM y cartera-back para reportes completos
  */
 
+import { ORPCError } from "@orpc/server";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
@@ -56,7 +57,9 @@ export const reportesCarteraRouter = {
 		)
 		.handler(async ({ input, context: _ }) => {
 			if (!isCarteraBackEnabled()) {
-				throw new Error("Integración con cartera-back no está habilitada");
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
 			}
 
 			const startTime = Date.now();
@@ -322,9 +325,9 @@ export const reportesCarteraRouter = {
 					},
 				};
 			} catch (error) {
-				throw new Error(
-					`Error generando reporte de cartera: ${error instanceof Error ? error.message : String(error)}`,
-				);
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Error generando reporte de cartera: ${error instanceof Error ? error.message : String(error)}`,
+				});
 			}
 		}),
 

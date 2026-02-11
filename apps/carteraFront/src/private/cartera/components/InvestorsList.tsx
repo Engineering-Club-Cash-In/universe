@@ -2,7 +2,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, Trash2, BookCopy, ArrowDown, ArrowUp } from "lucide-react";
+import { Plus, Trash2, BookCopy } from "lucide-react";
 import type { InversionistaPayload } from "../services/services";
 import { useState } from "react";
 
@@ -61,20 +61,29 @@ export function InvestorsList({
     ]);
   };
 
-  const removeInvestor = (index: number) => {
+  const removeInvestor = (indexToRemove: number) => {
+    // 1. Actualizar estado de expansión (Shift Logic)
+    const newExpandedSet = new Set<number>();
+    expandedMirrors.forEach((expandedIndex) => {
+      if (expandedIndex < indexToRemove) {
+        newExpandedSet.add(expandedIndex);
+      } else if (expandedIndex > indexToRemove) {
+        newExpandedSet.add(expandedIndex - 1);
+      }
+      // Si es igual, se ignora (se borra)
+    });
+    setExpandedMirrors(newExpandedSet);
+
+    // 2. Borrar del array principal
     const updated = [...investors];
-    updated.splice(index, 1);
+    updated.splice(indexToRemove, 1);
     formik.setFieldValue("investors", updated);
 
-    const updatedMirror = [...investorsMirror];
-    updatedMirror.splice(index, 1);
-    formik.setFieldValue("investorsMirror", updatedMirror);
-    
-    // Limpiar estado de expansión si se borra
-    if (expandedMirrors.has(index)) {
-        const newSet = new Set(expandedMirrors);
-        newSet.delete(index);
-        setExpandedMirrors(newSet);
+    // 3. Borrar del array espejo (si existe)
+    if (investorsMirror && investorsMirror.length > indexToRemove) {
+      const updatedMirror = [...investorsMirror];
+      updatedMirror.splice(indexToRemove, 1);
+      formik.setFieldValue("investorsMirror", updatedMirror);
     }
   };
 

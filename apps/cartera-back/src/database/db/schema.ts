@@ -319,6 +319,27 @@
       uxCreditoInv: uniqueIndex("ux_credito_inversionista").on(t.credito_id, t.inversionista_id),
     })
   );
+  export const creditos_inversionistas_espejo = customSchema.table(
+    "creditos_inversionistas_espejo",
+    {
+      id: serial("id").primaryKey(),
+      credito_id: integer("credito_id").notNull().references(() => creditos.credito_id),
+      inversionista_id: integer("inversionista_id").notNull().references(() => inversionistas.inversionista_id),
+      cuota_inversionista: numeric("cuota_inversionista", { precision: 18, scale: 2 }).notNull(),
+      porcentaje_participacion_inversionista: numeric("porcentaje_participacion_inversionista").notNull(),
+      monto_aportado: numeric("monto_aportado", { precision: 18, scale: 2 }).notNull(),
+      porcentaje_cash_in: numeric("porcentaje_cash_in").notNull().default("0"),
+      monto_inversionista: numeric("monto_inversionista", { precision: 18, scale: 2 }).notNull().default("0"),
+      monto_cash_in: numeric("monto_cash_in", { precision: 18, scale: 2 }).notNull().default("0"),
+      iva_inversionista: numeric("iva_inversionista", { precision: 18, scale: 2 }).notNull().default("0"),
+      iva_cash_in: numeric("iva_cash_in", { precision: 18 }).notNull().default("0"),
+      fecha_creacion: timestamp("fecha_creacion", { withTimezone: true }).notNull().$default(() => new Date()),
+    },
+    (t) => ({
+      uxCreditoInvEspejo: uniqueIndex("ux_credito_inversionista_espejo").on(t.credito_id, t.inversionista_id),
+    })
+  );
+
   export const credit_cancelations = customSchema.table("credit_cancelations", {
     id: serial("id").primaryKey(),
     credit_id: integer("credit_id")

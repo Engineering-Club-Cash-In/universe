@@ -1,3 +1,4 @@
+import { ORPCError } from "@orpc/server";
 import { and, count, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
@@ -218,9 +219,10 @@ export const notificationsRouter = {
 						.limit(1);
 
 					if (docs.length === 0) {
-						throw new Error(
-							"No se puede resolver esta notificación sin haber subido al menos un documento.",
-						);
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"No se puede resolver esta notificación sin haber subido al menos un documento.",
+						});
 					}
 				}
 			}
@@ -361,11 +363,15 @@ export const notificationsRouter = {
 				.limit(1);
 
 			if (!notification) {
-				throw new Error("Notificación no encontrada");
+				throw new ORPCError("NOT_FOUND", {
+					message: "Notificación no encontrada",
+				});
 			}
 
 			if (notification.type !== "action_upload_files") {
-				throw new Error("Esta notificación no permite subir documentos");
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Esta notificación no permite subir documentos",
+				});
 			}
 
 			// Validar archivo
@@ -375,7 +381,9 @@ export const notificationsRouter = {
 			} as File);
 
 			if (!validation.valid) {
-				throw new Error(validation.error || "Archivo inválido");
+				throw new ORPCError("BAD_REQUEST", {
+					message: validation.error || "Archivo inválido",
+				});
 			}
 
 			// Subir a R2

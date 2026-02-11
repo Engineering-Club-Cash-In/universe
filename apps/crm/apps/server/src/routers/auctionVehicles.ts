@@ -1,3 +1,4 @@
+import { ORPCError } from "@orpc/server";
 import { and, desc, eq } from "drizzle-orm";
 import z from "zod";
 import { db } from "../db";
@@ -38,7 +39,7 @@ export const auctionRouter = {
 				.limit(1);
 
 			if (!vehicle) {
-				throw new Error("Vehicle not found");
+				throw new ORPCError("NOT_FOUND", { message: "Vehículo no encontrado" });
 			}
 
 			// 2. Get latest inspection to fetch marketValue
@@ -50,7 +51,7 @@ export const auctionRouter = {
 				.limit(1);
 
 			if (!latestInspection) {
-				throw new Error("No inspection found for this vehicle");
+				throw new ORPCError("NOT_FOUND", { message: "No se encontró inspección para este vehículo" });
 			}
 
 			const marketValue = latestInspection.marketValue;
@@ -139,7 +140,7 @@ export const auctionRouter = {
 				.limit(1);
 
 			if (!vehicle) {
-				throw new Error("Vehicle not found");
+				throw new ORPCError("NOT_FOUND", { message: "Vehículo no encontrado" });
 			}
 
 			// 2. Get auction record
@@ -150,7 +151,7 @@ export const auctionRouter = {
 				.limit(1);
 
 			if (!auction) {
-				throw new Error("Auction entry not found for this vehicle");
+				throw new ORPCError("NOT_FOUND", { message: "No se encontró entrada de subasta para este vehículo" });
 			}
 
 			// 3. Get latest inspection to fetch marketValue
@@ -162,7 +163,7 @@ export const auctionRouter = {
 				.limit(1);
 
 			if (!latestInspection) {
-				throw new Error("No inspection found for this vehicle");
+				throw new ORPCError("NOT_FOUND", { message: "No se encontró inspección para este vehículo" });
 			}
 
 			const marketValue = Number.parseFloat(
@@ -456,7 +457,7 @@ export const auctionRouter = {
 				.limit(1);
 
 			if (!vehicle) {
-				throw new Error("Vehicle not found");
+				throw new ORPCError("NOT_FOUND", { message: "Vehículo no encontrado" });
 			}
 
 			// 2. Validate auction entry exists
@@ -467,7 +468,7 @@ export const auctionRouter = {
 				.limit(1);
 
 			if (!auction) {
-				throw new Error("Auction entry not found for this vehicle");
+				throw new ORPCError("NOT_FOUND", { message: "No se encontró entrada de subasta para este vehículo" });
 			}
 
 			// 3. Delete auction record

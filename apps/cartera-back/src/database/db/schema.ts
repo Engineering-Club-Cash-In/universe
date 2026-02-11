@@ -332,7 +332,7 @@
       monto_inversionista: numeric("monto_inversionista", { precision: 18, scale: 2 }).notNull().default("0"),
       monto_cash_in: numeric("monto_cash_in", { precision: 18, scale: 2 }).notNull().default("0"),
       iva_inversionista: numeric("iva_inversionista", { precision: 18, scale: 2 }).notNull().default("0"),
-      iva_cash_in: numeric("iva_cash_in", { precision: 18 }).notNull().default("0"),
+      iva_cash_in: numeric("iva_cash_in", { precision: 18, scale: 2 }).notNull().default("0"),
       fecha_creacion: timestamp("fecha_creacion", { withTimezone: true }).notNull().$default(() => new Date()),
     },
     (t) => ({

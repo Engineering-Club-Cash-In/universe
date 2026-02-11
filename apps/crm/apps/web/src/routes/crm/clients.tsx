@@ -76,6 +76,7 @@ export const Route = createFileRoute("/crm/clients")({
 	validateSearch: z.object({
 		opportunityId: z.string().optional(),
 		idLead: z.string().optional(),
+		edit: z.boolean().optional(),
 	}).parse,
 });
 
@@ -229,9 +230,6 @@ function RouteComponent() {
 		phone: "",
 		email: "",
 		direccion: "",
-		departamento: "",
-		municipio: "",
-		zona: "",
 	});
 
 	// Opportunity modal state
@@ -342,8 +340,16 @@ function RouteComponent() {
 			const client = specificClientQuery.data.data[0] as unknown as ClientData;
 			setSelectedClient(client);
 			setIsDetailsDialogOpen(true);
+			if (search.edit) {
+				setEditForm({
+					phone: client.phone || "",
+					email: client.email || "",
+					direccion: client.direccion || "",
+				});
+				setIsEditingContact(true);
+			}
 		}
-	}, [search.idLead, specificClientQuery.data]);
+	}, [search.idLead, search.edit, specificClientQuery.data]);
 
 	// Documentos de contabilidad para las oportunidades del cliente seleccionado
 	const opportunityIds =
@@ -409,8 +415,15 @@ function RouteComponent() {
 	}, [session, isPending, userProfile.data?.role, navigate]);
 
 	const updateLeadMutation = useMutation({
-		mutationFn: (input: { id: string; phone?: string; email?: string; direccion?: string; departamento?: string; municipio?: string; zona?: string }) =>
-			client.updateLead(input),
+		mutationFn: (input: {
+			id: string;
+			phone?: string;
+			email?: string;
+			direccion?: string;
+			departamento?: string;
+			municipio?: string;
+			zona?: string;
+		}) => client.updateLead(input),
 		onSuccess: () => {
 			queryClient.invalidateQueries({
 				predicate: (query) =>
@@ -425,9 +438,6 @@ function RouteComponent() {
 					phone: editForm.phone || null,
 					email: editForm.email,
 					direccion: editForm.direccion || null,
-					departamento: editForm.departamento || null,
-					municipio: editForm.municipio || null,
-					zona: editForm.zona || null,
 				});
 			}
 		},
@@ -442,9 +452,6 @@ function RouteComponent() {
 			phone: selectedClient.phone || "",
 			email: selectedClient.email || "",
 			direccion: selectedClient.direccion || "",
-			departamento: selectedClient.departamento || "",
-			municipio: selectedClient.municipio || "",
-			zona: selectedClient.zona || "",
 		});
 		setIsEditingContact(true);
 	};
@@ -456,9 +463,6 @@ function RouteComponent() {
 			phone: editForm.phone || undefined,
 			email: editForm.email || undefined,
 			direccion: editForm.direccion || undefined,
-			departamento: editForm.departamento || undefined,
-			municipio: editForm.municipio || undefined,
-			zona: editForm.zona || undefined,
 		});
 	};
 
@@ -764,7 +768,11 @@ function RouteComponent() {
 				onOpenChange={(open) => {
 					setIsDetailsDialogOpen(open);
 					if (!open && search.idLead) {
-						navigate({ to: "/crm/clients", search: { ...search, idLead: undefined }, replace: true });
+						navigate({
+							to: "/crm/clients",
+							search: { ...search, idLead: undefined },
+							replace: true,
+						});
 					}
 				}}
 			>
@@ -1083,7 +1091,12 @@ function RouteComponent() {
 														<Label className="text-xs">Correo</Label>
 														<Input
 															value={editForm.email}
-															onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+															onChange={(e) =>
+																setEditForm({
+																	...editForm,
+																	email: e.target.value,
+																})
+															}
 															className="h-8 text-sm"
 														/>
 													</div>
@@ -1091,7 +1104,12 @@ function RouteComponent() {
 														<Label className="text-xs">Teléfono</Label>
 														<Input
 															value={editForm.phone}
-															onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+															onChange={(e) =>
+																setEditForm({
+																	...editForm,
+																	phone: e.target.value,
+																})
+															}
 															className="h-8 text-sm"
 														/>
 													</div>
@@ -1100,35 +1118,14 @@ function RouteComponent() {
 													<Label className="text-xs">Dirección</Label>
 													<Input
 														value={editForm.direccion}
-														onChange={(e) => setEditForm({ ...editForm, direccion: e.target.value })}
+														onChange={(e) =>
+															setEditForm({
+																...editForm,
+																direccion: e.target.value,
+															})
+														}
 														className="h-8 text-sm"
 													/>
-												</div>
-												<div className="grid grid-cols-3 gap-3">
-													<div>
-														<Label className="text-xs">Departamento</Label>
-														<Input
-															value={editForm.departamento}
-															onChange={(e) => setEditForm({ ...editForm, departamento: e.target.value })}
-															className="h-8 text-sm"
-														/>
-													</div>
-													<div>
-														<Label className="text-xs">Municipio</Label>
-														<Input
-															value={editForm.municipio}
-															onChange={(e) => setEditForm({ ...editForm, municipio: e.target.value })}
-															className="h-8 text-sm"
-														/>
-													</div>
-													<div>
-														<Label className="text-xs">Zona</Label>
-														<Input
-															value={editForm.zona}
-															onChange={(e) => setEditForm({ ...editForm, zona: e.target.value })}
-															className="h-8 text-sm"
-														/>
-													</div>
 												</div>
 											</div>
 										) : (
@@ -1143,11 +1140,23 @@ function RouteComponent() {
 														{selectedClient.phone || "No especificado"}
 													</p>
 												</div>
-												{(selectedClient.direccion || selectedClient.departamento || selectedClient.municipio || selectedClient.zona) && (
+												{(selectedClient.direccion ||
+													selectedClient.departamento ||
+													selectedClient.municipio ||
+													selectedClient.zona) && (
 													<div className="flex items-center gap-2">
 														<MapPin className="h-4 w-4 text-muted-foreground" />
 														<p className="text-sm">
-															{[selectedClient.direccion, selectedClient.zona ? `Zona ${selectedClient.zona}` : null, selectedClient.municipio, selectedClient.departamento].filter(Boolean).join(", ")}
+															{[
+																selectedClient.direccion,
+																selectedClient.zona
+																	? `Zona ${selectedClient.zona}`
+																	: null,
+																selectedClient.municipio,
+																selectedClient.departamento,
+															]
+																.filter(Boolean)
+																.join(", ")}
 														</p>
 													</div>
 												)}
@@ -1460,16 +1469,14 @@ function RouteComponent() {
 				opportunity={selectedOpportunityForModal}
 				userRole={userProfile.data?.role}
 				readOnly
-				onNavigateToLead={
-					(id: string) => {
-						//borrar los search params de oportunidad y agregar el id del lead a la pagina actual de clients
-						navigate({ 
-							to: "/crm/clients", 
-							search: { ...search, idLead: id, opportunityId: undefined }, 
-							replace: true 
-						});
-					}
-				}
+				onNavigateToLead={(id: string) => {
+					//borrar los search params de oportunidad y agregar el id del lead a la pagina actual de clients
+					navigate({
+						to: "/crm/clients",
+						search: { ...search, idLead: id, opportunityId: undefined },
+						replace: true,
+					});
+				}}
 			/>
 		</div>
 	);

@@ -4,6 +4,8 @@ import { db } from "../database";
 import { creditos, cuotas_credito, pagos_credito } from "../database/db";
 import fs from "fs/promises";
 import { consultarEstadoCuentaPrestamo } from "../services/sifcoIntegrations";
+import { updateInstallments } from "./updateCredit";
+
 interface AjustarCuotasConSIFCOParams {
   numero_credito_sifco: string;
   cuota_esperada: number; // 20
@@ -155,12 +157,8 @@ if (diaEsperado === 1) {
   );
 
   // 🔒 NO tocar el mes
-  if (fechaBase.getMonth() === 1) {
-    // Febrero
-    fechaBase.setDate(28);
-  } else {
-    fechaBase.setDate(30);
-  }
+  const ultimoDia = new Date(fechaBase.getFullYear(), fechaBase.getMonth() + 1, 0).getDate();
+  fechaBase.setDate(Math.min(30, ultimoDia));
 } else {
   // Regla normal
   diaVencimiento = diaEsperado > 15 ? 30 : 15;
@@ -173,16 +171,8 @@ if (diaEsperado === 1) {
 
   // 🔥 HELPER para ajustar día según el mes
   const ajustarDiaVencimiento = (fecha: Date, dia: number): void => {
-    if (dia === 30) {
-      const mes = fecha.getMonth();
-      if (mes === 1) { // Febrero
-        fecha.setDate(28);
-      } else {
-        fecha.setDate(30);
-      }
-    } else {
-      fecha.setDate(dia);
-    }
+    const ultimoDiaMes = new Date(fecha.getFullYear(), fecha.getMonth() + 1, 0).getDate();
+    fecha.setDate(Math.min(dia, ultimoDiaMes));
   };
 
   // 🔥 CALCULAR LA FECHA DE LA CUOTA ESPERADA ajustada (usando fechaBase)
@@ -619,11 +609,13 @@ export const procesarPagosSIFCODesdeJSON = async (
 interface MarcarCuotasPagadasParams {
   numero_credito_sifco: string;
   hasta_cuota: number;
+  fecha_primer_pago?: string; // e.g. "2026-01-30 00:00:00"
 }
 
 export const marcarCuotasPagadasHastaNumero = async ({
   numero_credito_sifco,
   hasta_cuota,
+  fecha_primer_pago,
 }: MarcarCuotasPagadasParams): Promise<void> => {
 
   /* =====================================================
@@ -673,7 +665,7 @@ export const marcarCuotasPagadasHastaNumero = async ({
   /* =====================================================
      3️⃣ CUOTAS + PAGOS
      ===================================================== */
-  const cuotasConPagos = await db
+  const cuotasConPagosRaw = await db
     .select({
       cuota_id: cuotas_credito.cuota_id,
       numero_cuota: cuotas_credito.numero_cuota,
@@ -689,6 +681,14 @@ export const marcarCuotasPagadasHastaNumero = async ({
       )
     )
     .orderBy(asc(cuotas_credito.numero_cuota));
+
+  // Deduplicar: si una cuota tiene varios pagos, quedarse solo con el primero
+  const cuotasVistas = new Set<number>();
+  const cuotasConPagos = cuotasConPagosRaw.filter((row) => {
+    if (cuotasVistas.has(row.cuota_id)) return false;
+    cuotasVistas.add(row.cuota_id);
+    return true;
+  });
 
   /* =====================================================
      4️⃣ CONSTANTES FINANCIERAS
@@ -707,7 +707,39 @@ export const marcarCuotasPagadasHastaNumero = async ({
   };
 
   /* =====================================================
-     5️⃣ PROCESAMIENTO
+     5️⃣ CALCULAR FECHAS DESDE CUOTA 0
+     ===================================================== */
+  // Obtener fecha de cuota 0 como base
+  const [cuota0] = await db
+    .select({ fecha_vencimiento: cuotas_credito.fecha_vencimiento })
+    .from(cuotas_credito)
+    .where(
+      and(
+        eq(cuotas_credito.credito_id, credito.credito_id),
+        eq(cuotas_credito.numero_cuota, 0)
+      )
+    )
+    .limit(1);
+
+  const fechaCuota0 = cuota0?.fecha_vencimiento ? new Date(cuota0.fecha_vencimiento) : null;
+  // Día de pago del JSON (ej: "2026-01-30" → 30)
+  const fechaJsonPago = fecha_primer_pago ? new Date(fecha_primer_pago.replace(" ", "T")) : null;
+  const diaPago = fechaJsonPago?.getDate() ?? null;
+
+  // Calcula la fecha para cuota N: cuota0 + N meses, con el día del JSON
+  const calcularFechaCuota = (numeroCuota: number): Date | null => {
+    if (!fechaCuota0 || !diaPago) return null;
+    const mesBase = fechaCuota0.getMonth();
+    const añoBase = fechaCuota0.getFullYear();
+    const mesTarget = mesBase + numeroCuota;
+    const añoTarget = añoBase + Math.floor(mesTarget / 12);
+    const mesAjustado = ((mesTarget % 12) + 12) % 12;
+    const ultimoDiaMes = new Date(añoTarget, mesAjustado + 1, 0).getDate();
+    return new Date(añoTarget, mesAjustado, Math.min(diaPago, ultimoDiaMes));
+  };
+
+  /* =====================================================
+     6️⃣ PROCESAMIENTO
      ===================================================== */
   let capitalEnMemoria = capitalInicialSifco;
 
@@ -728,12 +760,14 @@ export const marcarCuotasPagadasHastaNumero = async ({
         const nuevoCapital = capitalEnMemoria.minus(abonoCapital);
         capitalEnMemoria = nuevoCapital.lt(0) ? new Big(0) : nuevoCapital;
 
+        const fechaCuota = calcularFechaCuota(row.numero_cuota);
         cuotasParaActualizar.push({
           cuota_id: row.cuota_id,
           data: {
             pagado: true,
             liquidado_inversionistas: true,
             fecha_liquidacion_inversionistas: new Date(),
+            ...(fechaCuota ? { fecha_vencimiento: fechaCuota.toISOString().slice(0, 10) } : {}),
           },
         });
 
@@ -761,7 +795,11 @@ export const marcarCuotasPagadasHastaNumero = async ({
             membresias_pago: membresias.toString(),
             membresias_mes: membresias.toString(),
 
-            fecha_pago: new Date(row.fecha_vencimiento ?? new Date()),
+            monto_boleta: cuotaMensual.toString(),
+            monto_boleta_cuota: cuotaMensual.toString(),
+
+            fecha_pago: fechaCuota ?? new Date(row.fecha_vencimiento ?? new Date()),
+            ...(fechaCuota ? { fecha_vencimiento: fechaCuota.toISOString().slice(0, 10) } : {}),
             pagado: true,
             validationStatus: "no_required",
             registerBy: "SIFCO_IMPORT",
@@ -771,11 +809,13 @@ export const marcarCuotasPagadasHastaNumero = async ({
         // 📋 CUOTA PENDIENTE → CAPITAL BD
         const { interes, iva } = calcularInteresIva(capitalActualBD);
 
+        const fechaCuotaPend = calcularFechaCuota(row.numero_cuota);
         cuotasParaActualizar.push({
           cuota_id: row.cuota_id,
           data: {
             pagado: false,
             liquidado_inversionistas: false,
+            ...(fechaCuotaPend ? { fecha_vencimiento: fechaCuotaPend.toISOString().slice(0, 10) } : {}),
           },
         });
 
@@ -804,6 +844,7 @@ export const marcarCuotasPagadasHastaNumero = async ({
             membresias_mes: membresias.toString(),
 
             fecha_pago: null,
+            ...(fechaCuotaPend ? { fecha_vencimiento: fechaCuotaPend.toISOString().slice(0, 10) } : {}),
             pagado: false,
             validationStatus: "no_required",
             registerBy: "SIFCO_IMPORT",
@@ -823,4 +864,11 @@ export const marcarCuotasPagadasHastaNumero = async ({
   });
 
   console.log(`✅ Cuotas marcadas correctamente hasta la ${hasta_cuota}`);
+
+  // Recalcular cuotas pendientes con el capital correcto
+  await updateInstallments({
+    numero_credito_sifco,
+    nueva_cuota: Number(credito.cuota),
+  });
+  console.log(`✅ Cuotas pendientes recalculadas para ${numero_credito_sifco}`);
 };

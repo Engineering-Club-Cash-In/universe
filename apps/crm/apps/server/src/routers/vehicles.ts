@@ -2,6 +2,7 @@ import { openai } from "@ai-sdk/openai";
 import { ORPCError } from "@orpc/server";
 import { generateObject } from "ai";
 import { and, desc, eq, ilike, not, or, sql } from "drizzle-orm";
+import { isUniqueViolation } from "../lib/db-errors";
 import { z } from "zod";
 import { db } from "../db";
 import {
@@ -385,11 +386,7 @@ export const vehiclesRouter = {
 
 				return newVehicle;
 			} catch (error: unknown) {
-				if (
-					error instanceof Error &&
-					error.message.includes("unique") &&
-					error.message.includes("license_plate")
-				) {
+				if (isUniqueViolation(error, "vehicles_license_plate_unique")) {
 					throw new ORPCError("BAD_REQUEST", {
 						message: `Ya existe un vehículo con la placa "${input.licensePlate}"`,
 					});
@@ -443,11 +440,7 @@ export const vehiclesRouter = {
 
 				return newVehicle;
 			} catch (error: unknown) {
-				if (
-					error instanceof Error &&
-					error.message.includes("unique") &&
-					error.message.includes("license_plate")
-				) {
+				if (isUniqueViolation(error, "vehicles_license_plate_unique")) {
 					throw new ORPCError("BAD_REQUEST", {
 						message: `Ya existe un vehículo con la placa "${input.licensePlate}"`,
 					});
@@ -505,11 +498,7 @@ export const vehiclesRouter = {
 
 				return updated;
 			} catch (error: unknown) {
-				if (
-					error instanceof Error &&
-					error.message.includes("unique") &&
-					error.message.includes("license_plate")
-				) {
+				if (isUniqueViolation(error, "vehicles_license_plate_unique")) {
 					throw new ORPCError("BAD_REQUEST", {
 						message: `Ya existe un vehículo con la placa "${input.data.licensePlate}"`,
 					});

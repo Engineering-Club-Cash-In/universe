@@ -637,6 +637,7 @@ export interface UpdateCreditBody {
 
   // Inversionistas nuevos
   inversionistas?: InversionistaPayload[];
+  inversionistas_espejo?: InversionistaPayload[];
 }
 export async function updateCreditService(body: UpdateCreditBody) {
   const response = await api.post(`${API_URL}/updateCredit`, body);

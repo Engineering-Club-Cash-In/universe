@@ -13,6 +13,7 @@ import {cuentasRoutes} from"./accounts"
 import { paymentAgreementsRouter } from "./paymentAgree";
 import { dteController } from "./cofidi";
 import { recalculateFromJsonRouter } from "./recalculateFromJson";
+import { mirrorInvestorRouter } from "./mirrorInvestor";
 export {
-    defaultRouter,inversionistasRouter,advisorRouter,usersRouter,creditRouter,paymentRouter,uploadRouter,sifcoRouter,authRouter,morasRouter,bancosRouter,cuentasRoutes,paymentAgreementsRouter,dteController,recalculateFromJsonRouter
+    defaultRouter,inversionistasRouter,advisorRouter,usersRouter,creditRouter,paymentRouter,uploadRouter,sifcoRouter,authRouter,morasRouter,bancosRouter,cuentasRoutes,paymentAgreementsRouter,dteController,recalculateFromJsonRouter,mirrorInvestorRouter
 }   

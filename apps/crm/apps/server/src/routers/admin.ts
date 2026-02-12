@@ -1,3 +1,4 @@
+import { ORPCError } from "@orpc/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
@@ -56,7 +57,7 @@ export const adminRouter = {
 		.handler(async ({ input, context }) => {
 			// Prevent changing own role
 			if (input.userId === context.session?.user?.id) {
-				throw new Error("Cannot change your own role");
+				throw new ORPCError("FORBIDDEN", { message: "No puedes cambiar tu propio rol" });
 			}
 
 			const updatedUser = await db
@@ -69,7 +70,7 @@ export const adminRouter = {
 				.returning();
 
 			if (updatedUser.length === 0) {
-				throw new Error("User not found");
+				throw new ORPCError("NOT_FOUND", { message: "Usuario no encontrado" });
 			}
 
 			return updatedUser[0];
@@ -85,7 +86,7 @@ export const adminRouter = {
 		.handler(async ({ input, context }) => {
 			// Prevent suspending own account
 			if (input.userId === context.session?.user?.id) {
-				throw new Error("No puedes suspender tu propia cuenta");
+				throw new ORPCError("FORBIDDEN", { message: "No puedes suspender tu propia cuenta" });
 			}
 
 			const updatedUser = await db
@@ -98,7 +99,7 @@ export const adminRouter = {
 				.returning();
 
 			if (updatedUser.length === 0) {
-				throw new Error("Usuario no encontrado");
+				throw new ORPCError("NOT_FOUND", { message: "Usuario no encontrado" });
 			}
 
 			return updatedUser[0];
@@ -113,7 +114,7 @@ export const adminRouter = {
 		.handler(async ({ input, context }) => {
 			// Prevent deleting own account
 			if (input.userId === context.session?.user?.id) {
-				throw new Error("Cannot delete your own account");
+				throw new ORPCError("FORBIDDEN", { message: "No puedes eliminar tu propia cuenta" });
 			}
 
 			const deletedUser = await db
@@ -122,7 +123,7 @@ export const adminRouter = {
 				.returning();
 
 			if (deletedUser.length === 0) {
-				throw new Error("User not found");
+				throw new ORPCError("NOT_FOUND", { message: "Usuario no encontrado" });
 			}
 
 			return { success: true, deletedUser: deletedUser[0] };
@@ -151,7 +152,7 @@ export const adminRouter = {
 		.handler(async ({ input, context: _ }) => {
 			// Check if email is from clubcashin.com domain
 			if (!input.email.endsWith("@clubcashin.com")) {
-				throw new Error("Only @clubcashin.com email addresses are allowed");
+				throw new ORPCError("BAD_REQUEST", { message: "Solo se permiten correos @clubcashin.com" });
 			}
 
 			// Use Better Auth's admin createUser API
@@ -165,7 +166,7 @@ export const adminRouter = {
 			});
 
 			if (!result.user) {
-				throw new Error("Failed to create user");
+				throw new ORPCError("BAD_REQUEST", { message: "Error al crear usuario" });
 			}
 
 			return result.user;

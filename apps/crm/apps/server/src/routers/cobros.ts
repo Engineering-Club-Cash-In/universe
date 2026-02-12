@@ -1,3 +1,4 @@
+import { ORPCError } from "@orpc/server";
 import { and, asc, count, desc, eq, gte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
@@ -13,7 +14,7 @@ import {
 	metodoContactoEnum,
 	recuperacionesVehiculo,
 } from "../db/schema/cobros";
-import { clients, leads, opportunities } from "../db/schema/crm";
+import { clients, leads, opportunities, salesStages } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
 import {
 	cobrosProcedure,
@@ -131,6 +132,192 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 		perPage: response.perPage,
 		totalCount: response.totalCount,
 		totalPages: response.totalPages,
+	};
+}
+
+/**
+ * Verifica si la auto-creación de datos migrate está habilitada
+ */
+function isAutoMigrateEnabled(): boolean {
+	return process.env.ENABLE_AUTO_MIGRATE_OPPORTUNITIES === "true";
+}
+
+/**
+ * Parsea nombre completo en componentes (firstName, middleName, lastName, secondLastName)
+ */
+function parseNombreCompleto(nombreCompleto: string | null | undefined): {
+	firstName: string;
+	middleName: string | null;
+	lastName: string;
+	secondLastName: string | null;
+} {
+	if (!nombreCompleto) {
+		return {
+			firstName: "N/A",
+			middleName: null,
+			lastName: "N/A",
+			secondLastName: null,
+		};
+	}
+	const partes = nombreCompleto.trim().split(/\s+/);
+	if (partes.length === 1)
+		return {
+			firstName: partes[0],
+			middleName: null,
+			lastName: "N/A",
+			secondLastName: null,
+		};
+	if (partes.length === 2)
+		return {
+			firstName: partes[0],
+			middleName: null,
+			lastName: partes[1],
+			secondLastName: null,
+		};
+	if (partes.length === 3)
+		return {
+			firstName: partes[0],
+			middleName: null,
+			lastName: partes[1],
+			secondLastName: partes[2],
+		};
+	return {
+		firstName: partes[0],
+		middleName: partes[1],
+		lastName: partes[2],
+		secondLastName: partes.slice(3).join(" "),
+	};
+}
+
+/**
+ * Auto-crea lead, vehículo y oportunidad cuando no se encuentra la oportunidad por número SIFCO.
+ * Solo se ejecuta si ENABLE_AUTO_MIGRATE_OPPORTUNITIES=true.
+ * Retorna los datos creados para que el endpoint los use, o null si no aplica.
+ */
+async function autoCrearDatosMigrate({
+	numeroSifco,
+	nombreCliente,
+	deudaTotal,
+	cuotaMensual,
+	diaPagoMensual,
+	tipoCredito,
+	userId,
+}: {
+	numeroSifco: string;
+	nombreCliente: string;
+	deudaTotal: string;
+	cuotaMensual: string;
+	diaPagoMensual: number | null;
+	tipoCredito: string | null;
+	userId: string;
+}) {
+	if (!isAutoMigrateEnabled()) return null;
+
+	console.log(
+		`[AutoMigrate] Creando datos migrate para crédito ${numeroSifco}`,
+	);
+
+	const nombre = parseNombreCompleto(nombreCliente);
+
+	// Obtener stage antes de la transacción (solo lectura)
+	const [defaultStage] = await db
+		.select({ id: salesStages.id })
+		.from(salesStages)
+		.orderBy(desc(salesStages.order))
+		.limit(1);
+
+	if (!defaultStage) {
+		console.error("[AutoMigrate] No hay etapas de venta configuradas");
+		return null;
+	}
+
+	const creditType = tipoCredito?.toLowerCase().includes("autocompra")
+		? ("autocompra" as const)
+		: ("sobre_vehiculo" as const);
+
+	// Transacción atómica: si algo falla, se revierte todo
+	const result = await db.transaction(async (tx) => {
+		// 1. Crear Lead con solo el nombre, status "migrate"
+		const [nuevoLead] = await tx
+			.insert(leads)
+			.values({
+				firstName: nombre.firstName,
+				middleName: nombre.middleName,
+				lastName: nombre.lastName,
+				secondLastName: nombre.secondLastName,
+				email: `migrado_${Date.now()}@placeholder.com`,
+				source: "other",
+				status: "migrate",
+				assignedTo: userId,
+				createdBy: userId,
+				notes: `Creado automáticamente desde Cartera-Back. Crédito SIFCO: ${numeroSifco}`,
+			})
+			.returning({ id: leads.id });
+
+		// 2. Crear Vehículo con datos nulos, status "sold"
+		const [nuevoVehiculo] = await tx
+			.insert(vehicles)
+			.values({
+				make: "N/A",
+				model: "N/A",
+				year: 2000,
+				color: "N/A",
+				vehicleType: "N/A",
+				status: "sold",
+			})
+			.returning({ id: vehicles.id });
+
+		// 3. Crear Oportunidad enlazando lead y vehículo
+		await tx.insert(opportunities).values({
+			title: `Crédito ${numeroSifco}`,
+			leadId: nuevoLead.id,
+			vehicleId: nuevoVehiculo.id,
+			creditType,
+			stageId: defaultStage.id,
+			assignedTo: userId,
+			createdBy: userId,
+			status: "migrate",
+			numeroSifco,
+			diaPagoMensual: diaPagoMensual,
+			cuotaMensual: cuotaMensual,
+			value: deudaTotal,
+			notes: `Crédito migrado automáticamente desde Cartera-Back.`,
+		});
+
+		return { leadId: nuevoLead.id, vehiculoId: nuevoVehiculo.id };
+	});
+
+	console.log(`[AutoMigrate] Datos creados exitosamente para crédito ${numeroSifco} (lead: ${result.leadId}, vehiculo: ${result.vehiculoId})`);
+
+	return {
+		leadId: result.leadId,
+		vehiculoId: result.vehiculoId,
+		leadInfo: {
+			nombre: `${nombre.firstName} ${nombre.lastName}`.trim(),
+			email: null as string | null,
+			telefono: null as string | null,
+		},
+		vehiculo: {
+			make: "N/A" as string | null,
+			model: "N/A" as string | null,
+			year: 2000 as number | null,
+			licensePlate: null as string | null,
+			tipo: null as string | null,
+			motor: null as string | null,
+			chasis: null as string | null,
+			asientos: null as number | null,
+			uso: null as string | null,
+			numeroPoliza: null as string | null,
+			fechaInicioSeguro: null as Date | null,
+			fechaVencimientoSeguro: null as Date | null,
+			montoAsegurado: null as string | null,
+		},
+		oportunidadData: {
+			notes: null as string | null,
+			cuotaMensual: cuotaMensual,
+			diaPago: diaPagoMensual,
+			creditType: creditType as string | null,
+		},
 	};
 }
 
@@ -480,7 +667,7 @@ export const cobrosRouter = {
 							"[Cobros] Respuesta inválida de Cartera-Back:",
 							creditosResponse,
 						);
-						throw new Error("Estructura de respuesta inválida");
+						throw new ORPCError("BAD_REQUEST", { message: "Estructura de respuesta inválida" });
 					}
 
 					console.log(
@@ -758,7 +945,7 @@ export const cobrosRouter = {
 					.limit(1);
 
 				if (!caso.length) {
-					throw new Error("No tienes permiso para acceder a este caso");
+					throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para acceder a este caso" });
 				}
 			}
 
@@ -808,7 +995,7 @@ export const cobrosRouter = {
 					.limit(1);
 
 				if (!caso.length) {
-					throw new Error("No tienes permiso para acceder a este caso");
+					throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para acceder a este caso" });
 				}
 			}
 			console.log(
@@ -871,9 +1058,7 @@ export const cobrosRouter = {
 					.limit(1);
 
 				if (!caso.length) {
-					throw new Error(
-						"No tienes permiso para crear convenios en este caso",
-					);
+					throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para crear convenios en este caso" });
 				}
 			}
 
@@ -906,7 +1091,7 @@ export const cobrosRouter = {
 					.limit(1);
 
 				if (!caso.length) {
-					throw new Error("No tienes permiso para ver convenios de este caso");
+					throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para ver convenios de este caso" });
 				}
 			}
 
@@ -949,7 +1134,7 @@ export const cobrosRouter = {
 				.limit(1);
 
 			if (!responsable.length) {
-				throw new Error("Usuario no encontrado");
+				throw new ORPCError("NOT_FOUND", { message: "Usuario no encontrado" });
 			}
 
 			if (
@@ -957,9 +1142,7 @@ export const cobrosRouter = {
 				responsable[0].role !== "cobros_supervisor" &&
 				responsable[0].role !== "admin"
 			) {
-				throw new Error(
-					"El usuario debe tener rol de cobros, supervisor de cobros o admin",
-				);
+				throw new ORPCError("BAD_REQUEST", { message: "El usuario debe tener rol de cobros, supervisor de cobros o admin" });
 			}
 
 			const casoActualizado = await db
@@ -1002,7 +1185,7 @@ export const cobrosRouter = {
 		.handler(async ({ input, context }) => {
 			try {
 				if (!input.numeroSifco) {
-					throw new Error("El número SIFCO es requerido");
+					throw new ORPCError("BAD_REQUEST", { message: "El número SIFCO es requerido" });
 				}
 
 				// TODO: Cambiar a verificación por caso de cobros cuando ya no haya datos importados sin responsable
@@ -1022,7 +1205,7 @@ export const cobrosRouter = {
 
 				if (!PERMISSIONS.canAccessCobros(context.userRole)) {
 					console.error("❌ Sin permisos para ver historial");
-					throw new Error("No tienes permiso para ver este historial");
+					throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para ver este historial" });
 				}
 
 				// Verificar si el contrato tiene referencia a cartera-back
@@ -1141,7 +1324,7 @@ export const cobrosRouter = {
 					.limit(1);
 
 				if (!caso.length) {
-					throw new Error("No tienes permiso para ver esta información");
+					throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para ver esta información" });
 				}
 			}
 
@@ -1285,7 +1468,7 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			if (!isCarteraBackEnabled()) {
-				throw new Error("Integración con Cartera-Back no está habilitada");
+				throw new ORPCError("BAD_REQUEST", { message: "Integración con Cartera-Back no está habilitada" });
 			}
 
 			try {
@@ -1468,8 +1651,11 @@ export const cobrosRouter = {
 					creditType: string | null;
 				} | null = null;
 
+				let vehicleId: string | null = null;
+
 				if (oportunidadResult.length > 0) {
 					const opp = oportunidadResult[0];
+					vehicleId = opp.vehicleId;
 					vehiculo = {
 						make: opp.vehiculoMarca,
 						model: opp.vehiculoModelo,
@@ -1499,6 +1685,24 @@ export const cobrosRouter = {
 						diaPago: opp.oportunidadDiaPago,
 						creditType: opp.oportunidadCreditType,
 					};
+				} else {
+					// No se encontró oportunidad: auto-crear datos migrate si está habilitado
+					const datosMigrate = await autoCrearDatosMigrate({
+						numeroSifco,
+						nombreCliente: creditoCompleto.usuario.nombre,
+						deudaTotal: creditoCompleto.credito.deudatotal,
+						cuotaMensual: creditoCompleto.credito.cuota,
+						diaPagoMensual: null,
+						tipoCredito: creditoCompleto.credito.tipoCredito,
+						userId: context.user.id,
+					});
+
+					if (datosMigrate) {
+						vehicleId = datosMigrate.vehiculoId;
+						vehiculo = datosMigrate.vehiculo;
+						leadInfo = datosMigrate.leadInfo;
+						oportunidadData = datosMigrate.oportunidadData;
+					}
 				}
 
 				// 4. Buscar o crear caso de cobros automáticamente
@@ -1523,7 +1727,7 @@ export const cobrosRouter = {
 				) {
 					// Crear caso de cobros automáticamente
 					if (!context.user?.id) {
-						throw new Error("Usuario no autenticado");
+						throw new ORPCError("UNAUTHORIZED", { message: "Usuario no autenticado" });
 					}
 
 					const cuotasAtrasadas = creditoCompleto?.mora?.cuotas_atrasadas ?? 0;
@@ -1563,7 +1767,24 @@ export const cobrosRouter = {
 
 				console.log(`COBROSCREDITOSDETALLES ${JSON.stringify(casoCobro)}`);
 
-				// 5. Mapear datos correctamente
+				// 5. Calcular fecha de inicio (cuota 0) y cuotas restantes
+				const todasLasCuotas = [
+					...(creditoCompleto.cuotasPagadas || []),
+					...(creditoCompleto.cuotasPendientes || []),
+					...(creditoCompleto.cuotasAtrasadas || []),
+				];
+				const cuota0 = todasLasCuotas.find((c) => c.numero_cuota === 0);
+				const fechaInicioCuota0 = cuota0?.fecha_vencimiento || null;
+				const cuotasPagadasCount = creditoCompleto.cuotasPagadas?.length || 0;
+				const totalCuotas = creditoCompleto.credito.plazo || 0;
+				let cuotasRestantes = totalCuotas;
+				if (cuota0?.pagado) {
+					cuotasRestantes = totalCuotas - cuotasPagadasCount + 1;
+				} else {
+					cuotasRestantes = totalCuotas - cuotasPagadasCount;
+				}
+
+				// 6. Mapear datos correctamente
 				const cuotasAtrasadas = creditoCompleto.cuotasAtrasadas?.length || 0;
 				const cuotaMensual = Number(creditoCompleto.credito.cuota ?? 0);
 				// Calcular días de mora exactos usando la fecha de vencimiento
@@ -1618,6 +1839,7 @@ export const cobrosRouter = {
 					clienteNit: creditoCompleto.usuario.nit,
 
 					// Datos del vehículo (de la oportunidad)
+					vehicleId,
 					vehiculoMarca: vehiculo?.make || "-",
 					vehiculoModelo: vehiculo?.model || "-",
 					vehiculoYear: vehiculo?.year || null,
@@ -1642,6 +1864,10 @@ export const cobrosRouter = {
 					// Notas de la oportunidad
 					oportunidadNotes: oportunidadData?.notes || null,
 					creditType: oportunidadData?.creditType || null,
+
+					// Campos calculados
+					fechaInicioCuota0,
+					cuotasRestantes,
 				};
 			} catch (error) {
 				console.error("[Cobros] Error obteniendo detalles de crédito:", error);
@@ -1673,9 +1899,7 @@ export const cobrosRouter = {
 			);
 
 			if (!reference) {
-				throw new Error(
-					`Crédito ${input.numeroSifco} no encontrado en el sistema`,
-				);
+				throw new ORPCError("BAD_REQUEST", { message: `Crédito ${input.numeroSifco} no encontrado en el sistema` });
 			}
 
 			// Register payment in cartera-back
@@ -1691,7 +1915,7 @@ export const cobrosRouter = {
 			});
 
 			if (!result.success) {
-				throw new Error(`Error registrando pago: ${result.error}`);
+				throw new ORPCError("BAD_REQUEST", { message: `Error registrando pago: ${result.error}` });
 			}
 
 			return {
@@ -1710,9 +1934,7 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context: _ }) => {
 			if (!isCarteraBackPaymentsEnabled()) {
-				throw new Error(
-					"Integración de pagos con cartera-back no está habilitada",
-				);
+				throw new ORPCError("BAD_REQUEST", { message: "Integración de pagos con cartera-back no está habilitada" });
 			}
 
 			try {
@@ -1755,9 +1977,7 @@ export const cobrosRouter = {
 					})),
 				};
 			} catch (error) {
-				throw new Error(
-					`Error obteniendo historial de pagos: ${error instanceof Error ? error.message : String(error)}`,
-				);
+				throw new ORPCError("BAD_REQUEST", { message: `Error obteniendo historial de pagos: ${error instanceof Error ? error.message : String(error)}` });
 			}
 		}),
 
@@ -1770,7 +1990,7 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context: _ }) => {
 			if (!isCarteraBackPaymentsEnabled()) {
-				throw new Error("Integración con cartera-back no está habilitada");
+				throw new ORPCError("BAD_REQUEST", { message: "Integración con cartera-back no está habilitada" });
 			}
 
 			try {
@@ -1830,9 +2050,7 @@ export const cobrosRouter = {
 					cuotasAtrasadas: creditoData.cuotasAtrasadas?.length || 0,
 				};
 			} catch (error) {
-				throw new Error(
-					`Error obteniendo crédito de cartera-back: ${error instanceof Error ? error.message : String(error)}`,
-				);
+				throw new ORPCError("BAD_REQUEST", { message: `Error obteniendo crédito de cartera-back: ${error instanceof Error ? error.message : String(error)}` });
 			}
 		}),
 
@@ -1904,7 +2122,7 @@ export const cobrosRouter = {
 				console.log(
 					"[getInversionistas] Cartera-back integration is NOT enabled",
 				);
-				throw new Error("Integración con cartera-back no está habilitada");
+				throw new ORPCError("BAD_REQUEST", { message: "Integración con cartera-back no está habilitada" });
 			}
 
 			try {
@@ -1936,9 +2154,7 @@ export const cobrosRouter = {
 					"[getInversionistas] Error stack:",
 					error instanceof Error ? error.stack : "No stack",
 				);
-				throw new Error(
-					`Error obteniendo inversionistas: ${error instanceof Error ? error.message : String(error)}`,
-				);
+				throw new ORPCError("BAD_REQUEST", { message: `Error obteniendo inversionistas: ${error instanceof Error ? error.message : String(error)}` });
 			}
 		}),
 
@@ -1955,7 +2171,7 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context: _ }) => {
 			if (!isCarteraBackPaymentsEnabled()) {
-				throw new Error("Integración con cartera-back no está habilitada");
+				throw new ORPCError("BAD_REQUEST", { message: "Integración con cartera-back no está habilitada" });
 			}
 
 			try {
@@ -2017,9 +2233,7 @@ export const cobrosRouter = {
 					},
 				};
 			} catch (error) {
-				throw new Error(
-					`Error obteniendo detalle de inversionista: ${error instanceof Error ? error.message : String(error)}`,
-				);
+				throw new ORPCError("BAD_REQUEST", { message: `Error obteniendo detalle de inversionista: ${error instanceof Error ? error.message : String(error)}` });
 			}
 		}),
 
@@ -2032,7 +2246,7 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context: _ }) => {
 			if (!isCarteraBackPaymentsEnabled()) {
-				throw new Error("Integración con cartera-back no está habilitada");
+				throw new ORPCError("BAD_REQUEST", { message: "Integración con cartera-back no está habilitada" });
 			}
 
 			try {
@@ -2069,9 +2283,7 @@ export const cobrosRouter = {
 				};
 				*/
 			} catch (error) {
-				throw new Error(
-					`Error obteniendo inversionistas del crédito: ${error instanceof Error ? error.message : String(error)}`,
-				);
+				throw new ORPCError("BAD_REQUEST", { message: `Error obteniendo inversionistas del crédito: ${error instanceof Error ? error.message : String(error)}` });
 			}
 		}),
 
@@ -2092,7 +2304,7 @@ export const cobrosRouter = {
 
 			if (!isCarteraBackPaymentsEnabled()) {
 				console.log("[getAsesores] Cartera-back integration is NOT enabled");
-				throw new Error("Integración con cartera-back no está habilitada");
+				throw new ORPCError("BAD_REQUEST", { message: "Integración con cartera-back no está habilitada" });
 			}
 
 			console.log("[getAsesores] Cartera-back integration is enabled");
@@ -2137,9 +2349,7 @@ export const cobrosRouter = {
 					"[getAsesores] Error stack:",
 					error instanceof Error ? error.stack : "No stack",
 				);
-				throw new Error(
-					`Error obteniendo asesores: ${error instanceof Error ? error.message : String(error)}`,
-				);
+				throw new ORPCError("BAD_REQUEST", { message: `Error obteniendo asesores: ${error instanceof Error ? error.message : String(error)}` });
 			}
 		}),
 };

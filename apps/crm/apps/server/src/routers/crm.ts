@@ -32,6 +32,7 @@ import {
 	opportunities,
 	opportunityStageHistory,
 	salesStages,
+	leadSourceEnum,
 } from "../db/schema/crm";
 import {
 	analysisChecklists,
@@ -208,9 +209,9 @@ export const crmRouter = {
 				.returning();
 
 			if (updatedCompany.length === 0) {
-				throw new Error(
-					"Company not found or you don't have permission to update it",
-				);
+				throw new ORPCError("NOT_FOUND", {
+					message: "Empresa no encontrada o no tienes permiso para actualizarla",
+				});
 			}
 
 			return updatedCompany[0];
@@ -506,15 +507,7 @@ export const crmRouter = {
 				hasCreditCard: z.boolean().default(false),
 				jobTitle: z.string().optional(),
 				companyId: z.string().uuid().optional(),
-				source: z.enum([
-					"website",
-					"referral",
-					"cold_call",
-					"email",
-					"social_media",
-					"event",
-					"other",
-				]),
+				source: z.enum(leadSourceEnum.enumValues),
 				assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
 				notes: z.string().optional(),
 			}),
@@ -525,7 +518,7 @@ export const crmRouter = {
 			const assignedTo = input.assignedTo || context.userId;
 
 			if (context.userRole === "sales" && assignedTo !== context.userId) {
-				throw new Error("Sales users can only assign leads to themselves");
+				throw new ORPCError("FORBIDDEN", { message: "Los usuarios de ventas solo pueden asignarse leads a sí mismos" });
 			}
 
 			const newLead = await db
@@ -579,15 +572,7 @@ export const crmRouter = {
 				jobTitle: z.string().optional(),
 				companyId: z.string().uuid().optional(),
 				source: z
-					.enum([
-						"website",
-						"referral",
-						"cold_call",
-						"email",
-						"social_media",
-						"event",
-						"other",
-					])
+					.enum(leadSourceEnum.enumValues)
 					.optional(),
 				status: z
 					.enum(["new", "contacted", "qualified", "unqualified", "converted"])
@@ -617,7 +602,7 @@ export const crmRouter = {
 				assignedTo &&
 				assignedTo !== context.userId
 			) {
-				throw new Error("Sales users cannot reassign leads");
+				throw new ORPCError("FORBIDDEN", { message: "Los usuarios de ventas no pueden reasignar leads" });
 			}
 
 			const updatedLead = await db
@@ -635,9 +620,9 @@ export const crmRouter = {
 				.returning();
 
 			if (updatedLead.length === 0) {
-				throw new Error(
-					"Lead not found or you don't have permission to update it",
-				);
+				throw new ORPCError("NOT_FOUND", {
+					message: "Lead no encontrado o no tienes permiso para actualizarlo",
+				});
 			}
 
 			// Sync NIT to associated opportunities
@@ -673,7 +658,7 @@ export const crmRouter = {
 					.limit(1);
 
 				if (lead.length === 0) {
-					throw new Error("Lead not found");
+					throw new ORPCError("NOT_FOUND", { message: "Lead no encontrado" });
 				}
 
 				// Sales users can only see analysis for their assigned leads
@@ -681,7 +666,7 @@ export const crmRouter = {
 					context.userRole === "sales" &&
 					lead[0].assignedTo !== context.userId
 				) {
-					throw new Error("You don't have permission to view this analysis");
+					throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para ver este análisis" });
 				}
 
 				const analysis = await db
@@ -702,7 +687,7 @@ export const crmRouter = {
 					.limit(1);
 
 				if (coDebtor.length === 0) {
-					throw new Error("Co-deudor no encontrado");
+					throw new ORPCError("NOT_FOUND", { message: "Co-deudor no encontrado" });
 				}
 
 				const analysis = await db
@@ -763,7 +748,7 @@ export const crmRouter = {
 					.limit(1);
 
 				if (lead.length === 0) {
-					throw new Error("Lead not found");
+					throw new ORPCError("NOT_FOUND", { message: "Lead no encontrado" });
 				}
 
 				// Sales users can only update analysis for their assigned leads
@@ -771,7 +756,7 @@ export const crmRouter = {
 					context.userRole === "sales" &&
 					lead[0].assignedTo !== context.userId
 				) {
-					throw new Error("You don't have permission to update this analysis");
+					throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para actualizar este análisis" });
 				}
 
 				// Check if analysis already exists
@@ -815,7 +800,7 @@ export const crmRouter = {
 					.limit(1);
 
 				if (coDebtor.length === 0) {
-					throw new Error("Co-deudor no encontrado");
+					throw new ORPCError("NOT_FOUND", { message: "Co-deudor no encontrado" });
 				}
 
 				// Check if analysis already exists
@@ -850,7 +835,7 @@ export const crmRouter = {
 				return created[0];
 			}
 
-			throw new Error("Debe proporcionar leadId o coDebtorId");
+			throw new ORPCError("BAD_REQUEST", { message: "Debe proporcionar leadId o coDebtorId" });
 		}),
 
 	// Opportunities
@@ -1053,15 +1038,7 @@ export const crmRouter = {
 				vehicleId: z.string().uuid().optional(),
 				creditType: z.enum(["autocompra", "sobre_vehiculo"]),
 				source: z
-					.enum([
-						"website",
-						"referral",
-						"cold_call",
-						"email",
-						"social_media",
-						"event",
-						"other",
-					])
+					.enum(leadSourceEnum.enumValues)
 					.optional(),
 				loanPurpose: z.enum(["personal", "business"]).optional(),
 				value: z.string().optional(), // Will be converted to decimal
@@ -1078,9 +1055,9 @@ export const crmRouter = {
 			const assignedTo = input.assignedTo || context.userId;
 
 			if (context.userRole === "sales" && assignedTo !== context.userId) {
-				throw new Error(
-					"Sales users can only assign opportunities to themselves",
-				);
+				throw new ORPCError("FORBIDDEN", {
+					message: "Los usuarios de ventas solo pueden asignarse oportunidades a sí mismos",
+				});
 			}
 
 			// Check for recent opportunity with same lead (within 1 hour)
@@ -1236,7 +1213,7 @@ export const crmRouter = {
 				.limit(1);
 
 			if (!currentOpportunity[0]) {
-				throw new Error("Opportunity not found");
+				throw new ORPCError("NOT_FOUND", { message: "Oportunidad no encontrada" });
 			}
 
 			// Validate stage transitions
@@ -1452,7 +1429,7 @@ export const crmRouter = {
 				assignedTo &&
 				assignedTo !== context.userId
 			) {
-				throw new Error("Sales users cannot reassign opportunities");
+				throw new ORPCError("FORBIDDEN", { message: "Los usuarios de ventas no pueden reasignar oportunidades" });
 			}
 
 			// Check if this is a stage change
@@ -1524,9 +1501,9 @@ export const crmRouter = {
 							"La oportunidad fue modificada por otro usuario. Por favor recarga la página e intenta de nuevo.",
 					});
 				}
-				throw new Error(
-					"Opportunity not found or you don't have permission to update it",
-				);
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada o no tienes permiso para actualizarla",
+				});
 			}
 
 			// Si viene direccion, actualizar en el lead en lugar de la oportunidad
@@ -1622,7 +1599,7 @@ export const crmRouter = {
 				.limit(1);
 
 			if (!analysisStage[0]) {
-				throw new Error("Analysis stage not found");
+				throw new ORPCError("NOT_FOUND", { message: "Etapa de análisis no encontrada" });
 			}
 
 			// Build conditions
@@ -1756,17 +1733,17 @@ export const crmRouter = {
 				.limit(1);
 
 			if (!opportunity[0]) {
-				throw new Error("Opportunity not found");
+				throw new ORPCError("NOT_FOUND", { message: "Oportunidad no encontrada" });
 			}
 
 			// NUEVA VALIDACIÓN: Verificar documentos y vehículo antes de aprobar
 			if (input.approved && !input.bypassValidation) {
 				// Validar que tenga vehicleId y creditType
 				if (!opportunity[0].vehicleId) {
-					throw new Error("La oportunidad debe tener un vehículo asociado");
+					throw new ORPCError("BAD_REQUEST", { message: "La oportunidad debe tener un vehículo asociado" });
 				}
 				if (!opportunity[0].creditType) {
-					throw new Error("La oportunidad debe tener un tipo de crédito");
+					throw new ORPCError("BAD_REQUEST", { message: "La oportunidad debe tener un tipo de crédito" });
 				}
 
 				// Obtener datos del vehículo para verificar si es nuevo
@@ -1792,7 +1769,7 @@ export const crmRouter = {
 						.limit(1);
 
 					if (!inspection || inspection.length === 0) {
-						throw new Error("El vehículo debe tener una inspección aprobada");
+						throw new ORPCError("BAD_REQUEST", { message: "El vehículo debe tener una inspección aprobada" });
 					}
 				}
 				// Vehículos nuevos no requieren inspección
@@ -1855,7 +1832,7 @@ export const crmRouter = {
 					const missingLabels = missingDocs
 						.map((d) => docLabels[d] || d)
 						.join(", ");
-					throw new Error(`Faltan documentos obligatorios: ${missingLabels}`);
+					throw new ORPCError("BAD_REQUEST", { message: `Faltan documentos obligatorios: ${missingLabels}` });
 				}
 
 				// Registrar validación exitosa
@@ -1873,7 +1850,7 @@ export const crmRouter = {
 
 			// Permitir bypass solo a admin
 			if (input.bypassValidation && context.userRole !== "admin") {
-				throw new Error("No tienes permisos para omitir la validación");
+				throw new ORPCError("FORBIDDEN", { message: "No tienes permisos para omitir la validación" });
 			}
 
 			// Get the analysis stage
@@ -1889,7 +1866,7 @@ export const crmRouter = {
 				.limit(1);
 
 			if (opportunity[0].stageId !== analysisStage[0].id) {
-				throw new Error("Opportunity is not in analysis stage");
+				throw new ORPCError("BAD_REQUEST", { message: "La oportunidad no está en etapa de análisis" });
 			}
 
 			// Validate analysisStatus is in a valid state for approval/rejection
@@ -1920,7 +1897,7 @@ export const crmRouter = {
 				.limit(1);
 
 			if (!nextStage[0]) {
-				throw new Error("Next stage not found");
+				throw new ORPCError("NOT_FOUND", { message: "Siguiente etapa no encontrada" });
 			}
 
 			// Get the previous stage (20% - Solución y propuesta) for rejection
@@ -1931,7 +1908,7 @@ export const crmRouter = {
 				.limit(1);
 
 			if (!previousStage[0]) {
-				throw new Error("Previous stage (Solución y propuesta) not found");
+				throw new ORPCError("NOT_FOUND", { message: "Etapa anterior (Solución y propuesta) no encontrada" });
 			}
 
 			// Determine new stage based on approval/rejection
@@ -2050,9 +2027,9 @@ export const crmRouter = {
 		.handler(async ({ input, context }) => {
 			// Only admin or sales_supervisor can approve
 			if (!PERMISSIONS.canApproveCreditDetail(context.userRole)) {
-				throw new Error(
-					"Solo supervisores de ventas o administradores pueden aprobar el detalle de crédito",
-				);
+				throw new ORPCError("FORBIDDEN", {
+					message: "Solo supervisores de ventas o administradores pueden aprobar el detalle de crédito",
+				});
 			}
 
 			// Get current opportunity
@@ -2063,12 +2040,12 @@ export const crmRouter = {
 				.limit(1);
 
 			if (!opportunity) {
-				throw new Error("Oportunidad no encontrada");
+				throw new ORPCError("NOT_FOUND", { message: "Oportunidad no encontrada" });
 			}
 
 			// Already approved
 			if (opportunity.creditDetailApproved) {
-				throw new Error("El detalle de crédito ya fue aprobado");
+				throw new ORPCError("BAD_REQUEST", { message: "El detalle de crédito ya fue aprobado" });
 			}
 
 			const nextStage = await db
@@ -2078,7 +2055,7 @@ export const crmRouter = {
 				.limit(1);
 
 			if (!nextStage[0]) {
-				throw new Error("Next stage not found");
+				throw new ORPCError("NOT_FOUND", { message: "Siguiente etapa no encontrada" });
 			}
 
 			// Update opportunity with approval
@@ -2128,9 +2105,9 @@ export const crmRouter = {
 		.handler(async ({ input, context }) => {
 			// Only admin or sales_supervisor can revoke
 			if (!PERMISSIONS.canApproveCreditDetail(context.userRole)) {
-				throw new Error(
-					"Solo supervisores de ventas o administradores pueden cancelar la aprobación",
-				);
+				throw new ORPCError("FORBIDDEN", {
+					message: "Solo supervisores de ventas o administradores pueden cancelar la aprobación",
+				});
 			}
 
 			// Get current opportunity with stage info
@@ -2147,12 +2124,12 @@ export const crmRouter = {
 				.limit(1);
 
 			if (!opportunity) {
-				throw new Error("Oportunidad no encontrada");
+				throw new ORPCError("NOT_FOUND", { message: "Oportunidad no encontrada" });
 			}
 
 			// Validate that it's approved
 			if (!opportunity.creditDetailApproved) {
-				throw new Error("El detalle de crédito no está aprobado");
+				throw new ORPCError("BAD_REQUEST", { message: "El detalle de crédito no está aprobado" });
 			}
 
 			// Get current stage to check closure percentage
@@ -2163,14 +2140,14 @@ export const crmRouter = {
 				.limit(1);
 
 			if (!currentStage) {
-				throw new Error("Etapa actual no encontrada");
+				throw new ORPCError("NOT_FOUND", { message: "Etapa actual no encontrada" });
 			}
 
 			// Cannot revoke if at 90% or higher (already sent to cartera)
 			if (currentStage.closurePercentage >= 90) {
-				throw new Error(
-					"No se puede cancelar la aprobación de una oportunidad que ya fue enviada a cartera",
-				);
+				throw new ORPCError("BAD_REQUEST", {
+					message: "No se puede cancelar la aprobación de una oportunidad que ya fue enviada a cartera",
+				});
 			}
 
 			// Get stage 40% by closurePercentage (more reliable than order)
@@ -2181,7 +2158,7 @@ export const crmRouter = {
 				.limit(1);
 
 			if (!previousStage) {
-				throw new Error("Etapa 40% no encontrada");
+				throw new ORPCError("NOT_FOUND", { message: "Etapa 40% no encontrada" });
 			}
 
 			// Update opportunity and record history in a transaction for atomicity
@@ -2248,7 +2225,7 @@ export const crmRouter = {
 				.limit(1);
 
 			if (!opportunity) {
-				throw new Error("Oportunidad no encontrada");
+				throw new ORPCError("NOT_FOUND", { message: "Oportunidad no encontrada" });
 			}
 
 			return {
@@ -2269,7 +2246,7 @@ export const crmRouter = {
 				.limit(1);
 
 			if (!opportunity[0]) {
-				throw new Error("Opportunity not found");
+				throw new ORPCError("NOT_FOUND", { message: "Oportunidad no encontrada" });
 			}
 
 			// For sales users, check if they are assigned to the opportunity
@@ -2277,7 +2254,7 @@ export const crmRouter = {
 				context.userRole === "sales" &&
 				opportunity[0].assignedTo !== context.userId
 			) {
-				throw new Error("You don't have permission to view this opportunity");
+				throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para ver esta oportunidad" });
 			}
 
 			// Get stage history with user and stage details
@@ -2838,7 +2815,7 @@ export const crmRouter = {
 			const assignedTo = input.assignedTo || context.userId;
 
 			if (context.userRole === "sales" && assignedTo !== context.userId) {
-				throw new Error("Sales users can only assign clients to themselves");
+				throw new ORPCError("FORBIDDEN", { message: "Los usuarios de ventas solo pueden asignarse clientes a sí mismos" });
 			}
 
 			const newClient = await db
@@ -2897,9 +2874,9 @@ export const crmRouter = {
 				.returning();
 
 			if (updatedClient.length === 0) {
-				throw new Error(
-					"Client not found or you don't have permission to update it",
-				);
+				throw new ORPCError("NOT_FOUND", {
+					message: "Cliente no encontrado o no tienes permiso para actualizarlo",
+				});
 			}
 
 			return updatedClient[0];
@@ -3011,7 +2988,7 @@ export const crmRouter = {
 				.limit(1);
 
 			if (!opportunity[0]) {
-				throw new Error("Oportunidad no encontrada");
+				throw new ORPCError("NOT_FOUND", { message: "Oportunidad no encontrada" });
 			}
 
 			// Para ventas, verificar que sea su oportunidad
@@ -3019,7 +2996,7 @@ export const crmRouter = {
 				context.userRole === "sales" &&
 				opportunity[0].assignedTo !== context.userId
 			) {
-				throw new Error("No tienes permiso para ver estos documentos");
+				throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para ver estos documentos" });
 			}
 
 			// Obtener documentos con información del usuario que los subió
@@ -3081,7 +3058,7 @@ export const crmRouter = {
 				.limit(1);
 
 			if (!opportunity[0]) {
-				throw new Error("Oportunidad no encontrada");
+				throw new ORPCError("NOT_FOUND", { message: "Oportunidad no encontrada" });
 			}
 
 			// Admin, sales, sales_supervisor y analyst pueden subir documentos
@@ -3090,7 +3067,7 @@ export const crmRouter = {
 					context.userRole,
 				)
 			) {
-				throw new Error("No tienes permiso para subir documentos");
+				throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para subir documentos" });
 			}
 
 			// Para sales, verificar que sea su oportunidad
@@ -3098,9 +3075,9 @@ export const crmRouter = {
 				context.userRole === "sales" &&
 				opportunity[0].assignedTo !== context.userId
 			) {
-				throw new Error(
-					"No tienes permiso para subir documentos a esta oportunidad",
-				);
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para subir documentos a esta oportunidad",
+				});
 			}
 
 			// Crear un File/Blob desde los datos
@@ -3114,7 +3091,7 @@ export const crmRouter = {
 			} as File);
 
 			if (!validation.valid) {
-				throw new Error(validation.error);
+				throw new ORPCError("BAD_REQUEST", { message: validation.error });
 			}
 
 			// Generar nombre único
@@ -3199,7 +3176,7 @@ export const crmRouter = {
 				.limit(1);
 
 			if (!document) {
-				throw new Error("Documento no encontrado");
+				throw new ORPCError("NOT_FOUND", { message: "Documento no encontrado" });
 			}
 
 			// Verificar permisos
@@ -3219,7 +3196,7 @@ export const crmRouter = {
 
 				return { success: true };
 			}
-			throw new Error("No tienes permiso para eliminar este documento");
+			throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para eliminar este documento" });
 		}),
 
 	// Validate opportunity documents - Para analistas
@@ -3242,7 +3219,7 @@ export const crmRouter = {
 					.limit(1);
 
 				if (!opp) {
-					throw new Error("Oportunidad no encontrada");
+					throw new ORPCError("NOT_FOUND", { message: "Oportunidad no encontrada" });
 				}
 
 				// Si falta creditType, no podemos determinar requisitos
@@ -3372,7 +3349,7 @@ export const crmRouter = {
 			const [existingChecklist] = existingChecklistResult;
 
 			if (!opportunity) {
-				throw new Error("Oportunidad no encontrada");
+				throw new ORPCError("NOT_FOUND", { message: "Oportunidad no encontrada" });
 			}
 
 			console.log("[getAnalysisChecklist] opportunity:", opportunity);
@@ -3777,7 +3754,7 @@ export const crmRouter = {
 				.limit(1);
 
 			if (!existing) {
-				throw new Error("Checklist no encontrado");
+				throw new ORPCError("NOT_FOUND", { message: "Checklist no encontrado" });
 			}
 
 			const checklistData = existing.checklistData as any;
@@ -3914,16 +3891,16 @@ export const crmRouter = {
 				.limit(1);
 
 			if (!existing) {
-				throw new Error("Checklist no encontrado");
+				throw new ORPCError("NOT_FOUND", { message: "Checklist no encontrado" });
 			}
 
 			const checklistData = existing.checklistData as any;
 
 			// Verify vehicle section exists
 			if (!checklistData.sections.vehiculo?.verificaciones) {
-				throw new Error(
-					"La sección de verificaciones de vehículo no existe en este checklist",
-				);
+				throw new ORPCError("BAD_REQUEST", {
+					message: "La sección de verificaciones de vehículo no existe en este checklist",
+				});
 			}
 
 			// Update the specific vehicle verification
@@ -4058,7 +4035,7 @@ export const crmRouter = {
 				.limit(1);
 
 			if (!opportunity) {
-				throw new Error("Oportunidad no encontrada");
+				throw new ORPCError("NOT_FOUND", { message: "Oportunidad no encontrada" });
 			}
 
 			// Get stage info
@@ -4069,9 +4046,9 @@ export const crmRouter = {
 				.limit(1);
 
 			if (!stage || stage.closurePercentage !== 90) {
-				throw new Error(
-					"Esta oportunidad no está en la etapa de 90% para desembolso",
-				);
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Esta oportunidad no está en la etapa de 90% para desembolso",
+				});
 			}
 
 			// Get lead info
@@ -4184,9 +4161,9 @@ export const crmRouter = {
 				.limit(1);
 
 			if (!checklist) {
-				throw new Error(
-					"Checklist de desembolso no encontrado. Primero obtén el checklist.",
-				);
+				throw new ORPCError("NOT_FOUND", {
+					message: "Checklist de desembolso no encontrado. Primero obtén el checklist.",
+				});
 			}
 
 			// Security: Explicit whitelist mapping for column names (defense-in-depth)
@@ -4203,7 +4180,7 @@ export const crmRouter = {
 
 			const columnKey = validColumnKeys[input.itemKey];
 			if (!columnKey) {
-				throw new Error("Clave de item inválida");
+				throw new ORPCError("BAD_REQUEST", { message: "Clave de item inválida" });
 			}
 
 			// Update the specific item using the validated column key
@@ -4864,14 +4841,14 @@ export const crmRouter = {
 				try {
 					newInversionistas = JSON.parse(input.inversionistas);
 					if (!Array.isArray(newInversionistas)) {
-						throw new Error("Invalid investors array");
+						throw new ORPCError("BAD_REQUEST", { message: "Lista de inversionistas inválida" });
 					}
 					if (newInversionistas.length > 20) {
-						throw new Error("Too many investors");
+						throw new ORPCError("BAD_REQUEST", { message: "Demasiados inversionistas" });
 					}
 				} catch (e) {
 					const message =
-						e instanceof Error && e.message === "Too many investors"
+						e instanceof Error && e.message === "Demasiados inversionistas"
 							? "No se pueden asignar más de 20 inversionistas por oportunidad"
 							: "Formato de inversionistas inválido";
 					throw new ORPCError("BAD_REQUEST", { message });

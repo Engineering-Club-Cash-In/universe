@@ -26,10 +26,12 @@ import { findOrCreateUserByName } from "../controllers/users";
 import { findOrCreateAdvisorByName } from "../controllers/advisor";
 import { db } from "../database";
 import {
+  boletas,
   creditos,
   creditos_inversionistas,
   cuotas_credito,
   pagos_credito,
+  pagos_credito_inversionistas,
 } from "../database/db";
 import { findOrCreateInvestor } from "../controllers/investor";
 import { map } from "zod";
@@ -533,6 +535,20 @@ export async function mapEstadoCuentaToPagosBig(
   console.log("└─────────────────────────────────────────────────────────────");
 
   await db.transaction(async (tx) => {
+    // Eliminar hijos primero (FK constraints)
+    const pagosDelCredito = await tx
+      .select({ pago_id: pagos_credito.pago_id })
+      .from(pagos_credito)
+      .where(eq(pagos_credito.credito_id, creditoId));
+    const pagoIds = pagosDelCredito.map((p) => p.pago_id);
+
+    if (pagoIds.length > 0) {
+      console.log("  🗑️  Eliminando boletas...");
+      await tx.delete(boletas).where(inArray(boletas.pago_id, pagoIds));
+      console.log("  🗑️  Eliminando pagos inversionistas...");
+      await tx.delete(pagos_credito_inversionistas).where(inArray(pagos_credito_inversionistas.pago_id, pagoIds));
+    }
+
     console.log("  🗑️  Eliminando pagos previos...");
     await tx
       .delete(pagos_credito)
@@ -1020,6 +1036,334 @@ export async function mapEstadoCuentaToPagosBig(
 
   return pagosDB;
 }
+
+/**
+ * Crea cuotas y pagos para un crédito SIN ir a SIFCO.
+ * Usa la info financiera de la DB y la cantidad de cuotas pagadas (hastaCuota)
+ * que viene del JSON resultado_ultimos_pagos.json.
+ *
+ * Reemplaza: mapPagosPorCreditos + marcarCuotasPagadasHastaNumero
+ */
+export async function mapPagosDesdeJson(
+  numeroSifco: string,
+  hastaCuota: number,
+  fechaPagoJson?: string
+) {
+  console.log(
+    "╔══════════════════════════════════════════════════════════════"
+  );
+  console.log("║ 🚀 INICIO mapPagosDesdeJson (sin SIFCO)");
+  console.log(
+    "╚══════════════════════════════════════════════════════════════"
+  );
+  console.log(`  • numeroSifco: ${numeroSifco}`);
+  console.log(`  • hastaCuota: ${hastaCuota}`);
+
+  // ═══════════════════════════════════════════════════════════════
+  // 1️⃣ CONSULTA DE CRÉDITO EN DB
+  // ═══════════════════════════════════════════════════════════════
+  const creditoDB = await db.query.creditos.findFirst({
+    where: eq(creditos.numero_credito_sifco, numeroSifco),
+    columns: {
+      credito_id: true,
+      seguro_10_cuotas: true,
+      membresias: true,
+      membresias_pago: true,
+      cuota: true,
+      cuota_interes: true,
+      iva_12: true,
+      capital: true,
+      deudatotal: true,
+      porcentaje_interes: true,
+      gps: true,
+      fecha_creacion: true,
+      plazo: true,
+    },
+  });
+
+  if (!creditoDB) {
+    throw new Error(`Crédito ${numeroSifco} no encontrado en DB`);
+  }
+
+  const creditoId = creditoDB.credito_id;
+  const plazo = Number(creditoDB.plazo ?? 0);
+  const cuotaAmount = toBig(creditoDB.cuota);
+  const capitalInicial = toBig(creditoDB.capital);
+  const porcentajeInteres = toBig(creditoDB.porcentaje_interes).div(100);
+  const seguroDb = toBig(creditoDB.seguro_10_cuotas);
+  const gpsDb = toBig(creditoDB.gps);
+  const membresiaDb = toBig(creditoDB.membresias_pago ?? creditoDB.membresias);
+
+  console.log(`  ✅ Crédito encontrado (ID: ${creditoId})`);
+  console.log(`  💰 Capital: ${capitalInicial} | Cuota: ${cuotaAmount} | Plazo: ${plazo}`);
+  console.log(`  📊 Seguro: ${seguroDb} | GPS: ${gpsDb} | Membresía: ${membresiaDb}`);
+
+  // ═══════════════════════════════════════════════════════════════
+  // 2️⃣ DETERMINAR DÍA DE VENCIMIENTO (desde JSON "pago")
+  // ═══════════════════════════════════════════════════════════════
+  // fechaCreacion: si hay fecha del JSON, usar esa; sino, la de la DB
+  const fechaCreacion = fechaPagoJson
+    ? new Date(fechaPagoJson)
+    : new Date(creditoDB.fecha_creacion);
+
+  const diaVencimiento = fechaCreacion.getDate();
+
+  console.log(`  📅 Fecha base: ${fechaCreacion.toISOString().split("T")[0]} (${fechaPagoJson ? "desde JSON" : "desde DB"})`);
+  console.log(`  🎯 Día vencimiento: ${diaVencimiento}`);
+
+  console.log(`  🎯 Día vencimiento: ${diaVencimiento}`);
+
+  // ═══════════════════════════════════════════════════════════════
+  // 3️⃣ LIMPIEZA DE DATOS PREVIOS
+  // ═══════════════════════════════════════════════════════════════
+  await db.transaction(async (tx) => {
+    const pagosDelCredito = await tx
+      .select({ pago_id: pagos_credito.pago_id })
+      .from(pagos_credito)
+      .where(eq(pagos_credito.credito_id, creditoId));
+    const pagoIds = pagosDelCredito.map((p) => p.pago_id);
+
+    if (pagoIds.length > 0) {
+      console.log("  🗑️  Eliminando boletas...");
+      await tx.delete(boletas).where(inArray(boletas.pago_id, pagoIds));
+      console.log("  🗑️  Eliminando pagos inversionistas...");
+      await tx.delete(pagos_credito_inversionistas).where(inArray(pagos_credito_inversionistas.pago_id, pagoIds));
+    }
+
+    console.log("  🗑️  Eliminando pagos previos...");
+    await tx
+      .delete(pagos_credito)
+      .where(eq(pagos_credito.credito_id, creditoId));
+    console.log("  🗑️  Eliminando cuotas previas...");
+    await tx
+      .delete(cuotas_credito)
+      .where(eq(cuotas_credito.credito_id, creditoId));
+  });
+  console.log(`  ✅ Limpieza completada para crédito_id=${creditoId}`);
+
+  // ═══════════════════════════════════════════════════════════════
+  // 4️⃣ CREAR CUOTA 0 (DESEMBOLSO)
+  // ═══════════════════════════════════════════════════════════════
+  const cuota0 = await db
+    .insert(cuotas_credito)
+    .values({
+      credito_id: creditoId,
+      numero_cuota: 0,
+      fecha_vencimiento: fechaCreacion.toISOString(),
+      pagado: true,
+    })
+    .returning();
+
+  console.log(`  ✅ Cuota 0 creada (ID: ${cuota0[0]?.cuota_id})`);
+
+  // Pago 0 (registro inicial)
+  const cuotaInteres0 = capitalInicial.times(porcentajeInteres).round(2);
+  const iva12_0 = cuotaInteres0.times(0.12).round(2);
+  const reserva = seguroDb.plus(600);
+  const deudaTotal = capitalInicial
+    .plus(cuotaInteres0)
+    .plus(iva12_0)
+    .plus(seguroDb)
+    .plus(gpsDb)
+    .plus(membresiaDb)
+    .round(2);
+
+  await db.insert(pagos_credito).values({
+    credito_id: creditoId,
+    cuota: cuotaAmount.toString(),
+    cuota_interes: cuotaInteres0.toString(),
+    cuota_id: cuota0[0].cuota_id,
+    fecha_pago: fechaCreacion,
+    abono_capital: "0.00",
+    abono_interes: cuotaInteres0.toString(),
+    abono_iva_12: iva12_0.toString(),
+    abono_interes_ci: "0.00",
+    abono_iva_ci: "0.00",
+    abono_seguro: seguroDb.toString(),
+    abono_gps: "0.00",
+    pago_del_mes: "0.00",
+    llamada: "pago 0",
+    monto_boleta: "0.00",
+    fecha_vencimiento: fechaCreacion.toISOString(),
+    renuevo_o_nuevo: "",
+    capital_restante: capitalInicial.toString(),
+    interes_restante: "0.00",
+    iva_12_restante: "0.00",
+    seguro_restante: "0.00",
+    gps_restante: "0.00",
+    total_restante: deudaTotal.toString(),
+    membresias: membresiaDb.toString(),
+    membresias_pago: membresiaDb.toString(),
+    membresias_mes: membresiaDb.toString(),
+    otros: "",
+    mora: "0.00",
+    monto_boleta_cuota: "0.00",
+    seguro_total: seguroDb.toString(),
+    pagado: true,
+    facturacion: "si",
+    mes_pagado: "",
+    seguro_facturado: seguroDb.toString(),
+    gps_facturado: "0.00",
+    reserva: reserva.toFixed(2),
+    observaciones: "pago inicial (desde JSON)",
+    paymentFalse: false,
+    validationStatus: "validated" as const,
+    registerBy: "JSON_SYNC",
+    pagoConvenio: "0",
+    fecha_boleta: fechaCreacion.toISOString(),
+  });
+
+  console.log("  ✅ Pago 0 insertado");
+
+  // ═══════════════════════════════════════════════════════════════
+  // 5️⃣ CREAR CUOTAS 1 AL PLAZO
+  // ═══════════════════════════════════════════════════════════════
+  const cuotasData = [];
+  for (let i = 1; i <= plazo; i++) {
+    const anioBase = fechaCreacion.getFullYear();
+    const mesBase = fechaCreacion.getMonth() + i; // JS maneja overflow de meses automáticamente
+
+    // Último día del mes destino (ej: Feb → 28/29)
+    const ultimoDiaMes = new Date(anioBase, mesBase + 1, 0).getDate();
+    // Clamp: si diaVencimiento=30 y es Feb, usa 28
+    const diaReal = Math.min(diaVencimiento, ultimoDiaMes);
+
+    const fechaVencimiento = new Date(anioBase, mesBase, diaReal);
+
+    cuotasData.push({
+      credito_id: creditoId,
+      numero_cuota: i,
+      fecha_vencimiento: fechaVencimiento.toISOString(),
+      pagado: i <= hastaCuota,
+    });
+  }
+
+  const cuotasInsertadas = await db
+    .insert(cuotas_credito)
+    .values(cuotasData)
+    .returning();
+
+  console.log(`  ✅ ${cuotasInsertadas.length} cuotas insertadas (${hastaCuota} pagadas, ${cuotasInsertadas.length - hastaCuota} pendientes)`);
+
+  // ═══════════════════════════════════════════════════════════════
+  // 6️⃣ CREAR PAGOS CON AMORTIZACIÓN LOCAL
+  // ═══════════════════════════════════════════════════════════════
+  let capitalEnMemoria = capitalInicial;
+  const pagosData = [];
+
+  for (let idx = 0; idx < cuotasInsertadas.length; idx++) {
+    const cuotaDB = cuotasInsertadas[idx];
+    const numeroCuota = cuotaDB.numero_cuota;
+    const isPagado = numeroCuota <= hastaCuota;
+
+    // Amortización: interés sobre capital restante
+    const interesMes = capitalEnMemoria.times(porcentajeInteres).round(2);
+    const ivaMes = interesMes.times(0.12).round(2);
+    const montosExtras = interesMes
+      .plus(ivaMes)
+      .plus(seguroDb)
+      .plus(gpsDb)
+      .plus(membresiaDb);
+    const abonoCapital = cuotaAmount.minus(montosExtras).round(2);
+
+    capitalEnMemoria = capitalEnMemoria.minus(abonoCapital);
+    if (capitalEnMemoria.lt(0)) capitalEnMemoria = new Big(0);
+
+    const pagoDelMes = isPagado
+      ? abonoCapital.plus(interesMes).plus(ivaMes).plus(seguroDb).plus(gpsDb).plus(membresiaDb)
+      : new Big(0);
+
+    const fechaVencimientoCuota = new Date(cuotaDB.fecha_vencimiento);
+    const mesNombre = fechaVencimientoCuota
+      .toLocaleDateString("es-ES", { month: "long" })
+      .replace(/^\w/, (ch) => ch.toUpperCase());
+
+    if (idx < 3 || idx >= cuotasInsertadas.length - 2) {
+      console.log(
+        `  📝 Cuota ${numeroCuota}: capital=${capitalEnMemoria.round(2)} | abonoK=${abonoCapital} | interes=${interesMes} | pagado=${isPagado}`
+      );
+    } else if (idx === 3) {
+      console.log(`  ... (${cuotasInsertadas.length - 4} cuotas más) ...`);
+    }
+
+    pagosData.push({
+      cuota_id: cuotaDB.cuota_id,
+      credito_id: creditoId,
+      cuota: cuotaAmount.toString(),
+      cuota_interes: interesMes.toString(),
+      fecha_pago: isPagado ? fechaVencimientoCuota : null,
+      abono_capital: isPagado ? abonoCapital.toString() : "0.00",
+      abono_interes: isPagado ? interesMes.toString() : "0.00",
+      abono_iva_12: isPagado ? ivaMes.toString() : "0.00",
+      abono_interes_ci: "0.00",
+      abono_iva_ci: "0.00",
+      abono_seguro: isPagado ? seguroDb.toString() : "0.00",
+      abono_gps: "0.00",
+      pago_del_mes: pagoDelMes.toString(),
+      llamada: "",
+      monto_boleta: isPagado ? pagoDelMes.toString() : "0.00",
+      fecha_vencimiento: fechaVencimientoCuota.toISOString(),
+      renuevo_o_nuevo: "",
+      capital_restante: capitalEnMemoria.round(2).toString(),
+      interes_restante: isPagado ? "0.00" : interesMes.toString(),
+      iva_12_restante: isPagado ? "0.00" : ivaMes.toString(),
+      seguro_restante: isPagado ? "0.00" : seguroDb.toString(),
+      gps_restante: "0.00",
+      total_restante: capitalEnMemoria.round(2).toString(),
+      membresias: membresiaDb.toString(),
+      membresias_pago: membresiaDb.toString(),
+      membresias_mes: membresiaDb.toString(),
+      otros: "",
+      mora: "0.00",
+      monto_boleta_cuota: isPagado ? pagoDelMes.toString() : "0.00",
+      seguro_total: seguroDb.toString(),
+      pagado: isPagado,
+      facturacion: "si",
+      mes_pagado: isPagado ? mesNombre : "",
+      seguro_facturado: seguroDb.toString(),
+      gps_facturado: "0.00",
+      reserva: "0.00",
+      observaciones: `pago sincronizado desde JSON cuota ${numeroCuota}`,
+      paymentFalse: false,
+      validationStatus: isPagado
+        ? ("validated" as const)
+        : ("no_required" as const),
+      registerBy: "JSON_SYNC",
+      pagoConvenio: "0",
+      fecha_boleta: fechaVencimientoCuota.toISOString(),
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // 7️⃣ INSERCIÓN BATCH DE PAGOS
+  // ═══════════════════════════════════════════════════════════════
+  const pagosInsertados = await db
+    .insert(pagos_credito)
+    .values(pagosData)
+    .returning();
+
+  const pagados = pagosInsertados.filter((p) => p.pagado).length;
+  const pendientes = pagosInsertados.filter((p) => !p.pagado).length;
+
+  console.log(
+    "╔══════════════════════════════════════════════════════════════"
+  );
+  console.log("║ ✅ mapPagosDesdeJson COMPLETADO");
+  console.log(
+    "╠══════════════════════════════════════════════════════════════"
+  );
+  console.log(`║   • Crédito: ${numeroSifco} (ID: ${creditoId})`);
+  console.log(`║   • Cuotas creadas: ${cuotasInsertadas.length}`);
+  console.log(`║   • Pagos insertados: ${pagosInsertados.length}`);
+  console.log(`║   • Pagados: ${pagados} | Pendientes: ${pendientes}`);
+  console.log(`║   • Hasta cuota: ${hastaCuota}`);
+  console.log(
+    "╚══════════════════════════════════════════════════════════════\n"
+  );
+
+  return pagosInsertados;
+}
+
 /**
  * Fetch a list of credits from DB. If numeroSifco is provided, filter by it.
  * NOTE: Adjust selected columns to match your schema.

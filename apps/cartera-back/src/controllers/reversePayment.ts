@@ -337,12 +337,17 @@ export const reversePayment = async ({ body, set }: any) => {
         await tx.delete(boletas).where(eq(boletas.pago_id, pago_id));
         console.log("✅ Boletas eliminadas");
       } else {
+        // Pago parcial (registro extra) - eliminar completamente
         await tx.delete(boletas).where(eq(boletas.pago_id, pago_id));
-        console.log("✅ Boletas eliminadasSS");
+        console.log("✅ Boletas eliminadas");
+        await tx
+          .delete(pagos_credito_inversionistas)
+          .where(eq(pagos_credito_inversionistas.pago_id, pago_id));
+        console.log("✅ Pagos inversionistas eliminados");
         await tx
           .delete(pagos_credito)
           .where(eq(pagos_credito.pago_id, pago_id));
- 
+        console.log("✅ Pago parcial eliminado");
       }
       console.log("✅ Pago reseteado correctamente");
 

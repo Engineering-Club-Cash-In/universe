@@ -2589,3 +2589,39 @@ export async function toggleCancelacionActivo(params: {
     };
   }
 }
+
+// ============================================
+// Actualizar NIT de un crédito (usuario)
+// ============================================
+export async function actualizarNitCredito({
+  numero_credito_sifco,
+  nit,
+}: {
+  numero_credito_sifco: string;
+  nit: string;
+}) {
+  // 1. Buscar el crédito
+  const [credito] = await db
+    .select({
+      credito_id: creditos.credito_id,
+      usuario_id: creditos.usuario_id,
+    })
+    .from(creditos)
+    .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
+    .limit(1);
+
+  if (!credito) {
+    return { success: false, message: "Crédito no encontrado" };
+  }
+
+  // 2. Actualizar el NIT del usuario
+  await db
+    .update(usuarios)
+    .set({ nit })
+    .where(eq(usuarios.usuario_id, credito.usuario_id));
+
+  return {
+    success: true,
+    message: `NIT actualizado a ${nit} para el crédito ${numero_credito_sifco}`,
+  };
+}

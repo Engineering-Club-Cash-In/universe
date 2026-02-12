@@ -1,6 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
+	AlertTriangle,
 	ArrowLeft,
 	Banknote,
 	CalendarClock,
@@ -20,6 +21,7 @@ import {
 	Users,
 } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 import { ContactoModal } from "@/components/contacto-modal";
 import {
 	OpportunityDetailModal,
@@ -34,9 +36,12 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { authClient } from "@/lib/auth-client";
-import { orpc } from "@/utils/orpc";
+import { ROLES } from "@/lib/roles";
+import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/cobros/$id")({
 	component: RouteComponent,
@@ -113,6 +118,15 @@ function RouteComponent() {
 	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
 	const [selectedOpportunityForModal, setSelectedOpportunityForModal] =
 		useState<OpportunityForModal | null>(null);
+
+	// Estado de edición de vehículo
+	const [isEditingVehicle, setIsEditingVehicle] = useState(false);
+	const [vehicleForm, setVehicleForm] = useState({
+		make: "",
+		model: "",
+		year: 2000,
+		licensePlate: "",
+	});
 
 	// Obtener detalles del contrato/caso
 	// Si es ID numérico, usar endpoint de Cartera-Back, si es UUID usar el del CRM
@@ -207,6 +221,33 @@ function RouteComponent() {
 		}
 	};
 
+	// Mutación para actualizar vehículo
+	const updateVehicleMutation = useMutation({
+		mutationFn: (data: {
+			make: string;
+			model: string;
+			year: number;
+			licensePlate: string;
+		}) =>
+			client.updateVehicle({
+				id: casoDetails.data?.vehicleId ?? "",
+				data: {
+					make: data.make,
+					model: data.model,
+					year: data.year,
+					licensePlate: data.licensePlate || null,
+				},
+			}),
+		onSuccess: () => {
+			toast.success("Vehículo actualizado exitosamente");
+			casoDetails.refetch();
+			setIsEditingVehicle(false);
+		},
+		onError: (err: any) => {
+			toast.error(err.message || "Error al actualizar el vehículo");
+		},
+	});
+
 	if (casoDetails.isLoading) {
 		return (
 			<div className="container mx-auto p-6">
@@ -245,6 +286,22 @@ function RouteComponent() {
 	const convenios = conveniosPago.data || [];
 	const cuotas = historialPagos.data || [];
 	const recuperacion = recuperacionInfo.data;
+
+	// Detectar si es vehículo migrado (todo N/A)
+	const isVehiculoMigrado =
+		caso.vehiculoMarca === "N/A" &&
+		caso.vehiculoModelo === "N/A" &&
+		!caso.vehiculoPlaca;
+
+	const handleEditVehicle = () => {
+		setVehicleForm({
+			make: caso.vehiculoMarca === "N/A" ? "" : caso.vehiculoMarca || "",
+			model: caso.vehiculoModelo === "N/A" ? "" : caso.vehiculoModelo || "",
+			year: caso.vehiculoYear || 2000,
+			licensePlate: caso.vehiculoPlaca || "",
+		});
+		setIsEditingVehicle(true);
+	};
 
 	const getEstadoBadge = (estado: string | null | undefined) => {
 		const colors: Record<string, string> = {
@@ -380,17 +437,20 @@ function RouteComponent() {
 								<Phone className="h-5 w-5" />
 								Información de Contacto
 							</CardTitle>
-							{matchingOpportunity?.lead?.id && (caso.telefonoPrincipal || caso.emailContacto || caso.direccionContacto) && (
-								<Link
-									to="/crm/clients"
-									search={{ idLead: matchingOpportunity.lead.id }}
-								>
-									<Button variant="outline" size="sm">
-										<Pencil className="mr-2 h-4 w-4" />
-										Editar
-									</Button>
-								</Link>
-							)}
+							{matchingOpportunity?.lead?.id &&
+								(caso.telefonoPrincipal ||
+									caso.emailContacto ||
+									caso.direccionContacto) && (
+									<Link
+										to="/crm/clients"
+										search={{ idLead: matchingOpportunity.lead.id, edit: true }}
+									>
+										<Button variant="outline" size="sm">
+											<Pencil className="mr-2 h-4 w-4" />
+											Editar
+										</Button>
+									</Link>
+								)}
 						</CardHeader>
 						<CardContent className="space-y-4">
 							<div className="grid grid-cols-2 gap-4">
@@ -628,7 +688,7 @@ function RouteComponent() {
 																		?.toUpperCase()}
 																</Badge>
 																{pagoConMora && (
-																	<Badge className="bg-orange-100 text-orange-800 text-xs">
+																	<Badge className="bg-orange-100 text-orange-800 text-xs dark:bg-orange-950/40 dark:text-orange-300">
 																		Pagado con Mora
 																	</Badge>
 																)}
@@ -712,8 +772,8 @@ function RouteComponent() {
 														{esPagada && cuota.detallesPago && (
 															<>
 																<div className="my-2 border-t" />
-																<div className="grid grid-cols-2 gap-2 rounded bg-green-50 p-2 text-xs">
-																	<div className="col-span-2 mb-1 font-medium text-green-900">
+																<div className="grid grid-cols-2 gap-2 rounded bg-green-50 p-2 text-xs dark:bg-green-950/40">
+																	<div className="col-span-2 mb-1 font-medium text-green-900 dark:text-green-100">
 																		Desglose del Pago:
 																	</div>
 																	{Number(cuota.detallesPago.abonoCapital) >
@@ -800,10 +860,10 @@ function RouteComponent() {
 																	)}
 																	{Number(cuota.detallesPago.pagoMora) > 0 && (
 																		<div className="col-span-2 border-t pt-1">
-																			<span className="text-orange-700">
+																			<span className="text-orange-700 dark:text-orange-400">
 																				Mora pagada:
 																			</span>
-																			<span className="float-right font-medium text-orange-700">
+																			<span className="float-right font-medium text-orange-700 dark:text-orange-400">
 																				Q
 																				{Number(
 																					cuota.detallesPago.pagoMora,
@@ -827,7 +887,7 @@ function RouteComponent() {
 																			</div>
 																		)}
 																	<div className="col-span-2 mt-2 border-t pt-2">
-																		<div className="flex justify-between text-blue-900">
+																		<div className="flex justify-between text-blue-900 dark:text-blue-200">
 																			<span>Capital restante:</span>
 																			<span className="font-bold">
 																				Q
@@ -836,7 +896,7 @@ function RouteComponent() {
 																				).toLocaleString()}
 																			</span>
 																		</div>
-																		<div className="flex justify-between text-blue-700 text-xs">
+																		<div className="flex justify-between text-blue-700 text-xs dark:text-blue-300">
 																			<span>Interés restante:</span>
 																			<span className="font-medium">
 																				Q
@@ -914,10 +974,6 @@ function RouteComponent() {
 								</p>
 							</div>
 							<div>
-								<p className="text-muted-foreground text-sm">Cuotas Totales</p>
-								<p className="font-medium">{caso.numeroCuotas}</p>
-							</div>
-							<div>
 								<p className="text-muted-foreground text-sm">Día de Pago</p>
 								<p className="font-medium">
 									Día {caso.diaPagoMensual || 15} de cada mes
@@ -926,9 +982,23 @@ function RouteComponent() {
 							<div>
 								<p className="text-muted-foreground text-sm">Fecha de Inicio</p>
 								<p className="font-medium">
-									{caso.fechaInicio
-										? new Date(caso.fechaInicio).toLocaleDateString("es-GT")
-										: "Sin fecha"}
+									{caso.fechaInicioCuota0
+										? new Date(caso.fechaInicioCuota0).toLocaleDateString(
+												"es-GT",
+											)
+										: caso.fechaInicio
+											? new Date(caso.fechaInicio).toLocaleDateString("es-GT")
+											: "Sin fecha"}
+								</p>
+							</div>
+							<div>
+								<p className="text-muted-foreground text-sm">
+									Cuotas Restantes
+								</p>
+								<p className="font-medium">
+									{caso.cuotasRestantes != null
+										? `${caso.cuotasRestantes} de ${caso.numeroCuotas}`
+										: "—"}
 								</p>
 							</div>
 							{caso.creditType && (
@@ -970,85 +1040,204 @@ function RouteComponent() {
 					{/* Información del Vehículo */}
 					<Card>
 						<CardHeader>
-							<CardTitle className="flex items-center gap-2">
-								<Car className="h-5 w-5" />
-								Vehículo
-							</CardTitle>
+							<div className="flex items-center justify-between">
+								<CardTitle className="flex items-center gap-2">
+									<Car className="h-5 w-5" />
+									Vehículo
+								</CardTitle>
+								{caso.vehicleId && !isEditingVehicle && (
+									<Button variant="ghost" size="sm" onClick={handleEditVehicle}>
+										<Pencil className="h-4 w-4" />
+									</Button>
+								)}
+							</div>
 						</CardHeader>
 						<CardContent className="space-y-3">
-							<div>
-								<p className="text-muted-foreground text-sm">Vehículo</p>
-								<p className="font-medium">
-									{caso.vehiculoMarca} {caso.vehiculoModelo} {caso.vehiculoYear}
-								</p>
-							</div>
-							{caso.vehiculoTipo && (
-								<div>
-									<p className="text-muted-foreground text-sm">Tipo</p>
-									<p className="font-medium">{caso.vehiculoTipo}</p>
-								</div>
-							)}
-							<div>
-								<p className="text-muted-foreground text-sm">Placa</p>
-								<p className="font-medium">{caso.vehiculoPlaca || "-"}</p>
-							</div>
-							{caso.vehiculoMotor && (
-								<div>
-									<p className="text-muted-foreground text-sm">Motor</p>
-									<p className="font-medium text-xs">{caso.vehiculoMotor}</p>
-								</div>
-							)}
-							{caso.vehiculoChasis && (
-								<div>
-									<p className="text-muted-foreground text-sm">Chasis</p>
-									<p className="font-medium text-xs">{caso.vehiculoChasis}</p>
-								</div>
-							)}
-							{caso.vehiculoAsientos && (
-								<div>
-									<p className="text-muted-foreground text-sm">Pasajeros</p>
-									<p className="font-medium">{caso.vehiculoAsientos}</p>
-								</div>
-							)}
-							{caso.vehiculoUso && (
-								<div>
-									<p className="text-muted-foreground text-sm">Uso</p>
-									<p className="font-medium">{caso.vehiculoUso}</p>
-								</div>
-							)}
-							{/* Información del Seguro */}
-							{caso.vehiculoNumeroPoliza && (
-								<div className="border-t pt-3">
-									<p className="mb-2 flex items-center gap-1 text-muted-foreground text-xs">
-										<Shield className="h-3 w-3" />
-										Seguro
-									</p>
-									<div className="space-y-2 text-xs">
-										<div>
-											<p className="text-muted-foreground">Póliza</p>
-											<p className="font-medium">{caso.vehiculoNumeroPoliza}</p>
-										</div>
-										{caso.vehiculoMontoAsegurado && (
-											<div>
-												<p className="text-muted-foreground">Monto Asegurado</p>
-												<p className="font-medium">
-													Q
-													{Number(caso.vehiculoMontoAsegurado).toLocaleString()}
-												</p>
-											</div>
-										)}
-										{caso.vehiculoFechaVencimientoSeguro && (
-											<div>
-												<p className="text-muted-foreground">Vencimiento</p>
-												<p className="font-medium">
-													{new Date(
-														caso.vehiculoFechaVencimientoSeguro,
-													).toLocaleDateString("es-GT")}
-												</p>
-											</div>
-										)}
+							{isEditingVehicle ? (
+								<div className="space-y-3">
+									<div>
+										<Label htmlFor="vehicle-make">Marca</Label>
+										<Input
+											id="vehicle-make"
+											value={vehicleForm.make}
+											onChange={(e) =>
+												setVehicleForm((f) => ({
+													...f,
+													make: e.target.value,
+												}))
+											}
+											placeholder="Ej: Toyota"
+										/>
+									</div>
+									<div>
+										<Label htmlFor="vehicle-model">Modelo</Label>
+										<Input
+											id="vehicle-model"
+											value={vehicleForm.model}
+											onChange={(e) =>
+												setVehicleForm((f) => ({
+													...f,
+													model: e.target.value,
+												}))
+											}
+											placeholder="Ej: Corolla"
+										/>
+									</div>
+									<div>
+										<Label htmlFor="vehicle-year">Año</Label>
+										<Input
+											id="vehicle-year"
+											type="number"
+											value={vehicleForm.year}
+											onChange={(e) =>
+												setVehicleForm((f) => ({
+													...f,
+													year: Number(e.target.value),
+												}))
+											}
+											placeholder="Ej: 2020"
+										/>
+									</div>
+									<div>
+										<Label htmlFor="vehicle-plate">Placa</Label>
+										<Input
+											id="vehicle-plate"
+											value={vehicleForm.licensePlate}
+											onChange={(e) =>
+												setVehicleForm((f) => ({
+													...f,
+													licensePlate: e.target.value,
+												}))
+											}
+											placeholder="Ej: P-123ABC"
+										/>
+									</div>
+									<div className="flex gap-2">
+										<Button
+											size="sm"
+											onClick={() => updateVehicleMutation.mutate(vehicleForm)}
+											disabled={
+												updateVehicleMutation.isPending ||
+												!vehicleForm.make ||
+												!vehicleForm.model
+											}
+										>
+											{updateVehicleMutation.isPending
+												? "Guardando..."
+												: "Guardar"}
+										</Button>
+										<Button
+											size="sm"
+											variant="outline"
+											onClick={() => setIsEditingVehicle(false)}
+											disabled={updateVehicleMutation.isPending}
+										>
+											Cancelar
+										</Button>
 									</div>
 								</div>
+							) : (
+								<>
+									{isVehiculoMigrado && (
+										<div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/40">
+											<AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+											<div className="text-xs">
+												<p className="font-medium text-amber-800 dark:text-amber-200">
+													Vehículo sin información
+												</p>
+												<p className="text-amber-700 dark:text-amber-300">
+													Este crédito fue migrado y no tiene datos del
+													vehículo. Edita la información manualmente.
+												</p>
+											</div>
+										</div>
+									)}
+									<div>
+										<p className="text-muted-foreground text-sm">Vehículo</p>
+										<p className="font-medium">
+											{caso.vehiculoMarca} {caso.vehiculoModelo}{" "}
+											{caso.vehiculoYear}
+										</p>
+									</div>
+									{caso.vehiculoTipo && caso.vehiculoTipo !== "N/A" && (
+										<div>
+											<p className="text-muted-foreground text-sm">Tipo</p>
+											<p className="font-medium">{caso.vehiculoTipo}</p>
+										</div>
+									)}
+									<div>
+										<p className="text-muted-foreground text-sm">Placa</p>
+										<p className="font-medium">{caso.vehiculoPlaca || "-"}</p>
+									</div>
+									{caso.vehiculoMotor && (
+										<div>
+											<p className="text-muted-foreground text-sm">Motor</p>
+											<p className="font-medium text-xs">
+												{caso.vehiculoMotor}
+											</p>
+										</div>
+									)}
+									{caso.vehiculoChasis && (
+										<div>
+											<p className="text-muted-foreground text-sm">Chasis</p>
+											<p className="font-medium text-xs">
+												{caso.vehiculoChasis}
+											</p>
+										</div>
+									)}
+									{caso.vehiculoAsientos && (
+										<div>
+											<p className="text-muted-foreground text-sm">Pasajeros</p>
+											<p className="font-medium">{caso.vehiculoAsientos}</p>
+										</div>
+									)}
+									{caso.vehiculoUso && (
+										<div>
+											<p className="text-muted-foreground text-sm">Uso</p>
+											<p className="font-medium">{caso.vehiculoUso}</p>
+										</div>
+									)}
+									{/* Información del Seguro */}
+									{caso.vehiculoNumeroPoliza && (
+										<div className="border-t pt-3">
+											<p className="mb-2 flex items-center gap-1 text-muted-foreground text-xs">
+												<Shield className="h-3 w-3" />
+												Seguro
+											</p>
+											<div className="space-y-2 text-xs">
+												<div>
+													<p className="text-muted-foreground">Póliza</p>
+													<p className="font-medium">
+														{caso.vehiculoNumeroPoliza}
+													</p>
+												</div>
+												{caso.vehiculoMontoAsegurado && (
+													<div>
+														<p className="text-muted-foreground">
+															Monto Asegurado
+														</p>
+														<p className="font-medium">
+															Q
+															{Number(
+																caso.vehiculoMontoAsegurado,
+															).toLocaleString()}
+														</p>
+													</div>
+												)}
+												{caso.vehiculoFechaVencimientoSeguro && (
+													<div>
+														<p className="text-muted-foreground">Vencimiento</p>
+														<p className="font-medium">
+															{new Date(
+																caso.vehiculoFechaVencimientoSeguro,
+															).toLocaleDateString("es-GT")}
+														</p>
+													</div>
+												)}
+											</div>
+										</div>
+									)}
+								</>
 							)}
 						</CardContent>
 					</Card>
@@ -1218,6 +1407,7 @@ function RouteComponent() {
 				onOpenChange={setIsOpportunityModalOpen}
 				opportunity={selectedOpportunityForModal}
 				readOnly
+				userRole={ROLES.COBROS}
 			/>
 		</div>
 	);

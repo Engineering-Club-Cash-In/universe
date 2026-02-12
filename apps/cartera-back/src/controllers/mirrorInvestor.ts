@@ -4,143 +4,237 @@ import {
   creditos,
   creditos_inversionistas,
   creditos_inversionistas_espejo,
+  inversionistas,
+  usuarios,
 } from "../database/db";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ilike, sql } from "drizzle-orm";
+
+/** Quita tildes/acentos de un string */
+function removeAccents(str: string): string {
+  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+/**
+ * Busca un inversionista por nombre.
+ * 1) Trae candidatos de la BD con ILIKE en la primera palabra (sin tildes via translate())
+ * 2) Puntúa cada candidato por cuántas palabras del input aparecen en su nombre
+ * 3) Retorna solo el/los de mayor puntaje
+ */
+async function buscarInversionista(nombreCompleto: string) {
+  const inputNorm = removeAccents(nombreCompleto.toLowerCase().trim());
+  const partes = inputNorm.split(/\s+/);
+
+  // Traer candidatos que coincidan con la primera palabra (sin acentos)
+  const candidatos = await db
+    .select({
+      inversionista_id: inversionistas.inversionista_id,
+      nombre: inversionistas.nombre,
+    })
+    .from(inversionistas)
+    .where(
+      sql`translate(lower(${inversionistas.nombre}), 'áéíóúàèìòùäëïöüâêîôûñ', 'aeiouaeiouaeiouaeioun') ILIKE ${"%" + partes[0] + "%"}`
+    );
+
+  if (candidatos.length <= 1) return candidatos;
+
+  // Puntuar: cuántas palabras del input aparecen en el nombre del candidato
+  const scored = candidatos.map((c) => {
+    const nombreNorm = removeAccents(c.nombre.toLowerCase());
+    const score = partes.filter((p) => nombreNorm.includes(p)).length;
+    return { ...c, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+
+  const maxScore = scored[0].score;
+  return scored
+    .filter((s) => s.score === maxScore)
+    .map(({ score, ...rest }) => rest);
+}
 
 /**
  * Controller: llenarTablaEspejo
  *
- * Recibe datos del inversionista con montos nuevos, calcula los campos derivados
- * usando la misma lógica que createCredit, y los inserta/actualiza en la tabla espejo.
+ * Body:
+ * {
+ *   inversionista: "nombre del inversionista",
+ *   creditos: [{
+ *     meses_en_credito: number,
+ *     cliente: "nombre del cliente",
+ *     capital: number,
+ *     inversor: number,        // porcentaje_inversion
+ *     interes_inversor: number, // monto_inversionista directo
+ *     iva: number              // iva_inversionista
+ *   }]
+ * }
  *
- * Campos recibidos: credito_id, inversionista_id, monto (nuevo monto_aportado),
- *   porcentaje_inversion, porcentaje_cash_in, iva_inversionista
- *
- * Campos calculados: monto_inversionista, monto_cash_in, iva_cash_in
- * Campos del padre: cuota_inversionista
+ * Campos calculados: monto_cash_in, iva_cash_in
+ * Campos del padre: cuota_inversionista, porcentaje_participacion, porcentaje_cash_in
  */
 export const llenarTablaEspejo = async ({ body, set }: any) => {
   try {
-    const {
-      credito_id,
-      inversionista_id,
-      monto,
-      porcentaje_inversion,
-      porcentaje_cash_in,
-      iva_inversionista,
-    } = body;
+    const { inversionista: nombreInversionista, creditos: creditosInput } = body;
 
-    // 1) Consultar el registro padre en creditos_inversionistas
-    const [padre] = await db
-      .select()
-      .from(creditos_inversionistas)
-      .where(
-        and(
-          eq(creditos_inversionistas.credito_id, credito_id),
-          eq(creditos_inversionistas.inversionista_id, inversionista_id)
-        )
-      )
-      .limit(1);
+    // 1) Buscar inversionista por nombre
+    const inversionistasEncontrados = await buscarInversionista(nombreInversionista);
 
-    if (!padre) {
+    if (inversionistasEncontrados.length === 0) {
       set.status = 404;
       return {
         success: false,
-        message: "No se encontró el registro padre en creditos_inversionistas",
+        message: `No se encontró inversionista con nombre: "${nombreInversionista}"`,
       };
     }
 
-    // 2) Consultar el crédito para obtener porcentaje_interes
-    const [creditoData] = await db
-      .select()
-      .from(creditos)
-      .where(eq(creditos.credito_id, credito_id))
-      .limit(1);
-
-    if (!creditoData) {
-      set.status = 404;
+    if (inversionistasEncontrados.length > 1) {
+      set.status = 400;
       return {
         success: false,
-        message: "No se encontró el crédito",
+        message: `Se encontraron ${inversionistasEncontrados.length} inversionistas con ese nombre. Sea más específico.`,
+        candidatos: inversionistasEncontrados.map((i) => ({
+          id: i.inversionista_id,
+          nombre: i.nombre,
+        })),
       };
     }
 
-    // 3) Cálculos con Big.js (misma lógica que createCredit)
-    const montoAportado = new Big(monto);
-    const porcInversion = new Big(porcentaje_inversion);
-    const porcCashIn = new Big(porcentaje_cash_in);
-    const interes = new Big(creditoData.porcentaje_interes ?? 0);
+    const inversionistaId = inversionistasEncontrados[0].inversionista_id;
+    const resultados: any[] = [];
 
-    // cuota_interes = monto * (porcentaje_interes / 100)
-    const cuotaInteres = montoAportado.times(interes.div(100)).round(2);
+    // 2) Transacción para procesar todos los créditos
+    await db.transaction(async (tx) => {
+      for (const creditoInput of creditosInput) {
+        const {
+          cliente,
+          capital,
+          interes_inversor,
+          iva,
+        } = creditoInput;
 
-    // Distribución del interés
-    const montoInversionista = cuotaInteres.times(porcInversion).div(100).round(2);
-    const montoCashIn = cuotaInteres.times(porcCashIn).div(100).round(2);
+        // 2a) Buscar crédito por nombre del cliente
+        const creditosEncontrados = await tx
+          .select({
+            credito_id: creditos.credito_id,
+            porcentaje_interes: creditos.porcentaje_interes,
+            nombre_usuario: usuarios.nombre,
+          })
+          .from(creditos)
+          .innerJoin(usuarios, eq(usuarios.usuario_id, creditos.usuario_id))
+          .where(ilike(usuarios.nombre, `%${cliente.trim()}%`));
 
-    // IVA cash-in = monto_cash_in * 0.12 (si monto_cash_in > 0)
-    const ivaCashIn = Number(montoCashIn) > 0
-      ? montoCashIn.times(0.12).round(2)
-      : new Big(0);
+        if (creditosEncontrados.length === 0) {
+          throw new Error(`No se encontró crédito para cliente: "${cliente}"`);
+        }
 
-    // porcentaje_participacion_inversionista se mantiene del padre
-    const porcentajeParticipacion = padre.porcentaje_participacion_inversionista;
+        // 2b) De los créditos encontrados, buscar cuál tiene padre con este inversionista
+        let creditoId: number | null = null;
+        let padre: any = null;
+        let porcentajeInteres: string | null = null;
 
-    // cuota_inversionista viene del padre
-    const cuotaInversionista = padre.cuota_inversionista;
+        for (const cred of creditosEncontrados) {
+          const [padreTemp] = await tx
+            .select()
+            .from(creditos_inversionistas)
+            .where(
+              and(
+                eq(creditos_inversionistas.credito_id, cred.credito_id),
+                eq(creditos_inversionistas.inversionista_id, inversionistaId)
+              )
+            )
+            .limit(1);
 
-    // 4) Verificar si ya existe un registro espejo para este credito+inversionista
-    const [existente] = await db
-      .select()
-      .from(creditos_inversionistas_espejo)
-      .where(
-        and(
-          eq(creditos_inversionistas_espejo.credito_id, credito_id),
-          eq(creditos_inversionistas_espejo.inversionista_id, inversionista_id)
-        )
-      )
-      .limit(1);
+          if (padreTemp) {
+            creditoId = cred.credito_id;
+            padre = padreTemp;
+            porcentajeInteres = cred.porcentaje_interes;
+            break;
+          }
+        }
 
-    const dataEspejo = {
-      credito_id,
-      inversionista_id,
-      cuota_inversionista: cuotaInversionista,
-      porcentaje_participacion_inversionista: porcentajeParticipacion,
-      monto_aportado: montoAportado.toString(),
-      porcentaje_cash_in: porcCashIn.toString(),
-      monto_inversionista: montoInversionista.toString(),
-      monto_cash_in: montoCashIn.toString(),
-      iva_inversionista: new Big(iva_inversionista).toString(),
-      iva_cash_in: ivaCashIn.toString(),
-      fecha_creacion: new Date(),
+        if (!padre || !creditoId) {
+          throw new Error(
+            `No se encontró relación padre entre inversionista "${nombreInversionista}" y cliente "${cliente}"`
+          );
+        }
+
+        // 3) Cálculos
+        const montoAportado = new Big(capital);
+        const porcCashInPadre = new Big(padre.porcentaje_cash_in);
+        const interes = new Big(porcentajeInteres ?? 0);
+
+        // cuota_interes = capital * (porcentaje_interes / 100)
+        const cuotaInteres = montoAportado.times(interes.div(100)).round(2);
+
+        // monto_cash_in = cuota_interes * (porcentaje_cash_in_padre / 100)
+        const montoCashIn = cuotaInteres.times(porcCashInPadre).div(100).round(2);
+
+        // iva_cash_in = monto_cash_in * 0.12
+        const ivaCashIn = Number(montoCashIn) > 0
+          ? montoCashIn.times(0.12).round(2)
+          : new Big(0);
+
+        console.log(`[ESPEJO] Cliente: ${cliente}`);
+        console.log(`  capital=${montoAportado} | %interes=${interes} | cuotaInteres=${cuotaInteres}`);
+        console.log(`  %cashIn(padre)=${porcCashInPadre} | montoCashIn=${montoCashIn} | ivaCashIn=${ivaCashIn}`);
+        console.log(`  interes_inversor=${interes_inversor} | iva=${iva}`);
+        console.log(`  cuota_inversionista(padre)=${padre.cuota_inversionista}`);
+
+        const dataEspejo = {
+          credito_id: creditoId,
+          inversionista_id: inversionistaId,
+          cuota_inversionista: padre.cuota_inversionista,
+          porcentaje_participacion_inversionista: padre.porcentaje_participacion_inversionista,
+          monto_aportado: montoAportado.toString(),
+          porcentaje_cash_in: porcCashInPadre.toString(),
+          monto_inversionista: new Big(interes_inversor).toString(),
+          monto_cash_in: montoCashIn.toString(),
+          iva_inversionista: new Big(iva).toString(),
+          iva_cash_in: ivaCashIn.toString(),
+          fecha_creacion: new Date(),
+        };
+
+        // 4) Upsert: verificar si ya existe
+        const [existente] = await tx
+          .select()
+          .from(creditos_inversionistas_espejo)
+          .where(
+            and(
+              eq(creditos_inversionistas_espejo.credito_id, creditoId),
+              eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId)
+            )
+          )
+          .limit(1);
+
+        if (existente) {
+          await tx
+            .update(creditos_inversionistas_espejo)
+            .set(dataEspejo)
+            .where(eq(creditos_inversionistas_espejo.id, existente.id));
+        } else {
+          await tx
+            .insert(creditos_inversionistas_espejo)
+            .values(dataEspejo);
+        }
+
+        resultados.push({
+          cliente,
+          credito_id: creditoId,
+          accion: existente ? "actualizado" : "creado",
+          data: dataEspejo,
+        });
+      }
+    });
+
+    set.status = 200;
+    return {
+      success: true,
+      message: `Se procesaron ${resultados.length} créditos para inversionista "${inversionistasEncontrados[0].nombre}"`,
+      inversionista: {
+        id: inversionistaId,
+        nombre: inversionistasEncontrados[0].nombre,
+      },
+      resultados,
     };
-
-    if (existente) {
-      // UPDATE
-      await db
-        .update(creditos_inversionistas_espejo)
-        .set(dataEspejo)
-        .where(eq(creditos_inversionistas_espejo.id, existente.id));
-
-      set.status = 200;
-      return {
-        success: true,
-        message: "Registro espejo actualizado correctamente",
-        data: dataEspejo,
-      };
-    } else {
-      // INSERT
-      await db
-        .insert(creditos_inversionistas_espejo)
-        .values(dataEspejo);
-
-      set.status = 201;
-      return {
-        success: true,
-        message: "Registro espejo creado correctamente",
-        data: dataEspejo,
-      };
-    }
   } catch (error) {
     console.error("[llenarTablaEspejo] Error:", error);
     set.status = 500;

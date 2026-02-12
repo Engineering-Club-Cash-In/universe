@@ -1,0 +1,40 @@
+{
+    "omitidos": [
+    {
+      "cliente": "Adan Gabriel del Cid Valenzuela",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"ALEXANDER KACHLER SIMONS\" y cliente \"Adan Gabriel del Cid Valenzuela\"."
+    },
+    {
+      "cliente": "Jose Angel Peralta Soma",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"AURA FLORIDALMA RODRIGUEZ \" y cliente \"Jose Angel Peralta Soma\"."
+    },
+     {
+      "cliente": "Rolando José Cedeño Morales",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Werner Oswaldo Osoy Trejo\" y cliente \"Rolando José Cedeño Morales\"."
+    },
+     {
+      "cliente": "Kevin Antonio García Véliz",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Rodrigo Rodas Sanchez\" y cliente \"Kevin Antonio García Véliz\"."
+    },
+    {
+      "cliente": "Lindsey Pamela Sanchez Moreno",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"RODRIGO ALFONSO MENDIETA AVILA\" y cliente \"Lindsey Pamela Sanchez Moreno\"."
+    },
+    {
+      "cliente": "Juan Carlos Quiroa Torres",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"RODRIGO ALFONSO MENDIETA AVILA\" y cliente \"Juan Carlos Quiroa Torres\"."
+    },
+    {
+      "cliente": "Cristián Ademar Villatoro Lozoj / Andremabeth, S.A.",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"RODRIGO ALFONSO MENDIETA AVILA\" y cliente \"Cristián Ademar Villatoro Lozoj / Andremabeth, S.A.\"."
+    },
+    {
+      "cliente": "Dora Maria Raguay Godinez",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Richard Kachler Ortega\" y cliente \"Dora Maria Raguay Godinez\"."
+    },
+    {
+      "cliente": "Guillermo Gutierrez Alfonzo",
+      "razon": "No se encontró padre en creditos_inversionistas para inversionista \"Richard Kachler Ortega\" y cliente \"Guillermo Gutierrez Alfonzo\"."
+    }
+  ]
+}

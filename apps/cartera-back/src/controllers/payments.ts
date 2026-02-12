@@ -502,12 +502,12 @@ export async function insertPagosCreditoInversionistas(
     console.log(`      addition: false (RESTA)`);
     console.log(`      inversionista_id: ${inv.inversionista_id}`);
 
-  if (!cuotaPagada) {  await processAndReplaceCreditInvestors(
+   await processAndReplaceCreditInvestors(
       credito_id,
       abono_capital.toNumber(),
       false,
       inv.inversionista_id
-    );}
+    );
 
     console.log(`   📊 Porcentajes:`);
     console.log(`      porcentaje_cash_in: ${inv.porcentaje_cash_in}`);

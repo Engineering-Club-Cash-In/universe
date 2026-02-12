@@ -13,11 +13,7 @@ CARPETA_EXCELS = r"C:\Users\Kelvin Palacios\Documents\analis de datos"
 ARCHIVO_EXCEL = "Cartera Préstamos (Cash-In) NUEVA 3.0.xlsx"
 # 📅 Hojas a procesar (orden cronológico inverso - más reciente primero)
 HOJAS_A_PROCESAR = [   
-     
-    "Diciembre 2025",
-    "Enero 2026",
-    "Febrero 2026",
-    "Marzo 2026",
+    "Enero 2026"
 ]
 
 # 🔥 MODO PRUEBA
@@ -443,7 +439,7 @@ def validar_porcentajes(fila: Dict[str, Any], credito_sifco: str) -> Dict[str, A
 def leer_hoja_excel(
     archivo_path: str,
     nombre_hoja: str,
-    solo_pools_raros: bool = True
+    solo_pools_raros: bool = False  # 🔥 False = procesa TODO, True = solo pools raros
 ) -> Dict[str, Dict[str, Any]]:
     """
     Lee una hoja específica del Excel y agrupa filas por crédito.
@@ -810,7 +806,7 @@ def enviar_credito_a_api(credito_data: Dict[str, Any], api_endpoint: str) -> Dic
 # ============================================
 # 🚀 FUNCIÓN PRINCIPAL
 # ============================================
-def procesar_multiples_hojas(api_endpoint: str, modo_nombre: str):
+def procesar_multiples_hojas(api_endpoint: str, modo_nombre: str, solo_pools_raros: bool = False):
     modo_texto = "🧪 MODO PRUEBA" if MODO_PRUEBA else "🔥 MODO COMPLETO"
     
     logger.titulo(f"{modo_texto} - {modo_nombre}")
@@ -855,15 +851,15 @@ def procesar_multiples_hojas(api_endpoint: str, modo_nombre: str):
         if nombre_hoja not in hojas_disponibles:
             logger.warning(f"⚠️ Hoja '{nombre_hoja}' no encontrada, saltando...")
             continue
-        
-        creditos_data = leer_hoja_excel(archivo_path, nombre_hoja)
-        
+
+        creditos_data = leer_hoja_excel(archivo_path, nombre_hoja, solo_pools_raros=solo_pools_raros)
+
         if not creditos_data:
             logger.warning(f"⚠️ No se encontraron datos en la hoja {nombre_hoja}")
             continue
-        
+
         stats_globales['hojas_procesadas'] += 1
-        
+
         creditos_a_procesar = list(creditos_data.values())
         if MODO_PRUEBA:
             creditos_a_procesar = creditos_a_procesar[:LIMITE_CREDITOS_PRUEBA]
@@ -2348,27 +2344,45 @@ if __name__ == "__main__":
                 logger.success("\n✅ Modo seleccionado: CRÉDITOS COMPLETOS")
                 api_endpoint = "http://localhost:7000/processUniqueCredit"
                 modo_nombre = "Créditos Completos (SIFCO + Inversionistas)"
-                
+
+                logger.info("\n📋 ¿Qué querés procesar?\n")
+                print("   1. Todo (individuales + pools normales + pools raros)")
+                print("   2. Solo pools raros\n")
+                sub = input("👉 Elegí (1/2): ").strip()
+                solo_pools = sub == '2'
+                if solo_pools:
+                    modo_nombre += " [SOLO POOLS RAROS]"
+                    logger.warning("🔥 Modo: SOLO POOLS RAROS")
+
                 input("\n📌 Presiona ENTER para continuar...")
-                procesar_multiples_hojas(api_endpoint, modo_nombre)
-                
+                procesar_multiples_hojas(api_endpoint, modo_nombre, solo_pools_raros=solo_pools)
+
                 input("\n✅ Proceso completado. Presiona ENTER para volver al menú...")
             
             elif opcion == '2':
                 logger.success("\n✅ Modo seleccionado: SOLO INVERSIONISTAS")
                 api_endpoint = "http://localhost:7000/processInvestorsOnly"
                 modo_nombre = "Solo Inversionistas (sin SIFCO)"
-                
+
+                logger.info("\n📋 ¿Qué querés procesar?\n")
+                print("   1. Todo (individuales + pools normales + pools raros)")
+                print("   2. Solo pools raros\n")
+                sub = input("👉 Elegí (1/2): ").strip()
+                solo_pools = sub == '2'
+                if solo_pools:
+                    modo_nombre += " [SOLO POOLS RAROS]"
+                    logger.warning("🔥 Modo: SOLO POOLS RAROS")
+
                 logger.warning("\n⚠️ IMPORTANTE:")
                 logger.warning("   - Los créditos DEBEN existir en la base de datos")
                 logger.warning("   - Solo se actualizarán los inversionistas")
                 logger.warning("   - NO se consultará SIFCO\n")
-                
+
                 confirmacion = input("¿Estás seguro de continuar? (s/n): ").strip().lower()
-                
+
                 if confirmacion == 's':
                     logger.info("Usuario confirmó operación")
-                    procesar_multiples_hojas(api_endpoint, modo_nombre)
+                    procesar_multiples_hojas(api_endpoint, modo_nombre, solo_pools_raros=solo_pools)
                     input("\n✅ Proceso completado. Presiona ENTER para volver al menú...")
                 else:
                     logger.warning("\n❌ Operación cancelada por el usuario")

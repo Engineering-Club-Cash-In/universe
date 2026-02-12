@@ -2,6 +2,7 @@ import { openai } from "@ai-sdk/openai";
 import { ORPCError } from "@orpc/server";
 import { generateObject } from "ai";
 import { and, desc, eq, ilike, not, or, sql } from "drizzle-orm";
+import { isUniqueViolation } from "../lib/db-errors";
 import { z } from "zod";
 import { db } from "../db";
 import {
@@ -300,7 +301,7 @@ export const vehiclesRouter = {
 				.limit(1);
 
 			if (!vehicle) {
-				throw new Error("Vehículo no encontrado");
+				throw new ORPCError("NOT_FOUND", { message: "Vehículo no encontrado" });
 			}
 
 			const inspections = await db
@@ -377,12 +378,21 @@ export const vehiclesRouter = {
 			}),
 		)
 		.handler(async ({ input }) => {
-			const [newVehicle] = await db
-				.insert(vehicles)
-				.values(input as NewVehicle)
-				.returning();
+			try {
+				const [newVehicle] = await db
+					.insert(vehicles)
+					.values(input as NewVehicle)
+					.returning();
 
-			return newVehicle;
+				return newVehicle;
+			} catch (error: unknown) {
+				if (isUniqueViolation(error, "vehicles_license_plate_unique")) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `Ya existe un vehículo con la placa "${input.licensePlate}"`,
+					});
+				}
+				throw error;
+			}
 		}),
 
 	// Create new vehicle (for brand new vehicles from dealer - minimal required fields)
@@ -418,16 +428,25 @@ export const vehiclesRouter = {
 			}),
 		)
 		.handler(async ({ input }) => {
-			const [newVehicle] = await db
-				.insert(vehicles)
-				.values({
-					...input,
-					isNew: true, // Siempre es vehículo nuevo
-					kmMileage: input.kmMileage ?? 0, // Default 0 para nuevos
-				} as NewVehicle)
-				.returning();
+			try {
+				const [newVehicle] = await db
+					.insert(vehicles)
+					.values({
+						...input,
+						isNew: true, // Siempre es vehículo nuevo
+						kmMileage: input.kmMileage ?? 0, // Default 0 para nuevos
+					} as NewVehicle)
+					.returning();
 
-			return newVehicle;
+				return newVehicle;
+			} catch (error: unknown) {
+				if (isUniqueViolation(error, "vehicles_license_plate_unique")) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `Ya existe un vehículo con la placa "${input.licensePlate}"`,
+					});
+				}
+				throw error;
+			}
 		}),
 
 	// Update vehicle
@@ -467,16 +486,25 @@ export const vehiclesRouter = {
 			}),
 		)
 		.handler(async ({ input }) => {
-			const [updated] = await db
-				.update(vehicles)
-				.set({
-					...input.data,
-					updatedAt: new Date(),
-				})
-				.where(eq(vehicles.id, input.id))
-				.returning();
+			try {
+				const [updated] = await db
+					.update(vehicles)
+					.set({
+						...input.data,
+						updatedAt: new Date(),
+					})
+					.where(eq(vehicles.id, input.id))
+					.returning();
 
-			return updated;
+				return updated;
+			} catch (error: unknown) {
+				if (isUniqueViolation(error, "vehicles_license_plate_unique")) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `Ya existe un vehículo con la placa "${input.data.licensePlate}"`,
+					});
+				}
+				throw error;
+			}
 		}),
 
 	// Delete vehicle
@@ -681,7 +709,7 @@ export const vehiclesRouter = {
 				.limit(1);
 
 			if (!inspection) {
-				throw new Error("Inspección no encontrada");
+				throw new ORPCError("NOT_FOUND", { message: "Inspección no encontrada" });
 			}
 
 			const photos = await db
@@ -976,9 +1004,9 @@ export const vehiclesRouter = {
 				});
 			} catch (error) {
 				console.error("Error in createFullInspection:", error);
-				throw new Error(
-					`Error al guardar la inspección: ${error instanceof Error ? error.message : "Error desconocido"}`,
-				);
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Error al guardar la inspección: ${error instanceof Error ? error.message : "Error desconocido"}`,
+				});
 			}
 		}),
 
@@ -1263,7 +1291,7 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 				.limit(1);
 
 			if (!vehicle) {
-				throw new Error("Vehículo no encontrado");
+				throw new ORPCError("NOT_FOUND", { message: "Vehículo no encontrado" });
 			}
 
 			// Get documents with uploader info
@@ -1321,7 +1349,7 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 				.limit(1);
 
 			if (!vehicle) {
-				throw new Error("Vehículo no encontrado");
+				throw new ORPCError("NOT_FOUND", { message: "Vehículo no encontrado" });
 			}
 
 			// Admin, sales, sales_supervisor and analyst can upload documents
@@ -1330,7 +1358,7 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 					context.userRole,
 				)
 			) {
-				throw new Error("No tienes permiso para subir documentos");
+				throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para subir documentos" });
 			}
 
 			// Create File/Blob from data
@@ -1344,7 +1372,7 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 			} as File);
 
 			if (!validation.valid) {
-				throw new Error(validation.error);
+				throw new ORPCError("BAD_REQUEST", { message: validation.error });
 			}
 
 			// Generate unique filename
@@ -1396,7 +1424,7 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 				.limit(1);
 
 			if (!document) {
-				throw new Error("Documento no encontrado");
+				throw new ORPCError("NOT_FOUND", { message: "Documento no encontrado" });
 			}
 
 			// Verify permissions (admin or uploader)
@@ -1415,6 +1443,6 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 				return { success: true };
 			}
 
-			throw new Error("No tienes permiso para eliminar este documento");
+			throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para eliminar este documento" });
 		}),
 };

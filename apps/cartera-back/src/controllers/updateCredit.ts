@@ -509,13 +509,15 @@ const updateInitialQuotaOtros = async (
  */
 const updateInvestors = async (
   credito_id: number,
-  inversionistas: any[], // Generic array to support both fields
+  inversionistas:
+    | CreditUpdateData["inversionistas"]
+    | CreditUpdateData["inversionistas_espejo"],
   updateFields: any,
   current: any,
   numero_credito_sifco: string,
   seguro: number,
   membresias: number,
-  targetTable: any = creditos_inversionistas
+  targetTable: any = creditos_inversionistas,
 ): Promise<void> => {
   if (!inversionistas || inversionistas.length === 0) return;
 

@@ -1249,35 +1249,30 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
 
       // 7. Procesar abono directo a capital (si aplica)
     }
-    // Jalar la primera cuota realmente sin pagar (cuota.pagado=false Y pago.pagado!=true)
+    // Jalar la última cuota pagada
     const hoy = new Date().toISOString().slice(0, 10);
-    const [primeraCuotaSinPagar] = await db
+    const [ultimaCuotaPagada] = await db
       .select({
         cuota_id: cuotas_credito.cuota_id,
         numero_cuota: cuotas_credito.numero_cuota,
         fecha_vencimiento: cuotas_credito.fecha_vencimiento,
-        pago_pagado: pagos_credito.pagado,
       })
       .from(cuotas_credito)
-      .leftJoin(pagos_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
+      .innerJoin(pagos_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
       .where(
         and(
           eq(cuotas_credito.credito_id, credito_id),
-          gt(cuotas_credito.numero_cuota, 0),
-          eq(cuotas_credito.pagado, false),
-          or(
-            eq(pagos_credito.pagado, false),
-            sql`${pagos_credito.pagado} IS NULL`
-          )
+          gt(cuotas_credito.numero_cuota, 0), 
+          eq(pagos_credito.pagado, true)
         )
       )
-      .orderBy(asc(cuotas_credito.numero_cuota))
+      .orderBy(desc(cuotas_credito.numero_cuota))
       .limit(1);
 
     const abonoCapital = new Big(abono_directo_capital ?? 0);
-    // Si la primera cuota realmente sin pagar aún no vence → al día → capital
-    const fechaVenc = primeraCuotaSinPagar?.fecha_vencimiento ?? null;
-    const estaAlDia = !primeraCuotaSinPagar || (fechaVenc && fechaVenc >= hoy);
+    // Si la última cuota pagada tiene vencimiento >= hoy → está al día → capital
+    const fechaVenc = ultimaCuotaPagada?.fecha_vencimiento ?? null;
+    const estaAlDia = ultimaCuotaPagada && fechaVenc && fechaVenc >= hoy;
 
     if (estaAlDia && abonoCapital.gt(0)) {
       console.log("\n💰 ========== ABONO DIRECTO A CAPITAL ==========");
@@ -1320,8 +1315,8 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         .insert(cuotas_credito)
         .values({
           credito_id: credito_id,
-          numero_cuota: primeraCuotaSinPagar.numero_cuota,
-          fecha_vencimiento: primeraCuotaSinPagar.fecha_vencimiento,
+          numero_cuota: ultimaCuotaPagada.numero_cuota,
+          fecha_vencimiento: ultimaCuotaPagada.fecha_vencimiento,
           pagado: true,
         })
         .returning();

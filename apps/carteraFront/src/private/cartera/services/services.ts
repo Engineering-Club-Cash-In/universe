@@ -322,11 +322,24 @@ export interface BadDebt {
     incobrable?: BadDebt | null;
   cancelacion?: CreditCancelation | null;
 }
+export interface InversionistaEspejo {
+  credito_id: number;
+  inversionista_id: number;
+  nombre: string;
+  monto_aportado: string;
+  porcentaje_participacion: string;
+  porcentaje_cash_in: string;
+  porcentaje_inversion: string;
+  monto_cash_in: string;
+  monto_inversionista: string;
+  cuota_inversionista: string;
+}
 
 export interface CreditoUsuarioPago {
   creditos: Credito;
   usuarios: Usuario;
   inversionistas: AporteInversionista[];
+  creditos_inversionistas_espejo?: InversionistaEspejo[];
   resumen: ResumenCreditos;
   asesor: Asesor; // 👈 corregí el typo "aseor" -> "asesor"
   cancelacion?: CreditCancelation | null;

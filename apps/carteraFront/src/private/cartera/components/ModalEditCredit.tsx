@@ -7,6 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -108,23 +109,29 @@ export function ModalEditCredit({
     })) || [];
 
   const parsedInvestors = parseInvestors(investorsInitial);
-  // Si no hay espejo inicial, usamos una lista vacía.
-  // Pero ojo: la UI necesita que estén sincronizados.
-  // Si investors tiene 3 items, investorsMirror debería tener 3 items (aunque vacíos)
-  // para que coincidan los índices.
-  // Sin embargo, para simplificar, dejaremos que InvestorsList maneje la creación
-  // dinámica del espejo si no existe.
-  const parsedInvestorsMirror = parseInvestors(investorsMirrorInitial);
+  // 🔥 Sincronización Real (Por ID de Inversionista)
+  // Buscamos explícitamente el espejo que corresponda al mismo ID de inversionista.
+  const parsedInvestorsMirror = parsedInvestors.map((inv) => {
+    const mirrorItem = investorsMirrorInitial?.find(
+      (m) => Number(m.inversionista_id) === Number(inv.inversionista_id)
+    );
 
-  // Sincronización inicial de longitudes
-  while (parsedInvestorsMirror.length < parsedInvestors.length) {
-    parsedInvestorsMirror.push({
+    if (mirrorItem) {
+      return {
+        inversionista_id: Number(mirrorItem.inversionista_id),
+        monto_aportado: Number(mirrorItem.monto_aportado),
+        porcentaje_cash_in: Number(mirrorItem.porcentaje_cash_in),
+        porcentaje_inversion: Number(mirrorItem.porcentaje_inversion),
+      };
+    }
+    // Si no hay espejo para ese inversionista, devolvemos objeto vacío
+    return {
       inversionista_id: 0,
       monto_aportado: 0,
       porcentaje_cash_in: 0,
       porcentaje_inversion: 0,
-    });
-  }
+    };
+  });
 
   const formik = useFormik({
     initialValues: {

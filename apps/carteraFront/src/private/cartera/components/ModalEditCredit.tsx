@@ -158,18 +158,7 @@ export function ModalEditCredit({
         }
       }
 
-      // 🔥 VALIDACIÓN 2: Inversionistas Espejo (solo validamos si HAY datos reales)
-      // Si la suma es 0, asumimos que no se está usando el espejo (o está vacío)
-      const sumaMontosMirror = values.investorsMirror.reduce(
-        (sum, inv) => sum + Number(inv.monto_aportado || 0),
-        0
-      );
 
-      if (sumaMontosMirror > 0 && Math.abs(sumaMontosMirror - capital) > 0.01) {
-        errors.investorsMirror = `(Espejo) Suma: Q${sumaMontosMirror.toFixed(
-          2
-        )} ≠ Capital: Q${capital.toFixed(2)}`;
-      }
 
       return errors;
     },

@@ -4,17 +4,23 @@ import { llenarTablaEspejo } from "../controllers/mirrorInvestor";
 export const mirrorInvestorRouter = new Elysia()
   .post("/llenar-tabla-espejo", llenarTablaEspejo, {
     body: t.Object({
-      credito_id: t.Number(),
-      inversionista_id: t.Number(),
-      monto: t.Number(),
-      porcentaje_inversion: t.Number(),
-      porcentaje_cash_in: t.Number(),
-      iva_inversionista: t.Number(),
+      inversionista: t.String({ minLength: 1 }),
+      creditos: t.Array(
+        t.Object({
+          meses_en_credito: t.Optional(t.Number()),
+          cliente: t.String({ minLength: 1 }),
+          capital: t.Number(),
+          inversor: t.Number(),
+          interes_inversor: t.Number(),
+          iva: t.Number(),
+        }),
+        { minItems: 1 }
+      ),
     }),
     detail: {
       summary: "Llenar tabla espejo de inversionistas",
       description:
-        "Recibe datos del inversionista con montos nuevos, calcula campos derivados y los inserta/actualiza en la tabla espejo (creditos_inversionistas_espejo).",
+        "Busca inversionista por nombre y para cada crédito (buscado por nombre de cliente) inserta/actualiza en la tabla espejo. Todo en transacción.",
       tags: ["Inversionistas", "Espejo"],
     },
   });

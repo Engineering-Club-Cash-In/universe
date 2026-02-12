@@ -24,7 +24,6 @@ async function buscarInversionista(nombreCompleto: string) {
   const inputNorm = removeAccents(nombreCompleto.toLowerCase().trim());
   const partes = inputNorm.split(/\s+/);
 
-  // Traer candidatos que coincidan con la primera palabra (sin acentos)
   const candidatos = await db
     .select({
       inversionista_id: inversionistas.inversionista_id,
@@ -37,7 +36,6 @@ async function buscarInversionista(nombreCompleto: string) {
 
   if (candidatos.length <= 1) return candidatos;
 
-  // Puntuar: cuántas palabras del input aparecen en el nombre del candidato
   const scored = candidatos.map((c) => {
     const nombreNorm = removeAccents(c.nombre.toLowerCase());
     const score = partes.filter((p) => nombreNorm.includes(p)).length;
@@ -52,6 +50,108 @@ async function buscarInversionista(nombreCompleto: string) {
     .map(({ score, ...rest }) => rest);
 }
 
+// ─────────────────────────────────────────────────────────────
+// FUNCIÓN: calcularCuotaInversionista
+// Replica la lógica de createCredit.ts líneas 335-494
+// pero consultando datos reales de la BD en vez de recibirlos.
+//
+// Parámetros:
+//   - tx: transacción de Drizzle
+//   - creditoId: ID del crédito
+//   - inversionistaId: ID del inversionista para quien calculamos
+//   - montoAportadoEspejo: el capital del inversionista en el espejo (body.capital)
+//
+// Lógica:
+//   1. Trae el crédito (cuota, seguro, membresías, capital total)
+//   2. Trae TODOS los inversionistas reales de ese crédito (creditos_inversionistas)
+//   3. Calcula porcentajeParticipacion = montoAportadoEspejo / capitalTotal * 100
+//   4. cuotaSinCargos = cuota - membresías - seguro
+//   5. cuotaBase = cuotaSinCargos * (porcentajeParticipacion / 100)
+//   6. Determina quién es el inversionista mayor (por monto_aportado en la tabla REAL)
+//   7. Si ESTE inversionista es el mayor → cuotaBase + seguro + membresías
+//   8. Si no → cuotaBase
+// ─────────────────────────────────────────────────────────────
+async function calcularCuotaInversionista(
+  tx: any,
+  creditoId: number,
+  inversionistaId: number,
+  montoAportadoEspejo: Big
+) {
+  // 1) Traer datos del crédito
+  const [creditoData] = await tx
+    .select({
+      capital: creditos.capital,
+      cuota: creditos.cuota,
+      seguro_10_cuotas: creditos.seguro_10_cuotas,
+      membresias_pago: creditos.membresias_pago,
+    })
+    .from(creditos)
+    .where(eq(creditos.credito_id, creditoId))
+    .limit(1);
+
+  if (!creditoData) {
+    throw new Error(`No se encontró crédito con ID ${creditoId}`);
+  }
+
+  const capitalTotal = new Big(creditoData.capital);
+  const cuotaTotal = new Big(creditoData.cuota);
+  const seguro = new Big(creditoData.seguro_10_cuotas || 0);
+  const membresias = new Big(creditoData.membresias_pago || 0);
+
+  // 2) Traer TODOS los inversionistas reales de este crédito
+  const inversionistasReales = await tx
+    .select({
+      inversionista_id: creditos_inversionistas.inversionista_id,
+      monto_aportado: creditos_inversionistas.monto_aportado,
+    })
+    .from(creditos_inversionistas)
+    .where(eq(creditos_inversionistas.credito_id, creditoId));
+
+  // 3) Porcentaje de participación = montoAportadoEspejo / capitalTotal * 100
+  const porcentajeParticipacion = montoAportadoEspejo.div(capitalTotal).times(100);
+
+  // 4) Cuota sin cargos = cuota - membresías - seguro
+  const cuotaSinCargos = cuotaTotal.minus(membresias).minus(seguro);
+
+  // 5) Cuota base = cuotaSinCargos * (porcentajeParticipacion / 100)
+  const cuotaBase = cuotaSinCargos.times(porcentajeParticipacion.div(100)).round(2);
+
+  // 6) Encontrar al inversionista con mayor monto_aportado (en la tabla REAL)
+  let mayorId: number | null = null;
+  let mayorMonto = new Big(0);
+
+  for (const inv of inversionistasReales) {
+    const monto = new Big(inv.monto_aportado);
+    if (monto.gt(mayorMonto)) {
+      mayorMonto = monto;
+      mayorId = inv.inversionista_id;
+    }
+  }
+
+  const esMayor = inversionistaId === mayorId;
+
+  // 7/8) Si es el mayor → sumar seguro + membresías
+  let cuotaInversionista: Big;
+  if (esMayor) {
+    cuotaInversionista = cuotaBase.plus(seguro).plus(membresias).round(2);
+  } else {
+    cuotaInversionista = cuotaBase;
+  }
+
+  console.log(`[calcularCuotaInversionista] credito=${creditoId} inv=${inversionistaId}`);
+  console.log(`  capitalTotal=${capitalTotal} | cuotaTotal=${cuotaTotal}`);
+  console.log(`  seguro=${seguro} | membresias=${membresias}`);
+  console.log(`  montoAportadoEspejo=${montoAportadoEspejo} | %participacion=${porcentajeParticipacion.toFixed(4)}%`);
+  console.log(`  cuotaSinCargos=${cuotaSinCargos} | cuotaBase=${cuotaBase}`);
+  console.log(`  esMayor=${esMayor} (mayor=${mayorId}, monto=${mayorMonto})`);
+  console.log(`  cuotaInversionista=${cuotaInversionista}`);
+
+  return {
+    cuotaInversionista,
+    porcentajeParticipacion,
+  };
+}
+
 /**
  * Controller: llenarTablaEspejo
  *
@@ -61,15 +161,17 @@ async function buscarInversionista(nombreCompleto: string) {
  *   creditos: [{
  *     meses_en_credito: number,
  *     cliente: "nombre del cliente",
- *     capital: number,
- *     inversor: number,        // porcentaje_inversion
+ *     capital: number,          // monto_aportado del espejo
+ *     inversor: number,         // porcentaje_inversion (0 a 1, ej: 0.8 = 80%)
  *     interes_inversor: number, // monto_inversionista directo
- *     iva: number              // iva_inversionista
+ *     iva: number               // iva_inversionista
  *   }]
  * }
  *
- * Campos calculados: monto_cash_in, iva_cash_in
- * Campos del padre: cuota_inversionista, porcentaje_participacion, porcentaje_cash_in
+ * - inversor se usa directo como multiplicador (ya viene de 0 a 1)
+ * - porcentaje_cash_in = 100 - (inversor * 100)
+ * - cuota_inversionista se calcula con la misma lógica de createCredit
+ * - Si no existe padre en creditos_inversionistas, igual se inserta el espejo
  */
 export const llenarTablaEspejo = async ({ body, set }: any) => {
   try {
@@ -107,9 +209,15 @@ export const llenarTablaEspejo = async ({ body, set }: any) => {
         const {
           cliente,
           capital,
+          inversor,
           interes_inversor,
           iva,
         } = creditoInput;
+
+        // inversor viene de 0 a 1 (ej: 0.8 = 80%)
+        // porcentaje_cash_in = 100 - (inversor * 100)
+        const inversorPct = new Big(inversor).times(100);   // 0.8 → 80
+        const porcCashIn = new Big(100).minus(inversorPct);  // 100 - 80 = 20
 
         // 2a) Buscar crédito por nombre del cliente
         const creditosEncontrados = await tx
@@ -126,14 +234,13 @@ export const llenarTablaEspejo = async ({ body, set }: any) => {
           throw new Error(`No se encontró crédito para cliente: "${cliente}"`);
         }
 
-        // 2b) De los créditos encontrados, buscar cuál tiene padre con este inversionista
+        // 2b) Buscar cuál crédito tiene relación con este inversionista en creditos_inversionistas
         let creditoId: number | null = null;
-        let padre: any = null;
         let porcentajeInteres: string | null = null;
 
         for (const cred of creditosEncontrados) {
           const [padreTemp] = await tx
-            .select()
+            .select({ id: creditos_inversionistas.id })
             .from(creditos_inversionistas)
             .where(
               and(
@@ -145,28 +252,36 @@ export const llenarTablaEspejo = async ({ body, set }: any) => {
 
           if (padreTemp) {
             creditoId = cred.credito_id;
-            padre = padreTemp;
             porcentajeInteres = cred.porcentaje_interes;
             break;
           }
         }
 
-        if (!padre || !creditoId) {
-          throw new Error(
-            `No se encontró relación padre entre inversionista "${nombreInversionista}" y cliente "${cliente}"`
-          );
+        // Si no hay padre: solo agarrar el crédito si es el ÚNICO a nombre de esa persona
+        if (!creditoId) {
+          if (creditosEncontrados.length > 1) {
+            throw new Error(
+              `No se encontró padre para inversionista "${nombreInversionista}" y cliente "${cliente}", y hay ${creditosEncontrados.length} créditos a nombre de ese cliente. No se puede determinar cuál usar.`
+            );
+          }
+          creditoId = creditosEncontrados[0].credito_id;
+          porcentajeInteres = creditosEncontrados[0].porcentaje_interes;
+          console.log(`[ESPEJO] No se encontró padre para inv=${inversionistaId} + credito cliente="${cliente}", usando único credito_id=${creditoId}`);
         }
 
-        // 3) Cálculos
+        // 3) Calcular cuota_inversionista (misma lógica de createCredit)
         const montoAportado = new Big(capital);
-        const porcCashInPadre = new Big(padre.porcentaje_cash_in);
+        const { cuotaInversionista, porcentajeParticipacion } =
+          await calcularCuotaInversionista(tx, creditoId, inversionistaId, montoAportado);
+
+        // 4) Cálculos de interés y distribución
         const interes = new Big(porcentajeInteres ?? 0);
 
         // cuota_interes = capital * (porcentaje_interes / 100)
         const cuotaInteres = montoAportado.times(interes.div(100)).round(2);
 
-        // monto_cash_in = cuota_interes * (porcentaje_cash_in_padre / 100)
-        const montoCashIn = cuotaInteres.times(porcCashInPadre).div(100).round(2);
+        // monto_cash_in = cuota_interes * (porcentaje_cash_in / 100)
+        const montoCashIn = cuotaInteres.times(porcCashIn).div(100).round(2);
 
         // iva_cash_in = monto_cash_in * 0.12
         const ivaCashIn = Number(montoCashIn) > 0
@@ -174,18 +289,19 @@ export const llenarTablaEspejo = async ({ body, set }: any) => {
           : new Big(0);
 
         console.log(`[ESPEJO] Cliente: ${cliente}`);
-        console.log(`  capital=${montoAportado} | %interes=${interes} | cuotaInteres=${cuotaInteres}`);
-        console.log(`  %cashIn(padre)=${porcCashInPadre} | montoCashIn=${montoCashIn} | ivaCashIn=${ivaCashIn}`);
+        console.log(`  capital=${montoAportado} | inversor=${inversor} → %cashIn=${porcCashIn}`);
+        console.log(`  %interes=${interes} | cuotaInteres=${cuotaInteres}`);
+        console.log(`  montoCashIn=${montoCashIn} | ivaCashIn=${ivaCashIn}`);
         console.log(`  interes_inversor=${interes_inversor} | iva=${iva}`);
-        console.log(`  cuota_inversionista(padre)=${padre.cuota_inversionista}`);
+        console.log(`  cuotaInversionista=${cuotaInversionista}`);
 
         const dataEspejo = {
           credito_id: creditoId,
           inversionista_id: inversionistaId,
-          cuota_inversionista: padre.cuota_inversionista,
-          porcentaje_participacion_inversionista: padre.porcentaje_participacion_inversionista,
+          cuota_inversionista: cuotaInversionista.toString(),
+          porcentaje_participacion_inversionista: porcentajeParticipacion.toString(),
           monto_aportado: montoAportado.toString(),
-          porcentaje_cash_in: porcCashInPadre.toString(),
+          porcentaje_cash_in: porcCashIn.toString(),
           monto_inversionista: new Big(interes_inversor).toString(),
           monto_cash_in: montoCashIn.toString(),
           iva_inversionista: new Big(iva).toString(),
@@ -193,7 +309,7 @@ export const llenarTablaEspejo = async ({ body, set }: any) => {
           fecha_creacion: new Date(),
         };
 
-        // 4) Upsert: verificar si ya existe
+        // 5) Upsert en tabla espejo
         const [existente] = await tx
           .select()
           .from(creditos_inversionistas_espejo)

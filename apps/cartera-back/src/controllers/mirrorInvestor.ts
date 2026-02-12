@@ -263,19 +263,13 @@ export const llenarTablaEspejo = async ({ body, query, set }: any) => {
           }
         }
 
-        // Si no hay padre: si es único crédito lo tomamos, si hay varios omitimos
+        // Si no hay padre: omitir siempre
         if (!creditoId) {
-          if (creditosEncontrados.length === 1) {
-            creditoId = creditosEncontrados[0].credito_id;
-            porcentajeInteres = creditosEncontrados[0].porcentaje_interes;
-            console.log(`[ESPEJO] Sin padre para inv=${inversionistaId} + cliente="${cliente}", usando único credito_id=${creditoId}`);
-          } else {
-            omitidos.push({
-              cliente,
-              razon: `No se encontró padre y hay ${creditosEncontrados.length} créditos a nombre de "${cliente}". No se puede determinar cuál usar.`,
-            });
-            continue;
-          }
+          omitidos.push({
+            cliente,
+            razon: `No se encontró padre en creditos_inversionistas para inversionista "${nombreInversionista}" y cliente "${cliente}".`,
+          });
+          continue;
         }
 
         // 3) Calcular o no la cuota_inversionista según el query param

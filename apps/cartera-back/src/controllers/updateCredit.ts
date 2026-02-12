@@ -4,6 +4,7 @@ import { db } from "../database";
 import {
   creditos,
   creditos_inversionistas,
+  creditos_inversionistas_espejo,
   cuotas_credito,
   pagos_credito,
   usuarios,
@@ -275,7 +276,19 @@ const creditUpdateSchema = z.object({
         porcentaje_inversion: z.number().min(0).max(100),
       }),
     )
-    .min(0),
+    .min(0)
+    .optional(),
+  inversionistas_espejo: z
+    .array(
+      z.object({
+        inversionista_id: z.number().int().positive(),
+        monto_aportado: z.number().positive(),
+        porcentaje_cash_in: z.number().min(0).max(100),
+        porcentaje_inversion: z.number().min(0).max(100),
+      }),
+    )
+    .min(0)
+    .optional(),
   capital: z.number().nonnegative(),
   porcentaje_interes: z.number().min(0).max(100),
   seguro_10_cuotas: z.number().min(0),
@@ -315,6 +328,7 @@ const validateInvestorsPercentages = (
   inversionistas: CreditUpdateData["inversionistas"],
   set: SetContext,
 ): ValidationResult => {
+  if (!inversionistas) return { success: true };
   for (const inv of inversionistas) {
     const total =
       Number(inv.porcentaje_cash_in) + Number(inv.porcentaje_inversion);
@@ -340,6 +354,7 @@ const validateInvestorsCapital = (
   capital: number,
   set: SetContext,
 ): ValidationResult => {
+  if (!inversionistas) return { success: true };
   const totalMontoAportado = inversionistas.reduce(
     (acc: Big, inv) => acc.plus(inv.monto_aportado ?? 0),
     new Big(0),
@@ -494,19 +509,22 @@ const updateInitialQuotaOtros = async (
  */
 const updateInvestors = async (
   credito_id: number,
-  inversionistas: CreditUpdateData["inversionistas"],
+  inversionistas:
+    | CreditUpdateData["inversionistas"]
+    | CreditUpdateData["inversionistas_espejo"],
   updateFields: any,
   current: any,
   numero_credito_sifco: string,
   seguro: number,
   membresias: number,
+  targetTable: any = creditos_inversionistas,
 ): Promise<void> => {
-  if (inversionistas.length === 0) return;
+  if (!inversionistas || inversionistas.length === 0) return;
 
   // Eliminar inversionistas existentes
   await db
-    .delete(creditos_inversionistas)
-    .where(eq(creditos_inversionistas.credito_id, credito_id));
+    .delete(targetTable)
+    .where(eq(targetTable.credito_id, credito_id));
   console.log(current.capital, "current values ");
 
   // 🔥 OBTENER CAPITAL Y CUOTA TOTAL DEL CRÉDITO
@@ -705,7 +723,7 @@ const updateInvestors = async (
 
   // Insertar nuevos inversionistas
   if (creditosInversionistasData.length > 0) {
-    await db.insert(creditos_inversionistas).values(creditosInversionistasData);
+    await db.insert(targetTable).values(creditosInversionistasData);
   }
 };
 
@@ -788,13 +806,28 @@ export const updateCredit = async ({ body, set }: any) => {
       return { message: "Credit not found" };
     }
 
+
     // 3. Validar inversionistas
-    const percentagesValidation = validateInvestorsPercentages(
-      inversionistas,
-      set,
-    );
-    if (!percentagesValidation.success) {
-      return percentagesValidation.error;
+    if (inversionistas && inversionistas.length > 0) {
+      const percentagesValidation = validateInvestorsPercentages(
+        inversionistas as any,
+        set,
+      );
+      if (!percentagesValidation.success) {
+        return percentagesValidation.error;
+      }
+    }
+
+    // 3.1. Validar inversionistas espejo si existen
+    const { inversionistas_espejo } = parseResult.data;
+    if (inversionistas_espejo && inversionistas_espejo.length > 0) {
+      const mirrorValidation = validateInvestorsPercentages(
+        inversionistas_espejo as any,
+        set
+      );
+      if (!mirrorValidation.success) {
+        return mirrorValidation.error;
+      }
     }
 
     // 3.5 Actualizar datos del usuario si se enviaron
@@ -914,16 +947,33 @@ export const updateCredit = async ({ body, set }: any) => {
         nueva_cuota: cuota,
       });
 
-    // 9. Actualizar inversionistas
-    await updateInvestors(
-      credito_id,
-      inversionistas,
-      updateFields,
-      current,
-      numero_credito_sifco ?? current.numero_credito_sifco,
-      Number(updateFields.seguro_10_cuotas ?? current.seguro_10_cuotas),
-      Number(updateFields.membresias_pago ?? current.membresias_pago),
-    );
+    // 9. Actualizar inversionistas (Principal)
+    if (inversionistas && inversionistas.length > 0) {
+      await updateInvestors(
+        credito_id,
+        inversionistas,
+        updateFields,
+        current,
+        numero_credito_sifco ?? current.numero_credito_sifco,
+        Number(updateFields.seguro_10_cuotas ?? current.seguro_10_cuotas),
+        Number(updateFields.membresias_pago ?? current.membresias_pago),
+        creditos_inversionistas // Explicit target
+      );
+    }
+
+    // 10. Actualizar inversionistas (Espejo)
+    if (inversionistas_espejo && inversionistas_espejo.length > 0) {
+      await updateInvestors(
+        credito_id,
+        inversionistas_espejo,
+        updateFields,
+        current,
+        numero_credito_sifco ?? current.numero_credito_sifco,
+        Number(updateFields.seguro_10_cuotas ?? current.seguro_10_cuotas),
+        Number(updateFields.membresias_pago ?? current.membresias_pago),
+        creditos_inversionistas_espejo // Mirror target
+      );
+    }
 
     set.status = 200;
     return updatedCredit;

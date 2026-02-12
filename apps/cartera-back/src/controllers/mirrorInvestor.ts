@@ -173,9 +173,10 @@ async function calcularCuotaInversionista(
  * - cuota_inversionista se calcula con la misma lógica de createCredit
  * - Si no existe padre en creditos_inversionistas, igual se inserta el espejo
  */
-export const llenarTablaEspejo = async ({ body, set }: any) => {
+export const llenarTablaEspejo = async ({ body, query, set }: any) => {
   try {
     const { inversionista: nombreInversionista, creditos: creditosInput } = body;
+    const calcularCuota = query?.calcular_cuota === "true";
 
     // 1) Buscar inversionista por nombre
     const inversionistasEncontrados = await buscarInversionista(nombreInversionista);
@@ -202,6 +203,7 @@ export const llenarTablaEspejo = async ({ body, set }: any) => {
 
     const inversionistaId = inversionistasEncontrados[0].inversionista_id;
     const resultados: any[] = [];
+    const omitidos: any[] = [];
 
     // 2) Transacción para procesar todos los créditos
     await db.transaction(async (tx) => {
@@ -231,7 +233,11 @@ export const llenarTablaEspejo = async ({ body, set }: any) => {
           .where(ilike(usuarios.nombre, `%${cliente.trim()}%`));
 
         if (creditosEncontrados.length === 0) {
-          throw new Error(`No se encontró crédito para cliente: "${cliente}"`);
+          omitidos.push({
+            cliente,
+            razon: `No se encontró crédito para cliente: "${cliente}"`,
+          });
+          continue;
         }
 
         // 2b) Buscar cuál crédito tiene relación con este inversionista en creditos_inversionistas
@@ -257,22 +263,46 @@ export const llenarTablaEspejo = async ({ body, set }: any) => {
           }
         }
 
-        // Si no hay padre: solo agarrar el crédito si es el ÚNICO a nombre de esa persona
+        // Si no hay padre: si es único crédito lo tomamos, si hay varios omitimos
         if (!creditoId) {
-          if (creditosEncontrados.length > 1) {
-            throw new Error(
-              `No se encontró padre para inversionista "${nombreInversionista}" y cliente "${cliente}", y hay ${creditosEncontrados.length} créditos a nombre de ese cliente. No se puede determinar cuál usar.`
-            );
+          if (creditosEncontrados.length === 1) {
+            creditoId = creditosEncontrados[0].credito_id;
+            porcentajeInteres = creditosEncontrados[0].porcentaje_interes;
+            console.log(`[ESPEJO] Sin padre para inv=${inversionistaId} + cliente="${cliente}", usando único credito_id=${creditoId}`);
+          } else {
+            omitidos.push({
+              cliente,
+              razon: `No se encontró padre y hay ${creditosEncontrados.length} créditos a nombre de "${cliente}". No se puede determinar cuál usar.`,
+            });
+            continue;
           }
-          creditoId = creditosEncontrados[0].credito_id;
-          porcentajeInteres = creditosEncontrados[0].porcentaje_interes;
-          console.log(`[ESPEJO] No se encontró padre para inv=${inversionistaId} + credito cliente="${cliente}", usando único credito_id=${creditoId}`);
         }
 
-        // 3) Calcular cuota_inversionista (misma lógica de createCredit)
+        // 3) Calcular o no la cuota_inversionista según el query param
         const montoAportado = new Big(capital);
-        const { cuotaInversionista, porcentajeParticipacion } =
-          await calcularCuotaInversionista(tx, creditoId, inversionistaId, montoAportado);
+        let cuotaInversionista: Big;
+
+        if (calcularCuota) {
+          const resultado = await calcularCuotaInversionista(tx, creditoId, inversionistaId, montoAportado);
+          cuotaInversionista = resultado.cuotaInversionista;
+        } else {
+          // Sin cálculo: traer cuota del padre si existe, sino poner 0
+          const [padre] = await tx
+            .select({
+              cuota_inversionista: creditos_inversionistas.cuota_inversionista,
+              porcentaje_participacion_inversionista: creditos_inversionistas.porcentaje_participacion_inversionista,
+            })
+            .from(creditos_inversionistas)
+            .where(
+              and(
+                eq(creditos_inversionistas.credito_id, creditoId),
+                eq(creditos_inversionistas.inversionista_id, inversionistaId)
+              )
+            )
+            .limit(1);
+
+          cuotaInversionista = new Big(padre?.cuota_inversionista ?? 0);
+        }
 
         // 4) Cálculos de interés y distribución
         const interes = new Big(porcentajeInteres ?? 0);
@@ -288,7 +318,7 @@ export const llenarTablaEspejo = async ({ body, set }: any) => {
           ? montoCashIn.times(0.12).round(2)
           : new Big(0);
 
-        console.log(`[ESPEJO] Cliente: ${cliente}`);
+        console.log(`[ESPEJO] Cliente: ${cliente} | calcularCuota=${calcularCuota}`);
         console.log(`  capital=${montoAportado} | inversor=${inversor} → %cashIn=${porcCashIn}`);
         console.log(`  %interes=${interes} | cuotaInteres=${cuotaInteres}`);
         console.log(`  montoCashIn=${montoCashIn} | ivaCashIn=${ivaCashIn}`);
@@ -299,7 +329,7 @@ export const llenarTablaEspejo = async ({ body, set }: any) => {
           credito_id: creditoId,
           inversionista_id: inversionistaId,
           cuota_inversionista: cuotaInversionista.toString(),
-          porcentaje_participacion_inversionista: porcentajeParticipacion.toString(),
+          porcentaje_participacion_inversionista: inversorPct.toString(),
           monto_aportado: montoAportado.toString(),
           porcentaje_cash_in: porcCashIn.toString(),
           monto_inversionista: new Big(interes_inversor).toString(),
@@ -344,12 +374,13 @@ export const llenarTablaEspejo = async ({ body, set }: any) => {
     set.status = 200;
     return {
       success: true,
-      message: `Se procesaron ${resultados.length} créditos para inversionista "${inversionistasEncontrados[0].nombre}"`,
+      message: `Se procesaron ${resultados.length} créditos, ${omitidos.length} omitidos`,
       inversionista: {
         id: inversionistaId,
         nombre: inversionistasEncontrados[0].nombre,
       },
       resultados,
+      omitidos,
     };
   } catch (error) {
     console.error("[llenarTablaEspejo] Error:", error);

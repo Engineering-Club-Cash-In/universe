@@ -196,6 +196,39 @@ def encontrar_columna(df, *keywords):
     return None
 
 
+def _primeras_tres_palabras(texto):
+    """Retorna las primeras tres palabras de un texto"""
+    palabras = texto.split()
+    return " ".join(palabras[:3]) if len(palabras) >= 3 else texto
+
+
+def _agrupar_por_observaciones(creditos_nc, credito_info):
+    """
+    Agrupa créditos por las primeras 3 palabras de observaciones.
+    Retorna lista de sub-grupos, cada uno con 2+ créditos que comparten observaciones.
+    Preserva orden original del Excel.
+    """
+    # Obtener clave de observaciones para cada crédito
+    obs_key = {}
+    for c in creditos_nc:
+        if c in credito_info:
+            obs = credito_info[c][2]  # índice 2 = observaciones
+        else:
+            obs = ""
+        obs_key[c] = _primeras_tres_palabras(obs) if obs else ""
+
+    # Agrupar por clave de observaciones
+    grupos_obs = {}
+    for c in creditos_nc:  # preservar orden del Excel
+        clave = obs_key[c]
+        if clave not in grupos_obs:
+            grupos_obs[clave] = []
+        grupos_obs[clave].append(c)
+
+    # Solo retornar sub-grupos con 2+ créditos
+    return [grupo for grupo in grupos_obs.values() if len(grupo) >= 2]
+
+
 def agregar_hijos_raros(df_creditos, grupos, col_credito):
     """
     PASO 2.5: Busca hijos raros — créditos que comparten el mismo nombre +
@@ -216,8 +249,13 @@ def agregar_hijos_raros(df_creditos, grupos, col_credito):
     if len(columnas_lista) > 2 and columnas_lista[2] == '#':
         col_cuota_idx = 2
 
-    # Leer nombre y cuota de TODOS los créditos
-    credito_info = {}  # numero_credito -> (nombre, cuota)
+    # Buscar columna Observaciones (índice 36)
+    col_obs_idx = None
+    if len(columnas_lista) > 36 and columnas_lista[36] == 'Observaciones':
+        col_obs_idx = 36
+
+    # Leer nombre, cuota y observaciones de TODOS los créditos
+    credito_info = {}  # numero_credito -> (nombre, cuota, observaciones)
     for _, fila in df_creditos.iterrows():
         numero_credito = fila[col_credito]
         if pd.isna(numero_credito) or str(numero_credito).strip() == '':
@@ -238,11 +276,17 @@ def agregar_hijos_raros(df_creditos, grupos, col_credito):
                 except (ValueError, TypeError):
                     num_cuota = str(val).strip()
 
-        credito_info[numero_credito] = (nombre, num_cuota)
+        observaciones = ""
+        if col_obs_idx is not None:
+            val = fila.iloc[col_obs_idx]
+            if pd.notna(val):
+                observaciones = str(val).strip().lower()
+
+        credito_info[numero_credito] = (nombre, num_cuota, observaciones)
 
     # Agrupar TODOS los créditos por (nombre, cuota)
     por_nombre_cuota = {}  # (nombre, cuota) -> [creditos]
-    for numero_credito, (nombre, cuota) in credito_info.items():
+    for numero_credito, (nombre, cuota, _obs) in credito_info.items():
         clave = (nombre, cuota)
         if clave not in por_nombre_cuota:
             por_nombre_cuota[clave] = []
@@ -255,36 +299,40 @@ def agregar_hijos_raros(df_creditos, grupos, col_credito):
             credito_a_padre[c] = padre
 
     # Para cada grupo nombre+cuota con 2+ créditos,
-    # verificar si están en grupos distintos por '_' → fusionarlos
+    # verificar observaciones (contains) y si están en grupos distintos → fusionarlos
     hijos_raros_encontrados = 0
     for (nombre, cuota), creditos_nc in por_nombre_cuota.items():
         if len(creditos_nc) < 2:
             continue
 
-        # Encontrar los padres distintos de estos créditos
-        padres_involucrados = set()
-        for c in creditos_nc:
-            if c in credito_a_padre:
-                padres_involucrados.add(credito_a_padre[c])
+        # Agrupar por observaciones (primeras 3 palabras)
+        sub_grupos = _agrupar_por_observaciones(creditos_nc, credito_info)
 
-        if len(padres_involucrados) <= 1:
-            # Ya están todos en el mismo grupo, nada que hacer
-            continue
+        for creditos_validados in sub_grupos:
+            # Encontrar los padres distintos de estos créditos
+            padres_involucrados = set()
+            for c in creditos_validados:
+                if c in credito_a_padre:
+                    padres_involucrados.add(credito_a_padre[c])
 
-        # Fusionar: el primer padre (ordenado) absorbe a todos los demás
-        padres_ordenados = sorted(padres_involucrados)
-        padre_principal = padres_ordenados[0]
-
-        for padre_secundario in padres_ordenados[1:]:
-            if padre_secundario not in grupos:
+            if len(padres_involucrados) <= 1:
+                # Ya están todos en el mismo grupo, nada que hacer
                 continue
-            creditos_a_mover = grupos[padre_secundario]
-            for c in creditos_a_mover:
-                if c not in grupos[padre_principal]:
-                    grupos[padre_principal].append(c)
-                    hijos_raros_encontrados += 1
-                credito_a_padre[c] = padre_principal
-            del grupos[padre_secundario]
+
+            # Fusionar: el primer padre (ordenado) absorbe a todos los demás
+            padres_ordenados = sorted(padres_involucrados)
+            padre_principal = padres_ordenados[0]
+
+            for padre_secundario in padres_ordenados[1:]:
+                if padre_secundario not in grupos:
+                    continue
+                creditos_a_mover = grupos[padre_secundario]
+                for c in creditos_a_mover:
+                    if c not in grupos[padre_principal]:
+                        grupos[padre_principal].append(c)
+                        hijos_raros_encontrados += 1
+                    credito_a_padre[c] = padre_principal
+                del grupos[padre_secundario]
 
     # Reordenar cada grupo (sin '_' primero, luego con '_')
     for padre in grupos:

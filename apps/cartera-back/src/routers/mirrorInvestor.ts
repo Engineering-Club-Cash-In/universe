@@ -12,6 +12,7 @@ export const mirrorInvestorRouter = new Elysia()
         t.Object({
           meses_en_credito: t.Optional(t.Number()),
           cliente: t.String({ minLength: 1 }),
+          numero_credito_sifco: t.Optional(t.String()),
           capital: t.Number(),
           inversor: t.Number(),
           interes_inversor: t.Number(),

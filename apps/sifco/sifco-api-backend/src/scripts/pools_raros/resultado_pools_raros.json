@@ -708,61 +708,6 @@
     ]
   },
   {
-    "nombre": "Rolando José Cedeño Morales",
-    "numeroCuota": "1",
-    "numeroCredito": "01010214121690",
-    "creditos": [
-      {
-        "numeroCredito": "01010214121690",
-        "fechaUltimoPago": "Diciembre 2025",
-        "numeroCuota": "0",
-        "cuota": "5994.63",
-        "montoBoleta": "",
-        "pagado": "Si",
-        "capitalRestante": "209981.49",
-        "inversionista": "Cube Investments S.A.",
-        "pago": "2025-12-30 00:00:00",
-        "pagosParciales": []
-      },
-      {
-        "numeroCredito": "01010214121690_2",
-        "fechaUltimoPago": "Enero 2026",
-        "numeroCuota": "1",
-        "cuota": "294.66",
-        "montoBoleta": "",
-        "pagado": "Si",
-        "capitalRestante": "13211.848207260986",
-        "inversionista": "Werner Oswaldo Osoy Trejo",
-        "pago": "2026-01-30 00:00:00",
-        "pagosParciales": []
-      },
-      {
-        "numeroCredito": "01010214121700",
-        "fechaUltimoPago": "Diciembre 2025",
-        "numeroCuota": "0",
-        "cuota": "4402.27",
-        "montoBoleta": "",
-        "pagado": "Si",
-        "capitalRestante": "136208.46",
-        "inversionista": "Cube Investments S.A.",
-        "pago": "2025-12-30 00:00:00",
-        "pagosParciales": []
-      },
-      {
-        "numeroCredito": "01010214121700_2",
-        "fechaUltimoPago": "Enero 2026",
-        "numeroCuota": "1",
-        "cuota": "109.64",
-        "montoBoleta": "",
-        "pagado": "No",
-        "capitalRestante": "4915.898805578387",
-        "inversionista": "Boris Gilberto Lemus Villatoro",
-        "pago": "2026-01-30 00:00:00",
-        "pagosParciales": []
-      }
-    ]
-  },
-  {
     "nombre": "Ruth Eunice Guerra Lopez",
     "numeroCuota": "25",
     "numeroCredito": "01010214108470",

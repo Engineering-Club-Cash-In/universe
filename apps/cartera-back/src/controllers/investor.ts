@@ -6,6 +6,7 @@ import {
   boletasPagoInversionista,
   creditos,
   creditos_inversionistas,
+  creditos_inversionistas_espejo,
   cuotas_credito,
   inversionistas,
   liquidaciones,
@@ -378,7 +379,8 @@ export async function processAndReplaceCreditInvestors(
   credito_id: number,
   abono_capital: number,
   addition: boolean,
-  inversionista_id: number
+  inversionista_id: number,
+  updateMirror: boolean = false
 ) {
   // 1. Fetch credit details
   const credit = await db.query.creditos.findFirst({
@@ -390,13 +392,26 @@ export async function processAndReplaceCreditInvestors(
   }
 
   // 2. Fetch all investors for this credit
-  const investors = await db.query.creditos_inversionistas.findMany({
-    where: (ci, { eq, and }) =>
-      and(
-        eq(ci.inversionista_id, inversionista_id),
-        eq(ci.credito_id, credito_id)
-      ),
-  });
+  // Determine which table to query based on updateMirror flag
+  let investors;
+  
+  if (updateMirror) {
+    investors = await db.query.creditos_inversionistas_espejo.findMany({
+      where: (ci, { eq, and }) =>
+        and(
+          eq(ci.inversionista_id, inversionista_id),
+          eq(ci.credito_id, credito_id)
+        ),
+    });
+  } else {
+    investors = await db.query.creditos_inversionistas.findMany({
+      where: (ci, { eq, and }) =>
+        and(
+          eq(ci.inversionista_id, inversionista_id),
+          eq(ci.credito_id, credito_id)
+        ),
+    });
+  }
 
   if (investors.length === 0) {
     return [];
@@ -449,21 +464,39 @@ export async function processAndReplaceCreditInvestors(
 
   // 4. Update all processed investors by their id
   for (const inv of processedInvestors) {
-    await db
-      .update(creditos_inversionistas)
-      .set({
-        cuota_inversionista: inv.cuota_inversionista,
-        porcentaje_participacion_inversionista:
-          inv.porcentaje_participacion_inversionista,
-        monto_aportado: inv.monto_aportado,
-        porcentaje_cash_in: inv.porcentaje_cash_in,
-        iva_inversionista: inv.iva_inversionista,
-        iva_cash_in: inv.iva_cash_in,
-        monto_inversionista: inv.monto_inversionista,
-        monto_cash_in: inv.monto_cash_in,
-        // fecha_creacion: inv.fecha_creacion, // Descomenta si deseas actualizarla
-      })
-      .where(eq(creditos_inversionistas.id, inv.id));
+    if (updateMirror) {
+       await db
+        .update(creditos_inversionistas_espejo)
+        .set({
+          cuota_inversionista: inv.cuota_inversionista,
+          porcentaje_participacion_inversionista:
+            inv.porcentaje_participacion_inversionista,
+          monto_aportado: inv.monto_aportado,
+          porcentaje_cash_in: inv.porcentaje_cash_in,
+          iva_inversionista: inv.iva_inversionista,
+          iva_cash_in: inv.iva_cash_in,
+          monto_inversionista: inv.monto_inversionista,
+          monto_cash_in: inv.monto_cash_in,
+          // fecha_creacion: inv.fecha_creacion, // Descomenta si deseas actualizarla
+        })
+        .where(eq(creditos_inversionistas_espejo.id, inv.id));
+    } else {
+      await db
+        .update(creditos_inversionistas)
+        .set({
+          cuota_inversionista: inv.cuota_inversionista,
+          porcentaje_participacion_inversionista:
+            inv.porcentaje_participacion_inversionista,
+          monto_aportado: inv.monto_aportado,
+          porcentaje_cash_in: inv.porcentaje_cash_in,
+          iva_inversionista: inv.iva_inversionista,
+          iva_cash_in: inv.iva_cash_in,
+          monto_inversionista: inv.monto_inversionista,
+          monto_cash_in: inv.monto_cash_in,
+          // fecha_creacion: inv.fecha_creacion, // Descomenta si deseas actualizarla
+        })
+        .where(eq(creditos_inversionistas.id, inv.id));
+    }
   }
 
   // 5. Return the new updated data (could re-fetch if you want actual DB values)

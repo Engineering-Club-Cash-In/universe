@@ -92,6 +92,36 @@ def encontrar_columna(df, *keywords):
     return None
 
 
+def _primeras_tres_palabras(texto):
+    """Retorna las primeras tres palabras de un texto"""
+    palabras = texto.split()
+    return " ".join(palabras[:3]) if len(palabras) >= 3 else texto
+
+
+def _agrupar_por_observaciones(creditos_nc, credito_obs):
+    """
+    Agrupa créditos por las primeras 3 palabras de observaciones.
+    Retorna lista de sub-grupos, cada uno con 2+ créditos que comparten observaciones.
+    Preserva orden original del Excel.
+    """
+    # Obtener clave de observaciones para cada crédito
+    obs_key = {}
+    for c in creditos_nc:
+        obs = credito_obs.get(c, "")
+        obs_key[c] = _primeras_tres_palabras(obs) if obs else ""
+
+    # Agrupar por clave de observaciones
+    grupos_obs = {}
+    for c in creditos_nc:  # preservar orden del Excel
+        clave = obs_key[c]
+        if clave not in grupos_obs:
+            grupos_obs[clave] = []
+        grupos_obs[clave].append(c)
+
+    # Solo retornar sub-grupos con 2+ créditos
+    return [grupo for grupo in grupos_obs.values() if len(grupo) >= 2]
+
+
 def agrupar_por_nombre_y_cuota(df_creditos):
     """
     Agrupa créditos por (Nombre, NumeroCuota).
@@ -117,11 +147,18 @@ def agrupar_por_nombre_y_cuota(df_creditos):
     if len(columnas_lista) > 2 and columnas_lista[2] == '#':
         col_cuota_idx = 2
 
+    # Buscar columna Observaciones (índice 36)
+    col_obs_idx = None
+    if len(columnas_lista) > 36 and columnas_lista[36] == 'Observaciones':
+        col_obs_idx = 36
+
     print(f"  Columna nombre: '{col_nombre}'")
     print(f"  Columna crédito: '{col_credito}'")
     print(f"  Columna # cuota: índice {col_cuota_idx}")
+    print(f"  Columna observaciones: índice {col_obs_idx}")
 
     grupos = {}
+    credito_obs = {}  # numero_credito -> observaciones (para filtro contains)
 
     for _, fila in df_creditos.iterrows():
         nombre = fila[col_nombre]
@@ -144,6 +181,14 @@ def agrupar_por_nombre_y_cuota(df_creditos):
                 except (ValueError, TypeError):
                     num_cuota = str(val).strip()
 
+        # Obtener observaciones
+        observaciones = ""
+        if col_obs_idx is not None:
+            val = fila.iloc[col_obs_idx]
+            if pd.notna(val):
+                observaciones = str(val).strip().lower()
+
+        credito_obs[numero_credito] = observaciones
         clave = (nombre, num_cuota)
 
         if clave not in grupos:
@@ -156,11 +201,15 @@ def agrupar_por_nombre_y_cuota(df_creditos):
     # Filtrar: solo mantener grupos donde hay 2+ créditos SIN "_"
     # Si un grupo tiene 1 sin "_" y el resto con "_", es el patrón normal padre/hijo → ignorar
     # Si tiene 2+ sin "_", es un pool raro → mantener (incluyendo los que tienen "_")
+    # Además validar que observaciones coincidan (contains)
     grupos_pool = {}
     for clave, creditos in grupos_multi.items():
-        sin_guion = [c for c in creditos if '_' not in c]
-        if len(sin_guion) >= 2:
-            grupos_pool[clave] = creditos
+        # Agrupar por observaciones (primeras 3 palabras)
+        sub_grupos = _agrupar_por_observaciones(creditos, credito_obs)
+        for sg_idx, sub_grupo in enumerate(sub_grupos):
+            sin_guion = [c for c in sub_grupo if '_' not in c]
+            if len(sin_guion) >= 2:
+                grupos_pool[(clave[0], clave[1], sg_idx)] = sub_grupo
 
     total_grupos = len(grupos)
     total_pools = len(grupos_pool)
@@ -173,7 +222,7 @@ def agrupar_por_nombre_y_cuota(df_creditos):
 
     if total_pools > 0:
         print(f"\n  Detalle de pools encontrados:")
-        for (nombre, cuota), creditos in sorted(grupos_pool.items()):
+        for (nombre, cuota, _sg), creditos in sorted(grupos_pool.items()):
             print(f"    - {nombre} | Cuota #{cuota} → {len(creditos)} créditos: {creditos}")
 
     return grupos_pool, col_credito
@@ -388,7 +437,7 @@ def procesar_pools_raros(xlsx, hojas_disponibles, grupos_pool):
     resultado = []
     total_grupos = len(grupos_pool)
 
-    for idx, ((nombre, num_cuota), creditos) in enumerate(sorted(grupos_pool.items()), 1):
+    for idx, ((nombre, num_cuota, _sg), creditos) in enumerate(sorted(grupos_pool.items()), 1):
         if idx % 50 == 0 or idx == 1:
             print(f"\n  Procesando pool {idx}/{total_grupos} - {nombre} | Cuota #{num_cuota}")
 

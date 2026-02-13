@@ -15176,18 +15176,6 @@
         "pagosParciales": []
       },
       {
-        "numeroCredito": "01010214121700",
-        "fechaUltimoPago": "Diciembre 2025",
-        "numeroCuota": "0",
-        "cuota": "4402.27",
-        "montoBoleta": "",
-        "pagado": "Si",
-        "capitalRestante": "136208.46",
-        "inversionista": "Cube Investments S.A.",
-        "pago": "2025-12-30 00:00:00",
-        "pagosParciales": []
-      },
-      {
         "numeroCredito": "01010214121690_2",
         "fechaUltimoPago": "Enero 2026",
         "numeroCuota": "1",
@@ -15197,6 +15185,39 @@
         "capitalRestante": "13211.848207260986",
         "inversionista": "Werner Oswaldo Osoy Trejo",
         "pago": "2026-01-30 00:00:00",
+        "pagosParciales": []
+      }
+    ],
+    "inversionistasActuales": [
+      {
+        "numeroCredito": "01010214121690",
+        "inversionista": "Cube Investments S.A.",
+        "porcentajeCashIn": "1.0",
+        "porcentajeInversionista": "0.0",
+        "capital": "196769.641792739"
+      },
+      {
+        "numeroCredito": "01010214121690_2",
+        "inversionista": "Werner Oswaldo Osoy Trejo",
+        "porcentajeCashIn": "0.2",
+        "porcentajeInversionista": "0.8",
+        "capital": "13211.848207260986"
+      }
+    ]
+  },
+  {
+    "numeroCredito": "01010214121700",
+    "creditos": [
+      {
+        "numeroCredito": "01010214121700",
+        "fechaUltimoPago": "Diciembre 2025",
+        "numeroCuota": "0",
+        "cuota": "4402.27",
+        "montoBoleta": "",
+        "pagado": "Si",
+        "capitalRestante": "136208.46",
+        "inversionista": "Cube Investments S.A.",
+        "pago": "2025-12-30 00:00:00",
         "pagosParciales": []
       },
       {
@@ -15214,25 +15235,11 @@
     ],
     "inversionistasActuales": [
       {
-        "numeroCredito": "01010214121690",
-        "inversionista": "Cube Investments S.A.",
-        "porcentajeCashIn": "1.0",
-        "porcentajeInversionista": "0.0",
-        "capital": "196769.641792739"
-      },
-      {
         "numeroCredito": "01010214121700",
         "inversionista": "Cube Investments S.A.",
         "porcentajeCashIn": "1.0",
         "porcentajeInversionista": "0.0",
         "capital": "131292.5611944216"
-      },
-      {
-        "numeroCredito": "01010214121690_2",
-        "inversionista": "Werner Oswaldo Osoy Trejo",
-        "porcentajeCashIn": "0.2",
-        "porcentajeInversionista": "0.8",
-        "capital": "13211.848207260986"
       },
       {
         "numeroCredito": "01010214121700_2",

@@ -161,6 +161,7 @@ async function calcularCuotaInversionista(
  *   creditos: [{
  *     meses_en_credito: number,
  *     cliente: "nombre del cliente",
+ *     numero_credito_sifco?: string, // opcional: si viene, busca por este número en vez del nombre
  *     capital: number,          // monto_aportado del espejo
  *     inversor: number,         // porcentaje_inversion (0 a 1, ej: 0.8 = 80%)
  *     interes_inversor: number, // monto_inversionista directo
@@ -210,6 +211,7 @@ export const llenarTablaEspejo = async ({ body, query, set }: any) => {
       for (const creditoInput of creditosInput) {
         const {
           cliente,
+          numero_credito_sifco,
           capital,
           inversor,
           interes_inversor,
@@ -221,21 +223,38 @@ export const llenarTablaEspejo = async ({ body, query, set }: any) => {
         const inversorPct = new Big(inversor).times(100);   // 0.8 → 80
         const porcCashIn = new Big(100).minus(inversorPct);  // 100 - 80 = 20
 
-        // 2a) Buscar crédito por nombre del cliente
-        const creditosEncontrados = await tx
-          .select({
-            credito_id: creditos.credito_id,
-            porcentaje_interes: creditos.porcentaje_interes,
-            nombre_usuario: usuarios.nombre,
-          })
-          .from(creditos)
-          .innerJoin(usuarios, eq(usuarios.usuario_id, creditos.usuario_id))
-          .where(ilike(usuarios.nombre, `%${cliente.trim()}%`));
+        // 2a) Buscar crédito: por numero_credito_sifco si viene, sino por nombre del cliente
+        let creditosEncontrados: { credito_id: number; porcentaje_interes: string | null; nombre_usuario: string | null }[];
+        console.log(`[ESPEJO] Buscando crédito para cliente="${cliente}"${numero_credito_sifco ? ` con SIFCO="${numero_credito_sifco}"` : ""}`);
+
+        if (numero_credito_sifco) {
+          creditosEncontrados = await tx
+            .select({
+              credito_id: creditos.credito_id,
+              porcentaje_interes: creditos.porcentaje_interes,
+              nombre_usuario: usuarios.nombre,
+            })
+            .from(creditos)
+            .innerJoin(usuarios, eq(usuarios.usuario_id, creditos.usuario_id))
+            .where(eq(creditos.numero_credito_sifco, numero_credito_sifco.trim()));
+        } else {
+          creditosEncontrados = await tx
+            .select({
+              credito_id: creditos.credito_id,
+              porcentaje_interes: creditos.porcentaje_interes,
+              nombre_usuario: usuarios.nombre,
+            })
+            .from(creditos)
+            .innerJoin(usuarios, eq(usuarios.usuario_id, creditos.usuario_id))
+            .where(ilike(usuarios.nombre, `%${cliente.trim()}%`));
+        }
 
         if (creditosEncontrados.length === 0) {
           omitidos.push({
             cliente,
-            razon: `No se encontró crédito para cliente: "${cliente}"`,
+            razon: numero_credito_sifco
+              ? `No se encontró crédito con número SIFCO: "${numero_credito_sifco}"`
+              : `No se encontró crédito para cliente: "${cliente}"`,
           });
           continue;
         }
@@ -265,9 +284,12 @@ export const llenarTablaEspejo = async ({ body, query, set }: any) => {
 
         // Si no hay padre: omitir siempre
         if (!creditoId) {
+          const ref = numero_credito_sifco
+            ? `crédito SIFCO "${numero_credito_sifco}"`
+            : `cliente "${cliente}"`;
           omitidos.push({
             cliente,
-            razon: `No se encontró padre en creditos_inversionistas para inversionista "${nombreInversionista}" y cliente "${cliente}".`,
+            razon: `No se encontró padre en creditos_inversionistas para inversionista "${nombreInversionista}" y ${ref}.`,
           });
           continue;
         }

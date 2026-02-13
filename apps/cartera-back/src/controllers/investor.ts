@@ -504,11 +504,9 @@ export async function processAndReplaceCreditInvestors(
 }
 export async function processAndReplaceCreditInvestorsReverse(
   credito_id: number,
-  abono_capital: number,
-  addition: boolean,
   pago_id: number
 ) {
-  // 1. Fetch credit details
+  // 1. Obtener crédito
   const credit = await db.query.creditos.findFirst({
     where: (c, { eq }) => eq(c.credito_id, credito_id),
   });
@@ -517,7 +515,7 @@ export async function processAndReplaceCreditInvestorsReverse(
     throw new Error("Credit not found");
   }
 
-  // 2. Fetch all investors for this credit
+  // 2. Obtener todos los inversionistas del crédito
   const investors = await db.query.creditos_inversionistas.findMany({
     where: (ci, { eq }) => eq(ci.credito_id, credito_id),
   });
@@ -525,45 +523,60 @@ export async function processAndReplaceCreditInvestorsReverse(
   if (investors.length === 0) {
     return [];
   }
-  console.log("adition", addition);
-  // 3. Process and calculate new values for each investor
-  const processedInvestors = investors.map(async (inv) => {
-    const [abonoCapital] = await db
-      .select({
-        abono_capital: pagos_credito_inversionistas.abono_capital,
-      })
-      .from(pagos_credito_inversionistas)
-      .where(
-        and(
-          eq(pagos_credito_inversionistas.pago_id, pago_id),
-          eq(
-            pagos_credito_inversionistas.inversionista_id,
-            inv.inversionista_id
+
+  // 3. Obtener la cuota del pago
+  const pago = await db.query.pagos_credito.findFirst({
+    where: (p, { eq }) => eq(p.pago_id, pago_id),
+  });
+
+  if (!pago) {
+    throw new Error(`Pago ${pago_id} no encontrado`);
+  }
+
+  // 4. Obtener TODOS los pagos de esa cuota
+  const pagosDeEsaCuota = await db
+    .select({ pago_id: pagos_credito.pago_id })
+    .from(pagos_credito)
+    .where(eq(pagos_credito.cuota_id, pago.cuota_id));
+
+  const pagoIds = pagosDeEsaCuota.map((p) => p.pago_id);
+
+  // 5. Por cada inversionista, sumar abono_capital de TODOS los pagos de esa cuota
+  for (const inv of investors) {
+    const abonos = pagoIds.length > 0
+      ? await db
+          .select({
+            abono_capital: pagos_credito_inversionistas.abono_capital,
+          })
+          .from(pagos_credito_inversionistas)
+          .where(
+            and(
+              inArray(pagos_credito_inversionistas.pago_id, pagoIds),
+              eq(pagos_credito_inversionistas.inversionista_id, inv.inversionista_id)
+            )
           )
-        )
-      );
-    console.log(abonoCapital);
-    const montoAportado = addition
-      ? new Big(inv.monto_aportado).add(abono_capital)
-      : new Big(inv.monto_aportado).minus(abono_capital);
-    console.log("montoAportado", montoAportado.toString());
-    const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
-    const porcentajeInversion = new Big(
-      inv.porcentaje_participacion_inversionista
+      : [];
+
+    if (abonos.length === 0) continue;
+
+    const abonoCapitalInv = abonos.reduce(
+      (acc, a) => acc.plus(new Big(a.abono_capital ?? 0)),
+      new Big(0)
     );
+    const montoAportado = new Big(inv.monto_aportado).plus(abonoCapitalInv);
+
+    // Recalcular todo basado en el nuevo monto_aportado
+    const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
+    const porcentajeInversion = new Big(inv.porcentaje_participacion_inversionista);
+
     const cuota = montoAportado
       .times(credit.porcentaje_interes)
       .div(100)
       .round(2);
 
-    // Proportional amounts
-    const montoInversionista = cuota
-      .times(porcentajeInversion)
-      .div(100)
-      .round(2);
+    const montoInversionista = cuota.times(porcentajeInversion).div(100).round(2);
     const montoCashIn = cuota.times(porcentajeCashIn).div(100).round(2);
 
-    // IVAs
     const ivaInversionista = montoInversionista.gt(0)
       ? montoInversionista.times(0.12).round(2)
       : new Big(0);
@@ -571,42 +584,17 @@ export async function processAndReplaceCreditInvestorsReverse(
       ? montoCashIn.times(0.12).round(2)
       : new Big(0);
 
-    return {
-      ...inv, // trae el id necesario para el update
-      credito_id,
-      monto_aportado: montoAportado.toFixed(2),
-      porcentaje_cash_in: porcentajeCashIn.toString(),
-      porcentaje_participacion_inversionista: porcentajeInversion.toString(),
-      monto_inversionista: montoInversionista.toFixed(2),
-      monto_cash_in: montoCashIn.toFixed(2),
-      iva_inversionista: ivaInversionista.toFixed(2),
-      iva_cash_in: ivaCashIn.toFixed(2),
-      fecha_creacion: new Date(),
-      cuota_inversionista: inv.cuota_inversionista,
-    };
-  });
-
-  // 4. Update all processed investors by their id
-  for (const inv of processedInvestors) {
     await db
       .update(creditos_inversionistas)
       .set({
-        cuota_inversionista: (await inv).cuota_inversionista,
-        porcentaje_participacion_inversionista: (await inv)
-          .porcentaje_participacion_inversionista,
-        monto_aportado: (await inv).monto_aportado,
-        porcentaje_cash_in: (await inv).porcentaje_cash_in,
-        iva_inversionista: (await inv).iva_inversionista,
-        iva_cash_in: (await inv).iva_cash_in,
-        monto_inversionista: (await inv).monto_inversionista,
-        monto_cash_in: (await inv).monto_cash_in,
-        // fecha_creacion: inv.fecha_creacion, // Descomenta si deseas actualizarla
+        monto_aportado: montoAportado.toFixed(2),
+        monto_inversionista: montoInversionista.toFixed(2),
+        monto_cash_in: montoCashIn.toFixed(2),
+        iva_inversionista: ivaInversionista.toFixed(2),
+        iva_cash_in: ivaCashIn.toFixed(2),
       })
-      .where(eq(creditos_inversionistas.id, (await inv).id));
+      .where(eq(creditos_inversionistas.id, inv.id));
   }
-
-  // 5. Return the new updated data (could re-fetch if you want actual DB values)
-  return processedInvestors;
 }
 
 /**

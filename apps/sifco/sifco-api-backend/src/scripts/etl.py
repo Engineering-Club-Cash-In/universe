@@ -186,6 +186,173 @@ def agrupar_creditos_por_padre(df_creditos):
     return grupos, col_credito
 
 
+def encontrar_columna(df, *keywords):
+    """Busca una columna por keywords en su nombre"""
+    for col in df.columns:
+        col_lower = col.lower()
+        for kw in keywords:
+            if kw in col_lower:
+                return col
+    return None
+
+
+def agregar_hijos_raros(df_creditos, grupos, col_credito):
+    """
+    PASO 2.5: Busca hijos raros — créditos que comparten el mismo nombre +
+    número de cuota pero tienen distinto número de crédito.
+    Un crédito puede tener hijos normales (por '_') Y hijos raros a la vez.
+    """
+    print(f"\n{'='*60}")
+    print("PASO 2.5: Buscando hijos raros (mismo nombre + misma cuota)")
+    print(f"{'='*60}")
+
+    col_nombre = encontrar_columna(df_creditos, 'nombre')
+    if col_nombre is None:
+        print("  ADVERTENCIA: No se encontró columna 'Nombre', saltando hijos raros")
+        return grupos
+
+    columnas_lista = list(df_creditos.columns)
+    col_cuota_idx = None
+    if len(columnas_lista) > 2 and columnas_lista[2] == '#':
+        col_cuota_idx = 2
+
+    # Leer nombre y cuota de TODOS los créditos
+    credito_info = {}  # numero_credito -> (nombre, cuota)
+    for _, fila in df_creditos.iterrows():
+        numero_credito = fila[col_credito]
+        if pd.isna(numero_credito) or str(numero_credito).strip() == '':
+            continue
+        numero_credito = str(numero_credito).strip()
+
+        nombre = fila[col_nombre]
+        if pd.isna(nombre) or str(nombre).strip() == '':
+            continue
+        nombre = str(nombre).strip()
+
+        num_cuota = ""
+        if col_cuota_idx is not None:
+            val = fila.iloc[col_cuota_idx]
+            if pd.notna(val):
+                try:
+                    num_cuota = str(int(float(val)))
+                except (ValueError, TypeError):
+                    num_cuota = str(val).strip()
+
+        credito_info[numero_credito] = (nombre, num_cuota)
+
+    # Agrupar TODOS los créditos por (nombre, cuota)
+    por_nombre_cuota = {}  # (nombre, cuota) -> [creditos]
+    for numero_credito, (nombre, cuota) in credito_info.items():
+        clave = (nombre, cuota)
+        if clave not in por_nombre_cuota:
+            por_nombre_cuota[clave] = []
+        por_nombre_cuota[clave].append(numero_credito)
+
+    # Mapa inverso: crédito -> su grupo padre actual
+    credito_a_padre = {}
+    for padre, creditos in grupos.items():
+        for c in creditos:
+            credito_a_padre[c] = padre
+
+    # Para cada grupo nombre+cuota con 2+ créditos,
+    # verificar si están en grupos distintos por '_' → fusionarlos
+    hijos_raros_encontrados = 0
+    for (nombre, cuota), creditos_nc in por_nombre_cuota.items():
+        if len(creditos_nc) < 2:
+            continue
+
+        # Encontrar los padres distintos de estos créditos
+        padres_involucrados = set()
+        for c in creditos_nc:
+            if c in credito_a_padre:
+                padres_involucrados.add(credito_a_padre[c])
+
+        if len(padres_involucrados) <= 1:
+            # Ya están todos en el mismo grupo, nada que hacer
+            continue
+
+        # Fusionar: el primer padre (ordenado) absorbe a todos los demás
+        padres_ordenados = sorted(padres_involucrados)
+        padre_principal = padres_ordenados[0]
+
+        for padre_secundario in padres_ordenados[1:]:
+            if padre_secundario not in grupos:
+                continue
+            creditos_a_mover = grupos[padre_secundario]
+            for c in creditos_a_mover:
+                if c not in grupos[padre_principal]:
+                    grupos[padre_principal].append(c)
+                    hijos_raros_encontrados += 1
+                credito_a_padre[c] = padre_principal
+            del grupos[padre_secundario]
+
+    # Reordenar cada grupo (sin '_' primero, luego con '_')
+    for padre in grupos:
+        grupos[padre] = sorted(
+            grupos[padre],
+            key=lambda x: (1 if '_' in str(x) else 0, str(x))
+        )
+
+    total_con_hijos = sum(1 for g in grupos.values() if len(g) > 1)
+    print(f"  Hijos raros encontrados (fusionados): {hijos_raros_encontrados}")
+    print(f"  Total grupos con hijos (normal + raros): {total_con_hijos}")
+
+    return grupos
+
+
+def extraer_inversionista_actual(df_enero, numero_credito):
+    """
+    Busca un crédito en Enero 2026 y extrae:
+    Inversionista, % Cash-In, % Inversionista, Capital
+    """
+    col_credito = encontrar_columna(df_enero, 'crédito sifco', 'credito sifco')
+    if col_credito is None:
+        return None
+
+    numero_str = str(numero_credito).strip()
+    fila_df = df_enero[df_enero[col_credito].astype(str).str.strip() == numero_str]
+
+    if len(fila_df) == 0:
+        return None
+
+    fila = fila_df.iloc[0]
+    columnas_lista = list(df_enero.columns)
+
+    info = {
+        "numeroCredito": numero_str,
+        "inversionista": "",
+        "porcentajeCashIn": "",
+        "porcentajeInversionista": "",
+        "capital": ""
+    }
+
+    # Inversionista - índice 35
+    if len(columnas_lista) > 35 and columnas_lista[35] == 'Inversionista':
+        val = fila.iloc[35]
+        if pd.notna(val):
+            info["inversionista"] = str(val).strip()
+
+    # % Cash-In - índice 9
+    if len(columnas_lista) > 9 and columnas_lista[9] == '% Cash-In':
+        val = fila.iloc[9]
+        if pd.notna(val):
+            info["porcentajeCashIn"] = str(val)
+
+    # % Inversionista - índice 10
+    if len(columnas_lista) > 10 and columnas_lista[10] == '% Inversionista':
+        val = fila.iloc[10]
+        if pd.notna(val):
+            info["porcentajeInversionista"] = str(val)
+
+    # Capital - índice 4
+    if len(columnas_lista) > 4 and columnas_lista[4] == 'Capital':
+        val = fila.iloc[4]
+        if pd.notna(val):
+            info["capital"] = str(val)
+
+    return info
+
+
 def buscar_ultimo_pago(xlsx, hojas_disponibles, numero_credito, col_credito):
     """
     Busca la última cuota pagada para un crédito específico
@@ -361,7 +528,8 @@ def extraer_info_pago(fila, columnas, hoja, pagado):
 
 def procesar_creditos(xlsx, hojas_disponibles, grupos_creditos):
     """
-    Procesa todos los créditos y busca su última cuota pagada
+    Procesa todos los créditos y busca su última cuota pagada.
+    Incluye inversionistasActuales de Enero 2026.
     """
     print(f"\n{'='*60}")
     print("PASO 3: Buscando última cuota pagada para cada crédito")
@@ -376,6 +544,11 @@ def procesar_creditos(xlsx, hojas_disponibles, grupos_creditos):
             hojas_cache[hoja] = df
     print(f"  {len(hojas_cache)} hojas cargadas")
 
+    # Obtener df de Enero 2026 para inversionistas actuales
+    df_enero = hojas_cache.get("Enero 2026")
+    if df_enero is None:
+        print("  ADVERTENCIA: No se encontró hoja Enero 2026 para inversionistas actuales")
+
     resultado = []
     total_grupos = len(grupos_creditos)
 
@@ -384,6 +557,7 @@ def procesar_creditos(xlsx, hojas_disponibles, grupos_creditos):
             print(f"\n  Procesando grupo {idx}/{total_grupos} - Padre: {padre}")
 
         creditos_info = []
+        inversionistas_actuales = []
 
         for numero_credito in creditos:
             info_pago = buscar_ultimo_pago_optimizado(
@@ -395,19 +569,29 @@ def procesar_creditos(xlsx, hojas_disponibles, grupos_creditos):
             if info_pago:
                 creditos_info.append(info_pago)
             else:
-                # No se encontró información
                 creditos_info.append({
                     "numeroCredito": str(numero_credito),
                     "fechaUltimoPago": "No encontrado",
                     "numeroCuota": "",
                     "cuota": "",
                     "montoBoleta": "",
-                    "pagado": "No encontrado"
+                    "pagado": "No encontrado",
+                    "capitalRestante": "",
+                    "inversionista": "",
+                    "pago": "",
+                    "pagosParciales": []
                 })
+
+            # Extraer inversionista actual de Enero 2026
+            if df_enero is not None:
+                inv_info = extraer_inversionista_actual(df_enero, numero_credito)
+                if inv_info:
+                    inversionistas_actuales.append(inv_info)
 
         resultado.append({
             "numeroCredito": str(padre),
-            "creditos": creditos_info
+            "creditos": creditos_info,
+            "inversionistasActuales": inversionistas_actuales
         })
 
     return resultado
@@ -604,8 +788,11 @@ def main():
         # 2. Obtener créditos válidos de Enero 2026
         df_creditos = obtener_creditos_enero_2026(xlsx)
 
-        # 3. Agrupar por padre (Pool)
-        grupos_creditos, _ = agrupar_creditos_por_padre(df_creditos)
+        # 3. Agrupar por padre (Pool) — hijos por '_'
+        grupos_creditos, col_credito = agrupar_creditos_por_padre(df_creditos)
+
+        # 3.5. Buscar hijos raros (mismo nombre + misma cuota)
+        grupos_creditos = agregar_hijos_raros(df_creditos, grupos_creditos, col_credito)
 
         # 4. Procesar y buscar últimos pagos
         resultado = procesar_creditos(xlsx, hojas_disponibles, grupos_creditos)

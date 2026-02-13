@@ -506,7 +506,8 @@ export async function insertPagosCreditoInversionistas(
       credito_id,
       abono_capital.toNumber(),
       false,
-      inv.inversionista_id
+      inv.inversionista_id,
+      true
     );
 
     console.log(`   📊 Porcentajes:`);

@@ -4,7 +4,8 @@
       "Bash(pip install:*)",
       "Bash(python:*)",
       "Bash(python3 -m venv:*)",
-      "Bash(/home/mdaniel543/Escritorio/universe/apps/sifco/sifco-api-backend/src/scripts/pools_raros/.venv/bin/pip install:*)"
+      "Bash(/home/mdaniel543/Escritorio/universe/apps/sifco/sifco-api-backend/src/scripts/pools_raros/.venv/bin/pip install:*)",
+      "Bash(/home/mdaniel543/Escritorio/universe/apps/sifco/sifco-api-backend/src/scripts/pools_raros/.venv/bin/python:*)"
     ]
   }
 }

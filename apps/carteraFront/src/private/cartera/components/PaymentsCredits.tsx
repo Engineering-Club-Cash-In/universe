@@ -63,6 +63,10 @@ const iconMap: Record<string, { icon: React.ReactNode; color: string }> = {
     icon: <BadgeDollarSign className="w-4 h-4 text-green-600" />,
     color: "text-green-800",
   },
+  monto_aplicado: {
+    icon: <BadgeDollarSign className="w-4 h-4 text-green-500" />,
+    color: "text-green-700",
+  },
   cuota: {
     icon: <BadgeDollarSign className="w-4 h-4 text-indigo-700" />,
     color: "text-indigo-700",
@@ -329,6 +333,9 @@ const handleDownloadExcel = async () => {
                     Monto Boleta
                   </TableHead>
                   <TableHead className="font-bold text-blue-700">
+                    Monto Aplicado
+                  </TableHead>
+                  <TableHead className="font-bold text-blue-700">
                     Fecha de Pago
                   </TableHead>
                   <TableHead className="font-bold text-blue-700">
@@ -365,6 +372,9 @@ const handleDownloadExcel = async () => {
                       </TableCell>
                       <TableCell className="text-center text-blue-900 font-bold">
                         {formatCurrency(item.pago.monto_boleta)}
+                      </TableCell>
+                      <TableCell className="text-center text-green-700 font-bold">
+                        {formatCurrency(item.pago.monto_aplicado)}
                       </TableCell>
                       <TableCell className="text-center font-semibold">
                         {formatDate(item.pago.fecha_pago)}
@@ -478,7 +488,7 @@ const handleDownloadExcel = async () => {
                     {openIdx === idx && (
                       <TableRow>
                         <TableCell
-                          colSpan={7}
+                          colSpan={8}
                           className="bg-blue-50 p-0 rounded-b-2xl"
                         >
                           <div className="p-6 space-y-6">

@@ -287,8 +287,9 @@
       cuenta_empresa_id: integer("cuenta_empresa_id")
       .references(() => cuentasEmpresa.cuentaId), // 
     pagoConvenio :numeric("pago_convenio",{precision:18,scale:2}).notNull(),
-    
+
     fecha_boleta: date("fecha_boleta"), // Fecha del pago en la boleta
+    monto_aplicado: numeric("monto_aplicado", { precision: 18, scale: 2 }).notNull(),
   });
   export const boletas = customSchema.table("boletas", {
     id: serial("id").primaryKey(),

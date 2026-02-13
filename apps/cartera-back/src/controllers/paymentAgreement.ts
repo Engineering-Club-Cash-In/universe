@@ -1309,6 +1309,7 @@ export async function processConvenioCuotas(
             numeroAutorizacion: pagoData.numeroAutorizacion || null,
             registerBy: pagoData.registerBy.toString(),
             pagoConvenio: pagoData.pagoConvenio,
+            monto_aplicado: pagoData.monto_boleta,
           })
           .returning();
 

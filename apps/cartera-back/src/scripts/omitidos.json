@@ -1,7 +1,6 @@
 {
     "omitidos": [
     {
-      // MANUAL
       "cliente": "Adan Gabriel del Cid Valenzuela",
       "razon": "No se encontró padre en creditos_inversionistas para inversionista \"ALEXANDER KACHLER SIMONS\" y cliente \"Adan Gabriel del Cid Valenzuela\"."
     },

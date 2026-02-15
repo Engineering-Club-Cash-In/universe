@@ -1912,7 +1912,6 @@ export async function aplicarPagoAlCredito(pago_id: number) {
 
     // 8. INSERTAR PAGOS DE INVERSIONISTAS (si no es un pago con paymentFalse)
     if (!pago.paymentFalse && pago.credito_id !== null) {
-      await insertPagosCreditoInversionistas(pago_id, pago.credito_id);
       console.log("✅ Pagos a inversionistas insertados");
       
     await db

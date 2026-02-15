@@ -38,9 +38,18 @@ interface CreditoJson {
   pagosParciales?: PagoParcial[];
 }
 
+interface InversionistaActual {
+  numeroCredito: string;
+  inversionista: string;
+  porcentajeCashIn: string;
+  porcentajeInversionista: string;
+  capital: string;
+}
+
 interface CreditoAgrupado {
   numeroCredito: string;
   creditos: CreditoJson[];
+  inversionistasActuales?: InversionistaActual[];
 }
 
 interface PoolRaro {
@@ -171,22 +180,27 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
 
       console.log(`   📊 Capital Total Calculado: Q${nuevoCapital.toFixed(2)}`);
 
-      // 3️⃣ Obtener porcentajes existentes antes de eliminar
-      const inversionistasExistentes = await db
-        .select({
-          inversionista_id: creditos_inversionistas.inversionista_id,
-          porcentaje_participacion_inversionista: creditos_inversionistas.porcentaje_participacion_inversionista,
-          porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
-        })
-        .from(creditos_inversionistas)
-        .where(eq(creditos_inversionistas.credito_id, creditoDB.credito_id));
+      // 3️⃣ Obtener porcentajes existentes antes de eliminar (solo si no hay inversionistasActuales)
+      const tieneInversionistasActuales = grupo.inversionistasActuales && grupo.inversionistasActuales.length > 0;
 
-      const porcentajesMap = new Map<number, { porcentajeInversion: string; porcentajeCashIn: string }>();
-      for (const ie of inversionistasExistentes) {
-        porcentajesMap.set(ie.inversionista_id, {
-          porcentajeInversion: ie.porcentaje_participacion_inversionista,
-          porcentajeCashIn: ie.porcentaje_cash_in,
-        });
+      let porcentajesMap = new Map<number, { porcentajeInversion: string; porcentajeCashIn: string }>();
+
+      if (!tieneInversionistasActuales) {
+        const inversionistasExistentes = await db
+          .select({
+            inversionista_id: creditos_inversionistas.inversionista_id,
+            porcentaje_participacion_inversionista: creditos_inversionistas.porcentaje_participacion_inversionista,
+            porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
+          })
+          .from(creditos_inversionistas)
+          .where(eq(creditos_inversionistas.credito_id, creditoDB.credito_id));
+
+        for (const ie of inversionistasExistentes) {
+          porcentajesMap.set(ie.inversionista_id, {
+            porcentajeInversion: ie.porcentaje_participacion_inversionista,
+            porcentajeCashIn: ie.porcentaje_cash_in,
+          });
+        }
       }
 
       // Eliminar inversionistas existentes
@@ -228,66 +242,127 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
       const membresias = new Big(creditoDB.membresias_pago ?? 0);
       const cuotaTotal = new Big(creditoDB.cuota ?? 0);
 
-      // Encontrar al inversionista con mayor capital para asignarle seguro y membresía
-      const inversionistaMayor = inversionistasData.reduce((max, current) =>
-        current.capitalRestante.gt(max.capitalRestante) ? current : max
-      );
+      if (tieneInversionistasActuales) {
+        // ✅ Usar inversionistasActuales del JSON
+        console.log(`   📋 Usando inversionistasActuales del JSON (${grupo.inversionistasActuales!.length})`);
 
-      for (const inv of inversionistasData) {
-        // Buscar o crear inversionista
-        const investor = await findOrCreateInvestor(inv.nombre, true);
+        // Encontrar al inversionista con mayor capital
+        const inversionistaMayor = grupo.inversionistasActuales!.reduce((max, current) =>
+          new Big(current.capital || 0).gt(new Big(max.capital || 0)) ? current : max
+        );
 
-        // El monto aportado es igual al capital restante
-        const montoAportado = inv.capitalRestante;
+        for (const invActual of grupo.inversionistasActuales!) {
+          const investor = await findOrCreateInvestor(invActual.inversionista, true);
 
-        // Calcular porcentaje de participación
-        const porcentajeParticipacion = nuevoCapital.gt(0)
-          ? montoAportado.div(nuevoCapital).times(100)
-          : new Big(0);
+          const montoAportado = new Big(invActual.capital || 0);
 
-        // Calcular interés
-        const interesInv = montoAportado.times(porcentajeInteres.div(100)).round(2);
+          // Calcular porcentaje de participacion
+          const porcentajeParticipacion = nuevoCapital.gt(0)
+            ? montoAportado.div(nuevoCapital).times(100)
+            : new Big(0);
 
-        // Obtener porcentajes de la DB, fallback a 70/30
-        const porcentajesExistentes = porcentajesMap.get(investor.inversionista_id);
-        const porcentajeInversion = new Big(porcentajesExistentes?.porcentajeInversion ?? 70);
-        const porcentajeCashIn = new Big(porcentajesExistentes?.porcentajeCashIn ?? 30);
+          // Calcular interes
+          const interesInv = montoAportado.times(porcentajeInteres.div(100)).round(2);
 
-        const montoInversionista = interesInv.times(porcentajeInversion.div(100)).round(2);
-        const montoCashIn = interesInv.times(porcentajeCashIn.div(100)).round(2);
+          // Porcentajes del JSON (0.2 -> 20, 0.8 -> 80)
+          const porcentajeInversion = new Big(invActual.porcentajeInversionista || 0.7).times(100);
+          const porcentajeCashIn = new Big(invActual.porcentajeCashIn || 0.3).times(100);
 
-        const ivaInversionista = montoInversionista.gt(0)
-          ? montoInversionista.times(0.12).round(2)
-          : new Big(0);
-        const ivaCashIn = montoCashIn.gt(0)
-          ? montoCashIn.times(0.12).round(2)
-          : new Big(0);
+          const montoInversionista = interesInv.times(porcentajeInversion.div(100)).round(2);
+          const montoCashIn = interesInv.times(porcentajeCashIn.div(100)).round(2);
 
-        // Calcular cuota del inversionista
-        const cuotaSinCargos = cuotaTotal.minus(seguro).minus(membresias);
-        let cuotaInversionista = cuotaSinCargos.times(porcentajeParticipacion.div(100)).round(2);
+          const ivaInversionista = montoInversionista.gt(0)
+            ? montoInversionista.times(0.12).round(2)
+            : new Big(0);
+          const ivaCashIn = montoCashIn.gt(0)
+            ? montoCashIn.times(0.12).round(2)
+            : new Big(0);
 
-        // Si es el inversionista mayor, sumarle seguro y membresía
-        if (inv.nombre === inversionistaMayor.nombre) {
-          cuotaInversionista = cuotaInversionista.plus(seguro).plus(membresias).round(2);
+          // Calcular cuota del inversionista
+          const cuotaSinCargos = cuotaTotal.minus(seguro).minus(membresias);
+          let cuotaInversionista = cuotaSinCargos.times(porcentajeParticipacion.div(100)).round(2);
+
+          // Si es el inversionista mayor, sumarle seguro y membresia
+          if (invActual.inversionista === inversionistaMayor.inversionista) {
+            cuotaInversionista = cuotaInversionista.plus(seguro).plus(membresias).round(2);
+          }
+
+          await db.insert(creditos_inversionistas).values({
+            credito_id: creditoDB.credito_id,
+            inversionista_id: investor.inversionista_id,
+            monto_aportado: montoAportado.round(2).toString(),
+            porcentaje_cash_in: porcentajeCashIn.toString(),
+            porcentaje_participacion_inversionista: porcentajeInversion.toString(),
+            monto_inversionista: montoInversionista.toString(),
+            monto_cash_in: montoCashIn.toString(),
+            iva_inversionista: ivaInversionista.toString(),
+            iva_cash_in: ivaCashIn.toString(),
+            fecha_creacion: new Date(),
+            cuota_inversionista: cuotaInversionista.toString(),
+          });
+
+          console.log(`   👤 Inversionista creado: ${investor.nombre} (Q${montoAportado.toFixed(2)}) [${porcentajeInversion}/${porcentajeCashIn}]`);
         }
+      } else {
+        // Flujo original: usar creditos + porcentajes de la BD
+        // Encontrar al inversionista con mayor capital para asignarle seguro y membresia
+        const inversionistaMayor = inversionistasData.reduce((max, current) =>
+          current.capitalRestante.gt(max.capitalRestante) ? current : max
+        );
 
-        // Insertar inversionista
-        await db.insert(creditos_inversionistas).values({
-          credito_id: creditoDB.credito_id,
-          inversionista_id: investor.inversionista_id,
-          monto_aportado: montoAportado.round(2).toString(),
-          porcentaje_cash_in: porcentajeCashIn.toString(),
-          porcentaje_participacion_inversionista: porcentajeInversion.toString(),
-          monto_inversionista: montoInversionista.toString(),
-          monto_cash_in: montoCashIn.toString(),
-          iva_inversionista: ivaInversionista.toString(),
-          iva_cash_in: ivaCashIn.toString(),
-          fecha_creacion: new Date(),
-          cuota_inversionista: cuotaInversionista.toString(),
-        });
+        for (const inv of inversionistasData) {
+          const investor = await findOrCreateInvestor(inv.nombre, true);
 
-        console.log(`   👤 Inversionista creado: ${investor.nombre} (Q${montoAportado.toFixed(2)})`);
+          const montoAportado = inv.capitalRestante;
+
+          // Calcular porcentaje de participacion
+          const porcentajeParticipacion = nuevoCapital.gt(0)
+            ? montoAportado.div(nuevoCapital).times(100)
+            : new Big(0);
+
+          // Calcular interes
+          const interesInv = montoAportado.times(porcentajeInteres.div(100)).round(2);
+
+          // Obtener porcentajes de la DB, fallback a 70/30
+          const porcentajesExistentes = porcentajesMap.get(investor.inversionista_id);
+          const porcentajeInversion = new Big(porcentajesExistentes?.porcentajeInversion ?? 70);
+          const porcentajeCashIn = new Big(porcentajesExistentes?.porcentajeCashIn ?? 30);
+
+          const montoInversionista = interesInv.times(porcentajeInversion.div(100)).round(2);
+          const montoCashIn = interesInv.times(porcentajeCashIn.div(100)).round(2);
+
+          const ivaInversionista = montoInversionista.gt(0)
+            ? montoInversionista.times(0.12).round(2)
+            : new Big(0);
+          const ivaCashIn = montoCashIn.gt(0)
+            ? montoCashIn.times(0.12).round(2)
+            : new Big(0);
+
+          // Calcular cuota del inversionista
+          const cuotaSinCargos = cuotaTotal.minus(seguro).minus(membresias);
+          let cuotaInversionista = cuotaSinCargos.times(porcentajeParticipacion.div(100)).round(2);
+
+          // Si es el inversionista mayor, sumarle seguro y membresia
+          if (inv.nombre === inversionistaMayor.nombre) {
+            cuotaInversionista = cuotaInversionista.plus(seguro).plus(membresias).round(2);
+          }
+
+          await db.insert(creditos_inversionistas).values({
+            credito_id: creditoDB.credito_id,
+            inversionista_id: investor.inversionista_id,
+            monto_aportado: montoAportado.round(2).toString(),
+            porcentaje_cash_in: porcentajeCashIn.toString(),
+            porcentaje_participacion_inversionista: porcentajeInversion.toString(),
+            monto_inversionista: montoInversionista.toString(),
+            monto_cash_in: montoCashIn.toString(),
+            iva_inversionista: ivaInversionista.toString(),
+            iva_cash_in: ivaCashIn.toString(),
+            fecha_creacion: new Date(),
+            cuota_inversionista: cuotaInversionista.toString(),
+          });
+
+          console.log(`   👤 Inversionista creado: ${investor.nombre} (Q${montoAportado.toFixed(2)})`);
+        }
       }
 
       // 7️⃣ Actualizar cuotas pendientes

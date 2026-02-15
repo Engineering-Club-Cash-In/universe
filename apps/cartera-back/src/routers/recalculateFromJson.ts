@@ -25,9 +25,18 @@ const CreditoJsonSchema = t.Object({
   pagosParciales: t.Optional(t.Array(t.Any())),
 });
 
+const InversionistaActualSchema = t.Object({
+  numeroCredito: t.String(),
+  inversionista: t.String(),
+  porcentajeCashIn: t.String(),
+  porcentajeInversionista: t.String(),
+  capital: t.String(),
+});
+
 const CreditoAgrupadoSchema = t.Object({
   numeroCredito: t.String(),
   creditos: t.Array(CreditoJsonSchema),
+  inversionistasActuales: t.Optional(t.Array(InversionistaActualSchema)),
 });
 
 const PoolRaroSchema = t.Object({

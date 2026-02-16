@@ -695,7 +695,8 @@ export async function mapEstadoCuentaToPagosBig(
       validationStatus: "validated" as const,
       registerBy: "SIFCO_SYNC",
       pagoConvenio: "0",
-      fecha_boleta:new Date(primeraTransaccion.CrMoFeTrx).toISOString()
+      fecha_boleta:new Date(primeraTransaccion.CrMoFeTrx).toISOString(),
+      monto_aplicado: "0.00",
     };
 
     console.log("\n📝 Insertando pago 0...");
@@ -975,7 +976,8 @@ export async function mapEstadoCuentaToPagosBig(
         : ("no_required" as const),
       registerBy: "SIFCO_SYNC",
       pagoConvenio: "0",
-      fecha_boleta:fechaVencimientoPago.toISOString()
+      fecha_boleta:fechaVencimientoPago.toISOString(),
+      monto_aplicado: isPagado ? pagoDelMes.toString() : "0.00",
     };
   });
 
@@ -1211,6 +1213,7 @@ export async function mapPagosDesdeJson(
     registerBy: "JSON_SYNC",
     pagoConvenio: "0",
     fecha_boleta: fechaCreacion.toISOString(),
+    monto_aplicado: "0.00",
   });
 
   console.log("  ✅ Pago 0 insertado");
@@ -1331,6 +1334,7 @@ export async function mapPagosDesdeJson(
       registerBy: "JSON_SYNC",
       pagoConvenio: "0",
       fecha_boleta: fechaVencimientoCuota.toISOString(),
+      monto_aplicado: isPagado ? pagoDelMes.toString() : "0.00",
     });
   }
 

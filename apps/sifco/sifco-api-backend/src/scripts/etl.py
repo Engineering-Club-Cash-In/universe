@@ -371,7 +371,8 @@ def extraer_inversionista_actual(df_enero, numero_credito):
         "inversionista": "",
         "porcentajeCashIn": "",
         "porcentajeInversionista": "",
-        "capital": ""
+        "capital": "",
+        "cuota": ""
     }
 
     # Inversionista - índice 35
@@ -397,6 +398,12 @@ def extraer_inversionista_actual(df_enero, numero_credito):
         val = fila.iloc[4]
         if pd.notna(val):
             info["capital"] = str(val)
+
+    # Cuota - índice 37
+    if len(columnas_lista) > 37 and columnas_lista[37] == 'Cuota':
+        val = fila.iloc[37]
+        if pd.notna(val):
+            info["cuota"] = str(val)
 
     return info
 

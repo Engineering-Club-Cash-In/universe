@@ -211,10 +211,7 @@ export const notificationsRouter = {
 						.select({ id: notificationDocuments.id })
 						.from(notificationDocuments)
 						.where(
-							eq(
-								notificationDocuments.notificationId,
-								input.notificationId,
-							),
+							eq(notificationDocuments.notificationId, input.notificationId),
 						)
 						.limit(1);
 
@@ -261,9 +258,7 @@ export const notificationsRouter = {
 			const docs = await db
 				.select()
 				.from(notificationDocuments)
-				.where(
-					eq(notificationDocuments.notificationId, input.notificationId),
-				)
+				.where(eq(notificationDocuments.notificationId, input.notificationId))
 				.orderBy(desc(notificationDocuments.uploadedAt));
 
 			// Generar URLs firmadas para cada documento

@@ -9,6 +9,7 @@ import {
   credit_cancelations,
   creditos,
   creditos_inversionistas,
+  creditos_inversionistas_espejo,
   creditos_rubros_otros,
   cuotas_credito,
   inversionistas,
@@ -525,6 +526,18 @@ export interface CreditoConInfo {
   mora?: any; // 👈 Este también faltaba si no lo tenías
   deuda_total_con_mora?: string; // 👈 Este también
   proxima_cuota?: ProximaCuota | null; // 🆕 NUEVO CAMPO
+  creditos_inversionistas_espejo?: {
+    credito_id: number;
+    inversionista_id: number;
+    nombre: string;
+    monto_aportado: string;
+    porcentaje_participacion: string;
+    porcentaje_cash_in: string;
+    porcentaje_inversion: string;
+    monto_cash_in: string;
+    monto_inversionista: string;
+    cuota_inversionista: string;
+  }[];
 }
 
 // 🔥 Función auxiliar para calcular proximidad (con zona horaria de Guatemala)
@@ -772,8 +785,11 @@ export async function getCreditosWithUserByMesAnio(
 
   // 3️⃣ 🔥 INVERSIONISTAS - Optimizado
   let inversionistasMap: Record<number, any> = {};
+  let inversionistasEspejoMap: Record<number, any[]> = {}; // 🆕 Mapa para Espejos
+
   if (creditosIds.length > 0) {
     try {
+      // 3.1 Inversionistas Normales (Ordenados por ID para consistencia)
       const inversionistasPorCredito = await db
         .select({
           credito_id: creditos_inversionistas.credito_id,
@@ -798,39 +814,81 @@ export async function getCreditosWithUserByMesAnio(
             inversionistas.inversionista_id
           )
         )
-        .where(inArray(creditos_inversionistas.credito_id, creditosIds));
+        .where(inArray(creditos_inversionistas.credito_id, creditosIds))
+        .orderBy(asc(creditos_inversionistas.id)); // 👈 Orden garantizado
 
-      console.log(`👥 Inversionistas encontrados: ${inversionistasPorCredito.length}`);
+      // 3.2 Inversionistas Espejo (Ordenados por ID para consistencia)
+      const inversionistasEspejoPorCredito = await db
+        .select({
+          credito_id: creditos_inversionistas_espejo.credito_id,
+          inversionista_id: inversionistas.inversionista_id,
+          nombre: inversionistas.nombre,
+          monto_aportado: creditos_inversionistas_espejo.monto_aportado,
+          porcentaje_participacion: sql<string>`'0'`, // Calculado en frontend
+          porcentaje_cash_in: creditos_inversionistas_espejo.porcentaje_cash_in,
+          porcentaje_inversion:
+            creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
+          monto_cash_in: creditos_inversionistas_espejo.monto_cash_in,
+          monto_inversionista:
+            creditos_inversionistas_espejo.monto_inversionista,
+          cuota_inversionista:
+            creditos_inversionistas_espejo.cuota_inversionista,
+        })
+        .from(creditos_inversionistas_espejo)
+        .innerJoin(
+          inversionistas,
+          eq(
+            creditos_inversionistas_espejo.inversionista_id,
+            inversionistas.inversionista_id
+          )
+        )
+        .where(inArray(creditos_inversionistas_espejo.credito_id, creditosIds))
+        .orderBy(asc(creditos_inversionistas_espejo.id)); // 👈 Orden garantizado
 
-      // 🔥 Agrupar por credito_id correctamente
-      inversionistasMap = creditosIds.reduce((acc, creditoId) => {
-        const aportes = inversionistasPorCredito.filter(
-          (inv) => inv.credito_id === creditoId
-        );
-        
-        acc[creditoId] = {
-          aportes,
-          resumen: {
-            total_cash_in_monto: aportes.reduce(
-              (sum, cur) => sum + Number(cur.monto_cash_in ?? 0),
-              0
-            ),
-            total_cash_in_iva: aportes.reduce(
-              (sum, cur) => sum + Number(cur.iva_cash_in ?? 0),
-              0
-            ),
-            total_inversion_monto: aportes.reduce(
-              (sum, cur) => sum + Number(cur.monto_inversionista ?? 0),
-              0
-            ),
-            total_inversion_iva: aportes.reduce(
-              (sum, cur) => sum + Number(cur.iva_inversionista ?? 0),
-              0
-            ),
-          },
-        };
-        return acc;
-      }, {} as Record<number, any>);
+      // 3.3 Mapeo Normales
+      inversionistasMap = creditosIds.reduce(
+        (acc, creditoId) => {
+          const aportes = inversionistasPorCredito.filter(
+            (inv) => inv.credito_id === creditoId
+          );
+
+          acc[creditoId] = {
+            aportes,
+            resumen: {
+              total_cash_in_monto: aportes.reduce(
+                (sum, cur) => sum + Number(cur.monto_cash_in ?? 0),
+                0
+              ),
+              total_cash_in_iva: aportes.reduce(
+                (sum, cur) => sum + Number(cur.iva_cash_in ?? 0),
+                0
+              ),
+              total_inversion_monto: aportes.reduce(
+                (sum, cur) => sum + Number(cur.monto_inversionista ?? 0),
+                0
+              ),
+              total_inversion_iva: aportes.reduce(
+                (sum, cur) => sum + Number(cur.iva_inversionista ?? 0),
+                0
+              ),
+            },
+          };
+          return acc;
+        },
+        {} as Record<number, any>
+      );
+
+      // 3.4 Mapeo Espejos
+      inversionistasEspejoMap = creditosIds.reduce(
+        (acc, creditoId) => {
+          const aportesEspejo = inversionistasEspejoPorCredito.filter(
+            (inv) => inv.credito_id === creditoId
+          );
+          acc[creditoId] = aportesEspejo;
+          return acc;
+        },
+        {} as Record<number, any[]>
+      );
     } catch (err) {
       console.error("❌ Error consultando inversionistas:", err);
     }
@@ -999,6 +1057,7 @@ export async function getCreditosWithUserByMesAnio(
           usuarios: row.usuarios,
           asesores: row.asesores,
           inversionistas: info.aportes,
+          creditos_inversionistas_espejo: inversionistasEspejoMap[creditoId] || [], // 👈 Agregado aquí
           resumen: info.resumen,
           cancelacion,
           rubros,
@@ -1664,6 +1723,7 @@ export async function resetCredit({
         numeroAutorizacion: numeroAutorizacion ?? "",
         registerBy: "system_reset",
         pagoConvenio: "0",
+        monto_aplicado: montoBoleta.toString(),
       })
       .returning();
 
@@ -1948,6 +2008,7 @@ export async function syncScheduleOnTermsChange({
         paymentFalse: false,
         registerBy: "system_reset",
         pagoConvenio: "0",
+        monto_aplicado: "0",
       };
       });
 

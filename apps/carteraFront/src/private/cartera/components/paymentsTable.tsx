@@ -722,6 +722,9 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                     <p className="text-green-700 font-bold text-xl">
                       {formatCurrency(pago.montoBoleta)}
                     </p>
+                    <p className="text-green-600 font-semibold text-sm">
+                      Aplicado: {formatCurrency(pago.monto_aplicado)}
+                    </p>
                     <p className="text-blue-900 font-semibold">
                       {pago.usuario?.nombre}
                     </p>
@@ -1048,6 +1051,16 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                             </div>
                             <div className="font-bold text-green-700 text-lg">
                               {formatCurrency(pago.montoBoleta)}
+                            </div>
+                          </div>
+
+                          <div className="bg-white rounded-lg p-3 shadow-sm border border-green-100">
+                            <div className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+                              <DollarSign className="w-3 h-3" />
+                              Monto Aplicado
+                            </div>
+                            <div className="font-bold text-green-700 text-lg">
+                              {formatCurrency(pago.monto_aplicado)}
                             </div>
                           </div>
 

@@ -26,6 +26,9 @@ export const vehicleTypeEnum = pgEnum("vehicle_type", [
 	"panel",
 	"camion",
 	"microbus",
+	"microbus_20",
+	"microbus_35",
+	"microbus_36plus",
 ]);
 
 export const quotations = pgTable("quotations", {

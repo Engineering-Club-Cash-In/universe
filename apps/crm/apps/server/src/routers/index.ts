@@ -89,6 +89,7 @@ export const appRouter = {
 	createClient: crmRouter.createClient,
 	updateClient: crmRouter.updateClient,
 	getDashboardStats: crmRouter.getDashboardStats,
+	getDashboardChartData: crmRouter.getDashboardChartData,
 	scoreLead: crmRouter.scoreLead,
 	// Co-debtors (Co-firmantes)
 	getCoDebtorsByOpportunity: crmRouter.getCoDebtorsByOpportunity,

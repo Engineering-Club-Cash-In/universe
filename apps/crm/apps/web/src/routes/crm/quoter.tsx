@@ -115,7 +115,10 @@ interface QuotationFormValues {
 		| "nuevo"
 		| "panel"
 		| "camion"
-		| "microbus";
+		| "microbus"
+		| "microbus_20"
+		| "microbus_35"
+		| "microbus_36plus";
 	vehicleValue: number;
 	insuredAmount: number;
 	downPayment: number;
@@ -925,6 +928,9 @@ function QuoterPage() {
 		quoterForm.state.values.vehicleType,
 	]);
 
+	// Tipos de bus RCDP (membresía ya incluida en la tarifa)
+	const BUS_TYPES = ["microbus_20", "microbus_35", "microbus_36plus"];
+
 	// Obtener costo de seguro automáticamente
 	const updateInsuranceCost = async (
 		insuredAmount: number,
@@ -942,21 +948,29 @@ function QuoterPage() {
 				Math.round(result.baseInsuranceCost * 100) / 100;
 			const rawMembershipCost = Math.round(result.membershipCost * 100) / 100;
 
-			// El seguro total para cálculos es: base + (membresía - GPS)
-			const GPS_COST = 148.2;
-			const netMembershipCost =
-				Math.round((rawMembershipCost - GPS_COST) * 100) / 100;
-			const insuranceCost =
-				Math.round((baseInsuranceCost + netMembershipCost) * 100) / 100;
+			if (BUS_TYPES.includes(vehicleType)) {
+				// Para bus RCDP: el seguro es solo la tarifa base, sin membresía
+				quoterForm.setFieldValue("insuranceCost", baseInsuranceCost);
+				quoterForm.setFieldValue("membershipCost", 0);
+				quoterForm.setFieldValue("extraInsuranceCost", baseInsuranceCost);
+				quoterForm.setFieldValue("extraMembershipCost", 0);
+			} else {
+				// El seguro total para cálculos es: base + (membresía - GPS)
+				const GPS_COST = 148.2;
+				const netMembershipCost =
+					Math.round((rawMembershipCost - GPS_COST) * 100) / 100;
+				const insuranceCost =
+					Math.round((baseInsuranceCost + netMembershipCost) * 100) / 100;
 
-			quoterForm.setFieldValue("insuranceCost", insuranceCost);
-			// membershipCost para resumen de arriba = neto (sin GPS)
-			quoterForm.setFieldValue("membershipCost", netMembershipCost);
+				quoterForm.setFieldValue("insuranceCost", insuranceCost);
+				// membershipCost para resumen de arriba = neto (sin GPS)
+				quoterForm.setFieldValue("membershipCost", netMembershipCost);
 
-			// Valores para la tabla de gastos extra (valores crudos de la tabla)
-			quoterForm.setFieldValue("extraInsuranceCost", baseInsuranceCost);
-			// Membresía extra = valor crudo de la tabla
-			quoterForm.setFieldValue("extraMembershipCost", rawMembershipCost);
+				// Valores para la tabla de gastos extra (valores crudos de la tabla)
+				quoterForm.setFieldValue("extraInsuranceCost", baseInsuranceCost);
+				// Membresía extra = valor crudo de la tabla
+				quoterForm.setFieldValue("extraMembershipCost", rawMembershipCost);
+			}
 
 			// Recalcular después de actualizar
 			setTimeout(() => recalculate(), 100);
@@ -1569,6 +1583,15 @@ function QuoterPage() {
 														<SelectItem value="panel">Panel</SelectItem>
 														<SelectItem value="camion">Camión</SelectItem>
 														<SelectItem value="microbus">Microbus</SelectItem>
+														<SelectItem value="microbus_20">
+															Bus hasta 20 pasajeros (RCDP)
+														</SelectItem>
+														<SelectItem value="microbus_35">
+															Bus 21-35 pasajeros (RCDP)
+														</SelectItem>
+														<SelectItem value="microbus_36plus">
+															Bus más de 35 pasajeros (RCDP)
+														</SelectItem>
 													</SelectContent>
 												</Select>
 											</div>

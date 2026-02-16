@@ -14,6 +14,7 @@ import {
   getInvestorPerformance,
   TipoConsulta, // 🆕 NUEVO: Tipo para validación de consultas
   reversePagosEspejoPorInversionista,
+  TipoConsulta, // 🆕 NUEVO: Tipo para validación de consultas
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
 import puppeteer from "puppeteer";
@@ -340,9 +341,9 @@ export const inversionistasRouter = new Elysia()
 
         set.status = 200;
         return {
+          ...resultado,
           success: true,
           message: "✅ Pagos espejo revertidos correctamente",
-          ...resultado,
         };
       } catch (error: any) {
         console.error("❌ Error en POST /reversePagosEspejo:", error);

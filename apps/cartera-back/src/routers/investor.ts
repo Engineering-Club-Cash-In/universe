@@ -12,8 +12,8 @@ import {
   resumenGlobalInversionistas,
   getLiquidaciones,
   getInvestorPerformance,
-  TipoConsulta, // 🆕 NUEVO: Tipo para validación de consultas
   reversePagosEspejoPorInversionista,
+  getInvestorTotalsGlobales, // 🆕 NUEVO: Función para totales globales
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
 import puppeteer from "puppeteer";
@@ -100,6 +100,68 @@ export const inversionistasRouter = new Elysia()
       detail: {
         summary: "Obtiene el resumen de un inversionista con sus créditos y pagos",
         description: "Permite consultar datos de tablas originales, espejo o ambas usando el parámetro 'tipo'. Por defecto consulta 'originales'.",
+        tags: ["Inversionistas"],
+      },
+    }
+  )
+  .get(
+    "/getInvestorTotals",
+    async ({ query, set }) => {
+      const {
+        id,
+        dpi,
+        tipo = "originales",
+        incluirLiquidados = "false",
+        numeroCuota,
+      } = query as Record<string, string | undefined>;
+
+      if (!id && !dpi) {
+        set.status = 400;
+        return {
+          message: "Debe proporcionar al menos 'id' o 'dpi' para buscar al inversionista.",
+        };
+      }
+
+      const incluirLiquidadosBool = incluirLiquidados === "true";
+      const numeroCuotaNum = numeroCuota ? Number(numeroCuota) : undefined;
+
+      if (numeroCuota && isNaN(numeroCuotaNum!)) {
+        set.status = 400;
+        return { message: "El parámetro 'numeroCuota' debe ser numérico." };
+      }
+
+      try {
+        const result = await getInvestorTotalsGlobales(
+          id ? Number(id) : undefined,
+          dpi,
+          tipo as "originales" | "espejos" | "ambas",
+          incluirLiquidadosBool,
+          numeroCuotaNum
+        );
+
+        return result;
+      } catch (error: any) {
+        set.status = 500;
+        return {
+          message: error.message || "Error al obtener totales del inversionista",
+        };
+      }
+    },
+    {
+      query: t.Object({
+        id: t.Optional(t.String()),
+        dpi: t.Optional(t.String()),
+        tipo: t.Optional(t.Union([
+          t.Literal("originales"),
+          t.Literal("espejos"),
+          t.Literal("ambas")
+        ])),
+        incluirLiquidados: t.Optional(t.String()),
+        numeroCuota: t.Optional(t.String()),
+      }),
+      detail: {
+        summary: "Obtiene los totales globales de un inversionista (sin paginación)",
+        description: "Calcula las sumas de TODOS los créditos y pagos del inversionista, sin aplicar paginación. Útil para mostrar totales reales en el frontend.",
         tags: ["Inversionistas"],
       },
     }
@@ -340,9 +402,9 @@ export const inversionistasRouter = new Elysia()
 
         set.status = 200;
         return {
+          ...resultado,
           success: true,
           message: "✅ Pagos espejo revertidos correctamente",
-          ...resultado,
         };
       } catch (error: any) {
         console.error("❌ Error en POST /reversePagosEspejo:", error);

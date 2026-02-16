@@ -17,7 +17,17 @@ import {
 	Users,
 } from "lucide-react";
 import { useEffect } from "react";
-import { Badge } from "@/components/ui/badge";
+import {
+	Bar,
+	BarChart,
+	CartesianGrid,
+	Cell,
+	Legend,
+	ResponsiveContainer,
+	Tooltip,
+	XAxis,
+	YAxis,
+} from "recharts";
 import {
 	Card,
 	CardContent,
@@ -54,14 +64,18 @@ function RouteComponent() {
 		queryKey: ["getDashboardStats", session?.user?.id, userProfile.data?.role],
 	});
 
-	// Sales Stages for funnel
-	const salesStages = useQuery({
-		...orpc.getSalesStages.queryOptions(),
+	// Chart data for dashboard graphs
+	const chartData = useQuery({
+		...orpc.getDashboardChartData.queryOptions(),
 		enabled:
 			!!userProfile.data?.role &&
 			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
 			!!session?.user?.id,
-		queryKey: ["getSalesStages", session?.user?.id, userProfile.data?.role],
+		queryKey: [
+			"getDashboardChartData",
+			session?.user?.id,
+			userProfile.data?.role,
+		],
 	});
 
 	// Cobros Dashboard Stats
@@ -649,52 +663,118 @@ function RouteComponent() {
 				</CardContent>
 			</Card>
 
-			{/* Sales Funnel Visualization */}
-			{salesStages.data && salesStages.data.length > 0 && (
-				<Card>
-					<CardHeader>
-						<CardTitle className="flex items-center gap-2">
-							<TrendingUp className="h-5 w-5" />
-							Etapas de Oportunidades
-						</CardTitle>
-						<CardDescription>
-							Seguir las oportunidades a través del proceso de ventas
-						</CardDescription>
-					</CardHeader>
-					<CardContent>
-						<div className="space-y-3">
-							{salesStages.data.map((stage) => (
-								<div
-									key={stage.id}
-									className="flex items-center justify-between rounded-lg border p-3"
-								>
-									<div className="flex items-center gap-3">
-										<Badge
-											style={{ backgroundColor: stage.color, color: "white" }}
-											className="min-w-[60px] justify-center"
-										>
-											{stage.closurePercentage}%
-										</Badge>
-										<div>
-											<p className="font-medium">{stage.name}</p>
-											{stage.description && (
-												<p className="text-muted-foreground text-sm">
-													{stage.description}
-												</p>
-											)}
-										</div>
-									</div>
-									<div className="text-right">
-										<p className="font-medium text-sm">Etapa {stage.order}</p>
-										<p className="text-muted-foreground text-xs">
-											{stage.closurePercentage}% tasa de cierre
-										</p>
-									</div>
-								</div>
-							))}
-						</div>
-					</CardContent>
-				</Card>
+			{/* Dashboard Charts */}
+			{chartData.data && (
+				<div className="grid gap-4 md:grid-cols-2">
+					{/* Pipeline por Etapa */}
+					{chartData.data.pipeline.length > 0 && (
+						<Card>
+							<CardHeader>
+								<CardTitle>Pipeline por Etapa</CardTitle>
+								<CardDescription>
+									Valor acumulado en cada etapa de ventas
+								</CardDescription>
+							</CardHeader>
+							<CardContent>
+								<ResponsiveContainer width="100%" height={300}>
+									<BarChart data={chartData.data.pipeline}>
+										<CartesianGrid strokeDasharray="3 3" />
+										<XAxis
+											dataKey="name"
+											angle={-45}
+											textAnchor="end"
+											height={100}
+											fontSize={12}
+										/>
+										<YAxis
+											tickFormatter={(v: number) =>
+												`Q${(v / 1000).toFixed(0)}k`
+											}
+										/>
+										<Tooltip
+											formatter={(value: number) =>
+												`Q${value.toLocaleString()}`
+											}
+										/>
+										<Bar dataKey="valor" name="Valor">
+											{chartData.data.pipeline.map((entry, i) => (
+												<Cell
+													key={`pipeline-${
+														// biome-ignore lint/suspicious/noArrayIndexKey: chart cell
+														i
+													}`}
+													fill={entry.color || "#3b82f6"}
+												/>
+											))}
+										</Bar>
+									</BarChart>
+								</ResponsiveContainer>
+							</CardContent>
+						</Card>
+					)}
+
+					{/* Ranking Vendedores por Monto Colocado */}
+					{chartData.data.ranking.length > 0 && (
+						<Card>
+							<CardHeader>
+								<CardTitle>Ranking Colocados</CardTitle>
+								<CardDescription>
+									Monto colocado por vendedor (etapas {"\u2265"}90%)
+								</CardDescription>
+							</CardHeader>
+							<CardContent>
+								<ResponsiveContainer width="100%" height={300}>
+									<BarChart data={chartData.data.ranking} layout="vertical">
+										<CartesianGrid strokeDasharray="3 3" />
+										<YAxis
+											dataKey="name"
+											type="category"
+											width={100}
+											fontSize={12}
+										/>
+										<XAxis
+											type="number"
+											tickFormatter={(v: number) =>
+												`Q${(v / 1000).toFixed(0)}k`
+											}
+										/>
+										<Tooltip
+											formatter={(value: number) =>
+												`Q${value.toLocaleString()}`
+											}
+										/>
+										<Bar dataKey="monto" name="Monto" fill="#22c55e" />
+									</BarChart>
+								</ResponsiveContainer>
+							</CardContent>
+						</Card>
+					)}
+
+					{/* Actividad por Vendedor */}
+					{chartData.data.activity.length > 0 && (
+						<Card className="md:col-span-2">
+							<CardHeader>
+								<CardTitle>Actividad por Vendedor</CardTitle>
+								<CardDescription>
+									Oportunidades abiertas vs cerradas por vendedor
+								</CardDescription>
+							</CardHeader>
+							<CardContent>
+								<ResponsiveContainer width="100%" height={300}>
+									<BarChart data={chartData.data.activity}>
+										<CartesianGrid strokeDasharray="3 3" />
+										<XAxis dataKey="name" fontSize={12} />
+										<YAxis />
+										<Tooltip />
+										<Legend />
+										<Bar dataKey="abiertas" name="Abiertas" fill="#3b82f6" />
+										<Bar dataKey="cerradas" name="Cerradas" fill="#94a3b8" />
+									</BarChart>
+								</ResponsiveContainer>
+							</CardContent>
+						</Card>
+					)}
+				</div>
 			)}
 		</div>
 	);

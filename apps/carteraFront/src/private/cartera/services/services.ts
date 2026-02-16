@@ -531,6 +531,7 @@ export interface PagoData {
     url_boleta: string | null; // URL del PDF de la boleta
     paymentFalse:boolean
     boletas:string[]
+    monto_aplicado: string | null;
     // Agrega más campos si los necesitas
     // Puedes agregar campos extra si necesitas
   };
@@ -1424,6 +1425,7 @@ export interface PagoDataInvestor {
   usuario: UsuarioPago;
   inversionistas: InversionistaPago[];
   boleta: BoletaPago | null;
+  monto_aplicado: number | null;
 
   cuentaEmpresaBanco: string | null;
   cuentaEmpresaNombre: string | null;

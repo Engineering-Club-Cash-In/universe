@@ -2,7 +2,6 @@ import { openai } from "@ai-sdk/openai";
 import { ORPCError } from "@orpc/server";
 import { generateObject } from "ai";
 import { and, desc, eq, ilike, not, or, sql } from "drizzle-orm";
-import { isUniqueViolation } from "../lib/db-errors";
 import { z } from "zod";
 import { db } from "../db";
 import {
@@ -21,6 +20,7 @@ import {
 	vehiclePhotos,
 	vehicles,
 } from "../db/schema";
+import { isUniqueViolation } from "../lib/db-errors";
 import {
 	mapOCRToVehicleForm,
 	vehicleRegistrationOCRSchema,
@@ -709,7 +709,9 @@ export const vehiclesRouter = {
 				.limit(1);
 
 			if (!inspection) {
-				throw new ORPCError("NOT_FOUND", { message: "Inspección no encontrada" });
+				throw new ORPCError("NOT_FOUND", {
+					message: "Inspección no encontrada",
+				});
 			}
 
 			const photos = await db
@@ -1358,7 +1360,9 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 					context.userRole,
 				)
 			) {
-				throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para subir documentos" });
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para subir documentos",
+				});
 			}
 
 			// Create File/Blob from data
@@ -1424,7 +1428,9 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 				.limit(1);
 
 			if (!document) {
-				throw new ORPCError("NOT_FOUND", { message: "Documento no encontrado" });
+				throw new ORPCError("NOT_FOUND", {
+					message: "Documento no encontrado",
+				});
 			}
 
 			// Verify permissions (admin or uploader)
@@ -1443,6 +1449,8 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 				return { success: true };
 			}
 
-			throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para eliminar este documento" });
+			throw new ORPCError("FORBIDDEN", {
+				message: "No tienes permiso para eliminar este documento",
+			});
 		}),
 };

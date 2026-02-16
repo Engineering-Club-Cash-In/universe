@@ -12,6 +12,7 @@ import {
   liquidaciones,
   pagos_credito,
   pagos_credito_inversionistas,
+  pagos_credito_inversionistas_espejo,
   platform_users,
   usuarios,
 } from "../database/db/schema";
@@ -595,6 +596,130 @@ export async function processAndReplaceCreditInvestorsReverse(
       })
       .where(eq(creditos_inversionistas.id, inv.id));
   }
+}
+
+export async function reversePagosEspejoPorInversionista(
+  inversionista_id: number
+) {
+  console.log(
+    `\n🔄 ========== INICIO reversePagosEspejoPorInversionista (inversionista: ${inversionista_id}) ==========`
+  );
+
+  // 1. Obtener TODOS los pagos del inversionista en la tabla espejo
+  const pagosEspejo = await db
+    .select()
+    .from(pagos_credito_inversionistas_espejo)
+    .where(eq(pagos_credito_inversionistas_espejo.inversionista_id, inversionista_id));
+
+  console.log(`📊 Pagos encontrados en espejo: ${pagosEspejo.length}`);
+
+  if (pagosEspejo.length === 0) {
+    console.log("⚠️ No hay pagos en espejo para este inversionista");
+    return { success: true, pagosRevertidos: 0 };
+  }
+
+  // 2. Agrupar pagos por credito_id
+  const pagosPorCredito: Record<number, typeof pagosEspejo> = {};
+  for (const pago of pagosEspejo) {
+    if (!pagosPorCredito[pago.credito_id]) {
+      pagosPorCredito[pago.credito_id] = [];
+    }
+    pagosPorCredito[pago.credito_id].push(pago);
+  }
+
+  console.log(`📂 Créditos afectados: ${Object.keys(pagosPorCredito).length}`);
+
+  // 3. Por cada crédito, revertir: sumar abono_capital de vuelta al monto_aportado
+  for (const [creditoIdStr, pagosDelCredito] of Object.entries(pagosPorCredito)) {
+    const creditoId = Number(creditoIdStr);
+
+    console.log(`\n--- 🏦 Procesando crédito ${creditoId} (${pagosDelCredito.length} pagos) ---`);
+
+    // Obtener el crédito para recalcular
+    const credit = await db.query.creditos.findFirst({
+      where: (c, { eq }) => eq(c.credito_id, creditoId),
+    });
+
+    if (!credit) {
+      console.error(`❌ Crédito ${creditoId} no encontrado, saltando...`);
+      continue;
+    }
+
+    // Obtener el registro del inversionista en espejo
+    const invEspejo = await db.query.creditos_inversionistas_espejo.findFirst({
+      where: (ci, { eq, and }) =>
+        and(
+          eq(ci.inversionista_id, inversionista_id),
+          eq(ci.credito_id, creditoId)
+        ),
+    });
+
+    if (!invEspejo) {
+      console.error(`❌ Inversionista ${inversionista_id} no encontrado en espejo para crédito ${creditoId}, saltando...`);
+      continue;
+    }
+
+    // Sumar todos los abono_capital de los pagos de este crédito
+    const totalAbonoCapital = pagosDelCredito.reduce(
+      (acc, p) => acc.plus(new Big(p.abono_capital ?? 0)),
+      new Big(0)
+    );
+
+    console.log(`   💰 Total abono_capital a revertir: ${totalAbonoCapital.toString()}`);
+    console.log(`   📊 monto_aportado actual: ${invEspejo.monto_aportado}`);
+
+    // Sumar de vuelta al monto_aportado
+    const nuevoMontoAportado = new Big(invEspejo.monto_aportado).plus(totalAbonoCapital);
+
+    console.log(`   ✅ Nuevo monto_aportado: ${nuevoMontoAportado.toString()}`);
+
+    // Recalcular cuota, montos, IVAs
+    const porcentajeCashIn = new Big(invEspejo.porcentaje_cash_in);
+    const porcentajeInversion = new Big(invEspejo.porcentaje_participacion_inversionista);
+
+    const cuota = nuevoMontoAportado
+      .times(credit.porcentaje_interes)
+      .div(100)
+      .round(2);
+
+    const montoInversionista = cuota.times(porcentajeInversion).div(100).round(2);
+    const montoCashIn = cuota.times(porcentajeCashIn).div(100).round(2);
+
+    const ivaInversionista = montoInversionista.gt(0)
+      ? montoInversionista.times(0.12).round(2)
+      : new Big(0);
+    const ivaCashIn = montoCashIn.gt(0)
+      ? montoCashIn.times(0.12).round(2)
+      : new Big(0);
+
+    // Actualizar creditos_inversionistas_espejo
+    await db
+      .update(creditos_inversionistas_espejo)
+      .set({
+        monto_aportado: nuevoMontoAportado.toFixed(2),
+        monto_inversionista: montoInversionista.toFixed(2),
+        monto_cash_in: montoCashIn.toFixed(2),
+        iva_inversionista: ivaInversionista.toFixed(2),
+        iva_cash_in: ivaCashIn.toFixed(2),
+      })
+      .where(eq(creditos_inversionistas_espejo.id, invEspejo.id));
+
+    console.log(`   ✅ creditos_inversionistas_espejo actualizado`);
+  }
+
+  // 4. Eliminar TODOS los pagos del inversionista en espejo
+  await db
+    .delete(pagos_credito_inversionistas_espejo)
+    .where(eq(pagos_credito_inversionistas_espejo.inversionista_id, inversionista_id));
+
+  console.log(`\n🗑️ ${pagosEspejo.length} pagos eliminados de pagos_credito_inversionistas_espejo`);
+  console.log(`✅ ========== FIN reversePagosEspejoPorInversionista ==========\n`);
+
+  return {
+    success: true,
+    pagosRevertidos: pagosEspejo.length,
+    creditosAfectados: Object.keys(pagosPorCredito).length,
+  };
 }
 
 /**

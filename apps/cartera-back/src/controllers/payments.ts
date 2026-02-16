@@ -5,7 +5,9 @@ import {
   usuarios,
   inversionistas,
   creditos_inversionistas,
+  creditos_inversionistas_espejo,
   pagos_credito_inversionistas,
+  pagos_credito_inversionistas_espejo,
   boletas,
   cuotas_credito,
 } from "../database/db/schema";
@@ -320,8 +322,8 @@ export async function insertPagosCreditoInversionistas(
   console.log(`   credito_id: ${credito_id}`);
   console.log(`   excludeCube: ${excludeCube}`);
 
-  // 1. Buscar inversionistas del crédito
-  const inversionistasData = await db.query.creditos_inversionistas.findMany({
+  // 1. Buscar inversionistas del crédito (ESPEJO)
+  const inversionistasData = await db.query.creditos_inversionistas_espejo.findMany({
     where: (ci, { eq }) => eq(ci.credito_id, credito_id),
   });
 
@@ -545,15 +547,15 @@ export async function insertPagosCreditoInversionistas(
     "\n✅ ========== FIN insertPagosCreditoInversionistas ==========\n"
   );
 
-  // 4. Insertar todos los registros
+  // 4. Insertar todos los registros (ESPEJO)
   const resolvedInserts = await Promise.all(inserts);
 await db
-  .insert(pagos_credito_inversionistas)
+  .insert(pagos_credito_inversionistas_espejo)
   .values(resolvedInserts)
   .onConflictDoUpdate({
     target: [
-      pagos_credito_inversionistas.pago_id,
-      pagos_credito_inversionistas.inversionista_id,
+      pagos_credito_inversionistas_espejo.pago_id,
+      pagos_credito_inversionistas_espejo.inversionista_id,
     ],
     set: {
       abono_capital: sql`EXCLUDED.abono_capital`,
@@ -1515,14 +1517,14 @@ export async function obtenerCreditosConPagosPendientes(
     
     console.log(`📆 Mes actual: ${rangoMesActual.inicio} - ${rangoMesActual.fin} (${rangoMesActual.mes})`);
 
-    // 1️⃣ PASO 1: Obtener todos los créditos del inversionista
+    // 1️⃣ PASO 1: Obtener todos los créditos del inversionista (ESPEJO)
     const creditosInversionista = await db
       .select({
-        creditoId: creditos_inversionistas.credito_id,
-        inversionistaId: creditos_inversionistas.inversionista_id,
-        montoAportado: creditos_inversionistas.monto_aportado,
+        creditoId: creditos_inversionistas_espejo.credito_id,
+        inversionistaId: creditos_inversionistas_espejo.inversionista_id,
+        montoAportado: creditos_inversionistas_espejo.monto_aportado,
         porcentajeParticipacion:
-          creditos_inversionistas.porcentaje_participacion_inversionista,
+          creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
         // Datos del crédito
         numeroCreditoSifco: creditos.numero_credito_sifco,
         capital: creditos.capital,
@@ -1533,14 +1535,14 @@ export async function obtenerCreditosConPagosPendientes(
         interes: creditos.cuota_interes,
         iva: creditos.iva_12,
       })
-      .from(creditos_inversionistas)
+      .from(creditos_inversionistas_espejo)
       .innerJoin(
         creditos,
-        eq(creditos_inversionistas.credito_id, creditos.credito_id)
+        eq(creditos_inversionistas_espejo.credito_id, creditos.credito_id)
       )
       .where(
         and(
-          eq(creditos_inversionistas.inversionista_id, inversionistaId),
+          eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId),
           inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "PENDIENTE_CANCELACION", "EN_CONVENIO"])
         )
       );
@@ -1559,11 +1561,11 @@ export async function obtenerCreditosConPagosPendientes(
         
         const pagosPendientesCredito = await db
           .select()
-          .from(pagos_credito_inversionistas)
+          .from(pagos_credito_inversionistas_espejo)
           .where(
             and(
-              eq(pagos_credito_inversionistas.credito_id, credito.creditoId),
-              eq(pagos_credito_inversionistas.estado_liquidacion, "NO_LIQUIDADO")
+              eq(pagos_credito_inversionistas_espejo.credito_id, credito.creditoId),
+              eq(pagos_credito_inversionistas_espejo.estado_liquidacion, "NO_LIQUIDADO")
             )
           );
 

@@ -758,6 +758,7 @@ export interface GetInvestorParams {
   nombreUsuario?: string; // 🆕
   incluirLiquidados?: boolean; // 🆕
   numeroCuota?: number; // 🆕
+  tipo?: "originales" | "espejos" | "ambas"; // 🆕 NUEVO: Permite consultar originales, espejos o ambas
 }
 
 export async function getInvestorServices(
@@ -773,6 +774,7 @@ export async function getInvestorServices(
   if (params?.nombreUsuario) query.append("nombreUsuario", params.nombreUsuario); // 🆕
   if (params?.incluirLiquidados !== undefined) query.append("incluirLiquidados", String(params.incluirLiquidados)); // 🆕
   if (params?.numeroCuota !== undefined) query.append("numeroCuota", String(params.numeroCuota)); // 🆕
+  if (params?.tipo) query.append("tipo", params.tipo); // 🆕 NUEVO: Agregar tipo a la query
 
   const url = `${import.meta.env.VITE_BACK_URL}/getInvestors${query.toString() ? `?${query.toString()}` : ""}`;
   const res = await api.get<InversionistasCreditosResponse>(url);

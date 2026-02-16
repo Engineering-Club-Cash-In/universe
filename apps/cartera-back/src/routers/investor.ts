@@ -12,6 +12,7 @@ import {
   resumenGlobalInversionistas,
   getLiquidaciones,
   getInvestorPerformance,
+  TipoConsulta, // 🆕 NUEVO: Tipo para validación de consultas
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
 import puppeteer from "puppeteer";
@@ -39,6 +40,7 @@ export const inversionistasRouter = new Elysia()
         nombreUsuario,
         incluirLiquidados = "false",
         numeroCuota,
+        tipo = "originales", // 🆕 NUEVO: Permite consultar originales, espejos o ambas
       } = query as Record<string, string | undefined>;
 
       const pageNum = Number(page);
@@ -72,7 +74,8 @@ export const inversionistasRouter = new Elysia()
         nombreUsuario,
         dpi,
         incluirLiquidadosBool,
-        numeroCuotaNum
+        numeroCuotaNum,
+        tipo as "originales" | "espejos" | "ambas" // 🆕 NUEVO: Pasar tipo a la función
       );
 
       return result;
@@ -87,9 +90,15 @@ export const inversionistasRouter = new Elysia()
         nombreUsuario: t.Optional(t.String()),
         incluirLiquidados: t.Optional(t.String()),
         numeroCuota: t.Optional(t.String()),
+        tipo: t.Optional(t.Union([
+          t.Literal("originales"),
+          t.Literal("espejos"),
+          t.Literal("ambas")
+        ])), // 🆕 NUEVO: Validación del parámetro tipo
       }),
       detail: {
         summary: "Obtiene el resumen de un inversionista con sus créditos y pagos",
+        description: "Permite consultar datos de tablas originales, espejo o ambas usando el parámetro 'tipo'. Por defecto consulta 'originales'.",
         tags: ["Inversionistas"],
       },
     }

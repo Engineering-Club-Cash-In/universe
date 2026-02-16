@@ -132,13 +132,15 @@ export function TableInvestors() {
   >();
   const [incluirLiquidados, setIncluirLiquidados] = useState(false);
   const [numeroCuota, setNumeroCuota] = useState<number | undefined>(undefined);
-  // Consulta con pag inación y filtro por id
+  // Consulta con paginación y filtro por id
+  // 🔥 NUEVO: Siempre consultar tablas ESPEJO
   const { data, isLoading, isError, isFetching, refetch } = useGetInvestors({
     id: selectedInvestor !== "" ? Number(selectedInvestor) : undefined,
     page,
     perPage,
     incluirLiquidados, // 🆕
     numeroCuota, // 🆕
+    tipo: "espejos", // 🔥 NUEVO: Consultar siempre datos de tablas espejo
   });
 
   const liquidateMutation = useLiquidateByInvestor();
@@ -237,9 +239,19 @@ const handleAbrirModalBoleta = (inversionista?: { id: number; nombre: string; dp
       {/* HEADER + FILTROS + BOTONES */}
       <div className="px-4 pt-4 pb-3 shrink-0">
         {/* Título */}
-        <h2 className="text-3xl font-extrabold text-blue-700 text-center mb-4">
+        <h2 className="text-3xl font-extrabold text-blue-700 text-center mb-2">
           Inversionistas y sus Créditos
         </h2>
+        
+        {/* 🔥 NUEVO: Indicador de tablas espejo */}
+        <div className="flex justify-center mb-4">
+          <div className="inline-flex items-center gap-2 bg-purple-100 px-4 py-2 rounded-lg border-2 border-purple-300 shadow-sm">
+            <span className="text-lg">🪞</span>
+            <span className="text-sm text-purple-700 font-semibold">
+              Mostrando datos de tablas espejo
+            </span>
+          </div>
+        </div>
 
         {/* Fila 1: Filtros EXISTENTES - CENTRADOS */}
         <div className="flex flex-wrap items-center justify-center gap-3 mb-3">
@@ -1241,6 +1253,12 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
           <span className="font-bold text-blue-900">Total Cuota: </span>
           <span className="text-green-700 font-bold">
             Q{Number(inv.subtotal?.total_cuota ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+          </span>
+        </div>
+        <div>
+          <span className="font-bold text-blue-900">Total Monto Aportado: </span>
+          <span className="text-purple-700 font-bold">
+            Q{Number(inv.subtotal?.total_monto_aportado ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
           </span>
         </div>
         <div>

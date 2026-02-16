@@ -724,10 +724,7 @@ function RouteComponent() {
 							</CardHeader>
 							<CardContent>
 								<ResponsiveContainer width="100%" height={300}>
-									<BarChart
-										data={chartData.data.ranking}
-										layout="vertical"
-									>
+									<BarChart data={chartData.data.ranking} layout="vertical">
 										<CartesianGrid strokeDasharray="3 3" />
 										<YAxis
 											dataKey="name"
@@ -746,11 +743,7 @@ function RouteComponent() {
 												`Q${value.toLocaleString()}`
 											}
 										/>
-										<Bar
-											dataKey="monto"
-											name="Monto"
-											fill="#22c55e"
-										/>
+										<Bar dataKey="monto" name="Monto" fill="#22c55e" />
 									</BarChart>
 								</ResponsiveContainer>
 							</CardContent>
@@ -774,16 +767,8 @@ function RouteComponent() {
 										<YAxis />
 										<Tooltip />
 										<Legend />
-										<Bar
-											dataKey="abiertas"
-											name="Abiertas"
-											fill="#3b82f6"
-										/>
-										<Bar
-											dataKey="cerradas"
-											name="Cerradas"
-											fill="#94a3b8"
-										/>
+										<Bar dataKey="abiertas" name="Abiertas" fill="#3b82f6" />
+										<Bar dataKey="cerradas" name="Cerradas" fill="#94a3b8" />
 									</BarChart>
 								</ResponsiveContainer>
 							</CardContent>

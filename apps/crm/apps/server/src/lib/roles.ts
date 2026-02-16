@@ -173,11 +173,10 @@ export const PERMISSIONS = {
 		role === ROLES.COBROS_SUPERVISOR ||
 		role === ROLES.COBROS ||
 		role === ROLES.ACCOUNTING ||
-		role === ROLES.JURIDICO || 
+		role === ROLES.JURIDICO ||
 		role === ROLES.SALES ||
 		role === ROLES.SALES_SUPERVISOR ||
 		role === ROLES.ANALYST,
-		
 
 	// Vehicles Module Access - All roles can access
 	canAccessVehicles: (_role: UserRole | string): boolean => true,

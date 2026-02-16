@@ -30,12 +30,16 @@ export const checksRouter = {
 			// Validar que el usuario sea sales o admin
 			const userRole = context.userRole;
 			if (userRole !== ROLES.SALES && userRole !== ROLES.ADMIN) {
-				throw new ORPCError("FORBIDDEN", { message: "Solo usuarios de ventas pueden registrar cheques" });
+				throw new ORPCError("FORBIDDEN", {
+					message: "Solo usuarios de ventas pueden registrar cheques",
+				});
 			}
 
 			// Validar que se proporcione al menos una referencia
 			if (!input.opportunityId && !input.quotationId) {
-				throw new ORPCError("BAD_REQUEST", { message: "Debe asociar el cheque a una oportunidad o cotización" });
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Debe asociar el cheque a una oportunidad o cotización",
+				});
 			}
 
 			// Crear cheque
@@ -124,7 +128,9 @@ export const checksRouter = {
 			// Validar permisos
 			const userRole = context.userRole;
 			if (userRole !== ROLES.ADMIN && existing.createdBy !== context.userId) {
-				throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para editar este cheque" });
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para editar este cheque",
+				});
 			}
 
 			// Actualizar
@@ -172,7 +178,9 @@ export const checksRouter = {
 			// Validar permisos
 			const userRole = context.userRole;
 			if (userRole !== ROLES.ADMIN && existing.createdBy !== context.userId) {
-				throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para eliminar este cheque" });
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para eliminar este cheque",
+				});
 			}
 
 			await db.delete(creditChecks).where(eq(creditChecks.id, input.checkId));

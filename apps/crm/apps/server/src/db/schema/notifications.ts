@@ -35,15 +35,18 @@ export const notificationEntityTypeEnum = pgEnum("notification_entity_type", [
 	"opportunity_client",
 ]);
 
-export const notificationRedirectPageEnum = pgEnum("notification_redirect_page", [
-	"opportunity_details",
-	"client_details",
-	"vehicle_details",
-	"contract_details",
-	"analysis_details",
-	"analysis_50_details",
-	"analysis_90_details",
-]);
+export const notificationRedirectPageEnum = pgEnum(
+	"notification_redirect_page",
+	[
+		"opportunity_details",
+		"client_details",
+		"vehicle_details",
+		"contract_details",
+		"analysis_details",
+		"analysis_50_details",
+		"analysis_90_details",
+	],
+);
 
 // Notifications table
 export const notifications = pgTable("notifications", {

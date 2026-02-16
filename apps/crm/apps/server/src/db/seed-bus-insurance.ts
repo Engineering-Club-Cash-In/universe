@@ -14,10 +14,10 @@ async function seedBusInsurance() {
 		console.log(`Procesando ${data.length} registros de bus...`);
 
 		let updated = 0;
-		let inserted = 0;
+		let skipped = 0;
 
 		for (const item of data) {
-			// Intentar actualizar fila existente
+			// Solo actualizar filas existentes para no crear filas con 0.00 en columnas de otros tipos
 			const [existing] = await db
 				.select()
 				.from(insuranceCosts)
@@ -35,23 +35,12 @@ async function seedBusInsurance() {
 					.where(eq(insuranceCosts.price, item.price));
 				updated++;
 			} else {
-				// Insertar nueva fila con valores de bus (otros campos en 0)
-				await db.insert(insuranceCosts).values({
-					price: item.price,
-					inrexsa: "0.00",
-					pickUp: "0.00",
-					panelCamionMicrobus: "0.00",
-					membership: "0.00",
-					busHasta20: item.bus_hasta_20.toFixed(2),
-					bus21a35: item.bus_21_a_35.toFixed(2),
-					busMas35: item.bus_mas_35.toFixed(2),
-				});
-				inserted++;
+				skipped++;
 			}
 		}
 
 		console.log(
-			`✓ Datos de seguros de bus cargados: ${updated} actualizados, ${inserted} insertados`,
+			`✓ Datos de seguros de bus cargados: ${updated} actualizados, ${skipped} omitidos (sin fila base)`,
 		);
 		process.exit(0);
 	} catch (error) {

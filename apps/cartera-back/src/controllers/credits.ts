@@ -668,36 +668,32 @@ export async function getCreditosWithUserByMesAnio(
     hoy.setHours(0, 0, 0, 0);
 
     if (proximidad_pago === "TODAY") {
-      conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date = ${hoyStr}::date`);
+      // Vencidos + vence hoy
+      conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date <= ${hoyStr}::date`);
     } else if (proximidad_pago === "WEEK") {
+      // Vencidos + vence esta semana
       const fin = new Date(hoy);
       fin.setDate(fin.getDate() + 7);
       const finStr = fin.toISOString().slice(0, 10);
-      conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date > ${hoyStr}::date`);
       conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date <= ${finStr}::date`);
     } else if (proximidad_pago === "TWO_WEEKS") {
-      const inicio = new Date(hoy);
-      inicio.setDate(inicio.getDate() + 8);
-      const inicioStr = inicio.toISOString().slice(0, 10);
+      // Vencidos + próximos 14 días
       const fin = new Date(hoy);
       fin.setDate(fin.getDate() + 14);
       const finStr = fin.toISOString().slice(0, 10);
-      conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date >= ${inicioStr}::date`);
       conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date <= ${finStr}::date`);
     } else if (proximidad_pago === "MONTH") {
-      const inicio = new Date(hoy);
-      inicio.setDate(inicio.getDate() + 15);
-      const inicioStr = inicio.toISOString().slice(0, 10);
+      // Vencidos + próximos 30 días
       const fin = new Date(hoy);
       fin.setDate(fin.getDate() + 30);
       const finStr = fin.toISOString().slice(0, 10);
-      conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date >= ${inicioStr}::date`);
       conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date <= ${finStr}::date`);
     } else if (proximidad_pago === "DUEMONTH") {
-      const inicio = new Date(hoy);
-      inicio.setDate(inicio.getDate() + 31);
-      const inicioStr = inicio.toISOString().slice(0, 10);
-      conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date >= ${inicioStr}::date`);
+      // Vencidos + próximos 15 días (quincena)
+      const fin = new Date(hoy);
+      fin.setDate(fin.getDate() + 15);
+      const finStr = fin.toISOString().slice(0, 10);
+      conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date <= ${finStr}::date`);
     }
 
     // Solo cuotas no pagadas y con numero > 0

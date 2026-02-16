@@ -317,7 +317,10 @@ function RouteComponent() {
 				| "email"
 				| "social_media"
 				| "event"
-				| "other",
+				| "other"
+				| "facebook"
+				| "instagram"
+				| "google",
 			assignedTo: "",
 			notes: "",
 			score: "",

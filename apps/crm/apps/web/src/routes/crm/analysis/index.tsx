@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { z } from "zod";
 import {
 	AlertCircle,
 	CheckCircle,
@@ -17,6 +16,7 @@ import {
 } from "lucide-react";
 import { startTransition, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { z } from "zod";
 import { DisbursementChecklistView } from "@/components/analysis/DisbursementChecklistView";
 import { InvestmentAssignmentSection } from "@/components/analysis/InvestmentAssignmentSection";
 import {
@@ -223,7 +223,10 @@ function AnalysisPage() {
 
 	// Auto-navigate to opportunity detail when opportunityId is in URL and stage is analysis
 	useEffect(() => {
-		if (search.opportunityId && (!search.stage || search.stage === "analysis")) {
+		if (
+			search.opportunityId &&
+			(!search.stage || search.stage === "analysis")
+		) {
 			navigate({
 				to: "/crm/analysis/$opportunityId",
 				params: { opportunityId: search.opportunityId },
@@ -417,7 +420,7 @@ function AnalysisPage() {
 							{/* Buscador */}
 							<div className="mb-4 flex items-center gap-4">
 								<div className="relative max-w-sm flex-1">
-									<Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+									<Search className="-translate-y-1/2 absolute top-1/2 left-3 h-4 w-4 text-muted-foreground" />
 									<Input
 										placeholder="Buscar por nombre, placa..."
 										value={searchTerm}
@@ -611,11 +614,19 @@ function AnalysisPage() {
 				</TabsContent>
 
 				<TabsContent value="investment">
-					<InvestmentAssignmentSection initialOpportunityId={search.stage === "investment" ? search.opportunityId : undefined} />
+					<InvestmentAssignmentSection
+						initialOpportunityId={
+							search.stage === "investment" ? search.opportunityId : undefined
+						}
+					/>
 				</TabsContent>
 
 				<TabsContent value="disbursement">
-					<DisbursementSection initialOpportunityId={search.stage === "disbursement" ? search.opportunityId : undefined} />
+					<DisbursementSection
+						initialOpportunityId={
+							search.stage === "disbursement" ? search.opportunityId : undefined
+						}
+					/>
 				</TabsContent>
 			</Tabs>
 
@@ -705,7 +716,11 @@ function AnalysisPage() {
 }
 
 // Component for disbursement section (90% → 100%)
-function DisbursementSection({ initialOpportunityId }: { initialOpportunityId?: string }) {
+function DisbursementSection({
+	initialOpportunityId,
+}: {
+	initialOpportunityId?: string;
+}) {
 	const [selectedOpportunity, setSelectedOpportunity] = useState<string | null>(
 		initialOpportunityId ?? null,
 	);
@@ -850,7 +865,7 @@ function DisbursementSection({ initialOpportunityId }: { initialOpportunityId?: 
 					{/* Buscador */}
 					<div className="mb-4 flex items-center gap-4">
 						<div className="relative flex-1">
-							<Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+							<Search className="-translate-y-1/2 absolute top-1/2 left-3 h-4 w-4 text-muted-foreground" />
 							<Input
 								placeholder="Buscar por nombre, placa..."
 								value={searchTerm}

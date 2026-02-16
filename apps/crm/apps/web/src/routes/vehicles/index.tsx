@@ -537,7 +537,9 @@ function VehiclesDashboard() {
 								</div>
 							</div>
 
-							<div className={`rounded-md border transition-opacity ${isFetching ? "opacity-50" : ""}`}>
+							<div
+								className={`rounded-md border transition-opacity ${isFetching ? "opacity-50" : ""}`}
+							>
 								<Table>
 									<TableHeader>
 										<TableRow>

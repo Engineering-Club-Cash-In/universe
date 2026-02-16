@@ -82,7 +82,11 @@ type InvestmentOpportunity = Awaited<
 	existingInvestors?: ExistingInvestor[];
 };
 
-export function InvestmentAssignmentSection({ initialOpportunityId }: { initialOpportunityId?: string } = {}) {
+export function InvestmentAssignmentSection({
+	initialOpportunityId,
+}: {
+	initialOpportunityId?: string;
+} = {}) {
 	const queryClient = useQueryClient();
 	const [selectedOpportunityId, setSelectedOpportunityId] = useState<
 		string | null
@@ -488,7 +492,7 @@ export function InvestmentAssignmentSection({ initialOpportunityId }: { initialO
 					{/* Buscador */}
 					<div className="mb-4 flex items-center gap-4">
 						<div className="relative flex-1">
-							<Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+							<Search className="-translate-y-1/2 absolute top-1/2 left-3 h-4 w-4 text-muted-foreground" />
 							<Input
 								placeholder="Buscar por nombre, placa..."
 								value={searchTerm}

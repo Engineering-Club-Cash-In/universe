@@ -57,7 +57,9 @@ export const adminRouter = {
 		.handler(async ({ input, context }) => {
 			// Prevent changing own role
 			if (input.userId === context.session?.user?.id) {
-				throw new ORPCError("FORBIDDEN", { message: "No puedes cambiar tu propio rol" });
+				throw new ORPCError("FORBIDDEN", {
+					message: "No puedes cambiar tu propio rol",
+				});
 			}
 
 			const updatedUser = await db
@@ -86,7 +88,9 @@ export const adminRouter = {
 		.handler(async ({ input, context }) => {
 			// Prevent suspending own account
 			if (input.userId === context.session?.user?.id) {
-				throw new ORPCError("FORBIDDEN", { message: "No puedes suspender tu propia cuenta" });
+				throw new ORPCError("FORBIDDEN", {
+					message: "No puedes suspender tu propia cuenta",
+				});
 			}
 
 			const updatedUser = await db
@@ -114,7 +118,9 @@ export const adminRouter = {
 		.handler(async ({ input, context }) => {
 			// Prevent deleting own account
 			if (input.userId === context.session?.user?.id) {
-				throw new ORPCError("FORBIDDEN", { message: "No puedes eliminar tu propia cuenta" });
+				throw new ORPCError("FORBIDDEN", {
+					message: "No puedes eliminar tu propia cuenta",
+				});
 			}
 
 			const deletedUser = await db
@@ -152,7 +158,9 @@ export const adminRouter = {
 		.handler(async ({ input, context: _ }) => {
 			// Check if email is from clubcashin.com domain
 			if (!input.email.endsWith("@clubcashin.com")) {
-				throw new ORPCError("BAD_REQUEST", { message: "Solo se permiten correos @clubcashin.com" });
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Solo se permiten correos @clubcashin.com",
+				});
 			}
 
 			// Use Better Auth's admin createUser API
@@ -166,7 +174,9 @@ export const adminRouter = {
 			});
 
 			if (!result.user) {
-				throw new ORPCError("BAD_REQUEST", { message: "Error al crear usuario" });
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Error al crear usuario",
+				});
 			}
 
 			return result.user;

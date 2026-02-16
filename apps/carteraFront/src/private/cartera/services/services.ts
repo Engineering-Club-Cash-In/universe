@@ -720,6 +720,7 @@ export interface SubtotalInversionista {
   total_abono_iva: string;
   total_isr: string;
   total_cuota: string;
+  total_monto_aportado: number; // 🆕
 }
 
 // Un inversionista con sus créditos y sus subtotales
@@ -748,6 +749,13 @@ export interface InversionistasCreditosResponse {
   perPage: number;
   totalItems: number;
   totalPages: number;
+}
+
+// 🆕 NUEVA INTERFACE: Respuesta de totales globales (sin paginación)
+export interface InvestorTotalsResponse {
+  inversionista_id: number;
+  nombre_inversionista: string;
+  totales: SubtotalInversionista;
 }
 
 export interface GetInvestorParams {
@@ -779,6 +787,25 @@ export async function getInvestorServices(
 
   const url = `${import.meta.env.VITE_BACK_URL}/getInvestors${query.toString() ? `?${query.toString()}` : ""}`;
   const res = await api.get<InversionistasCreditosResponse>(url);
+  return res.data;
+}
+
+// 🆕 NUEVO SERVICIO: Obtener totales globales (sin paginación)
+export async function getInvestorTotalsService(
+  params?: GetInvestorParams
+): Promise<InvestorTotalsResponse> {
+  const query = new URLSearchParams();
+
+  if (params?.id !== undefined) query.append("id", String(params.id));
+  if (params?.dpi) query.append("dpi", params.dpi);
+  if (params?.tipo) query.append("tipo", params.tipo);
+  if (params?.incluirLiquidados !== undefined) 
+    query.append("incluirLiquidados", String(params.incluirLiquidados));
+  if (params?.numeroCuota !== undefined) 
+    query.append("numeroCuota", String(params.numeroCuota));
+
+  const url = `${import.meta.env.VITE_BACK_URL}/getInvestorTotals${query.toString() ? `?${query.toString()}` : ""}`;
+  const res = await api.get<InvestorTotalsResponse>(url);
   return res.data;
 }
 

@@ -17,7 +17,6 @@ import {
 	viewOpportunityContractsProcedure,
 } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
-import { createNotification } from "./notifications";
 import {
 	generateUniqueFilename,
 	getFileUrl,
@@ -27,6 +26,7 @@ import {
 } from "../lib/storage";
 import { closeOpportunity } from "../services/close-opportunity";
 import { checkDocumensoSigningStatus } from "../services/documenso-signing";
+import { createNotification } from "./notifications";
 
 // Standardized env var naming: R2_BUCKET_* pattern
 const R2_LEGAL_DOCS_BUCKET_NAME =

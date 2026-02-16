@@ -200,6 +200,9 @@ const vehicleTypeLabels: Record<string, string> = {
 	panel: "Panel",
 	camion: "Camión",
 	microbus: "Microbus",
+	microbus_20: "Bus hasta 20 pasajeros (RCDP)",
+	microbus_35: "Bus 21-35 pasajeros (RCDP)",
+	microbus_36plus: "Bus más de 35 pasajeros (RCDP)",
 };
 
 export function CreditDetailView({

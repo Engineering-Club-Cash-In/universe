@@ -24,9 +24,9 @@ async function getInsuranceCost(
 ): Promise<{ baseInsuranceCost: number; membershipCost: number }> {
 	const isBus = isBusType(vehicleType);
 
-	// Para bus, filtrar solo filas que tengan datos de bus (columna NOT NULL)
+	// Para bus, filtrar solo filas que tengan datos en la columna específica del subtipo
 	const busNotNullFilter = isBus
-		? isNotNull(insuranceCosts.busHasta20)
+		? isNotNull(getBusColumn(vehicleType))
 		: undefined;
 
 	// Buscar el registro más cercano (VLOOKUP con aproximación)
@@ -103,6 +103,20 @@ async function getInsuranceCost(
 		baseInsuranceCost: Math.round(baseInsurance * 100) / 100,
 		membershipCost: Math.round(membershipFromTable * 100) / 100,
 	};
+}
+
+/** Obtener la columna de la tabla según subtipo de bus */
+function getBusColumn(vehicleType: string) {
+	switch (vehicleType) {
+		case "microbus_20":
+			return insuranceCosts.busHasta20;
+		case "microbus_35":
+			return insuranceCosts.bus21a35;
+		case "microbus_36plus":
+			return insuranceCosts.busMas35;
+		default:
+			return insuranceCosts.busHasta20;
+	}
 }
 
 /** Obtener valor de seguro de bus según subtipo */

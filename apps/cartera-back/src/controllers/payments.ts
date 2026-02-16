@@ -100,7 +100,7 @@ export async function getAllPagosWithCreditAndInversionistas(
       .from(pagos_credito)
       .innerJoin(creditos, eq(pagos_credito.credito_id, creditos.credito_id))
       .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
-      .innerJoin(
+      .leftJoin(
         cuotas_credito,
         eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
       )

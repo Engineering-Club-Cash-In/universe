@@ -4,6 +4,8 @@ import path from "path";
 import {
   recalcularCreditosDesdeJson,
   agruparCreditosPorNumeroBase,
+  processPoolsRaros,
+  eliminarCreditos,
 } from "../controllers/recalculateFromJson";
 
 // ========================================
@@ -23,9 +25,31 @@ const CreditoJsonSchema = t.Object({
   pagosParciales: t.Optional(t.Array(t.Any())),
 });
 
+const InversionistaActualSchema = t.Object({
+  numeroCredito: t.String(),
+  inversionista: t.String(),
+  porcentajeCashIn: t.String(),
+  porcentajeInversionista: t.String(),
+  capital: t.String(),
+});
+
 const CreditoAgrupadoSchema = t.Object({
   numeroCredito: t.String(),
   creditos: t.Array(CreditoJsonSchema),
+  inversionistasActuales: t.Optional(t.Array(InversionistaActualSchema)),
+});
+
+const PoolRaroSchema = t.Object({
+  nombre: t.String(),
+  numeroCuota: t.Optional(t.String()),
+  numeroCredito: t.String(),
+  creditos: t.Array(CreditoJsonSchema),
+});
+
+const CreditoEliminarSchema = t.Object({
+  numeroCredito: t.String(),
+  inversionista: t.String(),
+  capitalRestante: t.Optional(t.String()),
 });
 
 // ========================================
@@ -266,6 +290,126 @@ export const recalculateFromJsonRouter = new Elysia({ prefix: "/recalculate" })
               { "nombre": "Alexander Kachler Simons (AMJK)", "capitalRestante": 10001.30 }
             ]
           }
+        `,
+        tags: ["Recálculo"],
+      },
+    }
+  )
+
+  // 📌 POST: Procesar pools raros desde archivo local
+  .post(
+    "/pools-raros-file",
+    async ({ set }) => {
+      try {
+        const rutaArchivo =
+          "C:\\Users\\Kelvin Palacios\\Documents\\analis de datos\\resultado_pools_raros.json";
+
+        if (!fs.existsSync(rutaArchivo)) {
+          set.status = 404;
+          return { success: false, error: `Archivo no encontrado: ${rutaArchivo}` };
+        }
+
+        console.log(`\n📂 Leyendo archivo: ${rutaArchivo}`);
+        const contenido = fs.readFileSync(rutaArchivo, "utf-8");
+        const pools = JSON.parse(contenido);
+
+        console.log(`📥 ${pools.length} pools raros encontrados`);
+        const resultado = await processPoolsRaros(pools);
+
+        if (!resultado.success) {
+          set.status = 400;
+        }
+
+        return resultado;
+      } catch (error: any) {
+        console.error("❌ Error en /recalculate/pools-raros-file:", error);
+        set.status = 500;
+        return {
+          success: false,
+          error: error.message || "Error interno del servidor",
+        };
+      }
+    },
+    {
+      detail: {
+        summary: "Procesar pools raros desde archivo",
+        description: `Lee resultado_pools_raros.json y procesa automaticamente.`,
+        tags: ["Recálculo"],
+      },
+    }
+  )
+
+  // 📌 POST: Procesar pools raros desde body
+  .post(
+    "/pools-raros",
+    async ({ body, set }) => {
+      try {
+        console.log(`\n📥 Recibiendo ${body.pools.length} pools raros...`);
+
+        const resultado = await processPoolsRaros(body.pools);
+
+        if (!resultado.success) {
+          set.status = 400;
+        }
+
+        return resultado;
+      } catch (error: any) {
+        console.error("❌ Error en /recalculate/pools-raros:", error);
+        set.status = 500;
+        return {
+          success: false,
+          error: error.message || "Error interno del servidor",
+        };
+      }
+    },
+    {
+      body: t.Object({
+        pools: t.Array(PoolRaroSchema),
+      }),
+      detail: {
+        summary: "Procesar pools raros",
+        description: `
+          Recibe un array de pools raros. Por cada pool:
+          - Créditos que coinciden con el numeroCredito del pool → se recalculan (todos los inversionistas se asignan al crédito principal)
+          - Créditos con número diferente → se ELIMINAN completamente de la BD (el inversionista se mueve al crédito principal)
+        `,
+        tags: ["Recálculo"],
+      },
+    }
+  )
+
+  // 📌 POST: Eliminar créditos completos de la BD
+  .post(
+    "/eliminar-creditos",
+    async ({ body, set }) => {
+      try {
+        console.log(`\n📥 Eliminando ${body.creditos.length} créditos...`);
+
+        const resultado = await eliminarCreditos(body.creditos);
+
+        if (!resultado.success && resultado.exitosos === 0) {
+          set.status = 400;
+        }
+
+        return resultado;
+      } catch (error: any) {
+        console.error("❌ Error en /recalculate/eliminar-creditos:", error);
+        set.status = 500;
+        return {
+          success: false,
+          error: error.message || "Error interno del servidor",
+        };
+      }
+    },
+    {
+      body: t.Object({
+        creditos: t.Array(CreditoEliminarSchema),
+      }),
+      detail: {
+        summary: "Eliminar créditos completos",
+        description: `
+          Recibe un array de créditos.
+          Elimina el crédito completo de la BD incluyendo: pagos, boletas, cuotas, inversionistas y todo lo relacionado.
         `,
         tags: ["Recálculo"],
       },

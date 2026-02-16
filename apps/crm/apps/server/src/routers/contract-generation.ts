@@ -14,6 +14,7 @@ import {
 import { quotations } from "../db/schema/quotations";
 import { vehicles } from "../db/schema/vehicles";
 import { juridicoProcedure } from "../lib/orpc";
+import { getFileUrlWithBucketInKey } from "../lib/storage";
 import {
 	enrichLeadFromRenap,
 	mapOpportunityToContractData,
@@ -24,7 +25,6 @@ import {
 	getDocumentsByDpi,
 	getDocumentTypes,
 } from "../services/legal-docs-api";
-import { getFileUrlWithBucketInKey } from "../lib/storage";
 
 // URL de la API de generación de contratos (legal-docs-blueprints)
 const LEGAL_DOCS_API_URL =

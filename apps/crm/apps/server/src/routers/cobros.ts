@@ -281,13 +281,15 @@ async function autoCrearDatosMigrate({
 			diaPagoMensual: diaPagoMensual,
 			cuotaMensual: cuotaMensual,
 			value: deudaTotal,
-			notes: `Crédito migrado automáticamente desde Cartera-Back.`,
+			notes: "Crédito migrado automáticamente desde Cartera-Back.",
 		});
 
 		return { leadId: nuevoLead.id, vehiculoId: nuevoVehiculo.id };
 	});
 
-	console.log(`[AutoMigrate] Datos creados exitosamente para crédito ${numeroSifco} (lead: ${result.leadId}, vehiculo: ${result.vehiculoId})`);
+	console.log(
+		`[AutoMigrate] Datos creados exitosamente para crédito ${numeroSifco} (lead: ${result.leadId}, vehiculo: ${result.vehiculoId})`,
+	);
 
 	return {
 		leadId: result.leadId,
@@ -667,7 +669,9 @@ export const cobrosRouter = {
 							"[Cobros] Respuesta inválida de Cartera-Back:",
 							creditosResponse,
 						);
-						throw new ORPCError("BAD_REQUEST", { message: "Estructura de respuesta inválida" });
+						throw new ORPCError("BAD_REQUEST", {
+							message: "Estructura de respuesta inválida",
+						});
 					}
 
 					console.log(
@@ -945,7 +949,9 @@ export const cobrosRouter = {
 					.limit(1);
 
 				if (!caso.length) {
-					throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para acceder a este caso" });
+					throw new ORPCError("FORBIDDEN", {
+						message: "No tienes permiso para acceder a este caso",
+					});
 				}
 			}
 
@@ -995,7 +1001,9 @@ export const cobrosRouter = {
 					.limit(1);
 
 				if (!caso.length) {
-					throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para acceder a este caso" });
+					throw new ORPCError("FORBIDDEN", {
+						message: "No tienes permiso para acceder a este caso",
+					});
 				}
 			}
 			console.log(
@@ -1058,7 +1066,9 @@ export const cobrosRouter = {
 					.limit(1);
 
 				if (!caso.length) {
-					throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para crear convenios en este caso" });
+					throw new ORPCError("FORBIDDEN", {
+						message: "No tienes permiso para crear convenios en este caso",
+					});
 				}
 			}
 
@@ -1091,7 +1101,9 @@ export const cobrosRouter = {
 					.limit(1);
 
 				if (!caso.length) {
-					throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para ver convenios de este caso" });
+					throw new ORPCError("FORBIDDEN", {
+						message: "No tienes permiso para ver convenios de este caso",
+					});
 				}
 			}
 
@@ -1142,7 +1154,10 @@ export const cobrosRouter = {
 				responsable[0].role !== "cobros_supervisor" &&
 				responsable[0].role !== "admin"
 			) {
-				throw new ORPCError("BAD_REQUEST", { message: "El usuario debe tener rol de cobros, supervisor de cobros o admin" });
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"El usuario debe tener rol de cobros, supervisor de cobros o admin",
+				});
 			}
 
 			const casoActualizado = await db
@@ -1185,7 +1200,9 @@ export const cobrosRouter = {
 		.handler(async ({ input, context }) => {
 			try {
 				if (!input.numeroSifco) {
-					throw new ORPCError("BAD_REQUEST", { message: "El número SIFCO es requerido" });
+					throw new ORPCError("BAD_REQUEST", {
+						message: "El número SIFCO es requerido",
+					});
 				}
 
 				// TODO: Cambiar a verificación por caso de cobros cuando ya no haya datos importados sin responsable
@@ -1205,7 +1222,9 @@ export const cobrosRouter = {
 
 				if (!PERMISSIONS.canAccessCobros(context.userRole)) {
 					console.error("❌ Sin permisos para ver historial");
-					throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para ver este historial" });
+					throw new ORPCError("FORBIDDEN", {
+						message: "No tienes permiso para ver este historial",
+					});
 				}
 
 				// Verificar si el contrato tiene referencia a cartera-back
@@ -1324,7 +1343,9 @@ export const cobrosRouter = {
 					.limit(1);
 
 				if (!caso.length) {
-					throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para ver esta información" });
+					throw new ORPCError("FORBIDDEN", {
+						message: "No tienes permiso para ver esta información",
+					});
 				}
 			}
 
@@ -1468,7 +1489,9 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			if (!isCarteraBackEnabled()) {
-				throw new ORPCError("BAD_REQUEST", { message: "Integración con Cartera-Back no está habilitada" });
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con Cartera-Back no está habilitada",
+				});
 			}
 
 			try {
@@ -1727,7 +1750,9 @@ export const cobrosRouter = {
 				) {
 					// Crear caso de cobros automáticamente
 					if (!context.user?.id) {
-						throw new ORPCError("UNAUTHORIZED", { message: "Usuario no autenticado" });
+						throw new ORPCError("UNAUTHORIZED", {
+							message: "Usuario no autenticado",
+						});
 					}
 
 					const cuotasAtrasadas = creditoCompleto?.mora?.cuotas_atrasadas ?? 0;
@@ -1899,7 +1924,9 @@ export const cobrosRouter = {
 			);
 
 			if (!reference) {
-				throw new ORPCError("BAD_REQUEST", { message: `Crédito ${input.numeroSifco} no encontrado en el sistema` });
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Crédito ${input.numeroSifco} no encontrado en el sistema`,
+				});
 			}
 
 			// Register payment in cartera-back
@@ -1915,7 +1942,9 @@ export const cobrosRouter = {
 			});
 
 			if (!result.success) {
-				throw new ORPCError("BAD_REQUEST", { message: `Error registrando pago: ${result.error}` });
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Error registrando pago: ${result.error}`,
+				});
 			}
 
 			return {
@@ -1934,7 +1963,9 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context: _ }) => {
 			if (!isCarteraBackPaymentsEnabled()) {
-				throw new ORPCError("BAD_REQUEST", { message: "Integración de pagos con cartera-back no está habilitada" });
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración de pagos con cartera-back no está habilitada",
+				});
 			}
 
 			try {
@@ -1977,7 +2008,9 @@ export const cobrosRouter = {
 					})),
 				};
 			} catch (error) {
-				throw new ORPCError("BAD_REQUEST", { message: `Error obteniendo historial de pagos: ${error instanceof Error ? error.message : String(error)}` });
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Error obteniendo historial de pagos: ${error instanceof Error ? error.message : String(error)}`,
+				});
 			}
 		}),
 
@@ -1990,7 +2023,9 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context: _ }) => {
 			if (!isCarteraBackPaymentsEnabled()) {
-				throw new ORPCError("BAD_REQUEST", { message: "Integración con cartera-back no está habilitada" });
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
 			}
 
 			try {
@@ -2050,7 +2085,9 @@ export const cobrosRouter = {
 					cuotasAtrasadas: creditoData.cuotasAtrasadas?.length || 0,
 				};
 			} catch (error) {
-				throw new ORPCError("BAD_REQUEST", { message: `Error obteniendo crédito de cartera-back: ${error instanceof Error ? error.message : String(error)}` });
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Error obteniendo crédito de cartera-back: ${error instanceof Error ? error.message : String(error)}`,
+				});
 			}
 		}),
 
@@ -2122,7 +2159,9 @@ export const cobrosRouter = {
 				console.log(
 					"[getInversionistas] Cartera-back integration is NOT enabled",
 				);
-				throw new ORPCError("BAD_REQUEST", { message: "Integración con cartera-back no está habilitada" });
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
 			}
 
 			try {
@@ -2154,7 +2193,9 @@ export const cobrosRouter = {
 					"[getInversionistas] Error stack:",
 					error instanceof Error ? error.stack : "No stack",
 				);
-				throw new ORPCError("BAD_REQUEST", { message: `Error obteniendo inversionistas: ${error instanceof Error ? error.message : String(error)}` });
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Error obteniendo inversionistas: ${error instanceof Error ? error.message : String(error)}`,
+				});
 			}
 		}),
 
@@ -2171,7 +2212,9 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context: _ }) => {
 			if (!isCarteraBackPaymentsEnabled()) {
-				throw new ORPCError("BAD_REQUEST", { message: "Integración con cartera-back no está habilitada" });
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
 			}
 
 			try {
@@ -2233,7 +2276,9 @@ export const cobrosRouter = {
 					},
 				};
 			} catch (error) {
-				throw new ORPCError("BAD_REQUEST", { message: `Error obteniendo detalle de inversionista: ${error instanceof Error ? error.message : String(error)}` });
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Error obteniendo detalle de inversionista: ${error instanceof Error ? error.message : String(error)}`,
+				});
 			}
 		}),
 
@@ -2246,7 +2291,9 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context: _ }) => {
 			if (!isCarteraBackPaymentsEnabled()) {
-				throw new ORPCError("BAD_REQUEST", { message: "Integración con cartera-back no está habilitada" });
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
 			}
 
 			try {
@@ -2283,7 +2330,9 @@ export const cobrosRouter = {
 				};
 				*/
 			} catch (error) {
-				throw new ORPCError("BAD_REQUEST", { message: `Error obteniendo inversionistas del crédito: ${error instanceof Error ? error.message : String(error)}` });
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Error obteniendo inversionistas del crédito: ${error instanceof Error ? error.message : String(error)}`,
+				});
 			}
 		}),
 
@@ -2304,7 +2353,9 @@ export const cobrosRouter = {
 
 			if (!isCarteraBackPaymentsEnabled()) {
 				console.log("[getAsesores] Cartera-back integration is NOT enabled");
-				throw new ORPCError("BAD_REQUEST", { message: "Integración con cartera-back no está habilitada" });
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con cartera-back no está habilitada",
+				});
 			}
 
 			console.log("[getAsesores] Cartera-back integration is enabled");
@@ -2349,7 +2400,9 @@ export const cobrosRouter = {
 					"[getAsesores] Error stack:",
 					error instanceof Error ? error.stack : "No stack",
 				);
-				throw new ORPCError("BAD_REQUEST", { message: `Error obteniendo asesores: ${error instanceof Error ? error.message : String(error)}` });
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Error obteniendo asesores: ${error instanceof Error ? error.message : String(error)}`,
+				});
 			}
 		}),
 };

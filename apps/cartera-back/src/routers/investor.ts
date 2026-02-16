@@ -13,6 +13,7 @@ import {
   getLiquidaciones,
   getInvestorPerformance,
   TipoConsulta, // 🆕 NUEVO: Tipo para validación de consultas
+  reversePagosEspejoPorInversionista,
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
 import puppeteer from "puppeteer";
@@ -325,6 +326,44 @@ export const inversionistasRouter = new Elysia()
           error: t.String(),
         }),
       },
+    }
+  )
+  .post(
+    "/reversePagosEspejo",
+    async ({ body, set }) => {
+      try {
+        const { inversionistaId } = body;
+
+        console.log(`🔄 Revirtiendo pagos espejo para inversionista ${inversionistaId}`);
+
+        const resultado = await reversePagosEspejoPorInversionista(inversionistaId);
+
+        set.status = 200;
+        return {
+          success: true,
+          message: "✅ Pagos espejo revertidos correctamente",
+          ...resultado,
+        };
+      } catch (error: any) {
+        console.error("❌ Error en POST /reversePagosEspejo:", error);
+        set.status = 500;
+        return {
+          success: false,
+          error: error.message || "Error al revertir pagos espejo",
+        };
+      }
+    },
+    {
+      detail: {
+        summary: "Revertir todos los pagos espejo de un inversionista",
+        tags: ["Pagos Espejo"],
+      },
+      body: t.Object({
+        inversionistaId: t.Number({
+          description: "ID del inversionista",
+          minimum: 1,
+        }),
+      }),
     }
   )
   .get(

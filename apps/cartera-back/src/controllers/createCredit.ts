@@ -4,7 +4,8 @@ import { db } from "../database";
 import { 
   creditos, 
   creditos_rubros_otros, 
-  creditos_inversionistas, 
+  creditos_inversionistas,
+  creditos_inversionistas_espejo, 
   cuotas_credito, 
   pagos_credito 
 } from "../database/db";
@@ -521,6 +522,7 @@ creditosInversionistasData.forEach(({ monto_cash_in, iva_cash_in }: Inversionist
 
 if (creditosInversionistasData.length > 0) {
   await db.insert(creditos_inversionistas).values(creditosInversionistasData);
+  await db.insert(creditos_inversionistas_espejo).values(creditosInversionistasData);
 }
   return {
     newCredit,
@@ -750,7 +752,7 @@ const insertPayments = async (
       observaciones: "",
       paymentFalse: false,
       pagoConvenio: "0",
-      
+      monto_aplicado: "0",
     });
   }
 

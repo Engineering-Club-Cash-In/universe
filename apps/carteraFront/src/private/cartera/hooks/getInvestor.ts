@@ -33,6 +33,7 @@ export interface UseGetInvestorsParams {
   nombreUsuario?: string; // 🆕
   incluirLiquidados?: boolean; // 🆕
   numeroCuota?: number; // 🆕
+  tipo?: "originales" | "espejos" | "ambas"; // 🆕 NUEVO: Permite consultar originales, espejos o ambas
 }
 
 interface DownloadPDFVars {

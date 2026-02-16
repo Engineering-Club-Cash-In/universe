@@ -26,8 +26,8 @@ export const adminMiniagentRouter = {
 			// Solo admin puede acceder
 			if (context.session.user.role !== "admin") {
 				throw new ORPCError("FORBIDDEN", {
-				message: "No autorizado",
-			});
+					message: "No autorizado",
+				});
 			}
 
 			// Obtener todos los usuarios con acceso a WhatsApp (admin y sales)
@@ -70,8 +70,8 @@ export const adminMiniagentRouter = {
 			// Solo admin puede acceder
 			if (context.session.user.role !== "admin") {
 				throw new ORPCError("FORBIDDEN", {
-				message: "No autorizado",
-			});
+					message: "No autorizado",
+				});
 			}
 
 			// Cifrar credenciales
@@ -117,8 +117,8 @@ export const adminMiniagentRouter = {
 			// Solo admin puede acceder
 			if (context.session.user.role !== "admin") {
 				throw new ORPCError("FORBIDDEN", {
-				message: "No autorizado",
-			});
+					message: "No autorizado",
+				});
 			}
 
 			await db

@@ -5,7 +5,9 @@ import {
   usuarios,
   inversionistas,
   creditos_inversionistas,
+  creditos_inversionistas_espejo,
   pagos_credito_inversionistas,
+  pagos_credito_inversionistas_espejo,
   boletas,
   cuotas_credito,
 } from "../database/db/schema";
@@ -93,6 +95,7 @@ export async function getAllPagosWithCreditAndInversionistas(
         liquidacion_inversionistas: cuotas_credito.liquidado_inversionistas,
         fechaLiquidacion: cuotas_credito.fecha_liquidacion_inversionistas,
         paymentFalse: pagos_credito.paymentFalse,
+        monto_aplicado: pagos_credito.monto_aplicado,
       })
       .from(pagos_credito)
       .innerJoin(creditos, eq(pagos_credito.credito_id, creditos.credito_id))
@@ -319,8 +322,8 @@ export async function insertPagosCreditoInversionistas(
   console.log(`   credito_id: ${credito_id}`);
   console.log(`   excludeCube: ${excludeCube}`);
 
-  // 1. Buscar inversionistas del crédito
-  const inversionistasData = await db.query.creditos_inversionistas.findMany({
+  // 1. Buscar inversionistas del crédito (ESPEJO)
+  const inversionistasData = await db.query.creditos_inversionistas_espejo.findMany({
     where: (ci, { eq }) => eq(ci.credito_id, credito_id),
   });
 
@@ -506,7 +509,8 @@ export async function insertPagosCreditoInversionistas(
       credito_id,
       abono_capital.toNumber(),
       false,
-      inv.inversionista_id
+      inv.inversionista_id,
+      true
     );
 
     console.log(`   📊 Porcentajes:`);
@@ -543,15 +547,15 @@ export async function insertPagosCreditoInversionistas(
     "\n✅ ========== FIN insertPagosCreditoInversionistas ==========\n"
   );
 
-  // 4. Insertar todos los registros
+  // 4. Insertar todos los registros (ESPEJO)
   const resolvedInserts = await Promise.all(inserts);
 await db
-  .insert(pagos_credito_inversionistas)
+  .insert(pagos_credito_inversionistas_espejo)
   .values(resolvedInserts)
   .onConflictDoUpdate({
     target: [
-      pagos_credito_inversionistas.pago_id,
-      pagos_credito_inversionistas.inversionista_id,
+      pagos_credito_inversionistas_espejo.pago_id,
+      pagos_credito_inversionistas_espejo.inversionista_id,
     ],
     set: {
       abono_capital: sql`EXCLUDED.abono_capital`,
@@ -566,6 +570,122 @@ await db
   });
 
   return resolvedInserts;
+}
+
+export async function insertPagosCreditoInversionistasV2(
+  pago_id: number,
+  credito_id: number,
+) {
+  // 1. Obtener el pago
+  const currentPago = await db.query.pagos_credito.findFirst({
+    where: (p, { eq }) => eq(p.pago_id, pago_id),
+  });
+
+  if (!currentPago) {
+    throw new Error(`No se encontró el pago con id ${pago_id}`);
+  }
+
+  // 2. Obtener inversionistas del crédito
+  const inversionistasData = await db.query.creditos_inversionistas.findMany({
+    where: (ci, { eq }) => eq(ci.credito_id, credito_id),
+  });
+
+  if (!inversionistasData.length) {
+    throw new Error("No hay inversionistas registrados para este crédito");
+  }
+
+  // 3. Obtener nombres para identificar a Cube
+  const inversionistasWithName = await Promise.all(
+    inversionistasData.map(async (inv) => {
+      const [invRow] = await db
+        .select({ nombre: inversionistas.nombre })
+        .from(inversionistas)
+        .where(eq(inversionistas.inversionista_id, inv.inversionista_id));
+      return { ...inv, nombre: invRow?.nombre ?? "" };
+    })
+  );
+
+  // 4. Sumar todos los monto_aportado
+  const sumMontosAportados = inversionistasWithName.reduce(
+    (acc, inv) => acc.plus(new Big(inv.monto_aportado ?? 0)),
+    new Big(0)
+  );
+
+  if (sumMontosAportados.eq(0)) {
+    throw new Error("La suma de montos aportados es 0, no se puede distribuir");
+  }
+
+  // 5. Abonos totales del pago
+  const pagoAbonoCapital = new Big(currentPago.abono_capital ?? 0);
+  const pagoAbonoInteres = new Big(currentPago.abono_interes ?? 0);
+  const pagoAbonoIva = new Big(currentPago.abono_iva_12 ?? 0);
+
+  // 6. Calcular distribución por inversionista
+  const inserts = [];
+  for (const inv of inversionistasWithName) {
+    const isCube =
+      inv.nombre.trim().toLowerCase() === "cube investments s.a.".toLowerCase();
+
+    // Porcentaje general: monto_aportado / SUM(monto_aportado)
+    const porcentajeGeneral = new Big(inv.monto_aportado ?? 0).div(sumMontosAportados);
+
+    // Porcentaje de participación según tipo (dividir entre 100 porque se guarda como %)
+    const porcentajeParticipacion = isCube
+      ? new Big(inv.porcentaje_cash_in ?? 0).div(100)
+      : new Big(inv.porcentaje_participacion_inversionista ?? 0).div(100);
+
+    // Distribuir abonos: primero por participación, luego por porcentaje general
+    const abonoCapitalInv = pagoAbonoCapital.times(porcentajeParticipacion).times(porcentajeGeneral);
+    const abonoInteresInv = pagoAbonoInteres.times(porcentajeParticipacion).times(porcentajeGeneral);
+    const abonoIvaInv = pagoAbonoIva.times(porcentajeParticipacion).times(porcentajeGeneral);
+
+    // Solo actualizar monto_aportado si hubo abono a capital
+    if (abonoCapitalInv.gt(0)) {
+      await processAndReplaceCreditInvestors(
+        credito_id,
+        abonoCapitalInv.toNumber(),
+        false,
+        inv.inversionista_id
+      );
+    }
+
+    inserts.push({
+      pago_id,
+      inversionista_id: inv.inversionista_id,
+      credito_id,
+      abono_capital: abonoCapitalInv.toString(),
+      abono_interes: abonoInteresInv.toString(),
+      abono_iva_12: abonoIvaInv.toString(),
+      porcentaje_participacion: isCube
+        ? inv.porcentaje_cash_in
+        : inv.porcentaje_participacion_inversionista,
+      cuota: currentPago.cuota ?? "0",
+      estado_liquidacion: "NO_LIQUIDADO" as const,
+    });
+  }
+
+  // 7. Insertar/upsert en pagos_credito_inversionistas
+  await db
+    .insert(pagos_credito_inversionistas)
+    .values(inserts)
+    .onConflictDoUpdate({
+      target: [
+        pagos_credito_inversionistas.pago_id,
+        pagos_credito_inversionistas.inversionista_id,
+      ],
+      set: {
+        abono_capital: sql`EXCLUDED.abono_capital`,
+        abono_interes: sql`EXCLUDED.abono_interes`,
+        abono_iva_12: sql`EXCLUDED.abono_iva_12`,
+        porcentaje_participacion: sql`EXCLUDED.porcentaje_participacion`,
+        cuota: sql`EXCLUDED.cuota`,
+        fecha_pago: sql`EXCLUDED.fecha_pago`,
+        estado_liquidacion: sql`EXCLUDED.estado_liquidacion`,
+        credito_id: sql`EXCLUDED.credito_id`,
+      },
+    });
+
+  return inserts;
 }
 
 /**
@@ -819,6 +939,7 @@ export async function insertarPago({
       observaciones: "",
       registerBy: "ADMIN",
       pagoConvenio: "0",
+      monto_aplicado: boleta.toString(),
     })
     .returning();
   if (mora && Number(mora) > 0) {
@@ -1135,6 +1256,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         p.abono_seguro AS "abono_seguro",
         p.abono_gps AS "abono_gps",
         p.validation_status AS "validation_status",
+        p.monto_aplicado AS "monto_aplicado",
 
         -- 💳 Info del crédito
         json_build_object(
@@ -1241,6 +1363,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       abono_seguro: r.abono_seguro,
       validationStatus: r.validation_status,
       abono_gps: r.abono_gps,
+      monto_aplicado: r.monto_aplicado,
       credito: r.credito,
       cuota: r.cuota,
       usuario: r.usuario,
@@ -1394,14 +1517,14 @@ export async function obtenerCreditosConPagosPendientes(
     
     console.log(`📆 Mes actual: ${rangoMesActual.inicio} - ${rangoMesActual.fin} (${rangoMesActual.mes})`);
 
-    // 1️⃣ PASO 1: Obtener todos los créditos del inversionista
+    // 1️⃣ PASO 1: Obtener todos los créditos del inversionista (ESPEJO)
     const creditosInversionista = await db
       .select({
-        creditoId: creditos_inversionistas.credito_id,
-        inversionistaId: creditos_inversionistas.inversionista_id,
-        montoAportado: creditos_inversionistas.monto_aportado,
+        creditoId: creditos_inversionistas_espejo.credito_id,
+        inversionistaId: creditos_inversionistas_espejo.inversionista_id,
+        montoAportado: creditos_inversionistas_espejo.monto_aportado,
         porcentajeParticipacion:
-          creditos_inversionistas.porcentaje_participacion_inversionista,
+          creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
         // Datos del crédito
         numeroCreditoSifco: creditos.numero_credito_sifco,
         capital: creditos.capital,
@@ -1412,14 +1535,14 @@ export async function obtenerCreditosConPagosPendientes(
         interes: creditos.cuota_interes,
         iva: creditos.iva_12,
       })
-      .from(creditos_inversionistas)
+      .from(creditos_inversionistas_espejo)
       .innerJoin(
         creditos,
-        eq(creditos_inversionistas.credito_id, creditos.credito_id)
+        eq(creditos_inversionistas_espejo.credito_id, creditos.credito_id)
       )
       .where(
         and(
-          eq(creditos_inversionistas.inversionista_id, inversionistaId),
+          eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId),
           inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "PENDIENTE_CANCELACION", "EN_CONVENIO"])
         )
       );
@@ -1438,11 +1561,11 @@ export async function obtenerCreditosConPagosPendientes(
         
         const pagosPendientesCredito = await db
           .select()
-          .from(pagos_credito_inversionistas)
+          .from(pagos_credito_inversionistas_espejo)
           .where(
             and(
-              eq(pagos_credito_inversionistas.credito_id, credito.creditoId),
-              eq(pagos_credito_inversionistas.estado_liquidacion, "NO_LIQUIDADO")
+              eq(pagos_credito_inversionistas_espejo.credito_id, credito.creditoId),
+              eq(pagos_credito_inversionistas_espejo.estado_liquidacion, "NO_LIQUIDADO")
             )
           );
 

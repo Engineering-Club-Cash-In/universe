@@ -51,7 +51,9 @@ export const auctionRouter = {
 				.limit(1);
 
 			if (!latestInspection) {
-				throw new ORPCError("NOT_FOUND", { message: "No se encontró inspección para este vehículo" });
+				throw new ORPCError("NOT_FOUND", {
+					message: "No se encontró inspección para este vehículo",
+				});
 			}
 
 			const marketValue = latestInspection.marketValue;
@@ -151,7 +153,9 @@ export const auctionRouter = {
 				.limit(1);
 
 			if (!auction) {
-				throw new ORPCError("NOT_FOUND", { message: "No se encontró entrada de subasta para este vehículo" });
+				throw new ORPCError("NOT_FOUND", {
+					message: "No se encontró entrada de subasta para este vehículo",
+				});
 			}
 
 			// 3. Get latest inspection to fetch marketValue
@@ -163,7 +167,9 @@ export const auctionRouter = {
 				.limit(1);
 
 			if (!latestInspection) {
-				throw new ORPCError("NOT_FOUND", { message: "No se encontró inspección para este vehículo" });
+				throw new ORPCError("NOT_FOUND", {
+					message: "No se encontró inspección para este vehículo",
+				});
 			}
 
 			const marketValue = Number.parseFloat(
@@ -468,7 +474,9 @@ export const auctionRouter = {
 				.limit(1);
 
 			if (!auction) {
-				throw new ORPCError("NOT_FOUND", { message: "No se encontró entrada de subasta para este vehículo" });
+				throw new ORPCError("NOT_FOUND", {
+					message: "No se encontró entrada de subasta para este vehículo",
+				});
 			}
 
 			// 3. Delete auction record

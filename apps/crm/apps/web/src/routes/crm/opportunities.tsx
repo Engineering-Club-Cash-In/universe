@@ -3310,9 +3310,10 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 	};
 
 	// Find all detalle_analisis documents
-	const detalleDocuments = documentsQuery.data?.filter(
-		(doc) => (doc.documentType as string) === "detalle_analisis",
-	) ?? [];
+	const detalleDocuments =
+		documentsQuery.data?.filter(
+			(doc) => (doc.documentType as string) === "detalle_analisis",
+		) ?? [];
 	const otherDocuments = documentsQuery.data?.filter(
 		(doc) => (doc.documentType as string) !== "detalle_analisis",
 	);
@@ -3328,7 +3329,10 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 						<FileSpreadsheet className="h-5 w-5" />
 						Detalle de Análisis
 						{detalleDocuments.length > 0 ? (
-							<Badge className="bg-green-600">{detalleDocuments.length} subido{detalleDocuments.length > 1 ? "s" : ""}</Badge>
+							<Badge className="bg-green-600">
+								{detalleDocuments.length} subido
+								{detalleDocuments.length > 1 ? "s" : ""}
+							</Badge>
 						) : (
 							<Badge
 								variant="outline"
@@ -3347,7 +3351,10 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 					{detalleDocuments.length > 0 ? (
 						<div className="space-y-3">
 							{detalleDocuments.map((detalleDoc) => (
-								<div key={detalleDoc.id} className="flex items-center justify-between rounded-lg border border-green-200 bg-white p-4">
+								<div
+									key={detalleDoc.id}
+									className="flex items-center justify-between rounded-lg border border-green-200 bg-white p-4"
+								>
 									<div className="flex items-center gap-3">
 										<span className="text-3xl">📊</span>
 										<div>

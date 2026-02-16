@@ -322,11 +322,24 @@ export interface BadDebt {
     incobrable?: BadDebt | null;
   cancelacion?: CreditCancelation | null;
 }
+export interface InversionistaEspejo {
+  credito_id: number;
+  inversionista_id: number;
+  nombre: string;
+  monto_aportado: string;
+  porcentaje_participacion: string;
+  porcentaje_cash_in: string;
+  porcentaje_inversion: string;
+  monto_cash_in: string;
+  monto_inversionista: string;
+  cuota_inversionista: string;
+}
 
 export interface CreditoUsuarioPago {
   creditos: Credito;
   usuarios: Usuario;
   inversionistas: AporteInversionista[];
+  creditos_inversionistas_espejo?: InversionistaEspejo[];
   resumen: ResumenCreditos;
   asesor: Asesor; // 👈 corregí el typo "aseor" -> "asesor"
   cancelacion?: CreditCancelation | null;
@@ -518,6 +531,7 @@ export interface PagoData {
     url_boleta: string | null; // URL del PDF de la boleta
     paymentFalse:boolean
     boletas:string[]
+    monto_aplicado: string | null;
     // Agrega más campos si los necesitas
     // Puedes agregar campos extra si necesitas
   };
@@ -637,6 +651,7 @@ export interface UpdateCreditBody {
 
   // Inversionistas nuevos
   inversionistas?: InversionistaPayload[];
+  inversionistas_espejo?: InversionistaPayload[];
 }
 export async function updateCreditService(body: UpdateCreditBody) {
   const response = await api.post(`${API_URL}/updateCredit`, body);
@@ -744,6 +759,7 @@ export interface GetInvestorParams {
   nombreUsuario?: string; // 🆕
   incluirLiquidados?: boolean; // 🆕
   numeroCuota?: number; // 🆕
+  tipo?: "originales" | "espejos" | "ambas"; // 🆕 NUEVO: Permite consultar originales, espejos o ambas
 }
 
 export async function getInvestorServices(
@@ -759,6 +775,7 @@ export async function getInvestorServices(
   if (params?.nombreUsuario) query.append("nombreUsuario", params.nombreUsuario); // 🆕
   if (params?.incluirLiquidados !== undefined) query.append("incluirLiquidados", String(params.incluirLiquidados)); // 🆕
   if (params?.numeroCuota !== undefined) query.append("numeroCuota", String(params.numeroCuota)); // 🆕
+  if (params?.tipo) query.append("tipo", params.tipo); // 🆕 NUEVO: Agregar tipo a la query
 
   const url = `${import.meta.env.VITE_BACK_URL}/getInvestors${query.toString() ? `?${query.toString()}` : ""}`;
   const res = await api.get<InversionistasCreditosResponse>(url);
@@ -1408,6 +1425,7 @@ export interface PagoDataInvestor {
   usuario: UsuarioPago;
   inversionistas: InversionistaPago[];
   boleta: BoletaPago | null;
+  monto_aplicado: number | null;
 
   cuentaEmpresaBanco: string | null;
   cuentaEmpresaNombre: string | null;

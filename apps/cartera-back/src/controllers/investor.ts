@@ -863,6 +863,40 @@ export async function reversePagosEspejoPorInversionista(
     console.log(`   ✅ creditos_inversionistas_espejo actualizado`);
   }
 
+  // 3.5. Obtener cuotas asociadas a los pagos y marcarlas como NO liquidadas
+  const pagoIds = [...new Set(pagosEspejo.map((p) => p.pago_id))];
+  console.log(`\n📅 Revirtiendo liquidación de cuotas (${pagoIds.length} pago_ids únicos)...`);
+
+  if (pagoIds.length > 0) {
+    // Obtener los cuota_id de pagos_credito
+    const pagosConCuota = await db
+      .select({
+        cuota_id: pagos_credito.cuota_id,
+      })
+      .from(pagos_credito)
+      .where(inArray(pagos_credito.pago_id, pagoIds));
+
+    const cuotaIds = [...new Set(
+      pagosConCuota
+        .map((p) => p.cuota_id)
+        .filter((id): id is number => id !== null)
+    )];
+
+    console.log(`   📋 Cuotas a revertir: ${cuotaIds.length}`);
+
+    if (cuotaIds.length > 0) {
+      await db
+        .update(cuotas_credito)
+        .set({
+          liquidado_inversionistas: false,
+          fecha_liquidacion_inversionistas: null,
+        })
+        .where(inArray(cuotas_credito.cuota_id, cuotaIds));
+
+      console.log(`   ✅ ${cuotaIds.length} cuotas marcadas como liquidado_inversionistas = false`);
+    }
+  }
+
   // 4. Eliminar TODOS los pagos del inversionista en espejo
   await db
     .delete(pagos_credito_inversionistas_espejo)

@@ -339,7 +339,7 @@ export function PagoForm() {
         open={modalExcesoOpen}
         mode={modalMode}
         onClose={() => setModalExcesoOpen(false)}
-        onAbonoCapital={handleAbonoCapital}
+        onAbonoCapital={cuotasAtrasadasInfo && cuotasAtrasadasInfo.total > 0 ? undefined : handleAbonoCapital}
         onAbonoSiguienteCuota={handleAbonoSiguienteCuota}
         excedente={excedente}
         onAbonoOtros={handleAbonoOtros}

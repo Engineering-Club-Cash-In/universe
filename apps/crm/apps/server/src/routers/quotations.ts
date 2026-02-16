@@ -111,6 +111,9 @@ export const quotationsRouter = {
 						"panel",
 						"camion",
 						"microbus",
+						"microbus_20",
+						"microbus_35",
+						"microbus_36plus",
 					])
 					.default("particular"),
 				vehicleValue: z.number().positive(),
@@ -155,7 +158,9 @@ export const quotationsRouter = {
 			// Validar que el usuario sea sales o admin
 			const userRole = context.userRole;
 			if (userRole !== ROLES.SALES && userRole !== ROLES.ADMIN) {
-				throw new ORPCError("FORBIDDEN", { message: "Solo usuarios de ventas pueden crear cotizaciones" });
+				throw new ORPCError("FORBIDDEN", {
+					message: "Solo usuarios de ventas pueden crear cotizaciones",
+				});
 			}
 
 			// Si se proporciona vehicleId, obtener datos del vehículo
@@ -298,7 +303,9 @@ export const quotationsRouter = {
 				.limit(1);
 
 			if (!quotation) {
-				throw new ORPCError("NOT_FOUND", { message: "Cotización no encontrada" });
+				throw new ORPCError("NOT_FOUND", {
+					message: "Cotización no encontrada",
+				});
 			}
 
 			// Validar acceso
@@ -307,7 +314,9 @@ export const quotationsRouter = {
 				userRole !== ROLES.ADMIN &&
 				quotation.salesUserId !== context.userId
 			) {
-				throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para ver esta cotización" });
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para ver esta cotización",
+				});
 			}
 
 			// Generar tabla de amortización
@@ -343,12 +352,16 @@ export const quotationsRouter = {
 				.limit(1);
 
 			if (!existing) {
-				throw new ORPCError("NOT_FOUND", { message: "Cotización no encontrada" });
+				throw new ORPCError("NOT_FOUND", {
+					message: "Cotización no encontrada",
+				});
 			}
 
 			const userRole = context.userRole;
 			if (userRole !== ROLES.ADMIN && existing.salesUserId !== context.userId) {
-				throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para editar esta cotización" });
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para editar esta cotización",
+				});
 			}
 
 			// Actualizar
@@ -390,12 +403,16 @@ export const quotationsRouter = {
 				.limit(1);
 
 			if (!existing) {
-				throw new ORPCError("NOT_FOUND", { message: "Cotización no encontrada" });
+				throw new ORPCError("NOT_FOUND", {
+					message: "Cotización no encontrada",
+				});
 			}
 
 			const userRole = context.userRole;
 			if (userRole !== ROLES.ADMIN && existing.salesUserId !== context.userId) {
-				throw new ORPCError("FORBIDDEN", { message: "No tienes permiso para eliminar esta cotización" });
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para eliminar esta cotización",
+				});
 			}
 
 			await db.delete(quotations).where(eq(quotations.id, input.quotationId));

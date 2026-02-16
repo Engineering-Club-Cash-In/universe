@@ -287,8 +287,9 @@
       cuenta_empresa_id: integer("cuenta_empresa_id")
       .references(() => cuentasEmpresa.cuentaId), // 
     pagoConvenio :numeric("pago_convenio",{precision:18,scale:2}).notNull(),
-    
+
     fecha_boleta: date("fecha_boleta"), // Fecha del pago en la boleta
+    monto_aplicado: numeric("monto_aplicado", { precision: 18, scale: 2 }).notNull(),
   });
   export const boletas = customSchema.table("boletas", {
     id: serial("id").primaryKey(),
@@ -441,6 +442,64 @@
       ),
       // 🆕 Índice para búsquedas por liquidación
       liquidacionIdx: index("idx_pagos_liquidacion").on(table.liquidacion_id),
+    })
+  );
+
+  export const pagos_credito_inversionistas_espejo = customSchema.table(
+    "pagos_credito_inversionistas_espejo",
+    {
+      id: serial("id").primaryKey(),
+      pago_id: integer("pago_id")
+        .notNull()
+        .references(() => pagos_credito.pago_id),
+      inversionista_id: integer("inversionista_id")
+        .notNull()
+        .references(() => inversionistas.inversionista_id),
+      credito_id: integer("credito_id")
+        .notNull()
+        .references(() => creditos.credito_id),
+
+      abono_capital: numeric("abono_capital", {
+        precision: 18,
+        scale: 2,
+      }).notNull(),
+      abono_interes: numeric("abono_interes", {
+        precision: 18,
+        scale: 2,
+      }).notNull(),
+      abono_iva_12: numeric("abono_iva_12", {
+        precision: 18,
+        scale: 2,
+      }).notNull(),
+
+      porcentaje_participacion: numeric("porcentaje_participacion", {
+        precision: 5,
+        scale: 2,
+      }).notNull(),
+
+      fecha_pago: timestamp("fecha_pago", { withTimezone: true })
+        .notNull()
+        .$default(() => new Date()),
+      estado_liquidacion: estadoLiquidacionEnum("estado_liquidacion")
+        .notNull()
+        .default("NO_LIQUIDADO"),
+      cuota: numeric("cuota", { precision: 18, scale: 2 }).notNull(),
+
+      // 🆕 ENLACE A LIQUIDACIÓN
+      liquidacion_id: integer("liquidacion_id").references(
+        () => liquidaciones.liquidacion_id,
+        { onDelete: "set null" } // Si se borra la liquidación, el campo queda en null
+      ),
+    },
+    (table) => ({
+      uniquePagoInversionistaEspejo: unique("unique_pago_inversionista_espejo").on(
+        table.pago_id,
+        table.inversionista_id
+      ),
+      // 🆕 Índice para búsquedas por liquidación
+      liquidacionIdxEspejo: index("idx_pagos_liquidacion_espejo").on(
+        table.liquidacion_id
+      ),
     })
   );
   export const bancos = customSchema.table('bancos', {

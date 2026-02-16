@@ -9,8 +9,8 @@ export const authRouter = {
 		const userId = context.session?.user?.id;
 		if (!userId) {
 			throw new ORPCError("NOT_FOUND", {
-			message: "Usuario no encontrado",
-		});
+				message: "Usuario no encontrado",
+			});
 		}
 
 		const userData = await db

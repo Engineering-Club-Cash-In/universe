@@ -55,7 +55,8 @@ const STATUS_CONFIG: Record<
 > = {
 	pending: {
 		label: "Pendiente",
-		color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
+		color:
+			"bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
 		icon: Clock,
 	},
 	read: {
@@ -65,12 +66,14 @@ const STATUS_CONFIG: Record<
 	},
 	in_progress: {
 		label: "En proceso",
-		color: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400",
+		color:
+			"bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400",
 		icon: Loader2,
 	},
 	resolved: {
 		label: "Resuelta",
-		color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
+		color:
+			"bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
 		icon: CheckCircle,
 	},
 	dismissed: {
@@ -90,11 +93,21 @@ const TYPE_CONFIG: Record<string, { label: string; icon: typeof Bell }> = {
 
 const REDIRECT_CONFIG: Record<
 	string,
-	{ label: string; getRoute: (id: string) => { to: string; params?: Record<string, string>; search?: Record<string, string> } }
+	{
+		label: string;
+		getRoute: (id: string) => {
+			to: string;
+			params?: Record<string, string>;
+			search?: Record<string, string>;
+		};
+	}
 > = {
 	opportunity_details: {
 		label: "Ver oportunidad",
-		getRoute: (id) => ({ to: "/crm/opportunities", search: { opportunityId: id } }),
+		getRoute: (id) => ({
+			to: "/crm/opportunities",
+			search: { opportunityId: id },
+		}),
 	},
 	client_details: {
 		label: "Ver cliente",
@@ -102,19 +115,31 @@ const REDIRECT_CONFIG: Record<
 	},
 	contract_details: {
 		label: "Generar contratos",
-		getRoute: (id) => ({ to: "/juridico/generate/$opportunityId", params: { opportunityId: id } }),
+		getRoute: (id) => ({
+			to: "/juridico/generate/$opportunityId",
+			params: { opportunityId: id },
+		}),
 	},
 	analysis_details: {
 		label: "Ver análisis",
-		getRoute: (id) => ({ to: "/crm/analysis/$opportunityId", params: { opportunityId: id } }),
+		getRoute: (id) => ({
+			to: "/crm/analysis/$opportunityId",
+			params: { opportunityId: id },
+		}),
 	},
 	analysis_50_details: {
 		label: "Ver análisis 50%",
-		getRoute: (id) => ({ to: "/crm/analysis", search: { opportunityId: id, stage: "investment" } }),
+		getRoute: (id) => ({
+			to: "/crm/analysis",
+			search: { opportunityId: id, stage: "investment" },
+		}),
 	},
 	analysis_90_details: {
 		label: "Ver análisis 90%",
-		getRoute: (id) => ({ to: "/crm/analysis", search: { opportunityId: id, stage: "disbursement" } }),
+		getRoute: (id) => ({
+			to: "/crm/analysis",
+			search: { opportunityId: id, stage: "disbursement" },
+		}),
 	},
 };
 
@@ -256,9 +281,7 @@ function NotificationsPage() {
 	const resolvedCount = notifications.filter(
 		(n) => n.status === "resolved",
 	).length;
-	const readCount = notifications.filter(
-		(n) => n.status === "read",
-	).length;
+	const readCount = notifications.filter((n) => n.status === "read").length;
 	const dismissedCount = notifications.filter(
 		(n) => n.status === "dismissed",
 	).length;
@@ -445,12 +468,10 @@ function NotificationCard({
 			>
 				{/* Fila superior: icono + titulo + badges */}
 				<div className="flex items-start justify-between gap-3">
-					<div className="flex items-start gap-3 min-w-0">
+					<div className="flex min-w-0 items-start gap-3">
 						<div
 							className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-								isPending
-									? "bg-yellow-100 dark:bg-yellow-900/40"
-									: "bg-muted"
+								isPending ? "bg-yellow-100 dark:bg-yellow-900/40" : "bg-muted"
 							}`}
 						>
 							<TypeIcon
@@ -483,11 +504,11 @@ function NotificationCard({
 								variant="outline"
 								className="h-6 gap-1 text-[11px]"
 								onClick={() => {
-								if (isPending) {
-									onChangeStatus("read");
-								}
-								entityLink.action();
-							}}
+									if (isPending) {
+										onChangeStatus("read");
+									}
+									entityLink.action();
+								}}
 							>
 								<ExternalLink className="h-3 w-3" />
 								{entityLink.label}
@@ -586,7 +607,7 @@ function NotificationCard({
 									<Button
 										size="sm"
 										variant="ghost"
-										className="h-7 text-xs text-muted-foreground"
+										className="h-7 text-muted-foreground text-xs"
 										onClick={() => onChangeStatus("dismissed")}
 										disabled={isChanging}
 									>
@@ -637,7 +658,7 @@ function NotificationCard({
 									<Button
 										size="sm"
 										variant="ghost"
-										className="h-7 text-xs text-muted-foreground"
+										className="h-7 text-muted-foreground text-xs"
 										onClick={() => onChangeStatus("dismissed")}
 										disabled={isChanging}
 									>
@@ -709,7 +730,7 @@ function NotificationCard({
 									<Button
 										size="sm"
 										variant="ghost"
-										className="h-7 text-xs text-muted-foreground"
+										className="h-7 text-muted-foreground text-xs"
 										onClick={() => onChangeStatus("dismissed")}
 										disabled={isChanging}
 									>
@@ -823,7 +844,7 @@ function UploadDocumentsDialog({
 				{/* Lista de documentos subidos */}
 				{docs.length > 0 && (
 					<div className="space-y-2">
-						<p className="text-muted-foreground text-xs font-medium">
+						<p className="font-medium text-muted-foreground text-xs">
 							Documentos subidos ({docs.length})
 						</p>
 						<div className="space-y-1.5">
@@ -832,11 +853,9 @@ function UploadDocumentsDialog({
 									key={doc.id}
 									className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2"
 								>
-									<div className="flex items-center gap-2 min-w-0">
+									<div className="flex min-w-0 items-center gap-2">
 										<FileUp className="h-4 w-4 shrink-0 text-muted-foreground" />
-										<span className="truncate text-sm">
-											{doc.originalName}
-										</span>
+										<span className="truncate text-sm">{doc.originalName}</span>
 										<span className="shrink-0 text-muted-foreground text-xs">
 											({(doc.size / 1024).toFixed(0)} KB)
 										</span>
@@ -859,7 +878,7 @@ function UploadDocumentsDialog({
 
 				{/* Zona de subida */}
 				<div
-					className="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-muted-foreground/25 p-6 transition-colors hover:border-muted-foreground/50"
+					className="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-muted-foreground/25 border-dashed p-6 transition-colors hover:border-muted-foreground/50"
 					onClick={() => fileInputRef.current?.click()}
 				>
 					{uploading ? (
@@ -867,10 +886,8 @@ function UploadDocumentsDialog({
 					) : (
 						<Upload className="mb-2 h-8 w-8 text-muted-foreground/50" />
 					)}
-					<p className="text-sm text-muted-foreground">
-						{uploading
-							? "Subiendo..."
-							: "Haz clic para seleccionar archivos"}
+					<p className="text-muted-foreground text-sm">
+						{uploading ? "Subiendo..." : "Haz clic para seleccionar archivos"}
 					</p>
 					<p className="mt-1 text-[11px] text-muted-foreground/60">
 						PDF, imágenes, Word o Excel (máx. 10 MB)

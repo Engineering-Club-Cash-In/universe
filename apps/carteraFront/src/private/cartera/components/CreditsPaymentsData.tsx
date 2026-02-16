@@ -6,15 +6,12 @@ import {
   FileSpreadsheet,
   Loader2,
   Search,
-  SearchIcon,
   User,
-  UserIcon,
   X,
-  XIcon,
 } from "lucide-react";
 import { useCreditosPaginadosWithFilters } from "../hooks/credits";
 import { Button } from "@/components/ui/button";
-import { Eye, Pencil, XCircle, MoreVertical, FileCheck } from "lucide-react";
+import { Eye, Pencil, XCircle, FileCheck } from "lucide-react";
 
 import {
   Table,
@@ -88,6 +85,7 @@ export function ListaCreditosPagos() {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [creditToEdit, setCreditToEdit] = useState<any | null>(null);
   const [investorsToEdit, setInvestorsToEdit] = useState<any[]>([]);
+  const [investorsMirrorToEdit, setInvestorsMirrorToEdit] = useState<any[]>([]);
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
 
@@ -164,6 +162,8 @@ export function ListaCreditosPagos() {
     reportCancelationIntern.status === "pending" ||
     reportCostDetail.status === "pending";
 
+
+
   const handleOpenEdit = (credit: any, inversionistas: any, usuario?: any) => {
     console.log(credit);
     setCreditToEdit({
@@ -187,16 +187,31 @@ export function ListaCreditosPagos() {
       saldo_a_favor: usuario?.saldo_a_favor ?? 0,
     });
 
-    setInvestorsToEdit(
-      inversionistas.map((inv: any) => ({
-        inversionista_id: inv.inversionista_id,
-        porcentaje_participacion: inv.porcentaje_participacion,
-        monto_aportado: inv.monto_aportado,
-        porcentaje_cash_in: inv.porcentaje_cash_in,
-        porcentaje_inversion: inv.porcentaje_participacion_inversionista,
-        cuota_inversionista: inv.cuota_inversionista ?? 0,
-      }))
-    );
+    const mappedInvestors = inversionistas.map((inv: any) => ({
+      inversionista_id: inv.inversionista_id,
+      porcentaje_participacion: inv.porcentaje_participacion,
+      monto_aportado: inv.monto_aportado,
+      porcentaje_cash_in: inv.porcentaje_cash_in,
+      porcentaje_inversion: inv.porcentaje_participacion_inversionista,
+      cuota_inversionista: inv.cuota_inversionista ?? 0,
+    }));
+
+    setInvestorsToEdit(mappedInvestors);
+
+    // Mapeo seguro de espejo
+    const mirrorData = credit.creditos_inversionistas_espejo || [];
+    const mappedMirror = mirrorData.map((inv: any) => ({
+      inversionista_id: inv.inversionista_id,
+      porcentaje_participacion: inv.porcentaje_participacion,
+      monto_aportado: inv.monto_aportado,
+      porcentaje_cash_in: inv.porcentaje_cash_in,
+      porcentaje_inversion: inv.porcentaje_inversion,
+      cuota_inversionista: inv.cuota_inversionista ?? 0,
+    }));
+
+    setInvestorsMirrorToEdit(mappedMirror);
+
+
 
     setEditModalOpen(true);
   };
@@ -232,17 +247,47 @@ export function ListaCreditosPagos() {
   console.log("👥 Advisors:", advisors);
   console.log("🎯 Asesor ID actual:", asesorId);
 
+  // 🆕 Handler para activar convenio (por ahora vacío, lo conectarás después)
+  const handleActivarConvenio = (creditId: number) => {
+    console.log("🎯 Activar convenio para crédito:", creditId);
+    // TODO: Aquí llamarás al hook/servicio cuando esté listo
+  };
+
   // Cuando cierras el modal, resetea ambos states (opcional)
   const handleCloseModal = () => {
     setModalOpen(false);
     setSelectedCreditId(null);
   };
 
-  // 🆕 Handler para activar convenio (por ahora vacío, lo conectarás después)
-  const handleActivarConvenio = (creditId: number) => {
-    console.log("🎯 Activar convenio para crédito:", creditId);
-    // TODO: Aquí llamarás al hook/servicio cuando esté listo
-  };
+  // 🔍 DEBUG: Log credits with mirror investors
+  React.useEffect(() => {
+    if (data?.data) {
+      console.log("🔍 Datos recibidos del backend:", data.data);
+      const creditsWithMirror = data.data.filter(
+        (c: any) =>
+          c.creditos_inversionistas_espejo &&
+          c.creditos_inversionistas_espejo.length > 0
+      );
+
+      if (creditsWithMirror.length > 0) {
+        console.group("🔍 Créditos CON datos espejo detectados:");
+        creditsWithMirror.forEach((c: any) => {
+          console.group(
+            `📄 Crédito: ${c.creditos.numero_credito_sifco} (ID: ${c.creditos.credito_id})`
+          );
+          console.log("🟢 Inversionistas Normales:", c.inversionistas);
+          console.table(c.inversionistas);
+          console.log("🟣 Inversionistas Espejo:", c.creditos_inversionistas_espejo);
+          console.table(c.creditos_inversionistas_espejo);
+          console.groupEnd();
+        });
+        console.groupEnd();
+      } else {
+        console.log("ℹ️ No se detectaron créditos con datos espejo en esta página.");
+      }
+    }
+  }, [data]);
+
 
   if (isLoading) {
     return (
@@ -630,6 +675,7 @@ export function ListaCreditosPagos() {
         onClose={() => setEditModalOpen(false)}
         initialValues={creditToEdit}
         investorsInitial={investorsToEdit}
+        investorsMirrorInitial={investorsMirrorToEdit}
         onSuccess={() => {
           setEditModalOpen(false);
           queryClient.invalidateQueries({
@@ -1135,7 +1181,15 @@ function MobileView({
                   variant="outline"
                   className="text-yellow-700 border-yellow-300 hover:bg-yellow-50"
                   onClick={() =>
-                    handleOpenEdit(item.creditos, item.inversionistas, item.usuarios)
+                    handleOpenEdit(
+                      {
+                        ...item.creditos,
+                        creditos_inversionistas_espejo:
+                          item.creditos_inversionistas_espejo,
+                      },
+                      item.inversionistas,
+                      item.usuarios
+                    )
                   }
                 >
                   <Pencil className="w-4 h-4 mr-1" /> Editar
@@ -1344,7 +1398,11 @@ function DesktopView({
                               className="flex items-center gap-1 text-yellow-700 border-yellow-300 hover:bg-yellow-50"
                               onClick={() =>
                                 handleOpenEdit(
-                                  item.creditos,
+                                  {
+                                    ...item.creditos,
+                                    creditos_inversionistas_espejo:
+                                      item.creditos_inversionistas_espejo,
+                                  },
                                   item.inversionistas,
                                   item.usuarios
                                 )

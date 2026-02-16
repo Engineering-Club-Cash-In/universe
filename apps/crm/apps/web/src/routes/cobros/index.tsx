@@ -163,12 +163,13 @@ function RouteComponent() {
 			});
 	}, [creditos]);
 
-	// Filtrar según el rango temporal seleccionado
+	// Filtrar completados/incobrables según estado del toggle
 	const creditosFiltrados = useMemo(() => {
 		let filtrados = creditosConDias;
 
 		// Excluir completados e incobrables si el filtro está desactivado
 		// NOTA: El filtro por etapa ahora se hace en el servidor mediante estadoMora
+		// NOTA: El filtro temporal se hace en el servidor mediante proximidad_pago
 		if (!mostrarCompletadosIncobrables && !filtroEtapa) {
 			filtrados = filtrados.filter(
 				(c) =>
@@ -177,24 +178,8 @@ function RouteComponent() {
 			);
 		}
 
-		// Filtrar por rango temporal
-		if (filtroTemporal === "todos") return filtrados;
-
-		const limitesDias: Record<FiltroTemporal, number> = {
-			hoy: 0,
-			semana: 7,
-			quincena: 15,
-			mes: 30,
-			todos: Number.POSITIVE_INFINITY,
-		};
-
-		const limite = limitesDias[filtroTemporal];
-
-		return filtrados.filter((c) => {
-			// Incluir casos en mora (días negativos) y casos próximos a vencer
-			return c?.diasHastaPago !== null && c?.diasHastaPago <= limite;
-		});
-	}, [creditosConDias, filtroTemporal, mostrarCompletadosIncobrables]);
+		return filtrados;
+	}, [creditosConDias, mostrarCompletadosIncobrables, filtroEtapa]);
 
 	// Check permissions after all hooks
 	if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {

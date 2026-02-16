@@ -120,7 +120,10 @@ interface CreditDetailViewProps {
 			| "nuevo"
 			| "panel"
 			| "camion"
-			| "microbus";
+			| "microbus"
+			| "microbus_20"
+			| "microbus_35"
+			| "microbus_36plus";
 		vehicleValue: string;
 		insuredAmount: string;
 		downPayment: string;

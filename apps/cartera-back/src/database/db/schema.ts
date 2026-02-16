@@ -161,13 +161,16 @@
     numero_cuota: integer("numero_cuota").notNull(), // Ej: 1, 2, 3...
     fecha_vencimiento: date("fecha_vencimiento").notNull(),
     pagado: boolean("pagado").default(false), // 👈 Si el cliente ya pagó esta cuota
-    
+
     // 👇 NUEVO - Para control de liquidación a inversionistas
     liquidado_inversionistas: boolean("liquidado_inversionistas").default(false).notNull(), // 👈 Si ya se liquidó a TODOS los inversionistas
     fecha_liquidacion_inversionistas: timestamp("fecha_liquidacion_inversionistas"), // 👈 Cuándo se liquidó
-    
+
     createdAt: timestamp("createdat").defaultNow(),
-  });
+  },
+  (table) => ({
+    fechaVencimientoIdx: index("idx_cuotas_fecha_vencimiento").on(table.fecha_vencimiento),
+  }));
   export const moras_credito = customSchema.table("moras_credito", {
     mora_id: serial("mora_id").primaryKey(),
     credito_id: integer("credito_id")

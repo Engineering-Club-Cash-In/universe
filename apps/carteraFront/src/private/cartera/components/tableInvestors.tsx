@@ -11,6 +11,7 @@ import {
   FileSpreadsheet,
   Loader2,
   MoreVertical,
+  RefreshCw,
   Upload,
 } from "lucide-react";
 import { useGetInvestors, useGetInvestorTotals } from "../hooks/getInvestor";
@@ -40,10 +41,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Combobox, Transition } from "@headlessui/react";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useState } from "react";
 import { CrearBoletaInversionista } from "./investorPayment";
 
-const PER_PAGE_OPTIONS = [5, 10, 20, 50,100,200];
+const PER_PAGE_OPTIONS = [5, 10, 20, 50, 100, 200, 500];
+
+
 
 export function TableInvestors() {
   // 🆕 Estados para el modal de confirmación
@@ -200,11 +203,6 @@ export function TableInvestors() {
       console.error(err);
     }
   };
-  useEffect(() => {
-    if (investors.length > 0 && selectedInvestor === "") {
-      setSelectedInvestor(investors[0].inversionista_id);
-    }
-  }, [investors, selectedInvestor]);
 
   const handleEditInvestor = (inv: any) => {
     setModalMode("update");
@@ -286,11 +284,12 @@ const handleAbrirModalBoleta = (inversionista?: { id: number; nombre: string; dp
                     className="w-full border-2 border-blue-300 rounded-lg pl-3 pr-10 py-2 bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-900 font-medium focus:ring-2 focus:ring-blue-400 focus:border-blue-500 focus:outline-none placeholder:text-blue-400 transition-all shadow-sm hover:from-blue-100 hover:to-indigo-100"
                     displayValue={(id) =>
                       id === ""
-                        ? "Todos los inversionistas"
+                        ? ""
                         : investors.find((inv) => inv.inversionista_id === id)
                             ?.nombre || ""
                     }
                     onChange={(e) => setQuery(e.target.value)}
+                    onFocus={(e) => e.target.select()}
                     placeholder="Buscar inversionista..."
                   />
 
@@ -307,43 +306,6 @@ const handleAbrirModalBoleta = (inversionista?: { id: number; nombre: string; dp
                   afterLeave={() => setQuery("")}
                 >
                   <Combobox.Options className="absolute z-50 mt-2 w-[200px] sm:w-[280px] max-h-60 overflow-auto rounded-xl bg-white py-2 shadow-2xl border-2 border-blue-200 focus:outline-none">
-                    {/* Opción "Todos" */}
-                    <Combobox.Option
-                      value=""
-                      className={({ active, selected }) =>
-                        `relative cursor-pointer select-none py-3 pl-10 pr-4 transition-colors ${
-                          active
-                            ? "bg-gradient-to-r from-blue-100 to-indigo-100 text-blue-900"
-                            : selected
-                              ? "bg-blue-50 text-blue-900"
-                              : "bg-white text-gray-900"
-                        }`
-                      }
-                    >
-                      {({ selected }) => (
-                        <>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xl">📋</span>
-                            <span
-                              className={
-                                selected ? "font-bold" : "font-semibold"
-                              }
-                            >
-                              Todos los inversionistas
-                            </span>
-                          </div>
-                          {selected && (
-                            <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-green-600">
-                              <Check className="h-5 w-5" aria-hidden="true" />
-                            </span>
-                          )}
-                        </>
-                      )}
-                    </Combobox.Option>
-
-                    {/* Separador */}
-                    <div className="h-px bg-gradient-to-r from-transparent via-blue-300 to-transparent my-1" />
-
                     {/* Lista de inversionistas */}
                     {filteredInvestors.length === 0 && query !== "" ? (
                       <div className="relative cursor-default select-none py-4 px-4 text-center">
@@ -517,6 +479,19 @@ const handleAbrirModalBoleta = (inversionista?: { id: number; nombre: string; dp
 
         {/* Fila 3: Botones de Acción - CENTRADOS */}
         <div className="flex flex-wrap items-center justify-center gap-3">
+          {/* Recargar datos - solo cuando hay inversionista seleccionado */}
+          {selectedInvestor !== "" && (
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="px-4 py-2 rounded-lg bg-slate-600 text-white font-bold hover:bg-slate-700 active:scale-95 transition-all flex items-center gap-2 justify-center shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
+              title="Recargar estadísticas y datos del inversionista"
+            >
+              <RefreshCw className={`w-5 h-5 ${isFetching ? "animate-spin" : ""}`} />
+              <span className="hidden sm:inline">Recargar</span>
+            </button>
+          )}
+
           {/* Crear Inversionista - YA EXISTENTE */}
           <button
             onClick={handleCreateInvestor}
@@ -735,7 +710,6 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 </div>
               </div>
 
-              {/* 🔥 NUEVO: Bloque Total Monto Aportado */}
               <div className="bg-gradient-to-br from-purple-50 to-fuchsia-50 rounded-lg p-3 shadow-sm border-2 border-purple-300 h-full flex flex-col justify-center">
                 <div className="text-xs text-purple-700 mb-1 font-semibold">
                   Total Monto Aportado
@@ -1251,37 +1225,31 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
         <div>
           <span className="font-bold text-blue-900">Total Capital: </span>
           <span className="text-blue-800 font-bold">
-            Q{Number(inv.subtotal?.total_abono_capital ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+            Q{Number(totalesData?.totales.total_abono_capital ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
           </span>
         </div>
         <div>
           <span className="font-bold text-blue-900">Total Interés: </span>
           <span className="text-indigo-700 font-bold">
-            Q{Number(inv.subtotal?.total_abono_interes ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+            Q{Number(totalesData?.totales.total_abono_interes ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
           </span>
         </div>
         <div>
-          <span className="font-bold text-blue-900">Total IVA: </span>
+          <span className="font-bold text-blue-900">IVA + ISR: </span>
           <span className="text-violet-700 font-bold">
-            Q{Number(inv.subtotal?.total_abono_iva ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
-          </span>
-        </div>
-        <div>
-          <span className="font-bold text-blue-900">Total ISR: </span>
-          <span className="text-yellow-700 font-bold">
-            Q{Number(inv.subtotal?.total_isr ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+            Q{(Number(totalesData?.totales.total_abono_iva ?? 0) + Number(totalesData?.totales.total_isr ?? 0)).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
           </span>
         </div>
         <div>
           <span className="font-bold text-blue-900">Total Cuota: </span>
           <span className="text-green-700 font-bold">
-            Q{Number(inv.subtotal?.total_cuota ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+            Q{Number(totalesData?.totales.total_cuota ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
           </span>
         </div>
         <div>
           <span className="font-bold text-blue-900">Total Monto Aportado: </span>
           <span className="text-purple-700 font-bold">
-            Q{Number(inv.subtotal?.total_monto_aportado ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+            Q{Number(totalesData?.totales.total_monto_aportado ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
           </span>
         </div>
         <div>

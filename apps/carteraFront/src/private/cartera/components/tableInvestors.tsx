@@ -46,6 +46,8 @@ import { CrearBoletaInversionista } from "./investorPayment";
 
 const PER_PAGE_OPTIONS = [5, 10, 20, 50, 100, 200, 500];
 
+
+
 export function TableInvestors() {
   // 🆕 Estados para el modal de confirmación
   // 🆕 Estados para el modal de generar pagos falsos

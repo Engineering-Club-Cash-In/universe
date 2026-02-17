@@ -1,10 +1,11 @@
 import Big from "big.js";
-import { eq, inArray } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import fs from "fs";
 import { db } from "../database";
 import {
   creditos,
   creditos_inversionistas,
+  creditos_inversionistas_espejo,
   cuotas_credito,
   pagos_credito,
   pagos_credito_inversionistas,
@@ -44,6 +45,7 @@ interface InversionistaActual {
   porcentajeCashIn: string;
   porcentajeInversionista: string;
   capital: string;
+  cuota?: string;
 }
 
 interface CreditoAgrupado {
@@ -246,12 +248,28 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
         // ✅ Usar inversionistasActuales del JSON
         console.log(`   📋 Usando inversionistasActuales del JSON (${grupo.inversionistasActuales!.length})`);
 
+        // Agrupar inversionistas duplicados (mismo nombre) sumando capital y cuota
+        const inversionistasAgrupados = new Map<string, InversionistaActual>();
+        for (const inv of grupo.inversionistasActuales!) {
+          const existing = inversionistasAgrupados.get(inv.inversionista);
+          if (existing) {
+            existing.capital = new Big(existing.capital || 0).plus(new Big(inv.capital || 0)).toString();
+            existing.cuota = new Big(existing.cuota || 0).plus(new Big(inv.cuota || 0)).toString();
+            console.log(`   🔀 ${inv.inversionista} duplicado → sumando capital y cuota`);
+          } else {
+            inversionistasAgrupados.set(inv.inversionista, { ...inv });
+          }
+        }
+
+        const inversionistasUnicos = Array.from(inversionistasAgrupados.values());
+        console.log(`   📊 Inversionistas únicos: ${inversionistasUnicos.length}`);
+
         // Encontrar al inversionista con mayor capital
-        const inversionistaMayor = grupo.inversionistasActuales!.reduce((max, current) =>
+        const inversionistaMayor = inversionistasUnicos.reduce((max, current) =>
           new Big(current.capital || 0).gt(new Big(max.capital || 0)) ? current : max
         );
 
-        for (const invActual of grupo.inversionistasActuales!) {
+        for (const invActual of inversionistasUnicos) {
           const investor = await findOrCreateInvestor(invActual.inversionista, true);
 
           const montoAportado = new Big(invActual.capital || 0);
@@ -278,13 +296,20 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
             ? montoCashIn.times(0.12).round(2)
             : new Big(0);
 
-          // Calcular cuota del inversionista
-          const cuotaSinCargos = cuotaTotal.minus(seguro).minus(membresias);
-          let cuotaInversionista = cuotaSinCargos.times(porcentajeParticipacion.div(100)).round(2);
+          // Cuota del inversionista: viene directo en inversionistasActuales
+          let cuotaInversionista: Big;
 
-          // Si es el inversionista mayor, sumarle seguro y membresia
-          if (invActual.inversionista === inversionistaMayor.inversionista) {
-            cuotaInversionista = cuotaInversionista.plus(seguro).plus(membresias).round(2);
+          if (invActual.cuota) {
+            cuotaInversionista = new Big(invActual.cuota);
+            console.log(`   💵 Cuota de ${invActual.inversionista}: Q${cuotaInversionista.toFixed(2)} (del JSON)`);
+          } else {
+            // Fallback: calcular proporcionalmente
+            const cuotaSinCargos = cuotaTotal.minus(seguro).minus(membresias);
+            cuotaInversionista = cuotaSinCargos.times(porcentajeParticipacion.div(100)).round(6);
+            if (invActual.inversionista === inversionistaMayor.inversionista) {
+              cuotaInversionista = cuotaInversionista.plus(seguro).plus(membresias).round(6);
+            }
+            console.log(`   💵 Cuota de ${invActual.inversionista}: Q${cuotaInversionista.toFixed(6)} (calculada)`);
           }
 
           await db.insert(creditos_inversionistas).values({
@@ -340,11 +365,11 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
 
           // Calcular cuota del inversionista
           const cuotaSinCargos = cuotaTotal.minus(seguro).minus(membresias);
-          let cuotaInversionista = cuotaSinCargos.times(porcentajeParticipacion.div(100)).round(2);
+          let cuotaInversionista = cuotaSinCargos.times(porcentajeParticipacion.div(100)).round(6);
 
           // Si es el inversionista mayor, sumarle seguro y membresia
           if (inv.nombre === inversionistaMayor.nombre) {
-            cuotaInversionista = cuotaInversionista.plus(seguro).plus(membresias).round(2);
+            cuotaInversionista = cuotaInversionista.plus(seguro).plus(membresias).round(6);
           }
 
           await db.insert(creditos_inversionistas).values({
@@ -719,6 +744,127 @@ export async function eliminarCreditos(creditosEliminar: CreditoEliminar[]) {
     exitosos,
     errores,
     noEncontrados,
+    detalles: resultados,
+  };
+}
+
+// ========================================
+// ACTUALIZAR SOLO CUOTAS DE INVERSIONISTAS
+// ========================================
+
+export async function actualizarCuotasInversionistas(creditosAgrupados: CreditoAgrupado[]) {
+  const resultados: {
+    numeroCredito: string;
+    status: "success" | "error" | "not_found" | "sin_cuotas";
+    message: string;
+    inversionistasActualizados?: number;
+  }[] = [];
+
+  console.log(`\n🔄 ========== ACTUALIZANDO CUOTAS DE ${creditosAgrupados.length} CRÉDITOS ==========\n`);
+
+  for (const grupo of creditosAgrupados) {
+    const numeroBase = grupo.numeroCredito;
+    console.log(`\n📋 Procesando crédito: ${numeroBase}`);
+
+    if (!grupo.inversionistasActuales || grupo.inversionistasActuales.length === 0) {
+      console.log(`   ⚠️ No tiene inversionistasActuales con cuotas`);
+      resultados.push({
+        numeroCredito: numeroBase,
+        status: "sin_cuotas",
+        message: "No se proporcionaron inversionistasActuales",
+      });
+      continue;
+    }
+
+    try {
+      // 1. Buscar el crédito
+      const [creditoDB] = await db
+        .select({ credito_id: creditos.credito_id })
+        .from(creditos)
+        .where(eq(creditos.numero_credito_sifco, numeroBase))
+        .limit(1);
+
+      if (!creditoDB) {
+        console.log(`   ⚠️ Crédito no encontrado en BD`);
+        resultados.push({
+          numeroCredito: numeroBase,
+          status: "not_found",
+          message: "Crédito no encontrado en la base de datos",
+        });
+        continue;
+      }
+
+      // 2. Actualizar cuota de cada inversionista
+      let actualizados = 0;
+
+      for (const invActual of grupo.inversionistasActuales) {
+        if (!invActual.cuota) {
+          console.log(`   ⏭️ ${invActual.inversionista}: sin cuota, saltando`);
+          continue;
+        }
+
+        const investor = await findOrCreateInvestor(invActual.inversionista, false);
+
+        // Actualizar tabla principal
+        const [updated] = await db
+          .update(creditos_inversionistas)
+          .set({ cuota_inversionista: invActual.cuota })
+          .where(
+            and(
+              eq(creditos_inversionistas.credito_id, creditoDB.credito_id),
+              eq(creditos_inversionistas.inversionista_id, investor.inversionista_id)
+            )
+          )
+          .returning({ id: creditos_inversionistas.id });
+
+        // Actualizar espejo
+        await db
+          .update(creditos_inversionistas_espejo)
+          .set({ cuota_inversionista: invActual.cuota })
+          .where(
+            and(
+              eq(creditos_inversionistas_espejo.credito_id, creditoDB.credito_id),
+              eq(creditos_inversionistas_espejo.inversionista_id, investor.inversionista_id)
+            )
+          );
+
+        if (updated) {
+          actualizados++;
+          console.log(`   ✅ ${invActual.inversionista}: cuota → Q${invActual.cuota} (padre + espejo)`);
+        } else {
+          console.log(`   ⚠️ ${invActual.inversionista}: no encontrado en el crédito`);
+        }
+      }
+
+      resultados.push({
+        numeroCredito: numeroBase,
+        status: "success",
+        message: `${actualizados} inversionistas actualizados`,
+        inversionistasActualizados: actualizados,
+      });
+
+    } catch (error: any) {
+      console.error(`   ❌ Error: ${error.message}`);
+      resultados.push({
+        numeroCredito: numeroBase,
+        status: "error",
+        message: error.message || "Error desconocido",
+      });
+    }
+  }
+
+  const exitosos = resultados.filter(r => r.status === "success").length;
+  const errores = resultados.filter(r => r.status === "error").length;
+
+  console.log(`\n📊 ========== RESUMEN CUOTAS ==========`);
+  console.log(`✅ Exitosos: ${exitosos}`);
+  console.log(`❌ Errores: ${errores}`);
+
+  return {
+    success: exitosos > 0,
+    total: resultados.length,
+    exitosos,
+    errores,
     detalles: resultados,
   };
 }

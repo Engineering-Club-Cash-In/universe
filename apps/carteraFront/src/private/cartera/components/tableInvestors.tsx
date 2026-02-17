@@ -43,7 +43,7 @@ import { Combobox, Transition } from "@headlessui/react";
 import { Fragment, useEffect, useState } from "react";
 import { CrearBoletaInversionista } from "./investorPayment";
 
-const PER_PAGE_OPTIONS = [5, 10, 20, 50];
+const PER_PAGE_OPTIONS = [5, 10, 20, 50,100,200];
 
 export function TableInvestors() {
   // 🆕 Estados para el modal de confirmación

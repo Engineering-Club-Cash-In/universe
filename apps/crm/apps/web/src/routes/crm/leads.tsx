@@ -1,4 +1,5 @@
 import { useForm } from "@tanstack/react-form";
+import type { leadSourceEnum } from "server/src/db/schema/crm";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
@@ -163,10 +164,6 @@ function RouteComponent() {
 		return () => clearTimeout(timer);
 	}, [searchTerm]);
 
-	// Reset page when status filter changes
-	useEffect(() => {
-		setPage(0);
-	}, [statusFilter]);
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 
@@ -310,14 +307,7 @@ function RouteComponent() {
 			hasCreditCard: false,
 			jobTitle: "",
 			companyId: "none",
-			source: "website" as
-				| "website"
-				| "referral"
-				| "cold_call"
-				| "email"
-				| "social_media"
-				| "event"
-				| "other",
+			source: "website" as (typeof leadSourceEnum.enumValues)[number],
 			assignedTo: "",
 			notes: "",
 			score: "",
@@ -1960,7 +1950,7 @@ function RouteComponent() {
 								setPage(0);
 							}}
 						/>
-						<Select value={statusFilter} onValueChange={setStatusFilter}>
+						<Select value={statusFilter} onValueChange={(value) => { setStatusFilter(value); setPage(0); }}>
 							<SelectTrigger className="w-[180px]">
 								<Filter className="mr-2 h-4 w-4" />
 								<SelectValue placeholder="Filtrar por estado" />

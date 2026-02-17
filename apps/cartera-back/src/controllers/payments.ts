@@ -1570,6 +1570,7 @@ export async function obtenerCreditosConPagosPendientes(
           .where(
             and(
               eq(pagos_credito_inversionistas_espejo.credito_id, credito.creditoId),
+              eq(pagos_credito_inversionistas_espejo.inversionista_id, inversionistaId),
               eq(pagos_credito_inversionistas_espejo.estado_liquidacion, "NO_LIQUIDADO")
             )
           );

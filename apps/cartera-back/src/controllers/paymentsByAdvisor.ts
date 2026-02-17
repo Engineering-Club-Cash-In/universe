@@ -61,7 +61,19 @@ export const getCuotasPorDiaYAsesor = async (
         cuota_id: cuotas_credito.cuota_id,
         numero_cuota: cuotas_credito.numero_cuota,
         fecha_vencimiento: cuotas_credito.fecha_vencimiento,
-        pagado: cuotas_credito.pagado,
+        pagado: sql<boolean>`
+          CASE
+            WHEN EXISTS (
+              SELECT 1 FROM cartera.pagos_credito pc
+              WHERE pc.cuota_id = ${cuotas_credito.cuota_id}
+            ) AND NOT EXISTS (
+              SELECT 1 FROM cartera.pagos_credito pc
+              WHERE pc.cuota_id = ${cuotas_credito.cuota_id}
+              AND pc.pagado = false
+            ) THEN true
+            ELSE false
+          END
+        `.as("pagado"),
         // Convenio (si existe uno activo)
         convenio_id: convenios_pago.convenio_id,
         fecha_convenio: convenios_pago.fecha_convenio,
@@ -97,6 +109,15 @@ export const getCuotasPorDiaYAsesor = async (
         )
       )
       .where(and(...conditions));
+
+    // Deduplicar: quedarse con 1 sola cuota por (credito_id, numero_cuota)
+    const seen = new Set<string>();
+    const uniqueResults = results.filter((row) => {
+      const key = `${row.credito_id}-${row.numero_cuota}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 
     // Agrupar por asesor
     const porAsesor: Record<
@@ -135,7 +156,7 @@ export const getCuotasPorDiaYAsesor = async (
       }
     > = {};
 
-    for (const row of results) {
+    for (const row of uniqueResults) {
       if (!porAsesor[row.asesor_id]) {
         porAsesor[row.asesor_id] = {
           asesor_id: row.asesor_id,
@@ -295,9 +316,8 @@ export const upsertEfectividadAsesores = async (
 
           console.log(`[JOB]     efectividad_dia=${efectividadDia}%, efectividad_mes=${efectividadMes}%`);
 
-          // Upsert por cada crédito del asesor ese día (ignorar cuota #0)
+          // Upsert por cada crédito del asesor ese día
           for (const cuota of asesor.cuotas) {
-            if (cuota.numero_cuota <= 0) continue;
             const existing = await db
               .select({ efectividad_id: efectividad_asesores.efectividad_id })
               .from(efectividad_asesores)

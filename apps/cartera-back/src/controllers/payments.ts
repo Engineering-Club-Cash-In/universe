@@ -390,10 +390,15 @@ export async function insertPagosCreditoInversionistas(
     console.log(`   ${idx + 1}. ${inv.nombre}`);
   });
 
+  if (filteredInversionistas.length === 0) {
+    console.log(`\n⚠️ No hay inversionistas para procesar, saliendo...`);
+    return;
+  }
+
   const indexMayorCuota = filteredInversionistas.reduce(
     (maxIdx, inv, idx, arr) =>
-      new Big(inv.cuota_inversionista ?? 0).gt(
-        new Big(arr[maxIdx].cuota_inversionista ?? 0)
+      new Big(inv.cuota_inversionista || 0).gt(
+        new Big(arr[maxIdx].cuota_inversionista || 0)
       )
         ? idx
         : maxIdx,

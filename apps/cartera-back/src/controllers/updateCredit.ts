@@ -84,16 +84,14 @@ const updateInstallments = async ({
   const cuotaMensual = new Big(nueva_cuota);
   const cuotaInteresCredito = credito.cuota_interes;
 
-  // Capital en memoria
+  // Capital en memoria (saldo actual)
   let capitalEnMemoria = capitalInicial;
 
-  // 4️⃣ Preparar todas las actualizaciones en memoria primero (batch)
+  // 4️⃣ Amortización real: interés calculado sobre capital que va quedando
   const actualizaciones = pagosNoPagados.map((pago) => {
-    // Cálculos del mes
     const interesMes = capitalEnMemoria.times(porcentajeInteres).round(2);
     const ivaMes = interesMes.times(0.12).round(2);
 
-    // Abono a capital
     const montosExtras = interesMes
       .plus(ivaMes)
       .plus(seguroFijoPorMes)
@@ -101,11 +99,9 @@ const updateInstallments = async ({
       .plus(membresiasFijoPorMes);
     const abonoCapital = cuotaMensual.minus(montosExtras);
 
-    // Actualizar capital en memoria
     capitalEnMemoria = capitalEnMemoria.minus(abonoCapital);
     if (capitalEnMemoria.lt(0)) capitalEnMemoria = new Big(0);
 
-    // Retornar objeto de actualización
     return {
       pago_id: pago.pago_id,
       datos: {
@@ -118,11 +114,8 @@ const updateInstallments = async ({
         gps_restante: gpsFijoPorMes.toString(),
         total_restante: capitalEnMemoria.round(2).toString(),
         membresias: membresiasFijoPorMes.toString(),
-        membresias_pago: pago.validationStatus ==="pending"  ? pago.membresias_pago : "0",
-        membresias_mes: pago.validationStatus ==="pending"  ? pago.membresias_mes : "0",
-
-
-        
+        membresias_pago: pago.validationStatus === "pending" ? pago.membresias_pago : "0",
+        membresias_mes: pago.validationStatus === "pending" ? pago.membresias_mes : "0",
       },
     };
   });

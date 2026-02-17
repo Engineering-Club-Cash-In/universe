@@ -2,6 +2,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { 
   getInvestorServices,
+  getInvestorTotalsService, // 🆕 NUEVO: Servicio de totales globales
   liquidateByInvestorService,
   downloadInvestorPDFService,
   type LiquidateByInvestorRequest,
@@ -33,6 +34,7 @@ export interface UseGetInvestorsParams {
   nombreUsuario?: string; // 🆕
   incluirLiquidados?: boolean; // 🆕
   numeroCuota?: number; // 🆕
+  tipo?: "originales" | "espejos" | "ambas"; // 🆕 NUEVO: Permite consultar originales, espejos o ambas
 }
 
 interface DownloadPDFVars {
@@ -77,6 +79,43 @@ export function useGetInvestors(params: UseGetInvestorsParams = {}) {
   return useQuery({
     queryKey: investorsQueryKeys.list(params), // 🆕 Ahora incluye todos los parámetros
     queryFn: () => getInvestorServices(params),
+    
+    // ⏱️ Configuración de cache
+    staleTime: 1000 * 60 * 2, // 2 minutos
+    gcTime: 1000 * 60 * 5, // 5 minutos
+    
+    // 🔄 Refetch automático
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: true,
+    
+    // 🎯 Retry
+    retry: 2,
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
+    
+    // ✅ Placeholder data
+    placeholderData: (previousData) => previousData,
+    
+    // 🆕 Solo hacer query si hay al menos id o dpi
+    enabled: !!(params.id || params.dpi),
+  });
+}
+
+/**
+ * 🆕 NUEVO HOOK: Obtiene los totales globales de un inversionista (sin paginación)
+ * Calcula las sumas de TODOS los créditos y pagos del inversionista
+ * 
+ * @param params { id, dpi, tipo, incluirLiquidados, numeroCuota }
+ * @returns { data, isLoading, isError, error, refetch }
+ * 
+ * @example
+ * // Obtener totales globales de un inversionista
+ * const { data: totales } = useGetInvestorTotals({ id: 2, tipo: "espejos" })
+ * console.log(totales?.totales.total_monto_aportado)
+ */
+export function useGetInvestorTotals(params: UseGetInvestorsParams = {}) {
+  return useQuery({
+    queryKey: ['investor-totals', params],
+    queryFn: () => getInvestorTotalsService(params),
     
     // ⏱️ Configuración de cache
     staleTime: 1000 * 60 * 2, // 2 minutos

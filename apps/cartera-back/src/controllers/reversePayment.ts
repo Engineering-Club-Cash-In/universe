@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { eq, and, or, not, inArray } from "drizzle-orm";
+import { eq, and, or, not, inArray, sql } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
 import {
@@ -214,8 +214,6 @@ export const reversePayment = async ({ body, set }: any) => {
       console.log("\n💼 ========== REVERSANDO INVERSIONES ==========");
       await processAndReplaceCreditInvestorsReverse(
         credito_id,
-        abonoCapital.toNumber(),
-        true,
         pago_id,
       );
       console.log("✅ Inversiones reversadas correctamente");
@@ -311,6 +309,7 @@ export const reversePayment = async ({ body, set }: any) => {
             pago_del_mes: "0",
             monto_boleta: "0",
             monto_boleta_cuota: "0",
+            monto_aplicado: "0",
             mora: "0",
             otros: "0",
             pagoConvenio: "0",
@@ -337,17 +336,67 @@ export const reversePayment = async ({ body, set }: any) => {
         await tx.delete(boletas).where(eq(boletas.pago_id, pago_id));
         console.log("✅ Boletas eliminadas");
       } else {
-        // Pago parcial (registro extra) - eliminar completamente
+        // Pago parcial - verificar si es el único registro de la cuota
+        const [{ count: cantidadPagos }] = await tx
+          .select({ count: sql<number>`COUNT(*)` })
+          .from(pagos_credito)
+          .where(eq(pagos_credito.cuota_id, pago.cuota_id));
+
         await tx.delete(boletas).where(eq(boletas.pago_id, pago_id));
         console.log("✅ Boletas eliminadas");
         await tx
           .delete(pagos_credito_inversionistas)
           .where(eq(pagos_credito_inversionistas.pago_id, pago_id));
         console.log("✅ Pagos inversionistas eliminados");
-        await tx
-          .delete(pagos_credito)
-          .where(eq(pagos_credito.pago_id, pago_id));
-        console.log("✅ Pago parcial eliminado");
+
+        if (Number(cantidadPagos) > 1) {
+          // Hay más registros, se puede eliminar este
+          await tx
+            .delete(pagos_credito)
+            .where(eq(pagos_credito.pago_id, pago_id));
+          console.log("✅ Pago parcial eliminado (quedan otros registros en la cuota)");
+        } else {
+          // Es el único registro, resetear en vez de eliminar
+          console.log("⚠️ Único registro de la cuota, reseteando en vez de eliminar");
+          await tx
+            .update(pagos_credito)
+            .set({
+              capital_restante: nuevoCapitalRestante.toString(),
+              interes_restante: nuevoInteresRestante.toString(),
+              iva_12_restante: nuevoIvaRestante.toString(),
+              seguro_restante: nuevoSeguroRestante.toString(),
+              gps_restante: nuevoGpsRestante.toString(),
+              membresias: nuevoMembresiasRestante.toString(),
+              abono_capital: "0",
+              abono_interes: "0",
+              abono_iva_12: "0",
+              abono_interes_ci: "0",
+              abono_iva_ci: "0",
+              abono_seguro: "0",
+              abono_gps: "0",
+              membresias_pago: "0",
+              membresias_mes: "0",
+              pago_del_mes: "0",
+              monto_boleta: "0",
+              monto_boleta_cuota: "0",
+              monto_aplicado: "0",
+              mora: "0",
+              otros: "0",
+              pagoConvenio: "0",
+              fecha_pago: null,
+              mes_pagado: "",
+              pagado: false,
+              observaciones: "",
+              seguro_facturado: "0",
+              gps_facturado: "0",
+              reserva: "0",
+              validationStatus: "no_required" as const,
+              numeroAutorizacion: "",
+              banco_id: null,
+            })
+            .where(eq(pagos_credito.pago_id, pago_id));
+          console.log("✅ Pago reseteado (registro conservado para la cuota)");
+        }
       }
       console.log("✅ Pago reseteado correctamente");
 

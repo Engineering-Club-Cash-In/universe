@@ -241,6 +241,7 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
       // 6️⃣ Crear nuevos inversionistas
       const porcentajeInteres = new Big(creditoDB.porcentaje_interes ?? 0);
       const seguro = new Big(creditoDB.seguro_10_cuotas ?? 0);
+      const gps = new Big(creditoDB.gps ?? 0);
       const membresias = new Big(creditoDB.membresias_pago ?? 0);
       const cuotaTotal = new Big(creditoDB.cuota ?? 0);
 
@@ -304,10 +305,10 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
             console.log(`   💵 Cuota de ${invActual.inversionista}: Q${cuotaInversionista.toFixed(2)} (del JSON)`);
           } else {
             // Fallback: calcular proporcionalmente
-            const cuotaSinCargos = cuotaTotal.minus(seguro).minus(membresias);
+            const cuotaSinCargos = cuotaTotal.minus(seguro).minus(gps).minus(membresias);
             cuotaInversionista = cuotaSinCargos.times(porcentajeParticipacion.div(100)).round(6);
             if (invActual.inversionista === inversionistaMayor.inversionista) {
-              cuotaInversionista = cuotaInversionista.plus(seguro).plus(membresias).round(6);
+              cuotaInversionista = cuotaInversionista.plus(seguro).plus(gps).plus(membresias).round(6);
             }
             console.log(`   💵 Cuota de ${invActual.inversionista}: Q${cuotaInversionista.toFixed(6)} (calculada)`);
           }
@@ -364,12 +365,12 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
             : new Big(0);
 
           // Calcular cuota del inversionista
-          const cuotaSinCargos = cuotaTotal.minus(seguro).minus(membresias);
+          const cuotaSinCargos = cuotaTotal.minus(seguro).minus(gps).minus(membresias);
           let cuotaInversionista = cuotaSinCargos.times(porcentajeParticipacion.div(100)).round(6);
 
-          // Si es el inversionista mayor, sumarle seguro y membresia
+          // Si es el inversionista mayor, sumarle seguro, gps y membresia
           if (inv.nombre === inversionistaMayor.nombre) {
-            cuotaInversionista = cuotaInversionista.plus(seguro).plus(membresias).round(6);
+            cuotaInversionista = cuotaInversionista.plus(seguro).plus(gps).plus(membresias).round(6);
           }
 
           await db.insert(creditos_inversionistas).values({

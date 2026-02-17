@@ -571,9 +571,9 @@ const updateInvestors = async (
 
     const cuotaBase = cuotaSinCargos
       .times(porcentajeParticipacion.div(100))
-      .round(2);
+      .round(6);
 
-    console.log(`   Cuota Base Calculada: Q${cuotaBase.toFixed(2)}`);
+    console.log(`   Cuota Base Calculada: Q${cuotaBase.toFixed(6)}`);
 
     // 🔥 ENCONTRAR AL INVERSIONISTA CON MAYOR MONTO APORTADO
     console.log(`\n🔍 BUSCANDO INVERSIONISTA CON MAYOR MONTO APORTADO:`);
@@ -613,16 +613,16 @@ const updateInvestors = async (
       console.log(`   + Seguro: Q${seguro.toFixed(2)}`);
       console.log(`   + Membresía: Q${membresias.toFixed(2)}`);
 
-      cuotaInversionista = cuotaBase.plus(seguro).plus(membresias).round(2);
+      cuotaInversionista = cuotaBase.plus(seguro).plus(membresias).round(6);
 
-      console.log(`   = Cuota Final: Q${cuotaInversionista.toFixed(2)}`);
+      console.log(`   = Cuota Final: Q${cuotaInversionista.toFixed(6)}`);
       console.log(
-        `   Fórmula: ${cuotaBase.toFixed(2)} + ${seguro.toFixed(2)} + ${membresias.toFixed(2)}`,
+        `   Fórmula: ${cuotaBase.toFixed(6)} + ${seguro.toFixed(2)} + ${membresias.toFixed(2)}`,
       );
     } else {
       console.log(`   📍 Inversionista normal (no es el mayor)`);
       console.log(
-        `   Cuota Final = Cuota Base: Q${cuotaInversionista.toFixed(2)}`,
+        `   Cuota Final = Cuota Base: Q${cuotaInversionista.toFixed(6)}`,
       );
       console.log(`   (No se suman cargos)`);
     }

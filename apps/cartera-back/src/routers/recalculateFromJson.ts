@@ -6,6 +6,7 @@ import {
   agruparCreditosPorNumeroBase,
   processPoolsRaros,
   eliminarCreditos,
+  actualizarCuotasInversionistas,
 } from "../controllers/recalculateFromJson";
 
 // ========================================
@@ -31,6 +32,7 @@ const InversionistaActualSchema = t.Object({
   porcentajeCashIn: t.String(),
   porcentajeInversionista: t.String(),
   capital: t.String(),
+  cuota: t.Optional(t.String()),
 });
 
 const CreditoAgrupadoSchema = t.Object({
@@ -410,6 +412,60 @@ export const recalculateFromJsonRouter = new Elysia({ prefix: "/recalculate" })
         description: `
           Recibe un array de créditos.
           Elimina el crédito completo de la BD incluyendo: pagos, boletas, cuotas, inversionistas y todo lo relacionado.
+        `,
+        tags: ["Recálculo"],
+      },
+    }
+  )
+
+  // 📌 POST: Actualizar solo cuotas de inversionistas desde archivo
+  .post(
+    "/actualizar-cuotas",
+    async ({ set }) => {
+      try {
+        const rutaArchivo =
+          "C:\\Users\\Kelvin Palacios\\Documents\\analis de datos\\resultado_ultimos_pagos.json";
+
+        if (!fs.existsSync(rutaArchivo)) {
+          set.status = 404;
+          return { success: false, error: `Archivo no encontrado: ${rutaArchivo}` };
+        }
+
+        console.log(`\n📂 Leyendo archivo: ${rutaArchivo}`);
+        const contenido = fs.readFileSync(rutaArchivo, "utf-8");
+        const data = JSON.parse(contenido);
+
+        // Filtrar solo los que tienen inversionistasActuales con cuota
+        const creditosConCuotas = data.filter(
+          (g: any) => g.inversionistasActuales?.some((inv: any) => inv.cuota)
+        );
+
+        console.log(`📥 ${data.length} créditos en archivo, ${creditosConCuotas.length} con cuotas en inversionistasActuales`);
+
+        const resultado = await actualizarCuotasInversionistas(creditosConCuotas);
+
+        if (!resultado.success && resultado.exitosos === 0) {
+          set.status = 400;
+        }
+
+        return resultado;
+      } catch (error: any) {
+        console.error("❌ Error en /recalculate/actualizar-cuotas:", error);
+        set.status = 500;
+        return {
+          success: false,
+          error: error.message || "Error interno del servidor",
+        };
+      }
+    },
+    {
+      detail: {
+        summary: "Actualizar solo cuotas de inversionistas desde archivo",
+        description: `
+          Lee resultado_ultimos_pagos.json y actualiza SOLO la cuota_inversionista
+          de cada inversionista en creditos_inversionistas.
+          Usa el campo "cuota" de inversionistasActuales.
+          No toca capital, deuda, ni recrea inversionistas.
         `,
         tags: ["Recálculo"],
       },

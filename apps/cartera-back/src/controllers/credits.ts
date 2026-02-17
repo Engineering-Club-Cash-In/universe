@@ -1723,6 +1723,7 @@ export async function resetCredit({
         numeroAutorizacion: numeroAutorizacion ?? "",
         registerBy: "system_reset",
         pagoConvenio: "0",
+        monto_aplicado: montoBoleta.toString(),
       })
       .returning();
 
@@ -2007,6 +2008,7 @@ export async function syncScheduleOnTermsChange({
         paymentFalse: false,
         registerBy: "system_reset",
         pagoConvenio: "0",
+        monto_aplicado: "0",
       };
       });
 

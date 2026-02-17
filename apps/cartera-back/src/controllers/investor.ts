@@ -12,11 +12,168 @@ import {
   liquidaciones,
   pagos_credito,
   pagos_credito_inversionistas,
+  pagos_credito_inversionistas_espejo, // 🆕 NUEVO: Tabla espejo de pagos
   platform_users,
   usuarios,
 } from "../database/db/schema";
-import { eq, and, sql, inArray, ilike, like, desc, count } from "drizzle-orm";
+import { eq, and, sql, inArray, ilike, like, desc, count, SQL } from "drizzle-orm";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+
+// ============================================
+// 🆕 TIPOS Y CONFIGURACIÓN PARA CONSULTAS ORIGINALES/ESPEJO
+// ============================================
+
+// Tipo para origen de datos
+type OrigenDatos = "original" | "espejo";
+
+// Tipo para el parámetro tipo en consultas
+export type TipoConsulta = "originales" | "espejos" | "ambas";
+
+// 🔥 MEJORADO: Usar tipos genéricos de Drizzle para type-safety completo
+type CreditosInversionistasTable = 
+  | typeof creditos_inversionistas 
+  | typeof creditos_inversionistas_espejo;
+
+type PagosCreditoInversionistasTable = 
+  | typeof pagos_credito_inversionistas 
+  | typeof pagos_credito_inversionistas_espejo;
+
+// Configuración de tablas según tipo
+interface TablaConfig {
+  creditosInversionistas: CreditosInversionistasTable;
+  pagosCreditoInversionistas: PagosCreditoInversionistasTable;
+  origen: OrigenDatos;
+}
+
+// Función helper para obtener configuración de tablas
+function getTablaConfig(tipo: OrigenDatos): TablaConfig {
+  if (tipo === "espejo") {
+    return {
+      creditosInversionistas: creditos_inversionistas_espejo,
+      pagosCreditoInversionistas: pagos_credito_inversionistas_espejo,
+      origen: "espejo"
+    };
+  }
+  return {
+    creditosInversionistas: creditos_inversionistas,
+    pagosCreditoInversionistas: pagos_credito_inversionistas,
+    origen: "original"
+  };
+}
+
+// ============================================
+// 🆕 FUNCIONES HELPER GENÉRICAS PARA CONSULTAS
+// ============================================
+
+// Función genérica para consultar créditos de inversionista
+async function consultarCreditosInversionista(
+  inversionistaIds: number[],
+  config: TablaConfig
+) {
+  // 🔥 Type assertion segura: sabemos que ambas tablas tienen la misma estructura
+  const tabla = config.creditosInversionistas as typeof creditos_inversionistas;
+  
+  return await db
+    .select({
+      credito_id: tabla.credito_id,
+      inversionista_id: tabla.inversionista_id,
+      monto_aportado: tabla.monto_aportado,
+      porcentaje_inversionista: tabla.porcentaje_participacion_inversionista,
+      cuota_inversionista: tabla.cuota_inversionista,
+      origen: sql<OrigenDatos>`${config.origen}`.as('origen'),
+    })
+    .from(tabla)
+    .where(inArray(tabla.inversionista_id, inversionistaIds));
+}
+
+// Función genérica para consultar pagos de inversionista
+async function consultarPagosInversionista(
+  inversionistaId: number,
+  creditoId: number,
+  incluirLiquidados: boolean,
+  numeroCuota: number | undefined,
+  config: TablaConfig
+) {
+  // 🔥 Type assertion segura: sabemos que ambas tablas tienen la misma estructura
+  const tabla = config.pagosCreditoInversionistas as typeof pagos_credito_inversionistas;
+  
+  // 🔥 TIPADO: SQL[] es el tipo correcto para condiciones en Drizzle
+  const pagosConditions: SQL[] = [
+    eq(tabla.inversionista_id, inversionistaId),
+    eq(tabla.credito_id, creditoId),
+  ];
+
+  if (!incluirLiquidados) {
+    pagosConditions.push(
+      eq(tabla.estado_liquidacion, "NO_LIQUIDADO")
+    );
+  }
+
+  if (numeroCuota !== undefined) {
+    pagosConditions.push(eq(cuotas_credito.numero_cuota, numeroCuota));
+  }
+
+  return await db
+    .select({
+      abono_capital: tabla.abono_capital,
+      abono_interes: tabla.abono_interes,
+      abono_iva_12: tabla.abono_iva_12,
+      fecha_pago: tabla.fecha_pago,
+      porcentaje_participacion: tabla.porcentaje_participacion,
+      abonoGeneralInteres: pagos_credito.abono_interes,
+      cuota: cuotas_credito.numero_cuota,
+      estado_liquidacion: tabla.estado_liquidacion,
+      fecha_vencimiento_cuota: cuotas_credito.fecha_vencimiento,
+      fecha_pago_efectivo_cuota: cuotas_credito.fecha_liquidacion_inversionistas,
+      origen: sql<OrigenDatos>`${config.origen}`.as('origen'),
+    })
+    .from(tabla)
+    .innerJoin(
+      pagos_credito,
+      eq(tabla.pago_id, pagos_credito.pago_id)
+    )
+    .innerJoin(
+      cuotas_credito,
+      eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
+    )
+    .where(and(...pagosConditions));
+}
+
+// Función para combinar resultados de ambas fuentes (originales + espejos)
+async function consultarCreditosAmbos(inversionistaIds: number[]) {
+  const configOriginal = getTablaConfig("original");
+  const configEspejo = getTablaConfig("espejo");
+
+  const [creditosOriginales, creditosEspejos] = await Promise.all([
+    consultarCreditosInversionista(inversionistaIds, configOriginal),
+    consultarCreditosInversionista(inversionistaIds, configEspejo),
+  ]);
+
+  return [...creditosOriginales, ...creditosEspejos];
+}
+
+// Función para combinar pagos de ambas fuentes
+async function consultarPagosAmbos(
+  inversionistaId: number,
+  creditoId: number,
+  incluirLiquidados: boolean,
+  numeroCuota: number | undefined
+) {
+  const configOriginal = getTablaConfig("original");
+  const configEspejo = getTablaConfig("espejo");
+
+  const [pagosOriginales, pagosEspejos] = await Promise.all([
+    consultarPagosInversionista(inversionistaId, creditoId, incluirLiquidados, numeroCuota, configOriginal),
+    consultarPagosInversionista(inversionistaId, creditoId, incluirLiquidados, numeroCuota, configEspejo),
+  ]);
+
+  return [...pagosOriginales, ...pagosEspejos];
+}
+
+// ============================================
+// FIN DE CONFIGURACIÓN ORIGINALES/ESPEJO
+// ============================================
+
 export const insertInvestor = async ({ body, set }: any) => {
   try {
     const inversionistasToUpsert = Array.isArray(body) ? body : [body];
@@ -504,11 +661,9 @@ export async function processAndReplaceCreditInvestors(
 }
 export async function processAndReplaceCreditInvestorsReverse(
   credito_id: number,
-  abono_capital: number,
-  addition: boolean,
   pago_id: number
 ) {
-  // 1. Fetch credit details
+  // 1. Obtener crédito
   const credit = await db.query.creditos.findFirst({
     where: (c, { eq }) => eq(c.credito_id, credito_id),
   });
@@ -517,7 +672,7 @@ export async function processAndReplaceCreditInvestorsReverse(
     throw new Error("Credit not found");
   }
 
-  // 2. Fetch all investors for this credit
+  // 2. Obtener todos los inversionistas del crédito
   const investors = await db.query.creditos_inversionistas.findMany({
     where: (ci, { eq }) => eq(ci.credito_id, credito_id),
   });
@@ -525,45 +680,60 @@ export async function processAndReplaceCreditInvestorsReverse(
   if (investors.length === 0) {
     return [];
   }
-  console.log("adition", addition);
-  // 3. Process and calculate new values for each investor
-  const processedInvestors = investors.map(async (inv) => {
-    const [abonoCapital] = await db
-      .select({
-        abono_capital: pagos_credito_inversionistas.abono_capital,
-      })
-      .from(pagos_credito_inversionistas)
-      .where(
-        and(
-          eq(pagos_credito_inversionistas.pago_id, pago_id),
-          eq(
-            pagos_credito_inversionistas.inversionista_id,
-            inv.inversionista_id
+
+  // 3. Obtener la cuota del pago
+  const pago = await db.query.pagos_credito.findFirst({
+    where: (p, { eq }) => eq(p.pago_id, pago_id),
+  });
+
+  if (!pago) {
+    throw new Error(`Pago ${pago_id} no encontrado`);
+  }
+
+  // 4. Obtener TODOS los pagos de esa cuota
+  const pagosDeEsaCuota = await db
+    .select({ pago_id: pagos_credito.pago_id })
+    .from(pagos_credito)
+    .where(eq(pagos_credito.cuota_id, pago.cuota_id));
+
+  const pagoIds = pagosDeEsaCuota.map((p) => p.pago_id);
+
+  // 5. Por cada inversionista, sumar abono_capital de TODOS los pagos de esa cuota
+  for (const inv of investors) {
+    const abonos = pagoIds.length > 0
+      ? await db
+          .select({
+            abono_capital: pagos_credito_inversionistas.abono_capital,
+          })
+          .from(pagos_credito_inversionistas)
+          .where(
+            and(
+              inArray(pagos_credito_inversionistas.pago_id, pagoIds),
+              eq(pagos_credito_inversionistas.inversionista_id, inv.inversionista_id)
+            )
           )
-        )
-      );
-    console.log(abonoCapital);
-    const montoAportado = addition
-      ? new Big(inv.monto_aportado).add(abono_capital)
-      : new Big(inv.monto_aportado).minus(abono_capital);
-    console.log("montoAportado", montoAportado.toString());
-    const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
-    const porcentajeInversion = new Big(
-      inv.porcentaje_participacion_inversionista
+      : [];
+
+    if (abonos.length === 0) continue;
+
+    const abonoCapitalInv = abonos.reduce(
+      (acc, a) => acc.plus(new Big(a.abono_capital ?? 0)),
+      new Big(0)
     );
+    const montoAportado = new Big(inv.monto_aportado).plus(abonoCapitalInv);
+
+    // Recalcular todo basado en el nuevo monto_aportado
+    const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
+    const porcentajeInversion = new Big(inv.porcentaje_participacion_inversionista);
+
     const cuota = montoAportado
       .times(credit.porcentaje_interes)
       .div(100)
       .round(2);
 
-    // Proportional amounts
-    const montoInversionista = cuota
-      .times(porcentajeInversion)
-      .div(100)
-      .round(2);
+    const montoInversionista = cuota.times(porcentajeInversion).div(100).round(2);
     const montoCashIn = cuota.times(porcentajeCashIn).div(100).round(2);
 
-    // IVAs
     const ivaInversionista = montoInversionista.gt(0)
       ? montoInversionista.times(0.12).round(2)
       : new Big(0);
@@ -571,42 +741,141 @@ export async function processAndReplaceCreditInvestorsReverse(
       ? montoCashIn.times(0.12).round(2)
       : new Big(0);
 
-    return {
-      ...inv, // trae el id necesario para el update
-      credito_id,
-      monto_aportado: montoAportado.toFixed(2),
-      porcentaje_cash_in: porcentajeCashIn.toString(),
-      porcentaje_participacion_inversionista: porcentajeInversion.toString(),
-      monto_inversionista: montoInversionista.toFixed(2),
-      monto_cash_in: montoCashIn.toFixed(2),
-      iva_inversionista: ivaInversionista.toFixed(2),
-      iva_cash_in: ivaCashIn.toFixed(2),
-      fecha_creacion: new Date(),
-      cuota_inversionista: inv.cuota_inversionista,
-    };
-  });
-
-  // 4. Update all processed investors by their id
-  for (const inv of processedInvestors) {
     await db
       .update(creditos_inversionistas)
       .set({
-        cuota_inversionista: (await inv).cuota_inversionista,
-        porcentaje_participacion_inversionista: (await inv)
-          .porcentaje_participacion_inversionista,
-        monto_aportado: (await inv).monto_aportado,
-        porcentaje_cash_in: (await inv).porcentaje_cash_in,
-        iva_inversionista: (await inv).iva_inversionista,
-        iva_cash_in: (await inv).iva_cash_in,
-        monto_inversionista: (await inv).monto_inversionista,
-        monto_cash_in: (await inv).monto_cash_in,
-        // fecha_creacion: inv.fecha_creacion, // Descomenta si deseas actualizarla
+        monto_aportado: montoAportado.toFixed(2),
+        monto_inversionista: montoInversionista.toFixed(2),
+        monto_cash_in: montoCashIn.toFixed(2),
+        iva_inversionista: ivaInversionista.toFixed(2),
+        iva_cash_in: ivaCashIn.toFixed(2),
       })
-      .where(eq(creditos_inversionistas.id, (await inv).id));
+      .where(eq(creditos_inversionistas.id, inv.id));
+  }
+}
+
+export async function reversePagosEspejoPorInversionista(
+  inversionista_id: number
+) {
+  console.log(
+    `\n🔄 ========== INICIO reversePagosEspejoPorInversionista (inversionista: ${inversionista_id}) ==========`
+  );
+
+  // 1. Obtener TODOS los pagos del inversionista en la tabla espejo
+  const pagosEspejo = await db
+    .select()
+    .from(pagos_credito_inversionistas_espejo)
+    .where(eq(pagos_credito_inversionistas_espejo.inversionista_id, inversionista_id));
+
+  console.log(`📊 Pagos encontrados en espejo: ${pagosEspejo.length}`);
+
+  if (pagosEspejo.length === 0) {
+    console.log("⚠️ No hay pagos en espejo para este inversionista");
+    return { success: true, pagosRevertidos: 0 };
   }
 
-  // 5. Return the new updated data (could re-fetch if you want actual DB values)
-  return processedInvestors;
+  // 2. Agrupar pagos por credito_id
+  const pagosPorCredito: Record<number, typeof pagosEspejo> = {};
+  for (const pago of pagosEspejo) {
+    if (!pagosPorCredito[pago.credito_id]) {
+      pagosPorCredito[pago.credito_id] = [];
+    }
+    pagosPorCredito[pago.credito_id].push(pago);
+  }
+
+  console.log(`📂 Créditos afectados: ${Object.keys(pagosPorCredito).length}`);
+
+  // 3. Por cada crédito, revertir: sumar abono_capital de vuelta al monto_aportado
+  for (const [creditoIdStr, pagosDelCredito] of Object.entries(pagosPorCredito)) {
+    const creditoId = Number(creditoIdStr);
+
+    console.log(`\n--- 🏦 Procesando crédito ${creditoId} (${pagosDelCredito.length} pagos) ---`);
+
+    // Obtener el crédito para recalcular
+    const credit = await db.query.creditos.findFirst({
+      where: (c, { eq }) => eq(c.credito_id, creditoId),
+    });
+
+    if (!credit) {
+      console.error(`❌ Crédito ${creditoId} no encontrado, saltando...`);
+      continue;
+    }
+
+    // Obtener el registro del inversionista en espejo
+    const invEspejo = await db.query.creditos_inversionistas_espejo.findFirst({
+      where: (ci, { eq, and }) =>
+        and(
+          eq(ci.inversionista_id, inversionista_id),
+          eq(ci.credito_id, creditoId)
+        ),
+    });
+
+    if (!invEspejo) {
+      console.error(`❌ Inversionista ${inversionista_id} no encontrado en espejo para crédito ${creditoId}, saltando...`);
+      continue;
+    }
+
+    // Sumar todos los abono_capital de los pagos de este crédito
+    const totalAbonoCapital = pagosDelCredito.reduce(
+      (acc, p) => acc.plus(new Big(p.abono_capital ?? 0)),
+      new Big(0)
+    );
+
+    console.log(`   💰 Total abono_capital a revertir: ${totalAbonoCapital.toString()}`);
+    console.log(`   📊 monto_aportado actual: ${invEspejo.monto_aportado}`);
+
+    // Sumar de vuelta al monto_aportado
+    const nuevoMontoAportado = new Big(invEspejo.monto_aportado).plus(totalAbonoCapital);
+
+    console.log(`   ✅ Nuevo monto_aportado: ${nuevoMontoAportado.toString()}`);
+
+    // Recalcular cuota, montos, IVAs
+    const porcentajeCashIn = new Big(invEspejo.porcentaje_cash_in);
+    const porcentajeInversion = new Big(invEspejo.porcentaje_participacion_inversionista);
+
+    const cuota = nuevoMontoAportado
+      .times(credit.porcentaje_interes)
+      .div(100)
+      .round(2);
+
+    const montoInversionista = cuota.times(porcentajeInversion).div(100).round(2);
+    const montoCashIn = cuota.times(porcentajeCashIn).div(100).round(2);
+
+    const ivaInversionista = montoInversionista.gt(0)
+      ? montoInversionista.times(0.12).round(2)
+      : new Big(0);
+    const ivaCashIn = montoCashIn.gt(0)
+      ? montoCashIn.times(0.12).round(2)
+      : new Big(0);
+
+    // Actualizar creditos_inversionistas_espejo
+    await db
+      .update(creditos_inversionistas_espejo)
+      .set({
+        monto_aportado: nuevoMontoAportado.toFixed(2),
+        monto_inversionista: montoInversionista.toFixed(2),
+        monto_cash_in: montoCashIn.toFixed(2),
+        iva_inversionista: ivaInversionista.toFixed(2),
+        iva_cash_in: ivaCashIn.toFixed(2),
+      })
+      .where(eq(creditos_inversionistas_espejo.id, invEspejo.id));
+
+    console.log(`   ✅ creditos_inversionistas_espejo actualizado`);
+  }
+
+  // 4. Eliminar TODOS los pagos del inversionista en espejo
+  await db
+    .delete(pagos_credito_inversionistas_espejo)
+    .where(eq(pagos_credito_inversionistas_espejo.inversionista_id, inversionista_id));
+
+  console.log(`\n🗑️ ${pagosEspejo.length} pagos eliminados de pagos_credito_inversionistas_espejo`);
+  console.log(`✅ ========== FIN reversePagosEspejoPorInversionista ==========\n`);
+
+  return {
+    success: true,
+    pagosRevertidos: pagosEspejo.length,
+    creditosAfectados: Object.keys(pagosPorCredito).length,
+  };
 }
 
 /**
@@ -626,7 +895,8 @@ export async function resumeInvestor(
   nombreUsuario?: string,
   dpi?: string,
   incluirLiquidados = false,
-  numeroCuota?: number
+  numeroCuota?: number,
+  tipo: TipoConsulta = "originales" // 🆕 NUEVO: Permite consultar originales, espejos o ambas
 ) {
   console.log(
     "resumeInvestor for",
@@ -634,7 +904,9 @@ export async function resumeInvestor(
     "DPI:",
     dpi,
     "Incluir liquidados:",
-    incluirLiquidados
+    incluirLiquidados,
+    "Tipo:", // 🆕 Log del nuevo parámetro
+    tipo
   );
 
   // 1. Consulta inversionista (por ID o DPI)
@@ -686,17 +958,15 @@ export async function resumeInvestor(
   const inversionistaIds = listaInversionistas.map((i) => i.inversionista_id);
 
   // 2. Créditos asociados al inversionista
-  const creditosParticipa = await db
-    .select({
-      credito_id: creditos_inversionistas.credito_id,
-      inversionista_id: creditos_inversionistas.inversionista_id,
-      monto_aportado: creditos_inversionistas.monto_aportado,
-      porcentaje_inversionista:
-        creditos_inversionistas.porcentaje_participacion_inversionista,
-      cuota_inversionista: creditos_inversionistas.cuota_inversionista,
-    })
-    .from(creditos_inversionistas)
-    .where(inArray(creditos_inversionistas.inversionista_id, inversionistaIds));
+  // 🔥 NUEVO: Consultar según tipo (originales, espejos o ambas)
+  let creditosParticipa;
+
+  if (tipo === "ambas") {
+    creditosParticipa = await consultarCreditosAmbos(inversionistaIds);
+  } else {
+    const config = getTablaConfig(tipo === "espejos" ? "espejo" : "original");
+    creditosParticipa = await consultarCreditosInversionista(inversionistaIds, config);
+  }
 
   let creditosIds = creditosParticipa.map((c) => c.credito_id);
 
@@ -791,54 +1061,26 @@ export async function resumeInvestor(
             .limit(1);
 
           // 📌 Pagos (liquidados o no según el parámetro)
-          let pagosConditions = [
-            eq(
-              pagos_credito_inversionistas.inversionista_id,
-              inv.inversionista_id
-            ),
-            eq(pagos_credito_inversionistas.credito_id, c.credito_id),
-          ];
+          // 🔥 NUEVO: Consultar según tipo (originales, espejos o ambas)
+          let pagos;
 
-          // 🆕 Filtrar por estado de liquidación
-          if (!incluirLiquidados) {
-            pagosConditions.push(
-              eq(
-                pagos_credito_inversionistas.estado_liquidacion,
-                "NO_LIQUIDADO"
-              )
+          if (tipo === "ambas") {
+            pagos = await consultarPagosAmbos(
+              inv.inversionista_id,
+              c.credito_id,
+              incluirLiquidados,
+              numeroCuota
+            );
+          } else {
+            const config = getTablaConfig(tipo === "espejos" ? "espejo" : "original");
+            pagos = await consultarPagosInversionista(
+              inv.inversionista_id,
+              c.credito_id,
+              incluirLiquidados,
+              numeroCuota,
+              config
             );
           }
-
-          // 🆕 Filtrar por número de cuota si se proporciona
-          if (numeroCuota !== undefined) {
-            pagosConditions.push(eq(cuotas_credito.numero_cuota, numeroCuota));
-          }
-
-          const pagos = await db
-            .select({
-              abono_capital: pagos_credito_inversionistas.abono_capital,
-              abono_interes: pagos_credito_inversionistas.abono_interes,
-              abono_iva_12: pagos_credito_inversionistas.abono_iva_12,
-              fecha_pago: pagos_credito_inversionistas.fecha_pago,
-              porcentaje_participacion:
-                pagos_credito_inversionistas.porcentaje_participacion,
-              abonoGeneralInteres: pagos_credito.abono_interes,
-              cuota: cuotas_credito.numero_cuota,
-              estado_liquidacion:
-                pagos_credito_inversionistas.estado_liquidacion,
-              fecha_vencimiento_cuota: cuotas_credito.fecha_vencimiento, // 🔥 FECHA DE LA CUOTA
-              fecha_pago_efectivo_cuota: cuotas_credito.fecha_liquidacion_inversionistas, // 🔥 FECHA PAGO EFECTIVO
-            })
-            .from(pagos_credito_inversionistas)
-            .innerJoin(
-              pagos_credito,
-              eq(pagos_credito_inversionistas.pago_id, pagos_credito.pago_id)
-            )
-            .innerJoin( 
-              cuotas_credito,
-              eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
-            )
-            .where(and(...pagosConditions));
 
           // 📊 Totales del crédito
           let total_abono_capital = new Big(0);
@@ -1002,6 +1244,7 @@ const mes = fechaParaMes
             total_isr: Number(total_isr.toString()),
             total_cuota: Number(total_cuota.toString()),
             meses_en_credito,
+            origen: c.origen, // 🆕 NUEVO: Indica si viene de tabla original o espejo
           };
         })
       );
@@ -1048,6 +1291,238 @@ const mes = fechaParaMes
     perPage,
     totalItems,
     totalPages,
+  };
+}
+
+/**
+ * 🆕 NUEVA FUNCIÓN: Obtiene los totales globales de un inversionista SIN paginación
+ * Calcula las sumas de TODOS los créditos y pagos del inversionista
+ */
+export async function getInvestorTotalsGlobales(
+  investorId?: number,
+  dpi?: string,
+  tipo: TipoConsulta = "originales",
+  incluirLiquidados = false,
+  numeroCuota?: number
+) {
+  console.log(
+    "getInvestorTotalsGlobales for",
+    investorId,
+    "DPI:",
+    dpi,
+    "Tipo:",
+    tipo
+  );
+
+  // 1. Consulta inversionista (por ID o DPI)
+  let queryConditions = [];
+
+  if (investorId) {
+    queryConditions.push(eq(inversionistas.inversionista_id, investorId));
+  }
+
+  if (dpi) {
+    queryConditions.push(eq(inversionistas.dpi, parseInt(dpi)));
+  }
+
+  if (queryConditions.length === 0) {
+    throw new Error("Debe proporcionar al menos 'id' o 'dpi'");
+  }
+
+  const listaInversionistas = await db
+    .select({
+      inversionista_id: inversionistas.inversionista_id,
+      inversionista: inversionistas.nombre,
+      emite_factura: inversionistas.emite_factura,
+      reinversion: inversionistas.tipo_reinversion,
+    })
+    .from(inversionistas)
+    .where(and(...queryConditions))
+    .limit(1);
+
+  if (listaInversionistas.length === 0) {
+    throw new Error("Inversionista no encontrado");
+  }
+
+  const inv = listaInversionistas[0];
+  const inversionistaIds = [inv.inversionista_id];
+
+  // 2. Créditos asociados al inversionista (según tipo)
+  let creditosParticipa;
+
+  if (tipo === "ambas") {
+    creditosParticipa = await consultarCreditosAmbos(inversionistaIds);
+  } else {
+    const config = getTablaConfig(tipo === "espejos" ? "espejo" : "original");
+    creditosParticipa = await consultarCreditosInversionista(inversionistaIds, config);
+  }
+
+  let creditosIds = creditosParticipa.map((c) => c.credito_id);
+
+  if (creditosIds.length === 0) {
+    return {
+      inversionista_id: inv.inversionista_id,
+      nombre_inversionista: inv.inversionista,
+      totales: {
+        total_abono_capital: 0,
+        total_abono_interes: 0,
+        total_abono_iva: 0,
+        total_isr: 0,
+        total_cuota: 0,
+        total_monto_aportado: 0,
+        totalAbonoGeneralInteres: 0,
+        total_capital_creditos: 0,
+        total_capital_actual: 0,
+      },
+    };
+  }
+
+  // 3. Info de créditos con filtros (igual que resumeInvestor)
+  let conditions = [inArray(creditos.credito_id, creditosIds)];
+
+  const creditosInfo = await db
+    .select({
+      credito_id: creditos.credito_id,
+      capital: creditos.capital,
+      porcentaje_interes: creditos.porcentaje_interes,
+      fecha_creacion: creditos.fecha_creacion,
+    })
+    .from(creditos)
+    .where(and(...conditions));
+
+  creditosIds = creditosInfo.map((c) => c.credito_id);
+
+  if (creditosIds.length === 0) {
+    return {
+      inversionista_id: inv.inversionista_id,
+      nombre_inversionista: inv.inversionista,
+      totales: {
+        total_abono_capital: 0,
+        total_abono_interes: 0,
+        total_abono_iva: 0,
+        total_isr: 0,
+        total_cuota: 0,
+        total_monto_aportado: 0,
+        totalAbonoGeneralInteres: 0,
+        total_capital_creditos: 0,
+        total_capital_actual: 0,
+      },
+    };
+  }
+
+  // 4. 🔥 IMPORTANTE: NO PAGINAR - Usar TODOS los créditos
+  const creditosDeInv = creditosParticipa.filter(
+    (c) => c.inversionista_id === inv.inversionista_id && creditosIds.includes(c.credito_id)
+  );
+
+  // 5. Inicializar subtotales
+  let subtotal = {
+    total_abono_capital: new Big(0),
+    total_abono_interes: new Big(0),
+    total_abono_iva: new Big(0),
+    total_isr: new Big(0),
+    total_cuota: new Big(0),
+    total_monto_aportado: new Big(0),
+    totalAbonoGeneralInteres: new Big(0),
+    total_capital_creditos: new Big(0),
+    total_capital_actual: new Big(0),
+  };
+
+  // 6. Procesar TODOS los créditos del inversionista
+  for (const c of creditosDeInv) {
+    const credito = creditosInfo.find((cr) => cr.credito_id === c.credito_id);
+    if (!credito) continue;
+
+    // Obtener pagos del crédito
+    let pagos;
+
+    if (tipo === "ambas") {
+      pagos = await consultarPagosAmbos(
+        inv.inversionista_id,
+        c.credito_id,
+        incluirLiquidados,
+        numeroCuota
+      );
+    } else {
+      const config = getTablaConfig(tipo === "espejos" ? "espejo" : "original");
+      pagos = await consultarPagosInversionista(
+        inv.inversionista_id,
+        c.credito_id,
+        incluirLiquidados,
+        numeroCuota,
+        config
+      );
+    }
+
+    // Sumar totales
+    const capital_credito = new Big(credito?.capital ?? 0);
+    let capital_actual = capital_credito;
+
+    for (const pago of pagos) {
+      const abono_capital = new Big(pago.abono_capital ?? 0);
+      const abono_interes = new Big(pago.abono_interes ?? 0);
+      const abono_iva = new Big(pago.abono_iva_12 ?? 0);
+      const isr = abono_interes.times(0.07).round(2);
+
+      let abonoGeneralInteres;
+      if (inv.emite_factura) {
+        abonoGeneralInteres = abono_interes.plus(abono_iva);
+      } else {
+        abonoGeneralInteres = abono_interes.minus(isr);
+      }
+
+      let cuota_inversor;
+      switch (inv.reinversion) {
+        case "sin_reinversion":
+          cuota_inversor = abono_capital
+            .plus(abono_interes)
+            .plus(inv.emite_factura ? abono_iva : isr.neg());
+          break;
+        case "reinversion_capital":
+          cuota_inversor = abono_interes.plus(inv.emite_factura ? abono_iva : isr.neg());
+          break;
+        case "reinversion_interes":
+          cuota_inversor = abono_capital.plus(inv.emite_factura ? abono_iva : isr.neg());
+          break;
+        case "reinversion_total":
+          cuota_inversor = new Big(0);
+          break;
+        default:
+          cuota_inversor = abono_capital
+            .plus(abono_interes)
+            .plus(inv.emite_factura ? abono_iva : isr.neg());
+      }
+
+      capital_actual = capital_actual.minus(abono_capital);
+
+      subtotal.total_abono_capital = subtotal.total_abono_capital.plus(abono_capital);
+      subtotal.total_abono_interes = subtotal.total_abono_interes.plus(abono_interes);
+      subtotal.total_abono_iva = subtotal.total_abono_iva.plus(abono_iva);
+      subtotal.total_isr = subtotal.total_isr.plus(isr);
+      subtotal.total_cuota = subtotal.total_cuota.plus(cuota_inversor);
+      subtotal.totalAbonoGeneralInteres = subtotal.totalAbonoGeneralInteres.plus(abonoGeneralInteres);
+    }
+
+    subtotal.total_monto_aportado = subtotal.total_monto_aportado.plus(new Big(c.monto_aportado ?? 0));
+    subtotal.total_capital_creditos = subtotal.total_capital_creditos.plus(capital_credito);
+    subtotal.total_capital_actual = subtotal.total_capital_actual.plus(capital_actual);
+  }
+
+  // 7. Retornar solo los totales
+  return {
+    inversionista_id: inv.inversionista_id,
+    nombre_inversionista: inv.inversionista,
+    totales: {
+      total_abono_capital: Number(subtotal.total_abono_capital.toString()),
+      total_abono_interes: Number(subtotal.total_abono_interes.toString()),
+      total_abono_iva: Number(subtotal.total_abono_iva.toString()),
+      total_isr: Number(subtotal.total_isr.toString()),
+      total_cuota: Number(subtotal.total_cuota.toString()),
+      total_monto_aportado: Number(subtotal.total_monto_aportado.toString()),
+      totalAbonoGeneralInteres: Number(subtotal.totalAbonoGeneralInteres.toString()),
+      total_capital_creditos: Number(subtotal.total_capital_creditos.toString()),
+      total_capital_actual: Number(subtotal.total_capital_actual.toString()),
+    },
   };
 }
 

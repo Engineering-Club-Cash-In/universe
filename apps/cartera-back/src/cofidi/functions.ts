@@ -40,18 +40,21 @@ interface DatosFactura {
   };
 }
 
-export function generarHTMLFacturaPro(datos: DatosFactura, logoUrl: string): string {
+export function generarHTMLFacturaPro(
+  datos: DatosFactura,
+  logoUrl: string,
+): string {
   const formatoMoneda = (valor: number) => {
-    return `Q ${valor.toLocaleString('es-GT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `Q ${valor.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
   const formatoFecha = (fecha: string) => {
-    return new Date(fecha).toLocaleDateString('es-GT', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
+    return new Date(fecha).toLocaleDateString("es-GT", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     });
   };
 
@@ -422,14 +425,14 @@ export function generarHTMLFacturaPro(datos: DatosFactura, logoUrl: string): str
                     <h2 class="company-name">${datos.emisor.nombreComercial}</h2>
                     <p>${datos.emisor.nombre}</p>
                     <p>NIT: ${datos.emisor.nit}</p>
-                    <p>${datos.emisor.direccion['dte:Direccion']}</p>
-                    <p>${datos.emisor.direccion['dte:Municipio']}, ${datos.emisor.direccion['dte:Departamento']}</p>
+                    <p>${datos.emisor.direccion["dte:Direccion"]}</p>
+                    <p>${datos.emisor.direccion["dte:Municipio"]}, ${datos.emisor.direccion["dte:Departamento"]}</p>
                 </div>
             </div>
 
             <div class="invoice-info">
                 <h1 class="invoice-label">FACTURA</h1>
-                <p class="invoice-type">Cambiaria Electrónica</p>
+                <p class="invoice-type"> Electrónica</p>
 
                 <div class="meta-grid">
                     <span class="meta-label">Fecha de Emisión</span>
@@ -475,7 +478,9 @@ export function generarHTMLFacturaPro(datos: DatosFactura, logoUrl: string): str
                     </tr>
                 </thead>
                 <tbody>
-                    ${datos.items.map(item => `
+                    ${datos.items
+                      .map(
+                        (item) => `
                     <tr>
                         <td class="col-num">${item.numeroLinea}</td>
                         <td class="col-desc">${item.descripcion}</td>
@@ -484,7 +489,9 @@ export function generarHTMLFacturaPro(datos: DatosFactura, logoUrl: string): str
                         <td class="col-price">${formatoMoneda(item.precioUnitario)}</td>
                         <td class="col-total">${formatoMoneda(item.total)}</td>
                     </tr>
-                    `).join('')}
+                    `,
+                      )
+                      .join("")}
                 </tbody>
             </table>
         </section>
@@ -492,7 +499,9 @@ export function generarHTMLFacturaPro(datos: DatosFactura, logoUrl: string): str
         <div class="summary-container">
             <!-- ABONOS / NOTES -->
             <div class="left-column">
-                ${datos.abonos.length > 0 ? `
+                ${
+                  datos.abonos.length > 0
+                    ? `
                 <div class="abonos-section">
                     <h3 class="section-header">Plan de Pagos</h3>
                     <table class="abonos-table">
@@ -504,17 +513,23 @@ export function generarHTMLFacturaPro(datos: DatosFactura, logoUrl: string): str
                             </tr>
                         </thead>
                         <tbody>
-                            ${datos.abonos.map(abono => `
+                            ${datos.abonos
+                              .map(
+                                (abono) => `
                             <tr>
                                 <td>Cuota ${abono.numero}</td>
                                 <td>${formatoFecha(abono.fechaVencimiento)}</td>
                                 <td style="text-align: right;">${formatoMoneda(abono.monto)}</td>
                             </tr>
-                            `).join('')}
+                            `,
+                              )
+                              .join("")}
                         </tbody>
                     </table>
                 </div>
-                ` : ''}
+                `
+                    : ""
+                }
             </div>
 
             <!-- TOTALS -->
@@ -541,7 +556,7 @@ export function generarHTMLFacturaPro(datos: DatosFactura, logoUrl: string): str
             </div>
             <p>Documento certificado electrónicamente por SAT Guatemala</p>
             <p class="legal-notice">
-                Sujeto a pagos trimestrales ISR. Factura electrónica emitida en línea.
+               Sujeto a retención definitiva ISR. Factura electrónica emitida en línea.
                 Válida sin sello ni firma.
             </p>
         </footer>

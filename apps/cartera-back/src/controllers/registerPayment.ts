@@ -15,7 +15,7 @@ import {
 } from "../database/db";
 import { eq, and, lte, asc, desc, sql, gt, gte, or, ne, inArray } from "drizzle-orm";
 import { updateMora } from "./latefee";
-import { insertPagosCreditoInversionistas } from "./payments";
+import { insertPagosCreditoInversionistas, insertPagosCreditoInversionistasV2 } from "./payments";
 import { processAndReplaceCreditInvestors } from "./investor";
 import { formatInTimeZone } from "date-fns-tz/dist/cjs/formatInTimeZone";
 import { processConvenioPayment } from "./paymentAgreement";
@@ -581,7 +581,8 @@ export const insertPayment = async ({ body, set }: any) => {
         banco_id: banco_id ?? 0,
         numeroAutorizacion: numeroAutorizacion ?? "",
         registerBy: registerBy ?? "",
-        fecha_boleta
+        fecha_boleta,
+        monto_aplicado: otrosBig.toNumber(),
       });
     }
 
@@ -666,7 +667,8 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
             banco_id: banco_id ?? 0,
             numeroAutorizacion: numeroAutorizacion ?? "",
             registerBy: registerBy ?? "",
-            fecha_boleta
+            fecha_boleta,
+            monto_aplicado: otrosBig.plus(resultadoMora.montoAplicadoMora).toNumber(),
           });
         }
         console.log(
@@ -690,7 +692,8 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
             banco_id: banco_id ?? 0,
             numeroAutorizacion: numeroAutorizacion ?? "",
             registerBy: registerBy ?? "",
-            fecha_boleta
+            fecha_boleta,
+            monto_aplicado: otrosBig.plus(resultadoMora.montoAplicadoMora).toNumber(),
           });
         }
         return {
@@ -718,7 +721,8 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           banco_id: banco_id ?? 0,
           numeroAutorizacion: numeroAutorizacion ?? "",
           registerBy: registerBy ?? "",
-          fecha_boleta
+          fecha_boleta,
+          monto_aplicado: otrosBig.plus(resultadoMora.montoAplicadoMora).toNumber(),
         });
       }
       return {
@@ -1015,6 +1019,11 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         const [month, day, year] = datePart.split("/");
         const fechaGuatemala = new Date(`${year}-${month}-${day}T${timePart}`);
 
+        // Mora y otros solo van en la primera cuota (si ya hubo completas antes, no se repiten)
+        const esPrimeraCuota = cuotas_completas === 0 && cuotas_parciales === 0;
+        const moraParaPago = esPrimeraCuota ? moraBig : new Big(0);
+        const otrosParaPago = esPrimeraCuota ? otrosBig : new Big(0);
+
         const pagoData = {
           credito_id: credito.credito_id,
           cuota: credito.cuota,
@@ -1041,8 +1050,8 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           membresias: nuevo_membresias_restante.toString(),
           membresias_pago: abono_membresias.toString(),
           membresias_mes: abono_membresias.toString(),
-          otros: otrosBig?.toString() ?? "0",
-          mora: moraBig.toString(),
+          otros: otrosParaPago.toString(),
+          mora: moraParaPago.toString(),
           monto_boleta_cuota: montoBoleta.toString(),
           seguro_total: credito.seguro_10_cuotas?.toString() ?? "0",
           pagado: cuota_pagada,
@@ -1058,7 +1067,8 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           numeroAutorizacion: numeroAutorizacion,
           banco_id: banco_id,
           registerBy: registerBy,
-          fecha_boleta: convertirAHoraGuatemala(fecha_boleta)?.toISOString()
+          fecha_boleta: convertirAHoraGuatemala(fecha_boleta)?.toISOString(),
+          monto_aplicado: totalPagado.toString(),
         };
 
         // Insertar o actualizar pago
@@ -1112,6 +1122,14 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
                     pago_id: pagoInsertado!.pago_id,
                     url_boleta: url,
                   }))
+                );
+              }
+
+              // Distribuir pago entre inversionistas
+              if (pagoInsertado?.pago_id) {
+                await insertPagosCreditoInversionistasV2(
+                  pagoInsertado.pago_id,
+                  credito.credito_id
                 );
               }
             } else {
@@ -1203,8 +1221,8 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
                   llamada: pagoData.llamada || "",
                   otros: pagoData.otros,
                   mora: pagoData.mora,
-                  monto_boleta_cuota: cuotas_completas > 0 ? "0" : montoBoleta.toString(),
-                  monto_boleta: cuotas_completas > 0 ? "0" : montoBoleta.toString(),
+                  monto_boleta_cuota: montoBoleta.toString(),
+                  monto_boleta: montoBoleta.toString(),
                   observaciones: pagoData.observaciones,
 
                   // Seguros y GPS
@@ -1223,7 +1241,8 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
                   numeroAutorizacion: pagoData.numeroAutorizacion || null,
                   registerBy: pagoData.registerBy,
                   pagoConvenio: montoConvenio.toString() || "0",
-                  fecha_boleta:convertirAHoraGuatemala(pagoData.fecha_boleta)?.toISOString() ,
+                  fecha_boleta:convertirAHoraGuatemala(pagoData.fecha_boleta)?.toISOString(),
+                  monto_aplicado: pagoData.monto_aplicado,
                 })
                 .returning();
               console.log("pagoInsertado cuota parcial:", pagoInsertado);
@@ -1239,6 +1258,14 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
                   }))
                 );
               }
+
+              // Distribuir pago entre inversionistas
+              if (pagoInsertado?.pago_id) {
+                await insertPagosCreditoInversionistasV2(
+                  pagoInsertado.pago_id,
+                  credito.credito_id
+                );
+              }
             }
           }
           if (disponible_restante.lte(0)) {
@@ -1249,35 +1276,30 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
 
       // 7. Procesar abono directo a capital (si aplica)
     }
-    // Jalar la primera cuota realmente sin pagar (cuota.pagado=false Y pago.pagado!=true)
+    // Jalar la última cuota pagada
     const hoy = new Date().toISOString().slice(0, 10);
-    const [primeraCuotaSinPagar] = await db
+    const [ultimaCuotaPagada] = await db
       .select({
         cuota_id: cuotas_credito.cuota_id,
         numero_cuota: cuotas_credito.numero_cuota,
         fecha_vencimiento: cuotas_credito.fecha_vencimiento,
-        pago_pagado: pagos_credito.pagado,
       })
       .from(cuotas_credito)
-      .leftJoin(pagos_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
+      .innerJoin(pagos_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
       .where(
         and(
           eq(cuotas_credito.credito_id, credito_id),
-          gt(cuotas_credito.numero_cuota, 0),
-          eq(cuotas_credito.pagado, false),
-          or(
-            eq(pagos_credito.pagado, false),
-            sql`${pagos_credito.pagado} IS NULL`
-          )
+          gt(cuotas_credito.numero_cuota, 0), 
+          eq(pagos_credito.pagado, true)
         )
       )
-      .orderBy(asc(cuotas_credito.numero_cuota))
+      .orderBy(desc(cuotas_credito.numero_cuota))
       .limit(1);
 
     const abonoCapital = new Big(abono_directo_capital ?? 0);
-    // Si la primera cuota realmente sin pagar aún no vence → al día → capital
-    const fechaVenc = primeraCuotaSinPagar?.fecha_vencimiento ?? null;
-    const estaAlDia = !primeraCuotaSinPagar || (fechaVenc && fechaVenc >= hoy);
+    // Si la última cuota pagada tiene vencimiento >= hoy → está al día → capital
+    const fechaVenc = ultimaCuotaPagada?.fecha_vencimiento ?? null;
+    const estaAlDia = ultimaCuotaPagada && fechaVenc && fechaVenc >= hoy;
 
     if (estaAlDia && abonoCapital.gt(0)) {
       console.log("\n💰 ========== ABONO DIRECTO A CAPITAL ==========");
@@ -1320,8 +1342,8 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         .insert(cuotas_credito)
         .values({
           credito_id: credito_id,
-          numero_cuota: primeraCuotaSinPagar.numero_cuota,
-          fecha_vencimiento: primeraCuotaSinPagar.fecha_vencimiento,
+          numero_cuota: ultimaCuotaPagada.numero_cuota,
+          fecha_vencimiento: ultimaCuotaPagada.fecha_vencimiento,
           pagado: true,
         })
         .returning();
@@ -1398,6 +1420,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         registerBy: registerBy,
         pagoConvenio: montoConvenio.toString() || "0",
         fecha_boleta: convertirAHoraGuatemala(fecha_boleta)?.toISOString(),
+        monto_aplicado: abonoCapital.toString(),
       };
 
       console.log("\n📝 ========== REGISTRANDO PAGO ==========");
@@ -1509,19 +1532,18 @@ export async function getPagosDelMesActual(credito_id: number) {
 // Interfaz para los parámetros
 interface InsertarPagoParams {
   numero_credito_sifco: string;
-  numero_cuota: number; // opcional si no se especifica
-  cuotaId: number; // opcional si no se especifica
+  numero_cuota: number;
+  cuotaId: number;
   mora: number;
   otros: number;
   boleta: number;
-  urlBoletas: string[]; // opcional si no se especifica
+  urlBoletas: string[];
   pagado: boolean;
   banco_id: number;
   numeroAutorizacion: string;
   registerBy: string;
   fecha_boleta?: string;
-
-  // Puedes agregar otros si los necesitas
+  monto_aplicado: number;
 }
 export async function insertarPago({
   numero_credito_sifco,
@@ -1535,7 +1557,8 @@ export async function insertarPago({
   banco_id,
   numeroAutorizacion,
   registerBy,
-  fecha_boleta
+  fecha_boleta,
+  monto_aplicado
 }: InsertarPagoParams) {
   console.log(
     `Insertando pago para crédito SIFCO: ${numero_credito_sifco}, cuota: ${numero_cuota}, mora: ${mora}, otros: ${otros}`
@@ -1675,7 +1698,8 @@ export async function insertarPago({
       banco_id: banco_id ?? undefined,
       numeroAutorizacion: numeroAutorizacion ?? "",
       registerBy: registerBy,
-      pagoConvenio: "0", 
+      pagoConvenio: "0",
+      monto_aplicado: monto_aplicado.toString(),
     })
     .returning();
 
@@ -1888,7 +1912,6 @@ export async function aplicarPagoAlCredito(pago_id: number) {
 
     // 8. INSERTAR PAGOS DE INVERSIONISTAS (si no es un pago con paymentFalse)
     if (!pago.paymentFalse && pago.credito_id !== null) {
-      await insertPagosCreditoInversionistas(pago_id, pago.credito_id);
       console.log("✅ Pagos a inversionistas insertados");
       
     await db

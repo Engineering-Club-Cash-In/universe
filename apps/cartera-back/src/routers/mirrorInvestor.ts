@@ -1,5 +1,5 @@
 import { Elysia, t } from "elysia";
-import { llenarTablaEspejo } from "../controllers/mirrorInvestor";
+import { llenarTablaEspejo, getCreditsWithMirrors, getCreditsByInvestor } from "../controllers/mirrorInvestor";
 
 export const mirrorInvestorRouter = new Elysia()
   .post("/llenar-tabla-espejo", llenarTablaEspejo, {
@@ -27,4 +27,22 @@ export const mirrorInvestorRouter = new Elysia()
         "Busca inversionista por nombre y para cada crédito (buscado por nombre de cliente) inserta/actualiza en la tabla espejo. Si no encuentra padre, omite ese crédito y lo reporta. Query param calcular_cuota=true para calcular cuota_inversionista con lógica de createCredit.",
       tags: ["Inversionistas", "Espejo"],
     },
+  })
+  .get("/creditos-espejo", getCreditsWithMirrors, {
+    detail: {
+      summary: "Obtener todos los créditos con y sin espejo",
+      description: "Devuelve dos listas: creditos con espejo (excluyendo inversionista 86) y creditos sin espejo.",
+      tags: ["Inversionistas", "Espejo"],
+    }
+  })
+  .get("/creditos-por-inversionista", getCreditsByInvestor, {
+      query: t.Object({
+          id: t.String()
+      }),
+      detail: {
+          summary: "Obtener créditos asociados a un inversionista (Real o Espejo)",
+          description: "Devuelve todos los créditos donde el ID proporcionado participa, junto con sus inversionistas originales y espejo.",
+          tags: ["Inversionistas", "Espejo"]
+      }
   });
+

@@ -1654,6 +1654,7 @@ export async function insertarPago({
   const [nuevoPago] = await db
     .insert(pagos_credito)
     .values({
+      credito_id: creditData.credito_id,
       cuota_id: creditData.cuota_id ?? 0,
       cuota: creditData.cuota?.toString() ?? "0",
       cuota_interes: creditData.cuota_interes?.toString() ?? "0",

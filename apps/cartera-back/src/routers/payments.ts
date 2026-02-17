@@ -1119,3 +1119,38 @@ export const paymentRouter = new Elysia()
     description: "Lee resultado_ultimos_pagos.json, marca cuotas pagadas con marcarCuotasPagadasHastaNumero y recalcula con updateAllInstallments",
   },
 })
+.post(
+  "/marcar-cuotas",
+  async ({ body, set }) => {
+    try {
+      const { numero_credito_sifco, hasta_cuota, fecha_primer_pago } = body;
+
+      await marcarCuotasPagadasHastaNumero({
+        numero_credito_sifco,
+        hasta_cuota,
+        fecha_primer_pago,
+      });
+
+      set.status = 200;
+      return {
+        success: true,
+        message: `Cuotas marcadas hasta la cuota ${hasta_cuota} para crédito ${numero_credito_sifco}`,
+      };
+    } catch (error: any) {
+      console.error("Error en marcar-cuotas:", error);
+      set.status = 500;
+      return { success: false, message: error.message };
+    }
+  },
+  {
+    body: t.Object({
+      numero_credito_sifco: t.String(),
+      hasta_cuota: t.Number(),
+      fecha_primer_pago: t.String(),
+    }),
+    detail: {
+      tags: ["Créditos"],
+      summary: "Marcar cuotas pagadas hasta un número de cuota",
+    },
+  }
+)

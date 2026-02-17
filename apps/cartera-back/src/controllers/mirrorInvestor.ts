@@ -238,6 +238,7 @@ export const llenarTablaEspejo = async ({ body, query, set }: any) => {
             .innerJoin(usuarios, eq(usuarios.usuario_id, creditos.usuario_id))
             .where(eq(creditos.numero_credito_sifco, numero_credito_sifco.trim()));
         } else {
+          const clienteNorm = removeAccents(cliente.trim().toLowerCase());
           creditosEncontrados = await tx
             .select({
               credito_id: creditos.credito_id,
@@ -246,7 +247,9 @@ export const llenarTablaEspejo = async ({ body, query, set }: any) => {
             })
             .from(creditos)
             .innerJoin(usuarios, eq(usuarios.usuario_id, creditos.usuario_id))
-            .where(ilike(usuarios.nombre, `%${cliente.trim()}%`));
+            .where(
+              sql`translate(lower(${usuarios.nombre}), 'áéíóúàèìòùäëïöüâêîôûñÁÉÍÓÚÑ', 'aeiouaeiouaeiouaeiounaeioun') ILIKE ${"%" + clienteNorm + "%"}`
+            );
         }
 
         if (creditosEncontrados.length === 0) {

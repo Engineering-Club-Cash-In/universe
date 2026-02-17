@@ -44,6 +44,7 @@ interface InversionistaActual {
   porcentajeCashIn: string;
   porcentajeInversionista: string;
   capital: string;
+  cuota?: string;
 }
 
 interface CreditoAgrupado {
@@ -278,13 +279,20 @@ export async function recalcularCreditosDesdeJson(creditosAgrupados: CreditoAgru
             ? montoCashIn.times(0.12).round(2)
             : new Big(0);
 
-          // Calcular cuota del inversionista
-          const cuotaSinCargos = cuotaTotal.minus(seguro).minus(membresias);
-          let cuotaInversionista = cuotaSinCargos.times(porcentajeParticipacion.div(100)).round(2);
+          // Cuota del inversionista: viene directo en inversionistasActuales
+          let cuotaInversionista: Big;
 
-          // Si es el inversionista mayor, sumarle seguro y membresia
-          if (invActual.inversionista === inversionistaMayor.inversionista) {
-            cuotaInversionista = cuotaInversionista.plus(seguro).plus(membresias).round(2);
+          if (invActual.cuota) {
+            cuotaInversionista = new Big(invActual.cuota);
+            console.log(`   💵 Cuota de ${invActual.inversionista}: Q${cuotaInversionista.toFixed(2)} (del JSON)`);
+          } else {
+            // Fallback: calcular proporcionalmente
+            const cuotaSinCargos = cuotaTotal.minus(seguro).minus(membresias);
+            cuotaInversionista = cuotaSinCargos.times(porcentajeParticipacion.div(100)).round(2);
+            if (invActual.inversionista === inversionistaMayor.inversionista) {
+              cuotaInversionista = cuotaInversionista.plus(seguro).plus(membresias).round(2);
+            }
+            console.log(`   💵 Cuota de ${invActual.inversionista}: Q${cuotaInversionista.toFixed(2)} (calculada)`);
           }
 
           await db.insert(creditos_inversionistas).values({

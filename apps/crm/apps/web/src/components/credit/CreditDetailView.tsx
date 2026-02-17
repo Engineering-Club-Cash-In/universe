@@ -60,6 +60,7 @@ import {
 	generateQuotationPdf,
 } from "@/lib/generate-pdf";
 import type { IOpportunity } from "@/routes/crm/opportunities";
+import type { vehicleTypeEnum } from "server/src/db/schema/quotations";
 import { client } from "@/utils/orpc";
 
 // Tipos de categorías de crédito
@@ -113,14 +114,7 @@ interface CreditDetailViewProps {
 		vehicleBrand: string | null;
 		vehicleLine: string | null;
 		vehicleModel: string | null;
-		vehicleType:
-			| "particular"
-			| "uber"
-			| "pickup"
-			| "nuevo"
-			| "panel"
-			| "camion"
-			| "microbus";
+		vehicleType: (typeof vehicleTypeEnum.enumValues)[number];
 		vehicleValue: string;
 		insuredAmount: string;
 		downPayment: string;

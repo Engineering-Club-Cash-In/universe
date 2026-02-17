@@ -155,10 +155,6 @@ function VehiclesDashboard() {
 		return () => clearTimeout(timer);
 	}, [searchTerm]);
 
-	// Reset page when filter changes
-	useEffect(() => {
-		setPage(0);
-	}, [filterStatus]);
 
 	// Fetch vehicles with pagination
 	const {
@@ -521,7 +517,7 @@ function VehiclesDashboard() {
 											onChange={(e) => setSearchTerm(e.target.value)}
 										/>
 									</div>
-									<Select value={filterStatus} onValueChange={setFilterStatus}>
+									<Select value={filterStatus} onValueChange={(value) => { setFilterStatus(value); setPage(0); }}>
 										<SelectTrigger className="w-[180px]">
 											<SelectValue placeholder="Filtrar por estado" />
 										</SelectTrigger>

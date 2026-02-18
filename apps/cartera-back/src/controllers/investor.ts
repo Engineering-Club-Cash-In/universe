@@ -1576,6 +1576,74 @@ export async function getInvestorTotalsGlobales(
 }
 
 // ============================================
+// upsertPagosEspejo
+// ============================================
+
+/**
+ * Recibe un array de pagos con su `id` (PK de pagos_credito_inversionistas_espejo)
+ * y actualiza los campos financieros de cada uno.
+ *
+ * Validación previa: verifica que todos los ids existan en la BD antes de
+ * hacer cualquier UPDATE. Si alguno no existe, lanza un error descriptivo.
+ *
+ * No toca ninguna otra tabla.
+ *
+ * @param pagos - Array de pagos a actualizar (deben existir en la BD)
+ */
+export async function upsertPagosEspejo(
+  pagos: {
+    id: number;
+    abono_capital: string;
+    abono_interes: string;
+    abono_iva_12: string;
+    porcentaje_participacion: string;
+    cuota: string;
+    estado_liquidacion?: "NO_LIQUIDADO" | "LIQUIDADO";
+  }[]
+) {
+  if (pagos.length === 0) {
+    return { actualizados: 0 };
+  }
+
+  // ── PASO 1: Validar que todos los ids existen ────────────────────────────────
+  const ids = pagos.map((p) => p.id);
+
+  const encontrados = await db
+    .select({ id: pagos_credito_inversionistas_espejo.id })
+    .from(pagos_credito_inversionistas_espejo)
+    .where(inArray(pagos_credito_inversionistas_espejo.id, ids));
+
+  const idsEncontrados = new Set(encontrados.map((r) => r.id));
+  const idsNoEncontrados = ids.filter((id) => !idsEncontrados.has(id));
+
+  if (idsNoEncontrados.length > 0) {
+    throw new Error(
+      `Los siguientes ids no existen en pagos_credito_inversionistas_espejo: [${idsNoEncontrados.join(", ")}]`
+    );
+  }
+
+  // ── PASO 2: UPDATE por id para cada pago ────────────────────────────────────
+  await Promise.all(
+    pagos.map((p) =>
+      db
+        .update(pagos_credito_inversionistas_espejo)
+        .set({
+          abono_capital:            p.abono_capital,
+          abono_interes:            p.abono_interes,
+          abono_iva_12:             p.abono_iva_12,
+          porcentaje_participacion: p.porcentaje_participacion,
+          cuota:                    p.cuota,
+          ...(p.estado_liquidacion && { estado_liquidacion: p.estado_liquidacion }),
+        })
+        .where(eq(pagos_credito_inversionistas_espejo.id, p.id))
+    )
+  );
+
+  console.log(`[upsertPagosEspejo] ${pagos.length} registro(s) actualizados.`);
+  return { actualizados: pagos.length };
+}
+
+// ============================================
 // getInvestorMirrorSummary
 // ============================================
 

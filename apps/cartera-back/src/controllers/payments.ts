@@ -312,7 +312,8 @@ export async function insertPagosCreditoInversionistas(
   pago_id: number,
   credito_id: number,
   excludeCube: boolean = false,
-  cuotaPagada:boolean = false
+  cuotaPagada: boolean = false,
+  updateCredito: boolean = true  // si false, omite el UPDATE a creditos_inversionistas_espejo
 ) {
   console.log(
     "\n🔍 ========== INICIO insertPagosCreditoInversionistas =========="
@@ -504,19 +505,23 @@ export async function insertPagosCreditoInversionistas(
       );
     }
 
-    console.log(`\n   🔄 Llamando a processAndReplaceCreditInvestors:`);
-    console.log(`      credito_id: ${credito_id}`);
-    console.log(`      abono_capital: ${abono_capital.toNumber()}`);
-    console.log(`      addition: false (RESTA)`);
-    console.log(`      inversionista_id: ${inv.inversionista_id}`);
+    if (updateCredito) {
+      console.log(`\n   🔄 Llamando a processAndReplaceCreditInvestors:`);
+      console.log(`      credito_id: ${credito_id}`);
+      console.log(`      abono_capital: ${abono_capital.toNumber()}`);
+      console.log(`      addition: false (RESTA)`);
+      console.log(`      inversionista_id: ${inv.inversionista_id}`);
 
-   await processAndReplaceCreditInvestors(
-      credito_id,
-      abono_capital.toNumber(),
-      false,
-      inv.inversionista_id,
-      true
-    );
+      await processAndReplaceCreditInvestors(
+        credito_id,
+        abono_capital.toNumber(),
+        false,
+        inv.inversionista_id,
+        true
+      );
+    } else {
+      console.log(`\n   ⏭️  updateCredito=false → omitiendo UPDATE a creditos_inversionistas_espejo`);
+    }
 
     console.log(`   📊 Porcentajes:`);
     console.log(`      porcentaje_cash_in: ${inv.porcentaje_cash_in}`);
@@ -1779,4 +1784,201 @@ export async function obtenerCreditosConPagosPendientes(
     };
   }
 }
- 
+
+// ============================================================
+// calcularYRegistrarPagosEspejo
+// ============================================================
+
+/**
+ * Calcula y registra los pagos espejo de un inversionista SIN actualizar
+ * `creditos_inversionistas_espejo`.
+ *
+ * Diferencia clave vs `obtenerCreditosConPagosPendientes` con generateFalsePayment=true:
+ *  - Llama a `insertPagosCreditoInversionistas` con `updateCredito = false`
+ *    → Solo hace el upsert en `pagos_credito_inversionistas_espejo`
+ *    → NO toca `creditos_inversionistas_espejo`
+ *  - Sí marca la cuota como `liquidado_inversionistas = true` en `cuotas_credito`
+ *    para evitar reprocesar la misma cuota en ejecuciones futuras.
+ *
+ * @param inversionistaId - ID del inversionista a procesar
+ */
+export async function calcularYRegistrarPagosEspejo(inversionistaId: number) {
+  try {
+    const rangoMesActual = obtenerRangoMesActual();
+    console.log(
+      `\n🚀 [calcularYRegistrarPagosEspejo] Iniciando para inversionista ${inversionistaId}`
+    );
+    console.log(
+      `📆 Mes actual: ${rangoMesActual.inicio} - ${rangoMesActual.fin}`
+    );
+
+    // ── PASO 1: Obtener créditos espejo del inversionista (ACTIVO/MOROSO/etc.) ──
+    const creditosInversionista = await db
+      .select({
+        creditoId: creditos_inversionistas_espejo.credito_id,
+        inversionistaId: creditos_inversionistas_espejo.inversionista_id,
+        montoAportado: creditos_inversionistas_espejo.monto_aportado,
+        porcentajeParticipacion:
+          creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
+        numeroCreditoSifco: creditos.numero_credito_sifco,
+        capital: creditos.capital,
+        deudaTotal: creditos.deudatotal,
+        statusCredit: creditos.statusCredit,
+        cuota: creditos.cuota,
+      })
+      .from(creditos_inversionistas_espejo)
+      .innerJoin(
+        creditos,
+        eq(creditos_inversionistas_espejo.credito_id, creditos.credito_id)
+      )
+      .where(
+        and(
+          eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId),
+          inArray(creditos.statusCredit, [
+            "ACTIVO",
+            "MOROSO",
+            "PENDIENTE_CANCELACION",
+            "EN_CONVENIO",
+          ])
+        )
+      );
+
+    console.log(
+      `📊 Créditos encontrados: ${creditosInversionista.length}`
+    );
+
+    // ── PASO 2: Por cada crédito, buscar la primera cuota NO liquidada ──────────
+    const resultados = await Promise.all(
+      creditosInversionista.map(async (credito) => {
+        console.log(
+          `\n🔍 Verificando crédito ${credito.creditoId}...`
+        );
+
+        // Saltar si ya tiene pagos NO_LIQUIDADO en la tabla espejo
+        const pagosPendientes = await db
+          .select()
+          .from(pagos_credito_inversionistas_espejo)
+          .where(
+            and(
+              eq(
+                pagos_credito_inversionistas_espejo.credito_id,
+                credito.creditoId
+              ),
+              eq(
+                pagos_credito_inversionistas_espejo.inversionista_id,
+                inversionistaId
+              ),
+              eq(
+                pagos_credito_inversionistas_espejo.estado_liquidacion,
+                "NO_LIQUIDADO"
+              )
+            )
+          );
+
+        if (pagosPendientes.length > 0) {
+          console.log(
+            `⚠️  Crédito ${credito.creditoId} tiene ${pagosPendientes.length} pago(s) NO_LIQUIDADO → se omite`
+          );
+          return null;
+        }
+
+        // Buscar la primera cuota NO liquidada con sus pagos
+        const cuotaConPagos = await db
+          .select({
+            cuotaId: cuotas_credito.cuota_id,
+            numeroCuota: cuotas_credito.numero_cuota,
+            fechaVencimiento: cuotas_credito.fecha_vencimiento,
+            pagadoCuota: cuotas_credito.pagado,
+            liquidadoInversionistas: cuotas_credito.liquidado_inversionistas,
+            pagoId: pagos_credito.pago_id,
+            fechaPago: pagos_credito.fecha_pago,
+            montoBoleta: pagos_credito.monto_boleta,
+            abonoCapital: pagos_credito.abono_capital,
+            abonoInteres: pagos_credito.abono_interes,
+            abonoIva: pagos_credito.abono_iva_12,
+            validationStatus: pagos_credito.validationStatus,
+          })
+          .from(cuotas_credito)
+          .innerJoin(
+            pagos_credito,
+            eq(cuotas_credito.cuota_id, pagos_credito.cuota_id)
+          )
+          .where(
+            and(
+              eq(cuotas_credito.credito_id, credito.creditoId),
+              eq(cuotas_credito.liquidado_inversionistas, false)
+            )
+          )
+          .orderBy(cuotas_credito.numero_cuota, pagos_credito.fecha_pago);
+
+        if (cuotaConPagos.length === 0) {
+          console.log(
+            `⚠️  Crédito ${credito.creditoId}: sin cuotas pendientes con pagos`
+          );
+          return null;
+        }
+
+        const primeraFila = cuotaConPagos[0];
+        const { numeroCuota, cuotaId } = primeraFila;
+        const pagosDeLaCuota = cuotaConPagos.filter(
+          (r) => r.numeroCuota === numeroCuota
+        );
+
+        console.log(
+          `✅ Crédito ${credito.creditoId}, Cuota ${numeroCuota}: ${pagosDeLaCuota.length} pago(s) → procesando...`
+        );
+
+        // ── PASO 3: Upsert en pagos_credito_inversionistas_espejo ──────────────
+        // updateCredito = false → NO toca creditos_inversionistas_espejo
+        // NO se toca cuotas_credito → endpoint de solo escritura en pagos
+        try {
+          await insertPagosCreditoInversionistas(
+            pagosDeLaCuota[0].pagoId,
+            credito.creditoId,
+            false,  // excludeCube
+            false,  // cuotaPagada
+            false   // updateCredito ← omite el UPDATE a creditos_inversionistas_espejo
+          );
+
+          console.log(
+            `  ✅ Upsert completado para crédito ${credito.creditoId}, cuota ${numeroCuota}`
+          );
+
+          return {
+            creditoId: credito.creditoId,
+            numeroCreditoSifco: credito.numeroCreditoSifco,
+            cuotaProcesada: numeroCuota,
+            pagosRegistrados: pagosDeLaCuota.length,
+          };
+        } catch (err) {
+          console.error(
+            `  ❌ Error procesando crédito ${credito.creditoId}:`,
+            err
+          );
+          return null;
+        }
+      })
+    );
+
+    const procesados = resultados.filter((r) => r !== null);
+
+    console.log(
+      `\n✅ [calcularYRegistrarPagosEspejo] Completado. Créditos procesados: ${procesados.length}`
+    );
+
+    return {
+      success: true,
+      inversionistaId,
+      totalCreditosProcesados: procesados.length,
+      pagosGenerados: true,
+      data: procesados,
+    };
+  } catch (error: any) {
+    console.error("❌ Error en calcularYRegistrarPagosEspejo:", error);
+    return {
+      success: false,
+      error: error.message,
+      data: [],
+    };
+  }
+}

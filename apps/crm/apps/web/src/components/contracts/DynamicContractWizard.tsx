@@ -1569,7 +1569,7 @@ export function DynamicContractWizard({
 				contracts: successfulContracts.map((c) => ({
 					contractType: c.contractType,
 					contractName: c.contractName,
-					documentLink: c.documentLink,
+					documentLink: c.r2Key ?? c.documentLink,
 					signingLinks: c.signingLinks,
 					templateId: c.templateId,
 					apiResponse: c.apiResponse,

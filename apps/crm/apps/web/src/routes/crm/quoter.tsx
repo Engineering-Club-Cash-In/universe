@@ -689,6 +689,9 @@ function ExtraCostsTable({
 	);
 }
 
+/** Costo fijo del GPS (se resta de la membresía cruda para obtener la neta) */
+const GPS_COST = 148.2;
+
 function QuoterPage() {
 	const { data: session } = authClient.useSession();
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
@@ -822,7 +825,7 @@ function QuoterPage() {
 			termMonths: 60,
 			interestRate: 1.5,
 			insuranceCost: 0,
-			gpsCost: 148.2,
+			gpsCost: GPS_COST,
 			transferCost: 545, // 395 + 150 según Excel
 			adminCost: 0,
 			membershipCost: 0,
@@ -948,29 +951,16 @@ function QuoterPage() {
 				Math.round(result.baseInsuranceCost * 100) / 100;
 			const rawMembershipCost = Math.round(result.membershipCost * 100) / 100;
 
-			if (BUS_TYPES.includes(vehicleType)) {
-				// Para bus RCDP: el seguro es solo la tarifa base, sin membresía
-				quoterForm.setFieldValue("insuranceCost", baseInsuranceCost);
-				quoterForm.setFieldValue("membershipCost", 0);
-				quoterForm.setFieldValue("extraInsuranceCost", baseInsuranceCost);
-				quoterForm.setFieldValue("extraMembershipCost", 0);
-			} else {
-				// El seguro total para cálculos es: base + (membresía - GPS)
-				const GPS_COST = 148.2;
-				const netMembershipCost =
-					Math.round((rawMembershipCost - GPS_COST) * 100) / 100;
-				const insuranceCost =
-					Math.round((baseInsuranceCost + netMembershipCost) * 100) / 100;
+			// El seguro total para cálculos es: base + (membresía - GPS)
+			const netMembershipCost =
+				Math.round((rawMembershipCost - GPS_COST) * 100) / 100;
+			const insuranceCost =
+				Math.round((baseInsuranceCost + netMembershipCost) * 100) / 100;
 
-				quoterForm.setFieldValue("insuranceCost", insuranceCost);
-				// membershipCost para resumen de arriba = neto (sin GPS)
-				quoterForm.setFieldValue("membershipCost", netMembershipCost);
-
-				// Valores para la tabla de gastos extra (valores crudos de la tabla)
-				quoterForm.setFieldValue("extraInsuranceCost", baseInsuranceCost);
-				// Membresía extra = valor crudo de la tabla
-				quoterForm.setFieldValue("extraMembershipCost", rawMembershipCost);
-			}
+			quoterForm.setFieldValue("insuranceCost", insuranceCost);
+			quoterForm.setFieldValue("membershipCost", netMembershipCost);
+			quoterForm.setFieldValue("extraInsuranceCost", baseInsuranceCost);
+			quoterForm.setFieldValue("extraMembershipCost", rawMembershipCost);
 
 			// Recalcular después de actualizar
 			setTimeout(() => recalculate(), 100);

@@ -14,6 +14,7 @@ import {
   getInvestorPerformance,
   reversePagosEspejoPorInversionista,
   getInvestorTotalsGlobales, // 🆕 NUEVO: Función para totales globales
+  getInvestorMirrorSummary,  // 🆕 NUEVO: Resumen calculado desde pagos espejo
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
 import puppeteer from "puppeteer";
@@ -163,6 +164,74 @@ export const inversionistasRouter = new Elysia()
         summary: "Obtiene los totales globales de un inversionista (sin paginación)",
         description: "Calcula las sumas de TODOS los créditos y pagos del inversionista, sin aplicar paginación. Útil para mostrar totales reales en el frontend.",
         tags: ["Inversionistas"],
+      },
+    }
+  )
+  .get(
+    "/getInvestorMirrorSummary",
+    /**
+     * Endpoint: GET /getInvestorMirrorSummary
+     *
+     * Devuelve los subtotales financieros de un inversionista calculados
+     * EXCLUSIVAMENTE desde la tabla `pagos_credito_inversionistas_espejo`.
+     *
+     * El campo `total_monto_aportado` se recalcula dinámicamente:
+     *   monto_aportado_base (de creditos_inversionistas_espejo)
+     *   - SUM(abono_capital de pagos_credito_inversionistas_espejo)
+     *
+     * Esto garantiza que el saldo sea consistente con el historial real de pagos.
+     *
+     * @param id              - ID del inversionista
+     * @param dpi             - DPI del inversionista (alternativa al id)
+     * @param incluirLiquidados - "true" para incluir pagos ya liquidados
+     */
+    async ({ query, set }) => {
+      const {
+        id,
+        dpi,
+        incluirLiquidados = "false",
+      } = query as Record<string, string | undefined>;
+
+      if (!id && !dpi) {
+        set.status = 400;
+        return {
+          message: "Debe proporcionar al menos 'id' o 'dpi' para buscar al inversionista.",
+        };
+      }
+
+      const incluirLiquidadosBool = incluirLiquidados === "true";
+
+      try {
+        const result = await getInvestorMirrorSummary(
+          id ? Number(id) : undefined,
+          dpi,
+          incluirLiquidadosBool
+        );
+
+        set.status = 200;
+        return result;
+      } catch (error: any) {
+        console.error("[GET /getInvestorMirrorSummary] Error:", error);
+        set.status = error.message?.includes("no encontrado") ? 404 : 500;
+        return {
+          message: error.message || "Error al calcular el resumen espejo del inversionista",
+        };
+      }
+    },
+    {
+      query: t.Object({
+        id: t.Optional(t.String()),
+        dpi: t.Optional(t.String()),
+        incluirLiquidados: t.Optional(t.String()),
+      }),
+      detail: {
+        summary: "Resumen financiero calculado desde pagos espejo",
+        description:
+          "Calcula los subtotales del inversionista (capital, interés, IVA, ISR, cuota) " +
+          "usando EXCLUSIVAMENTE los registros de `pagos_credito_inversionistas_espejo`. " +
+          "El campo `total_monto_aportado` se recalcula restando los abonos de capital " +
+          "al monto_aportado_base, sin depender del saldo guardado en `creditos_inversionistas_espejo`.",
+        tags: ["Inversionistas", "Espejos"],
       },
     }
   )

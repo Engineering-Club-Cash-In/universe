@@ -183,7 +183,7 @@ export function useLiquidateByInvestor() {
       });
     },
     
-    onError: (error, t) => {
+    onError: (error) => {
       console.error("❌ Error al liquidar inversionista:", error);
       
       // 🔙 Rollback: restaura data anterior si falla

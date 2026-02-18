@@ -13,8 +13,16 @@ import {
   MoreVertical,
   RefreshCw,
   Upload,
+
 } from "lucide-react";
-import { useGetInvestors, useGetInvestorTotals } from "../hooks/getInvestor";
+import {
+  useGetInvestors,
+  useGetInvestorTotals,
+  useCalcularPagosEspejo,
+  useGetInvestorMirrorSummary,
+  useRecalcularPagosEspejo, // 🆕 Hook guardar cambios
+  useAplicarPagosEspejo,
+} from "../hooks/getInvestor";
 import { useCatalogs } from "../hooks/catalogs";
 import {
   inversionistasService,
@@ -56,9 +64,81 @@ export function TableInvestors() {
     number | null
   >(null);
 
-  // 🆕 Hook para generar pagos falsos
-  const { mutate: generateFalsePayments, isPending: isGenerating } =
-    useFalsePayments();
+  // Estado Draft: cuando está activo, se muestran subtotales del mirror summary
+  const [isDraft, setIsDraft] = useState(false);
+  const [draftInvestorId, setDraftInvestorId] = useState<number | null>(null);
+
+  // 🆕 Hook para calcular pagos espejo
+  const { mutate: calcularPagosEspejo, isPending: isCalculando } =
+    useCalcularPagosEspejo();
+
+  // 🆕 Hook para guardar cambios manuales (Recalcular)
+  const { mutate: guardarCambiosEspejo, isPending: isSavingChanges } =
+    useRecalcularPagosEspejo();
+
+
+
+  // 🆕 Hook para APLICAR cambios a encabezados
+  const { mutate: aplicarPagosEspejo, isPending: isApplying } =
+    useAplicarPagosEspejo();
+
+  // 🆕 Estado para cambios manuales en pagos espejo: { [pagoId]: { ...campos } }
+  // Usamos un Map o Record para acceso rápido.
+  const [changes, setChanges] = useState<Record<number, any>>({});
+
+  const handleInputChange = (pagoId: number, field: string, value: string) => {
+    setChanges((prev) => ({
+      ...prev,
+      [pagoId]: {
+        ...(prev[pagoId] || {}),
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleGuardarCambios = (inversionista: any) => {
+    // Recopilar TODOS los pagos de TODOS los créditos del inversionista
+    const allPayments: any[] = [];
+    inversionista.creditos?.forEach((cred: any) => {
+      if (cred.pagos) allPayments.push(...cred.pagos);
+    });
+    
+    // Procesar CADA pago del inversionista para enviar el estado completo
+    const pagosParaEnviar = allPayments.map((original) => {
+      const id = original.id; 
+      const changed = changes[id] || {}; 
+
+      return {
+        id,
+        // Convertir a STRING para el backend, y usar los nombres correctos 
+        abono_capital:            String(changed.abono_capital            ?? original.abono_capital),
+        abono_interes:            String(changed.abono_interes            ?? original.abono_interes),
+        abono_iva_12:             String(changed.abono_iva_12             ?? original.abono_iva),
+        porcentaje_participacion: String(changed.porcentaje_participacion ?? original.porcentaje_inversor),
+        cuota:                    String(changed.cuota                    ?? original.cuota),
+      };
+    });
+
+    if (pagosParaEnviar.length === 0) {
+      alert("No hay pagos para recalcular.");
+      return;
+    }
+
+    guardarCambiosEspejo(pagosParaEnviar, {
+      onSuccess: (res) => {
+        if (res.success) {
+          alert(`✅ Recálculo completado exitosamente.`);
+          setChanges({});
+          refetch(); 
+          refetchTotales(); 
+        }
+      },
+      onError: (err) => alert(`❌ Error al recalcular: ${err.message}`),
+    });
+  };
+
+  // 🆕 Hook para generar pagos falsos (se mantiene por compatibilidad)
+  const { isPending: isGenerating } = useFalsePayments();
   // 🆕 Confirmar liquidación
   // 🆕 Abrir modal de confirmación para generar pagos
   const handleOpenGenerarPagosModal = (inversionistaId: number) => {
@@ -66,28 +146,48 @@ export function TableInvestors() {
     setShowGenerarPagosModal(true);
   };
 
-  // 🆕 Confirmar generación de pagos falsos
+  // 🆕 Confirmar cálculo de pagos espejo (nuevo flujo Draft)
   const handleConfirmarGenerarPagos = async () => {
     if (!selectedInversionista) return;
 
-    // Generar pagos falsos
-    generateFalsePayments(
-      {
-        inversionistaId: selectedInversionista,
-        generateFalsePayment: true,
+    calcularPagosEspejo(selectedInversionista, {
+      onSuccess: (data) => {
+        if (data.success) {
+          setShowGenerarPagosModal(false);
+          setSelectedInversionista(null);
+          setIsDraft(true);   // ← activar modo borrador
+          refetch();
+          refetchTotales();
+        }
       },
-      {
-        onSuccess: (data) => {
-          if (data.success) {
-            // Cerrar modal
-            setShowGenerarPagosModal(false);
-            setSelectedInversionista(null);
-            refetch();
-            refetchTotales();
-          }
-        },
-      }
-    );
+      onError: (error) => {
+        alert(`❌ Error al calcular pagos: ${error.message}`);
+      },
+    });
+  };
+
+  // 🚀 Cálculo directo sin modal (Nuevo flujo)
+  const handleCalcularPagosDirecto = (inversionistaId: number) => {
+    console.log("🚀 Calculando pagos espejo para:", inversionistaId);
+    setSelectedInversionista(inversionistaId); // Para que el spinner se muestre en el row correcto
+
+    calcularPagosEspejo(inversionistaId, {
+      onSuccess: (data) => {
+        if (data.success) {
+          console.log("✅ Pagos calculados correctamente");
+          setIsDraft(true);
+          setDraftInvestorId(inversionistaId); // 📍 Guardamos el ID
+          refetch();
+          refetchTotales();
+          setSelectedInversionista(null);
+        }
+      },
+      onError: (error) => {
+        console.error("❌ Error al calcular pagos:", error);
+        alert(`Error al calcular pagos: ${error.message}`);
+        setSelectedInversionista(null);
+      },
+    });
   };
 
   // 🆕 Cancelar generación
@@ -153,6 +253,35 @@ export function TableInvestors() {
     numeroCuota,
     tipo: "espejos",
   });
+
+  // 🆕 DRAFT: Resumen calculado desde pagos espejo (solo activo en modo borrador)
+  const { data: mirrorSummaryData } = useGetInvestorMirrorSummary(
+    {
+      id: selectedInvestor !== "" ? Number(selectedInvestor) : undefined,
+      incluirLiquidados,
+    },
+    isDraft  // solo se activa cuando isDraft = true
+  );
+
+  // Fuente de subtotales: mirror summary en Draft, totales normales en modo normal
+  const subtotales = isDraft && mirrorSummaryData
+    ? {
+        total_abono_capital:  mirrorSummaryData.subtotal.total_abono_capital,
+        total_abono_interes:  mirrorSummaryData.subtotal.total_abono_interes,
+        total_abono_iva:      mirrorSummaryData.subtotal.total_abono_iva,
+        total_isr:            mirrorSummaryData.subtotal.total_isr,
+        total_cuota:          mirrorSummaryData.subtotal.total_cuota,
+        total_monto_aportado: mirrorSummaryData.subtotal.total_monto_aportado,
+      }
+    : {
+        total_abono_capital:  totalesData?.totales.total_abono_capital  ?? 0,
+        total_abono_interes:  totalesData?.totales.total_abono_interes  ?? 0,
+        total_abono_iva:      totalesData?.totales.total_abono_iva      ?? 0,
+        total_isr:            totalesData?.totales.total_isr            ?? 0,
+        total_cuota:          totalesData?.totales.total_cuota          ?? 0,
+        total_monto_aportado: totalesData?.totales.total_monto_aportado ?? 0,
+      };
+
 
   const liquidateMutation = useLiquidateByInvestor();
   const downloadPDF = useDownloadInvestorPDF();
@@ -653,73 +782,117 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
             </div>
 
             {/* Stats Grid - Ajustado para 5 elementos */}
+            {/* 🟡 Badge Modo Borrador */}
+            {/* 🟡 Modo Borrador y Acciones */}
+            {isDraft && inv.inversionista_id === draftInvestorId && (
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg animate-in fade-in zoom-in-95 duration-300">
+                <div className="flex items-center gap-3">
+                  <span className="inline-flex items-center gap-1.5 bg-yellow-100 border border-yellow-400 text-yellow-800 text-xs font-bold px-3 py-1 rounded-full animate-pulse shadow-sm">
+                    🟡 Modo Borrador
+                  </span>
+                  <span className="text-xs text-yellow-800 font-medium hidden sm:inline">
+                    Editando proyección de pagos
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-3 w-full sm:w-auto">
+
+                    <button
+                    onClick={() => handleGuardarCambios(inv)}
+                    disabled={isSavingChanges}
+                    className="flex-1 sm:flex-none bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold shadow-md hover:bg-indigo-700 hover:shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                    {isSavingChanges ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                        <RefreshCw className="w-4 h-4" />
+                    )}
+                    Recalcular
+                    </button>
+
+                    <button
+                        onClick={() => {
+                            if (confirm("⚠️ ¿Estás seguro de APLICAR estos pagos a los créditos?\n\nEsto actualizará el 'Monto Aportado' y otros totales en la ficha del crédito y SALDRÁ del modo borrador.")) {
+                                aplicarPagosEspejo(inv.inversionista_id, {
+                                    onSuccess: () => {
+                                        setIsDraft(false);
+                                        setDraftInvestorId(null);
+                                    }
+                                });
+                            }
+                        }}
+                        disabled={isApplying || isSavingChanges}
+                        className="flex-1 sm:flex-none bg-green-600 text-white px-4 py-2 rounded-lg font-bold shadow-md hover:bg-green-700 hover:shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {isApplying ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                            <CheckCircle className="w-4 h-4" />
+                        )}
+                        Aplicar
+                    </button>
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4">
-              <div className="bg-white rounded-lg p-3 shadow-sm border border-blue-100 h-full flex flex-col justify-center">
+              <div className={`rounded-lg p-3 shadow-sm border h-full flex flex-col justify-center ${isDraft ? "bg-yellow-50 border-yellow-300" : "bg-white border-blue-100"}`}>
                 <div className="text-xs text-gray-500 mb-1">
                   Total Capital
                 </div>
-                <div className="font-bold text-blue-700">
+                <div className={`font-bold ${isDraft ? "text-yellow-700" : "text-blue-700"}`}>
                   Q
-                  {Number(
-                    totalesData?.totales.total_abono_capital ?? 0
-                  ).toLocaleString("es-GT", {
+                  {Number(subtotales.total_abono_capital).toLocaleString("es-GT", {
                     minimumFractionDigits: 2,
                   })}
                 </div>
               </div>
 
-              <div className="bg-white rounded-lg p-3 shadow-sm border border-indigo-100 h-full flex flex-col justify-center">
+              <div className={`rounded-lg p-3 shadow-sm border h-full flex flex-col justify-center ${isDraft ? "bg-yellow-50 border-yellow-300" : "bg-white border-indigo-100"}`}>
                 <div className="text-xs text-gray-500 mb-1">
                   Total Interés
                 </div>
-                <div className="font-bold text-indigo-700">
+                <div className={`font-bold ${isDraft ? "text-yellow-700" : "text-indigo-700"}`}>
                   Q
-                  {Number(
-                    totalesData?.totales.total_abono_interes ?? 0
-                  ).toLocaleString("es-GT", {
+                  {Number(subtotales.total_abono_interes).toLocaleString("es-GT", {
                     minimumFractionDigits: 2,
                   })}
                 </div>
               </div>
 
-              <div className="bg-white rounded-lg p-3 shadow-sm border border-violet-100 h-full flex flex-col justify-center">
+              <div className={`rounded-lg p-3 shadow-sm border h-full flex flex-col justify-center ${isDraft ? "bg-yellow-50 border-yellow-300" : "bg-white border-violet-100"}`}>
                 <div className="text-xs text-gray-500 mb-1">
                   IVA + ISR
                 </div>
-                <div className="font-bold text-violet-700">
+                <div className={`font-bold ${isDraft ? "text-yellow-700" : "text-violet-700"}`}>
                   Q
                   {(
-                    Number(totalesData?.totales.total_abono_iva ?? 0) +
-                    Number(totalesData?.totales.total_isr ?? 0)
+                    Number(subtotales.total_abono_iva) +
+                    Number(subtotales.total_isr)
                   ).toLocaleString("es-GT", {
                     minimumFractionDigits: 2,
                   })}
                 </div>
               </div>
 
-              <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-3 shadow-sm border-2 border-green-300 h-full flex flex-col justify-center">
-                <div className="text-xs text-green-700 mb-1 font-semibold">
+              <div className={`rounded-lg p-3 shadow-sm border-2 h-full flex flex-col justify-center ${isDraft ? "bg-gradient-to-br from-yellow-50 to-amber-50 border-yellow-400" : "bg-gradient-to-br from-green-50 to-emerald-50 border-green-300"}`}>
+                <div className={`text-xs mb-1 font-semibold ${isDraft ? "text-yellow-700" : "text-green-700"}`}>
                   💰 Total Cuota
                 </div>
-                <div className="font-bold text-green-900 text-lg">
+                <div className={`font-bold text-lg ${isDraft ? "text-yellow-900" : "text-green-900"}`}>
                   Q
-                  {Number(
-                    totalesData?.totales.total_cuota ?? 0
-                  ).toLocaleString("es-GT", {
+                  {Number(subtotales.total_cuota).toLocaleString("es-GT", {
                     minimumFractionDigits: 2,
                   })}
                 </div>
               </div>
 
-              <div className="bg-gradient-to-br from-purple-50 to-fuchsia-50 rounded-lg p-3 shadow-sm border-2 border-purple-300 h-full flex flex-col justify-center">
-                <div className="text-xs text-purple-700 mb-1 font-semibold">
+              <div className={`rounded-lg p-3 shadow-sm border-2 h-full flex flex-col justify-center ${isDraft ? "bg-gradient-to-br from-yellow-50 to-amber-50 border-yellow-400" : "bg-gradient-to-br from-purple-50 to-fuchsia-50 border-purple-300"}`}>
+                <div className={`text-xs mb-1 font-semibold ${isDraft ? "text-yellow-700" : "text-purple-700"}`}>
                   Total Monto Aportado
                 </div>
-                <div className="font-bold text-purple-900 text-lg">
+                <div className={`font-bold text-lg ${isDraft ? "text-yellow-900" : "text-purple-900"}`}>
                   Q
-                  {Number(
-                    totalesData?.totales.total_monto_aportado ?? 0
-                  ).toLocaleString("es-GT", {
+                  {Number(subtotales.total_monto_aportado).toLocaleString("es-GT", {
                     minimumFractionDigits: 2,
                   })}
                 </div>
@@ -773,11 +946,12 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
 
                 <DropdownMenuSeparator />
 
-                {/* 🔥 PASO 1: Generar Pagos - SIEMPRE DISPONIBLE */}
+                {/* 🔥 PASO 1: Calcular Pagos - SIEMPRE DISPONIBLE */}
                 <DropdownMenuItem
                   onClick={(e) => {
                     e.stopPropagation();
-                    handleOpenGenerarPagosModal(inv.inversionista_id);
+                    // handleOpenGenerarPagosModal(inv.inversionista_id); // ANTERIOR: con modal
+                    handleCalcularPagosDirecto(inv.inversionista_id);     // NUEVO: directo
                   }}
                   disabled={
                     isGenerating &&
@@ -785,19 +959,19 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   }
                   className="cursor-pointer"
                 >
-                  {isGenerating &&
+                  {isCalculando &&
                   selectedInversionista === inv.inversionista_id ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin text-purple-600" />
                       <span className="text-purple-700 font-medium">
-                        Generando…
+                        Calculando…
                       </span>
                     </>
                   ) : (
                     <>
                       <FileSpreadsheet className="mr-2 h-4 w-4 text-purple-600" />
                       <span className="text-purple-700 font-medium">
-                        1️⃣ Generar Pagos
+                        1️⃣ Calcular Pagos
                       </span>
                     </>
                   )}
@@ -1020,117 +1194,105 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                       </h6>
 
                       {cred.pagos && cred.pagos.length > 0 ? (
-                        <div className="space-y-3">
-                          {cred.pagos.map((pago, pagoIdx) => (
-                            <div
-                              key={pagoIdx}
-                              className="bg-gradient-to-r from-indigo-50 to-blue-50 border-2 border-indigo-200 rounded-xl p-4"
-                            >
-                              <div className="flex items-center justify-between mb-3">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-lg">
-                                    📅
-                                  </span>
-                                  <div>
-                                    <div className="font-bold text-indigo-900">
-                                      {pago.mes ?? "--"} (Cuota
-                                      #{pago.cuota})
+                        <div>
+                          <div className="space-y-3">
+                            {cred.pagos.map((pago, pagoIdx) => (
+                              <div
+                                key={pagoIdx}
+                                className="bg-gradient-to-r from-indigo-50 to-blue-50 border-2 border-indigo-200 rounded-xl p-4"
+                              >
+                                <div className="flex items-center justify-between mb-3">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-lg">📅</span>
+                                    <div>
+                                      <div className="font-bold text-indigo-900">
+                                        {pago.mes ?? "--"} (Cuota #{pago.cuota})
+                                      </div>
+                                      <div className="text-xs text-gray-500">
+                                        {pago.fecha_pago ? new Date(pago.fecha_pago).toLocaleDateString("es-GT") : "--"}
+                                      </div>
                                     </div>
-                                    <div className="text-xs text-gray-500">
-                                      {pago.fecha_pago
-                                        ? new Date(
-                                            pago.fecha_pago
-                                          ).toLocaleDateString(
-                                            "es-GT"
-                                          )
-                                        : "--"}
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="text-xs text-gray-500">% Inversor</div>
+                                    <div className="font-bold text-indigo-700 text-lg">
+                                      {Number(pago.porcentaje_inversor)}%
                                     </div>
                                   </div>
                                 </div>
-                                <div className="text-right">
-                                  <div className="text-xs text-gray-500">
-                                    % Inversor
-                                  </div>
-                                  <div className="font-bold text-indigo-700 text-lg">
-                                    {Number(
-                                      pago.porcentaje_inversor
+
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                  {/* 💵 ABONO CAPITAL */}
+                                  <div className="bg-white rounded-lg p-2 border border-blue-200">
+                                    <div className="text-xs text-blue-700">💵 Abono Capital</div>
+                                    {isDraft ? (
+                                      <input
+                                        type="number"
+                                        className="w-full text-right bg-white border border-blue-300 rounded px-1 text-sm font-bold text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500 mt-1"
+                                        value={changes[pago.id]?.abono_capital ?? pago.abono_capital}
+                                        onChange={(e) => handleInputChange(pago.id, 'abono_capital', e.target.value)}
+                                      />
+                                    ) : (
+                                      <div className="font-bold text-blue-900 text-sm">
+                                        Q{Number(pago.abono_capital).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                      </div>
                                     )}
-                                    %
                                   </div>
+
+                                  {/* 💰 CUOTA INVERSOR */}
+                                  <div className="bg-white rounded-lg p-2 border border-violet-200">
+                                    <div className="text-xs text-violet-700">💰 Cuota Inversor</div>
+                                    {isDraft ? (
+                                      <input
+                                        type="number"
+                                        className="w-full text-right bg-white border border-violet-300 rounded px-1 text-sm font-bold text-violet-900 focus:outline-none focus:ring-2 focus:ring-violet-500 mt-1"
+                                        value={changes[pago.id]?.abono_interes ?? pago.abono_interes}
+                                        onChange={(e) => handleInputChange(pago.id, 'abono_interes', e.target.value)}
+                                      />
+                                    ) : (
+                                      <div className="font-bold text-violet-900 text-sm">
+                                        Q{Number(pago.abono_interes).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* 📈 IVA */}
+                                  <div className="bg-white rounded-lg p-2 border border-green-200">
+                                    <div className="text-xs text-green-700">📈 IVA</div>
+                                    {isDraft ? (
+                                      <input
+                                        type="number"
+                                        className="w-full text-right bg-white border border-green-300 rounded px-1 text-sm font-bold text-green-900 focus:outline-none focus:ring-2 focus:ring-green-500 mt-1"
+                                        value={changes[pago.id]?.abono_iva_12 ?? pago.abono_iva}
+                                        onChange={(e) => handleInputChange(pago.id, 'abono_iva_12', e.target.value)}
+                                      />
+                                    ) : (
+                                      <div className="font-bold text-green-900 text-sm">
+                                        Q{Number(pago.abono_iva).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* 📉 ISR */}
+                                  <div className="bg-white rounded-lg p-2 border border-yellow-200">
+                                    <div className="text-xs text-yellow-700">📉 ISR</div>
+                                    <div className="font-bold text-yellow-900 text-sm">
+                                      Q{Number(pago.isr).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="mt-2 pt-2 border-t border-indigo-200 text-center">
+                                  <span className="text-xs text-gray-600">Tasa Interés: </span>
+                                  <span className="font-semibold text-purple-700">
+                                    {Number(pago.tasaInteresInvesor)}%
+                                  </span>
                                 </div>
                               </div>
+                            ))}
+                          </div>
 
-                              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                                <div className="bg-white rounded-lg p-2 border border-blue-200">
-                                  <div className="text-xs text-blue-700">
-                                    💵 Abono Capital
-                                  </div>
-                                  <div className="font-bold text-blue-900 text-sm">
-                                    Q
-                                    {Number(
-                                      pago.abono_capital
-                                    ).toLocaleString("es-GT", {
-                                      minimumFractionDigits: 2,
-                                    })}
-                                  </div>
-                                </div>
-
-                                <div className="bg-white rounded-lg p-2 border border-violet-200">
-                                  <div className="text-xs text-violet-700">
-                                    💰 Cuota Inversor
-                                  </div>
-                                  <div className="font-bold text-violet-900 text-sm">
-                                    Q
-                                    {Number(
-                                      pago.abono_interes
-                                    ).toLocaleString("es-GT", {
-                                      minimumFractionDigits: 2,
-                                    })}
-                                  </div>
-                                </div>
-
-                                <div className="bg-white rounded-lg p-2 border border-green-200">
-                                  <div className="text-xs text-green-700">
-                                    📈 IVA
-                                  </div>
-                                  <div className="font-bold text-green-900 text-sm">
-                                    Q
-                                    {Number(
-                                      pago.abono_iva
-                                    ).toLocaleString("es-GT", {
-                                      minimumFractionDigits: 2,
-                                    })}
-                                  </div>
-                                </div>
-
-                                <div className="bg-white rounded-lg p-2 border border-yellow-200">
-                                  <div className="text-xs text-yellow-700">
-                                    📉 ISR
-                                  </div>
-                                  <div className="font-bold text-yellow-900 text-sm">
-                                    Q
-                                    {Number(
-                                      pago.isr
-                                    ).toLocaleString("es-GT", {
-                                      minimumFractionDigits: 2,
-                                    })}
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div className="mt-2 pt-2 border-t border-indigo-200 text-center">
-                                <span className="text-xs text-gray-600">
-                                  Tasa Interés:{" "}
-                                </span>
-                                <span className="font-semibold text-purple-700">
-                                  {Number(
-                                    pago.tasaInteresInvesor
-                                  )}
-                                  %
-                                </span>
-                              </div>
-                            </div>
-                          ))}
+                          {/* 💾 BARRA DE ACCIONES ELIMINADA DE AQUÍ */}
                         </div>
                       ) : (
                         <div className="text-gray-500 text-center py-6 bg-gray-50 rounded-lg">
@@ -1490,7 +1652,8 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                     </div>
 
                     {cred.pagos && cred.pagos.length > 0 ? (
-                      <div className="space-y-3">
+                      <div>
+                        <div className="space-y-3">
                         {cred.pagos.map((pago, pagoIdx) => (
                           <div
                             key={pagoIdx}
@@ -1517,30 +1680,65 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                             </div>
 
                             <div className="grid grid-cols-2 gap-2">
+                              {/* 💵 ABONO CAPITAL */}
                               <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-2 border border-blue-200">
                                 <div className="text-xs text-blue-700">💵 Abono Capital</div>
-                                <div className="font-bold text-blue-900 text-sm">
-                                  Q{Number(pago.abono_capital).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
-                                </div>
+                                {isDraft ? (
+                                  <input
+                                    type="number"
+                                    className="w-full text-right bg-white border border-blue-300 rounded px-1 text-sm font-bold text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500 mt-1"
+                                    value={changes[pago.id]?.abono_capital ?? pago.abono_capital}
+                                    onChange={(e) => handleInputChange(pago.id, 'abono_capital', e.target.value)}
+                                  />
+                                ) : (
+                                  <div className="font-bold text-blue-900 text-sm">
+                                    Q{Number(pago.abono_capital).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                  </div>
+                                )}
                               </div>
+
+                              {/* 💰 CUOTA INVERSOR (INTERÉS) */}
                               <div className="bg-gradient-to-br from-violet-50 to-violet-100 rounded-lg p-2 border border-violet-200">
                                 <div className="text-xs text-violet-700">💰 Cuota Inversor</div>
-                                <div className="font-bold text-violet-900 text-sm">
-                                  Q{Number(pago.abono_interes).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
-                                </div>
+                                {isDraft ? (
+                                  <input
+                                    type="number"
+                                    className="w-full text-right bg-white border border-violet-300 rounded px-1 text-sm font-bold text-violet-900 focus:outline-none focus:ring-2 focus:ring-violet-500 mt-1"
+                                    value={changes[pago.id]?.abono_interes ?? pago.abono_interes}
+                                    onChange={(e) => handleInputChange(pago.id, 'abono_interes', e.target.value)}
+                                  />
+                                ) : (
+                                  <div className="font-bold text-violet-900 text-sm">
+                                    Q{Number(pago.abono_interes).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                  </div>
+                                )}
                               </div>
+
+                              {/* 📈 IVA */}
                               <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-2 border border-green-200">
                                 <div className="text-xs text-green-700">📈 IVA</div>
-                                <div className="font-bold text-green-900 text-sm">
-                                  Q{Number(pago.abono_iva).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
-                                </div>
+                                {isDraft ? (
+                                  <input
+                                    type="number"
+                                    className="w-full text-right bg-white border border-green-300 rounded px-1 text-sm font-bold text-green-900 focus:outline-none focus:ring-2 focus:ring-green-500 mt-1"
+                                    value={changes[pago.id]?.abono_iva_12 ?? pago.abono_iva}
+                                    onChange={(e) => handleInputChange(pago.id, 'abono_iva_12', e.target.value)}
+                                  />
+                                ) : (
+                                  <div className="font-bold text-green-900 text-sm">
+                                    Q{Number(pago.abono_iva).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                  </div>
+                                )}
                               </div>
+
+                              {/* 📉 ISR - Si es editable, descomenta el input. Por ahora solo display */}
                               <div className="bg-gradient-to-br from-yellow-50 to-yellow-100 rounded-lg p-2 border border-yellow-200">
-                                <div className="text-xs text-yellow-700">📉 ISR</div>
+                                <div className="text-xs text-yellow-700">📉 ISR (Calc)</div>
                                 <div className="font-bold text-yellow-900 text-sm">
                                   Q{Number(pago.isr).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                                 </div>
                               </div>
+
                               <div className="col-span-2 bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-lg p-2 border border-indigo-300">
                                 <div className="text-xs text-indigo-700">💎 Total Inversor</div>
                                 <div className="font-bold text-indigo-900 text-base">
@@ -1549,6 +1747,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                               </div>
                             </div>
 
+                            {/* ... footer ... */}
                             <div className="mt-2 pt-2 border-t border-gray-200 text-center">
                               <span className="text-xs text-gray-600">Tasa Interés Inversor: </span>
                               <span className="font-semibold text-purple-700">
@@ -1557,6 +1756,12 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                             </div>
                           </div>
                         ))}
+
+                        {/* 💾 BARRA DE ACCIONES PARA RECALCULAR (Solo en Draft) - FUERA DEL MAP PERO DENTRO DEL DIV CONTAINER */}
+
+                        </div>
+
+                        {/* 💾 BARRA DE ACCIONES ELIMINADA DE AQUÍ */}
                       </div>
                     ) : (
                       <div className="text-gray-500 text-center py-4 bg-gray-50 rounded-lg">

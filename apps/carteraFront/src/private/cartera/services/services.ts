@@ -678,6 +678,7 @@ export async function reversePagosInversionistasService({ pago_id, credito_id,re
   return res.data;
 }
 export interface PagoCredito {
+  id: number;
   mes: string;
   abono_capital: string;
   abono_interes: string;
@@ -806,6 +807,123 @@ export async function getInvestorTotalsService(
 
   const url = `${import.meta.env.VITE_BACK_URL}/getInvestorTotals${query.toString() ? `?${query.toString()}` : ""}`;
   const res = await api.get<InvestorTotalsResponse>(url);
+  return res.data;
+}
+
+// ============================================================
+// calcularPagosEspejo — POST /calcularPagosEspejo
+// ============================================================
+export interface CalcularPagosEspejoResponse {
+  success: boolean;
+  message: string;
+  inversionistaId: number;
+  totalCreditosProcesados: number;
+  data: {
+    creditoId: number;
+    numeroCreditoSifco: string;
+    cuotaProcesada: number;
+    pagosRegistrados: number;
+  }[];
+}
+
+export async function calcularPagosEspejoService(
+  inversionistaId: number
+): Promise<CalcularPagosEspejoResponse> {
+  const res = await api.post<CalcularPagosEspejoResponse>(
+    `${import.meta.env.VITE_BACK_URL}/calcularPagosEspejo`,
+    { inversionistaId }
+  );
+  return res.data;
+}
+
+// ============================================================
+// getInvestorMirrorSummary — GET /getInvestorMirrorSummary
+// ============================================================
+export interface InvestorMirrorSummaryResponse {
+  inversionista_id: number;
+  nombre: string;
+  emite_factura: boolean;
+  reinversion: boolean;
+  banco_id: number | null;
+  tipo_cuenta: string | null;
+  numero_cuenta: string | null;
+  dpi: number | null;
+  subtotal: {
+    total_abono_capital: number;
+    total_abono_interes: number;
+    total_abono_iva: number;
+    total_isr: number;
+    total_cuota: number;
+    total_monto_aportado: number;
+    totalAbonoGeneralInteres: number;
+    total_capital_creditos: number;
+    total_capital_actual: number;
+  };
+}
+
+export async function getInvestorMirrorSummaryService(params: {
+  id?: number;
+  dpi?: string;
+  incluirLiquidados?: boolean;
+}): Promise<InvestorMirrorSummaryResponse> {
+  const query = new URLSearchParams();
+  if (params.id !== undefined) query.append("id", String(params.id));
+  if (params.dpi) query.append("dpi", params.dpi);
+  if (params.incluirLiquidados !== undefined)
+    query.append("incluirLiquidados", String(params.incluirLiquidados));
+
+  const url = `${import.meta.env.VITE_BACK_URL}/getInvestorMirrorSummary${
+    query.toString() ? `?${query.toString()}` : ""
+  }`;
+  const res = await api.get<InvestorMirrorSummaryResponse>(url);
+  return res.data;
+}
+
+// ============================================================
+// recalcularPagosEspejo — POST /recalcularPagosEspejo
+// ============================================================
+export interface RecalcularPagoPayload {
+  id: number;
+  abono_capital: string;
+  abono_interes: string;
+  abono_iva_12: string;
+  porcentaje_participacion: string;
+  cuota: string;
+  estado_liquidacion?: "NO_LIQUIDADO" | "LIQUIDADO";
+}
+
+export interface RecalcularPagosEspejoResponse {
+  success: boolean;
+  message: string;
+  actualizados: number;
+}
+
+export async function recalcularPagosEspejoService(
+  pagos: RecalcularPagoPayload[]
+): Promise<RecalcularPagosEspejoResponse> {
+  const res = await api.post<RecalcularPagosEspejoResponse>(
+    `${import.meta.env.VITE_BACK_URL}/recalcularPagosEspejo`,
+    { pagos }
+  );
+  return res.data;
+}
+
+// ============================================================
+// aplicarPagosEspejo — POST /aplicarPagosEspejo
+// ============================================================
+export interface AplicarPagosEspejoResponse {
+  success: boolean;
+  message: string;
+  actualizados: number;
+}
+
+export async function aplicarPagosEspejoService(
+  inversionistaId: number
+): Promise<AplicarPagosEspejoResponse> {
+  const res = await api.post<AplicarPagosEspejoResponse>(
+    `${import.meta.env.VITE_BACK_URL}/aplicarPagosEspejo`,
+    { inversionistaId }
+  );
   return res.data;
 }
 

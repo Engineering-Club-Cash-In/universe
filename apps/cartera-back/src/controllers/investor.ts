@@ -1575,6 +1575,236 @@ export async function getInvestorTotalsGlobales(
   };
 }
 
+// ============================================
+// getInvestorMirrorSummary
+// ============================================
+
+/**
+ * Calcula los subtotales financieros globales de un inversionista usando
+ * EXCLUSIVAMENTE los registros de `pagos_credito_inversionistas_espejo`.
+ *
+ * Lógica:
+ *  1. Lee `monto_aportado` base de `creditos_inversionistas_espejo`.
+ *  2. Suma todos los `abono_capital` de los pagos espejo.
+ *  3. Saldo actual = monto_aportado_base - SUM(abono_capital de pagos).
+ *
+ * La respuesta incluye únicamente datos básicos del inversionista y
+ * subtotales globales (sin detalle de créditos ni de pagos individuales).
+ *
+ * @param investorId        - ID del inversionista (opcional si se provee dpi)
+ * @param dpi               - DPI del inversionista (opcional si se provee investorId)
+ * @param incluirLiquidados - Si true, incluye pagos ya liquidados en el cálculo
+ */
+export async function getInvestorMirrorSummary(
+  investorId?: number,
+  dpi?: string,
+  incluirLiquidados = false
+) {
+  console.log(
+    "[getInvestorMirrorSummary] investorId:", investorId,
+    "DPI:", dpi,
+    "incluirLiquidados:", incluirLiquidados
+  );
+
+  // ── PASO 1: Validar y obtener datos del inversionista ──────────────────────
+  const queryConditions: SQL[] = [];
+  if (investorId) queryConditions.push(eq(inversionistas.inversionista_id, investorId));
+  if (dpi) {
+    const dpiNumber = parseInt(dpi, 10);
+    if (isNaN(dpiNumber)) throw new Error("DPI inválido: debe ser un número entero.");
+    queryConditions.push(eq(inversionistas.dpi, dpiNumber));
+  }
+  if (queryConditions.length === 0) {
+    throw new Error("Debe proporcionar al menos 'id' o 'dpi' del inversionista.");
+  }
+
+  const [inv] = await db
+    .select({
+      inversionista_id: inversionistas.inversionista_id,
+      nombre:           inversionistas.nombre,
+      emite_factura:    inversionistas.emite_factura,
+      reinversion:      inversionistas.tipo_reinversion,
+      banco_id:         inversionistas.banco_id,
+      tipo_cuenta:      inversionistas.tipo_cuenta,
+      numero_cuenta:    inversionistas.numero_cuenta,
+      dpi:              inversionistas.dpi,
+    })
+    .from(inversionistas)
+    .where(and(...queryConditions))
+    .limit(1);
+
+  if (!inv) throw new Error("Inversionista no encontrado.");
+
+  console.log(`[getInvestorMirrorSummary] Inversionista: ${inv.nombre} (ID: ${inv.inversionista_id})`);
+
+  // ── PASO 2: Leer monto_aportado base de creditos_inversionistas_espejo ─────
+  const creditosEspejo = await db
+    .select({
+      credito_id:          creditos_inversionistas_espejo.credito_id,
+      monto_aportado_base: creditos_inversionistas_espejo.monto_aportado,
+    })
+    .from(creditos_inversionistas_espejo)
+    .where(eq(creditos_inversionistas_espejo.inversionista_id, inv.inversionista_id));
+
+  const totalMontoBase = creditosEspejo.reduce(
+    (acc, c) => acc.plus(new Big(c.monto_aportado_base ?? 0)),
+    new Big(0)
+  );
+
+  // Caso sin créditos espejo: devolver ceros con monto base
+  if (creditosEspejo.length === 0) {
+    return {
+      inversionista_id: inv.inversionista_id,
+      nombre:           inv.nombre,
+      emite_factura:    inv.emite_factura,
+      reinversion:      inv.reinversion,
+      banco_id:         inv.banco_id,
+      tipo_cuenta:      inv.tipo_cuenta,
+      numero_cuenta:    inv.numero_cuenta,
+      dpi:              inv.dpi,
+      subtotal: {
+        total_abono_capital:      0,
+        total_abono_interes:      0,
+        total_abono_iva:          0,
+        total_isr:                0,
+        total_cuota:              0,
+        total_monto_aportado:     Number(totalMontoBase.toString()),
+        totalAbonoGeneralInteres: 0,
+        total_capital_creditos:   Number(totalMontoBase.toString()),
+        total_capital_actual:     Number(totalMontoBase.toString()),
+      },
+    };
+  }
+
+  const creditosIds = creditosEspejo.map((c) => c.credito_id);
+  console.log(`[getInvestorMirrorSummary] Créditos espejo: ${creditosIds.length}`);
+
+  // ── PASO 3: Obtener todos los pagos espejo (fuente de verdad) ─────────────
+  const pagosConditions: SQL[] = [
+    eq(pagos_credito_inversionistas_espejo.inversionista_id, inv.inversionista_id),
+    inArray(pagos_credito_inversionistas_espejo.credito_id, creditosIds),
+  ];
+  if (!incluirLiquidados) {
+    pagosConditions.push(
+      eq(pagos_credito_inversionistas_espejo.estado_liquidacion, "NO_LIQUIDADO")
+    );
+  }
+
+  const pagosEspejo = await db
+    .select({
+      credito_id:    pagos_credito_inversionistas_espejo.credito_id,
+      abono_capital: pagos_credito_inversionistas_espejo.abono_capital,
+      abono_interes: pagos_credito_inversionistas_espejo.abono_interes,
+      abono_iva_12:  pagos_credito_inversionistas_espejo.abono_iva_12,
+    })
+    .from(pagos_credito_inversionistas_espejo)
+    .where(and(...pagosConditions));
+
+  console.log(`[getInvestorMirrorSummary] Pagos espejo: ${pagosEspejo.length}`);
+
+  // Agrupar pagos por credito_id
+  const pagosPorCredito = new Map<number, typeof pagosEspejo>();
+  for (const pago of pagosEspejo) {
+    const arr = pagosPorCredito.get(pago.credito_id) ?? [];
+    arr.push(pago);
+    pagosPorCredito.set(pago.credito_id, arr);
+  }
+
+  // ── PASO 4: Calcular subtotales globales ──────────────────────────────────
+  const sg = {
+    total_abono_capital:      new Big(0),
+    total_abono_interes:      new Big(0),
+    total_abono_iva:          new Big(0),
+    total_isr:                new Big(0),
+    total_cuota:              new Big(0),
+    total_monto_aportado:     new Big(0),
+    totalAbonoGeneralInteres: new Big(0),
+    total_capital_creditos:   new Big(0),
+    total_capital_actual:     new Big(0),
+  };
+
+  for (const credito of creditosEspejo) {
+    const pagos             = pagosPorCredito.get(credito.credito_id) ?? [];
+    const montoAportadoBase = new Big(credito.monto_aportado_base ?? 0);
+
+    sg.total_capital_creditos = sg.total_capital_creditos.plus(montoAportadoBase);
+
+    let abonoCapitalCredito = new Big(0);
+
+    for (const pago of pagos) {
+      const abono_capital = new Big(pago.abono_capital ?? 0);
+      const abono_interes = new Big(pago.abono_interes ?? 0);
+      const abono_iva     = new Big(pago.abono_iva_12  ?? 0);
+
+      // ISR: 7% sobre interés si NO emite factura
+      const isr = inv.emite_factura
+        ? new Big(0)
+        : abono_interes.times(0.07).round(2);
+
+      const abonoGeneralInteres = inv.emite_factura
+        ? abono_interes.plus(abono_iva)
+        : abono_interes.minus(isr);
+
+      let cuota_inversor: Big;
+      switch (inv.reinversion) {
+        case "sin_reinversion":
+          cuota_inversor = abono_capital.plus(abono_interes).plus(inv.emite_factura ? abono_iva : isr.neg());
+          break;
+        case "reinversion_capital":
+          cuota_inversor = abono_interes.plus(inv.emite_factura ? abono_iva : isr.neg());
+          break;
+        case "reinversion_interes":
+          cuota_inversor = abono_capital.plus(inv.emite_factura ? abono_iva : isr.neg());
+          break;
+        case "reinversion_total":
+          cuota_inversor = new Big(0);
+          break;
+        default:
+          cuota_inversor = abono_capital.plus(abono_interes).plus(inv.emite_factura ? abono_iva : isr.neg());
+      }
+
+      abonoCapitalCredito         = abonoCapitalCredito.plus(abono_capital);
+      sg.total_abono_capital      = sg.total_abono_capital.plus(abono_capital);
+      sg.total_abono_interes      = sg.total_abono_interes.plus(abono_interes);
+      sg.total_abono_iva          = sg.total_abono_iva.plus(abono_iva);
+      sg.total_isr                = sg.total_isr.plus(isr);
+      sg.total_cuota              = sg.total_cuota.plus(cuota_inversor);
+      sg.totalAbonoGeneralInteres = sg.totalAbonoGeneralInteres.plus(abonoGeneralInteres);
+    }
+
+    // 🔑 Saldo actual = monto_aportado_base - SUM(abono_capital de pagos espejo)
+    const capital_actual = montoAportadoBase.minus(abonoCapitalCredito);
+    sg.total_monto_aportado = sg.total_monto_aportado.plus(capital_actual);
+    sg.total_capital_actual = sg.total_capital_actual.plus(capital_actual);
+  }
+
+  // ── PASO 5: Retornar datos del inversionista + subtotales globales ─────────
+  return {
+    inversionista_id: inv.inversionista_id,
+    nombre:           inv.nombre,
+    emite_factura:    inv.emite_factura,
+    reinversion:      inv.reinversion,
+    banco_id:         inv.banco_id,
+    tipo_cuenta:      inv.tipo_cuenta,
+    numero_cuenta:    inv.numero_cuenta,
+    dpi:              inv.dpi,
+    subtotal: {
+      total_abono_capital:      Number(sg.total_abono_capital.toString()),
+      total_abono_interes:      Number(sg.total_abono_interes.toString()),
+      total_abono_iva:          Number(sg.total_abono_iva.toString()),
+      total_isr:                Number(sg.total_isr.toString()),
+      total_cuota:              Number(sg.total_cuota.toString()),
+      /** Saldo actual: monto_aportado_base - SUM(abono_capital de pagos espejo) */
+      total_monto_aportado:     Number(sg.total_monto_aportado.toString()),
+      totalAbonoGeneralInteres: Number(sg.totalAbonoGeneralInteres.toString()),
+      /** Suma de monto_aportado_base de todos los créditos espejo */
+      total_capital_creditos:   Number(sg.total_capital_creditos.toString()),
+      /** Igual a total_monto_aportado: saldo vivo calculado desde pagos */
+      total_capital_actual:     Number(sg.total_capital_actual.toString()),
+    },
+  };
+}
+
 export const liquidateByInvestorSchema = z.object({
   inversionista_id: z.number().optional(), // 🆕 Ahora es opcional
 });

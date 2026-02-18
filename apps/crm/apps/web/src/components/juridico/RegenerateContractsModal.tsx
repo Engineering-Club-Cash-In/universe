@@ -89,9 +89,9 @@ export function RegenerateContractsModal({
 				<div className="space-y-4 py-4">
 					{/* Selector de fecha */}
 					<div className="space-y-2">
-						<label className="font-medium text-sm">
+						<span className="font-medium text-sm">
 							Nueva fecha del contrato
-						</label>
+						</span>
 						<Popover>
 							<PopoverTrigger asChild>
 								<Button
@@ -124,9 +124,9 @@ export function RegenerateContractsModal({
 					{/* Selector de tipos de contratos */}
 					<div className="space-y-2">
 						<div className="flex items-center justify-between">
-							<label className="font-medium text-sm">
+							<span className="font-medium text-sm">
 								Tipos de contratos a regenerar
-							</label>
+							</span>
 							<Button
 								variant="ghost"
 								size="sm"

@@ -7,15 +7,6 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
-// Campos requeridos para vehículos nuevos antes de cerrar la oportunidad
-const REQUIRED_FIELDS_FOR_NEW_VEHICLE = [
-	"vinNumber",
-	"licensePlate",
-	"origin",
-	"fuelType",
-	"transmission",
-] as const;
-
 type VehicleForValidation = {
 	isNew?: boolean | null;
 	vinNumber?: string | null;
@@ -24,22 +15,6 @@ type VehicleForValidation = {
 	fuelType?: string | null;
 	transmission?: string | null;
 };
-
-/**
- * Verifica si un vehículo nuevo tiene todos los datos completos
- */
-export function isNewVehicleDataComplete(
-	vehicle: VehicleForValidation,
-): boolean {
-	if (!vehicle.isNew) return true;
-	return !!(
-		vehicle.vinNumber &&
-		vehicle.licensePlate &&
-		vehicle.origin &&
-		vehicle.fuelType &&
-		vehicle.transmission
-	);
-}
 
 /**
  * Obtiene la lista de campos faltantes para un vehículo nuevo
@@ -71,7 +46,7 @@ export function getMissingFieldsForNewVehicle(
 /**
  * Renderiza un badge indicando si es vehículo nuevo
  */
-export function renderNewVehicleBadge(isNew: boolean | null | undefined) {
+function renderNewVehicleBadge(isNew: boolean | null | undefined) {
 	if (!isNew) return null;
 
 	return (
@@ -88,7 +63,7 @@ export function renderNewVehicleBadge(isNew: boolean | null | undefined) {
 /**
  * Renderiza un badge indicando el estado de datos del vehículo nuevo
  */
-export function renderVehicleDataStatusBadge(vehicle: VehicleForValidation) {
+function renderVehicleDataStatusBadge(vehicle: VehicleForValidation) {
 	if (!vehicle.isNew) return null;
 
 	const missingFields = getMissingFieldsForNewVehicle(vehicle);

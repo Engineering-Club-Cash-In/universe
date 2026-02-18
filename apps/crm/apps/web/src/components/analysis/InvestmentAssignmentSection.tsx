@@ -525,9 +525,18 @@ export function InvestmentAssignmentSection({
 												? "border-primary bg-muted/50"
 												: ""
 										}`}
+										role="button"
+										tabIndex={0}
 										onClick={() => {
 											setSelectedOpportunityId(opp.id);
 											setSelectedInversionistas([]);
+										}}
+										onKeyDown={(e) => {
+											if (e.key === "Enter" || e.key === " ") {
+												e.preventDefault();
+												setSelectedOpportunityId(opp.id);
+												setSelectedInversionistas([]);
+											}
 										}}
 									>
 										<div className="flex items-center justify-between">
@@ -649,7 +658,7 @@ export function InvestmentAssignmentSection({
 										<Button
 											variant="outline"
 											size="sm"
-											onClick={() => setPage(totalPages - 1)}
+											onClick={() => setPage(() => totalPages - 1)}
 											disabled={page >= totalPages - 1}
 										>
 											<ChevronsRight className="h-4 w-4" />

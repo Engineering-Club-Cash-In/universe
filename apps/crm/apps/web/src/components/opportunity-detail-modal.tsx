@@ -270,7 +270,15 @@ export function OpportunityDetailModal({
 										{onNavigateToLead ? (
 											<span
 												className="cursor-pointer font-medium text-primary hover:underline"
+												role="button"
+												tabIndex={0}
 												onClick={() => onNavigateToLead(opportunity.lead!.id)}
+												onKeyDown={(e) => {
+													if (e.key === "Enter" || e.key === " ") {
+														e.preventDefault();
+														onNavigateToLead(opportunity.lead!.id);
+													}
+												}}
 											>
 												{opportunity.lead.firstName} {opportunity.lead.lastName}
 											</span>

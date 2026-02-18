@@ -879,7 +879,15 @@ function UploadDocumentsDialog({
 				{/* Zona de subida */}
 				<div
 					className="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-muted-foreground/25 border-dashed p-6 transition-colors hover:border-muted-foreground/50"
+					role="button"
+					tabIndex={0}
 					onClick={() => fileInputRef.current?.click()}
+					onKeyDown={(e) => {
+						if (e.key === "Enter" || e.key === " ") {
+							e.preventDefault();
+							fileInputRef.current?.click();
+						}
+					}}
 				>
 					{uploading ? (
 						<Loader2 className="mb-2 h-8 w-8 animate-spin text-muted-foreground" />

@@ -240,7 +240,8 @@ export function DisbursementChecklistView({
 
 				{/* Notes */}
 				<div className="space-y-2">
-					<label className="font-medium text-sm">Notas</label>
+					<label className="font-medium text-sm">
+					Notas
 					<Textarea
 						value={notes}
 						onChange={(e) => setNotes(e.target.value)}
@@ -248,6 +249,7 @@ export function DisbursementChecklistView({
 						disabled={checklist.disbursementApproved ?? false}
 						rows={3}
 					/>
+				</label>
 					{!checklist.disbursementApproved && (
 						<Button
 							variant="outline"

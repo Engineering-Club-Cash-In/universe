@@ -264,17 +264,15 @@ function AuctionsDashboard() {
 										)}
 									</p>
 								) : (
-									<>
-										<label className="mb-1 block font-medium">
-											Precio Final de Venta
-										</label>
+									<label className="mb-1 block font-medium">
+										Precio Final de Venta
 										<Input
 											type="number"
 											placeholder="Ingrese el precio final"
 											value={finalPrice ?? ""}
 											onChange={(e) => setFinalPrice(Number(e.target.value))}
 										/>
-									</>
+									</label>
 								)}
 							</div>
 						</div>

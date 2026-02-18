@@ -142,7 +142,8 @@ export function ContactoModal({
 						<div className="grid grid-cols-2 gap-4">
 							<form.Field
 								name="metodoContacto"
-								children={(field) => (
+							>
+								{(field) => (
 									<div className="space-y-2">
 										<Label>Método de Contacto</Label>
 										<Select
@@ -168,11 +169,12 @@ export function ContactoModal({
 										</Select>
 									</div>
 								)}
-							/>
+							</form.Field>
 
 							<form.Field
 								name="estadoContacto"
-								children={(field) => (
+							>
+								{(field) => (
 									<div className="space-y-2">
 										<Label>Estado del Contacto</Label>
 										<Select
@@ -207,7 +209,7 @@ export function ContactoModal({
 										</Select>
 									</div>
 								)}
-							/>
+							</form.Field>
 						</div>
 
 						{/* Botón para ejecutar acción */}
@@ -246,11 +248,13 @@ export function ContactoModal({
 
 						<form.Field
 							name="metodoContacto"
-							children={(metodoField) =>
+						>
+							{(metodoField) =>
 								metodoField.state.value === "llamada" && (
 									<form.Field
 										name="duracionLlamada"
-										children={(field) => (
+									>
+										{(field) => (
 											<div className="space-y-2">
 												<Label>Duración de la Llamada (segundos)</Label>
 												<Input
@@ -263,10 +267,10 @@ export function ContactoModal({
 												/>
 											</div>
 										)}
-									/>
+									</form.Field>
 								)
 							}
-						/>
+						</form.Field>
 					</div>
 
 					{/* Sección: Detalles de la Conversación */}
@@ -279,7 +283,8 @@ export function ContactoModal({
 								onChange: ({ value }) =>
 									!value ? "Los comentarios son requeridos" : undefined,
 							}}
-							children={(field) => (
+						>
+							{(field) => (
 								<div className="space-y-2">
 									<Label>Comentarios *</Label>
 									<Textarea
@@ -296,12 +301,13 @@ export function ContactoModal({
 										)}
 								</div>
 							)}
-						/>
+						</form.Field>
 
 						<div className="grid grid-cols-2 gap-4">
 							<form.Field
 								name="acuerdosAlcanzados"
-								children={(field) => (
+							>
+								{(field) => (
 									<div className="space-y-2">
 										<Label>Acuerdos Alcanzados</Label>
 										<Textarea
@@ -311,11 +317,12 @@ export function ContactoModal({
 										/>
 									</div>
 								)}
-							/>
+							</form.Field>
 
 							<form.Field
 								name="estadoContacto"
-								children={(estadoField) => (
+							>
+								{(estadoField) => (
 									<form.Field
 										name="compromisosPago"
 										validators={{
@@ -338,7 +345,8 @@ export function ContactoModal({
 												return undefined;
 											},
 										}}
-										children={(field) => {
+									>
+										{(field) => {
 											const estadoContacto =
 												form.getFieldValue("estadoContacto");
 											const estadosExitosos = [
@@ -374,9 +382,9 @@ export function ContactoModal({
 												</div>
 											);
 										}}
-									/>
+									</form.Field>
 								)}
-							/>
+							</form.Field>
 						</div>
 					</div>
 
@@ -386,7 +394,8 @@ export function ContactoModal({
 
 						<form.Field
 							name="requiereSeguimiento"
-							children={(field) => (
+						>
+							{(field) => (
 								<div className="flex items-center space-x-2">
 									<input
 										type="checkbox"
@@ -396,7 +405,7 @@ export function ContactoModal({
 									<Label>Requiere seguimiento programado</Label>
 								</div>
 							)}
-						/>
+						</form.Field>
 					</div>
 
 					<DialogFooter>
@@ -411,7 +420,8 @@ export function ContactoModal({
 						</DialogClose>
 						<form.Subscribe
 							selector={(state) => [state.canSubmit, state.isSubmitting]}
-							children={([canSubmit, isSubmitting]) => (
+						>
+							{([canSubmit, isSubmitting]) => (
 								<Button
 									type="submit"
 									disabled={!canSubmit || createContactoMutation.isPending}
@@ -421,7 +431,7 @@ export function ContactoModal({
 										: "Registrar Contacto"}
 								</Button>
 							)}
-						/>
+						</form.Subscribe>
 					</DialogFooter>
 				</form>
 			</DialogContent>

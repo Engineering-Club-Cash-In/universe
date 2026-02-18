@@ -20,7 +20,7 @@ import { link, type orpc } from "@/utils/orpc";
 import type { appRouter } from "../../../server/src/routers";
 import "../index.css";
 
-export interface RouterAppContext {
+interface RouterAppContext {
 	orpc: typeof orpc;
 	queryClient: QueryClient;
 }

@@ -11,25 +11,25 @@ const statement = {
 
 const ac = createAccessControl(statement);
 
-export const adminRole = ac.newRole({
+const adminRole = ac.newRole({
 	user: ["read", "update"],
 	lead: ["create", "read", "update", "delete"],
 	report: ["read", "export"],
 });
 
-export const salesRole = ac.newRole({
+const salesRole = ac.newRole({
 	user: ["read", "update"],
 	lead: ["create", "read", "update"],
 	report: ["read"],
 });
 
-export const analystRole = ac.newRole({
+const analystRole = ac.newRole({
 	user: ["read"],
 	lead: ["read"],
 	report: ["read", "export"],
 });
 
-export const cobrosRole = ac.newRole({
+const cobrosRole = ac.newRole({
 	user: ["read"],
 	lead: ["read"],
 	report: ["read"],

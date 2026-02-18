@@ -49,6 +49,7 @@ export function Combobox({
 	const [open, setOpen] = React.useState(false);
 	const [searchValue, setSearchValue] = React.useState("");
 	const triggerRef = React.useRef<HTMLButtonElement>(null);
+	const listboxId = React.useId();
 
 	// Mantener la posición del scroll cuando se abre el popover en un modal
 	const handleOpenChange = React.useCallback(
@@ -83,6 +84,7 @@ export function Combobox({
 					variant="outline"
 					role="combobox"
 					aria-expanded={open}
+					aria-controls={listboxId}
 					className={`${
 						width === "min" || width === "full" ? `w-${width}` : `w-[${width}]`
 					} justify-between overflow-hidden`}
@@ -112,7 +114,7 @@ export function Combobox({
 								: `w-[${popOverWidth}]`,
 				)}
 			>
-				<Command shouldFilter={!onSearchChange}>
+				<Command shouldFilter={!onSearchChange} id={listboxId}>
 					<CommandInput
 						placeholder={placeholder}
 						value={searchValue}

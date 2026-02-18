@@ -23,7 +23,9 @@ export function OpportunitySelector({
 }: OpportunitySelectorProps) {
 	const [optimisticId, setOptimisticId] = useState<string | null>(null);
 	const [isOptimistic, setIsOptimistic] = useState(false);
-	const selectedOpportunityId = isOptimistic ? optimisticId : currentOpportunityId;
+	const selectedOpportunityId = isOptimistic
+		? optimisticId
+		: currentOpportunityId;
 
 	// Obtener oportunidades del lead
 	const { data: opportunities, isLoading: isLoadingOpportunities } = useQuery({

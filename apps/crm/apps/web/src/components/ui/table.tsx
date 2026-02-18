@@ -102,11 +102,4 @@ function TableCaption({
 	);
 }
 
-export {
-	Table,
-	TableHeader,
-	TableBody,
-	TableHead,
-	TableRow,
-	TableCell,
-};
+export { Table, TableHeader, TableBody, TableHead, TableRow, TableCell };

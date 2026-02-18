@@ -17,6 +17,9 @@ const RCDP_COST: Record<string, number> = {
 	microbus_36plus: 1328.35,
 };
 
+/** Factor de ajuste de membresía para tipos de bus RCDP */
+const BUS_MEMBERSHIP_FACTOR = 1.1;
+
 function isBusType(vehicleType: string): boolean {
 	return (BUS_TYPES as readonly string[]).includes(vehicleType);
 }
@@ -93,7 +96,7 @@ function calculateCosts(
 	// Determinar membresía según tipo
 	const membershipFromTable = Number(result.membership);
 	const membershipCost = isBus
-		? membershipFromTable * 1.1 // Bus RCDP: membresía × 1.1
+		? membershipFromTable * BUS_MEMBERSHIP_FACTOR
 		: membershipFromTable;
 
 	return {

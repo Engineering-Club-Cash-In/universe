@@ -152,6 +152,7 @@ interface QuotationFormValues {
 	extraInsuranceCost: number;
 	extraMembershipCost: number;
 	extraAdminCost: number;
+	rcdpCost: number;
 }
 
 // Configuración de campos de gastos extra
@@ -855,6 +856,7 @@ function QuoterPage() {
 			extraInsuranceCost: 0,
 			extraMembershipCost: 0,
 			extraAdminCost: 600,
+			rcdpCost: 0,
 		},
 		onSubmit: async ({ value }) => {
 			createQuotationMutation.mutate({
@@ -961,6 +963,7 @@ function QuoterPage() {
 			quoterForm.setFieldValue("membershipCost", netMembershipCost);
 			quoterForm.setFieldValue("extraInsuranceCost", baseInsuranceCost);
 			quoterForm.setFieldValue("extraMembershipCost", rawMembershipCost);
+			quoterForm.setFieldValue("rcdpCost", result.rcdpCost);
 
 			// Recalcular después de actualizar
 			setTimeout(() => recalculate(), 100);
@@ -1003,8 +1006,9 @@ function QuoterPage() {
 		// Nota: extraInsuranceCost y extraMembershipCost se calculan en updateInsuranceCost()
 		// para que sean editables y no se sobrescriban en cada recálculo
 
-		// Gastos Admin = 400 + Royalty + 400 + 600 + ROUNDUP(B22*1.78%,0) + GPS + Seguro
-		const extraCost = calculatedInterest + gpsCost + insuranceCost;
+		// Gastos Admin = 400 + Royalty + 400 + 600 + ROUNDUP(B22*1.78%,0) + GPS + Seguro + RCDP
+		const rcdpCost = Number(values.rcdpCost);
+		const extraCost = calculatedInterest + gpsCost + insuranceCost + rcdpCost;
 		const adminCost = 400 + calculatedRoyalty + 400 + 600 + extraCost;
 
 		// Actualizar el campo de gastos administrativos

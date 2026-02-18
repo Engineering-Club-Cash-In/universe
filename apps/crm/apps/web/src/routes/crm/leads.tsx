@@ -1,5 +1,4 @@
 import { useForm } from "@tanstack/react-form";
-import type { leadSourceEnum } from "server/src/db/schema/crm";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
@@ -22,6 +21,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DateRange } from "react-day-picker";
+import type { leadSourceEnum } from "server/src/db/schema/crm";
 import { toast } from "sonner";
 import { z } from "zod";
 import { BankStatementAnalysis } from "@/components/credit/BankStatementAnalysis";
@@ -163,7 +163,6 @@ function RouteComponent() {
 		}, 300);
 		return () => clearTimeout(timer);
 	}, [searchTerm]);
-
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 
@@ -1950,7 +1949,13 @@ function RouteComponent() {
 								setPage(0);
 							}}
 						/>
-						<Select value={statusFilter} onValueChange={(value) => { setStatusFilter(value); setPage(0); }}>
+						<Select
+							value={statusFilter}
+							onValueChange={(value) => {
+								setStatusFilter(value);
+								setPage(0);
+							}}
+						>
 							<SelectTrigger className="w-[180px]">
 								<Filter className="mr-2 h-4 w-4" />
 								<SelectValue placeholder="Filtrar por estado" />

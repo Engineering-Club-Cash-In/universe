@@ -36,7 +36,11 @@ function isBusType(vehicleType: string): boolean {
 async function getInsuranceCost(
 	insuredAmount: number,
 	vehicleType: string,
-): Promise<{ baseInsuranceCost: number; membershipCost: number }> {
+): Promise<{
+	baseInsuranceCost: number;
+	membershipCost: number;
+	rcdpCost: number;
+}> {
 	// Buscar el registro más cercano (VLOOKUP con aproximación)
 	const [result] = await db
 		.select()
@@ -53,7 +57,8 @@ async function getInsuranceCost(
 			.orderBy(insuranceCosts.price)
 			.limit(1);
 
-		if (!minResult) return { baseInsuranceCost: 0, membershipCost: 0 };
+		if (!minResult)
+			return { baseInsuranceCost: 0, membershipCost: 0, rcdpCost: 0 };
 		return calculateCosts(minResult, vehicleType);
 	}
 
@@ -64,7 +69,7 @@ async function getInsuranceCost(
 function calculateCosts(
 	result: typeof insuranceCosts.$inferSelect,
 	vehicleType: string,
-): { baseInsuranceCost: number; membershipCost: number } {
+): { baseInsuranceCost: number; membershipCost: number; rcdpCost: number } {
 	const isBus = isBusType(vehicleType);
 
 	// Determinar seguro base según tipo
@@ -99,9 +104,13 @@ function calculateCosts(
 		? membershipFromTable * BUS_MEMBERSHIP_FACTOR
 		: membershipFromTable;
 
+	// Costo RCDP completo (para gastos admin en el cotizador)
+	const rcdpCost = isBus ? RCDP_COST[vehicleType] || 0 : 0;
+
 	return {
 		baseInsuranceCost: Math.round(baseInsurance * 100) / 100,
 		membershipCost: Math.round(membershipCost * 100) / 100,
+		rcdpCost: Math.round(rcdpCost * 100) / 100,
 	};
 }
 

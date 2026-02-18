@@ -3300,3 +3300,52 @@ export async function getInvestorPerformance(dpi: string) {
     rendimiento_estimado: Number(rendimiento_total.toString()),
   };
 }
+
+// ============================================================
+// 💾 APLICAR PAGOS ESPEJO (Actualizar encabezados)
+// ============================================================
+export async function aplicarPagosEspejo(inversionistaId: number) {
+  console.log(`💾 Aplicando cambios de pagos espejo para inversionista ID: ${inversionistaId}`);
+
+  // 1. Obtener créditos espejo del inversionista
+  const creditosEspejo = await db
+    .select()
+    .from(creditos_inversionistas_espejo)
+    .where(eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId));
+
+  let totalActualizados = 0;
+
+  for (const cred of creditosEspejo) {
+    // 2. Sumar pagos espejo de este crédito
+    const sumaPagos = await db
+      .select({
+        totalCapital: sql<string>`coalesce(sum(${pagos_credito_inversionistas_espejo.abono_capital}), 0)`,
+      })
+      .from(pagos_credito_inversionistas_espejo)
+      .where(
+        and(
+          eq(pagos_credito_inversionistas_espejo.credito_id, cred.credito_id),
+          eq(pagos_credito_inversionistas_espejo.inversionista_id, inversionistaId)
+        )
+      );
+
+    const totales = sumaPagos[0];
+    const nuevoMontoAportado = totales.totalCapital; // Viene como string del SQL
+
+    console.log(
+      `   👉 Crédito ${cred.credito_id}: Nuevo monto aportado (suma capital) = Q${nuevoMontoAportado}`
+    );
+
+    // 3. Actualizar creditos_inversionistas_espejo
+    await db
+      .update(creditos_inversionistas_espejo)
+      .set({
+        monto_aportado: nuevoMontoAportado,
+      })
+      .where(eq(creditos_inversionistas_espejo.id, cred.id));
+
+    totalActualizados++;
+  }
+
+  return { success: true, actualizados: totalActualizados };
+}

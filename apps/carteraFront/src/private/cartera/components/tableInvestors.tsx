@@ -83,8 +83,7 @@ export function TableInvestors() {
             setShowGenerarPagosModal(false);
             setSelectedInversionista(null);
             refetch();
-            // Refrescar datos si tenés un refetch
-            // refetch?.();
+            refetchTotales();
           }
         },
       }
@@ -106,6 +105,7 @@ export function TableInvestors() {
         onSuccess: (data) => {
           setShowLiquidarTodosModal(false);
           refetch();
+          refetchTotales();
           alert(`✅ ${data.message}\n${data.updatedCount} pagos liquidados`);
         },
         onError: (error) => {
@@ -147,7 +147,7 @@ export function TableInvestors() {
   });
 
   // 🆕 NUEVO: Obtener totales globales (sin paginación)
-  const { data: totalesData } = useGetInvestorTotals({
+  const { data: totalesData, refetch: refetchTotales } = useGetInvestorTotals({
     id: selectedInvestor !== "" ? Number(selectedInvestor) : undefined,
     incluirLiquidados,
     numeroCuota,
@@ -237,7 +237,8 @@ const handleAbrirModalBoleta = (inversionista?: { id: number; nombre: string; dp
   const handleCloseModal = () => {
     setModalOpen(false);
     setSelectedInvestorData(undefined);
-    refetch(); // Refresca la tabla después de crear/editar
+    refetch();
+    refetchTotales(); // Refresca la tabla y totales después de crear/editar
   };
   return (
   <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-4 sm:px-6 lg:px-8 overflow-auto pt-8 pb-8">
@@ -482,7 +483,7 @@ const handleAbrirModalBoleta = (inversionista?: { id: number; nombre: string; dp
           {/* Recargar datos - solo cuando hay inversionista seleccionado */}
           {selectedInvestor !== "" && (
             <button
-              onClick={() => refetch()}
+              onClick={() => { refetch(); refetchTotales(); }}
               disabled={isFetching}
               className="px-4 py-2 rounded-lg bg-slate-600 text-white font-bold hover:bg-slate-700 active:scale-95 transition-all flex items-center gap-2 justify-center shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
               title="Recargar estadísticas y datos del inversionista"
@@ -841,7 +842,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                       {
                         inversionista_id: inv.inversionista_id,
                       },
-                      { onSuccess: () => refetch() }
+                      { onSuccess: () => { refetch(); refetchTotales(); } }
                     );
                   }}
                   disabled={liquidateMutation.isPending || !tieneBoletaPendiente}
@@ -1341,7 +1342,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
             }
             liquidateMutation.mutate(
               { inversionista_id: inv.inversionista_id },
-              { onSuccess: () => refetch() }
+              { onSuccess: () => { refetch(); refetchTotales(); } }
             );
           }}
         >
@@ -1754,6 +1755,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
     setModalBoletaOpen(false);
     setInversionistaParaBoleta(undefined);
     refetch();
+    refetchTotales();
   }}
   inversionistaPredeterminado={inversionistaParaBoleta}
 />

@@ -15,6 +15,7 @@ export interface ContractResult {
 	success: boolean;
 	contractId?: string;
 	documentLink?: string;
+	r2Key?: string;
 	signingLinks?: string[];
 	templateId?: number;
 	apiResponse?: unknown;

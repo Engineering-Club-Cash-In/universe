@@ -170,6 +170,56 @@ async function consultarPagosAmbos(
   return [...pagosOriginales, ...pagosEspejos];
 }
 
+// 🔥 Función BULK: consultar pagos de TODOS los créditos de un inversionista en UNA sola query
+async function consultarPagosBulk(
+  inversionistaId: number,
+  creditosIds: number[],
+  incluirLiquidados: boolean,
+  numeroCuota: number | undefined,
+  config: TablaConfig
+) {
+  const tabla = config.pagosCreditoInversionistas as typeof pagos_credito_inversionistas;
+
+  const pagosConditions: SQL[] = [
+    eq(tabla.inversionista_id, inversionistaId),
+    inArray(tabla.credito_id, creditosIds),
+  ];
+
+  if (!incluirLiquidados) {
+    pagosConditions.push(eq(tabla.estado_liquidacion, "NO_LIQUIDADO"));
+  }
+
+  if (numeroCuota !== undefined) {
+    pagosConditions.push(eq(cuotas_credito.numero_cuota, numeroCuota));
+  }
+
+  return await db
+    .select({
+      credito_id: tabla.credito_id,
+      abono_capital: tabla.abono_capital,
+      abono_interes: tabla.abono_interes,
+      abono_iva_12: tabla.abono_iva_12,
+    })
+    .from(tabla)
+    .innerJoin(pagos_credito, eq(tabla.pago_id, pagos_credito.pago_id))
+    .innerJoin(cuotas_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
+    .where(and(...pagosConditions));
+}
+
+// 🔥 Función BULK para ambos orígenes
+async function consultarPagosBulkAmbos(
+  inversionistaId: number,
+  creditosIds: number[],
+  incluirLiquidados: boolean,
+  numeroCuota: number | undefined
+) {
+  const [pagosOriginales, pagosEspejos] = await Promise.all([
+    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("original")),
+    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("espejo")),
+  ]);
+  return [...pagosOriginales, ...pagosEspejos];
+}
+
 // ============================================
 // FIN DE CONFIGURACIÓN ORIGINALES/ESPEJO
 // ============================================
@@ -1405,7 +1455,35 @@ export async function getInvestorTotalsGlobales(
     (c) => c.inversionista_id === inv.inversionista_id && creditosIds.includes(c.credito_id)
   );
 
-  // 5. Inicializar subtotales
+  // 5. 🔥 OPTIMIZACIÓN: Obtener TODOS los pagos en UNA sola query (en vez de N queries)
+  let todosPagos;
+  if (tipo === "ambas") {
+    todosPagos = await consultarPagosBulkAmbos(
+      inv.inversionista_id,
+      creditosIds,
+      incluirLiquidados,
+      numeroCuota
+    );
+  } else {
+    const config = getTablaConfig(tipo === "espejos" ? "espejo" : "original");
+    todosPagos = await consultarPagosBulk(
+      inv.inversionista_id,
+      creditosIds,
+      incluirLiquidados,
+      numeroCuota,
+      config
+    );
+  }
+
+  // Agrupar pagos por credito_id en un Map para acceso O(1)
+  const pagosPorCredito = new Map<number, typeof todosPagos>();
+  for (const pago of todosPagos) {
+    const arr = pagosPorCredito.get(pago.credito_id) ?? [];
+    arr.push(pago);
+    pagosPorCredito.set(pago.credito_id, arr);
+  }
+
+  // 6. Inicializar subtotales
   let subtotal = {
     total_abono_capital: new Big(0),
     total_abono_interes: new Big(0),
@@ -1418,31 +1496,12 @@ export async function getInvestorTotalsGlobales(
     total_capital_actual: new Big(0),
   };
 
-  // 6. Procesar TODOS los créditos del inversionista
+  // 7. Procesar TODOS los créditos del inversionista (sin queries adicionales)
   for (const c of creditosDeInv) {
     const credito = creditosInfo.find((cr) => cr.credito_id === c.credito_id);
     if (!credito) continue;
 
-    // Obtener pagos del crédito
-    let pagos;
-
-    if (tipo === "ambas") {
-      pagos = await consultarPagosAmbos(
-        inv.inversionista_id,
-        c.credito_id,
-        incluirLiquidados,
-        numeroCuota
-      );
-    } else {
-      const config = getTablaConfig(tipo === "espejos" ? "espejo" : "original");
-      pagos = await consultarPagosInversionista(
-        inv.inversionista_id,
-        c.credito_id,
-        incluirLiquidados,
-        numeroCuota,
-        config
-      );
-    }
+    const pagos = pagosPorCredito.get(c.credito_id) ?? [];
 
     // Sumar totales
     const capital_credito = new Big(credito?.capital ?? 0);

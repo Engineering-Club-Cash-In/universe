@@ -949,11 +949,17 @@ function QuoterPage() {
 			const rawMembershipCost = Math.round(result.membershipCost * 100) / 100;
 
 			if (BUS_TYPES.includes(vehicleType)) {
-				// Para bus RCDP: el seguro es solo la tarifa base, sin membresía
-				quoterForm.setFieldValue("insuranceCost", baseInsuranceCost);
-				quoterForm.setFieldValue("membershipCost", 0);
+				// Para bus RCDP: membresía normal (misma lógica que vehículos normales)
+				const GPS_COST = 148.2;
+				const netMembershipCost =
+					Math.round((rawMembershipCost - GPS_COST) * 100) / 100;
+				const insuranceCost =
+					Math.round((baseInsuranceCost + netMembershipCost) * 100) / 100;
+
+				quoterForm.setFieldValue("insuranceCost", insuranceCost);
+				quoterForm.setFieldValue("membershipCost", netMembershipCost);
 				quoterForm.setFieldValue("extraInsuranceCost", baseInsuranceCost);
-				quoterForm.setFieldValue("extraMembershipCost", 0);
+				quoterForm.setFieldValue("extraMembershipCost", rawMembershipCost);
 			} else {
 				// El seguro total para cálculos es: base + (membresía - GPS)
 				const GPS_COST = 148.2;

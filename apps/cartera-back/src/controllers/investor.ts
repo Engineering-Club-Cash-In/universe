@@ -3306,48 +3306,57 @@ export async function getInvestorPerformance(dpi: string) {
 // ============================================================
 // 💾 APLICAR PAGOS ESPEJO (Actualizar encabezados)
 // ============================================================
+// ============================================================
+// 💾 APLICAR PAGOS ESPEJO (Actualizar encabezados)
+// ============================================================
 export async function aplicarPagosEspejo(inversionistaId: number) {
+  if (!inversionistaId || isNaN(inversionistaId)) {
+    throw new Error("ID de inversionista inválido");
+  }
+
   console.log(`💾 Aplicando cambios de pagos espejo para inversionista ID: ${inversionistaId}`);
 
-  // 1. Obtener créditos espejo del inversionista
-  const creditosEspejo = await db
-    .select()
-    .from(creditos_inversionistas_espejo)
-    .where(eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId));
-
-  let totalActualizados = 0;
-
-  for (const cred of creditosEspejo) {
-    // 2. Sumar pagos espejo de este crédito
-    const sumaPagos = await db
+  return await db.transaction(async (tx) => {
+    // 1. Calcular sumas agrupadas por crédito (UNA sola consulta eficiente)
+    // Esto evita el problema N+1 de consultar suma por cada crédito.
+    const sumasPorCredito = await tx
       .select({
+        creditoId: pagos_credito_inversionistas_espejo.credito_id,
         totalCapital: sql<string>`coalesce(sum(${pagos_credito_inversionistas_espejo.abono_capital}), 0)`,
       })
       .from(pagos_credito_inversionistas_espejo)
-      .where(
-        and(
-          eq(pagos_credito_inversionistas_espejo.credito_id, cred.credito_id),
-          eq(pagos_credito_inversionistas_espejo.inversionista_id, inversionistaId)
-        )
-      );
+      .where(eq(pagos_credito_inversionistas_espejo.inversionista_id, inversionistaId))
+      .groupBy(pagos_credito_inversionistas_espejo.credito_id);
 
-    const totales = sumaPagos[0];
-    const nuevoMontoAportado = totales.totalCapital; // Viene como string del SQL
+    let totalActualizados = 0;
 
-    console.log(
-      `   👉 Crédito ${cred.credito_id}: Nuevo monto aportado (suma capital) = Q${nuevoMontoAportado}`
-    );
+    // 2. Actualizar cada crédito con su suma correspondiente
+    // Iteramos sobre los resultados de la suma, que son solo los créditos con pagos.
+    for (const suma of sumasPorCredito) {
+      if (!suma.creditoId) continue;
 
-    // 3. Actualizar creditos_inversionistas_espejo
-    await db
-      .update(creditos_inversionistas_espejo)
-      .set({
-        monto_aportado: nuevoMontoAportado,
-      })
-      .where(eq(creditos_inversionistas_espejo.id, cred.id));
+      const nuevoMontoAportado = suma.totalCapital; // String para precisión decimal
 
-    totalActualizados++;
-  }
+      // Actualizamos creditos_inversionistas_espejo
+      // Usamos el par (inversionista_id, credito_id) para encontrar el registro único
+      const resultado = await tx
+        .update(creditos_inversionistas_espejo)
+        .set({
+          monto_aportado: nuevoMontoAportado,
+        })
+        .where(
+          and(
+            eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId),
+            eq(creditos_inversionistas_espejo.credito_id, suma.creditoId)
+          )
+        );
 
-  return { success: true, actualizados: totalActualizados };
+      // Drizzle update devuelve result info dependiendo del driver, 
+      // pero aquí simplemente contamos las iteraciones exitosas.
+      totalActualizados++;
+    }
+
+    console.log(`✅ Transacción completada. ${totalActualizados} créditos actualizados.`);
+    return { success: true, actualizados: totalActualizados };
+  });
 }

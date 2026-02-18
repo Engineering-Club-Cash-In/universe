@@ -100,7 +100,7 @@ export async function getAllPagosWithCreditAndInversionistas(
       .from(pagos_credito)
       .innerJoin(creditos, eq(pagos_credito.credito_id, creditos.credito_id))
       .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
-      .innerJoin(
+      .leftJoin(
         cuotas_credito,
         eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
       )
@@ -390,10 +390,15 @@ export async function insertPagosCreditoInversionistas(
     console.log(`   ${idx + 1}. ${inv.nombre}`);
   });
 
+  if (filteredInversionistas.length === 0) {
+    console.log(`\n⚠️ No hay inversionistas para procesar, saliendo...`);
+    return;
+  }
+
   const indexMayorCuota = filteredInversionistas.reduce(
     (maxIdx, inv, idx, arr) =>
-      new Big(inv.cuota_inversionista ?? 0).gt(
-        new Big(arr[maxIdx].cuota_inversionista ?? 0)
+      new Big(inv.cuota_inversionista || 0).gt(
+        new Big(arr[maxIdx].cuota_inversionista || 0)
       )
         ? idx
         : maxIdx,
@@ -1565,6 +1570,7 @@ export async function obtenerCreditosConPagosPendientes(
           .where(
             and(
               eq(pagos_credito_inversionistas_espejo.credito_id, credito.creditoId),
+              eq(pagos_credito_inversionistas_espejo.inversionista_id, inversionistaId),
               eq(pagos_credito_inversionistas_espejo.estado_liquidacion, "NO_LIQUIDADO")
             )
           );

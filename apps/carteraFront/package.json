@@ -8,7 +8,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "tailwind:init": "tailwindcss init -p"
+    "tailwind:init": "tailwindcss init -p",
+    "push": "bash ./deploy.sh"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

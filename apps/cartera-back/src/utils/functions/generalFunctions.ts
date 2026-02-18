@@ -6,6 +6,21 @@ import axios from "axios";
 import Big from "big.js";
 // Tipos auxiliares
 
+/**
+ * Quita tildes/acentos de un string.
+ * Ej: "José María" → "Jose Maria"
+ */
+export function removeAccents(str: string): string {
+  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+/**
+ * Fragmento SQL reutilizable para quitar acentos en PostgreSQL usando translate().
+ * Uso: sql`${TRANSLATE_ACCENTS(column)} ILIKE ${searchTerm}`
+ * Nota: el searchTerm debe pasar por removeAccents() antes.
+ */
+export const SQL_UNACCENT = `translate(lower(COLUMN), 'áéíóúàèìòùäëïöüâêîôûãõñÁÉÍÓÚÀÈÌÒÙÄËÏÖÜÂÊÎÔÛÃÕÑ', 'aeiouaeiouaeiouaeiouaonAEIOUAEIOUAEIOUAEIOUAON')`;
+
 
 export async function generarPDFBuffer(
   inversionista: InversionistaReporte,

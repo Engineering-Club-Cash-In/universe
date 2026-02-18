@@ -385,14 +385,6 @@ export async function insertPagosCreditoInversionistas(
       )
     : inversionistasWithName;
 
-  // Si se pasa inversionista_id, solo procesar ese inversionista
-  if (inversionista_id) {
-    filteredInversionistas = filteredInversionistas.filter(
-      (inv) => inv.inversionista_id === inversionista_id
-    );
-    console.log(`\n🎯 Filtrando solo inversionista_id: ${inversionista_id}`);
-  }
-
   console.log(
     `\n🔍 Inversionistas después de filtrar (excludeCube=${excludeCube}, inversionista_id=${inversionista_id ?? 'todos'}): ${filteredInversionistas.length}`
   );
@@ -423,6 +415,14 @@ export async function insertPagosCreditoInversionistas(
   console.log(
     `   Valor cuota: ${filteredInversionistas[indexMayorCuota].cuota_inversionista}`
   );
+
+  // Si se pasa inversionista_id, solo procesar ese inversionista
+  if (inversionista_id) {
+    filteredInversionistas = filteredInversionistas.filter(
+      (inv) => inv.inversionista_id === inversionista_id
+    );
+    console.log(`\n🎯 Filtrando solo inversionista_id: ${inversionista_id}`);
+  }
 
   // 3. Calcular e insertar el abono proporcional de cada inversionista
   const inserts = filteredInversionistas.map(async (inv, idx) => {

@@ -2021,7 +2021,8 @@ function RouteComponent() {
 																	navigate({
 																		to: "/vehicles",
 																		search: {
-																			vehicleId: selectedOpportunity.vehicle?.id,
+																			vehicleId:
+																				selectedOpportunity.vehicle?.id,
 																			inspectionId: undefined,
 																		},
 																	});

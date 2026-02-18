@@ -241,15 +241,15 @@ export function DisbursementChecklistView({
 				{/* Notes */}
 				<div className="space-y-2">
 					<label className="font-medium text-sm">
-					Notas
-					<Textarea
-						value={notes}
-						onChange={(e) => setNotes(e.target.value)}
-						placeholder="Agregar notas sobre el proceso de desembolso..."
-						disabled={checklist.disbursementApproved ?? false}
-						rows={3}
-					/>
-				</label>
+						Notas
+						<Textarea
+							value={notes}
+							onChange={(e) => setNotes(e.target.value)}
+							placeholder="Agregar notas sobre el proceso de desembolso..."
+							disabled={checklist.disbursementApproved ?? false}
+							rows={3}
+						/>
+					</label>
 					{!checklist.disbursementApproved && (
 						<Button
 							variant="outline"

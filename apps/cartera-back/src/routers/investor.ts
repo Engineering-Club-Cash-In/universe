@@ -13,14 +13,15 @@ import {
   getLiquidaciones,
   getInvestorPerformance,
   reversePagosEspejoPorInversionista,
-  getInvestorTotalsGlobales, // 🆕 NUEVO: Función para totales globales
-  getInvestorMirrorSummary,  // 🆕 NUEVO: Resumen calculado desde pagos espejo
+  getInvestorTotalsGlobales,
+  getInvestorMirrorSummary,
+  upsertPagosEspejo,             // 🆕 Recalcular pagos espejo desde el front
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
 import puppeteer from "puppeteer";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { authMiddleware } from "./midleware";
-import { obtenerCreditosConPagosPendientes } from "../controllers/payments";
+import { obtenerCreditosConPagosPendientes, calcularYRegistrarPagosEspejo } from "../controllers/payments";
 import { createBoleta, getBoletaById, getAllBoletas, getBoletasPendientes, updateBoleta, marcarBoletaComoProcesada, marcarBoletaComoPendiente, deleteBoleta, getBoletasStats } from "../controllers/liquidateInvestor";
 // 🔥 IMPORTAR SERVICIO DE BOLETAS
  
@@ -914,6 +915,136 @@ export const inversionistasRouter = new Elysia()
       detail: {
         summary: "Obtener estadísticas de boletas",
         tags: ["Boletas"],
+      },
+    }
+  )
+  .post(
+    "/calcularPagosEspejo",
+    async ({ body, set }) => {
+      try {
+        const { inversionistaId } = body;
+
+        console.log(
+          `\n🚀 POST /calcularPagosEspejo → inversionistaId: ${inversionistaId}`
+        );
+
+        const resultado = await calcularYRegistrarPagosEspejo(inversionistaId);
+
+        if (!resultado.success) {
+          set.status = 500;
+          return {
+            success: false as const,
+            error: (resultado as any).error ?? "Error desconocido",
+          };
+        }
+
+        set.status = 200;
+        return {
+          success: true as const,
+          message: `✅ Pagos espejo calculados y registrados correctamente`,
+          inversionistaId: resultado.inversionistaId ?? inversionistaId,
+          totalCreditosProcesados: resultado.totalCreditosProcesados ?? 0,
+          data: resultado.data,
+        };
+      } catch (error: any) {
+        console.error("❌ Error en POST /calcularPagosEspejo:", error);
+        set.status = 500;
+        return {
+          success: false as const,
+          error: error.message || "Error al calcular pagos espejo",
+        };
+      }
+    },
+    {
+      detail: {
+        summary:
+          "Calcula y registra pagos espejo sin actualizar creditos_inversionistas_espejo",
+        description:
+          "Replica la lógica de /generateFalsePayments pero omite el UPDATE a creditos_inversionistas_espejo. Solo hace upsert en pagos_credito_inversionistas_espejo y marca las cuotas como liquidadas.",
+        tags: ["Pagos Espejo"],
+      },
+      body: t.Object({
+        inversionistaId: t.Number({
+          description: "ID del inversionista a procesar",
+          minimum: 1,
+        }),
+      }),
+      response: {
+        200: t.Object({
+          success: t.Literal(true),
+          message: t.String(),
+          inversionistaId: t.Number(),
+          totalCreditosProcesados: t.Number(),
+          data: t.Array(t.Any()),
+        }),
+        500: t.Object({
+          success: t.Literal(false),
+          error: t.String(),
+        }),
+      },
+    }
+  )
+  .post(
+    "/recalcularPagosEspejo",
+    async ({ body, set }) => {
+      try {
+        const { pagos } = body;
+
+        console.log(
+          `\n🔄 POST /recalcularPagosEspejo → ${pagos.length} pago(s) recibidos`
+        );
+
+        const resultado = await upsertPagosEspejo(pagos);
+
+        set.status = 200;
+        return {
+          success: true as const,
+          message: `✅ ${resultado.actualizados} pago(s) actualizados correctamente`,
+          actualizados: resultado.actualizados,
+        };
+      } catch (error: any) {
+        console.error("❌ Error en POST /recalcularPagosEspejo:", error);
+        set.status = 500;
+        return {
+          success: false as const,
+          error: error.message || "Error al recalcular pagos espejo",
+        };
+      }
+    },
+    {
+      detail: {
+        summary: "Recalcular pagos espejo desde el frontend",
+        description:
+          "Recibe un array de pagos (con su id PK) y actualiza los campos financieros en pagos_credito_inversionistas_espejo. " +
+          "Valida que todos los ids existan antes de hacer cualquier UPDATE. No toca ninguna otra tabla.",
+        tags: ["Pagos Espejo"],
+      },
+      body: t.Object({
+        pagos: t.Array(
+          t.Object({
+            id:                       t.Number({ description: "PK de pagos_credito_inversionistas_espejo" }),
+            abono_capital:            t.String(),
+            abono_interes:            t.String(),
+            abono_iva_12:             t.String(),
+            porcentaje_participacion: t.String(),
+            cuota:                    t.String(),
+            estado_liquidacion:       t.Optional(
+              t.Union([t.Literal("NO_LIQUIDADO"), t.Literal("LIQUIDADO")])
+            ),
+          }),
+          { minItems: 1, description: "Array de pagos espejo a actualizar (deben existir en la BD)" }
+        ),
+      }),
+      response: {
+        200: t.Object({
+          success: t.Literal(true),
+          message: t.String(),
+          actualizados: t.Number(),
+        }),
+        500: t.Object({
+          success: t.Literal(false),
+          error: t.String(),
+        }),
       },
     }
   );

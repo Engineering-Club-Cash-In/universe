@@ -599,7 +599,7 @@ function AnalysisPage() {
 												<Button
 													variant="outline"
 													size="sm"
-													onClick={() => setPage(totalPages - 1)}
+													onClick={() => setPage(() => totalPages - 1)}
 													disabled={page >= totalPages - 1}
 												>
 													<ChevronsRight className="h-4 w-4" />
@@ -898,7 +898,15 @@ function DisbursementSection({
 												? "border-primary bg-muted/50"
 												: ""
 										}`}
+										role="button"
+										tabIndex={0}
 										onClick={() => setSelectedOpportunity(opp.id)}
+										onKeyDown={(e) => {
+											if (e.key === "Enter" || e.key === " ") {
+												e.preventDefault();
+												setSelectedOpportunity(opp.id);
+											}
+										}}
 									>
 										<div className="flex items-center justify-between">
 											<div>
@@ -984,7 +992,7 @@ function DisbursementSection({
 										<Button
 											variant="outline"
 											size="sm"
-											onClick={() => setPageD(totalPagesD - 1)}
+											onClick={() => setPageD(() => totalPagesD - 1)}
 											disabled={pageD >= totalPagesD - 1}
 										>
 											<ChevronsRight className="h-4 w-4" />

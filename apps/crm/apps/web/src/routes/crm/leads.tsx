@@ -1994,7 +1994,15 @@ function RouteComponent() {
 											<div>
 												<div
 													className="cursor-pointer font-medium text-primary hover:underline"
+													role="button"
+													tabIndex={0}
 													onClick={() => handleLeadClick(lead)}
+													onKeyDown={(e) => {
+														if (e.key === "Enter" || e.key === " ") {
+															e.preventDefault();
+															handleLeadClick(lead);
+														}
+													}}
 												>
 													{lead.firstName} {lead.lastName}
 												</div>
@@ -2179,7 +2187,7 @@ function RouteComponent() {
 								<Button
 									variant="outline"
 									size="sm"
-									onClick={() => setPage(totalPages - 1)}
+									onClick={() => setPage(() => totalPages - 1)}
 									disabled={page >= totalPages - 1}
 								>
 									<ChevronsRight className="h-4 w-4" />
@@ -3127,12 +3135,24 @@ function RouteComponent() {
 												<div className="flex flex-col gap-1">
 													<span
 														className="cursor-pointer font-medium text-primary hover:underline"
+														role="button"
+														tabIndex={0}
 														onClick={() => {
 															setIsDetailsDialogOpen(false);
 															navigate({
 																to: "/crm/opportunities",
 																search: { opportunityId: opp.id },
 															});
+														}}
+														onKeyDown={(e) => {
+															if (e.key === "Enter" || e.key === " ") {
+																e.preventDefault();
+																setIsDetailsDialogOpen(false);
+																navigate({
+																	to: "/crm/opportunities",
+																	search: { opportunityId: opp.id },
+																});
+															}
 														}}
 													>
 														{opp.title}

@@ -1891,6 +1891,8 @@ function RouteComponent() {
 													<Users className="h-5 w-5 text-muted-foreground" />
 													<span
 														className="cursor-pointer font-medium text-primary hover:underline"
+														role="button"
+														tabIndex={0}
 														onClick={() => {
 															setIsDetailsDialogOpen(false);
 															navigate({
@@ -1899,6 +1901,18 @@ function RouteComponent() {
 																	leadId: selectedOpportunity.lead?.id,
 																},
 															});
+														}}
+														onKeyDown={(e) => {
+															if (e.key === "Enter" || e.key === " ") {
+																e.preventDefault();
+																setIsDetailsDialogOpen(false);
+																navigate({
+																	to: "/crm/leads",
+																	search: {
+																		leadId: selectedOpportunity.lead?.id,
+																	},
+																});
+															}
 														}}
 													>
 														{selectedOpportunity.lead.firstName}{" "}
@@ -1988,6 +2002,8 @@ function RouteComponent() {
 													<div className="flex flex-col gap-1">
 														<span
 															className="cursor-pointer font-medium text-primary hover:underline"
+															role="button"
+															tabIndex={0}
 															onClick={() => {
 																setIsDetailsDialogOpen(false);
 																navigate({
@@ -1997,6 +2013,19 @@ function RouteComponent() {
 																		inspectionId: undefined,
 																	},
 																});
+															}}
+															onKeyDown={(e) => {
+																if (e.key === "Enter" || e.key === " ") {
+																	e.preventDefault();
+																	setIsDetailsDialogOpen(false);
+																	navigate({
+																		to: "/vehicles",
+																		search: {
+																			vehicleId: selectedOpportunity.vehicle?.id,
+																			inspectionId: undefined,
+																		},
+																	});
+																}
 															}}
 														>
 															{selectedOpportunity.vehicle.year}{" "}

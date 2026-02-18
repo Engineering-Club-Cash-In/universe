@@ -115,6 +115,7 @@ async function consultarPagosInversionista(
 
   return await db
     .select({
+      id: config.origen === "espejo" ? (tabla as any).id : sql<number>`0`,
       abono_capital: tabla.abono_capital,
       abono_interes: tabla.abono_interes,
       abono_iva_12: tabla.abono_iva_12,
@@ -1219,6 +1220,7 @@ const mes = fechaParaMes
               total_cuota = total_cuota.plus(cuota_inversor);
 
               return {
+                id: (pago as any).id,
                 mes, // 🔥 AHORA USA LA FECHA DE LA CUOTA
                 abono_capital: Number(abono_capital.toString()),
                 abono_interes: Number(abono_interes.toString()),

@@ -17,6 +17,7 @@ import {
 	X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import type { vehicleTypeEnum } from "server/src/db/schema/quotations";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -60,7 +61,6 @@ import {
 	generateQuotationPdf,
 } from "@/lib/generate-pdf";
 import type { IOpportunity } from "@/routes/crm/opportunities";
-import type { vehicleTypeEnum } from "server/src/db/schema/quotations";
 import { client } from "@/utils/orpc";
 
 // Tipos de categorías de crédito

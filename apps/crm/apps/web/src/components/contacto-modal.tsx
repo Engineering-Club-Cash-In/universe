@@ -140,9 +140,7 @@ export function ContactoModal({
 						<h3 className="font-medium text-lg">Información del Contacto</h3>
 
 						<div className="grid grid-cols-2 gap-4">
-							<form.Field
-								name="metodoContacto"
-							>
+							<form.Field name="metodoContacto">
 								{(field) => (
 									<div className="space-y-2">
 										<Label>Método de Contacto</Label>
@@ -171,9 +169,7 @@ export function ContactoModal({
 								)}
 							</form.Field>
 
-							<form.Field
-								name="estadoContacto"
-							>
+							<form.Field name="estadoContacto">
 								{(field) => (
 									<div className="space-y-2">
 										<Label>Estado del Contacto</Label>
@@ -246,14 +242,10 @@ export function ContactoModal({
 							</Button>
 						</div>
 
-						<form.Field
-							name="metodoContacto"
-						>
+						<form.Field name="metodoContacto">
 							{(metodoField) =>
 								metodoField.state.value === "llamada" && (
-									<form.Field
-										name="duracionLlamada"
-									>
+									<form.Field name="duracionLlamada">
 										{(field) => (
 											<div className="space-y-2">
 												<Label>Duración de la Llamada (segundos)</Label>
@@ -304,9 +296,7 @@ export function ContactoModal({
 						</form.Field>
 
 						<div className="grid grid-cols-2 gap-4">
-							<form.Field
-								name="acuerdosAlcanzados"
-							>
+							<form.Field name="acuerdosAlcanzados">
 								{(field) => (
 									<div className="space-y-2">
 										<Label>Acuerdos Alcanzados</Label>
@@ -319,9 +309,7 @@ export function ContactoModal({
 								)}
 							</form.Field>
 
-							<form.Field
-								name="estadoContacto"
-							>
+							<form.Field name="estadoContacto">
 								{(estadoField) => (
 									<form.Field
 										name="compromisosPago"
@@ -392,9 +380,7 @@ export function ContactoModal({
 					<div className="space-y-4">
 						<h3 className="font-medium text-lg">Próximo Seguimiento</h3>
 
-						<form.Field
-							name="requiereSeguimiento"
-						>
+						<form.Field name="requiereSeguimiento">
 							{(field) => (
 								<div className="flex items-center space-x-2">
 									<input

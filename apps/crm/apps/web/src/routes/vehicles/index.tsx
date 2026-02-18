@@ -155,7 +155,6 @@ function VehiclesDashboard() {
 		return () => clearTimeout(timer);
 	}, [searchTerm]);
 
-
 	// Fetch vehicles with pagination
 	const {
 		data: vehicles,
@@ -517,7 +516,13 @@ function VehiclesDashboard() {
 											onChange={(e) => setSearchTerm(e.target.value)}
 										/>
 									</div>
-									<Select value={filterStatus} onValueChange={(value) => { setFilterStatus(value); setPage(0); }}>
+									<Select
+										value={filterStatus}
+										onValueChange={(value) => {
+											setFilterStatus(value);
+											setPage(0);
+										}}
+									>
 										<SelectTrigger className="w-[180px]">
 											<SelectValue placeholder="Filtrar por estado" />
 										</SelectTrigger>
@@ -1593,6 +1598,16 @@ function VehiclesDashboard() {
 											<SelectItem value="Pickup">Pickup</SelectItem>
 											<SelectItem value="Minivan">Minivan</SelectItem>
 											<SelectItem value="Deportivo">Deportivo</SelectItem>
+											<SelectItem value="Microbus">Microbus</SelectItem>
+											<SelectItem value="Bus hasta 20 pasajeros">
+												Bus hasta 20 pasajeros
+											</SelectItem>
+											<SelectItem value="Bus 21-35 pasajeros">
+												Bus 21-35 pasajeros
+											</SelectItem>
+											<SelectItem value="Bus más de 35 pasajeros">
+												Bus más de 35 pasajeros
+											</SelectItem>
 											<SelectItem value="Otro">Otro</SelectItem>
 										</SelectContent>
 									</Select>
@@ -1843,6 +1858,16 @@ function VehiclesDashboard() {
 											<SelectItem value="Pickup">Pickup</SelectItem>
 											<SelectItem value="Minivan">Minivan</SelectItem>
 											<SelectItem value="Deportivo">Deportivo</SelectItem>
+											<SelectItem value="Microbus">Microbus</SelectItem>
+											<SelectItem value="Bus hasta 20 pasajeros">
+												Bus hasta 20 pasajeros
+											</SelectItem>
+											<SelectItem value="Bus 21-35 pasajeros">
+												Bus 21-35 pasajeros
+											</SelectItem>
+											<SelectItem value="Bus más de 35 pasajeros">
+												Bus más de 35 pasajeros
+											</SelectItem>
 											<SelectItem value="Otro">Otro</SelectItem>
 										</SelectContent>
 									</Select>

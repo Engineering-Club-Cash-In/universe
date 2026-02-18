@@ -1609,7 +1609,11 @@ export async function getInvestorMirrorSummary(
   // ── PASO 1: Validar y obtener datos del inversionista ──────────────────────
   const queryConditions: SQL[] = [];
   if (investorId) queryConditions.push(eq(inversionistas.inversionista_id, investorId));
-  if (dpi)        queryConditions.push(eq(inversionistas.dpi, parseInt(dpi)));
+  if (dpi) {
+    const dpiNumber = parseInt(dpi, 10);
+    if (isNaN(dpiNumber)) throw new Error("DPI inválido: debe ser un número entero.");
+    queryConditions.push(eq(inversionistas.dpi, dpiNumber));
+  }
   if (queryConditions.length === 0) {
     throw new Error("Debe proporcionar al menos 'id' o 'dpi' del inversionista.");
   }

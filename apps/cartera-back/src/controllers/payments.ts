@@ -312,8 +312,9 @@ export async function insertPagosCreditoInversionistas(
   pago_id: number,
   credito_id: number,
   excludeCube: boolean = false,
-  cuotaPagada: boolean = false,
-  updateCredito: boolean = true  // si false, omite el UPDATE a creditos_inversionistas_espejo
+  cuotaPagada:boolean = false,
+  updateCredito: boolean = true,  // si false, omite el UPDATE a creditos_inversionistas_espejo
+  inversionista_id?: number
 ) {
   console.log(
     "\n🔍 ========== INICIO insertPagosCreditoInversionistas =========="
@@ -376,7 +377,7 @@ export async function insertPagosCreditoInversionistas(
     throw new Error("No se encontraron inversionistas");
   }
 
-  const filteredInversionistas = excludeCube
+  let filteredInversionistas = excludeCube
     ? inversionistasWithName.filter(
         (inv) =>
           inv.nombre.trim().toLowerCase() !==
@@ -384,8 +385,16 @@ export async function insertPagosCreditoInversionistas(
       )
     : inversionistasWithName;
 
+  // Si se pasa inversionista_id, solo procesar ese inversionista
+  if (inversionista_id) {
+    filteredInversionistas = filteredInversionistas.filter(
+      (inv) => inv.inversionista_id === inversionista_id
+    );
+    console.log(`\n🎯 Filtrando solo inversionista_id: ${inversionista_id}`);
+  }
+
   console.log(
-    `\n🔍 Inversionistas después de filtrar (excludeCube=${excludeCube}): ${filteredInversionistas.length}`
+    `\n🔍 Inversionistas después de filtrar (excludeCube=${excludeCube}, inversionista_id=${inversionista_id ?? 'todos'}): ${filteredInversionistas.length}`
   );
   filteredInversionistas.forEach((inv, idx) => {
     console.log(`   ${idx + 1}. ${inv.nombre}`);
@@ -1688,7 +1697,9 @@ export async function obtenerCreditosConPagosPendientes(
               primerPago.pagoId,
               credito.creditoId,
               false,
-              false
+              false,
+              true,
+              inversionistaId
             );
 
             console.log(

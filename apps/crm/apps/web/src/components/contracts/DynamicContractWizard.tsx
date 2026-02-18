@@ -29,12 +29,12 @@ import { Separator } from "@/components/ui/separator";
 import { type ContractResult, ContractResults } from "./ContractResults";
 
 // Types from API
-export interface DocumentType {
+interface DocumentType {
 	enum: string;
 	label: string;
 }
 
-export interface RenapData {
+interface RenapData {
 	dpi: string;
 	firstName: string;
 	secondName: string;
@@ -57,7 +57,7 @@ export interface RenapData {
 	dpi_expiracy_date: string;
 }
 
-export interface Document {
+interface Document {
 	id: number;
 	nombre_documento: string;
 	descripcion: string;
@@ -68,7 +68,7 @@ export interface Document {
 	count_doble_line: number;
 }
 
-export interface Field {
+interface Field {
 	name: string;
 	key: string;
 	regex: string;
@@ -1569,7 +1569,7 @@ export function DynamicContractWizard({
 				contracts: successfulContracts.map((c) => ({
 					contractType: c.contractType,
 					contractName: c.contractName,
-					documentLink: c.documentLink,
+					documentLink: c.r2Key ?? c.documentLink,
 					signingLinks: c.signingLinks,
 					templateId: c.templateId,
 					apiResponse: c.apiResponse,
@@ -1659,7 +1659,15 @@ export function DynamicContractWizard({
 												? "border-primary bg-primary/5"
 												: "border-border hover:border-primary/50"
 										}`}
+										role="button"
+										tabIndex={0}
 										onClick={() => handleDocumentToggle(docType.enum)}
+										onKeyDown={(e) => {
+											if (e.key === "Enter" || e.key === " ") {
+												e.preventDefault();
+												handleDocumentToggle(docType.enum);
+											}
+										}}
 									>
 										<Checkbox
 											id={docType.enum}

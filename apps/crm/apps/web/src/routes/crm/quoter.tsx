@@ -152,6 +152,7 @@ interface QuotationFormValues {
 	extraInsuranceCost: number;
 	extraMembershipCost: number;
 	extraAdminCost: number;
+	rcdpCost: number;
 }
 
 // Configuración de campos de gastos extra
@@ -689,6 +690,9 @@ function ExtraCostsTable({
 	);
 }
 
+/** Costo fijo del GPS (se resta de la membresía cruda para obtener la neta) */
+const GPS_COST = 148.2;
+
 function QuoterPage() {
 	const { data: session } = authClient.useSession();
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
@@ -822,7 +826,7 @@ function QuoterPage() {
 			termMonths: 60,
 			interestRate: 1.5,
 			insuranceCost: 0,
-			gpsCost: 148.2,
+			gpsCost: GPS_COST,
 			transferCost: 545, // 395 + 150 según Excel
 			adminCost: 0,
 			membershipCost: 0,
@@ -852,6 +856,7 @@ function QuoterPage() {
 			extraInsuranceCost: 0,
 			extraMembershipCost: 0,
 			extraAdminCost: 600,
+			rcdpCost: 0,
 		},
 		onSubmit: async ({ value }) => {
 			createQuotationMutation.mutate({
@@ -948,29 +953,17 @@ function QuoterPage() {
 				Math.round(result.baseInsuranceCost * 100) / 100;
 			const rawMembershipCost = Math.round(result.membershipCost * 100) / 100;
 
-			if (BUS_TYPES.includes(vehicleType)) {
-				// Para bus RCDP: el seguro es solo la tarifa base, sin membresía
-				quoterForm.setFieldValue("insuranceCost", baseInsuranceCost);
-				quoterForm.setFieldValue("membershipCost", 0);
-				quoterForm.setFieldValue("extraInsuranceCost", baseInsuranceCost);
-				quoterForm.setFieldValue("extraMembershipCost", 0);
-			} else {
-				// El seguro total para cálculos es: base + (membresía - GPS)
-				const GPS_COST = 148.2;
-				const netMembershipCost =
-					Math.round((rawMembershipCost - GPS_COST) * 100) / 100;
-				const insuranceCost =
-					Math.round((baseInsuranceCost + netMembershipCost) * 100) / 100;
+			// El seguro total para cálculos es: base + (membresía - GPS)
+			const netMembershipCost =
+				Math.round((rawMembershipCost - GPS_COST) * 100) / 100;
+			const insuranceCost =
+				Math.round((baseInsuranceCost + netMembershipCost) * 100) / 100;
 
-				quoterForm.setFieldValue("insuranceCost", insuranceCost);
-				// membershipCost para resumen de arriba = neto (sin GPS)
-				quoterForm.setFieldValue("membershipCost", netMembershipCost);
-
-				// Valores para la tabla de gastos extra (valores crudos de la tabla)
-				quoterForm.setFieldValue("extraInsuranceCost", baseInsuranceCost);
-				// Membresía extra = valor crudo de la tabla
-				quoterForm.setFieldValue("extraMembershipCost", rawMembershipCost);
-			}
+			quoterForm.setFieldValue("insuranceCost", insuranceCost);
+			quoterForm.setFieldValue("membershipCost", netMembershipCost);
+			quoterForm.setFieldValue("extraInsuranceCost", baseInsuranceCost);
+			quoterForm.setFieldValue("extraMembershipCost", rawMembershipCost);
+			quoterForm.setFieldValue("rcdpCost", result.rcdpCost);
 
 			// Recalcular después de actualizar
 			setTimeout(() => recalculate(), 100);
@@ -1013,8 +1006,9 @@ function QuoterPage() {
 		// Nota: extraInsuranceCost y extraMembershipCost se calculan en updateInsuranceCost()
 		// para que sean editables y no se sobrescriban en cada recálculo
 
-		// Gastos Admin = 400 + Royalty + 400 + 600 + ROUNDUP(B22*1.78%,0) + GPS + Seguro
-		const extraCost = calculatedInterest + gpsCost + insuranceCost;
+		// Gastos Admin = 400 + Royalty + 400 + 600 + ROUNDUP(B22*1.78%,0) + GPS + Seguro + RCDP
+		const rcdpCost = Number(values.rcdpCost);
+		const extraCost = calculatedInterest + gpsCost + insuranceCost + rcdpCost;
 		const adminCost = 400 + calculatedRoyalty + 400 + 600 + extraCost;
 
 		// Actualizar el campo de gastos administrativos

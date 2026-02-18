@@ -17,6 +17,7 @@ import {
 	X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import type { vehicleTypeEnum } from "server/src/db/schema/quotations";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -113,14 +114,7 @@ interface CreditDetailViewProps {
 		vehicleBrand: string | null;
 		vehicleLine: string | null;
 		vehicleModel: string | null;
-		vehicleType:
-			| "particular"
-			| "uber"
-			| "pickup"
-			| "nuevo"
-			| "panel"
-			| "camion"
-			| "microbus";
+		vehicleType: (typeof vehicleTypeEnum.enumValues)[number];
 		vehicleValue: string;
 		insuredAmount: string;
 		downPayment: string;

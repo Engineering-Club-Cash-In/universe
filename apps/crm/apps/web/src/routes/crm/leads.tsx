@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DateRange } from "react-day-picker";
+import type { leadSourceEnum } from "server/src/db/schema/crm";
 import { toast } from "sonner";
 import { z } from "zod";
 import { BankStatementAnalysis } from "@/components/credit/BankStatementAnalysis";
@@ -162,11 +163,6 @@ function RouteComponent() {
 		}, 300);
 		return () => clearTimeout(timer);
 	}, [searchTerm]);
-
-	// Reset page when status filter changes
-	useEffect(() => {
-		setPage(0);
-	}, [statusFilter]);
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 
@@ -310,14 +306,7 @@ function RouteComponent() {
 			hasCreditCard: false,
 			jobTitle: "",
 			companyId: "none",
-			source: "website" as
-				| "website"
-				| "referral"
-				| "cold_call"
-				| "email"
-				| "social_media"
-				| "event"
-				| "other",
+			source: "website" as (typeof leadSourceEnum.enumValues)[number],
 			assignedTo: "",
 			notes: "",
 			score: "",
@@ -1960,7 +1949,13 @@ function RouteComponent() {
 								setPage(0);
 							}}
 						/>
-						<Select value={statusFilter} onValueChange={setStatusFilter}>
+						<Select
+							value={statusFilter}
+							onValueChange={(value) => {
+								setStatusFilter(value);
+								setPage(0);
+							}}
+						>
 							<SelectTrigger className="w-[180px]">
 								<Filter className="mr-2 h-4 w-4" />
 								<SelectValue placeholder="Filtrar por estado" />
@@ -2004,7 +1999,15 @@ function RouteComponent() {
 											<div>
 												<div
 													className="cursor-pointer font-medium text-primary hover:underline"
+													role="button"
+													tabIndex={0}
 													onClick={() => handleLeadClick(lead)}
+													onKeyDown={(e) => {
+														if (e.key === "Enter" || e.key === " ") {
+															e.preventDefault();
+															handleLeadClick(lead);
+														}
+													}}
 												>
 													{lead.firstName} {lead.lastName}
 												</div>
@@ -2189,7 +2192,7 @@ function RouteComponent() {
 								<Button
 									variant="outline"
 									size="sm"
-									onClick={() => setPage(totalPages - 1)}
+									onClick={() => setPage(() => totalPages - 1)}
 									disabled={page >= totalPages - 1}
 								>
 									<ChevronsRight className="h-4 w-4" />
@@ -3137,12 +3140,24 @@ function RouteComponent() {
 												<div className="flex flex-col gap-1">
 													<span
 														className="cursor-pointer font-medium text-primary hover:underline"
+														role="button"
+														tabIndex={0}
 														onClick={() => {
 															setIsDetailsDialogOpen(false);
 															navigate({
 																to: "/crm/opportunities",
 																search: { opportunityId: opp.id },
 															});
+														}}
+														onKeyDown={(e) => {
+															if (e.key === "Enter" || e.key === " ") {
+																e.preventDefault();
+																setIsDetailsDialogOpen(false);
+																navigate({
+																	to: "/crm/opportunities",
+																	search: { opportunityId: opp.id },
+																});
+															}
 														}}
 													>
 														{opp.title}

@@ -421,6 +421,7 @@ export const contractGenerationRouter = {
 					signingLinks?: string[];
 					templateId?: number;
 					apiResponse?: unknown;
+					r2Key?: string;
 					error?: string;
 				}> = [];
 
@@ -444,6 +445,7 @@ export const contractGenerationRouter = {
 								documentLink: contractResult.r2Key
 									? await getFileUrlWithBucketInKey(contractResult.r2Key)
 									: contractResult.linkDocument,
+								r2Key: contractResult.r2Key ?? undefined,
 								signingLinks: contractResult.signing_links,
 								templateId: contractResult.templateId,
 								apiResponse: contractResult,

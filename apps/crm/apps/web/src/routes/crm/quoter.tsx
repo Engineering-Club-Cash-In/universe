@@ -285,7 +285,7 @@ const EXTRA_COST_FIELDS: ExtraCostFieldConfig[] = [
 		label: "Verificación de dirección",
 		type: "fixed",
 		valueField: "addressVerificationCost",
-		creditType: "autocompra",
+		creditType: "all",
 		section: "otros",
 		defaultActive: true,
 		defaultValue: 395,
@@ -1454,10 +1454,6 @@ function QuoterPage() {
 															quoterForm.setFieldValue("appointmentCost", 150);
 															quoterForm.setFieldValue("interestRate", 1.5);
 														} else {
-															quoterForm.setFieldValue(
-																"addressVerificationCost",
-																0,
-															);
 															quoterForm.setFieldValue("appointmentCost", 0);
 															quoterForm.setFieldValue("interestRate", 3);
 															// En sobre vehículo no hay enganche, limpiar

@@ -333,6 +333,7 @@ export interface InversionistaEspejo {
   monto_cash_in: string;
   monto_inversionista: string;
   cuota_inversionista: string;
+  fecha_inicio_participacion?: string;
 }
 
 export interface CreditoUsuarioPago {
@@ -427,6 +428,7 @@ export interface AporteInversionista {
   iva_cash_in: string;
   monto_inversionista: string;
   monto_cash_in: string;
+  fecha_inicio_participacion?: string;
 }
 
 export interface ResumenCreditos {
@@ -614,6 +616,7 @@ export interface InversionistaPayload {
   monto_aportado: number;
   porcentaje_cash_in: number;
   porcentaje_inversion: number; 
+  fecha_inicio_participacion?: string;
 }
 
 export interface UpdateCreditBody {

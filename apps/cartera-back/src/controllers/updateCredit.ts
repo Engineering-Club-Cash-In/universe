@@ -510,6 +510,7 @@ const updateInvestors = async (
   numero_credito_sifco: string,
   seguro: number,
   membresias: number,
+  gps: number,
   targetTable: any = creditos_inversionistas,
 ): Promise<void> => {
   if (!inversionistas || inversionistas.length === 0) return;
@@ -554,13 +555,14 @@ const updateInvestors = async (
     console.log(`\n💳 CUOTA TOTAL Y CARGOS:`);
     console.log(`   Cuota Total: Q${cuotaTotal.toFixed(2)}`);
     console.log(`   - Seguro: Q${seguro.toFixed(2)}`);
+    console.log(`   - GPS: Q${gps.toFixed(2)}`);
     console.log(`   - Membresía: Q${membresias.toFixed(2)}`);
 
-    const cuotaSinCargos = cuotaTotal.minus(seguro).minus(membresias);
+    const cuotaSinCargos = cuotaTotal.minus(seguro).minus(gps).minus(membresias);
 
     console.log(`   = Cuota sin cargos: Q${cuotaSinCargos.toFixed(2)}`);
     console.log(
-      `   Fórmula: ${cuotaTotal.toFixed(2)} - ${seguro.toFixed(2)} - ${membresias.toFixed(2)}`,
+      `   Fórmula: ${cuotaTotal.toFixed(2)} - ${seguro.toFixed(2)} - ${gps.toFixed(2)} - ${membresias.toFixed(2)}`,
     );
 
     // 🔥 PASO 2: MULTIPLICAR POR EL PORCENTAJE
@@ -602,22 +604,23 @@ const updateInvestors = async (
       `   ¿Es este inversionista el mayor? ${esMayor ? "✅ SÍ" : "❌ NO"}`,
     );
 
-    // 🔥 PASO 3: SI ES EL MAYOR, SUMARLE SEGURO + MEMBRESÍA
+    // 🔥 PASO 3: SI ES EL MAYOR, SUMARLE SEGURO + GPS + MEMBRESÍA
     let cuotaInversionista = cuotaBase;
 
     console.log(`\n🎯 PASO 3: CALCULAR CUOTA FINAL`);
 
     if (esMayor) {
       console.log(`   🏆 ESTE ES EL INVERSIONISTA MAYOR`);
-      console.log(`   Cuota Base: Q${cuotaBase.toFixed(2)}`);
+      console.log(`   Cuota Base: Q${cuotaBase.toFixed(6)}`);
       console.log(`   + Seguro: Q${seguro.toFixed(2)}`);
+      console.log(`   + GPS: Q${gps.toFixed(2)}`);
       console.log(`   + Membresía: Q${membresias.toFixed(2)}`);
 
-      cuotaInversionista = cuotaBase.plus(seguro).plus(membresias).round(6);
+      cuotaInversionista = cuotaBase.plus(seguro).plus(gps).plus(membresias).round(6);
 
       console.log(`   = Cuota Final: Q${cuotaInversionista.toFixed(6)}`);
       console.log(
-        `   Fórmula: ${cuotaBase.toFixed(6)} + ${seguro.toFixed(2)} + ${membresias.toFixed(2)}`,
+        `   Fórmula: ${cuotaBase.toFixed(6)} + ${seguro.toFixed(2)} + ${gps.toFixed(2)} + ${membresias.toFixed(2)}`,
       );
     } else {
       console.log(`   📍 Inversionista normal (no es el mayor)`);
@@ -950,6 +953,7 @@ export const updateCredit = async ({ body, set }: any) => {
         numero_credito_sifco ?? current.numero_credito_sifco,
         Number(updateFields.seguro_10_cuotas ?? current.seguro_10_cuotas),
         Number(updateFields.membresias_pago ?? current.membresias_pago),
+        Number(updateFields.gps ?? current.gps),
         creditos_inversionistas // Explicit target
       );
     }
@@ -964,6 +968,7 @@ export const updateCredit = async ({ body, set }: any) => {
         numero_credito_sifco ?? current.numero_credito_sifco,
         Number(updateFields.seguro_10_cuotas ?? current.seguro_10_cuotas),
         Number(updateFields.membresias_pago ?? current.membresias_pago),
+        Number(updateFields.gps ?? current.gps),
         creditos_inversionistas_espejo // Mirror target
       );
     }

@@ -2,9 +2,15 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { 
   getInvestorServices,
-  getInvestorTotalsService, // 🆕 NUEVO: Servicio de totales globales
+  getInvestorTotalsService,
+  calcularPagosEspejoService,
+  getInvestorMirrorSummaryService,
+  type InvestorMirrorSummaryResponse,
   liquidateByInvestorService,
   downloadInvestorPDFService,
+  recalcularPagosEspejoService,
+  reversePagosEspejoService,
+  type RecalcularPagoPayload,
   type LiquidateByInvestorRequest,
   type LiquidateByInvestorResponse,
 } from "../services/services";
@@ -183,7 +189,7 @@ export function useLiquidateByInvestor() {
       });
     },
     
-    onError: (error, t) => {
+    onError: (error) => {
       console.error("❌ Error al liquidar inversionista:", error);
       
       // 🔙 Rollback: restaura data anterior si falla
@@ -255,4 +261,80 @@ export function useInvalidateInvestors() {
       queryKey: investorsQueryKeys.all 
     });
   };
+}
+
+// ============================================================
+// 🧙 useGetInvestorMirrorSummary
+// ============================================================
+export function useGetInvestorMirrorSummary(
+  params: { id?: number; dpi?: string; incluirLiquidados?: boolean },
+  enabled: boolean = false
+) {
+  return useQuery<InvestorMirrorSummaryResponse>({
+    queryKey: ["investor-mirror-summary", params],
+    queryFn: () => getInvestorMirrorSummaryService(params),
+    staleTime: 0,
+    gcTime: 1000 * 60 * 5,
+    refetchOnWindowFocus: false,
+    retry: 1,
+    enabled: enabled && !!(params.id || params.dpi),
+  });
+}
+
+// ============================================================
+// 🚀 useCalcularPagosEspejo
+// ============================================================
+export function useCalcularPagosEspejo() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (inversionistaId: number) =>
+      calcularPagosEspejoService(inversionistaId),
+
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: investorsQueryKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: ["investor-mirror-summary"] });
+    },
+    onError: (error: Error) => console.error("❌ Error en calcularPagosEspejo:", error),
+  });
+}
+
+// ============================================================
+// 💾 useRecalcularPagosEspejo (Guardar cambios manuales)
+// ============================================================
+export function useRecalcularPagosEspejo() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (pagos: RecalcularPagoPayload[]) =>
+      recalcularPagosEspejoService(pagos),
+
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: investorsQueryKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: ["investor-mirror-summary"] });
+    },
+    onError: (error: Error) => console.error("❌ Error en recalcularPagosEspejo:", error),
+  });
+}
+
+// ============================================================
+// 🔄 useReversePagosEspejo (Revertir/Eliminar pagos espejo generados)
+// ============================================================
+export function useReversePagosEspejo() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (inversionistaId: number) =>
+      reversePagosEspejoService(inversionistaId),
+
+    onSuccess: (data) => {
+      console.log("✅ Pagos revertidos:", data);
+      queryClient.invalidateQueries({ queryKey: investorsQueryKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: ["investor-mirror-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["investor-totals"] });
+    },
+    onError: (error: Error) => {
+      console.error("❌ Error revirtiendo pagos:", error);
+    },
+  });
 }

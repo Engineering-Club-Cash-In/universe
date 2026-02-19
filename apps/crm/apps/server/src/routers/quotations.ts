@@ -116,6 +116,9 @@ export const quotationsRouter = {
 						"microbus_36plus",
 					])
 					.default("particular"),
+				creditType: z
+					.enum(["autocompra", "sobre_vehiculo"])
+					.default("autocompra"),
 				vehicleValue: z.number().positive(),
 				insuredAmount: z.number().positive(),
 				downPayment: z.number().positive(),
@@ -187,16 +190,21 @@ export const quotationsRouter = {
 			}
 
 			// Calcular valores
-			const downPaymentPercentage =
-				(input.downPayment / input.vehicleValue) * 100;
-			const amountToFinance = input.vehicleValue - input.downPayment;
+			const isSobreVehiculo = input.creditType === "sobre_vehiculo";
+			const downPaymentPercentage = isSobreVehiculo
+				? 0
+				: (input.downPayment / input.vehicleValue) * 100;
+			// En sobre vehículo: downPayment = monto solicitado (es el principal directo)
+			// En autocompra: monto a financiar = valor del vehículo - enganche
+			const amountToFinance = isSobreVehiculo
+				? input.downPayment
+				: input.vehicleValue - input.downPayment;
 
 			// Calcular royalty si no se proporcionó: 4% del total financiado
 			const royalty =
 				input.royalty > 0
 					? input.royalty
-					: (input.vehicleValue - input.downPayment) *
-						(input.royaltyPercentage / 100);
+					: amountToFinance * (input.royaltyPercentage / 100);
 
 			// Costos que se financian (NO incluyen seguro ni GPS)
 			// La membresía ya está incluida en adminCost, no se debe agregar de nuevo

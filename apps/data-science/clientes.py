@@ -609,10 +609,18 @@ for perfil in perfiles:
     }
 
 # Crear visualizaciones
+# Mapa de colores fijo por perfil
+COLOR_PERFIL = {
+    'PERFIL A: Propietario Conservador': '#2E8B57',
+    'PERFIL B: Urbano con Crédito': '#4169E1',
+    'PERFIL C: Establecido Premium': '#DC143C',
+    'PERFIL D: Joven Emergente': '#FF8C00',
+}
+
 # 1. Distribución de perfiles
 plt.figure(figsize=(12,8))
-colores = ['#2E8B57', '#4169E1', '#DC143C', '#FF8C00']
-distribucion_perfiles.plot(kind='bar', color=colores, alpha=0.8)
+colores_dist = [COLOR_PERFIL[p] for p in distribucion_perfiles.index]
+distribucion_perfiles.plot(kind='bar', color=colores_dist, alpha=0.8)
 plt.title('Distribución de Perfiles Crediticios', fontsize=16, fontweight='bold', pad=20)
 plt.xlabel('Perfil Crediticio', fontsize=14, fontweight='bold')
 plt.ylabel('Número de Clientes', fontsize=14, fontweight='bold')
@@ -631,7 +639,8 @@ sueldos = [resultados_perfiles[p]['sueldo'] for p in perfiles_ordenados]
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16,7))
 
 # Riesgo crediticio
-ax1.bar(range(len(perfiles_ordenados)), riesgos, color=colores, alpha=0.8)
+colores_ord = [COLOR_PERFIL[p] for p in perfiles_ordenados]
+ax1.bar(range(len(perfiles_ordenados)), riesgos, color=colores_ord, alpha=0.8)
 ax1.set_title('Riesgo Crediticio por Perfil', fontsize=14, fontweight='bold')
 ax1.set_xlabel('Perfil', fontsize=12, fontweight='bold')
 ax1.set_ylabel('% Clientes con Riesgo Alto', fontsize=12, fontweight='bold')
@@ -640,7 +649,7 @@ ax1.set_xticklabels([p.split(':')[0] for p in perfiles_ordenados], rotation=45, 
 ax1.grid(True, alpha=0.3)
 
 # Sueldo promedio
-ax2.bar(range(len(perfiles_ordenados)), sueldos, color=colores, alpha=0.8)
+ax2.bar(range(len(perfiles_ordenados)), sueldos, color=colores_ord, alpha=0.8)
 ax2.set_title('Sueldo Promedio por Perfil', fontsize=14, fontweight='bold')
 ax2.set_xlabel('Perfil', fontsize=12, fontweight='bold')
 ax2.set_ylabel('Sueldo Promedio (Q)', fontsize=12, fontweight='bold')
@@ -658,8 +667,8 @@ plt.figure(figsize=(12,8))
 capacidades = [resultados_perfiles[p]['capacidad_pago'] for p in perfiles_ordenados]
 tamaños = [resultados_perfiles[p]['tamaño'] for p in perfiles_ordenados]
 
-scatter = plt.scatter(capacidades, riesgos, s=[t*5 for t in tamaños], 
-                     c=range(len(perfiles_ordenados)), cmap='viridis', alpha=0.7, edgecolors='black')
+scatter = plt.scatter(capacidades, riesgos, s=[t*5 for t in tamaños],
+                     c=colores_ord, alpha=0.7, edgecolors='black')
 
 for i, perfil in enumerate(perfiles_ordenados):
     plt.annotate(perfil.split(':')[0], (capacidades[i], riesgos[i]), 
@@ -857,8 +866,8 @@ perfiles_morosos = df_morosos['PERFIL_CREDITICIO'].value_counts()
 perfiles_totales = df_seg['PERFIL_CREDITICIO'].value_counts()
 tasa_morosidad_perfil = (perfiles_morosos / perfiles_totales * 100).fillna(0)
 
-colores_riesgo = ['#ff4444', '#ff8844', '#ffdd44', '#44dd44']
-tasa_morosidad_perfil.plot(kind='bar', color=colores_riesgo, alpha=0.8)
+colores_morosidad = [COLOR_PERFIL[p] for p in tasa_morosidad_perfil.index]
+tasa_morosidad_perfil.plot(kind='bar', color=colores_morosidad, alpha=0.8)
 plt.title('Tasa de Morosidad por Perfil Crediticio', fontsize=16, fontweight='bold', pad=20)
 plt.xlabel('Perfil Crediticio', fontsize=14, fontweight='bold')
 plt.ylabel('Tasa de Morosidad (%)', fontsize=14, fontweight='bold')

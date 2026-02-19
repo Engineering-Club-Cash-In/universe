@@ -12,6 +12,7 @@ import {
   Loader2,
   MoreVertical,
   RefreshCw,
+  Trash2,
   Upload,
 
 } from "lucide-react";
@@ -21,7 +22,7 @@ import {
   useCalcularPagosEspejo,
   useGetInvestorMirrorSummary,
   useRecalcularPagosEspejo, // 🆕 Hook guardar cambios
-  useAplicarPagosEspejo,
+  useReversePagosEspejo,
 } from "../hooks/getInvestor";
 import { useCatalogs } from "../hooks/catalogs";
 import {
@@ -49,7 +50,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Combobox, Transition } from "@headlessui/react";
-import { Fragment, useState, useEffect } from "react";
+import { Fragment, useState, useEffect, useMemo } from "react";
+import { ConfirmationModal } from "@/components/ui/confirmation-modal";
 import { CrearBoletaInversionista } from "./investorPayment";
 
 const PER_PAGE_OPTIONS = [5, 10, 20, 50, 100, 200, 500];
@@ -68,6 +70,11 @@ export function TableInvestors() {
   const [isDraft, setIsDraft] = useState(false);
   const [draftInvestorId, setDraftInvestorId] = useState<number | null>(null);
 
+  // 🆕 Modal Revertir Pagos
+  const [showRevertirModal, setShowRevertirModal] = useState(false);
+  const [showSuccessRevertModal, setShowSuccessRevertModal] = useState(false);
+  const [inversionistaARevertir, setInversionistaARevertir] = useState<number | null>(null);
+
   // 🆕 Hook para calcular pagos espejo
   const { mutate: calcularPagosEspejo, isPending: isCalculando } =
     useCalcularPagosEspejo();
@@ -78,9 +85,9 @@ export function TableInvestors() {
 
 
 
-  // 🆕 Hook para APLICAR cambios a encabezados
-  const { mutate: aplicarPagosEspejo, isPending: isApplying } =
-    useAplicarPagosEspejo();
+  // 🆕 Hook para REVERTIR generación de pagos espejo
+  const { mutate: reversePagosEspejo, isPending: isReversing } =
+    useReversePagosEspejo();
 
   // 🆕 Estado para cambios manuales en pagos espejo: { [pagoId]: { ...campos } }
   // Usamos un Map o Record para acceso rápido.
@@ -304,45 +311,61 @@ export function TableInvestors() {
     tienePagosPendientes
   );
 
-  // 🆕 Efecto para activar Modo Borrador automático según el estado de los pagos
+  // 🆕 MEMO: Selección optimizada del inversionista actual (Recommendation 1 & 3)
+  const currentInv = useMemo(() => {
+    if (!data?.inversionistas?.length) return null;
+
+    // Si hay un ID seleccionado explícitamente y válido
+    if (selectedInvestor !== "" && selectedInvestor !== undefined) {
+      return (
+        data.inversionistas.find(
+          (inv: any) => inv.inversionista_id === Number(selectedInvestor)
+        ) || data.inversionistas[0]
+      );
+    }
+
+    // Comportamiento por defecto: el primero de la lista
+    return data.inversionistas[0];
+  }, [data?.inversionistas, selectedInvestor]);
+
+  // 🆕 Efecto para activar Modo Borrador automático (Optimizado)
+  // Se reducen las dependencias para evitar renders infinitos.
   useEffect(() => {
-    if (data?.inversionistas && data.inversionistas.length > 0) {
-      // Identificamos al inversionista actual: el seleccionado o el primero de la lista
-      const currentInv = data.inversionistas.find((inv: any) => 
-        selectedInvestor !== "" ? inv.inversionista_id === Number(selectedInvestor) : true
-      ) || data.inversionistas[0];
+    if (!currentInv) return;
 
-      if (currentInv) {
-        // Regla: Si hay créditos sin pagos, forzamos modo Normal (para permitir Generar)
-        const tieneCreditosSinPagos = (currentInv.creditos ?? []).some(
-          (c: any) => !c.pagos || c.pagos.length === 0
-        );
+    // Regla: Si hay créditos sin pagos (vacíos), forzamos modo Normal para permitir "Generar"
+    const creditos = currentInv.creditos ?? [];
+    
+    // Null-safety check (Recommendation 2 & 4)
+    const tieneCreditosSinPagos = creditos.some(
+      (c: any) => !c.pagos || c.pagos.length === 0
+    );
 
-        // Regla: Si todos tienen pagos, buscamos si hay alguno pendiente de liquidar
-        const tienePagoNoLiquidado = (currentInv.creditos ?? []).some((c: any) =>
-          (c.pagos ?? []).some(
-            (p: any) =>
-              p.estado_liquidacion === "NO_LIQUIDADO" || p.estado === "NO_LIQUIDADO"
-          )
-        );
+    // Regla: Si todos tienen pagos, buscamos pendientes de liquidar
+    const tienePagoNoLiquidado = creditos.some((c: any) =>
+      (c.pagos ?? []).some(
+        (p: any) =>
+          p?.estado_liquidacion === "NO_LIQUIDADO" || p?.estado === "NO_LIQUIDADO"
+      )
+    );
 
-        if (!tieneCreditosSinPagos && tienePagoNoLiquidado) {
-          if (!isDraft || draftInvestorId !== currentInv.inversionista_id) {
-            console.log("🛠️ Auto-Draft: ON para", currentInv.nombre_inversionista);
-            setIsDraft(true);
-            setDraftInvestorId(currentInv.inversionista_id);
-          }
-        } else {
-          // Si volvemos a tener créditos vacíos o todo liquidado, salimos del modo borrador
-          if (isDraft && draftInvestorId === currentInv.inversionista_id) {
-            console.log("🍃 Auto-Draft: OFF");
-            setIsDraft(false);
-            setDraftInvestorId(null);
-          }
-        }
+    if (!tieneCreditosSinPagos && tienePagoNoLiquidado) {
+      // Activar solo si es necesario
+      if (!isDraft || draftInvestorId !== currentInv.inversionista_id) {
+        console.log("🛠️ Auto-Draft Optimizado: ON para", currentInv.nombre_inversionista);
+        setIsDraft(true);
+        setDraftInvestorId(currentInv.inversionista_id);
+      }
+    } else {
+      // 🔄 FIX: Modo Borrador "Pegajoso"
+      // Si el inversionista actual NO cumple las condiciones, apagar SIEMPRE.
+      if (isDraft) {
+        console.log("🍃 Auto-Draft Optimizado: OFF (Condiciones no cumplidas)");
+        setIsDraft(false);
+        setDraftInvestorId(null);
       }
     }
-  }, [data, selectedInvestor, isDraft, draftInvestorId, setIsDraft, setDraftInvestorId]);
+  }, [currentInv, isDraft, draftInvestorId]); // (Recommendation 1: Dependencias limpias)
 
   // Rangos para el label de paginado
   const from = (page - 1) * perPage + 1;
@@ -770,6 +793,13 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 {inv.dpi}
               </h3>
 
+              {isCalculando && selectedInversionista === inv.inversionista_id && (
+                <div className="flex items-center gap-2 text-purple-600 bg-purple-50 px-3 py-1 rounded-full border border-purple-200 animate-pulse ml-4">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span className="text-sm font-bold">Calculando pagos...</span>
+                </div>
+              )}
+
               {/* 🔥 STEPPER VISUAL INLINE */}
               <div className="flex items-center gap-2 text-xs ml-4">
                 {/* Step 1: Pagos Generados */}
@@ -852,24 +882,18 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
 
                     <button
                         onClick={() => {
-                            if (confirm("⚠️ ¿Estás seguro de APLICAR estos pagos a los créditos?\n\nEsto actualizará el 'Monto Aportado' y otros totales en la ficha del crédito y SALDRÁ del modo borrador.")) {
-                                aplicarPagosEspejo(inv.inversionista_id, {
-                                    onSuccess: () => {
-                                        setIsDraft(false);
-                                        setDraftInvestorId(null);
-                                    }
-                                });
-                            }
+                            setInversionistaARevertir(inv.inversionista_id);
+                            setShowRevertirModal(true);
                         }}
-                        disabled={isApplying || isSavingChanges}
-                        className="flex-1 sm:flex-none bg-green-600 text-white px-4 py-2 rounded-lg font-bold shadow-md hover:bg-green-700 hover:shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={isReversing || isSavingChanges}
+                        className="flex-1 sm:flex-none bg-red-600 text-white px-4 py-2 rounded-lg font-bold shadow-md hover:bg-red-700 hover:shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                        {isApplying ? (
+                        {isReversing ? (
                             <Loader2 className="w-4 h-4 animate-spin" />
                         ) : (
-                            <CheckCircle className="w-4 h-4" />
+                            <Trash2 className="w-4 h-4" />
                         )}
-                        Aplicar
+                        Revertir / Eliminar
                     </button>
                 </div>
               </div>
@@ -2004,6 +2028,56 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
   }}
   inversionistaPredeterminado={inversionistaParaBoleta}
 />
+
+      {/* 🆕 Modal de Confirmación para Revertir */}
+      <ConfirmationModal
+        isOpen={showRevertirModal}
+        onClose={() => {
+          setShowRevertirModal(false);
+          setInversionistaARevertir(null);
+        }}
+        onConfirm={() => {
+          if (inversionistaARevertir) {
+            reversePagosEspejo(inversionistaARevertir, {
+              onSuccess: () => {
+                setIsDraft(false);
+                setDraftInvestorId(null);
+                setShowRevertirModal(false);
+                setInversionistaARevertir(null);
+                // 🟢 Abrir modal de éxito
+                setShowSuccessRevertModal(true);
+              },
+            });
+          }
+        }}
+        title="⚠️ ¿Seguro que deseas REVERTIR y ELIMINAR estos pagos?"
+        description={
+            <div className="space-y-2">
+                <p>Esta acción:</p>
+                <ul className="list-disc list-inside text-sm text-gray-600">
+                    <li>Eliminará todos los pagos espejo generados.</li>
+                    <li>Saldrá del modo borrador.</li>
+                </ul>
+            </div>
+        }
+        confirmText="Sí, Revertir y Eliminar"
+        cancelText="Cancelar"
+        variant="destructive"
+        isLoading={isReversing}
+      />
+
+      {/* 🆕 Modal de Éxito al Revertir */}
+      <ConfirmationModal
+        isOpen={showSuccessRevertModal}
+        onClose={() => setShowSuccessRevertModal(false)}
+        onConfirm={() => setShowSuccessRevertModal(false)}
+        title="¡Pagos Revertidos!"
+        description="Los cambios se han eliminado correctamente y has salido del modo borrador."
+        confirmText="Entendido"
+        cancelText={null}
+        variant="success"
+      />
+
       </div>
     </div>
   );

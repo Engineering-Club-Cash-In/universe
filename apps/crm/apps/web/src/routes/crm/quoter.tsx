@@ -80,25 +80,7 @@ export const Route = createFileRoute("/crm/quoter")({
 	component: QuoterPage,
 });
 
-// Función para calcular cuota mensual (según Excel)
-function calculateMonthlyPayment(
-	principal: number,
-	monthlyRate: number,
-	termMonths: number,
-	insuranceCost: number,
-	gpsCost: number,
-): number {
-	// La tasa incluye IVA (12%)
-	const r = (monthlyRate / 100) * 1.12;
-
-	if (r === 0) return principal / termMonths;
-
-	const factor = (1 + r) ** termMonths;
-	const baseMonthlyPayment = (principal * (r * factor)) / (factor - 1);
-
-	// Agregar seguro y GPS a la cuota mensual
-	return Math.round((baseMonthlyPayment + insuranceCost + gpsCost) * 100) / 100;
-}
+import { calculateQuotation, GPS_COST } from "@/utils/quoter-calculations";
 
 // Tipo para los valores del formulario de cotización
 interface QuotationFormValues {
@@ -690,9 +672,6 @@ function ExtraCostsTable({
 	);
 }
 
-/** Costo fijo del GPS (se resta de la membresía cruda para obtener la neta) */
-const GPS_COST = 148.2;
-
 function QuoterPage() {
 	const { data: session } = authClient.useSession();
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
@@ -982,74 +961,37 @@ function QuoterPage() {
 	// Función para recalcular cuando cambian los valores (según Excel)
 	const recalculate = () => {
 		const values = quoterForm.state.values;
-		const isSobreVehiculo = values.creditType === "sobre_vehiculo";
 
-		// En sobre vehículo: el "downPayment" field se usa como "monto solicitado" directo
-		// En autocompra: monto a financiar = valor del vehículo - enganche
-		const amountToFinance = isSobreVehiculo
-			? Number(values.downPayment) // downPayment field = monto solicitado
-			: Number(values.vehicleValue) - Number(values.downPayment);
-		const insuranceCost = Number(values.insuranceCost);
-		const gpsCost = Number(values.gpsCost);
-		const transferCost = Number(values.transferCost);
-		const membershipCost = Number(values.membershipCost);
+		const result = calculateQuotation({
+			creditType: values.creditType,
+			vehicleValue: Number(values.vehicleValue),
+			downPayment: Number(values.downPayment),
+			interestRate: Number(values.interestRate),
+			termMonths: Number(values.termMonths),
+			insuranceCost: Number(values.insuranceCost),
+			gpsCost: Number(values.gpsCost),
+			transferCost: Number(values.transferCost),
+			royaltyPercentage: Number(values.royaltyPercentage),
+			rcdpCost: Number(values.rcdpCost),
+		});
 
-		// Calcular B22 según Excel
-		// B22 = Monto a financiar + Traspaso + 400 + 400 + 600 + GPS + Seguro
-		const b22 =
-			amountToFinance +
-			transferCost +
-			400 +
-			400 +
-			600 +
-			gpsCost +
-			insuranceCost;
-
-		// Royalty = 4% de B22 redondeado hacia arriba
-		const royaltyPercentage = Number(values.royaltyPercentage) || 4.0;
-		const calculatedRoyalty = Math.ceil(b22 * (royaltyPercentage / 100));
-		quoterForm.setFieldValue("royalty", calculatedRoyalty);
-
-		// Interés = ROUNDUP(B22 * 1.78%) + RCDP (para microbuses)
-		const rcdpCost = Number(values.rcdpCost);
-		const calculatedInterest = Math.ceil(b22 * 0.0178) + rcdpCost;
-		quoterForm.setFieldValue("interestCost", calculatedInterest);
+		quoterForm.setFieldValue("royalty", result.calculatedRoyalty);
+		quoterForm.setFieldValue("interestCost", result.calculatedInterest);
+		quoterForm.setFieldValue("adminCost", result.adminCost);
 
 		// Nota: extraInsuranceCost y extraMembershipCost se calculan en updateInsuranceCost()
 		// para que sean editables y no se sobrescriban en cada recálculo
 
-		// Gastos Admin = 400 + Royalty + 400 + 600 + Intereses(incluye RCDP) + GPS + Seguro
-		const extraCost = calculatedInterest + gpsCost + insuranceCost;
-		const adminCost = 400 + calculatedRoyalty + 400 + 600 + extraCost;
-
-		// Actualizar el campo de gastos administrativos
-		quoterForm.setFieldValue("adminCost", Math.round(adminCost * 100) / 100);
-
-		// Costos que se financian (NO incluyen seguro ni GPS)
-		// La membresía ya está incluida en adminCost, no se debe agregar de nuevo
-		const financedCosts = transferCost + adminCost;
-
-		const totalFinanced = amountToFinance + financedCosts;
-
-		// La cuota mensual incluye seguro y GPS aparte
-		const monthlyPayment = calculateMonthlyPayment(
-			totalFinanced,
-			Number(values.interestRate),
-			Number(values.termMonths),
-			insuranceCost,
-			gpsCost,
-		);
-
 		setCalculatedValues({
-			amountToFinance,
-			totalFinanced,
-			monthlyPayment,
+			amountToFinance: result.amountToFinance,
+			totalFinanced: result.totalFinanced,
+			monthlyPayment: result.monthlyPayment,
 		});
 
 		// Generar tabla de amortización si hay valores
-		if (totalFinanced > 0 && monthlyPayment > 0) {
+		if (result.totalFinanced > 0 && result.monthlyPayment > 0) {
 			const table = generateAmortizationTable(
-				totalFinanced,
+				result.totalFinanced,
 				Number(values.interestRate),
 				Number(values.termMonths),
 			);

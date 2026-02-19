@@ -824,7 +824,7 @@ function QuoterPage() {
 			insuredAmount: 0,
 			downPayment: 0,
 			termMonths: 60,
-			interestRate: 1.5,
+			interestRate: 1.5, // default autocompra; sobre_vehiculo usa 3
 			insuranceCost: 0,
 			gpsCost: GPS_COST,
 			transferCost: 545, // 395 + 150 según Excel
@@ -862,6 +862,7 @@ function QuoterPage() {
 			createQuotationMutation.mutate({
 				opportunityId: value.opportunityId || undefined,
 				vehicleId: value.vehicleId || undefined,
+				creditType: value.creditType,
 				vehicleBrand: value.vehicleBrand,
 				vehicleLine: value.vehicleLine,
 				vehicleModel: value.vehicleModel,
@@ -915,8 +916,13 @@ function QuoterPage() {
 	// Auto-recalcular cuando cambien los valores relevantes del formulario
 	useEffect(() => {
 		const values = quoterForm.state.values;
-		// Solo recalcular si hay valores básicos
-		if (values.vehicleValue > 0 && values.downPayment > 0) {
+		const isSobreVehiculo = values.creditType === "sobre_vehiculo";
+		// Para sobre vehículo: recalcular si hay monto solicitado (downPayment field)
+		// Para autocompra: recalcular si hay valor del vehículo y enganche
+		const shouldRecalculate = isSobreVehiculo
+			? values.downPayment > 0
+			: values.vehicleValue > 0 && values.downPayment > 0;
+		if (shouldRecalculate) {
 			recalculate();
 		}
 	}, [
@@ -931,6 +937,7 @@ function QuoterPage() {
 		quoterForm.state.values.royaltyPercentage,
 		quoterForm.state.values.insuredAmount,
 		quoterForm.state.values.vehicleType,
+		quoterForm.state.values.creditType,
 	]);
 
 	// Tipos de bus RCDP (membresía ya incluida en la tarifa)
@@ -975,9 +982,13 @@ function QuoterPage() {
 	// Función para recalcular cuando cambian los valores (según Excel)
 	const recalculate = () => {
 		const values = quoterForm.state.values;
-		const downPayment = Number(values.downPayment);
-		const vehicleValue = Number(values.vehicleValue);
-		const amountToFinance = vehicleValue - downPayment;
+		const isSobreVehiculo = values.creditType === "sobre_vehiculo";
+
+		// En sobre vehículo: el "downPayment" field se usa como "monto solicitado" directo
+		// En autocompra: monto a financiar = valor del vehículo - enganche
+		const amountToFinance = isSobreVehiculo
+			? Number(values.downPayment) // downPayment field = monto solicitado
+			: Number(values.vehicleValue) - Number(values.downPayment);
 		const insuranceCost = Number(values.insuranceCost);
 		const gpsCost = Number(values.gpsCost);
 		const transferCost = Number(values.transferCost);
@@ -1085,15 +1096,23 @@ function QuoterPage() {
 				const numericValue = Number(inspection.marketValue);
 				quoterForm.setFieldValue("vehicleValue", numericValue);
 
-				// Auto-llenar monto asegurado (igual al valor)
-				quoterForm.setFieldValue("insuredAmount", numericValue);
+				const isSobreVehiculo =
+					quoterForm.state.values.creditType === "sobre_vehiculo";
 
-				// Auto-calcular enganche al 20%
-				const downPayment = Math.round(numericValue * 0.2);
-				quoterForm.setFieldValue("downPayment", downPayment);
+				if (!isSobreVehiculo) {
+					// Autocompra: auto-llenar monto asegurado y enganche
+					quoterForm.setFieldValue("insuredAmount", numericValue);
+					const downPayment = Math.round(numericValue * 0.2);
+					quoterForm.setFieldValue("downPayment", downPayment);
+				}
 
 				// Actualizar seguro y membresía con el tipo de vehículo correcto
-				updateInsuranceCost(numericValue, vehicleTypeToUse);
+				updateInsuranceCost(
+					isSobreVehiculo
+						? quoterForm.state.values.insuredAmount || numericValue
+						: numericValue,
+					vehicleTypeToUse,
+				);
 			}
 		} catch (error) {
 			console.error("Error al obtener inspección del vehículo:", error);
@@ -1115,15 +1134,23 @@ function QuoterPage() {
 				const numericValue = Number(latestInspection.marketValue);
 				quoterForm.setFieldValue("vehicleValue", numericValue);
 
-				// Auto-llenar monto asegurado (igual al valor)
-				quoterForm.setFieldValue("insuredAmount", numericValue);
+				const isSobreVehiculo =
+					quoterForm.state.values.creditType === "sobre_vehiculo";
 
-				// Auto-calcular enganche al 20%
-				const downPayment = Math.round(numericValue * 0.2);
-				quoterForm.setFieldValue("downPayment", downPayment);
+				if (!isSobreVehiculo) {
+					// Autocompra: auto-llenar monto asegurado y enganche
+					quoterForm.setFieldValue("insuredAmount", numericValue);
+					const downPayment = Math.round(numericValue * 0.2);
+					quoterForm.setFieldValue("downPayment", downPayment);
+				}
 
 				// Actualizar seguro y membresía
-				updateInsuranceCost(numericValue, quoterForm.state.values.vehicleType);
+				updateInsuranceCost(
+					isSobreVehiculo
+						? quoterForm.state.values.insuredAmount || numericValue
+						: numericValue,
+					quoterForm.state.values.vehicleType,
+				);
 			}
 		}
 	};
@@ -1308,7 +1335,10 @@ function QuoterPage() {
 			<div className="mb-8">
 				<h1 className="flex items-center gap-2 font-bold text-3xl">
 					<Calculator className="h-8 w-8" />
-					Cotizador de Autocompra
+					Cotizador de{" "}
+					{quoterForm.state.values.creditType === "sobre_vehiculo"
+						? "Sobre Vehículo"
+						: "Autocompra"}
 				</h1>
 				<p className="mt-2 text-muted-foreground">
 					Genera propuestas de financiamiento para tus clientes
@@ -1422,13 +1452,19 @@ function QuoterPage() {
 																395,
 															);
 															quoterForm.setFieldValue("appointmentCost", 150);
+															quoterForm.setFieldValue("interestRate", 1.5);
 														} else {
 															quoterForm.setFieldValue(
 																"addressVerificationCost",
 																0,
 															);
 															quoterForm.setFieldValue("appointmentCost", 0);
+															quoterForm.setFieldValue("interestRate", 3);
+															// En sobre vehículo no hay enganche, limpiar
+															quoterForm.setFieldValue("downPayment", 0);
 														}
+														// Recalcular después del cambio de tipo
+														setTimeout(() => recalculate(), 100);
 													}}
 													disabled={isDisabled}
 												>
@@ -1604,21 +1640,35 @@ function QuoterPage() {
 													value={field.state.value || ""}
 													onBlur={(e) => {
 														const value = Number(e.target.value) || 0;
+														const isSobreVehiculo =
+															quoterForm.state.values.creditType ===
+															"sobre_vehiculo";
 
 														if (value > 0) {
-															// Auto-llenar monto asegurado (igual al valor)
-															quoterForm.setFieldValue("insuredAmount", value);
+															if (isSobreVehiculo) {
+																// En sobre vehículo: NO auto-llenar monto asegurado ni enganche
+																// El usuario los define independientemente
+															} else {
+																// Autocompra: auto-llenar monto asegurado (igual al valor)
+																quoterForm.setFieldValue(
+																	"insuredAmount",
+																	value,
+																);
 
-															// Auto-calcular enganche al 20%
-															const downPayment = Math.round(value * 0.2);
-															quoterForm.setFieldValue(
-																"downPayment",
-																downPayment,
-															);
+																// Auto-calcular enganche al 20%
+																const downPayment = Math.round(value * 0.2);
+																quoterForm.setFieldValue(
+																	"downPayment",
+																	downPayment,
+																);
+															}
 
-															// Actualizar seguro y membresía
+															// Actualizar seguro y membresía en ambos casos
 															updateInsuranceCost(
-																value,
+																isSobreVehiculo
+																	? quoterForm.state.values.insuredAmount ||
+																			value
+																	: value,
 																quoterForm.state.values.vehicleType,
 															);
 														}
@@ -1667,35 +1717,45 @@ function QuoterPage() {
 								</CardHeader>
 								<CardContent className="space-y-4">
 									<quoterForm.Field name="downPayment">
-										{(field) => (
-											<div>
-												<div className="mb-2 flex items-center justify-between">
-													<Label htmlFor={field.name}>Enganche</Label>
-													<span className="text-muted-foreground text-sm">
-														{quoterForm.state.values.vehicleValue > 0
-															? (
-																	(Number(field.state.value) /
-																		Number(
-																			quoterForm.state.values.vehicleValue,
-																		)) *
-																	100
-																).toFixed(2)
-															: "0.00"}
-														% del valor
-													</span>
+										{(field) => {
+											const isSobreVehiculo =
+												quoterForm.state.values.creditType === "sobre_vehiculo";
+											return (
+												<div>
+													<div className="mb-2 flex items-center justify-between">
+														<Label htmlFor={field.name}>
+															{isSobreVehiculo
+																? "Monto Solicitado"
+																: "Enganche"}
+														</Label>
+														{!isSobreVehiculo && (
+															<span className="text-muted-foreground text-sm">
+																{quoterForm.state.values.vehicleValue > 0
+																	? (
+																			(Number(field.state.value) /
+																				Number(
+																					quoterForm.state.values.vehicleValue,
+																				)) *
+																			100
+																		).toFixed(2)
+																	: "0.00"}
+																% del valor
+															</span>
+														)}
+													</div>
+													<Input
+														id={field.name}
+														type="number"
+														value={field.state.value || ""}
+														onChange={(e) => {
+															field.handleChange(Number(e.target.value) || 0);
+															recalculate();
+														}}
+														placeholder={isSobreVehiculo ? "43000" : "20000"}
+													/>
 												</div>
-												<Input
-													id={field.name}
-													type="number"
-													value={field.state.value || ""}
-													onChange={(e) => {
-														field.handleChange(Number(e.target.value) || 0);
-														recalculate();
-													}}
-													placeholder="20000"
-												/>
-											</div>
-										)}
+											);
+										}}
 									</quoterForm.Field>
 
 									<quoterForm.Field name="termMonths">

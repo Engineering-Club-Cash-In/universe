@@ -26,14 +26,57 @@ def generar_dashboard_ejecutivo():
     df['Cuotas pendientes actual'] = pd.to_numeric(df['Cuotas pendientes actual'], errors='coerce')
     
     # Limpiar datos para análisis
+    for col in ['ESTADO CIVIL', 'OCUPACION', 'VIVIENDA PROPIA', 'VEHICULO PROPIO', 'TARJETA DE CREDITO', 'TIPO DE COMPRAS', 'UTILIZACION DINERO']:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip()
+            df[col] = df[col].replace('nan', np.nan)
+
     df_limpio = df.dropna(subset=['VIVIENDA PROPIA', 'TARJETA DE CREDITO', 'SUELDO', 'PRECIO PRODUCTO', 'Cuotas pendientes actual'])
-    
+
     # Calcular métricas principales
     total_clientes = len(df_limpio)
     morosos = len(df_limpio[df_limpio['Cuotas pendientes actual'] > 1])
     tasa_morosidad = (morosos / total_clientes) * 100
     monto_promedio = df_limpio['PRECIO PRODUCTO'].mean()
     sueldo_promedio = df_limpio['SUELDO'].mean()
+
+    # Crear perfiles crediticios para métricas dinámicas
+    def crear_perfil(row):
+        v = row['VIVIENDA PROPIA']
+        t = row['TARJETA DE CREDITO']
+        if v == 'Si' and t == 'No':
+            return 'Propietario Conservador'
+        elif v == 'No' and t == 'Si':
+            return 'Urbano con Crédito'
+        elif v == 'Si' and t == 'Si':
+            return 'Establecido Premium'
+        else:
+            return 'Joven Emergente'
+
+    df_limpio = df_limpio.copy()
+    df_limpio['PERFIL'] = df_limpio.apply(crear_perfil, axis=1)
+
+    # Calcular métricas por perfil
+    perfiles_dist = df_limpio['PERFIL'].value_counts()
+    perfiles_pct = df_limpio['PERFIL'].value_counts(normalize=True) * 100
+
+    perfiles_morosos = df_limpio[df_limpio['Cuotas pendientes actual'] > 1]['PERFIL'].value_counts()
+    perfiles_totales = df_limpio['PERFIL'].value_counts()
+    tasa_morosidad_perfil = (perfiles_morosos / perfiles_totales * 100).fillna(0)
+
+    # Identificar perfil de mayor y menor riesgo
+    perfil_mayor_riesgo = tasa_morosidad_perfil.idxmax()
+    perfil_menor_riesgo = tasa_morosidad_perfil.idxmin()
+    perfil_mas_grande = perfiles_dist.idxmax()
+
+    # Correlación vivienda-tarjeta
+    df_limpio['VIV_NUM'] = df_limpio['VIVIENDA PROPIA'].map({'Si': 1, 'No': 0})
+    df_limpio['TAR_NUM'] = df_limpio['TARJETA DE CREDITO'].map({'Si': 1, 'No': 0})
+    corr_viv_tar = df_limpio[['VIV_NUM', 'TAR_NUM']].corr().iloc[0, 1]
+
+    # Ahorro potencial
+    monto_promedio_moroso = df_limpio[df_limpio['Cuotas pendientes actual'] > 1]['PRECIO PRODUCTO'].mean()
+    ahorro_potencial = monto_promedio_moroso * morosos * 0.5
     
     # Función para convertir imagen a base64
     def imagen_a_base64(ruta_imagen):
@@ -308,19 +351,19 @@ def generar_dashboard_ejecutivo():
                 <div class="insights-grid">
                     <div class="insight-card">
                         <h3>🏠 Correlación Vivienda-Crédito</h3>
-                        <p>Fuerte correlación negativa (-0.48) entre vivienda propia y tarjeta de crédito. Los propietarios tienden a ser más conservadores financieramente.</p>
+                        <p>Correlación de {corr_viv_tar:.2f} entre vivienda propia y tarjeta de crédito. Los propietarios tienden a ser más conservadores financieramente.</p>
                     </div>
                     <div class="insight-card">
                         <h3>💳 Perfiles Diferenciados</h3>
-                        <p>4 perfiles crediticios identificados: Urbano con Crédito (34.2%), Establecido Premium (31.6%), Propietario Conservador (30.8%), y Joven Emergente (3.4%).</p>
+                        <p>4 perfiles crediticios identificados: {', '.join(f'{p} ({perfiles_pct[p]:.1f}%)' for p in perfiles_pct.index)}.</p>
                     </div>
                     <div class="insight-card">
                         <h3>⚠️ Riesgo Concentrado</h3>
-                        <p>El perfil "Joven Emergente" representa solo 3.4% de clientes pero tiene 25% de morosidad vs 11% promedio general.</p>
+                        <p>El perfil "{perfil_mayor_riesgo}" tiene {tasa_morosidad_perfil[perfil_mayor_riesgo]:.1f}% de morosidad vs {tasa_morosidad:.1f}% promedio general. Representa {perfiles_pct[perfil_mayor_riesgo]:.1f}% de clientes.</p>
                     </div>
                     <div class="insight-card">
                         <h3>💰 Capacidad Limitada</h3>
-                        <p>Todos los perfiles muestran capacidad de pago de 0.3x (productos 3x mayores que sueldo), indicando necesidad de financiamiento a largo plazo.</p>
+                        <p>Los productos promedian Q{monto_promedio:,.0f} vs sueldo promedio de Q{sueldo_promedio:,.0f} (ratio {sueldo_promedio/monto_promedio:.1f}x), indicando necesidad de financiamiento a largo plazo.</p>
                     </div>
                 </div>
             </section>
@@ -374,19 +417,19 @@ def generar_dashboard_ejecutivo():
                 <div class="rec-grid">
                     <div class="rec-card">
                         <h3>🎯 Enfoque Prioritario</h3>
-                        <p><strong>Perfil Urbano con Crédito:</strong> Concentrar esfuerzos en este segmento (34.2% de clientes) con baja morosidad (10.9%) y buena capacidad de pago.</p>
+                        <p><strong>Perfil {perfil_menor_riesgo}:</strong> Concentrar esfuerzos en este segmento ({perfiles_pct[perfil_menor_riesgo]:.1f}% de clientes) con la menor morosidad ({tasa_morosidad_perfil[perfil_menor_riesgo]:.1f}%).</p>
                     </div>
                     <div class="rec-card">
                         <h3>⚠️ Gestión de Riesgo</h3>
-                        <p><strong>Perfil Joven Emergente:</strong> Implementar scoring más estricto y monitoreo especial para este segmento de alto riesgo (25% morosidad).</p>
+                        <p><strong>Perfil {perfil_mayor_riesgo}:</strong> Implementar scoring más estricto y monitoreo especial para este segmento de mayor riesgo ({tasa_morosidad_perfil[perfil_mayor_riesgo]:.1f}% morosidad).</p>
                     </div>
                     <div class="rec-card">
                         <h3>🚀 Oportunidades de Crecimiento</h3>
-                        <p><strong>Up-selling:</strong> Los perfiles Premium y Conservador muestran estabilidad. Ofrecer productos complementarios y aumentar límites de crédito.</p>
+                        <p><strong>Up-selling:</strong> Los perfiles con menor morosidad muestran estabilidad. Ofrecer productos complementarios y aumentar límites de crédito.</p>
                     </div>
                     <div class="rec-card">
                         <h3>🔄 Estrategia Anti-Morosidad</h3>
-                        <p><strong>Prevención:</strong> Contacto proactivo con clientes en cuota 1, reestructuración para sueldos bajos, y programas de lealtad.</p>
+                        <p><strong>Prevención:</strong> Contacto proactivo con clientes en cuota 1, reestructuración para sueldos bajos, y programas de lealtad. {morosos:,} clientes actualmente morosos.</p>
                     </div>
                     <div class="rec-card">
                         <h3>📊 Scoring Crediticio</h3>
@@ -394,7 +437,7 @@ def generar_dashboard_ejecutivo():
                     </div>
                     <div class="rec-card">
                         <h3>💰 Impacto Financiero</h3>
-                        <p><strong>ROI Estimado:</strong> Reducir morosidad en 50% podría generar ahorros de Q{(df_limpio[df_limpio['Cuotas pendientes actual'] > 1]['PRECIO PRODUCTO'].mean() * morosos * 0.5):,.0f}</p>
+                        <p><strong>ROI Estimado:</strong> Reducir morosidad en 50% podría generar ahorros de Q{ahorro_potencial:,.0f}. Monto total en riesgo: Q{monto_promedio_moroso * morosos:,.0f}.</p>
                     </div>
                 </div>
             </section>
@@ -405,15 +448,15 @@ def generar_dashboard_ejecutivo():
                 <div class="insights-grid">
                     <div class="insight-card">
                         <h3>✅ Fortalezas Identificadas</h3>
-                        <p>Base de clientes diversificada con 3 perfiles principales equilibrados. Tasa de morosidad general controlada ({tasa_morosidad:.1f}%). Correlaciones claras para scoring crediticio.</p>
+                        <p>Base de {total_clientes:,} clientes con 3 perfiles principales equilibrados (~30% cada uno). Tasa de morosidad general: {tasa_morosidad:.1f}%. Correlaciones claras para scoring crediticio.</p>
                     </div>
                     <div class="insight-card">
                         <h3>⚡ Acciones Inmediatas</h3>
-                        <p>1) Implementar scoring diferenciado por perfil. 2) Monitoreo especial del segmento Joven Emergente. 3) Estrategias de up-selling para perfiles estables.</p>
+                        <p>1) Implementar scoring diferenciado por perfil. 2) Monitoreo especial del segmento {perfil_mayor_riesgo}. 3) Estrategias de up-selling para perfiles estables.</p>
                     </div>
                     <div class="insight-card">
-                        <h3>🎯 Objetivos 2024</h3>
-                        <p>Reducir morosidad a <8%. Incrementar penetración en Perfil Urbano. Desarrollar productos específicos por perfil crediticio.</p>
+                        <h3>🎯 Objetivos 2026</h3>
+                        <p>Reducir morosidad de {tasa_morosidad:.1f}% a &lt;10%. Incrementar penetración en Perfil {perfil_mas_grande}. Desarrollar productos específicos por perfil crediticio.</p>
                     </div>
                     <div class="insight-card">
                         <h3>📊 Próximos Análisis</h3>

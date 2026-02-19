@@ -10,6 +10,9 @@ export const FIXED_ADMIN_COST = 600;
 /** Garantía mobiliaria */
 export const GARANTIA_MOBILIARIA = 400;
 
+/** Garantía mobiliaria para crédito interno (empleados) */
+export const GARANTIA_MOBILIARIA_INTERNO = 300;
+
 /** Contrato leasing */
 export const CONTRATO_LEASING = 400;
 
@@ -27,6 +30,7 @@ interface QuotationInput {
 	transferCost: number;
 	royaltyPercentage: number;
 	rcdpCost: number;
+	isInterno?: boolean;
 }
 
 export interface QuotationResult {
@@ -101,15 +105,24 @@ export function calculateQuotation(input: QuotationInput): QuotationResult {
 		// Total financiado = monto solicitado (los gastos se descuentan del desembolso)
 		totalFinanced = amountToFinance;
 	} else {
+		// Constantes según tipo de crédito (interno vs normal)
+		const garantia = input.isInterno
+			? GARANTIA_MOBILIARIA_INTERNO
+			: GARANTIA_MOBILIARIA;
+		const leasing = input.isInterno ? 0 : CONTRATO_LEASING;
+		const adminFijo = input.isInterno ? 0 : FIXED_ADMIN_COST;
+		const gps = input.isInterno ? 0 : input.gpsCost;
+		const seguro = input.insuranceCost;
+
 		// B22 = Monto a financiar + Traspaso + Garantía + Leasing + Admin fijo + GPS + Seguro
 		const b22 =
 			amountToFinance +
 			input.transferCost +
-			GARANTIA_MOBILIARIA +
-			CONTRATO_LEASING +
-			FIXED_ADMIN_COST +
-			input.gpsCost +
-			input.insuranceCost;
+			garantia +
+			leasing +
+			adminFijo +
+			gps +
+			seguro;
 
 		// Royalty = % de B22 redondeado hacia arriba
 		calculatedRoyalty = Math.ceil(b22 * (royaltyPercentage / 100));
@@ -119,25 +132,23 @@ export function calculateQuotation(input: QuotationInput): QuotationResult {
 			Math.ceil(b22 * AUTOCOMPRA_INTEREST_RATE) + input.rcdpCost;
 
 		// Gastos Admin = Garantía + Royalty + Leasing + Admin fijo + Intereses + GPS + Seguro
-		const extraCost = calculatedInterest + input.gpsCost + input.insuranceCost;
-		adminCost =
-			GARANTIA_MOBILIARIA +
-			calculatedRoyalty +
-			CONTRATO_LEASING +
-			FIXED_ADMIN_COST +
-			extraCost;
+		const extraCost = calculatedInterest + gps + seguro;
+		adminCost = garantia + calculatedRoyalty + leasing + adminFijo + extraCost;
 
 		// Total financiado = monto a financiar + costos financiados
 		const financedCosts = input.transferCost + adminCost;
 		totalFinanced = amountToFinance + financedCosts;
 	}
 
+	const effectiveGpsCost =
+		!isSobreVehiculo && input.isInterno ? 0 : input.gpsCost;
+
 	const monthlyPayment = calculateMonthlyPayment(
 		totalFinanced,
 		input.interestRate,
 		input.termMonths,
 		input.insuranceCost,
-		input.gpsCost,
+		effectiveGpsCost,
 	);
 
 	return {

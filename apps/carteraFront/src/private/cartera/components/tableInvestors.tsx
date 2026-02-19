@@ -58,6 +58,9 @@ import { CrearBoletaInversionista } from "./investorPayment";
 
 const PER_PAGE_OPTIONS = [5, 10, 20, 50, 100, 200, 500];
 
+const MOBILE_MAX_HEIGHT = "max-h-[50vh]";
+const DESKTOP_MAX_HEIGHT = "max-h-[60vh]";
+
 
 
 export function TableInvestors() {
@@ -1156,7 +1159,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 </p>
               </div>
             ) : (
-              <div className="space-y-4 max-h-[60vh] overflow-y-auto pl-1 pr-2 custom-scrollbar">
+              <div className={`space-y-4 ${DESKTOP_MAX_HEIGHT} overflow-y-auto pl-1 pr-2 custom-scrollbar`}>
                 {filteredCreditos.map((cred) => (
                 <div
                   key={cred.credito_id}
@@ -1641,7 +1644,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 </p>
               </div>
             ) : (
-              <div className="space-y-4 max-h-[50vh] overflow-y-auto pl-1 pr-2 custom-scrollbar">
+              <div className={`space-y-4 ${MOBILE_MAX_HEIGHT} overflow-y-auto pl-1 pr-2 custom-scrollbar`}>
                 {filteredCreditos.map((cred) => (
                 <div
                   key={cred.credito_id}

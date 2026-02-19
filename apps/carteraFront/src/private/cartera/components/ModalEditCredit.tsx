@@ -99,6 +99,10 @@ export function ModalEditCredit({
   const { mutate: recalculateQuota, isPending: isRecalculating } =
     useRecalculateQuota();
 
+  const parseParticipantDate = (dateString?: string | Date | null) => {
+    return dateString ? new Date(dateString).toISOString().split('T')[0] : "2025-12-01";
+  };
+
   // Preparamos los valores iniciales
   const parseInvestors = (list?: InvestorItem[]) =>
     list?.map((inv) => ({
@@ -106,7 +110,7 @@ export function ModalEditCredit({
       monto_aportado: Number(inv.monto_aportado),
       porcentaje_cash_in: Number(inv.porcentaje_cash_in),
       porcentaje_inversion: Number(inv.porcentaje_inversion),
-      fecha_inicio_participacion: inv.fecha_inicio_participacion ? new Date(inv.fecha_inicio_participacion).toISOString().split('T')[0] : "2025-12-01",
+      fecha_inicio_participacion: parseParticipantDate(inv.fecha_inicio_participacion),
     })) || [];
 
   const parsedInvestors = parseInvestors(investorsInitial);
@@ -123,7 +127,7 @@ export function ModalEditCredit({
         monto_aportado: Number(mirrorItem.monto_aportado),
         porcentaje_cash_in: Number(mirrorItem.porcentaje_cash_in),
         porcentaje_inversion: Number(mirrorItem.porcentaje_inversion),
-        fecha_inicio_participacion: mirrorItem.fecha_inicio_participacion ? new Date(mirrorItem.fecha_inicio_participacion).toISOString().split('T')[0] : "2025-12-01",
+        fecha_inicio_participacion: parseParticipantDate(mirrorItem.fecha_inicio_participacion),
       };
     }
     // Si no hay espejo para ese inversionista, devolvemos objeto vacío

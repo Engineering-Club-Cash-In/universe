@@ -80,40 +80,7 @@ export const Route = createFileRoute("/crm/quoter")({
 	component: QuoterPage,
 });
 
-/** IVA de Guatemala (12%) */
-const IVA_FACTOR = 1.12;
-
-/** Tasa de interés fija para autocompra usada en el cálculo de intereses del detalle */
-const AUTOCOMPRA_INTEREST_RATE = 0.0178;
-
-/** Gastos administrativos fijos para sobre vehículo */
-const FIXED_ADMIN_COST = 600;
-
-/** Garantía mobiliaria */
-const GARANTIA_MOBILIARIA = 400;
-
-/** Contrato leasing */
-const CONTRATO_LEASING = 400;
-
-// Función para calcular cuota mensual (según Excel)
-function calculateMonthlyPayment(
-	principal: number,
-	monthlyRate: number,
-	termMonths: number,
-	insuranceCost: number,
-	gpsCost: number,
-): number {
-	// La tasa incluye IVA (12%)
-	const r = (monthlyRate / 100) * IVA_FACTOR;
-
-	if (r === 0) return principal / termMonths;
-
-	const factor = (1 + r) ** termMonths;
-	const baseMonthlyPayment = (principal * (r * factor)) / (factor - 1);
-
-	// Agregar seguro y GPS a la cuota mensual
-	return Math.round((baseMonthlyPayment + insuranceCost + gpsCost) * 100) / 100;
-}
+import { calculateQuotation, GPS_COST } from "@/utils/quoter-calculations";
 
 // Tipo para los valores del formulario de cotización
 interface QuotationFormValues {
@@ -705,9 +672,6 @@ function ExtraCostsTable({
 	);
 }
 
-/** Costo fijo del GPS (se resta de la membresía cruda para obtener la neta) */
-const GPS_COST = 148.2;
-
 function QuoterPage() {
 	const { data: session } = authClient.useSession();
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
@@ -997,100 +961,37 @@ function QuoterPage() {
 	// Función para recalcular cuando cambian los valores (según Excel)
 	const recalculate = () => {
 		const values = quoterForm.state.values;
-		const isSobreVehiculo = values.creditType === "sobre_vehiculo";
 
-		// En sobre vehículo: el "downPayment" field se usa como "monto solicitado" directo
-		// En autocompra: monto a financiar = valor del vehículo - enganche
-		const amountToFinance = isSobreVehiculo
-			? Number(values.downPayment) // downPayment field = monto solicitado
-			: Number(values.vehicleValue) - Number(values.downPayment);
-		const insuranceCost = Number(values.insuranceCost);
-		const gpsCost = Number(values.gpsCost);
-		const transferCost = Number(values.transferCost);
-		const royaltyPercentage = Number(values.royaltyPercentage) || 4.0;
-		const rcdpCost = Number(values.rcdpCost);
+		const result = calculateQuotation({
+			creditType: values.creditType,
+			vehicleValue: Number(values.vehicleValue),
+			downPayment: Number(values.downPayment),
+			interestRate: Number(values.interestRate),
+			termMonths: Number(values.termMonths),
+			insuranceCost: Number(values.insuranceCost),
+			gpsCost: Number(values.gpsCost),
+			transferCost: Number(values.transferCost),
+			royaltyPercentage: Number(values.royaltyPercentage),
+			rcdpCost: Number(values.rcdpCost),
+		});
 
-		let calculatedRoyalty: number;
-		let calculatedInterest: number;
-		let adminCost: number;
-		let totalFinanced: number;
-
-		if (isSobreVehiculo) {
-			// Sobre vehículo: cálculos sobre el monto solicitado directamente
-			// Royalty = % del monto solicitado
-			calculatedRoyalty = Math.ceil(
-				amountToFinance * (royaltyPercentage / 100),
-			);
-
-			// Intereses = monto solicitado × tasa × IVA
-			const interestRate = Number(values.interestRate) / 100;
-			calculatedInterest =
-				Math.round(amountToFinance * interestRate * IVA_FACTOR * 100) / 100;
-
-			// Gastos administrativos fijos
-			adminCost = FIXED_ADMIN_COST;
-
-			// Total financiado = monto solicitado (los gastos se descuentan del desembolso)
-			totalFinanced = amountToFinance;
-		} else {
-			// Autocompra: cálculos sobre B22
-			// B22 = Monto a financiar + Traspaso + Garantía + Leasing + Admin fijo + GPS + Seguro
-			const b22 =
-				amountToFinance +
-				transferCost +
-				GARANTIA_MOBILIARIA +
-				CONTRATO_LEASING +
-				FIXED_ADMIN_COST +
-				gpsCost +
-				insuranceCost;
-
-			// Royalty = % de B22 redondeado hacia arriba
-			calculatedRoyalty = Math.ceil(b22 * (royaltyPercentage / 100));
-
-			// Interés = ROUNDUP(B22 * tasa autocompra) + RCDP (para microbuses)
-			calculatedInterest =
-				Math.ceil(b22 * AUTOCOMPRA_INTEREST_RATE) + rcdpCost;
-
-			// Gastos Admin = Garantía + Royalty + Leasing + Admin fijo + Intereses + GPS + Seguro
-			const extraCost = calculatedInterest + gpsCost + insuranceCost;
-			adminCost =
-				GARANTIA_MOBILIARIA +
-				calculatedRoyalty +
-				CONTRATO_LEASING +
-				FIXED_ADMIN_COST +
-				extraCost;
-
-			// Total financiado = monto a financiar + costos financiados
-			const financedCosts = transferCost + adminCost;
-			totalFinanced = amountToFinance + financedCosts;
-		}
-
-		quoterForm.setFieldValue("royalty", calculatedRoyalty);
-		quoterForm.setFieldValue("interestCost", calculatedInterest);
-		quoterForm.setFieldValue("adminCost", Math.round(adminCost * 100) / 100);
+		quoterForm.setFieldValue("royalty", result.calculatedRoyalty);
+		quoterForm.setFieldValue("interestCost", result.calculatedInterest);
+		quoterForm.setFieldValue("adminCost", result.adminCost);
 
 		// Nota: extraInsuranceCost y extraMembershipCost se calculan en updateInsuranceCost()
 		// para que sean editables y no se sobrescriban en cada recálculo
 
-		// La cuota mensual incluye seguro y GPS aparte
-		const monthlyPayment = calculateMonthlyPayment(
-			totalFinanced,
-			Number(values.interestRate),
-			Number(values.termMonths),
-			insuranceCost,
-			gpsCost,
-		);
-
 		setCalculatedValues({
-			amountToFinance,
-			totalFinanced,
-			monthlyPayment,
+			amountToFinance: result.amountToFinance,
+			totalFinanced: result.totalFinanced,
+			monthlyPayment: result.monthlyPayment,
 		});
 
 		// Generar tabla de amortización si hay valores
-		if (totalFinanced > 0 && monthlyPayment > 0) {
+		if (result.totalFinanced > 0 && result.monthlyPayment > 0) {
 			const table = generateAmortizationTable(
-				totalFinanced,
+				result.totalFinanced,
 				Number(values.interestRate),
 				Number(values.termMonths),
 			);

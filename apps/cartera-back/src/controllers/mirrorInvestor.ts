@@ -214,8 +214,6 @@ export const llenarTablaEspejo = async ({ body, query, set }: any) => {
           numero_credito_sifco,
           capital,
           inversor,
-          interes_inversor,
-          iva,
         } = creditoInput;
 
         // inversor viene de 0 a 1 (ej: 0.8 = 80%)
@@ -349,7 +347,6 @@ export const llenarTablaEspejo = async ({ body, query, set }: any) => {
         console.log(`  capital=${montoAportado} | inversor=${inversor} → %cashIn=${porcCashIn}`);
         console.log(`  %interes=${interes} | cuotaInteres=${cuotaInteres}`);
         console.log(`  montoCashIn=${montoCashIn} | ivaCashIn=${ivaCashIn}`);
-        console.log(`  interes_inversor=${interes_inversor} | iva=${iva}`);
         console.log(`  cuotaInversionista=${cuotaInversionista}`);
 
         const dataEspejo = {

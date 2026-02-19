@@ -80,6 +80,21 @@ export const Route = createFileRoute("/crm/quoter")({
 	component: QuoterPage,
 });
 
+/** IVA de Guatemala (12%) */
+const IVA_FACTOR = 1.12;
+
+/** Tasa de interés fija para autocompra usada en el cálculo de intereses del detalle */
+const AUTOCOMPRA_INTEREST_RATE = 0.0178;
+
+/** Gastos administrativos fijos para sobre vehículo */
+const FIXED_ADMIN_COST = 600;
+
+/** Garantía mobiliaria */
+const GARANTIA_MOBILIARIA = 400;
+
+/** Contrato leasing */
+const CONTRATO_LEASING = 400;
+
 // Función para calcular cuota mensual (según Excel)
 function calculateMonthlyPayment(
 	principal: number,
@@ -89,7 +104,7 @@ function calculateMonthlyPayment(
 	gpsCost: number,
 ): number {
 	// La tasa incluye IVA (12%)
-	const r = (monthlyRate / 100) * 1.12;
+	const r = (monthlyRate / 100) * IVA_FACTOR;
 
 	if (r === 0) return principal / termMonths;
 
@@ -1007,37 +1022,43 @@ function QuoterPage() {
 				amountToFinance * (royaltyPercentage / 100),
 			);
 
-			// Intereses = monto solicitado × tasa × 1.12 (IVA)
+			// Intereses = monto solicitado × tasa × IVA
 			const interestRate = Number(values.interestRate) / 100;
 			calculatedInterest =
-				Math.round(amountToFinance * interestRate * 1.12 * 100) / 100;
+				Math.round(amountToFinance * interestRate * IVA_FACTOR * 100) / 100;
 
-			// Gastos administrativos = Q600 fijo
-			adminCost = 600;
+			// Gastos administrativos fijos
+			adminCost = FIXED_ADMIN_COST;
 
 			// Total financiado = monto solicitado (los gastos se descuentan del desembolso)
 			totalFinanced = amountToFinance;
 		} else {
 			// Autocompra: cálculos sobre B22
-			// B22 = Monto a financiar + Traspaso + 400 + 400 + 600 + GPS + Seguro
+			// B22 = Monto a financiar + Traspaso + Garantía + Leasing + Admin fijo + GPS + Seguro
 			const b22 =
 				amountToFinance +
 				transferCost +
-				400 +
-				400 +
-				600 +
+				GARANTIA_MOBILIARIA +
+				CONTRATO_LEASING +
+				FIXED_ADMIN_COST +
 				gpsCost +
 				insuranceCost;
 
 			// Royalty = % de B22 redondeado hacia arriba
 			calculatedRoyalty = Math.ceil(b22 * (royaltyPercentage / 100));
 
-			// Interés = ROUNDUP(B22 * 1.78%) + RCDP (para microbuses)
-			calculatedInterest = Math.ceil(b22 * 0.0178) + rcdpCost;
+			// Interés = ROUNDUP(B22 * tasa autocompra) + RCDP (para microbuses)
+			calculatedInterest =
+				Math.ceil(b22 * AUTOCOMPRA_INTEREST_RATE) + rcdpCost;
 
-			// Gastos Admin = 400 + Royalty + 400 + 600 + Intereses(incluye RCDP) + GPS + Seguro
+			// Gastos Admin = Garantía + Royalty + Leasing + Admin fijo + Intereses + GPS + Seguro
 			const extraCost = calculatedInterest + gpsCost + insuranceCost;
-			adminCost = 400 + calculatedRoyalty + 400 + 600 + extraCost;
+			adminCost =
+				GARANTIA_MOBILIARIA +
+				calculatedRoyalty +
+				CONTRATO_LEASING +
+				FIXED_ADMIN_COST +
+				extraCost;
 
 			// Total financiado = monto a financiar + costos financiados
 			const financedCosts = transferCost + adminCost;

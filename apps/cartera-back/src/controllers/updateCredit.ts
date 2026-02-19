@@ -267,6 +267,7 @@ const creditUpdateSchema = z.object({
         monto_aportado: z.number().positive(),
         porcentaje_cash_in: z.number().min(0).max(100),
         porcentaje_inversion: z.number().min(0).max(100),
+        fecha_inicio_participacion: z.string().optional(),
       }),
     )
     .min(0)
@@ -278,6 +279,7 @@ const creditUpdateSchema = z.object({
         monto_aportado: z.number().positive(),
         porcentaje_cash_in: z.number().min(0).max(100),
         porcentaje_inversion: z.number().min(0).max(100),
+        fecha_inicio_participacion: z.string().optional(),
       }),
     )
     .min(0)
@@ -717,6 +719,9 @@ const updateInvestors = async (
       iva_inversionista: ivaInversionista.toString(),
       iva_cash_in: ivaCashIn.toString(),
       fecha_creacion: new Date(),
+      fecha_inicio_participacion: inv.fecha_inicio_participacion 
+        ? new Date(inv.fecha_inicio_participacion).toISOString().split('T')[0] 
+        : "2025-12-01",
       cuota_inversionista: cuotaInversionista.toString(), // 🔥 CON LÓGICA CORRECTA
       numero_credito_sifco: numero_credito_sifco ?? undefined,
     };

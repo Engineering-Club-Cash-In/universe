@@ -1756,28 +1756,26 @@ export function CreditDetailView({
 														: "Q -"}
 												</TableCell>
 											</TableRow>
-											{isAutocompra && (
-												<TableRow>
-													<TableCell>Verificación de dirección</TableCell>
-													<TableCell className="text-center">
-														<Badge
-															variant={
-																verificacionDireccion > 0
-																	? "default"
-																	: "outline"
-															}
-															className="text-xs"
-														>
-															{verificacionDireccion > 0 ? "SI" : "NO"}
-														</Badge>
-													</TableCell>
-													<TableCell className="text-right">
-														{verificacionDireccion > 0
-															? formatCurrency(verificacionDireccion)
-															: "Q -"}
-													</TableCell>
-												</TableRow>
-											)}
+											<TableRow>
+												<TableCell>Verificación de dirección</TableCell>
+												<TableCell className="text-center">
+													<Badge
+														variant={
+															verificacionDireccion > 0
+																? "default"
+																: "outline"
+														}
+														className="text-xs"
+													>
+														{verificacionDireccion > 0 ? "SI" : "NO"}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">
+													{verificacionDireccion > 0
+														? formatCurrency(verificacionDireccion)
+														: "Q -"}
+												</TableCell>
+											</TableRow>
 											<TableRow>
 												<TableCell>Impuesto circulación</TableCell>
 												<TableCell className="text-center">

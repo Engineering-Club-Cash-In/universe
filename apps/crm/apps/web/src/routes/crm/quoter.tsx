@@ -992,44 +992,64 @@ function QuoterPage() {
 		const insuranceCost = Number(values.insuranceCost);
 		const gpsCost = Number(values.gpsCost);
 		const transferCost = Number(values.transferCost);
-		const membershipCost = Number(values.membershipCost);
-
-		// Calcular B22 según Excel
-		// B22 = Monto a financiar + Traspaso + 400 + 400 + 600 + GPS + Seguro
-		const b22 =
-			amountToFinance +
-			transferCost +
-			400 +
-			400 +
-			600 +
-			gpsCost +
-			insuranceCost;
-
-		// Royalty = 4% de B22 redondeado hacia arriba
 		const royaltyPercentage = Number(values.royaltyPercentage) || 4.0;
-		const calculatedRoyalty = Math.ceil(b22 * (royaltyPercentage / 100));
-		quoterForm.setFieldValue("royalty", calculatedRoyalty);
-
-		// Interés = ROUNDUP(B22 * 1.78%) + RCDP (para microbuses)
 		const rcdpCost = Number(values.rcdpCost);
-		const calculatedInterest = Math.ceil(b22 * 0.0178) + rcdpCost;
+
+		let calculatedRoyalty: number;
+		let calculatedInterest: number;
+		let adminCost: number;
+		let totalFinanced: number;
+
+		if (isSobreVehiculo) {
+			// Sobre vehículo: cálculos sobre el monto solicitado directamente
+			// Royalty = % del monto solicitado
+			calculatedRoyalty = Math.ceil(
+				amountToFinance * (royaltyPercentage / 100),
+			);
+
+			// Intereses = monto solicitado × tasa × 1.12 (IVA)
+			const interestRate = Number(values.interestRate) / 100;
+			calculatedInterest =
+				Math.round(amountToFinance * interestRate * 1.12 * 100) / 100;
+
+			// Gastos administrativos = Q600 fijo
+			adminCost = 600;
+
+			// Total financiado = monto solicitado (los gastos se descuentan del desembolso)
+			totalFinanced = amountToFinance;
+		} else {
+			// Autocompra: cálculos sobre B22
+			// B22 = Monto a financiar + Traspaso + 400 + 400 + 600 + GPS + Seguro
+			const b22 =
+				amountToFinance +
+				transferCost +
+				400 +
+				400 +
+				600 +
+				gpsCost +
+				insuranceCost;
+
+			// Royalty = % de B22 redondeado hacia arriba
+			calculatedRoyalty = Math.ceil(b22 * (royaltyPercentage / 100));
+
+			// Interés = ROUNDUP(B22 * 1.78%) + RCDP (para microbuses)
+			calculatedInterest = Math.ceil(b22 * 0.0178) + rcdpCost;
+
+			// Gastos Admin = 400 + Royalty + 400 + 600 + Intereses(incluye RCDP) + GPS + Seguro
+			const extraCost = calculatedInterest + gpsCost + insuranceCost;
+			adminCost = 400 + calculatedRoyalty + 400 + 600 + extraCost;
+
+			// Total financiado = monto a financiar + costos financiados
+			const financedCosts = transferCost + adminCost;
+			totalFinanced = amountToFinance + financedCosts;
+		}
+
+		quoterForm.setFieldValue("royalty", calculatedRoyalty);
 		quoterForm.setFieldValue("interestCost", calculatedInterest);
+		quoterForm.setFieldValue("adminCost", Math.round(adminCost * 100) / 100);
 
 		// Nota: extraInsuranceCost y extraMembershipCost se calculan en updateInsuranceCost()
 		// para que sean editables y no se sobrescriban en cada recálculo
-
-		// Gastos Admin = 400 + Royalty + 400 + 600 + Intereses(incluye RCDP) + GPS + Seguro
-		const extraCost = calculatedInterest + gpsCost + insuranceCost;
-		const adminCost = 400 + calculatedRoyalty + 400 + 600 + extraCost;
-
-		// Actualizar el campo de gastos administrativos
-		quoterForm.setFieldValue("adminCost", Math.round(adminCost * 100) / 100);
-
-		// Costos que se financian (NO incluyen seguro ni GPS)
-		// La membresía ya está incluida en adminCost, no se debe agregar de nuevo
-		const financedCosts = transferCost + adminCost;
-
-		const totalFinanced = amountToFinance + financedCosts;
 
 		// La cuota mensual incluye seguro y GPS aparte
 		const monthlyPayment = calculateMonthlyPayment(

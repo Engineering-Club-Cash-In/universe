@@ -49,7 +49,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Combobox, Transition } from "@headlessui/react";
-import { Fragment, useState } from "react";
+import { Fragment, useState, useEffect } from "react";
 import { CrearBoletaInversionista } from "./investorPayment";
 
 const PER_PAGE_OPTIONS = [5, 10, 20, 50, 100, 200, 500];
@@ -303,6 +303,46 @@ export function TableInvestors() {
     "[DEBUG] ¿Algún inversionista tiene pagos pendientes?:",
     tienePagosPendientes
   );
+
+  // 🆕 Efecto para activar Modo Borrador automático según el estado de los pagos
+  useEffect(() => {
+    if (data?.inversionistas && data.inversionistas.length > 0) {
+      // Identificamos al inversionista actual: el seleccionado o el primero de la lista
+      const currentInv = data.inversionistas.find((inv: any) => 
+        selectedInvestor !== "" ? inv.inversionista_id === Number(selectedInvestor) : true
+      ) || data.inversionistas[0];
+
+      if (currentInv) {
+        // Regla: Si hay créditos sin pagos, forzamos modo Normal (para permitir Generar)
+        const tieneCreditosSinPagos = (currentInv.creditos ?? []).some(
+          (c: any) => !c.pagos || c.pagos.length === 0
+        );
+
+        // Regla: Si todos tienen pagos, buscamos si hay alguno pendiente de liquidar
+        const tienePagoNoLiquidado = (currentInv.creditos ?? []).some((c: any) =>
+          (c.pagos ?? []).some(
+            (p: any) =>
+              p.estado_liquidacion === "NO_LIQUIDADO" || p.estado === "NO_LIQUIDADO"
+          )
+        );
+
+        if (!tieneCreditosSinPagos && tienePagoNoLiquidado) {
+          if (!isDraft || draftInvestorId !== currentInv.inversionista_id) {
+            console.log("🛠️ Auto-Draft: ON para", currentInv.nombre_inversionista);
+            setIsDraft(true);
+            setDraftInvestorId(currentInv.inversionista_id);
+          }
+        } else {
+          // Si volvemos a tener créditos vacíos o todo liquidado, salimos del modo borrador
+          if (isDraft && draftInvestorId === currentInv.inversionista_id) {
+            console.log("🍃 Auto-Draft: OFF");
+            setIsDraft(false);
+            setDraftInvestorId(null);
+          }
+        }
+      }
+    }
+  }, [data, selectedInvestor, isDraft, draftInvestorId, setIsDraft, setDraftInvestorId]);
 
   // Rangos para el label de paginado
   const from = (page - 1) * perPage + 1;

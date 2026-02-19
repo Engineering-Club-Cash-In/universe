@@ -1010,16 +1010,16 @@ function QuoterPage() {
 		const calculatedRoyalty = Math.ceil(b22 * (royaltyPercentage / 100));
 		quoterForm.setFieldValue("royalty", calculatedRoyalty);
 
-		// Interés = ROUNDUP(B22 * 1.78%)
-		const calculatedInterest = Math.ceil(b22 * 0.0178);
+		// Interés = ROUNDUP(B22 * 1.78%) + RCDP (para microbuses)
+		const rcdpCost = Number(values.rcdpCost);
+		const calculatedInterest = Math.ceil(b22 * 0.0178) + rcdpCost;
 		quoterForm.setFieldValue("interestCost", calculatedInterest);
 
 		// Nota: extraInsuranceCost y extraMembershipCost se calculan en updateInsuranceCost()
 		// para que sean editables y no se sobrescriban en cada recálculo
 
-		// Gastos Admin = 400 + Royalty + 400 + 600 + ROUNDUP(B22*1.78%,0) + GPS + Seguro + RCDP
-		const rcdpCost = Number(values.rcdpCost);
-		const extraCost = calculatedInterest + gpsCost + insuranceCost + rcdpCost;
+		// Gastos Admin = 400 + Royalty + 400 + 600 + Intereses(incluye RCDP) + GPS + Seguro
+		const extraCost = calculatedInterest + gpsCost + insuranceCost;
 		const adminCost = 400 + calculatedRoyalty + 400 + 600 + extraCost;
 
 		// Actualizar el campo de gastos administrativos

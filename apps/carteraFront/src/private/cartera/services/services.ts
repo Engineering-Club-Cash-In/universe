@@ -2202,6 +2202,24 @@ export const togglePaymentAgreementStatus = async (
 
 
 
+// ============================================================
+// reversePagosEspejo — POST /reversePagosEspejo
+// ============================================================
+export interface ReversePagosEspejoResponse {
+  success: boolean;
+  message: string;
+}
+
+export async function reversePagosEspejoService(
+  inversionistaId: number
+): Promise<ReversePagosEspejoResponse> {
+  const res = await api.post<ReversePagosEspejoResponse>(
+    `${import.meta.env.VITE_BACK_URL}/deletePagosEspejoNoLiquidados`,
+    { inversionistaId }
+  );
+  return res.data;
+}
+
 // 📋 TYPES
 export interface FacturaElectronica {
   factura_id: number;

@@ -3360,3 +3360,29 @@ export async function aplicarPagosEspejo(inversionistaId: number) {
     return { success: true, actualizados: totalActualizados };
   });
 }
+
+// ============================================================
+// 🗑️ deletePagosEspejoNoLiquidados (Solo elimina NO_LIQUIDADO)
+// ============================================================
+export async function deletePagosEspejoNoLiquidados(inversionistaId: number) {
+  console.log(`\n🔄 DELETE Pagos Espejo NO_LIQUIDADO (inversionista: ${inversionistaId})`);
+
+  try {
+    // 1. Eliminar pagos con estado 'NO_LIQUIDADO'
+    const deleted = await db
+      .delete(pagos_credito_inversionistas_espejo)
+      .where(
+        and(
+          eq(pagos_credito_inversionistas_espejo.inversionista_id, inversionistaId),
+          eq(pagos_credito_inversionistas_espejo.estado_liquidacion, 'NO_LIQUIDADO')
+        )
+      )
+      .returning();
+
+    console.log(`✅ ${deleted.length} pagos eliminados.`);
+    return { success: true, deletedCount: deleted.length };
+  } catch (error) {
+    console.error("Error eliminando pagos no liquidados:", error);
+    throw error;
+  }
+}

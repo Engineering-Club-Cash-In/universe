@@ -3,6 +3,8 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
 	Bell,
 	CheckCircle,
+	ChevronLeft,
+	ChevronRight,
 	Clock,
 	Download,
 	ExternalLink,
@@ -143,6 +145,70 @@ const REDIRECT_CONFIG: Record<
 	},
 };
 
+const PAGE_SIZE = 20;
+const SUPERVISOR_ROLES = ["sales_supervisor", "analyst", "juridico"] as const;
+
+function usePagination(totalItems: number) {
+	const [page, setPage] = useState(1);
+	const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
+	const safePage = Math.min(page, totalPages);
+
+	return {
+		page: safePage,
+		totalPages,
+		setPage,
+		startIndex: (safePage - 1) * PAGE_SIZE,
+		endIndex: safePage * PAGE_SIZE,
+	};
+}
+
+function PaginationControls({
+	page,
+	totalPages,
+	setPage,
+	totalItems,
+}: {
+	page: number;
+	totalPages: number;
+	setPage: (p: number) => void;
+	totalItems: number;
+}) {
+	if (totalPages <= 1) return null;
+
+	return (
+		<div className="flex items-center justify-between border-t pt-4">
+			<span className="text-muted-foreground text-sm">
+				{totalItems} notificación{totalItems !== 1 ? "es" : ""}
+			</span>
+			<div className="flex items-center gap-2">
+				<Button
+					size="sm"
+					variant="outline"
+					className="h-8"
+					onClick={() => setPage(page - 1)}
+					disabled={page <= 1}
+				>
+					<ChevronLeft className="h-4 w-4" />
+					Anterior
+				</Button>
+				<span className="text-sm">
+					Página {page} de {totalPages}
+				</span>
+				<Button
+					size="sm"
+					variant="outline"
+					className="h-8"
+					onClick={() => setPage(page + 1)}
+					disabled={page >= totalPages}
+				>
+					Siguiente
+					<ChevronRight className="h-4 w-4" />
+				</Button>
+			</div>
+		</div>
+	);
+}
+
 function NotificationsPage() {
 	const { data: session, isPending: isSessionPending } =
 		authClient.useSession();
@@ -152,6 +218,7 @@ function NotificationsPage() {
 	});
 
 	const userRole = userProfile.data?.role;
+	const userId = session?.user?.id;
 	const isAdmin = userRole === ROLES.ADMIN;
 	const isSalesSupervisor = userRole === ROLES.SALES_SUPERVISOR;
 
@@ -163,11 +230,11 @@ function NotificationsPage() {
 		enabled: !!session && isAdmin,
 	});
 
-	// Supervisor de ventas: notificaciones de su rol + analyst
+	// Supervisor de ventas: notificaciones de su rol + analyst + juridico
 	const supervisorNotifications = useQuery({
 		...orpc.getNotificationsByRoles.queryOptions({
 			input: {
-				roles: ["sales_supervisor", "analyst"],
+				roles: [...SUPERVISOR_ROLES],
 			},
 		}),
 		enabled: !!session && isSalesSupervisor,
@@ -185,7 +252,24 @@ function NotificationsPage() {
 		enabled: !!session && !isAdmin,
 	});
 
+	const invalidateAll = useCallback(() => {
+		queryClient.invalidateQueries(orpc.getAllNotifications.queryOptions());
+		queryClient.invalidateQueries(orpc.getNotificationsByRole.queryOptions());
+		queryClient.invalidateQueries(
+			orpc.getNotificationsByRoles.queryOptions({
+				input: { roles: [...SUPERVISOR_ROLES] },
+			}),
+		);
+		queryClient.invalidateQueries(orpc.getNotificationsByAssign.queryOptions());
+		queryClient.invalidateQueries(
+			orpc.getUnreadNotificationCount.queryOptions(),
+		);
+	}, []);
+
 	// Mutation para cambiar status
+	const [changingNotificationId, setChangingNotificationId] = useState<
+		string | null
+	>(null);
 	const changeStatus = useMutation({
 		mutationFn: async ({
 			notificationId,
@@ -194,23 +278,31 @@ function NotificationsPage() {
 			notificationId: string;
 			status: NotificationStatus;
 		}) => {
+			setChangingNotificationId(notificationId);
 			return await client.changeNotificationStatus({ notificationId, status });
 		},
 		onSuccess: () => {
 			toast.success("Estado actualizado");
-			queryClient.invalidateQueries(orpc.getAllNotifications.queryOptions());
-			queryClient.invalidateQueries(orpc.getNotificationsByRole.queryOptions());
-			queryClient.invalidateQueries(
-				orpc.getNotificationsByRoles.queryOptions({
-					input: { roles: ["sales_supervisor", "analyst", "juridico"] },
-				}),
+			invalidateAll();
+		},
+		onSettled: () => {
+			setChangingNotificationId(null);
+		},
+		onError: (error: Error) => {
+			toast.error(error.message);
+		},
+	});
+
+	// Mutation para marcar todas como leídas (admin)
+	const markAllAsRead = useMutation({
+		mutationFn: async () => {
+			return await client.markAllNotificationsAsRead({});
+		},
+		onSuccess: (data) => {
+			toast.success(
+				`${data.count} notificación${data.count !== 1 ? "es" : ""} marcada${data.count !== 1 ? "s" : ""} como leída${data.count !== 1 ? "s" : ""}`,
 			);
-			queryClient.invalidateQueries(
-				orpc.getNotificationsByAssign.queryOptions(),
-			);
-			queryClient.invalidateQueries(
-				orpc.getUnreadNotificationCount.queryOptions(),
-			);
+			invalidateAll();
 		},
 		onError: (error: Error) => {
 			toast.error(error.message);
@@ -243,12 +335,61 @@ function NotificationsPage() {
 		byAssignNotifications.data,
 	]);
 
-	// Filtro por status (descartadas ocultas por defecto)
-	const filtered = useMemo(() => {
-		if (statusFilter === "all")
-			return notifications.filter((n) => n.status !== "dismissed");
-		return notifications.filter((n) => n.status === statusFilter);
-	}, [notifications, statusFilter]);
+	// Admin: separar notificaciones propias vs sistema
+	const { myNotifications, systemNotifications } = useMemo(() => {
+		if (!isAdmin) {
+			return { myNotifications: notifications, systemNotifications: [] };
+		}
+		const my: typeof notifications = [];
+		const system: typeof notifications = [];
+		for (const n of notifications) {
+			if (n.assignedToRole === "admin" || n.assignedTo === userId) {
+				my.push(n);
+			} else {
+				system.push(n);
+			}
+		}
+		return { myNotifications: my, systemNotifications: system };
+	}, [isAdmin, notifications, userId]);
+
+	// Aplicar filtro de status
+	const filterByStatus = useCallback(
+		(items: typeof notifications) => {
+			if (statusFilter === "all")
+				return items.filter((n) => n.status !== "dismissed");
+			return items.filter((n) => n.status === statusFilter);
+		},
+		[statusFilter],
+	);
+
+	const filteredMy = useMemo(
+		() => filterByStatus(myNotifications),
+		[filterByStatus, myNotifications],
+	);
+	const filteredSystem = useMemo(
+		() => filterByStatus(systemNotifications),
+		[filterByStatus, systemNotifications],
+	);
+
+	// Paginación
+	const myPagination = usePagination(filteredMy.length);
+	const systemPagination = usePagination(filteredSystem.length);
+
+	const pagedMy = filteredMy.slice(
+		myPagination.startIndex,
+		myPagination.endIndex,
+	);
+	const pagedSystem = filteredSystem.slice(
+		systemPagination.startIndex,
+		systemPagination.endIndex,
+	);
+
+	// Reset página al cambiar filtro
+	const handleStatusFilter = (value: string) => {
+		setStatusFilter(value);
+		myPagination.setPage(1);
+		systemPagination.setPage(1);
+	};
 
 	const isLoading =
 		isSessionPending ||
@@ -271,20 +412,62 @@ function NotificationsPage() {
 		return null;
 	}
 
-	// Contadores
-	const pendingCount = notifications.filter(
-		(n) => n.status === "pending",
-	).length;
-	const inProgressCount = notifications.filter(
+	// Contadores (solo de "mis notificaciones" para admin)
+	const countSource = myNotifications;
+	const pendingCount = countSource.filter((n) => n.status === "pending").length;
+	const inProgressCount = countSource.filter(
 		(n) => n.status === "in_progress",
 	).length;
-	const resolvedCount = notifications.filter(
+	const resolvedCount = countSource.filter(
 		(n) => n.status === "resolved",
 	).length;
-	const readCount = notifications.filter((n) => n.status === "read").length;
-	const dismissedCount = notifications.filter(
+	const readCount = countSource.filter((n) => n.status === "read").length;
+	const dismissedCount = countSource.filter(
 		(n) => n.status === "dismissed",
 	).length;
+
+	const renderNotificationList = (
+		items: typeof notifications,
+		pagination: ReturnType<typeof usePagination>,
+		totalFiltered: number,
+	) => {
+		if (items.length === 0) {
+			return (
+				<Card>
+					<CardContent className="flex flex-col items-center justify-center py-12">
+						<Bell className="mb-4 h-12 w-12 text-muted-foreground/50" />
+						<p className="font-medium text-lg text-muted-foreground">
+							No hay notificaciones
+						</p>
+					</CardContent>
+				</Card>
+			);
+		}
+
+		return (
+			<div className="space-y-3">
+				{items.map((notification) => (
+					<NotificationCard
+						key={notification.id}
+						notification={notification}
+						onChangeStatus={(status) =>
+							changeStatus.mutate({
+								notificationId: notification.id,
+								status,
+							})
+						}
+						isChanging={changingNotificationId === notification.id}
+					/>
+				))}
+				<PaginationControls
+					page={pagination.page}
+					totalPages={pagination.totalPages}
+					setPage={pagination.setPage}
+					totalItems={totalFiltered}
+				/>
+			</div>
+		);
+	};
 
 	return (
 		<div className="container mx-auto space-y-6 p-6">
@@ -293,7 +476,7 @@ function NotificationsPage() {
 				<h1 className="font-bold text-3xl">Notificaciones</h1>
 				<p className="text-muted-foreground">
 					{isAdmin
-						? "Todas las notificaciones del sistema"
+						? "Tus notificaciones y vista general del sistema"
 						: "Tus notificaciones pendientes y asignadas"}
 				</p>
 			</div>
@@ -343,7 +526,7 @@ function NotificationsPage() {
 
 			{/* Filtro */}
 			<div className="flex items-center gap-4">
-				<Select value={statusFilter} onValueChange={setStatusFilter}>
+				<Select value={statusFilter} onValueChange={handleStatusFilter}>
 					<SelectTrigger className="w-[200px]">
 						<SelectValue placeholder="Filtrar por estado" />
 					</SelectTrigger>
@@ -356,37 +539,48 @@ function NotificationsPage() {
 						<SelectItem value="dismissed">Descartadas</SelectItem>
 					</SelectContent>
 				</Select>
-				<span className="text-muted-foreground text-sm">
-					{filtered.length} notificación{filtered.length !== 1 ? "es" : ""}
-				</span>
 			</div>
 
-			{/* Lista de notificaciones */}
-			{filtered.length === 0 ? (
-				<Card>
-					<CardContent className="flex flex-col items-center justify-center py-12">
-						<Bell className="mb-4 h-12 w-12 text-muted-foreground/50" />
-						<p className="font-medium text-lg text-muted-foreground">
-							No hay notificaciones
-						</p>
-					</CardContent>
-				</Card>
-			) : (
-				<div className="space-y-3">
-					{filtered.map((notification) => (
-						<NotificationCard
-							key={notification.id}
-							notification={notification}
-							onChangeStatus={(status) =>
-								changeStatus.mutate({
-									notificationId: notification.id,
-									status,
-								})
-							}
-							isChanging={changeStatus.isPending}
-						/>
-					))}
+			{/* Sección: Mis notificaciones (o única sección para no-admins) */}
+			{isAdmin && (
+				<div className="flex items-center justify-between">
+					<h2 className="font-semibold text-xl">Mis notificaciones</h2>
+					{pendingCount > 0 && (
+						<Button
+							size="sm"
+							variant="outline"
+							onClick={() => markAllAsRead.mutate()}
+							disabled={markAllAsRead.isPending}
+						>
+							{markAllAsRead.isPending ? (
+								<Loader2 className="mr-1 h-3 w-3 animate-spin" />
+							) : (
+								<CheckCircle className="mr-1 h-3 w-3" />
+							)}
+							Marcar {pendingCount} como leída{pendingCount !== 1 ? "s" : ""}
+						</Button>
+					)}
 				</div>
+			)}
+			{renderNotificationList(pagedMy, myPagination, filteredMy.length)}
+
+			{/* Sección: Sistema (solo admin) */}
+			{isAdmin && (
+				<>
+					<div className="border-t pt-6">
+						<h2 className="font-semibold text-xl">
+							Notificaciones del sistema
+						</h2>
+						<p className="text-muted-foreground text-sm">
+							Notificaciones de otros roles (solo lectura)
+						</p>
+					</div>
+					{renderNotificationList(
+						pagedSystem,
+						systemPagination,
+						filteredSystem.length,
+					)}
+				</>
 			)}
 		</div>
 	);
@@ -816,14 +1010,15 @@ function UploadDocumentsDialog({
 			if (!files?.length) return;
 
 			setUploading(true);
-			for (const file of Array.from(files)) {
-				await uploadMutation.mutateAsync(file);
-			}
-			setUploading(false);
-
-			// Reset input
-			if (fileInputRef.current) {
-				fileInputRef.current.value = "";
+			try {
+				for (const file of Array.from(files)) {
+					await uploadMutation.mutateAsync(file);
+				}
+			} finally {
+				setUploading(false);
+				if (fileInputRef.current) {
+					fileInputRef.current.value = "";
+				}
 			}
 		},
 		[uploadMutation],

@@ -17,6 +17,7 @@ import {
   getInvestorMirrorSummary,
   upsertPagosEspejo,             // 🆕 Recalcular pagos espejo desde el front
   aplicarPagosEspejo,
+  deletePagosEspejoNoLiquidados,
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
 import puppeteer from "puppeteer";
@@ -1091,6 +1092,42 @@ export const inversionistasRouter = new Elysia()
           success: t.Literal(false),
           error: t.String(),
         }),
+      },
+    }
+
+  )
+  .post(
+    "/deletePagosEspejoNoLiquidados",
+    async ({ body, set }) => {
+      const { inversionistaId } = body;
+      
+      console.log(`🗑️ DELETE /deletePagosEspejoNoLiquidados (ID: ${inversionistaId})`);
+
+      if (!inversionistaId) {
+        set.status = 400;
+        return { success: false, message: "ID de inversionista requerido" };
+      }
+
+      try {
+        const result = await deletePagosEspejoNoLiquidados(inversionistaId);
+        return { 
+          success: true, 
+          deletedCount: result.deletedCount, 
+          message: "Pagos eliminados correctamente" 
+        };
+      } catch (error: any) {
+        console.error(error);
+        set.status = 500;
+        return { success: false, message: error.message };
+      }
+    },
+    {
+      body: t.Object({
+        inversionistaId: t.Number(),
+      }),
+      detail: {
+        summary: "Elimina pagos espejo estrictamente NO_LIQUIDADO",
+        tags: ["Pagos Espejo"],
       },
     }
   );

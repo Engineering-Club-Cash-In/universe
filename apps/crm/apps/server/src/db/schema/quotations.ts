@@ -1,4 +1,5 @@
 import {
+	boolean,
 	decimal,
 	integer,
 	pgEnum,
@@ -171,6 +172,9 @@ export const quotations = pgTable("quotations", {
 		precision: 12,
 		scale: 2,
 	}).default("0"), // Traspaso de vehículo (diferente de transferCost)
+
+	// Crédito interno (empleados)
+	isInterno: boolean("is_interno").notNull().default(false),
 
 	// Valores calculados
 	amountToFinance: decimal("amount_to_finance", {

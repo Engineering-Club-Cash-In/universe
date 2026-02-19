@@ -80,7 +80,11 @@ export const Route = createFileRoute("/crm/quoter")({
 	component: QuoterPage,
 });
 
-import { calculateQuotation, GPS_COST } from "@/utils/quoter-calculations";
+import {
+	calculateQuotation,
+	GARANTIA_MOBILIARIA_INTERNO,
+	GPS_COST,
+} from "@/utils/quoter-calculations";
 
 // Tipo para los valores del formulario de cotización
 interface QuotationFormValues {
@@ -751,6 +755,8 @@ function QuoterPage() {
 		monthlyPayment: 0,
 	});
 
+	const [isInterno, setIsInterno] = useState(false);
+
 	const [amortizationTable, setAmortizationTable] = useState<AmortizationRow[]>(
 		[],
 	);
@@ -764,6 +770,7 @@ function QuoterPage() {
 			toast.success("Cotización creada exitosamente");
 			queryClient.invalidateQueries(orpc.getQuotations.queryOptions());
 			quoterForm.reset();
+			setIsInterno(false);
 			setOpportunityVehicle(null);
 			setCalculatedValues({
 				amountToFinance: 0,
@@ -881,6 +888,7 @@ function QuoterPage() {
 				extraAdminCost: Number(value.extraAdminCost),
 				interestCost: Number(value.interestCost),
 				vehicleTransferCost: Number(value.vehicleTransferCost),
+				isInterno,
 			});
 		},
 	});
@@ -917,6 +925,7 @@ function QuoterPage() {
 		quoterForm.state.values.insuredAmount,
 		quoterForm.state.values.vehicleType,
 		quoterForm.state.values.creditType,
+		isInterno,
 	]);
 
 	// Tipos de bus RCDP (membresía ya incluida en la tarifa)
@@ -973,6 +982,7 @@ function QuoterPage() {
 			transferCost: Number(values.transferCost),
 			royaltyPercentage: Number(values.royaltyPercentage),
 			rcdpCost: Number(values.rcdpCost),
+			isInterno,
 		});
 
 		quoterForm.setFieldValue("royalty", result.calculatedRoyalty);
@@ -1207,6 +1217,9 @@ function QuoterPage() {
 					Number(q.vehicleTransferCost) || 0,
 				);
 
+				// Restaurar estado de crédito interno
+				setIsInterno(q.isInterno ?? false);
+
 				// Recalcular después de cargar
 				setTimeout(() => recalculate(), 100);
 
@@ -1387,6 +1400,10 @@ function QuoterPage() {
 														field.handleChange(
 															value as "autocompra" | "sobre_vehiculo",
 														);
+														// Resetear crédito interno al cambiar tipo
+														if (value === "sobre_vehiculo") {
+															setIsInterno(false);
+														}
 														// Actualizar campos específicos según tipo de crédito
 														if (value === "autocompra") {
 															quoterForm.setFieldValue(
@@ -1427,6 +1444,54 @@ function QuoterPage() {
 										);
 									}}
 								</quoterForm.Field>
+
+								{/* Toggle Crédito Interno - solo visible para autocompra */}
+								{quoterForm.state.values.creditType === "autocompra" && (
+									<div className="flex items-center space-x-2">
+										<Checkbox
+											id="isInterno"
+											checked={isInterno}
+											onCheckedChange={(checked) => {
+												const value = checked === true;
+												setIsInterno(value);
+												if (value) {
+													// Crédito interno: sin membresía, sin GPS, sin admin fijo, sin leasing, garantía 300
+													quoterForm.setFieldValue("membershipCost", 0);
+													quoterForm.setFieldValue("extraMembershipCost", 0);
+													quoterForm.setFieldValue("gpsCost", 0);
+													quoterForm.setFieldValue(
+														"mobileGuaranteeCost",
+														GARANTIA_MOBILIARIA_INTERNO,
+													);
+													quoterForm.setFieldValue("leasingContractCost", 0);
+													quoterForm.setFieldValue("extraAdminCost", 0);
+												} else {
+													// Restaurar defaults de autocompra
+													quoterForm.setFieldValue("gpsCost", GPS_COST);
+													quoterForm.setFieldValue("mobileGuaranteeCost", 400);
+													quoterForm.setFieldValue("leasingContractCost", 400);
+													quoterForm.setFieldValue("extraAdminCost", 600);
+													// Recalcular seguro/membresía
+													const insuredAmount =
+														quoterForm.getFieldValue("insuredAmount") ?? 0;
+													if (insuredAmount > 0) {
+														updateInsuranceCost(
+															insuredAmount,
+															quoterForm.state.values.vehicleType,
+														);
+													}
+												}
+												setTimeout(() => recalculate(), 100);
+											}}
+										/>
+										<Label
+											htmlFor="isInterno"
+											className="cursor-pointer font-medium text-sm"
+										>
+											Crédito Interno (Empleados)
+										</Label>
+									</div>
+								)}
 							</CardContent>
 						</Card>
 

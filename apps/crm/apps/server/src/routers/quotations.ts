@@ -154,6 +154,7 @@ export const quotationsRouter = {
 				extraAdminCost: z.number().default(600),
 				interestCost: z.number().default(0),
 				vehicleTransferCost: z.number().default(0),
+				isInterno: z.boolean().default(false),
 				notes: z.string().optional(),
 			}),
 		)
@@ -268,6 +269,7 @@ export const quotationsRouter = {
 					extraAdminCost: input.extraAdminCost.toString(),
 					interestCost: input.interestCost.toString(),
 					vehicleTransferCost: input.vehicleTransferCost.toString(),
+					isInterno: input.isInterno,
 					amountToFinance: amountToFinance.toString(),
 					totalFinanced: totalFinanced.toString(),
 					monthlyPayment: monthlyPayment.toFixed(2),

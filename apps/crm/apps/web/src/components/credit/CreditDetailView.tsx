@@ -151,6 +151,7 @@ interface CreditDetailViewProps {
 		extraAdminCost?: string | null;
 		interestCost?: string | null;
 		vehicleTransferCost?: string | null;
+		isInterno?: boolean;
 		amountToFinance: string;
 		totalFinanced: string;
 		monthlyPayment: string;
@@ -812,6 +813,14 @@ export function CreditDetailView({
 											className="ml-2 border-green-500 bg-green-50 text-green-700"
 										>
 											Cotización Aceptada
+										</Badge>
+									)}
+									{quotation.isInterno && (
+										<Badge
+											variant="outline"
+											className="ml-2 border-purple-500 bg-purple-50 text-purple-700"
+										>
+											Crédito Interno
 										</Badge>
 									)}
 								</div>
@@ -1761,9 +1770,7 @@ export function CreditDetailView({
 												<TableCell className="text-center">
 													<Badge
 														variant={
-															verificacionDireccion > 0
-																? "default"
-																: "outline"
+															verificacionDireccion > 0 ? "default" : "outline"
 														}
 														className="text-xs"
 													>

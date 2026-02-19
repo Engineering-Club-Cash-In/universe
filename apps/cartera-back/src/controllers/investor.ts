@@ -115,6 +115,7 @@ async function consultarPagosInversionista(
 
   return await db
     .select({
+      id: config.origen === "espejo" ? (tabla as any).id : sql<number>`0`,
       abono_capital: tabla.abono_capital,
       abono_interes: tabla.abono_interes,
       abono_iva_12: tabla.abono_iva_12,
@@ -1219,6 +1220,7 @@ const mes = fechaParaMes
               total_cuota = total_cuota.plus(cuota_inversor);
 
               return {
+                id: (pago as any).id,
                 mes, // 🔥 AHORA USA LA FECHA DE LA CUOTA
                 abono_capital: Number(abono_capital.toString()),
                 abono_interes: Number(abono_interes.toString()),
@@ -3299,4 +3301,88 @@ export async function getInvestorPerformance(dpi: string) {
     cantidad_inversiones: inversiones.length,
     rendimiento_estimado: Number(rendimiento_total.toString()),
   };
+}
+
+// ============================================================
+// 💾 APLICAR PAGOS ESPEJO (Actualizar encabezados)
+// ============================================================
+// ============================================================
+// 💾 APLICAR PAGOS ESPEJO (Actualizar encabezados)
+// ============================================================
+export async function aplicarPagosEspejo(inversionistaId: number) {
+  if (!inversionistaId || isNaN(inversionistaId)) {
+    throw new Error("ID de inversionista inválido");
+  }
+
+  console.log(`💾 Aplicando cambios de pagos espejo para inversionista ID: ${inversionistaId}`);
+
+  return await db.transaction(async (tx) => {
+    // 1. Calcular sumas agrupadas por crédito (UNA sola consulta eficiente)
+    // Esto evita el problema N+1 de consultar suma por cada crédito.
+    const sumasPorCredito = await tx
+      .select({
+        creditoId: pagos_credito_inversionistas_espejo.credito_id,
+        totalCapital: sql<string>`coalesce(sum(${pagos_credito_inversionistas_espejo.abono_capital}), 0)`,
+      })
+      .from(pagos_credito_inversionistas_espejo)
+      .where(eq(pagos_credito_inversionistas_espejo.inversionista_id, inversionistaId))
+      .groupBy(pagos_credito_inversionistas_espejo.credito_id);
+
+    let totalActualizados = 0;
+
+    // 2. Actualizar cada crédito con su suma correspondiente
+    // Iteramos sobre los resultados de la suma, que son solo los créditos con pagos.
+    for (const suma of sumasPorCredito) {
+      if (!suma.creditoId) continue;
+
+      const nuevoMontoAportado = suma.totalCapital; // String para precisión decimal
+
+      // Actualizamos creditos_inversionistas_espejo
+      // Usamos el par (inversionista_id, credito_id) para encontrar el registro único
+      const resultado = await tx
+        .update(creditos_inversionistas_espejo)
+        .set({
+          monto_aportado: nuevoMontoAportado,
+        })
+        .where(
+          and(
+            eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId),
+            eq(creditos_inversionistas_espejo.credito_id, suma.creditoId)
+          )
+        );
+
+      // Drizzle update devuelve result info dependiendo del driver, 
+      // pero aquí simplemente contamos las iteraciones exitosas.
+      totalActualizados++;
+    }
+
+    console.log(`✅ Transacción completada. ${totalActualizados} créditos actualizados.`);
+    return { success: true, actualizados: totalActualizados };
+  });
+}
+
+// ============================================================
+// 🗑️ deletePagosEspejoNoLiquidados (Solo elimina NO_LIQUIDADO)
+// ============================================================
+export async function deletePagosEspejoNoLiquidados(inversionistaId: number) {
+  console.log(`\n🔄 DELETE Pagos Espejo NO_LIQUIDADO (inversionista: ${inversionistaId})`);
+
+  try {
+    // 1. Eliminar pagos con estado 'NO_LIQUIDADO'
+    const deleted = await db
+      .delete(pagos_credito_inversionistas_espejo)
+      .where(
+        and(
+          eq(pagos_credito_inversionistas_espejo.inversionista_id, inversionistaId),
+          eq(pagos_credito_inversionistas_espejo.estado_liquidacion, 'NO_LIQUIDADO')
+        )
+      )
+      .returning();
+
+    console.log(`✅ ${deleted.length} pagos eliminados.`);
+    return { success: true, deletedCount: deleted.length };
+  } catch (error) {
+    console.error("Error eliminando pagos no liquidados:", error);
+    throw error;
+  }
 }

@@ -337,6 +337,14 @@ export const llenarTablaEspejo = async ({ body, query, set }: any) => {
           ? montoCashIn.times(0.12).round(2)
           : new Big(0);
 
+        // interes_inversor = cuota_interes - monto_cash_in
+        const monto_inv = cuotaInteres.times(inversorPct).div(100).round(2);
+
+        // iva_inversionista = interes_inversor * 0.12
+        const ivaInversor = Number(monto_inv) > 0
+          ? monto_inv.times(0.12).round(2)
+          : new Big(0);
+
         console.log(`[ESPEJO] Cliente: ${cliente} | calcularCuota=${calcularCuota}`);
         console.log(`  capital=${montoAportado} | inversor=${inversor} → %cashIn=${porcCashIn}`);
         console.log(`  %interes=${interes} | cuotaInteres=${cuotaInteres}`);
@@ -351,9 +359,9 @@ export const llenarTablaEspejo = async ({ body, query, set }: any) => {
           porcentaje_participacion_inversionista: inversorPct.toString(),
           monto_aportado: montoAportado.toString(),
           porcentaje_cash_in: porcCashIn.toString(),
-          monto_inversionista: new Big(interes_inversor).toString(),
+          monto_inversionista: new Big(monto_inv).toString(),
           monto_cash_in: montoCashIn.toString(),
-          iva_inversionista: new Big(iva).toString(),
+          iva_inversionista: new Big(ivaInversor).toString(),
           iva_cash_in: ivaCashIn.toString(),
           fecha_creacion: new Date(),
         };

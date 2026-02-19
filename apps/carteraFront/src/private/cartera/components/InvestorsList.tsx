@@ -3,8 +3,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Plus, Trash2, BookCopy } from "lucide-react";
-import type { InversionistaPayload } from "../services/services";
 import { useState } from "react";
+import { DatePickerMUI } from "./calendar";
+import type { InversionistaPayload } from "../services/services";
 
 interface InvestorOption {
   inversionista_id: number;
@@ -52,6 +53,7 @@ export function InvestorsList({
       monto_aportado: 0,
       porcentaje_cash_in: 0,
       porcentaje_inversion: 0,
+      fecha_inicio_participacion: "2025-12-01",
     };
 
     formik.setFieldValue("investors", [...investors, { ...newInvestor }]);
@@ -176,6 +178,18 @@ export function InvestorsList({
                   }}
                 />
               </div>
+              <div className="w-40 flex flex-col justify-end">
+                <Label className="text-blue-900 mb-1">Inicio Participación</Label>
+                <div className="h-10 mt-1 [&_.MuiInputBase-root]:h-10 [&_.MuiInputBase-root]:text-sm [&_.MuiInputBase-root]:bg-white [&_.MuiOutlinedInput-notchedOutline]:border-gray-200 [&_.MuiOutlinedInput-notchedOutline]:rounded-md hover:[&_.MuiOutlinedInput-notchedOutline]:border-gray-300 [&_.Mui-focused_.MuiOutlinedInput-notchedOutline]:border-blue-500 [&_.Mui-focused_.MuiOutlinedInput-notchedOutline]:border-2">
+                  <DatePickerMUI
+                    disableFuture={false}
+                    value={inv.fecha_inicio_participacion || ""}
+                    onChange={(val) => {
+                      formik.setFieldValue(`${fieldName}.${index}.fecha_inicio_participacion`, val);
+                    }}
+                  />
+                </div>
+              </div>
 
                {/* Botones de Acción */}
                <div className="flex gap-2 mb-0.5">
@@ -262,6 +276,18 @@ export function InvestorsList({
                             formik.setFieldValue(`investorsMirror.${index}.porcentaje_cash_in`, parseFloat((100 - val).toFixed(10)));
                         }}
                         />
+                    </div>
+                    <div className="w-40 flex flex-col justify-end">
+                        <Label className="text-purple-900 text-xs mb-1">Inicio Participación</Label>
+                        <div className="h-9 mt-1 [&_.MuiInputBase-root]:h-9 [&_.MuiInputBase-root]:text-sm [&_.MuiInputBase-root]:bg-white [&_.MuiOutlinedInput-notchedOutline]:border-purple-200 [&_.MuiOutlinedInput-notchedOutline]:rounded-md hover:[&_.MuiOutlinedInput-notchedOutline]:border-purple-300 [&_.Mui-focused_.MuiOutlinedInput-notchedOutline]:border-purple-500 [&_.Mui-focused_.MuiOutlinedInput-notchedOutline]:border-2">
+                          <DatePickerMUI
+                            disableFuture={false}
+                            value={invMirror.fecha_inicio_participacion || ""}
+                            onChange={(val) => {
+                              formik.setFieldValue(`investorsMirror.${index}.fecha_inicio_participacion`, val);
+                            }}
+                          />
+                        </div>
                     </div>
                     <div className="w-10"></div> {/* Spacer para alinear con botones de arriba */}
                 </div>

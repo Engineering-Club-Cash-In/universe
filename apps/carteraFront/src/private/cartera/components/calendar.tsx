@@ -13,19 +13,20 @@ interface DatePickerMUIProps {
   value?: string
   onChange?: (value: string) => void
   label?: string
+  disableFuture?: boolean
 }
 
 export function DatePickerMUI({
   value,
   onChange,
- 
+  disableFuture = true,
 }: DatePickerMUIProps) {
   return (
     <LocalizationProvider dateAdapter={AdapterDayjs} adapterLocale="es">
       <DatePicker
      
         value={value ? dayjs(value) : null}
-        maxDate={dayjs()} // 🚫 sin fechas futuras
+        maxDate={disableFuture ? dayjs() : undefined} // 🚫 sin fechas futuras si disableFuture es true
         enableAccessibleFieldDOMStructure={false} // 🔥 FIX CLAVE
         onChange={(newValue: Dayjs | null) => {
           onChange?.(

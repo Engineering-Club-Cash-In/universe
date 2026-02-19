@@ -106,6 +106,7 @@ export function ModalEditCredit({
       monto_aportado: Number(inv.monto_aportado),
       porcentaje_cash_in: Number(inv.porcentaje_cash_in),
       porcentaje_inversion: Number(inv.porcentaje_inversion),
+      fecha_inicio_participacion: inv.fecha_inicio_participacion ? new Date(inv.fecha_inicio_participacion).toISOString().split('T')[0] : "2025-12-01",
     })) || [];
 
   const parsedInvestors = parseInvestors(investorsInitial);
@@ -122,6 +123,7 @@ export function ModalEditCredit({
         monto_aportado: Number(mirrorItem.monto_aportado),
         porcentaje_cash_in: Number(mirrorItem.porcentaje_cash_in),
         porcentaje_inversion: Number(mirrorItem.porcentaje_inversion),
+        fecha_inicio_participacion: mirrorItem.fecha_inicio_participacion ? new Date(mirrorItem.fecha_inicio_participacion).toISOString().split('T')[0] : "2025-12-01",
       };
     }
     // Si no hay espejo para ese inversionista, devolvemos objeto vacío
@@ -130,6 +132,7 @@ export function ModalEditCredit({
       monto_aportado: 0,
       porcentaje_cash_in: 0,
       porcentaje_inversion: 0,
+      fecha_inicio_participacion: "2025-12-01",
     };
   });
 
@@ -216,6 +219,7 @@ export function ModalEditCredit({
           monto_aportado: Number(i.monto_aportado),
           porcentaje_cash_in: Number(i.porcentaje_cash_in),
           porcentaje_inversion: Number(i.porcentaje_inversion),
+          fecha_inicio_participacion: i.fecha_inicio_participacion,
         })),
 
         // Lista Espejo
@@ -224,6 +228,7 @@ export function ModalEditCredit({
           monto_aportado: Number(i.monto_aportado),
           porcentaje_cash_in: Number(i.porcentaje_cash_in),
           porcentaje_inversion: Number(i.porcentaje_inversion),
+          fecha_inicio_participacion: i.fecha_inicio_participacion,
         })),
       };
       updateCredit(payload, {

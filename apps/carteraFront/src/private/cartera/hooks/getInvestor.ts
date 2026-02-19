@@ -9,7 +9,7 @@ import {
   liquidateByInvestorService,
   downloadInvestorPDFService,
   recalcularPagosEspejoService,
-  aplicarPagosEspejoService,
+  reversePagosEspejoService,
   type RecalcularPagoPayload,
   type LiquidateByInvestorRequest,
   type LiquidateByInvestorResponse,
@@ -318,24 +318,23 @@ export function useRecalcularPagosEspejo() {
 }
 
 // ============================================================
-// ✅ useAplicarPagosEspejo (Confirmar cambios en encabezados)
+// 🔄 useReversePagosEspejo (Revertir/Eliminar pagos espejo generados)
 // ============================================================
-export function useAplicarPagosEspejo() {
+export function useReversePagosEspejo() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: (inversionistaId: number) =>
-      aplicarPagosEspejoService(inversionistaId),
+      reversePagosEspejoService(inversionistaId),
 
     onSuccess: (data) => {
-      console.log("✅ Pagos aplicados a encabezados:", data);
+      console.log("✅ Pagos revertidos:", data);
       queryClient.invalidateQueries({ queryKey: investorsQueryKeys.lists() });
       queryClient.invalidateQueries({ queryKey: ["investor-mirror-summary"] });
-      alert("✅ Cambios aplicados correctamente a los créditos.");
+      queryClient.invalidateQueries({ queryKey: ["investor-totals"] });
     },
     onError: (error: Error) => {
-      console.error("❌ Error aplicando pagos:", error);
-      alert(`Error al aplicar cambios: ${error.message}`);
+      console.error("❌ Error revirtiendo pagos:", error);
     },
   });
 }

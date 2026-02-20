@@ -1910,17 +1910,17 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
     inversionistasALiquidar = [inversionista_id];
   } else {
     const inversionistasConPagos = await db
-      .selectDistinct({
-        inversionista_id: pagos_credito_inversionistas.inversionista_id,
-      })
-      .from(pagos_credito_inversionistas)
-      .where(
-        eq(pagos_credito_inversionistas.estado_liquidacion, "NO_LIQUIDADO")
-      );
+        .selectDistinct({
+          inversionista_id: pagos_credito_inversionistas_espejo.inversionista_id,
+        })
+        .from(pagos_credito_inversionistas_espejo)
+        .where(
+          eq(pagos_credito_inversionistas_espejo.estado_liquidacion, "NO_LIQUIDADO")
+        );
 
-    inversionistasALiquidar = inversionistasConPagos.map(
-      (i) => i.inversionista_id
-    );
+      inversionistasALiquidar = inversionistasConPagos.map(
+        (i) => i.inversionista_id
+      );
   }
 
   if (inversionistasALiquidar.length === 0) {
@@ -1984,7 +1984,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
       console.log(`     Monto: Q${boletaPendiente.monto_boleta ?? "N/A"}`);
       console.log(`     Fecha subida: ${boletaPendiente.fecha_subida}`);
 
-      // 🆕 Obtener datos del inversionista
+      // 🆕 Obtener datos del inversionista desde las tablas espejo
       const resumen = await resumeInvestor(
         inv_id,
         1,
@@ -1993,7 +1993,8 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
         undefined,
         undefined,
         false,
-        undefined
+        undefined,
+        "espejos"
       );
 
       if (!resumen.inversionistas || resumen.inversionistas.length === 0) {
@@ -2059,36 +2060,80 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
 
       console.log(`  ✅ Boleta ${boletaPendiente.boleta_id} marcada como PROCESADO`);
 
-      // 🆕 PASO 4: Obtener IDs de pagos y actualizar
+      // 🆕 PASO 4: Obtener IDs de pagos y actualizar en base a ESPEJO
       const pagosIds: number[] = [];
       for (const credito of inversionista.creditos) {
         if (credito.pagos && credito.pagos.length > 0) {
           const pagosBD = await db
-            .select({ id: pagos_credito_inversionistas.id })
-            .from(pagos_credito_inversionistas)
+            .select({ 
+              id: pagos_credito_inversionistas_espejo.id,
+              abono_capital: pagos_credito_inversionistas_espejo.abono_capital,
+            })
+            .from(pagos_credito_inversionistas_espejo)
             .where(
               and(
-                eq(pagos_credito_inversionistas.inversionista_id, inv_id),
-                eq(pagos_credito_inversionistas.credito_id, credito.credito_id),
+                eq(pagos_credito_inversionistas_espejo.inversionista_id, inv_id),
+                eq(pagos_credito_inversionistas_espejo.credito_id, credito.credito_id),
                 eq(
-                  pagos_credito_inversionistas.estado_liquidacion,
+                  pagos_credito_inversionistas_espejo.estado_liquidacion,
                   "NO_LIQUIDADO"
                 )
               )
             );
-          pagosIds.push(...pagosBD.map((p) => p.id));
+          
+          const idsActuales = pagosBD.map((p) => p.id);
+          pagosIds.push(...idsActuales);
+
+          if (idsActuales.length > 0) {
+            // Calcular capital total a descontar
+            const sumaCapital = pagosBD.reduce(
+              (sum, p) => sum + Number(p.abono_capital || 0),
+              0
+            );
+
+            if (sumaCapital > 0) {
+              // 1. Descontar capital en la tabla original
+              await db
+                .update(creditos_inversionistas)
+                .set({
+                  monto_aportado: sql`monto_aportado - ${sumaCapital}`,
+                })
+                .where(
+                  and(
+                    eq(creditos_inversionistas.inversionista_id, inv_id),
+                    eq(creditos_inversionistas.credito_id, credito.credito_id)
+                  )
+                );
+
+              // 2. Descontar capital en la tabla espejo
+              await db
+                .update(creditos_inversionistas_espejo)
+                .set({
+                  monto_aportado: sql`monto_aportado - ${sumaCapital}`,
+                })
+                .where(
+                  and(
+                    eq(creditos_inversionistas_espejo.inversionista_id, inv_id),
+                    eq(creditos_inversionistas_espejo.credito_id, credito.credito_id)
+                  )
+                );
+            }
+          }
         }
       }
 
-      const updateResult = await db
-        .update(pagos_credito_inversionistas)
-        .set({
-          estado_liquidacion: "LIQUIDADO",
-          liquidacion_id: liquidacion.liquidacion_id,
-        })
-        .where(inArray(pagos_credito_inversionistas.id, pagosIds));
+      let updateResult: any = { rowCount: 0 };
+      if (pagosIds.length > 0) {
+        updateResult = await db
+          .update(pagos_credito_inversionistas_espejo)
+          .set({
+            estado_liquidacion: "LIQUIDADO",
+            liquidacion_id: liquidacion.liquidacion_id,
+          })
+          .where(inArray(pagos_credito_inversionistas_espejo.id, pagosIds));
+      }
 
-      console.log(`  ✅ ${updateResult.rowCount ?? 0} pagos actualizados`);
+      console.log(`  ✅ ${updateResult.rowCount ?? 0} pagos espero actualizados`);
 
       // 🆕 PASO 5: Generar PDF usando la data que YA TENEMOS
       console.log(`  📄 Generando PDF...`);

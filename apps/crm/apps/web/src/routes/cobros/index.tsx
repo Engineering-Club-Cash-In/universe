@@ -5,6 +5,7 @@ import {
 	Banknote,
 	CalendarDays,
 	CalendarRange,
+	ChevronDown,
 	Loader2,
 	Phone,
 	TrendingDown,
@@ -22,6 +23,11 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import {
+	Collapsible,
+	CollapsibleContent,
+	CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { authClient } from "@/lib/auth-client";
 import { type ContratoCobranza, columns } from "@/lib/cobros/columns";
 import { PERMISSIONS, ROLES } from "@/lib/roles";
@@ -44,6 +50,213 @@ function calcularDiasHastaPago(fechaProximoPago: string | null) {
 }
 
 type FiltroTemporal = "hoy" | "semana" | "quincena" | "mes" | "todos";
+
+interface EmbudoEstado {
+	key: string;
+	label: string;
+	color: string;
+	barColor: string;
+}
+
+interface EmbudoStats {
+	totalCases: number;
+	montoTotal: string;
+	sumaCapital: string;
+	porcentaje: string;
+}
+
+function EmbudoRow({
+	estado,
+	estadoStats,
+	maxCasos,
+	emailCobrador,
+	onNavigate,
+}: {
+	estado: EmbudoEstado;
+	estadoStats: EmbudoStats;
+	maxCasos: number;
+	emailCobrador: string | undefined;
+	onNavigate: (id: string, tipo: string) => void;
+}) {
+	const [isOpen, setIsOpen] = useState(false);
+	const porcentaje = (estadoStats.totalCases / maxCasos) * 100;
+
+	const topCasos = useQuery({
+		...orpc.getTodosLosCreditos.queryOptions({
+			input: {
+				limit: 5,
+				offset: 0,
+				estadoMora: estado.key,
+				emailCobrador,
+			},
+		}),
+		enabled: isOpen && estadoStats.totalCases > 0,
+	});
+
+	const casosOrdenados = useMemo(() => {
+		if (!topCasos.data?.data) return [];
+		return [...topCasos.data.data].sort(
+			(a, b) => Number(b.montoFinanciado || 0) - Number(a.montoFinanciado || 0),
+		);
+	}, [topCasos.data]);
+
+	return (
+		<Collapsible
+			open={isOpen}
+			onOpenChange={setIsOpen}
+			className="rounded-lg border border-border"
+		>
+			<CollapsibleTrigger asChild>
+				<button
+					type="button"
+					className="group flex w-full cursor-pointer items-center gap-3 p-3 text-left transition-all hover:bg-muted/50"
+				>
+					<div className="flex w-32 shrink-0 items-center gap-2">
+						<Badge className={`${estado.color} whitespace-nowrap text-xs`}>
+							{estado.label}
+						</Badge>
+					</div>
+					<div className="relative flex-1">
+						<div className="h-10 w-full overflow-hidden rounded-md bg-muted">
+							{porcentaje >= 15 ? (
+								<div
+									className="flex h-full items-center justify-between px-3 transition-all duration-300 group-hover:opacity-80"
+									style={{
+										width: `${porcentaje}%`,
+										backgroundColor: estado.barColor,
+									}}
+								>
+									<span
+										className="whitespace-nowrap font-semibold text-sm"
+										style={{
+											color: porcentaje > 60 ? "white" : "#1f2937",
+										}}
+									>
+										{estadoStats.totalCases} casos -{" "}
+										{Number.parseFloat(estadoStats.porcentaje || "0").toFixed(
+											1,
+										)}
+										%
+									</span>
+								</div>
+							) : (
+								<div className="flex h-full items-center">
+									<div
+										className="h-full transition-all duration-300 group-hover:opacity-80"
+										style={{
+											width: `${Math.max(porcentaje, 3)}%`,
+											backgroundColor: estado.barColor,
+										}}
+									/>
+									<span className="ml-2 whitespace-nowrap font-semibold text-muted-foreground text-sm">
+										{estadoStats.totalCases} casos -{" "}
+										{Number.parseFloat(estadoStats.porcentaje || "0").toFixed(
+											1,
+										)}
+										%
+									</span>
+								</div>
+							)}
+						</div>
+					</div>
+					<div className="flex w-52 shrink-0 flex-col gap-1 text-right text-sm">
+						<div className="flex items-center justify-end gap-2">
+							<span className="text-muted-foreground text-xs">Mora:</span>
+							<span className="font-medium">
+								Q{Number(estadoStats.montoTotal || 0).toLocaleString()}
+							</span>
+						</div>
+						<div className="flex items-center justify-end gap-2">
+							<span className="text-muted-foreground text-xs">Capital:</span>
+							<span className="font-medium">
+								Q{Number(estadoStats.sumaCapital || 0).toLocaleString()}
+							</span>
+						</div>
+					</div>
+					<ChevronDown
+						className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
+					/>
+				</button>
+			</CollapsibleTrigger>
+			<CollapsibleContent>
+				<div className="overflow-hidden border-t bg-card">
+					{topCasos.isLoading ? (
+						<div className="flex items-center justify-center gap-2 py-4">
+							<Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+							<span className="text-muted-foreground text-sm">
+								Cargando casos...
+							</span>
+						</div>
+					) : casosOrdenados.length === 0 ? (
+						<div className="py-4 text-center text-muted-foreground text-sm">
+							Sin casos en esta etapa
+						</div>
+					) : (
+						<table className="w-full text-sm">
+							<thead>
+								<tr className="border-b bg-muted/30">
+									<th className="py-2 pl-3 text-left font-medium text-muted-foreground">
+										Cliente
+									</th>
+									<th className="py-2 text-left font-medium text-muted-foreground">
+										No. Crédito
+									</th>
+									<th className="py-2 text-right font-medium text-muted-foreground">
+										Capital Activo
+									</th>
+									<th className="py-2 text-right font-medium text-muted-foreground">
+										Mora
+									</th>
+									<th className="py-2 pr-3 text-right font-medium text-muted-foreground">
+										Cuota
+									</th>
+								</tr>
+							</thead>
+							<tbody>
+								{casosOrdenados.map((caso) => (
+									<tr
+										key={caso.numeroCredito || caso.contratoId}
+										className="cursor-pointer border-b transition-colors last:border-b-0 hover:bg-muted/40"
+										onClick={() => {
+											const linkId = caso.numeroCredito || caso.contratoId;
+											const tipoLink = caso.casoCobroId ? "caso" : "contrato";
+											onNavigate(linkId, tipoLink);
+										}}
+									>
+										<td className="py-2 pl-3 font-medium">
+											{caso.clienteNombre}
+										</td>
+										<td className="py-2 font-mono text-muted-foreground text-xs">
+											{caso.numeroCredito || "-"}
+										</td>
+										<td className="py-2 text-right tabular-nums">
+											Q{Number(caso.montoFinanciado || 0).toLocaleString()}
+										</td>
+										<td className="py-2 text-right text-red-600 tabular-nums">
+											{Number(caso.montoEnMora || 0) > 0
+												? `Q${Number(caso.montoEnMora).toLocaleString()}`
+												: "-"}
+										</td>
+										<td className="py-2 pr-3 text-right tabular-nums">
+											Q{Number(caso.cuotaMensual || 0).toLocaleString()}
+										</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					)}
+					{estadoStats.totalCases > 5 && (
+						<div className="border-t px-3 py-2 text-center">
+							<span className="text-muted-foreground text-xs">
+								Mostrando top 5 de {estadoStats.totalCases} casos
+							</span>
+						</div>
+					)}
+				</div>
+			</CollapsibleContent>
+		</Collapsible>
+	);
+}
 
 export const Route = createFileRoute("/cobros/")({
 	component: RouteComponent,
@@ -386,7 +599,7 @@ function RouteComponent() {
 				</Card>
 			</div>
 
-			{/* Embudo Visual de Estados */}
+			{/* Embudo Visual de Estados - Acordeón */}
 			<Card>
 				<CardHeader>
 					<CardTitle className="flex items-center gap-2">
@@ -394,49 +607,59 @@ function RouteComponent() {
 						Embudo de Cobranza
 					</CardTitle>
 					<CardDescription>
-						Distribución de casos por estado de mora
+						Distribución de casos por estado de mora — click en una etapa para
+						ver los casos de mayor capital
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
-					<div className="space-y-3">
-						{[
-							{
-								key: "al_dia",
-								label: "Al Día",
-								color: "bg-green-100 text-green-800",
-							},
-							{
-								key: "mora_30",
-								label: "Mora 30",
-								color: "bg-yellow-100 text-yellow-800",
-							},
-							{
-								key: "mora_60",
-								label: "Mora 60",
-								color: "bg-orange-100 text-orange-800",
-							},
-							{
-								key: "mora_90",
-								label: "Mora 90",
-								color: "bg-red-100 text-red-800",
-							},
-							{
-								key: "mora_120",
-								label: "Mora 120",
-								color: "bg-red-200 text-red-900",
-							},
-							{
-								key: "incobrable",
-								label: "Incobrable",
-								color: "bg-gray-100 text-gray-800",
-							},
-							{
-								key: "completado",
-								label: "Completado",
-								color: "bg-blue-100 text-blue-800",
-							},
-						].map((estado) => {
-							const estadoStats = stats.find(
+					<div className="space-y-1">
+						{(
+							[
+								{
+									key: "al_dia",
+									label: "Al Día",
+									color: "bg-green-100 text-green-800",
+									barColor: "#22c55e",
+								},
+								{
+									key: "mora_30",
+									label: "Mora 30",
+									color: "bg-yellow-100 text-yellow-800",
+									barColor: "#eab308",
+								},
+								{
+									key: "mora_60",
+									label: "Mora 60",
+									color: "bg-orange-100 text-orange-800",
+									barColor: "#f97316",
+								},
+								{
+									key: "mora_90",
+									label: "Mora 90",
+									color: "bg-red-100 text-red-800",
+									barColor: "#ef4444",
+								},
+								{
+									key: "mora_120",
+									label: "Mora 120+",
+									color: "bg-red-200 text-red-900",
+									barColor: "#b91c1c",
+								},
+								{
+									key: "incobrable",
+									label: "Incobrable",
+									color: "bg-gray-100 text-gray-800",
+									barColor: "#6b7280",
+								},
+								{
+									key: "completado",
+									label: "Completado",
+									color: "bg-blue-100 text-blue-800",
+									barColor: "#3b82f6",
+								},
+							] satisfies EmbudoEstado[]
+						).map((estado) => {
+							const estadoStat = stats.find(
 								(s) => s.estadoMora === estado.key,
 							) || {
 								totalCases: 0,
@@ -445,84 +668,28 @@ function RouteComponent() {
 								porcentaje: "0",
 							};
 							const maxCasos = Math.max(...stats.map((s) => s.totalCases), 1);
-							const porcentaje = (estadoStats.totalCases / maxCasos) * 100;
 
 							return (
-								<div
+								<EmbudoRow
 									key={estado.key}
-									className="group flex items-center gap-3 rounded-lg p-3 transition-all hover:bg-muted/50"
-								>
-									<div className="flex w-32 shrink-0 items-center gap-2">
-										<Badge
-											className={`${estado.color} whitespace-nowrap text-xs`}
-										>
-											{estado.label}
-										</Badge>
-									</div>
-									<div className="relative flex-1">
-										<div className="h-10 w-full overflow-hidden rounded-md bg-muted">
-											{porcentaje >= 15 ? (
-												// Barra suficientemente ancha - texto dentro
-												<div
-													className="flex h-full items-center justify-between px-3 transition-all duration-300 group-hover:opacity-80"
-													style={{
-														width: `${porcentaje}%`,
-														backgroundColor: `hsl(220, 15%, ${Math.max(30, 90 - porcentaje * 0.5)}%)`,
-													}}
-												>
-													<span
-														className="whitespace-nowrap font-semibold text-sm"
-														style={{
-															color: porcentaje > 60 ? "white" : "#1f2937",
-														}}
-													>
-														{estadoStats.totalCases} casos -{" "}
-														{Number.parseFloat(
-															estadoStats.porcentaje || "0",
-														).toFixed(2)}
-														% del total
-													</span>
-												</div>
-											) : (
-												// Barra estrecha - texto fuera
-												<div className="flex h-full items-center">
-													<div
-														className="h-full transition-all duration-300 group-hover:opacity-80"
-														style={{
-															width: `${Math.max(porcentaje, 3)}%`,
-															backgroundColor: `hsl(220, 15%, ${Math.max(30, 90 - porcentaje * 0.5)}%)`,
-														}}
-													/>
-													<span className="ml-2 whitespace-nowrap font-semibold text-muted-foreground text-sm">
-														{estadoStats.totalCases} casos -{" "}
-														{Number.parseFloat(
-															estadoStats.porcentaje || "0",
-														).toFixed(2)}
-														% del total
-													</span>
-												</div>
-											)}
-										</div>
-									</div>
-									<div className="flex w-52 shrink-0 flex-col gap-1 text-right text-sm">
-										<div className="flex items-center justify-end gap-2">
-											<span className="text-muted-foreground text-xs">
-												Mora:
-											</span>
-											<span className="font-medium">
-												Q{Number(estadoStats.montoTotal || 0).toLocaleString()}
-											</span>
-										</div>
-										<div className="flex items-center justify-end gap-2">
-											<span className="text-muted-foreground text-xs">
-												Capital:
-											</span>
-											<span className="font-medium">
-												Q{Number(estadoStats.sumaCapital || 0).toLocaleString()}
-											</span>
-										</div>
-									</div>
-								</div>
+									estado={estado}
+									estadoStats={estadoStat}
+									maxCasos={maxCasos}
+									emailCobrador={
+										!PERMISSIONS.canAssignCobros(userRole ?? "")
+											? (session?.user?.email ?? undefined)
+											: undefined
+									}
+									onNavigate={(id, tipo) => {
+										navigate({
+											to: "/cobros/$id",
+											params: { id },
+											search: {
+												tipo: tipo as "caso" | "contrato",
+											},
+										});
+									}}
+								/>
 							);
 						})}
 					</div>

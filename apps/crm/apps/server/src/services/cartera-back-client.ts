@@ -658,6 +658,11 @@ export class CarteraBackClient {
 			true,
 		);
 
+		console.log(
+			"[CarteraBackClient] getStats raw response:",
+			JSON.stringify(response, null, 2),
+		);
+
 		return response;
 	}
 

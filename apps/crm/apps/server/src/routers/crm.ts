@@ -5515,8 +5515,7 @@ export const crmRouter = {
 
 			// Only admin and sales_supervisor see global charts
 			const isGlobal =
-				context.userRole === "admin" ||
-				context.userRole === "sales_supervisor";
+				context.userRole === "admin" || context.userRole === "sales_supervisor";
 			const userFilter = isGlobal ? undefined : context.userId;
 
 			// 1) Pipeline por Etapa: count + sum(value) grouped by stage
@@ -5536,9 +5535,7 @@ export const crmRouter = {
 						eq(opportunities.status, "open"),
 						gte(opportunities.createdAt, startOfMonth),
 						lt(opportunities.createdAt, endOfMonth),
-						userFilter
-							? eq(opportunities.assignedTo, userFilter)
-							: undefined,
+						userFilter ? eq(opportunities.assignedTo, userFilter) : undefined,
 					),
 				)
 				.groupBy(
@@ -5577,9 +5574,7 @@ export const crmRouter = {
 							inArray(opportunities.stageId, placedStageIds),
 							gte(opportunities.createdAt, startOfMonth),
 							lt(opportunities.createdAt, endOfMonth),
-							userFilter
-								? eq(opportunities.assignedTo, userFilter)
-								: undefined,
+							userFilter ? eq(opportunities.assignedTo, userFilter) : undefined,
 						),
 					)
 					.groupBy(user.id, user.name)
@@ -5605,9 +5600,7 @@ export const crmRouter = {
 						inArray(opportunities.status, ["open", "won", "lost"]),
 						gte(opportunities.createdAt, startOfMonth),
 						lt(opportunities.createdAt, endOfMonth),
-						userFilter
-							? eq(opportunities.assignedTo, userFilter)
-							: undefined,
+						userFilter ? eq(opportunities.assignedTo, userFilter) : undefined,
 					),
 				)
 				.groupBy(user.id, user.name, opportunities.status);

@@ -328,7 +328,10 @@ function RouteComponent() {
 					errors.lastName = "El apellido es requerido";
 				}
 
-				if (value.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.email)) {
+				if (
+					value.email.trim() &&
+					!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.email)
+				) {
 					errors.email = "El correo electrónico no es válido";
 				}
 
@@ -346,7 +349,9 @@ function RouteComponent() {
 		onSubmit: async ({ value }) => {
 			const leadData = {
 				...value,
-				...(value.email ? { email: value.email } : { email: undefined as string | undefined }),
+				...(value.email
+					? { email: value.email }
+					: { email: undefined as string | undefined }),
 				age: value.age ? Number.parseInt(value.age) : undefined,
 				dependents: Number.parseInt(value.dependents),
 				monthlyIncome: value.monthlyIncome
@@ -1057,13 +1062,19 @@ function RouteComponent() {
 												name="email"
 												validators={{
 													onChange: ({ value }) => {
-														if (value.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+														if (
+															value.trim() &&
+															!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+														) {
 															return "El correo electrónico no es válido";
 														}
 														return undefined;
 													},
 													onBlur: ({ value }) => {
-														if (value.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+														if (
+															value.trim() &&
+															!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+														) {
 															return "El correo electrónico no es válido";
 														}
 														return undefined;
@@ -2310,7 +2321,9 @@ function RouteComponent() {
 											</Label>
 											<div className="flex items-center gap-2">
 												<Mail className="h-4 w-4 text-muted-foreground" />
-												<p className="text-sm">{selectedLead.email || "No especificado"}</p>
+												<p className="text-sm">
+													{selectedLead.email || "No especificado"}
+												</p>
 											</div>
 										</div>
 										<div>

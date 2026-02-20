@@ -24,6 +24,7 @@ import {
 	uploadFileToR2,
 	validateFile,
 } from "../lib/storage";
+import { closeOpportunity } from "../services/close-opportunity";
 import { createNotification } from "./notifications";
 
 // Standardized env var naming: R2_BUCKET_* pattern
@@ -811,18 +812,6 @@ export const legalContractsRouter = {
 				});
 			}
 
-			// Close the opportunity (create credit, client, contract)
-			const closeResult = await closeOpportunity({
-				opportunityId: input.opportunityId,
-				userId: context.userId,
-			});
-
-			if (!closeResult.success) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: closeResult.error || "Error al cerrar la oportunidad",
-				});
-			}
-
 			// Obtener la etapa del 85%
 			const [targetStage] = await db
 				.select()
@@ -1008,6 +997,18 @@ export const legalContractsRouter = {
 					reason: "Contratos firmados confirmados - Avanza a formalización",
 				});
 			});
+
+			// Cerrar la oportunidad (crear crédito, cliente, contrato en cartera)
+			const closeResult = await closeOpportunity({
+				opportunityId: input.opportunityId,
+				userId: context.userId,
+			});
+
+			if (!closeResult.success) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: closeResult.error || "Error al cerrar la oportunidad",
+				});
+			}
 
 			// Notificar a análisis que está lista para desembolso
 			await createNotification({

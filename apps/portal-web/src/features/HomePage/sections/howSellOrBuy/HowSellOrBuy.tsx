@@ -123,7 +123,8 @@ export const HowSellOrBuy = () => {
           ))}
         </div>
         <div className="flex justify-center mt-12">
-          <Link to="/marketplace">
+          {/* TODO: devolver a "/marketplace" cuando esté habilitado */}
+          <Link to="/credit">
             <Button size={isMobile ? "sm" : "lg"}>Comprar un auto</Button>
           </Link>
         </div>

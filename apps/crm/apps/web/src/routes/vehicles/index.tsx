@@ -287,9 +287,18 @@ function VehiclesDashboard() {
 		// Campos opcionales
 		licensePlate: "",
 		vinNumber: "",
+		motorNumber: "",
 		origin: "",
 		fuelType: "",
 		transmission: "",
+		kmMileage: 0,
+		// Datos técnicos para contratos
+		seats: null as number | null,
+		doors: null as number | null,
+		axles: 2 as number | null,
+		vehicleUse: "",
+		series: "",
+		iscvCode: "",
 	});
 
 	const createNewVehicleMutation = useMutation({
@@ -302,9 +311,17 @@ function VehiclesDashboard() {
 				vehicleType: data.vehicleType,
 				licensePlate: data.licensePlate || undefined,
 				vinNumber: data.vinNumber || undefined,
+				motorNumber: data.motorNumber || undefined,
 				origin: data.origin || undefined,
 				fuelType: data.fuelType || undefined,
 				transmission: data.transmission || undefined,
+				kmMileage: data.kmMileage ?? undefined,
+				seats: data.seats ?? undefined,
+				doors: data.doors ?? undefined,
+				axles: data.axles ?? undefined,
+				vehicleUse: data.vehicleUse || undefined,
+				series: data.series || undefined,
+				iscvCode: data.iscvCode || undefined,
 			}),
 		onSuccess: () => {
 			toast.success("Vehículo nuevo creado exitosamente");
@@ -319,9 +336,17 @@ function VehiclesDashboard() {
 				vehicleType: "",
 				licensePlate: "",
 				vinNumber: "",
+				motorNumber: "",
 				origin: "",
 				fuelType: "",
 				transmission: "",
+				kmMileage: 0,
+				seats: null,
+				doors: null,
+				axles: 2,
+				vehicleUse: "",
+				series: "",
+				iscvCode: "",
 			});
 		},
 		onError: (err: any) => {
@@ -1704,6 +1729,159 @@ function VehiclesDashboard() {
 											<SelectItem value="Manual">Manual</SelectItem>
 										</SelectContent>
 									</Select>
+								</div>
+							</div>
+						</div>
+
+						{/* Identificación adicional */}
+						<div className="space-y-4">
+							<h4 className="font-medium text-muted-foreground text-sm">
+								Identificación y Kilometraje
+							</h4>
+							<div className="grid grid-cols-2 gap-4">
+								<div className="space-y-2">
+									<Label htmlFor="motorNumber">Número de Motor</Label>
+									<Input
+										id="motorNumber"
+										value={newVehicleForm.motorNumber}
+										onChange={(e) =>
+											setNewVehicleForm({
+												...newVehicleForm,
+												motorNumber: e.target.value,
+											})
+										}
+										placeholder="Número de motor"
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="kmMileage">Kilometraje</Label>
+									<Input
+										id="kmMileage"
+										type="number"
+										value={newVehicleForm.kmMileage}
+										onChange={(e) =>
+											setNewVehicleForm({
+												...newVehicleForm,
+												kmMileage: Number.parseInt(e.target.value) || 0,
+											})
+										}
+										min={0}
+										placeholder="0"
+									/>
+								</div>
+							</div>
+						</div>
+
+						{/* Datos técnicos para contratos */}
+						<div className="space-y-4">
+							<h4 className="font-medium text-muted-foreground text-sm">
+								Datos Técnicos para Contratos
+							</h4>
+							<div className="grid grid-cols-3 gap-4">
+								<div className="space-y-2">
+									<Label htmlFor="seats">Asientos</Label>
+									<Input
+										id="seats"
+										type="number"
+										value={newVehicleForm.seats ?? ""}
+										onChange={(e) =>
+											setNewVehicleForm({
+												...newVehicleForm,
+												seats: e.target.value
+													? Number.parseInt(e.target.value)
+													: null,
+											})
+										}
+										min={1}
+										max={50}
+										placeholder="Ej: 5"
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="doors">Puertas</Label>
+									<Input
+										id="doors"
+										type="number"
+										value={newVehicleForm.doors ?? ""}
+										onChange={(e) =>
+											setNewVehicleForm({
+												...newVehicleForm,
+												doors: e.target.value
+													? Number.parseInt(e.target.value)
+													: null,
+											})
+										}
+										min={2}
+										max={6}
+										placeholder="Ej: 4"
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="axles">Ejes</Label>
+									<Input
+										id="axles"
+										type="number"
+										value={newVehicleForm.axles ?? ""}
+										onChange={(e) =>
+											setNewVehicleForm({
+												...newVehicleForm,
+												axles: e.target.value
+													? Number.parseInt(e.target.value)
+													: null,
+											})
+										}
+										min={2}
+										max={10}
+										placeholder="Ej: 2"
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="vehicleUse">Uso del Vehículo</Label>
+									<Select
+										value={newVehicleForm.vehicleUse}
+										onValueChange={(value) =>
+											setNewVehicleForm({
+												...newVehicleForm,
+												vehicleUse: value,
+											})
+										}
+									>
+										<SelectTrigger>
+											<SelectValue placeholder="Seleccionar uso" />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="Particular">Particular</SelectItem>
+											<SelectItem value="Comercial">Comercial</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="series">Serie</Label>
+									<Input
+										id="series"
+										value={newVehicleForm.series}
+										onChange={(e) =>
+											setNewVehicleForm({
+												...newVehicleForm,
+												series: e.target.value,
+											})
+										}
+										placeholder="Serie del vehículo"
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="iscvCode">Código ISCV</Label>
+									<Input
+										id="iscvCode"
+										value={newVehicleForm.iscvCode}
+										onChange={(e) =>
+											setNewVehicleForm({
+												...newVehicleForm,
+												iscvCode: e.target.value,
+											})
+										}
+										placeholder="Código ISCV"
+									/>
 								</div>
 							</div>
 						</div>

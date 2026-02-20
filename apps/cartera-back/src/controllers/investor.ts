@@ -2097,33 +2097,18 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
             if (sumaCapital > 0) {
               const sumaSegura = Number(sumaCapital) || 0;
               
-              await db.transaction(async (tx) => {
-                // 1. Descontar capital en la tabla original
-                await tx
-                  .update(creditos_inversionistas)
-                  .set({
-                    monto_aportado: sql`monto_aportado - ${sumaSegura}`,
-                  })
-                  .where(
-                    and(
-                      eq(creditos_inversionistas.inversionista_id, inv_id),
-                      eq(creditos_inversionistas.credito_id, credito.credito_id)
-                    )
-                  );
-
-                // 2. Descontar capital en la tabla espejo
-                await tx
-                  .update(creditos_inversionistas_espejo)
-                  .set({
-                    monto_aportado: sql`monto_aportado - ${sumaSegura}`,
-                  })
-                  .where(
-                    and(
-                      eq(creditos_inversionistas_espejo.inversionista_id, inv_id),
-                      eq(creditos_inversionistas_espejo.credito_id, credito.credito_id)
-                    )
-                  );
-              });
+              // Descontar capital de la tabla espejo SOLAMENTE
+              await db
+                .update(creditos_inversionistas_espejo)
+                .set({
+                  monto_aportado: sql`monto_aportado - ${sumaSegura}`,
+                })
+                .where(
+                  and(
+                    eq(creditos_inversionistas_espejo.inversionista_id, inv_id),
+                    eq(creditos_inversionistas_espejo.credito_id, credito.credito_id)
+                  )
+                );
             }
           }
         }

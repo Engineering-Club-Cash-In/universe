@@ -1354,8 +1354,8 @@ export const crmRouter = {
 					}
 				}
 
-				// Note: The actual 100% closure logic (credit creation, client, contract)
-				// is now handled by approveDisbursement via closeOpportunity service
+				// Note: El cierre del crédito (creación en cartera-back, cliente, contrato)
+				// se ejecuta en confirmContractsSigned (85% → 90%) en legal-contracts.ts
 			}
 
 			// Calculate new analysisStatus based on stage transition

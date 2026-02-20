@@ -32,8 +32,8 @@ const slides: CarouselSlide[] = [
     id: 2,
     imageUrl: url + "/familia-joven-disfrutando-de-su-viaje.jpg",
     title: "Tenemos el auto ideal para darte momentos inolvidables",
-    buttonText: "Ver marketplace",
-    buttonLink: "/marketplace",
+    buttonText: "Solicita tu crédito", // TODO: devolver a "Ver marketplace" y "/marketplace" cuando esté habilitado
+    buttonLink: "/credit",
   },
   {
     id: 3,

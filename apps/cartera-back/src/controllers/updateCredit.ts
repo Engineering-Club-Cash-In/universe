@@ -267,6 +267,7 @@ const creditUpdateSchema = z.object({
         monto_aportado: z.number().positive(),
         porcentaje_cash_in: z.number().min(0).max(100),
         porcentaje_inversion: z.number().min(0).max(100),
+        fecha_inicio_participacion: z.string().optional(),
       }),
     )
     .min(0)
@@ -278,6 +279,7 @@ const creditUpdateSchema = z.object({
         monto_aportado: z.number().positive(),
         porcentaje_cash_in: z.number().min(0).max(100),
         porcentaje_inversion: z.number().min(0).max(100),
+        fecha_inicio_participacion: z.string().optional(),
       }),
     )
     .min(0)
@@ -512,6 +514,7 @@ const updateInvestors = async (
   membresias: number,
   gps: number,
   targetTable: any = creditos_inversionistas,
+  parentCuotas?: Map<number, string>,
 ): Promise<void> => {
   if (!inversionistas || inversionistas.length === 0) return;
 
@@ -521,9 +524,9 @@ const updateInvestors = async (
     .where(eq(targetTable.credito_id, credito_id));
   console.log(current.capital, "current values ");
 
-  // 🔥 OBTENER CAPITAL Y CUOTA TOTAL DEL CRÉDITO
-  const capitalTotal = new Big(current?.capital);
-  const cuotaTotal = new Big(current?.cuota);
+  // 🔥 OBTENER CAPITAL Y CUOTA TOTAL DEL CRÉDITO (usar valores nuevos si existen)
+  const capitalTotal = new Big(updateFields.capital ?? current?.capital);
+  const cuotaTotal = new Big(updateFields.cuota ?? current?.cuota);
 
   console.log(`💰 Capital Total: Q${capitalTotal.toFixed(2)}`);
   console.log(`📊 Cuota Total: Q${cuotaTotal.toFixed(2)}`);
@@ -609,7 +612,11 @@ const updateInvestors = async (
 
     console.log(`\n🎯 PASO 3: CALCULAR CUOTA FINAL`);
 
-    if (esMayor) {
+    // Si es espejo, jalar la cuota del padre
+    if (parentCuotas && parentCuotas.has(inv.inversionista_id)) {
+      cuotaInversionista = new Big(parentCuotas.get(inv.inversionista_id)!);
+      console.log(`   🪞 ESPEJO: Usando cuota del padre: Q${cuotaInversionista.toFixed(2)}`);
+    } else if (esMayor) {
       console.log(`   🏆 ESTE ES EL INVERSIONISTA MAYOR`);
       console.log(`   Cuota Base: Q${cuotaBase.toFixed(6)}`);
       console.log(`   + Seguro: Q${seguro.toFixed(2)}`);
@@ -712,6 +719,9 @@ const updateInvestors = async (
       iva_inversionista: ivaInversionista.toString(),
       iva_cash_in: ivaCashIn.toString(),
       fecha_creacion: new Date(),
+      fecha_inicio_participacion: inv.fecha_inicio_participacion 
+        ? new Date(inv.fecha_inicio_participacion).toISOString().split('T')[0] 
+        : "2025-12-01",
       cuota_inversionista: cuotaInversionista.toString(), // 🔥 CON LÓGICA CORRECTA
       numero_credito_sifco: numero_credito_sifco ?? undefined,
     };
@@ -768,6 +778,7 @@ export const updateCredit = async ({ body, set }: any) => {
     const {
       credito_id,
       inversionistas = [],
+      inversionistas_espejo,
       mora,
       cuota,
       numero_credito_sifco,
@@ -815,7 +826,6 @@ export const updateCredit = async ({ body, set }: any) => {
     }
 
     // 3.1. Validar inversionistas espejo si existen
-    const { inversionistas_espejo } = parseResult.data;
     if (inversionistas_espejo && inversionistas_espejo.length > 0) {
       const mirrorValidation = validateInvestorsPercentages(
         inversionistas_espejo as any,
@@ -958,8 +968,20 @@ export const updateCredit = async ({ body, set }: any) => {
       );
     }
 
-    // 10. Actualizar inversionistas (Espejo)
+    // 10. Actualizar inversionistas (Espejo) - jala cuota del padre
     if (inversionistas_espejo && inversionistas_espejo.length > 0) {
+      const parentInvestors = await db
+        .select({
+          inversionista_id: creditos_inversionistas.inversionista_id,
+          cuota_inversionista: creditos_inversionistas.cuota_inversionista,
+        })
+        .from(creditos_inversionistas)
+        .where(eq(creditos_inversionistas.credito_id, credito_id));
+
+      const parentCuotas = new Map(
+        parentInvestors.map((p) => [p.inversionista_id, p.cuota_inversionista])
+      );
+
       await updateInvestors(
         credito_id,
         inversionistas_espejo,
@@ -969,7 +991,8 @@ export const updateCredit = async ({ body, set }: any) => {
         Number(updateFields.seguro_10_cuotas ?? current.seguro_10_cuotas),
         Number(updateFields.membresias_pago ?? current.membresias_pago),
         Number(updateFields.gps ?? current.gps),
-        creditos_inversionistas_espejo // Mirror target
+        creditos_inversionistas_espejo, // Mirror target
+        parentCuotas, // Cuotas del padre
       );
     }
 

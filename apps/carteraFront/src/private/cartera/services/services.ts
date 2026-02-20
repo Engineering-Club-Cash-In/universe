@@ -31,6 +31,7 @@ export interface InvestorPayload {
   tipo_cuenta: string | null;
   re_inversion: string | null;
   numero_cuenta: string | null;
+  moneda?: string;
 }
 export interface InvestorResponse {
   inversionista_id: number;
@@ -40,6 +41,8 @@ export interface InvestorResponse {
   banco: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;
+  moneda?: string;
+  currencySymbol?: string;
 }
 
 // Crear inversionista(s)
@@ -742,7 +745,8 @@ export interface InversionistaConCreditos {
   re_inversion:string
   dpi:number | null
   tieneBoletaPendiente:boolean
-
+  moneda?: string;
+  currencySymbol?: string;
 }
 
 // La respuesta completa (paginada)
@@ -759,6 +763,8 @@ export interface InversionistasCreditosResponse {
 export interface InvestorTotalsResponse {
   inversionista_id: number;
   nombre_inversionista: string;
+  moneda?: string;
+  currencySymbol?: string;
   totales: SubtotalInversionista;
 }
 

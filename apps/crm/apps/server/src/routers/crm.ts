@@ -8,6 +8,7 @@ import {
 	ilike,
 	inArray,
 	isNotNull,
+	lt,
 	lte,
 	not,
 	or,
@@ -2934,98 +2935,173 @@ export const crmRouter = {
 		}),
 
 	// Dashboard stats
-	getDashboardStats: crmProcedure.handler(async ({ context }) => {
-		const PLACED_STAGE_THRESHOLD = 90;
+	getDashboardStats: crmProcedure
+		.input(
+			z.object({
+				month: z.number().min(1).max(12),
+				year: z.number(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const PLACED_STAGE_THRESHOLD = 90;
+			const startOfMonth = new Date(input.year, input.month - 1, 1);
+			const endOfMonth = new Date(input.year, input.month, 1);
 
-		// Helper: get placed credits stats (stage >= threshold) with optional user filter
-		const getPlacedCreditsStats = async (userId?: string) => {
-			const placedStages = await db
-				.select({ id: salesStages.id })
-				.from(salesStages)
-				.where(gte(salesStages.closurePercentage, PLACED_STAGE_THRESHOLD));
+			// Helper: get placed credits stats (stage >= threshold) with optional user filter
+			const getPlacedCreditsStats = async (userId?: string) => {
+				const placedStages = await db
+					.select({ id: salesStages.id })
+					.from(salesStages)
+					.where(gte(salesStages.closurePercentage, PLACED_STAGE_THRESHOLD));
 
-			const placedStageIds = placedStages.map((s) => s.id);
+				const placedStageIds = placedStages.map((s) => s.id);
 
-			if (placedStageIds.length === 0) {
-				return { placedCount: 0, placedAmount: 0 };
+				if (placedStageIds.length === 0) {
+					return { placedCount: 0, placedAmount: 0 };
+				}
+
+				const conditions = [
+					inArray(opportunities.stageId, placedStageIds),
+					gte(opportunities.createdAt, startOfMonth),
+					lt(opportunities.createdAt, endOfMonth),
+				];
+				if (userId) {
+					conditions.push(eq(opportunities.assignedTo, userId));
+				}
+
+				const [result] = await db
+					.select({
+						placedCount: count(),
+						placedAmount: sum(opportunities.value),
+					})
+					.from(opportunities)
+					.where(and(...conditions));
+
+				return {
+					placedCount: result?.placedCount || 0,
+					placedAmount: Number.parseFloat(result?.placedAmount ?? "0"),
+				};
+			};
+
+			if (context.userRole === "admin") {
+				const [totalLeads] = await db
+					.select({ count: count() })
+					.from(leads)
+					.where(
+						and(
+							gte(leads.createdAt, startOfMonth),
+							lt(leads.createdAt, endOfMonth),
+						),
+					);
+				const [totalOpportunities] = await db
+					.select({ count: count() })
+					.from(opportunities)
+					.where(
+						and(
+							gte(opportunities.createdAt, startOfMonth),
+							lt(opportunities.createdAt, endOfMonth),
+						),
+					);
+				const [totalClients] = await db
+					.select({ count: count() })
+					.from(clients)
+					.where(
+						and(
+							gte(clients.createdAt, startOfMonth),
+							lt(clients.createdAt, endOfMonth),
+						),
+					);
+				const placed = await getPlacedCreditsStats();
+
+				return {
+					totalLeads: totalLeads?.count || 0,
+					totalOpportunities: totalOpportunities?.count || 0,
+					totalClients: totalClients?.count || 0,
+					placedCount: placed.placedCount,
+					placedAmount: placed.placedAmount,
+				};
 			}
 
-			const conditions = [inArray(opportunities.stageId, placedStageIds)];
-			if (userId) {
-				conditions.push(eq(opportunities.assignedTo, userId));
+			if (context.userRole === "sales_supervisor") {
+				const [totalLeads] = await db
+					.select({ count: count() })
+					.from(leads)
+					.where(
+						and(
+							gte(leads.createdAt, startOfMonth),
+							lt(leads.createdAt, endOfMonth),
+						),
+					);
+				const [totalOpportunities] = await db
+					.select({ count: count() })
+					.from(opportunities)
+					.where(
+						and(
+							gte(opportunities.createdAt, startOfMonth),
+							lt(opportunities.createdAt, endOfMonth),
+						),
+					);
+				const [totalClients] = await db
+					.select({ count: count() })
+					.from(clients)
+					.where(
+						and(
+							gte(clients.createdAt, startOfMonth),
+							lt(clients.createdAt, endOfMonth),
+						),
+					);
+				const placed = await getPlacedCreditsStats();
+
+				return {
+					teamLeads: totalLeads?.count || 0,
+					teamOpportunities: totalOpportunities?.count || 0,
+					teamClients: totalClients?.count || 0,
+					placedCount: placed.placedCount,
+					placedAmount: placed.placedAmount,
+				};
 			}
 
-			const [result] = await db
-				.select({
-					placedCount: count(),
-					placedAmount: sum(opportunities.value),
-				})
+			// Sales users get their own stats
+			const [myLeads] = await db
+				.select({ count: count() })
+				.from(leads)
+				.where(
+					and(
+						eq(leads.assignedTo, context.userId),
+						gte(leads.createdAt, startOfMonth),
+						lt(leads.createdAt, endOfMonth),
+					),
+				);
+			const [myOpportunities] = await db
+				.select({ count: count() })
 				.from(opportunities)
-				.where(and(...conditions));
-
-			return {
-				placedCount: result?.placedCount || 0,
-				placedAmount: Number.parseFloat(result?.placedAmount ?? "0"),
-			};
-		};
-
-		if (context.userRole === "admin") {
-			const [totalLeads] = await db.select({ count: count() }).from(leads);
-			const [totalOpportunities] = await db
+				.where(
+					and(
+						eq(opportunities.assignedTo, context.userId),
+						gte(opportunities.createdAt, startOfMonth),
+						lt(opportunities.createdAt, endOfMonth),
+					),
+				);
+			const [myClients] = await db
 				.select({ count: count() })
-				.from(opportunities);
-			const [totalClients] = await db.select({ count: count() }).from(clients);
-			const placed = await getPlacedCreditsStats();
+				.from(clients)
+				.where(
+					and(
+						eq(clients.assignedTo, context.userId),
+						gte(clients.createdAt, startOfMonth),
+						lt(clients.createdAt, endOfMonth),
+					),
+				);
+			const placed = await getPlacedCreditsStats(context.userId);
 
 			return {
-				totalLeads: totalLeads?.count || 0,
-				totalOpportunities: totalOpportunities?.count || 0,
-				totalClients: totalClients?.count || 0,
+				myLeads: myLeads?.count || 0,
+				myOpportunities: myOpportunities?.count || 0,
+				myClients: myClients?.count || 0,
 				placedCount: placed.placedCount,
 				placedAmount: placed.placedAmount,
 			};
-		}
-
-		if (context.userRole === "sales_supervisor") {
-			const [totalLeads] = await db.select({ count: count() }).from(leads);
-			const [totalOpportunities] = await db
-				.select({ count: count() })
-				.from(opportunities);
-			const [totalClients] = await db.select({ count: count() }).from(clients);
-			const placed = await getPlacedCreditsStats();
-
-			return {
-				teamLeads: totalLeads?.count || 0,
-				teamOpportunities: totalOpportunities?.count || 0,
-				teamClients: totalClients?.count || 0,
-				placedCount: placed.placedCount,
-				placedAmount: placed.placedAmount,
-			};
-		}
-
-		// Sales users get their own stats
-		const [myLeads] = await db
-			.select({ count: count() })
-			.from(leads)
-			.where(eq(leads.assignedTo, context.userId));
-		const [myOpportunities] = await db
-			.select({ count: count() })
-			.from(opportunities)
-			.where(eq(opportunities.assignedTo, context.userId));
-		const [myClients] = await db
-			.select({ count: count() })
-			.from(clients)
-			.where(eq(clients.assignedTo, context.userId));
-		const placed = await getPlacedCreditsStats(context.userId);
-
-		return {
-			myLeads: myLeads?.count || 0,
-			myOpportunities: myOpportunities?.count || 0,
-			myClients: myClients?.count || 0,
-			placedCount: placed.placedCount,
-			placedAmount: placed.placedAmount,
-		};
-	}),
+		}),
 
 	// Document Management
 	getOpportunityDocuments: crmProcedure
@@ -5425,114 +5501,136 @@ export const crmRouter = {
 		}),
 
 	// Dashboard chart data — optimized aggregations for graphs
-	getDashboardChartData: crmProcedure.handler(async ({ context }) => {
-		const PLACED_STAGE_THRESHOLD = 90;
+	getDashboardChartData: crmProcedure
+		.input(
+			z.object({
+				month: z.number().min(1).max(12),
+				year: z.number(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const PLACED_STAGE_THRESHOLD = 90;
+			const startOfMonth = new Date(input.year, input.month - 1, 1);
+			const endOfMonth = new Date(input.year, input.month, 1);
 
-		// Only admin and sales_supervisor see global charts
-		const isGlobal =
-			context.userRole === "admin" || context.userRole === "sales_supervisor";
-		const userFilter = isGlobal ? undefined : context.userId;
+			// Only admin and sales_supervisor see global charts
+			const isGlobal =
+				context.userRole === "admin" ||
+				context.userRole === "sales_supervisor";
+			const userFilter = isGlobal ? undefined : context.userId;
 
-		// 1) Pipeline por Etapa: count + sum(value) grouped by stage
-		const pipelineRows = await db
-			.select({
-				stageId: salesStages.id,
-				stageName: salesStages.name,
-				stageColor: salesStages.color,
-				stageOrder: salesStages.order,
-				cantidad: count(),
-				valor: sql<string>`coalesce(sum(${opportunities.value}), 0)`,
-			})
-			.from(opportunities)
-			.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
-			.where(
-				and(
-					eq(opportunities.status, "open"),
-					userFilter ? eq(opportunities.assignedTo, userFilter) : undefined,
-				),
-			)
-			.groupBy(
-				salesStages.id,
-				salesStages.name,
-				salesStages.color,
-				salesStages.order,
-			)
-			.orderBy(salesStages.order);
+			// 1) Pipeline por Etapa: count + sum(value) grouped by stage
+			const pipelineRows = await db
+				.select({
+					stageId: salesStages.id,
+					stageName: salesStages.name,
+					stageColor: salesStages.color,
+					stageOrder: salesStages.order,
+					cantidad: count(),
+					valor: sql<string>`coalesce(sum(${opportunities.value}), 0)`,
+				})
+				.from(opportunities)
+				.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+				.where(
+					and(
+						eq(opportunities.status, "open"),
+						gte(opportunities.createdAt, startOfMonth),
+						lt(opportunities.createdAt, endOfMonth),
+						userFilter
+							? eq(opportunities.assignedTo, userFilter)
+							: undefined,
+					),
+				)
+				.groupBy(
+					salesStages.id,
+					salesStages.name,
+					salesStages.color,
+					salesStages.order,
+				)
+				.orderBy(salesStages.order);
 
-		const pipeline = pipelineRows.map((r) => ({
-			name: r.stageName,
-			cantidad: r.cantidad,
-			valor: Number.parseFloat(r.valor) || 0,
-			color: r.stageColor,
-		}));
+			const pipeline = pipelineRows.map((r) => ({
+				name: r.stageName,
+				cantidad: r.cantidad,
+				valor: Number.parseFloat(r.valor) || 0,
+				color: r.stageColor,
+			}));
 
-		// 2) Ranking vendedores por monto colocado (stage >= threshold)
-		const placedStages = await db
-			.select({ id: salesStages.id })
-			.from(salesStages)
-			.where(gte(salesStages.closurePercentage, PLACED_STAGE_THRESHOLD));
-		const placedStageIds = placedStages.map((s) => s.id);
+			// 2) Ranking vendedores por monto colocado (stage >= threshold)
+			const placedStages = await db
+				.select({ id: salesStages.id })
+				.from(salesStages)
+				.where(gte(salesStages.closurePercentage, PLACED_STAGE_THRESHOLD));
+			const placedStageIds = placedStages.map((s) => s.id);
 
-		let ranking: { name: string; monto: number }[] = [];
-		if (placedStageIds.length > 0) {
-			const rankingRows = await db
+			let ranking: { name: string; monto: number }[] = [];
+			if (placedStageIds.length > 0) {
+				const rankingRows = await db
+					.select({
+						userName: user.name,
+						monto: sql<string>`coalesce(sum(${opportunities.value}), 0)`,
+					})
+					.from(opportunities)
+					.innerJoin(user, eq(opportunities.assignedTo, user.id))
+					.where(
+						and(
+							inArray(opportunities.stageId, placedStageIds),
+							gte(opportunities.createdAt, startOfMonth),
+							lt(opportunities.createdAt, endOfMonth),
+							userFilter
+								? eq(opportunities.assignedTo, userFilter)
+								: undefined,
+						),
+					)
+					.groupBy(user.id, user.name)
+					.orderBy(desc(sql`sum(${opportunities.value})`));
+
+				ranking = rankingRows.map((r) => ({
+					name: r.userName || "Sin asignar",
+					monto: Number.parseFloat(r.monto) || 0,
+				}));
+			}
+
+			// 3) Actividad por vendedor: open vs cerradas (won + lost)
+			const activityRows = await db
 				.select({
 					userName: user.name,
-					monto: sql<string>`coalesce(sum(${opportunities.value}), 0)`,
+					status: opportunities.status,
+					cantidad: count(),
 				})
 				.from(opportunities)
 				.innerJoin(user, eq(opportunities.assignedTo, user.id))
 				.where(
 					and(
-						inArray(opportunities.stageId, placedStageIds),
-						userFilter ? eq(opportunities.assignedTo, userFilter) : undefined,
+						inArray(opportunities.status, ["open", "won", "lost"]),
+						gte(opportunities.createdAt, startOfMonth),
+						lt(opportunities.createdAt, endOfMonth),
+						userFilter
+							? eq(opportunities.assignedTo, userFilter)
+							: undefined,
 					),
 				)
-				.groupBy(user.id, user.name)
-				.orderBy(desc(sql`sum(${opportunities.value})`));
+				.groupBy(user.id, user.name, opportunities.status);
 
-			ranking = rankingRows.map((r) => ({
-				name: r.userName || "Sin asignar",
-				monto: Number.parseFloat(r.monto) || 0,
-			}));
-		}
+			const activityMap = new Map<
+				string,
+				{ name: string; abiertas: number; cerradas: number }
+			>();
+			for (const row of activityRows) {
+				const name = row.userName || "Sin asignar";
+				const curr = activityMap.get(name) || {
+					name,
+					abiertas: 0,
+					cerradas: 0,
+				};
+				if (row.status === "open") curr.abiertas += row.cantidad;
+				else curr.cerradas += row.cantidad;
+				activityMap.set(name, curr);
+			}
+			const activity = [...activityMap.values()].sort(
+				(a, b) => b.abiertas + b.cerradas - (a.abiertas + a.cerradas),
+			);
 
-		// 3) Actividad por vendedor: open vs cerradas (won + lost)
-		const activityRows = await db
-			.select({
-				userName: user.name,
-				status: opportunities.status,
-				cantidad: count(),
-			})
-			.from(opportunities)
-			.innerJoin(user, eq(opportunities.assignedTo, user.id))
-			.where(
-				and(
-					inArray(opportunities.status, ["open", "won", "lost"]),
-					userFilter ? eq(opportunities.assignedTo, userFilter) : undefined,
-				),
-			)
-			.groupBy(user.id, user.name, opportunities.status);
-
-		const activityMap = new Map<
-			string,
-			{ name: string; abiertas: number; cerradas: number }
-		>();
-		for (const row of activityRows) {
-			const name = row.userName || "Sin asignar";
-			const curr = activityMap.get(name) || {
-				name,
-				abiertas: 0,
-				cerradas: 0,
-			};
-			if (row.status === "open") curr.abiertas += row.cantidad;
-			else curr.cerradas += row.cantidad;
-			activityMap.set(name, curr);
-		}
-		const activity = [...activityMap.values()].sort(
-			(a, b) => b.abiertas + b.cerradas - (a.abiertas + a.cerradas),
-		);
-
-		return { pipeline, ranking, activity };
-	}),
+			return { pipeline, ranking, activity };
+		}),
 };

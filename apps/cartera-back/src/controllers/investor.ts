@@ -2095,31 +2095,35 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
             );
 
             if (sumaCapital > 0) {
-              // 1. Descontar capital en la tabla original
-              await db
-                .update(creditos_inversionistas)
-                .set({
-                  monto_aportado: sql`monto_aportado - ${sumaCapital}`,
-                })
-                .where(
-                  and(
-                    eq(creditos_inversionistas.inversionista_id, inv_id),
-                    eq(creditos_inversionistas.credito_id, credito.credito_id)
-                  )
-                );
+              const sumaSegura = Number(sumaCapital) || 0;
+              
+              await db.transaction(async (tx) => {
+                // 1. Descontar capital en la tabla original
+                await tx
+                  .update(creditos_inversionistas)
+                  .set({
+                    monto_aportado: sql`monto_aportado - ${sumaSegura}`,
+                  })
+                  .where(
+                    and(
+                      eq(creditos_inversionistas.inversionista_id, inv_id),
+                      eq(creditos_inversionistas.credito_id, credito.credito_id)
+                    )
+                  );
 
-              // 2. Descontar capital en la tabla espejo
-              await db
-                .update(creditos_inversionistas_espejo)
-                .set({
-                  monto_aportado: sql`monto_aportado - ${sumaCapital}`,
-                })
-                .where(
-                  and(
-                    eq(creditos_inversionistas_espejo.inversionista_id, inv_id),
-                    eq(creditos_inversionistas_espejo.credito_id, credito.credito_id)
-                  )
-                );
+                // 2. Descontar capital en la tabla espejo
+                await tx
+                  .update(creditos_inversionistas_espejo)
+                  .set({
+                    monto_aportado: sql`monto_aportado - ${sumaSegura}`,
+                  })
+                  .where(
+                    and(
+                      eq(creditos_inversionistas_espejo.inversionista_id, inv_id),
+                      eq(creditos_inversionistas_espejo.credito_id, credito.credito_id)
+                    )
+                  );
+              });
             }
           }
         }
@@ -2127,6 +2131,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
 
       let updateResult: any = { rowCount: 0 };
       if (pagosIds.length > 0) {
+        // NOTA: Por requerimiento del negocio, solo se liquida la tabla espejo, la original debe permanecer intacta en su estado.
         updateResult = await db
           .update(pagos_credito_inversionistas_espejo)
           .set({

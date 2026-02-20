@@ -1,5 +1,6 @@
 // app.ts (o donde declares tus rutas Elysia)
 import { z } from "zod";
+import { formatToUSD } from "../utils/functions/currencyConverter";
 import { db } from "../database/index";
 import {
   bancos,
@@ -363,6 +364,7 @@ export const insertInvestor = async ({ body, set }: any) => {
         if (inv.numero_cuenta?.trim())
           updateData.numero_cuenta = inv.numero_cuenta.trim();
         if (inv.dpi) updateData.dpi = inv.dpi;
+        if (inv.moneda?.trim()) updateData.moneda = inv.moneda.trim();
 
         const [updated] = await db
           .update(inversionistas)
@@ -392,6 +394,7 @@ export const insertInvestor = async ({ body, set }: any) => {
           banco_id: inv._banco_id || null,
           tipo_cuenta: inv.tipo_cuenta?.trim() || null,
           numero_cuenta: inv.numero_cuenta?.trim() || null,
+          moneda: inv.moneda?.trim() || "quetzales",
         };
 
         const [inserted] = await db
@@ -978,6 +981,7 @@ export async function resumeInvestor(
       tipo_cuenta: inversionistas.tipo_cuenta,
       numero_cuenta: inversionistas.numero_cuenta,
       dpi: inversionistas.dpi,
+      moneda: inversionistas.moneda,
    tiene_boleta_pendiente: sql<boolean>`
       EXISTS (
         SELECT 1 
@@ -1079,6 +1083,9 @@ export async function resumeInvestor(
         total_capital_creditos: new Big(0),
         total_capital_actual: new Big(0),
       };
+
+      const formatValue = (val: string | number | null | undefined) =>
+        inv.moneda === "dolares" ? formatToUSD(val) : Number(val || 0);
 
       // Procesar créditos del inversionista
       const creditosData = await Promise.all(
@@ -1222,18 +1229,18 @@ const mes = fechaParaMes
               return {
                 id: (pago as any).id,
                 mes, // 🔥 AHORA USA LA FECHA DE LA CUOTA
-                abono_capital: Number(abono_capital.toString()),
-                abono_interes: Number(abono_interes.toString()),
-                abono_iva: Number(abono_iva.toString()),
-                isr: inv.emite_factura ? 0 : Number(isr.toString()),
+                abono_capital: formatValue(abono_capital.toString()),
+                abono_interes: formatValue(abono_interes.toString()),
+                abono_iva: formatValue(abono_iva.toString()),
+                isr: inv.emite_factura ? 0 : formatValue(isr.toString()),
                 porcentaje_inversor: pago.porcentaje_participacion,
-                cuota_inversor: Number(cuota_inversor.toString()),
-                cuota: cuota,
+                cuota_inversor: formatValue(cuota_inversor.toString()),
+                cuota: formatValue(cuota),
                 fecha_pago: pago.fecha_pago,
                 fecha_vencimiento_cuota: pago.fecha_vencimiento_cuota, // 🔥 NUEVA
                 fecha_pago_efectivo_cuota: pago.fecha_pago_efectivo_cuota, // 🔥 NUEVA
-                cuota_inversionista: c.cuota_inversionista,
-                abonoGeneralInteres: Number(abonoGeneralInteres.toString()),
+                cuota_inversionista: formatValue(c.cuota_inversionista),
+                abonoGeneralInteres: formatValue(abonoGeneralInteres.toString()),
                 tasaInteresInvesor: Number(
                   new Big(credito?.porcentaje_interes ?? 0).mul(
                     pago.porcentaje_participacion
@@ -1269,22 +1276,22 @@ const mes = fechaParaMes
             numero_credito_sifco: credito?.numero_credito_sifco,
             nombre_usuario: credito?.nombre_usuario,
             nit_usuario: credito?.nit_usuario,
-            capital: credito?.capital,
-            capital_actual: Number(capital_actual.toString()),
+            capital: formatValue(credito?.capital),
+            capital_actual: formatValue(capital_actual.toString()),
             porcentaje_interes: credito?.porcentaje_interes,
-            cuota_interes: credito?.cuota_interes,
-            iva12: credito?.iva12,
+            cuota_interes: formatValue(credito?.cuota_interes),
+            iva12: formatValue(credito?.iva12),
             fecha_creacion: credito?.fecha_creacion,
-            monto_aportado: c.monto_aportado,
+            monto_aportado: formatValue(c.monto_aportado),
             porcentaje_inversionista: c.porcentaje_inversionista,
-            cuota_inversionista: c.cuota_inversionista,
+            cuota_inversionista: formatValue(c.cuota_inversionista),
             plazo: credito.plazo,
             pagos: pagos_detalle,
-            total_abono_capital: Number(total_abono_capital.toString()),
-            total_abono_interes: Number(total_abono_interes.toString()),
-            total_abono_iva: Number(total_abono_iva.toString()),
-            total_isr: Number(total_isr.toString()),
-            total_cuota: Number(total_cuota.toString()),
+            total_abono_capital: formatValue(total_abono_capital.toString()),
+            total_abono_interes: formatValue(total_abono_interes.toString()),
+            total_abono_iva: formatValue(total_abono_iva.toString()),
+            total_isr: formatValue(total_isr.toString()),
+            total_cuota: formatValue(total_cuota.toString()),
             meses_en_credito,
             origen: c.origen, // 🆕 NUEVO: Indica si viene de tabla original o espejo
           };
@@ -1303,25 +1310,19 @@ const mes = fechaParaMes
         re_inversion: inv.reinversion,
         tieneBoletaPendiente: inv.tiene_boleta_pendiente,
         dpi: inv.dpi,
+        moneda: inv.moneda,
+        currencySymbol: inv.moneda === "dolares" ? "$" : "Q.",
         creditos: creditosData,
         subtotal: {
-          total_abono_capital: Number(subtotal.total_abono_capital.toString()),
-          total_abono_interes: Number(subtotal.total_abono_interes.toString()),
-          total_abono_iva: Number(subtotal.total_abono_iva.toString()),
-          total_isr: Number(subtotal.total_isr.toString()),
-          total_cuota: Number(subtotal.total_cuota.toString()),
-          total_monto_aportado: Number(
-            subtotal.total_monto_aportado.toString()
-          ),
-          totalAbonoGeneralInteres: Number(
-            subtotal.totalAbonoGeneralInteres.toString()
-          ),
-          total_capital_creditos: Number(
-            subtotal.total_capital_creditos.toString()
-          ),
-          total_capital_actual: Number(
-            subtotal.total_capital_actual.toString()
-          ),
+          total_abono_capital: formatValue(subtotal.total_abono_capital.toString()),
+          total_abono_interes: formatValue(subtotal.total_abono_interes.toString()),
+          total_abono_iva: formatValue(subtotal.total_abono_iva.toString()),
+          total_isr: formatValue(subtotal.total_isr.toString()),
+          total_cuota: formatValue(subtotal.total_cuota.toString()),
+          total_monto_aportado: formatValue(subtotal.total_monto_aportado.toString()),
+          totalAbonoGeneralInteres: formatValue(subtotal.totalAbonoGeneralInteres.toString()),
+          total_capital_creditos: formatValue(subtotal.total_capital_creditos.toString()),
+          total_capital_actual: formatValue(subtotal.total_capital_actual.toString()),
         },
       };
     })
@@ -1377,6 +1378,7 @@ export async function getInvestorTotalsGlobales(
       inversionista: inversionistas.nombre,
       emite_factura: inversionistas.emite_factura,
       reinversion: inversionistas.tipo_reinversion,
+      moneda: inversionistas.moneda,
     })
     .from(inversionistas)
     .where(and(...queryConditions))
@@ -1401,10 +1403,14 @@ export async function getInvestorTotalsGlobales(
 
   let creditosIds = creditosParticipa.map((c) => c.credito_id);
 
+  const formatValue = (val: string | number) => inv.moneda === "dolares" ? formatToUSD(val) : Number(val);
+
   if (creditosIds.length === 0) {
     return {
       inversionista_id: inv.inversionista_id,
       nombre_inversionista: inv.inversionista,
+      moneda: inv.moneda,
+      currencySymbol: inv.moneda === "dolares" ? "$" : "Q.",
       totales: {
         total_abono_capital: 0,
         total_abono_interes: 0,
@@ -1438,6 +1444,8 @@ export async function getInvestorTotalsGlobales(
     return {
       inversionista_id: inv.inversionista_id,
       nombre_inversionista: inv.inversionista,
+      moneda: inv.moneda,
+      currencySymbol: inv.moneda === "dolares" ? "$" : "Q.",
       totales: {
         total_abono_capital: 0,
         total_abono_interes: 0,
@@ -1563,16 +1571,18 @@ export async function getInvestorTotalsGlobales(
   return {
     inversionista_id: inv.inversionista_id,
     nombre_inversionista: inv.inversionista,
+    moneda: inv.moneda,
+    currencySymbol: inv.moneda === "dolares" ? "$" : "Q.",
     totales: {
-      total_abono_capital: Number(subtotal.total_abono_capital.toString()),
-      total_abono_interes: Number(subtotal.total_abono_interes.toString()),
-      total_abono_iva: Number(subtotal.total_abono_iva.toString()),
-      total_isr: Number(subtotal.total_isr.toString()),
-      total_cuota: Number(subtotal.total_cuota.toString()),
-      total_monto_aportado: Number(subtotal.total_monto_aportado.toString()),
-      totalAbonoGeneralInteres: Number(subtotal.totalAbonoGeneralInteres.toString()),
-      total_capital_creditos: Number(subtotal.total_capital_creditos.toString()),
-      total_capital_actual: Number(subtotal.total_capital_actual.toString()),
+      total_abono_capital: formatValue(subtotal.total_abono_capital.toString()),
+      total_abono_interes: formatValue(subtotal.total_abono_interes.toString()),
+      total_abono_iva: formatValue(subtotal.total_abono_iva.toString()),
+      total_isr: formatValue(subtotal.total_isr.toString()),
+      total_cuota: formatValue(subtotal.total_cuota.toString()),
+      total_monto_aportado: formatValue(subtotal.total_monto_aportado.toString()),
+      totalAbonoGeneralInteres: formatValue(subtotal.totalAbonoGeneralInteres.toString()),
+      total_capital_creditos: formatValue(subtotal.total_capital_creditos.toString()),
+      total_capital_actual: formatValue(subtotal.total_capital_actual.toString()),
     },
   };
 }
@@ -1698,6 +1708,7 @@ export async function getInvestorMirrorSummary(
       tipo_cuenta:      inversionistas.tipo_cuenta,
       numero_cuenta:    inversionistas.numero_cuenta,
       dpi:              inversionistas.dpi,
+      moneda:           inversionistas.moneda,
     })
     .from(inversionistas)
     .where(and(...queryConditions))
@@ -1721,6 +1732,8 @@ export async function getInvestorMirrorSummary(
     new Big(0)
   );
 
+  const formatValue = (val: string | number) => inv.moneda === "dolares" ? formatToUSD(val) : Number(val);
+
   // Caso sin créditos espejo: devolver ceros con monto base
   if (creditosEspejo.length === 0) {
     return {
@@ -1732,16 +1745,18 @@ export async function getInvestorMirrorSummary(
       tipo_cuenta:      inv.tipo_cuenta,
       numero_cuenta:    inv.numero_cuenta,
       dpi:              inv.dpi,
+      moneda:           inv.moneda,
+      currencySymbol:   inv.moneda === "dolares" ? "$" : "Q.",
       subtotal: {
         total_abono_capital:      0,
         total_abono_interes:      0,
         total_abono_iva:          0,
         total_isr:                0,
         total_cuota:              0,
-        total_monto_aportado:     Number(totalMontoBase.toString()),
+        total_monto_aportado:     formatValue(totalMontoBase.toString()),
         totalAbonoGeneralInteres: 0,
-        total_capital_creditos:   Number(totalMontoBase.toString()),
-        total_capital_actual:     Number(totalMontoBase.toString()),
+        total_capital_creditos:   formatValue(totalMontoBase.toString()),
+        total_capital_actual:     formatValue(totalMontoBase.toString()),
       },
     };
   }
@@ -1858,19 +1873,22 @@ export async function getInvestorMirrorSummary(
     tipo_cuenta:      inv.tipo_cuenta,
     numero_cuenta:    inv.numero_cuenta,
     dpi:              inv.dpi,
+    moneda:           inv.moneda,
+    currencySymbol:   inv.moneda === "dolares" ? "$" : "Q.",
     subtotal: {
-      total_abono_capital:      Number(sg.total_abono_capital.toString()),
-      total_abono_interes:      Number(sg.total_abono_interes.toString()),
-      total_abono_iva:          Number(sg.total_abono_iva.toString()),
-      total_isr:                Number(sg.total_isr.toString()),
-      total_cuota:              Number(sg.total_cuota.toString()),
+      total_abono_capital:      formatValue(sg.total_abono_capital.toString()),
+      total_abono_interes:      formatValue(sg.total_abono_interes.toString()),
+      total_abono_iva:          formatValue(sg.total_abono_iva.toString()),
+      total_isr:                formatValue(sg.total_isr.toString()),
+      total_cuota:              formatValue(sg.total_cuota.toString()),
       /** Saldo actual: monto_aportado_base - SUM(abono_capital de pagos espejo) */
-      total_monto_aportado:     Number(sg.total_monto_aportado.toString()),
-      totalAbonoGeneralInteres: Number(sg.totalAbonoGeneralInteres.toString()),
+      total_monto_aportado:     formatValue(sg.total_monto_aportado.toString()),
+      totalAbonoGeneralInteres: formatValue(sg.totalAbonoGeneralInteres.toString()),
       /** Suma de monto_aportado_base de todos los créditos espejo */
-      total_capital_creditos:   Number(sg.total_capital_creditos.toString()),
+
+      total_capital_creditos:   formatValue(sg.total_capital_creditos.toString()),
       /** Igual a total_monto_aportado: saldo vivo calculado desde pagos */
-      total_capital_actual:     Number(sg.total_capital_actual.toString()),
+      total_capital_actual:     formatValue(sg.total_capital_actual.toString()),
     },
   };
 }
@@ -2721,6 +2739,7 @@ export const updateInvestor = async ({ body, set }: any) => {
         tipo_cuenta,
         numero_cuenta,
         dpi,
+        moneda,
       } = inv;
 
       // Construir dinámicamente solo los campos enviados
@@ -2737,6 +2756,7 @@ export const updateInvestor = async ({ body, set }: any) => {
       if (typeof numero_cuenta !== "undefined")
         updateData.numero_cuenta = numero_cuenta;
       if (typeof dpi !== "undefined") updateData.dpi = dpi;
+      if (typeof moneda !== "undefined") updateData.moneda = moneda;
 
       // Si no hay nada que actualizar, saltar
       if (Object.keys(updateData).length === 0) continue;

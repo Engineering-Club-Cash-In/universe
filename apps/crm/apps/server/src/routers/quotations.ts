@@ -27,7 +27,7 @@ function calculateMonthlyPayment(
 	const baseMonthlyPayment = (principal * (r * factor)) / (factor - 1);
 
 	// Agregar seguro y GPS a la cuota mensual
-	return baseMonthlyPayment + insuranceCost + gpsCost;
+	return Math.round((baseMonthlyPayment + insuranceCost + gpsCost) * 100) / 100;
 }
 
 /**
@@ -207,9 +207,12 @@ export const quotationsRouter = {
 					? input.royalty
 					: amountToFinance * (input.royaltyPercentage / 100);
 
-			// Costos que se financian (NO incluyen seguro ni GPS)
-			// La membresía ya está incluida en adminCost, no se debe agregar de nuevo
-			const financedCosts = input.transferCost + input.adminCost;
+			// En sobre vehículo: total financiado = monto solicitado directo
+			// (los gastos se descuentan del desembolso al cliente, no se suman al financiamiento)
+			// En autocompra: se suman los costos financiados al monto a financiar
+			const financedCosts = isSobreVehiculo
+				? 0
+				: input.transferCost + input.adminCost;
 
 			const totalFinanced = amountToFinance + financedCosts;
 

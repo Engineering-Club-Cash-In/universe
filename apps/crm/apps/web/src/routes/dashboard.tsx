@@ -5,6 +5,8 @@ import {
 	Banknote,
 	Building,
 	CheckCircle,
+	ChevronLeft,
+	ChevronRight,
 	ClipboardList,
 	DollarSign,
 	FileText,
@@ -16,7 +18,7 @@ import {
 	Trophy,
 	Users,
 } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
 	Bar,
 	BarChart,
@@ -28,6 +30,7 @@ import {
 	XAxis,
 	YAxis,
 } from "recharts";
+import { Button } from "@/components/ui/button";
 import {
 	Card,
 	CardContent,
@@ -43,10 +46,46 @@ export const Route = createFileRoute("/dashboard")({
 	component: RouteComponent,
 });
 
+const MONTH_NAMES = [
+	"Enero",
+	"Febrero",
+	"Marzo",
+	"Abril",
+	"Mayo",
+	"Junio",
+	"Julio",
+	"Agosto",
+	"Septiembre",
+	"Octubre",
+	"Noviembre",
+	"Diciembre",
+];
+
 function RouteComponent() {
 	const { data: session, isPending } = authClient.useSession();
 
 	const navigate = Route.useNavigate();
+
+	const [month, setMonth] = useState(() => new Date().getMonth() + 1);
+	const [year, setYear] = useState(() => new Date().getFullYear());
+
+	const goToPreviousMonth = () => {
+		if (month === 1) {
+			setMonth(12);
+			setYear((y) => y - 1);
+		} else {
+			setMonth((m) => m - 1);
+		}
+	};
+
+	const goToNextMonth = () => {
+		if (month === 12) {
+			setMonth(1);
+			setYear((y) => y + 1);
+		} else {
+			setMonth((m) => m + 1);
+		}
+	};
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 	const adminData = useQuery({
@@ -56,26 +95,20 @@ function RouteComponent() {
 
 	// CRM Dashboard Stats
 	const crmStats = useQuery({
-		...orpc.getDashboardStats.queryOptions(),
+		...orpc.getDashboardStats.queryOptions({ input: { month, year } }),
 		enabled:
 			!!userProfile.data?.role &&
 			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
 			!!session?.user?.id,
-		queryKey: ["getDashboardStats", session?.user?.id, userProfile.data?.role],
 	});
 
 	// Chart data for dashboard graphs
 	const chartData = useQuery({
-		...orpc.getDashboardChartData.queryOptions(),
+		...orpc.getDashboardChartData.queryOptions({ input: { month, year } }),
 		enabled:
 			!!userProfile.data?.role &&
 			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
 			!!session?.user?.id,
-		queryKey: [
-			"getDashboardChartData",
-			session?.user?.id,
-			userProfile.data?.role,
-		],
 	});
 
 	// Cobros Dashboard Stats
@@ -132,6 +165,21 @@ function RouteComponent() {
 					Rol: {getRoleLabel(userRole || "")}
 				</div>
 			</div>
+
+			{/* Month Selector */}
+			{userRole && PERMISSIONS.canAccessCRM(userRole) && (
+				<div className="flex items-center gap-2">
+					<Button variant="outline" size="icon" onClick={goToPreviousMonth}>
+						<ChevronLeft className="h-4 w-4" />
+					</Button>
+					<span className="min-w-[160px] text-center font-medium text-sm">
+						{MONTH_NAMES[month - 1]} {year}
+					</span>
+					<Button variant="outline" size="icon" onClick={goToNextMonth}>
+						<ChevronRight className="h-4 w-4" />
+					</Button>
+				</div>
+			)}
 
 			{/* CRM Metrics */}
 			{userRole === ROLES.ADMIN && crmStats.data && (

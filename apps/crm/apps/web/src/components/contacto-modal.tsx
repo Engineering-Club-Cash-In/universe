@@ -31,6 +31,7 @@ interface ContactoModalProps {
 	casoCobroId: string;
 	clienteNombre: string;
 	telefonoPrincipal: string;
+	emailCliente?: string;
 	metodoInicial: "llamada" | "whatsapp" | "email";
 	children: React.ReactNode;
 }
@@ -39,6 +40,7 @@ export function ContactoModal({
 	casoCobroId,
 	clienteNombre,
 	telefonoPrincipal,
+	emailCliente,
 	metodoInicial,
 	children,
 }: ContactoModalProps) {
@@ -106,8 +108,7 @@ export function ContactoModal({
 				);
 				break;
 			case "email":
-				// El email se obtendría del caso, por ahora placeholder
-				window.open("mailto:cliente@email.com");
+				window.open(`mailto:${emailCliente || ""}`);
 				break;
 		}
 	};

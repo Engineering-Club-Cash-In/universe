@@ -124,14 +124,14 @@ export function TableInvestors() {
       const changed = changes[id] || {}; 
 
       const currentInteres = Number(changed.abono_interes ?? original.abono_interes);
-      const calculatedIva = inversionista.emite_factura ? (currentInteres * 0.12).toFixed(2) : "0.00";
 
       return {
         id,
         // Convertir a STRING para el backend, y usar los nombres correctos 
         abono_capital:            String(changed.abono_capital            ?? original.abono_capital),
         abono_interes:            String(currentInteres),
-        abono_iva_12:             String(calculatedIva),
+        // Ya no calculamos IVA localmente, enviamos lo original, backend recalcula
+        abono_iva_12:             original.abono_iva_12 ?? "0.00",
         porcentaje_participacion: String(changed.porcentaje_participacion ?? original.porcentaje_inversor),
         cuota:                    String(changed.cuota                    ?? original.cuota),
       };

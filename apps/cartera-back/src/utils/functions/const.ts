@@ -318,3 +318,5 @@ export function getInversionistaFacturadorConfig(nombreInversionista: string) {
 
   return null;
 }
+
+export const USD_EXCHANGE_RATE = process.env.USD_EXCHANGE_RATE ? Number(process.env.USD_EXCHANGE_RATE) : 8.9;

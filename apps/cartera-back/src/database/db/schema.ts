@@ -544,6 +544,8 @@
       "reinversion_total"
     ]);
 
+  export const tipoMonedaEnum = customSchema.enum("tipo_moneda", ["quetzales", "dolares"]);
+
 
   export const inversionistas = customSchema.table("inversionistas", {
     inversionista_id: serial("inversionista_id").primaryKey(),
@@ -558,6 +560,7 @@
     banco_id: integer("banco_id").references(() => bancos.banco_id),
     tipo_cuenta: tipoCuentaEnum("tipo_cuenta"),
     numero_cuenta: varchar("numero_cuenta", { length: 100 }),
+    moneda: tipoMonedaEnum("moneda").notNull().default("quetzales"),
   });
   export const asesores = customSchema.table("asesores", {
     asesor_id: serial("asesor_id").primaryKey(),

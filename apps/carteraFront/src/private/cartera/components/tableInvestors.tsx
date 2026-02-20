@@ -12,6 +12,7 @@ import {
   Loader2,
   MoreVertical,
   RefreshCw,
+  Search,
   Trash2,
   Upload,
 
@@ -50,11 +51,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Combobox, Transition } from "@headlessui/react";
+import { Input } from "@/components/ui/input";
 import { Fragment, useState, useEffect, useMemo } from "react";
 import { ConfirmationModal } from "@/components/ui/confirmation-modal";
 import { CrearBoletaInversionista } from "./investorPayment";
 
 const PER_PAGE_OPTIONS = [5, 10, 20, 50, 100, 200, 500];
+
+const MOBILE_MAX_HEIGHT = "max-h-[50vh]";
+const DESKTOP_MAX_HEIGHT = "max-h-[60vh]";
 
 
 
@@ -69,6 +74,9 @@ export function TableInvestors() {
   // Estado Draft: cuando está activo, se muestran subtotales del mirror summary
   const [isDraft, setIsDraft] = useState(false);
   const [draftInvestorId, setDraftInvestorId] = useState<number | null>(null);
+
+  // 🆕 Estado para el buscador interno de créditos asociados
+  const [creditSearchQuery, setCreditSearchQuery] = useState<Record<number, string>>({});
 
   // 🆕 Modal Revertir Pagos
   const [showRevertirModal, setShowRevertirModal] = useState(false);
@@ -115,12 +123,15 @@ export function TableInvestors() {
       const id = original.id; 
       const changed = changes[id] || {}; 
 
+      const currentInteres = Number(changed.abono_interes ?? original.abono_interes);
+
       return {
         id,
         // Convertir a STRING para el backend, y usar los nombres correctos 
         abono_capital:            String(changed.abono_capital            ?? original.abono_capital),
-        abono_interes:            String(changed.abono_interes            ?? original.abono_interes),
-        abono_iva_12:             String(changed.abono_iva_12             ?? original.abono_iva),
+        abono_interes:            String(currentInteres),
+        // Ya no calculamos IVA localmente, enviamos lo original, backend recalcula
+        abono_iva_12:             original.abono_iva_12 ?? "0.00",
         porcentaje_participacion: String(changed.porcentaje_participacion ?? original.porcentaje_inversor),
         cuota:                    String(changed.cuota                    ?? original.cuota),
       };
@@ -408,6 +419,7 @@ export function TableInvestors() {
       tipo_cuenta: inv.tipo_cuenta ?? "",
       numero_cuenta: inv.numero_cuenta ?? "",
       re_inversion: inv.re_inversion ?? "sin_reinversion",
+      moneda: inv.moneda ?? "quetzales",
       dpi: inv.dpi ?? "",
     });
     setModalOpen(true);
@@ -717,25 +729,6 @@ const handleAbrirModalBoleta = (inversionista?: { id: number; nombre: string; dp
               <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
             </div>
           </div>
-          <button
-            onClick={() => setShowLiquidarTodosModal(true)}
-            disabled={liquidateMutation.isPending}
-            className="px-4 py-2 rounded-lg bg-red-600 text-white font-bold hover:bg-red-700 active:scale-95 transition-all flex items-center gap-2 justify-center shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {liquidateMutation.isPending ? (
-              <>
-                <Loader2 className="w-5 h-5 animate-spin" />
-                <span className="hidden sm:inline">Liquidando TODO...</span>
-                <span className="sm:hidden">Liquidando...</span>
-              </>
-            ) : (
-              <>
-                <CheckCircle className="w-5 h-5" />
-                <span className="hidden sm:inline">Liquidar TODOS</span>
-                <span className="sm:hidden">Liquidar</span>
-              </>
-            )}
-          </button>
         </div>
       </div>
       <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
@@ -904,8 +897,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   Total Capital
                 </div>
                 <div className={`font-bold ${isDraft ? "text-yellow-700" : "text-blue-700"}`}>
-                  Q
-                  {Number(subtotales.total_abono_capital).toLocaleString("es-GT", {
+                  {inv.currencySymbol} {Number(subtotales.total_abono_capital).toLocaleString("es-GT", {
                     minimumFractionDigits: 2,
                   })}
                 </div>
@@ -916,8 +908,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   Total Interés
                 </div>
                 <div className={`font-bold ${isDraft ? "text-yellow-700" : "text-indigo-700"}`}>
-                  Q
-                  {Number(subtotales.total_abono_interes).toLocaleString("es-GT", {
+                  {inv.currencySymbol} {Number(subtotales.total_abono_interes).toLocaleString("es-GT", {
                     minimumFractionDigits: 2,
                   })}
                 </div>
@@ -928,9 +919,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   IVA + ISR
                 </div>
                 <div className={`font-bold ${isDraft ? "text-yellow-700" : "text-violet-700"}`}>
-                  Q
-                  {(
-                    Number(subtotales.total_abono_iva) +
+                  {inv.currencySymbol} {(Number(subtotales.total_abono_iva) +
                     Number(subtotales.total_isr)
                   ).toLocaleString("es-GT", {
                     minimumFractionDigits: 2,
@@ -943,8 +932,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   💰 Total Cuota
                 </div>
                 <div className={`font-bold text-lg ${isDraft ? "text-yellow-900" : "text-green-900"}`}>
-                  Q
-                  {Number(subtotales.total_cuota).toLocaleString("es-GT", {
+                  {inv.currencySymbol} {Number(subtotales.total_cuota).toLocaleString("es-GT", {
                     minimumFractionDigits: 2,
                   })}
                 </div>
@@ -955,8 +943,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   Total Monto Aportado
                 </div>
                 <div className={`font-bold text-lg ${isDraft ? "text-yellow-900" : "text-purple-900"}`}>
-                  Q
-                  {Number(subtotales.total_monto_aportado).toLocaleString("es-GT", {
+                  {inv.currencySymbol} {Number(subtotales.total_monto_aportado).toLocaleString("es-GT", {
                     minimumFractionDigits: 2,
                   })}
                 </div>
@@ -1136,22 +1123,42 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
       {/* COLLAPSE - Créditos */}
       {expandedRow === idx && (
         <div className="p-6 bg-white border-t-2 border-blue-100">
-          <div className="mb-4">
+          <div className="mb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <h4 className="text-lg font-bold text-blue-900 flex items-center gap-2">
               <span className="text-2xl">💼</span>
               Créditos Asociados
             </h4>
+            
+            <div className="relative w-full sm:w-72">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <Input
+                placeholder="Buscar cliente o NIT..."
+                value={creditSearchQuery[inv.inversionista_id] || ""}
+                onChange={(e) => 
+                  setCreditSearchQuery(prev => ({ ...prev, [inv.inversionista_id]: e.target.value }))
+                }
+                className="pl-9 bg-gradient-to-r from-blue-50 to-white border-blue-200 focus-visible:ring-blue-400 rounded-full h-10 shadow-sm transition-all text-gray-900 placeholder:text-gray-400 font-medium"
+              />
+            </div>
           </div>
 
-          {(inv.creditos ?? []).length === 0 ? (
-            <div className="text-center py-12 text-gray-500">
-              <p className="text-lg">
-                Este inversionista no tiene créditos asociados.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {inv.creditos.map((cred) => (
+          {(() => {
+            const query = (creditSearchQuery[inv.inversionista_id] || "").toLowerCase();
+            const filteredCreditos = (inv.creditos ?? []).filter(cred => 
+              cred.nombre_usuario?.toLowerCase().includes(query) ||
+              cred.nit_usuario?.toLowerCase().includes(query)
+            );
+
+            return filteredCreditos.length === 0 ? (
+              <div className="text-center py-12 text-gray-500 bg-blue-50/50 rounded-xl border border-dashed border-blue-200">
+                <p className="text-lg flex flex-col items-center justify-center gap-2">
+                  <span className="text-3xl">🔍</span>
+                  {query ? "No se encontraron créditos con esa búsqueda." : "Este inversionista no tiene créditos asociados."}
+                </p>
+              </div>
+            ) : (
+              <div className={`space-y-4 ${DESKTOP_MAX_HEIGHT} overflow-y-auto pl-1 pr-2 custom-scrollbar`}>
+                {filteredCreditos.map((cred) => (
                 <div
                   key={cred.credito_id}
                   className="border-2 border-blue-200 rounded-xl bg-gradient-to-br from-blue-50 to-white overflow-hidden"
@@ -1206,7 +1213,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                               Capital Aportado
                             </div>
                             <div className="font-semibold text-green-700 text-sm">
-                              Q
+                              {inv.currencySymbol}
                               {Number(
                                 cred.monto_aportado
                               ).toLocaleString("es-GT", {
@@ -1227,7 +1234,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                               Total a Recibir
                             </div>
                             <div className="font-bold text-green-700 text-sm">
-                              Q
+                              {inv.currencySymbol}
                               {Number(
                                 cred.total_cuota
                               ).toLocaleString("es-GT", {
@@ -1290,15 +1297,18 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                   <div className="bg-white rounded-lg p-2 border border-blue-200">
                                     <div className="text-xs text-blue-700">💵 Abono Capital</div>
                                     {isDraft ? (
-                                      <input
-                                        type="number"
-                                        className="w-full text-right bg-white border border-blue-300 rounded px-1 text-sm font-bold text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500 mt-1"
-                                        value={changes[pago.id]?.abono_capital ?? pago.abono_capital}
-                                        onChange={(e) => handleInputChange(pago.id, 'abono_capital', e.target.value)}
-                                      />
+                                      <div className="flex items-center mt-1">
+                                        <span className="text-blue-900 font-bold text-sm mr-1">{inv.currencySymbol}</span>
+                                        <input
+                                          type="number"
+                                          className="w-full text-right bg-white border border-blue-300 rounded px-1 text-sm font-bold text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                          value={changes[pago.id]?.abono_capital ?? pago.abono_capital}
+                                          onChange={(e) => handleInputChange(pago.id, 'abono_capital', e.target.value)}
+                                        />
+                                      </div>
                                     ) : (
                                       <div className="font-bold text-blue-900 text-sm">
-                                        Q{Number(pago.abono_capital).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                        {inv.currencySymbol} {Number(pago.abono_capital).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                                       </div>
                                     )}
                                   </div>
@@ -1307,15 +1317,18 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                   <div className="bg-white rounded-lg p-2 border border-violet-200">
                                     <div className="text-xs text-violet-700">💰 Cuota Inversor</div>
                                     {isDraft ? (
-                                      <input
-                                        type="number"
-                                        className="w-full text-right bg-white border border-violet-300 rounded px-1 text-sm font-bold text-violet-900 focus:outline-none focus:ring-2 focus:ring-violet-500 mt-1"
-                                        value={changes[pago.id]?.abono_interes ?? pago.abono_interes}
-                                        onChange={(e) => handleInputChange(pago.id, 'abono_interes', e.target.value)}
-                                      />
+                                      <div className="flex items-center mt-1">
+                                        <span className="text-violet-900 font-bold text-sm mr-1">{inv.currencySymbol}</span>
+                                        <input
+                                          type="number"
+                                          className="w-full text-right bg-white border border-violet-300 rounded px-1 text-sm font-bold text-violet-900 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                                          value={changes[pago.id]?.abono_interes ?? pago.abono_interes}
+                                          onChange={(e) => handleInputChange(pago.id, 'abono_interes', e.target.value)}
+                                        />
+                                      </div>
                                     ) : (
                                       <div className="font-bold text-violet-900 text-sm">
-                                        Q{Number(pago.abono_interes).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                        {inv.currencySymbol} {Number(pago.abono_interes).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                                       </div>
                                     )}
                                   </div>
@@ -1324,15 +1337,14 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                   <div className="bg-white rounded-lg p-2 border border-green-200">
                                     <div className="text-xs text-green-700">📈 IVA</div>
                                     {isDraft ? (
-                                      <input
-                                        type="number"
-                                        className="w-full text-right bg-white border border-green-300 rounded px-1 text-sm font-bold text-green-900 focus:outline-none focus:ring-2 focus:ring-green-500 mt-1"
-                                        value={changes[pago.id]?.abono_iva_12 ?? pago.abono_iva}
-                                        onChange={(e) => handleInputChange(pago.id, 'abono_iva_12', e.target.value)}
-                                      />
+                                      <div className="w-full text-right bg-green-50 rounded px-1 text-sm font-bold text-green-700 mt-1 h-7 flex items-center justify-end">
+                                        {inv.currencySymbol} {inv.emite_factura
+                                          ? (Number(changes[pago.id]?.abono_interes ?? pago.abono_interes) * 0.12).toFixed(2)
+                                          : "0.00"}
+                                      </div>
                                     ) : (
                                       <div className="font-bold text-green-900 text-sm">
-                                        Q{Number(pago.abono_iva).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                        {inv.currencySymbol} {Number(pago.abono_iva).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                                       </div>
                                     )}
                                   </div>
@@ -1340,9 +1352,17 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                   {/* 📉 ISR */}
                                   <div className="bg-white rounded-lg p-2 border border-yellow-200">
                                     <div className="text-xs text-yellow-700">📉 ISR</div>
-                                    <div className="font-bold text-yellow-900 text-sm">
-                                      Q{Number(pago.isr).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
-                                    </div>
+                                    {isDraft ? (
+                                      <div className="w-full text-right bg-yellow-50 rounded px-1 text-sm font-bold text-yellow-700 mt-1 h-7 flex items-center justify-end">
+                                        {inv.currencySymbol} {!inv.emite_factura
+                                          ? (Number(changes[pago.id]?.abono_interes ?? pago.abono_interes) * 0.07).toFixed(2)
+                                          : "0.00"}
+                                      </div>
+                                    ) : (
+                                      <div className="font-bold text-yellow-900 text-sm">
+                                        {inv.currencySymbol} {Number(pago.isr).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
 
@@ -1367,8 +1387,9 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   )}
                 </div>
               ))}
-            </div>
-          )}
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>
@@ -1452,31 +1473,31 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
         <div>
           <span className="font-bold text-blue-900">Total Capital: </span>
           <span className="text-blue-800 font-bold">
-            Q{Number(totalesData?.totales.total_abono_capital ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+            {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_abono_capital ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
           </span>
         </div>
         <div>
           <span className="font-bold text-blue-900">Total Interés: </span>
           <span className="text-indigo-700 font-bold">
-            Q{Number(totalesData?.totales.total_abono_interes ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+            {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_abono_interes ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
           </span>
         </div>
         <div>
           <span className="font-bold text-blue-900">IVA + ISR: </span>
           <span className="text-violet-700 font-bold">
-            Q{(Number(totalesData?.totales.total_abono_iva ?? 0) + Number(totalesData?.totales.total_isr ?? 0)).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+            {totalesData?.currencySymbol ?? 'Q.'} {(Number(totalesData?.totales.total_abono_iva ?? 0) + Number(totalesData?.totales.total_isr ?? 0)).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
           </span>
         </div>
         <div>
           <span className="font-bold text-blue-900">Total Cuota: </span>
           <span className="text-green-700 font-bold">
-            Q{Number(totalesData?.totales.total_cuota ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+            {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_cuota ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
           </span>
         </div>
         <div>
           <span className="font-bold text-blue-900">Total Monto Aportado: </span>
           <span className="text-purple-700 font-bold">
-            Q{Number(totalesData?.totales.total_monto_aportado ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+            {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_monto_aportado ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
           </span>
         </div>
         <div>
@@ -1601,19 +1622,45 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
       {/* COLLAPSE: Créditos Asociados - SIN CAMBIOS */}
       {expandedRow === idx && (
         <div className="mt-2">
-          <div className="font-bold text-blue-900 mb-2">
-            Créditos asociados:
-          </div>
-          {(inv.creditos ?? []).length === 0 ? (
-            <div className="text-gray-500 text-center py-4">
-              Este inversionista no tiene créditos asociados.
+          <div className="flex flex-col gap-3 mb-3 mt-4">
+            <div className="font-bold text-blue-900 flex items-center gap-2">
+              <span className="text-xl">💼</span>
+              Créditos asociados:
             </div>
-          ) : (
-            inv.creditos.map((cred) => (
-              <div
-                key={cred.credito_id}
-                className="mb-4 border-2 border-blue-200 rounded-xl p-4 bg-gradient-to-br from-blue-50 to-indigo-50 shadow-sm"
-              >
+            <div className="relative w-full">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <Input
+                placeholder="Buscar cliente o NIT..."
+                value={creditSearchQuery[inv.inversionista_id] || ""}
+                onChange={(e) => 
+                  setCreditSearchQuery(prev => ({ ...prev, [inv.inversionista_id]: e.target.value }))
+                }
+                className="pl-9 bg-gradient-to-r from-blue-50 to-white border-blue-200 focus-visible:ring-blue-400 rounded-full h-10 shadow-sm transition-all text-sm w-full text-gray-900 placeholder:text-gray-400 font-medium"
+              />
+            </div>
+          </div>
+
+          {(() => {
+            const query = (creditSearchQuery[inv.inversionista_id] || "").toLowerCase();
+            const filteredCreditos = (inv.creditos ?? []).filter(cred => 
+              cred.nombre_usuario?.toLowerCase().includes(query) ||
+              cred.nit_usuario?.toLowerCase().includes(query)
+            );
+
+            return filteredCreditos.length === 0 ? (
+              <div className="text-gray-500 text-center py-8 bg-blue-50/50 rounded-xl border border-dashed border-blue-200">
+                <p className="flex flex-col items-center justify-center gap-2 text-sm">
+                  <span className="text-2xl">🔍</span>
+                  {query ? "No hay resultados." : "El inversionista no tiene créditos."}
+                </p>
+              </div>
+            ) : (
+              <div className={`space-y-4 ${MOBILE_MAX_HEIGHT} overflow-y-auto pl-1 pr-2 custom-scrollbar`}>
+                {filteredCreditos.map((cred) => (
+                <div
+                  key={cred.credito_id}
+                  className="mb-4 border-2 border-blue-200 rounded-xl p-4 bg-gradient-to-br from-blue-50 to-indigo-50 shadow-sm"
+                >
                 {/* ... resto del código de créditos sin cambios ... */}
                 <button
                   className="w-full flex justify-between items-center mb-3"
@@ -1656,7 +1703,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-3 shadow-sm border border-green-200">
                     <div className="text-xs text-green-700 mb-1">💰 Capital Aportado</div>
                     <div className="font-bold text-green-900 text-sm">
-                      Q{Number(cred.monto_aportado).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      {inv.currencySymbol} {Number(cred.monto_aportado).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                     </div>
                   </div>
                   <div className="bg-gradient-to-br from-purple-50 to-violet-50 rounded-lg p-3 shadow-sm border border-purple-200">
@@ -1668,13 +1715,13 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   <div className="bg-gradient-to-br from-blue-50 to-cyan-50 rounded-lg p-3 shadow-sm border border-blue-200">
                     <div className="text-xs text-blue-700 mb-1">🏦 Capital Crédito</div>
                     <div className="font-bold text-blue-900 text-sm">
-                      Q{Number(cred.capital).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      {inv.currencySymbol} {Number(cred.capital).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                     </div>
                   </div>
                   <div className="bg-gradient-to-br from-yellow-50 to-amber-50 rounded-lg p-3 shadow-sm border border-yellow-300">
                     <div className="text-xs text-yellow-700 mb-1">✨ Total a Recibir</div>
                     <div className="font-bold text-yellow-900 text-sm">
-                      Q{Number(cred.total_cuota).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      {inv.currencySymbol} {Number(cred.total_cuota).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                     </div>
                   </div>
                 </div>
@@ -1684,25 +1731,25 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   <div className="bg-white rounded-lg p-2 shadow-sm border border-gray-200">
                     <div className="text-xs text-gray-600">Abono Capital</div>
                     <div className="font-semibold text-blue-900 text-xs">
-                      Q{Number(cred.total_abono_capital).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      {inv.currencySymbol} {Number(cred.total_abono_capital).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                     </div>
                   </div>
                   <div className="bg-white rounded-lg p-2 shadow-sm border border-gray-200">
                     <div className="text-xs text-gray-600">Abono Interés</div>
                     <div className="font-semibold text-blue-900 text-xs">
-                      Q{Number(cred.total_abono_interes).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      {inv.currencySymbol} {Number(cred.total_abono_interes).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                     </div>
                   </div>
                   <div className="bg-white rounded-lg p-2 shadow-sm border border-gray-200">
                     <div className="text-xs text-gray-600">IVA</div>
                     <div className="font-semibold text-blue-900 text-xs">
-                      Q{Number(cred.total_abono_iva).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      {inv.currencySymbol} {Number(cred.total_abono_iva).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                     </div>
                   </div>
                   <div className="bg-white rounded-lg p-2 shadow-sm border border-gray-200">
                     <div className="text-xs text-gray-600">ISR</div>
                     <div className="font-semibold text-blue-900 text-xs">
-                      Q{Number(cred.total_isr).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      {inv.currencySymbol} {Number(cred.total_isr).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                     </div>
                   </div>
                 </div>
@@ -1748,15 +1795,18 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                               <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-2 border border-blue-200">
                                 <div className="text-xs text-blue-700">💵 Abono Capital</div>
                                 {isDraft ? (
-                                  <input
-                                    type="number"
-                                    className="w-full text-right bg-white border border-blue-300 rounded px-1 text-sm font-bold text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500 mt-1"
-                                    value={changes[pago.id]?.abono_capital ?? pago.abono_capital}
-                                    onChange={(e) => handleInputChange(pago.id, 'abono_capital', e.target.value)}
-                                  />
+                                  <div className="flex items-center mt-1">
+                                    <span className="text-blue-900 font-bold text-sm mr-1">{inv.currencySymbol}</span>
+                                    <input
+                                      type="number"
+                                      className="w-full text-right bg-white border border-blue-300 rounded px-1 text-sm font-bold text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                      value={changes[pago.id]?.abono_capital ?? pago.abono_capital}
+                                      onChange={(e) => handleInputChange(pago.id, 'abono_capital', e.target.value)}
+                                    />
+                                  </div>
                                 ) : (
                                   <div className="font-bold text-blue-900 text-sm">
-                                    Q{Number(pago.abono_capital).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                    {inv.currencySymbol} {Number(pago.abono_capital).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                                   </div>
                                 )}
                               </div>
@@ -1765,15 +1815,18 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                               <div className="bg-gradient-to-br from-violet-50 to-violet-100 rounded-lg p-2 border border-violet-200">
                                 <div className="text-xs text-violet-700">💰 Cuota Inversor</div>
                                 {isDraft ? (
-                                  <input
-                                    type="number"
-                                    className="w-full text-right bg-white border border-violet-300 rounded px-1 text-sm font-bold text-violet-900 focus:outline-none focus:ring-2 focus:ring-violet-500 mt-1"
-                                    value={changes[pago.id]?.abono_interes ?? pago.abono_interes}
-                                    onChange={(e) => handleInputChange(pago.id, 'abono_interes', e.target.value)}
-                                  />
+                                  <div className="flex items-center mt-1">
+                                    <span className="text-violet-900 font-bold text-sm mr-1">{inv.currencySymbol}</span>
+                                    <input
+                                      type="number"
+                                      className="w-full text-right bg-white border border-violet-300 rounded px-1 text-sm font-bold text-violet-900 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                                      value={changes[pago.id]?.abono_interes ?? pago.abono_interes}
+                                      onChange={(e) => handleInputChange(pago.id, 'abono_interes', e.target.value)}
+                                    />
+                                  </div>
                                 ) : (
                                   <div className="font-bold text-violet-900 text-sm">
-                                    Q{Number(pago.abono_interes).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                    {inv.currencySymbol} {Number(pago.abono_interes).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                                   </div>
                                 )}
                               </div>
@@ -1782,15 +1835,18 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                               <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-2 border border-green-200">
                                 <div className="text-xs text-green-700">📈 IVA</div>
                                 {isDraft ? (
-                                  <input
-                                    type="number"
-                                    className="w-full text-right bg-white border border-green-300 rounded px-1 text-sm font-bold text-green-900 focus:outline-none focus:ring-2 focus:ring-green-500 mt-1"
-                                    value={changes[pago.id]?.abono_iva_12 ?? pago.abono_iva}
-                                    onChange={(e) => handleInputChange(pago.id, 'abono_iva_12', e.target.value)}
-                                  />
+                                  <div className="flex items-center mt-1">
+                                    <span className="text-green-900 font-bold text-sm mr-1">{inv.currencySymbol}</span>
+                                    <input
+                                      type="number"
+                                      className="w-full text-right bg-white border border-green-300 rounded px-1 text-sm font-bold text-green-900 focus:outline-none focus:ring-2 focus:ring-green-500"
+                                      value={changes[pago.id]?.abono_iva_12 ?? pago.abono_iva}
+                                      onChange={(e) => handleInputChange(pago.id, 'abono_iva_12', e.target.value)}
+                                    />
+                                  </div>
                                 ) : (
                                   <div className="font-bold text-green-900 text-sm">
-                                    Q{Number(pago.abono_iva).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                    {inv.currencySymbol} {Number(pago.abono_iva).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                                   </div>
                                 )}
                               </div>
@@ -1799,14 +1855,14 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                               <div className="bg-gradient-to-br from-yellow-50 to-yellow-100 rounded-lg p-2 border border-yellow-200">
                                 <div className="text-xs text-yellow-700">📉 ISR (Calc)</div>
                                 <div className="font-bold text-yellow-900 text-sm">
-                                  Q{Number(pago.isr).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                  {inv.currencySymbol} {Number(pago.isr).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                                 </div>
                               </div>
 
                               <div className="col-span-2 bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-lg p-2 border border-indigo-300">
                                 <div className="text-xs text-indigo-700">💎 Total Inversor</div>
                                 <div className="font-bold text-indigo-900 text-base">
-                                  Q{Number(pago.abonoGeneralInteres).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                  {inv.currencySymbol} {Number(pago.abonoGeneralInteres).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                                 </div>
                               </div>
                             </div>
@@ -1835,8 +1891,10 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   </div>
                 )}
               </div>
-            ))
-          )}
+            ))}
+            </div>
+            );
+          })()}
         </div>
       )}
     </div>

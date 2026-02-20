@@ -812,7 +812,7 @@ export const legalContractsRouter = {
 			}
 
 			// Close the opportunity (create credit, client, contract)
-			/*const closeResult = await closeOpportunity({
+			const closeResult = await closeOpportunity({
 				opportunityId: input.opportunityId,
 				userId: context.userId,
 			});
@@ -821,7 +821,7 @@ export const legalContractsRouter = {
 				throw new ORPCError("BAD_REQUEST", {
 					message: closeResult.error || "Error al cerrar la oportunidad",
 				});
-			}*/
+			}
 
 			// Obtener la etapa del 85%
 			const [targetStage] = await db

@@ -313,6 +313,7 @@
       iva_inversionista: numeric("iva_inversionista", { precision: 18, scale: 2 }).notNull().default("0"),
       iva_cash_in: numeric("iva_cash_in", { precision: 18 }).notNull().default("0"),
       fecha_creacion: timestamp("fecha_creacion", { withTimezone: true }).notNull().$default(() => new Date()),
+      fecha_inicio_participacion: date("fecha_inicio_participacion").notNull().default("2025-12-01"),
       monto_inversionista: numeric("monto_inversionista", { precision: 18, scale: 2 }).notNull().default("0"),
       monto_cash_in: numeric("monto_cash_in", { precision: 18, scale: 2 }).notNull(),
     },
@@ -335,6 +336,7 @@
       iva_inversionista: numeric("iva_inversionista", { precision: 18, scale: 2 }).notNull().default("0"),
       iva_cash_in: numeric("iva_cash_in", { precision: 18, scale: 2 }).notNull().default("0"),
       fecha_creacion: timestamp("fecha_creacion", { withTimezone: true }).notNull().$default(() => new Date()),
+      fecha_inicio_participacion: date("fecha_inicio_participacion").notNull().default("2025-12-01"),
     },
     (t) => ({
       uxCreditoInvEspejo: uniqueIndex("ux_credito_inversionista_espejo").on(t.credito_id, t.inversionista_id),
@@ -542,6 +544,8 @@
       "reinversion_total"
     ]);
 
+  export const tipoMonedaEnum = customSchema.enum("tipo_moneda", ["quetzales", "dolares"]);
+
 
   export const inversionistas = customSchema.table("inversionistas", {
     inversionista_id: serial("inversionista_id").primaryKey(),
@@ -556,6 +560,7 @@
     banco_id: integer("banco_id").references(() => bancos.banco_id),
     tipo_cuenta: tipoCuentaEnum("tipo_cuenta"),
     numero_cuenta: varchar("numero_cuenta", { length: 100 }),
+    moneda: tipoMonedaEnum("moneda").notNull().default("quetzales"),
   });
   export const asesores = customSchema.table("asesores", {
     asesor_id: serial("asesor_id").primaryKey(),

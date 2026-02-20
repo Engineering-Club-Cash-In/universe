@@ -105,9 +105,7 @@ function RouteComponent() {
 			refetch();
 		},
 		onError: (error: Error) => {
-			toast.error(
-				error.message || "Error al marcar contratos como firmados",
-			);
+			toast.error(error.message || "Error al marcar contratos como firmados");
 		},
 	});
 

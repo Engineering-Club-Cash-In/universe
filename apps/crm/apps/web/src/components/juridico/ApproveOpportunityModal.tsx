@@ -1,4 +1,9 @@
-import { AlertCircle, AlertTriangle, CheckCircle, FileText } from "lucide-react";
+import {
+	AlertCircle,
+	AlertTriangle,
+	CheckCircle,
+	FileText,
+} from "lucide-react";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -55,9 +60,7 @@ export function ApproveOpportunityModal({
 						) : (
 							<CheckCircle className="h-5 w-5 text-green-600" />
 						)}
-						{hasUnsigned
-							? "Contratos sin firmar"
-							: "¿Completar contratos?"}
+						{hasUnsigned ? "Contratos sin firmar" : "¿Completar contratos?"}
 					</AlertDialogTitle>
 					<AlertDialogDescription asChild>
 						<div className="space-y-3 pt-2">
@@ -73,8 +76,7 @@ export function ApproveOpportunityModal({
 										{opportunityTitle && (
 											<>
 												{" "}
-												en la oportunidad{" "}
-												<strong>{opportunityTitle}</strong>
+												en la oportunidad <strong>{opportunityTitle}</strong>
 											</>
 										)}
 										:
@@ -91,9 +93,7 @@ export function ApproveOpportunityModal({
 												</span>
 												<Badge
 													variant={
-														contract.status === "signed"
-															? "default"
-															: "outline"
+														contract.status === "signed" ? "default" : "outline"
 													}
 													className={
 														contract.status === "signed"
@@ -111,8 +111,7 @@ export function ApproveOpportunityModal({
 									<div className="rounded-lg bg-amber-50 p-3">
 										<p className="font-medium text-amber-900 text-sm">
 											<AlertCircle className="mr-1 inline h-4 w-4" />
-											Debes marcar los contratos como firmados antes de
-											aprobar
+											Debes marcar los contratos como firmados antes de aprobar
 										</p>
 									</div>
 								</>
@@ -123,8 +122,7 @@ export function ApproveOpportunityModal({
 										{opportunityTitle && (
 											<>
 												{" "}
-												para la oportunidad{" "}
-												<strong>{opportunityTitle}</strong>
+												para la oportunidad <strong>{opportunityTitle}</strong>
 											</>
 										)}
 										.
@@ -135,8 +133,8 @@ export function ApproveOpportunityModal({
 											Esta acción moverá la oportunidad al 90% de cierre
 										</p>
 										<p className="mt-1 text-blue-700 text-xs">
-											La oportunidad avanzará a la siguiente etapa del
-											proceso de venta.
+											La oportunidad avanzará a la siguiente etapa del proceso
+											de venta.
 										</p>
 									</div>
 									<p className="font-medium text-sm">
@@ -160,9 +158,7 @@ export function ApproveOpportunityModal({
 							disabled={isMarkingAsSigned}
 							className="bg-amber-600 hover:bg-amber-700"
 						>
-							{isMarkingAsSigned
-								? "Marcando..."
-								: "Marcar todos como firmados"}
+							{isMarkingAsSigned ? "Marcando..." : "Marcar todos como firmados"}
 						</Button>
 					) : (
 						<AlertDialogAction

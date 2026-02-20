@@ -137,7 +137,7 @@ export const leads = pgTable("leads", {
 	middleName: text("middle_name"), // Segundo nombre
 	lastName: text("last_name").notNull(),
 	secondLastName: text("second_last_name"), // Segundo apellido
-	email: text("email").notNull(),
+	email: text("email"),
 	phone: text("phone"),
 	age: integer("age"),
 	dpi: text("dpi"),

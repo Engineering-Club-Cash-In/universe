@@ -547,6 +547,57 @@ export const legalContractsRouter = {
 			return updatedContract;
 		}),
 
+	// Marcar todos los contratos de una oportunidad como firmados
+	markAllContractsSigned: juridicoProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			if (!context.canCreateLegalContracts) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permisos para actualizar contratos",
+				});
+			}
+
+			// Verificar que la oportunidad existe
+			const [opportunity] = await db
+				.select({ id: opportunities.id })
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
+			}
+
+			const updated = await db
+				.update(generatedLegalContracts)
+				.set({
+					status: "signed",
+					updatedAt: new Date(),
+				})
+				.where(
+					and(
+						eq(generatedLegalContracts.opportunityId, input.opportunityId),
+						eq(generatedLegalContracts.status, "pending"),
+					),
+				)
+				.returning();
+
+			if (updated.length === 0) {
+				throw new ORPCError("NOT_FOUND", {
+					message:
+						"No se encontraron contratos pendientes para esta oportunidad",
+				});
+			}
+
+			return { success: true, updatedCount: updated.length };
+		}),
+
 	// Eliminar contrato (solo admin)
 	deleteContract: adminProcedure
 		.input(
@@ -810,6 +861,24 @@ export const legalContractsRouter = {
 				throw new ORPCError("BAD_REQUEST", {
 					message:
 						"Debe haber al menos un contrato asociado a la oportunidad para aprobarla",
+				});
+			}
+
+			// Verificar que todos los contratos activos estén firmados
+			const [{ count: unsignedCount }] = await db
+				.select({ count: count() })
+				.from(generatedLegalContracts)
+				.where(
+					and(
+						eq(generatedLegalContracts.opportunityId, input.opportunityId),
+						eq(generatedLegalContracts.status, "pending"),
+					),
+				);
+
+			if (Number(unsignedCount) > 0) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Todos los contratos deben estar firmados antes de aprobar. Hay contratos pendientes de firma.",
 				});
 			}
 

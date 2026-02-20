@@ -166,6 +166,7 @@ export const appRouter = {
 	getOpportunitiesForContracts:
 		legalContractsRouter.getOpportunitiesForContracts,
 	approveOpportunityLegal: legalContractsRouter.approveOpportunityLegal,
+	markAllContractsSigned: legalContractsRouter.markAllContractsSigned,
 
 	// Contract Generation routes (Generación automática de contratos)
 	getContractTypes: contractGenerationRouter.getContractTypes,

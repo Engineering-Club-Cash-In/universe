@@ -1607,7 +1607,6 @@ export async function upsertPagosEspejo(
     id: number;
     abono_capital: string;
     abono_interes: string;
-    abono_iva_12: string;
     porcentaje_participacion: string;
     cuota: string;
     estado_liquidacion?: "NO_LIQUIDADO" | "LIQUIDADO";
@@ -1636,19 +1635,23 @@ export async function upsertPagosEspejo(
 
   // ── PASO 2: UPDATE por id para cada pago ────────────────────────────────────
   await Promise.all(
-    pagos.map((p) =>
-      db
+    pagos.map((p) => {
+      // 🆕 Recalcular IVA basado en el interés (Siempre 12%)
+      const numericInteres = Number(p.abono_interes) || 0;
+      const calculadoIva = (numericInteres * 0.12).toFixed(2);
+
+      return db
         .update(pagos_credito_inversionistas_espejo)
         .set({
           abono_capital:            p.abono_capital,
           abono_interes:            p.abono_interes,
-          abono_iva_12:             p.abono_iva_12,
+          abono_iva_12:             calculadoIva,
           porcentaje_participacion: p.porcentaje_participacion,
           cuota:                    p.cuota,
           ...(p.estado_liquidacion && { estado_liquidacion: p.estado_liquidacion }),
         })
-        .where(eq(pagos_credito_inversionistas_espejo.id, p.id))
-    )
+        .where(eq(pagos_credito_inversionistas_espejo.id, p.id));
+    })
   );
 
   console.log(`[upsertPagosEspejo] ${pagos.length} registro(s) actualizados.`);

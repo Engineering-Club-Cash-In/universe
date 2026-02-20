@@ -328,9 +328,7 @@ function RouteComponent() {
 					errors.lastName = "El apellido es requerido";
 				}
 
-				if (!value.email.trim()) {
-					errors.email = "El correo electrónico es requerido";
-				} else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.email)) {
+				if (value.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.email)) {
 					errors.email = "El correo electrónico no es válido";
 				}
 
@@ -348,6 +346,7 @@ function RouteComponent() {
 		onSubmit: async ({ value }) => {
 			const leadData = {
 				...value,
+				...(value.email ? { email: value.email } : { email: undefined as string | undefined }),
 				age: value.age ? Number.parseInt(value.age) : undefined,
 				dependents: Number.parseInt(value.dependents),
 				monthlyIncome: value.monthlyIncome
@@ -1058,19 +1057,13 @@ function RouteComponent() {
 												name="email"
 												validators={{
 													onChange: ({ value }) => {
-														if (!value.trim()) {
-															return "El correo electrónico es requerido";
-														}
-														if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+														if (value.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
 															return "El correo electrónico no es válido";
 														}
 														return undefined;
 													},
 													onBlur: ({ value }) => {
-														if (!value.trim()) {
-															return "El correo electrónico es requerido";
-														}
-														if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+														if (value.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
 															return "El correo electrónico no es válido";
 														}
 														return undefined;
@@ -1080,8 +1073,7 @@ function RouteComponent() {
 												{(field) => (
 													<div className="space-y-2">
 														<Label htmlFor={field.name}>
-															Correo Electrónico{" "}
-															<span className="text-red-500">*</span>
+															Correo Electrónico
 														</Label>
 														<Input
 															id={field.name}
@@ -2020,10 +2012,12 @@ function RouteComponent() {
 										</TableCell>
 										<TableCell>
 											<div className="space-y-1">
-												<div className="flex items-center gap-1 text-sm">
-													<Mail className="h-3 w-3" />
-													{lead.email}
-												</div>
+												{lead.email && (
+													<div className="flex items-center gap-1 text-sm">
+														<Mail className="h-3 w-3" />
+														{lead.email}
+													</div>
+												)}
 												{lead.phone && (
 													<div className="flex items-center gap-1 text-muted-foreground text-sm">
 														<Phone className="h-3 w-3" />
@@ -2217,9 +2211,11 @@ function RouteComponent() {
 									<h3 className="font-semibold text-lg">
 										{selectedLead.firstName} {selectedLead.lastName}
 									</h3>
-									<p className="text-muted-foreground text-sm">
-										{selectedLead.email}
-									</p>
+									{selectedLead.email && (
+										<p className="text-muted-foreground text-sm">
+											{selectedLead.email}
+										</p>
+									)}
 								</div>
 								<div className="flex flex-col gap-2">
 									<Badge
@@ -2314,7 +2310,7 @@ function RouteComponent() {
 											</Label>
 											<div className="flex items-center gap-2">
 												<Mail className="h-4 w-4 text-muted-foreground" />
-												<p className="text-sm">{selectedLead.email}</p>
+												<p className="text-sm">{selectedLead.email || "No especificado"}</p>
 											</div>
 										</div>
 										<div>

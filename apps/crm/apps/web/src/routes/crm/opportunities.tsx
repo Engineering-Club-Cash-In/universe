@@ -1919,10 +1919,12 @@ function RouteComponent() {
 														{selectedOpportunity.lead.lastName}
 													</span>
 												</div>
-												<div className="flex items-center gap-3 text-muted-foreground text-sm">
-													<Mail className="h-5 w-5" />
-													<span>{selectedOpportunity.lead.email}</span>
-												</div>
+												{selectedOpportunity.lead.email && (
+													<div className="flex items-center gap-3 text-muted-foreground text-sm">
+														<Mail className="h-5 w-5" />
+														<span>{selectedOpportunity.lead.email}</span>
+													</div>
+												)}
 											</div>
 										)}
 

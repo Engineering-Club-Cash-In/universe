@@ -1213,7 +1213,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                               Capital Aportado
                             </div>
                             <div className="font-semibold text-green-700 text-sm">
-                              Q
+                              {inv.currencySymbol}
                               {Number(
                                 cred.monto_aportado
                               ).toLocaleString("es-GT", {
@@ -1234,7 +1234,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                               Total a Recibir
                             </div>
                             <div className="font-bold text-green-700 text-sm">
-                              Q
+                              {inv.currencySymbol}
                               {Number(
                                 cred.total_cuota
                               ).toLocaleString("es-GT", {
@@ -1297,12 +1297,15 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                   <div className="bg-white rounded-lg p-2 border border-blue-200">
                                     <div className="text-xs text-blue-700">💵 Abono Capital</div>
                                     {isDraft ? (
-                                      <input
-                                        type="number"
-                                        className="w-full text-right bg-white border border-blue-300 rounded px-1 text-sm font-bold text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500 mt-1"
-                                        value={changes[pago.id]?.abono_capital ?? pago.abono_capital}
-                                        onChange={(e) => handleInputChange(pago.id, 'abono_capital', e.target.value)}
-                                      />
+                                      <div className="flex items-center mt-1">
+                                        <span className="text-blue-900 font-bold text-sm mr-1">{inv.currencySymbol}</span>
+                                        <input
+                                          type="number"
+                                          className="w-full text-right bg-white border border-blue-300 rounded px-1 text-sm font-bold text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                          value={changes[pago.id]?.abono_capital ?? pago.abono_capital}
+                                          onChange={(e) => handleInputChange(pago.id, 'abono_capital', e.target.value)}
+                                        />
+                                      </div>
                                     ) : (
                                       <div className="font-bold text-blue-900 text-sm">
                                         {inv.currencySymbol} {Number(pago.abono_capital).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
@@ -1314,12 +1317,15 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                   <div className="bg-white rounded-lg p-2 border border-violet-200">
                                     <div className="text-xs text-violet-700">💰 Cuota Inversor</div>
                                     {isDraft ? (
-                                      <input
-                                        type="number"
-                                        className="w-full text-right bg-white border border-violet-300 rounded px-1 text-sm font-bold text-violet-900 focus:outline-none focus:ring-2 focus:ring-violet-500 mt-1"
-                                        value={changes[pago.id]?.abono_interes ?? pago.abono_interes}
-                                        onChange={(e) => handleInputChange(pago.id, 'abono_interes', e.target.value)}
-                                      />
+                                      <div className="flex items-center mt-1">
+                                        <span className="text-violet-900 font-bold text-sm mr-1">{inv.currencySymbol}</span>
+                                        <input
+                                          type="number"
+                                          className="w-full text-right bg-white border border-violet-300 rounded px-1 text-sm font-bold text-violet-900 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                                          value={changes[pago.id]?.abono_interes ?? pago.abono_interes}
+                                          onChange={(e) => handleInputChange(pago.id, 'abono_interes', e.target.value)}
+                                        />
+                                      </div>
                                     ) : (
                                       <div className="font-bold text-violet-900 text-sm">
                                         {inv.currencySymbol} {Number(pago.abono_interes).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
@@ -1332,7 +1338,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                     <div className="text-xs text-green-700">📈 IVA</div>
                                     {isDraft ? (
                                       <div className="w-full text-right bg-green-50 rounded px-1 text-sm font-bold text-green-700 mt-1 h-7 flex items-center justify-end">
-                                        {inv.emite_factura
+                                        {inv.currencySymbol} {inv.emite_factura
                                           ? (Number(changes[pago.id]?.abono_interes ?? pago.abono_interes) * 0.12).toFixed(2)
                                           : "0.00"}
                                       </div>
@@ -1348,7 +1354,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                     <div className="text-xs text-yellow-700">📉 ISR</div>
                                     {isDraft ? (
                                       <div className="w-full text-right bg-yellow-50 rounded px-1 text-sm font-bold text-yellow-700 mt-1 h-7 flex items-center justify-end">
-                                        {!inv.emite_factura
+                                        {inv.currencySymbol} {!inv.emite_factura
                                           ? (Number(changes[pago.id]?.abono_interes ?? pago.abono_interes) * 0.07).toFixed(2)
                                           : "0.00"}
                                       </div>
@@ -1789,12 +1795,15 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                               <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-2 border border-blue-200">
                                 <div className="text-xs text-blue-700">💵 Abono Capital</div>
                                 {isDraft ? (
-                                  <input
-                                    type="number"
-                                    className="w-full text-right bg-white border border-blue-300 rounded px-1 text-sm font-bold text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500 mt-1"
-                                    value={changes[pago.id]?.abono_capital ?? pago.abono_capital}
-                                    onChange={(e) => handleInputChange(pago.id, 'abono_capital', e.target.value)}
-                                  />
+                                  <div className="flex items-center mt-1">
+                                    <span className="text-blue-900 font-bold text-sm mr-1">{inv.currencySymbol}</span>
+                                    <input
+                                      type="number"
+                                      className="w-full text-right bg-white border border-blue-300 rounded px-1 text-sm font-bold text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                      value={changes[pago.id]?.abono_capital ?? pago.abono_capital}
+                                      onChange={(e) => handleInputChange(pago.id, 'abono_capital', e.target.value)}
+                                    />
+                                  </div>
                                 ) : (
                                   <div className="font-bold text-blue-900 text-sm">
                                     {inv.currencySymbol} {Number(pago.abono_capital).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
@@ -1806,12 +1815,15 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                               <div className="bg-gradient-to-br from-violet-50 to-violet-100 rounded-lg p-2 border border-violet-200">
                                 <div className="text-xs text-violet-700">💰 Cuota Inversor</div>
                                 {isDraft ? (
-                                  <input
-                                    type="number"
-                                    className="w-full text-right bg-white border border-violet-300 rounded px-1 text-sm font-bold text-violet-900 focus:outline-none focus:ring-2 focus:ring-violet-500 mt-1"
-                                    value={changes[pago.id]?.abono_interes ?? pago.abono_interes}
-                                    onChange={(e) => handleInputChange(pago.id, 'abono_interes', e.target.value)}
-                                  />
+                                  <div className="flex items-center mt-1">
+                                    <span className="text-violet-900 font-bold text-sm mr-1">{inv.currencySymbol}</span>
+                                    <input
+                                      type="number"
+                                      className="w-full text-right bg-white border border-violet-300 rounded px-1 text-sm font-bold text-violet-900 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                                      value={changes[pago.id]?.abono_interes ?? pago.abono_interes}
+                                      onChange={(e) => handleInputChange(pago.id, 'abono_interes', e.target.value)}
+                                    />
+                                  </div>
                                 ) : (
                                   <div className="font-bold text-violet-900 text-sm">
                                     {inv.currencySymbol} {Number(pago.abono_interes).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
@@ -1823,12 +1835,15 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                               <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-2 border border-green-200">
                                 <div className="text-xs text-green-700">📈 IVA</div>
                                 {isDraft ? (
-                                  <input
-                                    type="number"
-                                    className="w-full text-right bg-white border border-green-300 rounded px-1 text-sm font-bold text-green-900 focus:outline-none focus:ring-2 focus:ring-green-500 mt-1"
-                                    value={changes[pago.id]?.abono_iva_12 ?? pago.abono_iva}
-                                    onChange={(e) => handleInputChange(pago.id, 'abono_iva_12', e.target.value)}
-                                  />
+                                  <div className="flex items-center mt-1">
+                                    <span className="text-green-900 font-bold text-sm mr-1">{inv.currencySymbol}</span>
+                                    <input
+                                      type="number"
+                                      className="w-full text-right bg-white border border-green-300 rounded px-1 text-sm font-bold text-green-900 focus:outline-none focus:ring-2 focus:ring-green-500"
+                                      value={changes[pago.id]?.abono_iva_12 ?? pago.abono_iva}
+                                      onChange={(e) => handleInputChange(pago.id, 'abono_iva_12', e.target.value)}
+                                    />
+                                  </div>
                                 ) : (
                                   <div className="font-bold text-green-900 text-sm">
                                     {inv.currencySymbol} {Number(pago.abono_iva).toLocaleString("es-GT", { minimumFractionDigits: 2 })}

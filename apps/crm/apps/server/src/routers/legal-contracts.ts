@@ -24,8 +24,6 @@ import {
 	uploadFileToR2,
 	validateFile,
 } from "../lib/storage";
-import { closeOpportunity } from "../services/close-opportunity";
-import { checkDocumensoSigningStatus } from "../services/documenso-signing";
 import { createNotification } from "./notifications";
 
 // Standardized env var naming: R2_BUCKET_* pattern
@@ -547,57 +545,6 @@ export const legalContractsRouter = {
 			return updatedContract;
 		}),
 
-	// Marcar todos los contratos de una oportunidad como firmados
-	markAllContractsSigned: juridicoProcedure
-		.input(
-			z.object({
-				opportunityId: z.string().uuid(),
-			}),
-		)
-		.handler(async ({ input, context }) => {
-			if (!context.canCreateLegalContracts) {
-				throw new ORPCError("FORBIDDEN", {
-					message: "No tienes permisos para actualizar contratos",
-				});
-			}
-
-			// Verificar que la oportunidad existe
-			const [opportunity] = await db
-				.select({ id: opportunities.id })
-				.from(opportunities)
-				.where(eq(opportunities.id, input.opportunityId))
-				.limit(1);
-
-			if (!opportunity) {
-				throw new ORPCError("NOT_FOUND", {
-					message: "Oportunidad no encontrada",
-				});
-			}
-
-			const updated = await db
-				.update(generatedLegalContracts)
-				.set({
-					status: "signed",
-					updatedAt: new Date(),
-				})
-				.where(
-					and(
-						eq(generatedLegalContracts.opportunityId, input.opportunityId),
-						eq(generatedLegalContracts.status, "pending"),
-					),
-				)
-				.returning();
-
-			if (updated.length === 0) {
-				throw new ORPCError("NOT_FOUND", {
-					message:
-						"No se encontraron contratos pendientes para esta oportunidad",
-				});
-			}
-
-			return { success: true, updatedCount: updated.length };
-		}),
-
 	// Eliminar contrato (solo admin)
 	deleteContract: adminProcedure
 		.input(
@@ -864,24 +811,6 @@ export const legalContractsRouter = {
 				});
 			}
 
-			// Verificar que todos los contratos activos estén firmados
-			const [{ count: unsignedCount }] = await db
-				.select({ count: count() })
-				.from(generatedLegalContracts)
-				.where(
-					and(
-						eq(generatedLegalContracts.opportunityId, input.opportunityId),
-						eq(generatedLegalContracts.status, "pending"),
-					),
-				);
-
-			if (Number(unsignedCount) > 0) {
-				throw new ORPCError("BAD_REQUEST", {
-					message:
-						"Todos los contratos deben estar firmados antes de aprobar. Hay contratos pendientes de firma.",
-				});
-			}
-
 			// Close the opportunity (create credit, client, contract)
 			/*const closeResult = await closeOpportunity({
 				opportunityId: input.opportunityId,
@@ -894,22 +823,22 @@ export const legalContractsRouter = {
 				});
 			}*/
 
-			// Obtener la etapa del 90%
+			// Obtener la etapa del 85%
 			const [targetStage] = await db
 				.select()
 				.from(salesStages)
-				.where(eq(salesStages.closurePercentage, 90))
+				.where(eq(salesStages.closurePercentage, 85))
 				.limit(1);
 
 			if (!targetStage) {
 				throw new ORPCError("NOT_FOUND", {
-					message: "No se encontró la etapa del 90%",
+					message: "No se encontró la etapa del 85%",
 				});
 			}
 
 			// Actualizar la oportunidad y registrar historial en una transacción
 			await db.transaction(async (tx) => {
-				// Actualizar la oportunidad a 90%
+				// Actualizar la oportunidad a 85%
 				await tx
 					.update(opportunities)
 					.set({
@@ -924,14 +853,166 @@ export const legalContractsRouter = {
 					fromStageId: opportunity.stageId,
 					toStageId: targetStage.id,
 					changedBy: context.userId,
-					reason: "Aprobación legal - Contratos adjuntados",
+					reason: "Aprobación legal - Contratos generados, pendientes de firma",
 				});
 			});
 
-			// Notificar a análisis que los contratos fueron creados y está lista para desembolso
+			// Notificar al asesor de ventas que debe confirmar firma de contratos
+			if (opportunity.assignedTo) {
+				await createNotification({
+					titulo: `Contratos listos para firma - ${opportunity.title}`,
+					descripcion: `Los contratos de la oportunidad "${opportunity.title}" fueron generados por jurídico. Confirma cuando estén firmados para avanzar al 90%.`,
+					type: "aviso",
+					createdBy: context.userId,
+					createdByRole: context.userRole,
+					assignedToRole: "sales",
+					assignedTo: opportunity.assignedTo,
+					relatedEntityType: "opportunity",
+					relatedEntityId: input.opportunityId,
+					redirectPage: "opportunity_details",
+				});
+			}
+
+			return {
+				success: true,
+				message:
+					"Oportunidad aprobada y movida a la etapa del 85% (Contratos en Firma)",
+				newStageId: targetStage.id,
+				newStageName: targetStage.name,
+			};
+		}),
+
+	// Confirmar que los contratos fueron firmados (mover de 85% a 90%)
+	confirmContractsSigned: viewOpportunityContractsProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Verificar permisos
+			if (!PERMISSIONS.canConfirmContractsSigning(context.userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permisos para confirmar la firma de contratos",
+				});
+			}
+
+			// Obtener la oportunidad con su etapa actual
+			const [opportunity] = await db
+				.select({
+					id: opportunities.id,
+					stageId: opportunities.stageId,
+					leadId: opportunities.leadId,
+					title: opportunities.title,
+					assignedTo: opportunities.assignedTo,
+				})
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
+			}
+
+			// Verificar que la oportunidad está en 85%
+			const [currentStage] = await db
+				.select()
+				.from(salesStages)
+				.where(eq(salesStages.id, opportunity.stageId))
+				.limit(1);
+
+			if (!currentStage || currentStage.closurePercentage !== 85) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `La oportunidad debe estar en la etapa del 85% (Contratos en Firma) para confirmar. Actualmente está en ${currentStage?.closurePercentage || 0}%`,
+				});
+			}
+
+			// Verificar que hay contratos asociados a la oportunidad
+			const [{ count: contractCount }] = await db
+				.select({ count: count() })
+				.from(generatedLegalContracts)
+				.where(eq(generatedLegalContracts.opportunityId, input.opportunityId));
+
+			if (Number(contractCount) === 0) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"No hay contratos asociados a esta oportunidad. No se puede confirmar la firma.",
+				});
+			}
+
+			// Obtener la etapa del 90%
+			const [targetStage] = await db
+				.select()
+				.from(salesStages)
+				.where(eq(salesStages.closurePercentage, 90))
+				.limit(1);
+
+			if (!targetStage) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "No se encontró la etapa del 90%",
+				});
+			}
+
+			// En transacción: re-verificar etapa + marcar contratos + mover a 90%
+			await db.transaction(async (tx) => {
+				// Re-verificar que la oportunidad sigue en 85% (previene race condition)
+				const [currentOpp] = await tx
+					.select({ stageId: opportunities.stageId })
+					.from(opportunities)
+					.where(eq(opportunities.id, input.opportunityId))
+					.limit(1);
+
+				const [currentStageInTx] = await tx
+					.select({ closurePercentage: salesStages.closurePercentage })
+					.from(salesStages)
+					.where(eq(salesStages.id, currentOpp.stageId))
+					.limit(1);
+
+				if (currentStageInTx.closurePercentage !== 85) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "La oportunidad ya fue procesada por otro usuario.",
+					});
+				}
+
+				// Marcar todos los contratos pending como signed
+				await tx
+					.update(generatedLegalContracts)
+					.set({
+						status: "signed",
+						updatedAt: new Date(),
+					})
+					.where(
+						and(
+							eq(generatedLegalContracts.opportunityId, input.opportunityId),
+							eq(generatedLegalContracts.status, "pending"),
+						),
+					);
+
+				// Mover oportunidad a 90%
+				await tx
+					.update(opportunities)
+					.set({
+						stageId: targetStage.id,
+						updatedAt: new Date(),
+					})
+					.where(eq(opportunities.id, input.opportunityId));
+
+				// Registrar en historial
+				await tx.insert(opportunityStageHistory).values({
+					opportunityId: input.opportunityId,
+					fromStageId: opportunity.stageId,
+					toStageId: targetStage.id,
+					changedBy: context.userId,
+					reason: "Contratos firmados confirmados - Avanza a formalización",
+				});
+			});
+
+			// Notificar a análisis que está lista para desembolso
 			await createNotification({
-				titulo: `Contratos listos - ${opportunity.title}`,
-				descripcion: `Los contratos legales de la oportunidad "${opportunity.title}" fueron adjuntados. La oportunidad pasó a la etapa del 90% y está lista para revisión de desembolso.`,
+				titulo: `Contratos firmados - ${opportunity.title}`,
+				descripcion: `Los contratos de la oportunidad "${opportunity.title}" fueron firmados. La oportunidad pasó a la etapa del 90% y está lista para revisión de desembolso.`,
 				type: "aviso",
 				createdBy: context.userId,
 				createdByRole: context.userRole,
@@ -941,25 +1022,10 @@ export const legalContractsRouter = {
 				redirectPage: "analysis_90_details",
 			});
 
-			// Notificar al asesor de ventas asignado que el crédito está ganado
-			if (opportunity.assignedTo) {
-				await createNotification({
-					titulo: `Crédito ganado - ${opportunity.title}`,
-					descripcion: `Los contratos de la oportunidad "${opportunity.title}" fueron cargados y avanzó al 90%. El crédito está ganado.`,
-					type: "aviso",
-					createdBy: context.userId,
-					createdByRole: context.userRole,
-					assignedToRole: "sales",
-					assignedTo: opportunity.assignedTo,
-					relatedEntityType: "opportunity",
-					redirectPage: "client_details",
-					relatedEntityId: input.opportunityId,
-				});
-			}
-
 			return {
 				success: true,
-				message: "Oportunidad aprobada y movida a la etapa del 90%",
+				message:
+					"Contratos confirmados como firmados. Oportunidad movida a la etapa del 90%",
 				newStageId: targetStage.id,
 				newStageName: targetStage.name,
 			};

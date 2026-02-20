@@ -75,7 +75,7 @@ function RouteComponent() {
 		title: string;
 	} | null>(null);
 
-	// Mutación para aprobar oportunidad (mover a 90%)
+	// Mutación para aprobar oportunidad (mover a 85%)
 	const approveMutation = useMutation({
 		mutationFn: async (opportunityId: string) => {
 			return await client.approveOpportunityLegal({ opportunityId });
@@ -510,7 +510,7 @@ function RouteComponent() {
 																		className="cursor-pointer"
 																	>
 																		<CheckCircle className="mr-2 h-4 w-4" />
-																		Aprobar (→ 90%)
+																		Aprobar (→ 85%)
 																	</DropdownMenuItem>
 																)}
 														</DropdownMenuContent>

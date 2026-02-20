@@ -76,7 +76,7 @@ function RouteComponent() {
 
 	const opportunityId = searchParams?.opportunityId;
 
-	// Mutación para aprobar oportunidad (mover a 90%)
+	// Mutación para aprobar oportunidad (mover a 85%)
 	const approveMutation = useMutation({
 		mutationFn: async (opportunityId: string) => {
 			return await client.approveOpportunityLegal({ opportunityId });
@@ -92,20 +92,6 @@ function RouteComponent() {
 		},
 		onError: (error: Error) => {
 			toast.error(error.message || "Error al aprobar la oportunidad");
-		},
-	});
-
-	// Mutación para marcar todos los contratos como firmados
-	const markAllSignedMutation = useMutation({
-		mutationFn: async (opportunityId: string) => {
-			return await client.markAllContractsSigned({ opportunityId });
-		},
-		onSuccess: () => {
-			toast.success("Todos los contratos marcados como firmados");
-			refetch();
-		},
-		onError: (error: Error) => {
-			toast.error(error.message || "Error al marcar contratos como firmados");
 		},
 	});
 
@@ -479,21 +465,8 @@ function RouteComponent() {
 						approveMutation.mutate(opportunityId);
 					}
 				}}
-				onMarkAllSigned={() => {
-					if (opportunityId) {
-						markAllSignedMutation.mutate(opportunityId);
-					}
-				}}
 				isLoading={approveMutation.isPending}
-				isMarkingAsSigned={markAllSignedMutation.isPending}
 				opportunityTitle={opportunityData?.title}
-				contracts={
-					contracts?.map((c) => ({
-						id: c.contract.id,
-						contractName: c.contract.contractName,
-						status: c.contract.status,
-					})) || []
-				}
 			/>
 
 			{/* Modal para regenerar contratos */}

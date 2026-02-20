@@ -209,6 +209,7 @@ export const appRouter = {
 	addDocumentToNotification: notificationsRouter.addDocumentToNotification,
 	getAccountDocumentsByOpportunities:
 		notificationsRouter.getAccountDocumentsByOpportunities,
+	markAllNotificationsAsRead: notificationsRouter.markAllNotificationsAsRead,
 
 	// Quotations routes
 	createQuotation: quotationsRouter.createQuotation,

@@ -102,7 +102,8 @@ export const notificationsRouter = {
 			.select(notificationWithCreator)
 			.from(notifications)
 			.leftJoin(user, eq(notifications.createdBy, user.id))
-			.orderBy(desc(notifications.createdAt));
+			.orderBy(desc(notifications.createdAt))
+			.limit(500);
 
 		return result;
 	}),
@@ -131,7 +132,8 @@ export const notificationsRouter = {
 					isNull(notifications.assignedTo),
 				),
 			)
-			.orderBy(desc(notifications.createdAt));
+			.orderBy(desc(notifications.createdAt))
+			.limit(500);
 
 		return result;
 	}),
@@ -145,7 +147,8 @@ export const notificationsRouter = {
 			.from(notifications)
 			.leftJoin(user, eq(notifications.createdBy, user.id))
 			.where(eq(notifications.assignedTo, userId))
-			.orderBy(desc(notifications.createdAt));
+			.orderBy(desc(notifications.createdAt))
+			.limit(500);
 
 		return result;
 	}),
@@ -170,13 +173,36 @@ export const notificationsRouter = {
 					.min(1),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
+			const userId = context.session.user.id;
+
+			const [userData] = await db
+				.select({ role: user.role })
+				.from(user)
+				.where(eq(user.id, userId))
+				.limit(1);
+
+			if (!userData) return [];
+
+			// Admin puede consultar cualquier rol; otros solo los que les corresponden
+			const isAdmin = userData.role === "admin";
+			let allowedRoles = input.roles;
+			if (!isAdmin) {
+				const visibleRoles: Record<string, string[]> = {
+					sales_supervisor: ["sales_supervisor", "analyst", "juridico"],
+				};
+				const allowed = visibleRoles[userData.role] ?? [userData.role];
+				allowedRoles = input.roles.filter((r) => allowed.includes(r));
+				if (allowedRoles.length === 0) return [];
+			}
+
 			const result = await db
 				.select(notificationWithCreator)
 				.from(notifications)
 				.leftJoin(user, eq(notifications.createdBy, user.id))
-				.where(inArray(notifications.assignedToRole, input.roles))
-				.orderBy(desc(notifications.createdAt));
+				.where(inArray(notifications.assignedToRole, allowedRoles))
+				.orderBy(desc(notifications.createdAt))
+				.limit(500);
 
 			return result;
 		}),
@@ -195,57 +221,107 @@ export const notificationsRouter = {
 				]),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
+			const userId = context.session.user.id;
+
+			// Obtener datos del usuario y la notificación
+			const [userData] = await db
+				.select({ role: user.role })
+				.from(user)
+				.where(eq(user.id, userId))
+				.limit(1);
+
+			const [notif] = await db
+				.select({
+					type: notifications.type,
+					assignedToRole: notifications.assignedToRole,
+					assignedTo: notifications.assignedTo,
+				})
+				.from(notifications)
+				.where(eq(notifications.id, input.notificationId))
+				.limit(1);
+
+			if (!notif) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Notificación no encontrada",
+				});
+			}
+
+			// Verificar autorización: admin, rol coincide, asignación directa, o supervisor con visibilidad expandida
+			const isAdmin = userData?.role === "admin";
+			const roleMatches = userData?.role === notif.assignedToRole;
+			const isDirectlyAssigned = notif.assignedTo === userId;
+			const isSupervisorWithAccess =
+				userData?.role === "sales_supervisor" &&
+				["sales_supervisor", "analyst"].includes(notif.assignedToRole);
+
+			if (
+				!isAdmin &&
+				!roleMatches &&
+				!isDirectlyAssigned &&
+				!isSupervisorWithAccess
+			) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para modificar esta notificación",
+				});
+			}
+
 			// Si se intenta resolver, verificar que no sea action_upload_files sin documentos
-			if (input.status === "resolved") {
-				const [notif] = await db
-					.select({
-						type: notifications.type,
-					})
-					.from(notifications)
-					.where(eq(notifications.id, input.notificationId))
+			if (input.status === "resolved" && notif.type === "action_upload_files") {
+				const docs = await db
+					.select({ id: notificationDocuments.id })
+					.from(notificationDocuments)
+					.where(eq(notificationDocuments.notificationId, input.notificationId))
 					.limit(1);
 
-				if (notif?.type === "action_upload_files") {
-					const docs = await db
-						.select({ id: notificationDocuments.id })
-						.from(notificationDocuments)
-						.where(
-							eq(notificationDocuments.notificationId, input.notificationId),
-						)
-						.limit(1);
-
-					if (docs.length === 0) {
-						throw new ORPCError("BAD_REQUEST", {
-							message:
-								"No se puede resolver esta notificación sin haber subido al menos un documento.",
-						});
-					}
+				if (docs.length === 0) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"No se puede resolver esta notificación sin haber subido al menos un documento.",
+					});
 				}
 			}
 
 			const now = new Date();
 
-			const setData: Record<string, unknown> = {
-				status: input.status,
-				updatedAt: now,
-			};
-
-			if (input.status === "read") {
-				setData.readAt = now;
-			}
-			if (input.status === "resolved") {
-				setData.resolvedAt = now;
-			}
-
 			const [updated] = await db
 				.update(notifications)
-				.set(setData)
+				.set({
+					status: input.status,
+					updatedAt: now,
+					...(input.status === "read" ? { readAt: now } : {}),
+					...(input.status === "resolved" ? { resolvedAt: now } : {}),
+				})
 				.where(eq(notifications.id, input.notificationId))
 				.returning();
 
 			return updated;
 		}),
+
+	// Marcar todas las notificaciones pendientes del admin como leídas
+	markAllNotificationsAsRead: adminProcedure.handler(async ({ context }) => {
+		const userId = context.session.user.id;
+		const now = new Date();
+		const updated = await db
+			.update(notifications)
+			.set({
+				status: "read",
+				readAt: now,
+				updatedAt: now,
+			})
+			.where(
+				and(
+					eq(notifications.status, "pending"),
+					or(
+						eq(notifications.assignedToRole, "admin"),
+						eq(notifications.assignedTo, userId),
+					),
+				),
+			)
+			.returning({ id: notifications.id });
+
+		return { count: updated.length };
+	}),
 
 	// Obtener documentos de una notificación
 	getNotificationDocuments: protectedProcedure

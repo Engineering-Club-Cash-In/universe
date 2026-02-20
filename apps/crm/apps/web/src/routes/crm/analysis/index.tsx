@@ -501,9 +501,11 @@ function AnalysisPage() {
 																	{opportunity.lead.firstName}{" "}
 																	{opportunity.lead.lastName}
 																</button>
-																<p className="text-muted-foreground text-sm">
-																	{opportunity.lead.email}
-																</p>
+																{opportunity.lead.email && (
+																	<p className="text-muted-foreground text-sm">
+																		{opportunity.lead.email}
+																	</p>
+																)}
 															</div>
 														) : (
 															<span className="text-muted-foreground">

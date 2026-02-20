@@ -479,7 +479,7 @@ export const crmRouter = {
 				middleName: z.string().optional(),
 				lastName: z.string().min(1, "Last name is required"),
 				secondLastName: z.string().optional(),
-				email: z.string().email("Valid email is required"),
+				email: z.string().email("Valid email is required").optional(),
 				phone: z.string().min(1, "Phone is required"),
 				age: z.number().int().positive().optional(),
 				dpi: z.string().optional(),

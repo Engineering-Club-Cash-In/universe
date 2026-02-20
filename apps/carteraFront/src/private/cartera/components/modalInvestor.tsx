@@ -23,10 +23,12 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
       nombre: "",
       dpi: undefined,
       emite_factura: false,
+      reinversion: false,
       banco: null,
       tipo_cuenta: "",
       numero_cuenta: "",
       re_inversion: "sin_reinversion",
+      moneda: "quetzales",
     },
   });
 
@@ -47,10 +49,12 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
         nombre: "",
         dpi: undefined,
         emite_factura: false,
+        reinversion: false,
         banco: null,
         tipo_cuenta: "",
         numero_cuenta: "",
         re_inversion: "sin_reinversion",
+        moneda: "quetzales",
       });
     }
   }, [initialData, mode, reset]);
@@ -72,6 +76,8 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
           : "✅ Inversionista actualizado correctamente.";
         alert(mensaje);
         queryClient.invalidateQueries({ queryKey: ["investors"] });
+        queryClient.invalidateQueries({ queryKey: ["investor-mirror-summary"] });
+        queryClient.invalidateQueries({ queryKey: ["investor-totals"] });
         reset();
         onClose();
       },
@@ -176,7 +182,18 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
               <option value="sin_reinversion">Sin Reinversión</option>
               <option value="reinversion_capital">Reinversión Capital</option>
               <option value="reinversion_interes">Reinversión Interés</option>
-              <option value="reinversion_total">Reinversión Total</option>
+            </select>
+          </div>
+
+          {/* Moneda */}
+          <div>
+            <label className="block text-sm text-blue-800 mb-1">Moneda Preferida</label>
+            <select
+              {...register("moneda")}
+              className="bg-white text-blue-900 border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+            >
+              <option value="quetzales">Quetzales (Q)</option>
+              <option value="dolares">Dólares ($)</option>
             </select>
           </div>
 

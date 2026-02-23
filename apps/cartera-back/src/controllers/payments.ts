@@ -96,6 +96,7 @@ export async function getAllPagosWithCreditAndInversionistas(
         fechaLiquidacion: cuotas_credito.fecha_liquidacion_inversionistas,
         paymentFalse: pagos_credito.paymentFalse,
         monto_aplicado: pagos_credito.monto_aplicado,
+        fecha_aplicado: pagos_credito.fecha_aplicado,
       })
       .from(pagos_credito)
       .innerJoin(creditos, eq(pagos_credito.credito_id, creditos.credito_id))
@@ -1265,10 +1266,15 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         -- 📅 Fecha boleta en zona Guatemala
         TO_CHAR(p.fecha_boleta::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD') AS "fechaBoleta",
 
+        -- 📅 Fecha en que se aplicó el pago (zona Guatemala)
+        TO_CHAR(p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD HH24:MI:SS') AS "fechaAplicado",
+
         -- 👤 Nombre del asesor que registró
         ase.nombre AS "registerByNombre",
 
         -- 💰 Abonos del pago
+        p.cuota AS "cuotaMonto",
+        p.pagado AS "pagado",
         p.abono_capital AS "abono_capital",
         p.abono_interes AS "abono_interes",
         p.abono_iva_12 AS "abono_iva_12",
@@ -1332,23 +1338,24 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
           WHERE pci.pago_id = p.pago_id
         ), '[]'::json) AS "inversionistas",
 
-        -- 📸 Boleta asociada
-        (
-          SELECT json_build_object(
-            'boletaId', b.id,
-            'urlBoleta', b.url_boleta
+        -- 📸 Boletas asociadas (todas)
+        COALESCE((
+          SELECT json_agg(
+            json_build_object(
+              'boletaId', bol.id,
+              'urlBoleta', bol.url_boleta
+            )
           )
-          FROM cartera.boletas b
-          WHERE b.pago_id = p.pago_id
-          LIMIT 1
-        ) AS "boleta"
+          FROM cartera.boletas bol
+          WHERE bol.pago_id = p.pago_id
+        ), '[]'::json) AS "boletas"
 
       FROM cartera.pagos_credito p
       LEFT JOIN cartera.creditos c ON c.credito_id = p.credito_id
       LEFT JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
       LEFT JOIN cartera.bancos b ON b.banco_id = p.banco_id
       LEFT JOIN cartera.cuentas_empresa ce ON ce.cuenta_id = p.cuenta_empresa_id
-      LEFT JOIN cartera.asesores ase ON ase.email_cash_in = p.registerby
+      LEFT JOIN cartera.asesores ase ON ase.asesor_id = c.asesor_id
       ${sql.raw(whereSQL)}
       ORDER BY p.fecha_pago DESC
       LIMIT ${pageSize} OFFSET ${offset};
@@ -1374,8 +1381,11 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       cuentaEmpresaBanco: r.cuentaEmpresaBanco, // 👈 NUEVO
       cuentaEmpresaNumero: r.cuentaEmpresaNumero,
       fechaBoleta: r.fechaBoleta,
+      fechaAplicado: r.fechaAplicado,
       registerByNombre: r.registerByNombre,
       observaciones: r.observaciones,
+      cuotaMonto: r.cuotaMonto,
+      pagado: r.pagado,
       abono_capital: r.abono_capital,
       abono_interes: r.abono_interes,
       abono_iva_12: r.abono_iva_12,
@@ -1391,7 +1401,11 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         : JSON.parse(
             typeof r.inversionistas === "string" ? r.inversionistas : "[]"
           ),
-      boleta: r.boleta,
+      boletas: Array.isArray(r.boletas)
+        ? r.boletas
+        : JSON.parse(
+            typeof r.boletas === "string" ? r.boletas : "[]"
+          ),
     }));
 
     interface TotalesGenerales {

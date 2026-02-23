@@ -25,7 +25,7 @@ const updateInstallments = async ({
   all = false,
 }: UpdateInstallmentsParams): Promise<void> => {
   // 1️⃣ Obtener crédito y pagos en paralelo (en lugar de secuencial)
-  const [creditoResult, pagosNoPagados] = await Promise.all([
+  const [creditoResult, todosPagos] = await Promise.all([
     db
       .select({
         credito_id: creditos.credito_id,
@@ -42,10 +42,14 @@ const updateInstallments = async ({
       .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
       .limit(1),
 
-    // 🔥 Optimización: Hacer el WHERE con subconsulta en lugar de dos queries
+    // Solo traer cuotas NO pagadas, ordenadas por numero_cuota (no por cuota_id)
     db
       .select()
       .from(pagos_credito)
+      .innerJoin(
+        cuotas_credito,
+        eq(pagos_credito.cuota_id, cuotas_credito.cuota_id),
+      )
       .where(
         and(
           eq(
@@ -59,7 +63,8 @@ const updateInstallments = async ({
           eq(pagos_credito.pagado, all),
         ),
       )
-      .orderBy(pagos_credito.cuota_id),
+      .orderBy(asc(cuotas_credito.numero_cuota))
+      .then((rows) => rows.map((r) => r.pagos_credito)),
   ]);
 
   const credito = creditoResult[0];
@@ -71,7 +76,7 @@ const updateInstallments = async ({
     );
   }
 
-  if (pagosNoPagados.length === 0) {
+  if (todosPagos.length === 0) {
     throw new Error("No hay cuotas pendientes por actualizar");
   }
 
@@ -88,7 +93,7 @@ const updateInstallments = async ({
   let capitalEnMemoria = capitalInicial;
 
   // 4️⃣ Amortización real: interés calculado sobre capital que va quedando
-  const actualizaciones = pagosNoPagados.map((pago) => {
+  const actualizaciones = todosPagos.map((pago) => {
     const interesMes = capitalEnMemoria.times(porcentajeInteres).round(2);
     const ivaMes = interesMes.times(0.12).round(2);
 
@@ -122,7 +127,7 @@ const updateInstallments = async ({
 
   // 5️⃣ Ejecutar TODAS las actualizaciones en paralelo (batch update)
   await Promise.all([
-    // Actualizar todos los pagos
+    // Actualizar todos los pagos pendientes
     ...actualizaciones.map(({ pago_id, datos }) =>
       db
         .update(pagos_credito)
@@ -137,7 +142,7 @@ const updateInstallments = async ({
   ]);
 
   console.log(
-    `✅ Se actualizaron ${pagosNoPagados.length} cuotas para el crédito ${numero_credito_sifco}`,
+    `✅ Se actualizaron ${todosPagos.length} cuotas para el crédito ${numero_credito_sifco}`,
   );
 };
 

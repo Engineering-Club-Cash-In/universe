@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useFormik } from "formik";
+import { useRef } from "react";
 import { toast } from "sonner";
 import { useUpdateCredit } from "../hooks/updateCredit";
 import { useRecalculateQuota } from "../hooks/recalculateQuota";
@@ -19,6 +20,7 @@ import type {
   InversionistaPayload,
   UpdateCreditBody,
 } from "../services/services";
+import { updateSaldoReinversionService } from "../services/services";
 import { InvestorsList } from "./InvestorsList";
 
 // Tipos locales
@@ -26,6 +28,7 @@ interface InvestorItem extends InversionistaPayload {}
 interface InvestorOption {
   inversionista_id: number;
   nombre: string;
+  saldo_reinversion?: string | null;
 }
 
 interface ModalEditCreditProps {
@@ -98,6 +101,9 @@ export function ModalEditCredit({
   const { mutate: updateCredit, isPending } = useUpdateCredit();
   const { mutate: recalculateQuota, isPending: isRecalculating } =
     useRecalculateQuota();
+
+  // Ref para acumular los cambios de saldo reinversion desde InvestorsList
+  const saldoChangesRef = useRef<Record<number, number>>({});
 
   const parseParticipantDate = (dateString?: string | Date | null) => {
     return dateString ? new Date(dateString).toISOString().split('T')[0] : "2025-12-01";
@@ -236,7 +242,25 @@ export function ModalEditCredit({
         })),
       };
       updateCredit(payload, {
-        onSuccess: () => {
+        onSuccess: async () => {
+          // Persistir cambios de saldo reinversion
+          const changes = saldoChangesRef.current;
+          const ids = Object.keys(changes);
+          if (ids.length > 0) {
+            try {
+              await Promise.all(
+                ids.map((id) =>
+                  updateSaldoReinversionService({
+                    inversionista_id: Number(id),
+                    saldo_reinversion: changes[Number(id)],
+                  })
+                )
+              );
+              toast.success("Saldos de reinversion actualizados");
+            } catch {
+              toast.error("Error actualizando saldos de reinversion");
+            }
+          }
           onSuccess();
           onClose();
         },
@@ -427,6 +451,7 @@ export function ModalEditCredit({
               labelTitle="Inversionistas Asociados"
               errorMessage={formik.errors.investors as string}
               errorMessageMirror={formik.errors.investorsMirror as string}
+              onSaldoChanges={(changes) => { saldoChangesRef.current = changes; }}
             />
           </form>
         </div>

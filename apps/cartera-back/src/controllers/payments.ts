@@ -438,19 +438,65 @@ export async function insertPagosCreditoInversionistas(
 
     console.log(`   ¿Es Cube? ${isCube ? "SÍ ✅" : "NO ❌"}`);
 
-    const bigInteres = isCube
-      ? new Big(inv.monto_cash_in ?? 0)
-      : new Big(inv.monto_inversionista);
+    // --- Interés proporcional si fecha_inicio_participacion es del mes anterior ---
+    const fechaInicio = inv.fecha_inicio_participacion
+      ? new Date(inv.fecha_inicio_participacion + "T00:00:00")
+      : null;
+    const fechaPago =  new Date();
 
-    const bigIVA = isCube
-      ? new Big(inv.iva_cash_in ?? 0)
-      : new Big(inv.iva_inversionista);
+    const mesAnterior = fechaPago.getMonth() === 0 ? 11 : fechaPago.getMonth() - 1;
+    const anioMesAnterior = fechaPago.getMonth() === 0
+      ? fechaPago.getFullYear() - 1
+      : fechaPago.getFullYear();
+
+    const esMesAnterior =
+      !isCube &&
+      fechaInicio !== null &&
+      fechaInicio.getMonth() === mesAnterior &&
+      fechaInicio.getFullYear() === anioMesAnterior;
+
+    let bigInteres: Big;
+    let bigIVA: Big;
+
+    if (esMesAnterior) {
+      // Días totales del mes de la fecha de inicio (ej: enero = 31)
+      const diasDelMes = new Date(
+        fechaInicio!.getFullYear(),
+        fechaInicio!.getMonth() + 1,
+        0
+      ).getDate();
+      const diaInicio = fechaInicio!.getDate(); // ej: 18
+
+      // Interés proporcional = (monto_inversionista / diasDelMes) * diaInicio
+      bigInteres = new Big(inv.monto_inversionista)
+        .div(diasDelMes)
+        .times(diaInicio)
+        .round(2);
+
+      // IVA proporcional = interés proporcional * 12%
+      bigIVA = bigInteres.times(0.12).round(2);
+
+      console.log(`   📅 INTERÉS PROPORCIONAL:`);
+      console.log(`      fecha_inicio: ${inv.fecha_inicio_participacion}`);
+      console.log(`      días del mes: ${diasDelMes}`);
+      console.log(`      día inicio: ${diaInicio}`);
+      console.log(`      interés proporcional: ${bigInteres.toString()}`);
+      console.log(`      IVA proporcional: ${bigIVA.toString()}`);
+    } else {
+      bigInteres = isCube
+        ? new Big(inv.monto_cash_in ?? 0)
+        : new Big(inv.monto_inversionista);
+
+      bigIVA = isCube
+        ? new Big(inv.iva_cash_in ?? 0)
+        : new Big(inv.iva_inversionista);
+    }
 
     console.log(
-      `   💵 Interés a usar: ${bigInteres.toString()} (${isCube ? "monto_cash_in" : "monto_inversionista"})`
+      `   💵 Interés a usar: ${bigInteres.toString()} (${esMesAnterior ? "PROPORCIONAL" : isCube ? "monto_cash_in" : "monto_inversionista"})`
     );
     console.log(
-      `   🧾 IVA a usar: ${bigIVA.toString()} (${isCube ? "iva_cash_in" : "iva_inversionista"})`
+      `   🧾 IVA a usar: ${bigIVA.toString()} (${esMesAnterior ? "PROPORCIONAL" : isCube ? "iva_cash_in" : "iva_inversionista"})`
     );
 
     console.log(

@@ -689,6 +689,76 @@ app.post("/info/check-liveness", async (c) => {
 });
 // 🔥 ENDPOINT - Validar OTP con control de intentos
 
+// Upload boleta de inversionista a cartera-back
+app.post("/api/accounting/upload-boleta", async (c) => {
+	try {
+		const context = await createContext({ context: c });
+		if (!context.session?.user?.id) {
+			return c.json({ error: "No autorizado" }, 401);
+		}
+
+		const formData = await c.req.formData();
+		const file = formData.get("file") as File;
+		if (!file) {
+			return c.json({ error: "No se envió archivo" }, 400);
+		}
+
+		const { carteraBackClient } = await import(
+			"./services/cartera-back-client"
+		);
+		const result = await carteraBackClient.uploadFile(file, file.name);
+		return c.json(result);
+	} catch (err: any) {
+		console.error("[UploadBoleta] Error:", err);
+		return c.json({ error: err.message || "Error al subir archivo" }, 500);
+	}
+});
+
+// Endpoint para que cartera-back cree notificaciones de pago de inversionistas
+app.post("/api/notifications/pay-investors", async (c) => {
+	try {
+		const body = await c.req.json<{
+			titulo: string;
+			descripcion?: string;
+		}>();
+
+		if (!body.titulo) {
+			return c.json({ error: "El campo 'titulo' es requerido" }, 400);
+		}
+
+		const { createNotification } = await import("./routers/notifications");
+		const { db } = await import("./db");
+		const { user } = await import("./db/schema/auth");
+		const { eq } = await import("drizzle-orm");
+
+		// Buscar un usuario admin para asignar como creador
+		const [adminUser] = await db
+			.select({ id: user.id })
+			.from(user)
+			.where(eq(user.role, "admin"))
+			.limit(1);
+
+		if (!adminUser) {
+			return c.json({ error: "No se encontró un usuario admin" }, 500);
+		}
+
+		const notification = await createNotification({
+			titulo: body.titulo,
+			descripcion: body.descripcion || null,
+			type: "pay_investors",
+			createdBy: adminUser.id,
+			createdByRole: "admin",
+			assignedToRole: "accounting",
+			redirectPage: "pay_investors",
+		});
+
+		return c.json({ success: true, notification });
+	} catch (err: any) {
+		console.error("[PayInvestorsNotification] Error:", err);
+		return c.json({ error: err.message || "Error al crear notificación" }, 500);
+	}
+});
+
 // REST endpoint for public lead creation (for external web forms)
 app.post("/api/public/lead", createPublicLead);
 

@@ -1816,6 +1816,15 @@ export type ResumenGlobalResponse =
 
 
 
+export const notificarContabilidadBoletas = async () => {
+  const { data } = await api.post("/notifications/pay-investors", {
+    titulo: "Pagos de inversionistas cargados",
+    descripcion:
+      "Ya se pueden cargar las boletas correspondientes al mes de febrero 2026.",
+  });
+  return data;
+};
+
 export const inversionistasService = {
   
   // 📊 Obtener resumen global

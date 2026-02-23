@@ -7,6 +7,7 @@ import {
   ChevronUp,
   Download,
   Edit,
+  Bell,
   FileDown,
   FileSpreadsheet,
   Loader2,
@@ -28,6 +29,7 @@ import {
 import { useCatalogs } from "../hooks/catalogs";
 import {
   inversionistasService,
+  notificarContabilidadBoletas,
   type Investor,
   type InvestorPayload,
 } from "../services/services";
@@ -415,6 +417,21 @@ export function TableInvestors() {
     }
   };
 
+  const [notificando, setNotificando] = useState(false);
+  const handleNotificarContabilidad = async () => {
+    if (!confirm("¿Deseas notificar a contabilidad para carga de boletas?")) return;
+    setNotificando(true);
+    try {
+      await notificarContabilidadBoletas();
+      alert("✅ Notificación enviada a contabilidad");
+    } catch (err) {
+      alert("❌ Error al enviar la notificación");
+      console.error(err);
+    } finally {
+      setNotificando(false);
+    }
+  };
+
   const handleEditInvestor = (inv: any) => {
     setModalMode("update");
     console.log(inv);
@@ -739,6 +756,18 @@ const handleAbrirModalBoleta = (inversionista?: { id: number; nombre: string; dp
               <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
             </div>
           </div>
+
+          {/* Notificar a Contabilidad */}
+          <button
+            onClick={handleNotificarContabilidad}
+            disabled={notificando}
+            className="px-4 py-2 rounded-lg bg-amber-500 text-white font-bold hover:bg-amber-600 active:scale-95 transition-all flex items-center gap-2 justify-center shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
+            title="Enviar notificación a contabilidad para carga de boletas"
+          >
+            <Bell className={`w-5 h-5 ${notificando ? "animate-pulse" : ""}`} />
+            <span className="hidden sm:inline">{notificando ? "Notificando..." : "Notificar a contabilidad"}</span>
+            <span className="sm:hidden">{notificando ? "..." : "Notificar"}</span>
+          </button>
         </div>
       </div>
       <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0">

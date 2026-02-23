@@ -442,7 +442,10 @@ export async function insertPagosCreditoInversionistas(
     const fechaInicio = inv.fecha_inicio_participacion
       ? new Date(inv.fecha_inicio_participacion + "T00:00:00")
       : null;
-    const fechaPago =  new Date();
+    // Usar hora de Guatemala (UTC-6) en lugar de la hora del servidor
+    const fechaPago = new Date(
+      new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" })
+    );
 
     const mesAnterior = fechaPago.getMonth() === 0 ? 11 : fechaPago.getMonth() - 1;
     const anioMesAnterior = fechaPago.getMonth() === 0
@@ -1170,7 +1173,9 @@ export async function falsePayment(pago_id: number, credito_id: number) {
 }
 
 export async function getPagosDelMesActual(credito_id: number) {
-  const hoy = new Date();
+  const hoy = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" })
+  );
   const mes = hoy.getMonth() + 1; // getMonth() es 0-based
   const anio = hoy.getFullYear();
 
@@ -1576,7 +1581,9 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
 
 // 📅 Función helper para obtener el rango del mes actual
 function obtenerRangoMesActual() {
-  const hoy = new Date();
+  const hoy = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" })
+  );
   const primerDia = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
   const ultimoDia = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0);
   

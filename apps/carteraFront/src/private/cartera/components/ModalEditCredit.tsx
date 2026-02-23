@@ -137,12 +137,13 @@ export function ModalEditCredit({
       };
     }
     // Si no hay espejo para ese inversionista, devolvemos objeto vacío
+    const today = new Date().toISOString().split("T")[0];
     return {
       inversionista_id: 0,
       monto_aportado: 0,
       porcentaje_cash_in: 0,
       porcentaje_inversion: 0,
-      fecha_inicio_participacion: "2025-12-01",
+      fecha_inicio_participacion: today,
     };
   });
 

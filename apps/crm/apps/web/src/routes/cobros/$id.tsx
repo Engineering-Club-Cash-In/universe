@@ -405,12 +405,10 @@ function RouteComponent() {
 								</div>
 								<div className="space-y-2">
 									<div className="flex items-center gap-2 text-sm">
-										<Banknote className="h-4 w-4 text-muted-foreground" />
-										<span className="font-medium">Monto en Mora:</span>
+										<FileText className="h-4 w-4 text-muted-foreground" />
+										<span className="font-medium">Cuotas Vencidas:</span>
 									</div>
-									<p className="font-bold text-lg text-red-600">
-										Q{Number(caso.montoEnMora).toLocaleString()}
-									</p>
+									<p>{caso.cuotasVencidas} cuotas</p>
 								</div>
 								<div className="space-y-2">
 									<div className="flex items-center gap-2 text-sm">
@@ -421,12 +419,63 @@ function RouteComponent() {
 								</div>
 								<div className="space-y-2">
 									<div className="flex items-center gap-2 text-sm">
-										<FileText className="h-4 w-4 text-muted-foreground" />
-										<span className="font-medium">Cuotas Vencidas:</span>
+										<Banknote className="h-4 w-4 text-muted-foreground" />
+										<span className="font-medium">Monto en Mora:</span>
 									</div>
-									<p>{caso.cuotasVencidas} cuotas</p>
+									<p className="font-bold text-lg text-red-600">
+										Q{Number(caso.montoEnMora).toLocaleString()}
+									</p>
+								</div>
+								<div className="space-y-2">
+									<div className="flex items-center gap-2 text-sm">
+										<Banknote className="h-4 w-4 text-muted-foreground" />
+										<span className="font-medium">Cuota Mensual:</span>
+									</div>
+									<p className="font-bold text-lg text-blue-600 uppercase tracking-tight">
+										Q{Number(caso.cuotaMensual || 0).toLocaleString()}
+									</p>
+								</div>
+								<div className="space-y-2">
+									<div className="flex items-center gap-2 text-sm">
+										<Banknote className="h-4 w-4 text-muted-foreground" />
+										<span className="font-medium">Total a Pagar <span className="text-xs text-muted-foreground">(Mora + Cuota)</span>:</span>
+									</div>
+									<p className="font-bold text-lg text-orange-600">
+										Q{(Number(caso.montoEnMora) + Number(caso.cuotaMensual || 0)).toLocaleString()}
+									</p>
 								</div>
 							</div>
+
+							{/* Strip visual: Total a Cobrar */}
+							{Number(caso.montoEnMora) > 0 && (
+								<div className="mt-2 rounded-lg border border-orange-200 bg-orange-50 p-4">
+									<div className="flex items-center justify-between">
+										<div>
+											<p className="font-semibold text-orange-900 text-sm">
+												Total a Cobrar (Mora + Cuota)
+											</p>
+											<div className="mt-1 flex items-center gap-3 text-orange-700 text-xs">
+												<span>
+													Mora:{" "}
+													<strong>
+														Q{Number(caso.montoEnMora).toLocaleString()}
+													</strong>
+												</span>
+												<span>+</span>
+												<span>
+													Cuota:{" "}
+													<strong>
+														Q{Number(caso.cuotaMensual || 0).toLocaleString()}
+													</strong>
+												</span>
+											</div>
+										</div>
+										<p className="font-extrabold text-2xl text-orange-700">
+											Q{(Number(caso.montoEnMora) + Number(caso.cuotaMensual || 0)).toLocaleString()}
+										</p>
+									</div>
+								</div>
+							)}
 						</CardContent>
 					</Card>
 

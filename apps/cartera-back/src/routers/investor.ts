@@ -18,6 +18,7 @@ import {
   upsertPagosEspejo,             // 🆕 Recalcular pagos espejo desde el front
   aplicarPagosEspejo,
   deletePagosEspejoNoLiquidados,
+  updateSaldoReinversion,
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
 import puppeteer from "puppeteer";
@@ -32,6 +33,7 @@ export const inversionistasRouter = new Elysia()
   .post("/investor", insertInvestor)
   .get("/investor", getInvestors)
   .post("/investor/update", updateInvestor)
+  .post("/investor/saldo-reinversion", updateSaldoReinversion)
   .get("/getInvestorsWithFullCredits", getInvestorsWithCredits)
   .get(
     "/getInvestors",

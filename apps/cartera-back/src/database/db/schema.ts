@@ -290,6 +290,7 @@
 
     fecha_boleta: date("fecha_boleta"), // Fecha del pago en la boleta
     monto_aplicado: numeric("monto_aplicado", { precision: 18, scale: 2 }).notNull(),
+    fecha_aplicado: timestamp("fecha_aplicado"), // Fecha en que se aplicó el pago al crédito
   });
   export const boletas = customSchema.table("boletas", {
     id: serial("id").primaryKey(),
@@ -541,7 +542,8 @@
       "sin_reinversion",
       "reinversion_capital",
       "reinversion_interes",
-      "reinversion_total"
+      "reinversion_total",
+      "reinversion_variable"
     ]);
 
   export const tipoMonedaEnum = customSchema.enum("tipo_moneda", ["quetzales", "dolares"]);
@@ -561,7 +563,23 @@
     tipo_cuenta: tipoCuentaEnum("tipo_cuenta"),
     numero_cuenta: varchar("numero_cuenta", { length: 100 }),
     moneda: tipoMonedaEnum("moneda").notNull().default("quetzales"),
+    permite_distribucion: boolean("permite_distribucion").notNull().default(false),
+    monto_reinversion: numeric("monto_reinversion", { precision: 18, scale: 2 }),
+    saldo_reinversion: numeric("saldo_reinversion", { precision: 18, scale: 2 }).notNull().default("0"),
   });
+
+  export const reinversiones = customSchema.table("reinversiones", {
+    reinversion_id: serial("reinversion_id").primaryKey(),
+    inversionista_id: integer("inversionista_id")
+      .notNull()
+      .references(() => inversionistas.inversionista_id),
+    monto_capital: numeric("monto_capital", { precision: 18, scale: 2 }).notNull().default("0"),
+    monto_interes: numeric("monto_interes", { precision: 18, scale: 2 }).notNull().default("0"),
+    monto_total: numeric("monto_total", { precision: 18, scale: 2 }).notNull().default("0"),
+    tipo_reinversion: tipoReinversionEnum("tipo_reinversion").notNull(),
+    fecha_creacion: timestamp("fecha_creacion").defaultNow().notNull(),
+  });
+
   export const asesores = customSchema.table("asesores", {
     asesor_id: serial("asesor_id").primaryKey(),
     nombre: varchar("nombre", { length: 100 }).notNull(),
@@ -791,7 +809,12 @@
       total_iva: numeric("total_iva", { precision: 18, scale: 2 }).notNull().default("0"),
       total_isr: numeric("total_isr", { precision: 18, scale: 2 }).notNull().default("0"),
       total_cuota: numeric("total_cuota", { precision: 18, scale: 2 }).notNull().default("0"),
-      
+
+      // Reinversión
+      reinversion_capital: numeric("reinversion_capital", { precision: 18, scale: 2 }).notNull().default("0"),
+      reinversion_interes: numeric("reinversion_interes", { precision: 18, scale: 2 }).notNull().default("0"),
+      reinversion_total: numeric("reinversion_total", { precision: 18, scale: 2 }).notNull().default("0"),
+
       // Reporte de liquidación (Excel/PDF)
       reporte_liquidacion_url: text("reporte_liquidacion_url"),
       

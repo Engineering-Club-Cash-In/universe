@@ -284,20 +284,28 @@ export function TableInvestors() {
   // Fuente de subtotales: mirror summary en Draft, totales normales en modo normal
   const subtotales = isDraft && mirrorSummaryData
     ? {
-        total_abono_capital:  mirrorSummaryData.subtotal.total_abono_capital,
-        total_abono_interes:  mirrorSummaryData.subtotal.total_abono_interes,
-        total_abono_iva:      mirrorSummaryData.subtotal.total_abono_iva,
-        total_isr:            mirrorSummaryData.subtotal.total_isr,
-        total_cuota:          mirrorSummaryData.subtotal.total_cuota,
-        total_monto_aportado: mirrorSummaryData.subtotal.total_monto_aportado,
+        total_abono_capital:         mirrorSummaryData.subtotal.total_abono_capital,
+        total_abono_interes:         mirrorSummaryData.subtotal.total_abono_interes,
+        total_abono_iva:             mirrorSummaryData.subtotal.total_abono_iva,
+        total_isr:                   mirrorSummaryData.subtotal.total_isr,
+        total_cuota_sin_reinversion: mirrorSummaryData.subtotal.total_cuota_sin_reinversion,
+        total_cuota_con_reinversion: mirrorSummaryData.subtotal.total_cuota_con_reinversion,
+        total_monto_aportado:        mirrorSummaryData.subtotal.total_monto_aportado,
+        total_reinversion_capital:   mirrorSummaryData.subtotal.total_reinversion_capital,
+        total_reinversion_interes:   mirrorSummaryData.subtotal.total_reinversion_interes,
+        total_reinversion:           mirrorSummaryData.subtotal.total_reinversion,
       }
     : {
-        total_abono_capital:  totalesData?.totales.total_abono_capital  ?? 0,
-        total_abono_interes:  totalesData?.totales.total_abono_interes  ?? 0,
-        total_abono_iva:      totalesData?.totales.total_abono_iva      ?? 0,
-        total_isr:            totalesData?.totales.total_isr            ?? 0,
-        total_cuota:          totalesData?.totales.total_cuota          ?? 0,
-        total_monto_aportado: totalesData?.totales.total_monto_aportado ?? 0,
+        total_abono_capital:         totalesData?.totales.total_abono_capital         ?? 0,
+        total_abono_interes:         totalesData?.totales.total_abono_interes         ?? 0,
+        total_abono_iva:             totalesData?.totales.total_abono_iva             ?? 0,
+        total_isr:                   totalesData?.totales.total_isr                   ?? 0,
+        total_cuota_sin_reinversion: totalesData?.totales.total_cuota_sin_reinversion ?? 0,
+        total_cuota_con_reinversion: totalesData?.totales.total_cuota_con_reinversion ?? 0,
+        total_monto_aportado:        totalesData?.totales.total_monto_aportado        ?? 0,
+        total_reinversion_capital:   totalesData?.totales.total_reinversion_capital   ?? 0,
+        total_reinversion_interes:   totalesData?.totales.total_reinversion_interes   ?? 0,
+        total_reinversion:           totalesData?.totales.total_reinversion           ?? 0,
       };
 
 
@@ -415,12 +423,14 @@ export function TableInvestors() {
       nombre: inv.nombre_inversionista,
       emite_factura: inv.emite_factura,
       reinversion: inv.reinversion ?? false,
-      banco: inv.banco_id ?? null, // 🔥 CAMBIO: Ahora usa banco_id en lugar de banco y acepta null
+      banco: inv.banco_id ?? null,
       tipo_cuenta: inv.tipo_cuenta ?? "",
       numero_cuenta: inv.numero_cuenta ?? "",
       re_inversion: inv.re_inversion ?? "sin_reinversion",
       moneda: inv.moneda ?? "quetzales",
       dpi: inv.dpi ?? "",
+      tipo_reinversion: inv.re_inversion ?? inv.tipo_reinversion ?? "sin_reinversion",
+      monto_reinversion: Number(inv.monto_reinversion ?? 0),
     });
     setModalOpen(true);
   };
@@ -842,6 +852,18 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   ? "✓ Emite Factura"
                   : "No emite factura"}
               </span>
+
+              {Number(inv.monto_reinversion ?? 0) > 0 && (
+                <span className="px-3 py-1 rounded-full text-sm font-semibold bg-orange-100 text-orange-700">
+                  Monto Reinversión: {inv.currencySymbol} {Number(inv.monto_reinversion).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                </span>
+              )}
+
+              {Number(inv.saldo_reinversion ?? 0) > 0 && (
+                <span className="px-3 py-1 rounded-full text-sm font-semibold bg-amber-100 text-amber-700">
+                  Saldo Reinversión: {inv.currencySymbol} {Number(inv.saldo_reinversion).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                </span>
+              )}
             </div>
 
             {/* Stats Grid - Ajustado para 5 elementos */}
@@ -893,48 +915,41 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
             )}
             <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4">
               <div className={`rounded-lg p-3 shadow-sm border h-full flex flex-col justify-center ${isDraft ? "bg-yellow-50 border-yellow-300" : "bg-white border-blue-100"}`}>
-                <div className="text-xs text-gray-500 mb-1">
-                  Total Capital
-                </div>
+                <div className="text-xs text-gray-500 mb-1">Total Capital</div>
                 <div className={`font-bold ${isDraft ? "text-yellow-700" : "text-blue-700"}`}>
-                  {inv.currencySymbol} {Number(subtotales.total_abono_capital).toLocaleString("es-GT", {
-                    minimumFractionDigits: 2,
-                  })}
+                  {inv.currencySymbol} {Number(subtotales.total_abono_capital).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                 </div>
               </div>
 
               <div className={`rounded-lg p-3 shadow-sm border h-full flex flex-col justify-center ${isDraft ? "bg-yellow-50 border-yellow-300" : "bg-white border-indigo-100"}`}>
-                <div className="text-xs text-gray-500 mb-1">
-                  Total Interés
-                </div>
+                <div className="text-xs text-gray-500 mb-1">Total Interés</div>
                 <div className={`font-bold ${isDraft ? "text-yellow-700" : "text-indigo-700"}`}>
-                  {inv.currencySymbol} {Number(subtotales.total_abono_interes).toLocaleString("es-GT", {
-                    minimumFractionDigits: 2,
-                  })}
+                  {inv.currencySymbol} {Number(subtotales.total_abono_interes).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                 </div>
               </div>
 
               <div className={`rounded-lg p-3 shadow-sm border h-full flex flex-col justify-center ${isDraft ? "bg-yellow-50 border-yellow-300" : "bg-white border-violet-100"}`}>
-                <div className="text-xs text-gray-500 mb-1">
-                  IVA + ISR
-                </div>
+                <div className="text-xs text-gray-500 mb-1">IVA + ISR</div>
                 <div className={`font-bold ${isDraft ? "text-yellow-700" : "text-violet-700"}`}>
-                  {inv.currencySymbol} {(Number(subtotales.total_abono_iva) +
-                    Number(subtotales.total_isr)
-                  ).toLocaleString("es-GT", {
-                    minimumFractionDigits: 2,
-                  })}
+                  {inv.currencySymbol} {(Number(subtotales.total_abono_iva) + Number(subtotales.total_isr)).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                 </div>
               </div>
 
               <div className={`rounded-lg p-3 shadow-sm border-2 h-full flex flex-col justify-center ${isDraft ? "bg-gradient-to-br from-yellow-50 to-amber-50 border-yellow-400" : "bg-gradient-to-br from-green-50 to-emerald-50 border-green-300"}`}>
                 <div className={`text-xs mb-1 font-semibold ${isDraft ? "text-yellow-700" : "text-green-700"}`}>
-                  💰 Total Cuota
+                  Cuota Sin Reinversión
                 </div>
                 <div className={`font-bold text-lg ${isDraft ? "text-yellow-900" : "text-green-900"}`}>
-                  {inv.currencySymbol} {Number(subtotales.total_cuota).toLocaleString("es-GT", {
-                    minimumFractionDigits: 2,
-                  })}
+                  {inv.currencySymbol} {Number(subtotales.total_cuota_sin_reinversion).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                </div>
+              </div>
+
+              <div className={`rounded-lg p-3 shadow-sm border-2 h-full flex flex-col justify-center ${isDraft ? "bg-gradient-to-br from-yellow-50 to-amber-50 border-yellow-400" : "bg-gradient-to-br from-teal-50 to-emerald-50 border-teal-300"}`}>
+                <div className={`text-xs mb-1 font-semibold ${isDraft ? "text-yellow-700" : "text-teal-700"}`}>
+                  Cuota Con Reinversión
+                </div>
+                <div className={`font-bold text-lg ${isDraft ? "text-yellow-900" : "text-teal-900"}`}>
+                  {inv.currencySymbol} {Number(subtotales.total_cuota_con_reinversion).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                 </div>
               </div>
 
@@ -943,11 +958,36 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   Total Monto Aportado
                 </div>
                 <div className={`font-bold text-lg ${isDraft ? "text-yellow-900" : "text-purple-900"}`}>
-                  {inv.currencySymbol} {Number(subtotales.total_monto_aportado).toLocaleString("es-GT", {
-                    minimumFractionDigits: 2,
-                  })}
+                  {inv.currencySymbol} {Number(subtotales.total_monto_aportado).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                 </div>
               </div>
+
+              {Number(subtotales.total_reinversion_capital) > 0 && (
+                <div className="rounded-lg p-3 shadow-sm border-2 h-full flex flex-col justify-center bg-gradient-to-br from-orange-50 to-amber-50 border-orange-300">
+                  <div className="text-xs mb-1 font-semibold text-orange-700">Reinversión Capital</div>
+                  <div className="font-bold text-lg text-orange-900">
+                    {inv.currencySymbol} {Number(subtotales.total_reinversion_capital).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                  </div>
+                </div>
+              )}
+
+              {Number(subtotales.total_reinversion_interes) > 0 && (
+                <div className="rounded-lg p-3 shadow-sm border-2 h-full flex flex-col justify-center bg-gradient-to-br from-orange-50 to-amber-50 border-orange-300">
+                  <div className="text-xs mb-1 font-semibold text-orange-700">Reinversión Interés</div>
+                  <div className="font-bold text-lg text-orange-900">
+                    {inv.currencySymbol} {Number(subtotales.total_reinversion_interes).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                  </div>
+                </div>
+              )}
+
+              {Number(subtotales.total_reinversion) > 0 && (
+                <div className="rounded-lg p-3 shadow-sm border-2 h-full flex flex-col justify-center bg-gradient-to-br from-orange-50 to-amber-50 border-orange-300">
+                  <div className="text-xs mb-1 font-semibold text-orange-700">Total Reinversión</div>
+                  <div className="font-bold text-lg text-orange-900">
+                    {inv.currencySymbol} {Number(subtotales.total_reinversion).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1468,6 +1508,22 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
         </div>
       </div>
 
+      {/* Badges reinversión */}
+      {(Number(inv.monto_reinversion ?? 0) > 0 || Number(inv.saldo_reinversion ?? 0) > 0) && (
+        <div className="flex flex-wrap gap-2 mb-2">
+          {Number(inv.monto_reinversion ?? 0) > 0 && (
+            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-700">
+              Monto Reinversión: {inv.currencySymbol} {Number(inv.monto_reinversion).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+            </span>
+          )}
+          {Number(inv.saldo_reinversion ?? 0) > 0 && (
+            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">
+              Saldo Reinversión: {inv.currencySymbol} {Number(inv.saldo_reinversion).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* SUBTOTALES resumen */}
       <div className="flex flex-wrap gap-x-6 gap-y-2 mb-2 text-sm">
         <div>
@@ -1489,9 +1545,15 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
           </span>
         </div>
         <div>
-          <span className="font-bold text-blue-900">Total Cuota: </span>
+          <span className="font-bold text-blue-900">Cuota Sin Reinversión: </span>
           <span className="text-green-700 font-bold">
-            {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_cuota ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+            {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_cuota_sin_reinversion ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+          </span>
+        </div>
+        <div>
+          <span className="font-bold text-blue-900">Cuota Con Reinversión: </span>
+          <span className="text-teal-700 font-bold">
+            {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_cuota_con_reinversion ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
           </span>
         </div>
         <div>
@@ -1500,6 +1562,30 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
             {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_monto_aportado ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
           </span>
         </div>
+        {Number(totalesData?.totales.total_reinversion_capital ?? 0) > 0 && (
+          <div>
+            <span className="font-bold text-blue-900">Reinversión Capital: </span>
+            <span className="text-orange-700 font-bold">
+              {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_reinversion_capital ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+            </span>
+          </div>
+        )}
+        {Number(totalesData?.totales.total_reinversion_interes ?? 0) > 0 && (
+          <div>
+            <span className="font-bold text-blue-900">Reinversión Interés: </span>
+            <span className="text-orange-700 font-bold">
+              {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_reinversion_interes ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+            </span>
+          </div>
+        )}
+        {Number(totalesData?.totales.total_reinversion ?? 0) > 0 && (
+          <div>
+            <span className="font-bold text-blue-900">Total Reinversión: </span>
+            <span className="text-orange-700 font-bold">
+              {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_reinversion ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+            </span>
+          </div>
+        )}
         <div>
           <span className="font-bold text-blue-900">Emite Factura: </span>
           <span className="text-indigo-700 font-bold">

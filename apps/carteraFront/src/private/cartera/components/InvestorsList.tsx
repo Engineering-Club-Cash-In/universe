@@ -2,14 +2,17 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, Trash2, BookCopy } from "lucide-react";
-import { useState } from "react";
+import { Plus, Trash2, BookCopy, Wallet } from "lucide-react";
+import { useRef, useState } from "react";
 import { DatePickerMUI } from "./calendar";
 import type { InversionistaPayload } from "../services/services";
+
+
 
 interface InvestorOption {
   inversionista_id: number;
   nombre: string;
+  saldo_reinversion?: string | null;
 }
 
 interface InvestorsListProps {
@@ -21,6 +24,7 @@ interface InvestorsListProps {
   labelTitle: string;
   errorMessage?: string | string[];
   errorMessageMirror?: string | string[];
+  onSaldoChanges?: (changes: Record<number, number>) => void;
 }
 
 export function InvestorsList({
@@ -32,9 +36,48 @@ export function InvestorsList({
   labelTitle,
   errorMessage,
   errorMessageMirror,
+  onSaldoChanges,
 }: InvestorsListProps) {
   // Estado local para saber qué items tienen el espejo expandido
   const [expandedMirrors, setExpandedMirrors] = useState<Set<number>>(new Set());
+
+  // Track saldo_reinversion overrides por inversionista_id (para mostrar el saldo actualizado en UI)
+  const [saldoOverrides, setSaldoOverrides] = useState<Record<number, number>>({});
+  // Ref para guardar el monto_aportado ORIGINAL por index (el valor al abrir el modal)
+  const initialMontoRef = useRef<Record<number, number>>({});
+
+  const getOriginalSaldo = (inversionistaId: number): number => {
+    const opt = investorsOptions.find((o) => o.inversionista_id === Number(inversionistaId));
+    return Number(opt?.saldo_reinversion ?? 0);
+  };
+
+  const getSaldoReinversion = (inversionistaId: number): number => {
+    if (saldoOverrides[inversionistaId] !== undefined) return saldoOverrides[inversionistaId];
+    return getOriginalSaldo(inversionistaId);
+  };
+
+  const handleMontoAportadoChange = (index: number, newValue: number) => {
+    const invId = Number(investors[index]?.inversionista_id);
+
+    // Guardar el monto original solo la primera vez que se edita
+    if (initialMontoRef.current[index] === undefined) {
+      initialMontoRef.current[index] = Number(investors[index]?.monto_aportado ?? 0);
+    }
+
+    formik.setFieldValue(`${fieldName}.${index}.monto_aportado`, newValue);
+
+    if (invId > 0) {
+      const saldoOriginal = getOriginalSaldo(invId);
+      if (saldoOriginal > 0) {
+        // Diferencia total desde el monto original
+        const diffTotal = Math.max(0, newValue - initialMontoRef.current[index]);
+        const nuevoSaldo = Math.max(0, saldoOriginal - diffTotal);
+        const newOverrides = { ...saldoOverrides, [invId]: nuevoSaldo };
+        setSaldoOverrides(newOverrides);
+        onSaldoChanges?.(newOverrides);
+      }
+    }
+  };
 
   const toggleMirror = (index: number) => {
     const newSet = new Set(expandedMirrors);
@@ -135,7 +178,7 @@ export function InvestorsList({
                   type="number"
                   name={`${fieldName}.${index}.monto_aportado`}
                   value={inv.monto_aportado}
-                  onChange={formik.handleChange}
+                  onChange={(e) => handleMontoAportadoChange(index, Number(e.target.value))}
                 />
               </div>
               <div className="w-24">
@@ -213,6 +256,31 @@ export function InvestorsList({
                 </Button>
               </div>
             </div>
+
+            {/* Saldo Reinversion */}
+            {(() => {
+              const invId = Number(inv.inversionista_id);
+              const opt = investorsOptions.find((o) => o.inversionista_id === invId);
+              const saldoOriginal = Number(opt?.saldo_reinversion ?? 0);
+              // Mostrar si el inversionista tiene/tenia saldo > 0
+              if (saldoOriginal <= 0 && saldoOverrides[invId] === undefined) return null;
+              const saldo = getSaldoReinversion(invId);
+              return (
+                <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${
+                  saldo > 0
+                    ? "bg-emerald-50 border-emerald-200"
+                    : "bg-gray-50 border-gray-200"
+                }`}>
+                  <Wallet className={`w-4 h-4 shrink-0 ${saldo > 0 ? "text-emerald-600" : "text-gray-400"}`} />
+                  <span className={`text-sm font-semibold ${saldo > 0 ? "text-emerald-800" : "text-gray-500"}`}>
+                    Saldo de reinversion:
+                  </span>
+                  <span className={`text-sm font-bold ${saldo > 0 ? "text-emerald-900" : "text-gray-600"}`}>
+                    Q{saldo.toFixed(2)}
+                  </span>
+                </div>
+              );
+            })()}
 
             {/* 🟪 SECCIÓN ESPEJO (EXPANDIBLE) */}
             {isMirrorExpanded && (

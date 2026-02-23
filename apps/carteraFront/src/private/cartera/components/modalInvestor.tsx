@@ -4,6 +4,7 @@ import { useForm } from "react-hook-form";
 import { useInvestor } from "../hooks/investor";
 import { useBancos } from "../hooks/bancos";
 import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import type { InvestorPayload } from "../services/services";
 
 interface InvestorModalProps {
@@ -18,7 +19,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
   const { bancos, loading: loadingBancos, loadBancos } = useBancos();
   const queryClient = useQueryClient();
 
-  const { register, handleSubmit, reset } = useForm<InvestorPayload>({
+  const { register, handleSubmit, reset, watch, setValue } = useForm<InvestorPayload>({
     defaultValues: {
       nombre: "",
       dpi: undefined,
@@ -29,6 +30,8 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
       numero_cuenta: "",
       re_inversion: "sin_reinversion",
       moneda: "quetzales",
+      tipo_reinversion: "sin_reinversion",
+      monto_reinversion: 0,
     },
   });
 
@@ -55,6 +58,8 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
         numero_cuenta: "",
         re_inversion: "sin_reinversion",
         moneda: "quetzales",
+        tipo_reinversion: "sin_reinversion",
+        monto_reinversion: 0,
       });
     }
   }, [initialData, mode, reset]);
@@ -65,16 +70,19 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
       ...data,
       dpi: data.dpi ? Number(data.dpi) : null,
       banco: data.banco ? Number(data.banco) : null,
+      monto_reinversion: data.monto_reinversion ? Number(data.monto_reinversion) : 0,
+      re_inversion: data.tipo_reinversion ?? data.re_inversion ?? "sin_reinversion",
     };
     console.log("Submitting payload:", payload);
 
     // 🔥 SIMPLIFICADO: Siempre usa insertInvestor (hace upsert automático)
     insertInvestor.mutate(payload, {
       onSuccess: () => {
-        const mensaje = mode === "create" 
-          ? "✅ Inversionista creado correctamente." 
-          : "✅ Inversionista actualizado correctamente.";
-        alert(mensaje);
+        toast.success(
+          mode === "create"
+            ? "Inversionista creado correctamente"
+            : "Inversionista actualizado correctamente"
+        );
         queryClient.invalidateQueries({ queryKey: ["investors"] });
         queryClient.invalidateQueries({ queryKey: ["investor-mirror-summary"] });
         queryClient.invalidateQueries({ queryKey: ["investor-totals"] });
@@ -83,10 +91,11 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
       },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       onError: (error: any) => {
-        const mensaje = mode === "create"
-          ? "❌ Error al crear el inversionista."
-          : "❌ Error al actualizar el inversionista.";
-        alert(`${mensaje}\n${error.message || ""}`);
+        toast.error(
+          mode === "create"
+            ? `Error al crear el inversionista. ${error.message || ""}`
+            : `Error al actualizar el inversionista. ${error.message || ""}`
+        );
       },
     });
   };
@@ -176,13 +185,38 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
           <div>
             <label className="block text-sm text-blue-800 mb-1">Tipo de Reinversión</label>
             <select
-              {...register("re_inversion")}
+              {...register("tipo_reinversion", {
+                onChange: (e) => {
+                  if (e.target.value !== "reinversion_variable") {
+                    setValue("monto_reinversion", 0);
+                  }
+                },
+              })}
               className="bg-white text-blue-900 border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
             >
               <option value="sin_reinversion">Sin Reinversión</option>
               <option value="reinversion_capital">Reinversión Capital</option>
               <option value="reinversion_interes">Reinversión Interés</option>
+              <option value="reinversion_variable">Reinversión Variable</option>
             </select>
+          </div>
+
+          {/* Monto Reinversión */}
+          <div>
+            <label className="block text-sm text-blue-800 mb-1">Monto Reinversión</label>
+            <input
+              {...register("monto_reinversion", { valueAsNumber: true })}
+              type="number"
+              step="any"
+              min={0}
+              disabled={watch("tipo_reinversion") !== "reinversion_variable"}
+              className={`border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition ${
+                watch("tipo_reinversion") !== "reinversion_variable"
+                  ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                  : "bg-white text-blue-900 placeholder-gray-400"
+              }`}
+              placeholder="0.00"
+            />
           </div>
 
           {/* Moneda */}

@@ -32,6 +32,8 @@ export interface InvestorPayload {
   re_inversion: string | null;
   numero_cuenta: string | null;
   moneda?: string;
+  tipo_reinversion?: string | null;
+  monto_reinversion?: number | null;
 }
 export interface InvestorResponse {
   inversionista_id: number;
@@ -43,6 +45,8 @@ export interface InvestorResponse {
   numero_cuenta: string | null;
   moneda?: string;
   currencySymbol?: string;
+  tipo_reinversion?: string | null;
+  monto_reinversion?: number | null;
 }
 
 // Crear inversionista(s)
@@ -726,8 +730,12 @@ export interface SubtotalInversionista {
   total_abono_interes: string;
   total_abono_iva: string;
   total_isr: string;
-  total_cuota: string;
-  total_monto_aportado: number; // 🆕
+  total_cuota_sin_reinversion: number;
+  total_cuota_con_reinversion: number;
+  total_monto_aportado: number;
+  total_reinversion_capital: number;
+  total_reinversion_interes: number;
+  total_reinversion: number;
 }
 
 // Un inversionista con sus créditos y sus subtotales
@@ -742,9 +750,11 @@ export interface InversionistaConCreditos {
   banco: string | null;           // 🔹 nuevo
   tipo_cuenta: string | null;     // 🔹 nuevo
   numero_cuenta: string | null;   // 🔹 nuevo
-  re_inversion:string
-  dpi:number | null
-  tieneBoletaPendiente:boolean
+  re_inversion: string;
+  monto_reinversion?: string | null;
+  saldo_reinversion?: string | null;
+  dpi: number | null;
+  tieneBoletaPendiente: boolean;
   moneda?: string;
   currencySymbol?: string;
 }
@@ -852,21 +862,27 @@ export interface InvestorMirrorSummaryResponse {
   inversionista_id: number;
   nombre: string;
   emite_factura: boolean;
-  reinversion: boolean;
+  reinversion: string;
   banco_id: number | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;
   dpi: number | null;
+  moneda?: string;
+  currencySymbol?: string;
   subtotal: {
     total_abono_capital: number;
     total_abono_interes: number;
     total_abono_iva: number;
     total_isr: number;
-    total_cuota: number;
+    total_cuota_sin_reinversion: number;
+    total_cuota_con_reinversion: number;
     total_monto_aportado: number;
     totalAbonoGeneralInteres: number;
     total_capital_creditos: number;
     total_capital_actual: number;
+    total_reinversion_capital: number;
+    total_reinversion_interes: number;
+    total_reinversion: number;
   };
 }
 
@@ -2717,6 +2733,17 @@ export interface RecalculateQuotaPayload {
 
 export async function recalculateQuotaService(payload: RecalculateQuotaPayload) {
   const { data } = await api.post(`${API_URL}/recalculate-quota`, payload);
+  return data;
+}
+
+// Actualizar saldo de reinversión de un inversionista
+export interface UpdateSaldoReinversionPayload {
+  inversionista_id: number;
+  saldo_reinversion: number;
+}
+
+export async function updateSaldoReinversionService(payload: UpdateSaldoReinversionPayload) {
+  const { data } = await api.post(`${API_URL}/investor/saldo-reinversion`, payload);
   return data;
 }
 

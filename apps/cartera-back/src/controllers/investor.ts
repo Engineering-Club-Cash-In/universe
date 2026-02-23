@@ -15,6 +15,7 @@ import {
   pagos_credito_inversionistas,
   pagos_credito_inversionistas_espejo, // 🆕 NUEVO: Tabla espejo de pagos
   platform_users,
+  reinversiones,
   usuarios,
 } from "../database/db/schema";
 import { eq, and, sql, inArray, ilike, like, desc, count, SQL } from "drizzle-orm";
@@ -365,6 +366,8 @@ export const insertInvestor = async ({ body, set }: any) => {
           updateData.numero_cuenta = inv.numero_cuenta.trim();
         if (inv.dpi) updateData.dpi = inv.dpi;
         if (inv.moneda?.trim()) updateData.moneda = inv.moneda.trim();
+        if (inv.monto_reinversion !== undefined)
+          updateData.monto_reinversion = inv.monto_reinversion;
 
         const [updated] = await db
           .update(inversionistas)
@@ -395,6 +398,7 @@ export const insertInvestor = async ({ body, set }: any) => {
           tipo_cuenta: inv.tipo_cuenta?.trim() || null,
           numero_cuenta: inv.numero_cuenta?.trim() || null,
           moneda: inv.moneda?.trim() || "quetzales",
+          monto_reinversion: inv.monto_reinversion || null,
         };
 
         const [inserted] = await db
@@ -497,6 +501,36 @@ export const getInvestors = async ({ query, set }: any) => {
     };
   }
 };
+
+export const updateSaldoReinversion = async ({ body, set }: any) => {
+  try {
+    const { inversionista_id, saldo_reinversion } = body;
+
+    if (!inversionista_id || saldo_reinversion === undefined) {
+      set.status = 400;
+      return { message: "Se requiere inversionista_id y saldo_reinversion" };
+    }
+
+    const [updated] = await db
+      .update(inversionistas)
+      .set({ saldo_reinversion: String(saldo_reinversion) })
+      .where(eq(inversionistas.inversionista_id, inversionista_id))
+      .returning();
+
+    if (!updated) {
+      set.status = 404;
+      return { message: "Inversionista no encontrado" };
+    }
+
+    set.status = 200;
+    return updated;
+  } catch (error) {
+    console.error("Error al actualizar saldo_reinversion:", error);
+    set.status = 500;
+    return { message: "Error al actualizar saldo_reinversion", error: String(error) };
+  }
+};
+
 import Big from "big.js";
 
 export const getInvestorsWithCredits = async () => {
@@ -593,6 +627,8 @@ export async function processAndReplaceCreditInvestors(
   inversionista_id: number,
   updateMirror: boolean = false
 ) {
+
+  
   // 1. Fetch credit details
   const credit = await db.query.creditos.findFirst({
     where: (c, { eq }) => eq(c.credito_id, credito_id),
@@ -602,10 +638,17 @@ export async function processAndReplaceCreditInvestors(
     throw new Error("Credit not found");
   }
 
+  // 1.5 Verificar si el inversionista tiene permite_distribucion
+  const inversionista = await db.query.inversionistas.findFirst({
+    where: (i, { eq }) => eq(i.inversionista_id, inversionista_id),
+  });
+
+  const permiteDistribucion = inversionista?.permite_distribucion ?? false;
+
   // 2. Fetch all investors for this credit
   // Determine which table to query based on updateMirror flag
   let investors;
-  
+
   if (updateMirror) {
     investors = await db.query.creditos_inversionistas_espejo.findMany({
       where: (ci, { eq, and }) =>
@@ -675,42 +718,37 @@ export async function processAndReplaceCreditInvestors(
 
   // 4. Update all processed investors by their id
   for (const inv of processedInvestors) {
+    const setData = {
+      cuota_inversionista: inv.cuota_inversionista,
+      porcentaje_participacion_inversionista: inv.porcentaje_participacion_inversionista,
+      monto_aportado: inv.monto_aportado,
+      porcentaje_cash_in: inv.porcentaje_cash_in,
+      iva_inversionista: inv.iva_inversionista,
+      iva_cash_in: inv.iva_cash_in,
+      monto_inversionista: inv.monto_inversionista,
+      monto_cash_in: inv.monto_cash_in,
+    };
+
     if (updateMirror) {
-       await db
-        .update(creditos_inversionistas_espejo)
-        .set({
-          cuota_inversionista: inv.cuota_inversionista,
-          porcentaje_participacion_inversionista:
-            inv.porcentaje_participacion_inversionista,
-          monto_aportado: inv.monto_aportado,
-          porcentaje_cash_in: inv.porcentaje_cash_in,
-          iva_inversionista: inv.iva_inversionista,
-          iva_cash_in: inv.iva_cash_in,
-          monto_inversionista: inv.monto_inversionista,
-          monto_cash_in: inv.monto_cash_in,
-          // fecha_creacion: inv.fecha_creacion, // Descomenta si deseas actualizarla
-        })
+      await db.update(creditos_inversionistas_espejo).set(setData)
         .where(eq(creditos_inversionistas_espejo.id, inv.id));
     } else {
-      await db
-        .update(creditos_inversionistas)
-        .set({
-          cuota_inversionista: inv.cuota_inversionista,
-          porcentaje_participacion_inversionista:
-            inv.porcentaje_participacion_inversionista,
-          monto_aportado: inv.monto_aportado,
-          porcentaje_cash_in: inv.porcentaje_cash_in,
-          iva_inversionista: inv.iva_inversionista,
-          iva_cash_in: inv.iva_cash_in,
-          monto_inversionista: inv.monto_inversionista,
-          monto_cash_in: inv.monto_cash_in,
-          // fecha_creacion: inv.fecha_creacion, // Descomenta si deseas actualizarla
-        })
+      await db.update(creditos_inversionistas).set(setData)
         .where(eq(creditos_inversionistas.id, inv.id));
+    }
+
+    // Si permite_distribucion = true, también actualizar la OTRA tabla con los mismos valores
+    if (permiteDistribucion) {
+      const otraTabla = updateMirror ? creditos_inversionistas : creditos_inversionistas_espejo;
+      await db.update(otraTabla).set(setData)
+        .where(and(
+          eq(otraTabla.inversionista_id, inversionista_id),
+          eq(otraTabla.credito_id, credito_id)
+        ));
     }
   }
 
-  // 5. Return the new updated data (could re-fetch if you want actual DB values)
+  // 6. Return the new updated data (could re-fetch if you want actual DB values)
   return processedInvestors;
 }
 export async function processAndReplaceCreditInvestorsReverse(
@@ -976,6 +1014,8 @@ export async function resumeInvestor(
       inversionista: inversionistas.nombre,
       emite_factura: inversionistas.emite_factura,
       reinversion: inversionistas.tipo_reinversion,
+      monto_reinversion: inversionistas.monto_reinversion,
+      saldo_reinversion: inversionistas.saldo_reinversion,
       banco_id: inversionistas.banco_id,
       banco_nombre: bancos.nombre,
       tipo_cuenta: inversionistas.tipo_cuenta,
@@ -1205,6 +1245,18 @@ const mes = fechaParaMes
                   cuota_inversor = new Big(0);
                   break;
 
+                case "reinversion_variable": {
+                  const montoReinv = new Big(inv.monto_reinversion ?? 0);
+                  const interesTotal = abono_interes.plus(inv.emite_factura ? abono_iva : isr.neg());
+                  // Primero resta de interés, luego de capital
+                  const reinvInteres = montoReinv.gt(interesTotal) ? interesTotal : montoReinv;
+                  const reinvCapital = montoReinv.minus(reinvInteres).gt(abono_capital)
+                    ? abono_capital
+                    : montoReinv.minus(reinvInteres);
+                  cuota_inversor = abono_capital.minus(reinvCapital).plus(interesTotal.minus(reinvInteres));
+                  break;
+                }
+
                 default:
                   cuota_inversor = abono_capital
                     .plus(abono_interes)
@@ -1308,6 +1360,8 @@ const mes = fechaParaMes
         tipo_cuenta: inv.tipo_cuenta,
         numero_cuenta: inv.numero_cuenta,
         re_inversion: inv.reinversion,
+        monto_reinversion: inv.monto_reinversion,
+        saldo_reinversion: inv.saldo_reinversion,
         tieneBoletaPendiente: inv.tiene_boleta_pendiente,
         dpi: inv.dpi,
         moneda: inv.moneda,
@@ -1378,6 +1432,7 @@ export async function getInvestorTotalsGlobales(
       inversionista: inversionistas.nombre,
       emite_factura: inversionistas.emite_factura,
       reinversion: inversionistas.tipo_reinversion,
+      monto_reinversion: inversionistas.monto_reinversion,
       moneda: inversionistas.moneda,
     })
     .from(inversionistas)
@@ -1504,6 +1559,9 @@ export async function getInvestorTotalsGlobales(
     totalAbonoGeneralInteres: new Big(0),
     total_capital_creditos: new Big(0),
     total_capital_actual: new Big(0),
+    total_reinversion_capital: new Big(0),
+    total_reinversion_interes: new Big(0),
+    total_reinversion: new Big(0),
   };
 
   // 7. Procesar TODOS los créditos del inversionista (sin queries adicionales)
@@ -1531,25 +1589,38 @@ export async function getInvestorTotalsGlobales(
       }
 
       let cuota_inversor;
+      let reinvCapital = new Big(0);
+      let reinvInteres = new Big(0);
+      const interesTotal = abono_interes.plus(inv.emite_factura ? abono_iva : isr.neg());
+
       switch (inv.reinversion) {
         case "sin_reinversion":
-          cuota_inversor = abono_capital
-            .plus(abono_interes)
-            .plus(inv.emite_factura ? abono_iva : isr.neg());
+          cuota_inversor = abono_capital.plus(interesTotal);
           break;
         case "reinversion_capital":
-          cuota_inversor = abono_interes.plus(inv.emite_factura ? abono_iva : isr.neg());
+          reinvCapital = abono_capital;
+          cuota_inversor = interesTotal;
           break;
         case "reinversion_interes":
+          reinvInteres = abono_interes;
           cuota_inversor = abono_capital.plus(inv.emite_factura ? abono_iva : isr.neg());
           break;
         case "reinversion_total":
+          reinvCapital = abono_capital;
+          reinvInteres = abono_interes;
           cuota_inversor = new Big(0);
           break;
+        case "reinversion_variable": {
+          const montoReinv = new Big(inv.monto_reinversion ?? 0);
+          reinvInteres = montoReinv.gt(abono_interes) ? abono_interes : montoReinv;
+          reinvCapital = montoReinv.minus(reinvInteres).gt(abono_capital)
+            ? abono_capital
+            : montoReinv.minus(reinvInteres);
+          cuota_inversor = abono_capital.minus(reinvCapital).plus(interesTotal.minus(reinvInteres));
+          break;
+        }
         default:
-          cuota_inversor = abono_capital
-            .plus(abono_interes)
-            .plus(inv.emite_factura ? abono_iva : isr.neg());
+          cuota_inversor = abono_capital.plus(interesTotal);
       }
 
       capital_actual = capital_actual.minus(abono_capital);
@@ -1560,6 +1631,9 @@ export async function getInvestorTotalsGlobales(
       subtotal.total_isr = subtotal.total_isr.plus(isr);
       subtotal.total_cuota = subtotal.total_cuota.plus(cuota_inversor);
       subtotal.totalAbonoGeneralInteres = subtotal.totalAbonoGeneralInteres.plus(abonoGeneralInteres);
+      subtotal.total_reinversion_capital = subtotal.total_reinversion_capital.plus(reinvCapital);
+      subtotal.total_reinversion_interes = subtotal.total_reinversion_interes.plus(reinvInteres);
+      subtotal.total_reinversion = subtotal.total_reinversion.plus(reinvCapital).plus(reinvInteres);
     }
 
     subtotal.total_monto_aportado = subtotal.total_monto_aportado.plus(new Big(c.monto_aportado ?? 0));
@@ -1567,7 +1641,31 @@ export async function getInvestorTotalsGlobales(
     subtotal.total_capital_actual = subtotal.total_capital_actual.plus(capital_actual);
   }
 
-  // 7. Retornar solo los totales
+  // 7. Upsert en reinversiones
+  const existeReinversion = await db.query.reinversiones.findFirst({
+    where: (r, { eq }) => eq(r.inversionista_id, inv.inversionista_id),
+  });
+
+  if (existeReinversion) {
+    await db.update(reinversiones)
+      .set({
+        monto_capital: subtotal.total_reinversion_capital.toFixed(2),
+        monto_interes: subtotal.total_reinversion_interes.toFixed(2),
+        monto_total: subtotal.total_reinversion.toFixed(2),
+        tipo_reinversion: inv.reinversion,
+      })
+      .where(eq(reinversiones.inversionista_id, inv.inversionista_id));
+  } else {
+    await db.insert(reinversiones).values({
+      inversionista_id: inv.inversionista_id,
+      monto_capital: subtotal.total_reinversion_capital.toFixed(2),
+      monto_interes: subtotal.total_reinversion_interes.toFixed(2),
+      monto_total: subtotal.total_reinversion.toFixed(2),
+      tipo_reinversion: inv.reinversion,
+    });
+  }
+
+  // 8. Retornar solo los totales
   return {
     inversionista_id: inv.inversionista_id,
     nombre_inversionista: inv.inversionista,
@@ -1578,11 +1676,15 @@ export async function getInvestorTotalsGlobales(
       total_abono_interes: formatValue(subtotal.total_abono_interes.toString()),
       total_abono_iva: formatValue(subtotal.total_abono_iva.toString()),
       total_isr: formatValue(subtotal.total_isr.toString()),
-      total_cuota: formatValue(subtotal.total_cuota.toString()),
+      total_cuota_sin_reinversion: formatValue(subtotal.total_cuota.plus(subtotal.total_reinversion).toString()),
+      total_cuota_con_reinversion: formatValue(subtotal.total_cuota.toString()),
       total_monto_aportado: formatValue(subtotal.total_monto_aportado.toString()),
       totalAbonoGeneralInteres: formatValue(subtotal.totalAbonoGeneralInteres.toString()),
       total_capital_creditos: formatValue(subtotal.total_capital_creditos.toString()),
       total_capital_actual: formatValue(subtotal.total_capital_actual.toString()),
+      total_reinversion_capital: formatValue(subtotal.total_reinversion_capital.toString()),
+      total_reinversion_interes: formatValue(subtotal.total_reinversion_interes.toString()),
+      total_reinversion: formatValue(subtotal.total_reinversion.toString()),
     },
   };
 }
@@ -1707,6 +1809,7 @@ export async function getInvestorMirrorSummary(
       nombre:           inversionistas.nombre,
       emite_factura:    inversionistas.emite_factura,
       reinversion:      inversionistas.tipo_reinversion,
+      monto_reinversion: inversionistas.monto_reinversion,
       banco_id:         inversionistas.banco_id,
       tipo_cuenta:      inversionistas.tipo_cuenta,
       numero_cuenta:    inversionistas.numero_cuenta,
@@ -1755,11 +1858,15 @@ export async function getInvestorMirrorSummary(
         total_abono_interes:      0,
         total_abono_iva:          0,
         total_isr:                0,
-        total_cuota:              0,
+        total_cuota_sin_reinversion: 0,
+        total_cuota_con_reinversion: 0,
         total_monto_aportado:     formatValue(totalMontoBase.toString()),
         totalAbonoGeneralInteres: 0,
         total_capital_creditos:   formatValue(totalMontoBase.toString()),
         total_capital_actual:     formatValue(totalMontoBase.toString()),
+        total_reinversion_capital: 0,
+        total_reinversion_interes: 0,
+        total_reinversion:         0,
       },
     };
   }
@@ -1809,6 +1916,9 @@ export async function getInvestorMirrorSummary(
     totalAbonoGeneralInteres: new Big(0),
     total_capital_creditos:   new Big(0),
     total_capital_actual:     new Big(0),
+    total_reinversion_capital: new Big(0),
+    total_reinversion_interes: new Big(0),
+    total_reinversion:         new Big(0),
   };
 
   for (const credito of creditosEspejo) {
@@ -1834,21 +1944,38 @@ export async function getInvestorMirrorSummary(
         : abono_interes.minus(isr);
 
       let cuota_inversor: Big;
+      let reinvCapital = new Big(0);
+      let reinvInteres = new Big(0);
+      const interesTotal = abono_interes.plus(inv.emite_factura ? abono_iva : isr.neg());
+
       switch (inv.reinversion) {
         case "sin_reinversion":
-          cuota_inversor = abono_capital.plus(abono_interes).plus(inv.emite_factura ? abono_iva : isr.neg());
+          cuota_inversor = abono_capital.plus(interesTotal);
           break;
         case "reinversion_capital":
-          cuota_inversor = abono_interes.plus(inv.emite_factura ? abono_iva : isr.neg());
+          reinvCapital = abono_capital;
+          cuota_inversor = interesTotal;
           break;
         case "reinversion_interes":
+          reinvInteres = abono_interes;
           cuota_inversor = abono_capital.plus(inv.emite_factura ? abono_iva : isr.neg());
           break;
         case "reinversion_total":
+          reinvCapital = abono_capital;
+          reinvInteres = abono_interes;
           cuota_inversor = new Big(0);
           break;
+        case "reinversion_variable": {
+          const montoReinv = new Big(inv.monto_reinversion ?? 0);
+          reinvInteres = montoReinv.gt(abono_interes) ? abono_interes : montoReinv;
+          reinvCapital = montoReinv.minus(reinvInteres).gt(abono_capital)
+            ? abono_capital
+            : montoReinv.minus(reinvInteres);
+          cuota_inversor = abono_capital.minus(reinvCapital).plus(interesTotal.minus(reinvInteres));
+          break;
+        }
         default:
-          cuota_inversor = abono_capital.plus(abono_interes).plus(inv.emite_factura ? abono_iva : isr.neg());
+          cuota_inversor = abono_capital.plus(interesTotal);
       }
 
       abonoCapitalCredito         = abonoCapitalCredito.plus(abono_capital);
@@ -1858,6 +1985,9 @@ export async function getInvestorMirrorSummary(
       sg.total_isr                = sg.total_isr.plus(isr);
       sg.total_cuota              = sg.total_cuota.plus(cuota_inversor);
       sg.totalAbonoGeneralInteres = sg.totalAbonoGeneralInteres.plus(abonoGeneralInteres);
+      sg.total_reinversion_capital = sg.total_reinversion_capital.plus(reinvCapital);
+      sg.total_reinversion_interes = sg.total_reinversion_interes.plus(reinvInteres);
+      sg.total_reinversion         = sg.total_reinversion.plus(reinvCapital).plus(reinvInteres);
     }
 
     // 🔑 Saldo actual = monto_aportado_base - SUM(abono_capital de pagos espejo)
@@ -1883,15 +2013,15 @@ export async function getInvestorMirrorSummary(
       total_abono_interes:      formatValue(sg.total_abono_interes.toString()),
       total_abono_iva:          formatValue(sg.total_abono_iva.toString()),
       total_isr:                formatValue(sg.total_isr.toString()),
-      total_cuota:              formatValue(sg.total_cuota.toString()),
-      /** Saldo actual: monto_aportado_base - SUM(abono_capital de pagos espejo) */
+      total_cuota_sin_reinversion: formatValue(sg.total_cuota.plus(sg.total_reinversion).toString()),
+      total_cuota_con_reinversion: formatValue(sg.total_cuota.toString()),
       total_monto_aportado:     formatValue(sg.total_monto_aportado.toString()),
       totalAbonoGeneralInteres: formatValue(sg.totalAbonoGeneralInteres.toString()),
-      /** Suma de monto_aportado_base de todos los créditos espejo */
-
       total_capital_creditos:   formatValue(sg.total_capital_creditos.toString()),
-      /** Igual a total_monto_aportado: saldo vivo calculado desde pagos */
       total_capital_actual:     formatValue(sg.total_capital_actual.toString()),
+      total_reinversion_capital: formatValue(sg.total_reinversion_capital.toString()),
+      total_reinversion_interes: formatValue(sg.total_reinversion_interes.toString()),
+      total_reinversion:         formatValue(sg.total_reinversion.toString()),
     },
   };
 }
@@ -2032,6 +2162,11 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
 
       console.log(`  📊 Total pagos a liquidar: ${cantidadPagos}`);
 
+      // Leer reinversión acumulada del inversionista
+      const reinversionActual = await db.query.reinversiones.findFirst({
+        where: (r, { eq }) => eq(r.inversionista_id, inv_id),
+      });
+
       // 🆕 PASO 3: Crear registro de liquidación CON la boleta
       const [liquidacion] = await db
         .insert(liquidaciones)
@@ -2044,6 +2179,9 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
           total_iva: inversionista.subtotal.total_abono_iva.toString(),
           total_isr: inversionista.subtotal.total_isr.toString(),
           total_cuota: inversionista.subtotal.total_cuota.toString(),
+          reinversion_capital: reinversionActual?.monto_capital ?? "0",
+          reinversion_interes: reinversionActual?.monto_interes ?? "0",
+          reinversion_total: reinversionActual?.monto_total ?? "0",
           fecha_liquidacion: new Date(),
         })
         .returning();
@@ -2062,6 +2200,29 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
         .where(eq(boletasPagoInversionista.boleta_id, boletaPendiente.boleta_id));
 
       console.log(`  ✅ Boleta ${boletaPendiente.boleta_id} marcada como PROCESADO`);
+
+      // Reiniciar reinversiones y actualizar saldo_reinversion del inversionista
+      if (reinversionActual) {
+        const montoReinvertido = new Big(reinversionActual.monto_total ?? 0);
+
+        // Sumar lo reinvertido al saldo disponible del inversionista
+        await db.update(inversionistas)
+          .set({
+            saldo_reinversion: sql`${inversionistas.saldo_reinversion} + ${montoReinvertido.toFixed(2)}::numeric`,
+          })
+          .where(eq(inversionistas.inversionista_id, inv_id));
+
+        // Reiniciar acumulado
+        await db.update(reinversiones)
+          .set({
+            monto_capital: "0",
+            monto_interes: "0",
+            monto_total: "0",
+          })
+          .where(eq(reinversiones.inversionista_id, inv_id));
+
+        console.log(`  ✅ Saldo reinversión actualizado (+${montoReinvertido.toFixed(2)}) y reinversiones reiniciadas para inversionista ${inv_id}`);
+      }
 
       // 🆕 PASO 4: Obtener IDs de pagos y actualizar en base a ESPEJO
       const pagosIds: number[] = [];
@@ -2773,6 +2934,8 @@ export const updateInvestor = async ({ body, set }: any) => {
         nombre,
         emite_factura,
         tipo_reinversion, // ⭐ Agregado
+        monto_reinversion,
+        permite_distribucion,
         banco,
         tipo_cuenta,
         numero_cuenta,
@@ -2786,8 +2949,11 @@ export const updateInvestor = async ({ body, set }: any) => {
       if (typeof emite_factura !== "undefined")
         updateData.emite_factura = emite_factura;
       if (typeof tipo_reinversion !== "undefined")
-        // ⭐ Agregado
         updateData.tipo_reinversion = tipo_reinversion;
+      if (typeof monto_reinversion !== "undefined")
+        updateData.monto_reinversion = monto_reinversion;
+      if (typeof permite_distribucion !== "undefined")
+        updateData.permite_distribucion = permite_distribucion;
       if (typeof banco !== "undefined") updateData.banco = banco;
       if (typeof tipo_cuenta !== "undefined")
         updateData.tipo_cuenta = tipo_cuenta;
@@ -2827,7 +2993,8 @@ interface InversionistaResumen {
     | "sin_reinversion"
     | "reinversion_capital"
     | "reinversion_interes"
-    | "reinversion_total";
+    | "reinversion_total"
+    | "reinversion_variable";
   banco: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;
@@ -2835,7 +3002,9 @@ interface InversionistaResumen {
   total_abono_interes: number;
   total_abono_iva: number;
   total_isr: number;
-  total_a_recibir: number;
+  total_a_recibir_sin_reinversion: number;
+  total_reinversion: number;
+  total_a_recibir_con_reinversion: number;
 }
 
 export async function resumenGlobalInversionistas(
@@ -2896,14 +3065,45 @@ export async function resumenGlobalInversionistas(
         END
       ), 0)`,
 
-      // 🆕 Total a recibir con la nueva lógica
-      total_a_recibir: sql<number>`COALESCE(SUM(
-        ${pagos_credito_inversionistas.abono_capital} 
-        + ${pagos_credito_inversionistas.abono_interes} 
-        + CASE 
-            WHEN ${inversionistas.emite_factura} 
+      // 🆕 Total a recibir sin reinversión (cuota bruta)
+      total_a_recibir_sin_reinversion: sql<number>`COALESCE(SUM(
+        ${pagos_credito_inversionistas.abono_capital}
+        + ${pagos_credito_inversionistas.abono_interes}
+        + CASE
+            WHEN ${inversionistas.emite_factura}
               THEN ${pagos_credito_inversionistas.abono_iva_12}
             ELSE -(${pagos_credito_inversionistas.abono_interes} * 0.07)
+          END
+      ), 0)`,
+
+      // Total reinversión según tipo (interés = solo abono_interes, sin iva/isr)
+      total_reinversion: sql<number>`COALESCE(SUM(
+        CASE ${inversionistas.tipo_reinversion}
+          WHEN 'sin_reinversion' THEN 0
+          WHEN 'reinversion_capital' THEN ${pagos_credito_inversionistas.abono_capital}
+          WHEN 'reinversion_interes' THEN ${pagos_credito_inversionistas.abono_interes}
+          WHEN 'reinversion_total' THEN ${pagos_credito_inversionistas.abono_capital} + ${pagos_credito_inversionistas.abono_interes}
+          WHEN 'reinversion_variable' THEN LEAST(COALESCE(${inversionistas.monto_reinversion}, 0), ${pagos_credito_inversionistas.abono_capital} + ${pagos_credito_inversionistas.abono_interes})
+          ELSE 0
+        END
+      ), 0)`,
+
+      // Total a recibir con reinversión (cuota bruta - reinversión)
+      total_a_recibir_con_reinversion: sql<number>`COALESCE(SUM(
+        ${pagos_credito_inversionistas.abono_capital}
+        + ${pagos_credito_inversionistas.abono_interes}
+        + CASE
+            WHEN ${inversionistas.emite_factura}
+              THEN ${pagos_credito_inversionistas.abono_iva_12}
+            ELSE -(${pagos_credito_inversionistas.abono_interes} * 0.07)
+          END
+        - CASE ${inversionistas.tipo_reinversion}
+            WHEN 'sin_reinversion' THEN 0
+            WHEN 'reinversion_capital' THEN ${pagos_credito_inversionistas.abono_capital}
+            WHEN 'reinversion_interes' THEN ${pagos_credito_inversionistas.abono_interes}
+            WHEN 'reinversion_total' THEN ${pagos_credito_inversionistas.abono_capital} + ${pagos_credito_inversionistas.abono_interes}
+            WHEN 'reinversion_variable' THEN LEAST(COALESCE(${inversionistas.monto_reinversion}, 0), ${pagos_credito_inversionistas.abono_capital} + ${pagos_credito_inversionistas.abono_interes})
+            ELSE 0
           END
       ), 0)`,
     })
@@ -2949,7 +3149,9 @@ export async function resumenGlobalInversionistas(
       "Interés",
       "IVA",
       "ISR",
-      "Total a Recibir",
+      "Total sin Reinversión",
+      "Reinversión",
+      "Total con Reinversión",
     ]);
 
     // Estilizar encabezados
@@ -2975,7 +3177,9 @@ export async function resumenGlobalInversionistas(
         Number(inv.total_abono_interes).toFixed(2),
         Number(inv.total_abono_iva).toFixed(2),
         Number(inv.total_isr).toFixed(2),
-        Number(inv.total_a_recibir).toFixed(2),
+        Number(inv.total_a_recibir_sin_reinversion).toFixed(2),
+        Number(inv.total_reinversion).toFixed(2),
+        Number(inv.total_a_recibir_con_reinversion).toFixed(2),
       ]);
 
       // 🆕 Resaltar ISR = 0 cuando emite factura
@@ -2990,7 +3194,7 @@ export async function resumenGlobalInversionistas(
       }
 
       // 🆕 Formato de moneda para columnas numéricas
-      for (let i = 8; i <= 12; i++) {
+      for (let i = 8; i <= 14; i++) {
         row.getCell(i).numFmt = "Q#,##0.00";
       }
     });
@@ -3053,7 +3257,9 @@ export async function resumenGlobalInversionistas(
     total_abono_interes: inv.total_abono_interes,
     total_abono_iva: inv.total_abono_iva,
     total_isr: inv.total_isr,
-    total_a_recibir: inv.total_a_recibir,
+    total_a_recibir_sin_reinversion: inv.total_a_recibir_sin_reinversion,
+    total_reinversion: inv.total_reinversion,
+    total_a_recibir_con_reinversion: inv.total_a_recibir_con_reinversion,
   }));
 }
 /**

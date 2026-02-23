@@ -1,13 +1,14 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getAdvisors, getInvestors } from "../services/services";
- 
+
 
 export const useCatalogs = () => {
   const [investors, setInvestors] = useState([]);
   const [advisors, setAdvisors] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const fetchCatalogs = useCallback(() => {
+    setLoading(true);
     Promise.all([getInvestors(), getAdvisors()])
       .then(([inv, adv]) => {
         setInvestors(inv);
@@ -16,5 +17,9 @@ export const useCatalogs = () => {
       .finally(() => setLoading(false));
   }, []);
 
-  return { investors, advisors, loading };
+  useEffect(() => {
+    fetchCatalogs();
+  }, [fetchCatalogs]);
+
+  return { investors, advisors, loading, refetch: fetchCatalogs };
 };

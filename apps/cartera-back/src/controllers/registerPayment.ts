@@ -1801,7 +1801,7 @@ export async function aplicarPagoAlCredito(pago_id: number) {
       // Solo actualizar el pago para validarlo (NO aplica al crédito)
       await db
         .update(pagos_credito)
-        .set({ validationStatus: "validated" })
+        .set({ validationStatus: "validated", fecha_aplicado: new Date() })
         .where(eq(pagos_credito.pago_id, pago_id));
 
       return {
@@ -1898,10 +1898,10 @@ export async function aplicarPagoAlCredito(pago_id: number) {
       throw new Error("No se puede actualizar el crédito: credito_id es null");
     }
 
-    // 7. VALIDAR EL PAGO
+    // 7. VALIDAR EL PAGO y registrar fecha de aplicación
     await db
       .update(pagos_credito)
-      .set({ validationStatus: "validated" })
+      .set({ validationStatus: "validated", fecha_aplicado: new Date() })
       .where(eq(pagos_credito.pago_id, pago_id));
 
     await db

@@ -82,15 +82,23 @@ const salesStagesData = [
 		description: "Cierre definitivo del negocio",
 	},
 	{
-		name: "Formalización Final",
+		name: "Contratos en Firma",
 		order: 8,
+		closurePercentage: 85,
+		color: "#22c55e", // green-500
+		description:
+			"Contratos generados por jurídico, pendientes de firma por el cliente",
+	},
+	{
+		name: "Formalización Final",
+		order: 9,
 		closurePercentage: 90,
 		color: "#22c55e", // green-500
 		description: "Formalización completa de todos los documentos",
 	},
 	{
 		name: "Post Venta",
-		order: 9,
+		order: 10,
 		closurePercentage: 100,
 		color: "#22c55e", // green-500
 		description: "Seguimiento post-venta y gestión de la relación cliente",

@@ -960,9 +960,7 @@ function RouteComponent() {
 						</CardHeader>
 						<CardContent className="space-y-3">
 							<div>
-								<p className="text-muted-foreground text-sm">
-									Monto Financiado
-								</p>
+								<p className="text-muted-foreground text-sm">Capital Activo</p>
 								<p className="font-medium">
 									Q{Number(caso.montoFinanciado || 0).toLocaleString()}
 								</p>

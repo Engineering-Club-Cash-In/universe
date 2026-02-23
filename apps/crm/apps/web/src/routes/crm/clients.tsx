@@ -635,7 +635,9 @@ function RouteComponent() {
 											</TableCell>
 											<TableCell>
 												<div className="space-y-1">
-													{clientData.email && <div className="text-sm">{clientData.email}</div>}
+													{clientData.email && (
+														<div className="text-sm">{clientData.email}</div>
+													)}
 													{clientData.phone && (
 														<div className="flex items-center gap-1 text-muted-foreground text-xs">
 															<Phone className="h-3 w-3" />

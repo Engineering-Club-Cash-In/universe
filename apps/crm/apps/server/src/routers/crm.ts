@@ -1253,28 +1253,12 @@ export const crmRouter = {
 					}
 				}
 
-				// Validate legal approval when moving from 80% to 90%
-				if (fromPercentage === 80 && toPercentage === 90) {
-					// Only juridico and admin can approve this transition
-					if (!PERMISSIONS.canApproveLegalStage(context.userRole)) {
-						throw new ORPCError("BAD_REQUEST", {
-							message:
-								"Para avanzar de 80% a 90%, la oportunidad debe ser aprobada por el departamento jurídico.",
-						});
-					}
-
-					// Verify there's at least one contract associated
-					const [{ count: contractCount }] = await db
-						.select({ count: count() })
-						.from(generatedLegalContracts)
-						.where(eq(generatedLegalContracts.opportunityId, id));
-
-					if (Number(contractCount) === 0) {
-						throw new ORPCError("BAD_REQUEST", {
-							message:
-								"Debe haber al menos un contrato asociado a la oportunidad para avanzar a 90%.",
-						});
-					}
+				// Validate transitions from 80% - must go through jurídico approval to 85%
+				if (fromPercentage === 80 && toPercentage >= 85) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Para avanzar de 80% a la siguiente etapa, la oportunidad debe ser aprobada por el departamento jurídico desde el módulo de Jurídico.",
+					});
 				}
 
 				// Validaciones para avanzar a etapa 80% (jurídica)
@@ -1350,15 +1334,11 @@ export const crmRouter = {
 					}
 				}
 
-				//  en este apartado ya nadie puede mover de 80 a 90 sin aprobacion de analista
-				// Validate document approval when moving from 80% to 90%
-				if (fromPercentage === 80 && toPercentage >= 90) {
-					console.log(
-						"Validating document approval for 80% to 90% stage change",
-					);
+				// Validate: 85% → 90% must use confirmContractsSigned endpoint
+				if (fromPercentage === 85 && toPercentage >= 90) {
 					throw new ORPCError("BAD_REQUEST", {
 						message:
-							"Para avanzar de evaluación (80%) a la siguiente etapa (90%+), solo un analista puede realizar este cambio después de aprobar los documentos.",
+							"Para avanzar de 85% (Contratos en Firma) a 90%, debes confirmar que los contratos fueron firmados usando el botón de confirmación.",
 					});
 				}
 
@@ -1374,8 +1354,8 @@ export const crmRouter = {
 					}
 				}
 
-				// Note: The actual 100% closure logic (credit creation, client, contract)
-				// is now handled by approveDisbursement via closeOpportunity service
+				// Note: El cierre del crédito (creación en cartera-back, cliente, contrato)
+				// se ejecuta en confirmContractsSigned (85% → 90%) en legal-contracts.ts
 			}
 
 			// Calculate new analysisStatus based on stage transition
@@ -5515,8 +5495,7 @@ export const crmRouter = {
 
 			// Only admin and sales_supervisor see global charts
 			const isGlobal =
-				context.userRole === "admin" ||
-				context.userRole === "sales_supervisor";
+				context.userRole === "admin" || context.userRole === "sales_supervisor";
 			const userFilter = isGlobal ? undefined : context.userId;
 
 			// 1) Pipeline por Etapa: count + sum(value) grouped by stage
@@ -5536,9 +5515,7 @@ export const crmRouter = {
 						eq(opportunities.status, "open"),
 						gte(opportunities.createdAt, startOfMonth),
 						lt(opportunities.createdAt, endOfMonth),
-						userFilter
-							? eq(opportunities.assignedTo, userFilter)
-							: undefined,
+						userFilter ? eq(opportunities.assignedTo, userFilter) : undefined,
 					),
 				)
 				.groupBy(
@@ -5577,9 +5554,7 @@ export const crmRouter = {
 							inArray(opportunities.stageId, placedStageIds),
 							gte(opportunities.createdAt, startOfMonth),
 							lt(opportunities.createdAt, endOfMonth),
-							userFilter
-								? eq(opportunities.assignedTo, userFilter)
-								: undefined,
+							userFilter ? eq(opportunities.assignedTo, userFilter) : undefined,
 						),
 					)
 					.groupBy(user.id, user.name)
@@ -5605,9 +5580,7 @@ export const crmRouter = {
 						inArray(opportunities.status, ["open", "won", "lost"]),
 						gte(opportunities.createdAt, startOfMonth),
 						lt(opportunities.createdAt, endOfMonth),
-						userFilter
-							? eq(opportunities.assignedTo, userFilter)
-							: undefined,
+						userFilter ? eq(opportunities.assignedTo, userFilter) : undefined,
 					),
 				)
 				.groupBy(user.id, user.name, opportunities.status);

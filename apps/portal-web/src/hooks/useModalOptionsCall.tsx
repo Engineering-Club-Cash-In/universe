@@ -64,17 +64,30 @@ export const useModalOptionsCall = () => {
       ),
   };
 
-  const optionCreditSell: ModalOption = {
-    type: "whatsapp",
-    title:
-      "Puedes obtener más información y realizar el proceso para vender tu auto a través de nuestro WhatsApp.",
-    description: "",
-    buttonText: "WhatsApp",
-    buttonAction: () =>
-      openWhatsApp(
-        "Hola, estoy interesado en obtener más información sobre la venta de mi auto."
-      ),
-  };
+  const optionCreditSell: ModalOption[] = [
+    {
+      type: "whatsapp",
+      title:
+        "Puedes obtener más información y realizar el proceso para vender tu auto a través de nuestro WhatsApp.",
+      description: "",
+      buttonText: "WhatsApp",
+      buttonAction: () =>
+        openWhatsApp(
+          "Hola, estoy interesado en obtener más información sobre la venta de mi auto."
+        ),
+    },
+    {
+      type: "form",
+      title:
+        "También puedes completar nuestro formulario y un asesor se pondrá en contacto contigo.",
+      description: "",
+      buttonText: "Ir al formulario",
+      buttonAction: () => {
+        setIsModalOpen(false);
+        globalThis.location.href = "/leads";
+      },
+    },
+  ];
 
   const optionCrediQuestions: ModalOption = {
     type: "whatsapp",

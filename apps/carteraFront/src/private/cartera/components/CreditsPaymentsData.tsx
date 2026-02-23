@@ -217,7 +217,7 @@ export function ListaCreditosPagos() {
   };
 
   const inputRef = useRef<HTMLInputElement>(null);
-  const { investors, advisors } = useCatalogs() as {
+  const { investors, advisors, refetch: refetchCatalogs } = useCatalogs() as {
     investors: Investor[];
     advisors: any[];
     loading: boolean;
@@ -681,6 +681,7 @@ export function ListaCreditosPagos() {
           queryClient.invalidateQueries({
             queryKey: ["creditos-paginados", mes, anio, page, perPage],
           });
+          refetchCatalogs();
         }}
         investorsOptions={investors}
         advisorsOptions={advisors}

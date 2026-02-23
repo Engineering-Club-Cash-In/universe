@@ -67,6 +67,10 @@ const iconMap: Record<string, { icon: React.ReactNode; color: string }> = {
     icon: <BadgeDollarSign className="w-4 h-4 text-green-500" />,
     color: "text-green-700",
   },
+  fecha_aplicado: {
+    icon: <CalendarDays className="w-4 h-4 text-green-600" />,
+    color: "text-green-700",
+  },
   cuota: {
     icon: <BadgeDollarSign className="w-4 h-4 text-indigo-700" />,
     color: "text-indigo-700",
@@ -116,6 +120,16 @@ function formatDate(d: string) {
   // Si el string es tipo "2025-07-30"
   const [year, month, day] = d.split("-");
   return `${parseInt(day, 10)}/${parseInt(month, 10)}/${year}`;
+}
+function formatDateTime(d: string) {
+  if (!d) return "--";
+  const date = new Date(d);
+  const day = date.getDate();
+  const month = date.getMonth() + 1;
+  const year = date.getFullYear();
+  const hours = date.getHours().toString().padStart(2, "0");
+  const minutes = date.getMinutes().toString().padStart(2, "0");
+  return `${day}/${month}/${year} ${hours}:${minutes}`;
 }
 const Campo = ({
   label,
@@ -339,6 +353,9 @@ const handleDownloadExcel = async () => {
                     Fecha de Pago
                   </TableHead>
                   <TableHead className="font-bold text-blue-700">
+                    Fecha Aplicado
+                  </TableHead>
+                  <TableHead className="font-bold text-blue-700">
                     Cuota
                   </TableHead>
                   <TableHead className="font-bold text-blue-700">
@@ -378,6 +395,9 @@ const handleDownloadExcel = async () => {
                       </TableCell>
                       <TableCell className="text-center font-semibold">
                         {formatDate(item.pago.fecha_pago)}
+                      </TableCell>
+                      <TableCell className="text-center font-semibold text-green-700">
+                        {formatDateTime(item.pago.fecha_aplicado)}
                       </TableCell>
                       <TableCell className="text-center text-blue-700 font-semibold">
                         {formatCurrency(item.pago.cuota)}
@@ -488,7 +508,7 @@ const handleDownloadExcel = async () => {
                     {openIdx === idx && (
                       <TableRow>
                         <TableCell
-                          colSpan={8}
+                          colSpan={9}
                           className="bg-blue-50 p-0 rounded-b-2xl"
                         >
                           <div className="p-6 space-y-6">
@@ -631,7 +651,7 @@ const handleDownloadExcel = async () => {
                                               </TableRow>
                                               {collapseInv[index] && (
                                                 <TableRow className="bg-blue-50">
-                                                  <TableCell colSpan={8}>
+                                                  <TableCell colSpan={9}>
                                                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3 p-2 text-[11px] md:text-xs">
                                                       <div>
                                                         <span className="font-bold text-blue-700">

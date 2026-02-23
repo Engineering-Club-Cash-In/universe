@@ -42,8 +42,8 @@ export const CLUB_CASHIN_CONFIG = {
 
 // 🆕 Configuración SE PRESTA SOCIEDAD ANONIMA - Ambiente de Pruebas
 export const SE_PRESTA_SAT_CONFIG = {
-  requestor: "027221F2-3831-4240-B6B2-0EB0E9E8B055",
-  user: "027221F2-3831-4240-B6B2-0EB0E9E8B055",
+  requestor: "20FA80E7-ABC0-48F9-8069-1229FA2BA6CA",
+  user: "20FA80E7-ABC0-48F9-8069-1229FA2BA6CA",
   userName: "ADMINISTRADOR",
   endpointUrl:
     "https://portaltest.cofidiguatemala.com:8443/webservicefront/factwsfront.asmx",
@@ -51,7 +51,7 @@ export const SE_PRESTA_SAT_CONFIG = {
 };
 
 export const SE_PRESTA_COFIDI_CONFIG = {
-  requestor: "027221F2-3831-4240-B6B2-0EB0E9E8B055",
+  requestor: "20FA80E7-ABC0-48F9-8069-1229FA2BA6CA",
   nit: "52956032",
   endpointUrl:
     "https://portaltest.cofidiguatemala.com:8443/nitfel/consultanit.asmx",
@@ -88,8 +88,8 @@ export const SE_PRESTA_CONFIG = {
 
 // 🆕 Configuración AMJK INVERSIONES, SOCIEDAD ANONIMA - Ambiente de Pruebas
 export const AMJK_SAT_CONFIG = {
-  requestor: "80A8AFDD-CFA1-4779-9A81-8B117A136213",
-  user: "80A8AFDD-CFA1-4779-9A81-8B117A136213",
+  requestor: "027221F2-3831-4240-B6B2-0EB0E9E8B055",
+  user: "027221F2-3831-4240-B6B2-0EB0E9E8B055",
   userName: "ADMINISTRADOR",
   endpointUrl:
     "https://portaltest.cofidiguatemala.com:8443/webservicefront/factwsfront.asmx",
@@ -97,7 +97,7 @@ export const AMJK_SAT_CONFIG = {
 };
 
 export const AMJK_COFIDI_CONFIG = {
-  requestor: "80A8AFDD-CFA1-4779-9A81-8B117A136213",
+  requestor: "027221F2-3831-4240-B6B2-0EB0E9E8B055",
   nit: "100691455",
   endpointUrl:
     "https://portaltest.cofidiguatemala.com:8443/nitfel/consultanit.asmx",

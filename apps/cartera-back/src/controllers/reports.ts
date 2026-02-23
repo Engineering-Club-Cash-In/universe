@@ -2,6 +2,9 @@ import ExcelJS from "exceljs";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getCreditosWithUserByMesAnio } from "./credits";
 import { getAllPagosWithCreditAndInversionistas, getPagosConInversionistas } from "./payments";
+import { fetchImageBase64 } from "../utils/functions/internReportCancelations";
+
+const LOGO_URL = process.env.LOGO_URL || "https://pub-8081c8d6e5e743f9adfc9e0db92e5a88.r2.dev/reports/logo-cashin.png";
 
 export async function getCreditosWithUserByMesAnioExcel(
   params: {
@@ -324,174 +327,230 @@ export async function exportPagosConInversionistasExcel(
     throw new Error("No se encontraron pagos para generar el Excel.");
   }
 
-  console.log(`📊 Generando Excel con ${result.data.length} pagos...`);
+  console.log(`📊 Generando Excel con ${result.data.length} pagos (estilo distri_recaudo)...`);
 
   // 2️⃣ Crear el workbook
   const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet("Pagos con Inversionistas");
+  const sheet = workbook.addWorksheet("Distribución Recaudo");
 
-  // 3️⃣ Definir columnas base
-  const columns: any[] = [
-    { header: "Pago ID", key: "pagoId", width: 12 },
-    { header: "Número Crédito", key: "numeroCredito", width: 20 },
-    { header: "Crédito ID", key: "creditoId", width: 15 },
-    { header: "Capital Crédito", key: "capital", width: 15 },
-    { header: "Deuda Total", key: "deudaTotal", width: 15 },
-    { header: "Usuario", key: "usuarioNombre", width: 25 },
-    { header: "Monto Boleta", key: "montoBoleta", width: 15 },
-    { header: "Monto Aplicado", key: "montoAplicado", width: 15 },
-    { header: "Número Autorización", key: "numeroAutorizacion", width: 20 },
-    { header: "Fecha Pago", key: "fechaPago", width: 20 },
-    { header: "Cuota ID", key: "cuotaId", width: 12 },
-    { header: "Número Cuota", key: "numeroCuota", width: 12 },
-    { header: "Fecha Vencimiento", key: "fechaVencimiento", width: 20 },
-    { header: "Pagado", key: "pagado", width: 10 },
-    { header: "Boleta ID", key: "boletaId", width: 12 },
-    { header: "URL Boleta", key: "urlBoleta", width: 50 },
-    
-    { header: "Abono Capital", key: "abono_capital", width: 15 },
-    { header: "Abono Interés", key: "abono_interes", width: 15 },
-    { header: "Abono IVA 12%", key: "abono_iva_12", width: 15 },
-    { header: "Abono Seguro", key: "abono_seguro", width: 15 },
-    { header: "Abono GPS", key: "abono_gps", width: 15 },
+  // Helper: tipo de pago
+  const getTipoPago = (item: any): string => {
+    const mora = Number(item.mora || 0);
+    const boleta = Number(item.montoBoleta || 0);
+    const abonoCapital = Number(item.abono_capital || 0);
+    const cuota = Number(item.cuotaMonto || 0);
+    const montoAplicado = Number(item.monto_aplicado || 0);
+    if (mora > 0 && mora === boleta) return "PAGO DE MORA";
+    if (abonoCapital > 0 && abonoCapital === boleta) return "ABONOS A CAPITAL";
+    if (cuota > 0 && cuota === montoAplicado) return "PAGOS DE CREDITOS";
+    if (cuota > 0 && cuota > montoAplicado) return "PAGO PARCIAL";
+    return "PAGOS DE CREDITOS";
+  };
+
+  // 3️⃣ Columnas fijas al estilo distri_recaudo
+  const columns: { header: string; key: string; width: number }[] = [
+    { header: "No. Prestamo", key: "noPrestamo", width: 20 },
+    { header: "Nombre Deudor", key: "nombreDeudor", width: 25 },
+    { header: "Monto Otorgado", key: "montoOtorgado", width: 15 },
+    { header: "# Cuota", key: "numCuota", width: 10 },
+    { header: "Capital", key: "capital", width: 15 },
+    { header: "Intereses", key: "intereses", width: 15 },
     { header: "Mora", key: "mora", width: 15 },
-    { header: "Otros", key: "otros", width: 15 },
-    { header: "Reserva", key: "reserva", width: 15 },
-    { header: "Membresías", key: "membresias", width: 15 },
-    { header: "Categoría", key: "categoria", width: 15 },
+    { header: "Otros", key: "otrosPago", width: 12 },
+    { header: "Total Pago", key: "totalPago", width: 15 },
+    { header: "Inversionistas", key: "inversionista", width: 28 },
+    { header: "Fondos Otorgados", key: "fondosOtorgados", width: 18 },
+    { header: "Capital Inversionista", key: "capitalInv", width: 18 },
+    { header: "Interes Inversionista", key: "interesInv", width: 18 },
+    { header: "IVA Incluido en Intereses", key: "ivaInv", width: 22 },
+    { header: "SubTotal Inversionista", key: "subtotalInv", width: 18 },
+    { header: "Retencion ISR", key: "isrInv", width: 15 },
+    { header: "Cuota Pago", key: "cuotaPago", width: 15 },
+    { header: "Seguro", key: "seguro", width: 12 },
+    { header: "Membresías", key: "membresias", width: 12 },
+    { header: "GPS", key: "gps", width: 12 },
+    { header: "Otros", key: "otros", width: 12 },
+    { header: "Reserva", key: "reserva", width: 12 },
     { header: "Pago Convenio", key: "pagoConvenio", width: 15 },
-    { header: "Observaciones", key: "observaciones", width: 30 },
-    { header: "Banco", key: "bancoNombre", width: 20 },
-    { header: "Cuenta Empresa", key: "cuentaEmpresaNombre", width: 20 },
-    { header: "Banco Empresa", key: "cuentaEmpresaBanco", width: 20 },
-    { header: "Número Cuenta Empresa", key: "cuentaEmpresaNumero", width: 20 },
-    { header: "Fecha Boleta", key: "fechaBoleta", width: 15 },
-    { header: "Registrado Por", key: "registerByNombre", width: 25 },
-    { header: "Registrado Por (Email)", key: "registerBy", width: 30 },
-    { header: "Estado Validación", key: "validationStatus", width: 18 },
-    { header: "Estado Crédito", key: "statusCredit", width: 18 },
-    { header: "NIT", key: "nit", width: 15 },
+    { header: "SubTotal Distribución", key: "subtotalDist", width: 18 },
+    { header: "Categoría Crédito", key: "categoriaCredito", width: 18 },
+    { header: "Tipo de Pago", key: "tipoPago", width: 18 },
+    { header: "Fecha Aplicado", key: "fechaAplicado", width: 20 },
+    { header: "Boletas", key: "boletas", width: 50 },
   ];
 
-  // 4️⃣ Determinar máximo de inversionistas por pago
-  const maxInversionistas = Math.max(
-    ...result.data.map((pago: any) => pago.inversionistas.length)
-  );
+  const totalCols = columns.length;
 
-  // 5️⃣ Agregar columnas dinámicas para inversionistas
-  for (let i = 1; i <= maxInversionistas; i++) {
-    columns.push({ header: `Inv${i}_ID`, key: `inv${i}_id`, width: 12 });
-    columns.push({ header: `Inv${i}_Nombre`, key: `inv${i}_nombre`, width: 25 });
-    columns.push({ header: `Inv${i}_Monto Aportado`, key: `inv${i}_monto_aportado`, width: 15 });
-    columns.push({ header: `Inv${i}_% Participación`, key: `inv${i}_porcentaje`, width: 15 });
-    columns.push({ header: `Inv${i}_Abono Capital`, key: `inv${i}_abono_capital`, width: 15 });
-    columns.push({ header: `Inv${i}_Abono Interés`, key: `inv${i}_abono_interes`, width: 15 });
-    columns.push({ header: `Inv${i}_Abono IVA`, key: `inv${i}_abono_iva`, width: 15 });
-    columns.push({ header: `Inv${i}_ISR (5%)`, key: `inv${i}_isr`, width: 12 });
-    columns.push({ header: `Inv${i}_Cuota Pago`, key: `inv${i}_cuota_pago`, width: 15 });
+  // Setear solo key + width
+  sheet.columns = columns.map(c => ({ key: c.key, width: c.width }));
+
+  // Logo
+  const logo = await fetchImageBase64(LOGO_URL);
+  if (logo) {
+    const imgId = workbook.addImage({ base64: logo.data, extension: logo.ext });
+    sheet.addImage(imgId, "A1:B2");
+    sheet.addRow([]);
+    sheet.addRow([]);
   }
 
-  sheet.columns = columns;
+  // Header row
+  const headerLabels = columns.map(c => c.header);
+  const headerRow = sheet.addRow(headerLabels);
+  headerRow.font = { bold: true, color: { argb: "FFFFFF" }, size: 10 };
+  headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "1F4E79" } };
+  headerRow.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+  headerRow.height = 35;
 
-  // 6️⃣ Poblar filas
+  // 4️⃣ Estilo helpers
+  const thinBorder = {
+    top: { style: "thin" as const, color: { argb: "D9D9D9" } },
+    bottom: { style: "thin" as const, color: { argb: "D9D9D9" } },
+    left: { style: "thin" as const, color: { argb: "D9D9D9" } },
+    right: { style: "thin" as const, color: { argb: "D9D9D9" } },
+  };
+
+  // 5️⃣ Recorrer todos los pagos (sin agrupar por asesor)
   result.data.forEach((item: any) => {
-    const row: any = {
-      pagoId: item.pagoId,
-      numeroCredito: item.credito?.numeroCreditoSifco ?? "",
-      creditoId: item.credito?.creditoId ?? "",
-      capital: item.credito?.capital ?? "",
-      deudaTotal: item.credito?.deudaTotal ?? "",
-      usuarioNombre: item.usuario?.nombre ?? "",
-      montoBoleta: item.montoBoleta,
-      montoAplicado: item.monto_aplicado,
-      numeroAutorizacion: item.numeroAutorizacion,
-      fechaPago: item.fechaPago,
-      cuotaId: item.cuota?.cuotaId ?? "",
-      numeroCuota: item.cuota?.numeroCuota ?? "",
-      fechaVencimiento: item.cuota?.fechaVencimiento ?? "",
-      pagado: item.cuota?.pagado ? "Sí" : "No",
-      boletaId: item.boleta?.boletaId ?? "",
-      urlBoleta: item.boleta?.urlBoleta ?? "",
-      categoria: item.usuario?.categoria ?? "",
-      abono_capital: item.abono_capital,
-      abono_interes: item.abono_interes,
-      abono_iva_12: item.abono_iva_12,
-      abono_seguro: item.abono_seguro,
-      abono_gps: item.abono_gps,
-      mora: item.mora,
-      otros: item.otros,
-      reserva: item.reserva,
-      membresias: item.membresias,
-      pagoConvenio: item.pagoConvenio,
-      observaciones: item.observaciones,
-      bancoNombre: item.bancoNombre,
-      cuentaEmpresaNombre: item.cuentaEmpresaNombre,
-      cuentaEmpresaBanco: item.cuentaEmpresaBanco,
-      cuentaEmpresaNumero: item.cuentaEmpresaNumero,
-      fechaBoleta: item.fechaBoleta,
-      registerByNombre: item.registerByNombre,
-      registerBy: item.registerBy,
-      validationStatus: item.validationStatus,
-      statusCredit: item.credito?.statusCredit ?? "",
-      nit: item.usuario?.nit ?? "",
-    };
+    const noPrestamo = item.credito?.numeroCreditoSifco ?? "";
+    const nombreDeudor = item.usuario?.nombre ?? "";
+    const montoOtorgado = Number(item.credito?.capital ?? 0);
+    const numCuota = item.cuota?.numeroCuota ?? "";
+    const capitalPago = Number(item.abono_capital || 0);
+    const interesesPago = Number(item.abono_interes || 0);
+    const moraPago = Number(item.mora || 0);
+    const totalPago = Number(item.monto_aplicado || 0);
+    const tipoPago = getTipoPago(item);
+    const boletas = item.boletas ?? [];
 
-    // Agregar inversionistas dinámicos
-    item.inversionistas.forEach((inv: any, index: number) => {
-      const i = index + 1;
-      row[`inv${i}_id`] = inv.inversionistaId;
-      row[`inv${i}_nombre`] = inv.nombreInversionista;
-      row[`inv${i}_monto_aportado`] = inv.montoAportado;
-      row[`inv${i}_porcentaje`] = inv.porcentajeParticipacion;
-      row[`inv${i}_abono_capital`] = inv.abonoCapital;
-      row[`inv${i}_abono_interes`] = inv.abonoInteres;
-      row[`inv${i}_abono_iva`] = inv.abonoIva;
-      row[`inv${i}_isr`] = inv.isr;
-      row[`inv${i}_cuota_pago`] = inv.cuotaPago;
+    // ── Fila header de transacción (bold) ──
+    const txHeaderRow = sheet.addRow([]);
+    txHeaderRow.getCell(1).value = noPrestamo;
+    txHeaderRow.getCell(9).value = `Correlativo: ${item.pagoId}`;
+    txHeaderRow.getCell(10).value = `Cuenta Bancaria: ${item.cuentaEmpresaNombre ?? ""}`;
+    sheet.mergeCells(txHeaderRow.number, 11, txHeaderRow.number, 13);
+    txHeaderRow.getCell(11).value = `Fecha Transaccion: ${item.fechaPago}`;
+    sheet.mergeCells(txHeaderRow.number, 14, txHeaderRow.number, 16);
+    txHeaderRow.getCell(14).value = `Transacción: ${tipoPago}`;
+    sheet.mergeCells(txHeaderRow.number, 17, txHeaderRow.number, totalCols);
+    txHeaderRow.getCell(17).value = boletas.length > 0 ? `No. Boleta: ${boletas[0]?.boletaId ?? ""}` : "";
+    txHeaderRow.font = { bold: true, size: 10 };
+    txHeaderRow.eachCell({ includeEmpty: false }, (cell) => {
+      cell.border = thinBorder;
     });
 
-    sheet.addRow(row);
+    const inversionistas = item.inversionistas ?? [];
+    const txFirstInvRow = sheet.rowCount + 1;
+
+    // Campos comunes del pago
+    const commonPayFields = {
+      categoriaCredito: item.usuario?.categoria ?? "",
+      tipoPago,
+      fechaAplicado: item.fechaAplicado ?? "",
+      boletas: boletas.map((b: any) => b.urlBoleta).filter(Boolean).join("\n"),
+    };
+
+    if (inversionistas.length === 0) {
+      // Sin inversionistas - una fila con datos del pago
+      const r = sheet.addRow({
+        noPrestamo, nombreDeudor, montoOtorgado, numCuota,
+        capital: capitalPago, intereses: interesesPago, mora: moraPago, otrosPago: Number(item.otros || 0), totalPago,
+        inversionista: "", fondosOtorgados: 0,
+        capitalInv: 0, interesInv: 0, ivaInv: 0, subtotalInv: 0, isrInv: 0, cuotaPago: 0,
+        seguro: Number(item.abono_seguro || 0), membresias: Number(item.membresias || 0),
+        gps: Number(item.abono_gps || 0), otros: Number(item.otros || 0),
+        reserva: Number(item.reserva || 0), pagoConvenio: Number(item.pagoConvenio || 0),
+        subtotalDist: totalPago,
+        ...commonPayFields,
+      });
+      r.eachCell({ includeEmpty: true }, (cell) => { cell.border = thinBorder; cell.alignment = { vertical: "middle" }; });
+    } else {
+      // ── Filas de inversionistas ──
+      inversionistas.forEach((inv: any) => {
+        const capitalI = Number(inv.abonoCapital || 0);
+        const interesI = Number(inv.abonoInteres || 0);
+        const ivaI = Number(inv.abonoIva || 0);
+        const subtotalI = capitalI + interesI + ivaI;
+        const isrI = Number(inv.isr || 0);
+        const cuotaP = Number(inv.cuotaPago || 0);
+
+        const r = sheet.addRow({
+          noPrestamo, nombreDeudor, montoOtorgado, numCuota,
+          capital: capitalPago, intereses: interesesPago, mora: moraPago, otrosPago: Number(item.otros || 0), totalPago,
+          inversionista: inv.nombreInversionista,
+          fondosOtorgados: Number(inv.montoAportado || 0),
+          capitalInv: capitalI, interesInv: interesI, ivaInv: ivaI,
+          subtotalInv: subtotalI, isrInv: isrI, cuotaPago: cuotaP,
+          seguro: Number(item.abono_seguro || 0), membresias: Number(item.membresias || 0),
+          gps: Number(item.abono_gps || 0), otros: Number(item.otros || 0),
+          reserva: Number(item.reserva || 0), pagoConvenio: Number(item.pagoConvenio || 0),
+          subtotalDist: cuotaP + Number(item.abono_seguro || 0) + Number(item.membresias || 0) + Number(item.abono_gps || 0) + Number(item.otros || 0) + Number(item.reserva || 0),
+          ...commonPayFields,
+        });
+        r.eachCell({ includeEmpty: true }, (cell) => { cell.border = thinBorder; cell.alignment = { vertical: "middle" }; });
+      });
+
+      const txLastInvRow = sheet.rowCount;
+
+      // Merge vertical de columnas repetidas si hay más de 1 inversionista
+      if (inversionistas.length > 1) {
+        // Cols A-I (datos del pago, incluyendo Otros)
+        for (let col = 1; col <= 9; col++) {
+          sheet.mergeCells(txFirstInvRow, col, txLastInvRow, col);
+          sheet.getCell(txFirstInvRow, col).alignment = { vertical: "middle" };
+        }
+        // Cols finales: Categoría, Tipo Pago, Fecha Aplicado, Boletas
+        const catIdx = columns.findIndex(c => c.key === "categoriaCredito") + 1;
+        for (let col = catIdx; col <= totalCols; col++) {
+          sheet.mergeCells(txFirstInvRow, col, txLastInvRow, col);
+          sheet.getCell(txFirstInvRow, col).alignment = { vertical: "middle" };
+        }
+      }
+    }
+
+    // ── Fila resumen de la transacción (teal) ──
+    const summaryData: any = {};
+    summaryData.capital = capitalPago;
+    summaryData.intereses = interesesPago;
+    summaryData.mora = moraPago;
+    summaryData.otrosPago = Number(item.otros || 0);
+    summaryData.totalPago = totalPago;
+    summaryData.capitalInv = inversionistas.reduce((s: number, i: any) => s + Number(i.abonoCapital || 0), 0);
+    summaryData.interesInv = inversionistas.reduce((s: number, i: any) => s + Number(i.abonoInteres || 0), 0);
+    summaryData.ivaInv = inversionistas.reduce((s: number, i: any) => s + Number(i.abonoIva || 0), 0);
+    summaryData.subtotalInv = summaryData.capitalInv + summaryData.interesInv + summaryData.ivaInv;
+    summaryData.isrInv = inversionistas.reduce((s: number, i: any) => s + Number(i.isr || 0), 0);
+    summaryData.cuotaPago = inversionistas.reduce((s: number, i: any) => s + Number(i.cuotaPago || 0), 0);
+
+    const sumRow = sheet.addRow(summaryData);
+    sumRow.eachCell({ includeEmpty: true }, (cell) => {
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "B4D6E4" } };
+      cell.border = thinBorder;
+      cell.alignment = { vertical: "middle" };
+    });
   });
 
-  // 💰 AGREGAR FILA DE TOTALES (usando los totales que ya vienen en result.totales)
-  sheet.addRow({}); // Fila vacía para separar
+  // Fila vacía + TOTALES GENERALES
+  sheet.addRow([]);
 
-  const totalRow = sheet.addRow({
-    pagoId: "TOTALES",
-    numeroCredito: "",
-    creditoId: "",
-    capital: "",
-    deudaTotal: "",
-    usuarioNombre: "",
-    montoBoleta: "",
-    numeroAutorizacion: "",
-    fechaPago: "",
-    cuotaId: "",
-    numeroCuota: "",
-    fechaVencimiento: "",
-    pagado: "",
-    boletaId: "",
-    urlBoleta: "",
-    categoria:"",
-    abono_capital: result.totales?.totalAbonoCapital ?? 0,
-    abono_interes: result.totales?.totalAbonoInteres ?? 0,
-    abono_iva_12: result.totales?.totalAbonoIva ?? 0,
-    abono_seguro: result.totales?.totalAbonoSeguro ?? 0,
-    abono_gps: result.totales?.totalAbonoGps ?? 0,
-    mora: result.totales?.totalMora ?? 0,
-    otros: result.totales?.totalOtros ?? 0,
-    reserva: result.totales?.totalReserva ?? 0,
-    membresias: result.totales?.totalMembresias ?? 0,
-    pagoConvenio: result.totales?.totalConvenio ?? 0,
-  });
+  const grandTotals: any = { noPrestamo: "TOTALES GENERALES" };
+  grandTotals.capital = result.totales?.totalAbonoCapital ?? 0;
+  grandTotals.intereses = result.totales?.totalAbonoInteres ?? 0;
+  grandTotals.mora = result.totales?.totalMora ?? 0;
+  grandTotals.otrosPago = result.totales?.totalOtros ?? 0;
+  grandTotals.seguro = result.totales?.totalAbonoSeguro ?? 0;
+  grandTotals.gps = result.totales?.totalAbonoGps ?? 0;
+  grandTotals.otros = result.totales?.totalOtros ?? 0;
+  grandTotals.reserva = result.totales?.totalReserva ?? 0;
+  grandTotals.membresias = result.totales?.totalMembresias ?? 0;
+  grandTotals.pagoConvenio = result.totales?.totalConvenio ?? 0;
 
-  // 🎨 Formatear fila de totales (negrita + fondo amarillo)
+  const totalRow = sheet.addRow(grandTotals);
   totalRow.eachCell((cell) => {
-    cell.font = { bold: true };
-    cell.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FFFF00' }
+    cell.font = { bold: true, color: { argb: "000000" } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD966" } };
+    cell.border = {
+      top: { style: "medium" as const, color: { argb: "1F4E79" } },
+      bottom: { style: "medium" as const, color: { argb: "1F4E79" } },
     };
   });
 
@@ -560,95 +619,166 @@ export async function exportPagosAdvisorExcel(
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Reporte Asesores");
 
-  const columns: any[] = [
-    { header: "Pago ID", key: "pagoId", width: 12 },
-    { header: "Número Crédito", key: "numeroCredito", width: 20 },
-    { header: "Crédito ID", key: "creditoId", width: 15 },
-    { header: "Capital Crédito", key: "capital", width: 15 },
-    { header: "Deuda Total", key: "deudaTotal", width: 15 },
-    { header: "Estado Crédito", key: "statusCredit", width: 18 },
-    { header: "Cliente", key: "usuarioNombre", width: 25 },
-    { header: "NIT", key: "nit", width: 15 },
-    { header: "Categoría", key: "categoria", width: 15 },
-    { header: "Monto Boleta", key: "montoBoleta", width: 15 },
-    { header: "Monto Aplicado", key: "montoAplicado", width: 15 },
-    { header: "Número Autorización", key: "numeroAutorizacion", width: 20 },
+  // Helpers
+  const getTipoPago = (item: any): string => {
+    const mora = Number(item.mora || 0);
+    const boleta = Number(item.montoBoleta || 0);
+    const abonoCapital = Number(item.abono_capital || 0);
+    const cuota = Number(item.cuotaMonto || 0);
+    const montoAplicado = Number(item.monto_aplicado || 0);
+    if (mora > 0 && mora === boleta) return "Pago de mora";
+    if (abonoCapital > 0 && abonoCapital === boleta) return "Pago capital";
+    if (cuota > 0 && cuota === montoAplicado) return "Pago de cuota";
+    if (cuota > 0 && cuota > montoAplicado) return "Parcial";
+    return "";
+  };
+  const getDiaPago = (fechaVencimiento: string | null): string => {
+    if (!fechaVencimiento) return "";
+    const dia = new Date(fechaVencimiento).getDate();
+    return isNaN(dia) ? "" : dia.toString();
+  };
+
+  // Máximo de boletas por pago
+  const maxBoletas = Math.max(1, ...result.data.map((p: any) => (p.boletas ?? []).length));
+
+  const columns: { header: string; key: string; width: number }[] = [
     { header: "Fecha Pago", key: "fechaPago", width: 20 },
-    { header: "Fecha Boleta", key: "fechaBoleta", width: 15 },
-    { header: "Cuota ID", key: "cuotaId", width: 12 },
+    { header: "Número Crédito", key: "numeroCredito", width: 20 },
+    { header: "Asesor", key: "registerByNombre", width: 25 },
+    { header: "Cliente", key: "usuarioNombre", width: 25 },
+    { header: "Monto Boleta", key: "montoBoleta", width: 15 },
     { header: "Número Cuota", key: "numeroCuota", width: 12 },
-    { header: "Fecha Vencimiento", key: "fechaVencimiento", width: 20 },
+    { header: "Cuota (Q)", key: "cuotaMonto", width: 15 },
+    { header: "Monto Aplicado", key: "montoAplicado", width: 15 },
+    { header: "Seguro", key: "abono_seguro", width: 15 },
+    { header: "Membresías", key: "membresias", width: 15 },
+    { header: "Mora", key: "mora", width: 15 },
+    { header: "Otros", key: "otros", width: 15 },
+    { header: "Abono Capital", key: "abono_capital", width: 15 },
+    { header: "Abono Interés", key: "abono_interes", width: 15 },
+    { header: "Abono IVA 12%", key: "abono_iva_12", width: 15 },
+    { header: "Abono GPS", key: "abono_gps", width: 15 },
+    { header: "Tipo de Pago", key: "tipoPago", width: 18 },
+    { header: "Estado", key: "validationStatus", width: 18 },
+    { header: "Observaciones", key: "observaciones", width: 30 },
+    { header: "Pago Convenio", key: "pagoConvenio", width: 15 },
+    { header: "Fecha Boleta", key: "fechaBoleta", width: 15 },
+    { header: "Fecha Aplicado", key: "fechaAplicado", width: 20 },
+  ];
+
+  // Columnas dinámicas de boletas
+  for (let i = 1; i <= maxBoletas; i++) {
+    columns.push({ header: maxBoletas === 1 ? "URL Boleta" : `Boleta ${i}`, key: `boleta_${i}`, width: 50 });
+  }
+
+  columns.push(
     { header: "Banco", key: "bancoNombre", width: 20 },
     { header: "Cuenta Empresa", key: "cuentaEmpresaNombre", width: 20 },
     { header: "Banco Empresa", key: "cuentaEmpresaBanco", width: 20 },
     { header: "Número Cuenta Empresa", key: "cuentaEmpresaNumero", width: 20 },
-    { header: "Abono Capital", key: "abono_capital", width: 15 },
-    { header: "Abono Interés", key: "abono_interes", width: 15 },
-    { header: "Abono IVA 12%", key: "abono_iva_12", width: 15 },
-    { header: "Abono Seguro", key: "abono_seguro", width: 15 },
-    { header: "Abono GPS", key: "abono_gps", width: 15 },
-    { header: "Mora", key: "mora", width: 15 },
-    { header: "Pago Convenio", key: "pagoConvenio", width: 15 },
-    { header: "Otros", key: "otros", width: 15 },
+    { header: "Tipo de Crédito", key: "tipoCredito", width: 15 },
+    { header: "Día de Pago", key: "diaPago", width: 12 },
+    { header: "Número Autorización", key: "numeroAutorizacion", width: 20 },
+    { header: "Capital Crédito", key: "capital", width: 15 },
+    { header: "Deuda Total", key: "deudaTotal", width: 15 },
+    { header: "Estado Crédito", key: "statusCredit", width: 18 },
+    { header: "NIT", key: "nit", width: 15 },
     { header: "Reserva", key: "reserva", width: 15 },
-    { header: "Membresías", key: "membresias", width: 15 },
-    { header: "Observaciones", key: "observaciones", width: 30 },
-    { header: "Estado Validación", key: "validationStatus", width: 18 },
-    { header: "Registrado Por", key: "registerByNombre", width: 25 },
     { header: "Registrado Por (Email)", key: "registerBy", width: 30 },
-    { header: "Boleta ID", key: "boletaId", width: 12 },
-    { header: "URL Boleta", key: "urlBoleta", width: 50 },
-  ];
+    { header: "Pago ID", key: "pagoId", width: 12 },
+  );
 
-  sheet.columns = columns;
+  // Setear solo key + width (sin header, para no escribir en row 1 automáticamente)
+  sheet.columns = columns.map(c => ({ key: c.key, width: c.width }));
 
-  result.data.forEach((item: any) => {
-    sheet.addRow({
-      pagoId: item.pagoId,
-      numeroCredito: item.credito?.numeroCreditoSifco ?? "",
-      creditoId: item.credito?.creditoId ?? "",
-      capital: item.credito?.capital ?? "",
-      deudaTotal: item.credito?.deudaTotal ?? "",
-      statusCredit: item.credito?.statusCredit ?? "",
-      usuarioNombre: item.usuario?.nombre ?? "",
-      nit: item.usuario?.nit ?? "",
-      categoria: item.usuario?.categoria ?? "",
-      montoBoleta: item.montoBoleta,
-      montoAplicado: item.monto_aplicado,
-      numeroAutorizacion: item.numeroAutorizacion,
+  // Logo
+  let dataStartRow = 2; // fila donde inician los datos (después del header)
+  const logo = await fetchImageBase64(LOGO_URL);
+  if (logo) {
+    const imgId = workbook.addImage({ base64: logo.data, extension: logo.ext });
+    sheet.addImage(imgId, "A1:B2");
+    sheet.addRow([]); // Fila 1 - logo
+    sheet.addRow([]); // Fila 2 - espacio
+    dataStartRow = 4; // header en fila 3, datos desde fila 4
+  }
+
+  // Header row manual
+  const headerLabels = columns.map(c => c.header);
+  const headerRow = sheet.addRow(headerLabels);
+  headerRow.font = { bold: true, color: { argb: "FFFFFF" }, size: 11 };
+  headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "1F4E79" } };
+  headerRow.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+  headerRow.height = 30;
+
+  // ── Filas de datos (sin agrupar por asesor) ──
+  result.data.forEach((item: any, idx: number) => {
+    const row: any = {
       fechaPago: item.fechaPago,
-      fechaBoleta: item.fechaBoleta,
-      cuotaId: item.cuota?.cuotaId ?? "",
+      numeroCredito: item.credito?.numeroCreditoSifco ?? "",
+      registerByNombre: item.registerByNombre,
+      usuarioNombre: item.usuario?.nombre ?? "",
+      montoBoleta: item.montoBoleta,
       numeroCuota: item.cuota?.numeroCuota ?? "",
-      fechaVencimiento: item.cuota?.fechaVencimiento ?? "",
+      cuotaMonto: item.cuotaMonto,
+      montoAplicado: item.monto_aplicado,
+      abono_seguro: item.abono_seguro,
+      membresias: item.membresias,
+      mora: item.mora,
+      otros: item.otros,
+      abono_capital: item.abono_capital,
+      abono_interes: item.abono_interes,
+      abono_iva_12: item.abono_iva_12,
+      abono_gps: item.abono_gps,
+      tipoPago: getTipoPago(item),
+      validationStatus: item.validationStatus,
+      observaciones: item.observaciones,
+      pagoConvenio: item.pagoConvenio,
+      fechaBoleta: item.fechaBoleta,
+      fechaAplicado: item.fechaAplicado,
       bancoNombre: item.bancoNombre,
       cuentaEmpresaNombre: item.cuentaEmpresaNombre,
       cuentaEmpresaBanco: item.cuentaEmpresaBanco,
       cuentaEmpresaNumero: item.cuentaEmpresaNumero,
-      abono_capital: item.abono_capital,
-      abono_interes: item.abono_interes,
-      abono_iva_12: item.abono_iva_12,
-      abono_seguro: item.abono_seguro,
-      abono_gps: item.abono_gps,
-      mora: item.mora,
-      pagoConvenio: item.pagoConvenio,
-      otros: item.otros,
+      tipoCredito: item.usuario?.categoria ?? "",
+      diaPago: getDiaPago(item.cuota?.fechaVencimiento),
+      numeroAutorizacion: item.numeroAutorizacion,
+      capital: item.credito?.capital ?? "",
+      deudaTotal: item.credito?.deudaTotal ?? "",
+      statusCredit: item.credito?.statusCredit ?? "",
+      nit: item.usuario?.nit ?? "",
       reserva: item.reserva,
-      membresias: item.membresias,
-      observaciones: item.observaciones,
-      validationStatus: item.validationStatus,
-      registerByNombre: item.registerByNombre,
       registerBy: item.registerBy,
-      boletaId: item.boleta?.boletaId ?? "",
-      urlBoleta: item.boleta?.urlBoleta ?? "",
+      pagoId: item.pagoId,
+    };
+
+    // Boletas dinámicas
+    const boletas = item.boletas ?? [];
+    for (let b = 0; b < maxBoletas; b++) {
+      row[`boleta_${b + 1}`] = boletas[b]?.urlBoleta ?? "";
+    }
+
+    const dataRow = sheet.addRow(row);
+    // Zebra striping
+    const bgColor = idx % 2 === 1 ? "F2F7FB" : "FFFFFF";
+    dataRow.eachCell({ includeEmpty: true }, (cell) => {
+      cell.border = {
+        top: { style: "thin", color: { argb: "D9D9D9" } },
+        bottom: { style: "thin", color: { argb: "D9D9D9" } },
+        left: { style: "thin", color: { argb: "D9D9D9" } },
+        right: { style: "thin", color: { argb: "D9D9D9" } },
+      };
+      cell.alignment = { vertical: "middle" };
+      if (bgColor !== "FFFFFF") {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bgColor } };
+      }
     });
   });
 
-  // Fila vacía + totales
-  sheet.addRow({});
+  // Fila vacía + TOTALES GENERALES
+  sheet.addRow([]);
 
   const totalRow = sheet.addRow({
-    pagoId: "TOTALES",
+    fechaPago: "TOTALES GENERALES",
     abono_capital: result.totales?.totalAbonoCapital ?? 0,
     abono_interes: result.totales?.totalAbonoInteres ?? 0,
     abono_iva_12: result.totales?.totalAbonoIva ?? 0,
@@ -662,11 +792,11 @@ export async function exportPagosAdvisorExcel(
   });
 
   totalRow.eachCell((cell) => {
-    cell.font = { bold: true };
-    cell.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "FFFF00" },
+    cell.font = { bold: true, color: { argb: "000000" } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD966" } };
+    cell.border = {
+      top: { style: "medium", color: { argb: "1F4E79" } },
+      bottom: { style: "medium", color: { argb: "1F4E79" } },
     };
   });
 

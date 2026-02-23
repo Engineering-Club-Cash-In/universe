@@ -11,7 +11,7 @@ ARCHIVO_DIFERENCIAS = os.path.join(
     os.path.dirname(__file__),
     "diferencias_abono_capital.xlsx"
 )
-HOJA_DIFERENCIAS = "Diferencias Abono Capital"
+HOJA_DIFERENCIAS = "Diferencias Abono Capital v2"
 
 ARCHIVO_SALIDA = os.path.join(
     os.path.dirname(__file__),
@@ -72,8 +72,8 @@ def main():
     no_encontrados = 0
     no_match = 0
 
-    # Header row = 8, data starts at 9
-    for row in ws_dif.iter_rows(min_row=9, max_col=7, values_only=True):
+    # Header row = 9, data starts at 10
+    for row in ws_dif.iter_rows(min_row=10, max_col=7, values_only=True):
         nombre = row[0]
         abono_capital_tabla = row[1]
         abono_capital_json = row[2]

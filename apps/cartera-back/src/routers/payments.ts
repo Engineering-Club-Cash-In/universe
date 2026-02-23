@@ -1,10 +1,11 @@
 import { Elysia, t } from "elysia";
-import { 
+import {
   getAllPagosWithCreditAndInversionistas,
-  getPayments, 
+  getPayments,
   liquidatePagosCreditoInversionistas,
   falsePayment,
   getPagosConInversionistas,
+  updatePagosEspejoPorCredito,
 } from "../controllers/payments"; 
 import { z } from "zod";
 import { promises as fs } from "fs";
@@ -1151,6 +1152,43 @@ export const paymentRouter = new Elysia()
     detail: {
       tags: ["Créditos"],
       summary: "Marcar cuotas pagadas hasta un número de cuota",
+    },
+  }
+)
+.post(
+  "/update-pagos-espejo",
+  async ({ body, set }) => {
+    try {
+      const { numero_credito_sifco, abono_capital, abono_interes, abono_iva } = body;
+
+      const result = await updatePagosEspejoPorCredito(
+        numero_credito_sifco,
+        abono_capital,
+        abono_interes,
+        abono_iva
+      );
+
+      set.status = 200;
+      return result;
+    } catch (error: any) {
+      console.error("Error en /update-pagos-espejo:", error);
+      set.status = 500;
+      return {
+        success: false,
+        message: error.message || "Error actualizando pagos espejo",
+      };
+    }
+  },
+  {
+    body: t.Object({
+      numero_credito_sifco: t.String(),
+      abono_capital: t.Optional(t.Number()),
+      abono_interes: t.Optional(t.Number()),
+      abono_iva: t.Optional(t.Number()),
+    }),
+    detail: {
+      tags: ["Pagos/Inversionistas"],
+      summary: "Actualizar pagos espejo NO_LIQUIDADO por crédito",
     },
   }
 )

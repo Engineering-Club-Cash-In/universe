@@ -55,43 +55,62 @@ function getEstadoBadge(estado: string) {
 
 export const columns: ColumnDef<ContratoCobranza>[] = [
 	{
-		accessorKey: "diasHastaPago",
+		accessorKey: "fechaProximoPago",
 		header: ({ column }) => {
 			return (
 				<Button
 					variant="ghost"
 					onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
 				>
-					Días hasta Pago
+					Fecha de Pago
 					<ArrowUpDown className="ml-2 h-4 w-4" />
 				</Button>
 			);
 		},
 		cell: ({ row }) => {
-			const dias = row.getValue("diasHastaPago") as number | null;
-			let className = "font-medium";
+			const fecha = row.getValue("fechaProximoPago") as string | null;
+			const dias = row.original.diasHastaPago;
 
-			// Si no hay fecha de próximo pago definida
+			if (!fecha) {
+				return (
+					<div className="font-medium text-gray-500">Sin fecha definida</div>
+				);
+			}
+
+			const fechaFormateada = new Date(fecha).toLocaleDateString("es-GT", {
+				day: "2-digit",
+				month: "short",
+				year: "numeric",
+			});
+
+			let diasClassName = "text-xs mt-0.5";
+			let diasText = "";
+
 			if (dias === null) {
-				className += " text-gray-500";
-				return <div className={className}>Sin fecha definida</div>;
-			}
-
-			if (dias === 0) {
-				className += " text-red-600";
-				return <div className={className}>¡Hoy!</div>;
-			}
-			if (dias < 0) {
-				className += " text-red-700";
-				return <div className={className}>{Math.abs(dias)} días vencido</div>;
-			}
-			if (dias <= 3) {
-				className += " text-orange-600";
+				diasText = "";
+			} else if (dias === 0) {
+				diasClassName += " text-red-600 font-semibold";
+				diasText = "¡Hoy!";
+			} else if (dias < 0) {
+				diasClassName += " text-red-700 font-semibold";
+				diasText = `${Math.abs(dias)} días vencido`;
+			} else if (dias <= 3) {
+				diasClassName += " text-orange-600";
+				diasText = `en ${dias} días`;
 			} else if (dias <= 7) {
-				className += " text-yellow-600";
+				diasClassName += " text-yellow-600";
+				diasText = `en ${dias} días`;
+			} else {
+				diasClassName += " text-muted-foreground";
+				diasText = `en ${dias} días`;
 			}
 
-			return <div className={className}>{dias} días</div>;
+			return (
+				<div className="font-medium">
+					<div>{fechaFormateada}</div>
+					{diasText && <div className={diasClassName}>{diasText}</div>}
+				</div>
+			);
 		},
 	},
 	{

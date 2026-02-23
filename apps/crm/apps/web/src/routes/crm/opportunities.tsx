@@ -39,6 +39,7 @@ import { z } from "zod";
 import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
 import { ConsolidatedCreditSummary } from "@/components/credit/ConsolidatedCreditSummary";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
+import { ConfirmContractsSignedModal } from "@/components/crm/ConfirmContractsSignedModal";
 import { DataTable } from "@/components/data-table";
 import { NotesTimeline } from "@/components/notes-timeline";
 import { Badge } from "@/components/ui/badge";
@@ -378,6 +379,30 @@ function RouteComponent() {
 		localStorage.setItem("opportunities-view-mode", mode);
 	};
 
+	// State for confirm contracts signed modal
+	const [confirmSignedModalOpen, setConfirmSignedModalOpen] = useState(false);
+	const [opportunityToConfirmSigned, setOpportunityToConfirmSigned] = useState<{
+		id: string;
+		title: string;
+	} | null>(null);
+
+	const confirmContractsSignedMutation = useMutation({
+		mutationFn: async (opportunityId: string) => {
+			return await client.confirmContractsSigned({ opportunityId });
+		},
+		onSuccess: (data) => {
+			toast.success(data.message);
+			setConfirmSignedModalOpen(false);
+			setOpportunityToConfirmSigned(null);
+			queryClient.invalidateQueries({
+				queryKey: ["getOpportunities"],
+			});
+		},
+		onError: (error: Error) => {
+			toast.error(error.message || "Error al confirmar firma de contratos");
+		},
+	});
+
 	const handleDropOpportunity = (opportunityId: string, newStageId: string) => {
 		// Find the opportunity and the target stage
 		const opportunity = opportunitiesQuery.data?.find(
@@ -413,6 +438,22 @@ function RouteComponent() {
 			toast.error(
 				"No puedes mover manualmente una oportunidad de Recepción de documentación (30%) a etapas superiores. El equipo de análisis debe aprobar los documentos para que la oportunidad avance automáticamente al 40%.",
 			);
+			return;
+		}
+
+		// Intercept 85% → 90%+: open confirm contracts signed modal
+		if (
+			opportunity &&
+			targetStage &&
+			currentStage &&
+			currentStage.closurePercentage === 85 &&
+			targetStage.closurePercentage >= 90
+		) {
+			setOpportunityToConfirmSigned({
+				id: opportunity.id,
+				title: opportunity.title,
+			});
+			setConfirmSignedModalOpen(true);
 			return;
 		}
 
@@ -3057,6 +3098,21 @@ function RouteComponent() {
 					}
 				/>
 			)}
+
+			{/* Modal para confirmar firma de contratos (85% → 90%) */}
+			<ConfirmContractsSignedModal
+				open={confirmSignedModalOpen}
+				onOpenChange={setConfirmSignedModalOpen}
+				onConfirm={() => {
+					if (opportunityToConfirmSigned) {
+						confirmContractsSignedMutation.mutate(
+							opportunityToConfirmSigned.id,
+						);
+					}
+				}}
+				isLoading={confirmContractsSignedMutation.isPending}
+				opportunityTitle={opportunityToConfirmSigned?.title}
+			/>
 		</div>
 	);
 }

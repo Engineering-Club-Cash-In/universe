@@ -167,6 +167,13 @@ export const PERMISSIONS = {
 	canApproveLegalStage: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.JURIDICO,
 
+	// Confirm contracts have been signed (85% → 90%)
+	canConfirmContractsSigning: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.SALES ||
+		role === ROLES.SALES_SUPERVISOR ||
+		role === ROLES.JURIDICO,
+
 	// Clients Module Access
 	canAccessClients: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN ||

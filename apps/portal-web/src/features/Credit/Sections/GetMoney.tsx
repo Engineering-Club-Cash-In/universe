@@ -143,7 +143,7 @@ export const GetMoney = () => {
       <ModalChatBot
         open={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        options={[optionsCredit.sell]}
+        options={optionsCredit.sell}
       />
     </section>
   );

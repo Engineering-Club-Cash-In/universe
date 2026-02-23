@@ -2985,6 +2985,15 @@ export const updateInvestor = async ({ body, set }: any) => {
     return { message: "Error updating investors", error: String(error) };
   }
 };
+interface BoletaPendiente {
+  boleta_id: number;
+  boleta_url: string;
+  estado: string;
+  notas: string | null;
+  monto_boleta: string | null;
+  fecha_subida: Date;
+}
+
 interface InversionistaResumen {
   inversionista_id: number;
   nombre: string;
@@ -3005,6 +3014,7 @@ interface InversionistaResumen {
   total_a_recibir_sin_reinversion: number;
   total_reinversion: number;
   total_a_recibir_con_reinversion: number;
+  boleta_pendiente: BoletaPendiente | null;
 }
 
 export async function resumenGlobalInversionistas(
@@ -3244,6 +3254,45 @@ export async function resumenGlobalInversionistas(
     };
   }
 
+  // 🔎 Obtener boletas pendientes por inversionista (solo para consulta JSON)
+  const inversionistaIds = result.map((inv) => inv.inversionista_id);
+
+  const boletasPendientes = inversionistaIds.length > 0
+    ? await db
+        .select({
+          boleta_id: boletasPagoInversionista.boleta_id,
+          inversionista_id: boletasPagoInversionista.inversionista_id,
+          boleta_url: boletasPagoInversionista.boleta_url,
+          estado: boletasPagoInversionista.estado,
+          notas: boletasPagoInversionista.notas,
+          monto_boleta: boletasPagoInversionista.monto_boleta,
+          fecha_subida: boletasPagoInversionista.fecha_subida,
+        })
+        .from(boletasPagoInversionista)
+        .where(
+          and(
+            inArray(boletasPagoInversionista.inversionista_id, inversionistaIds),
+            eq(boletasPagoInversionista.estado, "PENDIENTE")
+          )
+        )
+        .orderBy(desc(boletasPagoInversionista.fecha_subida))
+    : [];
+
+  // Mapear boleta pendiente por inversionista (solo la más reciente)
+  const boletaMap = new Map<number, BoletaPendiente>();
+  for (const b of boletasPendientes) {
+    if (!boletaMap.has(b.inversionista_id)) {
+      boletaMap.set(b.inversionista_id, {
+        boleta_id: b.boleta_id,
+        boleta_url: b.boleta_url,
+        estado: b.estado,
+        notas: b.notas,
+        monto_boleta: b.monto_boleta,
+        fecha_subida: b.fecha_subida,
+      });
+    }
+  }
+
   // Map result to match InversionistaResumen interface
   return result.map((inv) => ({
     inversionista_id: inv.inversionista_id,
@@ -3260,6 +3309,7 @@ export async function resumenGlobalInversionistas(
     total_a_recibir_sin_reinversion: inv.total_a_recibir_sin_reinversion,
     total_reinversion: inv.total_reinversion,
     total_a_recibir_con_reinversion: inv.total_a_recibir_con_reinversion,
+    boleta_pendiente: boletaMap.get(inv.inversionista_id) ?? null,
   }));
 }
 /**

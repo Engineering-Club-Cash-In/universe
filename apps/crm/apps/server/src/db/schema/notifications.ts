@@ -24,6 +24,7 @@ export const notificationTypeEnum = pgEnum("notification_type", [
 	"action_required",
 	"reminder",
 	"system",
+	"pay_investors",
 ]);
 
 export const notificationEntityTypeEnum = pgEnum("notification_entity_type", [
@@ -45,6 +46,7 @@ export const notificationRedirectPageEnum = pgEnum(
 		"analysis_details",
 		"analysis_50_details",
 		"analysis_90_details",
+		"pay_investors",
 	],
 );
 

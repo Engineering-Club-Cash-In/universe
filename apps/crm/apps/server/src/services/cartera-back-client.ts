@@ -30,7 +30,10 @@ import type {
 	GetPaymentsParams,
 	InversionistaReporte,
 	LiquidatePagosInversionistasInput,
+	BoletaPagoInversionista,
+	CreateBoletaInput,
 	PaginatedResponse,
+	ResumenGlobalInversionista,
 	ReversePagoInput,
 	UpdateCreditoInput,
 } from "../types/cartera-back";
@@ -685,6 +688,53 @@ export class CarteraBackClient {
 				body: JSON.stringify(input),
 			},
 		);
+		return response;
+	}
+
+	// ========================================================================
+	// RESUMEN GLOBAL INVERSIONISTAS
+	// ========================================================================
+
+	async getResumenGlobalInversionistas(): Promise<ResumenGlobalInversionista[]> {
+		const response = await this.request<ResumenGlobalInversionista[]>(
+			"/resumen-global",
+			{ method: "GET" },
+			true,
+		);
+		return response;
+	}
+
+	async uploadFile(file: File | Blob, filename: string): Promise<{ url: string; filename: string }> {
+		const url = `${this.config.baseUrl}/upload`;
+		const formData = new FormData();
+		formData.append("file", file, filename);
+
+		const response = await fetch(url, {
+			method: "POST",
+			body: formData,
+			...(this.config.apiKey && {
+				headers: { Authorization: `Bearer ${this.config.apiKey}` },
+			}),
+			signal: AbortSignal.timeout(this.config.timeout),
+		});
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new Error(`Upload failed: ${errorText}`);
+		}
+
+		return response.json();
+	}
+
+	async createBoleta(input: CreateBoletaInput): Promise<BoletaPagoInversionista> {
+		const response = await this.request<BoletaPagoInversionista>(
+			"/boletas",
+			{
+				method: "POST",
+				body: JSON.stringify(input),
+			},
+		);
+		this.cache.invalidate("resumen-global");
 		return response;
 	}
 

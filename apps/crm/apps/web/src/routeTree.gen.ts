@@ -30,6 +30,7 @@ import { Route as CobrosIdRouteImport } from './routes/cobros/$id'
 import { Route as AdminUsersRouteImport } from './routes/admin/users'
 import { Route as AdminSettingsRouteImport } from './routes/admin/settings'
 import { Route as AdminImportRouteImport } from './routes/admin/import'
+import { Route as AccountingPayInvestorsRouteImport } from './routes/accounting/pay-investors'
 import { Route as CrmAnalysisIndexRouteImport } from './routes/crm/analysis/index'
 import { Route as AdminReportsIndexRouteImport } from './routes/admin/reports/index'
 import { Route as JuridicoGenerateOpportunityIdRouteImport } from './routes/juridico/generate.$opportunityId'
@@ -141,6 +142,11 @@ const AdminImportRoute = AdminImportRouteImport.update({
   path: '/admin/import',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AccountingPayInvestorsRoute = AccountingPayInvestorsRouteImport.update({
+  id: '/accounting/pay-investors',
+  path: '/accounting/pay-investors',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CrmAnalysisIndexRoute = CrmAnalysisIndexRouteImport.update({
   id: '/crm/analysis/',
   path: '/crm/analysis/',
@@ -174,6 +180,7 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
+  '/accounting/pay-investors': typeof AccountingPayInvestorsRoute
   '/admin/import': typeof AdminImportRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
@@ -188,20 +195,21 @@ export interface FileRoutesByFullPath {
   '/juridico/$leadId': typeof JuridicoLeadIdRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
-  '/cobros': typeof CobrosIndexRoute
-  '/juridico': typeof JuridicoIndexRoute
-  '/vehicles': typeof VehiclesIndexRoute
+  '/cobros/': typeof CobrosIndexRoute
+  '/juridico/': typeof JuridicoIndexRoute
+  '/vehicles/': typeof VehiclesIndexRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
-  '/admin/reports': typeof AdminReportsIndexRoute
-  '/crm/analysis': typeof CrmAnalysisIndexRoute
+  '/admin/reports/': typeof AdminReportsIndexRoute
+  '/crm/analysis/': typeof CrmAnalysisIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
+  '/accounting/pay-investors': typeof AccountingPayInvestorsRoute
   '/admin/import': typeof AdminImportRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
@@ -231,6 +239,7 @@ export interface FileRoutesById {
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
+  '/accounting/pay-investors': typeof AccountingPayInvestorsRoute
   '/admin/import': typeof AdminImportRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
@@ -261,6 +270,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/login'
     | '/notifications'
+    | '/accounting/pay-investors'
     | '/admin/import'
     | '/admin/settings'
     | '/admin/users'
@@ -275,20 +285,21 @@ export interface FileRouteTypes {
     | '/juridico/$leadId'
     | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
-    | '/cobros'
-    | '/juridico'
-    | '/vehicles'
+    | '/cobros/'
+    | '/juridico/'
+    | '/vehicles/'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
     | '/juridico/generate/$opportunityId'
-    | '/admin/reports'
-    | '/crm/analysis'
+    | '/admin/reports/'
+    | '/crm/analysis/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/dashboard'
     | '/login'
     | '/notifications'
+    | '/accounting/pay-investors'
     | '/admin/import'
     | '/admin/settings'
     | '/admin/users'
@@ -317,6 +328,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/login'
     | '/notifications'
+    | '/accounting/pay-investors'
     | '/admin/import'
     | '/admin/settings'
     | '/admin/users'
@@ -346,6 +358,7 @@ export interface RootRouteChildren {
   DashboardRoute: typeof DashboardRoute
   LoginRoute: typeof LoginRoute
   NotificationsRoute: typeof NotificationsRoute
+  AccountingPayInvestorsRoute: typeof AccountingPayInvestorsRoute
   AdminImportRoute: typeof AdminImportRoute
   AdminSettingsRoute: typeof AdminSettingsRoute
   AdminUsersRoute: typeof AdminUsersRoute
@@ -403,21 +416,21 @@ declare module '@tanstack/react-router' {
     '/vehicles/': {
       id: '/vehicles/'
       path: '/vehicles'
-      fullPath: '/vehicles'
+      fullPath: '/vehicles/'
       preLoaderRoute: typeof VehiclesIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/juridico/': {
       id: '/juridico/'
       path: '/juridico'
-      fullPath: '/juridico'
+      fullPath: '/juridico/'
       preLoaderRoute: typeof JuridicoIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/cobros/': {
       id: '/cobros/'
       path: '/cobros'
-      fullPath: '/cobros'
+      fullPath: '/cobros/'
       preLoaderRoute: typeof CobrosIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
@@ -519,17 +532,24 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminImportRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/accounting/pay-investors': {
+      id: '/accounting/pay-investors'
+      path: '/accounting/pay-investors'
+      fullPath: '/accounting/pay-investors'
+      preLoaderRoute: typeof AccountingPayInvestorsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/crm/analysis/': {
       id: '/crm/analysis/'
       path: '/crm/analysis'
-      fullPath: '/crm/analysis'
+      fullPath: '/crm/analysis/'
       preLoaderRoute: typeof CrmAnalysisIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/reports/': {
       id: '/admin/reports/'
       path: '/admin/reports'
-      fullPath: '/admin/reports'
+      fullPath: '/admin/reports/'
       preLoaderRoute: typeof AdminReportsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
@@ -562,6 +582,7 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardRoute: DashboardRoute,
   LoginRoute: LoginRoute,
   NotificationsRoute: NotificationsRoute,
+  AccountingPayInvestorsRoute: AccountingPayInvestorsRoute,
   AdminImportRoute: AdminImportRoute,
   AdminSettingsRoute: AdminSettingsRoute,
   AdminUsersRoute: AdminUsersRoute,

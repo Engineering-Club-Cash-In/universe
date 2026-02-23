@@ -2060,3 +2060,55 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number) {
     };
   }
 }
+
+/**
+ * Actualiza los pagos NO_LIQUIDADO en pagos_credito_inversionistas_espejo
+ * para un crédito dado (por numero_credito_sifco).
+ * Recibe abono_capital, abono_interes, abono_iva y los aplica a todos
+ * los registros NO_LIQUIDADO de ese crédito.
+ */
+export async function updatePagosEspejoPorCredito(
+  numero_credito_sifco: string,
+  abono_capital?: number,
+  abono_interes?: number,
+  abono_iva?: number
+) {
+  // 1. Buscar el crédito por SIFCO
+  const [credito] = await db
+    .select({ credito_id: creditos.credito_id })
+    .from(creditos)
+    .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
+    .limit(1);
+
+  if (!credito) {
+    throw new Error(`No se encontró el crédito con SIFCO: ${numero_credito_sifco}`);
+  }
+
+  // 2. Armar el set dinámico solo con los campos que vienen
+  const setData: Record<string, string> = {};
+  if (abono_capital !== undefined) setData.abono_capital = abono_capital.toString();
+  if (abono_interes !== undefined) setData.abono_interes = abono_interes.toString();
+  if (abono_iva !== undefined) setData.abono_iva_12 = abono_iva.toString();
+
+  if (Object.keys(setData).length === 0) {
+    throw new Error("Debe enviar al menos un campo a actualizar (abono_capital, abono_interes, abono_iva)");
+  }
+
+  // 3. Actualizar todos los registros NO_LIQUIDADO de ese crédito en la tabla espejo
+  const result = await db
+    .update(pagos_credito_inversionistas_espejo)
+    .set(setData)
+    .where(
+      and(
+        eq(pagos_credito_inversionistas_espejo.credito_id, credito.credito_id),
+        eq(pagos_credito_inversionistas_espejo.estado_liquidacion, "NO_LIQUIDADO")
+      )
+    );
+
+  return {
+    success: true,
+    message: `Pagos espejo actualizados para crédito ${numero_credito_sifco}`,
+    credito_id: credito.credito_id,
+    registrosActualizados: result.rowCount ?? 0,
+  };
+}

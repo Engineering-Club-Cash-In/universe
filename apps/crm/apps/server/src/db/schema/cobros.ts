@@ -280,3 +280,32 @@ export const notificacionesCobros = pgTable("notificaciones_cobros", {
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+// Metas de mora mensuales (porcentajes objetivo globales)
+export const categoriaMetaMoraEnum = pgEnum("categoria_meta_mora", [
+	"mora_total",
+	"mora_30",
+	"mora_60",
+	"mora_90",
+	"mora_120",
+]);
+
+export const metasMoraCobros = pgTable("metas_mora_cobros", {
+	id: uuid("id").primaryKey().defaultRandom(),
+
+	// Período
+	mes: integer("mes").notNull(), // 1-12
+	anio: integer("anio").notNull(),
+
+	// Categoría de mora
+	categoria: categoriaMetaMoraEnum("categoria").notNull(),
+
+	// Porcentaje objetivo (ej: 8.35 = 8.35%)
+	valorObjetivo: decimal("valor_objetivo", {
+		precision: 5,
+		scale: 2,
+	}).notNull(),
+
+	createdAt: timestamp("created_at").notNull().defaultNow(),
+	updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});

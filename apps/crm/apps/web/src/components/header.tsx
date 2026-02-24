@@ -245,6 +245,38 @@ export default function Header() {
 							</Button>
 						)}
 
+						{/* Contabilidad Dropdown */}
+						{session &&
+							userRole &&
+							PERMISSIONS.canAccessAccounting(userRole) && (
+								<DropdownMenu>
+									<DropdownMenuTrigger asChild>
+										<Button
+											variant={
+												isActive("/accounting") ? "secondary" : "ghost"
+											}
+											size="sm"
+											className="gap-1"
+										>
+											<Calculator className="h-4 w-4" />
+											Contabilidad
+											<ChevronDown className="h-3 w-3 opacity-50" />
+										</Button>
+									</DropdownMenuTrigger>
+									<DropdownMenuContent align="start" className="w-56">
+										<DropdownMenuItem asChild>
+											<Link
+												to="/accounting/pay-investors"
+												className="cursor-pointer"
+											>
+												<Banknote className="mr-2 h-4 w-4" />
+												Pagar Inversionistas
+											</Link>
+										</DropdownMenuItem>
+									</DropdownMenuContent>
+								</DropdownMenu>
+							)}
+
 						{/* Admin Dropdown */}
 						{session && userRole && PERMISSIONS.canAccessAdmin(userRole) && (
 							<DropdownMenu>

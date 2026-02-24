@@ -1,4 +1,5 @@
 import { publicProcedure } from "../lib/orpc";
+import { accountingRouter } from "./accounting";
 import { adminRouter } from "./admin";
 import { adminImportRouter } from "./admin-import";
 import { adminMiniagentRouter } from "./admin-miniagent";
@@ -262,6 +263,11 @@ export const appRouter = {
 	adminSetMiniAgentCredentials: adminMiniagentRouter.setMiniAgentCredentials,
 	adminDeleteMiniAgentCredentials:
 		adminMiniagentRouter.deleteMiniAgentCredentials,
+
+	// Accounting routes (Contabilidad)
+	getResumenGlobalInversionistas:
+		accountingRouter.getResumenGlobalInversionistas,
+	createBoleta: accountingRouter.createBoleta,
 };
 
 export type AppRouter = typeof appRouter;

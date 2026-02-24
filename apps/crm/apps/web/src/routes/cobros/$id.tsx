@@ -739,6 +739,16 @@ function RouteComponent() {
 																{contacto.compromisosPago}
 															</div>
 														)}
+														{contacto.fechaProximoContacto && (
+															<div className="mt-2 rounded bg-amber-50 p-2 text-sm">
+																<span className="font-medium">
+																	📅 Seguimiento programado:{" "}
+																</span>
+																{new Date(
+																	contacto.fechaProximoContacto,
+																).toLocaleDateString("es-GT")}
+															</div>
+														)}
 														<div className="mt-2 flex items-center justify-between text-muted-foreground text-xs">
 															<span>
 																Por: {contacto.realizadoPor || "Sin asignar"}

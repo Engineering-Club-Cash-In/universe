@@ -3028,6 +3028,7 @@ export async function resumenGlobalInversionistas(
   // 🔎 Condiciones dinámicas — ahora sobre tablas ESPEJO
   const condiciones: any[] = [
     eq(pagos_credito_inversionistas_espejo.estado_liquidacion, "NO_LIQUIDADO"),
+    eq(inversionistas.permite_distribucion, false) // Solo inversionistas que NO permiten distribución (es decir, que se les paga directamente)
   ];
 
   if (inversionistaId) {

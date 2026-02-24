@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
 	AlertTriangle,
@@ -23,6 +23,7 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 import { ContactoModal } from "@/components/contacto-modal";
+import { ReferenciasView } from "@/components/cobros/ReferenciasView";
 import {
 	OpportunityDetailModal,
 	type OpportunityForModal,
@@ -127,6 +128,16 @@ function RouteComponent() {
 		year: 2000,
 		licensePlate: "",
 	});
+
+	// Estado de edición de contacto
+	const [isEditingContact, setIsEditingContact] = useState(false);
+	const [contactForm, setContactForm] = useState({
+		telefonoPrincipal: "",
+		telefonoAlternativo: "",
+		emailContacto: "",
+	});
+
+	const queryClient = useQueryClient();
 
 	// Obtener detalles del contrato/caso
 	// Si es ID numérico, usar endpoint de Cartera-Back, si es UUID usar el del CRM
@@ -245,6 +256,30 @@ function RouteComponent() {
 		},
 		onError: (err: any) => {
 			toast.error(err.message || "Error al actualizar el vehículo");
+		},
+	});
+
+	const updateContactMutation = useMutation({
+		mutationFn: (data: {
+			telefonoPrincipal: string;
+			telefonoAlternativo?: string;
+			emailContacto?: string;
+		}) =>
+			client.updateContactInfoCobros({
+				casoCobroId: casoDetails.data?.id ?? "",
+				...data,
+			}),
+		onSuccess: () => {
+			toast.success("Información de contacto actualizada");
+			queryClient.invalidateQueries(
+				orpc.getDetallesCreditoCarteraBack.queryOptions({
+					input: { creditoId: id },
+				}),
+			);
+			setIsEditingContact(false);
+		},
+		onError: (err: any) => {
+			toast.error(err.message || "Error al actualizar contacto");
 		},
 	});
 
@@ -486,47 +521,134 @@ function RouteComponent() {
 								<Phone className="h-5 w-5" />
 								Información de Contacto
 							</CardTitle>
-							{matchingOpportunity?.lead?.id &&
-								(caso.telefonoPrincipal ||
-									caso.emailContacto ||
-									caso.direccionContacto) && (
-									<Link
-										to="/crm/clients"
-										search={{ idLead: matchingOpportunity.lead.id, edit: true }}
-									>
-										<Button variant="outline" size="sm">
-											<Pencil className="mr-2 h-4 w-4" />
-											Editar
-										</Button>
-									</Link>
-								)}
+							{caso.id && !isEditingContact && (
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => {
+										setContactForm({
+											telefonoPrincipal: caso.telefonoPrincipal || "",
+											telefonoAlternativo: caso.telefonoAlternativo || "",
+											emailContacto: caso.emailContacto || "",
+										});
+										setIsEditingContact(true);
+									}}
+								>
+									<Pencil className="mr-2 h-4 w-4" />
+									Editar
+								</Button>
+							)}
 						</CardHeader>
 						<CardContent className="space-y-4">
+							{isEditingContact ? (
+								<div className="space-y-3">
+									<div>
+										<Label htmlFor="contact-phone">Teléfono Principal *</Label>
+										<Input
+											id="contact-phone"
+											value={contactForm.telefonoPrincipal}
+											onChange={(e) =>
+												setContactForm((f) => ({
+													...f,
+													telefonoPrincipal: e.target.value,
+												}))
+											}
+											placeholder="Ej: 5555-5555"
+										/>
+									</div>
+									<div>
+										<Label htmlFor="contact-phone-alt">Teléfono Alternativo</Label>
+										<Input
+											id="contact-phone-alt"
+											value={contactForm.telefonoAlternativo}
+											onChange={(e) =>
+												setContactForm((f) => ({
+													...f,
+													telefonoAlternativo: e.target.value,
+												}))
+											}
+											placeholder="Ej: 4444-4444"
+										/>
+									</div>
+									<div>
+										<Label htmlFor="contact-email">Email</Label>
+										<Input
+											id="contact-email"
+											type="email"
+											value={contactForm.emailContacto}
+											onChange={(e) =>
+												setContactForm((f) => ({
+													...f,
+													emailContacto: e.target.value,
+												}))
+											}
+											placeholder="Ej: correo@ejemplo.com"
+										/>
+									</div>
+									<div className="flex gap-2">
+										<Button
+											size="sm"
+											onClick={() => {
+												if (!window.confirm("¿Estás seguro de actualizar la información de contacto?")) return;
+												updateContactMutation.mutate({
+													telefonoPrincipal: contactForm.telefonoPrincipal,
+													telefonoAlternativo: contactForm.telefonoAlternativo || undefined,
+													emailContacto: contactForm.emailContacto || undefined,
+												});
+											}}
+											disabled={
+												updateContactMutation.isPending ||
+												!contactForm.telefonoPrincipal
+											}
+										>
+											{updateContactMutation.isPending
+												? "Guardando..."
+												: "Guardar"}
+										</Button>
+										<Button
+											size="sm"
+											variant="outline"
+											onClick={() => setIsEditingContact(false)}
+											disabled={updateContactMutation.isPending}
+										>
+											Cancelar
+										</Button>
+									</div>
+								</div>
+							) : (
 							<div className="grid grid-cols-2 gap-4">
 								<div>
 									<p className="text-muted-foreground text-sm">
 										Teléfono Principal
 									</p>
-									<p className="font-medium">{caso.telefonoPrincipal}</p>
+									{caso.telefonoPrincipal ? (
+										<a href={`tel:${caso.telefonoPrincipal.replace(/[^0-9+]/g, "")}`} className="font-medium text-primary hover:underline">{caso.telefonoPrincipal}</a>
+									) : (
+										<p className="font-medium">-</p>
+									)}
 								</div>
 								{caso.telefonoAlternativo && (
 									<div>
 										<p className="text-muted-foreground text-sm">
 											Teléfono Alternativo
 										</p>
-										<p className="font-medium">{caso.telefonoAlternativo}</p>
+										<a href={`tel:${String(caso.telefonoAlternativo).replace(/[^0-9+]/g, "")}`} className="font-medium text-primary hover:underline">{caso.telefonoAlternativo}</a>
 									</div>
 								)}
 								<div>
 									<p className="text-muted-foreground text-sm">Email</p>
-									<p className="font-medium">{caso.emailContacto}</p>
+									{caso.emailContacto ? (
+										<a href={`mailto:${caso.emailContacto}`} className="font-medium text-primary hover:underline">{caso.emailContacto}</a>
+									) : (
+										<p className="font-medium">-</p>
+									)}
 								</div>
 								<div>
 									<p className="text-muted-foreground text-sm">Dirección</p>
 									<p className="font-medium">{caso.direccionContacto}</p>
 								</div>
 							</div>
-
+							)}
 							{/* Botones de Contacto - Solo si existe caso de cobros */}
 							{caso.id ? (
 								<>
@@ -536,6 +658,7 @@ function RouteComponent() {
 											casoCobroId={caso.id}
 											clienteNombre={caso.clienteNombre || ""}
 											telefonoPrincipal={caso.telefonoPrincipal || ""}
+											emailCliente={caso.emailContacto || ""}
 											metodoInicial="llamada"
 										>
 											<Button className="flex items-center gap-2">
@@ -548,6 +671,7 @@ function RouteComponent() {
 											casoCobroId={caso.id}
 											clienteNombre={caso.clienteNombre || ""}
 											telefonoPrincipal={caso.telefonoPrincipal || ""}
+											emailCliente={caso.emailContacto || ""}
 											metodoInicial="whatsapp"
 										>
 											<Button
@@ -563,6 +687,7 @@ function RouteComponent() {
 											casoCobroId={caso.id}
 											clienteNombre={caso.clienteNombre || ""}
 											telefonoPrincipal={caso.telefonoPrincipal || ""}
+											emailCliente={caso.emailContacto || ""}
 											metodoInicial="email"
 										>
 											<Button
@@ -586,6 +711,11 @@ function RouteComponent() {
 							)}
 						</CardContent>
 					</Card>
+
+					{/* Referencias */}
+					{matchingOpportunity?.lead?.id && (
+						<ReferenciasView leadId={matchingOpportunity.lead.id} />
+					)}
 
 					{/* Historial de Contactos */}
 					<Card>
@@ -656,6 +786,16 @@ function RouteComponent() {
 																	Compromisos:{" "}
 																</span>
 																{contacto.compromisosPago}
+															</div>
+														)}
+														{contacto.fechaProximoContacto && (
+															<div className="mt-2 rounded bg-amber-50 p-2 text-sm">
+																<span className="font-medium">
+																	📅 Seguimiento programado:{" "}
+																</span>
+																{new Date(
+																	contacto.fechaProximoContacto,
+																).toLocaleDateString("es-GT")}
 															</div>
 														)}
 														<div className="mt-2 flex items-center justify-between text-muted-foreground text-xs">

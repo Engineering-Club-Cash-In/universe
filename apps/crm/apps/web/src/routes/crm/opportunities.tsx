@@ -2941,6 +2941,22 @@ function RouteComponent() {
 													);
 													return;
 												}
+												// Intercept 85% → 90%+: open confirm contracts signed modal
+												if (
+													targetStage &&
+													currentStage &&
+													currentStage.closurePercentage === 85 &&
+													targetStage.closurePercentage >= 90
+												) {
+													setOpportunityToConfirmSigned({
+														id: selectedOpportunity.id,
+														title: selectedOpportunity.title,
+													});
+													setConfirmSignedModalOpen(true);
+													setIsChangeStageDialogOpen(false);
+													return;
+												}
+
 												// Validate: moving from <=20% to >=30% requires a vehicle
 												if (
 													targetStage &&

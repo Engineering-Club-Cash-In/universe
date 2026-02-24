@@ -1,10 +1,13 @@
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { format } from "date-fns";
+import { es } from "date-fns/locale";
 import { CalendarIcon, Mail, MessageCircle, Phone } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
 import {
 	Dialog,
 	DialogClose,
@@ -18,6 +21,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from "@/components/ui/popover";
+import {
 	Select,
 	SelectContent,
 	SelectItem,
@@ -25,12 +33,14 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import { client, orpc } from "@/utils/orpc";
 
 interface ContactoModalProps {
 	casoCobroId: string;
 	clienteNombre: string;
 	telefonoPrincipal: string;
+	emailCliente?: string;
 	metodoInicial: "llamada" | "whatsapp" | "email";
 	children: React.ReactNode;
 }
@@ -39,6 +49,7 @@ export function ContactoModal({
 	casoCobroId,
 	clienteNombre,
 	telefonoPrincipal,
+	emailCliente,
 	metodoInicial,
 	children,
 }: ContactoModalProps) {
@@ -52,6 +63,7 @@ export function ContactoModal({
 			acuerdosAlcanzados: "",
 			compromisosPago: "",
 			requiereSeguimiento: false,
+			fechaProximoContacto: undefined as Date | undefined,
 			duracionLlamada: undefined as number | undefined,
 		},
 		onSubmit: async ({ value }) => {
@@ -71,6 +83,15 @@ export function ContactoModal({
 			queryClient.invalidateQueries(
 				orpc.getHistorialContactos.queryOptions({ input: { casoCobroId } }),
 			);
+			// Invalidar también el detalle del caso para actualizar el sidebar de próximo contacto
+			queryClient.invalidateQueries({
+				predicate: (query) =>
+					query.queryKey.some(
+						(k) =>
+							typeof k === "string" &&
+							k.includes("getDetallesCreditoCarteraBack"),
+					),
+			});
 			form.reset();
 			// Cerrar el dialogo
 			document
@@ -106,8 +127,7 @@ export function ContactoModal({
 				);
 				break;
 			case "email":
-				// El email se obtendría del caso, por ahora placeholder
-				window.open("mailto:cliente@email.com");
+				window.open(`mailto:${emailCliente || ""}`);
 				break;
 		}
 	};
@@ -386,11 +406,64 @@ export function ContactoModal({
 									<input
 										type="checkbox"
 										checked={field.state.value}
-										onChange={(e) => field.handleChange(e.target.checked)}
+										onChange={(e) => {
+											field.handleChange(e.target.checked);
+											if (!e.target.checked) {
+												form.setFieldValue("fechaProximoContacto", undefined);
+											}
+										}}
 									/>
 									<Label>Requiere seguimiento programado</Label>
 								</div>
 							)}
+						</form.Field>
+
+						<form.Field name="requiereSeguimiento">
+							{(seguimientoField) =>
+								seguimientoField.state.value && (
+									<form.Field name="fechaProximoContacto">
+										{(field) => (
+											<div className="space-y-2">
+												<Label>Fecha de próximo contacto *</Label>
+												<Popover>
+													<PopoverTrigger asChild>
+														<Button
+															type="button"
+															variant="outline"
+															className={cn(
+																"w-full justify-start text-left font-normal",
+																!field.state.value && "text-muted-foreground",
+															)}
+														>
+															<CalendarIcon className="mr-2 h-4 w-4" />
+															{field.state.value
+																? format(field.state.value, "dd MMM, yyyy", {
+																		locale: es,
+																	})
+																: "Seleccionar fecha"}
+														</Button>
+													</PopoverTrigger>
+													<PopoverContent
+														className="w-auto p-0"
+														align="start"
+													>
+														<Calendar
+															mode="single"
+															selected={field.state.value}
+															onSelect={(date) => field.handleChange(date)}
+															disabled={(date) =>
+																date <
+																new Date(new Date().setHours(0, 0, 0, 0))
+															}
+															locale={es}
+														/>
+													</PopoverContent>
+												</Popover>
+											</div>
+										)}
+									</form.Field>
+								)
+							}
 						</form.Field>
 					</div>
 

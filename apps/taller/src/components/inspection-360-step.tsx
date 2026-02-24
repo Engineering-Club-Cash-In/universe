@@ -120,7 +120,19 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
         }
     };
 
-    const handleMetadataChange = (category: string, itemLabel: string, metadataKey: string, metadataValue: any) => {
+    const handleMetadataChange = (category: string, itemLabel: string, metadataKey: string, rawValue: string) => {
+        let metadataValue: any = rawValue;
+
+        // Validation para los inputs de compresión (cilindro_X)
+        if (metadataKey.startsWith('cilindro_') && rawValue !== '') {
+            const num = parseInt(rawValue, 10);
+            if (isNaN(num)) {
+                return; // Ignorar si no es número
+            }
+            // Limitar entre 0 y 300 PSI
+            metadataValue = Math.max(0, Math.min(300, num));
+        }
+
         const existing = items360.slice();
         const existingIndex = existing.findIndex(i => i.item === itemLabel && i.category === category);
         if (existingIndex >= 0) {
@@ -143,36 +155,48 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
     };
 
     const totalPoints = useMemo(() => INSPECTION_AREAS.reduce((acc, area) => acc + area.points.length, 0), []);
-    const completedPoints = items360.length;
-    const progressPercentage = Math.round((completedPoints / totalPoints) * 100);
-    const isComplete = completedPoints === totalPoints;
     
-    // Contamos como fallo todo lo que no sea 'bueno' ni 'na' o 'ok' para el resumen de fallos
-    const failedItemsCount = items360.filter(i => ['bad', 'regular', 'malo'].includes(i.status)).length;
-    const okItemsCount = items360.filter(i => ['ok', 'bueno', 'na'].includes(i.status)).length;
-
-    // Calculamos el % de estado general del vehículo
-    const calculateHealthScore = () => {
-        if (items360.length === 0) return 0;
+    // Todo envuelto permanentemente en useMemo para evitar re-cálculos si items360 no cambia
+    const { 
+        completedPoints, 
+        progressPercentage, 
+        isComplete, 
+        failedItemsCount, 
+        okItemsCount, 
+        healthScore 
+    } = useMemo(() => {
+        const completed = items360.length;
+        const _failedItemsCount = items360.filter(i => ['bad', 'regular', 'malo'].includes(i.status)).length;
+        const _okItemsCount = items360.filter(i => ['ok', 'bueno', 'na'].includes(i.status)).length;
         
-        // N/A no suma ni resta, se excluyen del cálculo base
-        const countableItems = items360.filter(i => i.status !== 'na');
-        if (countableItems.length === 0) return 100; // Si todo es N/A
-
-        let totalScore = 0;
-        countableItems.forEach(item => {
-            if (item.status === 'ok' || item.status === 'bueno') {
-                totalScore += 100;
-            } else if (item.status === 'regular') {
-                totalScore += 50; // Regular suma la mitad
+        // Calcular Salud
+        let _healthScore = 0;
+        if (completed > 0) {
+            const countableItems = items360.filter(i => i.status !== 'na');
+            if (countableItems.length === 0) {
+                _healthScore = 100;
+            } else {
+                let totalScore = 0;
+                countableItems.forEach(item => {
+                    if (item.status === 'ok' || item.status === 'bueno') {
+                        totalScore += 100;
+                    } else if (item.status === 'regular') {
+                        totalScore += 50;
+                    }
+                });
+                _healthScore = Math.round(totalScore / countableItems.length);
             }
-            // 'malo' o 'bad' suma 0
-        });
+        }
 
-        return Math.round(totalScore / countableItems.length);
-    };
-
-    const healthScore = calculateHealthScore();
+        return {
+            completedPoints: completed,
+            progressPercentage: Math.round((completed / totalPoints) * 100),
+            isComplete: completed === totalPoints,
+            failedItemsCount: _failedItemsCount,
+            okItemsCount: _okItemsCount,
+            healthScore: _healthScore
+        };
+    }, [items360, totalPoints]);
 
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
@@ -402,6 +426,7 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
                                                         placeholder={hasWarning ? "Por favor describa el problema encontrado..." : "Comentarios u observaciones adicionales (opcional)..."}
                                                         value={state?.notes || ''}
                                                         onChange={(e) => handleObservationChange(area.id, point.label, e.target.value)}
+                                                        maxLength={1000}
                                                         className={cn(
                                                             "min-h-[60px] text-sm resize-none",
                                                             hasWarning ? "bg-amber-50/50 border-amber-200 focus-visible:ring-amber-400" : "bg-slate-50 border-slate-200 focus-visible:ring-slate-300"

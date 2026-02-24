@@ -8,6 +8,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Dialog,
 	DialogClose,
@@ -580,17 +581,19 @@ export function ContactoModal({
 						<form.Field name="requiereSeguimiento">
 							{(field) => (
 								<div className="flex items-center space-x-2">
-									<input
-										type="checkbox"
+									<Checkbox
+										id="requiereSeguimiento"
 										checked={field.state.value}
-										onChange={(e) => {
-											field.handleChange(e.target.checked);
-											if (!e.target.checked) {
+										onCheckedChange={(checked) => {
+											field.handleChange(!!checked);
+											if (!checked) {
 												form.setFieldValue("fechaProximoContacto", undefined);
 											}
 										}}
 									/>
-									<Label>Requiere seguimiento programado</Label>
+									<Label htmlFor="requiereSeguimiento">
+										Requiere seguimiento programado
+									</Label>
 								</div>
 							)}
 						</form.Field>

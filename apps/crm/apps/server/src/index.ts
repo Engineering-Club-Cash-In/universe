@@ -731,24 +731,26 @@ app.post("/api/notifications/pay-investors", async (c) => {
 		const { user } = await import("./db/schema/auth");
 		const { eq } = await import("drizzle-orm");
 
-		// Buscar un usuario admin para asignar como creador
-		const [adminUser] = await db
+		const { ROLES } = await import("./lib/roles");
+
+		// Buscar el primer supervisor de cobros como creador
+		const [cobrosSupervisor] = await db
 			.select({ id: user.id })
 			.from(user)
-			.where(eq(user.role, "admin"))
+			.where(eq(user.role, ROLES.COBROS_SUPERVISOR))
 			.limit(1);
 
-		if (!adminUser) {
-			return c.json({ error: "No se encontró un usuario admin" }, 500);
+		if (!cobrosSupervisor) {
+			return c.json({ error: "No se encontró un usuario cobros_supervisor" }, 500);
 		}
 
 		const notification = await createNotification({
 			titulo: body.titulo,
 			descripcion: body.descripcion || null,
 			type: "pay_investors",
-			createdBy: adminUser.id,
-			createdByRole: "admin",
-			assignedToRole: "accounting",
+			createdBy: cobrosSupervisor.id,
+			createdByRole: ROLES.COBROS_SUPERVISOR,
+			assignedToRole: ROLES.ACCOUNTING,
 			redirectPage: "pay_investors",
 		});
 

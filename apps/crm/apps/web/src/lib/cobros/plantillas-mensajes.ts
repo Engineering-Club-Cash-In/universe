@@ -177,17 +177,34 @@ Tel: {telefonoAsesor}`,
 	},
 ];
 
-/** Sugiere una plantilla según el estado de mora del caso */
+/** Sugiere una plantilla según el estado de mora y antigüedad del caso */
 export function sugerirPlantilla(
 	estadoMora: string | undefined,
-): string | undefined {
-	const mapa: Record<string, string> = {
-		al_dia: "al_dia",
+	fechaInicio?: string | Date | null,
+): string {
+	const mapaMora: Record<string, string> = {
 		pre_mora: "pre_mora",
 		mora_30: "mora_30",
 		mora_60: "mora_60",
 		mora_90: "aviso_juridico",
 		incobrable: "aviso_juridico",
 	};
-	return estadoMora ? mapa[estadoMora] : undefined;
+
+	// Si tiene mora, usar plantilla correspondiente
+	if (estadoMora && mapaMora[estadoMora]) {
+		return mapaMora[estadoMora];
+	}
+
+	// Si es cliente reciente (menos de 30 días), bienvenida
+	if (fechaInicio) {
+		const inicio = new Date(fechaInicio);
+		const diasDesdeInicio =
+			(Date.now() - inicio.getTime()) / (1000 * 60 * 60 * 24);
+		if (diasDesdeInicio <= 30) {
+			return "bienvenida";
+		}
+	}
+
+	// Fallback: recordatorio de pago
+	return "al_dia";
 }

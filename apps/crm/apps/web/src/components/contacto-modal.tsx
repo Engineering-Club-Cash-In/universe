@@ -59,6 +59,7 @@ interface ContactoModalProps {
 	montoAdeudado?: string;
 	cuotasAtraso?: number;
 	estadoMora?: string;
+	fechaInicio?: string | null;
 	nombreAsesor?: string;
 	telefonoAsesor?: string;
 }
@@ -78,6 +79,7 @@ export function ContactoModal({
 	montoAdeudado = "",
 	cuotasAtraso = 0,
 	estadoMora,
+	fechaInicio,
 	nombreAsesor = "",
 	telefonoAsesor = "",
 }: ContactoModalProps) {
@@ -136,16 +138,14 @@ export function ContactoModal({
 
 	// Pre-seleccionar plantilla sugerida al abrir
 	useEffect(() => {
-		const sugerida = sugerirPlantilla(estadoMora);
-		if (sugerida) {
-			setPlantillaId(sugerida);
-			const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === sugerida);
-			if (plantilla) {
-				setMensajeEditado(interpolar(plantilla.cuerpo, variables));
-				setAsuntoEditado(interpolar(plantilla.asunto, variables));
-			}
+		const sugerida = sugerirPlantilla(estadoMora, fechaInicio);
+		setPlantillaId(sugerida);
+		const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === sugerida);
+		if (plantilla) {
+			setMensajeEditado(interpolar(plantilla.cuerpo, variables));
+			setAsuntoEditado(interpolar(plantilla.asunto, variables));
 		}
-	}, [estadoMora, variables]);
+	}, [estadoMora, fechaInicio, variables]);
 
 	const handlePlantillaChange = (id: string) => {
 		setPlantillaId(id);

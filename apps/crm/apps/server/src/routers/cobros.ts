@@ -11,6 +11,7 @@ import {
 	conveniosPago,
 	estadoContactoEnum,
 	estadoMoraEnum,
+	metasDesempenoCobros,
 	metasMoraCobros,
 	metodoContactoEnum,
 	recuperacionesVehiculo,
@@ -323,6 +324,61 @@ async function autoCrearDatosMigrate({
 			creditType: creditType as string | null,
 		},
 	};
+}
+
+async function calcularProgresoMeta(meta: {
+	cobradorId: string;
+	mes: number;
+	anio: number;
+	tipoMeta: "casos_contactados" | "convenios_cerrados" | "contactos_realizados";
+}): Promise<number> {
+	const inicioMes = new Date(meta.anio, meta.mes - 1, 1);
+	const finMes = new Date(meta.anio, meta.mes, 0, 23, 59, 59);
+
+	switch (meta.tipoMeta) {
+		case "contactos_realizados": {
+			const [result] = await db
+				.select({ count: count() })
+				.from(contactosCobros)
+				.where(
+					and(
+						eq(contactosCobros.realizadoPor, meta.cobradorId),
+						gte(contactosCobros.fechaContacto, inicioMes),
+						sql`${contactosCobros.fechaContacto} <= ${finMes}`,
+					),
+				);
+			return result?.count ?? 0;
+		}
+		case "casos_contactados": {
+			const result = await db
+				.selectDistinct({ casoId: contactosCobros.casoCobroId })
+				.from(contactosCobros)
+				.where(
+					and(
+						eq(contactosCobros.realizadoPor, meta.cobradorId),
+						gte(contactosCobros.fechaContacto, inicioMes),
+						sql`${contactosCobros.fechaContacto} <= ${finMes}`,
+					),
+				);
+			return result.length;
+		}
+		case "convenios_cerrados": {
+			const [result] = await db
+				.select({ count: count() })
+				.from(conveniosPago)
+				.innerJoin(casosCobros, eq(conveniosPago.casoCobroId, casosCobros.id))
+				.where(
+					and(
+						eq(casosCobros.responsableCobros, meta.cobradorId),
+						gte(conveniosPago.createdAt, inicioMes),
+						sql`${conveniosPago.createdAt} <= ${finMes}`,
+					),
+				);
+			return result?.count ?? 0;
+		}
+		default:
+			return 0;
+	}
 }
 
 export const cobrosRouter = {
@@ -2664,6 +2720,140 @@ export const cobrosRouter = {
 			}
 
 			return resultados;
+		}),
+
+	// ========================================================================
+	// METAS DE DESEMPEÑO INDIVIDUAL POR COBRADOR
+	// ========================================================================
+
+	createMetaDesempeno: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				cobradorId: z.string(),
+				mes: z.number().min(1).max(12),
+				anio: z.number().min(2024),
+				tipoMeta: z.enum([
+					"casos_contactados",
+					"convenios_cerrados",
+					"contactos_realizados",
+				]),
+				valorObjetivo: z.string(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const existente = await db
+				.select({ id: metasDesempenoCobros.id })
+				.from(metasDesempenoCobros)
+				.where(
+					and(
+						eq(metasDesempenoCobros.cobradorId, input.cobradorId),
+						eq(metasDesempenoCobros.mes, input.mes),
+						eq(metasDesempenoCobros.anio, input.anio),
+						eq(metasDesempenoCobros.tipoMeta, input.tipoMeta),
+					),
+				)
+				.limit(1);
+
+			if (existente.length > 0) {
+				throw new ORPCError("CONFLICT", {
+					message:
+						"Ya existe una meta de este tipo para este cobrador en este período",
+				});
+			}
+
+			const [meta] = await db
+				.insert(metasDesempenoCobros)
+				.values({
+					cobradorId: input.cobradorId,
+					mes: input.mes,
+					anio: input.anio,
+					tipoMeta: input.tipoMeta,
+					valorObjetivo: input.valorObjetivo,
+					creadoPor: context.userId,
+				})
+				.returning();
+
+			return meta;
+		}),
+
+	getMetasDesempeno: cobrosProcedure
+		.input(
+			z.object({
+				cobradorId: z.string().optional(),
+				mes: z.number().min(1).max(12),
+				anio: z.number().min(2024),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const targetId = input.cobradorId || context.userId;
+
+			if (
+				!PERMISSIONS.canViewAllCasosCobros(context.userRole) &&
+				targetId !== context.userId
+			) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permisos para ver metas de otro cobrador",
+				});
+			}
+
+			const metas = await db
+				.select()
+				.from(metasDesempenoCobros)
+				.where(
+					and(
+						eq(metasDesempenoCobros.cobradorId, targetId),
+						eq(metasDesempenoCobros.mes, input.mes),
+						eq(metasDesempenoCobros.anio, input.anio),
+					),
+				);
+
+			return await Promise.all(
+				metas.map(async (meta) => {
+					const progreso = await calcularProgresoMeta(meta);
+					return { ...meta, valorActual: progreso.toString() };
+				}),
+			);
+		}),
+
+	updateMetaDesempeno: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				metaId: z.string().uuid(),
+				valorObjetivo: z.string(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const [updated] = await db
+				.update(metasDesempenoCobros)
+				.set({
+					valorObjetivo: input.valorObjetivo,
+					updatedAt: new Date(),
+				})
+				.where(eq(metasDesempenoCobros.id, input.metaId))
+				.returning();
+
+			if (!updated) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Meta no encontrada",
+				});
+			}
+			return updated;
+		}),
+
+	deleteMetaDesempeno: cobrosSupervisorProcedure
+		.input(z.object({ metaId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			const [deleted] = await db
+				.delete(metasDesempenoCobros)
+				.where(eq(metasDesempenoCobros.id, input.metaId))
+				.returning({ id: metasDesempenoCobros.id });
+
+			if (!deleted) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Meta no encontrada",
+				});
+			}
+			return { success: true };
 		}),
 
 	// ============================================================================

@@ -21,6 +21,7 @@ import {
 	cobrosSupervisorProcedure,
 	crmOrCobrosProcedure,
 } from "../lib/orpc";
+import { createNotification } from "./notifications";
 import { PERMISSIONS } from "../lib/roles";
 import { carteraBackClient } from "../services/cartera-back-client";
 import {
@@ -1137,7 +1138,7 @@ export const cobrosRouter = {
 				responsableCobros: z.string(),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
 			// Verificar que el responsable tenga rol de cobros
 			const responsable = await db
 				.select()
@@ -1168,6 +1169,20 @@ export const cobrosRouter = {
 				})
 				.where(eq(casosCobros.id, input.casoCobroId))
 				.returning();
+
+			// Notificar al nuevo cobrador asignado
+			await createNotification({
+				titulo: "Caso de cobro asignado",
+				descripcion: `Se te ha asignado el caso de cobro #${input.casoCobroId.slice(0, 8)}`,
+				type: "aviso",
+				createdBy: context.user.id,
+				createdByRole: context.user.role,
+				assignedToRole: "cobros",
+				assignedTo: input.responsableCobros,
+				relatedEntityType: "collection_case",
+				relatedEntityId: input.casoCobroId,
+				redirectPage: "cobros_detail",
+			});
 
 			return casoActualizado[0];
 		}),

@@ -329,15 +329,17 @@ function RouteComponent() {
 			const en7Dias = new Date(hoy);
 			en7Dias.setDate(en7Dias.getDate() + 7);
 
-			return data.filter((caso) => {
-				if (!caso.proximoContacto) return false;
-				const fecha = new Date(caso.proximoContacto);
-				return fecha <= en7Dias;
-			}).sort((a, b) => {
-				const fechaA = new Date(a.proximoContacto!);
-				const fechaB = new Date(b.proximoContacto!);
-				return fechaA.getTime() - fechaB.getTime();
-			});
+			return data
+				.filter((caso) => {
+					if (!caso.proximoContacto) return false;
+					const fecha = new Date(caso.proximoContacto);
+					return fecha <= en7Dias;
+				})
+				.sort((a, b) => {
+					const fechaA = new Date(a.proximoContacto!);
+					const fechaB = new Date(b.proximoContacto!);
+					return fechaA.getTime() - fechaB.getTime();
+				});
 		},
 	});
 
@@ -482,7 +484,12 @@ function RouteComponent() {
 			// Incluir casos en mora (días negativos) y casos próximos a vencer
 			return c?.diasHastaPago !== null && c?.diasHastaPago <= limite;
 		});
-	}, [creditosConDias, filtroTemporal, mostrarCompletadosIncobrables, filtroEtiqueta]);
+	}, [
+		creditosConDias,
+		filtroTemporal,
+		mostrarCompletadosIncobrables,
+		filtroEtiqueta,
+	]);
 
 	// Check permissions after all hooks
 	if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
@@ -816,7 +823,7 @@ function RouteComponent() {
 										</div>
 										<div className="text-right">
 											<p
-												className={`text-sm font-medium ${esPasado ? "text-red-600" : esHoy ? "text-amber-600" : "text-muted-foreground"}`}
+												className={`font-medium text-sm ${esPasado ? "text-red-600" : esHoy ? "text-amber-600" : "text-muted-foreground"}`}
 											>
 												{esHoy
 													? "Hoy"
@@ -866,7 +873,9 @@ function RouteComponent() {
 										"mora_90",
 										"mora_120",
 									];
-									return orden.indexOf(a.categoria) - orden.indexOf(b.categoria);
+									return (
+										orden.indexOf(a.categoria) - orden.indexOf(b.categoria)
+									);
 								})
 								.map((meta) => {
 									const label: Record<string, string> = {
@@ -929,7 +938,7 @@ function RouteComponent() {
 											key={meta.id}
 											className={`rounded-lg border p-3 ${color[meta.categoria] || ""}`}
 										>
-											<p className="font-medium text-xs text-muted-foreground">
+											<p className="font-medium text-muted-foreground text-xs">
 												{label[meta.categoria] || meta.categoria}
 											</p>
 											<p
@@ -939,10 +948,9 @@ function RouteComponent() {
 											</p>
 											{actual !== undefined && (
 												<p
-													className={`text-xs font-medium ${cumplida ? "text-green-600" : "text-red-600"}`}
+													className={`font-medium text-xs ${cumplida ? "text-green-600" : "text-red-600"}`}
 												>
-													Real: {actual.toFixed(2)}%{" "}
-													{cumplida ? "✓" : "↑"}
+													Real: {actual.toFixed(2)}% {cumplida ? "✓" : "↑"}
 												</p>
 											)}
 										</div>
@@ -1055,9 +1063,7 @@ function RouteComponent() {
 										key={key}
 										className={`cursor-pointer ${filtroEtiqueta === key ? "bg-primary text-primary-foreground" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
 										onClick={() => {
-											setFiltroEtiqueta(
-												filtroEtiqueta === key ? null : key,
-											);
+											setFiltroEtiqueta(filtroEtiqueta === key ? null : key);
 											setPage(1);
 										}}
 									>

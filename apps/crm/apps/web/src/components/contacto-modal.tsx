@@ -443,17 +443,13 @@ export function ContactoModal({
 																: "Seleccionar fecha"}
 														</Button>
 													</PopoverTrigger>
-													<PopoverContent
-														className="w-auto p-0"
-														align="start"
-													>
+													<PopoverContent className="w-auto p-0" align="start">
 														<Calendar
 															mode="single"
 															selected={field.state.value}
 															onSelect={(date) => field.handleChange(date)}
 															disabled={(date) =>
-																date <
-																new Date(new Date().setHours(0, 0, 0, 0))
+																date < new Date(new Date().setHours(0, 0, 0, 0))
 															}
 															locale={es}
 														/>

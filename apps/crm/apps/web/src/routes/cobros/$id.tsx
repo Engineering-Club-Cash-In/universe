@@ -23,8 +23,8 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { ContactoModal } from "@/components/contacto-modal";
 import { ReferenciasView } from "@/components/cobros/ReferenciasView";
+import { ContactoModal } from "@/components/contacto-modal";
 import {
 	OpportunityDetailModal,
 	type OpportunityForModal,
@@ -38,9 +38,9 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Popover,
 	PopoverContent,
@@ -530,17 +530,26 @@ function RouteComponent() {
 										<Banknote className="h-4 w-4 text-muted-foreground" />
 										<span className="font-medium">Cuota Mensual:</span>
 									</div>
-									<p className="font-bold text-lg text-blue-600 uppercase tracking-tight">
+									<p className="font-bold text-blue-600 text-lg uppercase tracking-tight">
 										Q{Number(caso.cuotaMensual || 0).toLocaleString()}
 									</p>
 								</div>
 								<div className="space-y-2">
 									<div className="flex items-center gap-2 text-sm">
 										<Banknote className="h-4 w-4 text-muted-foreground" />
-										<span className="font-medium">Total a Pagar <span className="text-xs text-muted-foreground">(Mora + Cuota)</span>:</span>
+										<span className="font-medium">
+											Total a Pagar{" "}
+											<span className="text-muted-foreground text-xs">
+												(Mora + Cuota)
+											</span>
+											:
+										</span>
 									</div>
 									<p className="font-bold text-lg text-orange-600">
-										Q{(Number(caso.montoEnMora) + Number(caso.cuotaMensual || 0)).toLocaleString()}
+										Q
+										{(
+											Number(caso.montoEnMora) + Number(caso.cuotaMensual || 0)
+										).toLocaleString()}
 									</p>
 								</div>
 							</div>
@@ -562,7 +571,9 @@ function RouteComponent() {
 											</PopoverTrigger>
 											<PopoverContent className="w-64">
 												<div className="space-y-2">
-													<h4 className="font-medium text-sm">Gestionar Etiquetas</h4>
+													<h4 className="font-medium text-sm">
+														Gestionar Etiquetas
+													</h4>
 													{ETIQUETAS_COBROS.map((etiqueta) => (
 														<div
 															key={etiqueta}
@@ -570,12 +581,17 @@ function RouteComponent() {
 														>
 															<Checkbox
 																id={`etiqueta-${etiqueta}`}
-																checked={(caso.etiquetas || []).includes(etiqueta)}
+																checked={(caso.etiquetas || []).includes(
+																	etiqueta,
+																)}
 																onCheckedChange={(checked) => {
-																	const currentEtiquetas = (caso.etiquetas || []) as (typeof ETIQUETAS_COBROS)[number][];
+																	const currentEtiquetas = (caso.etiquetas ||
+																		[]) as (typeof ETIQUETAS_COBROS)[number][];
 																	const newEtiquetas = checked
 																		? [...currentEtiquetas, etiqueta]
-																		: currentEtiquetas.filter((e) => e !== etiqueta);
+																		: currentEtiquetas.filter(
+																				(e) => e !== etiqueta,
+																			);
 																	updateEtiquetasMutation.mutate({
 																		casoCobroId: caso.id!,
 																		etiquetas: newEtiquetas,
@@ -599,7 +615,10 @@ function RouteComponent() {
 											(caso.etiquetas || []).map((etiqueta: string) => (
 												<Badge
 													key={etiqueta}
-													className={ETIQUETA_COLORS[etiqueta] || "bg-gray-100 text-gray-800"}
+													className={
+														ETIQUETA_COLORS[etiqueta] ||
+														"bg-gray-100 text-gray-800"
+													}
 												>
 													{ETIQUETA_LABELS[etiqueta] || etiqueta}
 												</Badge>
@@ -637,7 +656,11 @@ function RouteComponent() {
 											</div>
 										</div>
 										<p className="font-extrabold text-2xl text-orange-700">
-											Q{(Number(caso.montoEnMora) + Number(caso.cuotaMensual || 0)).toLocaleString()}
+											Q
+											{(
+												Number(caso.montoEnMora) +
+												Number(caso.cuotaMensual || 0)
+											).toLocaleString()}
 										</p>
 									</div>
 								</div>
@@ -688,7 +711,9 @@ function RouteComponent() {
 										/>
 									</div>
 									<div>
-										<Label htmlFor="contact-phone-alt">Teléfono Alternativo</Label>
+										<Label htmlFor="contact-phone-alt">
+											Teléfono Alternativo
+										</Label>
 										<Input
 											id="contact-phone-alt"
 											value={contactForm.telefonoAlternativo}
@@ -720,10 +745,16 @@ function RouteComponent() {
 										<Button
 											size="sm"
 											onClick={() => {
-												if (!window.confirm("¿Estás seguro de actualizar la información de contacto?")) return;
+												if (
+													!window.confirm(
+														"¿Estás seguro de actualizar la información de contacto?",
+													)
+												)
+													return;
 												updateContactMutation.mutate({
 													telefonoPrincipal: contactForm.telefonoPrincipal,
-													telefonoAlternativo: contactForm.telefonoAlternativo || undefined,
+													telefonoAlternativo:
+														contactForm.telefonoAlternativo || undefined,
 													emailContacto: contactForm.emailContacto || undefined,
 												});
 											}}
@@ -747,38 +778,53 @@ function RouteComponent() {
 									</div>
 								</div>
 							) : (
-							<div className="grid grid-cols-2 gap-4">
-								<div>
-									<p className="text-muted-foreground text-sm">
-										Teléfono Principal
-									</p>
-									{caso.telefonoPrincipal ? (
-										<a href={`tel:${caso.telefonoPrincipal.replace(/[^0-9+]/g, "")}`} className="font-medium text-primary hover:underline">{caso.telefonoPrincipal}</a>
-									) : (
-										<p className="font-medium">-</p>
-									)}
-								</div>
-								{caso.telefonoAlternativo && (
+								<div className="grid grid-cols-2 gap-4">
 									<div>
 										<p className="text-muted-foreground text-sm">
-											Teléfono Alternativo
+											Teléfono Principal
 										</p>
-										<a href={`tel:${String(caso.telefonoAlternativo).replace(/[^0-9+]/g, "")}`} className="font-medium text-primary hover:underline">{caso.telefonoAlternativo}</a>
+										{caso.telefonoPrincipal ? (
+											<a
+												href={`tel:${caso.telefonoPrincipal.replace(/[^0-9+]/g, "")}`}
+												className="font-medium text-primary hover:underline"
+											>
+												{caso.telefonoPrincipal}
+											</a>
+										) : (
+											<p className="font-medium">-</p>
+										)}
 									</div>
-								)}
-								<div>
-									<p className="text-muted-foreground text-sm">Email</p>
-									{caso.emailContacto ? (
-										<a href={`mailto:${caso.emailContacto}`} className="font-medium text-primary hover:underline">{caso.emailContacto}</a>
-									) : (
-										<p className="font-medium">-</p>
+									{caso.telefonoAlternativo && (
+										<div>
+											<p className="text-muted-foreground text-sm">
+												Teléfono Alternativo
+											</p>
+											<a
+												href={`tel:${String(caso.telefonoAlternativo).replace(/[^0-9+]/g, "")}`}
+												className="font-medium text-primary hover:underline"
+											>
+												{caso.telefonoAlternativo}
+											</a>
+										</div>
 									)}
+									<div>
+										<p className="text-muted-foreground text-sm">Email</p>
+										{caso.emailContacto ? (
+											<a
+												href={`mailto:${caso.emailContacto}`}
+												className="font-medium text-primary hover:underline"
+											>
+												{caso.emailContacto}
+											</a>
+										) : (
+											<p className="font-medium">-</p>
+										)}
+									</div>
+									<div>
+										<p className="text-muted-foreground text-sm">Dirección</p>
+										<p className="font-medium">{caso.direccionContacto}</p>
+									</div>
 								</div>
-								<div>
-									<p className="text-muted-foreground text-sm">Dirección</p>
-									<p className="font-medium">{caso.direccionContacto}</p>
-								</div>
-							</div>
 							)}
 							{/* Botones de Contacto - Solo si existe caso de cobros */}
 							{caso.id ? (

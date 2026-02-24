@@ -98,16 +98,15 @@ function MetasMoraPage() {
 			const promises = [];
 			for (let mes = 1; mes <= 12; mes++) {
 				const metas = CATEGORIAS.filter(
-					(cat) => editValues[mes]?.[cat] !== undefined && editValues[mes][cat] !== "",
+					(cat) =>
+						editValues[mes]?.[cat] !== undefined && editValues[mes][cat] !== "",
 				).map((cat) => ({
 					categoria: cat,
 					valorObjetivo: editValues[mes][cat],
 				}));
 
 				if (metas.length > 0) {
-					promises.push(
-						client.upsertMetasMora({ mes, anio, metas }),
-					);
+					promises.push(client.upsertMetasMora({ mes, anio, metas }));
 				}
 			}
 			return Promise.all(promises);

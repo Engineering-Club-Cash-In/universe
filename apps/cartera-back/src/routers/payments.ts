@@ -6,6 +6,7 @@ import {
   falsePayment,
   getPagosConInversionistas,
   updatePagosEspejoPorCredito,
+  getAbonosPorCuota,
 } from "../controllers/payments"; 
 import { z } from "zod";
 import { promises as fs } from "fs";
@@ -1189,6 +1190,37 @@ export const paymentRouter = new Elysia()
     detail: {
       tags: ["Pagos/Inversionistas"],
       summary: "Actualizar pagos espejo NO_LIQUIDADO por crédito",
+    },
+  }
+)
+.get(
+  "/abonos-cuota/:numero_credito_sifco/:numero_cuota",
+  async ({ params, set }) => {
+    try {
+      const { numero_credito_sifco, numero_cuota } = params;
+      const result = await getAbonosPorCuota(
+        numero_credito_sifco,
+        Number(numero_cuota)
+      );
+      set.status = 200;
+      return result;
+    } catch (error: any) {
+      console.error("Error en /abonos-cuota:", error);
+      set.status = 500;
+      return {
+        success: false,
+        message: error.message || "Error obteniendo abonos de cuota",
+      };
+    }
+  },
+  {
+    params: t.Object({
+      numero_credito_sifco: t.String(),
+      numero_cuota: t.String(),
+    }),
+    detail: {
+      tags: ["Pagos"],
+      summary: "Obtener abonos de una cuota por número de crédito SIFCO",
     },
   }
 )

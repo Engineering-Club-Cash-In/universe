@@ -81,6 +81,7 @@ export function PagoForm() {
     mora,
     convenioActivoInfo,
     cuotaSeleccionada,
+    abonosCuota,
   } = usePagoForm();
 
   const { bancos, loading: loadingBancos } = useBancos();
@@ -195,8 +196,17 @@ export function PagoForm() {
           });
         }
 
-        // 4️⃣ Cuota Normal
-        const cuotaNormal = Number(dataCredito?.credito?.cuota) || 0;
+        // 4️⃣ Cuota Normal (restando abonos ya realizados desde endpoint)
+        const cuotaBase = Number(dataCredito?.credito?.cuota) || 0;
+        const abonosYaHechos = abonosCuota ? (
+          Number(abonosCuota.abono_capital || 0) +
+          Number(abonosCuota.abono_interes || 0) +
+          Number(abonosCuota.abono_iva_12 || 0) +
+          Number(abonosCuota.abono_seguro || 0) +
+          Number(abonosCuota.abono_gps || 0) +
+          Number(abonosCuota.membresias_pago || 0)
+        ) : 0;
+        const cuotaNormal = Math.max(0, cuotaBase - abonosYaHechos);
         if (cuotaNormal > 0 && montoRestante > 0) {
           const montoCuota = Math.min(montoRestante, cuotaNormal);
           montoRestante -= montoCuota;
@@ -441,14 +451,13 @@ export function PagoForm() {
                 convenioActivoInfo={convenioActivoInfo}
                 cuotaMensualAPagar={dataCredito.cuotaMensualAPagar}
                 abonosParciales={(() => {
-                  const data = cuotaActualInfo?.data;
-                  if (!data) return null;
-                  const abono_capital = Number(data.abono_capital || 0);
-                  const abono_interes = Number(data.abono_interes || 0);
-                  const abono_iva_12 = Number(data.abono_iva_12 || 0);
-                  const abono_seguro = Number(data.abono_seguro || 0);
-                  const abono_gps = Number(data.abono_gps || 0);
-                  const abono_membresias = Number(data.membresias_pago || 0);
+                  if (!abonosCuota) return null;
+                  const abono_capital = Number(abonosCuota.abono_capital || 0);
+                  const abono_interes = Number(abonosCuota.abono_interes || 0);
+                  const abono_iva_12 = Number(abonosCuota.abono_iva_12 || 0);
+                  const abono_seguro = Number(abonosCuota.abono_seguro || 0);
+                  const abono_gps = Number(abonosCuota.abono_gps || 0);
+                  const abono_membresias = Number(abonosCuota.membresias_pago || 0);
                   const total = abono_capital + abono_interes + abono_iva_12 + abono_seguro + abono_gps + abono_membresias;
                   if (total === 0) return null;
                   return { abono_capital, abono_interes, abono_iva_12, abono_seguro, abono_gps, abono_membresias, total };

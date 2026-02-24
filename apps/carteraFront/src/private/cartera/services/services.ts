@@ -2820,3 +2820,29 @@ export const getEfectividadAsesores = async (params: {
   );
   return data;
 };
+
+// ============================================
+// Abonos por cuota
+// ============================================
+export interface AbonosCuotaResponse {
+  success: boolean;
+  numero_credito_sifco: string;
+  numero_cuota: number;
+  total_pagos: number;
+  abono_capital: string;
+  abono_iva_12: string;
+  abono_interes: string;
+  membresias_pago: string;
+  abono_seguro: string;
+  abono_gps: string;
+}
+
+export async function getAbonosCuotaService(
+  numero_credito_sifco: string,
+  numero_cuota: number
+): Promise<AbonosCuotaResponse> {
+  const { data } = await api.get<AbonosCuotaResponse>(
+    `/abonos-cuota/${numero_credito_sifco}/${numero_cuota}`
+  );
+  return data;
+}

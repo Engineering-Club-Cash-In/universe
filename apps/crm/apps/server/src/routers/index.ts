@@ -150,6 +150,7 @@ export const appRouter = {
 	getInversionistasDelCredito: cobrosRouter.getInversionistasDelCredito,
 	getAsesores: cobrosRouter.getAsesores,
 	updateContactInfoCobros: cobrosRouter.updateContactInfoCobros,
+	updateEtiquetasCobros: cobrosRouter.updateEtiquetasCobros,
 	getReferencias: cobrosRouter.getReferencias,
 	createReferencia: cobrosRouter.createReferencia,
 	updateReferencia: cobrosRouter.updateReferencia,

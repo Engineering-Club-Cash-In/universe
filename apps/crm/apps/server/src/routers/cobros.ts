@@ -762,6 +762,7 @@ export const cobrosRouter = {
 								proximoContacto: null,
 								responsableNombre: null,
 								numeroCredito: numeroSifco || null,
+								etiquetas: null as string[] | null,
 							};
 						}),
 					);
@@ -1865,6 +1866,7 @@ export const cobrosRouter = {
 					direccionContacto: direccion || null,
 					proximoContacto: casoCobro?.proximoContacto || null,
 					metodoContactoProximo: null,
+					etiquetas: casoCobro?.etiquetas || [],
 
 					// Datos del contrato (cartera primero, fallback a nuestra BD)
 					montoFinanciado: creditoCompleto.credito.deudatotal,
@@ -2662,5 +2664,48 @@ export const cobrosRouter = {
 			}
 
 			return resultados;
+		}),
+
+	// ============================================================================
+	// ACTUALIZAR ETIQUETAS DEL CASO
+	// ============================================================================
+
+	updateEtiquetasCobros: cobrosProcedure
+		.input(
+			z.object({
+				casoCobroId: z.string().uuid(),
+				etiquetas: z.array(
+					z.enum([
+						"juridico",
+						"convenio",
+						"cobro",
+						"no_localizable",
+						"unidad_a_recuperar",
+						"unidad_recuperada",
+						"moras_pendientes",
+						"compromiso_de_pago",
+						"cancelado",
+						"reclamo",
+					]),
+				),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const [updated] = await db
+				.update(casosCobros)
+				.set({
+					etiquetas: input.etiquetas,
+					updatedAt: new Date(),
+				})
+				.where(eq(casosCobros.id, input.casoCobroId))
+				.returning();
+
+			if (!updated) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Caso de cobros no encontrado",
+				});
+			}
+
+			return updated;
 		}),
 };

@@ -26,6 +26,7 @@ import { Route as CrmOpportunitiesRouteImport } from './routes/crm/opportunities
 import { Route as CrmLeadsRouteImport } from './routes/crm/leads'
 import { Route as CrmCompaniesRouteImport } from './routes/crm/companies'
 import { Route as CrmClientsRouteImport } from './routes/crm/clients'
+import { Route as CobrosMetasRouteImport } from './routes/cobros/metas'
 import { Route as CobrosIdRouteImport } from './routes/cobros/$id'
 import { Route as AdminUsersRouteImport } from './routes/admin/users'
 import { Route as AdminSettingsRouteImport } from './routes/admin/settings'
@@ -122,6 +123,11 @@ const CrmClientsRoute = CrmClientsRouteImport.update({
   path: '/crm/clients',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CobrosMetasRoute = CobrosMetasRouteImport.update({
+  id: '/cobros/metas',
+  path: '/cobros/metas',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CobrosIdRoute = CobrosIdRouteImport.update({
   id: '/cobros/$id',
   path: '/cobros/$id',
@@ -185,6 +191,7 @@ export interface FileRoutesByFullPath {
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
   '/cobros/$id': typeof CobrosIdRoute
+  '/cobros/metas': typeof CobrosMetasRoute
   '/crm/clients': typeof CrmClientsRoute
   '/crm/companies': typeof CrmCompaniesRoute
   '/crm/leads': typeof CrmLeadsRoute
@@ -195,14 +202,14 @@ export interface FileRoutesByFullPath {
   '/juridico/$leadId': typeof JuridicoLeadIdRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
-  '/cobros/': typeof CobrosIndexRoute
-  '/juridico/': typeof JuridicoIndexRoute
-  '/vehicles/': typeof VehiclesIndexRoute
+  '/cobros': typeof CobrosIndexRoute
+  '/juridico': typeof JuridicoIndexRoute
+  '/vehicles': typeof VehiclesIndexRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
-  '/admin/reports/': typeof AdminReportsIndexRoute
-  '/crm/analysis/': typeof CrmAnalysisIndexRoute
+  '/admin/reports': typeof AdminReportsIndexRoute
+  '/crm/analysis': typeof CrmAnalysisIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -214,6 +221,7 @@ export interface FileRoutesByTo {
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
   '/cobros/$id': typeof CobrosIdRoute
+  '/cobros/metas': typeof CobrosMetasRoute
   '/crm/clients': typeof CrmClientsRoute
   '/crm/companies': typeof CrmCompaniesRoute
   '/crm/leads': typeof CrmLeadsRoute
@@ -244,6 +252,7 @@ export interface FileRoutesById {
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
   '/cobros/$id': typeof CobrosIdRoute
+  '/cobros/metas': typeof CobrosMetasRoute
   '/crm/clients': typeof CrmClientsRoute
   '/crm/companies': typeof CrmCompaniesRoute
   '/crm/leads': typeof CrmLeadsRoute
@@ -275,6 +284,7 @@ export interface FileRouteTypes {
     | '/admin/settings'
     | '/admin/users'
     | '/cobros/$id'
+    | '/cobros/metas'
     | '/crm/clients'
     | '/crm/companies'
     | '/crm/leads'
@@ -285,14 +295,14 @@ export interface FileRouteTypes {
     | '/juridico/$leadId'
     | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
-    | '/cobros/'
-    | '/juridico/'
-    | '/vehicles/'
+    | '/cobros'
+    | '/juridico'
+    | '/vehicles'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
     | '/juridico/generate/$opportunityId'
-    | '/admin/reports/'
-    | '/crm/analysis/'
+    | '/admin/reports'
+    | '/crm/analysis'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -304,6 +314,7 @@ export interface FileRouteTypes {
     | '/admin/settings'
     | '/admin/users'
     | '/cobros/$id'
+    | '/cobros/metas'
     | '/crm/clients'
     | '/crm/companies'
     | '/crm/leads'
@@ -333,6 +344,7 @@ export interface FileRouteTypes {
     | '/admin/settings'
     | '/admin/users'
     | '/cobros/$id'
+    | '/cobros/metas'
     | '/crm/clients'
     | '/crm/companies'
     | '/crm/leads'
@@ -363,6 +375,7 @@ export interface RootRouteChildren {
   AdminSettingsRoute: typeof AdminSettingsRoute
   AdminUsersRoute: typeof AdminUsersRoute
   CobrosIdRoute: typeof CobrosIdRoute
+  CobrosMetasRoute: typeof CobrosMetasRoute
   CrmClientsRoute: typeof CrmClientsRoute
   CrmCompaniesRoute: typeof CrmCompaniesRoute
   CrmLeadsRoute: typeof CrmLeadsRoute
@@ -416,21 +429,21 @@ declare module '@tanstack/react-router' {
     '/vehicles/': {
       id: '/vehicles/'
       path: '/vehicles'
-      fullPath: '/vehicles/'
+      fullPath: '/vehicles'
       preLoaderRoute: typeof VehiclesIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/juridico/': {
       id: '/juridico/'
       path: '/juridico'
-      fullPath: '/juridico/'
+      fullPath: '/juridico'
       preLoaderRoute: typeof JuridicoIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/cobros/': {
       id: '/cobros/'
       path: '/cobros'
-      fullPath: '/cobros/'
+      fullPath: '/cobros'
       preLoaderRoute: typeof CobrosIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
@@ -504,6 +517,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CrmClientsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cobros/metas': {
+      id: '/cobros/metas'
+      path: '/cobros/metas'
+      fullPath: '/cobros/metas'
+      preLoaderRoute: typeof CobrosMetasRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/cobros/$id': {
       id: '/cobros/$id'
       path: '/cobros/$id'
@@ -542,14 +562,14 @@ declare module '@tanstack/react-router' {
     '/crm/analysis/': {
       id: '/crm/analysis/'
       path: '/crm/analysis'
-      fullPath: '/crm/analysis/'
+      fullPath: '/crm/analysis'
       preLoaderRoute: typeof CrmAnalysisIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/reports/': {
       id: '/admin/reports/'
       path: '/admin/reports'
-      fullPath: '/admin/reports/'
+      fullPath: '/admin/reports'
       preLoaderRoute: typeof AdminReportsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
@@ -587,6 +607,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminSettingsRoute: AdminSettingsRoute,
   AdminUsersRoute: AdminUsersRoute,
   CobrosIdRoute: CobrosIdRoute,
+  CobrosMetasRoute: CobrosMetasRoute,
   CrmClientsRoute: CrmClientsRoute,
   CrmCompaniesRoute: CrmCompaniesRoute,
   CrmLeadsRoute: CrmLeadsRoute,

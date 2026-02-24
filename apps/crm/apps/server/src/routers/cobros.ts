@@ -11,6 +11,7 @@ import {
 	conveniosPago,
 	estadoContactoEnum,
 	estadoMoraEnum,
+	metasMoraCobros,
 	metodoContactoEnum,
 	recuperacionesVehiculo,
 } from "../db/schema/cobros";
@@ -21,6 +22,7 @@ import {
 	cobrosSupervisorProcedure,
 	crmOrCobrosProcedure,
 } from "../lib/orpc";
+import { createNotification } from "./notifications";
 import { PERMISSIONS } from "../lib/roles";
 import { carteraBackClient } from "../services/cartera-back-client";
 import {
@@ -33,42 +35,8 @@ import {
 	getUltimasSincronizaciones,
 	sincronizarCasosCobros,
 } from "../services/sync-casos-cobros";
-import type {
-	CarteraCuotaCredito,
-	CreditoDirectoResponse,
-} from "../types/cartera-back";
-
-// ============================================================================
-// HELPERS
-// ============================================================================
-
-/**
- * Calcula los días de mora exactos basándose en la fecha de vencimiento
- * de la cuota más antigua que está atrasada
- */
-function calcularDiasMoraExactos(
-	cuotasAtrasadas: CarteraCuotaCredito[],
-): number {
-	if (!cuotasAtrasadas || cuotasAtrasadas.length === 0) {
-		return 0;
-	}
-
-	// Encontrar la cuota con fecha de vencimiento más antigua
-	const cuotaMasAntigua = cuotasAtrasadas.reduce((antigua, actual) => {
-		const fechaAntigua = new Date(antigua.fecha_vencimiento);
-		const fechaActual = new Date(actual.fecha_vencimiento);
-		return fechaActual < fechaAntigua ? actual : antigua;
-	});
-
-	// Calcular días transcurridos desde la fecha de vencimiento
-	const fechaVencimiento = new Date(cuotaMasAntigua.fecha_vencimiento);
-	const hoy = new Date();
-	const diffMs = hoy.getTime() - fechaVencimiento.getTime();
-	const diasMora = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-	// Retornar 0 si el resultado es negativo (cuota aún no vence)
-	return Math.max(0, diasMora);
-}
+import type { CreditoDirectoResponse } from "../types/cartera-back";
+import { calcularDiasMoraExactos } from "../lib/mora-utils";
 
 // Helper: Obtener todos los créditos de todos los estados
 async function obtenerTodosLosCreditosCarteraBack(params: {
@@ -760,6 +728,7 @@ export const cobrosRouter = {
 								proximoContacto: null,
 								responsableNombre: null,
 								numeroCredito: numeroSifco || null,
+								etiquetas: null as string[] | null,
 							};
 						}),
 					);
@@ -1137,7 +1106,7 @@ export const cobrosRouter = {
 				responsableCobros: z.string(),
 			}),
 		)
-		.handler(async ({ input }) => {
+		.handler(async ({ input, context }) => {
 			// Verificar que el responsable tenga rol de cobros
 			const responsable = await db
 				.select()
@@ -1168,6 +1137,20 @@ export const cobrosRouter = {
 				})
 				.where(eq(casosCobros.id, input.casoCobroId))
 				.returning();
+
+			// Notificar al nuevo cobrador asignado
+			await createNotification({
+				titulo: "Caso de cobro asignado",
+				descripcion: `Se te ha asignado el caso de cobro #${input.casoCobroId.slice(0, 8)}`,
+				type: "aviso",
+				createdBy: context.user.id,
+				createdByRole: context.user.role,
+				assignedToRole: "cobros",
+				assignedTo: input.responsableCobros,
+				relatedEntityType: "collection_case",
+				relatedEntityId: input.casoCobroId,
+				redirectPage: "cobros_detail",
+			});
 
 			return casoActualizado[0];
 		}),
@@ -1849,6 +1832,7 @@ export const cobrosRouter = {
 					direccionContacto: direccion || null,
 					proximoContacto: casoCobro?.proximoContacto || null,
 					metodoContactoProximo: null,
+					etiquetas: casoCobro?.etiquetas || [],
 
 					// Datos del contrato (cartera primero, fallback a nuestra BD)
 					montoFinanciado: creditoCompleto.credito.deudatotal,
@@ -2538,5 +2522,156 @@ export const cobrosRouter = {
 			}
 
 			return { success: true };
+		}),
+
+	// ========================================================================
+	// METAS DE MORA
+	// ========================================================================
+
+	// Obtener metas de mora para un mes/año
+	getMetasMora: cobrosProcedure
+		.input(
+			z.object({
+				mes: z.number().min(1).max(12),
+				anio: z.number().min(2024),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const metas = await db
+				.select()
+				.from(metasMoraCobros)
+				.where(
+					and(
+						eq(metasMoraCobros.mes, input.mes),
+						eq(metasMoraCobros.anio, input.anio),
+					),
+				);
+
+			return metas;
+		}),
+
+	// Obtener metas de mora del año completo
+	getMetasMoraAnual: cobrosProcedure
+		.input(
+			z.object({
+				anio: z.number().min(2024),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const metas = await db
+				.select()
+				.from(metasMoraCobros)
+				.where(eq(metasMoraCobros.anio, input.anio));
+
+			return metas;
+		}),
+
+	// Crear o actualizar metas de mora (solo supervisor/admin)
+	upsertMetasMora: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				mes: z.number().min(1).max(12),
+				anio: z.number().min(2024),
+				metas: z.array(
+					z.object({
+						categoria: z.enum([
+							"mora_total",
+							"mora_30",
+							"mora_60",
+							"mora_90",
+							"mora_120",
+						]),
+						valorObjetivo: z.string(),
+					}),
+				),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const resultados = [];
+
+			for (const meta of input.metas) {
+				// Buscar si ya existe
+				const existente = await db
+					.select({ id: metasMoraCobros.id })
+					.from(metasMoraCobros)
+					.where(
+						and(
+							eq(metasMoraCobros.mes, input.mes),
+							eq(metasMoraCobros.anio, input.anio),
+							eq(metasMoraCobros.categoria, meta.categoria),
+						),
+					)
+					.limit(1);
+
+				if (existente.length > 0) {
+					// Actualizar
+					const [updated] = await db
+						.update(metasMoraCobros)
+						.set({
+							valorObjetivo: meta.valorObjetivo,
+							updatedAt: new Date(),
+						})
+						.where(eq(metasMoraCobros.id, existente[0].id))
+						.returning();
+					resultados.push(updated);
+				} else {
+					// Crear
+					const [created] = await db
+						.insert(metasMoraCobros)
+						.values({
+							mes: input.mes,
+							anio: input.anio,
+							categoria: meta.categoria,
+							valorObjetivo: meta.valorObjetivo,
+						})
+						.returning();
+					resultados.push(created);
+				}
+			}
+
+			return resultados;
+		}),
+
+	// ============================================================================
+	// ACTUALIZAR ETIQUETAS DEL CASO
+	// ============================================================================
+
+	updateEtiquetasCobros: cobrosProcedure
+		.input(
+			z.object({
+				casoCobroId: z.string().uuid(),
+				etiquetas: z.array(
+					z.enum([
+						"juridico",
+						"convenio",
+						"cobro",
+						"no_localizable",
+						"unidad_a_recuperar",
+						"unidad_recuperada",
+						"moras_pendientes",
+						"compromiso_de_pago",
+						"cancelado",
+						"reclamo",
+					]),
+				),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const [updated] = await db
+				.update(casosCobros)
+				.set({
+					etiquetas: input.etiquetas,
+					updatedAt: new Date(),
+				})
+				.where(eq(casosCobros.id, input.casoCobroId))
+				.returning();
+
+			if (!updated) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Caso de cobros no encontrado",
+				});
+			}
+
+			return updated;
 		}),
 };

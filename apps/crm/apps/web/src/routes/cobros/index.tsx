@@ -9,6 +9,7 @@ import {
 	ChevronDown,
 	Loader2,
 	Phone,
+	Target,
 	TrendingDown,
 	TrendingUp,
 	Users,
@@ -29,6 +30,7 @@ import {
 	CollapsibleContent,
 	CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { Separator } from "@/components/ui/separator";
 import { authClient } from "@/lib/auth-client";
 import { type ContratoCobranza, columns } from "@/lib/cobros/columns";
 import { PERMISSIONS, ROLES } from "@/lib/roles";
@@ -263,6 +265,19 @@ export const Route = createFileRoute("/cobros/")({
 	component: RouteComponent,
 });
 
+const ETIQUETA_LABELS_FILTRO: Record<string, string> = {
+	juridico: "Jurídico",
+	convenio: "Convenio",
+	cobro: "Cobro",
+	no_localizable: "No Localizable",
+	unidad_a_recuperar: "Unidad a Recuperar",
+	unidad_recuperada: "Unidad Recuperada",
+	moras_pendientes: "Moras Pendientes",
+	compromiso_de_pago: "Compromiso de Pago",
+	cancelado: "Cancelado",
+	reclamo: "Reclamo",
+};
+
 function RouteComponent() {
 	const { data: session } = authClient.useSession();
 	const navigate = useNavigate();
@@ -270,6 +285,7 @@ function RouteComponent() {
 	const [mostrarCompletadosIncobrables, setMostrarCompletadosIncobrables] =
 		useState(false);
 	const [filtroEtapa, setFiltroEtapa] = useState<string | null>(null);
+	const [filtroEtiqueta, setFiltroEtiqueta] = useState<string | null>(null);
 	const [page, setPage] = useState(1);
 	const [filterValue, setFilterValue] = useState("");
 	const [debouncedFilterValue, setDebouncedFilterValue] = useState("");
@@ -324,6 +340,30 @@ function RouteComponent() {
 			});
 		},
 	});
+
+	// Query para metas de mora del mes actual
+	const now = new Date();
+	const metasMoraQuery = useQuery({
+		...orpc.getMetasMora.queryOptions({
+			input: {
+				mes: now.getMonth() + 1,
+				anio: now.getFullYear(),
+			},
+		}),
+		enabled: !!session,
+	});
+
+	// Categorías visibles según rol
+	const categoriasVisibles = useMemo(() => {
+		if (userRole === "cobros") {
+			return ["mora_total", "mora_30", "mora_60", "mora_90", "mora_120"];
+		}
+		if (userRole === "cobros_supervisor") {
+			return ["mora_total", "mora_30"];
+		}
+		// admin / gerencia
+		return ["mora_total"];
+	}, [userRole]);
 
 	// Mapear filtroTemporal al enum time
 	const timeParam = useMemo(():
@@ -393,7 +433,7 @@ function RouteComponent() {
 				return {
 					...contrato,
 					diasHastaPago,
-				} as ContratoCobranza;
+				};
 			})
 			.sort((a, b) => {
 				// Ordenar: primero los que tienen fecha (por días), luego los que no tienen
@@ -418,6 +458,13 @@ function RouteComponent() {
 			);
 		}
 
+		// Filtrar por etiqueta
+		if (filtroEtiqueta) {
+			filtrados = filtrados.filter(
+				(c) => c.etiquetas && c.etiquetas.includes(filtroEtiqueta),
+			);
+		}
+
 		// Filtrar por rango temporal
 		if (filtroTemporal === "todos") return filtrados;
 
@@ -435,7 +482,7 @@ function RouteComponent() {
 			// Incluir casos en mora (días negativos) y casos próximos a vencer
 			return c?.diasHastaPago !== null && c?.diasHastaPago <= limite;
 		});
-	}, [creditosConDias, filtroTemporal, mostrarCompletadosIncobrables]);
+	}, [creditosConDias, filtroTemporal, mostrarCompletadosIncobrables, filtroEtiqueta]);
 
 	// Check permissions after all hooks
 	if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
@@ -791,6 +838,121 @@ function RouteComponent() {
 				</Card>
 			)}
 
+			{/* Metas de Mora del Mes */}
+			{metasMoraQuery.data && metasMoraQuery.data.length > 0 && (
+				<Card>
+					<CardHeader className="pb-3">
+						<CardTitle className="flex items-center gap-2">
+							<Target className="h-5 w-5 text-blue-600" />
+							Metas de Mora —{" "}
+							{now.toLocaleDateString("es-GT", {
+								month: "long",
+								year: "numeric",
+							})}
+						</CardTitle>
+						<CardDescription>
+							Porcentajes objetivo de mora para este mes
+						</CardDescription>
+					</CardHeader>
+					<CardContent>
+						<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+							{metasMoraQuery.data
+								.filter((m) => categoriasVisibles.includes(m.categoria))
+								.sort((a, b) => {
+									const orden = [
+										"mora_total",
+										"mora_30",
+										"mora_60",
+										"mora_90",
+										"mora_120",
+									];
+									return orden.indexOf(a.categoria) - orden.indexOf(b.categoria);
+								})
+								.map((meta) => {
+									const label: Record<string, string> = {
+										mora_total: "Mora Total",
+										mora_30: "Mora 30",
+										mora_60: "Mora 60",
+										mora_90: "Mora 90",
+										mora_120: "Mora 120+",
+									};
+									const color: Record<string, string> = {
+										mora_total: "border-blue-200 bg-blue-50",
+										mora_30: "border-yellow-200 bg-yellow-50",
+										mora_60: "border-orange-200 bg-orange-50",
+										mora_90: "border-red-200 bg-red-50",
+										mora_120: "border-red-300 bg-red-100",
+									};
+									const textColor: Record<string, string> = {
+										mora_total: "text-blue-700",
+										mora_30: "text-yellow-700",
+										mora_60: "text-orange-700",
+										mora_90: "text-red-700",
+										mora_120: "text-red-800",
+									};
+
+									// Buscar el % real del embudo
+									const statReal = stats.find((s) => {
+										if (meta.categoria === "mora_total") return false;
+										return s.estadoMora === meta.categoria;
+									});
+									const porcentajeReal = statReal
+										? Number.parseFloat(statReal.porcentaje)
+										: undefined;
+
+									// Para mora_total, sumar todas las moras
+									const porcentajeMoraTotal =
+										meta.categoria === "mora_total"
+											? stats
+													.filter(
+														(s) =>
+															s.estadoMora !== "al_dia" &&
+															s.estadoMora !== "completado",
+													)
+													.reduce(
+														(sum, s) =>
+															sum + Number.parseFloat(s.porcentaje || "0"),
+														0,
+													)
+											: undefined;
+
+									const actual =
+										meta.categoria === "mora_total"
+											? porcentajeMoraTotal
+											: porcentajeReal;
+									const objetivo = Number.parseFloat(meta.valorObjetivo);
+									const cumplida =
+										actual !== undefined ? actual <= objetivo : undefined;
+
+									return (
+										<div
+											key={meta.id}
+											className={`rounded-lg border p-3 ${color[meta.categoria] || ""}`}
+										>
+											<p className="font-medium text-xs text-muted-foreground">
+												{label[meta.categoria] || meta.categoria}
+											</p>
+											<p
+												className={`font-bold text-xl ${textColor[meta.categoria] || ""}`}
+											>
+												{objetivo.toFixed(2)}%
+											</p>
+											{actual !== undefined && (
+												<p
+													className={`text-xs font-medium ${cumplida ? "text-green-600" : "text-red-600"}`}
+												>
+													Real: {actual.toFixed(2)}%{" "}
+													{cumplida ? "✓" : "↑"}
+												</p>
+											)}
+										</div>
+									);
+								})}
+						</div>
+					</CardContent>
+				</Card>
+			)}
+
 			{/* Filtros Temporales y Tabla */}
 			<Card>
 				<CardHeader>
@@ -872,6 +1034,34 @@ function RouteComponent() {
 										}}
 									>
 										{filtro.label}
+									</Badge>
+								))}
+								<Separator orientation="vertical" className="mx-2 h-6" />
+								<span className="font-medium text-muted-foreground text-sm">
+									Etiqueta:
+								</span>
+								<Button
+									variant={filtroEtiqueta === null ? "default" : "outline"}
+									size="sm"
+									onClick={() => {
+										setFiltroEtiqueta(null);
+										setPage(1);
+									}}
+								>
+									Todas
+								</Button>
+								{Object.entries(ETIQUETA_LABELS_FILTRO).map(([key, label]) => (
+									<Badge
+										key={key}
+										className={`cursor-pointer ${filtroEtiqueta === key ? "bg-primary text-primary-foreground" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
+										onClick={() => {
+											setFiltroEtiqueta(
+												filtroEtiqueta === key ? null : key,
+											);
+											setPage(1);
+										}}
+									>
+										{label}
 									</Badge>
 								))}
 							</>

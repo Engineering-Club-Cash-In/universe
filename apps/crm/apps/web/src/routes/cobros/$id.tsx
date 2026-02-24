@@ -17,6 +17,7 @@ import {
 	Pencil,
 	Phone,
 	Shield,
+	Tag,
 	User,
 	Users,
 } from "lucide-react";
@@ -39,6 +40,12 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { authClient } from "@/lib/auth-client";
 import { ROLES } from "@/lib/roles";
@@ -97,6 +104,45 @@ function Pagination({
 		</div>
 	);
 }
+
+const ETIQUETAS_COBROS = [
+	"juridico",
+	"convenio",
+	"cobro",
+	"no_localizable",
+	"unidad_a_recuperar",
+	"unidad_recuperada",
+	"moras_pendientes",
+	"compromiso_de_pago",
+	"cancelado",
+	"reclamo",
+] as const;
+
+const ETIQUETA_LABELS: Record<string, string> = {
+	juridico: "Jurídico",
+	convenio: "Convenio",
+	cobro: "Cobro",
+	no_localizable: "No Localizable",
+	unidad_a_recuperar: "Unidad a Recuperar",
+	unidad_recuperada: "Unidad Recuperada",
+	moras_pendientes: "Moras Pendientes",
+	compromiso_de_pago: "Compromiso de Pago",
+	cancelado: "Cancelado",
+	reclamo: "Reclamo",
+};
+
+const ETIQUETA_COLORS: Record<string, string> = {
+	juridico: "bg-purple-100 text-purple-800",
+	convenio: "bg-blue-100 text-blue-800",
+	cobro: "bg-green-100 text-green-800",
+	no_localizable: "bg-gray-100 text-gray-800",
+	unidad_a_recuperar: "bg-orange-100 text-orange-800",
+	unidad_recuperada: "bg-teal-100 text-teal-800",
+	moras_pendientes: "bg-red-100 text-red-800",
+	compromiso_de_pago: "bg-yellow-100 text-yellow-800",
+	cancelado: "bg-slate-100 text-slate-800",
+	reclamo: "bg-pink-100 text-pink-800",
+};
 
 // Helper para detectar si es un UUID o un ID numérico
 function isUUID(id: string): boolean {
@@ -256,6 +302,24 @@ function RouteComponent() {
 		},
 		onError: (err: any) => {
 			toast.error(err.message || "Error al actualizar el vehículo");
+		},
+	});
+
+	const updateEtiquetasMutation = useMutation({
+		mutationFn: (data: {
+			casoCobroId: string;
+			etiquetas: (typeof ETIQUETAS_COBROS)[number][];
+		}) => client.updateEtiquetasCobros(data),
+		onSuccess: () => {
+			toast.success("Etiquetas actualizadas");
+			queryClient.invalidateQueries(
+				orpc.getDetallesCreditoCarteraBack.queryOptions({
+					input: { creditoId: id },
+				}),
+			);
+		},
+		onError: (error: any) => {
+			toast.error(`Error al actualizar etiquetas: ${error.message}`);
 		},
 	});
 
@@ -481,6 +545,73 @@ function RouteComponent() {
 								</div>
 							</div>
 
+							{/* Etiquetas del caso */}
+							{caso.id && (
+								<div className="space-y-2 pt-2">
+									<div className="flex items-center justify-between">
+										<div className="flex items-center gap-2 text-sm">
+											<Tag className="h-4 w-4 text-muted-foreground" />
+											<span className="font-medium">Etiquetas:</span>
+										</div>
+										<Popover>
+											<PopoverTrigger asChild>
+												<Button variant="outline" size="sm">
+													<Pencil className="mr-1 h-3 w-3" />
+													Editar
+												</Button>
+											</PopoverTrigger>
+											<PopoverContent className="w-64">
+												<div className="space-y-2">
+													<h4 className="font-medium text-sm">Gestionar Etiquetas</h4>
+													{ETIQUETAS_COBROS.map((etiqueta) => (
+														<div
+															key={etiqueta}
+															className="flex items-center space-x-2"
+														>
+															<Checkbox
+																id={`etiqueta-${etiqueta}`}
+																checked={(caso.etiquetas || []).includes(etiqueta)}
+																onCheckedChange={(checked) => {
+																	const currentEtiquetas = (caso.etiquetas || []) as (typeof ETIQUETAS_COBROS)[number][];
+																	const newEtiquetas = checked
+																		? [...currentEtiquetas, etiqueta]
+																		: currentEtiquetas.filter((e) => e !== etiqueta);
+																	updateEtiquetasMutation.mutate({
+																		casoCobroId: caso.id!,
+																		etiquetas: newEtiquetas,
+																	});
+																}}
+															/>
+															<label
+																htmlFor={`etiqueta-${etiqueta}`}
+																className="cursor-pointer text-sm"
+															>
+																{ETIQUETA_LABELS[etiqueta]}
+															</label>
+														</div>
+													))}
+												</div>
+											</PopoverContent>
+										</Popover>
+									</div>
+									<div className="flex flex-wrap gap-1.5">
+										{(caso.etiquetas || []).length > 0 ? (
+											(caso.etiquetas || []).map((etiqueta: string) => (
+												<Badge
+													key={etiqueta}
+													className={ETIQUETA_COLORS[etiqueta] || "bg-gray-100 text-gray-800"}
+												>
+													{ETIQUETA_LABELS[etiqueta] || etiqueta}
+												</Badge>
+											))
+										) : (
+											<span className="text-muted-foreground text-sm">
+												Sin etiquetas asignadas
+											</span>
+										)}
+									</div>
+								</div>
+							)}
 							{/* Strip visual: Total a Cobrar */}
 							{Number(caso.montoEnMora) > 0 && (
 								<div className="mt-2 rounded-lg border border-orange-200 bg-orange-50 p-4">

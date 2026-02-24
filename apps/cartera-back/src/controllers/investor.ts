@@ -3157,6 +3157,12 @@ export async function resumenGlobalInversionistas(
       bancos.nombre,
       inversionistas.tipo_cuenta,
       inversionistas.numero_cuenta
+    )
+    // Solo mostrar inversionistas que tengan al menos 1 pago espejo NO_LIQUIDADO (cuando no es excel)
+    .having(
+      excel
+        ? undefined
+        : sql`COUNT(${pe.id}) > 0`
     );
 
   // 📂 Si excel = true → generar archivo, subir a R2 y devolver URL

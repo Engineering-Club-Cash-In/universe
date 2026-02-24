@@ -160,6 +160,12 @@ export const appRouter = {
 	getMetasMoraAnual: cobrosRouter.getMetasMoraAnual,
 	upsertMetasMora: cobrosRouter.upsertMetasMora,
 
+	// Metas de desempeño individual
+	createMetaDesempeno: cobrosRouter.createMetaDesempeno,
+	getMetasDesempeno: cobrosRouter.getMetasDesempeno,
+	updateMetaDesempeno: cobrosRouter.updateMetaDesempeno,
+	deleteMetaDesempeno: cobrosRouter.deleteMetaDesempeno,
+
 	// Legal Contracts routes (Jurídico)
 	createLegalContract: legalContractsRouter.createLegalContract,
 	updateLegalContract: legalContractsRouter.updateLegalContract,

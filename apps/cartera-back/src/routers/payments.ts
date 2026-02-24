@@ -1160,10 +1160,11 @@ export const paymentRouter = new Elysia()
   "/update-pagos-espejo",
   async ({ body, set }) => {
     try {
-      const { numero_credito_sifco, abono_capital, abono_interes, abono_iva } = body;
+      const { numero_credito_sifco, nombre_inversionista, abono_capital, abono_interes, abono_iva } = body;
 
       const result = await updatePagosEspejoPorCredito(
         numero_credito_sifco,
+        nombre_inversionista,
         abono_capital,
         abono_interes,
         abono_iva
@@ -1183,13 +1184,14 @@ export const paymentRouter = new Elysia()
   {
     body: t.Object({
       numero_credito_sifco: t.String(),
+      nombre_inversionista: t.String(),
       abono_capital: t.Optional(t.Number()),
       abono_interes: t.Optional(t.Number()),
       abono_iva: t.Optional(t.Number()),
     }),
     detail: {
       tags: ["Pagos/Inversionistas"],
-      summary: "Actualizar pagos espejo NO_LIQUIDADO por crédito",
+      summary: "Actualizar pagos espejo NO_LIQUIDADO por crédito e inversionista",
     },
   }
 )

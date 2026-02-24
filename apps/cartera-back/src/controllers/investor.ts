@@ -3025,94 +3025,114 @@ export async function resumenGlobalInversionistas(
 ): Promise<
   InversionistaResumen[] | { success: boolean; url: string; filename: string }
 > {
-  // 🔎 Condiciones dinámicas
+  // 🔎 Condiciones dinámicas — ahora sobre tablas ESPEJO
   const condiciones: any[] = [
-    eq(pagos_credito_inversionistas.estado_liquidacion, "NO_LIQUIDADO"),
+    eq(pagos_credito_inversionistas_espejo.estado_liquidacion, "NO_LIQUIDADO"),
   ];
 
   if (inversionistaId) {
     condiciones.push(
-      eq(pagos_credito_inversionistas.inversionista_id, inversionistaId)
+      eq(pagos_credito_inversionistas_espejo.inversionista_id, inversionistaId)
     );
   }
 
   if (mes) {
     condiciones.push(
-      sql`EXTRACT(MONTH FROM ${pagos_credito_inversionistas.fecha_pago}) = ${mes}`
+      sql`EXTRACT(MONTH FROM ${pagos_credito_inversionistas_espejo.fecha_pago}) = ${mes}`
     );
   }
 
   if (anio) {
     condiciones.push(
-      sql`EXTRACT(YEAR FROM ${pagos_credito_inversionistas.fecha_pago}) = ${anio}`
+      sql`EXTRACT(YEAR FROM ${pagos_credito_inversionistas_espejo.fecha_pago}) = ${anio}`
     );
   }
 
-  // 📊 Query agregada con la NUEVA LÓGICA + JOIN con bancos
+  // 📊 Query agregada usando tablas ESPEJO (misma lógica que getInvestorMirrorSummary)
+  const pe = pagos_credito_inversionistas_espejo; // alias corto
+
   const result = await db
     .select({
       inversionista_id: inversionistas.inversionista_id,
       nombre: inversionistas.nombre,
       emite_factura: inversionistas.emite_factura,
       reinversion: inversionistas.tipo_reinversion,
-      banco_id: inversionistas.banco_id, // 🔥 ID del banco
-      banco_nombre: bancos.nombre, // 🔥 Nombre del banco desde la tabla
+      banco_id: inversionistas.banco_id,
+      banco_nombre: bancos.nombre,
       tipo_cuenta: inversionistas.tipo_cuenta,
       numero_cuenta: inversionistas.numero_cuenta,
 
-      total_abono_capital: sql<number>`COALESCE(SUM(${pagos_credito_inversionistas.abono_capital}), 0)`,
-      total_abono_interes: sql<number>`COALESCE(SUM(${pagos_credito_inversionistas.abono_interes}), 0)`,
+      // Sumas directas de pagos espejo
+      total_abono_capital: sql<number>`COALESCE(SUM(${pe.abono_capital}), 0)`,
+      total_abono_interes: sql<number>`COALESCE(SUM(${pe.abono_interes}), 0)`,
+      total_abono_iva: sql<number>`COALESCE(SUM(${pe.abono_iva_12}), 0)`,
 
-      // 🆕 IVA: SIEMPRE se suma (mostrar la cantidad)
-      total_abono_iva: sql<number>`COALESCE(SUM(${pagos_credito_inversionistas.abono_iva_12}), 0)`,
-
-      // 🆕 ISR: Solo se calcula si NO emite factura, de lo contrario = 0
+      // ISR: 7% sobre interés si NO emite factura
       total_isr: sql<number>`COALESCE(SUM(
         CASE 
-          WHEN ${inversionistas.emite_factura} 
-            THEN 0 
-            ELSE ${pagos_credito_inversionistas.abono_interes} * 0.07
+          WHEN ${inversionistas.emite_factura} THEN 0 
+          ELSE ${pe.abono_interes} * 0.07
         END
       ), 0)`,
 
-      // 🆕 Total a recibir sin reinversión (cuota bruta)
+      // Total a recibir sin reinversión = abono_capital + interesTotal
+      // interesTotal = abono_interes + (emite_factura ? iva : -(interes*0.07))
       total_a_recibir_sin_reinversion: sql<number>`COALESCE(SUM(
-        ${pagos_credito_inversionistas.abono_capital}
-        + ${pagos_credito_inversionistas.abono_interes}
+        ${pe.abono_capital}
+        + ${pe.abono_interes}
         + CASE
             WHEN ${inversionistas.emite_factura}
-              THEN ${pagos_credito_inversionistas.abono_iva_12}
-            ELSE -(${pagos_credito_inversionistas.abono_interes} * 0.07)
+              THEN ${pe.abono_iva_12}
+            ELSE -(${pe.abono_interes} * 0.07)
           END
       ), 0)`,
 
-      // Total reinversión según tipo (interés = solo abono_interes, sin iva/isr)
+      // Reinversión por tipo (misma lógica que getInvestorMirrorSummary)
+      // reinversion_variable: primero se asigna a interés, luego el remanente a capital
       total_reinversion: sql<number>`COALESCE(SUM(
         CASE ${inversionistas.tipo_reinversion}
           WHEN 'sin_reinversion' THEN 0
-          WHEN 'reinversion_capital' THEN ${pagos_credito_inversionistas.abono_capital}
-          WHEN 'reinversion_interes' THEN ${pagos_credito_inversionistas.abono_interes}
-          WHEN 'reinversion_total' THEN ${pagos_credito_inversionistas.abono_capital} + ${pagos_credito_inversionistas.abono_interes}
-          WHEN 'reinversion_variable' THEN LEAST(COALESCE(${inversionistas.monto_reinversion}, 0), ${pagos_credito_inversionistas.abono_capital} + ${pagos_credito_inversionistas.abono_interes})
+          WHEN 'reinversion_capital' THEN ${pe.abono_capital}
+          WHEN 'reinversion_interes' THEN ${pe.abono_interes}
+          WHEN 'reinversion_total' THEN ${pe.abono_capital} + ${pe.abono_interes}
+          WHEN 'reinversion_variable' THEN
+            LEAST(COALESCE(${inversionistas.monto_reinversion}, 0)::numeric, ${pe.abono_interes}::numeric)
+            + LEAST(
+                GREATEST(
+                  COALESCE(${inversionistas.monto_reinversion}, 0)::numeric
+                  - LEAST(COALESCE(${inversionistas.monto_reinversion}, 0)::numeric, ${pe.abono_interes}::numeric),
+                  0
+                ),
+                ${pe.abono_capital}::numeric
+              )
           ELSE 0
         END
       ), 0)`,
 
-      // Total a recibir con reinversión (cuota bruta - reinversión)
+      // Total a recibir con reinversión = sin_reinversion - reinversion
       total_a_recibir_con_reinversion: sql<number>`COALESCE(SUM(
-        ${pagos_credito_inversionistas.abono_capital}
-        + ${pagos_credito_inversionistas.abono_interes}
+        ${pe.abono_capital}
+        + ${pe.abono_interes}
         + CASE
             WHEN ${inversionistas.emite_factura}
-              THEN ${pagos_credito_inversionistas.abono_iva_12}
-            ELSE -(${pagos_credito_inversionistas.abono_interes} * 0.07)
+              THEN ${pe.abono_iva_12}
+            ELSE -(${pe.abono_interes} * 0.07)
           END
         - CASE ${inversionistas.tipo_reinversion}
             WHEN 'sin_reinversion' THEN 0
-            WHEN 'reinversion_capital' THEN ${pagos_credito_inversionistas.abono_capital}
-            WHEN 'reinversion_interes' THEN ${pagos_credito_inversionistas.abono_interes}
-            WHEN 'reinversion_total' THEN ${pagos_credito_inversionistas.abono_capital} + ${pagos_credito_inversionistas.abono_interes}
-            WHEN 'reinversion_variable' THEN LEAST(COALESCE(${inversionistas.monto_reinversion}, 0), ${pagos_credito_inversionistas.abono_capital} + ${pagos_credito_inversionistas.abono_interes})
+            WHEN 'reinversion_capital' THEN ${pe.abono_capital}
+            WHEN 'reinversion_interes' THEN ${pe.abono_interes}
+            WHEN 'reinversion_total' THEN ${pe.abono_capital} + ${pe.abono_interes}
+            WHEN 'reinversion_variable' THEN
+              LEAST(COALESCE(${inversionistas.monto_reinversion}, 0)::numeric, ${pe.abono_interes}::numeric)
+              + LEAST(
+                  GREATEST(
+                    COALESCE(${inversionistas.monto_reinversion}, 0)::numeric
+                    - LEAST(COALESCE(${inversionistas.monto_reinversion}, 0)::numeric, ${pe.abono_interes}::numeric),
+                    0
+                  ),
+                  ${pe.abono_capital}::numeric
+                )
             ELSE 0
           END
       ), 0)`,
@@ -3120,14 +3140,11 @@ export async function resumenGlobalInversionistas(
     .from(inversionistas)
     .leftJoin(
       bancos,
-      eq(inversionistas.banco_id, bancos.banco_id) // 🔥 JOIN con tabla bancos
+      eq(inversionistas.banco_id, bancos.banco_id)
     )
     .leftJoin(
-      pagos_credito_inversionistas,
-      eq(
-        inversionistas.inversionista_id,
-        pagos_credito_inversionistas.inversionista_id
-      )
+      pe,
+      eq(inversionistas.inversionista_id, pe.inversionista_id)
     )
     .where(and(...condiciones))
     .groupBy(
@@ -3135,8 +3152,9 @@ export async function resumenGlobalInversionistas(
       inversionistas.nombre,
       inversionistas.emite_factura,
       inversionistas.tipo_reinversion,
-      inversionistas.banco_id, // 🔥 Ahora agrupamos por banco_id
-      bancos.nombre, // 🔥 Y también por banco.nombre
+      inversionistas.monto_reinversion,
+      inversionistas.banco_id,
+      bancos.nombre,
       inversionistas.tipo_cuenta,
       inversionistas.numero_cuenta
     );

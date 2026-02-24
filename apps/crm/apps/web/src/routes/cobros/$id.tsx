@@ -933,6 +933,7 @@ function RouteComponent() {
 											montoAdeudado={Number(caso.montoEnMora || 0).toLocaleString()}
 											cuotasAtraso={caso.cuotasVencidas ?? 0}
 											estadoMora={caso.estadoMora || undefined}
+											fechaInicio={caso.fechaInicio || null}
 											nombreAsesor={session?.user?.name || ""}
 											telefonoAsesor=""
 										>
@@ -956,6 +957,7 @@ function RouteComponent() {
 											montoAdeudado={Number(caso.montoEnMora || 0).toLocaleString()}
 											cuotasAtraso={caso.cuotasVencidas ?? 0}
 											estadoMora={caso.estadoMora || undefined}
+											fechaInicio={caso.fechaInicio || null}
 											nombreAsesor={session?.user?.name || ""}
 											telefonoAsesor=""
 										>
@@ -982,6 +984,7 @@ function RouteComponent() {
 											montoAdeudado={Number(caso.montoEnMora || 0).toLocaleString()}
 											cuotasAtraso={caso.cuotasVencidas ?? 0}
 											estadoMora={caso.estadoMora || undefined}
+											fechaInicio={caso.fechaInicio || null}
 											nombreAsesor={session?.user?.name || ""}
 											telefonoAsesor=""
 										>

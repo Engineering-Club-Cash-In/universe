@@ -10,8 +10,9 @@ export interface SectionTimes {
 export interface Inspection360Item {
   category: string;
   item: string;
-  status: 'ok' | 'bad';
+  status: 'ok' | 'bad' | 'na' | 'bueno' | 'regular' | 'malo';
   notes?: string;
+  metadata?: Record<string, any>;
 }
 
 interface InspectionContextType {

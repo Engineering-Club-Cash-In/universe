@@ -33,10 +33,19 @@ export const inspectionStatusEnum = pgEnum("inspection_status", [
 ]);
 
 // Enum for 360 inspection items status
-export const inspection360StatusEnum = pgEnum("inspection_360_status", [
+export const INSPECTION_360_STATUSES = [
 	"ok",
 	"bad",
-]);
+	"na",
+	"bueno",
+	"regular",
+	"malo",
+] as const;
+
+export const inspection360StatusEnum = pgEnum(
+	"inspection_360_status",
+	INSPECTION_360_STATUSES
+);
 
 // Vehicle owner type - determines document requirements
 export const vehicleOwnerTypeEnum = pgEnum("vehicle_owner_type", [
@@ -287,8 +296,9 @@ export const vehicleInspection360Items = pgTable(
 		area: text("area").notNull(), // "Motor y Transmisión", "Frenos"...
 		checkpoint: text("checkpoint").notNull(), // "Verificar fugas...", "Nivel de aceite..."
 
-		status: inspection360StatusEnum("status").notNull(), // "ok", "bad"
+		status: inspection360StatusEnum("status").notNull(), // "ok", "bad", "na", "bueno", "regular", "malo"
 		comment: text("comment"), // Obligatorio si status="bad"
+		metadata: json("metadata").$type<Record<string, any>>(),
 
 		createdAt: timestamp("created_at").defaultNow().notNull(),
 		updatedAt: timestamp("updated_at"),

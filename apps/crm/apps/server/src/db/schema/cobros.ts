@@ -6,7 +6,6 @@ import {
 	pgTable,
 	text,
 	timestamp,
-	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core";
 import { user } from "./auth";
@@ -313,42 +312,3 @@ export const metasMoraCobros = pgTable("metas_mora_cobros", {
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
-
-// Metas individuales de desempeño por cobrador
-export const tipoMetaDesempenoEnum = pgEnum("tipo_meta_desempeno", [
-	"casos_contactados",
-	"convenios_cerrados",
-	"contactos_realizados",
-]);
-
-export const metasDesempenoCobros = pgTable("metas_desempeno_cobros", {
-	id: uuid("id").primaryKey().defaultRandom(),
-
-	// A quién se le asigna
-	cobradorId: text("cobrador_id")
-		.notNull()
-		.references(() => user.id),
-
-	// Período
-	mes: integer("mes").notNull(), // 1-12
-	anio: integer("anio").notNull(),
-
-	// Meta
-	tipoMeta: tipoMetaDesempenoEnum("tipo_meta").notNull(),
-	valorObjetivo: decimal("valor_objetivo", { precision: 12, scale: 2 }).notNull(),
-
-	// Quién la creó
-	creadoPor: text("creado_por")
-		.notNull()
-		.references(() => user.id),
-
-	createdAt: timestamp("created_at").notNull().defaultNow(),
-	updatedAt: timestamp("updated_at").notNull().defaultNow(),
-}, (table) => [
-	uniqueIndex("metas_desempeno_cobrador_periodo_tipo_idx").on(
-		table.cobradorId,
-		table.mes,
-		table.anio,
-		table.tipoMeta,
-	),
-]);

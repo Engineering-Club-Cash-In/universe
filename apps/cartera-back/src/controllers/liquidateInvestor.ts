@@ -1457,6 +1457,10 @@ export async function createBoleta(
     console.log(`✅ Inversionista encontrado: ${inversionista.nombre}`);
 
 
+    const [boletaUrlCompleta] = prepararURLsBoletas([data.boleta_url]);
+    console.log(`\n📎 URL de la boleta: ${boletaUrlCompleta}`);
+
+
     // 3️⃣ Preparar monto (si existe)
     let montoBoleta: string | null = null;
     if (data.monto_boleta) {
@@ -1488,7 +1492,7 @@ export async function createBoleta(
       .insert(boletasPagoInversionista)
       .values({
         inversionista_id: data.inversionista_id,
-        boleta_url: data.boleta_url, // Solo el filename, la URL completa se construye al mostrar
+        boleta_url: boletaUrlCompleta,
         monto_boleta: montoBoleta,
         notas: data.notas || null,
         subido_por: data.subido_por ? Number(data.subido_por) : null,

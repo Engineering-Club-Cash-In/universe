@@ -40,7 +40,7 @@ export async function uploadFileController({ request, set }: any) {
     })
   );
 
-  const url = `${process.env.R2_ENDPOINT}/${process.env.R2_BUCKET}/${filename}`;
+  const url = `${filename}`;
   return { success: true, url, filename };}
   catch (error) {
     console.error("Error uploading file:", error);

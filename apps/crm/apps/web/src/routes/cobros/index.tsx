@@ -353,6 +353,13 @@ function RouteComponent() {
 		enabled: !!session,
 	});
 
+	// Query para metas de desempeño individual del cobrador
+	const metasDesempenoQuery = useQuery(
+		orpc.getMetasDesempeno.queryOptions({
+			input: { mes: now.getMonth() + 1, anio: now.getFullYear() },
+		}),
+	);
+
 	// Categorías visibles según rol
 	const categoriasVisibles = useMemo(() => {
 		if (userRole === "cobros") {
@@ -949,6 +956,66 @@ function RouteComponent() {
 									);
 								})}
 						</div>
+					</CardContent>
+				</Card>
+			)}
+
+			{/* Metas de Desempeño Individual */}
+			{metasDesempenoQuery.data && metasDesempenoQuery.data.length > 0 && (
+				<Card>
+					<CardHeader className="pb-3">
+						<CardTitle className="flex items-center gap-2">
+							<Target className="h-5 w-5 text-purple-600" />
+							Mis Metas —{" "}
+							{now.toLocaleDateString("es-GT", {
+								month: "long",
+								year: "numeric",
+							})}
+						</CardTitle>
+						<CardDescription>
+							Objetivos individuales de desempeño
+						</CardDescription>
+					</CardHeader>
+					<CardContent className="space-y-4">
+						{metasDesempenoQuery.data.map((meta) => {
+							const actual = Number(meta.valorActual);
+							const objetivo = Number(meta.valorObjetivo);
+							const porcentaje =
+								objetivo > 0
+									? Math.min((actual / objetivo) * 100, 100)
+									: 0;
+							const color =
+								porcentaje >= 100
+									? "bg-green-500"
+									: porcentaje >= 50
+										? "bg-amber-500"
+										: "bg-red-500";
+
+							const LABEL_META: Record<string, string> = {
+								casos_contactados: "Casos Contactados",
+								convenios_cerrados: "Convenios Cerrados",
+								contactos_realizados: "Contactos Realizados",
+							};
+
+							return (
+								<div key={meta.id} className="space-y-1">
+									<div className="flex justify-between text-sm">
+										<span className="font-medium">
+											{LABEL_META[meta.tipoMeta] || meta.tipoMeta}
+										</span>
+										<span className="text-muted-foreground">
+											{actual} / {objetivo}
+										</span>
+									</div>
+									<div className="h-2 rounded-full bg-muted">
+										<div
+											className={`h-full rounded-full transition-all ${color}`}
+											style={{ width: `${porcentaje}%` }}
+										/>
+									</div>
+								</div>
+							);
+						})}
 					</CardContent>
 				</Card>
 			)}

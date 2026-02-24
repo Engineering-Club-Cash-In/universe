@@ -17,6 +17,7 @@ import {
 	MessageSquare,
 	Scale,
 	Settings,
+	Target,
 	TrendingUp,
 	UserCircle,
 	Users,
@@ -203,18 +204,37 @@ export default function Header() {
 							</DropdownMenu>
 						)}
 
-						{/* Cobros */}
+						{/* Cobros Dropdown */}
 						{session && userRole && PERMISSIONS.canAccessCobros(userRole) && (
-							<Button
-								variant={isActive("/cobros") ? "secondary" : "ghost"}
-								size="sm"
-								asChild
-							>
-								<Link to="/cobros">
-									<Banknote className="mr-2 h-4 w-4" />
-									Cobros
-								</Link>
-							</Button>
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									<Button
+										variant={isActive("/cobros") ? "secondary" : "ghost"}
+										size="sm"
+										className="gap-1"
+									>
+										<Banknote className="h-4 w-4" />
+										Cobros
+										<ChevronDown className="h-3 w-3 opacity-50" />
+									</Button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="start" className="w-48">
+									<DropdownMenuItem asChild>
+										<Link to="/cobros" className="cursor-pointer">
+											<Banknote className="mr-2 h-4 w-4" />
+											Dashboard
+										</Link>
+									</DropdownMenuItem>
+									{PERMISSIONS.canAssignCobros(userRole) && (
+										<DropdownMenuItem asChild>
+											<Link to="/cobros/metas" className="cursor-pointer">
+												<Target className="mr-2 h-4 w-4" />
+												Metas de Mora
+											</Link>
+										</DropdownMenuItem>
+									)}
+								</DropdownMenuContent>
+							</DropdownMenu>
 						)}
 
 						{/* Análisis */}

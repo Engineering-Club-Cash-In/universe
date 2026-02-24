@@ -32,6 +32,11 @@ import { createContext } from "./lib/context";
 import { appRouter } from "./routers/index";
 import externalContractsRouter from "./routes/external-contracts";
 
+import {
+	checkCasosSinContacto,
+	checkSeguimientosVencidos,
+} from "./jobs/cobros-notifications";
+
 const app = new Hono();
 
 app.use(logger());
@@ -860,6 +865,25 @@ app.delete("/api/migrate/cleanup", async (c) => {
 		return c.json({ error: err.message }, 500);
 	}
 });
+
+// Job periódico de notificaciones de cobros (cada hora)
+setInterval(
+	async () => {
+		try {
+			await checkSeguimientosVencidos();
+			await checkCasosSinContacto(3);
+		} catch (error) {
+			console.error("Error en job de notificaciones cobros:", error);
+		}
+	},
+	60 * 60 * 1000,
+);
+
+// Ejecutar una vez al iniciar (con delay de 10s para que la DB esté lista)
+setTimeout(() => {
+	checkSeguimientosVencidos().catch(console.error);
+	checkCasosSinContacto(3).catch(console.error);
+}, 10_000);
 
 export default {
 	port: process.env.PORT || 3000,

@@ -150,6 +150,13 @@ const REDIRECT_CONFIG: Record<
 			to: "/accounting/pay-investors",
 		}),
 	},
+	cobros_detail: {
+		label: "Ver caso de cobro",
+		getRoute: (id) => ({
+			to: "/cobros/$id",
+			params: { id },
+		}),
+	},
 };
 
 const PAGE_SIZE = 20;

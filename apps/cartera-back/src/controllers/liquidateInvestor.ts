@@ -751,7 +751,7 @@ interface LiquidarCuotasPorCreditoInput {
   inversionista_id: number;
   cuota_mes: string;
   capital: number;
-  porcentaje_inversor: number;
+  porcentaje_inversor?: number;
 }
 
 export async function liquidarCuotasPorCredito(
@@ -1807,16 +1807,6 @@ export async function getBoletasStats(inversionista_id?: number) {
   }
 }
 
-interface LiquidacionBatchItem {
-  nombre_usuario: string;
-  cuota_mes: string;
-  capital: number;
-}
-
-interface LiquidacionBatchInput {
-  nombre_inversionista: string;
-  liquidaciones: LiquidacionBatchItem[];
-}
 
 interface ResultadoLiquidacion {
   nombre_usuario: string;
@@ -1832,15 +1822,15 @@ interface ResultadoLiquidacion {
 // 🔥 FUNCIÓN BATCH INTELIGENTE CON SYNC
 // ============================================
 
-interface LiquidacionBatchItem {
+export interface LiquidacionBatchItem {
   nombre_usuario: string;
   cuota_mes: string;
   capital: number;
   meses_en_credito?: number | null;
-  porcentaje_inversor: number; // 🔥 NUEVO CAMPO OPCIONAL
+  porcentaje_inversor?: number; // 🔥 NUEVO CAMPO OPCIONAL
 }
 
-interface LiquidacionBatchInput {
+export interface LiquidacionBatchInput {
   nombre_inversionista: string;
   liquidaciones: LiquidacionBatchItem[];
 }
@@ -2302,6 +2292,299 @@ export async function liquidarCuotasBatchInteligente(
       agregados: 0,
       actualizados: 0,
       eliminados: 0,
+    };
+  }
+}
+
+// ============================================
+// 🔥 MARCAR LIQUIDADO INVERSIONISTAS POR NOMBRE
+// Busca el crédito por nombre de inversionista + nombre de cliente
+// y marca las cuotas como liquidadas según la fecha de corte del cuota_mes
+// ============================================
+
+export interface MarcarLiquidadoInput {
+  nombre_inversionista: string;
+  nombre_usuario: string; // nombre del cliente/deudor
+  cuota_mes: string;       // ej: "dic. 25"  →  dic 2025 es la fecha de corte
+}
+
+export async function marcarLiquidadoInversionistasPorNombre(
+  input: MarcarLiquidadoInput,
+) {
+  try {
+    console.log("🔥 ========== MARCAR LIQUIDADO POR NOMBRE ==========");
+    console.log(`   👤 Inversionista: "${input.nombre_inversionista}"`);
+    console.log(`   🧑  Cliente:       "${input.nombre_usuario}"`);
+    console.log(`   📅 Cuota mes:     "${input.cuota_mes}"`);
+
+    // ─────────────────────────────────────────────────
+    // 1️⃣  Buscar inversionista (permisivo)
+    // ─────────────────────────────────────────────────
+    const inversionistasEncontrados = await buscarInversionistaPermisivo(
+      input.nombre_inversionista,
+    );
+
+    if (inversionistasEncontrados.length === 0) {
+      return {
+        success: false,
+        message: `Inversionista "${input.nombre_inversionista}" no encontrado`,
+      };
+    }
+
+    // Preferir match exacto si hay varios
+    const inversionista =
+      inversionistasEncontrados.find(
+        (inv) =>
+          inv.nombre.trim().toLowerCase() ===
+          input.nombre_inversionista.trim().toLowerCase(),
+      ) ?? inversionistasEncontrados[0];
+
+    console.log(
+      `   ✅ Inversionista: ${inversionista.nombre} (ID: ${inversionista.inversionista_id})`,
+    );
+
+    // ─────────────────────────────────────────────────
+    // 2️⃣  Buscar usuario/cliente (permisivo)
+    // ─────────────────────────────────────────────────
+    const usuariosEncontrados = await buscarUsuarioPermisivo(
+      input.nombre_usuario,
+    );
+
+    if (usuariosEncontrados.length === 0) {
+      return {
+        success: false,
+        message: `Cliente "${input.nombre_usuario}" no encontrado`,
+      };
+    }
+
+    const usuario = usuariosEncontrados[0];
+    console.log(
+      `   ✅ Cliente: ${usuario.nombre} (ID: ${usuario.usuario_id})`,
+    );
+
+    // ─────────────────────────────────────────────────
+    // 3️⃣  Buscar crédito del cliente que tenga relación con el inversionista
+    // ─────────────────────────────────────────────────
+    const creditosConRelacion = await db
+      .select({
+        credito_id: creditos.credito_id,
+        numero_credito: creditos.numero_credito_sifco,
+      })
+      .from(creditos)
+      .innerJoin(
+        creditos_inversionistas,
+        eq(creditos_inversionistas.credito_id, creditos.credito_id),
+      )
+      .where(
+        and(
+          eq(creditos.usuario_id, usuario.usuario_id),
+          eq(
+            creditos_inversionistas.inversionista_id,
+            inversionista.inversionista_id,
+          ),
+        ),
+      );
+
+    if (creditosConRelacion.length === 0) {
+      return {
+        success: false,
+        message: `No se encontró un crédito del cliente "${usuario.nombre}" vinculado al inversionista "${inversionista.nombre}"`,
+      };
+    }
+
+    // Tomar el primero (debería ser único en la mayoría de los casos)
+    const credito = creditosConRelacion[0];
+    console.log(
+      `   ✅ Crédito: ${credito.numero_credito} (ID: ${credito.credito_id})`,
+    );
+
+    // ─────────────────────────────────────────────────
+    // 4️⃣  Parsear cuota_mes → obtener mes y año de corte
+    // ─────────────────────────────────────────────────
+    const cuotaMesNormalizada = normalizarCuotaMes(input.cuota_mes);
+    console.log(`   🔧 Mes normalizado: "${cuotaMesNormalizada}"`);
+
+    let rangoMes: { inicio: string; fin: string; mesDescriptivo: string };
+    try {
+      rangoMes = obtenerRangoDelMes(cuotaMesNormalizada);
+    } catch (err) {
+      return {
+        success: false,
+        message: `Formato de cuota_mes inválido: "${input.cuota_mes}"`,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+
+    // La fecha de corte (inclusive) es el último día del mes indicado
+    const fechaCorte = rangoMes.fin; // ej: "2025-12-31"
+    console.log(
+      `   📅 Fecha de corte (inclusive): ${fechaCorte}  (${rangoMes.mesDescriptivo})`,
+    );
+
+    // ─────────────────────────────────────────────────
+    // 5️⃣  Obtener todas las cuotas del crédito
+    // ─────────────────────────────────────────────────
+    const todasLasCuotas = await db
+      .select()
+      .from(cuotas_credito)
+      .where(eq(cuotas_credito.credito_id, credito.credito_id))
+      .orderBy(cuotas_credito.numero_cuota);
+
+    console.log(`   📊 Total cuotas del crédito: ${todasLasCuotas.length}`);
+
+    // ─────────────────────────────────────────────────
+    // 6️⃣  Actualizar cuotas (3 casos) + capturar valores anteriores para revertir
+    // ─────────────────────────────────────────────────
+
+    // Helper: día 10 del mes siguiente al de un "YYYY-MM-DD"
+    function diezDelMesSiguiente(fechaVencStr: string): Date {
+      const [year, month] = fechaVencStr.split("-").map(Number);
+      const mesNext = month === 12 ? 1 : month + 1;
+      const yearNext = month === 12 ? year + 1 : year;
+      return new Date(yearNext, mesNext - 1, 10);
+    }
+
+    // Día 10 del mes ACTUAL
+    const hoy = new Date();
+    const diezDelMesActual = new Date(hoy.getFullYear(), hoy.getMonth(), 10);
+
+    let cuotasLiquidadas = 0;
+    let cuotasPendientes = 0;
+
+    // Snapshot de valores ANTERIORES (para poder revertir)
+    const snapshot: Array<{
+      cuota_id: number;
+      numero_cuota: number;
+      fecha_vencimiento: string;
+      caso: "A" | "B" | "C";
+      // ANTES
+      liquidado_antes: boolean;
+      fecha_liq_antes: string | null;
+      // DESPUÉS
+      liquidado_despues: boolean;
+      fecha_liq_despues: string | null;
+    }> = [];
+
+    for (const cuota of todasLasCuotas) {
+      const fv = cuota.fecha_vencimiento; // "YYYY-MM-DD"
+
+      if (fv >= rangoMes.inicio && fv <= rangoMes.fin) {
+        // ── CASO A: cuota del mes de corte ──────────────────
+        const fechaLiqStr = diezDelMesActual.toISOString().slice(0, 10);
+        await db
+          .update(cuotas_credito)
+          .set({
+            liquidado_inversionistas: true,
+            fecha_liquidacion_inversionistas: diezDelMesActual,
+          })
+          .where(eq(cuotas_credito.cuota_id, cuota.cuota_id));
+
+        snapshot.push({
+          cuota_id: cuota.cuota_id,
+          numero_cuota: cuota.numero_cuota,
+          fecha_vencimiento: fv,
+          caso: "A",
+          liquidado_antes: cuota.liquidado_inversionistas ?? false,
+          fecha_liq_antes: cuota.fecha_liquidacion_inversionistas
+            ? new Date(cuota.fecha_liquidacion_inversionistas).toISOString().slice(0, 10)
+            : null,
+          liquidado_despues: true,
+          fecha_liq_despues: fechaLiqStr,
+        });
+
+        console.log(`   ✅ [A] Cuota #${cuota.numero_cuota} (${fv}) → true, liq: ${fechaLiqStr}`);
+        cuotasLiquidadas++;
+
+      } else if (fv < rangoMes.inicio) {
+        // ── CASO B: cuota anterior ──────────────────────────
+        const fechaLiq = diezDelMesSiguiente(fv);
+        const fechaLiqStr = fechaLiq.toISOString().slice(0, 10);
+        await db
+          .update(cuotas_credito)
+          .set({
+            liquidado_inversionistas: true,
+            fecha_liquidacion_inversionistas: fechaLiq,
+          })
+          .where(eq(cuotas_credito.cuota_id, cuota.cuota_id));
+
+        snapshot.push({
+          cuota_id: cuota.cuota_id,
+          numero_cuota: cuota.numero_cuota,
+          fecha_vencimiento: fv,
+          caso: "B",
+          liquidado_antes: cuota.liquidado_inversionistas ?? false,
+          fecha_liq_antes: cuota.fecha_liquidacion_inversionistas
+            ? new Date(cuota.fecha_liquidacion_inversionistas).toISOString().slice(0, 10)
+            : null,
+          liquidado_despues: true,
+          fecha_liq_despues: fechaLiqStr,
+        });
+
+        console.log(`   ✅ [B] Cuota #${cuota.numero_cuota} (${fv}) → true, liq: ${fechaLiqStr}`);
+        cuotasLiquidadas++;
+
+      } else {
+        // ── CASO C: cuota futura ────────────────────────────
+        await db
+          .update(cuotas_credito)
+          .set({
+            liquidado_inversionistas: false,
+            fecha_liquidacion_inversionistas: null,
+          })
+          .where(eq(cuotas_credito.cuota_id, cuota.cuota_id));
+
+        snapshot.push({
+          cuota_id: cuota.cuota_id,
+          numero_cuota: cuota.numero_cuota,
+          fecha_vencimiento: fv,
+          caso: "C",
+          liquidado_antes: cuota.liquidado_inversionistas ?? false,
+          fecha_liq_antes: cuota.fecha_liquidacion_inversionistas
+            ? new Date(cuota.fecha_liquidacion_inversionistas).toISOString().slice(0, 10)
+            : null,
+          liquidado_despues: false,
+          fecha_liq_despues: null,
+        });
+
+        console.log(`   ⏭️  [C] Cuota #${cuota.numero_cuota} (${fv}) → false, null`);
+        cuotasPendientes++;
+      }
+    }
+
+    console.log(`   ✅ Cuotas liquidadas (true):  ${cuotasLiquidadas}`);
+    console.log(`   ✅ Cuotas pendientes (false): ${cuotasPendientes}`);
+
+    return {
+      success: true,
+      message: `Cuotas actualizadas correctamente para el crédito ${credito.numero_credito}`,
+      data: {
+        inversionista: {
+          id: inversionista.inversionista_id,
+          nombre: inversionista.nombre,
+        },
+        cliente: {
+          id: usuario.usuario_id,
+          nombre: usuario.nombre,
+        },
+        credito: {
+          id: credito.credito_id,
+          numero: credito.numero_credito,
+        },
+        fecha_corte: fechaCorte,
+        mes_corte: rangoMes.mesDescriptivo,
+        cuotas_liquidadas: cuotasLiquidadas,
+        cuotas_pendientes: cuotasPendientes,
+        total_cuotas: todasLasCuotas.length,
+        // 🔒 Snapshot completo para revertir si es necesario
+        snapshot,
+      },
+    };
+  } catch (error) {
+    console.error("❌ Error en marcarLiquidadoInversionistasPorNombre:", error);
+    return {
+      success: false,
+      message: "Error interno al marcar cuotas",
+      error: error instanceof Error ? error.message : String(error),
     };
   }
 }

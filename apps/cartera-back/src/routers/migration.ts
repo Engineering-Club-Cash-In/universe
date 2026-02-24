@@ -8,7 +8,7 @@ import { authMiddleware } from "./midleware";
 import { listarCreditosConDetalle, procesarCreditoIndividual } from "../migration/migrationCredits";
 import z from "zod";
 import { procesarCreditosMora } from "../migration/migrationLateFee";
-import {  liquidarCuotasBatchInteligente } from "../controllers/liquidateInvestor";
+import { liquidarCuotasBatchInteligente, marcarLiquidadoInversionistasPorNombre } from "../controllers/liquidateInvestor";
 import { procesarInversionistasSoloExcel } from "../controllers/migrateInvestor";
 
 const LiquidacionBatchItemSchema = t.Object({
@@ -508,7 +508,7 @@ export const sifcoRouter = new Elysia()
       });
 
       // 🔥 Si requiere input del usuario, retornar 200 con requires_user_input
-      if (resultado.requires_user_input) {
+      if ((resultado as any).requires_user_input) {
         console.log(`\n❓ Esperando decisiones del usuario...`);
         return resultado;
       }
@@ -658,5 +658,68 @@ export const sifcoRouter = new Elysia()
         \`\`\`
       `,
     }
+  }
+).post(
+  "/marcar-liquidado-inversionistas",
+  async ({ body, set }) => {
+    try {
+      console.log("🔥 ========== MARCAR LIQUIDADO INVERSIONISTAS ==========");
+      console.log(`   👤 Inversionista: ${body.nombre_inversionista}`);
+      console.log(`   🧑  Cliente:       ${body.nombre_usuario}`);
+      console.log(`   📅 Cuota mes:     ${body.cuota_mes}`);
+
+      const resultado = await marcarLiquidadoInversionistasPorNombre({
+        nombre_inversionista: body.nombre_inversionista,
+        nombre_usuario: body.nombre_usuario,
+        cuota_mes: body.cuota_mes,
+      });
+
+      if (!resultado.success) {
+        set.status = 400;
+        return resultado;
+      }
+
+      set.status = 200;
+      return resultado;
+    } catch (error) {
+      console.error("❌ Error en /marcar-liquidado-inversionistas:", error);
+      set.status = 500;
+      return {
+        success: false,
+        message: "Error interno del servidor",
+        error: error instanceof Error ? error.message : "Error desconocido",
+      };
+    }
+  },
+  {
+    body: t.Object({
+      nombre_inversionista: t.String({ minLength: 1, description: "Nombre del inversionista (búsqueda permisiva)" }),
+      nombre_usuario: t.String({ minLength: 1, description: "Nombre del cliente/deudor (búsqueda permisiva)" }),
+      cuota_mes: t.String({
+        minLength: 4,
+        description: "Mes de corte: 'mes. AA', ej: 'dic. 25'. Cuotas hasta ese mes → true; cuotas después → false.",
+      }),
+    }),
+    detail: {
+      tags: ["Liquidaciones"],
+      summary: "Marcar liquidado_inversionistas por nombre de inversionista y cliente",
+      description: `
+        Dado el nombre del inversionista, el nombre del cliente y el mes de corte (\'cuota_mes\'),
+        localiza el crédito y actualiza el campo \`liquidado_inversionistas\` en \`cuotas_credito\`:
+
+        - \`fecha_vencimiento\` **≤ último día del mes de corte** → \`liquidado_inversionistas = true\`
+        - \`fecha_vencimiento\` **> último día del mes de corte** → \`liquidado_inversionistas = false\`
+
+        **Ejemplo:** \`cuota_mes = "dic. 25"\` → cuotas hasta el 31-dic-2025 quedan en **true**.
+
+        \`\`\`json
+        {
+          "nombre_inversionista": "Juan Pérez",
+          "nombre_usuario": "María García",
+          "cuota_mes": "dic. 25"
+        }
+        \`\`\`
+      `,
+    },
   }
 );

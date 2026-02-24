@@ -393,24 +393,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
     }
   };
 
-  const handleOpenBoleta = (boleta?: any[] | { urlBoleta?: string } | null) => {
-    if (!boleta) {
-      toast.warning("No hay boleta disponible para este pago");
-      return;
-    }
-
-    let url;
-    if (Array.isArray(boleta)) {
-      if (boleta.length === 0) {
-        toast.warning("No hay boleta disponible para este pago");
-        return;
-      }
-      const first = boleta[0];
-      url = first.url || first;
-    } else {
-      url = boleta.urlBoleta;
-    }
-
+  const handleOpenBoleta = (url: string) => {
     if (!url) {
       toast.warning("Boleta sin URL válida");
       return;
@@ -742,13 +725,44 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
 
                   {/* 🔘 Acciones */}
                   <div className="flex gap-3 mt-3 flex-wrap">
-                    {/* Ver Boleta */}
-                    <button
-                      onClick={() => handleOpenBoleta(pago.boleta)}
-                      className="text-blue-700 font-semibold flex items-center gap-1 hover:text-blue-900"
-                    >
-                      <FileText className="w-4 h-4" /> Ver Boleta
-                    </button>
+                    {/* Ver Boletas */}
+                    {pago.boletas && pago.boletas.length > 0 ? (
+                      pago.boletas.length === 1 ? (
+                        <button
+                          onClick={() => handleOpenBoleta(pago.boletas[0].urlBoleta)}
+                          className="text-blue-700 font-semibold flex items-center gap-1 hover:text-blue-900"
+                        >
+                          <FileText className="w-4 h-4" /> Ver Boleta
+                        </button>
+                      ) : (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button className="text-blue-700 font-semibold flex items-center gap-1 hover:text-blue-900">
+                              <FileText className="w-4 h-4" /> Ver Boletas ({pago.boletas.length})
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent className="bg-white border border-blue-200 shadow-lg rounded-xl p-2 min-w-[170px]">
+                            {pago.boletas.map((b, idx) => (
+                              <DropdownMenuItem
+                                key={b.boletaId}
+                                onClick={() => handleOpenBoleta(b.urlBoleta)}
+                                className="cursor-pointer text-blue-700 hover:text-blue-900 hover:bg-blue-50 py-2 px-3 flex items-center rounded-lg transition"
+                              >
+                                <FileText className="w-4 h-4 mr-2 text-blue-600" />
+                                <span className="font-semibold">Boleta {idx + 1}</span>
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )
+                    ) : (
+                      <button
+                        disabled
+                        className="text-gray-400 font-semibold flex items-center gap-1 cursor-not-allowed"
+                      >
+                        <FileText className="w-4 h-4" /> Sin Boleta
+                      </button>
+                    )}
 
                     {/* Inversionistas */}
                     <button
@@ -1113,17 +1127,32 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                             align="end"
                             className="w-64 bg-white shadow-2xl border-2 border-blue-200 rounded-xl p-2"
                           >
-                            {/* Ver Boleta */}
-                            <DropdownMenuItem
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenBoleta(pago.boleta);
-                              }}
-                              className="cursor-pointer text-blue-700 hover:text-blue-900 hover:bg-blue-50 py-2.5 px-3 flex items-center rounded-lg transition"
-                            >
-                              <FileText className="w-4 h-4 mr-2 text-blue-600 flex-shrink-0" />
-                              <span className="font-semibold">Ver Boleta</span>
-                            </DropdownMenuItem>
+                            {/* Ver Boletas */}
+                            {pago.boletas && pago.boletas.length > 0 ? (
+                              pago.boletas.map((b, idx) => (
+                                <DropdownMenuItem
+                                  key={b.boletaId}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenBoleta(b.urlBoleta);
+                                  }}
+                                  className="cursor-pointer text-blue-700 hover:text-blue-900 hover:bg-blue-50 py-2.5 px-3 flex items-center rounded-lg transition"
+                                >
+                                  <FileText className="w-4 h-4 mr-2 text-blue-600 flex-shrink-0" />
+                                  <span className="font-semibold">
+                                    {pago.boletas.length === 1 ? "Ver Boleta" : `Boleta ${idx + 1}`}
+                                  </span>
+                                </DropdownMenuItem>
+                              ))
+                            ) : (
+                              <DropdownMenuItem
+                                disabled
+                                className="text-gray-400 py-2.5 px-3 flex items-center rounded-lg"
+                              >
+                                <FileText className="w-4 h-4 mr-2 flex-shrink-0" />
+                                <span className="font-semibold">Sin Boleta</span>
+                              </DropdownMenuItem>
+                            )}
 
                             <DropdownMenuSeparator className="bg-gray-200 my-1" />
 

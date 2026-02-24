@@ -19,6 +19,7 @@ import {
 	vehicleInspections,
 	vehiclePhotos,
 	vehicles,
+	INSPECTION_360_STATUSES,
 } from "../db/schema";
 import { isUniqueViolation } from "../lib/db-errors";
 import {
@@ -842,8 +843,9 @@ export const vehiclesRouter = {
 						z.object({
 							area: z.string(),
 							checkpoint: z.string(),
-							status: z.enum(["ok", "bad"]),
+							status: z.enum(INSPECTION_360_STATUSES),
 							comment: z.string().optional(),
+							metadata: z.record(z.any()).optional(),
 						}),
 					)
 					.optional()

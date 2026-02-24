@@ -154,6 +154,9 @@ export const casosCobros = pgTable("casos_cobros", {
 	// General notes
 	notes: text("notes"),
 
+	// Etiquetas del caso
+	etiquetas: text("etiquetas").array().default([]),
+
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

@@ -30,6 +30,7 @@ import {
 	CollapsibleContent,
 	CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { Separator } from "@/components/ui/separator";
 import { authClient } from "@/lib/auth-client";
 import { type ContratoCobranza, columns } from "@/lib/cobros/columns";
 import { PERMISSIONS, ROLES } from "@/lib/roles";
@@ -264,6 +265,19 @@ export const Route = createFileRoute("/cobros/")({
 	component: RouteComponent,
 });
 
+const ETIQUETA_LABELS_FILTRO: Record<string, string> = {
+	juridico: "Jurídico",
+	convenio: "Convenio",
+	cobro: "Cobro",
+	no_localizable: "No Localizable",
+	unidad_a_recuperar: "Unidad a Recuperar",
+	unidad_recuperada: "Unidad Recuperada",
+	moras_pendientes: "Moras Pendientes",
+	compromiso_de_pago: "Compromiso de Pago",
+	cancelado: "Cancelado",
+	reclamo: "Reclamo",
+};
+
 function RouteComponent() {
 	const { data: session } = authClient.useSession();
 	const navigate = useNavigate();
@@ -271,6 +285,7 @@ function RouteComponent() {
 	const [mostrarCompletadosIncobrables, setMostrarCompletadosIncobrables] =
 		useState(false);
 	const [filtroEtapa, setFiltroEtapa] = useState<string | null>(null);
+	const [filtroEtiqueta, setFiltroEtiqueta] = useState<string | null>(null);
 	const [page, setPage] = useState(1);
 	const [filterValue, setFilterValue] = useState("");
 	const [debouncedFilterValue, setDebouncedFilterValue] = useState("");
@@ -418,7 +433,7 @@ function RouteComponent() {
 				return {
 					...contrato,
 					diasHastaPago,
-				} as ContratoCobranza;
+				};
 			})
 			.sort((a, b) => {
 				// Ordenar: primero los que tienen fecha (por días), luego los que no tienen
@@ -443,6 +458,13 @@ function RouteComponent() {
 			);
 		}
 
+		// Filtrar por etiqueta
+		if (filtroEtiqueta) {
+			filtrados = filtrados.filter(
+				(c) => c.etiquetas && c.etiquetas.includes(filtroEtiqueta),
+			);
+		}
+
 		// Filtrar por rango temporal
 		if (filtroTemporal === "todos") return filtrados;
 
@@ -460,7 +482,7 @@ function RouteComponent() {
 			// Incluir casos en mora (días negativos) y casos próximos a vencer
 			return c?.diasHastaPago !== null && c?.diasHastaPago <= limite;
 		});
-	}, [creditosConDias, filtroTemporal, mostrarCompletadosIncobrables]);
+	}, [creditosConDias, filtroTemporal, mostrarCompletadosIncobrables, filtroEtiqueta]);
 
 	// Check permissions after all hooks
 	if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
@@ -1012,6 +1034,34 @@ function RouteComponent() {
 										}}
 									>
 										{filtro.label}
+									</Badge>
+								))}
+								<Separator orientation="vertical" className="mx-2 h-6" />
+								<span className="font-medium text-muted-foreground text-sm">
+									Etiqueta:
+								</span>
+								<Button
+									variant={filtroEtiqueta === null ? "default" : "outline"}
+									size="sm"
+									onClick={() => {
+										setFiltroEtiqueta(null);
+										setPage(1);
+									}}
+								>
+									Todas
+								</Button>
+								{Object.entries(ETIQUETA_LABELS_FILTRO).map(([key, label]) => (
+									<Badge
+										key={key}
+										className={`cursor-pointer ${filtroEtiqueta === key ? "bg-primary text-primary-foreground" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
+										onClick={() => {
+											setFiltroEtiqueta(
+												filtroEtiqueta === key ? null : key,
+											);
+											setPage(1);
+										}}
+									>
+										{label}
 									</Badge>
 								))}
 							</>

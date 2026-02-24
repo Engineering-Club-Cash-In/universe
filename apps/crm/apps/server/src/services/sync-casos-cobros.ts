@@ -16,9 +16,9 @@ import {
 	type estadoMoraEnum,
 } from "../db/schema/cobros";
 import { leads } from "../db/schema/crm";
-import type { StatusCreditEnum } from "../types/cartera-back";
 import { calcularDiasMoraExactos } from "../lib/mora-utils";
 import { createNotification } from "../routers/notifications";
+import type { StatusCreditEnum } from "../types/cartera-back";
 import { carteraBackClient } from "./cartera-back-client";
 import { isCarteraBackEnabled } from "./cartera-back-integration";
 
@@ -62,10 +62,7 @@ const MORA_SEVERITY: Record<string, number> = {
 	incobrable: 6,
 };
 
-function moraEscalo(
-	estadoAnterior: string,
-	estadoNuevo: string,
-): boolean {
+function moraEscalo(estadoAnterior: string, estadoNuevo: string): boolean {
 	return (
 		(MORA_SEVERITY[estadoNuevo] ?? 0) > (MORA_SEVERITY[estadoAnterior] ?? 0)
 	);
@@ -420,21 +417,24 @@ export async function sincronizarCasosCobros(
 					const emailContacto = lead[0]?.email || "Sin email";
 					const direccionContacto = "Por confirmar";
 
-					const [nuevoCaso] = await db.insert(casosCobros).values({
-						contratoId,
-						numeroCreditoSifco: credito.creditos.numero_credito_sifco,
-						estadoMora,
-						montoEnMora: creditoCompleto.moraActual, // ya es string
-						diasMoraMaximo: diasMora,
-						cuotasVencidas: creditoCompleto.cuotasAtrasadas?.length || 0,
-						responsableCobros: responsable,
-						telefonoPrincipal,
-						telefonoAlternativo: null,
-						emailContacto,
-						direccionContacto,
-						activo: true,
-						notes: `Caso creado automáticamente desde cartera-back el ${now.toLocaleDateString()}`,
-					}).returning();
+					const [nuevoCaso] = await db
+						.insert(casosCobros)
+						.values({
+							contratoId,
+							numeroCreditoSifco: credito.creditos.numero_credito_sifco,
+							estadoMora,
+							montoEnMora: creditoCompleto.moraActual, // ya es string
+							diasMoraMaximo: diasMora,
+							cuotasVencidas: creditoCompleto.cuotasAtrasadas?.length || 0,
+							responsableCobros: responsable,
+							telefonoPrincipal,
+							telefonoAlternativo: null,
+							emailContacto,
+							direccionContacto,
+							activo: true,
+							notes: `Caso creado automáticamente desde cartera-back el ${now.toLocaleDateString()}`,
+						})
+						.returning();
 
 					result.casosCreados++;
 					console.log(

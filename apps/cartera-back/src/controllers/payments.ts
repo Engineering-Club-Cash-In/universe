@@ -1211,9 +1211,16 @@ interface GetPagosOptions {
   dia?: number;
   mes?: number;
   anio?: number;
+  fechaInicio?: string;
+  fechaFin?: string;
   inversionistaId?: number;
-  usuarioNombre?: string; // 🆕 nuevo filtro
-  validationStatus?: string; // 🆕 nuevo filtro
+  usuarioNombre?: string;
+  validationStatus?: string;
+  categoriaCredito?: string;
+  tipoCredito?: string;
+  formatoCredito?: string;
+  soloAplicados?: boolean;
+  fechaAplicado?: string;
 }
 /**
  * 📊 Obtiene los pagos junto con su información detallada de créditos, usuarios, cuotas e inversionistas.
@@ -1233,9 +1240,16 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     dia,
     mes,
     anio,
+    fechaInicio,
+    fechaFin,
     inversionistaId,
     usuarioNombre,
     validationStatus,
+    categoriaCredito,
+    tipoCredito,
+    formatoCredito,
+    soloAplicados,
+    fechaAplicado,
   } = options;
 
   try {
@@ -1247,14 +1261,24 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     if (numeroCredito)
       whereClauses.push(`c.numero_credito_sifco = '${numeroCredito}'`);
     if (usuarioNombre) whereClauses.push(`u.nombre ILIKE '%${usuarioNombre}%'`);
-    console.log("dia", dia);
-    console.log("mes", mes);
-    console.log("anio", anio);
 
-    // ✅ Convertir a zona horaria de Guatemala (America/Guatemala = UTC-6)
-    if (anio) whereClauses.push(`EXTRACT(YEAR FROM p.fecha_pago) = ${anio}`);
-    if (mes) whereClauses.push(`EXTRACT(MONTH FROM p.fecha_pago) = ${mes}`);
-    if (dia) whereClauses.push(`EXTRACT(DAY FROM p.fecha_pago) = ${dia}`);
+    // 📅 Rango de fechas (zona Guatemala UTC-6)
+    if (fechaInicio) {
+      whereClauses.push(
+        `(p.fecha_pago AT TIME ZONE 'America/Guatemala')::date >= '${fechaInicio}'::date`
+      );
+    }
+    if (fechaFin) {
+      whereClauses.push(
+        `(p.fecha_pago AT TIME ZONE 'America/Guatemala')::date <= '${fechaFin}'::date`
+      );
+    }
+
+    // 📅 Filtros individuales de día/mes/año (legacy, compatibilidad)
+    if (anio && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(YEAR FROM p.fecha_pago AT TIME ZONE 'America/Guatemala') = ${anio}`);
+    if (mes && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(MONTH FROM p.fecha_pago AT TIME ZONE 'America/Guatemala') = ${mes}`);
+    if (dia && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(DAY FROM p.fecha_pago AT TIME ZONE 'America/Guatemala') = ${dia}`);
+
     whereClauses.push(
       `p.validation_status IN ('validated', 'pending' ,'reset', 'capital')`
     );
@@ -1268,6 +1292,18 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
           AND pci2.inversionista_id = '${inversionistaId}'
         )
       `);
+    }
+
+    // 🏷️ Filtros de crédito
+    if (categoriaCredito) whereClauses.push(`u.categoria = '${categoriaCredito}'`);
+    if (tipoCredito) whereClauses.push(`c.tipo_credito = '${tipoCredito}'`);
+    if (formatoCredito) whereClauses.push(`c.formato_credito = '${formatoCredito}'`);
+    if (soloAplicados === true) whereClauses.push(`p.fecha_aplicado IS NOT NULL`);
+    if (soloAplicados === false) whereClauses.push(`p.fecha_aplicado IS NULL`);
+    if (fechaAplicado) {
+      whereClauses.push(
+        `(p.fecha_aplicado AT TIME ZONE 'America/Guatemala')::date = '${fechaAplicado}'::date`
+      );
     }
 
     // ✅ Solo créditos activos
@@ -1484,7 +1520,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         acc.totalOtros += Number(r.otros || 0);
         acc.totalReserva += Number(r.reserva || 0);
         acc.totalMembresias += Number(r.membresias || 0);
-        acc.totalConvenio += Number(r.pago_convenio || 0);
+        acc.totalConvenio += Number(r.pagoConvenio || 0);
         return acc;
       },
       {
@@ -1540,7 +1576,40 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         .round(2)
         .toNumber(),
     };
-    console.log("Totales finales calculados:", totalesFinales);
+    // 💰 Totales de inversionistas (desde pagos_credito_inversionistas)
+    const totalesInvQuery = sql`
+      SELECT
+        i.inversionista_id AS "inversionistaId",
+        i.nombre AS "nombreInversionista",
+        COALESCE(SUM(pci.abono_capital::numeric), 0) AS "totalAbonoCapital",
+        COALESCE(SUM(pci.abono_interes::numeric), 0) AS "totalAbonoInteres",
+        COALESCE(SUM(pci.abono_iva_12::numeric), 0) AS "totalAbonoIva",
+        ROUND(COALESCE(SUM(pci.abono_interes::numeric), 0) * 0.05, 2) AS "totalIsr",
+        COALESCE(SUM(ci.monto_aportado::numeric), 0) AS "totalMontoAportado"
+      FROM cartera.pagos_credito_inversionistas pci
+      INNER JOIN cartera.pagos_credito p ON p.pago_id = pci.pago_id
+      INNER JOIN cartera.creditos c ON c.credito_id = pci.credito_id
+      INNER JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
+      INNER JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
+      LEFT JOIN cartera.creditos_inversionistas ci
+        ON ci.credito_id = pci.credito_id
+        AND ci.inversionista_id = pci.inversionista_id
+      ${sql.raw(whereSQL)}
+      ${sql.raw(inversionistaId ? `AND pci.inversionista_id = '${inversionistaId}'` : '')}
+      GROUP BY i.inversionista_id, i.nombre
+      ORDER BY i.nombre
+    `;
+
+    const totalesInvResult = await db.execute(totalesInvQuery);
+    const totalesInversionistas = totalesInvResult.rows.map((r: any) => ({
+      inversionistaId: r.inversionistaId,
+      nombreInversionista: r.nombreInversionista,
+      totalAbonoCapital: new Big(r.totalAbonoCapital).round(2).toNumber(),
+      totalAbonoInteres: new Big(r.totalAbonoInteres).round(2).toNumber(),
+      totalAbonoIva: new Big(r.totalAbonoIva).round(2).toNumber(),
+      totalIsr: new Big(r.totalIsr).round(2).toNumber(),
+      totalMontoAportado: new Big(r.totalMontoAportado).round(2).toNumber(),
+    }));
 
     return {
       success: true,
@@ -1551,6 +1620,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       totalPages,
       data,
       totales: totalesFinales,
+      totalesInversionistas,
     };
   } catch (error: any) {
     console.error("❌ Error en getPagosConInversionistas:", error);

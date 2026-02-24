@@ -152,7 +152,6 @@ export interface GetCreditDTO {
     moneda: "Quetzal";
     saldo_total: string;
     extras_total: string;
-    restantes_cuota_actual: string;
     saldo_total_con_extras: string;
   };
   closure: ClosureInfo;

@@ -12,29 +12,7 @@ import { casosCobros } from "../db/schema/cobros";
 import { adminProcedure } from "../lib/orpc";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
-import type { CarteraCuotaCredito } from "../types/cartera-back";
-
-// Helper para calcular días de mora exactos
-function calcularDiasMoraExactos(
-	cuotasAtrasadas: CarteraCuotaCredito[],
-): number {
-	if (!cuotasAtrasadas || cuotasAtrasadas.length === 0) {
-		return 0;
-	}
-
-	const cuotaMasAntigua = cuotasAtrasadas.reduce((antigua, actual) => {
-		const fechaAntigua = new Date(antigua.fecha_vencimiento);
-		const fechaActual = new Date(actual.fecha_vencimiento);
-		return fechaActual < fechaAntigua ? actual : antigua;
-	});
-
-	const fechaVencimiento = new Date(cuotaMasAntigua.fecha_vencimiento);
-	const hoy = new Date();
-	const diffMs = hoy.getTime() - fechaVencimiento.getTime();
-	const diasMora = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-	return Math.max(0, diasMora);
-}
+import { calcularDiasMoraExactos } from "../lib/mora-utils";
 
 export const reportesCarteraRouter = {
 	// ========================================================================

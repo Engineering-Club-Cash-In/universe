@@ -91,6 +91,7 @@ const TYPE_CONFIG: Record<string, { label: string; icon: typeof Bell }> = {
 	action_required: { label: "Acción requerida", icon: Bell },
 	reminder: { label: "Recordatorio", icon: Clock },
 	system: { label: "Sistema", icon: Bell },
+	pay_investors: { label: "Pagar inversionistas", icon: Bell },
 };
 
 const REDIRECT_CONFIG: Record<
@@ -141,6 +142,12 @@ const REDIRECT_CONFIG: Record<
 		getRoute: (id) => ({
 			to: "/crm/analysis",
 			search: { opportunityId: id, stage: "disbursement" },
+		}),
+	},
+	pay_investors: {
+		label: "Pagar inversionistas",
+		getRoute: () => ({
+			to: "/accounting/pay-investors",
 		}),
 	},
 };
@@ -613,13 +620,16 @@ function NotificationCard({
 	const navigate = useNavigate();
 
 	const getEntityLink = () => {
-		if (!notification.redirectPage || !notification.relatedEntityId)
-			return null;
+		if (!notification.redirectPage) return null;
 
 		const config = REDIRECT_CONFIG[notification.redirectPage];
 		if (!config) return null;
 
-		const route = config.getRoute(notification.relatedEntityId);
+		// Algunas notificaciones (como pay_investors) no necesitan relatedEntityId
+		if (!notification.relatedEntityId && notification.redirectPage !== "pay_investors")
+			return null;
+
+		const route = config.getRoute(notification.relatedEntityId ?? "");
 		return {
 			label: config.label,
 			action: () => navigate(route as any),

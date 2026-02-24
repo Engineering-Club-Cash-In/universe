@@ -187,6 +187,10 @@ export const PERMISSIONS = {
 
 	// Vehicles Module Access - All roles can access
 	canAccessVehicles: (_role: UserRole | string): boolean => true,
+
+	// Accounting Module Access (Contabilidad)
+	canAccessAccounting: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.ACCOUNTING,
 } as const;
 
 // Helper functions

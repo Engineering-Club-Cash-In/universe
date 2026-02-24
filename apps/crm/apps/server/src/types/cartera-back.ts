@@ -638,6 +638,50 @@ export class CarteraBackError extends Error {
 	}
 }
 
+// ============================================================================
+// RESUMEN GLOBAL INVERSIONISTAS
+// ============================================================================
+
+export interface BoletaPagoInversionista {
+	boleta_id: number;
+	inversionista_id: number;
+	boleta_url: string;
+	estado: string;
+	notas: string | null;
+	monto_boleta: string;
+	fecha_subida: string;
+}
+
+export interface CreateBoletaInput {
+	inversionista_id: number;
+	boleta_url: string;
+	monto_boleta?: string;
+	notas?: string;
+	subido_por?: number;
+}
+
+export interface ResumenGlobalInversionista {
+	inversionista_id: number;
+	nombre: string;
+	emite_factura: boolean;
+	reinversion: string;
+	banco: string | null;
+	tipo_cuenta: string | null;
+	numero_cuenta: string | null;
+	total_abono_capital: string;
+	total_abono_interes: string;
+	total_abono_iva: string;
+	total_isr: string;
+	total_a_recibir_sin_reinversion: string;
+	total_reinversion: string;
+	total_a_recibir_con_reinversion: string;
+	boleta_pendiente: BoletaPagoInversionista | null;
+}
+
+// ============================================================================
+// ERRORS
+// ============================================================================
+
 export class CarteraBackConnectionError extends CarteraBackError {
 	constructor(message: string) {
 		super(message, 503);

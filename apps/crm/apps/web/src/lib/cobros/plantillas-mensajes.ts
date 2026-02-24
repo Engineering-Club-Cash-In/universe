@@ -29,20 +29,46 @@ export interface PlantillaMensaje {
 	cuerpo: string;
 }
 
+function toCapitalCase(str: string): string {
+	return str
+		.toLowerCase()
+		.split(" ")
+		.map((word) => (word ? word[0].toUpperCase() + word.slice(1) : ""))
+		.join(" ");
+}
+
 export function interpolar(
 	texto: string,
 	variables: VariablesPlantilla,
 ): string {
+	const v = (val: string | number, placeholder: string) =>
+		val !== undefined && val !== null && val !== "" && val !== 0
+			? String(val)
+			: `[${placeholder}]`;
+
+	const nombre = variables.clienteNombre
+		? toCapitalCase(variables.clienteNombre)
+		: "";
+
 	return texto
-		.replace(/{clienteNombre}/g, variables.clienteNombre)
-		.replace(/{fechaPago}/g, variables.fechaPago)
-		.replace(/{cuotaMensual}/g, variables.cuotaMensual)
-		.replace(/{placa}/g, variables.placa)
-		.replace(/{marcaLineaModelo}/g, variables.marcaLineaModelo)
-		.replace(/{montoAdeudado}/g, variables.montoAdeudado)
-		.replace(/{cuotasAtraso}/g, String(variables.cuotasAtraso))
-		.replace(/{telefonoAsesor}/g, variables.telefonoAsesor)
-		.replace(/{nombreAsesor}/g, variables.nombreAsesor);
+		.replace(/{clienteNombre}/g, v(nombre, "nombre cliente"))
+		.replace(/{fechaPago}/g, v(variables.fechaPago, "fecha pago"))
+		.replace(/{cuotaMensual}/g, v(variables.cuotaMensual, "cuota mensual"))
+		.replace(/{placa}/g, v(variables.placa, "placa"))
+		.replace(
+			/{marcaLineaModelo}/g,
+			v(variables.marcaLineaModelo, "marca/modelo"),
+		)
+		.replace(/{montoAdeudado}/g, v(variables.montoAdeudado, "monto adeudado"))
+		.replace(
+			/{cuotasAtraso}/g,
+			v(variables.cuotasAtraso, "cuotas en atraso"),
+		)
+		.replace(
+			/{telefonoAsesor}/g,
+			v(variables.telefonoAsesor, "teléfono asesor"),
+		)
+		.replace(/{nombreAsesor}/g, v(variables.nombreAsesor, "nombre asesor"));
 }
 
 export const PLANTILLAS_MENSAJES: PlantillaMensaje[] = [

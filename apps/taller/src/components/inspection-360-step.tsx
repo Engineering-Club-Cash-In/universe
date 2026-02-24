@@ -124,13 +124,17 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
         let metadataValue: any = rawValue;
 
         // Validation para los inputs de compresión (cilindro_X)
-        if (metadataKey.startsWith('cilindro_') && rawValue !== '') {
-            const num = parseInt(rawValue, 10);
-            if (isNaN(num)) {
-                return; // Ignorar si no es número
+        if (metadataKey.startsWith('cilindro_')) {
+            if (rawValue === '') {
+                metadataValue = 0; // Si está vacío, por defecto es 0 para evitar fallos matemáticos
+            } else {
+                const num = parseInt(rawValue, 10);
+                if (isNaN(num)) {
+                    return; // Ignorar si escriben letras
+                }
+                // Limitar entre 0 y 300 PSI
+                metadataValue = Math.max(0, Math.min(300, num));
             }
-            // Limitar entre 0 y 300 PSI
-            metadataValue = Math.max(0, Math.min(300, num));
         }
 
         const existing = items360.slice();

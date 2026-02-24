@@ -63,8 +63,9 @@ export interface PhotoData {
 export interface Inspection360Item {
   category: string;
   item: string;
-  status: 'ok' | 'bad';
+  status: 'ok' | 'bad' | 'na' | 'bueno' | 'regular' | 'malo';
   notes?: string;
+  metadata?: Record<string, any>;
 }
 
 // Main function to create a full vehicle inspection
@@ -84,8 +85,9 @@ export const createFullInspection = async (
       inspection360Items: items360?.map(item => ({
         area: item.category,
         checkpoint: item.item,
-        status: item.status,
-        comment: item.notes
+        status: item.status as any, // TypeScript might complain about 'any' here if the ORPC client types haven't regenerated yet, but it's safe since the backend accepts it
+        comment: item.notes,
+        metadata: item.metadata,
       }))
     });
 

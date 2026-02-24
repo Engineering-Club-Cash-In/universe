@@ -31,7 +31,7 @@ export async function uploadFileToTwenty(
   form.append("map", JSON.stringify({ "1": ["variables.file"] }));
 
   // Actual file content
-  form.append("1", new Blob([fileBuffer]), fileName);
+  form.append("1", new Blob([new Uint8Array(fileBuffer)]), fileName);
 
   const response = await fetch("https://crm.devteamatcci.site/graphql", {
     method: "POST",

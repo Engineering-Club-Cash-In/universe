@@ -34,12 +34,12 @@ export const inspectionStatusEnum = pgEnum("inspection_status", [
 
 // Enum for 360 inspection items status
 export const INSPECTION_360_STATUSES = [
-	"ok",
-	"bad",
-	"na",
-	"bueno",
-	"regular",
-	"malo",
+	"GOOD",
+	"REGULAR",
+	"BAD",
+	"NA",
+	"OK",
+	"LEGACY_BAD",
 ] as const;
 
 export const inspection360StatusEnum = pgEnum(

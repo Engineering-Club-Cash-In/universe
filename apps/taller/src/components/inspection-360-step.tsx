@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { useInspection } from '../contexts/InspectionContext';
+import { useInspection, InspectionStatus } from '../contexts/InspectionContext';
 import { INSPECTION_AREAS } from '../lib/inspection-data';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
@@ -55,25 +55,32 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
         ];
         
         // Sesgo para datos dummy
-        const statuses: ('bueno' | 'regular' | 'malo' | 'na')[] = ['bueno', 'bueno', 'bueno', 'bueno', 'regular', 'malo', 'na'];
+        const statuses: InspectionStatus[] = [
+            InspectionStatus.GOOD, InspectionStatus.GOOD, InspectionStatus.GOOD, InspectionStatus.GOOD, 
+            InspectionStatus.REGULAR, InspectionStatus.BAD, InspectionStatus.NA
+        ];
+
+        const MIN_COMPRESSION_PSI = 110;
+        const MAX_COMPRESSION_PSI = 150;
+        const generateRandomCompression = () => Math.floor(Math.random() * (MAX_COMPRESSION_PSI - MIN_COMPRESSION_PSI + 1) + MIN_COMPRESSION_PSI);
 
         INSPECTION_AREAS.forEach(area => {
             area.points.forEach(point => {
                 const randomStatus = statuses[Math.floor(Math.random() * statuses.length)];
-                const isFail = randomStatus === 'malo' || randomStatus === 'regular';
+                const isFail = randomStatus === InspectionStatus.BAD || randomStatus === InspectionStatus.REGULAR;
                 
                 if (point.id === 'compresiones') {
                     newItems.push({
                         category: area.id,
                         item: point.label,
-                        status: 'bueno',
+                        status: InspectionStatus.GOOD,
                         metadata: {
-                            cilindro_1: Math.floor(Math.random() * (150 - 110 + 1) + 110),
-                            cilindro_2: Math.floor(Math.random() * (150 - 110 + 1) + 110),
-                            cilindro_3: Math.floor(Math.random() * (150 - 110 + 1) + 110),
-                            cilindro_4: Math.floor(Math.random() * (150 - 110 + 1) + 110),
-                            cilindro_5: Math.floor(Math.random() * (150 - 110 + 1) + 110),
-                            cilindro_6: Math.floor(Math.random() * (150 - 110 + 1) + 110),
+                            cilindro_1: generateRandomCompression(),
+                            cilindro_2: generateRandomCompression(),
+                            cilindro_3: generateRandomCompression(),
+                            cilindro_4: generateRandomCompression(),
+                            cilindro_5: generateRandomCompression(),
+                            cilindro_6: generateRandomCompression(),
                             cilindro_7: 0,
                             cilindro_8: 0,
                         }
@@ -93,7 +100,7 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
         setOpenSections(allOpen);
     };
 
-    const handleStatusChange = (category: string, itemLabel: string, status: 'ok' | 'bad' | 'na' | 'bueno' | 'regular' | 'malo') => {
+    const handleStatusChange = (category: string, itemLabel: string, status: InspectionStatus) => {
         const existing = items360.slice();
         const existingIndex = existing.findIndex(i => i.item === itemLabel && i.category === category);
 
@@ -116,7 +123,7 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
             existing[existingIndex] = { ...existing[existingIndex], notes };
             setItems360(existing);
         } else {
-             setItems360([...existing, { category, item: itemLabel, status: 'na', notes }]);
+             setItems360([...existing, { category, item: itemLabel, status: InspectionStatus.NA, notes }]);
         }
     };
 
@@ -150,7 +157,7 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
             setItems360(existing);
         } else {
             // Default to 'bueno' explicitly if they start typing compressions without selecting status
-            setItems360([...existing, { category, item: itemLabel, status: 'bueno', metadata: { [metadataKey]: metadataValue } }]);
+            setItems360([...existing, { category, item: itemLabel, status: InspectionStatus.GOOD, metadata: { [metadataKey]: metadataValue } }]);
         }
     };
 
@@ -170,21 +177,21 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
         healthScore 
     } = useMemo(() => {
         const completed = items360.length;
-        const _failedItemsCount = items360.filter(i => ['bad', 'regular', 'malo'].includes(i.status)).length;
-        const _okItemsCount = items360.filter(i => ['ok', 'bueno', 'na'].includes(i.status)).length;
+        const _failedItemsCount = items360.filter(i => [InspectionStatus.LEGACY_BAD, InspectionStatus.REGULAR, InspectionStatus.BAD].includes(i.status as InspectionStatus)).length;
+        const _okItemsCount = items360.filter(i => [InspectionStatus.OK, InspectionStatus.GOOD, InspectionStatus.NA].includes(i.status as InspectionStatus)).length;
         
         // Calcular Salud
         let _healthScore = 0;
         if (completed > 0) {
-            const countableItems = items360.filter(i => i.status !== 'na');
+            const countableItems = items360.filter(i => i.status !== InspectionStatus.NA);
             if (countableItems.length === 0) {
                 _healthScore = 100;
             } else {
                 let totalScore = 0;
                 countableItems.forEach(item => {
-                    if (item.status === 'ok' || item.status === 'bueno') {
+                    if (item.status === InspectionStatus.OK || item.status === InspectionStatus.GOOD) {
                         totalScore += 100;
-                    } else if (item.status === 'regular') {
+                    } else if (item.status === InspectionStatus.REGULAR) {
                         totalScore += 50;
                     }
                 });
@@ -317,10 +324,10 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
 
                                     {area.points.map((point) => {
                                         const state = getItemState(area.id, point.label);
-                                        const isNa = state?.status === 'na';
-                                        const isBueno = state?.status === 'bueno' || state?.status === 'ok'; // Fallback a ok
-                                        const isRegular = state?.status === 'regular';
-                                        const isMalo = state?.status === 'malo' || state?.status === 'bad'; // Fallback a bad
+                                        const isNa = state?.status === InspectionStatus.NA;
+                                        const isBueno = state?.status === InspectionStatus.GOOD || state?.status === InspectionStatus.OK; // Fallback a ok
+                                        const isRegular = state?.status === InspectionStatus.REGULAR;
+                                        const isMalo = state?.status === InspectionStatus.BAD || state?.status === InspectionStatus.LEGACY_BAD; // Fallback a bad
                                         
                                         const hasWarning = isRegular || isMalo;
 
@@ -341,7 +348,7 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
                                                         <Button
                                                             variant="outline"
                                                             size="sm"
-                                                            onClick={() => handleStatusChange(area.id, point.label, 'na')}
+                                                            onClick={() => handleStatusChange(area.id, point.label, InspectionStatus.NA)}
                                                             className={cn(
                                                                 "h-8 px-3 gap-1.5 min-w-[70px] transition-all",
                                                                 isNa
@@ -356,7 +363,7 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
                                                         <Button
                                                             variant="outline"
                                                             size="sm"
-                                                            onClick={() => handleStatusChange(area.id, point.label, 'bueno')}
+                                                            onClick={() => handleStatusChange(area.id, point.label, InspectionStatus.GOOD)}
                                                             className={cn(
                                                                 "h-8 px-3 gap-1.5 min-w-[80px] transition-all",
                                                                 isBueno
@@ -371,7 +378,7 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
                                                         <Button
                                                             variant="outline"
                                                             size="sm"
-                                                            onClick={() => handleStatusChange(area.id, point.label, 'regular')}
+                                                            onClick={() => handleStatusChange(area.id, point.label, InspectionStatus.REGULAR)}
                                                             className={cn(
                                                                 "h-8 px-3 gap-1.5 min-w-[80px] transition-all",
                                                                 isRegular
@@ -386,7 +393,7 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
                                                         <Button
                                                             variant="outline"
                                                             size="sm"
-                                                            onClick={() => handleStatusChange(area.id, point.label, 'malo')}
+                                                            onClick={() => handleStatusChange(area.id, point.label, InspectionStatus.BAD)}
                                                             className={cn(
                                                                 "h-8 px-3 gap-1.5 min-w-[80px] transition-all",
                                                                 isMalo

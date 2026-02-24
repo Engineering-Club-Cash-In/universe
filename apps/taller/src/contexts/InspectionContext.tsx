@@ -7,10 +7,20 @@ export interface SectionTimes {
   [sectionId: string]: number; // tiempo en segundos
 }
 
+export enum InspectionStatus {
+  GOOD = 'GOOD',
+  REGULAR = 'REGULAR',
+  BAD = 'BAD',
+  NA = 'NA',
+  // Backward compatibility keys
+  OK = 'OK',
+  LEGACY_BAD = 'LEGACY_BAD'
+}
+
 export interface Inspection360Item {
   category: string;
   item: string;
-  status: 'ok' | 'bad' | 'na' | 'bueno' | 'regular' | 'malo';
+  status: InspectionStatus | 'ok' | 'bad' | 'na' | 'bueno' | 'regular' | 'malo' | 'GOOD' | 'REGULAR' | 'BAD' | 'NA' | 'OK' | 'LEGACY_BAD';
   notes?: string;
   metadata?: Record<string, any>;
 }

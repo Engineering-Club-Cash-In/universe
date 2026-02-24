@@ -282,7 +282,7 @@ const ETIQUETA_LABELS_FILTRO: Record<string, string> = {
 function RouteComponent() {
 	const { data: session } = authClient.useSession();
 	const navigate = useNavigate();
-	const [filtroTemporal, setFiltroTemporal] = useState<FiltroTemporal>("todos");
+	const [filtroTemporal, setFiltroTemporal] = useState<FiltroTemporal>("hoy");
 	const [mostrarCompletadosIncobrables, setMostrarCompletadosIncobrables] =
 		useState(false);
 	const [filtroEtapa, setFiltroEtapa] = useState<string | null>(null);

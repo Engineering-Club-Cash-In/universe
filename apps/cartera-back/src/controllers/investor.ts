@@ -1246,17 +1246,12 @@ const mes = fechaParaMes
                   cuota_inversor = new Big(0);
                   break;
 
-                case "reinversion_variable": {
-                  const montoReinv = new Big(inv.monto_reinversion ?? 0);
-                  const interesTotal = abono_interes.plus(inv.emite_factura ? abono_iva : isr.neg());
-                  // Primero resta de interés, luego de capital
-                  const reinvInteres = montoReinv.gt(interesTotal) ? interesTotal : montoReinv;
-                  const reinvCapital = montoReinv.minus(reinvInteres).gt(abono_capital)
-                    ? abono_capital
-                    : montoReinv.minus(reinvInteres);
-                  cuota_inversor = abono_capital.minus(reinvCapital).plus(interesTotal.minus(reinvInteres));
+                case "reinversion_variable":
+                  // Se calcula como sin_reinversion per-pago; el tope global se aplica después
+                  cuota_inversor = abono_capital
+                    .plus(abono_interes)
+                    .plus(inv.emite_factura ? abono_iva : isr.neg());
                   break;
-                }
 
                 default:
                   cuota_inversor = abono_capital
@@ -1350,6 +1345,13 @@ const mes = fechaParaMes
           };
         })
       );
+
+      // Aplicar reinversión variable como tope global sobre el total
+      if (inv.reinversion === "reinversion_variable") {
+        const montoReinv = new Big(inv.monto_reinversion ?? 0);
+        const reinversion = montoReinv.gt(subtotal.total_cuota) ? subtotal.total_cuota : montoReinv;
+        subtotal.total_cuota = subtotal.total_cuota.minus(reinversion);
+      }
 
       // 🔹 Retornar estructura del inversionista
       return {
@@ -1611,15 +1613,10 @@ export async function getInvestorTotalsGlobales(
           reinvInteres = abono_interes;
           cuota_inversor = new Big(0);
           break;
-        case "reinversion_variable": {
-          const montoReinv = new Big(inv.monto_reinversion ?? 0);
-          reinvInteres = montoReinv.gt(abono_interes) ? abono_interes : montoReinv;
-          reinvCapital = montoReinv.minus(reinvInteres).gt(abono_capital)
-            ? abono_capital
-            : montoReinv.minus(reinvInteres);
-          cuota_inversor = abono_capital.minus(reinvCapital).plus(interesTotal.minus(reinvInteres));
+        case "reinversion_variable":
+          // Se calcula como sin_reinversion per-pago; el tope global se aplica después
+          cuota_inversor = abono_capital.plus(interesTotal);
           break;
-        }
         default:
           cuota_inversor = abono_capital.plus(interesTotal);
       }
@@ -1640,6 +1637,14 @@ export async function getInvestorTotalsGlobales(
     subtotal.total_monto_aportado = subtotal.total_monto_aportado.plus(new Big(c.monto_aportado ?? 0));
     subtotal.total_capital_creditos = subtotal.total_capital_creditos.plus(capital_credito);
     subtotal.total_capital_actual = subtotal.total_capital_actual.plus(capital_actual);
+  }
+
+  // Aplicar reinversión variable como tope global sobre el total
+  if (inv.reinversion === "reinversion_variable") {
+    const montoReinv = new Big(inv.monto_reinversion ?? 0);
+    const reinversion = montoReinv.gt(subtotal.total_cuota) ? subtotal.total_cuota : montoReinv;
+    subtotal.total_reinversion = reinversion;
+    subtotal.total_cuota = subtotal.total_cuota.minus(reinversion);
   }
 
   // 7. Upsert en reinversiones
@@ -1966,15 +1971,10 @@ export async function getInvestorMirrorSummary(
           reinvInteres = abono_interes;
           cuota_inversor = new Big(0);
           break;
-        case "reinversion_variable": {
-          const montoReinv = new Big(inv.monto_reinversion ?? 0);
-          reinvInteres = montoReinv.gt(abono_interes) ? abono_interes : montoReinv;
-          reinvCapital = montoReinv.minus(reinvInteres).gt(abono_capital)
-            ? abono_capital
-            : montoReinv.minus(reinvInteres);
-          cuota_inversor = abono_capital.minus(reinvCapital).plus(interesTotal.minus(reinvInteres));
+        case "reinversion_variable":
+          // Se calcula como sin_reinversion per-pago; el tope global se aplica después
+          cuota_inversor = abono_capital.plus(interesTotal);
           break;
-        }
         default:
           cuota_inversor = abono_capital.plus(interesTotal);
       }
@@ -1995,6 +1995,14 @@ export async function getInvestorMirrorSummary(
     const capital_actual = montoAportadoBase.minus(abonoCapitalCredito);
     sg.total_monto_aportado = sg.total_monto_aportado.plus(capital_actual);
     sg.total_capital_actual = sg.total_capital_actual.plus(capital_actual);
+  }
+
+  // Aplicar reinversión variable como tope global sobre el total
+  if (inv.reinversion === "reinversion_variable") {
+    const montoReinv = new Big(inv.monto_reinversion ?? 0);
+    const reinversion = montoReinv.gt(sg.total_cuota) ? sg.total_cuota : montoReinv;
+    sg.total_reinversion = reinversion;
+    sg.total_cuota = sg.total_cuota.minus(reinversion);
   }
 
   // ── PASO 5: Retornar datos del inversionista + subtotales globales ─────────
@@ -3176,8 +3184,7 @@ export async function resumenGlobalInversionistas(
                   ${pe.abono_capital}::numeric
                 )
             ELSE 0
-          END
-      ), 0)`,
+          END`,
     })
     .from(inversionistas)
     .leftJoin(

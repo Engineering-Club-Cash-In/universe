@@ -272,9 +272,7 @@ export default function Header() {
 								<DropdownMenu>
 									<DropdownMenuTrigger asChild>
 										<Button
-											variant={
-												isActive("/accounting") ? "secondary" : "ghost"
-											}
+											variant={isActive("/accounting") ? "secondary" : "ghost"}
 											size="sm"
 											className="gap-1"
 										>

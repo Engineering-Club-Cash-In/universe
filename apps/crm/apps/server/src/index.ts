@@ -27,15 +27,14 @@ import {
 import { createPublicLead } from "./controllers/public-lead";
 import type { db } from "./db";
 import { otps } from "./db/schema/otp";
-import { auth } from "./lib/auth";
-import { createContext } from "./lib/context";
-import { appRouter } from "./routers/index";
-import externalContractsRouter from "./routes/external-contracts";
-
 import {
 	checkCasosSinContacto,
 	checkSeguimientosVencidos,
 } from "./jobs/cobros-notifications";
+import { auth } from "./lib/auth";
+import { createContext } from "./lib/context";
+import { appRouter } from "./routers/index";
+import externalContractsRouter from "./routes/external-contracts";
 
 const app = new Hono();
 

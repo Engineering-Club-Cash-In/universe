@@ -82,9 +82,9 @@ function useUploadBoleta() {
 		onSuccess: () => {
 			queryClient.invalidateQueries({
 				queryKey: orpc.getResumenGlobalInversionistas.queryOptions().queryKey,
-			})
+			});
 		},
-	})
+	});
 
 	const upload = useCallback(
 		async (params: {
@@ -105,7 +105,7 @@ function useUploadBoleta() {
 					body: formData,
 					credentials: "include",
 				},
-			)
+			);
 
 			if (!uploadRes.ok) {
 				const err = await uploadRes.json();
@@ -122,10 +122,10 @@ function useUploadBoleta() {
 				boleta_url: url,
 				monto_boleta: params.monto_boleta,
 				notas: params.notas || undefined,
-			})
+			});
 		},
 		[createBoletaMutation],
-	)
+	);
 
 	return { upload, isPending: createBoletaMutation.isPending };
 }
@@ -150,7 +150,7 @@ function SubirBoletaDialog({
 	const handleSubmit = async () => {
 		if (!file) {
 			toast.error("Selecciona un archivo");
-			return
+			return;
 		}
 
 		setUploading(true);
@@ -160,7 +160,7 @@ function SubirBoletaDialog({
 				inversionista_id: inv.inversionista_id,
 				monto_boleta: inv.total_a_recibir_con_reinversion,
 				notas: notas.trim() || undefined,
-			})
+			});
 			toast.success("Boleta subida correctamente");
 			setFile(null);
 			setNotas("");
@@ -170,7 +170,7 @@ function SubirBoletaDialog({
 		} finally {
 			setUploading(false);
 		}
-	}
+	};
 
 	const handleClose = (value: boolean) => {
 		if (!uploading) {
@@ -178,7 +178,7 @@ function SubirBoletaDialog({
 			setNotas("");
 			onOpenChange(value);
 		}
-	}
+	};
 
 	return (
 		<Dialog open={open} onOpenChange={handleClose}>
@@ -254,7 +254,7 @@ function SubirBoletaDialog({
 				</DialogFooter>
 			</DialogContent>
 		</Dialog>
-	)
+	);
 }
 
 // ─── Card del inversionista ───────────────────────────────────────────────────
@@ -264,7 +264,7 @@ function DetailItem({ label, value }: { label: string; value: string }) {
 		<span className="text-[10px] text-muted-foreground">
 			{label} <span className="font-medium text-foreground/70">{value}</span>
 		</span>
-	)
+	);
 }
 
 function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
@@ -377,7 +377,7 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 				onOpenChange={setDialogOpen}
 			/>
 		</>
-	)
+	);
 }
 
 // ─── Página principal ─────────────────────────────────────────────────────────
@@ -387,7 +387,7 @@ function PagarInversionistas() {
 	const userProfile = useQuery({
 		...orpc.getUserProfile.queryOptions(),
 		enabled: !!session,
-	})
+	});
 	const userRole = userProfile.data?.role;
 
 	const [search, setSearch] = useState("");
@@ -397,7 +397,7 @@ function PagarInversionistas() {
 		...orpc.getResumenGlobalInversionistas.queryOptions(),
 		enabled:
 			!!session && !!userRole && PERMISSIONS.canAccessAccounting(userRole),
-	})
+	});
 
 	const inversionistas = (data ?? []) as ResumenInversionista[];
 
@@ -408,7 +408,7 @@ function PagarInversionistas() {
 			(inv) =>
 				inv.nombre.toLowerCase().includes(q) ||
 				String(inv.inversionista_id).includes(q),
-		)
+		);
 	}, [inversionistas, search]);
 
 	const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -416,12 +416,12 @@ function PagarInversionistas() {
 	const paginatedData = filtered.slice(
 		(safePage - 1) * PAGE_SIZE,
 		safePage * PAGE_SIZE,
-	)
+	);
 
 	const handleSearch = (value: string) => {
 		setSearch(value);
 		setPage(1);
-	}
+	};
 
 	if (!userRole || !PERMISSIONS.canAccessAccounting(userRole)) {
 		return (
@@ -433,7 +433,7 @@ function PagarInversionistas() {
 					</p>
 				</div>
 			</div>
-		)
+		);
 	}
 
 	if (isLoading) {
@@ -441,7 +441,7 @@ function PagarInversionistas() {
 			<div className="flex min-h-screen items-center justify-center">
 				<Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
 			</div>
-		)
+		);
 	}
 
 	if (error) {
@@ -454,14 +454,14 @@ function PagarInversionistas() {
 					</p>
 				</div>
 			</div>
-		)
+		);
 	}
 
 	const totalARecibir = inversionistas.reduce(
 		(acc, inv) =>
 			acc + Number.parseFloat(inv.total_a_recibir_con_reinversion || "0"),
 		0,
-	)
+	);
 	const conBoleta = inversionistas.filter(
 		(inv) => inv.boleta_pendiente != null,
 	).length;
@@ -507,7 +507,7 @@ function PagarInversionistas() {
 			{/* Buscador + paginación */}
 			<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 				<div className="relative max-w-xs flex-1">
-					<Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+					<Search className="-translate-y-1/2 absolute top-1/2 left-3 h-4 w-4 text-muted-foreground" />
 					<Input
 						placeholder="Buscar por nombre o ID..."
 						value={search}
@@ -550,7 +550,7 @@ function PagarInversionistas() {
 				</div>
 			)}
 		</div>
-	)
+	);
 }
 
 // ─── Componentes auxiliares ───────────────────────────────────────────────────
@@ -582,7 +582,7 @@ function StatCard({
 				</div>
 			</CardContent>
 		</Card>
-	)
+	);
 }
 
 function PaginationControls({
@@ -623,5 +623,5 @@ function PaginationControls({
 				<ChevronRight className="h-4 w-4" />
 			</Button>
 		</div>
-	)
+	);
 }

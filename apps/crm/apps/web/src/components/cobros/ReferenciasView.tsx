@@ -338,16 +338,10 @@ export function ReferenciasView({ leadId }: ReferenciasViewProps) {
 					</DialogHeader>
 					{renderFormFields()}
 					<DialogFooter>
-						<Button
-							variant="outline"
-							onClick={() => setIsAddDialogOpen(false)}
-						>
+						<Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
 							Cancelar
 						</Button>
-						<Button
-							onClick={handleCreate}
-							disabled={createMutation.isPending}
-						>
+						<Button onClick={handleCreate} disabled={createMutation.isPending}>
 							{createMutation.isPending ? (
 								"Guardando..."
 							) : (
@@ -378,10 +372,7 @@ export function ReferenciasView({ leadId }: ReferenciasViewProps) {
 						>
 							Cancelar
 						</Button>
-						<Button
-							onClick={handleUpdate}
-							disabled={updateMutation.isPending}
-						>
+						<Button onClick={handleUpdate} disabled={updateMutation.isPending}>
 							{updateMutation.isPending ? (
 								"Guardando..."
 							) : (

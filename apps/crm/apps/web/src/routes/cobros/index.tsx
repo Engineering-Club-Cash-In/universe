@@ -33,6 +33,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { authClient } from "@/lib/auth-client";
 import { type ContratoCobranza, columns } from "@/lib/cobros/columns";
+import { parseFechaLocal } from "@/lib/date-utils";
 import { PERMISSIONS, ROLES } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
@@ -42,7 +43,7 @@ function calcularDiasHastaPago(fechaProximoPago: string | null) {
 
 	const ahora = new Date();
 	const hoy = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
-	const fechaPago = new Date(fechaProximoPago);
+	const fechaPago = parseFechaLocal(fechaProximoPago);
 
 	const diasRestantes = differenceInDays(fechaPago, hoy);
 
@@ -281,11 +282,11 @@ const ETIQUETA_LABELS_FILTRO: Record<string, string> = {
 function RouteComponent() {
 	const { data: session } = authClient.useSession();
 	const navigate = useNavigate();
-	const [filtroTemporal, setFiltroTemporal] = useState<FiltroTemporal>("todos");
+	const [filtroTemporal, setFiltroTemporal] = useState<FiltroTemporal>("hoy");
 	const [mostrarCompletadosIncobrables, setMostrarCompletadosIncobrables] =
 		useState(false);
 	const [filtroEtapa, setFiltroEtapa] = useState<string | null>(null);
-	const [filtroEtiqueta, setFiltroEtiqueta] = useState<string | null>(null);
+	const [filtroEtiquetas, setFiltroEtiquetas] = useState<string[]>([]);
 	const [page, setPage] = useState(1);
 	const [filterValue, setFilterValue] = useState("");
 	const [debouncedFilterValue, setDebouncedFilterValue] = useState("");
@@ -329,15 +330,17 @@ function RouteComponent() {
 			const en7Dias = new Date(hoy);
 			en7Dias.setDate(en7Dias.getDate() + 7);
 
-			return data.filter((caso) => {
-				if (!caso.proximoContacto) return false;
-				const fecha = new Date(caso.proximoContacto);
-				return fecha <= en7Dias;
-			}).sort((a, b) => {
-				const fechaA = new Date(a.proximoContacto!);
-				const fechaB = new Date(b.proximoContacto!);
-				return fechaA.getTime() - fechaB.getTime();
-			});
+			return data
+				.filter((caso) => {
+					if (!caso.proximoContacto) return false;
+					const fecha = new Date(caso.proximoContacto);
+					return fecha <= en7Dias;
+				})
+				.sort((a, b) => {
+					const fechaA = new Date(a.proximoContacto!);
+					const fechaB = new Date(b.proximoContacto!);
+					return fechaA.getTime() - fechaB.getTime();
+				});
 		},
 	});
 
@@ -458,10 +461,12 @@ function RouteComponent() {
 			);
 		}
 
-		// Filtrar por etiqueta
-		if (filtroEtiqueta) {
+		// Filtrar por etiquetas (AND: el caso debe tener todas las seleccionadas)
+		if (filtroEtiquetas.length > 0) {
 			filtrados = filtrados.filter(
-				(c) => c.etiquetas && c.etiquetas.includes(filtroEtiqueta),
+				(c) =>
+					c.etiquetas &&
+					filtroEtiquetas.every((et) => c.etiquetas!.includes(et)),
 			);
 		}
 
@@ -482,7 +487,12 @@ function RouteComponent() {
 			// Incluir casos en mora (días negativos) y casos próximos a vencer
 			return c?.diasHastaPago !== null && c?.diasHastaPago <= limite;
 		});
-	}, [creditosConDias, filtroTemporal, mostrarCompletadosIncobrables, filtroEtiqueta]);
+	}, [
+		creditosConDias,
+		filtroTemporal,
+		mostrarCompletadosIncobrables,
+		filtroEtiquetas,
+	]);
 
 	// Check permissions after all hooks
 	if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
@@ -816,7 +826,7 @@ function RouteComponent() {
 										</div>
 										<div className="text-right">
 											<p
-												className={`text-sm font-medium ${esPasado ? "text-red-600" : esHoy ? "text-amber-600" : "text-muted-foreground"}`}
+												className={`font-medium text-sm ${esPasado ? "text-red-600" : esHoy ? "text-amber-600" : "text-muted-foreground"}`}
 											>
 												{esHoy
 													? "Hoy"
@@ -866,7 +876,9 @@ function RouteComponent() {
 										"mora_90",
 										"mora_120",
 									];
-									return orden.indexOf(a.categoria) - orden.indexOf(b.categoria);
+									return (
+										orden.indexOf(a.categoria) - orden.indexOf(b.categoria)
+									);
 								})
 								.map((meta) => {
 									const label: Record<string, string> = {
@@ -929,22 +941,29 @@ function RouteComponent() {
 											key={meta.id}
 											className={`rounded-lg border p-3 ${color[meta.categoria] || ""}`}
 										>
-											<p className="font-medium text-xs text-muted-foreground">
+											<p className="font-medium text-muted-foreground text-xs">
 												{label[meta.categoria] || meta.categoria}
 											</p>
 											<p
-												className={`font-bold text-xl ${textColor[meta.categoria] || ""}`}
+												className={`font-bold text-2xl ${actual !== undefined ? (cumplida ? "text-green-600" : "text-red-600") : (textColor[meta.categoria] || "")}`}
 											>
-												{objetivo.toFixed(2)}%
+												{actual !== undefined
+													? `${actual.toFixed(2)}%`
+													: "—"}
 											</p>
-											{actual !== undefined && (
-												<p
-													className={`text-xs font-medium ${cumplida ? "text-green-600" : "text-red-600"}`}
-												>
-													Real: {actual.toFixed(2)}%{" "}
-													{cumplida ? "✓" : "↑"}
-												</p>
-											)}
+											<p className="text-muted-foreground text-xs">
+												Meta: {objetivo.toFixed(2)}%
+												{actual !== undefined &&
+													(cumplida ? (
+														<span className="ml-1 font-semibold text-green-600">
+															✓
+														</span>
+													) : (
+														<span className="ml-1 font-semibold text-red-600">
+															↑ {(actual - objetivo).toFixed(2)}%
+														</span>
+													))}
+											</p>
 										</div>
 									);
 								})}
@@ -1008,63 +1027,70 @@ function RouteComponent() {
 							});
 						}}
 						filterContent={
-							<>
-								<span className="font-medium text-muted-foreground text-sm">
-									Filtrar por etapa:
-								</span>
-								<Button
-									variant={filtroEtapa === null ? "default" : "outline"}
-									size="sm"
-									onClick={() => {
-										setFiltroEtapa(null);
-										setPage(1);
-									}}
-								>
-									Todas
-								</Button>
-								{filtrosEtapa.map((filtro) => (
-									<Badge
-										key={filtro.key}
-										className={`cursor-pointer ${filtroEtapa === filtro.key ? filtro.color : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
+							<div className="flex flex-col gap-3 w-full">
+								<div className="flex flex-wrap items-center gap-2 rounded-md border border-border/50 bg-muted/30 px-3 py-2">
+									<span className="font-semibold text-foreground text-sm">
+										Filtrar por etapa:
+									</span>
+									<Button
+										variant={filtroEtapa === null ? "default" : "outline"}
+										size="sm"
 										onClick={() => {
-											setFiltroEtapa(
-												filtroEtapa === filtro.key ? null : filtro.key,
-											);
+											setFiltroEtapa(null);
 											setPage(1);
 										}}
 									>
-										{filtro.label}
-									</Badge>
-								))}
-								<Separator orientation="vertical" className="mx-2 h-6" />
-								<span className="font-medium text-muted-foreground text-sm">
-									Etiqueta:
-								</span>
-								<Button
-									variant={filtroEtiqueta === null ? "default" : "outline"}
-									size="sm"
-									onClick={() => {
-										setFiltroEtiqueta(null);
-										setPage(1);
-									}}
-								>
-									Todas
-								</Button>
-								{Object.entries(ETIQUETA_LABELS_FILTRO).map(([key, label]) => (
-									<Badge
-										key={key}
-										className={`cursor-pointer ${filtroEtiqueta === key ? "bg-primary text-primary-foreground" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
+										Todas
+									</Button>
+									{filtrosEtapa.map((filtro) => (
+										<Badge
+											key={filtro.key}
+											className={`cursor-pointer ${filtroEtapa === filtro.key ? filtro.color : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
+											onClick={() => {
+												setFiltroEtapa(
+													filtroEtapa === filtro.key ? null : filtro.key,
+												);
+												setPage(1);
+											}}
+										>
+											{filtro.label}
+										</Badge>
+									))}
+								</div>
+								<div className="flex flex-wrap items-center gap-2 rounded-md border border-border/50 bg-muted/30 px-3 py-2">
+									<span className="font-semibold text-foreground text-sm">
+										Etiquetas:
+									</span>
+									<Button
+										variant={filtroEtiquetas.length === 0 ? "default" : "outline"}
+										size="sm"
 										onClick={() => {
-											setFiltroEtiqueta(
-												filtroEtiqueta === key ? null : key,
-											);
+											setFiltroEtiquetas([]);
 											setPage(1);
 										}}
 									>
-										{label}
-									</Badge>
-								))}
-							</>
+										Todas
+									</Button>
+									{Object.entries(ETIQUETA_LABELS_FILTRO).map(
+										([key, label]) => (
+											<Badge
+												key={key}
+												className={`cursor-pointer ${filtroEtiquetas.includes(key) ? "bg-primary text-primary-foreground" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
+												onClick={() => {
+													setFiltroEtiquetas((prev) =>
+														prev.includes(key)
+															? prev.filter((e) => e !== key)
+															: [...prev, key],
+													);
+													setPage(1);
+												}}
+											>
+												{label}
+											</Badge>
+										),
+									)}
+								</div>
+							</div>
 						}
 						serverPagination={{
 							page: page,

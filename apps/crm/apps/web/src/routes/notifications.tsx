@@ -633,7 +633,10 @@ function NotificationCard({
 		if (!config) return null;
 
 		// Algunas notificaciones (como pay_investors) no necesitan relatedEntityId
-		if (!notification.relatedEntityId && notification.redirectPage !== "pay_investors")
+		if (
+			!notification.relatedEntityId &&
+			notification.redirectPage !== "pay_investors"
+		)
 			return null;
 
 		const route = config.getRoute(notification.relatedEntityId ?? "");

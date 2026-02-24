@@ -15,14 +15,21 @@ import {
 	metodoContactoEnum,
 	recuperacionesVehiculo,
 } from "../db/schema/cobros";
-import { clients, leads, opportunities, PARENTESCO_VALUES, referenciasLead, salesStages } from "../db/schema/crm";
+import {
+	clients,
+	leads,
+	opportunities,
+	PARENTESCO_VALUES,
+	referenciasLead,
+	salesStages,
+} from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
+import { calcularDiasMoraExactos } from "../lib/mora-utils";
 import {
 	cobrosProcedure,
 	cobrosSupervisorProcedure,
 	crmOrCobrosProcedure,
 } from "../lib/orpc";
-import { createNotification } from "./notifications";
 import { PERMISSIONS } from "../lib/roles";
 import { carteraBackClient } from "../services/cartera-back-client";
 import {
@@ -36,7 +43,7 @@ import {
 	sincronizarCasosCobros,
 } from "../services/sync-casos-cobros";
 import type { CreditoDirectoResponse } from "../types/cartera-back";
-import { calcularDiasMoraExactos } from "../lib/mora-utils";
+import { createNotification } from "./notifications";
 
 // Helper: Obtener todos los créditos de todos los estados
 async function obtenerTodosLosCreditosCarteraBack(params: {
@@ -1826,7 +1833,8 @@ export const cobrosRouter = {
 					cuotasVencidas: cuotasAtrasadas,
 
 					// Datos de contacto (del caso de cobros primero, fallback al lead)
-					telefonoPrincipal: casoCobro?.telefonoPrincipal || leadInfo?.telefono || null,
+					telefonoPrincipal:
+						casoCobro?.telefonoPrincipal || leadInfo?.telefono || null,
 					telefonoAlternativo: casoCobro?.telefonoAlternativo || null,
 					emailContacto: casoCobro?.emailContacto || leadInfo?.email || null,
 					direccionContacto: direccion || null,
@@ -2490,7 +2498,12 @@ export const cobrosRouter = {
 					notas: input.notas || null,
 					updatedAt: new Date(),
 				})
-				.where(and(eq(referenciasLead.id, input.id), eq(referenciasLead.leadId, input.leadId)))
+				.where(
+					and(
+						eq(referenciasLead.id, input.id),
+						eq(referenciasLead.leadId, input.leadId),
+					),
+				)
 				.returning();
 
 			if (!updated) {
@@ -2512,7 +2525,12 @@ export const cobrosRouter = {
 		.handler(async ({ input }) => {
 			const [deleted] = await db
 				.delete(referenciasLead)
-				.where(and(eq(referenciasLead.id, input.id), eq(referenciasLead.leadId, input.leadId)))
+				.where(
+					and(
+						eq(referenciasLead.id, input.id),
+						eq(referenciasLead.leadId, input.leadId),
+					),
+				)
 				.returning();
 
 			if (!deleted) {

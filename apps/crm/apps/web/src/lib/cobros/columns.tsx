@@ -2,6 +2,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { ArrowUpDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { parseFechaLocal } from "@/lib/date-utils";
 
 export type ContratoCobranza = {
 	contratoId: string;
@@ -104,7 +105,7 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 				);
 			}
 
-			const fechaFormateada = new Date(fecha).toLocaleDateString("es-GT", {
+			const fechaFormateada = parseFechaLocal(fecha).toLocaleDateString("es-GT", {
 				day: "2-digit",
 				month: "short",
 				year: "numeric",

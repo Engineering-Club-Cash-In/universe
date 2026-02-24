@@ -2109,22 +2109,14 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
         .orderBy(desc(boletasPagoInversionista.fecha_subida)) // La más reciente
         .limit(1);
 
-      // 🚨 SI NO HAY BOLETA PENDIENTE, SALTAR ESTE INVERSIONISTA
-      if (!boletaPendiente) {
-        const razon = "No tiene boleta PENDIENTE";
-        console.warn(`  ⚠️ ${razon} - Saltando inversionista ${inv_id}`);
-        errores.push({
-          inversionista_id: inv_id,
-          razon: razon,
-        });
-        inversionistasSaltados++;
-        continue; // 🔥 Seguir con el siguiente inversionista
+      if (boletaPendiente) {
+        console.log(`  ✅ Boleta encontrada: ID ${boletaPendiente.boleta_id}`);
+        console.log(`     URL: ${boletaPendiente.boleta_url}`);
+        console.log(`     Monto: Q${boletaPendiente.monto_boleta ?? "N/A"}`);
+        console.log(`     Fecha subida: ${boletaPendiente.fecha_subida}`);
+      } else {
+        console.log(`  ⚠️ Sin boleta PENDIENTE, se liquida sin boleta`);
       }
-
-      console.log(`  ✅ Boleta encontrada: ID ${boletaPendiente.boleta_id}`);
-      console.log(`     URL: ${boletaPendiente.boleta_url}`);
-      console.log(`     Monto: Q${boletaPendiente.monto_boleta ?? "N/A"}`);
-      console.log(`     Fecha subida: ${boletaPendiente.fecha_subida}`);
 
       // 🆕 Obtener datos del inversionista desde las tablas espejo
       const resumen = await resumeInvestor(
@@ -2195,12 +2187,12 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
       const reinvInteres = totales.total_reinversion_interes ?? 0;
       const reinvTotal = totales.total_reinversion ?? 0;
 
-      // 🆕 PASO 3: Crear registro de liquidación CON la boleta
+      // 🆕 PASO 3: Crear registro de liquidación (con o sin boleta)
       const [liquidacion] = await db
         .insert(liquidaciones)
         .values({
           inversionista_id: inv_id,
-          boleta_id: boletaPendiente.boleta_id, // 🔥 SIEMPRE con boleta
+          boleta_id: boletaPendiente?.boleta_id ?? null,
           total_pagos_liquidados: cantidadPagos,
           total_capital: totales.total_abono_capital.toString(),
           total_interes: totales.total_abono_interes.toString(),
@@ -2218,16 +2210,18 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
         `  ✅ Liquidación creada: liquidacion_id=${liquidacion.liquidacion_id}`
       );
 
-      // 🔥 PASO 3.1: Marcar boleta como PROCESADO
-      await db
-        .update(boletasPagoInversionista)
-        .set({
-          estado: "PROCESADO",
-          fecha_procesado: new Date(),
-        })
-        .where(eq(boletasPagoInversionista.boleta_id, boletaPendiente.boleta_id));
+      // 🔥 PASO 3.1: Marcar boleta como PROCESADO (solo si existe)
+      if (boletaPendiente) {
+        await db
+          .update(boletasPagoInversionista)
+          .set({
+            estado: "PROCESADO",
+            fecha_procesado: new Date(),
+          })
+          .where(eq(boletasPagoInversionista.boleta_id, boletaPendiente.boleta_id));
 
-      console.log(`  ✅ Boleta ${boletaPendiente.boleta_id} marcada como PROCESADO`);
+        console.log(`  ✅ Boleta ${boletaPendiente.boleta_id} marcada como PROCESADO`);
+      }
 
       // Reiniciar reinversiones y actualizar saldo_reinversion del inversionista
       const montoReinvertido = new Big(reinvTotal);
@@ -2382,11 +2376,11 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
         `  ✅ Reporte actualizado en liquidación ${liquidacion.liquidacion_id}`
       );
       
-      reportesGenerados.push({ 
-        inversionista_id: inv_id, 
+      reportesGenerados.push({
+        inversionista_id: inv_id,
         url,
-        boleta_id: boletaPendiente.boleta_id,
-        boleta_url: boletaPendiente.boleta_url,
+        boleta_id: boletaPendiente?.boleta_id ?? 0,
+        boleta_url: boletaPendiente?.boleta_url ?? "",
       });
       
       totalPagosLiquidados += updateResult.rowCount ?? 0;
@@ -3137,52 +3131,39 @@ export async function resumenGlobalInversionistas(
           END
       ), 0)`,
 
-      // Reinversión por tipo (misma lógica que getInvestorMirrorSummary)
-      // reinversion_variable: primero se asigna a interés, luego el remanente a capital
-      total_reinversion: sql<number>`COALESCE(SUM(
-        CASE ${inversionistas.tipo_reinversion}
-          WHEN 'sin_reinversion' THEN 0
-          WHEN 'reinversion_capital' THEN ${pe.abono_capital}
-          WHEN 'reinversion_interes' THEN ${pe.abono_interes}
-          WHEN 'reinversion_total' THEN ${pe.abono_capital} + ${pe.abono_interes}
-          WHEN 'reinversion_variable' THEN
-            LEAST(COALESCE(${inversionistas.monto_reinversion}, 0)::numeric, ${pe.abono_interes}::numeric)
-            + LEAST(
-                GREATEST(
-                  COALESCE(${inversionistas.monto_reinversion}, 0)::numeric
-                  - LEAST(COALESCE(${inversionistas.monto_reinversion}, 0)::numeric, ${pe.abono_interes}::numeric),
-                  0
-                ),
-                ${pe.abono_capital}::numeric
-              )
-          ELSE 0
-        END
-      ), 0)`,
+      // Reinversión por tipo — CASE fuera de SUM para que reinversion_variable sea tope global
+      total_reinversion: sql<number>`CASE ${inversionistas.tipo_reinversion}
+        WHEN 'sin_reinversion' THEN 0
+        WHEN 'reinversion_capital' THEN COALESCE(SUM(${pe.abono_capital}), 0)
+        WHEN 'reinversion_interes' THEN COALESCE(SUM(${pe.abono_interes}), 0)
+        WHEN 'reinversion_total' THEN COALESCE(SUM(${pe.abono_capital} + ${pe.abono_interes}), 0)
+        WHEN 'reinversion_variable' THEN LEAST(
+          COALESCE(${inversionistas.monto_reinversion}, 0)::numeric,
+          COALESCE(SUM(${pe.abono_capital} + ${pe.abono_interes}), 0)
+        )
+        ELSE 0
+      END`,
 
       // Total a recibir con reinversión = sin_reinversion - reinversion
-      total_a_recibir_con_reinversion: sql<number>`COALESCE(SUM(
-        ${pe.abono_capital}
-        + ${pe.abono_interes}
-        + CASE
-            WHEN ${inversionistas.emite_factura}
-              THEN ${pe.abono_iva_12}
-            ELSE -(${pe.abono_interes} * 0.07)
-          END
+      total_a_recibir_con_reinversion: sql<number>`
+        COALESCE(SUM(
+          ${pe.abono_capital}
+          + ${pe.abono_interes}
+          + CASE
+              WHEN ${inversionistas.emite_factura}
+                THEN ${pe.abono_iva_12}
+              ELSE -(${pe.abono_interes} * 0.07)
+            END
+        ), 0)
         - CASE ${inversionistas.tipo_reinversion}
             WHEN 'sin_reinversion' THEN 0
-            WHEN 'reinversion_capital' THEN ${pe.abono_capital}
-            WHEN 'reinversion_interes' THEN ${pe.abono_interes}
-            WHEN 'reinversion_total' THEN ${pe.abono_capital} + ${pe.abono_interes}
-            WHEN 'reinversion_variable' THEN
-              LEAST(COALESCE(${inversionistas.monto_reinversion}, 0)::numeric, ${pe.abono_interes}::numeric)
-              + LEAST(
-                  GREATEST(
-                    COALESCE(${inversionistas.monto_reinversion}, 0)::numeric
-                    - LEAST(COALESCE(${inversionistas.monto_reinversion}, 0)::numeric, ${pe.abono_interes}::numeric),
-                    0
-                  ),
-                  ${pe.abono_capital}::numeric
-                )
+            WHEN 'reinversion_capital' THEN COALESCE(SUM(${pe.abono_capital}), 0)
+            WHEN 'reinversion_interes' THEN COALESCE(SUM(${pe.abono_interes}), 0)
+            WHEN 'reinversion_total' THEN COALESCE(SUM(${pe.abono_capital} + ${pe.abono_interes}), 0)
+            WHEN 'reinversion_variable' THEN LEAST(
+              COALESCE(${inversionistas.monto_reinversion}, 0)::numeric,
+              COALESCE(SUM(${pe.abono_capital} + ${pe.abono_interes}), 0)
+            )
             ELSE 0
           END`,
     })

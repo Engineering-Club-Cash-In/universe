@@ -2112,3 +2112,88 @@ export async function updatePagosEspejoPorCredito(
     registrosActualizados: result.rowCount ?? 0,
   };
 }
+
+/**
+ * Obtiene los abonos de una cuota específica de un crédito por numero_credito_sifco.
+ */
+export async function getAbonosPorCuota(
+  numero_credito_sifco: string,
+  numero_cuota: number
+) {
+  // 1. Buscar el crédito por SIFCO
+  const [credito] = await db
+    .select({ credito_id: creditos.credito_id })
+    .from(creditos)
+    .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
+    .limit(1);
+
+  if (!credito) {
+    throw new Error(`No se encontró el crédito con SIFCO: ${numero_credito_sifco}`);
+  }
+
+  // 2. Buscar la cuota
+  const [cuota] = await db
+    .select({ cuota_id: cuotas_credito.cuota_id })
+    .from(cuotas_credito)
+    .where(
+      and(
+        eq(cuotas_credito.credito_id, credito.credito_id),
+        eq(cuotas_credito.numero_cuota, numero_cuota)
+      )
+    )
+    .limit(1);
+
+  if (!cuota) {
+    throw new Error(`No se encontró la cuota ${numero_cuota} para el crédito ${numero_credito_sifco}`);
+  }
+
+  // 3. Buscar los pagos de esa cuota
+  const pagos = await db
+    .select({
+      pago_id: pagos_credito.pago_id,
+      abono_capital: pagos_credito.abono_capital,
+      abono_iva_12: pagos_credito.abono_iva_12,
+      abono_interes: pagos_credito.abono_interes,
+      membresias_pago: pagos_credito.membresias_pago,
+      abono_seguro: pagos_credito.abono_seguro,
+      abono_gps: pagos_credito.abono_gps,
+      fecha_pago: pagos_credito.fecha_pago,
+    })
+    .from(pagos_credito)
+    .where(
+      and(
+        eq(pagos_credito.credito_id, credito.credito_id),
+        eq(pagos_credito.cuota_id, cuota.cuota_id)
+      )
+    );
+
+  // 4. Sumatoria de todos los pagos
+  let total_abono_capital = Big(0);
+  let total_abono_iva_12 = Big(0);
+  let total_abono_interes = Big(0);
+  let total_membresias_pago = Big(0);
+  let total_abono_seguro = Big(0);
+  let total_abono_gps = Big(0);
+
+  for (const p of pagos) {
+    total_abono_capital = total_abono_capital.plus(p.abono_capital || "0");
+    total_abono_iva_12 = total_abono_iva_12.plus(p.abono_iva_12 || "0");
+    total_abono_interes = total_abono_interes.plus(p.abono_interes || "0");
+    total_membresias_pago = total_membresias_pago.plus(p.membresias_pago || "0");
+    total_abono_seguro = total_abono_seguro.plus(p.abono_seguro || "0");
+    total_abono_gps = total_abono_gps.plus(p.abono_gps || "0");
+  }
+
+  return {
+    success: true,
+    numero_credito_sifco,
+    numero_cuota,
+    total_pagos: pagos.length,
+    abono_capital: total_abono_capital.toFixed(2),
+    abono_iva_12: total_abono_iva_12.toFixed(2),
+    abono_interes: total_abono_interes.toFixed(2),
+    membresias_pago: total_membresias_pago.toFixed(2),
+    abono_seguro: total_abono_seguro.toFixed(2),
+    abono_gps: total_abono_gps.toFixed(2),
+  };
+}

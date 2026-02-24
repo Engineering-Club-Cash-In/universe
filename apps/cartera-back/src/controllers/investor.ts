@@ -3028,6 +3028,7 @@ export async function resumenGlobalInversionistas(
   // 🔎 Condiciones dinámicas — ahora sobre tablas ESPEJO
   const condiciones: any[] = [
     eq(pagos_credito_inversionistas_espejo.estado_liquidacion, "NO_LIQUIDADO"),
+    eq(inversionistas.permite_distribucion, false) // Solo inversionistas que NO permiten distribución (es decir, que se les paga directamente)
   ];
 
   if (inversionistaId) {
@@ -3157,6 +3158,12 @@ export async function resumenGlobalInversionistas(
       bancos.nombre,
       inversionistas.tipo_cuenta,
       inversionistas.numero_cuenta
+    )
+    // Solo mostrar inversionistas que tengan al menos 1 pago espejo NO_LIQUIDADO (cuando no es excel)
+    .having(
+      excel
+        ? undefined
+        : sql`COUNT(${pe.id}) > 0`
     );
 
   // 📂 Si excel = true → generar archivo, subir a R2 y devolver URL

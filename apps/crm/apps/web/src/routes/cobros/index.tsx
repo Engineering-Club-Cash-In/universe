@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { differenceInDays } from "date-fns";
 import {
 	Banknote,
+	CalendarClock,
 	CalendarDays,
 	CalendarRange,
 	ChevronDown,
@@ -295,6 +296,33 @@ function RouteComponent() {
 			},
 		}),
 		enabled: !!session,
+	});
+
+	// Query para seguimientos pendientes (casos con proximoContacto)
+	const seguimientosQuery = useQuery({
+		...orpc.getCasosCobros.queryOptions({
+			input: {
+				limit: 100,
+				offset: 0,
+			},
+		}),
+		enabled: !!session,
+		select: (data) => {
+			const hoy = new Date();
+			hoy.setHours(0, 0, 0, 0);
+			const en7Dias = new Date(hoy);
+			en7Dias.setDate(en7Dias.getDate() + 7);
+
+			return data.filter((caso) => {
+				if (!caso.proximoContacto) return false;
+				const fecha = new Date(caso.proximoContacto);
+				return fecha <= en7Dias;
+			}).sort((a, b) => {
+				const fechaA = new Date(a.proximoContacto!);
+				const fechaB = new Date(b.proximoContacto!);
+				return fechaA.getTime() - fechaB.getTime();
+			});
+		},
 	});
 
 	// Mapear filtroTemporal al enum time
@@ -695,6 +723,73 @@ function RouteComponent() {
 					</div>
 				</CardContent>
 			</Card>
+
+			{/* Seguimientos Pendientes */}
+			{seguimientosQuery.data && seguimientosQuery.data.length > 0 && (
+				<Card className="border-amber-200">
+					<CardHeader className="pb-3">
+						<CardTitle className="flex items-center gap-2">
+							<CalendarClock className="h-5 w-5 text-amber-600" />
+							Seguimientos Pendientes
+						</CardTitle>
+						<CardDescription>
+							Casos con seguimiento programado para hoy o los próximos 7 días
+						</CardDescription>
+					</CardHeader>
+					<CardContent>
+						<div className="space-y-2">
+							{seguimientosQuery.data.map((caso) => {
+								const fecha = new Date(caso.proximoContacto!);
+								const hoy = new Date();
+								hoy.setHours(0, 0, 0, 0);
+								const esHoy = fecha.toDateString() === hoy.toDateString();
+								const esPasado = fecha < hoy;
+
+								return (
+									<Link
+										key={caso.id}
+										to="/cobros/$id"
+										params={{ id: caso.contratoId || caso.id }}
+										search={{ tipo: "caso" as const }}
+										className="flex items-center justify-between rounded-lg border p-3 transition-colors hover:bg-muted/50"
+									>
+										<div className="flex items-center gap-3">
+											<div
+												className={`h-2 w-2 rounded-full ${esPasado ? "bg-red-500" : esHoy ? "bg-amber-500" : "bg-green-500"}`}
+											/>
+											<div>
+												<p className="font-medium text-sm">
+													{caso.clienteNombre || "Sin nombre"}
+												</p>
+												<p className="text-muted-foreground text-xs">
+													{caso.vehiculoMarca} {caso.vehiculoModelo}{" "}
+													{caso.vehiculoYear}
+												</p>
+											</div>
+										</div>
+										<div className="text-right">
+											<p
+												className={`text-sm font-medium ${esPasado ? "text-red-600" : esHoy ? "text-amber-600" : "text-muted-foreground"}`}
+											>
+												{esHoy
+													? "Hoy"
+													: esPasado
+														? "Vencido"
+														: fecha.toLocaleDateString("es-GT")}
+											</p>
+											{esPasado && (
+												<p className="text-red-500 text-xs">
+													{fecha.toLocaleDateString("es-GT")}
+												</p>
+											)}
+										</div>
+									</Link>
+								);
+							})}
+						</div>
+					</CardContent>
+				</Card>
+			)}
 
 			{/* Filtros Temporales y Tabla */}
 			<Card>

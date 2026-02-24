@@ -336,7 +336,7 @@ function RouteComponent() {
 									type="monotone"
 									dataKey="monto"
 									stroke="#10b981"
-									name="Monto Financiado"
+									name="Capital Activo"
 								/>
 							</LineChart>
 						</ResponsiveContainer>

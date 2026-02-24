@@ -419,3 +419,34 @@ export const activities = pgTable("activities", {
 		.notNull()
 		.references(() => user.id),
 });
+
+// Enum para parentesco de referencias
+export const parentescoReferenciaEnum = pgEnum("parentesco_referencia", [
+	"padre_madre",
+	"hermano_a",
+	"hijo_a",
+	"conyuge",
+	"tio_a",
+	"primo_a",
+	"amigo_a",
+	"vecino_a",
+	"companero_trabajo",
+	"otro",
+]);
+
+/** Valores canónicos del enum de parentesco. Úsalo en lugar de duplicar el array. */
+export const PARENTESCO_VALUES = parentescoReferenciaEnum.enumValues;
+
+// Referencias de un lead (personas de contacto: familiares, amigos, etc.)
+export const referenciasLead = pgTable("referencias_lead", {
+	id: uuid("id").primaryKey().defaultRandom(),
+	leadId: uuid("lead_id")
+		.notNull()
+		.references(() => leads.id, { onDelete: "cascade" }),
+	nombre: text("nombre").notNull(),
+	telefono: text("telefono").notNull(),
+	parentesco: parentescoReferenciaEnum("parentesco").notNull(),
+	notas: text("notas"),
+	createdAt: timestamp("created_at").notNull().defaultNow(),
+	updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});

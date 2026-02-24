@@ -135,9 +135,9 @@ export interface FileRoutesByFullPath {
   '/sell': typeof SellRoute
   '/styles': typeof StylesRoute
   '/terms&conditions': typeof TermsChar38conditionsRoute
-  '/marketplace': typeof MarketplaceIndexRoute
+  '/marketplace/': typeof MarketplaceIndexRoute
   '/marketplace/search/$id': typeof MarketplaceSearchIdRoute
-  '/marketplace/search': typeof MarketplaceSearchIndexRoute
+  '/marketplace/search/': typeof MarketplaceSearchIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -198,9 +198,9 @@ export interface FileRouteTypes {
     | '/sell'
     | '/styles'
     | '/terms&conditions'
-    | '/marketplace'
+    | '/marketplace/'
     | '/marketplace/search/$id'
-    | '/marketplace/search'
+    | '/marketplace/search/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -374,14 +374,14 @@ declare module '@tanstack/react-router' {
     '/marketplace/': {
       id: '/marketplace/'
       path: '/marketplace'
-      fullPath: '/marketplace'
+      fullPath: '/marketplace/'
       preLoaderRoute: typeof MarketplaceIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/marketplace/search/': {
       id: '/marketplace/search/'
       path: '/marketplace/search'
-      fullPath: '/marketplace/search'
+      fullPath: '/marketplace/search/'
       preLoaderRoute: typeof MarketplaceSearchIndexRouteImport
       parentRoute: typeof rootRouteImport
     }

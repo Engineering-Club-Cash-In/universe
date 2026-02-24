@@ -12,7 +12,7 @@ export const accountingRouter = {
 		.input(
 			z.object({
 				inversionista_id: z.number().int().positive(),
-				boleta_url: z.string().url(),
+				boleta_url: z.string(),
 				monto_boleta: z.string().optional(),
 				notas: z.string().optional(),
 			}),

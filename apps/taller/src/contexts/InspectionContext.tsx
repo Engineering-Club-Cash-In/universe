@@ -20,7 +20,7 @@ export enum InspectionStatus {
 export interface Inspection360Item {
   category: string;
   item: string;
-  status: InspectionStatus | 'ok' | 'bad' | 'na' | 'bueno' | 'regular' | 'malo' | 'GOOD' | 'REGULAR' | 'BAD' | 'NA' | 'OK' | 'LEGACY_BAD';
+  status: InspectionStatus;
   notes?: string;
   metadata?: Record<string, any>;
 }

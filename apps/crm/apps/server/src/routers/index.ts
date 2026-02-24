@@ -149,6 +149,11 @@ export const appRouter = {
 	getDetalleInversionista: cobrosRouter.getDetalleInversionista,
 	getInversionistasDelCredito: cobrosRouter.getInversionistasDelCredito,
 	getAsesores: cobrosRouter.getAsesores,
+	updateContactInfoCobros: cobrosRouter.updateContactInfoCobros,
+	getReferencias: cobrosRouter.getReferencias,
+	createReferencia: cobrosRouter.createReferencia,
+	updateReferencia: cobrosRouter.updateReferencia,
+	deleteReferencia: cobrosRouter.deleteReferencia,
 
 	// Legal Contracts routes (Jurídico)
 	createLegalContract: legalContractsRouter.createLegalContract,

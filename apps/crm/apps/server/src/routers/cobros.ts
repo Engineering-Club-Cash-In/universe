@@ -14,7 +14,7 @@ import {
 	metodoContactoEnum,
 	recuperacionesVehiculo,
 } from "../db/schema/cobros";
-import { clients, leads, opportunities, salesStages } from "../db/schema/crm";
+import { clients, leads, opportunities, PARENTESCO_VALUES, referenciasLead, salesStages } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
 import {
 	cobrosProcedure,
@@ -1447,7 +1447,7 @@ export const cobrosRouter = {
 					cuotasVencidas: sql<number>`0`,
 					telefonoPrincipal: sql<string>`COALESCE(${casosCobros.telefonoPrincipal}, '')`,
 					telefonoAlternativo: sql<string>`COALESCE(${casosCobros.telefonoAlternativo}, '')`,
-					emailContacto: sql<string>`COALESCE(${casosCobros.emailContacto}, 'cliente@email.com')`,
+					emailContacto: sql<string>`COALESCE(${casosCobros.emailContacto}, '')`,
 					direccionContacto: sql<string>`COALESCE(${casosCobros.direccionContacto}, '')`,
 					proximoContacto: casosCobros.proximoContacto,
 					metodoContactoProximo: casosCobros.metodoContactoProximo,
@@ -1842,10 +1842,10 @@ export const cobrosRouter = {
 					diasMoraMaximo: diasMora,
 					cuotasVencidas: cuotasAtrasadas,
 
-					// Datos de contacto (del lead y oportunidad)
-					telefonoPrincipal: leadInfo?.telefono || null,
-					telefonoAlternativo: null,
-					emailContacto: leadInfo?.email || null,
+					// Datos de contacto (del caso de cobros primero, fallback al lead)
+					telefonoPrincipal: casoCobro?.telefonoPrincipal || leadInfo?.telefono || null,
+					telefonoAlternativo: casoCobro?.telefonoAlternativo || null,
+					emailContacto: casoCobro?.emailContacto || leadInfo?.email || null,
 					direccionContacto: direccion || null,
 					proximoContacto: casoCobro?.proximoContacto || null,
 					metodoContactoProximo: null,
@@ -2404,5 +2404,139 @@ export const cobrosRouter = {
 					message: `Error obteniendo asesores: ${error instanceof Error ? error.message : String(error)}`,
 				});
 			}
+		}),
+
+	// ============================================================================
+	// ACTUALIZAR INFO DE CONTACTO
+	// ============================================================================
+
+	updateContactInfoCobros: cobrosProcedure
+		.input(
+			z.object({
+				casoCobroId: z.string().uuid(),
+				telefonoPrincipal: z.string().min(1),
+				telefonoAlternativo: z.string().optional(),
+				emailContacto: z.string().email().optional().or(z.literal("")),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const [updated] = await db
+				.update(casosCobros)
+				.set({
+					telefonoPrincipal: input.telefonoPrincipal,
+					telefonoAlternativo: input.telefonoAlternativo || null,
+					emailContacto: input.emailContacto || "",
+					updatedAt: new Date(),
+				})
+				.where(eq(casosCobros.id, input.casoCobroId))
+				.returning();
+
+			if (!updated) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Caso de cobros no encontrado",
+				});
+			}
+
+			return updated;
+		}),
+
+	// ============================================================================
+	// CRUD DE REFERENCIAS
+	// ============================================================================
+
+	getReferencias: cobrosProcedure
+		.input(
+			z.object({
+				leadId: z.string().uuid(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const result = await db
+				.select()
+				.from(referenciasLead)
+				.where(eq(referenciasLead.leadId, input.leadId))
+				.orderBy(desc(referenciasLead.createdAt));
+
+			return result;
+		}),
+
+	createReferencia: cobrosProcedure
+		.input(
+			z.object({
+				leadId: z.string().uuid(),
+				nombre: z.string().min(1),
+				telefono: z.string().min(1),
+				parentesco: z.enum(PARENTESCO_VALUES),
+				notas: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const [created] = await db
+				.insert(referenciasLead)
+				.values({
+					leadId: input.leadId,
+					nombre: input.nombre,
+					telefono: input.telefono,
+					parentesco: input.parentesco,
+					notas: input.notas || null,
+				})
+				.returning();
+
+			return created;
+		}),
+
+	updateReferencia: cobrosProcedure
+		.input(
+			z.object({
+				id: z.string().uuid(),
+				leadId: z.string().uuid(),
+				nombre: z.string().min(1),
+				telefono: z.string().min(1),
+				parentesco: z.enum(PARENTESCO_VALUES),
+				notas: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const [updated] = await db
+				.update(referenciasLead)
+				.set({
+					nombre: input.nombre,
+					telefono: input.telefono,
+					parentesco: input.parentesco,
+					notas: input.notas || null,
+					updatedAt: new Date(),
+				})
+				.where(and(eq(referenciasLead.id, input.id), eq(referenciasLead.leadId, input.leadId)))
+				.returning();
+
+			if (!updated) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Referencia no encontrada",
+				});
+			}
+
+			return updated;
+		}),
+
+	deleteReferencia: cobrosProcedure
+		.input(
+			z.object({
+				id: z.string().uuid(),
+				leadId: z.string().uuid(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const [deleted] = await db
+				.delete(referenciasLead)
+				.where(and(eq(referenciasLead.id, input.id), eq(referenciasLead.leadId, input.leadId)))
+				.returning();
+
+			if (!deleted) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Referencia no encontrada",
+				});
+			}
+
+			return { success: true };
 		}),
 };

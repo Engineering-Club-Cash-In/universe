@@ -88,8 +88,9 @@ export default function UserMenu() {
 					<Button
 						variant="outline"
 						className="w-full"
-						onClick={() => {
-							authClient.signOut();
+						onClick={async () => {
+							await authClient.signOut();
+							window.location.href = "/";
 						}}
 					>
 						Cerrar Sesión

@@ -154,6 +154,10 @@ export const appRouter = {
 	createReferencia: cobrosRouter.createReferencia,
 	updateReferencia: cobrosRouter.updateReferencia,
 	deleteReferencia: cobrosRouter.deleteReferencia,
+	// Metas de mora
+	getMetasMora: cobrosRouter.getMetasMora,
+	getMetasMoraAnual: cobrosRouter.getMetasMoraAnual,
+	upsertMetasMora: cobrosRouter.upsertMetasMora,
 
 	// Legal Contracts routes (Jurídico)
 	createLegalContract: legalContractsRouter.createLegalContract,

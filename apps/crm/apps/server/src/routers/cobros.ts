@@ -11,6 +11,7 @@ import {
 	conveniosPago,
 	estadoContactoEnum,
 	estadoMoraEnum,
+	metasMoraCobros,
 	metodoContactoEnum,
 	recuperacionesVehiculo,
 } from "../db/schema/cobros";
@@ -2553,5 +2554,113 @@ export const cobrosRouter = {
 			}
 
 			return { success: true };
+		}),
+
+	// ========================================================================
+	// METAS DE MORA
+	// ========================================================================
+
+	// Obtener metas de mora para un mes/año
+	getMetasMora: cobrosProcedure
+		.input(
+			z.object({
+				mes: z.number().min(1).max(12),
+				anio: z.number().min(2024),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const metas = await db
+				.select()
+				.from(metasMoraCobros)
+				.where(
+					and(
+						eq(metasMoraCobros.mes, input.mes),
+						eq(metasMoraCobros.anio, input.anio),
+					),
+				);
+
+			return metas;
+		}),
+
+	// Obtener metas de mora del año completo
+	getMetasMoraAnual: cobrosProcedure
+		.input(
+			z.object({
+				anio: z.number().min(2024),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const metas = await db
+				.select()
+				.from(metasMoraCobros)
+				.where(eq(metasMoraCobros.anio, input.anio));
+
+			return metas;
+		}),
+
+	// Crear o actualizar metas de mora (solo supervisor/admin)
+	upsertMetasMora: cobrosSupervisorProcedure
+		.input(
+			z.object({
+				mes: z.number().min(1).max(12),
+				anio: z.number().min(2024),
+				metas: z.array(
+					z.object({
+						categoria: z.enum([
+							"mora_total",
+							"mora_30",
+							"mora_60",
+							"mora_90",
+							"mora_120",
+						]),
+						valorObjetivo: z.string(),
+					}),
+				),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const resultados = [];
+
+			for (const meta of input.metas) {
+				// Buscar si ya existe
+				const existente = await db
+					.select({ id: metasMoraCobros.id })
+					.from(metasMoraCobros)
+					.where(
+						and(
+							eq(metasMoraCobros.mes, input.mes),
+							eq(metasMoraCobros.anio, input.anio),
+							eq(metasMoraCobros.categoria, meta.categoria),
+						),
+					)
+					.limit(1);
+
+				if (existente.length > 0) {
+					// Actualizar
+					const [updated] = await db
+						.update(metasMoraCobros)
+						.set({
+							valorObjetivo: meta.valorObjetivo,
+							updatedAt: new Date(),
+						})
+						.where(eq(metasMoraCobros.id, existente[0].id))
+						.returning();
+					resultados.push(updated);
+				} else {
+					// Crear
+					const [created] = await db
+						.insert(metasMoraCobros)
+						.values({
+							mes: input.mes,
+							anio: input.anio,
+							categoria: meta.categoria,
+							valorObjetivo: meta.valorObjetivo,
+						})
+						.returning();
+					resultados.push(created);
+				}
+			}
+
+			return resultados;
 		}),
 };

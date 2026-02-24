@@ -1594,7 +1594,7 @@ export interface PagoDataInvestor {
   cuota: CuotaPago | null;
   usuario: UsuarioPago;
   inversionistas: InversionistaPago[];
-  boleta: BoletaPago | null;
+  boletas: BoletaPago[];
   monto_aplicado: number | null;
 
   cuentaEmpresaBanco: string | null;

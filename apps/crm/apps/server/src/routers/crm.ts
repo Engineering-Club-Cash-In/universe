@@ -3787,6 +3787,16 @@ export const crmRouter = {
 									required: true,
 									completed: false,
 								},
+								...(vehicle.isNew
+									? [
+											{
+												name: "Factura del vehículo nuevo",
+												type: "factura_vehiculo_nuevo",
+												required: true,
+												completed: false,
+											},
+										]
+									: []),
 							],
 						},
 					},

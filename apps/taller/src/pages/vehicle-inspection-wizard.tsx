@@ -358,8 +358,6 @@ export default function VehicleInspectionWizard() {
                     setValuationCompleted(true);
                     // Merge valuation data with existing form data
                     const completeData = { ...formData, ...valuationData };
-                    console.log("Fotos guardadas del paso 2:", photos);
-                    console.log("Cantidad de fotos:", photos?.length || 0);
                     handleCompleteInspection(photos, completeData);
                   }}
                   isWizardMode={true}

@@ -44,7 +44,7 @@ export const INSPECTION_360_STATUSES = [
 
 export const inspection360StatusEnum = pgEnum(
 	"inspection_360_status",
-	INSPECTION_360_STATUSES
+	INSPECTION_360_STATUSES,
 );
 
 // Vehicle owner type - determines document requirements

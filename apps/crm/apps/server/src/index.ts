@@ -299,8 +299,6 @@ app.post("/api/upload-opportunity-document", async (c) => {
 		const { db } = await import("./db");
 		const { opportunities, opportunityDocuments } = await import("./db/schema");
 		const { eq } = await import("drizzle-orm");
-		const { validateFile, generateUniqueFilename, uploadFileToR2 } =
-			await import("./lib/storage");
 
 		// Verify access to opportunity
 		const opportunity = await db
@@ -327,10 +325,18 @@ app.post("/api/upload-opportunity-document", async (c) => {
 		}
 
 		// Validate file
+		const {
+			validateFile,
+			generateUniqueFilename,
+			uploadFileToR2,
+			resolveMimeType,
+		} = await import("./lib/storage");
 		const validation = validateFile(file);
 		if (!validation.valid) {
 			return c.json({ error: validation.error }, 400);
 		}
+
+		const resolvedMimeType = resolveMimeType(file);
 
 		// Generate unique filename
 		const uniqueFilename = generateUniqueFilename(file.name);
@@ -345,7 +351,7 @@ app.post("/api/upload-opportunity-document", async (c) => {
 				opportunityId,
 				filename: uniqueFilename,
 				originalName: file.name,
-				mimeType: file.type,
+				mimeType: resolvedMimeType,
 				size: file.size,
 				documentType: documentType as any,
 				description: description || undefined,
@@ -745,7 +751,10 @@ app.post("/api/notifications/pay-investors", async (c) => {
 			.limit(1);
 
 		if (!cobrosSupervisor) {
-			return c.json({ error: "No se encontró un usuario cobros_supervisor" }, 500);
+			return c.json(
+				{ error: "No se encontró un usuario cobros_supervisor" },
+				500,
+			);
 		}
 
 		const notification = await createNotification({

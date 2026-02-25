@@ -8,6 +8,7 @@ import {
 	casosCobros,
 	contratosFinanciamiento,
 	conveniosPago,
+	INSPECTION_360_STATUSES,
 	inspectionChecklistItems,
 	checklistItemEvidence,
 	type NewChecklistItemEvidence,
@@ -21,7 +22,6 @@ import {
 	vehicleInspections,
 	vehiclePhotos,
 	vehicles,
-	INSPECTION_360_STATUSES,
 } from "../db/schema";
 import { isUniqueViolation } from "../lib/db-errors";
 import {
@@ -38,6 +38,7 @@ import {
 	deleteFileFromR2,
 	generateUniqueFilename,
 	getFileUrl,
+	resolveMimeType,
 	uploadFileToR2,
 	validateFile,
 } from "../lib/storage";
@@ -1464,14 +1465,21 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 				});
 			}
 
+			// Resolver MIME type (fallback por extensión)
+			const resolvedMimeType = resolveMimeType({
+				type: input.file.type,
+				name: input.file.name,
+			} as File);
+
 			// Create File/Blob from data
 			const fileBuffer = Buffer.from(input.file.data, "base64");
-			const fileBlob = new Blob([fileBuffer], { type: input.file.type });
+			const fileBlob = new Blob([fileBuffer], { type: resolvedMimeType });
 
 			// Validate file
 			const validation = validateFile({
-				type: input.file.type,
+				type: resolvedMimeType,
 				size: input.file.size,
+				name: input.file.name,
 			} as File);
 
 			if (!validation.valid) {
@@ -1494,7 +1502,7 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 					vehicleId: input.vehicleId,
 					filename: uniqueFilename,
 					originalName: input.file.name,
-					mimeType: input.file.type,
+					mimeType: resolvedMimeType,
 					size: input.file.size,
 					documentType: input.documentType,
 					description: input.description || undefined,

@@ -378,7 +378,7 @@ function NotificationBell() {
 		>
 			<Bell className="h-5 w-5" />
 			{count > 0 && (
-				<span className="-top-1 -right-1 absolute flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 font-bold text-[10px] text-white">
+				<span className="absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 font-bold text-[10px] text-white">
 					{count > 99 ? "99+" : count}
 				</span>
 			)}

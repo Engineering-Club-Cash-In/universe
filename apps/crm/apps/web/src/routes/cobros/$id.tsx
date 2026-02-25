@@ -681,7 +681,9 @@ function RouteComponent() {
 									variant="outline"
 									size="sm"
 									onClick={() => {
-										const parseTels = (val: string | number | null | undefined) =>
+										const parseTels = (
+											val: string | number | null | undefined,
+										) =>
 											String(val || "")
 												.split(",")
 												.map((t) => t.trim())
@@ -709,7 +711,7 @@ function RouteComponent() {
 												<Badge
 													key={`principal-${tel}-${i}`}
 													variant="secondary"
-													className="gap-1 pl-2 pr-1"
+													className="gap-1 pr-1 pl-2"
 												>
 													{tel}
 													<button
@@ -753,7 +755,7 @@ function RouteComponent() {
 												<Badge
 													key={`alt-${tel}-${i}`}
 													variant="secondary"
-													className="gap-1 pl-2 pr-1"
+													className="gap-1 pr-1 pl-2"
 												>
 													{tel}
 													<button
@@ -820,7 +822,8 @@ function RouteComponent() {
 												)
 													return;
 												updateContactMutation.mutate({
-													telefonoPrincipal: contactForm.telefonoPrincipal.join(", "),
+													telefonoPrincipal:
+														contactForm.telefonoPrincipal.join(", "),
 													telefonoAlternativo:
 														contactForm.telefonoAlternativo.length > 0
 															? contactForm.telefonoAlternativo.join(", ")
@@ -923,14 +926,22 @@ function RouteComponent() {
 											casoCobroId={caso.id}
 											clienteNombre={caso.clienteNombre || ""}
 											telefonoPrincipal={caso.telefonoPrincipal || ""}
-											telefonoAlternativo={caso.telefonoAlternativo ? String(caso.telefonoAlternativo) : undefined}
+											telefonoAlternativo={
+												caso.telefonoAlternativo
+													? String(caso.telefonoAlternativo)
+													: undefined
+											}
 											emailCliente={caso.emailContacto || ""}
 											metodoInicial="llamada"
 											fechaPago={String(caso.diaPagoMensual || 15)}
-											cuotaMensual={Number(caso.cuotaMensual || 0).toLocaleString()}
+											cuotaMensual={Number(
+												caso.cuotaMensual || 0,
+											).toLocaleString()}
 											placa={caso.vehiculoPlaca || ""}
 											marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
-											montoAdeudado={Number(caso.montoEnMora || 0).toLocaleString()}
+											montoAdeudado={Number(
+												caso.montoEnMora || 0,
+											).toLocaleString()}
 											cuotasAtraso={caso.cuotasVencidas ?? 0}
 											estadoMora={caso.estadoMora || undefined}
 											fechaInicio={caso.fechaInicio || null}
@@ -947,14 +958,22 @@ function RouteComponent() {
 											casoCobroId={caso.id}
 											clienteNombre={caso.clienteNombre || ""}
 											telefonoPrincipal={caso.telefonoPrincipal || ""}
-											telefonoAlternativo={caso.telefonoAlternativo ? String(caso.telefonoAlternativo) : undefined}
+											telefonoAlternativo={
+												caso.telefonoAlternativo
+													? String(caso.telefonoAlternativo)
+													: undefined
+											}
 											emailCliente={caso.emailContacto || ""}
 											metodoInicial="whatsapp"
 											fechaPago={String(caso.diaPagoMensual || 15)}
-											cuotaMensual={Number(caso.cuotaMensual || 0).toLocaleString()}
+											cuotaMensual={Number(
+												caso.cuotaMensual || 0,
+											).toLocaleString()}
 											placa={caso.vehiculoPlaca || ""}
 											marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
-											montoAdeudado={Number(caso.montoEnMora || 0).toLocaleString()}
+											montoAdeudado={Number(
+												caso.montoEnMora || 0,
+											).toLocaleString()}
 											cuotasAtraso={caso.cuotasVencidas ?? 0}
 											estadoMora={caso.estadoMora || undefined}
 											fechaInicio={caso.fechaInicio || null}
@@ -974,14 +993,22 @@ function RouteComponent() {
 											casoCobroId={caso.id}
 											clienteNombre={caso.clienteNombre || ""}
 											telefonoPrincipal={caso.telefonoPrincipal || ""}
-											telefonoAlternativo={caso.telefonoAlternativo ? String(caso.telefonoAlternativo) : undefined}
+											telefonoAlternativo={
+												caso.telefonoAlternativo
+													? String(caso.telefonoAlternativo)
+													: undefined
+											}
 											emailCliente={caso.emailContacto || ""}
 											metodoInicial="email"
 											fechaPago={String(caso.diaPagoMensual || 15)}
-											cuotaMensual={Number(caso.cuotaMensual || 0).toLocaleString()}
+											cuotaMensual={Number(
+												caso.cuotaMensual || 0,
+											).toLocaleString()}
 											placa={caso.vehiculoPlaca || ""}
 											marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
-											montoAdeudado={Number(caso.montoEnMora || 0).toLocaleString()}
+											montoAdeudado={Number(
+												caso.montoEnMora || 0,
+											).toLocaleString()}
 											cuotasAtraso={caso.cuotasVencidas ?? 0}
 											estadoMora={caso.estadoMora || undefined}
 											fechaInicio={caso.fechaInicio || null}

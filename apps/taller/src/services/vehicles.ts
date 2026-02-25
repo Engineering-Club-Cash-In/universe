@@ -91,7 +91,7 @@ export const createFullInspection = async (
       inspection360Items: items360?.map(item => ({
         area: item.category,
         checkpoint: item.item,
-        status: item.status as any, // TypeScript might complain about 'any' here if the ORPC client types haven't regenerated yet, but it's safe since the backend accepts it
+        status: item.status as 'GOOD' | 'REGULAR' | 'BAD' | 'NA' | 'OK' | 'LEGACY_BAD',
         comment: item.notes,
         metadata: item.metadata,
       }))

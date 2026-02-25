@@ -12,6 +12,7 @@ import { adminProcedure, protectedProcedure } from "../lib/orpc";
 import {
 	generateUniqueFilename,
 	getFileUrl,
+	resolveMimeType,
 	uploadFileToR2,
 	validateFile,
 } from "../lib/storage";
@@ -445,10 +446,17 @@ export const notificationsRouter = {
 				});
 			}
 
+			// Resolver MIME type (fallback por extensión)
+			const resolvedMimeType = resolveMimeType({
+				type: input.file.type,
+				name: input.file.name,
+			} as File);
+
 			// Validar archivo
 			const validation = validateFile({
-				type: input.file.type,
+				type: resolvedMimeType,
 				size: input.file.size,
+				name: input.file.name,
 			} as File);
 
 			if (!validation.valid) {
@@ -459,7 +467,7 @@ export const notificationsRouter = {
 
 			// Subir a R2
 			const fileBuffer = Buffer.from(input.file.data, "base64");
-			const fileBlob = new Blob([fileBuffer], { type: input.file.type });
+			const fileBlob = new Blob([fileBuffer], { type: resolvedMimeType });
 			const uniqueFilename = generateUniqueFilename(input.file.name);
 
 			const { key } = await uploadFileToR2(
@@ -475,7 +483,7 @@ export const notificationsRouter = {
 					notificationId: input.notificationId,
 					filename: uniqueFilename,
 					originalName: input.file.name,
-					mimeType: input.file.type,
+					mimeType: resolvedMimeType,
 					size: input.file.size,
 					filePath: key,
 					uploadedBy: userId,

@@ -884,9 +884,9 @@ export const vehiclesRouter = {
 						evidence: z
 							.array(
 								z.object({
-									url: z.string(),
-									mimeType: z.string(),
-									originalName: z.string(),
+									url: z.string().url({ message: "La URL de la evidencia debe ser válida" }),
+									mimeType: z.string().regex(/^(image|video)\//, { message: "El archivo debe ser una imagen o un video" }),
+									originalName: z.string().min(1).max(255),
 								}),
 							)
 							.optional(),
@@ -1025,6 +1025,10 @@ export const vehiclesRouter = {
 											originalName: ev.originalName,
 										});
 									}
+								} else {
+									throw new ORPCError("INTERNAL_SERVER_ERROR", {
+										message: `No se pudo enlazar la evidencia al punto crítico: ${inputItem.category} - ${inputItem.item}`,
+									});
 								}
 							}
 						}

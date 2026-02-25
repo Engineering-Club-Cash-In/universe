@@ -258,7 +258,11 @@ export const inspectionChecklistItems = pgTable("inspection_checklist_items", {
 	createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-// New Table for Checklist Items Evidence (Photos/Videos)
+/**
+ * Table: checklist_item_evidence
+ * Stores multimedia evidence (photos/videos) linked to checklist items.
+ * Uses a cascade deletion strategy ensuring evidence is removed if the root checklist point is deleted.
+ */
 export const checklistItemEvidence = pgTable(
 	"checklist_item_evidence",
 	{

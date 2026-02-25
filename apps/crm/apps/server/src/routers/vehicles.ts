@@ -1,7 +1,7 @@
 import { openai } from "@ai-sdk/openai";
 import { ORPCError } from "@orpc/server";
 import { generateObject } from "ai";
-import { and, desc, eq, ilike, not, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, not, or, sql, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import {
@@ -9,6 +9,8 @@ import {
 	contratosFinanciamiento,
 	conveniosPago,
 	inspectionChecklistItems,
+	checklistItemEvidence,
+	type NewChecklistItemEvidence,
 	type NewInspectionChecklistItem,
 	type NewVehicle,
 	type NewVehicleInspection,
@@ -320,6 +322,24 @@ export const vehiclesRouter = {
 						.where(eq(inspectionChecklistItems.inspectionId, inspection.id))
 						.orderBy(inspectionChecklistItems.category);
 
+					let evidenceData: typeof checklistItemEvidence.$inferSelect[] = [];
+					if (checklistItems.length > 0) {
+						evidenceData = await db
+							.select()
+							.from(checklistItemEvidence)
+							.where(
+								inArray(
+									checklistItemEvidence.itemId,
+									checklistItems.map((i) => i.id)
+								)
+							);
+					}
+
+					const itemsWithEvidence = checklistItems.map((item) => ({
+						...item,
+						evidence: evidenceData.filter((ev) => ev.itemId === item.id),
+					}));
+
 					const inspection360ItemsData = await db
 						.select()
 						.from(vehicleInspection360Items)
@@ -328,7 +348,7 @@ export const vehiclesRouter = {
 
 					return {
 						...inspection,
-						checklistItems,
+						checklistItems: itemsWithEvidence,
 						inspection360Items: inspection360ItemsData,
 					};
 				}),
@@ -720,9 +740,34 @@ export const vehiclesRouter = {
 				.from(vehiclePhotos)
 				.where(eq(vehiclePhotos.inspectionId, input.id));
 
+			const checklistItems = await db
+				.select()
+				.from(inspectionChecklistItems)
+				.where(eq(inspectionChecklistItems.inspectionId, input.id))
+				.orderBy(inspectionChecklistItems.category);
+
+			let evidenceData: typeof checklistItemEvidence.$inferSelect[] = [];
+			if (checklistItems.length > 0) {
+				evidenceData = await db
+					.select()
+					.from(checklistItemEvidence)
+					.where(
+						inArray(
+							checklistItemEvidence.itemId,
+							checklistItems.map((i) => i.id)
+						)
+					);
+			}
+
+			const itemsWithEvidence = checklistItems.map((item) => ({
+				...item,
+				evidence: evidenceData.filter((ev) => ev.itemId === item.id),
+			}));
+
 			return {
 				...inspection,
 				photos,
+				checklistItems: itemsWithEvidence,
 			};
 		}),
 
@@ -835,6 +880,16 @@ export const vehiclesRouter = {
 						item: z.string(),
 						checked: z.boolean(),
 						severity: z.string().optional().default("critical"),
+						notes: z.string().optional(),
+						evidence: z
+							.array(
+								z.object({
+									url: z.string(),
+									mimeType: z.string(),
+									originalName: z.string(),
+								}),
+							)
+							.optional(),
 					}),
 				),
 				// 360 Inspection Items
@@ -935,15 +990,48 @@ export const vehiclesRouter = {
 
 					// 3. Create checklist items
 					if (input.checklistItems.length > 0) {
-						await tx.insert(inspectionChecklistItems).values(
+						const insertedChecklistItems = await tx.insert(inspectionChecklistItems).values(
 							input.checklistItems.map(
 								(item) =>
 									({
 										inspectionId: newInspection.id,
-										...item,
+										category: item.category,
+										item: item.item,
+										checked: item.checked,
+										severity: item.severity,
+										notes: item.notes,
 									}) as NewInspectionChecklistItem,
 							),
-						);
+						).returning({
+							id: inspectionChecklistItems.id,
+							category: inspectionChecklistItems.category,
+							item: inspectionChecklistItems.item,
+						});
+
+						const evidenceToInsert: NewChecklistItemEvidence[] = [];
+
+						for (const inputItem of input.checklistItems) {
+							if (inputItem.evidence && inputItem.evidence.length > 0) {
+								const insertedItem = insertedChecklistItems.find(
+									(i) => i.category === inputItem.category && i.item === inputItem.item
+								);
+
+								if (insertedItem) {
+									for (const ev of inputItem.evidence) {
+										evidenceToInsert.push({
+											itemId: insertedItem.id,
+											url: ev.url,
+											mimeType: ev.mimeType,
+											originalName: ev.originalName,
+										});
+									}
+								}
+							}
+						}
+
+						if (evidenceToInsert.length > 0) {
+							await tx.insert(checklistItemEvidence).values(evidenceToInsert);
+						}
 					}
 
 					// 4. Create 360 Inspection Items

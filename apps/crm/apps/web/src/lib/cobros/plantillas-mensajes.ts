@@ -60,10 +60,7 @@ export function interpolar(
 			v(variables.marcaLineaModelo, "marca/modelo"),
 		)
 		.replace(/{montoAdeudado}/g, v(variables.montoAdeudado, "monto adeudado"))
-		.replace(
-			/{cuotasAtraso}/g,
-			v(variables.cuotasAtraso, "cuotas en atraso"),
-		)
+		.replace(/{cuotasAtraso}/g, v(variables.cuotasAtraso, "cuotas en atraso"))
 		.replace(
 			/{telefonoAsesor}/g,
 			v(variables.telefonoAsesor, "teléfono asesor"),

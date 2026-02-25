@@ -154,7 +154,7 @@ export async function uploadVehiclePhotoToR2(
 		Bucket: R2_BUCKET_NAME,
 		Key: key,
 		Body: Buffer.from(await file.arrayBuffer()),
-		ContentType: file.type,
+		ContentType: file instanceof File ? resolveMimeType(file) : file.type,
 	});
 
 	await r2Client.send(command);
@@ -273,7 +273,6 @@ export async function uploadFileFromUrlToR2(
 export const ALLOWED_DOCUMENT_TYPES = [
 	"application/pdf",
 	"image/jpeg",
-	"image/jpg",
 	"image/png",
 	"image/webp",
 	"image/avif", // Agregado soporte para AVIF
@@ -346,9 +345,29 @@ export const ALLOWED_VIDEO_TYPES = [
 // Tamaño máximo del video (50MB)
 export const MAX_VIDEO_SIZE = 50 * 1024 * 1024;
 
+// Mapa de extensiones de video a MIME types
+const VIDEO_EXTENSION_TO_MIME: Record<string, string> = {
+	mp4: "video/mp4",
+	mov: "video/quicktime",
+	webm: "video/webm",
+};
+
+// Resolver MIME type de video desde extensión como fallback
+export function resolveVideoMimeType(file: File): string {
+	if (file.type && ALLOWED_VIDEO_TYPES.includes(file.type)) {
+		return file.type;
+	}
+	const extension = file.name.split(".").pop()?.toLowerCase();
+	if (extension && VIDEO_EXTENSION_TO_MIME[extension]) {
+		return VIDEO_EXTENSION_TO_MIME[extension];
+	}
+	return file.type || "";
+}
+
 // Validar video
 export function validateVideo(file: File): { valid: boolean; error?: string } {
-	if (!ALLOWED_VIDEO_TYPES.includes(file.type)) {
+	const mimeType = resolveVideoMimeType(file);
+	if (!ALLOWED_VIDEO_TYPES.includes(mimeType)) {
 		return {
 			valid: false,
 			error:
@@ -376,11 +395,14 @@ export async function uploadVehicleVideoToR2(
 ): Promise<{ key: string; url: string }> {
 	const key = `vehicles/${vehicleId}/videos/${category}/${filename}`;
 
+	const contentType =
+		file instanceof File ? resolveVideoMimeType(file) : file.type;
+
 	const command = new PutObjectCommand({
 		Bucket: R2_BUCKET_NAME,
 		Key: key,
 		Body: Buffer.from(await file.arrayBuffer()),
-		ContentType: file.type,
+		ContentType: contentType,
 	});
 
 	await r2Client.send(command);

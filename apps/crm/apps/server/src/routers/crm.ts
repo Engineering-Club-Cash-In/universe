@@ -2945,6 +2945,7 @@ export const crmRouter = {
 					inArray(opportunities.stageId, placedStageIds),
 					gte(opportunities.createdAt, startOfMonth),
 					lt(opportunities.createdAt, endOfMonth),
+					not(eq(opportunities.status, "migrate")),
 				];
 				if (userId) {
 					conditions.push(eq(opportunities.assignedTo, userId));
@@ -2981,6 +2982,7 @@ export const crmRouter = {
 						and(
 							gte(opportunities.createdAt, startOfMonth),
 							lt(opportunities.createdAt, endOfMonth),
+							not(eq(opportunities.status, "migrate")),
 						),
 					);
 				const [totalClients] = await db
@@ -3020,6 +3022,7 @@ export const crmRouter = {
 						and(
 							gte(opportunities.createdAt, startOfMonth),
 							lt(opportunities.createdAt, endOfMonth),
+							not(eq(opportunities.status, "migrate")),
 						),
 					);
 				const [totalClients] = await db
@@ -3061,6 +3064,7 @@ export const crmRouter = {
 						eq(opportunities.assignedTo, context.userId),
 						gte(opportunities.createdAt, startOfMonth),
 						lt(opportunities.createdAt, endOfMonth),
+						not(eq(opportunities.status, "migrate")),
 					),
 				);
 			const [myClients] = await db
@@ -5572,6 +5576,7 @@ export const crmRouter = {
 							inArray(opportunities.stageId, placedStageIds),
 							gte(opportunities.createdAt, startOfMonth),
 							lt(opportunities.createdAt, endOfMonth),
+							not(eq(opportunities.status, "migrate")),
 							userFilter ? eq(opportunities.assignedTo, userFilter) : undefined,
 						),
 					)

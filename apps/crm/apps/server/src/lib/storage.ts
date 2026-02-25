@@ -117,12 +117,13 @@ export async function uploadFileToR2(
 	opportunityId: string,
 ): Promise<{ key: string; url: string }> {
 	const key = `opportunities/${opportunityId}/${filename}`;
+	const contentType = file instanceof File ? resolveMimeType(file) : file.type;
 
 	const command = new PutObjectCommand({
 		Bucket: R2_BUCKET_NAME,
 		Key: key,
 		Body: Buffer.from(await file.arrayBuffer()),
-		ContentType: file.type,
+		ContentType: contentType,
 	});
 
 	await r2Client.send(command);
@@ -286,9 +287,37 @@ export const ALLOWED_DOCUMENT_TYPES = [
 // Tamaño máximo del archivo (10MB)
 export const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
+// Mapa de extensiones a MIME types para fallback cuando el browser no reporta el tipo
+const EXTENSION_TO_MIME: Record<string, string> = {
+	pdf: "application/pdf",
+	jpg: "image/jpeg",
+	jpeg: "image/jpeg",
+	png: "image/png",
+	webp: "image/webp",
+	avif: "image/avif",
+	doc: "application/msword",
+	docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+	xls: "application/vnd.ms-excel",
+	xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+};
+
+// Resolver MIME type desde extensión como fallback
+export function resolveMimeType(file: File): string {
+	if (file.type && ALLOWED_DOCUMENT_TYPES.includes(file.type)) {
+		return file.type;
+	}
+	const extension = file.name.split(".").pop()?.toLowerCase();
+	if (extension && EXTENSION_TO_MIME[extension]) {
+		return EXTENSION_TO_MIME[extension];
+	}
+	return file.type || "";
+}
+
 // Validar archivo
 export function validateFile(file: File): { valid: boolean; error?: string } {
-	if (!ALLOWED_DOCUMENT_TYPES.includes(file.type)) {
+	const mimeType = resolveMimeType(file);
+
+	if (!ALLOWED_DOCUMENT_TYPES.includes(mimeType)) {
 		return {
 			valid: false,
 			error:

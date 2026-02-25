@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 
 interface ButtonProps {
   children: React.ReactNode;
-  size?: "lg" | "md" | "sm";
+  size?: "lg" | "md" | "sm" | "xs";
   onClick?: () => void;
   type?: "button" | "submit" | "reset";
   className?: string;
@@ -22,6 +22,7 @@ export const Button: React.FC<ButtonProps> = ({
     lg: "min-w-[225px] h-[59px] px-7 py-[10px] text-body",
     md: "min-w-[180px] h-12 px-5 py-2 text-lg",
     sm: "min-w-[150px] h-10 px-4 py-1.5 text-base",
+    xs: "min-w-[120px] h-8 px-3 py-1 text-sm",
   };
 
   return (

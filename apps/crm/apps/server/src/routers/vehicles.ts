@@ -45,6 +45,10 @@ import {
 	prepareValuationContext,
 	vehicleValuationSchema,
 } from "../lib/valuation-schema";
+// Configuration Constants for Evidence Uploads
+const MAX_EVIDENCE_FILES_PER_ITEM = 10;
+const MAX_FILE_SIZE_MB = 50; // Reference for frontend/upload API
+const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'video/mp4', 'video/quicktime'];
 
 export const vehiclesRouter = {
 	// Get all vehicles with their latest inspection and photos
@@ -884,11 +888,12 @@ export const vehiclesRouter = {
 						evidence: z
 							.array(
 								z.object({
-									url: z.string().url({ message: "La URL de la evidencia debe ser válida" }),
-									mimeType: z.string().regex(/^(image|video)\//, { message: "El archivo debe ser una imagen o un video" }),
+									url: z.string().url({ message: "Evidence URL must be valid" }),
+									mimeType: z.string().regex(/^(image|video)\//, { message: "File must be an image or video" }),
 									originalName: z.string().min(1).max(255),
 								}),
 							)
+							.max(MAX_EVIDENCE_FILES_PER_ITEM, { message: `Maximum ${MAX_EVIDENCE_FILES_PER_ITEM} evidence files allowed per checklist item` })
 							.optional(),
 					}),
 				),
@@ -1027,7 +1032,7 @@ export const vehiclesRouter = {
 									}
 								} else {
 									throw new ORPCError("INTERNAL_SERVER_ERROR", {
-										message: `No se pudo enlazar la evidencia al punto crítico: ${inputItem.category} - ${inputItem.item}`,
+										message: `Failed to link evidence to checklist item: ${inputItem.category} - ${inputItem.item}`,
 									});
 								}
 							}

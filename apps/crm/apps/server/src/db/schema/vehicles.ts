@@ -253,9 +253,27 @@ export const inspectionChecklistItems = pgTable("inspection_checklist_items", {
 	item: text("item").notNull(), // description of the criterion
 	checked: boolean("checked").notNull().default(false),
 	severity: text("severity").notNull().default("critical"), // critical, warning, info
+	notes: text("notes"), // Optional notes for the item (e.g. for "Otros")
 
 	createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+// New Table for Checklist Items Evidence (Photos/Videos)
+export const checklistItemEvidence = pgTable(
+	"checklist_item_evidence",
+	{
+		id: uuid("id").defaultRandom().primaryKey(),
+		itemId: uuid("item_id")
+			.references(() => inspectionChecklistItems.id, { onDelete: "cascade" })
+			.notNull(),
+
+		url: text("url").notNull(),
+		mimeType: text("mime_type").notNull(),
+		originalName: text("original_name").notNull(),
+
+		createdAt: timestamp("created_at").defaultNow().notNull(),
+	},
+);
 
 // Vehicle Documents table - Documents specific to vehicles (registration, title, etc.)
 export const vehicleDocuments = pgTable("vehicle_documents", {
@@ -376,10 +394,21 @@ export const vehiclePhotosRelations = relations(vehiclePhotos, ({ one }) => ({
 
 export const inspectionChecklistItemsRelations = relations(
 	inspectionChecklistItems,
-	({ one }) => ({
+	({ one, many }) => ({
 		inspection: one(vehicleInspections, {
 			fields: [inspectionChecklistItems.inspectionId],
 			references: [vehicleInspections.id],
+		}),
+		evidence: many(checklistItemEvidence),
+	}),
+);
+
+export const checklistItemEvidenceRelations = relations(
+	checklistItemEvidence,
+	({ one }) => ({
+		item: one(inspectionChecklistItems, {
+			fields: [checklistItemEvidence.itemId],
+			references: [inspectionChecklistItems.id],
 		}),
 	}),
 );
@@ -421,6 +450,11 @@ export type InspectionChecklistItem =
 	typeof inspectionChecklistItems.$inferSelect;
 export type NewInspectionChecklistItem =
 	typeof inspectionChecklistItems.$inferInsert;
+
+export type ChecklistItemEvidence =
+	typeof checklistItemEvidence.$inferSelect;
+export type NewChecklistItemEvidence =
+	typeof checklistItemEvidence.$inferInsert;
 
 export type VehicleInspection360Item =
 	typeof vehicleInspection360Items.$inferSelect;

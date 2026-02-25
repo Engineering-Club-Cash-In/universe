@@ -7,7 +7,8 @@ import {
   Camera,
   CheckCircle,
   DollarSign,
-  Activity
+  Activity,
+  Trash2
 } from "lucide-react";
 import { useInspection } from "../contexts/InspectionContext";
 import { prepareInspectionData, createFullInspection } from "../services/vehicles";
@@ -57,6 +58,7 @@ const STEPS = [
 
 export default function VehicleInspectionWizard() {
   const { formData, checklistItems, photos, sectionTimes, resetInspection, currentStep, setCurrentStep, items360, rejectionEvidenceUrl } = useInspection();
+  const isDevMode = import.meta.env.VITE_DEV_MODE === 'TRUE';
   const [basicInfoCompleted, setBasicInfoCompleted] = useState(false);
   const [inspection360Completed, setInspection360Completed] = useState(false);
   const vehicleFormRef = useRef<VehicleInspectionFormRef>(null);
@@ -127,13 +129,19 @@ export default function VehicleInspectionWizard() {
       // Prepare data for submission
       const { vehicleData, inspectionData } = prepareInspectionData(dataToUse, sectionTimes, rejectionEvidenceUrl);
 
+      // Map items360 to match API service interface (the backend expects uppercase enums: 'GOOD', 'BAD', etc)
+      const apiItems360 = items360.map(item => ({
+        ...item,
+        status: item.status as 'GOOD' | 'REGULAR' | 'BAD' | 'NA' | 'OK' | 'LEGACY_BAD'
+      }));
+
       // Call the API to create the full inspection
       const result = await createFullInspection(
         vehicleData,
         inspectionData,
         checklistItems,
         photosToUse,
-        items360
+        apiItems360
       );
 
       if (result.success) {
@@ -166,13 +174,29 @@ export default function VehicleInspectionWizard() {
 
       {/* Header */}
       <div className="bg-white border-b">
-        <div className="container mx-auto px-2 sm:px-4 py-1">
-          <div className="text-center">
+        <div className="container mx-auto px-2 sm:px-4 py-1 flex items-center justify-between">
+          <div className="text-left">
             <h1 className="text-2xl sm:text-3xl font-bold">Nueva Inspección de Vehículo</h1>
             <p className="text-sm sm:text-base text-muted-foreground mt-1">
               Complete todos los pasos para registrar la inspección
             </p>
           </div>
+          {isDevMode && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                if (window.confirm('¿Está seguro de querer limpiar toda la inspección y empezar de 0?')) {
+                  resetInspection();
+                  window.location.reload();
+                }
+              }}
+              className="hidden sm:flex"
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Reset (Dev)
+            </Button>
+          )}
         </div>
       </div>
 

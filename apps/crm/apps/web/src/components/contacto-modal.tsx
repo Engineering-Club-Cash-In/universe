@@ -35,10 +35,10 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
-	PLANTILLAS_MENSAJES,
-	type VariablesPlantilla,
 	interpolar,
+	PLANTILLAS_MENSAJES,
 	sugerirPlantilla,
+	type VariablesPlantilla,
 } from "@/lib/cobros/plantillas-mensajes";
 import { cn } from "@/lib/utils";
 import { client, orpc } from "@/utils/orpc";
@@ -233,15 +233,14 @@ export function ContactoModal({
 				if (asuntoEditado) params.set("subject", asuntoEditado);
 				if (mensajeEditado) params.set("body", mensajeEditado);
 				const query = params.toString();
-				window.open(
-					`mailto:${emailCliente || ""}${query ? `?${query}` : ""}`,
-				);
+				window.open(`mailto:${emailCliente || ""}${query ? `?${query}` : ""}`);
 				break;
 			}
 		}
 	};
 
-	const mostrarPlantillas = metodoInicial === "whatsapp" || metodoInicial === "email";
+	const mostrarPlantillas =
+		metodoInicial === "whatsapp" || metodoInicial === "email";
 
 	return (
 		<Dialog>

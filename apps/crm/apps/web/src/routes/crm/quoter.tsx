@@ -1479,7 +1479,8 @@ function QuoterPage() {
 													if (insuredAmountInterno > 0) {
 														// Setear insuranceCost solo al base (extraInsuranceCost ya tiene el valor)
 														const baseOnly =
-															quoterForm.getFieldValue("extraInsuranceCost") ?? 0;
+															quoterForm.getFieldValue("extraInsuranceCost") ??
+															0;
 														quoterForm.setFieldValue(
 															"insuranceCost",
 															Number(baseOnly),

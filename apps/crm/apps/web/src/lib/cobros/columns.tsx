@@ -105,11 +105,14 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 				);
 			}
 
-			const fechaFormateada = parseFechaLocal(fecha).toLocaleDateString("es-GT", {
-				day: "2-digit",
-				month: "short",
-				year: "numeric",
-			});
+			const fechaFormateada = parseFechaLocal(fecha).toLocaleDateString(
+				"es-GT",
+				{
+					day: "2-digit",
+					month: "short",
+					year: "numeric",
+				},
+			);
 
 			let diasClassName = "text-xs mt-0.5";
 			let diasText = "";

@@ -945,11 +945,9 @@ function RouteComponent() {
 												{label[meta.categoria] || meta.categoria}
 											</p>
 											<p
-												className={`font-bold text-2xl ${actual !== undefined ? (cumplida ? "text-green-600" : "text-red-600") : (textColor[meta.categoria] || "")}`}
+												className={`font-bold text-2xl ${actual !== undefined ? (cumplida ? "text-green-600" : "text-red-600") : textColor[meta.categoria] || ""}`}
 											>
-												{actual !== undefined
-													? `${actual.toFixed(2)}%`
-													: "—"}
+												{actual !== undefined ? `${actual.toFixed(2)}%` : "—"}
 											</p>
 											<p className="text-muted-foreground text-xs">
 												Meta: {objetivo.toFixed(2)}%
@@ -1027,7 +1025,7 @@ function RouteComponent() {
 							});
 						}}
 						filterContent={
-							<div className="flex flex-col gap-3 w-full">
+							<div className="flex w-full flex-col gap-3">
 								<div className="flex flex-wrap items-center gap-2 rounded-md border border-border/50 bg-muted/30 px-3 py-2">
 									<span className="font-semibold text-foreground text-sm">
 										Filtrar por etapa:
@@ -1062,7 +1060,9 @@ function RouteComponent() {
 										Etiquetas:
 									</span>
 									<Button
-										variant={filtroEtiquetas.length === 0 ? "default" : "outline"}
+										variant={
+											filtroEtiquetas.length === 0 ? "default" : "outline"
+										}
 										size="sm"
 										onClick={() => {
 											setFiltroEtiquetas([]);

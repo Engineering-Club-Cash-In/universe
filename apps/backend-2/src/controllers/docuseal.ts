@@ -1,4 +1,4 @@
-import { asc, desc, inArray, sql } from "drizzle-orm";
+import { asc, inArray, sql } from "drizzle-orm";
 import { detail_document_field, docusealDocuments, field } from "../database/schemas/docuseal";
 import { db } from "../database";
 import { and, eq } from "drizzle-orm";

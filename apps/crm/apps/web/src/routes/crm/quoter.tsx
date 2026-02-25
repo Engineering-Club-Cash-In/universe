@@ -948,16 +948,24 @@ function QuoterPage() {
 				Math.round(result.baseInsuranceCost * 100) / 100;
 			const rawMembershipCost = Math.round(result.membershipCost * 100) / 100;
 
-			// El seguro total para cálculos es: base + (membresía - GPS)
-			const netMembershipCost =
-				Math.round((rawMembershipCost - GPS_COST) * 100) / 100;
-			const insuranceCost =
-				Math.round((baseInsuranceCost + netMembershipCost) * 100) / 100;
+			if (isInterno) {
+				// Crédito interno: solo seguro base, sin membresía ni GPS
+				quoterForm.setFieldValue("insuranceCost", baseInsuranceCost);
+				quoterForm.setFieldValue("membershipCost", 0);
+				quoterForm.setFieldValue("extraInsuranceCost", baseInsuranceCost);
+				quoterForm.setFieldValue("extraMembershipCost", 0);
+			} else {
+				// El seguro total para cálculos es: base + (membresía - GPS)
+				const netMembershipCost =
+					Math.round((rawMembershipCost - GPS_COST) * 100) / 100;
+				const insuranceCost =
+					Math.round((baseInsuranceCost + netMembershipCost) * 100) / 100;
 
-			quoterForm.setFieldValue("insuranceCost", insuranceCost);
-			quoterForm.setFieldValue("membershipCost", netMembershipCost);
-			quoterForm.setFieldValue("extraInsuranceCost", baseInsuranceCost);
-			quoterForm.setFieldValue("extraMembershipCost", rawMembershipCost);
+				quoterForm.setFieldValue("insuranceCost", insuranceCost);
+				quoterForm.setFieldValue("membershipCost", netMembershipCost);
+				quoterForm.setFieldValue("extraInsuranceCost", baseInsuranceCost);
+				quoterForm.setFieldValue("extraMembershipCost", rawMembershipCost);
+			}
 			quoterForm.setFieldValue("rcdpCost", result.rcdpCost);
 
 			// Recalcular después de actualizar
@@ -1465,6 +1473,18 @@ function QuoterPage() {
 													);
 													quoterForm.setFieldValue("leasingContractCost", 0);
 													quoterForm.setFieldValue("extraAdminCost", 0);
+													// Recalcular seguro sin membresía
+													const insuredAmountInterno =
+														quoterForm.getFieldValue("insuredAmount") ?? 0;
+													if (insuredAmountInterno > 0) {
+														// Setear insuranceCost solo al base (extraInsuranceCost ya tiene el valor)
+														const baseOnly =
+															quoterForm.getFieldValue("extraInsuranceCost") ?? 0;
+														quoterForm.setFieldValue(
+															"insuranceCost",
+															Number(baseOnly),
+														);
+													}
 												} else {
 													// Restaurar defaults de autocompra
 													quoterForm.setFieldValue("gpsCost", GPS_COST);

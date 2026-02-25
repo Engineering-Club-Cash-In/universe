@@ -48,6 +48,12 @@ export interface ChecklistItem {
   item: string;
   checked: boolean;
   severity?: string;
+  notes?: string;
+  evidence?: Array<{
+    url: string;
+    mimeType: string;
+    originalName: string;
+  }>;
 }
 
 export interface PhotoData {
@@ -63,7 +69,7 @@ export interface PhotoData {
 export interface Inspection360Item {
   category: string;
   item: string;
-  status: 'ok' | 'bad' | 'na' | 'bueno' | 'regular' | 'malo';
+  status: 'GOOD' | 'REGULAR' | 'BAD' | 'NA' | 'OK' | 'LEGACY_BAD';
   notes?: string;
   metadata?: Record<string, any>;
 }

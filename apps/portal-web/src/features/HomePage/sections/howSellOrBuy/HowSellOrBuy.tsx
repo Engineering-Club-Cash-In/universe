@@ -154,7 +154,7 @@ export const HowSellOrBuy = () => {
         </div>
         <div className="flex justify-center mt-12">
           <Link to="/sell">
-            <Button size={isMobile ? "sm" : "lg"}>Vender un auto</Button>
+            <Button size={isMobile ? "sm" : "lg"}>Vender mi auto</Button>
           </Link>
         </div>
       </div>

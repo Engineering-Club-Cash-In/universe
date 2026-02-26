@@ -5241,6 +5241,24 @@ export const crmRouter = {
 							"Cada inversionista debe tener ID, nombre y monto mayor a 0",
 					});
 				}
+				if (
+					inv.porcentaje_participacion < 0 ||
+					inv.porcentaje_participacion > 100
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"El porcentaje de participación debe estar entre 0 y 100",
+					});
+				}
+				if (
+					inv.porcentaje_cash_in !== undefined &&
+					(inv.porcentaje_cash_in < 0 || inv.porcentaje_cash_in > 100)
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"El porcentaje de cash-in debe estar entre 0 y 100",
+					});
+				}
 			}
 
 			// Update

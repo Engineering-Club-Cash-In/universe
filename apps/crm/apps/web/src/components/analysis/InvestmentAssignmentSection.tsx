@@ -959,7 +959,7 @@ export function InvestmentAssignmentSection({
 											<div className="space-y-3">
 												{editedExistingInvestors.map((inv, index) => (
 													<div
-														key={index}
+														key={`edit-${inv.inversionista_id || index}`}
 														className="rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-950"
 													>
 														<div className="space-y-3">

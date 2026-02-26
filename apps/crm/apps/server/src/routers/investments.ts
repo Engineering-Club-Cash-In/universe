@@ -77,14 +77,15 @@ export const investmentsRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			const assignedTo = input.assignedTo ?? context.userId;
+			const { proposedAmount, assignedTo: inputAssignedTo, ...rest } = input;
+			const assignedTo = inputAssignedTo ?? context.userId;
 
 			const [lead] = await db
 				.insert(investmentLeads)
 				.values({
-					...input,
+					...rest,
 					assignedTo,
-					proposedAmount: input.proposedAmount?.toString(),
+					proposedAmount: proposedAmount?.toString(),
 				})
 				.returning();
 
@@ -444,7 +445,7 @@ export const investmentsRouter = {
 				}
 			}
 
-			// Actualizar etapa
+			// Actualizar etapa (con condicion de stage actual para evitar race condition)
 			const [updated] = await db
 				.update(investmentOpportunities)
 				.set({
@@ -453,8 +454,19 @@ export const investmentsRouter = {
 					stageEnteredAt: new Date(),
 					updatedAt: new Date(),
 				})
-				.where(eq(investmentOpportunities.id, opp.id))
+				.where(
+					and(
+						eq(investmentOpportunities.id, opp.id),
+						eq(investmentOpportunities.stage, opp.stage),
+					),
+				)
 				.returning();
+
+			if (!updated) {
+				throw new ORPCError("CONFLICT", {
+					message: "La etapa fue modificada por otro usuario. Recargue la pagina.",
+				});
+			}
 
 			// Registrar en stage history
 			await db.insert(investmentStageHistory).values({
@@ -626,38 +638,42 @@ export const investmentsRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			// Desmarcar todos los escenarios aceptados de esta oportunidad
-			await db
-				.update(investmentScenarios)
-				.set({ isAccepted: false })
-				.where(
-					eq(
-						investmentScenarios.investmentOpportunityId,
-						input.opportunityId,
-					),
-				);
+			const accepted = await db.transaction(async (tx) => {
+				// Desmarcar todos los escenarios aceptados de esta oportunidad
+				await tx
+					.update(investmentScenarios)
+					.set({ isAccepted: false })
+					.where(
+						eq(
+							investmentScenarios.investmentOpportunityId,
+							input.opportunityId,
+						),
+					);
 
-			// Marcar el seleccionado
-			const [accepted] = await db
-				.update(investmentScenarios)
-				.set({ isAccepted: true })
-				.where(eq(investmentScenarios.id, input.scenarioId))
-				.returning();
+				// Marcar el seleccionado
+				const [result] = await tx
+					.update(investmentScenarios)
+					.set({ isAccepted: true })
+					.where(eq(investmentScenarios.id, input.scenarioId))
+					.returning();
 
-			// Actualizar checklist
-			await db
-				.update(investmentOpportunities)
-				.set({
-					scenariosCompleted: true,
-					updatedAt: new Date(),
-				})
-				.where(eq(investmentOpportunities.id, input.opportunityId));
+				// Actualizar checklist
+				await tx
+					.update(investmentOpportunities)
+					.set({
+						scenariosCompleted: true,
+						updatedAt: new Date(),
+					})
+					.where(eq(investmentOpportunities.id, input.opportunityId));
 
-			await db.insert(investmentAuditLog).values({
-				investmentOpportunityId: input.opportunityId,
-				action: "scenario_accepted",
-				details: { scenarioId: input.scenarioId },
-				performedBy: context.userId,
+				await tx.insert(investmentAuditLog).values({
+					investmentOpportunityId: input.opportunityId,
+					action: "scenario_accepted",
+					details: { scenarioId: input.scenarioId },
+					performedBy: context.userId,
+				});
+
+				return result;
 			});
 
 			return accepted;

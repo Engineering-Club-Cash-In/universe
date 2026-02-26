@@ -17,15 +17,7 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { client } from "@/utils/orpc";
-
-interface AmortizationRow {
-	month: number;
-	initialBalance: number;
-	interestPlusIva: number;
-	amortization: number;
-	totalToReceive: number;
-}
+import { client, orpc } from "@/utils/orpc";
 
 interface Scenario {
 	id: string;
@@ -48,7 +40,7 @@ interface InvestmentCalculatorProps {
 }
 
 function formatCurrency(value: number | string): string {
-	const num = typeof value === "string" ? parseFloat(value) : value;
+	const num = typeof value === "string" ? Number.parseFloat(value) : value;
 	if (isNaN(num)) return "Q0.00";
 	return `Q${num.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
@@ -90,16 +82,21 @@ export function InvestmentCalculator({
 	>("traditional");
 	const [isSmallTaxpayer, setIsSmallTaxpayer] = useState(false);
 	const [desiredMonthlyAmount, setDesiredMonthlyAmount] = useState("");
-	const [calculationResult, setCalculationResult] = useState<any>(null);
+	const [calculationResult, setCalculationResult] = useState<Awaited<
+		ReturnType<typeof client.calculateInvestmentScenario>
+	> | null>(null);
 
 	const calculateMutation = useMutation({
-		mutationFn: (input: any) => client.calculateInvestmentScenario(input),
+		mutationFn: (
+			input: Parameters<typeof client.calculateInvestmentScenario>[0],
+		) => client.calculateInvestmentScenario(input),
 		onSuccess: (data) => setCalculationResult(data),
 		onError: (error: Error) => toast.error(error.message),
 	});
 
 	const calculateGoalMutation = useMutation({
-		mutationFn: (input: any) => client.calculateInvestmentGoal(input),
+		mutationFn: (input: Parameters<typeof client.calculateInvestmentGoal>[0]) =>
+			client.calculateInvestmentGoal(input),
 		onSuccess: (data) => {
 			setCalculationResult(data.scenario);
 			setAmount(data.requiredCapital.toString());
@@ -108,11 +105,15 @@ export function InvestmentCalculator({
 	});
 
 	const saveScenarioMutation = useMutation({
-		mutationFn: (input: any) => client.createInvestmentScenario(input),
+		mutationFn: (
+			input: Parameters<typeof client.createInvestmentScenario>[0],
+		) => client.createInvestmentScenario(input),
 		onSuccess: () => {
 			toast.success("Escenario guardado");
 			queryClient.invalidateQueries({
-				queryKey: ["getInvestmentOpportunityById"],
+				queryKey: orpc.getInvestmentOpportunityById.queryOptions({
+					input: { id: opportunityId },
+				}).queryKey,
 			});
 			onScenarioSaved?.();
 		},
@@ -120,11 +121,15 @@ export function InvestmentCalculator({
 	});
 
 	const acceptScenarioMutation = useMutation({
-		mutationFn: (input: any) => client.acceptInvestmentScenario(input),
+		mutationFn: (
+			input: Parameters<typeof client.acceptInvestmentScenario>[0],
+		) => client.acceptInvestmentScenario(input),
 		onSuccess: () => {
 			toast.success("Escenario aceptado");
 			queryClient.invalidateQueries({
-				queryKey: ["getInvestmentOpportunityById"],
+				queryKey: orpc.getInvestmentOpportunityById.queryOptions({
+					input: { id: opportunityId },
+				}).queryKey,
 			});
 		},
 		onError: (error: Error) => toast.error(error.message),
@@ -140,9 +145,9 @@ export function InvestmentCalculator({
 				return;
 			}
 			calculateMutation.mutate({
-				amount: parseFloat(amount),
-				monthlyRate: parseFloat(monthlyRate),
-				termMonths: parseInt(termMonths, 10),
+				amount: Number.parseFloat(amount),
+				monthlyRate: Number.parseFloat(monthlyRate),
+				termMonths: Number.parseInt(termMonths, 10),
 				modality,
 				isSmallTaxpayer,
 			});
@@ -152,9 +157,9 @@ export function InvestmentCalculator({
 				return;
 			}
 			calculateGoalMutation.mutate({
-				desiredMonthlyReturn: parseFloat(desiredMonthlyAmount),
-				monthlyRate: parseFloat(monthlyRate),
-				termMonths: parseInt(termMonths, 10),
+				desiredMonthlyReturn: Number.parseFloat(desiredMonthlyAmount),
+				monthlyRate: Number.parseFloat(monthlyRate),
+				termMonths: Number.parseInt(termMonths, 10),
 				isSmallTaxpayer,
 			});
 		}
@@ -164,9 +169,9 @@ export function InvestmentCalculator({
 		if (!calculationResult) return;
 		saveScenarioMutation.mutate({
 			opportunityId,
-			amount: parseFloat(amount),
-			monthlyRate: parseFloat(monthlyRate),
-			termMonths: parseInt(termMonths, 10),
+			amount: Number.parseFloat(amount),
+			monthlyRate: Number.parseFloat(monthlyRate),
+			termMonths: Number.parseInt(termMonths, 10),
 			modality: mode === "objetivo" ? "compound" : modality,
 			isSmallTaxpayer,
 		});
@@ -176,11 +181,7 @@ export function InvestmentCalculator({
 		acceptScenarioMutation.mutate({ scenarioId });
 	}
 
-	const amortizationRows: AmortizationRow[] = Array.isArray(
-		calculationResult?.amortizationTable,
-	)
-		? (calculationResult.amortizationTable as AmortizationRow[])
-		: [];
+	const amortizationRows = calculationResult?.amortizationTable ?? [];
 
 	return (
 		<div className="space-y-6">
@@ -345,9 +346,7 @@ export function InvestmentCalculator({
 							<Tabs
 								value={modality}
 								onValueChange={(v) =>
-									setModality(
-										v as "traditional" | "maturity" | "compound",
-									)
+									setModality(v as "traditional" | "maturity" | "compound")
 								}
 							>
 								<TabsList className="grid w-full grid-cols-3">
@@ -369,8 +368,8 @@ export function InvestmentCalculator({
 								</TabsContent>
 								<TabsContent value="compound" className="mt-2">
 									<p className="text-muted-foreground text-xs">
-										Los intereses se reinvierten cada mes, generando rendimientos
-										sobre rendimientos.
+										Los intereses se reinvierten cada mes, generando
+										rendimientos sobre rendimientos.
 									</p>
 								</TabsContent>
 							</Tabs>
@@ -402,32 +401,30 @@ export function InvestmentCalculator({
 					<div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
 						<Card className="border-blue-200 bg-blue-50 dark:border-blue-900 dark:bg-blue-950/30">
 							<CardContent className="pt-4">
-								<p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
+								<p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
 									Monto
 								</p>
-								<p className="mt-1 text-xl font-bold text-blue-700 dark:text-blue-300">
-									{formatCurrency(
-										calculationResult.amount ?? amount,
-									)}
+								<p className="mt-1 font-bold text-blue-700 text-xl dark:text-blue-300">
+									{formatCurrency(calculationResult.amount ?? amount)}
 								</p>
 							</CardContent>
 						</Card>
 						<Card className="border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30">
 							<CardContent className="pt-4">
-								<p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
+								<p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
 									Interés Total
 								</p>
-								<p className="mt-1 text-xl font-bold text-amber-700 dark:text-amber-300">
+								<p className="mt-1 font-bold text-amber-700 text-xl dark:text-amber-300">
 									{formatCurrency(calculationResult.totalInterest ?? 0)}
 								</p>
 							</CardContent>
 						</Card>
 						<Card className="border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/30">
 							<CardContent className="pt-4">
-								<p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
+								<p className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
 									Total a Recibir
 								</p>
-								<p className="mt-1 text-xl font-bold text-green-700 dark:text-green-300">
+								<p className="mt-1 font-bold text-green-700 text-xl dark:text-green-300">
 									{formatCurrency(calculationResult.totalToReceive ?? 0)}
 								</p>
 							</CardContent>
@@ -445,9 +442,9 @@ export function InvestmentCalculator({
 							<CardContent className="p-0">
 								<div className="max-h-72 overflow-y-auto">
 									<Table>
-										<TableHeader className="sticky top-0 bg-background z-10">
+										<TableHeader className="sticky top-0 z-10 bg-background">
 											<TableRow>
-												<TableHead className="text-center w-16">Mes</TableHead>
+												<TableHead className="w-16 text-center">Mes</TableHead>
 												<TableHead className="text-right">
 													Saldo Inicial
 												</TableHead>
@@ -472,7 +469,7 @@ export function InvestmentCalculator({
 														{formatCurrency(row.initialBalance)}
 													</TableCell>
 													<TableCell className="text-right">
-														{formatCurrency(row.interestPlusIva)}
+														{formatCurrency(row.interestPlusVat)}
 													</TableCell>
 													<TableCell className="text-right">
 														{formatCurrency(row.amortization)}
@@ -542,7 +539,7 @@ export function InvestmentCalculator({
 											{scenario.isAccepted && (
 												<Badge
 													variant="default"
-													className="bg-green-600 text-xs text-white"
+													className="bg-green-600 text-white text-xs"
 												>
 													<Check className="mr-1 h-3 w-3" />
 													Aceptado
@@ -554,7 +551,7 @@ export function InvestmentCalculator({
 												</Badge>
 											)}
 										</div>
-										<div className="grid grid-cols-2 gap-x-6 gap-y-0.5 text-xs text-muted-foreground sm:grid-cols-4">
+										<div className="grid grid-cols-2 gap-x-6 gap-y-0.5 text-muted-foreground text-xs sm:grid-cols-4">
 											<span>
 												Tasa:{" "}
 												<span className="font-medium text-foreground">
@@ -584,7 +581,7 @@ export function InvestmentCalculator({
 												</span>
 											)}
 										</div>
-										<p className="text-xs text-muted-foreground">
+										<p className="text-muted-foreground text-xs">
 											Creado el {formatDate(scenario.createdAt)}
 										</p>
 									</div>

@@ -1,11 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-	CheckCircle,
-	Clock,
-	FileText,
-	Upload,
-	XCircle,
-} from "lucide-react";
+import { CheckCircle, Clock, FileText, Upload, XCircle } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -28,7 +22,7 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { client } from "@/utils/orpc";
+import { client, orpc } from "@/utils/orpc";
 
 const DOC_TYPE_LABELS: Record<string, string> = {
 	dpi_front: "DPI (Frente)",
@@ -119,7 +113,9 @@ export function InvestmentDocuments({
 
 	const invalidate = () =>
 		queryClient.invalidateQueries({
-			queryKey: ["getInvestmentOpportunityById"],
+			queryKey: orpc.getInvestmentOpportunityById.queryOptions({
+				input: { id: opportunityId },
+			}).queryKey,
 		});
 
 	const uploadMutation = useMutation({
@@ -287,20 +283,19 @@ export function InvestmentDocuments({
 								>
 									<div className="flex items-start justify-between gap-2">
 										<div className="min-w-0 flex-1">
-											<p className="truncate text-sm font-medium">
+											<p className="truncate font-medium text-sm">
 												{DOC_TYPE_LABELS[docType]}
 											</p>
 											{latestDoc?.fileName && (
-												<p className="text-muted-foreground truncate text-xs">
+												<p className="truncate text-muted-foreground text-xs">
 													{latestDoc.fileName}
 												</p>
 											)}
-											{latestDoc?.rejectionReason &&
-												status === "rejected" && (
-													<p className="mt-1 text-xs text-red-600">
-														Motivo: {latestDoc.rejectionReason}
-													</p>
-												)}
+											{latestDoc?.rejectionReason && status === "rejected" && (
+												<p className="mt-1 text-red-600 text-xs">
+													Motivo: {latestDoc.rejectionReason}
+												</p>
+											)}
 											{latestDoc?.reviewedAt && (
 												<p className="text-muted-foreground text-xs">
 													{new Date(latestDoc.reviewedAt).toLocaleDateString(
@@ -309,9 +304,7 @@ export function InvestmentDocuments({
 												</p>
 											)}
 										</div>
-										<div className="shrink-0">
-											{getStatusBadge(status)}
-										</div>
+										<div className="shrink-0">{getStatusBadge(status)}</div>
 									</div>
 
 									<div className="flex flex-wrap gap-2">
@@ -339,7 +332,7 @@ export function InvestmentDocuments({
 											</Button>
 										)}
 
-										{latestDoc && (
+										{latestDoc && latestDoc.fileUrl.startsWith("https://") && (
 											<Button
 												size="sm"
 												variant="ghost"
@@ -360,7 +353,7 @@ export function InvestmentDocuments({
 											<>
 												<Button
 													size="sm"
-													className="h-7 bg-green-600 text-xs text-white hover:bg-green-700"
+													className="h-7 bg-green-600 text-white text-xs hover:bg-green-700"
 													onClick={() => approveMutation.mutate(latestDoc.id)}
 													disabled={approveMutation.isPending}
 												>
@@ -383,7 +376,7 @@ export function InvestmentDocuments({
 					</div>
 
 					{totalUploaded === 0 && (
-						<p className="text-muted-foreground mt-4 text-center text-sm">
+						<p className="mt-4 text-center text-muted-foreground text-sm">
 							No se han subido documentos aún.
 						</p>
 					)}
@@ -399,10 +392,7 @@ export function InvestmentDocuments({
 					<div className="space-y-4">
 						<div className="space-y-2">
 							<Label htmlFor="docType">Tipo de Documento</Label>
-							<Select
-								value={uploadDocType}
-								onValueChange={setUploadDocType}
-							>
+							<Select value={uploadDocType} onValueChange={setUploadDocType}>
 								<SelectTrigger>
 									<SelectValue placeholder="Selecciona el tipo" />
 								</SelectTrigger>
@@ -448,10 +438,7 @@ export function InvestmentDocuments({
 						>
 							Cancelar
 						</Button>
-						<Button
-							onClick={handleUpload}
-							disabled={uploadMutation.isPending}
-						>
+						<Button onClick={handleUpload} disabled={uploadMutation.isPending}>
 							{uploadMutation.isPending ? "Subiendo..." : "Subir"}
 						</Button>
 					</DialogFooter>

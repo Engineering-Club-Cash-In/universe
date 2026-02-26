@@ -708,6 +708,8 @@ function RouteComponent() {
 
 							{/* Investor Profile */}
 							<InvestorProfile
+								key={investor?.id ?? "new"}
+								opportunityId={opportunityId}
 								investmentLeadId={lead?.id}
 								investor={investor}
 							/>

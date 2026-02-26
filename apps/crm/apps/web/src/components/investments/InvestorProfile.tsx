@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
-import { client } from "@/utils/orpc";
+import { client, orpc } from "@/utils/orpc";
 
 const CLIENT_TYPE_LABELS: Record<string, string> = {
 	individual: "Individual",
@@ -48,6 +48,7 @@ interface InvestorData {
 }
 
 interface InvestorProfileProps {
+	opportunityId: string;
 	investmentLeadId?: string;
 	investor?: InvestorData | null;
 }
@@ -68,6 +69,7 @@ function isProfileComplete(data: Record<string, unknown>): boolean {
 }
 
 export function InvestorProfile({
+	opportunityId,
 	investmentLeadId,
 	investor,
 }: InvestorProfileProps) {
@@ -103,7 +105,9 @@ export function InvestorProfile({
 
 	const invalidateQueries = () => {
 		queryClient.invalidateQueries({
-			queryKey: ["getInvestmentOpportunityById"],
+			queryKey: orpc.getInvestmentOpportunityById.queryOptions({
+				input: { id: opportunityId },
+			}).queryKey,
 		});
 	};
 

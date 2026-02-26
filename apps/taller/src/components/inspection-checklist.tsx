@@ -331,6 +331,8 @@ export default function InspectionChecklist({
   }, []);
 
   const handleItemEvidenceUpload = async (itemId: string, event: React.ChangeEvent<HTMLInputElement>) => {
+    if (isUploadingItemEvidence[itemId]) return;
+    
     const files = Array.from(event.target.files || []);
     if (files.length === 0) return;
 
@@ -379,8 +381,12 @@ export default function InspectionChecklist({
     });
 
     try {
-      const results = await Promise.all(uploadPromises);
-      const successfulUploads = results.filter((res): res is { url: string; mimeType: string; originalName: string } => res !== null);
+      const results = await Promise.allSettled(uploadPromises);
+      const successfulUploads = results
+        .filter((result): result is PromiseFulfilledResult<{ url: string; mimeType: string; originalName: string } | null> => 
+          result.status === 'fulfilled' && result.value !== null
+        )
+        .map(result => result.value!);
 
       if (successfulUploads.length > 0) {
         setItemEvidence((prev) => ({
@@ -389,6 +395,9 @@ export default function InspectionChecklist({
         }));
         toast.success(`Se adjuntaron ${successfulUploads.length} evidencia(s) exitosamente`);
       }
+    } catch (error) {
+      console.error("Error procesando resultados de subida:", error);
+      toast.error("Ocurrió un problema procesando las subidas.");
     } finally {
       setIsUploadingItemEvidence(prev => ({ ...prev, [itemId]: false }));
       event.target.value = '';
@@ -409,14 +418,14 @@ export default function InspectionChecklist({
     if (!file) return;
 
     if (file.size > MAX_FILE_SIZE) {
-      toast.error("File exceeds the maximum limit of 10MB.");
+      toast.error("El archivo excede el límite de 10MB.");
       if (evidenceInputRef.current) evidenceInputRef.current.value = '';
       if (cameraInputRef.current) cameraInputRef.current.value = '';
       return;
     }
 
     if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
-      toast.error("Invalid format. Use JPG, PNG or WEBP.");
+      toast.error("Formato inválido. Use JPG, PNG o WEBP.");
       if (evidenceInputRef.current) evidenceInputRef.current.value = '';
       if (cameraInputRef.current) cameraInputRef.current.value = '';
       return;
@@ -451,18 +460,18 @@ export default function InspectionChecklist({
 
       if (url) {
         setRejectionEvidenceUrl(url);
-        toast.success("Evidence attached successfully");
+        toast.success("Evidencia adjuntada exitosamente");
       }
     } catch (error) {
-      console.error("Error uploading evidence:", error);
-      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      console.error("Error al subir evidencia:", error);
+      const errorMsg = error instanceof Error ? error.message : 'Error desconocido';
 
       if (errorMsg.includes('size')) {
-        toast.error("File exceeds the maximum limit of 10MB.");
+        toast.error("El archivo excede el límite de 10MB.");
       } else if (errorMsg.includes('network') || errorMsg.includes('fetch')) {
-        toast.error("Connection error. Check your internet and try again.");
+        toast.error("Error de conexión. Revisa tu internet e intenta de nuevo.");
       } else {
-        toast.error("Failed to upload evidence. Please try again.");
+        toast.error("No se pudo subir la evidencia. Por favor intenta de nuevo.");
       }
     } finally {
       setIsUploadingEvidence(false);

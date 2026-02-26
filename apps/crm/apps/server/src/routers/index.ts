@@ -11,6 +11,7 @@ import { cobrosRouter } from "./cobros";
 import { contractGenerationRouter } from "./contract-generation";
 import { crmRouter } from "./crm";
 import { insuranceRouter } from "./insurance";
+import { investmentsRouter } from "./investments";
 import { legalContractsRouter } from "./legal-contracts";
 import { locationsRouter } from "./locations";
 import { miniagentRouter } from "./miniagent";
@@ -274,6 +275,31 @@ export const appRouter = {
 	adminSetMiniAgentCredentials: adminMiniagentRouter.setMiniAgentCredentials,
 	adminDeleteMiniAgentCredentials:
 		adminMiniagentRouter.deleteMiniAgentCredentials,
+
+	// Investment routes (Inversiones)
+	getInvestmentLeads: investmentsRouter.getInvestmentLeads,
+	createInvestmentLead: investmentsRouter.createInvestmentLead,
+	updateInvestmentLead: investmentsRouter.updateInvestmentLead,
+	getInvestmentOpportunities: investmentsRouter.getInvestmentOpportunities,
+	getInvestmentOpportunityById: investmentsRouter.getInvestmentOpportunityById,
+	advanceInvestmentStage: investmentsRouter.advanceInvestmentStage,
+	markAsLost: investmentsRouter.markAsLost,
+	calculateInvestmentScenario: investmentsRouter.calculateInvestmentScenario,
+	calculateInvestmentGoal: investmentsRouter.calculateInvestmentGoal,
+	createInvestmentScenario: investmentsRouter.createInvestmentScenario,
+	acceptInvestmentScenario: investmentsRouter.acceptInvestmentScenario,
+	createInvestor: investmentsRouter.createInvestor,
+	updateInvestor: investmentsRouter.updateInvestor,
+	getInvestorById: investmentsRouter.getInvestorById,
+	uploadInvestmentDocument: investmentsRouter.uploadInvestmentDocument,
+	reviewInvestmentDocument: investmentsRouter.reviewInvestmentDocument,
+	createInvestmentInteraction: investmentsRouter.createInvestmentInteraction,
+	validateInvestmentFunds: investmentsRouter.validateInvestmentFunds,
+	updateSignatureStatus: investmentsRouter.updateSignatureStatus,
+	submitNonAdvanceSurvey: investmentsRouter.submitNonAdvanceSurvey,
+	updateNegotiationChecklist: investmentsRouter.updateNegotiationChecklist,
+	getInvestmentAuditLog: investmentsRouter.getInvestmentAuditLog,
+	getInvestmentDashboardStats: investmentsRouter.getInvestmentDashboardStats,
 
 	// Accounting routes (Contabilidad)
 	getResumenGlobalInversionistas:

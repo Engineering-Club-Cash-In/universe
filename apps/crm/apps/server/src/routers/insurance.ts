@@ -108,9 +108,9 @@ function calculateCosts(
 	const rcdpCost = isBus ? RCDP_COST[vehicleType] || 0 : 0;
 
 	return {
-		baseInsuranceCost: Math.round(baseInsurance * 100) / 100,
-		membershipCost: Math.round(membershipCost * 100) / 100,
-		rcdpCost: Math.round(rcdpCost * 100) / 100,
+		baseInsuranceCost: baseInsurance,
+		membershipCost: membershipCost,
+		rcdpCost: rcdpCost,
 	};
 }
 

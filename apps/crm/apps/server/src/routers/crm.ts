@@ -5246,8 +5246,7 @@ export const crmRouter = {
 					inv.porcentaje_participacion > 100
 				) {
 					throw new ORPCError("BAD_REQUEST", {
-						message:
-							"El porcentaje de participación debe estar entre 0 y 100",
+						message: "El porcentaje de participación debe estar entre 0 y 100",
 					});
 				}
 				if (
@@ -5255,8 +5254,7 @@ export const crmRouter = {
 					(inv.porcentaje_cash_in < 0 || inv.porcentaje_cash_in > 100)
 				) {
 					throw new ORPCError("BAD_REQUEST", {
-						message:
-							"El porcentaje de cash-in debe estar entre 0 y 100",
+						message: "El porcentaje de cash-in debe estar entre 0 y 100",
 					});
 				}
 			}

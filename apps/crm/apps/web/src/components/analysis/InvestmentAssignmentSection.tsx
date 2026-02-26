@@ -12,7 +12,9 @@ import {
 	Eye,
 	FileText,
 	Loader2,
+	Pencil,
 	Plus,
+	Save,
 	Search,
 	Trash2,
 	TrendingUp,
@@ -92,6 +94,10 @@ export function InvestmentAssignmentSection({
 		string | null
 	>(initialOpportunityId ?? null);
 	const [selectedInversionistas, setSelectedInversionistas] = useState<
+		SelectedInversionista[]
+	>([]);
+	const [isEditingExisting, setIsEditingExisting] = useState(false);
+	const [editedExistingInvestors, setEditedExistingInvestors] = useState<
 		SelectedInversionista[]
 	>([]);
 
@@ -197,6 +203,8 @@ export function InvestmentAssignmentSection({
 			);
 			// Limpiar inversionistas seleccionados
 			setSelectedInversionistas([]);
+			setIsEditingExisting(false);
+			setEditedExistingInvestors([]);
 		}
 	}, [selectedOpportunity]);
 
@@ -239,6 +247,33 @@ export function InvestmentAssignmentSection({
 		},
 		onError: (error: Error) => {
 			toast.error(error.message || "Error al asignar inversionista");
+		},
+	});
+
+	const updateInvestorsMutation = useMutation({
+		mutationFn: async ({
+			opportunityId,
+			inversionistas,
+		}: {
+			opportunityId: string;
+			inversionistas: string;
+		}) => {
+			return client.updateOpportunityInvestors({
+				opportunityId,
+				inversionistas,
+			});
+		},
+		onSuccess: () => {
+			toast.success("Inversionistas actualizados correctamente");
+			queryClient.invalidateQueries({
+				queryKey: ["getOpportunitiesForInvestment"],
+			});
+			setIsEditingExisting(false);
+			setEditedExistingInvestors([]);
+			refetchOpportunities();
+		},
+		onError: (error: Error) => {
+			toast.error(error.message || "Error al actualizar inversionistas");
 		},
 	});
 
@@ -299,6 +334,83 @@ export function InvestmentAssignmentSection({
 			newList[index][field] = Number(value) || 0;
 		}
 		setSelectedInversionistas(newList);
+	};
+
+	const handleStartEditExisting = () => {
+		if (!selectedOpportunity?.existingInvestors) return;
+		setEditedExistingInvestors(
+			selectedOpportunity.existingInvestors.map((inv) => ({
+				inversionista_id: inv.inversionista_id,
+				nombre: inv.nombre,
+				porcentaje_participacion: inv.porcentaje_participacion,
+				monto_aportado: inv.monto_aportado,
+				porcentaje_cash_in: inv.porcentaje_cash_in ?? 0,
+			})),
+		);
+		setIsEditingExisting(true);
+	};
+
+	const handleCancelEditExisting = () => {
+		setIsEditingExisting(false);
+		setEditedExistingInvestors([]);
+	};
+
+	const handleUpdateExistingInvestor = (
+		index: number,
+		field: keyof SelectedInversionista,
+		value: string | number,
+	) => {
+		const newList = [...editedExistingInvestors];
+		if (field === "inversionista_id") {
+			const selectedInv = inversionistasQuery.data?.inversionistas?.find(
+				(i) => i.inversionistaId.toString() === value,
+			);
+			newList[index].inversionista_id = Number(value);
+			newList[index].nombre = selectedInv?.nombre || "";
+		} else if (
+			field === "monto_aportado" ||
+			field === "porcentaje_participacion" ||
+			field === "porcentaje_cash_in"
+		) {
+			newList[index][field] = Number(value) || 0;
+		}
+		setEditedExistingInvestors(newList);
+	};
+
+	const handleRemoveExistingInvestor = (index: number) => {
+		const newList = [...editedExistingInvestors];
+		newList.splice(index, 1);
+		setEditedExistingInvestors(newList);
+	};
+
+	const handleAddExistingInvestor = () => {
+		setEditedExistingInvestors([
+			...editedExistingInvestors,
+			{
+				inversionista_id: 0,
+				nombre: "",
+				porcentaje_participacion: 0,
+				monto_aportado: 0,
+				porcentaje_cash_in: 0,
+			},
+		]);
+	};
+
+	const handleSaveExistingInvestors = () => {
+		if (!selectedOpportunityId) return;
+		const invalid = editedExistingInvestors.filter(
+			(inv) => !inv.inversionista_id || inv.monto_aportado <= 0,
+		);
+		if (invalid.length > 0) {
+			toast.error(
+				"Todos los inversionistas deben tener datos válidos y monto > 0",
+			);
+			return;
+		}
+		updateInvestorsMutation.mutate({
+			opportunityId: selectedOpportunityId,
+			inversionistas: JSON.stringify(editedExistingInvestors),
+		});
 	};
 
 	// Handle assign and advance
@@ -826,40 +938,183 @@ export function InvestmentAssignmentSection({
 							{selectedOpportunity?.existingInvestors &&
 								selectedOpportunity.existingInvestors.length > 0 && (
 									<div className="space-y-2">
-										<Label className="font-medium text-sm">
-											Inversionistas Asignados
-										</Label>
-										<div className="space-y-2">
-											{selectedOpportunity.existingInvestors.map(
-												(inv: ExistingInvestor, index: number) => (
-													<div
-														key={index}
-														className="rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-800 dark:bg-green-950"
-													>
-														<div className="flex items-center justify-between">
-															<div>
-																<p className="font-medium text-sm">
-																	{inv.nombre}
-																</p>
-																<p className="text-muted-foreground text-xs">
-																	Monto: Q{" "}
-																	{inv.monto_aportado?.toLocaleString("es-GT", {
-																		minimumFractionDigits: 2,
-																	})}{" "}
-																	| Participación:{" "}
-																	{inv.porcentaje_participacion}%
-																	{inv.porcentaje_cash_in !== undefined &&
-																		` | Cash-in: ${inv.porcentaje_cash_in}%`}
-																</p>
-															</div>
-															<Badge variant="default" className="bg-green-600">
-																Asignado
-															</Badge>
-														</div>
-													</div>
-												),
+										<div className="flex items-center justify-between">
+											<Label className="font-medium text-sm">
+												Inversionistas Asignados
+											</Label>
+											{!isEditingExisting && (
+												<Button
+													type="button"
+													variant="outline"
+													size="sm"
+													onClick={handleStartEditExisting}
+												>
+													<Pencil className="mr-1 h-4 w-4" />
+													Editar
+												</Button>
 											)}
 										</div>
+
+										{isEditingExisting ? (
+											<div className="space-y-3">
+												{editedExistingInvestors.map((inv, index) => (
+													<div
+														key={index}
+														className="rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-950"
+													>
+														<div className="space-y-3">
+															<div>
+																<Label className="text-xs">Inversionista</Label>
+																<Combobox
+																	value={inv.inversionista_id?.toString() || ""}
+																	onChange={(value) =>
+																		handleUpdateExistingInvestor(
+																			index,
+																			"inversionista_id",
+																			value,
+																		)
+																	}
+																	options={
+																		inversionistasQuery.data?.inversionistas?.map(
+																			(investor) => ({
+																				label: investor.nombre,
+																				value:
+																					investor.inversionistaId.toString(),
+																			}),
+																		) || []
+																	}
+																	placeholder="Seleccionar inversionista..."
+																	width="full"
+																/>
+															</div>
+															<div className="grid grid-cols-2 gap-2">
+																<div>
+																	<Label className="text-xs">
+																		Monto aportado
+																	</Label>
+																	<Input
+																		type="number"
+																		value={inv.monto_aportado || ""}
+																		onChange={(e) =>
+																			handleUpdateExistingInvestor(
+																				index,
+																				"monto_aportado",
+																				e.target.value,
+																			)
+																		}
+																		placeholder="Q0.00"
+																	/>
+																</div>
+																<div>
+																	<Label className="text-xs">
+																		% Participación
+																	</Label>
+																	<Input
+																		type="number"
+																		value={inv.porcentaje_participacion || ""}
+																		onChange={(e) =>
+																			handleUpdateExistingInvestor(
+																				index,
+																				"porcentaje_participacion",
+																				e.target.value,
+																			)
+																		}
+																		placeholder="0%"
+																	/>
+																</div>
+															</div>
+															<div className="flex justify-end">
+																<Button
+																	type="button"
+																	variant="ghost"
+																	size="sm"
+																	onClick={() =>
+																		handleRemoveExistingInvestor(index)
+																	}
+																>
+																	<Trash2 className="mr-1 h-4 w-4" />
+																	Eliminar
+																</Button>
+															</div>
+														</div>
+													</div>
+												))}
+
+												<Button
+													type="button"
+													variant="outline"
+													size="sm"
+													onClick={handleAddExistingInvestor}
+												>
+													<Plus className="mr-1 h-4 w-4" />
+													Agregar
+												</Button>
+
+												<div className="flex gap-2">
+													<Button
+														type="button"
+														variant="default"
+														size="sm"
+														onClick={handleSaveExistingInvestors}
+														disabled={updateInvestorsMutation.isPending}
+													>
+														{updateInvestorsMutation.isPending ? (
+															<Loader2 className="mr-1 h-4 w-4 animate-spin" />
+														) : (
+															<Save className="mr-1 h-4 w-4" />
+														)}
+														Guardar cambios
+													</Button>
+													<Button
+														type="button"
+														variant="outline"
+														size="sm"
+														onClick={handleCancelEditExisting}
+														disabled={updateInvestorsMutation.isPending}
+													>
+														Cancelar
+													</Button>
+												</div>
+											</div>
+										) : (
+											<div className="space-y-2">
+												{selectedOpportunity.existingInvestors.map(
+													(inv: ExistingInvestor, index: number) => (
+														<div
+															key={index}
+															className="rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-800 dark:bg-green-950"
+														>
+															<div className="flex items-center justify-between">
+																<div>
+																	<p className="font-medium text-sm">
+																		{inv.nombre}
+																	</p>
+																	<p className="text-muted-foreground text-xs">
+																		Monto: Q{" "}
+																		{inv.monto_aportado?.toLocaleString(
+																			"es-GT",
+																			{
+																				minimumFractionDigits: 2,
+																			},
+																		)}{" "}
+																		| Participación:{" "}
+																		{inv.porcentaje_participacion}%
+																		{inv.porcentaje_cash_in !== undefined &&
+																			` | Cash-in: ${inv.porcentaje_cash_in}%`}
+																	</p>
+																</div>
+																<Badge
+																	variant="default"
+																	className="bg-green-600"
+																>
+																	Asignado
+																</Badge>
+															</div>
+														</div>
+													),
+												)}
+											</div>
+										)}
 									</div>
 								)}
 

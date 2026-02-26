@@ -5167,6 +5167,97 @@ export const crmRouter = {
 			};
 		}),
 
+	updateOpportunityInvestors: analystProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				inversionistas: z.string(), // JSON string with full investors array
+			}),
+		)
+		.handler(async ({ input }) => {
+			// Get the opportunity
+			const [opportunity] = await db
+				.select()
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
+			}
+
+			// Validate opportunity is at 50%
+			const [currentStage] = await db
+				.select()
+				.from(salesStages)
+				.where(eq(salesStages.id, opportunity.stageId))
+				.limit(1);
+
+			if (!currentStage || currentStage.closurePercentage !== 50) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Solo se pueden editar inversionistas en la etapa del 50%",
+				});
+			}
+
+			// Parse and validate investors
+			let parsedInvestors: Array<{
+				inversionista_id: number;
+				nombre: string;
+				monto_aportado: number;
+				porcentaje_participacion: number;
+				porcentaje_cash_in?: number;
+			}>;
+
+			try {
+				parsedInvestors = JSON.parse(input.inversionistas);
+				if (!Array.isArray(parsedInvestors)) {
+					throw new Error("Not an array");
+				}
+			} catch {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Formato de inversionistas inválido",
+				});
+			}
+
+			if (parsedInvestors.length === 0) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Debe haber al menos un inversionista",
+				});
+			}
+
+			if (parsedInvestors.length > 20) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "No se pueden asignar más de 20 inversionistas",
+				});
+			}
+
+			// Validate each investor has required fields
+			for (const inv of parsedInvestors) {
+				if (!inv.inversionista_id || !inv.nombre || inv.monto_aportado <= 0) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Cada inversionista debe tener ID, nombre y monto mayor a 0",
+					});
+				}
+			}
+
+			// Update
+			await db
+				.update(opportunities)
+				.set({
+					inversionistas: JSON.stringify(parsedInvestors),
+					updatedAt: new Date(),
+				})
+				.where(eq(opportunities.id, input.opportunityId));
+
+			return {
+				success: true,
+				message: "Inversionistas actualizados correctamente",
+			};
+		}),
+
 	// ── Credit Scoring ──────────────────────────────────────────────────
 	scoreLead: crmProcedure
 		.input(

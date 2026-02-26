@@ -270,7 +270,7 @@ function RouteComponent() {
 										/>
 									))}
 								</Pie>
-								<Tooltip formatter={(value: number) => formatCurrency(value)} />
+								<Tooltip formatter={(value) => formatCurrency(Number(value))} />
 							</PieChart>
 						</ResponsiveContainer>
 					</CardContent>
@@ -319,8 +319,10 @@ function RouteComponent() {
 								<YAxis yAxisId="left" />
 								<YAxis yAxisId="right" orientation="right" />
 								<Tooltip
-									formatter={(value: number, name: string) =>
-										name === "monto" ? formatCurrency(value) : value
+									formatter={(value, name) =>
+										name === "monto"
+											? formatCurrency(Number(value))
+											: value
 									}
 								/>
 								<Legend />

@@ -276,7 +276,10 @@ export function ContactoModal({
 										<Label>Método de Contacto</Label>
 										<Select
 											onValueChange={(value) =>
-												form.setFieldValue(field.name, value)
+												form.setFieldValue(
+													field.name,
+													value as typeof field.state.value,
+												)
 											}
 											defaultValue={field.state.value}
 										>
@@ -305,7 +308,10 @@ export function ContactoModal({
 										<Label>Estado del Contacto</Label>
 										<Select
 											onValueChange={(value) =>
-												form.setFieldValue(field.name, value)
+												form.setFieldValue(
+													field.name,
+													value as typeof field.state.value,
+												)
 											}
 											defaultValue={field.state.value}
 										>

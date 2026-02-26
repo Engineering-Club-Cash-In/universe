@@ -344,6 +344,62 @@ const requireTallerOrCrm = o.middleware(async ({ context, next }) => {
 	});
 });
 
+const requireInvestmentAccess = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (!PERMISSIONS.canAccessInvestments(userRole)) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Se requiere acceso al modulo de inversiones",
+		});
+	}
+
+	return next({
+		context: {
+			session: context.session,
+			user: userData[0],
+			userId,
+			userRole,
+		},
+	});
+});
+
+const requireInvestmentManager = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (!PERMISSIONS.canValidateInvestmentFunds(userRole)) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Se requiere rol de gerente de inversiones",
+		});
+	}
+
+	return next({
+		context: {
+			session: context.session,
+			user: userData[0],
+			userId,
+			userRole,
+		},
+	});
+});
+
 export const protectedProcedure = publicProcedure.use(requireAuth);
 export const adminProcedure = publicProcedure.use(requireAdmin);
 export const crmProcedure = publicProcedure.use(requireCrmAccess);
@@ -359,3 +415,5 @@ export const viewOpportunityContractsProcedure = publicProcedure.use(
 export const juridicoProcedure = publicProcedure.use(requireJuridico);
 export const tallerProcedure = publicProcedure.use(requireTallerOrigin);
 export const tallerOrCrmProcedure = publicProcedure.use(requireTallerOrCrm);
+export const investmentProcedure = publicProcedure.use(requireInvestmentAccess);
+export const investmentManagerProcedure = publicProcedure.use(requireInvestmentManager);

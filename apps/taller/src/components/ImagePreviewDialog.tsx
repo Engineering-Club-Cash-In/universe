@@ -3,7 +3,7 @@ import {
     DialogContent,
     DialogHeader,
 } from "@/components/ui/dialog";
-import { X, Loader2, AlertCircle } from "lucide-react";
+import { X, Loader2, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
@@ -11,7 +11,9 @@ import { cn } from "@/lib/utils";
 interface ImagePreviewDialogProps {
     isOpen: boolean;
     onClose: () => void;
-    imageUrl: string | null;
+    imageUrl?: string | null;
+    images?: string[];
+    initialIndex?: number;
     title?: string;
 }
 
@@ -19,18 +21,75 @@ export default function ImagePreviewDialog({
     isOpen,
     onClose,
     imageUrl,
+    images = [],
+    initialIndex = 0,
     title = "Evidencia de Rechazo",
 }: ImagePreviewDialogProps) {
     const [isLoading, setIsLoading] = useState(true);
     const [hasError, setHasError] = useState(false);
+    const [currentIndex, setCurrentIndex] = useState(initialIndex);
 
-    // Reset states when dialog opens or URL changes
+    const targetImages = images.length > 0 ? images : (imageUrl ? [imageUrl] : []);
+    const currentImageUrl = targetImages[currentIndex] || null;
+
+    // Initialize index when dialog opens
     useEffect(() => {
-        if (isOpen && imageUrl) {
+        if (isOpen) {
+            setCurrentIndex(Math.min(initialIndex, Math.max(0, targetImages.length - 1)));
+        }
+    }, [isOpen, initialIndex, targetImages.length]);
+
+    // Reset loading states when current image URL changes
+    useEffect(() => {
+        if (isOpen && currentImageUrl) {
             setIsLoading(true);
             setHasError(false);
         }
-    }, [isOpen, imageUrl]);
+    }, [currentImageUrl, isOpen]);
+
+    // Preload next and previous images for smoother navigation
+    useEffect(() => {
+        if (isOpen && targetImages.length > 1) {
+            if (currentIndex < targetImages.length - 1) {
+                const img = new Image();
+                img.src = targetImages[currentIndex + 1];
+            }
+            if (currentIndex > 0) {
+                const img = new Image();
+                img.src = targetImages[currentIndex - 1];
+            }
+        }
+    }, [currentIndex, isOpen, targetImages]);
+
+    // Keyboard navigation
+    useEffect(() => {
+        if (!isOpen || targetImages.length <= 1) return;
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === "ArrowRight") {
+                setCurrentIndex(prev => Math.min(prev + 1, targetImages.length - 1));
+            } else if (e.key === "ArrowLeft") {
+                setCurrentIndex(prev => Math.max(prev - 1, 0));
+            }
+        };
+
+        window.addEventListener("keydown", handleKeyDown);
+        return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [isOpen, targetImages.length]);
+
+    const handleNext = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (currentIndex < targetImages.length - 1) {
+            setCurrentIndex(prev => prev + 1);
+        }
+    };
+
+    const handlePrev = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (currentIndex > 0) {
+            setCurrentIndex(prev => prev - 1);
+        }
+    };
 
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
@@ -48,8 +107,8 @@ export default function ImagePreviewDialog({
                 </DialogHeader>
 
                 {/* Contenedor de Imagen con Loader */}
-                <div className="flex-1 flex items-center justify-center w-full h-full bg-black/90 rounded-lg overflow-hidden relative">
-                    {imageUrl ? (
+                <div className="flex-1 flex items-center justify-center w-full h-full bg-black/90 rounded-lg overflow-hidden relative group">
+                    {currentImageUrl ? (
                         <>
                             {/* Loader */}
                             {isLoading && !hasError && (
@@ -74,8 +133,8 @@ export default function ImagePreviewDialog({
                             {/* Imagen */}
                             {!hasError && (
                                 <img
-                                    key={imageUrl}
-                                    src={imageUrl}
+                                    key={currentImageUrl}
+                                    src={currentImageUrl}
                                     alt={title}
                                     className={cn(
                                         "max-w-full max-h-full object-contain transition-opacity duration-300",
@@ -88,9 +147,45 @@ export default function ImagePreviewDialog({
                                     }}
                                 />
                             )}
+                            
+                            {/* Controles de Navegación */}
+                            {targetImages.length > 1 && (
+                                <>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className={cn(
+                                            "absolute left-4 top-1/2 -translate-y-1/2 rounded-full w-12 h-12 bg-black/50 hover:bg-black/70 text-white border border-white/20 transition-all opacity-0 group-hover:opacity-100",
+                                            currentIndex === 0 && "opacity-0 pointer-events-none"
+                                        )}
+                                        onClick={handlePrev}
+                                        disabled={currentIndex === 0}
+                                    >
+                                        <ChevronLeft className="h-8 w-8" />
+                                    </Button>
+                                    
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className={cn(
+                                            "absolute right-4 top-1/2 -translate-y-1/2 rounded-full w-12 h-12 bg-black/50 hover:bg-black/70 text-white border border-white/20 transition-all opacity-0 group-hover:opacity-100",
+                                            currentIndex === targetImages.length - 1 && "opacity-0 pointer-events-none"
+                                        )}
+                                        onClick={handleNext}
+                                        disabled={currentIndex === targetImages.length - 1}
+                                    >
+                                        <ChevronRight className="h-8 w-8" />
+                                    </Button>
+
+                                    {/* Indicador de posición */}
+                                    <div className="absolute top-4 left-4 bg-black/60 px-3 py-1.5 rounded-full text-white text-sm font-medium backdrop-blur-sm border border-white/10">
+                                        {currentIndex + 1} / {targetImages.length}
+                                    </div>
+                                </>
+                            )}
 
                             {/* Título en la parte inferior */}
-                            <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent text-white">
+                            <div className="absolute bottom-0 left-0 right-0 p-4 bg-linear-to-t from-black/80 to-transparent text-white">
                                 <h3 className="text-lg font-semibold text-center">{title}</h3>
                             </div>
                         </>

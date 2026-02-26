@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
@@ -354,26 +354,7 @@ export default function VehiclesDashboard() {
     inspectionResult: "",
   });
 
-  // Debounce search term
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setPage(1); // Reset to first page on search
-      loadVehicles();
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [searchTerm, filterStatus, category]);
-
-  // Load vehicles when page changes
-  useEffect(() => {
-    loadVehicles();
-  }, [page]);
-
-  useEffect(() => {
-    loadStatistics();
-  }, []);
-
-
-  const transformVehicleData = (vehicle: VehicleWithRelations): DashboardVehicle => {
+  const transformVehicleData = useCallback((vehicle: VehicleWithRelations): DashboardVehicle => {
     // Get the latest inspection if available
     const latestInspection = vehicle.inspections?.[0] || null;
 
@@ -430,9 +411,9 @@ export default function VehiclesDashboard() {
         : [],
       rejectionEvidenceUrl: latestInspection?.rejectionEvidenceUrl,
     };
-  };
+  }, []);
 
-  const loadVehicles = async () => {
+  const loadVehicles = useCallback(async () => {
     setIsLoading(true);
     try {
       const offset = (page - 1) * pageSize;
@@ -442,33 +423,54 @@ export default function VehiclesDashboard() {
         query: searchTerm,
         status: filterStatus,
         category: category === 'all' ? undefined : category
-      });
+      }) as unknown as { data: VehicleWithRelations[], total: number };
 
       if (result) {
-        // Handle the new response format { data, total }
-        // @ts-ignore - The API type might not be fully updated in the IDE context yet
-        const rawData = result.data || [];
-        // @ts-ignore
-        const total = result.total || 0;
-
-        setRawVehiclesData(rawData);
-        const transformedVehicles = rawData.map(transformVehicleData);
+        setRawVehiclesData(result.data || []);
+        const transformedVehicles = (result.data || []).map(transformVehicleData);
         setVehicles(transformedVehicles);
-        setTotalVehicles(total);
+        setTotalVehicles(result.total || 0);
       } else {
-        // Fall back to sample data if API fails
-        setVehicles(sampleVehicles);
-        setTotalVehicles(sampleVehicles.length);
+        setVehicles([]);
+        setTotalVehicles(0);
       }
     } catch (error) {
       console.error("Error loading vehicles:", error);
-      // Fall back to sample data if API fails
-      setVehicles(sampleVehicles);
-      setTotalVehicles(sampleVehicles.length);
+      toast.error("Hubo un error al cargar los vehículos.");
+      setVehicles([]);
+      setTotalVehicles(0);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [page, pageSize, searchTerm, filterStatus, category, transformVehicleData]);
+
+  // Debounce search term
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1); // Reset to first page on search
+      // We pass the latest state context via the useCallback loadVehicles effect or call it directly:
+      // However since React sets state asynchronously, calling loadVehicles() here would use old page values unless we pass it.
+      // Easiest is to let the 'page' effect handle it, but wait: if page is ALREADY 1, the page effect won't trigger!
+      // So we must manually trigger loadVehicles if page === 1
+      setPage((prevPage) => {
+        if (prevPage === 1) {
+          loadVehicles(); // trigger it manualy since effect won't
+        }
+        return 1;
+      });
+    }, 500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchTerm, filterStatus, category]);
+
+  // Load vehicles when page changes
+  useEffect(() => {
+    loadVehicles();
+  }, [page, loadVehicles]);
+
+  useEffect(() => {
+    loadStatistics();
+  }, []);
 
   const loadStatistics = async () => {
     try {

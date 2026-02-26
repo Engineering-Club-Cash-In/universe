@@ -327,9 +327,9 @@ function AuditLogTab({
 		id: string;
 		fromStage: string | null;
 		toStage: string;
-		changedBy: string | null;
+		changedBy: string;
 		reason: string | null;
-		createdAt: string | null;
+		createdAt: Date;
 	}[];
 }) {
 	const auditQuery = useQuery({
@@ -405,7 +405,7 @@ function AuditLogTab({
 								<History className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
 								<div className="min-w-0 flex-1">
 									<p className="font-medium text-sm">{entry.action}</p>
-									{entry.details && (
+									{entry.details != null && (
 										<pre className="mt-1 overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-xs">
 											{JSON.stringify(entry.details, null, 2)}
 										</pre>

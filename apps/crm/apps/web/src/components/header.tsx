@@ -267,18 +267,20 @@ export default function Header() {
 						)}
 
 						{/* Inversiones */}
-						{session && userRole && PERMISSIONS.canAccessInvestments(userRole) && (
-							<Button
-								variant={isActive("/inversiones") ? "secondary" : "ghost"}
-								size="sm"
-								asChild
-							>
-								<Link to="/inversiones">
-									<TrendingUp className="mr-2 h-4 w-4" />
-									Inversiones
-								</Link>
-							</Button>
-						)}
+						{session &&
+							userRole &&
+							PERMISSIONS.canAccessInvestments(userRole) && (
+								<Button
+									variant={isActive("/inversiones") ? "secondary" : "ghost"}
+									size="sm"
+									asChild
+								>
+									<Link to="/inversiones">
+										<TrendingUp className="mr-2 h-4 w-4" />
+										Inversiones
+									</Link>
+								</Button>
+							)}
 
 						{/* Contabilidad Dropdown */}
 						{session &&

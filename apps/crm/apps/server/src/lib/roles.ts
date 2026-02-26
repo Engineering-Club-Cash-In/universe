@@ -225,12 +225,10 @@ export const PERMISSIONS = {
 		role === ROLES.INVESTMENT_MANAGER,
 
 	canApproveInvestmentDocuments: (role: UserRole | string): boolean =>
-		role === ROLES.ADMIN ||
-		role === ROLES.ANALYST,
+		role === ROLES.ADMIN || role === ROLES.ANALYST,
 
 	canValidateInvestmentFunds: (role: UserRole | string): boolean =>
-		role === ROLES.ADMIN ||
-		role === ROLES.INVESTMENT_MANAGER,
+		role === ROLES.ADMIN || role === ROLES.INVESTMENT_MANAGER,
 
 	canViewFullInvestmentPipeline: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN ||

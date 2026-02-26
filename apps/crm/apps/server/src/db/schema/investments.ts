@@ -1,5 +1,6 @@
 import {
 	boolean,
+	date,
 	decimal,
 	integer,
 	jsonb,
@@ -8,7 +9,6 @@ import {
 	text,
 	timestamp,
 	uuid,
-	date,
 } from "drizzle-orm/pg-core";
 import { user } from "./auth";
 
@@ -144,9 +144,7 @@ export const investmentOpportunities = pgTable("investment_opportunities", {
 	assignedAdvisorId: text("assigned_advisor_id")
 		.notNull()
 		.references(() => user.id),
-	status: investmentOpportunityStatusEnum("status")
-		.notNull()
-		.default("open"),
+	status: investmentOpportunityStatusEnum("status").notNull().default("open"),
 	// Perdido
 	lostReason: text("lost_reason"),
 	lastStageBeforeLost: investmentStageEnum("last_stage_before_lost"),

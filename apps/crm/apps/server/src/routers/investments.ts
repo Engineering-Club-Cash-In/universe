@@ -3,54 +3,56 @@ import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import {
-	investmentLeads,
-	investmentOpportunities,
-	investmentStageHistory,
 	investmentAuditLog,
-	investors,
-	investmentScenarios,
 	investmentDocuments,
 	investmentInteractions,
+	investmentLeads,
 	investmentNonAdvanceSurvey,
+	investmentOpportunities,
+	investmentScenarios,
+	investmentStageHistory,
+	investors,
 } from "../db/schema/investments";
 import {
-	investmentProcedure,
-	investmentManagerProcedure,
+	calculateGoal,
+	calculateInvestment,
+} from "../lib/investment-calculator";
+import {
 	analystProcedure,
+	investmentManagerProcedure,
+	investmentProcedure,
 } from "../lib/orpc";
-import { calculateInvestment, calculateGoal } from "../lib/investment-calculator";
-import { createNotification } from "./notifications";
 import { ROLES } from "../lib/roles";
+import { createNotification } from "./notifications";
 
 export const investmentsRouter = {
 	// ============ LEADS ============
 
 	getInvestmentLeads: investmentProcedure
 		.input(
-			z.object({
-				limit: z.number().int().positive().default(50),
-				offset: z.number().int().min(0).default(0),
-			}).optional(),
+			z
+				.object({
+					limit: z.number().int().positive().default(50),
+					offset: z.number().int().min(0).default(0),
+				})
+				.optional(),
 		)
 		.handler(async ({ input, context }) => {
 			const limit = input?.limit ?? 50;
 			const offset = input?.offset ?? 0;
 
-			const query = db
+			const conditions =
+				context.userRole === ROLES.INVESTMENT_ADVISOR_JR
+					? [eq(investmentLeads.assignedTo, context.userId)]
+					: [];
+
+			return await db
 				.select()
 				.from(investmentLeads)
+				.where(conditions.length > 0 ? and(...conditions) : undefined)
 				.orderBy(desc(investmentLeads.createdAt))
 				.limit(limit)
 				.offset(offset);
-
-			// Advisors Jr solo ven sus leads
-			if (context.userRole === ROLES.INVESTMENT_ADVISOR_JR) {
-				return query.where(
-					eq(investmentLeads.assignedTo, context.userId),
-				);
-			}
-
-			return query;
 		}),
 
 	createInvestmentLead: investmentProcedure
@@ -155,24 +157,24 @@ export const investmentsRouter = {
 
 	getInvestmentOpportunities: investmentProcedure
 		.input(
-			z.object({
-				stage: z
-					.enum([
-						"prospecting",
-						"contacted",
-						"negotiation",
-						"acceptance_signatures",
-						"welcome",
-						"closed",
-						"lost",
-					])
-					.optional(),
-			}).optional(),
+			z
+				.object({
+					stage: z
+						.enum([
+							"prospecting",
+							"contacted",
+							"negotiation",
+							"acceptance_signatures",
+							"welcome",
+							"closed",
+							"lost",
+						])
+						.optional(),
+				})
+				.optional(),
 		)
 		.handler(async ({ input, context }) => {
-			const conditions = [
-				eq(investmentOpportunities.status, "open"),
-			];
+			const conditions = [eq(investmentOpportunities.status, "open")];
 
 			if (input?.stage) {
 				conditions.push(eq(investmentOpportunities.stage, input.stage));
@@ -239,42 +241,22 @@ export const investmentsRouter = {
 					db
 						.select()
 						.from(investmentScenarios)
-						.where(
-							eq(
-								investmentScenarios.investmentOpportunityId,
-								input.id,
-							),
-						)
+						.where(eq(investmentScenarios.investmentOpportunityId, input.id))
 						.orderBy(desc(investmentScenarios.createdAt)),
 					db
 						.select()
 						.from(investmentDocuments)
-						.where(
-							eq(
-								investmentDocuments.investmentOpportunityId,
-								input.id,
-							),
-						)
+						.where(eq(investmentDocuments.investmentOpportunityId, input.id))
 						.orderBy(desc(investmentDocuments.createdAt)),
 					db
 						.select()
 						.from(investmentInteractions)
-						.where(
-							eq(
-								investmentInteractions.investmentOpportunityId,
-								input.id,
-							),
-						)
+						.where(eq(investmentInteractions.investmentOpportunityId, input.id))
 						.orderBy(desc(investmentInteractions.createdAt)),
 					db
 						.select()
 						.from(investmentStageHistory)
-						.where(
-							eq(
-								investmentStageHistory.investmentOpportunityId,
-								input.id,
-							),
-						)
+						.where(eq(investmentStageHistory.investmentOpportunityId, input.id))
 						.orderBy(desc(investmentStageHistory.createdAt)),
 				]);
 
@@ -337,12 +319,7 @@ export const investmentsRouter = {
 					const [interaction] = await db
 						.select()
 						.from(investmentInteractions)
-						.where(
-							eq(
-								investmentInteractions.investmentOpportunityId,
-								opp.id,
-							),
-						)
+						.where(eq(investmentInteractions.investmentOpportunityId, opp.id))
 						.limit(1);
 					if (!interaction) {
 						throw new ORPCError("BAD_REQUEST", {
@@ -357,12 +334,7 @@ export const investmentsRouter = {
 					const [interaction] = await db
 						.select()
 						.from(investmentInteractions)
-						.where(
-							eq(
-								investmentInteractions.investmentOpportunityId,
-								opp.id,
-							),
-						)
+						.where(eq(investmentInteractions.investmentOpportunityId, opp.id))
 						.limit(1);
 					if (!interaction) {
 						throw new ORPCError("BAD_REQUEST", {
@@ -384,13 +356,10 @@ export const investmentsRouter = {
 						const missing = [];
 						if (!opp.scenariosCompleted)
 							missing.push("escenarios de inversion");
-						if (!opp.documentsApproved)
-							missing.push("documentacion aprobada");
+						if (!opp.documentsApproved) missing.push("documentacion aprobada");
 						if (!opp.kycCompleted) missing.push("KYC completado");
-						if (!opp.profileCompleted)
-							missing.push("perfil del inversionista");
-						if (!opp.webappProfileCreated)
-							missing.push("perfil en webapp CCI");
+						if (!opp.profileCompleted) missing.push("perfil del inversionista");
+						if (!opp.webappProfileCreated) missing.push("perfil en webapp CCI");
 						throw new ORPCError("BAD_REQUEST", {
 							message: `Faltan requisitos: ${missing.join(", ")}`,
 						});
@@ -464,7 +433,8 @@ export const investmentsRouter = {
 
 			if (!updated) {
 				throw new ORPCError("CONFLICT", {
-					message: "La etapa fue modificada por otro usuario. Recargue la pagina.",
+					message:
+						"La etapa fue modificada por otro usuario. Recargue la pagina.",
 				});
 			}
 
@@ -703,10 +673,7 @@ export const investmentsRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			const [investor] = await db
-				.insert(investors)
-				.values(input)
-				.returning();
+			const [investor] = await db.insert(investors).values(input).returning();
 
 			return investor;
 		}),
@@ -850,8 +817,7 @@ export const investmentsRouter = {
 				);
 
 			const allApproved =
-				allDocs.length > 0 &&
-				allDocs.every((d) => d.status === "approved");
+				allDocs.length > 0 && allDocs.every((d) => d.status === "approved");
 
 			if (allApproved) {
 				await db
@@ -861,10 +827,7 @@ export const investmentsRouter = {
 						updatedAt: new Date(),
 					})
 					.where(
-						eq(
-							investmentOpportunities.id,
-							updated.investmentOpportunityId,
-						),
+						eq(investmentOpportunities.id, updated.investmentOpportunityId),
 					);
 			}
 
@@ -1087,14 +1050,11 @@ export const investmentsRouter = {
 			}),
 		)
 		.handler(async ({ input }) => {
-			return db
+			return await db
 				.select()
 				.from(investmentAuditLog)
 				.where(
-					eq(
-						investmentAuditLog.investmentOpportunityId,
-						input.opportunityId,
-					),
+					eq(investmentAuditLog.investmentOpportunityId, input.opportunityId),
 				)
 				.orderBy(desc(investmentAuditLog.createdAt));
 		}),
@@ -1105,12 +1065,7 @@ export const investmentsRouter = {
 		async ({ context }) => {
 			const conditions =
 				context.userRole === ROLES.INVESTMENT_ADVISOR_JR
-					? [
-							eq(
-								investmentOpportunities.assignedAdvisorId,
-								context.userId,
-							),
-						]
+					? [eq(investmentOpportunities.assignedAdvisorId, context.userId)]
 					: [];
 
 			const allOpps = await db
@@ -1129,12 +1084,9 @@ export const investmentsRouter = {
 			return {
 				totalOpportunities: allOpps.length,
 				byStage,
-				openOpportunities: allOpps.filter((o) => o.status === "open")
-					.length,
-				wonOpportunities: allOpps.filter((o) => o.status === "won")
-					.length,
-				lostOpportunities: allOpps.filter((o) => o.status === "lost")
-					.length,
+				openOpportunities: allOpps.filter((o) => o.status === "open").length,
+				wonOpportunities: allOpps.filter((o) => o.status === "won").length,
+				lostOpportunities: allOpps.filter((o) => o.status === "lost").length,
 			};
 		},
 	),

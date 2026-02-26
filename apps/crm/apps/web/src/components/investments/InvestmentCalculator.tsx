@@ -97,7 +97,9 @@ export function InvestmentCalculator({
 	const calculateGoalMutation = useMutation({
 		mutationFn: (input: Parameters<typeof client.calculateInvestmentGoal>[0]) =>
 			client.calculateInvestmentGoal(input),
-		onSuccess: (data) => {
+		onSuccess: (
+			data: Awaited<ReturnType<typeof client.calculateInvestmentGoal>>,
+		) => {
 			setCalculationResult(data.scenario);
 			setAmount(data.requiredCapital.toString());
 		},
@@ -157,7 +159,7 @@ export function InvestmentCalculator({
 				return;
 			}
 			calculateGoalMutation.mutate({
-				desiredMonthlyReturn: Number.parseFloat(desiredMonthlyAmount),
+				desiredMonthlyAmount: Number.parseFloat(desiredMonthlyAmount),
 				monthlyRate: Number.parseFloat(monthlyRate),
 				termMonths: Number.parseInt(termMonths, 10),
 				isSmallTaxpayer,
@@ -168,7 +170,7 @@ export function InvestmentCalculator({
 	function handleSaveScenario() {
 		if (!calculationResult) return;
 		saveScenarioMutation.mutate({
-			opportunityId,
+			investmentOpportunityId: opportunityId,
 			amount: Number.parseFloat(amount),
 			monthlyRate: Number.parseFloat(monthlyRate),
 			termMonths: Number.parseInt(termMonths, 10),
@@ -178,7 +180,7 @@ export function InvestmentCalculator({
 	}
 
 	function handleAcceptScenario(scenarioId: string) {
-		acceptScenarioMutation.mutate({ scenarioId });
+		acceptScenarioMutation.mutate({ scenarioId, opportunityId });
 	}
 
 	const amortizationRows = calculationResult?.amortizationTable ?? [];

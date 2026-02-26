@@ -93,15 +93,7 @@ function RouteComponent() {
 		id: string;
 		name: string;
 		email: string;
-		role:
-			| "admin"
-			| "sales"
-			| "sales_supervisor"
-			| "analyst"
-			| "cobros"
-			| "cobros_supervisor"
-			| "juridico"
-			| "accounting";
+		role: UserRole;
 		banned: boolean | null;
 		emailVerified: boolean;
 		createdAt: Date;

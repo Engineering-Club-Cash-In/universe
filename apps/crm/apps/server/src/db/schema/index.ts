@@ -14,3 +14,4 @@ export * from "./notifications";
 export * from "./quotations";
 export * from "./renap";
 export * from "./vehicles";
+export * from "./investments";

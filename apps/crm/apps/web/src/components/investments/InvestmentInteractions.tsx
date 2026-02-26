@@ -29,7 +29,7 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { client } from "@/utils/orpc";
+import { client, orpc } from "@/utils/orpc";
 
 const INTERACTION_TYPE_LABELS: Record<string, string> = {
 	call: "Llamada",
@@ -112,7 +112,9 @@ export function InvestmentInteractions({
 
 	const invalidate = () =>
 		queryClient.invalidateQueries({
-			queryKey: ["getInvestmentOpportunityById"],
+			queryKey: orpc.getInvestmentOpportunityById.queryOptions({
+				input: { id: opportunityId },
+			}).queryKey,
 		});
 
 	const createMutation = useMutation({
@@ -168,8 +170,7 @@ export function InvestmentInteractions({
 
 	// Sort interactions most recent first
 	const sorted = [...interactions].sort(
-		(a, b) =>
-			new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+		(a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
 	);
 
 	return (
@@ -191,13 +192,13 @@ export function InvestmentInteractions({
 						<div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
 							<Calendar className="h-5 w-5 shrink-0 text-amber-600" />
 							<div>
-								<p className="text-sm font-semibold text-amber-800">
+								<p className="font-semibold text-amber-800 text-sm">
 									Próximo seguimiento
 								</p>
-								<p className="text-sm text-amber-700">
-									{new Date(nearestFollowup.nextFollowupDate!).toLocaleDateString(
-										"es-GT",
-									)}{" "}
+								<p className="text-amber-700 text-sm">
+									{new Date(
+										nearestFollowup.nextFollowupDate!,
+									).toLocaleDateString("es-GT")}{" "}
 									&mdash; {nearestFollowup.description.slice(0, 60)}
 									{nearestFollowup.description.length > 60 ? "..." : ""}
 								</p>
@@ -207,7 +208,7 @@ export function InvestmentInteractions({
 
 					{/* Timeline */}
 					{sorted.length === 0 ? (
-						<p className="text-muted-foreground py-6 text-center text-sm">
+						<p className="py-6 text-center text-muted-foreground text-sm">
 							No hay interacciones registradas aún.
 						</p>
 					) : (
@@ -236,8 +237,9 @@ export function InvestmentInteractions({
 											>
 												{getInteractionIcon(interaction.interactionType)}
 												<span className="ml-1">
-													{INTERACTION_TYPE_LABELS[interaction.interactionType] ??
-														interaction.interactionType}
+													{INTERACTION_TYPE_LABELS[
+														interaction.interactionType
+													] ?? interaction.interactionType}
 												</span>
 											</Badge>
 											<span className="text-muted-foreground text-xs">
@@ -249,7 +251,7 @@ export function InvestmentInteractions({
 										<p className="mt-1 text-sm">{interaction.description}</p>
 
 										{interaction.nextFollowupDate && (
-											<div className="mt-1 flex items-center gap-1 text-xs text-amber-700">
+											<div className="mt-1 flex items-center gap-1 text-amber-700 text-xs">
 												<Calendar className="h-3 w-3" />
 												Seguimiento:{" "}
 												{new Date(
@@ -258,7 +260,7 @@ export function InvestmentInteractions({
 											</div>
 										)}
 
-										<p className="text-muted-foreground mt-1 text-xs">
+										<p className="mt-1 text-muted-foreground text-xs">
 											Registrado el{" "}
 											{new Date(interaction.createdAt).toLocaleDateString(
 												"es-GT",
@@ -317,8 +319,7 @@ export function InvestmentInteractions({
 							</div>
 							<div className="space-y-2">
 								<Label htmlFor="intTime">
-									Hora{" "}
-									<span className="text-muted-foreground">(opcional)</span>
+									Hora <span className="text-muted-foreground">(opcional)</span>
 								</Label>
 								<Input
 									id="intTime"

@@ -3,7 +3,7 @@ import {
 	dropTargetForElements,
 } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import {
 	AlertCircle,
 	Banknote,
@@ -119,7 +119,10 @@ function DraggableInvestmentCard({
 	const days = getDaysInStage(item.opportunity.updatedAt);
 
 	return (
-		<Link to="/inversiones/$opportunityId" params={{ opportunityId: item.opportunity.id }}>
+		<Link
+			to="/inversiones/$opportunityId"
+			params={{ opportunityId: item.opportunity.id }}
+		>
 			<Card
 				ref={ref}
 				className={`cursor-pointer p-3 transition-shadow hover:shadow-md ${
@@ -251,11 +254,7 @@ function DroppableInvestmentColumn({
 
 // ─── Create Lead Dialog ───────────────────────────────────────────────────────
 
-function CreateLeadDialog({
-	onSuccess,
-}: {
-	onSuccess: () => void;
-}) {
+function CreateLeadDialog({ onSuccess }: { onSuccess: () => void }) {
 	const [open, setOpen] = useState(false);
 	const [name, setName] = useState("");
 	const [email, setEmail] = useState("");
@@ -299,8 +298,18 @@ function CreateLeadDialog({
 			name: name.trim(),
 			email: email.trim() || undefined,
 			phones: phone.trim() ? [phone.trim()] : undefined,
-			source: (source as "website" | "referral" | "cold_call" | "email" | "social_media" | "event" | "whatsapp") || undefined,
-			proposedAmount: proposedAmount ? Number.parseFloat(proposedAmount) : undefined,
+			source:
+				(source as
+					| "website"
+					| "referral"
+					| "cold_call"
+					| "email"
+					| "social_media"
+					| "event"
+					| "whatsapp") || undefined,
+			proposedAmount: proposedAmount
+				? Number.parseFloat(proposedAmount)
+				: undefined,
 			notes: notes.trim() || undefined,
 		});
 	}
@@ -463,8 +472,27 @@ function RouteComponent() {
 	);
 
 	function handleDrop(opportunityId: string, newStage: string) {
-		// For drag-and-drop we use advanceInvestmentStage only when moving forward
-		// Since the backend validates gates, we just call it and let the server handle errors
+		// Find the current stage of the opportunity
+		const item = allItems.find((i) => i.opportunity.id === opportunityId);
+		if (!item) return;
+
+		const currentStageIdx = INVESTMENT_STAGES.findIndex(
+			(s) => s.id === item.opportunity.stage,
+		);
+		const targetStageIdx = INVESTMENT_STAGES.findIndex(
+			(s) => s.id === newStage,
+		);
+
+		// Only allow advancing to the immediate next stage
+		if (targetStageIdx !== currentStageIdx + 1) {
+			if (targetStageIdx <= currentStageIdx) {
+				toast.error("No se puede retroceder de etapa");
+			} else {
+				toast.error("Solo se puede avanzar una etapa a la vez");
+			}
+			return;
+		}
+
 		advanceStageMutation.mutate({ opportunityId });
 	}
 
@@ -504,28 +532,36 @@ function RouteComponent() {
 						<div className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2">
 							<Users className="h-4 w-4 text-muted-foreground" />
 							<div>
-								<p className="font-semibold text-sm">{stats.totalOpportunities}</p>
+								<p className="font-semibold text-sm">
+									{stats.totalOpportunities}
+								</p>
 								<p className="text-muted-foreground text-xs">Total</p>
 							</div>
 						</div>
 						<div className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2">
 							<TrendingUp className="h-4 w-4 text-blue-500" />
 							<div>
-								<p className="font-semibold text-sm">{stats.openOpportunities}</p>
+								<p className="font-semibold text-sm">
+									{stats.openOpportunities}
+								</p>
 								<p className="text-muted-foreground text-xs">Abiertas</p>
 							</div>
 						</div>
 						<div className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2">
 							<Banknote className="h-4 w-4 text-green-500" />
 							<div>
-								<p className="font-semibold text-sm">{stats.wonOpportunities}</p>
+								<p className="font-semibold text-sm">
+									{stats.wonOpportunities}
+								</p>
 								<p className="text-muted-foreground text-xs">Ganadas</p>
 							</div>
 						</div>
 						<div className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2">
 							<TrendingDown className="h-4 w-4 text-red-500" />
 							<div>
-								<p className="font-semibold text-sm">{stats.lostOpportunities}</p>
+								<p className="font-semibold text-sm">
+									{stats.lostOpportunities}
+								</p>
 								<p className="text-muted-foreground text-xs">Perdidas</p>
 							</div>
 						</div>

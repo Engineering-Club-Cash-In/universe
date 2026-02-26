@@ -1271,6 +1271,19 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           if (disponible_restante.lte(0)) {
             break;
           }
+          // Si el sobrante es <= Q25, agregarlo como "otros" al pago actual y no continuar
+          if (disponible_restante.lte(25) && pagoInsertado?.pago_id) {
+            const otrosActual = new Big(pagoInsertado.otros ?? "0");
+            await db
+              .update(pagos_credito)
+              .set({
+                otros: otrosActual.plus(disponible_restante).toString(),
+                monto_aplicado: new Big(pagoInsertado.monto_aplicado ?? "0").plus(disponible_restante).toString(),
+              })
+              .where(eq(pagos_credito.pago_id, pagoInsertado.pago_id));
+            disponible_restante = new Big(0);
+            break;
+          }
         }
       }
 

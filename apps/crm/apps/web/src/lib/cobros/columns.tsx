@@ -21,6 +21,7 @@ export type ContratoCobranza = {
 	numeroCredito: string | null;
 	cuotaMensual: string | null;
 	etiquetas: string[] | null;
+	isPool?: boolean;
 };
 
 function getEstadoBadge(estado: string) {
@@ -173,12 +174,18 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 		header: "No. Crédito",
 		cell: ({ row }) => {
 			const numero = row.getValue("numeroCredito") as string | null;
+			const isPool = row.original.isPool;
 			return (
 				<div
 					className="w-[180px] whitespace-normal font-mono text-sm"
 					style={{ wordBreak: "break-all" }}
 				>
 					{numero || "-"}
+					{isPool && (
+						<Badge variant="secondary" className="ml-2 bg-indigo-100 text-indigo-800">
+							Pool
+						</Badge>
+					)}
 				</div>
 			);
 		},

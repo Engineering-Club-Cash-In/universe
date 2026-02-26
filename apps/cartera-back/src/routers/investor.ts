@@ -7,7 +7,6 @@ import {
   resumeInvestor,
   liquidateByInvestorId,
   liquidateByInvestorSchema,
-  generarHTMLReporte,
   updateInvestor,
   resumenGlobalInversionistas,
   getLiquidaciones,
@@ -21,8 +20,7 @@ import {
   updateSaldoReinversion,
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
-import puppeteer from "puppeteer";
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { generarYSubirPDFInversionista } from "../utils/functions/generalFunctions";
 import { authMiddleware } from "./midleware";
 import { obtenerCreditosConPagosPendientes, calcularYRegistrarPagosEspejo } from "../controllers/payments";
 import { createBoleta, getBoletaById, getAllBoletas, getBoletasPendientes, updateBoleta, marcarBoletaComoProcesada, marcarBoletaComoPendiente, deleteBoleta, getBoletasStats } from "../controllers/liquidateInvestor";
@@ -305,8 +303,17 @@ export const inversionistasRouter = new Elysia()
       return { message: "El parámetro 'id' es obligatorio y debe ser numérico." };
     }
 
-    const result = await resumeInvestor(Number(id), pageNum, perPageNum);
-    console.log("Datos obtenidos para el reporte:", result);
+    const result = await resumeInvestor(
+      Number(id),
+      1,
+      999999,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      "espejos"
+    );
 
     if (!result.inversionistas.length) {
       set.status = 404;
@@ -314,52 +321,23 @@ export const inversionistasRouter = new Elysia()
     }
 
     const inversionista = result.inversionistas[0];
-    const logoUrl = import.meta.env.LOGO_URL || "";
-    const html = generarHTMLReporte(inversionista as any, logoUrl);
 
-    const browser = await puppeteer.launch({ 
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu'
-      ]
-    });
-    
-    const pagePDF = await browser.newPage();
-    await pagePDF.setContent(html, { waitUntil: "networkidle0" });
-
-    const pdfBuffer = await pagePDF.pdf({
-      printBackground: true,
-      width: "2500px",
-      height: "980px",
-      landscape: false,
-      margin: { top: 20, bottom: 20, left: 8, right: 8 },
-    });
-
-    await browser.close();
-
-    const filename = `reporte_inversionista_${id}.pdf`;
-    const s3 = new S3Client({
-      endpoint: process.env.BUCKET_REPORTS_URL,
-      region: "auto",
-      credentials: {
-        accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
-        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
-      },
-    });
-    
-    await s3.send(
-      new PutObjectCommand({
-        Bucket: process.env.BUCKET_REPORTS,
-        Key: filename,
-        Body: pdfBuffer,
-        ContentType: "application/pdf",
-      })
+    // Totales desde getInvestorTotalsGlobales (espejos, no liquidados)
+    const totales = await getInvestorTotalsGlobales(
+      Number(id),
+      undefined,
+      "espejos",
+      false
     );
+    inversionista.subtotal = totales.totales as any;
 
-    const url = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
+    const logoUrl = import.meta.env.LOGO_URL || "";
+    const filename = `reporte_inversionista_${id}.pdf`;
+    const url = await generarYSubirPDFInversionista(
+      inversionista as any,
+      filename,
+      logoUrl
+    );
 
     return {
       success: true,

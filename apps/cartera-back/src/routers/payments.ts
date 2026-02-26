@@ -1,10 +1,12 @@
 import { Elysia, t } from "elysia";
-import { 
+import {
   getAllPagosWithCreditAndInversionistas,
-  getPayments, 
+  getPayments,
   liquidatePagosCreditoInversionistas,
   falsePayment,
   getPagosConInversionistas,
+  updatePagosEspejoPorCredito,
+  getAbonosPorCuota,
 } from "../controllers/payments"; 
 import { z } from "zod";
 import { promises as fs } from "fs";
@@ -183,10 +185,17 @@ export const paymentRouter = new Elysia()
           dia,
           mes,
           anio,
+          fechaInicio,
+          fechaFin,
           inversionistaId,
           excel,
           usuarioNombre,
-          validationStatus
+          validationStatus,
+          categoriaCredito,
+          tipoCredito,
+          formatoCredito,
+          soloAplicados,
+          fechaAplicado,
         } = query;
 
         // ✅ Si viene reportAdvisor=true, generamos el reporte Excel de asesores (sin inversionistas)
@@ -236,13 +245,19 @@ export const paymentRouter = new Elysia()
           dia,
           mes,
           anio,
+          fechaInicio,
+          fechaFin,
           inversionistaId,
-          usuarioNombre
+          usuarioNombre,
+          categoriaCredito,
+          tipoCredito,
+          formatoCredito,
+          soloAplicados,
+          fechaAplicado,
         });
 
         set.status = 200;
-        console.log(data)
-        return  data
+        return data;
       } catch (error: any) {
         console.error("❌ Error en /reportes/pagos-inversionistas:", error);
         set.status = 500;
@@ -266,11 +281,18 @@ export const paymentRouter = new Elysia()
         dia: t.Optional(t.Integer({ minimum: 1, maximum: 31 })),
         mes: t.Optional(t.Integer({ minimum: 1, maximum: 12 })),
         anio: t.Optional(t.Integer({ minimum: 2000, maximum: 2100 })),
+        fechaInicio: t.Optional(t.String({ format: "date" })),
+        fechaFin: t.Optional(t.String({ format: "date" })),
         inversionistaId: t.Optional(t.Integer({ minimum: 1 })),
         excel: t.Optional(t.Boolean({ default: false })),
         reportAdvisor: t.Optional(t.Boolean({ default: false })),
         usuarioNombre: t.Optional(t.String()),
         validationStatus: t.Optional(t.String()),
+        categoriaCredito: t.Optional(t.String()),
+        tipoCredito: t.Optional(t.String()),
+        formatoCredito: t.Optional(t.String()),
+        soloAplicados: t.Optional(t.Boolean()),
+        fechaAplicado: t.Optional(t.String({ format: "date" })),
       }),
       response: {
         200: t.Object({
@@ -281,6 +303,7 @@ export const paymentRouter = new Elysia()
           data: t.Optional(t.Array(t.Any())),
           totalPages: t.Optional(t.Number()),
           totales: t.Optional(t.Any()),
+          totalesInversionistas: t.Optional(t.Array(t.Any())),
         }),
         500: t.Object({
           success: t.Literal(false),
@@ -1151,6 +1174,76 @@ export const paymentRouter = new Elysia()
     detail: {
       tags: ["Créditos"],
       summary: "Marcar cuotas pagadas hasta un número de cuota",
+    },
+  }
+)
+.post(
+  "/update-pagos-espejo",
+  async ({ body, set }) => {
+    try {
+      const { numero_credito_sifco, nombre_inversionista, abono_capital, abono_interes, abono_iva } = body;
+
+      const result = await updatePagosEspejoPorCredito(
+        numero_credito_sifco,
+        nombre_inversionista,
+        abono_capital,
+        abono_interes,
+        abono_iva
+      );
+
+      set.status = 200;
+      return result;
+    } catch (error: any) {
+      console.error("Error en /update-pagos-espejo:", error);
+      set.status = 500;
+      return {
+        success: false,
+        message: error.message || "Error actualizando pagos espejo",
+      };
+    }
+  },
+  {
+    body: t.Object({
+      numero_credito_sifco: t.String(),
+      nombre_inversionista: t.String(),
+      abono_capital: t.Optional(t.Number()),
+      abono_interes: t.Optional(t.Number()),
+      abono_iva: t.Optional(t.Number()),
+    }),
+    detail: {
+      tags: ["Pagos/Inversionistas"],
+      summary: "Actualizar pagos espejo NO_LIQUIDADO por crédito e inversionista",
+    },
+  }
+)
+.get(
+  "/abonos-cuota/:numero_credito_sifco/:numero_cuota",
+  async ({ params, set }) => {
+    try {
+      const { numero_credito_sifco, numero_cuota } = params;
+      const result = await getAbonosPorCuota(
+        numero_credito_sifco,
+        Number(numero_cuota)
+      );
+      set.status = 200;
+      return result;
+    } catch (error: any) {
+      console.error("Error en /abonos-cuota:", error);
+      set.status = 500;
+      return {
+        success: false,
+        message: error.message || "Error obteniendo abonos de cuota",
+      };
+    }
+  },
+  {
+    params: t.Object({
+      numero_credito_sifco: t.String(),
+      numero_cuota: t.String(),
+    }),
+    detail: {
+      tags: ["Pagos"],
+      summary: "Obtener abonos de una cuota por número de crédito SIFCO",
     },
   }
 )

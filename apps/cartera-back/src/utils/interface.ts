@@ -42,13 +42,18 @@ export interface CreditoData {
 
 
 export interface Subtotal {
-  total_abono_capital: number;   // 👈 number
-  total_abono_interes: number;   // 👈 number
-  total_abono_iva: number;       // 👈 number
-  total_isr: number;             // 👈 number
-  total_cuota: number;           // 👈 number
-  total_monto_aportado: number; // 👈 number
-  total_abono_general_interes: number; // 👈 number
+  total_abono_capital: number;
+  total_abono_interes: number;
+  total_abono_iva: number;
+  total_isr: number;
+  total_cuota: number;
+  total_cuota_sin_reinversion: number;
+  total_cuota_con_reinversion: number;
+  total_monto_aportado: number;
+  total_abono_general_interes: number;
+  total_reinversion_capital: number;
+  total_reinversion_interes: number;
+  total_reinversion: number;
 }
 
 export interface InversionistaReporte {
@@ -147,7 +152,6 @@ export interface GetCreditDTO {
     moneda: "Quetzal";
     saldo_total: string;
     extras_total: string;
-    restantes_cuota_actual: string;
     saldo_total_con_extras: string;
   };
   closure: ClosureInfo;

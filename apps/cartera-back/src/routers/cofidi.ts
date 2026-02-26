@@ -2512,6 +2512,7 @@ const fechaHoraEmision = fechaGuatemala.toISOString().substring(0, 19);
         receptor: {
           nit: receptorXML["@_IDReceptor"],
           nombre: receptorXML["@_NombreReceptor"],
+          direccion: receptorXML["dte:DireccionReceptor"]?.["dte:Direccion"],
         },
 
         items: itemsXML.map((item: any) => ({

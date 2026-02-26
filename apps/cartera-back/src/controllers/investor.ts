@@ -20,6 +20,8 @@ import {
 } from "../database/db/schema";
 import { eq, and, sql, inArray, ilike, like, desc, count, SQL } from "drizzle-orm";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import Big from "big.js";
+import { sendLiquidationEmail } from "@cci/email";
 
 // ============================================
 // 🆕 TIPOS Y CONFIGURACIÓN PARA CONSULTAS ORIGINALES/ESPEJO
@@ -531,7 +533,7 @@ export const updateSaldoReinversion = async ({ body, set }: any) => {
   }
 };
 
-import Big from "big.js";
+
 
 export const getInvestorsWithCredits = async () => {
   const data = await db
@@ -1022,6 +1024,7 @@ export async function resumeInvestor(
       numero_cuenta: inversionistas.numero_cuenta,
       dpi: inversionistas.dpi,
       moneda: inversionistas.moneda,
+      email: inversionistas.email,
    tiene_boleta_pendiente: sql<boolean>`
       EXISTS (
         SELECT 1 
@@ -1365,6 +1368,7 @@ const mes = fechaParaMes
         tieneBoletaPendiente: inv.tiene_boleta_pendiente,
         dpi: inv.dpi,
         moneda: inv.moneda,
+        email: inv.email,
         currencySymbol: inv.moneda === "dolares" ? "$" : "Q.",
         creditos: creditosData,
         subtotal: {
@@ -2351,6 +2355,32 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
       console.log(
         `  ✅ Reporte actualizado en liquidación ${liquidacion.liquidacion_id}`
       );
+
+      // 📧 ENVIAR CORREO AL INVERSIONISTA
+      if (inversionista.email) {
+        try {
+          const totalCuota = inversionista.subtotal.total_cuota.toString();
+          
+          await sendLiquidationEmail({
+            to: inversionista.email,
+            investorName: inversionista.nombre_inversionista,
+            amount: totalCuota,
+            creditNumber: "Múltiples", // O podrías concatenar los IDs
+            date: dayjs().format("DD/MM/YYYY"),
+            currencySymbol: inversionista.moneda === "dolares" ? "$" : "Q.",
+            attachment: {
+              filename: `Liquidacion_${inversionista.nombre_inversionista.replace(/\s+/g, '_')}_${dayjs().format('YYYYMMDD')}.pdf`,
+              content: Buffer.from(pdfBuffer),
+            }
+          });
+          console.log(`  📧 Correo enviado a ${inversionista.email}`);
+        } catch (emailError) {
+          console.error(`  ❌ Error al enviar correo a ${inversionista.email}:`, emailError);
+          // No lanzamos error para no detener la liquidación
+        }
+      } else {
+        console.warn(`  ⚠️ El inversionista ${inversionista.nombre_inversionista} no tiene correo configurado.`);
+      }
       
       reportesGenerados.push({ 
         inversionista_id: inv_id, 

@@ -1232,6 +1232,19 @@ function RouteComponent() {
 		}
 	}, [isDetailsDialogOpen, navigate, search.opportunityId]);
 
+	// Extract unique salespeople from loaded opportunities
+	const salespeople = useMemo(() => {
+		const map = new Map<string, string>();
+		for (const opp of opportunitiesQuery.data ?? []) {
+			if (opp.assignedUser?.id && opp.assignedUser?.name) {
+				map.set(opp.assignedUser.id, opp.assignedUser.name);
+			}
+		}
+		return [...map.entries()]
+			.map(([id, name]) => ({ id, name }))
+			.sort((a, b) => a.name.localeCompare(b.name));
+	}, [opportunitiesQuery.data]);
+
 	// Filter opportunities by salesperson (client-side)
 	const filteredData = useMemo(
 		() =>
@@ -1473,7 +1486,7 @@ function RouteComponent() {
 						/>
 					</div>
 					<Select value={stageFilter} onValueChange={setStageFilter}>
-						<SelectTrigger className="w-[180px]">
+						<SelectTrigger className="w-52">
 							<Filter className="mr-2 h-4 w-4" />
 							<SelectValue placeholder="Filtrar por estado" />
 						</SelectTrigger>
@@ -1483,6 +1496,20 @@ function RouteComponent() {
 							<SelectItem value="won">Ganado</SelectItem>
 							<SelectItem value="lost">Perdido</SelectItem>
 							<SelectItem value="on_hold">En Espera</SelectItem>
+						</SelectContent>
+					</Select>
+					<Select value={salespersonFilter} onValueChange={setSalespersonFilter}>
+						<SelectTrigger className="w-56">
+							<Users className="mr-2 h-4 w-4" />
+							<SelectValue placeholder="Filtrar por asesor" />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="all">Todos los Asesores</SelectItem>
+							{salespeople.map((sp) => (
+								<SelectItem key={sp.id} value={sp.id}>
+									{sp.name}
+								</SelectItem>
+							))}
 						</SelectContent>
 					</Select>
 					<Button

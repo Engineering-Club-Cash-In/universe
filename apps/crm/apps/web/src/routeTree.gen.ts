@@ -202,14 +202,14 @@ export interface FileRoutesByFullPath {
   '/juridico/$leadId': typeof JuridicoLeadIdRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
-  '/cobros/': typeof CobrosIndexRoute
-  '/juridico/': typeof JuridicoIndexRoute
-  '/vehicles/': typeof VehiclesIndexRoute
+  '/cobros': typeof CobrosIndexRoute
+  '/juridico': typeof JuridicoIndexRoute
+  '/vehicles': typeof VehiclesIndexRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
-  '/admin/reports/': typeof AdminReportsIndexRoute
-  '/crm/analysis/': typeof CrmAnalysisIndexRoute
+  '/admin/reports': typeof AdminReportsIndexRoute
+  '/crm/analysis': typeof CrmAnalysisIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -295,14 +295,14 @@ export interface FileRouteTypes {
     | '/juridico/$leadId'
     | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
-    | '/cobros/'
-    | '/juridico/'
-    | '/vehicles/'
+    | '/cobros'
+    | '/juridico'
+    | '/vehicles'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
     | '/juridico/generate/$opportunityId'
-    | '/admin/reports/'
-    | '/crm/analysis/'
+    | '/admin/reports'
+    | '/crm/analysis'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -429,21 +429,21 @@ declare module '@tanstack/react-router' {
     '/vehicles/': {
       id: '/vehicles/'
       path: '/vehicles'
-      fullPath: '/vehicles/'
+      fullPath: '/vehicles'
       preLoaderRoute: typeof VehiclesIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/juridico/': {
       id: '/juridico/'
       path: '/juridico'
-      fullPath: '/juridico/'
+      fullPath: '/juridico'
       preLoaderRoute: typeof JuridicoIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/cobros/': {
       id: '/cobros/'
       path: '/cobros'
-      fullPath: '/cobros/'
+      fullPath: '/cobros'
       preLoaderRoute: typeof CobrosIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
@@ -562,14 +562,14 @@ declare module '@tanstack/react-router' {
     '/crm/analysis/': {
       id: '/crm/analysis/'
       path: '/crm/analysis'
-      fullPath: '/crm/analysis/'
+      fullPath: '/crm/analysis'
       preLoaderRoute: typeof CrmAnalysisIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/reports/': {
       id: '/admin/reports/'
       path: '/admin/reports'
-      fullPath: '/admin/reports/'
+      fullPath: '/admin/reports'
       preLoaderRoute: typeof AdminReportsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }

@@ -744,8 +744,8 @@ function RouteComponent() {
 											}
 										/>
 										<Tooltip
-											formatter={(value: number) =>
-												`Q${value.toLocaleString()}`
+											formatter={(value) =>
+												`Q${Number(value).toLocaleString()}`
 											}
 										/>
 										<Bar dataKey="valor" name="Valor">
@@ -791,8 +791,8 @@ function RouteComponent() {
 											}
 										/>
 										<Tooltip
-											formatter={(value: number) =>
-												`Q${value.toLocaleString()}`
+											formatter={(value) =>
+												`Q${Number(value).toLocaleString()}`
 											}
 										/>
 										<Bar dataKey="monto" name="Monto" fill="#22c55e" />

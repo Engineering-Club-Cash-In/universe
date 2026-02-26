@@ -57,6 +57,7 @@ import { Input } from "@/components/ui/input";
 import { Fragment, useState, useEffect, useMemo } from "react";
 import { ConfirmationModal } from "@/components/ui/confirmation-modal";
 import { CrearBoletaInversionista } from "./investorPayment";
+import { toast } from "sonner";
 
 const PER_PAGE_OPTIONS = [5, 10, 20, 50, 100, 200, 500];
 
@@ -312,6 +313,7 @@ export function TableInvestors() {
 
 
   const liquidateMutation = useLiquidateByInvestor();
+  const reinversionEnCero = Number(subtotales.total_cuota_con_reinversion) === 0;
   const downloadPDF = useDownloadInvestorPDF();
   const [query, setQuery] = useState("");
 
@@ -1022,18 +1024,18 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
 
           {/* Acciones + Chevron */}
           <div className="flex items-center gap-4 ml-6">
-            {/* Dropdown Menu con TODAS las acciones */}
+            {/* Dropdown Menu */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
-                  className="px-4 py-3 rounded-lg bg-blue-600 hover:bg-blue-700 transition-colors inline-flex items-center justify-center shadow-md"
+                  className="w-10 h-10 rounded-xl bg-gray-100 hover:bg-gray-200 border border-gray-200 transition-all inline-flex items-center justify-center shadow-sm"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <MoreVertical className="w-5 h-5 text-white" />
+                  <MoreVertical className="w-5 h-5 text-gray-600" />
                 </button>
               </DropdownMenuTrigger>
 
-              <DropdownMenuContent align="end" className="w-64">
+              <DropdownMenuContent align="end" className="w-56 rounded-xl shadow-lg border border-gray-200 p-1">
                 {/* Descargar PDF */}
                 <DropdownMenuItem
                   onClick={(e) => {
@@ -1045,66 +1047,39 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                     });
                   }}
                   disabled={downloadPDF.isPending}
-                  className="cursor-pointer"
+                  className="cursor-pointer rounded-lg px-3 py-2.5 focus:bg-blue-50"
                 >
                   {downloadPDF.isPending ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin text-blue-600" />
-                      <span className="text-blue-700 font-medium">
-                        Descargando…
-                      </span>
-                    </>
+                    <><Loader2 className="mr-2.5 h-4 w-4 animate-spin text-blue-500" /><span className="text-sm font-medium text-blue-600">Descargando…</span></>
                   ) : (
-                    <>
-                      <FileDown className="mr-2 h-4 w-4 text-blue-600" />
-                      <span className="text-blue-700 font-medium">
-                        Descargar PDF
-                      </span>
-                    </>
+                    <><FileDown className="mr-2.5 h-4 w-4 text-blue-500" /><span className="text-sm font-medium text-gray-700">Descargar PDF</span></>
                   )}
                 </DropdownMenuItem>
 
-                <DropdownMenuSeparator />
+                <DropdownMenuSeparator className="my-1" />
 
-                {/* 🔥 PASO 1: Calcular Pagos - SIEMPRE DISPONIBLE */}
+                {/* Paso 1: Calcular Pagos */}
                 <DropdownMenuItem
                   onClick={(e) => {
                     e.stopPropagation();
-                    // handleOpenGenerarPagosModal(inv.inversionista_id); // ANTERIOR: con modal
-                    handleCalcularPagosDirecto(inv.inversionista_id);     // NUEVO: directo
+                    handleCalcularPagosDirecto(inv.inversionista_id);
                   }}
-                  disabled={
-                    isGenerating &&
-                    selectedInversionista === inv.inversionista_id
-                  }
-                  className="cursor-pointer"
+                  disabled={isGenerating && selectedInversionista === inv.inversionista_id}
+                  className="cursor-pointer rounded-lg px-3 py-2.5 focus:bg-purple-50"
                 >
-                  {isCalculando &&
-                  selectedInversionista === inv.inversionista_id ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin text-purple-600" />
-                      <span className="text-purple-700 font-medium">
-                        Calculando…
-                      </span>
-                    </>
+                  {isCalculando && selectedInversionista === inv.inversionista_id ? (
+                    <><Loader2 className="mr-2.5 h-4 w-4 animate-spin text-purple-500" /><span className="text-sm font-medium text-purple-600">Calculando…</span></>
                   ) : (
-                    <>
-                      <FileSpreadsheet className="mr-2 h-4 w-4 text-purple-600" />
-                      <span className="text-purple-700 font-medium">
-                        1️⃣ Calcular Pagos
-                      </span>
-                    </>
+                    <><FileSpreadsheet className="mr-2.5 h-4 w-4 text-purple-500" /><span className="text-sm font-medium text-gray-700">Calcular Pagos</span></>
                   )}
                 </DropdownMenuItem>
 
-                <DropdownMenuSeparator />
-
-                {/* 🔥 PASO 2: Subir Boleta - SOLO SI TIENE PAGOS */}
+                {/* Paso 2: Subir Boleta */}
                 <DropdownMenuItem
                   onClick={(e) => {
                     e.stopPropagation();
                     if (!tienePagosGenerados) {
-                      alert("⚠️ Primero debes generar los pagos antes de subir una boleta");
+                      toast.warning("Primero debes generar los pagos antes de subir una boleta");
                       return;
                     }
                     handleAbrirModalBoleta({
@@ -1114,52 +1089,38 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                     });
                   }}
                   disabled={!tienePagosGenerados}
-                  className={`cursor-pointer ${!tienePagosGenerados ? 'opacity-50' : ''}`}
+                  className={`cursor-pointer rounded-lg px-3 py-2.5 focus:bg-orange-50 ${!tienePagosGenerados ? 'opacity-40' : ''}`}
                 >
-                  <Upload className={`mr-2 h-4 w-4 ${!tienePagosGenerados ? 'text-gray-400' : 'text-orange-600'}`} />
-                  <span className={`font-medium ${!tienePagosGenerados ? 'text-gray-400' : 'text-orange-700'}`}>
-                    {!tienePagosGenerados ? '🔒 2️⃣ Subir Boleta' : '2️⃣ Subir Boleta'}
+                  <Upload className={`mr-2.5 h-4 w-4 ${tienePagosGenerados ? 'text-orange-500' : 'text-gray-400'}`} />
+                  <span className={`text-sm font-medium ${tienePagosGenerados ? 'text-gray-700' : 'text-gray-400'}`}>
+                    Subir Boleta
                   </span>
                 </DropdownMenuItem>
 
-                <DropdownMenuSeparator />
-
-                {/* 🔥 PASO 3: Liquidar - SOLO SI TIENE BOLETA */}
+                {/* Paso 3: Liquidar - permite si reinversión es 0 O tiene boleta */}
                 <DropdownMenuItem
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (!tieneBoletaPendiente) {
-                      alert("⚠️ Primero debes subir una boleta antes de liquidar");
+                    if (!reinversionEnCero && !tieneBoletaPendiente) {
+                      toast.error("No se puede liquidar: falta boleta y cuota con reinversión no es 0");
                       return;
                     }
                     liquidateMutation.mutate(
-                      {
-                        inversionista_id: inv.inversionista_id,
-                      },
+                      { inversionista_id: inv.inversionista_id },
                       { onSuccess: () => { refetch(); refetchTotales(); } }
                     );
                   }}
-                  disabled={liquidateMutation.isPending || !tieneBoletaPendiente}
-                  className={`cursor-pointer ${!tieneBoletaPendiente ? 'opacity-50' : ''}`}
+                  disabled={liquidateMutation.isPending || (!reinversionEnCero && !tieneBoletaPendiente)}
+                  className={`cursor-pointer rounded-lg px-3 py-2.5 focus:bg-green-50 ${(!reinversionEnCero && !tieneBoletaPendiente) ? 'opacity-40' : ''}`}
                 >
                   {liquidateMutation.isPending ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin text-green-600" />
-                      <span className="text-green-700 font-medium">
-                        Liquidando…
-                      </span>
-                    </>
+                    <><Loader2 className="mr-2.5 h-4 w-4 animate-spin text-green-500" /><span className="text-sm font-medium text-green-600">Liquidando…</span></>
                   ) : (
-                    <>
-                      <CheckCircle className={`mr-2 h-4 w-4 ${!tieneBoletaPendiente ? 'text-gray-400' : 'text-green-600'}`} />
-                      <span className={`font-medium ${!tieneBoletaPendiente ? 'text-gray-400' : 'text-green-700'}`}>
-                        {!tieneBoletaPendiente ? '🔒 3️⃣ Liquidar' : '3️⃣ Liquidar'}
-                      </span>
-                    </>
+                    <><CheckCircle className="mr-2.5 h-4 w-4 text-green-500" /><span className="text-sm font-medium text-gray-700">Liquidar</span></>
                   )}
                 </DropdownMenuItem>
 
-                <DropdownMenuSeparator />
+                <DropdownMenuSeparator className="my-1" />
 
                 {/* Editar */}
                 <DropdownMenuItem
@@ -1167,12 +1128,10 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                     e.stopPropagation();
                     handleEditInvestor(inv);
                   }}
-                  className="cursor-pointer"
+                  className="cursor-pointer rounded-lg px-3 py-2.5 focus:bg-amber-50"
                 >
-                  <Edit className="mr-2 h-4 w-4 text-amber-600" />
-                  <span className="text-amber-700 font-medium">
-                    Editar
-                  </span>
+                  <Edit className="mr-2.5 h-4 w-4 text-amber-500" />
+                  <span className="text-sm font-medium text-gray-700">Editar</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -1691,15 +1650,15 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
           <span>{tienePagosGenerados ? '2️⃣ Boleta' : '🔒 Boleta'}</span>
         </button>
 
-        {/* 🔥 PASO 3: Liquidar - SOLO SI TIENE BOLETA */}
+        {/* 🔥 PASO 3: Liquidar - permite si reinversión es 0 O tiene boleta */}
         <button
           className={`px-3 py-2 rounded-lg text-white text-xs font-semibold active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2 shadow-sm ${
-            tieneBoletaPendiente ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-400'
+            (reinversionEnCero || tieneBoletaPendiente) ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-400'
           }`}
-          disabled={liquidateMutation.isPending || !tieneBoletaPendiente}
+          disabled={liquidateMutation.isPending || (!reinversionEnCero && !tieneBoletaPendiente)}
           onClick={() => {
-            if (!tieneBoletaPendiente) {
-              alert("⚠️ Primero debes subir una boleta antes de liquidar");
+            if (!reinversionEnCero && !tieneBoletaPendiente) {
+              toast.error("No se puede liquidar: falta boleta y cuota con reinversión no es 0");
               return;
             }
             liquidateMutation.mutate(

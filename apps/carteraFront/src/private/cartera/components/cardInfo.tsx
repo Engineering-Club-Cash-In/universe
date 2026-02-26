@@ -448,7 +448,7 @@ export function MiniCardCredito({
           {/* Total a Pagar */}
           <div className="flex flex-col bg-gradient-to-br from-yellow-50 to-amber-50 rounded-lg p-4 shadow-sm border border-yellow-200">
             <span className="font-bold text-yellow-700 text-sm mb-1">
-              {convenioActivoInfo ? "💰 Total a Pagar" : "Saldo a Favor"}
+              {convenioActivoInfo ? "💰 Total a Pagar" : "Abonos Realizados"}
             </span>
             
             {convenioActivoInfo ? (
@@ -470,16 +470,16 @@ export function MiniCardCredito({
                     </span>
                   </div>
                   
-                  {/* Saldo a favor */}
-                  {Number(usuario.saldo_a_favor ?? 0) > 0 && (
+                  {/* Abonos realizados */}
+                  {(abonosParciales?.total ?? 0) > 0 && (
                     <div className="flex items-center justify-between pb-2 border-b border-yellow-200">
-                      <span className="text-xs text-gray-600">Saldo a favor:</span>
+                      <span className="text-xs text-gray-600">Abonos realizados:</span>
                       <span className="text-sm font-bold text-green-600">
-                        -Q{Number(usuario.saldo_a_favor).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                        -Q{(abonosParciales?.total ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                       </span>
                     </div>
                   )}
-                  
+
                   {/* Total */}
                   <div className="flex items-center justify-between pt-1">
                     <span className="text-sm font-bold text-gray-700">TOTAL:</span>
@@ -487,8 +487,8 @@ export function MiniCardCredito({
                       Q{(() => {
                         const cuotaConvenio = Number(convenioActivoInfo.cuotaConvenioAPagar);
                         const cuotaNormal = Number(cuotaMensualAPagar || credito.cuota);
-                        const saldoFavor = Number(usuario.saldo_a_favor ?? 0);
-                        const total = cuotaConvenio + cuotaNormal - saldoFavor;
+                        const abonosTotal = abonosParciales?.total ?? 0;
+                        const total = cuotaConvenio + cuotaNormal - abonosTotal;
                         return total.toLocaleString("es-GT", { minimumFractionDigits: 2 });
                       })()}
                     </span>
@@ -498,19 +498,19 @@ export function MiniCardCredito({
             ) : (
               <>
                 <span className="text-green-700 font-bold text-xl">
-                  Q{Number(usuario.saldo_a_favor ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                  Q{(abonosParciales?.total ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                 </span>
 
                 {(() => {
                   const cuotaMensual = Number(cuotaMensualAPagar || credito.cuota);
-                  const saldoFavor = Number(usuario.saldo_a_favor ?? 0);
-                  const montoRestante = Math.max(0, cuotaMensual - saldoFavor);
+                  const abonosTotal = abonosParciales?.total ?? 0;
+                  const montoRestante = Math.max(0, cuotaMensual - abonosTotal);
 
-                  if (saldoFavor > 0) {
+                  if (abonosTotal > 0) {
                     return (
                       <div className="mt-2 pt-2 border-t border-yellow-300">
                         <span className="text-xs text-gray-600 block mb-0.5">
-                          A pagar con saldo:
+                          Restante de cuota:
                         </span>
                         <span className="text-indigo-700 font-bold text-lg">
                           Q{montoRestante.toLocaleString("es-GT", { minimumFractionDigits: 2 })}

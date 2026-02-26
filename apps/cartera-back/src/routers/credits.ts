@@ -77,6 +77,7 @@ const RouterBodySchema = z.object({
   traspaso: z.number().optional(),
   garantia_mobiliaria: z.number().optional(),
   otros: z.number().optional(),
+  cuotas_atrasadas: z.number().int().min(0).optional(),
 });
 export const creditRouter = new Elysia()
  
@@ -316,6 +317,7 @@ export const creditRouter = new Elysia()
       traspaso,
       garantia_mobiliaria,
       otros,
+      cuotas_atrasadas,
     } = parse.data;
 
     // 2) Reglas de negocio: acciones que requieren motivo + monto
@@ -348,6 +350,7 @@ export const creditRouter = new Elysia()
         traspaso,
         garantia_mobiliaria,
         otros,
+        cuotas_atrasadas,
       });
 
       if (!result.ok) set.status = 400; // error del servicio

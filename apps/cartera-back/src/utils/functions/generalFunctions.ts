@@ -4,6 +4,7 @@ import puppeteer from "puppeteer";
 import ExcelJS from "exceljs";
 import axios from "axios";
 import Big from "big.js";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 // Tipos auxiliares
 
 /**
@@ -39,6 +40,61 @@ export async function generarPDFBuffer(
 
   await browser.close();
   return Buffer.from(pdfData);
+}
+
+/**
+ * Genera PDF del reporte de inversionista y lo sube a R2.
+ * Retorna la URL pública del PDF.
+ */
+export async function generarYSubirPDFInversionista(
+  inversionista: InversionistaReporte,
+  filename: string,
+  logoUrl: string = ""
+): Promise<string> {
+  const html = generarHTMLReporte(inversionista, logoUrl);
+
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+    ],
+  });
+
+  const page = await browser.newPage();
+  await page.setContent(html, { waitUntil: "networkidle0" });
+
+  const pdfBuffer = await page.pdf({
+    printBackground: true,
+    width: "2500px",
+    height: "980px",
+    landscape: false,
+    margin: { top: 20, bottom: 20, left: 8, right: 8 },
+  });
+
+  await browser.close();
+
+  const s3 = new S3Client({
+    endpoint: process.env.BUCKET_REPORTS_URL,
+    region: "auto",
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
+    },
+  });
+
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: process.env.BUCKET_REPORTS,
+      Key: filename,
+      Body: pdfBuffer,
+      ContentType: "application/pdf",
+    })
+  );
+
+  return `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
 }
 
 function gtq(n: string | number) {

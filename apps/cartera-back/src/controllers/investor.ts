@@ -1,6 +1,7 @@
 // app.ts (o donde declares tus rutas Elysia)
 import { z } from "zod";
 import { formatToUSD } from "../utils/functions/currencyConverter";
+import { generarYSubirPDFInversionista } from "../utils/functions/generalFunctions";
 import { db } from "../database/index";
 import {
   bancos,
@@ -1245,17 +1246,12 @@ const mes = fechaParaMes
                   cuota_inversor = new Big(0);
                   break;
 
-                case "reinversion_variable": {
-                  const montoReinv = new Big(inv.monto_reinversion ?? 0);
-                  const interesTotal = abono_interes.plus(inv.emite_factura ? abono_iva : isr.neg());
-                  // Primero resta de interés, luego de capital
-                  const reinvInteres = montoReinv.gt(interesTotal) ? interesTotal : montoReinv;
-                  const reinvCapital = montoReinv.minus(reinvInteres).gt(abono_capital)
-                    ? abono_capital
-                    : montoReinv.minus(reinvInteres);
-                  cuota_inversor = abono_capital.minus(reinvCapital).plus(interesTotal.minus(reinvInteres));
+                case "reinversion_variable":
+                  // Se calcula como sin_reinversion per-pago; el tope global se aplica después
+                  cuota_inversor = abono_capital
+                    .plus(abono_interes)
+                    .plus(inv.emite_factura ? abono_iva : isr.neg());
                   break;
-                }
 
                 default:
                   cuota_inversor = abono_capital
@@ -1349,6 +1345,13 @@ const mes = fechaParaMes
           };
         })
       );
+
+      // Aplicar reinversión variable como tope global sobre el total
+      if (inv.reinversion === "reinversion_variable") {
+        const montoReinv = new Big(inv.monto_reinversion ?? 0);
+        const reinversion = montoReinv.gt(subtotal.total_cuota) ? subtotal.total_cuota : montoReinv;
+        subtotal.total_cuota = subtotal.total_cuota.minus(reinversion);
+      }
 
       // 🔹 Retornar estructura del inversionista
       return {
@@ -1610,15 +1613,10 @@ export async function getInvestorTotalsGlobales(
           reinvInteres = abono_interes;
           cuota_inversor = new Big(0);
           break;
-        case "reinversion_variable": {
-          const montoReinv = new Big(inv.monto_reinversion ?? 0);
-          reinvInteres = montoReinv.gt(abono_interes) ? abono_interes : montoReinv;
-          reinvCapital = montoReinv.minus(reinvInteres).gt(abono_capital)
-            ? abono_capital
-            : montoReinv.minus(reinvInteres);
-          cuota_inversor = abono_capital.minus(reinvCapital).plus(interesTotal.minus(reinvInteres));
+        case "reinversion_variable":
+          // Se calcula como sin_reinversion per-pago; el tope global se aplica después
+          cuota_inversor = abono_capital.plus(interesTotal);
           break;
-        }
         default:
           cuota_inversor = abono_capital.plus(interesTotal);
       }
@@ -1639,6 +1637,14 @@ export async function getInvestorTotalsGlobales(
     subtotal.total_monto_aportado = subtotal.total_monto_aportado.plus(new Big(c.monto_aportado ?? 0));
     subtotal.total_capital_creditos = subtotal.total_capital_creditos.plus(capital_credito);
     subtotal.total_capital_actual = subtotal.total_capital_actual.plus(capital_actual);
+  }
+
+  // Aplicar reinversión variable como tope global sobre el total
+  if (inv.reinversion === "reinversion_variable") {
+    const montoReinv = new Big(inv.monto_reinversion ?? 0);
+    const reinversion = montoReinv.gt(subtotal.total_cuota) ? subtotal.total_cuota : montoReinv;
+    subtotal.total_reinversion = reinversion;
+    subtotal.total_cuota = subtotal.total_cuota.minus(reinversion);
   }
 
   // 7. Upsert en reinversiones
@@ -1965,15 +1971,10 @@ export async function getInvestorMirrorSummary(
           reinvInteres = abono_interes;
           cuota_inversor = new Big(0);
           break;
-        case "reinversion_variable": {
-          const montoReinv = new Big(inv.monto_reinversion ?? 0);
-          reinvInteres = montoReinv.gt(abono_interes) ? abono_interes : montoReinv;
-          reinvCapital = montoReinv.minus(reinvInteres).gt(abono_capital)
-            ? abono_capital
-            : montoReinv.minus(reinvInteres);
-          cuota_inversor = abono_capital.minus(reinvCapital).plus(interesTotal.minus(reinvInteres));
+        case "reinversion_variable":
+          // Se calcula como sin_reinversion per-pago; el tope global se aplica después
+          cuota_inversor = abono_capital.plus(interesTotal);
           break;
-        }
         default:
           cuota_inversor = abono_capital.plus(interesTotal);
       }
@@ -1994,6 +1995,14 @@ export async function getInvestorMirrorSummary(
     const capital_actual = montoAportadoBase.minus(abonoCapitalCredito);
     sg.total_monto_aportado = sg.total_monto_aportado.plus(capital_actual);
     sg.total_capital_actual = sg.total_capital_actual.plus(capital_actual);
+  }
+
+  // Aplicar reinversión variable como tope global sobre el total
+  if (inv.reinversion === "reinversion_variable") {
+    const montoReinv = new Big(inv.monto_reinversion ?? 0);
+    const reinversion = montoReinv.gt(sg.total_cuota) ? sg.total_cuota : montoReinv;
+    sg.total_reinversion = reinversion;
+    sg.total_cuota = sg.total_cuota.minus(reinversion);
   }
 
   // ── PASO 5: Retornar datos del inversionista + subtotales globales ─────────
@@ -2100,22 +2109,14 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
         .orderBy(desc(boletasPagoInversionista.fecha_subida)) // La más reciente
         .limit(1);
 
-      // 🚨 SI NO HAY BOLETA PENDIENTE, SALTAR ESTE INVERSIONISTA
-      if (!boletaPendiente) {
-        const razon = "No tiene boleta PENDIENTE";
-        console.warn(`  ⚠️ ${razon} - Saltando inversionista ${inv_id}`);
-        errores.push({
-          inversionista_id: inv_id,
-          razon: razon,
-        });
-        inversionistasSaltados++;
-        continue; // 🔥 Seguir con el siguiente inversionista
+      if (boletaPendiente) {
+        console.log(`  ✅ Boleta encontrada: ID ${boletaPendiente.boleta_id}`);
+        console.log(`     URL: ${boletaPendiente.boleta_url}`);
+        console.log(`     Monto: Q${boletaPendiente.monto_boleta ?? "N/A"}`);
+        console.log(`     Fecha subida: ${boletaPendiente.fecha_subida}`);
+      } else {
+        console.log(`  ⚠️ Sin boleta PENDIENTE, se liquida sin boleta`);
       }
-
-      console.log(`  ✅ Boleta encontrada: ID ${boletaPendiente.boleta_id}`);
-      console.log(`     URL: ${boletaPendiente.boleta_url}`);
-      console.log(`     Monto: Q${boletaPendiente.monto_boleta ?? "N/A"}`);
-      console.log(`     Fecha subida: ${boletaPendiente.fecha_subida}`);
 
       // 🆕 Obtener datos del inversionista desde las tablas espejo
       const resumen = await resumeInvestor(
@@ -2143,7 +2144,6 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
       const inversionista = resumen.inversionistas[0];
 
       if (
-        Number(inversionista.subtotal.total_cuota) === 0 ||
         !inversionista.creditos.some((c) => c.pagos.length > 0)
       ) {
         console.log(`  ⚠️ Inversionista ${inv_id} sin pagos para liquidar`);
@@ -2155,33 +2155,53 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
         continue;
       }
 
+      // Totales desde getInvestorTotalsGlobales (espejos, no liquidados)
+      const totalesResult = await getInvestorTotalsGlobales(
+        inv_id,
+        undefined,
+        "espejos",
+        false
+      );
+      const totales = totalesResult.totales;
+      inversionista.subtotal = totales as any;
+
       const cantidadPagos = inversionista.creditos.reduce(
         (sum, cred) => sum + (cred.pagos?.length ?? 0),
         0
       );
 
+      if (Number(totales.total_cuota_con_reinversion) === 0 && cantidadPagos === 0) {
+        console.log(`  ⚠️ Inversionista ${inv_id} sin pagos para liquidar`);
+        errores.push({
+          inversionista_id: inv_id,
+          razon: "Sin pagos para liquidar",
+        });
+        inversionistasSaltados++;
+        continue;
+      }
+
       console.log(`  📊 Total pagos a liquidar: ${cantidadPagos}`);
 
-      // Leer reinversión acumulada del inversionista
-      const reinversionActual = await db.query.reinversiones.findFirst({
-        where: (r, { eq }) => eq(r.inversionista_id, inv_id),
-      });
+      // Reinversión desde los totales globales
+      const reinvCapital = totales.total_reinversion_capital ?? 0;
+      const reinvInteres = totales.total_reinversion_interes ?? 0;
+      const reinvTotal = totales.total_reinversion ?? 0;
 
-      // 🆕 PASO 3: Crear registro de liquidación CON la boleta
+      // 🆕 PASO 3: Crear registro de liquidación (con o sin boleta)
       const [liquidacion] = await db
         .insert(liquidaciones)
         .values({
           inversionista_id: inv_id,
-          boleta_id: boletaPendiente.boleta_id, // 🔥 SIEMPRE con boleta
+          boleta_id: boletaPendiente?.boleta_id ?? null,
           total_pagos_liquidados: cantidadPagos,
-          total_capital: inversionista.subtotal.total_abono_capital.toString(),
-          total_interes: inversionista.subtotal.total_abono_interes.toString(),
-          total_iva: inversionista.subtotal.total_abono_iva.toString(),
-          total_isr: inversionista.subtotal.total_isr.toString(),
-          total_cuota: inversionista.subtotal.total_cuota.toString(),
-          reinversion_capital: reinversionActual?.monto_capital ?? "0",
-          reinversion_interes: reinversionActual?.monto_interes ?? "0",
-          reinversion_total: reinversionActual?.monto_total ?? "0",
+          total_capital: totales.total_abono_capital.toString(),
+          total_interes: totales.total_abono_interes.toString(),
+          total_iva: totales.total_abono_iva.toString(),
+          total_isr: totales.total_isr.toString(),
+          total_cuota: (totales.total_cuota_con_reinversion ?? 0).toString(),
+          reinversion_capital: reinvCapital.toString(),
+          reinversion_interes: reinvInteres.toString(),
+          reinversion_total: reinvTotal.toString(),
           fecha_liquidacion: new Date(),
         })
         .returning();
@@ -2190,21 +2210,22 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
         `  ✅ Liquidación creada: liquidacion_id=${liquidacion.liquidacion_id}`
       );
 
-      // 🔥 PASO 3.1: Marcar boleta como PROCESADO
-      await db
-        .update(boletasPagoInversionista)
-        .set({
-          estado: "PROCESADO",
-          fecha_procesado: new Date(),
-        })
-        .where(eq(boletasPagoInversionista.boleta_id, boletaPendiente.boleta_id));
+      // 🔥 PASO 3.1: Marcar boleta como PROCESADO (solo si existe)
+      if (boletaPendiente) {
+        await db
+          .update(boletasPagoInversionista)
+          .set({
+            estado: "PROCESADO",
+            fecha_procesado: new Date(),
+          })
+          .where(eq(boletasPagoInversionista.boleta_id, boletaPendiente.boleta_id));
 
-      console.log(`  ✅ Boleta ${boletaPendiente.boleta_id} marcada como PROCESADO`);
+        console.log(`  ✅ Boleta ${boletaPendiente.boleta_id} marcada como PROCESADO`);
+      }
 
       // Reiniciar reinversiones y actualizar saldo_reinversion del inversionista
-      if (reinversionActual) {
-        const montoReinvertido = new Big(reinversionActual.monto_total ?? 0);
-
+      const montoReinvertido = new Big(reinvTotal);
+      if (montoReinvertido.gt(0)) {
         // Sumar lo reinvertido al saldo disponible del inversionista
         await db.update(inversionistas)
           .set({
@@ -2229,8 +2250,9 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
       for (const credito of inversionista.creditos) {
         if (credito.pagos && credito.pagos.length > 0) {
           const pagosBD = await db
-            .select({ 
+            .select({
               id: pagos_credito_inversionistas_espejo.id,
+              pago_id: pagos_credito_inversionistas_espejo.pago_id,
               abono_capital: pagos_credito_inversionistas_espejo.abono_capital,
             })
             .from(pagos_credito_inversionistas_espejo)
@@ -2256,20 +2278,16 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
             );
 
             if (sumaCapital > 0) {
-              const sumaSegura = Number(sumaCapital) || 0;
+              const sumaSegura = new Big(sumaCapital) || 0;
               
               // Descontar capital de la tabla espejo SOLAMENTE
-              await db
-                .update(creditos_inversionistas_espejo)
-                .set({
-                  monto_aportado: sql`monto_aportado - ${sumaSegura}`,
-                })
-                .where(
-                  and(
-                    eq(creditos_inversionistas_espejo.inversionista_id, inv_id),
-                    eq(creditos_inversionistas_espejo.credito_id, credito.credito_id)
-                  )
-                );
+              await processAndReplaceCreditInvestors(
+                credito.credito_id,
+                sumaSegura.toNumber(),
+                false,
+                inv_id,
+               true
+              );
             }
           }
         }
@@ -2287,62 +2305,68 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
           .where(inArray(pagos_credito_inversionistas_espejo.id, pagosIds));
       }
 
-      console.log(`  ✅ ${updateResult.rowCount ?? 0} pagos espero actualizados`);
+      console.log(`  ✅ ${updateResult.rowCount ?? 0} pagos espejo actualizados`);
 
-      // 🆕 PASO 5: Generar PDF usando la data que YA TENEMOS
+      // 🆕 PASO 4.1: Marcar cuotas como liquidado_inversionistas = false con fecha Guatemala
+      const allPagoIds: number[] = [];
+      for (const credito of inversionista.creditos) {
+        if (credito.pagos && credito.pagos.length > 0) {
+          const pagosBDCuota = await db
+            .select({ pago_id: pagos_credito_inversionistas_espejo.pago_id })
+            .from(pagos_credito_inversionistas_espejo)
+            .where(
+              and(
+                eq(pagos_credito_inversionistas_espejo.inversionista_id, inv_id),
+                eq(pagos_credito_inversionistas_espejo.credito_id, credito.credito_id),
+                eq(pagos_credito_inversionistas_espejo.liquidacion_id, liquidacion.liquidacion_id)
+              )
+            );
+          allPagoIds.push(...pagosBDCuota.map((p) => p.pago_id));
+        }
+      }
+
+      if (allPagoIds.length > 0) {
+        const uniquePagoIds = [...new Set(allPagoIds)];
+
+        // Buscar cuota_ids de esos pagos
+        const cuotasDeLosPagos = await db
+          .select({ cuota_id: pagos_credito.cuota_id })
+          .from(pagos_credito)
+          .where(inArray(pagos_credito.pago_id, uniquePagoIds));
+
+        const uniqueCuotaIds = [...new Set(cuotasDeLosPagos.map((c) => c.cuota_id))];
+
+        if (uniqueCuotaIds.length > 0) {
+          const fechaGuatemala = new Date(
+            new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" })
+          );
+
+          await db
+            .update(cuotas_credito)
+            .set({
+              liquidado_inversionistas: false,
+              fecha_liquidacion_inversionistas: fechaGuatemala,
+            })
+            .where(inArray(cuotas_credito.cuota_id, uniqueCuotaIds));
+
+          console.log(`  ✅ ${uniqueCuotaIds.length} cuotas actualizadas (liquidado_inversionistas=false)`);
+        }
+      }
+
+      // 🆕 PASO 5: Generar PDF y subir a R2
       console.log(`  📄 Generando PDF...`);
 
       const logoUrl = process.env.LOGO_URL || "";
-      const html = generarHTMLReporte(inversionista as any, logoUrl);
-
-      const browser = await puppeteer.launch({
-        headless: true,
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-gpu",
-        ],
-      });
-
-      const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: "networkidle0" });
-
-      const pdfBuffer = await page.pdf({
-        printBackground: true,
-        width: "2500px",
-        height: "980px",
-        landscape: false,
-        margin: { top: 20, bottom: 20, left: 8, right: 8 },
-      });
-
-      await browser.close();
-
-      // 🆕 PASO 6: Subir a R2
       const filename = `liquidacion_${liquidacion.liquidacion_id}_${Date.now()}.pdf`;
-      const s3 = new S3Client({
-        endpoint: process.env.BUCKET_REPORTS_URL,
-        region: "auto",
-        credentials: {
-          accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
-          secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
-        },
-      });
-
-      await s3.send(
-        new PutObjectCommand({
-          Bucket: process.env.BUCKET_REPORTS,
-          Key: filename,
-          Body: pdfBuffer,
-          ContentType: "application/pdf",
-        })
+      const url = await generarYSubirPDFInversionista(
+        inversionista as any,
+        filename,
+        logoUrl
       );
 
-      const url = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
-
       console.log(`  ✅ PDF generado y guardado: ${filename}`);
-      
-      // 🆕 PASO 7: Actualizar liquidación con URL del reporte
+
+      // 🆕 PASO 6: Actualizar liquidación con URL del reporte
       await db
         .update(liquidaciones)
         .set({ reporte_liquidacion_url: url })
@@ -2352,11 +2376,11 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
         `  ✅ Reporte actualizado en liquidación ${liquidacion.liquidacion_id}`
       );
       
-      reportesGenerados.push({ 
-        inversionista_id: inv_id, 
+      reportesGenerados.push({
+        inversionista_id: inv_id,
         url,
-        boleta_id: boletaPendiente.boleta_id,
-        boleta_url: boletaPendiente.boleta_url,
+        boleta_id: boletaPendiente?.boleta_id ?? 0,
+        boleta_url: boletaPendiente?.boleta_url ?? "",
       });
       
       totalPagosLiquidados += updateResult.rowCount ?? 0;
@@ -2408,7 +2432,6 @@ import "dayjs/locale/es";
 import { InversionistaReporte } from "../utils/interface";
 
 import ExcelJS from "exceljs";
-import puppeteer from "puppeteer";
 
 dayjs.locale("es");
 
@@ -2442,8 +2465,8 @@ export function generarHTMLReporte(
       })
     : "";
 
-  const granTotal = subtotal.total_cuota
-    ? subtotal.total_cuota.toLocaleString("es-GT", {
+  const granTotal = subtotal.total_cuota_con_reinversion
+    ? subtotal.total_cuota_con_reinversion.toLocaleString("es-GT", {
         style: "currency",
         currency: "GTQ",
       })
@@ -2645,7 +2668,7 @@ export function generarHTMLReporte(
                     .map(
                       (pago) => `
                                 <tr>
-                                  <td>${c.meses_en_credito ?? ""}</td>
+                                  <td>${pago.cuota ?? c.meses_en_credito ?? ""}</td>
                                   <td>${c.nombre_usuario ?? ""}</td>
                           <td>
                   Q${Big(c.monto_aportado || 0)
@@ -2747,6 +2770,26 @@ export function generarHTMLReporte(
           </tr>
         </tbody>
       </table>
+    </div>
+    <div style="display:flex;gap:80px;margin:28px 50px 0 50px;">
+      <div style="text-align:center;min-width:220px;">
+        <div style="font-size:2.2rem;font-weight:bold;color:#1d293b;">
+          ${Number(subtotal.total_reinversion_capital ?? 0).toLocaleString("es-GT", { style: "currency", currency: "GTQ" })}
+        </div>
+        <div style="color:#8c98b5;font-size:1.15rem;margin-top:4px;">Reinversión Capital</div>
+      </div>
+      <div style="text-align:center;min-width:220px;">
+        <div style="font-size:2.2rem;font-weight:bold;color:#1d293b;">
+          ${Number(subtotal.total_reinversion_interes ?? 0).toLocaleString("es-GT", { style: "currency", currency: "GTQ" })}
+        </div>
+        <div style="color:#8c98b5;font-size:1.15rem;margin-top:4px;">Reinversión Interés</div>
+      </div>
+      <div style="text-align:center;min-width:220px;">
+        <div style="font-size:2.2rem;font-weight:bold;color:#215da8;">
+          ${Number(subtotal.total_reinversion ?? 0).toLocaleString("es-GT", { style: "currency", currency: "GTQ" })}
+        </div>
+        <div style="color:#8c98b5;font-size:1.15rem;margin-top:4px;">Total Reinversión</div>
+      </div>
     </div>
     <div class="footer">
       Generado por Club Cashin.com · ${fechaHoy}
@@ -3088,55 +3131,41 @@ export async function resumenGlobalInversionistas(
           END
       ), 0)`,
 
-      // Reinversión por tipo (misma lógica que getInvestorMirrorSummary)
-      // reinversion_variable: primero se asigna a interés, luego el remanente a capital
-      total_reinversion: sql<number>`COALESCE(SUM(
-        CASE ${inversionistas.tipo_reinversion}
-          WHEN 'sin_reinversion' THEN 0
-          WHEN 'reinversion_capital' THEN ${pe.abono_capital}
-          WHEN 'reinversion_interes' THEN ${pe.abono_interes}
-          WHEN 'reinversion_total' THEN ${pe.abono_capital} + ${pe.abono_interes}
-          WHEN 'reinversion_variable' THEN
-            LEAST(COALESCE(${inversionistas.monto_reinversion}, 0)::numeric, ${pe.abono_interes}::numeric)
-            + LEAST(
-                GREATEST(
-                  COALESCE(${inversionistas.monto_reinversion}, 0)::numeric
-                  - LEAST(COALESCE(${inversionistas.monto_reinversion}, 0)::numeric, ${pe.abono_interes}::numeric),
-                  0
-                ),
-                ${pe.abono_capital}::numeric
-              )
-          ELSE 0
-        END
-      ), 0)`,
+      // Reinversión por tipo — CASE fuera de SUM para que reinversion_variable sea tope global
+      total_reinversion: sql<number>`CASE ${inversionistas.tipo_reinversion}
+        WHEN 'sin_reinversion' THEN 0
+        WHEN 'reinversion_capital' THEN COALESCE(SUM(${pe.abono_capital}), 0)
+        WHEN 'reinversion_interes' THEN COALESCE(SUM(${pe.abono_interes}), 0)
+        WHEN 'reinversion_total' THEN COALESCE(SUM(${pe.abono_capital} + ${pe.abono_interes}), 0)
+        WHEN 'reinversion_variable' THEN LEAST(
+          COALESCE(${inversionistas.monto_reinversion}, 0)::numeric,
+          COALESCE(SUM(${pe.abono_capital} + ${pe.abono_interes}), 0)
+        )
+        ELSE 0
+      END`,
 
       // Total a recibir con reinversión = sin_reinversion - reinversion
-      total_a_recibir_con_reinversion: sql<number>`COALESCE(SUM(
-        ${pe.abono_capital}
-        + ${pe.abono_interes}
-        + CASE
-            WHEN ${inversionistas.emite_factura}
-              THEN ${pe.abono_iva_12}
-            ELSE -(${pe.abono_interes} * 0.07)
-          END
+      total_a_recibir_con_reinversion: sql<number>`
+        COALESCE(SUM(
+          ${pe.abono_capital}
+          + ${pe.abono_interes}
+          + CASE
+              WHEN ${inversionistas.emite_factura}
+                THEN ${pe.abono_iva_12}
+              ELSE -(${pe.abono_interes} * 0.07)
+            END
+        ), 0)
         - CASE ${inversionistas.tipo_reinversion}
             WHEN 'sin_reinversion' THEN 0
-            WHEN 'reinversion_capital' THEN ${pe.abono_capital}
-            WHEN 'reinversion_interes' THEN ${pe.abono_interes}
-            WHEN 'reinversion_total' THEN ${pe.abono_capital} + ${pe.abono_interes}
-            WHEN 'reinversion_variable' THEN
-              LEAST(COALESCE(${inversionistas.monto_reinversion}, 0)::numeric, ${pe.abono_interes}::numeric)
-              + LEAST(
-                  GREATEST(
-                    COALESCE(${inversionistas.monto_reinversion}, 0)::numeric
-                    - LEAST(COALESCE(${inversionistas.monto_reinversion}, 0)::numeric, ${pe.abono_interes}::numeric),
-                    0
-                  ),
-                  ${pe.abono_capital}::numeric
-                )
+            WHEN 'reinversion_capital' THEN COALESCE(SUM(${pe.abono_capital}), 0)
+            WHEN 'reinversion_interes' THEN COALESCE(SUM(${pe.abono_interes}), 0)
+            WHEN 'reinversion_total' THEN COALESCE(SUM(${pe.abono_capital} + ${pe.abono_interes}), 0)
+            WHEN 'reinversion_variable' THEN LEAST(
+              COALESCE(${inversionistas.monto_reinversion}, 0)::numeric,
+              COALESCE(SUM(${pe.abono_capital} + ${pe.abono_interes}), 0)
+            )
             ELSE 0
-          END
-      ), 0)`,
+          END`,
     })
     .from(inversionistas)
     .leftJoin(

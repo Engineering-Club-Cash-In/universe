@@ -65,7 +65,7 @@ export const SE_PRESTA_CONFIG = {
     nombreComercial: "SE PRESTA",
     afiliacionIVA: "GEN",
     direccion: {
-      direccion: "CIUDAD",
+      direccion: "3 AVENIDA Zona 13 COLONIA LOMAS DE PAMPLONA A 13-78",
       codigoPostal: "01001",
       municipio: "Guatemala",
       departamento: "Guatemala",
@@ -111,7 +111,7 @@ export const AMJK_CONFIG = {
     nombreComercial: "AMJK INVERSIONES",
     afiliacionIVA: "GEN",
     direccion: {
-      direccion: "CIUDAD",
+      direccion: "3 AVENIDA Zona 13 COLONIA LOMAS DE PAMPLONA A 13-78",
       codigoPostal: "01001",
       municipio: "Guatemala",
       departamento: "Guatemala",
@@ -156,7 +156,7 @@ export const CREACION_IMAGEN_CONFIG = {
     nombreComercial: "CREACION E IMAGEN",
     afiliacionIVA: "GEN",
     direccion: {
-      direccion: "CIUDAD",
+      direccion: "3 AVENIDA Zona 13 COLONIA LOMAS DE PAMPLONA A 13-78",
       codigoPostal: "01001",
       municipio: "Guatemala",
       departamento: "Guatemala",
@@ -201,7 +201,7 @@ export const GRUPO_BATRO_CONFIG = {
     nombreComercial: "GRUPO BATRO",
     afiliacionIVA: "GEN",
     direccion: {
-      direccion: "CIUDAD",
+      direccion: "3 AVENIDA Zona 13 COLONIA LOMAS DE PAMPLONA A 13-78",
       codigoPostal: "01001",
       municipio: "Guatemala",
       departamento: "Guatemala",
@@ -246,7 +246,7 @@ export const AUTOCASH_CONFIG = {
     nombreComercial: "AUTOCASH",
     afiliacionIVA: "GEN",
     direccion: {
-      direccion: "CIUDAD",
+      direccion: "3 AVENIDA Zona 13 COLONIA LOMAS DE PAMPLONA A 13-78",
       codigoPostal: "01001",
       municipio: "Guatemala",
       departamento: "Guatemala",
@@ -319,4 +319,4 @@ export function getInversionistaFacturadorConfig(nombreInversionista: string) {
   return null;
 }
 
-export const USD_EXCHANGE_RATE = process.env.USD_EXCHANGE_RATE ? Number(process.env.USD_EXCHANGE_RATE) : 8.9;
+export const USD_EXCHANGE_RATE = process.env.USD_EXCHANGE_RATE ? Number(process.env.USD_EXCHANGE_RATE) : 7.9;

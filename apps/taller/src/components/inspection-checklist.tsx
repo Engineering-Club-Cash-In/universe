@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   AlertTriangle,
   CheckCircle,
@@ -35,6 +35,8 @@ import {
 } from "@/components/ui/collapsible";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { toast } from "sonner";
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
 
 // ==========================================
 // CRITERIOS DE RECHAZO (Causales de rechazo)
@@ -286,16 +288,16 @@ export default function InspectionChecklist({
   }, [saveTimeForCategory]);
 
   // Toggle item check
-  const toggleItem = (itemId: string) => {
+  const toggleItem = useCallback((itemId: string) => {
     setCheckedItems((prev) => ({
       ...prev,
       [itemId]: !prev[itemId], // Toggle state
     }));
-  };
+  }, []);
 
-  // Sync local changes to context automatically
-  useEffect(() => {
-    const checklistData: Array<{
+  // Memoize the checklist data processing to prevent creating new arrays on every render unless the actual state changes
+  const checklistData = useMemo(() => {
+    const data: Array<{
       category: string;
       item: string;
       checked: boolean;
@@ -303,9 +305,10 @@ export default function InspectionChecklist({
       notes?: string;
       evidence?: Array<any>;
     }> = [];
+    
     inspectionCategories.forEach((category) => {
       category.items.forEach((item) => {
-        checklistData.push({
+        data.push({
           category: category.id,
           item: item.label,
           checked: checkedItems[item.id] || false,
@@ -315,27 +318,29 @@ export default function InspectionChecklist({
         });
       });
     });
-    setChecklistItems(checklistData);
-  }, [checkedItems, itemNotes, itemEvidence, setChecklistItems]);
+    return data;
+  }, [inspectionCategories, checkedItems, itemNotes, itemEvidence]);
 
-  const handleItemNoteChange = (itemId: string, note: string) => {
+  // Sync local changes to context automatically when the memoized data changes
+  useEffect(() => {
+    setChecklistItems(checklistData);
+  }, [checklistData, setChecklistItems]);
+
+  const handleItemNoteChange = useCallback((itemId: string, note: string) => {
     setItemNotes(prev => ({ ...prev, [itemId]: note }));
-  };
+  }, []);
 
   const handleItemEvidenceUpload = async (itemId: string, event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const maxSize = 10 * 1024 * 1024; // 10MB
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
-
-    if (file.size > maxSize) {
+    if (file.size > MAX_FILE_SIZE) {
       toast.error("File exceeds the maximum limit of 10MB.");
       event.target.value = '';
       return;
     }
 
-    if (!allowedTypes.includes(file.type)) {
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
       toast.error("Invalid format. Use JPG, PNG or WEBP.");
       event.target.value = '';
       return;
@@ -366,13 +371,10 @@ export default function InspectionChecklist({
       const url = result.data?.url || result.url;
 
       if (url) {
-        setItemEvidence(prev => {
-          const currentList = prev[itemId] || [];
-          return {
+        setItemEvidence((prev) => ({
             ...prev,
-            [itemId]: [...currentList, { url, mimeType: file.type, originalName: file.name }]
-          };
-        });
+            [itemId]: [...(prev[itemId] || []), { url, mimeType: file.type, originalName: file.name }]
+        }));
         toast.success("Evidence attached to item successfully");
       }
     } catch (error: any) {
@@ -397,19 +399,15 @@ export default function InspectionChecklist({
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // Validación de seguridad
-    const maxSize = 10 * 1024 * 1024; // 10MB
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
-
-    if (file.size > maxSize) {
-      toast.error("Archivo demasiado grande. El máximo permitido es 10MB.");
+    if (file.size > MAX_FILE_SIZE) {
+      toast.error("File exceeds the maximum limit of 10MB.");
       if (evidenceInputRef.current) evidenceInputRef.current.value = '';
       if (cameraInputRef.current) cameraInputRef.current.value = '';
       return;
     }
 
-    if (!allowedTypes.includes(file.type)) {
-      toast.error("Tipo de archivo no válido. Use JPG, PNG o WebP.");
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+      toast.error("Invalid format. Use JPG, PNG or WEBP.");
       if (evidenceInputRef.current) evidenceInputRef.current.value = '';
       if (cameraInputRef.current) cameraInputRef.current.value = '';
       return;
@@ -444,18 +442,18 @@ export default function InspectionChecklist({
 
       if (url) {
         setRejectionEvidenceUrl(url);
-        toast.success("Evidencia adjuntada correctamente");
+        toast.success("Evidence attached successfully");
       }
     } catch (error) {
       console.error("Error uploading evidence:", error);
-      const errorMsg = error instanceof Error ? error.message : 'Error desconocido';
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
 
       if (errorMsg.includes('size')) {
-        toast.error("El archivo excede el límite permitido por el servidor.");
+        toast.error("File exceeds the maximum limit of 10MB.");
       } else if (errorMsg.includes('network') || errorMsg.includes('fetch')) {
-        toast.error("Error de conexión. Verifique su internet e intente de nuevo.");
+        toast.error("Connection error. Check your internet and try again.");
       } else {
-        toast.error("Error al subir la evidencia. Intente nuevamente.");
+        toast.error("Failed to upload evidence. Please try again.");
       }
     } finally {
       setIsUploadingEvidence(false);
@@ -483,8 +481,8 @@ export default function InspectionChecklist({
     });
   };
 
-  // Calculate statistics
-  const calculateStats = () => {
+  // Calculate statistics using useMemo to prevent unnecessary recalculations
+  const stats = useMemo(() => {
     let totalItems = 0;
     let checkedCount = 0;
     let criticalIssues = 0;
@@ -502,9 +500,8 @@ export default function InspectionChecklist({
     });
 
     return { totalItems, checkedCount, criticalIssues };
-  };
+  }, [inspectionCategories, checkedItems]);
 
-  const stats = calculateStats();
   const hasRejectionCriteria = stats.criticalIssues > 0;
 
   // Expand all / Collapse all
@@ -744,14 +741,7 @@ export default function InspectionChecklist({
                                 <div className="flex flex-wrap gap-2">
                                   {itemEvidence[item.id]?.map((ev, idx) => (
                                     <div key={idx} className="relative w-16 h-16 rounded-md border border-border overflow-hidden group bg-black/5 flex items-center justify-center">
-                                      {ev.mimeType.startsWith('video/') ? (
-                                        <div className="flex flex-col items-center justify-center text-[10px] text-muted-foreground">
-                                          <Upload className="h-4 w-4 mb-1" />
-                                          Video
-                                        </div>
-                                      ) : (
                                         <img src={ev.url} alt="Evidencia" className="object-cover w-full h-full" />
-                                      )}
                                       <Button
                                         size="icon"
                                         variant="destructive"
@@ -768,7 +758,7 @@ export default function InspectionChecklist({
                                     <label title="Tomar Foto" className={cn("cursor-pointer flex items-center justify-center w-16 h-16 rounded-md border border-dashed border-muted-foreground/50 hover:bg-muted/50 transition-colors text-muted-foreground/70 hover:text-foreground", isUploadingItemEvidence[item.id] && "opacity-50 cursor-not-allowed")}>
                                       <input 
                                         type="file" 
-                                        accept="image/*" //,video/*" 
+                                        accept="image/*" 
                                         capture="environment" 
                                         className="hidden" 
                                         onChange={(e) => handleItemEvidenceUpload(item.id, e)}
@@ -780,7 +770,7 @@ export default function InspectionChecklist({
                                     <label title="Subir Archivo" className={cn("cursor-pointer flex items-center justify-center w-16 h-16 rounded-md border border-dashed border-muted-foreground/50 hover:bg-muted/50 transition-colors text-muted-foreground/70 hover:text-foreground", isUploadingItemEvidence[item.id] && "opacity-50 cursor-not-allowed")}>
                                       <input 
                                         type="file" 
-                                        accept="image/*" //,video/*" 
+                                        accept="image/*" 
                                         className="hidden" 
                                         onChange={(e) => handleItemEvidenceUpload(item.id, e)}
                                         disabled={isUploadingItemEvidence[item.id]}

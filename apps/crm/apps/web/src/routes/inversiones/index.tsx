@@ -75,26 +75,18 @@ function formatAmount(amount: string | null | undefined): string {
 	return `Q${num.toLocaleString("es-GT")}`;
 }
 
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+type InvestmentOpportunityItem = Awaited<
+	ReturnType<typeof client.getInvestmentOpportunities>
+>[number];
+
 // ─── Draggable Card ──────────────────────────────────────────────────────────
 
 function DraggableInvestmentCard({
 	item,
 }: {
-	item: {
-		opportunity: {
-			id: string;
-			stage: string;
-			status: string;
-			updatedAt: string | null;
-		};
-		lead: {
-			id: string;
-			name: string;
-			proposedAmount: string | null;
-			assignedTo: string | null;
-		} | null;
-		investor: { id: string; name: string } | null;
-	};
+	item: InvestmentOpportunityItem;
 }) {
 	const ref = useRef<HTMLDivElement | null>(null);
 	const [isDragging, setIsDragging] = useState(false);
@@ -115,7 +107,9 @@ function DraggableInvestmentCard({
 		});
 	}, [item.opportunity.id, item.opportunity.stage]);
 
-	const displayName = item.investor?.name ?? item.lead?.name ?? "Sin nombre";
+	const displayName = item.investor
+		? `${item.investor.firstName} ${item.investor.lastName}`
+		: (item.lead?.name ?? "Sin nombre");
 	const days = getDaysInStage(item.opportunity.updatedAt);
 
 	return (
@@ -169,21 +163,7 @@ function DroppableInvestmentColumn({
 	onDrop,
 }: {
 	stage: (typeof INVESTMENT_STAGES)[number];
-	items: {
-		opportunity: {
-			id: string;
-			stage: string;
-			status: string;
-			updatedAt: string | null;
-		};
-		lead: {
-			id: string;
-			name: string;
-			proposedAmount: string | null;
-			assignedTo: string | null;
-		} | null;
-		investor: { id: string; name: string } | null;
-	}[];
+	items: InvestmentOpportunityItem[];
 	onDrop: (opportunityId: string, newStage: string) => void;
 }) {
 	const ref = useRef<HTMLDivElement | null>(null);
@@ -196,10 +176,11 @@ function DroppableInvestmentColumn({
 		return dropTargetForElements({
 			element,
 			getData: () => ({ type: "stage", stageId: stage.id }),
-			canDrop: ({ source }) => source.data.type === "investment",
+			canDrop: ({ source }: { source: { data: Record<string, unknown> } }) =>
+				source.data.type === "investment",
 			onDragEnter: () => setIsDraggedOver(true),
 			onDragLeave: () => setIsDraggedOver(false),
-			onDrop: ({ source }) => {
+			onDrop: ({ source }: { source: { data: Record<string, unknown> } }) => {
 				setIsDraggedOver(false);
 				const opportunityId = source.data.opportunityId as string;
 				const currentStage = source.data.currentStage as string;
@@ -264,14 +245,8 @@ function CreateLeadDialog({ onSuccess }: { onSuccess: () => void }) {
 	const [notes, setNotes] = useState("");
 
 	const createMutation = useMutation({
-		mutationFn: (data: {
-			name: string;
-			email?: string;
-			phones?: string[];
-			source?: string;
-			proposedAmount?: number;
-			notes?: string;
-		}) => client.createInvestmentLead(data),
+		mutationFn: (data: Parameters<typeof client.createInvestmentLead>[0]) =>
+			client.createInvestmentLead(data),
 		onSuccess: () => {
 			toast.success("Lead de inversión creado correctamente");
 			setOpen(false);

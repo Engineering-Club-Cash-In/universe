@@ -997,12 +997,14 @@ export const crmRouter = {
 			const filterMonth = input?.month;
 			const filterYear = input?.year;
 			const now = new Date();
-			const startOfMonth = filterMonth && filterYear
-				? new Date(filterYear, filterMonth - 1, 1)
-				: new Date(now.getFullYear(), now.getMonth(), 1);
-			const endOfMonth = filterMonth && filterYear
-				? new Date(filterYear, filterMonth, 1)
-				: undefined;
+			const startOfMonth =
+				filterMonth && filterYear
+					? new Date(filterYear, filterMonth - 1, 1)
+					: new Date(now.getFullYear(), now.getMonth(), 1);
+			const endOfMonth =
+				filterMonth && filterYear
+					? new Date(filterYear, filterMonth, 1)
+					: undefined;
 
 			// Solo mostrar oportunidades al 100% que llegaron ahí en el mes seleccionado
 			const fullStages = await db
@@ -1017,7 +1019,9 @@ export const crmRouter = {
 					gte(opportunityStageHistory.changedAt, startOfMonth),
 				];
 				if (endOfMonth) {
-					historyConditions.push(lt(opportunityStageHistory.changedAt, endOfMonth));
+					historyConditions.push(
+						lt(opportunityStageHistory.changedAt, endOfMonth),
+					);
 				}
 
 				const thisMonthFullOpps = await db

@@ -416,4 +416,6 @@ export const juridicoProcedure = publicProcedure.use(requireJuridico);
 export const tallerProcedure = publicProcedure.use(requireTallerOrigin);
 export const tallerOrCrmProcedure = publicProcedure.use(requireTallerOrCrm);
 export const investmentProcedure = publicProcedure.use(requireInvestmentAccess);
-export const investmentManagerProcedure = publicProcedure.use(requireInvestmentManager);
+export const investmentManagerProcedure = publicProcedure.use(
+	requireInvestmentManager,
+);

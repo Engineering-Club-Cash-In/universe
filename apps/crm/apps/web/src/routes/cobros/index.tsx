@@ -9,6 +9,7 @@ import {
 	ChevronDown,
 	Loader2,
 	Phone,
+	Target,
 	TrendingDown,
 	TrendingUp,
 	Users,
@@ -29,8 +30,10 @@ import {
 	CollapsibleContent,
 	CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { Separator } from "@/components/ui/separator";
 import { authClient } from "@/lib/auth-client";
 import { type ContratoCobranza, columns } from "@/lib/cobros/columns";
+import { parseFechaLocal } from "@/lib/date-utils";
 import { PERMISSIONS, ROLES } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
@@ -40,7 +43,7 @@ function calcularDiasHastaPago(fechaProximoPago: string | null) {
 
 	const ahora = new Date();
 	const hoy = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
-	const fechaPago = new Date(fechaProximoPago);
+	const fechaPago = parseFechaLocal(fechaProximoPago);
 
 	const diasRestantes = differenceInDays(fechaPago, hoy);
 
@@ -263,13 +266,27 @@ export const Route = createFileRoute("/cobros/")({
 	component: RouteComponent,
 });
 
+const ETIQUETA_LABELS_FILTRO: Record<string, string> = {
+	juridico: "Jurídico",
+	convenio: "Convenio",
+	cobro: "Cobro",
+	no_localizable: "No Localizable",
+	unidad_a_recuperar: "Unidad a Recuperar",
+	unidad_recuperada: "Unidad Recuperada",
+	moras_pendientes: "Moras Pendientes",
+	compromiso_de_pago: "Compromiso de Pago",
+	cancelado: "Cancelado",
+	reclamo: "Reclamo",
+};
+
 function RouteComponent() {
 	const { data: session } = authClient.useSession();
 	const navigate = useNavigate();
-	const [filtroTemporal, setFiltroTemporal] = useState<FiltroTemporal>("todos");
+	const [filtroTemporal, setFiltroTemporal] = useState<FiltroTemporal>("hoy");
 	const [mostrarCompletadosIncobrables, setMostrarCompletadosIncobrables] =
 		useState(false);
 	const [filtroEtapa, setFiltroEtapa] = useState<string | null>(null);
+	const [filtroEtiquetas, setFiltroEtiquetas] = useState<string[]>([]);
 	const [page, setPage] = useState(1);
 	const [filterValue, setFilterValue] = useState("");
 	const [debouncedFilterValue, setDebouncedFilterValue] = useState("");
@@ -313,17 +330,43 @@ function RouteComponent() {
 			const en7Dias = new Date(hoy);
 			en7Dias.setDate(en7Dias.getDate() + 7);
 
-			return data.filter((caso) => {
-				if (!caso.proximoContacto) return false;
-				const fecha = new Date(caso.proximoContacto);
-				return fecha <= en7Dias;
-			}).sort((a, b) => {
-				const fechaA = new Date(a.proximoContacto!);
-				const fechaB = new Date(b.proximoContacto!);
-				return fechaA.getTime() - fechaB.getTime();
-			});
+			return data
+				.filter((caso) => {
+					if (!caso.proximoContacto) return false;
+					const fecha = new Date(caso.proximoContacto);
+					return fecha <= en7Dias;
+				})
+				.sort((a, b) => {
+					const fechaA = new Date(a.proximoContacto!);
+					const fechaB = new Date(b.proximoContacto!);
+					return fechaA.getTime() - fechaB.getTime();
+				});
 		},
 	});
+
+	// Query para metas de mora del mes actual
+	const now = new Date();
+	const metasMoraQuery = useQuery({
+		...orpc.getMetasMora.queryOptions({
+			input: {
+				mes: now.getMonth() + 1,
+				anio: now.getFullYear(),
+			},
+		}),
+		enabled: !!session,
+	});
+
+	// Categorías visibles según rol
+	const categoriasVisibles = useMemo(() => {
+		if (userRole === "cobros") {
+			return ["mora_total", "mora_30", "mora_60", "mora_90", "mora_120"];
+		}
+		if (userRole === "cobros_supervisor") {
+			return ["mora_total", "mora_30"];
+		}
+		// admin / gerencia
+		return ["mora_total"];
+	}, [userRole]);
 
 	// Mapear filtroTemporal al enum time
 	const timeParam = useMemo(():
@@ -393,7 +436,7 @@ function RouteComponent() {
 				return {
 					...contrato,
 					diasHastaPago,
-				} as ContratoCobranza;
+				};
 			})
 			.sort((a, b) => {
 				// Ordenar: primero los que tienen fecha (por días), luego los que no tienen
@@ -418,6 +461,15 @@ function RouteComponent() {
 			);
 		}
 
+		// Filtrar por etiquetas (AND: el caso debe tener todas las seleccionadas)
+		if (filtroEtiquetas.length > 0) {
+			filtrados = filtrados.filter(
+				(c) =>
+					c.etiquetas &&
+					filtroEtiquetas.every((et) => c.etiquetas!.includes(et)),
+			);
+		}
+
 		// Filtrar por rango temporal
 		if (filtroTemporal === "todos") return filtrados;
 
@@ -435,7 +487,12 @@ function RouteComponent() {
 			// Incluir casos en mora (días negativos) y casos próximos a vencer
 			return c?.diasHastaPago !== null && c?.diasHastaPago <= limite;
 		});
-	}, [creditosConDias, filtroTemporal, mostrarCompletadosIncobrables]);
+	}, [
+		creditosConDias,
+		filtroTemporal,
+		mostrarCompletadosIncobrables,
+		filtroEtiquetas,
+	]);
 
 	// Check permissions after all hooks
 	if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
@@ -769,7 +826,7 @@ function RouteComponent() {
 										</div>
 										<div className="text-right">
 											<p
-												className={`text-sm font-medium ${esPasado ? "text-red-600" : esHoy ? "text-amber-600" : "text-muted-foreground"}`}
+												className={`font-medium text-sm ${esPasado ? "text-red-600" : esHoy ? "text-amber-600" : "text-muted-foreground"}`}
 											>
 												{esHoy
 													? "Hoy"
@@ -786,6 +843,128 @@ function RouteComponent() {
 									</Link>
 								);
 							})}
+						</div>
+					</CardContent>
+				</Card>
+			)}
+
+			{/* Metas de Mora del Mes */}
+			{metasMoraQuery.data && metasMoraQuery.data.length > 0 && (
+				<Card>
+					<CardHeader className="pb-3">
+						<CardTitle className="flex items-center gap-2">
+							<Target className="h-5 w-5 text-blue-600" />
+							Metas de Mora —{" "}
+							{now.toLocaleDateString("es-GT", {
+								month: "long",
+								year: "numeric",
+							})}
+						</CardTitle>
+						<CardDescription>
+							Porcentajes objetivo de mora para este mes
+						</CardDescription>
+					</CardHeader>
+					<CardContent>
+						<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+							{metasMoraQuery.data
+								.filter((m) => categoriasVisibles.includes(m.categoria))
+								.sort((a, b) => {
+									const orden = [
+										"mora_total",
+										"mora_30",
+										"mora_60",
+										"mora_90",
+										"mora_120",
+									];
+									return (
+										orden.indexOf(a.categoria) - orden.indexOf(b.categoria)
+									);
+								})
+								.map((meta) => {
+									const label: Record<string, string> = {
+										mora_total: "Mora Total",
+										mora_30: "Mora 30",
+										mora_60: "Mora 60",
+										mora_90: "Mora 90",
+										mora_120: "Mora 120+",
+									};
+									const color: Record<string, string> = {
+										mora_total: "border-blue-200 bg-blue-50",
+										mora_30: "border-yellow-200 bg-yellow-50",
+										mora_60: "border-orange-200 bg-orange-50",
+										mora_90: "border-red-200 bg-red-50",
+										mora_120: "border-red-300 bg-red-100",
+									};
+									const textColor: Record<string, string> = {
+										mora_total: "text-blue-700",
+										mora_30: "text-yellow-700",
+										mora_60: "text-orange-700",
+										mora_90: "text-red-700",
+										mora_120: "text-red-800",
+									};
+
+									// Buscar el % real del embudo
+									const statReal = stats.find((s) => {
+										if (meta.categoria === "mora_total") return false;
+										return s.estadoMora === meta.categoria;
+									});
+									const porcentajeReal = statReal
+										? Number.parseFloat(statReal.porcentaje)
+										: undefined;
+
+									// Para mora_total, sumar todas las moras
+									const porcentajeMoraTotal =
+										meta.categoria === "mora_total"
+											? stats
+													.filter(
+														(s) =>
+															s.estadoMora !== "al_dia" &&
+															s.estadoMora !== "completado",
+													)
+													.reduce(
+														(sum, s) =>
+															sum + Number.parseFloat(s.porcentaje || "0"),
+														0,
+													)
+											: undefined;
+
+									const actual =
+										meta.categoria === "mora_total"
+											? porcentajeMoraTotal
+											: porcentajeReal;
+									const objetivo = Number.parseFloat(meta.valorObjetivo);
+									const cumplida =
+										actual !== undefined ? actual <= objetivo : undefined;
+
+									return (
+										<div
+											key={meta.id}
+											className={`rounded-lg border p-3 ${color[meta.categoria] || ""}`}
+										>
+											<p className="font-medium text-muted-foreground text-xs">
+												{label[meta.categoria] || meta.categoria}
+											</p>
+											<p
+												className={`font-bold text-2xl ${actual !== undefined ? (cumplida ? "text-green-600" : "text-red-600") : textColor[meta.categoria] || ""}`}
+											>
+												{actual !== undefined ? `${actual.toFixed(2)}%` : "—"}
+											</p>
+											<p className="text-muted-foreground text-xs">
+												Meta: {objetivo.toFixed(2)}%
+												{actual !== undefined &&
+													(cumplida ? (
+														<span className="ml-1 font-semibold text-green-600">
+															✓
+														</span>
+													) : (
+														<span className="ml-1 font-semibold text-red-600">
+															↑ {(actual - objetivo).toFixed(2)}%
+														</span>
+													))}
+											</p>
+										</div>
+									);
+								})}
 						</div>
 					</CardContent>
 				</Card>
@@ -846,35 +1025,72 @@ function RouteComponent() {
 							});
 						}}
 						filterContent={
-							<>
-								<span className="font-medium text-muted-foreground text-sm">
-									Filtrar por etapa:
-								</span>
-								<Button
-									variant={filtroEtapa === null ? "default" : "outline"}
-									size="sm"
-									onClick={() => {
-										setFiltroEtapa(null);
-										setPage(1);
-									}}
-								>
-									Todas
-								</Button>
-								{filtrosEtapa.map((filtro) => (
-									<Badge
-										key={filtro.key}
-										className={`cursor-pointer ${filtroEtapa === filtro.key ? filtro.color : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
+							<div className="flex w-full flex-col gap-3">
+								<div className="flex flex-wrap items-center gap-2 rounded-md border border-border/50 bg-muted/30 px-3 py-2">
+									<span className="font-semibold text-foreground text-sm">
+										Filtrar por etapa:
+									</span>
+									<Button
+										variant={filtroEtapa === null ? "default" : "outline"}
+										size="sm"
 										onClick={() => {
-											setFiltroEtapa(
-												filtroEtapa === filtro.key ? null : filtro.key,
-											);
+											setFiltroEtapa(null);
 											setPage(1);
 										}}
 									>
-										{filtro.label}
-									</Badge>
-								))}
-							</>
+										Todas
+									</Button>
+									{filtrosEtapa.map((filtro) => (
+										<Badge
+											key={filtro.key}
+											className={`cursor-pointer ${filtroEtapa === filtro.key ? filtro.color : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
+											onClick={() => {
+												setFiltroEtapa(
+													filtroEtapa === filtro.key ? null : filtro.key,
+												);
+												setPage(1);
+											}}
+										>
+											{filtro.label}
+										</Badge>
+									))}
+								</div>
+								<div className="flex flex-wrap items-center gap-2 rounded-md border border-border/50 bg-muted/30 px-3 py-2">
+									<span className="font-semibold text-foreground text-sm">
+										Etiquetas:
+									</span>
+									<Button
+										variant={
+											filtroEtiquetas.length === 0 ? "default" : "outline"
+										}
+										size="sm"
+										onClick={() => {
+											setFiltroEtiquetas([]);
+											setPage(1);
+										}}
+									>
+										Todas
+									</Button>
+									{Object.entries(ETIQUETA_LABELS_FILTRO).map(
+										([key, label]) => (
+											<Badge
+												key={key}
+												className={`cursor-pointer ${filtroEtiquetas.includes(key) ? "bg-primary text-primary-foreground" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
+												onClick={() => {
+													setFiltroEtiquetas((prev) =>
+														prev.includes(key)
+															? prev.filter((e) => e !== key)
+															: [...prev, key],
+													);
+													setPage(1);
+												}}
+											>
+												{label}
+											</Badge>
+										),
+									)}
+								</div>
+							</div>
 						}
 						serverPagination={{
 							page: page,

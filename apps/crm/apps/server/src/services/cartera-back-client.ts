@@ -4,6 +4,7 @@
  */
 
 import type {
+	BoletaPagoInversionista,
 	CarteraAsesor,
 	CarteraBackApiResponse,
 	CarteraBackAuthError,
@@ -15,6 +16,7 @@ import type {
 	CarteraPagoCredito,
 	CarteraStatsResponse,
 	CarteraUsuario,
+	CreateBoletaInput,
 	CreateCreditoInput,
 	CreatePagoInput,
 	CreateUsuarioInput,
@@ -30,8 +32,6 @@ import type {
 	GetPaymentsParams,
 	InversionistaReporte,
 	LiquidatePagosInversionistasInput,
-	BoletaPagoInversionista,
-	CreateBoletaInput,
 	PaginatedResponse,
 	ResumenGlobalInversionista,
 	ReversePagoInput,
@@ -695,7 +695,9 @@ export class CarteraBackClient {
 	// RESUMEN GLOBAL INVERSIONISTAS
 	// ========================================================================
 
-	async getResumenGlobalInversionistas(): Promise<ResumenGlobalInversionista[]> {
+	async getResumenGlobalInversionistas(): Promise<
+		ResumenGlobalInversionista[]
+	> {
 		const response = await this.request<ResumenGlobalInversionista[]>(
 			"/resumen-global",
 			{ method: "GET" },
@@ -704,7 +706,10 @@ export class CarteraBackClient {
 		return response;
 	}
 
-	async uploadFile(file: File | Blob, filename: string): Promise<{ url: string; filename: string }> {
+	async uploadFile(
+		file: File | Blob,
+		filename: string,
+	): Promise<{ url: string; filename: string }> {
 		const url = `${this.config.baseUrl}/upload`;
 		const formData = new FormData();
 		formData.append("file", file, filename);
@@ -726,14 +731,13 @@ export class CarteraBackClient {
 		return response.json();
 	}
 
-	async createBoleta(input: CreateBoletaInput): Promise<BoletaPagoInversionista> {
-		const response = await this.request<BoletaPagoInversionista>(
-			"/boletas",
-			{
-				method: "POST",
-				body: JSON.stringify(input),
-			},
-		);
+	async createBoleta(
+		input: CreateBoletaInput,
+	): Promise<BoletaPagoInversionista> {
+		const response = await this.request<BoletaPagoInversionista>("/boletas", {
+			method: "POST",
+			body: JSON.stringify(input),
+		});
 		this.cache.invalidate("resumen-global");
 		return response;
 	}

@@ -17,13 +17,15 @@ import {
 	Pencil,
 	Phone,
 	Shield,
+	Tag,
 	User,
 	Users,
+	X,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { ContactoModal } from "@/components/contacto-modal";
 import { ReferenciasView } from "@/components/cobros/ReferenciasView";
+import { ContactoModal } from "@/components/contacto-modal";
 import {
 	OpportunityDetailModal,
 	type OpportunityForModal,
@@ -37,8 +39,14 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { authClient } from "@/lib/auth-client";
 import { ROLES } from "@/lib/roles";
@@ -98,6 +106,45 @@ function Pagination({
 	);
 }
 
+const ETIQUETAS_COBROS = [
+	"juridico",
+	"convenio",
+	"cobro",
+	"no_localizable",
+	"unidad_a_recuperar",
+	"unidad_recuperada",
+	"moras_pendientes",
+	"compromiso_de_pago",
+	"cancelado",
+	"reclamo",
+] as const;
+
+const ETIQUETA_LABELS: Record<string, string> = {
+	juridico: "Jurídico",
+	convenio: "Convenio",
+	cobro: "Cobro",
+	no_localizable: "No Localizable",
+	unidad_a_recuperar: "Unidad a Recuperar",
+	unidad_recuperada: "Unidad Recuperada",
+	moras_pendientes: "Moras Pendientes",
+	compromiso_de_pago: "Compromiso de Pago",
+	cancelado: "Cancelado",
+	reclamo: "Reclamo",
+};
+
+const ETIQUETA_COLORS: Record<string, string> = {
+	juridico: "bg-purple-100 text-purple-800",
+	convenio: "bg-blue-100 text-blue-800",
+	cobro: "bg-green-100 text-green-800",
+	no_localizable: "bg-gray-100 text-gray-800",
+	unidad_a_recuperar: "bg-orange-100 text-orange-800",
+	unidad_recuperada: "bg-teal-100 text-teal-800",
+	moras_pendientes: "bg-red-100 text-red-800",
+	compromiso_de_pago: "bg-yellow-100 text-yellow-800",
+	cancelado: "bg-slate-100 text-slate-800",
+	reclamo: "bg-pink-100 text-pink-800",
+};
+
 // Helper para detectar si es un UUID o un ID numérico
 function isUUID(id: string): boolean {
 	return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
@@ -132,8 +179,8 @@ function RouteComponent() {
 	// Estado de edición de contacto
 	const [isEditingContact, setIsEditingContact] = useState(false);
 	const [contactForm, setContactForm] = useState({
-		telefonoPrincipal: "",
-		telefonoAlternativo: "",
+		telefonoPrincipal: [] as string[],
+		telefonoAlternativo: [] as string[],
 		emailContacto: "",
 	});
 
@@ -256,6 +303,24 @@ function RouteComponent() {
 		},
 		onError: (err: any) => {
 			toast.error(err.message || "Error al actualizar el vehículo");
+		},
+	});
+
+	const updateEtiquetasMutation = useMutation({
+		mutationFn: (data: {
+			casoCobroId: string;
+			etiquetas: (typeof ETIQUETAS_COBROS)[number][];
+		}) => client.updateEtiquetasCobros(data),
+		onSuccess: () => {
+			toast.success("Etiquetas actualizadas");
+			queryClient.invalidateQueries(
+				orpc.getDetallesCreditoCarteraBack.queryOptions({
+					input: { creditoId: id },
+				}),
+			);
+		},
+		onError: (error: any) => {
+			toast.error(`Error al actualizar etiquetas: ${error.message}`);
 		},
 	});
 
@@ -466,21 +531,107 @@ function RouteComponent() {
 										<Banknote className="h-4 w-4 text-muted-foreground" />
 										<span className="font-medium">Cuota Mensual:</span>
 									</div>
-									<p className="font-bold text-lg text-blue-600 uppercase tracking-tight">
+									<p className="font-bold text-blue-600 text-lg uppercase tracking-tight">
 										Q{Number(caso.cuotaMensual || 0).toLocaleString()}
 									</p>
 								</div>
 								<div className="space-y-2">
 									<div className="flex items-center gap-2 text-sm">
 										<Banknote className="h-4 w-4 text-muted-foreground" />
-										<span className="font-medium">Total a Pagar <span className="text-xs text-muted-foreground">(Mora + Cuota)</span>:</span>
+										<span className="font-medium">
+											Total a Pagar{" "}
+											<span className="text-muted-foreground text-xs">
+												(Mora + Cuota)
+											</span>
+											:
+										</span>
 									</div>
 									<p className="font-bold text-lg text-orange-600">
-										Q{(Number(caso.montoEnMora) + Number(caso.cuotaMensual || 0)).toLocaleString()}
+										Q
+										{(
+											Number(caso.montoEnMora) + Number(caso.cuotaMensual || 0)
+										).toLocaleString()}
 									</p>
 								</div>
 							</div>
 
+							{/* Etiquetas del caso */}
+							{caso.id && (
+								<div className="space-y-2 pt-2">
+									<div className="flex items-center justify-between">
+										<div className="flex items-center gap-2 text-sm">
+											<Tag className="h-4 w-4 text-muted-foreground" />
+											<span className="font-medium">Etiquetas:</span>
+										</div>
+										<Popover>
+											<PopoverTrigger asChild>
+												<Button variant="outline" size="sm">
+													<Pencil className="mr-1 h-3 w-3" />
+													Editar
+												</Button>
+											</PopoverTrigger>
+											<PopoverContent className="w-64">
+												<div className="space-y-2">
+													<h4 className="font-medium text-sm">
+														Gestionar Etiquetas
+													</h4>
+													{ETIQUETAS_COBROS.map((etiqueta) => (
+														<div
+															key={etiqueta}
+															className="flex items-center space-x-2"
+														>
+															<Checkbox
+																id={`etiqueta-${etiqueta}`}
+																checked={(caso.etiquetas || []).includes(
+																	etiqueta,
+																)}
+																onCheckedChange={(checked) => {
+																	const currentEtiquetas = (caso.etiquetas ||
+																		[]) as (typeof ETIQUETAS_COBROS)[number][];
+																	const newEtiquetas = checked
+																		? [...currentEtiquetas, etiqueta]
+																		: currentEtiquetas.filter(
+																				(e) => e !== etiqueta,
+																			);
+																	updateEtiquetasMutation.mutate({
+																		casoCobroId: caso.id!,
+																		etiquetas: newEtiquetas,
+																	});
+																}}
+															/>
+															<label
+																htmlFor={`etiqueta-${etiqueta}`}
+																className="cursor-pointer text-sm"
+															>
+																{ETIQUETA_LABELS[etiqueta]}
+															</label>
+														</div>
+													))}
+												</div>
+											</PopoverContent>
+										</Popover>
+									</div>
+									<div className="flex flex-wrap gap-1.5">
+										{(caso.etiquetas || []).length > 0 ? (
+											(caso.etiquetas || []).map((etiqueta: string) => (
+												<Badge
+													key={etiqueta}
+													className={
+														ETIQUETA_COLORS[etiqueta] ||
+														"bg-gray-100 text-gray-800"
+													}
+												>
+													{ETIQUETA_LABELS[etiqueta] || etiqueta}
+												</Badge>
+											))
+										) : (
+											<span className="text-muted-foreground text-sm">
+												Sin etiquetas asignadas
+											</span>
+										)}
+									</div>
+								</div>
+							)}
 							{/* Strip visual: Total a Cobrar */}
 							{Number(caso.montoEnMora) > 0 && (
 								<div className="mt-2 rounded-lg border border-orange-200 bg-orange-50 p-4">
@@ -506,7 +657,11 @@ function RouteComponent() {
 											</div>
 										</div>
 										<p className="font-extrabold text-2xl text-orange-700">
-											Q{(Number(caso.montoEnMora) + Number(caso.cuotaMensual || 0)).toLocaleString()}
+											Q
+											{(
+												Number(caso.montoEnMora) +
+												Number(caso.cuotaMensual || 0)
+											).toLocaleString()}
 										</p>
 									</div>
 								</div>
@@ -526,9 +681,16 @@ function RouteComponent() {
 									variant="outline"
 									size="sm"
 									onClick={() => {
+										const parseTels = (
+											val: string | number | null | undefined,
+										) =>
+											String(val || "")
+												.split(",")
+												.map((t) => t.trim())
+												.filter(Boolean);
 										setContactForm({
-											telefonoPrincipal: caso.telefonoPrincipal || "",
-											telefonoAlternativo: caso.telefonoAlternativo || "",
+											telefonoPrincipal: parseTels(caso.telefonoPrincipal),
+											telefonoAlternativo: parseTels(caso.telefonoAlternativo),
 											emailContacto: caso.emailContacto || "",
 										});
 										setIsEditingContact(true);
@@ -542,35 +704,99 @@ function RouteComponent() {
 						<CardContent className="space-y-4">
 							{isEditingContact ? (
 								<div className="space-y-3">
-									<div>
-										<Label htmlFor="contact-phone">Teléfono Principal *</Label>
+									<div className="space-y-1">
+										<Label>Teléfono Principal *</Label>
+										<div className="flex flex-wrap gap-1.5">
+											{contactForm.telefonoPrincipal.map((tel, i) => (
+												<Badge
+													key={`principal-${tel}-${i}`}
+													variant="secondary"
+													className="gap-1 pr-1 pl-2"
+												>
+													{tel}
+													<button
+														type="button"
+														onClick={() =>
+															setContactForm((f) => ({
+																...f,
+																telefonoPrincipal: f.telefonoPrincipal.filter(
+																	(_, idx) => idx !== i,
+																),
+															}))
+														}
+														className="rounded-full hover:bg-muted"
+													>
+														<X className="h-3 w-3" />
+													</button>
+												</Badge>
+											))}
+										</div>
 										<Input
-											id="contact-phone"
-											value={contactForm.telefonoPrincipal}
-											onChange={(e) =>
-												setContactForm((f) => ({
-													...f,
-													telefonoPrincipal: e.target.value,
-												}))
-											}
-											placeholder="Ej: 5555-5555"
+											placeholder="Agregar teléfono y presionar Enter"
+											onKeyDown={(e) => {
+												if (e.key === "Enter") {
+													e.preventDefault();
+													const val = e.currentTarget.value.trim();
+													if (val) {
+														setContactForm((f) => ({
+															...f,
+															telefonoPrincipal: [...f.telefonoPrincipal, val],
+														}));
+														e.currentTarget.value = "";
+													}
+												}
+											}}
 										/>
 									</div>
-									<div>
-										<Label htmlFor="contact-phone-alt">Teléfono Alternativo</Label>
+									<div className="space-y-1">
+										<Label>Teléfono Alternativo</Label>
+										<div className="flex flex-wrap gap-1.5">
+											{contactForm.telefonoAlternativo.map((tel, i) => (
+												<Badge
+													key={`alt-${tel}-${i}`}
+													variant="secondary"
+													className="gap-1 pr-1 pl-2"
+												>
+													{tel}
+													<button
+														type="button"
+														onClick={() =>
+															setContactForm((f) => ({
+																...f,
+																telefonoAlternativo:
+																	f.telefonoAlternativo.filter(
+																		(_, idx) => idx !== i,
+																	),
+															}))
+														}
+														className="rounded-full hover:bg-muted"
+													>
+														<X className="h-3 w-3" />
+													</button>
+												</Badge>
+											))}
+										</div>
 										<Input
-											id="contact-phone-alt"
-											value={contactForm.telefonoAlternativo}
-											onChange={(e) =>
-												setContactForm((f) => ({
-													...f,
-													telefonoAlternativo: e.target.value,
-												}))
-											}
-											placeholder="Ej: 4444-4444"
+											placeholder="Agregar teléfono y presionar Enter"
+											onKeyDown={(e) => {
+												if (e.key === "Enter") {
+													e.preventDefault();
+													const val = e.currentTarget.value.trim();
+													if (val) {
+														setContactForm((f) => ({
+															...f,
+															telefonoAlternativo: [
+																...f.telefonoAlternativo,
+																val,
+															],
+														}));
+														e.currentTarget.value = "";
+													}
+												}
+											}}
 										/>
 									</div>
-									<div>
+									<div className="space-y-1">
 										<Label htmlFor="contact-email">Email</Label>
 										<Input
 											id="contact-email"
@@ -589,16 +815,25 @@ function RouteComponent() {
 										<Button
 											size="sm"
 											onClick={() => {
-												if (!window.confirm("¿Estás seguro de actualizar la información de contacto?")) return;
+												if (
+													!window.confirm(
+														"¿Estás seguro de actualizar la información de contacto?",
+													)
+												)
+													return;
 												updateContactMutation.mutate({
-													telefonoPrincipal: contactForm.telefonoPrincipal,
-													telefonoAlternativo: contactForm.telefonoAlternativo || undefined,
+													telefonoPrincipal:
+														contactForm.telefonoPrincipal.join(", "),
+													telefonoAlternativo:
+														contactForm.telefonoAlternativo.length > 0
+															? contactForm.telefonoAlternativo.join(", ")
+															: undefined,
 													emailContacto: contactForm.emailContacto || undefined,
 												});
 											}}
 											disabled={
 												updateContactMutation.isPending ||
-												!contactForm.telefonoPrincipal
+												contactForm.telefonoPrincipal.length === 0
 											}
 										>
 											{updateContactMutation.isPending
@@ -616,38 +851,71 @@ function RouteComponent() {
 									</div>
 								</div>
 							) : (
-							<div className="grid grid-cols-2 gap-4">
-								<div>
-									<p className="text-muted-foreground text-sm">
-										Teléfono Principal
-									</p>
-									{caso.telefonoPrincipal ? (
-										<a href={`tel:${caso.telefonoPrincipal.replace(/[^0-9+]/g, "")}`} className="font-medium text-primary hover:underline">{caso.telefonoPrincipal}</a>
-									) : (
-										<p className="font-medium">-</p>
-									)}
-								</div>
-								{caso.telefonoAlternativo && (
+								<div className="grid grid-cols-2 gap-4">
 									<div>
 										<p className="text-muted-foreground text-sm">
-											Teléfono Alternativo
+											Teléfono Principal
 										</p>
-										<a href={`tel:${String(caso.telefonoAlternativo).replace(/[^0-9+]/g, "")}`} className="font-medium text-primary hover:underline">{caso.telefonoAlternativo}</a>
+										{caso.telefonoPrincipal ? (
+											<div className="flex flex-wrap gap-1.5">
+												{String(caso.telefonoPrincipal)
+													.split(",")
+													.map((t) => t.trim())
+													.filter(Boolean)
+													.map((tel) => (
+														<a
+															key={tel}
+															href={`tel:${tel.replace(/[^0-9+]/g, "")}`}
+															className="inline-flex items-center rounded-md border px-2 py-0.5 font-medium text-primary text-sm hover:underline"
+														>
+															{tel}
+														</a>
+													))}
+											</div>
+										) : (
+											<p className="font-medium">-</p>
+										)}
 									</div>
-								)}
-								<div>
-									<p className="text-muted-foreground text-sm">Email</p>
-									{caso.emailContacto ? (
-										<a href={`mailto:${caso.emailContacto}`} className="font-medium text-primary hover:underline">{caso.emailContacto}</a>
-									) : (
-										<p className="font-medium">-</p>
+									{caso.telefonoAlternativo && (
+										<div>
+											<p className="text-muted-foreground text-sm">
+												Teléfono Alternativo
+											</p>
+											<div className="flex flex-wrap gap-1.5">
+												{String(caso.telefonoAlternativo)
+													.split(",")
+													.map((t) => t.trim())
+													.filter(Boolean)
+													.map((tel) => (
+														<a
+															key={tel}
+															href={`tel:${tel.replace(/[^0-9+]/g, "")}`}
+															className="inline-flex items-center rounded-md border px-2 py-0.5 font-medium text-primary text-sm hover:underline"
+														>
+															{tel}
+														</a>
+													))}
+											</div>
+										</div>
 									)}
+									<div>
+										<p className="text-muted-foreground text-sm">Email</p>
+										{caso.emailContacto ? (
+											<a
+												href={`mailto:${caso.emailContacto}`}
+												className="font-medium text-primary hover:underline"
+											>
+												{caso.emailContacto}
+											</a>
+										) : (
+											<p className="font-medium">-</p>
+										)}
+									</div>
+									<div>
+										<p className="text-muted-foreground text-sm">Dirección</p>
+										<p className="font-medium">{caso.direccionContacto}</p>
+									</div>
 								</div>
-								<div>
-									<p className="text-muted-foreground text-sm">Dirección</p>
-									<p className="font-medium">{caso.direccionContacto}</p>
-								</div>
-							</div>
 							)}
 							{/* Botones de Contacto - Solo si existe caso de cobros */}
 							{caso.id ? (
@@ -658,8 +926,27 @@ function RouteComponent() {
 											casoCobroId={caso.id}
 											clienteNombre={caso.clienteNombre || ""}
 											telefonoPrincipal={caso.telefonoPrincipal || ""}
+											telefonoAlternativo={
+												caso.telefonoAlternativo
+													? String(caso.telefonoAlternativo)
+													: undefined
+											}
 											emailCliente={caso.emailContacto || ""}
 											metodoInicial="llamada"
+											fechaPago={String(caso.diaPagoMensual || 15)}
+											cuotaMensual={Number(
+												caso.cuotaMensual || 0,
+											).toLocaleString()}
+											placa={caso.vehiculoPlaca || ""}
+											marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
+											montoAdeudado={Number(
+												caso.montoEnMora || 0,
+											).toLocaleString()}
+											cuotasAtraso={caso.cuotasVencidas ?? 0}
+											estadoMora={caso.estadoMora || undefined}
+											fechaInicio={caso.fechaInicio || null}
+											nombreAsesor={session?.user?.name || ""}
+											telefonoAsesor=""
 										>
 											<Button className="flex items-center gap-2">
 												<Phone className="h-4 w-4" />
@@ -671,8 +958,27 @@ function RouteComponent() {
 											casoCobroId={caso.id}
 											clienteNombre={caso.clienteNombre || ""}
 											telefonoPrincipal={caso.telefonoPrincipal || ""}
+											telefonoAlternativo={
+												caso.telefonoAlternativo
+													? String(caso.telefonoAlternativo)
+													: undefined
+											}
 											emailCliente={caso.emailContacto || ""}
 											metodoInicial="whatsapp"
+											fechaPago={String(caso.diaPagoMensual || 15)}
+											cuotaMensual={Number(
+												caso.cuotaMensual || 0,
+											).toLocaleString()}
+											placa={caso.vehiculoPlaca || ""}
+											marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
+											montoAdeudado={Number(
+												caso.montoEnMora || 0,
+											).toLocaleString()}
+											cuotasAtraso={caso.cuotasVencidas ?? 0}
+											estadoMora={caso.estadoMora || undefined}
+											fechaInicio={caso.fechaInicio || null}
+											nombreAsesor={session?.user?.name || ""}
+											telefonoAsesor=""
 										>
 											<Button
 												variant="outline"
@@ -687,8 +993,27 @@ function RouteComponent() {
 											casoCobroId={caso.id}
 											clienteNombre={caso.clienteNombre || ""}
 											telefonoPrincipal={caso.telefonoPrincipal || ""}
+											telefonoAlternativo={
+												caso.telefonoAlternativo
+													? String(caso.telefonoAlternativo)
+													: undefined
+											}
 											emailCliente={caso.emailContacto || ""}
 											metodoInicial="email"
+											fechaPago={String(caso.diaPagoMensual || 15)}
+											cuotaMensual={Number(
+												caso.cuotaMensual || 0,
+											).toLocaleString()}
+											placa={caso.vehiculoPlaca || ""}
+											marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
+											montoAdeudado={Number(
+												caso.montoEnMora || 0,
+											).toLocaleString()}
+											cuotasAtraso={caso.cuotasVencidas ?? 0}
+											estadoMora={caso.estadoMora || undefined}
+											fechaInicio={caso.fechaInicio || null}
+											nombreAsesor={session?.user?.name || ""}
+											telefonoAsesor=""
 										>
 											<Button
 												variant="outline"

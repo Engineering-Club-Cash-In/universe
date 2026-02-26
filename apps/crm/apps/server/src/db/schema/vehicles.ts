@@ -33,10 +33,19 @@ export const inspectionStatusEnum = pgEnum("inspection_status", [
 ]);
 
 // Enum for 360 inspection items status
-export const inspection360StatusEnum = pgEnum("inspection_360_status", [
-	"ok",
-	"bad",
-]);
+export const INSPECTION_360_STATUSES = [
+	"GOOD",
+	"REGULAR",
+	"BAD",
+	"NA",
+	"OK",
+	"LEGACY_BAD",
+] as const;
+
+export const inspection360StatusEnum = pgEnum(
+	"inspection_360_status",
+	INSPECTION_360_STATUSES,
+);
 
 // Vehicle owner type - determines document requirements
 export const vehicleOwnerTypeEnum = pgEnum("vehicle_owner_type", [
@@ -244,6 +253,25 @@ export const inspectionChecklistItems = pgTable("inspection_checklist_items", {
 	item: text("item").notNull(), // description of the criterion
 	checked: boolean("checked").notNull().default(false),
 	severity: text("severity").notNull().default("critical"), // critical, warning, info
+	notes: text("notes"), // Optional notes for the item (e.g. for "Otros")
+
+	createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/**
+ * Table: checklist_item_evidence
+ * Stores multimedia evidence (photos/videos) linked to checklist items.
+ * Uses a cascade deletion strategy ensuring evidence is removed if the root checklist point is deleted.
+ */
+export const checklistItemEvidence = pgTable("checklist_item_evidence", {
+	id: uuid("id").defaultRandom().primaryKey(),
+	itemId: uuid("item_id")
+		.references(() => inspectionChecklistItems.id, { onDelete: "cascade" })
+		.notNull(),
+
+	url: text("url").notNull(),
+	mimeType: text("mime_type").notNull(),
+	originalName: text("original_name").notNull(),
 
 	createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -287,8 +315,9 @@ export const vehicleInspection360Items = pgTable(
 		area: text("area").notNull(), // "Motor y Transmisión", "Frenos"...
 		checkpoint: text("checkpoint").notNull(), // "Verificar fugas...", "Nivel de aceite..."
 
-		status: inspection360StatusEnum("status").notNull(), // "ok", "bad"
+		status: inspection360StatusEnum("status").notNull(), // "ok", "bad", "na", "bueno", "regular", "malo"
 		comment: text("comment"), // Obligatorio si status="bad"
+		metadata: json("metadata").$type<Record<string, any>>(),
 
 		createdAt: timestamp("created_at").defaultNow().notNull(),
 		updatedAt: timestamp("updated_at"),
@@ -366,10 +395,21 @@ export const vehiclePhotosRelations = relations(vehiclePhotos, ({ one }) => ({
 
 export const inspectionChecklistItemsRelations = relations(
 	inspectionChecklistItems,
-	({ one }) => ({
+	({ one, many }) => ({
 		inspection: one(vehicleInspections, {
 			fields: [inspectionChecklistItems.inspectionId],
 			references: [vehicleInspections.id],
+		}),
+		evidence: many(checklistItemEvidence),
+	}),
+);
+
+export const checklistItemEvidenceRelations = relations(
+	checklistItemEvidence,
+	({ one }) => ({
+		item: one(inspectionChecklistItems, {
+			fields: [checklistItemEvidence.itemId],
+			references: [inspectionChecklistItems.id],
 		}),
 	}),
 );
@@ -411,6 +451,10 @@ export type InspectionChecklistItem =
 	typeof inspectionChecklistItems.$inferSelect;
 export type NewInspectionChecklistItem =
 	typeof inspectionChecklistItems.$inferInsert;
+
+export type ChecklistItemEvidence = typeof checklistItemEvidence.$inferSelect;
+export type NewChecklistItemEvidence =
+	typeof checklistItemEvidence.$inferInsert;
 
 export type VehicleInspection360Item =
 	typeof vehicleInspection360Items.$inferSelect;

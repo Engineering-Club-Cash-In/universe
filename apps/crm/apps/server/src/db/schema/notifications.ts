@@ -1,5 +1,6 @@
 import { relations } from "drizzle-orm";
 import {
+	index,
 	integer,
 	pgEnum,
 	pgTable,
@@ -47,44 +48,56 @@ export const notificationRedirectPageEnum = pgEnum(
 		"analysis_50_details",
 		"analysis_90_details",
 		"pay_investors",
+		"cobros_detail",
 	],
 );
 
 // Notifications table
-export const notifications = pgTable("notifications", {
-	id: uuid("id").primaryKey().defaultRandom(),
+export const notifications = pgTable(
+	"notifications",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
 
-	titulo: text("titulo").notNull(),
-	descripcion: text("descripcion"),
+		titulo: text("titulo").notNull(),
+		descripcion: text("descripcion"),
 
-	status: notificationStatusEnum("status").notNull().default("pending"),
-	type: notificationTypeEnum("type").notNull(),
+		status: notificationStatusEnum("status").notNull().default("pending"),
+		type: notificationTypeEnum("type").notNull(),
 
-	// Creador
-	createdBy: text("created_by")
-		.notNull()
-		.references(() => user.id),
-	createdByRole: userRoleEnum("created_by_role").notNull(),
+		// Creador
+		createdBy: text("created_by")
+			.notNull()
+			.references(() => user.id),
+		createdByRole: userRoleEnum("created_by_role").notNull(),
 
-	// Asignación
-	assignedToRole: userRoleEnum("assigned_to_role").notNull(),
-	assignedTo: text("assigned_to").references(() => user.id),
+		// Asignación
+		assignedToRole: userRoleEnum("assigned_to_role").notNull(),
+		assignedTo: text("assigned_to").references(() => user.id),
 
-	// Entidad relacionada (polimórfica)
-	relatedEntityType: notificationEntityTypeEnum("related_entity_type"),
-	relatedEntityId: uuid("related_entity_id"),
+		// Entidad relacionada (polimórfica)
+		relatedEntityType: notificationEntityTypeEnum("related_entity_type"),
+		relatedEntityId: uuid("related_entity_id"),
 
-	// Redirect URL
-	redirectPage: notificationRedirectPageEnum("redirect_page"),
+		// Redirect URL
+		redirectPage: notificationRedirectPageEnum("redirect_page"),
 
-	// Timestamps de estado
-	readAt: timestamp("read_at"),
-	resolvedAt: timestamp("resolved_at"),
+		// Timestamps de estado
+		readAt: timestamp("read_at"),
+		resolvedAt: timestamp("resolved_at"),
 
-	// Timestamps
-	createdAt: timestamp("created_at").notNull().defaultNow(),
-	updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+		// Timestamps
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+		updatedAt: timestamp("updated_at").notNull().defaultNow(),
+	},
+	(table) => [
+		index("idx_notifications_dedup").on(
+			table.relatedEntityId,
+			table.relatedEntityType,
+			table.titulo,
+			table.createdAt,
+		),
+	],
+);
 
 // Notification Documents table
 export const notificationDocuments = pgTable("notification_documents", {

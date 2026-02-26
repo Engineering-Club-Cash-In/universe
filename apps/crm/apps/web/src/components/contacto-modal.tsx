@@ -3,11 +3,12 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { CalendarIcon, Mail, MessageCircle, Phone } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Dialog,
 	DialogClose,
@@ -33,6 +34,12 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import {
+	interpolar,
+	PLANTILLAS_MENSAJES,
+	sugerirPlantilla,
+	type VariablesPlantilla,
+} from "@/lib/cobros/plantillas-mensajes";
 import { cn } from "@/lib/utils";
 import { client, orpc } from "@/utils/orpc";
 
@@ -40,20 +47,114 @@ interface ContactoModalProps {
 	casoCobroId: string;
 	clienteNombre: string;
 	telefonoPrincipal: string;
+	telefonoAlternativo?: string;
 	emailCliente?: string;
 	metodoInicial: "llamada" | "whatsapp" | "email";
 	children: React.ReactNode;
+	// Variables para plantillas de mensaje
+	fechaPago?: string;
+	cuotaMensual?: string;
+	placa?: string;
+	marcaLineaModelo?: string;
+	montoAdeudado?: string;
+	cuotasAtraso?: number;
+	estadoMora?: string;
+	fechaInicio?: string | null;
+	nombreAsesor?: string;
+	telefonoAsesor?: string;
 }
 
 export function ContactoModal({
 	casoCobroId,
 	clienteNombre,
 	telefonoPrincipal,
+	telefonoAlternativo,
 	emailCliente,
 	metodoInicial,
 	children,
+	fechaPago = "",
+	cuotaMensual = "",
+	placa = "",
+	marcaLineaModelo = "",
+	montoAdeudado = "",
+	cuotasAtraso = 0,
+	estadoMora,
+	fechaInicio,
+	nombreAsesor = "",
+	telefonoAsesor = "",
 }: ContactoModalProps) {
 	const queryClient = useQueryClient();
+
+	const telefonos = useMemo(() => {
+		const lista: string[] = [];
+		// telefonoPrincipal puede traer varios números separados por coma
+		if (telefonoPrincipal) {
+			for (const t of telefonoPrincipal.split(",")) {
+				const limpio = t.trim();
+				if (limpio) lista.push(limpio);
+			}
+		}
+		if (telefonoAlternativo) {
+			for (const t of telefonoAlternativo.split(",")) {
+				const limpio = t.trim();
+				if (limpio && !lista.includes(limpio)) lista.push(limpio);
+			}
+		}
+		return lista;
+	}, [telefonoPrincipal, telefonoAlternativo]);
+
+	const [telefonoSeleccionado, setTelefonoSeleccionado] = useState(
+		() => telefonos[0] || telefonoPrincipal,
+	);
+
+	const [plantillaId, setPlantillaId] = useState<string>("");
+	const [mensajeEditado, setMensajeEditado] = useState("");
+	const [asuntoEditado, setAsuntoEditado] = useState("");
+
+	const variables: VariablesPlantilla = useMemo(
+		() => ({
+			clienteNombre,
+			fechaPago,
+			cuotaMensual,
+			placa,
+			marcaLineaModelo,
+			montoAdeudado,
+			cuotasAtraso,
+			telefonoAsesor,
+			nombreAsesor,
+		}),
+		[
+			clienteNombre,
+			fechaPago,
+			cuotaMensual,
+			placa,
+			marcaLineaModelo,
+			montoAdeudado,
+			cuotasAtraso,
+			telefonoAsesor,
+			nombreAsesor,
+		],
+	);
+
+	// Pre-seleccionar plantilla sugerida al abrir
+	useEffect(() => {
+		const sugerida = sugerirPlantilla(estadoMora, fechaInicio);
+		setPlantillaId(sugerida);
+		const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === sugerida);
+		if (plantilla) {
+			setMensajeEditado(interpolar(plantilla.cuerpo, variables));
+			setAsuntoEditado(interpolar(plantilla.asunto, variables));
+		}
+	}, [estadoMora, fechaInicio, variables]);
+
+	const handlePlantillaChange = (id: string) => {
+		setPlantillaId(id);
+		const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === id);
+		if (plantilla) {
+			setMensajeEditado(interpolar(plantilla.cuerpo, variables));
+			setAsuntoEditado(interpolar(plantilla.asunto, variables));
+		}
+	};
 
 	const form = useForm({
 		defaultValues: {
@@ -79,11 +180,9 @@ export function ContactoModal({
 			}),
 		onSuccess: () => {
 			toast.success("Contacto registrado correctamente");
-			// Invalidar usando los queryOptions de orpc para obtener las query keys correctas
 			queryClient.invalidateQueries(
 				orpc.getHistorialContactos.queryOptions({ input: { casoCobroId } }),
 			);
-			// Invalidar también el detalle del caso para actualizar el sidebar de próximo contacto
 			queryClient.invalidateQueries({
 				predicate: (query) =>
 					query.queryKey.some(
@@ -93,7 +192,6 @@ export function ContactoModal({
 					),
 			});
 			form.reset();
-			// Cerrar el dialogo
 			document
 				.querySelector<HTMLButtonElement>("[data-radix-dialog-close]")
 				?.click();
@@ -117,25 +215,37 @@ export function ContactoModal({
 	};
 
 	const ejecutarAccion = (metodo: "llamada" | "whatsapp" | "email") => {
+		const tel = telefonoSeleccionado || telefonoPrincipal;
 		switch (metodo) {
 			case "llamada":
-				window.open(`tel:${telefonoPrincipal}`);
+				window.open(`tel:${tel}`);
 				break;
-			case "whatsapp":
-				window.open(
-					`https://wa.me/${telefonoPrincipal.replace(/[^0-9]/g, "")}`,
-				);
+			case "whatsapp": {
+				const telLimpio = tel.replace(/[^0-9]/g, "");
+				const url = mensajeEditado
+					? `https://wa.me/${telLimpio}?text=${encodeURIComponent(mensajeEditado)}`
+					: `https://wa.me/${telLimpio}`;
+				window.open(url);
 				break;
-			case "email":
-				window.open(`mailto:${emailCliente || ""}`);
+			}
+			case "email": {
+				const params = new URLSearchParams();
+				if (asuntoEditado) params.set("subject", asuntoEditado);
+				if (mensajeEditado) params.set("body", mensajeEditado);
+				const query = params.toString();
+				window.open(`mailto:${emailCliente || ""}${query ? `?${query}` : ""}`);
 				break;
+			}
 		}
 	};
+
+	const mostrarPlantillas =
+		metodoInicial === "whatsapp" || metodoInicial === "email";
 
 	return (
 		<Dialog>
 			<DialogTrigger asChild>{children}</DialogTrigger>
-			<DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+			<DialogContent className="max-h-[90vh] min-w-3xl max-w-4xl overflow-y-auto">
 				<DialogHeader>
 					<DialogTitle className="flex items-center gap-2">
 						{getIconoMetodo(metodoInicial)}
@@ -228,7 +338,74 @@ export function ContactoModal({
 							</form.Field>
 						</div>
 
-						{/* Botón para ejecutar acción */}
+						{/* Selector de plantilla para WhatsApp y Email */}
+						{mostrarPlantillas && (
+							<div className="space-y-3 rounded-md border p-3">
+								<div className="space-y-2">
+									<Label>Plantilla de mensaje</Label>
+									<Select
+										value={plantillaId}
+										onValueChange={handlePlantillaChange}
+									>
+										<SelectTrigger>
+											<SelectValue placeholder="Seleccionar plantilla..." />
+										</SelectTrigger>
+										<SelectContent>
+											{PLANTILLAS_MENSAJES.map((p) => (
+												<SelectItem key={p.id} value={p.id}>
+													{p.nombre}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+								</div>
+
+								{plantillaId && metodoInicial === "email" && (
+									<div className="space-y-2">
+										<Label>Asunto</Label>
+										<Input
+											value={asuntoEditado}
+											onChange={(e) => setAsuntoEditado(e.target.value)}
+										/>
+									</div>
+								)}
+
+								{plantillaId && (
+									<div className="space-y-2">
+										<Label>Mensaje (editable)</Label>
+										<Textarea
+											className="min-h-[150px] text-sm"
+											value={mensajeEditado}
+											onChange={(e) => setMensajeEditado(e.target.value)}
+										/>
+									</div>
+								)}
+							</div>
+						)}
+
+						{/* Selector de teléfono cuando hay múltiples */}
+						{telefonos.length > 1 && (
+							<div className="space-y-2">
+								<Label>Teléfono a contactar</Label>
+								<Select
+									value={telefonoSeleccionado}
+									onValueChange={setTelefonoSeleccionado}
+								>
+									<SelectTrigger>
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										{telefonos.map((t) => (
+											<SelectItem key={t} value={t}>
+												{t}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							</div>
+						)}
+
+						{/* Botones para ejecutar acción */}
 						<div className="flex gap-2">
 							<Button
 								type="button"
@@ -238,7 +415,7 @@ export function ContactoModal({
 								className="flex items-center gap-2"
 							>
 								<Phone className="h-4 w-4" />
-								Llamar {telefonoPrincipal}
+								Llamar {telefonos.length <= 1 ? telefonos[0] || "" : ""}
 							</Button>
 							<Button
 								type="button"
@@ -403,17 +580,19 @@ export function ContactoModal({
 						<form.Field name="requiereSeguimiento">
 							{(field) => (
 								<div className="flex items-center space-x-2">
-									<input
-										type="checkbox"
+									<Checkbox
+										id="requiereSeguimiento"
 										checked={field.state.value}
-										onChange={(e) => {
-											field.handleChange(e.target.checked);
-											if (!e.target.checked) {
+										onCheckedChange={(checked) => {
+											field.handleChange(!!checked);
+											if (!checked) {
 												form.setFieldValue("fechaProximoContacto", undefined);
 											}
 										}}
 									/>
-									<Label>Requiere seguimiento programado</Label>
+									<Label htmlFor="requiereSeguimiento">
+										Requiere seguimiento programado
+									</Label>
 								</div>
 							)}
 						</form.Field>
@@ -443,17 +622,13 @@ export function ContactoModal({
 																: "Seleccionar fecha"}
 														</Button>
 													</PopoverTrigger>
-													<PopoverContent
-														className="w-auto p-0"
-														align="start"
-													>
+													<PopoverContent className="w-auto p-0" align="start">
 														<Calendar
 															mode="single"
 															selected={field.state.value}
 															onSelect={(date) => field.handleChange(date)}
 															disabled={(date) =>
-																date <
-																new Date(new Date().setHours(0, 0, 0, 0))
+																date < new Date(new Date().setHours(0, 0, 0, 0))
 															}
 															locale={es}
 														/>

@@ -27,6 +27,10 @@ import {
 import { createPublicLead } from "./controllers/public-lead";
 import type { db } from "./db";
 import { otps } from "./db/schema/otp";
+import {
+	checkCasosSinContacto,
+	checkSeguimientosVencidos,
+} from "./jobs/cobros-notifications";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
 import { appRouter } from "./routers/index";
@@ -295,8 +299,6 @@ app.post("/api/upload-opportunity-document", async (c) => {
 		const { db } = await import("./db");
 		const { opportunities, opportunityDocuments } = await import("./db/schema");
 		const { eq } = await import("drizzle-orm");
-		const { validateFile, generateUniqueFilename, uploadFileToR2 } =
-			await import("./lib/storage");
 
 		// Verify access to opportunity
 		const opportunity = await db
@@ -323,10 +325,18 @@ app.post("/api/upload-opportunity-document", async (c) => {
 		}
 
 		// Validate file
+		const {
+			validateFile,
+			generateUniqueFilename,
+			uploadFileToR2,
+			resolveMimeType,
+		} = await import("./lib/storage");
 		const validation = validateFile(file);
 		if (!validation.valid) {
 			return c.json({ error: validation.error }, 400);
 		}
+
+		const resolvedMimeType = resolveMimeType(file);
 
 		// Generate unique filename
 		const uniqueFilename = generateUniqueFilename(file.name);
@@ -341,7 +351,7 @@ app.post("/api/upload-opportunity-document", async (c) => {
 				opportunityId,
 				filename: uniqueFilename,
 				originalName: file.name,
-				mimeType: file.type,
+				mimeType: resolvedMimeType,
 				size: file.size,
 				documentType: documentType as any,
 				description: description || undefined,
@@ -741,7 +751,10 @@ app.post("/api/notifications/pay-investors", async (c) => {
 			.limit(1);
 
 		if (!cobrosSupervisor) {
-			return c.json({ error: "No se encontró un usuario cobros_supervisor" }, 500);
+			return c.json(
+				{ error: "No se encontró un usuario cobros_supervisor" },
+				500,
+			);
 		}
 
 		const notification = await createNotification({
@@ -860,6 +873,25 @@ app.delete("/api/migrate/cleanup", async (c) => {
 		return c.json({ error: err.message }, 500);
 	}
 });
+
+// Job periódico de notificaciones de cobros (cada hora)
+setInterval(
+	async () => {
+		try {
+			await checkSeguimientosVencidos();
+			await checkCasosSinContacto(3);
+		} catch (error) {
+			console.error("Error en job de notificaciones cobros:", error);
+		}
+	},
+	60 * 60 * 1000,
+);
+
+// Ejecutar una vez al iniciar (con delay de 10s para que la DB esté lista)
+setTimeout(() => {
+	checkSeguimientosVencidos().catch(console.error);
+	checkCasosSinContacto(3).catch(console.error);
+}, 10_000);
 
 export default {
 	port: process.env.PORT || 3000,

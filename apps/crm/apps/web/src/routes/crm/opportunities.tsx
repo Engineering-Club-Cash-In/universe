@@ -85,7 +85,7 @@ import {
 	type Opportunity,
 	opportunitiesColumns,
 } from "@/lib/opportunities/columns";
-import { getRoleLabel, PERMISSIONS } from "@/lib/roles";
+import { getRoleLabel, PERMISSIONS, ROLES } from "@/lib/roles";
 import {
 	getMissingFieldsForNewVehicle,
 	renderNewVehicleBadges,
@@ -338,6 +338,7 @@ function RouteComponent() {
 	const [debouncedVehiclesSearch, setDebouncedVehiclesSearch] = useState("");
 	const [showLostOpportunities, setShowLostOpportunities] = useState(false);
 	const [boardSearch, setBoardSearch] = useState("");
+	const [salespersonFilter, setSalespersonFilter] = useState<string>("all");
 	const debouncedBoardSearch = useDeferredValue(boardSearch);
 	// View toggle: "kanban" or "table" - persist in localStorage
 	const [viewMode, setViewMode] = useState<"kanban" | "table">(() => {
@@ -676,6 +677,15 @@ function RouteComponent() {
 
 	const vendorsQuery = useQuery({
 		...orpc.getVendors.queryOptions(),
+	});
+
+	const canFilterBySalesperson =
+		userProfile.data?.role === ROLES.ADMIN ||
+		userProfile.data?.role === ROLES.SALES_SUPERVISOR;
+
+	const crmUsersQuery = useQuery({
+		...orpc.getCrmUsers.queryOptions(),
+		enabled: canFilterBySalesperson && !!session?.user?.id,
 	});
 
 	const vehiclesQuery = useQuery({
@@ -1175,12 +1185,23 @@ function RouteComponent() {
 		}
 	}, [isDetailsDialogOpen, navigate, search.opportunityId]);
 
+	// Filter opportunities by salesperson (client-side)
+	const filteredData = useMemo(
+		() =>
+			salespersonFilter === "all"
+				? opportunitiesQuery.data
+				: opportunitiesQuery.data?.filter(
+						(opp) => opp.assignedUser?.id === salespersonFilter,
+					),
+		[opportunitiesQuery.data, salespersonFilter],
+	);
+
 	// Group opportunities by stage - must be before early returns to follow hooks rules
 	const opportunitiesByStage = useMemo(
 		() =>
 			salesStagesQuery.data?.map((stage) => {
 				const stageOpportunities =
-					opportunitiesQuery.data?.filter(
+					filteredData?.filter(
 						(opp) =>
 							opp.stage?.id === stage.id &&
 							(stageFilter === "all" || opp.status === stageFilter) &&
@@ -1208,7 +1229,7 @@ function RouteComponent() {
 			}) || [],
 		[
 			salesStagesQuery.data,
-			opportunitiesQuery.data,
+			filteredData,
 			stageFilter,
 			showLostOpportunities,
 			debouncedBoardSearch,
@@ -1242,18 +1263,18 @@ function RouteComponent() {
 	};
 
 	// Calculate comprehensive opportunities metrics
-	const totalOpportunities = opportunitiesQuery.data?.length || 0;
+	const totalOpportunities = filteredData?.length || 0;
 	const totalValue =
-		opportunitiesQuery.data?.reduce(
+		filteredData?.reduce(
 			(sum, opp) => sum + (Number.parseFloat(opp.value || "0") || 0),
 			0,
 		) || 0;
 	const wonOpportunities =
-		opportunitiesQuery.data?.filter((opp) => opp.status === "won").length || 0;
+		filteredData?.filter((opp) => opp.status === "won").length || 0;
 	const lostOpportunities =
-		opportunitiesQuery.data?.filter((opp) => opp.status === "lost").length || 0;
+		filteredData?.filter((opp) => opp.status === "lost").length || 0;
 	const _openOpportunities =
-		opportunitiesQuery.data?.filter((opp) => opp.status === "open").length || 0;
+		filteredData?.filter((opp) => opp.status === "open").length || 0;
 
 	// Calculate win rate from closed deals only
 	const closedOpportunities = wonOpportunities + lostOpportunities;
@@ -1264,7 +1285,7 @@ function RouteComponent() {
 
 	const PLACED_STAGE_THRESHOLD = 90;
 	const placedOpportunities =
-		opportunitiesQuery.data?.filter(
+		filteredData?.filter(
 			(opp) => (opp.stage?.closurePercentage || 0) >= PLACED_STAGE_THRESHOLD,
 		) || [];
 	const placedCount = placedOpportunities.length;

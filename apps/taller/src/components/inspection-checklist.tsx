@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   AlertTriangle,
   CheckCircle,
@@ -35,6 +35,8 @@ import {
 } from "@/components/ui/collapsible";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { toast } from "sonner";
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
 
 // ==========================================
 // CRITERIOS DE RECHAZO (Causales de rechazo)
@@ -77,6 +79,11 @@ const rejectionCriteria: Array<{
           label: "Corrosión estructural avanzada y excesiva",
           critical: true,
         },
+        {
+          id: "structural-other",
+          label: "Otros (especificar)",
+          critical: true,
+        },
       ],
     },
     {
@@ -105,6 +112,11 @@ const rejectionCriteria: Array<{
           label: "Pérdida de potencia, transmisión con respuesta irregular o golpeteo (verificar en prueba de manejo)",
           critical: true,
         },
+        {
+          id: "engine-transmission-other",
+          label: "Otros (especificar)",
+          critical: true,
+        },
       ],
     },
     {
@@ -126,6 +138,11 @@ const rejectionCriteria: Array<{
         {
           id: "steering-wear",
           label: "Dirección y tren delantero con desgaste excesivo o vibración anormal",
+          critical: true,
+        },
+        {
+          id: "suspension-brakes-steering-other",
+          label: "Otros (especificar)",
           critical: true,
         },
       ],
@@ -151,6 +168,11 @@ const rejectionCriteria: Array<{
           label: "Daños en pintura excesivos, piezas sueltas, presencia de masilla excesiva",
           critical: true,
         },
+        {
+          id: "body-glass-other",
+          label: "Otros (especificar)",
+          critical: true,
+        },
       ],
     },
   ];
@@ -165,206 +187,6 @@ const additionalInspectionPoints: Array<{
   critical: boolean;
   items: Array<{ id: string; label: string; critical: boolean }>;
 }> = [
-    {
-      id: "engine-transmission-detail",
-      title: "Motor y Transmisión (Detalle)",
-      icon: Wrench,
-      critical: false,
-      items: [
-        {
-          id: "engine-startup",
-          label: "Encendido sin ruidos ni vibraciones anormales",
-          critical: false,
-        },
-        {
-          id: "oil-transmission-leaks",
-          label: "Ausencia de fugas de aceite o líquido de transmisión",
-          critical: false,
-        },
-        {
-          id: "engine-oil-condition",
-          label: "Nivel y estado del aceite del motor (color, consistencia)",
-          critical: false,
-        },
-        {
-          id: "coolant-level",
-          label: "Nivel y estado del líquido refrigerante",
-          critical: false,
-        },
-        {
-          id: "exhaust-smoke",
-          label: "Ausencia de humo inusual en el escape (negro, azul o blanco constante)",
-          critical: false,
-        },
-        {
-          id: "hoses-belts",
-          label: "Mangueras y correas en buen estado, sin grietas ni desgaste",
-          critical: false,
-        },
-        {
-          id: "obd2-scan",
-          label: "Prueba de escáner OBD2 (sin errores activos)",
-          critical: false,
-        },
-      ],
-    },
-    {
-      id: "brakes-suspension-detail",
-      title: "Frenos y Suspensión (Detalle)",
-      icon: Gauge,
-      critical: false,
-      items: [
-        {
-          id: "brake-fluid-level",
-          label: "Nivel del líquido de frenos",
-          critical: false,
-        },
-        {
-          id: "brake-pads-discs",
-          label: "Desgaste de pastillas y discos de freno (surcos profundos o marcas inusuales)",
-          critical: false,
-        },
-        {
-          id: "brake-lines",
-          label: "Líneas, mangueras y conexiones de frenos sin fugas ni corrosión",
-          critical: false,
-        },
-        {
-          id: "brake-pedal-travel",
-          label: "Recorrido del pedal de freno (altura, juego libre y distancia de reserva)",
-          critical: false,
-        },
-        {
-          id: "shocks-suspension",
-          label: "Amortiguadores y suspensión (prueba de rebote, ausencia de fugas, bases de amortiguadores)",
-          critical: false,
-        },
-        {
-          id: "dust-covers-bushings",
-          label: "Guardapolvos y silentblocks visibles en buen estado",
-          critical: false,
-        },
-      ],
-    },
-    {
-      id: "steering-tires-detail",
-      title: "Tren Delantero, Dirección y Neumáticos (Detalle)",
-      icon: Car,
-      critical: false,
-      items: [
-        {
-          id: "ball-joints",
-          label: "Rótulas",
-          critical: false,
-        },
-        {
-          id: "bushings",
-          label: "Bujes",
-          critical: false,
-        },
-        {
-          id: "cv-joints",
-          label: "Puntas de flecha",
-          critical: false,
-        },
-        {
-          id: "steering-rack",
-          label: "Cremallera (verificación de fugas, estado de puntas)",
-          critical: false,
-        },
-        {
-          id: "stabilizer-bar",
-          label: "Barra estabilizadora",
-          critical: false,
-        },
-        {
-          id: "steering-play",
-          label: "Holgura de la dirección (excesivo movimiento del volante sin respuesta)",
-          critical: false,
-        },
-        {
-          id: "tire-wear-tread",
-          label: "Desgaste uniforme de los neumáticos y profundidad de la banda de rodadura adecuada",
-          critical: false,
-        },
-        {
-          id: "tire-pressure",
-          label: "Presión de aire correcta en todos los neumáticos (incluida la rueda de repuesto)",
-          critical: false,
-        },
-      ],
-    },
-    {
-      id: "electrical-other-detail",
-      title: "Sistema Eléctrico y Otros (Detalle)",
-      icon: Zap,
-      critical: false,
-      items: [
-        {
-          id: "lights-interior-exterior",
-          label: "Funcionamiento de todas las luces exteriores e interiores",
-          critical: false,
-        },
-        {
-          id: "battery-condition",
-          label: "Estado de la batería (terminales limpios, sin corrosión)",
-          critical: false,
-        },
-        {
-          id: "ac-heating-accessories",
-          label: "Funcionamiento del aire acondicionado, calefacción, radio y otros accesorios",
-          critical: false,
-        },
-        {
-          id: "wipers-washer",
-          label: "Limpiaparabrisas y líquido lavaparabrisas operativos",
-          critical: false,
-        },
-        {
-          id: "horn-functional",
-          label: "Bocina funcional",
-          critical: false,
-        },
-        {
-          id: "warning-lights",
-          label: "Testigos activos en el tablero (Check Engine, ABS, airbag)",
-          critical: false,
-        },
-        {
-          id: "odometer-tampered",
-          label: "Kilometraje alterado",
-          critical: false,
-        },
-        {
-          id: "lights-broken",
-          label: "Faros, frenos o luces direccionales quebrados y opacos",
-          critical: false,
-        },
-        {
-          id: "dashboard-altered",
-          label: "Tablero alterado o con señales de manipulación",
-          critical: false,
-        },
-      ],
-    },
-    {
-      id: "tires-condition-detail",
-      title: "Estado de Llantas (Detalle)",
-      icon: Gauge,
-      critical: false,
-      items: [
-        {
-          id: "uneven-tire-wear",
-          label: "Llantas con desgaste irregular",
-          critical: false,
-        },
-        {
-          id: "tire-bulges-cuts",
-          label: "Abultamientos o cortes laterales",
-          critical: false,
-        },
-      ],
-    },
     {
       id: "documentation",
       title: "Documentación y Legalidad",
@@ -384,6 +206,11 @@ const additionalInspectionPoints: Array<{
         {
           id: "pending-fines",
           label: "Multas graves pendientes o papelería incompleta",
+          critical: false,
+        },
+        {
+          id: "documentation-other",
+          label: "Otros (especificar)",
           critical: false,
         },
       ],
@@ -410,6 +237,9 @@ export default function InspectionChecklist({
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
+  const [itemNotes, setItemNotes] = useState<Record<string, string>>({});
+  const [itemEvidence, setItemEvidence] = useState<Record<string, Array<{url: string, mimeType: string, originalName: string}>>>({});
+  const [isUploadingItemEvidence, setIsUploadingItemEvidence] = useState<Record<string, boolean>>({});
   const [expandedCategories, setExpandedCategories] = useState<
     Record<string, boolean>
   >({});
@@ -458,42 +288,128 @@ export default function InspectionChecklist({
   }, [saveTimeForCategory]);
 
   // Toggle item check
-  const toggleItem = (itemId: string) => {
-    setCheckedItems((prev) => {
-      const newState = {
-        ...prev,
-        [itemId]: !prev[itemId],
-      };
+  const toggleItem = useCallback((itemId: string) => {
+    setCheckedItems((prev) => ({
+      ...prev,
+      [itemId]: !prev[itemId], // Toggle state
+    }));
+  }, []);
 
-      // Update context with checklist items
-      updateChecklistContext(newState);
-
-      return newState;
-    });
-  };
-
-  // Update checklist items in context
-  const updateChecklistContext = (items: Record<string, boolean>) => {
-    const checklistData: Array<{
+  // Memoize the checklist data processing to prevent creating new arrays on every render unless the actual state changes
+  const checklistData = useMemo(() => {
+    const data: Array<{
       category: string;
       item: string;
       checked: boolean;
       severity: string;
+      notes?: string;
+      evidence?: Array<any>;
     }> = [];
+    
     inspectionCategories.forEach((category) => {
       category.items.forEach((item) => {
-        // Always include the item in the checklist data
-        // In the UI: checked = true means the item has issues (doesn't comply)
-        // In the DB: checked = true means the issue is active/present
-        checklistData.push({
+        data.push({
           category: category.id,
           item: item.label,
-          checked: items[item.id] || false, // If marked in UI, it means there's an issue (true), otherwise false
+          checked: checkedItems[item.id] || false,
           severity: item.critical ? 'critical' : 'warning',
+          notes: itemNotes[item.id],
+          evidence: itemEvidence[item.id] || [],
         });
       });
     });
+    return data;
+  }, [inspectionCategories, checkedItems, itemNotes, itemEvidence]);
+
+  // Sync local changes to context automatically when the memoized data changes
+  useEffect(() => {
     setChecklistItems(checklistData);
+  }, [checklistData, setChecklistItems]);
+
+  const handleItemNoteChange = useCallback((itemId: string, note: string) => {
+    setItemNotes(prev => ({ ...prev, [itemId]: note }));
+  }, []);
+
+  const handleItemEvidenceUpload = async (itemId: string, event: React.ChangeEvent<HTMLInputElement>) => {
+    if (isUploadingItemEvidence[itemId]) return;
+    
+    const files = Array.from(event.target.files || []);
+    if (files.length === 0) return;
+
+    setIsUploadingItemEvidence(prev => ({ ...prev, [itemId]: true }));
+
+    const uploadPromises = files.map(async (file) => {
+      if (file.size > MAX_FILE_SIZE) {
+        toast.error(`El archivo ${file.name} excede el límite de 10MB.`);
+        return null;
+      }
+
+      if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+        toast.error(`Formato inválido para ${file.name}. Use JPG, PNG o WEBP.`);
+        return null;
+      }
+
+      const formData = new FormData();
+      formData.append("file", file);
+      const vId = contextFormData?.id || `temp-${Date.now()}`;
+      formData.append("vehicleId", vId);
+      formData.append("category", "checklist_evidence");
+      formData.append("photoType", "checklist_item_proof");
+      formData.append("title", "Evidencia de inspección");
+
+      try {
+        const response = await fetch(`${import.meta.env.VITE_SERVER_URL || 'http://localhost:3000'}/api/upload-vehicle-photo`, {
+          method: "POST",
+          credentials: "include",
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error || `Error subiendo ${file.name}`);
+        }
+
+        const result = await response.json();
+        const url = result.data?.url || result.url;
+
+        return url ? { url, mimeType: file.type, originalName: file.name } : null;
+      } catch (error: any) {
+        console.error("Item evidence upload error:", error);
+        toast.error(error.message || `No se pudo subir ${file.name}.`);
+        return null;
+      }
+    });
+
+    try {
+      const results = await Promise.allSettled(uploadPromises);
+      const successfulUploads = results
+        .filter((result): result is PromiseFulfilledResult<{ url: string; mimeType: string; originalName: string } | null> => 
+          result.status === 'fulfilled' && result.value !== null
+        )
+        .map(result => result.value!);
+
+      if (successfulUploads.length > 0) {
+        setItemEvidence((prev) => ({
+            ...prev,
+            [itemId]: [...(prev[itemId] || []), ...successfulUploads]
+        }));
+        toast.success(`Se adjuntaron ${successfulUploads.length} evidencia(s) exitosamente`);
+      }
+    } catch (error) {
+      console.error("Error procesando resultados de subida:", error);
+      toast.error("Ocurrió un problema procesando las subidas.");
+    } finally {
+      setIsUploadingItemEvidence(prev => ({ ...prev, [itemId]: false }));
+      event.target.value = '';
+    }
+  };
+
+  const deleteItemEvidence = (itemId: string, indexToRemove: number) => {
+    setItemEvidence(prev => {
+      const currentList = prev[itemId] || [];
+      const updatedList = currentList.filter((_, idx) => idx !== indexToRemove);
+      return { ...prev, [itemId]: updatedList };
+    });
   };
 
   // Handle evidence upload
@@ -501,19 +417,15 @@ export default function InspectionChecklist({
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // Validación de seguridad
-    const maxSize = 10 * 1024 * 1024; // 10MB
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
-
-    if (file.size > maxSize) {
-      toast.error("Archivo demasiado grande. El máximo permitido es 10MB.");
+    if (file.size > MAX_FILE_SIZE) {
+      toast.error("El archivo excede el límite de 10MB.");
       if (evidenceInputRef.current) evidenceInputRef.current.value = '';
       if (cameraInputRef.current) cameraInputRef.current.value = '';
       return;
     }
 
-    if (!allowedTypes.includes(file.type)) {
-      toast.error("Tipo de archivo no válido. Use JPG, PNG o WebP.");
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+      toast.error("Formato inválido. Use JPG, PNG o WEBP.");
       if (evidenceInputRef.current) evidenceInputRef.current.value = '';
       if (cameraInputRef.current) cameraInputRef.current.value = '';
       return;
@@ -538,7 +450,8 @@ export default function InspectionChecklist({
       });
 
       if (!response.ok) {
-        throw new Error("Error al subir imagen");
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || "Error al subir imagen");
       }
 
       const result = await response.json();
@@ -547,18 +460,18 @@ export default function InspectionChecklist({
 
       if (url) {
         setRejectionEvidenceUrl(url);
-        toast.success("Evidencia adjuntada correctamente");
+        toast.success("Evidencia adjuntada exitosamente");
       }
     } catch (error) {
-      console.error("Error uploading evidence:", error);
+      console.error("Error al subir evidencia:", error);
       const errorMsg = error instanceof Error ? error.message : 'Error desconocido';
 
       if (errorMsg.includes('size')) {
-        toast.error("El archivo excede el límite permitido por el servidor.");
+        toast.error("El archivo excede el límite de 10MB.");
       } else if (errorMsg.includes('network') || errorMsg.includes('fetch')) {
-        toast.error("Error de conexión. Verifique su internet e intente de nuevo.");
+        toast.error("Error de conexión. Revisa tu internet e intenta de nuevo.");
       } else {
-        toast.error("Error al subir la evidencia. Intente nuevamente.");
+        toast.error("No se pudo subir la evidencia. Por favor intenta de nuevo.");
       }
     } finally {
       setIsUploadingEvidence(false);
@@ -586,8 +499,8 @@ export default function InspectionChecklist({
     });
   };
 
-  // Calculate statistics
-  const calculateStats = () => {
+  // Calculate statistics using useMemo to prevent unnecessary recalculations
+  const stats = useMemo(() => {
     let totalItems = 0;
     let checkedCount = 0;
     let criticalIssues = 0;
@@ -605,9 +518,8 @@ export default function InspectionChecklist({
     });
 
     return { totalItems, checkedCount, criticalIssues };
-  };
+  }, [inspectionCategories, checkedItems]);
 
-  const stats = calculateStats();
   const hasRejectionCriteria = stats.criticalIssues > 0;
 
   // Expand all / Collapse all
@@ -637,29 +549,12 @@ export default function InspectionChecklist({
   // Function to fill checklist with dummy data
   const fillWithDummyData = () => {
     const dummyCheckedItems: Record<string, boolean> = {};
-
-    // Randomly select some items to check (simulate issues found)
-    // Let's check a few items to simulate a realistic inspection
-    dummyCheckedItems['visible-leaks'] = true; // Minor oil leak
-    dummyCheckedItems['brake-issues'] = false; // Brakes OK
-    dummyCheckedItems['uneven-wear'] = true; // Uneven tire wear
-    dummyCheckedItems['front-left-wheel'] = false;
-    dummyCheckedItems['chassis-bent'] = false; // No structural damage
-    dummyCheckedItems['warning-lights'] = false; // No warning lights
-
-    // Set most items as OK (not checked)
-    inspectionCategories.forEach((category) => {
-      category.items.forEach((item) => {
-        if (!(item.id in dummyCheckedItems)) {
-          dummyCheckedItems[item.id] = false; // Most items are OK
-        }
-      });
+    inspectionCategories.forEach((category, cIdx) => {
+      if (cIdx < 2 && category.items.length > 0) {
+        dummyCheckedItems[category.items[0].id] = true;
+      }
     });
-
     setCheckedItems(dummyCheckedItems);
-    updateChecklistContext(dummyCheckedItems);
-
-    // Expand all categories to show the results
     expandAll();
   };
 
@@ -813,32 +708,104 @@ export default function InspectionChecklist({
                         <div
                           key={item.id}
                           className={cn(
-                            "flex items-start gap-3 p-3 rounded-lg border transition-colors",
+                            "flex flex-col gap-3 p-3 rounded-lg border transition-colors",
                             checkedItems[item.id]
                               ? "bg-destructive/10 border-destructive/30"
                               : "hover:bg-muted/50"
                           )}
                         >
-                          <Checkbox
-                            id={item.id}
-                            checked={checkedItems[item.id] || false}
-                            onCheckedChange={() => toggleItem(item.id)}
-                            className="mt-0.5"
-                          />
-                          <label
-                            htmlFor={item.id}
-                            className="flex-1 cursor-pointer text-sm"
-                          >
-                            {item.label}
-                            {item.critical && (
-                              <Badge
-                                variant="outline"
-                                className="ml-2 text-xs px-1.5 py-0"
-                              >
-                                Crítico
-                              </Badge>
-                            )}
-                          </label>
+                          <div className="flex items-start gap-3">
+                            <Checkbox
+                              id={item.id}
+                              checked={checkedItems[item.id] || false}
+                              onCheckedChange={() => toggleItem(item.id)}
+                              className="mt-0.5"
+                            />
+                            <label
+                              htmlFor={item.id}
+                              className="flex-1 cursor-pointer text-sm font-medium"
+                            >
+                              {item.label}
+                              {item.critical && (
+                                <Badge
+                                  variant="outline"
+                                  className="ml-2 text-xs px-1.5 py-0 border-red-200 text-red-600 bg-red-50"
+                                >
+                                  Crítico
+                                </Badge>
+                              )}
+                            </label>
+                          </div>
+                          
+                          {checkedItems[item.id] && (
+                            <div className="ml-7 space-y-4 mt-1 border-t border-destructive/20 pt-3">
+                              {item.id.endsWith("-other") && (
+                                <div className="space-y-1.5 w-full max-w-sm">
+                                  <label className="text-xs font-semibold text-muted-foreground">Descripción del problema *</label>
+                                  <textarea
+                                    className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 min-h-[60px]"
+                                    placeholder="Detalles sobre el daño o problema encontrado..."
+                                    value={itemNotes[item.id] || ""}
+                                    onChange={(e) => handleItemNoteChange(item.id, e.target.value)}
+                                  />
+                                </div>
+                              )}
+                              
+                              <div className="space-y-2">
+                                <label className="text-xs font-semibold text-muted-foreground flex items-center gap-1">
+                                  <Camera className="h-3 w-3" /> Evidencia Fotográfica
+                                </label>
+                                
+                                <div className="flex flex-wrap gap-2">
+                                  {itemEvidence[item.id]?.map((ev, idx) => (
+                                    <div key={idx} className="relative w-16 h-16 rounded-md border border-border overflow-hidden group bg-black/5 flex items-center justify-center">
+                                        <img src={ev.url} alt="Evidencia" className="object-cover w-full h-full" />
+                                      <Button
+                                        size="icon"
+                                        variant="destructive"
+                                        type="button"
+                                        className="absolute top-0 right-0 h-5 w-5 rounded-none rounded-bl-md opacity-0 group-hover:opacity-100 transition-opacity"
+                                        onClick={() => deleteItemEvidence(item.id, idx)}
+                                      >
+                                        <XCircle className="h-3 w-3" />
+                                      </Button>
+                                    </div>
+                                  ))}
+                                  
+                                  <div className="flex gap-2">
+                                    <label title="Tomar Foto" className={cn("cursor-pointer flex items-center justify-center w-16 h-16 rounded-md border border-dashed border-muted-foreground/50 hover:bg-muted/50 transition-colors text-muted-foreground/70 hover:text-foreground", isUploadingItemEvidence[item.id] && "opacity-50 cursor-not-allowed")}>
+                                      <input 
+                                        type="file" 
+                                        accept="image/*" 
+                                        capture="environment" 
+                                        className="hidden" 
+                                        onChange={(e) => handleItemEvidenceUpload(item.id, e)}
+                                        disabled={isUploadingItemEvidence[item.id]}
+                                      />
+                                      <Camera className="h-6 w-6" />
+                                    </label>
+                                    
+                                    <label title="Subir Archivo" className={cn("cursor-pointer flex items-center justify-center w-16 h-16 rounded-md border border-dashed border-muted-foreground/50 hover:bg-muted/50 transition-colors text-muted-foreground/70 hover:text-foreground", isUploadingItemEvidence[item.id] && "opacity-50 cursor-not-allowed")}>
+                                      <input 
+                                        type="file" 
+                                        accept="image/*" 
+                                        multiple
+                                        className="hidden" 
+                                        onChange={(e) => handleItemEvidenceUpload(item.id, e)}
+                                        disabled={isUploadingItemEvidence[item.id]}
+                                      />
+                                      <Upload className="h-6 w-6" />
+                                    </label>
+                                  </div>
+                                </div>
+                                {isUploadingItemEvidence[item.id] && (
+                                  <p className="text-[10px] text-muted-foreground animate-pulse mt-1">
+                                    Subiendo archivo...
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -937,72 +904,7 @@ export default function InspectionChecklist({
                     </ul>
                   </div>
 
-                  {/* Evidence Upload Section */}
-                  <div className="border border-dashed border-red-300 rounded-lg p-4 bg-red-50/50">
-                    <div className="flex flex-col items-center gap-3">
-                      <h4 className="text-sm font-medium text-red-800">Evidencia de Rechazo (Opcional)</h4>
-
-                      {rejectionEvidenceUrl ? (
-                        <div className="relative w-full aspect-video max-w-xs rounded-lg overflow-hidden border border-slate-200 bg-black">
-                          <img src={rejectionEvidenceUrl} alt="Evidencia" className="object-contain w-full h-full" />
-                          <Button
-                            size="icon"
-                            variant="destructive"
-                            className="absolute top-2 right-2 h-6 w-6"
-                            onClick={() => setRejectionEvidenceUrl(undefined)}
-                          >
-                            <XCircle className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      ) : (
-                        <>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            capture="environment"
-                            className="hidden"
-                            ref={cameraInputRef}
-                            onChange={handleEvidenceUpload}
-                          />
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            ref={evidenceInputRef}
-                            onChange={handleEvidenceUpload}
-                          />
-                          <div className="grid grid-cols-2 gap-3 w-full max-w-sm">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              className="h-20 flex flex-col gap-2 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
-                              onClick={() => cameraInputRef.current?.click()}
-                              disabled={isUploadingEvidence}
-                            >
-                              <Camera className="h-6 w-6" />
-                              <span>Tomar Foto</span>
-                            </Button>
-
-                            <Button
-                              type="button"
-                              variant="outline"
-                              className="h-20 flex flex-col gap-2 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
-                              onClick={() => evidenceInputRef.current?.click()}
-                              disabled={isUploadingEvidence}
-                            >
-                              <Upload className="h-6 w-6" />
-                              <span>Galería</span>
-                            </Button>
-                          </div>
-                          {isUploadingEvidence && (
-                            <p className="text-xs text-red-600 animate-pulse mt-1">
-                              Subiendo evidencia...
-                            </p>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </div>
+                  {/* Removed Evidence Upload Section per user request */}
                 </div>
               )}
 

@@ -117,12 +117,13 @@ export async function uploadFileToR2(
 	opportunityId: string,
 ): Promise<{ key: string; url: string }> {
 	const key = `opportunities/${opportunityId}/${filename}`;
+	const contentType = file instanceof File ? resolveMimeType(file) : file.type;
 
 	const command = new PutObjectCommand({
 		Bucket: R2_BUCKET_NAME,
 		Key: key,
 		Body: Buffer.from(await file.arrayBuffer()),
-		ContentType: file.type,
+		ContentType: contentType,
 	});
 
 	await r2Client.send(command);
@@ -153,7 +154,7 @@ export async function uploadVehiclePhotoToR2(
 		Bucket: R2_BUCKET_NAME,
 		Key: key,
 		Body: Buffer.from(await file.arrayBuffer()),
-		ContentType: file.type,
+		ContentType: file instanceof File ? resolveMimeType(file) : file.type,
 	});
 
 	await r2Client.send(command);
@@ -272,7 +273,6 @@ export async function uploadFileFromUrlToR2(
 export const ALLOWED_DOCUMENT_TYPES = [
 	"application/pdf",
 	"image/jpeg",
-	"image/jpg",
 	"image/png",
 	"image/webp",
 	"image/avif", // Agregado soporte para AVIF
@@ -286,9 +286,37 @@ export const ALLOWED_DOCUMENT_TYPES = [
 // Tamaño máximo del archivo (10MB)
 export const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
+// Mapa de extensiones a MIME types para fallback cuando el browser no reporta el tipo
+const EXTENSION_TO_MIME: Record<string, string> = {
+	pdf: "application/pdf",
+	jpg: "image/jpeg",
+	jpeg: "image/jpeg",
+	png: "image/png",
+	webp: "image/webp",
+	avif: "image/avif",
+	doc: "application/msword",
+	docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+	xls: "application/vnd.ms-excel",
+	xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+};
+
+// Resolver MIME type desde extensión como fallback
+export function resolveMimeType(file: File): string {
+	if (file.type && ALLOWED_DOCUMENT_TYPES.includes(file.type)) {
+		return file.type;
+	}
+	const extension = file.name.split(".").pop()?.toLowerCase();
+	if (extension && EXTENSION_TO_MIME[extension]) {
+		return EXTENSION_TO_MIME[extension];
+	}
+	return file.type || "";
+}
+
 // Validar archivo
 export function validateFile(file: File): { valid: boolean; error?: string } {
-	if (!ALLOWED_DOCUMENT_TYPES.includes(file.type)) {
+	const mimeType = resolveMimeType(file);
+
+	if (!ALLOWED_DOCUMENT_TYPES.includes(mimeType)) {
 		return {
 			valid: false,
 			error:
@@ -317,9 +345,29 @@ export const ALLOWED_VIDEO_TYPES = [
 // Tamaño máximo del video (50MB)
 export const MAX_VIDEO_SIZE = 50 * 1024 * 1024;
 
+// Mapa de extensiones de video a MIME types
+const VIDEO_EXTENSION_TO_MIME: Record<string, string> = {
+	mp4: "video/mp4",
+	mov: "video/quicktime",
+	webm: "video/webm",
+};
+
+// Resolver MIME type de video desde extensión como fallback
+export function resolveVideoMimeType(file: File): string {
+	if (file.type && ALLOWED_VIDEO_TYPES.includes(file.type)) {
+		return file.type;
+	}
+	const extension = file.name.split(".").pop()?.toLowerCase();
+	if (extension && VIDEO_EXTENSION_TO_MIME[extension]) {
+		return VIDEO_EXTENSION_TO_MIME[extension];
+	}
+	return file.type || "";
+}
+
 // Validar video
 export function validateVideo(file: File): { valid: boolean; error?: string } {
-	if (!ALLOWED_VIDEO_TYPES.includes(file.type)) {
+	const mimeType = resolveVideoMimeType(file);
+	if (!ALLOWED_VIDEO_TYPES.includes(mimeType)) {
 		return {
 			valid: false,
 			error:
@@ -347,11 +395,14 @@ export async function uploadVehicleVideoToR2(
 ): Promise<{ key: string; url: string }> {
 	const key = `vehicles/${vehicleId}/videos/${category}/${filename}`;
 
+	const contentType =
+		file instanceof File ? resolveVideoMimeType(file) : file.type;
+
 	const command = new PutObjectCommand({
 		Bucket: R2_BUCKET_NAME,
 		Key: key,
 		Body: Buffer.from(await file.arrayBuffer()),
-		ContentType: file.type,
+		ContentType: contentType,
 	});
 
 	await r2Client.send(command);

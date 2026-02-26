@@ -2,6 +2,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { ArrowUpDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { parseFechaLocal } from "@/lib/date-utils";
 
 export type ContratoCobranza = {
 	contratoId: string;
@@ -9,16 +10,17 @@ export type ContratoCobranza = {
 	clienteNombre: string;
 	vehiculoMarca: string;
 	vehiculoModelo: string;
-	vehiculoYear: number;
+	vehiculoYear: number | null;
 	vehiculoPlaca: string;
 	montoEnMora: string;
 	diasMoraMaximo: number;
 	estadoMora: string | null;
 	estadoContrato: string;
 	fechaProximoPago: string | null;
-	diasHastaPago: number | null; // Calculado: días hasta el próximo pago (null si no hay fecha definida)
+	diasHastaPago: number | null;
 	numeroCredito: string | null;
 	cuotaMensual: string | null;
+	etiquetas: string[] | null;
 };
 
 function getEstadoBadge(estado: string) {
@@ -53,6 +55,32 @@ function getEstadoBadge(estado: string) {
 	);
 }
 
+const ETIQUETA_LABELS: Record<string, string> = {
+	juridico: "Jurídico",
+	convenio: "Convenio",
+	cobro: "Cobro",
+	no_localizable: "No Loc.",
+	unidad_a_recuperar: "U. a Recup.",
+	unidad_recuperada: "U. Recup.",
+	moras_pendientes: "Moras Pend.",
+	compromiso_de_pago: "Comp. Pago",
+	cancelado: "Cancelado",
+	reclamo: "Reclamo",
+};
+
+const ETIQUETA_COLORS: Record<string, string> = {
+	juridico: "bg-purple-100 text-purple-800",
+	convenio: "bg-blue-100 text-blue-800",
+	cobro: "bg-green-100 text-green-800",
+	no_localizable: "bg-gray-100 text-gray-800",
+	unidad_a_recuperar: "bg-orange-100 text-orange-800",
+	unidad_recuperada: "bg-teal-100 text-teal-800",
+	moras_pendientes: "bg-red-100 text-red-800",
+	compromiso_de_pago: "bg-yellow-100 text-yellow-800",
+	cancelado: "bg-slate-100 text-slate-800",
+	reclamo: "bg-pink-100 text-pink-800",
+};
+
 export const columns: ColumnDef<ContratoCobranza>[] = [
 	{
 		accessorKey: "fechaProximoPago",
@@ -77,11 +105,14 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 				);
 			}
 
-			const fechaFormateada = new Date(fecha).toLocaleDateString("es-GT", {
-				day: "2-digit",
-				month: "short",
-				year: "numeric",
-			});
+			const fechaFormateada = parseFechaLocal(fecha).toLocaleDateString(
+				"es-GT",
+				{
+					day: "2-digit",
+					month: "short",
+					year: "numeric",
+				},
+			);
 
 			let diasClassName = "text-xs mt-0.5";
 			let diasText = "";
@@ -204,6 +235,27 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 					className={`font-medium ${monto > 0 ? "text-right" : "text-center"}`}
 				>
 					{monto > 0 ? formatted : "-"}
+				</div>
+			);
+		},
+	},
+	{
+		id: "etiquetas",
+		accessorKey: "etiquetas",
+		header: "Etiquetas",
+		cell: ({ row }) => {
+			const etiquetas = row.original.etiquetas;
+			if (!etiquetas || etiquetas.length === 0) return null;
+			return (
+				<div className="flex flex-wrap gap-1">
+					{etiquetas.map((etiqueta) => (
+						<Badge
+							key={etiqueta}
+							className={`text-xs ${ETIQUETA_COLORS[etiqueta] || "bg-gray-100 text-gray-800"}`}
+						>
+							{ETIQUETA_LABELS[etiqueta] || etiqueta}
+						</Badge>
+					))}
 				</div>
 			);
 		},

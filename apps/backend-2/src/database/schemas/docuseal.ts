@@ -1,4 +1,4 @@
-import { pgSchema, pgEnum, pgTable, varchar, text, uniqueIndex, serial, boolean, integer, primaryKey } from "drizzle-orm/pg-core";
+import { pgSchema, varchar, text, uniqueIndex, serial, boolean, integer, primaryKey } from "drizzle-orm/pg-core";
 
 // 🧱 Schema principal
 export const docusealSchema = pgSchema("docuseal");

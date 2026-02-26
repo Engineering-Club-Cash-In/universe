@@ -48,6 +48,12 @@ export interface ChecklistItem {
   item: string;
   checked: boolean;
   severity?: string;
+  notes?: string;
+  evidence?: Array<{
+    url: string;
+    mimeType: string;
+    originalName: string;
+  }>;
 }
 
 export interface PhotoData {
@@ -63,7 +69,7 @@ export interface PhotoData {
 export interface Inspection360Item {
   category: string;
   item: string;
-  status: 'ok' | 'bad' | 'na' | 'bueno' | 'regular' | 'malo';
+  status: 'GOOD' | 'REGULAR' | 'BAD' | 'NA' | 'OK' | 'LEGACY_BAD';
   notes?: string;
   metadata?: Record<string, any>;
 }
@@ -85,7 +91,7 @@ export const createFullInspection = async (
       inspection360Items: items360?.map(item => ({
         area: item.category,
         checkpoint: item.item,
-        status: item.status as any, // TypeScript might complain about 'any' here if the ORPC client types haven't regenerated yet, but it's safe since the backend accepts it
+        status: item.status as 'GOOD' | 'REGULAR' | 'BAD' | 'NA' | 'OK' | 'LEGACY_BAD',
         comment: item.notes,
         metadata: item.metadata,
       }))

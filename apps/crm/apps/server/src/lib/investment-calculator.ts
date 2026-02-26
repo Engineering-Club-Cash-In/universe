@@ -170,6 +170,12 @@ export function calculateInvestment(
 	modality: "traditional" | "maturity" | "compound",
 	isSmallTaxpayer = false,
 ): InvestmentCalculationResult {
+	if (amount <= 0 || monthlyRate <= 0 || termMonths <= 0) {
+		throw new Error("Monto, tasa y plazo deben ser numeros positivos");
+	}
+	if (!Number.isInteger(termMonths)) {
+		throw new Error("El plazo debe ser un numero entero de meses");
+	}
 	const vatRate = getVatRate(isSmallTaxpayer);
 
 	let result: {
@@ -213,6 +219,9 @@ export function calculateGoal(
 	monthlyRate = 1.5,
 	isSmallTaxpayer = false,
 ): { requiredCapital: number; scenario: InvestmentCalculationResult } {
+	if (desiredMonthlyAmount <= 0 || monthlyRate <= 0 || termMonths <= 0) {
+		throw new Error("Monto deseado, tasa y plazo deben ser numeros positivos");
+	}
 	const vatRate = getVatRate(isSmallTaxpayer);
 	const r = monthlyRate / 100;
 	const netRate = r * (1 - vatRate);

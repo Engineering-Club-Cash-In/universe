@@ -282,7 +282,7 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
                     const areaItems = items360.filter(i => i.category === area.id);
                     const areaTotal = area.points.length;
                     const areaCompleted = areaItems.length;
-                    const areaFails = areaItems.filter(i => i.status === 'bad').length;
+                    const areaFails = areaItems.filter(i => i.status === InspectionStatus.BAD).length;
                     const isOpen = openSections[area.id];
 
                     return (

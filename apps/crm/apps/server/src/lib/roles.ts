@@ -10,6 +10,9 @@ export const ROLES = {
 	COBROS_SUPERVISOR: "cobros_supervisor",
 	JURIDICO: "juridico",
 	ACCOUNTING: "accounting",
+	INVESTMENT_ADVISOR_JR: "investment_advisor_jr",
+	INVESTMENT_ADVISOR_SR: "investment_advisor_sr",
+	INVESTMENT_MANAGER: "investment_manager",
 } as const;
 
 export type UserRole = (typeof ROLES)[keyof typeof ROLES];
@@ -55,6 +58,21 @@ export const ROLE_CONFIG = {
 		label: "Contabilidad",
 		color: "bg-teal-100 text-teal-800",
 		icon: "Calculator" as const,
+	},
+	[ROLES.INVESTMENT_ADVISOR_JR]: {
+		label: "Asesor de Inversiones Jr",
+		color: "bg-emerald-100 text-emerald-800",
+		icon: "TrendingUp" as const,
+	},
+	[ROLES.INVESTMENT_ADVISOR_SR]: {
+		label: "Asesor de Inversiones Sr",
+		color: "bg-cyan-100 text-cyan-800",
+		icon: "TrendingUp" as const,
+	},
+	[ROLES.INVESTMENT_MANAGER]: {
+		label: "Gerente de Inversiones",
+		color: "bg-sky-100 text-sky-800",
+		icon: "Landmark" as const,
 	},
 } as const;
 
@@ -192,6 +210,33 @@ export const PERMISSIONS = {
 	// Accounting Module Access (Contabilidad)
 	canAccessAccounting: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.ACCOUNTING,
+
+	// Investment Module Access
+	canAccessInvestments: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.INVESTMENT_ADVISOR_JR ||
+		role === ROLES.INVESTMENT_ADVISOR_SR ||
+		role === ROLES.INVESTMENT_MANAGER,
+
+	canManageInvestmentLeads: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.INVESTMENT_ADVISOR_JR ||
+		role === ROLES.INVESTMENT_ADVISOR_SR ||
+		role === ROLES.INVESTMENT_MANAGER,
+
+	canApproveInvestmentDocuments: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.ANALYST,
+
+	canValidateInvestmentFunds: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.INVESTMENT_MANAGER,
+
+	canViewFullInvestmentPipeline: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.INVESTMENT_ADVISOR_SR ||
+		role === ROLES.INVESTMENT_MANAGER ||
+		role === ROLES.ANALYST,
 } as const;
 
 // Helper functions

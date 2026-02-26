@@ -32,21 +32,50 @@ export default function ImagePreviewDialog({
     const targetImages = images.length > 0 ? images : (imageUrl ? [imageUrl] : []);
     const currentImageUrl = targetImages[currentIndex] || null;
 
-    // Reset states when dialog opens or URL changes
+    // Initialize index when dialog opens
     useEffect(() => {
         if (isOpen) {
             setCurrentIndex(Math.min(initialIndex, Math.max(0, targetImages.length - 1)));
-            setIsLoading(true);
-            setHasError(false);
         }
-    }, [isOpen, initialIndex]);
+    }, [isOpen, initialIndex, targetImages.length]);
 
+    // Reset loading states when current image URL changes
     useEffect(() => {
         if (isOpen && currentImageUrl) {
             setIsLoading(true);
             setHasError(false);
         }
     }, [currentImageUrl, isOpen]);
+
+    // Preload next and previous images for smoother navigation
+    useEffect(() => {
+        if (isOpen && targetImages.length > 1) {
+            if (currentIndex < targetImages.length - 1) {
+                const img = new Image();
+                img.src = targetImages[currentIndex + 1];
+            }
+            if (currentIndex > 0) {
+                const img = new Image();
+                img.src = targetImages[currentIndex - 1];
+            }
+        }
+    }, [currentIndex, isOpen, targetImages]);
+
+    // Keyboard navigation
+    useEffect(() => {
+        if (!isOpen || targetImages.length <= 1) return;
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === "ArrowRight") {
+                setCurrentIndex(prev => Math.min(prev + 1, targetImages.length - 1));
+            } else if (e.key === "ArrowLeft") {
+                setCurrentIndex(prev => Math.max(prev - 1, 0));
+            }
+        };
+
+        window.addEventListener("keydown", handleKeyDown);
+        return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [isOpen, targetImages.length]);
 
     const handleNext = (e: React.MouseEvent) => {
         e.stopPropagation();

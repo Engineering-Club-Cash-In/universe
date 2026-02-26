@@ -239,7 +239,7 @@ export const quotationsRouter = {
 					vehicleValue: input.vehicleValue.toString(),
 					insuredAmount: input.insuredAmount.toString(),
 					downPayment: input.downPayment.toString(),
-					downPaymentPercentage: downPaymentPercentage.toFixed(2),
+					downPaymentPercentage: downPaymentPercentage.toString(),
 					termMonths: input.termMonths,
 					interestRate: input.interestRate.toString(),
 					insuranceCost: input.insuranceCost.toString(),
@@ -250,7 +250,7 @@ export const quotationsRouter = {
 					// Gastos adicionales para detalle de crédito
 					freelanceCost: input.freelanceCost.toString(),
 					freelancePercentage: input.freelancePercentage?.toString() ?? null,
-					royalty: royalty.toFixed(2),
+					royalty: royalty.toString(),
 					royaltyPercentage: input.royaltyPercentage.toString(),
 					inspectionCost: input.inspectionCost.toString(),
 					finesCost: input.finesCost.toString(),

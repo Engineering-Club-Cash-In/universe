@@ -83,6 +83,7 @@ export const appRouter = {
 	// Investment assignment (50% → 80%)
 	getOpportunitiesForInvestment: crmRouter.getOpportunitiesForInvestment,
 	assignInvestorAndAdvance: crmRouter.assignInvestorAndAdvance,
+	updateOpportunityInvestors: crmRouter.updateOpportunityInvestors,
 	getClients: crmRouter.getClients,
 	getClientsStats: crmRouter.getClientsStats,
 	getLeadsAsClients: crmRouter.getLeadsAsClients,

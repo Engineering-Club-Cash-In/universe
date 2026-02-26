@@ -160,13 +160,14 @@ if (diaEsperado === 1) {
   const ultimoDia = new Date(fechaBase.getFullYear(), fechaBase.getMonth() + 1, 0).getDate();
   fechaBase.setDate(Math.min(30, ultimoDia));
 } else {
-  // Regla normal
-  diaVencimiento = diaEsperado > 15 ? 30 : 15;
-  fechaBase.setDate(diaVencimiento);
+  // Usar el día exacto de la fecha recibida
+  diaVencimiento = diaEsperado;
+  const ultimoDia = new Date(fechaBase.getFullYear(), fechaBase.getMonth() + 1, 0).getDate();
+  fechaBase.setDate(Math.min(diaVencimiento, ultimoDia));
 }
 
   console.log(`   📌 Día de la fecha esperada: ${diaEsperado}`);
-  console.log(`   📌 Día de vencimiento determinado: ${diaVencimiento === 30 ? "30 (28 en febrero)" : "15"}`);
+  console.log(`   📌 Día de vencimiento determinado: ${diaVencimiento}`);
   console.log(`   📌 Fecha base ajustada: ${fechaBase.toISOString().split("T")[0]}`); // 👈 NUEVO LOG
 
   // 🔥 HELPER para ajustar día según el mes

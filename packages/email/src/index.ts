@@ -1,15 +1,29 @@
 import { Resend } from "resend";
-import { LiquidationEmail } from "./templates/LiquidationTemplate";
+import LiquidationEmail from "./templates/LiquidationTemplate";
 import * as React from "react";
 
-// The API key and domain should be picked up from environment variables.
+import { z } from "zod";
+
+// Validaciones de variables de entorno
 const apiKey = process.env.RESEND_API_KEY;
-if (!apiKey && process.env.NODE_ENV !== "test") {
-  console.warn("⚠️ [Email Package] RESEND_API_KEY is not defined in environment variables.");
+const domain = process.env.EMAIL_DOMAIN;
+
+if (!apiKey) {
+  throw new Error(
+    "❌ [Email Package] RESEND_API_KEY is missing. Please add it to your environment variables."
+  );
 }
 
-const resend = new Resend(apiKey || "dummy_key");
-const domain = process.env.EMAIL_DOMAIN || "resend.dev"; 
+if (!domain) {
+  throw new Error(
+    "❌ [Email Package] EMAIL_DOMAIN is missing. Please add it to your environment variables (e.g., servicioscashin.com)."
+  );
+}
+
+const resend = new Resend(apiKey);
+
+// Schema para validación de correo
+const emailSchema = z.string().email({ message: "Formato de correo electrónico inválido" });
 
 export interface SendLiquidationEmailParams {
   to: string;
@@ -33,6 +47,9 @@ export const sendLiquidationEmail = async ({
   currencySymbol,
   attachment,
 }: SendLiquidationEmailParams) => {
+  // Validar formato de correo antes de enviar
+  emailSchema.parse(to);
+
   try {
     const { data, error } = await resend.emails.send({
       from: `Club Cash In <no-reply@${domain}>`,
@@ -62,6 +79,9 @@ export const sendLiquidationEmail = async ({
 };
 
 export const sendSimpleEmail = async (to: string, subject: string, message: string) => {
+  // Validar formato de correo antes de enviar
+  emailSchema.parse(to);
+
   try {
     const { data, error } = await resend.emails.send({
       from: `Club Cash In <no-reply@${domain}>`,

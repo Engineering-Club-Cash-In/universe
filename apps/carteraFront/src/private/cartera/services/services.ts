@@ -1091,13 +1091,13 @@ export async function falsePaymentService(data: FalsePaymentPayload): Promise<Fa
 export interface CancelCreditResponse {
   message: string;
   credito: {
-    capital_actual: string;
-    total_intereses_pendientes: string;
-    total_membresias_pendientes: string;
-    total_seguro_pendiente: string;
-    total_iva_pendiente: string;
-    cuotas_pendientes: number;
-    mora:number
+    capital: string;
+    interes: string;
+    iva: string;
+    membresias: string;
+    seguro: string;
+    gps: string;
+    mora: string;
   };
   error?: string;
 }
@@ -1123,6 +1123,7 @@ export interface CancelCreditPayload {
   traspaso?: number;
   garantia_mobiliaria?: number;
   otros?: number;
+  cuotas_atrasadas?: number;
   montosAdicionales?: MontoAdicional[];
 }
 export interface PendingCancelCreditPayload {
@@ -1131,6 +1132,7 @@ export interface PendingCancelCreditPayload {
   motivo: string;
   observaciones?: string;
   monto_cancelacion: number;
+  cuotas_atrasadas?: number;
   traspaso?: number;
   garantia_mobiliaria?: number;
   otros?: number;
@@ -1594,7 +1596,7 @@ export interface PagoDataInvestor {
   cuota: CuotaPago | null;
   usuario: UsuarioPago;
   inversionistas: InversionistaPago[];
-  boleta: BoletaPago | null;
+  boletas: BoletaPago[];
   monto_aplicado: number | null;
 
   cuentaEmpresaBanco: string | null;
@@ -1603,6 +1605,16 @@ export interface PagoDataInvestor {
 }
 
 // 💰 Totales generales de todos los pagos
+export interface TotalInversionista {
+  inversionistaId: number;
+  nombreInversionista: string;
+  totalAbonoCapital: number;
+  totalAbonoInteres: number;
+  totalAbonoIva: number;
+  totalIsr: number;
+  totalMontoAportado: number;
+}
+
 export interface TotalesPagos {
   totalAbonoCapital: number;
   totalAbonoInteres: number;
@@ -1625,8 +1637,9 @@ export interface GetPagosResponse {
   pageSize: number;
   total: number;
   data: PagoDataInvestor[];
-  totales?: TotalesPagos; // 🆕 Totales opcionales (vienen cuando NO es Excel)
-  excelUrl?: string; // 🆕 URL del Excel (viene cuando excel=true)
+  totales?: TotalesPagos;
+  totalesInversionistas?: TotalInversionista[];
+  excelUrl?: string;
   totalPages: number
 }
 
@@ -1638,6 +1651,12 @@ export interface GetPagosParams {
   dia?: number;
   mes?: number;
   anio?: number;
+  fechaInicio?: string;
+  fechaFin?: string;
+  fechaAplicado?: string;
+  categoriaCredito?: string;
+  formatoCredito?: string;
+  soloAplicados?: boolean;
   inversionistaId?: number;
   excel?: boolean;
   usuarioNombre?: string;
@@ -1690,7 +1709,7 @@ export async function getPagosConInversionistasService(
           totalConvenio: Number(data.totales.totalConvenio ?? 0),
         }
       : undefined,
-    // 📊 Incluir URL del Excel si viene
+    totalesInversionistas: data.totalesInversionistas ?? undefined,
     excelUrl: data.excelUrl,
   };
 
@@ -2820,3 +2839,29 @@ export const getEfectividadAsesores = async (params: {
   );
   return data;
 };
+
+// ============================================
+// Abonos por cuota
+// ============================================
+export interface AbonosCuotaResponse {
+  success: boolean;
+  numero_credito_sifco: string;
+  numero_cuota: number;
+  total_pagos: number;
+  abono_capital: string;
+  abono_iva_12: string;
+  abono_interes: string;
+  membresias_pago: string;
+  abono_seguro: string;
+  abono_gps: string;
+}
+
+export async function getAbonosCuotaService(
+  numero_credito_sifco: string,
+  numero_cuota: number
+): Promise<AbonosCuotaResponse> {
+  const { data } = await api.get<AbonosCuotaResponse>(
+    `/abonos-cuota/${numero_credito_sifco}/${numero_cuota}`
+  );
+  return data;
+}

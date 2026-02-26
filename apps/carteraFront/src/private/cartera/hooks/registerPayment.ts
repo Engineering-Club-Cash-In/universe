@@ -4,9 +4,11 @@ import { useFormik } from "formik";
 import {
   createPago,
   getCreditoByNumero,
+  getAbonosCuotaService,
   liquidatePagosInversionistasService,
   reversePagosInversionistasService,
   uploadFileService,
+  type AbonosCuotaResponse,
   type CancelacionCredito,
   type Credito,
   type Usuario,
@@ -101,8 +103,27 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
     number | undefined
   >();
   const [archivosParaSubir, setArchivosParaSubir] = useState<File[]>([]);
-  const { user } = useAuth(); // 
+  const [abonosCuota, setAbonosCuota] = useState<AbonosCuotaResponse | null>(null);
+  const { user } = useAuth(); //
   console.log(user)
+
+  // Fetch abonos cuando cambia la cuota seleccionada
+  useEffect(() => {
+    if (!cuotaSeleccionada || !dataCredito?.credito?.numero_credito_sifco) {
+      setAbonosCuota(null);
+      return;
+    }
+    let cancelled = false;
+    getAbonosCuotaService(dataCredito.credito.numero_credito_sifco, cuotaSeleccionada)
+      .then((res) => {
+        if (!cancelled) setAbonosCuota(res);
+      })
+      .catch(() => {
+        if (!cancelled) setAbonosCuota(null);
+      });
+    return () => { cancelled = true; };
+  }, [cuotaSeleccionada, dataCredito?.credito?.numero_credito_sifco]);
+
   // Formik
   const formik = useFormik<PagoFormValues>({
     validateOnChange: false,
@@ -400,16 +421,14 @@ console.log("Cuota a usar:", cuotaAPagar);
 // ===== MANEJO DE EXCEDENTES =====
 const montoRedondeado = Math.round(montoBoletaReal * 100) / 100;
 
-// 🔥 Calcular abonos ya realizados en la cuota actual
-const dataCuotaActual = cuotaActualInfo?.data;
-const abonosRealizados = dataCuotaActual ? (
-  Number(dataCuotaActual.abono_capital || 0) +
-  Number(dataCuotaActual.abono_interes || 0) +
-  Number(dataCuotaActual.abono_iva_12 || 0) +
-
-  Number(dataCuotaActual.abono_seguro || 0) +
-  Number(dataCuotaActual.abono_gps || 0) +
-  Number(dataCuotaActual.abono_membresias || 0)
+// 🔥 Calcular abonos ya realizados en la cuota SELECCIONADA (desde endpoint)
+const abonosRealizados = abonosCuota ? (
+  Number(abonosCuota.abono_capital || 0) +
+  Number(abonosCuota.abono_interes || 0) +
+  Number(abonosCuota.abono_iva_12 || 0) +
+  Number(abonosCuota.abono_seguro || 0) +
+  Number(abonosCuota.abono_gps || 0) +
+  Number(abonosCuota.membresias_pago || 0)
 ) : 0;
 
 // 🔥 Cuota menos los abonos ya hechos = lo que falta por pagar
@@ -668,6 +687,7 @@ async function handleResetCredito() {
     setResetBuscador,
     mora,
     convenioActivoInfo,
-    cuotaSeleccionada
+    cuotaSeleccionada,
+    abonosCuota
   };
 }

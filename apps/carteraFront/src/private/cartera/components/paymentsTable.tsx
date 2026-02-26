@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/rules-of-hooks */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useState } from "react";
+import React, { useState, Fragment } from "react";
 
 import { Input } from "@/components/ui/input";
 import {
@@ -22,8 +22,17 @@ import {
   AlertCircle,
   Calendar,
   DollarSign,
-  User, // 🆕 NUEVO ICONO
+  User,
+  CalendarRange,
+  ListFilter,
+  Search,
+  ChevronsUpDown,
+  Hash,
+  Handshake,
+  CheckCircle,
+  RotateCcw,
 } from "lucide-react";
+import { Combobox, Transition } from "@headlessui/react";
 import {
   useAplicarPago,
   usePagosConInversionistas,
@@ -53,6 +62,7 @@ import {
 import { useActualizarCuentaPago, useCuentasEmpresa } from "../hooks/account";
 import { useFacturarPagoCompleto } from "../hooks/cofidi";
 import { ModalFacturasPago } from "./modalFacts";
+import { DatePickerMUI } from "./calendar";
 
 // --- utilidades ---
 const meses = [
@@ -134,16 +144,34 @@ export function PaymentsTable() {
   const { mutate: aplicarPago, isPending } = useAplicarPago();
   const facturarPago = useFacturarPagoCompleto(); // 🆕 NUEVO HOOK
 
+  // Filtros de fecha - modo "simple" (año/mes/día), "rango" (fechaInicio/fechaFin) o "aplicado" (fechaAplicado)
+  const [modoFecha, setModoFecha] = React.useState<"simple" | "rango" | "aplicado">("simple");
   const [mes, setMes] = React.useState(new Date().getMonth() + 1);
   const [anio, setAnio] = React.useState(new Date().getFullYear());
   const [dia, setDia] = React.useState<number | undefined>(
     new Date().getDate(),
   );
+  const [fechaInicio, setFechaInicio] = React.useState("");
+  const [fechaFin, setFechaFin] = React.useState("");
+  const [fechaAplicado, setFechaAplicado] = React.useState("");
+
+  // Filtros de crédito
   const [sifco, setSifco] = React.useState("");
+  const [categoriaCredito, setCategoriaCredito] = React.useState("");
+  const [formatoCredito, setFormatoCredito] = React.useState("");
+
+  // Filtros generales
   const [usuarioNombre, setUsuarioNombre] = React.useState("");
   const [inversionistaId, setInversionistaId] = React.useState<
     number | undefined
   >();
+  const [soloAplicados, setSoloAplicados] = React.useState<boolean | undefined>(undefined);
+  const [queryInv, setQueryInv] = React.useState("");
+  const filteredInvestors = queryInv === ""
+    ? investors
+    : investors.filter((inv) => inv.nombre.toLowerCase().includes(queryInv.toLowerCase()));
+
+
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(10);
   const { data: cuentas, isLoading: cargandoCuentas } = useCuentasEmpresa();
@@ -306,9 +334,15 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
     page,
     pageSize,
     numeroCredito: sifco || undefined,
-    dia,
-    mes,
-    anio,
+    // Fecha: modo simple, rango o aplicado (mutuamente excluyentes)
+    ...(modoFecha === "simple"
+      ? { dia, mes, anio }
+      : modoFecha === "rango"
+        ? { fechaInicio: fechaInicio || undefined, fechaFin: fechaFin || undefined }
+        : { fechaAplicado: fechaAplicado || undefined }),
+    categoriaCredito: categoriaCredito || undefined,
+    formatoCredito: formatoCredito || undefined,
+    soloAplicados,
     inversionistaId,
     usuarioNombre: usuarioNombre || undefined,
   });
@@ -338,9 +372,14 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
         page,
         pageSize,
         numeroCredito: sifco || undefined,
-        dia,
-        mes,
-        anio,
+        ...(modoFecha === "simple"
+          ? { dia, mes, anio }
+          : modoFecha === "rango"
+            ? { fechaInicio: fechaInicio || undefined, fechaFin: fechaFin || undefined }
+            : { fechaAplicado: fechaAplicado || undefined }),
+        categoriaCredito: categoriaCredito || undefined,
+        formatoCredito: formatoCredito || undefined,
+        soloAplicados,
         inversionistaId,
         usuarioNombre: usuarioNombre || undefined,
         excel: true,
@@ -371,9 +410,14 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
         page,
         pageSize,
         numeroCredito: sifco || undefined,
-        dia,
-        mes,
-        anio,
+        ...(modoFecha === "simple"
+          ? { dia, mes, anio }
+          : modoFecha === "rango"
+            ? { fechaInicio: fechaInicio || undefined, fechaFin: fechaFin || undefined }
+            : { fechaAplicado: fechaAplicado || undefined }),
+        categoriaCredito: categoriaCredito || undefined,
+        formatoCredito: formatoCredito || undefined,
+        soloAplicados,
         inversionistaId,
         usuarioNombre: usuarioNombre || undefined,
         reportAdvisor: true,
@@ -393,24 +437,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
     }
   };
 
-  const handleOpenBoleta = (boleta?: any[] | { urlBoleta?: string } | null) => {
-    if (!boleta) {
-      toast.warning("No hay boleta disponible para este pago");
-      return;
-    }
-
-    let url;
-    if (Array.isArray(boleta)) {
-      if (boleta.length === 0) {
-        toast.warning("No hay boleta disponible para este pago");
-        return;
-      }
-      const first = boleta[0];
-      url = first.url || first;
-    } else {
-      url = boleta.urlBoleta;
-    }
-
+  const handleOpenBoleta = (url: string) => {
     if (!url) {
       toast.warning("Boleta sin URL válida");
       return;
@@ -426,122 +453,314 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
           Pagos con Inversionistas
         </h2>
 
-        {/* 🔹 Filtros */}
-        <div className="flex flex-col sm:flex-row gap-4 mb-5 flex-wrap">
-          {/* Año */}
-          <div>
-            <label className="block text-blue-900 font-semibold">Año</label>
-            <select
-              value={anio}
-              onChange={(e) => setAnio(Number(e.target.value))}
-              className="border-2 border-blue-600 rounded px-2 py-1 text-blue-900 font-semibold bg-white focus:ring-2 focus:ring-blue-400"
-            >
-              {years.map((y) => (
-                <option key={y} value={y}>
-                  {y}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Mes */}
-          <div>
-            <label className="block text-blue-900 font-semibold">Mes</label>
-            <select
-              value={mes}
-              onChange={(e) => setMes(Number(e.target.value))}
-              className="border-2 border-blue-600 rounded px-2 py-1 text-blue-900 font-semibold bg-white focus:ring-2 focus:ring-blue-400"
-            >
-              {meses.map((m, i) => (
-                <option key={i} value={i + 1}>
-                  {m}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Día */}
-          <div>
-            <label className="block text-blue-900 font-semibold">Día</label>
-            <Input
-              type="number"
-              min={1}
-              max={31}
-              value={dia ?? ""}
-              onChange={(e) => setDia(Number(e.target.value))}
-              placeholder="1-31"
-              className="border-2 border-blue-600 text-blue-900 font-semibold bg-white w-[90px]"
-            />
-          </div>
-
-          {/* N° Crédito SIFCO */}
-          <div>
-            <label className="block text-blue-900 font-semibold">
-              N° Crédito SIFCO
-            </label>
-            <Input
-              value={sifco}
-              onChange={(e) => setSifco(e.target.value)}
-              placeholder="Buscar SIFCO"
-              className="border-2 border-blue-600 text-blue-900 font-semibold bg-white"
-            />
-          </div>
-
-          {/* Nombre de Usuario */}
-          <div>
-            <label className="block text-blue-900 font-semibold">
-              Nombre de Usuario
-            </label>
-            <Input
-              value={usuarioNombre}
-              onChange={(e) => {
-                setUsuarioNombre(e.target.value);
+        {/* Filtros */}
+        <div className="border border-blue-200 rounded-xl bg-white p-5 mb-4">
+          {/* Header con título y botón limpiar */}
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <ListFilter className="w-4 h-4 text-blue-600" />
+              <span className="font-bold text-blue-900 text-sm">Filtros</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setModoFecha("simple");
+                setSifco("");
+                setUsuarioNombre("");
+                setMes(new Date().getMonth() + 1);
+                setAnio(new Date().getFullYear());
+                setDia(new Date().getDate());
+                setFechaInicio("");
+                setFechaFin("");
+                setFechaAplicado("");
+                setCategoriaCredito("");
+                setFormatoCredito("");
+                setSoloAplicados(undefined);
+                setInversionistaId(undefined);
+                setQueryInv("");
                 setPage(1);
               }}
-              placeholder="Buscar usuario"
-              className="border-2 border-blue-600 text-blue-900 font-semibold bg-white"
-            />
-          </div>
-
-          {/* Inversionista */}
-          <div>
-            <label className="block text-blue-900 font-semibold">
-              Inversionista
-            </label>
-            <select
-              value={inversionistaId ?? ""}
-              onChange={(e) => {
-                const val = e.target.value ? Number(e.target.value) : undefined;
-                setInversionistaId(val);
-                setPage(1);
-              }}
-              className="border-2 border-blue-600 rounded px-2 py-1 text-blue-900 font-semibold bg-white w-[220px]"
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-500 hover:text-red-600 hover:bg-red-50 transition-all flex items-center gap-1.5"
             >
-              <option value="">Todos los inversionistas</option>
-              {investors.map((inv) => (
-                <option key={inv.inversionista_id} value={inv.inversionista_id}>
-                  {inv.nombre}
-                </option>
-              ))}
-            </select>
+              <RotateCcw className="w-3 h-3" />
+              Limpiar
+            </button>
           </div>
 
-          {/* Botón limpiar filtro */}
-          <button
-            type="button"
-            onClick={() => {
-              setSifco("");
-              setUsuarioNombre("");
-              setMes(new Date().getMonth() + 1);
-              setAnio(new Date().getFullYear());
-              setDia(new Date().getDate());
-              setInversionistaId(undefined);
-              setPage(1);
-            }}
-            className="self-end px-3 py-2 rounded-lg bg-blue-100 border border-blue-400 text-blue-800 font-bold hover:bg-blue-200"
-          >
-            Limpiar filtro
-          </button>
+          {/* Grid principal de filtros */}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-x-5 gap-y-4">
+
+            {/* Columna 1: Fechas */}
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-1.5 pb-1.5 border-b border-blue-100">
+                <CalendarRange className="w-3.5 h-3.5 text-blue-500" />
+                <span className="font-semibold text-blue-800 text-[11px] uppercase tracking-wider">Fechas</span>
+              </div>
+              <div className="flex gap-1 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => { setModoFecha("simple"); setFechaInicio(""); setFechaFin(""); setFechaAplicado(""); setPage(1); }}
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all ${modoFecha === "simple" ? "bg-blue-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                >
+                  Fecha
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setModoFecha("rango"); setDia(undefined); setFechaAplicado(""); setPage(1); }}
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all ${modoFecha === "rango" ? "bg-blue-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                >
+                  Rango
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setModoFecha("aplicado"); setDia(undefined); setFechaInicio(""); setFechaFin(""); setPage(1); }}
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all ${modoFecha === "aplicado" ? "bg-emerald-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                >
+                  Aplicado
+                </button>
+              </div>
+              {modoFecha === "simple" ? (
+                <div className="grid grid-cols-3 gap-1.5">
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Año</label>
+                    <select
+                      value={anio}
+                      onChange={(e) => { setAnio(Number(e.target.value)); setPage(1); }}
+                      className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-800 font-medium bg-gray-50/50 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all"
+                    >
+                      {years.map((y) => (<option key={y} value={y}>{y}</option>))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Mes</label>
+                    <select
+                      value={mes}
+                      onChange={(e) => { setMes(Number(e.target.value)); setPage(1); }}
+                      className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-800 font-medium bg-gray-50/50 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all"
+                    >
+                      {meses.map((m, i) => (<option key={i} value={i + 1}>{m}</option>))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Día</label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={31}
+                      value={dia ?? ""}
+                      onChange={(e) => { setDia(e.target.value ? Number(e.target.value) : undefined); setPage(1); }}
+                      placeholder="—"
+                      className="border border-gray-200 text-xs text-gray-800 font-medium bg-gray-50/50 w-full h-[30px] px-2 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+                    />
+                  </div>
+                </div>
+              ) : modoFecha === "rango" ? (
+                <div className="space-y-1.5">
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Desde</label>
+                    <DatePickerMUI
+                      value={fechaInicio}
+                      onChange={(value) => { setFechaInicio(value); setPage(1); }}
+                      disableFuture={false}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Hasta</label>
+                    <DatePickerMUI
+                      value={fechaFin}
+                      onChange={(value) => { setFechaFin(value); setPage(1); }}
+                      disableFuture={false}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Fecha de Aplicación</label>
+                  <DatePickerMUI
+                    value={fechaAplicado}
+                    onChange={(value) => { setFechaAplicado(value); setPage(1); }}
+                    disableFuture={false}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Columna 2: Crédito y Usuario */}
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-1.5 pb-1.5 border-b border-blue-100">
+                <Hash className="w-3.5 h-3.5 text-blue-500" />
+                <span className="font-semibold text-blue-800 text-[11px] uppercase tracking-wider">Crédito</span>
+              </div>
+              <div>
+                <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">N° SIFCO</label>
+                <Input
+                  value={sifco}
+                  onChange={(e) => { setSifco(e.target.value); setPage(1); }}
+                  placeholder="Buscar..."
+                  className="border border-gray-200 text-xs text-gray-800 font-medium bg-gray-50/50 h-[30px] px-2.5 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Usuario</label>
+                <Input
+                  value={usuarioNombre}
+                  onChange={(e) => { setUsuarioNombre(e.target.value); setPage(1); }}
+                  placeholder="Buscar..."
+                  className="border border-gray-200 text-xs text-gray-800 font-medium bg-gray-50/50 h-[30px] px-2.5 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Categoría</label>
+                <select
+                  value={categoriaCredito}
+                  onChange={(e) => { setCategoriaCredito(e.target.value); setPage(1); }}
+                  className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-800 font-medium bg-gray-50/50 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all"
+                >
+                  <option value="">Todas</option>
+                  <option value="Contraseña">Contraseña</option>
+                  <option value="CV Vehículo">CV Vehículo</option>
+                  <option value="CV Vehículo nuevo">CV Vehículo nuevo</option>
+                  <option value="Fiduciario">Fiduciario</option>
+                  <option value="Hipotecario">Hipotecario</option>
+                  <option value="Vehículo">Vehículo</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Columna 3: Inversionista */}
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-1.5 pb-1.5 border-b border-blue-100">
+                <Handshake className="w-3.5 h-3.5 text-blue-500" />
+                <span className="font-semibold text-blue-800 text-[11px] uppercase tracking-wider">Inversionista</span>
+              </div>
+              <div>
+                <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Buscar</label>
+                <Combobox
+                  value={inversionistaId as unknown as number}
+                  onChange={(value: any) => {
+                    setInversionistaId(value === "" ? undefined : value);
+                    setPage(1);
+                    setQueryInv("");
+                  }}
+                >
+                  <div className="relative">
+                    <div className="relative">
+                      <Combobox.Input
+                        className="w-full border border-gray-200 rounded-lg pl-2.5 pr-8 py-1.5 text-xs text-gray-800 font-medium bg-gray-50/50 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 focus:outline-none placeholder:text-gray-400 transition-all"
+                        displayValue={(id: any) =>
+                          id === "" || id === undefined
+                            ? ""
+                            : investors.find((inv) => inv.inversionista_id === id)?.nombre || ""
+                        }
+                        onChange={(e) => setQueryInv(e.target.value)}
+                        onFocus={(e: any) => e.target.select()}
+                        placeholder="Seleccionar..."
+                      />
+                      <Combobox.Button className="absolute inset-y-0 right-0 flex items-center pr-2">
+                        <ChevronsUpDown className="h-3.5 w-3.5 text-gray-400" />
+                      </Combobox.Button>
+                    </div>
+                    <Transition
+                      as={Fragment}
+                      leave="transition ease-in duration-100"
+                      leaveFrom="opacity-100"
+                      leaveTo="opacity-0"
+                      afterLeave={() => setQueryInv("")}
+                    >
+                      <Combobox.Options className="absolute z-50 mt-1 w-full max-h-48 overflow-auto rounded-lg bg-white py-1 shadow-xl border border-gray-200 focus:outline-none">
+                        <Combobox.Option
+                          value=""
+                          className={({ active }) =>
+                            `relative cursor-pointer select-none py-1.5 pl-8 pr-3 text-xs ${active ? "bg-blue-50 text-blue-900" : "text-gray-600"}`
+                          }
+                        >
+                          {({ selected }) => (
+                            <>
+                              <span className={`block truncate ${selected ? "font-bold" : "font-medium"}`}>
+                                Todos
+                              </span>
+                              {selected && (
+                                <span className="absolute inset-y-0 left-0 flex items-center pl-2 text-blue-600">
+                                  <Check className="h-3.5 w-3.5" />
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </Combobox.Option>
+                        {filteredInvestors.length === 0 && queryInv !== "" ? (
+                          <div className="py-2 px-3 text-center text-gray-400 text-xs">
+                            No se encontró
+                          </div>
+                        ) : (
+                          filteredInvestors.map((inv) => (
+                            <Combobox.Option
+                              key={inv.inversionista_id}
+                              value={inv.inversionista_id}
+                              className={({ active, selected }) =>
+                                `relative cursor-pointer select-none py-1.5 pl-8 pr-3 text-xs transition-colors ${
+                                  active ? "bg-blue-50 text-blue-900" : selected ? "bg-blue-50/50 text-blue-900" : "text-gray-700"
+                                }`
+                              }
+                            >
+                              {({ selected, active }) => (
+                                <>
+                                  <span className={`block truncate ${selected ? "font-bold" : "font-medium"} ${active ? "text-blue-900" : ""}`}>
+                                    {inv.nombre}
+                                  </span>
+                                  {selected && (
+                                    <span className="absolute inset-y-0 left-0 flex items-center pl-2 text-blue-600">
+                                      <Check className="h-3.5 w-3.5" />
+                                    </span>
+                                  )}
+                                </>
+                              )}
+                            </Combobox.Option>
+                          ))
+                        )}
+                      </Combobox.Options>
+                    </Transition>
+                  </div>
+                </Combobox>
+              </div>
+            </div>
+
+            {/* Columna 4: Estado y Formato */}
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-1.5 pb-1.5 border-b border-blue-100">
+                <CheckCircle className="w-3.5 h-3.5 text-blue-500" />
+                <span className="font-semibold text-blue-800 text-[11px] uppercase tracking-wider">Estado</span>
+              </div>
+              <div>
+                <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Estado de Pago</label>
+                <select
+                  value={soloAplicados === undefined ? "" : soloAplicados ? "true" : "false"}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSoloAplicados(val === "" ? undefined : val === "true");
+                    setPage(1);
+                  }}
+                  className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-800 font-medium bg-gray-50/50 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all"
+                >
+                  <option value="">Todos</option>
+                  <option value="true">Aplicados</option>
+                  <option value="false">Pendientes</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Formato</label>
+                <select
+                  value={formatoCredito}
+                  onChange={(e) => { setFormatoCredito(e.target.value); setPage(1); }}
+                  className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-800 font-medium bg-gray-50/50 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all"
+                >
+                  <option value="">Todos</option>
+                  <option value="pool">Pool</option>
+                  <option value="individual">Individual</option>
+                </select>
+              </div>
+            </div>
+
+          </div>
         </div>
 
         {data?.totales && (
@@ -636,6 +855,37 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                         </div>
                       ))}
                     </div>
+
+                    {/* Totales por Inversionista (solo si hay uno seleccionado) */}
+                    {inversionistaId && data.totalesInversionistas && data.totalesInversionistas.length > 0 && (
+                      <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl border border-indigo-200 p-4">
+                        <h4 className="text-md font-bold text-indigo-900 mb-3 flex items-center gap-2">
+                          <Users2 className="w-4 h-4 text-indigo-700" />
+                          Totales por Inversionista
+                        </h4>
+                        <div className="space-y-3">
+                          {data.totalesInversionistas.map((inv) => (
+                            <div key={inv.inversionistaId} className="bg-white rounded-lg border border-indigo-100 p-3">
+                              <p className="font-bold text-indigo-900 mb-2">{inv.nombreInversionista}</p>
+                              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                                {[
+                                  { label: "Abono Capital", value: inv.totalAbonoCapital },
+                                  { label: "Abono Interés", value: inv.totalAbonoInteres },
+                                  { label: "Abono IVA", value: inv.totalAbonoIva },
+                                  { label: "ISR", value: inv.totalIsr },
+                                  { label: "Monto Aportado", value: inv.totalMontoAportado },
+                                ].map((campo, i) => (
+                                  <div key={i} className="bg-indigo-50 rounded-lg p-2 border border-indigo-100">
+                                    <p className="text-indigo-700 text-xs font-bold">{campo.label}</p>
+                                    <p className="text-indigo-900 font-semibold text-sm">{formatCurrency(campo.value)}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Botones Excel */}
                     <div className="flex justify-end gap-3 pt-4 border-t border-blue-100">
@@ -742,13 +992,44 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
 
                   {/* 🔘 Acciones */}
                   <div className="flex gap-3 mt-3 flex-wrap">
-                    {/* Ver Boleta */}
-                    <button
-                      onClick={() => handleOpenBoleta(pago.boleta)}
-                      className="text-blue-700 font-semibold flex items-center gap-1 hover:text-blue-900"
-                    >
-                      <FileText className="w-4 h-4" /> Ver Boleta
-                    </button>
+                    {/* Ver Boletas */}
+                    {pago.boletas && pago.boletas.length > 0 ? (
+                      pago.boletas.length === 1 ? (
+                        <button
+                          onClick={() => handleOpenBoleta(pago.boletas[0].urlBoleta)}
+                          className="text-blue-700 font-semibold flex items-center gap-1 hover:text-blue-900"
+                        >
+                          <FileText className="w-4 h-4" /> Ver Boleta
+                        </button>
+                      ) : (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button className="text-blue-700 font-semibold flex items-center gap-1 hover:text-blue-900">
+                              <FileText className="w-4 h-4" /> Ver Boletas ({pago.boletas.length})
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent className="bg-white border border-blue-200 shadow-lg rounded-xl p-2 min-w-[170px]">
+                            {pago.boletas.map((b, idx) => (
+                              <DropdownMenuItem
+                                key={b.boletaId}
+                                onClick={() => handleOpenBoleta(b.urlBoleta)}
+                                className="cursor-pointer text-blue-700 hover:text-blue-900 hover:bg-blue-50 py-2 px-3 flex items-center rounded-lg transition"
+                              >
+                                <FileText className="w-4 h-4 mr-2 text-blue-600" />
+                                <span className="font-semibold">Boleta {idx + 1}</span>
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )
+                    ) : (
+                      <button
+                        disabled
+                        className="text-gray-400 font-semibold flex items-center gap-1 cursor-not-allowed"
+                      >
+                        <FileText className="w-4 h-4" /> Sin Boleta
+                      </button>
+                    )}
 
                     {/* Inversionistas */}
                     <button
@@ -1113,17 +1394,32 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                             align="end"
                             className="w-64 bg-white shadow-2xl border-2 border-blue-200 rounded-xl p-2"
                           >
-                            {/* Ver Boleta */}
-                            <DropdownMenuItem
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenBoleta(pago.boleta);
-                              }}
-                              className="cursor-pointer text-blue-700 hover:text-blue-900 hover:bg-blue-50 py-2.5 px-3 flex items-center rounded-lg transition"
-                            >
-                              <FileText className="w-4 h-4 mr-2 text-blue-600 flex-shrink-0" />
-                              <span className="font-semibold">Ver Boleta</span>
-                            </DropdownMenuItem>
+                            {/* Ver Boletas */}
+                            {pago.boletas && pago.boletas.length > 0 ? (
+                              pago.boletas.map((b, idx) => (
+                                <DropdownMenuItem
+                                  key={b.boletaId}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenBoleta(b.urlBoleta);
+                                  }}
+                                  className="cursor-pointer text-blue-700 hover:text-blue-900 hover:bg-blue-50 py-2.5 px-3 flex items-center rounded-lg transition"
+                                >
+                                  <FileText className="w-4 h-4 mr-2 text-blue-600 flex-shrink-0" />
+                                  <span className="font-semibold">
+                                    {pago.boletas.length === 1 ? "Ver Boleta" : `Boleta ${idx + 1}`}
+                                  </span>
+                                </DropdownMenuItem>
+                              ))
+                            ) : (
+                              <DropdownMenuItem
+                                disabled
+                                className="text-gray-400 py-2.5 px-3 flex items-center rounded-lg"
+                              >
+                                <FileText className="w-4 h-4 mr-2 flex-shrink-0" />
+                                <span className="font-semibold">Sin Boleta</span>
+                              </DropdownMenuItem>
+                            )}
 
                             <DropdownMenuSeparator className="bg-gray-200 my-1" />
 

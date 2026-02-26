@@ -132,3 +132,6 @@ dist
 
 # Playwright MCP temporary files
 .playwright-mcp/
+
+# Git worktrees
+.worktrees/

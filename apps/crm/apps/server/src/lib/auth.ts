@@ -62,6 +62,24 @@ export const accountRole = ac.newRole({
 	report: ["read"],
 });
 
+export const investmentAdvisorJrRole = ac.newRole({
+	user: ["read"],
+	lead: ["create", "read", "update"],
+	report: ["read"],
+});
+
+export const investmentAdvisorSrRole = ac.newRole({
+	user: ["read"],
+	lead: ["create", "read", "update"],
+	report: ["read", "export"],
+});
+
+export const investmentManagerRole = ac.newRole({
+	user: ["read", "update"],
+	lead: ["create", "read", "update", "delete"],
+	report: ["read", "export"],
+});
+
 export const auth = betterAuth({
 	database: drizzleAdapter(db, {
 		provider: "pg",
@@ -79,6 +97,9 @@ export const auth = betterAuth({
 				cobros_supervisor: cobrosSupervisorRole,
 				juridico: juridicoRole,
 				accounting: accountRole,
+				investment_advisor_jr: investmentAdvisorJrRole,
+				investment_advisor_sr: investmentAdvisorSrRole,
+				investment_manager: investmentManagerRole,
 			},
 			schema: {
 				user: {

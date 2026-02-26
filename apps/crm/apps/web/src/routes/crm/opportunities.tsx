@@ -1498,7 +1498,10 @@ function RouteComponent() {
 							<SelectItem value="on_hold">En Espera</SelectItem>
 						</SelectContent>
 					</Select>
-					<Select value={salespersonFilter} onValueChange={setSalespersonFilter}>
+					<Select
+						value={salespersonFilter}
+						onValueChange={setSalespersonFilter}
+					>
 						<SelectTrigger className="w-56">
 							<Users className="mr-2 h-4 w-4" />
 							<SelectValue placeholder="Filtrar por asesor" />

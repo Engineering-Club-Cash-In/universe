@@ -6,6 +6,7 @@ export * from "./cobros";
 export * from "./crm";
 export * from "./documents";
 export * from "./insurance";
+export * from "./investments";
 export * from "./legal-contracts";
 export * from "./locations";
 export * from "./miniagent-credentials";

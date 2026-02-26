@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
@@ -28,12 +28,14 @@ import { vehiclesApi, client } from "../utils/orpc";
 import { toast } from "sonner";
 import { INSPECTION_AREAS } from "../lib/inspection-data";
 import ImagePreviewDialog from "@/components/ImagePreviewDialog";
-import type { Vehicle, VehicleInspection, VehiclePhoto, InspectionChecklistItem, VehicleInspection360Item } from "../../../crm/apps/server/src/db/schema/vehicles";
+import type { Vehicle, VehicleInspection, VehiclePhoto, InspectionChecklistItem, VehicleInspection360Item, ChecklistItemEvidence } from "../../../crm/apps/server/src/db/schema/vehicles";
 
 // Type for what the getAll endpoint returns
 type VehicleWithRelations = Vehicle & {
   inspections: (VehicleInspection & {
-    checklistItems: InspectionChecklistItem[];
+    checklistItems: (InspectionChecklistItem & {
+      evidence?: ChecklistItemEvidence[];
+    })[];
     inspection360Items?: VehicleInspection360Item[];
   })[];
   photos: VehiclePhoto[];
@@ -70,7 +72,8 @@ interface DashboardVehicle {
   tiresCondition: number | null;
   paintCondition: number | null;
   hasAgencyHistory: boolean | null;
-  failedChecks: { area: string; checkpoint: string; comment?: string | null }[];
+  failedChecks: { area: string; checkpoint: string; status?: string; comment?: string | null }[];
+  checklistIssues?: { id?: string; item: string; severity: string; notes?: string | null; evidence?: any[] }[];
   rejectionEvidenceUrl?: string | null;
 }
 
@@ -338,7 +341,7 @@ export default function VehiclesDashboard() {
   const [totalVehicles, setTotalVehicles] = useState(0);
   const [isModalLoading, setIsModalLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewImages, setPreviewImages] = useState<string[]>([]);
 
   // Edit form state
   const [editForm, setEditForm] = useState({
@@ -351,26 +354,7 @@ export default function VehiclesDashboard() {
     inspectionResult: "",
   });
 
-  // Debounce search term
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setPage(1); // Reset to first page on search
-      loadVehicles();
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [searchTerm, filterStatus, category]);
-
-  // Load vehicles when page changes
-  useEffect(() => {
-    loadVehicles();
-  }, [page]);
-
-  useEffect(() => {
-    loadStatistics();
-  }, []);
-
-
-  const transformVehicleData = (vehicle: VehicleWithRelations): DashboardVehicle => {
+  const transformVehicleData = useCallback((vehicle: VehicleWithRelations): DashboardVehicle => {
     // Get the latest inspection if available
     const latestInspection = vehicle.inspections?.[0] || null;
 
@@ -406,18 +390,30 @@ export default function VehiclesDashboard() {
       hasAgencyHistory: latestInspection?.hasAgencyHistory ?? null,
       failedChecks: latestInspection?.inspection360Items
         ? latestInspection.inspection360Items
-          .filter(item => item.status === 'bad')
+          .filter(item => item.status !== 'OK' && item.status !== 'GOOD')
           .map(item => ({
             area: item.area,
             checkpoint: item.checkpoint,
+            status: item.status,
             comment: item.comment
+          }))
+        : [],
+      checklistIssues: latestInspection?.checklistItems
+        ? latestInspection.checklistItems
+          .filter(item => item.checked)
+          .map(item => ({
+            id: item.id,
+            item: item.item,
+            severity: item.severity,
+            notes: item.notes,
+            evidence: item.evidence || [],
           }))
         : [],
       rejectionEvidenceUrl: latestInspection?.rejectionEvidenceUrl,
     };
-  };
+  }, []);
 
-  const loadVehicles = async () => {
+  const loadVehicles = useCallback(async () => {
     setIsLoading(true);
     try {
       const offset = (page - 1) * pageSize;
@@ -427,33 +423,54 @@ export default function VehiclesDashboard() {
         query: searchTerm,
         status: filterStatus,
         category: category === 'all' ? undefined : category
-      });
+      }) as unknown as { data: VehicleWithRelations[], total: number };
 
       if (result) {
-        // Handle the new response format { data, total }
-        // @ts-ignore - The API type might not be fully updated in the IDE context yet
-        const rawData = result.data || [];
-        // @ts-ignore
-        const total = result.total || 0;
-
-        setRawVehiclesData(rawData);
-        const transformedVehicles = rawData.map(transformVehicleData);
+        setRawVehiclesData(result.data || []);
+        const transformedVehicles = (result.data || []).map(transformVehicleData);
         setVehicles(transformedVehicles);
-        setTotalVehicles(total);
+        setTotalVehicles(result.total || 0);
       } else {
-        // Fall back to sample data if API fails
-        setVehicles(sampleVehicles);
-        setTotalVehicles(sampleVehicles.length);
+        setVehicles([]);
+        setTotalVehicles(0);
       }
     } catch (error) {
       console.error("Error loading vehicles:", error);
-      // Fall back to sample data if API fails
-      setVehicles(sampleVehicles);
-      setTotalVehicles(sampleVehicles.length);
+      toast.error("Hubo un error al cargar los vehículos.");
+      setVehicles([]);
+      setTotalVehicles(0);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [page, pageSize, searchTerm, filterStatus, category, transformVehicleData]);
+
+  // Debounce search term
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1); // Reset to first page on search
+      // We pass the latest state context via the useCallback loadVehicles effect or call it directly:
+      // However since React sets state asynchronously, calling loadVehicles() here would use old page values unless we pass it.
+      // Easiest is to let the 'page' effect handle it, but wait: if page is ALREADY 1, the page effect won't trigger!
+      // So we must manually trigger loadVehicles if page === 1
+      setPage((prevPage) => {
+        if (prevPage === 1) {
+          loadVehicles(); // trigger it manualy since effect won't
+        }
+        return 1;
+      });
+    }, 500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchTerm, filterStatus, category]);
+
+  // Load vehicles when page changes
+  useEffect(() => {
+    loadVehicles();
+  }, [page, loadVehicles]);
+
+  useEffect(() => {
+    loadStatistics();
+  }, []);
 
   const loadStatistics = async () => {
     try {
@@ -1387,7 +1404,7 @@ export default function VehiclesDashboard() {
                                 variant="outline"
                                 size="sm"
                                 className="h-7 text-xs px-2 text-red-600 border-red-300 hover:bg-red-50 hover:text-red-700"
-                                onClick={() => setPreviewUrl(selectedVehicle.rejectionEvidenceUrl || null)}
+                                onClick={() => setPreviewImages(selectedVehicle.rejectionEvidenceUrl ? [selectedVehicle.rejectionEvidenceUrl] : [])}
                               >
                                 <ExternalLink className="h-3 w-3 mr-1.5" />
                                 Ver evidencia
@@ -1490,23 +1507,6 @@ export default function VehiclesDashboard() {
                               </Badge>
                             </div>
                           </div>
-
-                          {selectedVehicle.alerts && selectedVehicle.alerts.length > 0 && (
-                            <div className="pt-3 border-t">
-                              <p className="text-sm text-muted-foreground mb-2">Alertas detectadas:</p>
-                              <div className="flex flex-wrap gap-1.5">
-                                {selectedVehicle.alerts.map((alert: string, index: number) => (
-                                  <Badge
-                                    key={index}
-                                    variant="outline"
-                                    className="bg-red-50 text-red-700 border-red-200 text-xs"
-                                  >
-                                    {alert}
-                                  </Badge>
-                                ))}
-                              </div>
-                            </div>
-                          )}
                         </CardContent>
                       </Card>
 
@@ -1560,39 +1560,116 @@ export default function VehiclesDashboard() {
 
                     {/* Hallazgos Críticos (Check 360) */}
                     {selectedVehicle.failedChecks && selectedVehicle.failedChecks.length > 0 && (
-                      <Card className="border-red-200 bg-red-50/30">
+                      <Card className="border-orange-200 bg-orange-50/30">
                         <CardHeader className="pb-3">
-                          <CardTitle className="text-base flex items-center gap-2 text-red-700">
+                          <CardTitle className="text-base flex items-center gap-2 text-orange-800">
                             <AlertTriangle className="h-4 w-4" />
                             Hallazgos del Check 360
-                            <Badge variant="destructive" className="ml-2 h-5 text-[10px] px-1.5">
+                            <Badge variant="outline" className="ml-2 h-5 text-[10px] px-1.5 bg-background text-orange-800 border-orange-300">
                               {selectedVehicle.failedChecks.length}
                             </Badge>
                           </CardTitle>
                         </CardHeader>
                         <CardContent>
                           <div className="max-h-[300px] overflow-y-auto pr-2 space-y-2">
-                            {selectedVehicle.failedChecks.map((check, idx) => (
-                              <div
-                                key={idx}
-                                className="flex gap-3 p-3 rounded-md border border-red-100 bg-white shadow-sm"
-                              >
-                                <div className="mt-0.5">
-                                  <XCircle className="h-4 w-4 text-red-500" />
-                                </div>
-                                <div className="flex-1 space-y-1">
-                                  <div className="font-medium text-sm text-foreground">
-                                    <span className="text-muted-foreground mr-1">{getAreaLabel(check.area)}:</span>
-                                    {check.checkpoint}
-                                  </div>
-                                  {check.comment && (
-                                    <p className="text-sm text-muted-foreground">
-                                      {check.comment}
-                                    </p>
+                            {selectedVehicle.failedChecks.map((check, idx) => {
+                              const isBad = check.status === 'bad' || check.status === 'legacy_bad' || check.status === 'BAD' || check.status === 'LEGACY_BAD';
+                              const isRegular = check.status === 'regular' || check.status === 'REGULAR';
+                              const isNA = check.status === 'na' || check.status === 'NA';
+                              
+                              return (
+                                <div
+                                  key={idx}
+                                  className={cn("flex gap-3 p-3 rounded-md border shadow-sm bg-white", 
+                                    isBad ? "border-red-200" : isRegular ? "border-orange-200" : "border-slate-200"
                                   )}
+                                >
+                                  <div className="mt-0.5 shrink-0">
+                                    {isBad && <XCircle className="h-4 w-4 text-red-500" />}
+                                    {isRegular && <AlertTriangle className="h-4 w-4 text-orange-500" />}
+                                    {isNA && <span className="flex h-4 w-4 items-center justify-center rounded-full bg-slate-100 text-[9px] font-bold text-slate-500">NA</span>}
+                                  </div>
+                                  <div className="flex-1 space-y-1 min-w-0">
+                                    <div className="font-medium text-sm text-foreground flex items-center flex-wrap gap-1">
+                                      <span className="text-muted-foreground mr-1">{getAreaLabel(check.area)}:</span>
+                                      <span>{check.checkpoint}</span>
+                                      
+                                      {isBad && <Badge variant="outline" className="ml-1 text-[9px] px-1 py-0 h-4 border-red-200 text-red-600 bg-red-50">Malo</Badge>}
+                                      {isRegular && <Badge variant="outline" className="ml-1 text-[9px] px-1 py-0 h-4 border-orange-200 text-orange-600 bg-orange-50">Regular</Badge>}
+                                    </div>
+                                    {check.comment && (
+                                      <p className="text-sm text-muted-foreground break-all">
+                                        {check.comment}
+                                      </p>
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
-                            ))}
+                              );
+                            })}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {/* Puntos Críticos (Checklist) */}
+                    {selectedVehicle.checklistIssues && selectedVehicle.checklistIssues.length > 0 && (
+                      <Card className="border-amber-200 bg-amber-50/20">
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-base flex items-center gap-2 text-amber-800">
+                            <ClipboardCheck className="h-4 w-4" />
+                            Puntos de Revisión Adicionales
+                            <Badge variant="outline" className="ml-2 h-5 text-[10px] px-1.5 bg-background text-amber-800 border-amber-300">
+                              {selectedVehicle.checklistIssues.length}
+                            </Badge>
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="max-h-[300px] overflow-y-auto pr-2 space-y-2">
+                            {selectedVehicle.checklistIssues.map((issue, idx) => {
+                              const isCritical = issue.severity === 'critical';
+                              
+                              return (
+                                <div
+                                  key={idx}
+                                  className={cn("flex flex-col sm:flex-row gap-3 p-3 rounded-md border shadow-sm bg-white", 
+                                    isCritical ? "border-red-200" : "border-amber-200"
+                                  )}
+                                >
+                                  <div className="mt-0.5 shrink-0">
+                                    <AlertTriangle className={cn("h-4 w-4", isCritical ? "text-red-500" : "text-amber-500")} />
+                                  </div>
+                                  <div className="flex-1 space-y-1 min-w-0">
+                                    <div className="font-medium text-sm text-foreground flex items-start sm:items-center justify-between flex-wrap gap-2">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <span>{issue.item}</span>
+                                        <Badge variant="outline" className={cn("text-[9px] px-1 py-0 h-4", 
+                                          isCritical ? "border-red-200 text-red-600 bg-red-50" : "border-amber-200 text-amber-600 bg-amber-50"
+                                        )}>
+                                          {isCritical ? "Crítico" : "Advertencia"}
+                                        </Badge>
+                                      </div>
+                                      
+                                      {issue.evidence && issue.evidence.length > 0 && (
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-6 text-xs px-2 shrink-0 border-slate-200 text-slate-600 hover:bg-slate-50"
+                                          onClick={() => setPreviewImages(issue.evidence?.map((e: any) => e.url) || [])}
+                                        >
+                                          <Camera className="h-3 w-3 mr-1" />
+                                          Ver evidencia ({issue.evidence.length})
+                                        </Button>
+                                      )}
+                                    </div>
+                                    {issue.notes && (
+                                      <p className="text-sm text-muted-foreground break-all bg-slate-50 p-2 rounded border border-slate-100 mt-2">
+                                        {issue.notes}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         </CardContent>
                       </Card>
@@ -1811,9 +1888,9 @@ export default function VehiclesDashboard() {
       </Dialog>
 
       <ImagePreviewDialog
-        isOpen={!!previewUrl}
-        onClose={() => setPreviewUrl(null)}
-        imageUrl={previewUrl}
+        isOpen={previewImages.length > 0}
+        onClose={() => setPreviewImages([])}
+        images={previewImages}
         title="Evidencia de Rechazo / Daño"
       />
     </div>

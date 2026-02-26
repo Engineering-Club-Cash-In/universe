@@ -979,11 +979,13 @@ export const legalContractsRouter = {
 						),
 					);
 
-				// Mover oportunidad a 90%
+				// Mover oportunidad a 90% y marcar como ganada
 				await tx
 					.update(opportunities)
 					.set({
 						stageId: targetStage.id,
+						status: "won",
+						actualCloseDate: new Date(),
 						updatedAt: new Date(),
 					})
 					.where(eq(opportunities.id, input.opportunityId));

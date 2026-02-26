@@ -862,6 +862,9 @@ export const crmRouter = {
 						.array(z.enum(["open", "won", "lost", "on_hold", "migrate"]))
 						.optional(),
 					opportunityId: z.string().uuid().optional(),
+					// Filtro por mes/año para alinear con dashboard
+					month: z.number().min(1).max(12).optional(),
+					year: z.number().optional(),
 				})
 				.optional(),
 		)
@@ -990,10 +993,18 @@ export const crmRouter = {
 				);
 			}
 
-			// Solo mostrar oportunidades al 100% que llegaron ahí este mes
+			// Determinar rango de mes para filtros basados en historial de stages
+			const filterMonth = input?.month;
+			const filterYear = input?.year;
 			const now = new Date();
-			const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+			const startOfMonth = filterMonth && filterYear
+				? new Date(filterYear, filterMonth - 1, 1)
+				: new Date(now.getFullYear(), now.getMonth(), 1);
+			const endOfMonth = filterMonth && filterYear
+				? new Date(filterYear, filterMonth, 1)
+				: undefined;
 
+			// Solo mostrar oportunidades al 100% que llegaron ahí en el mes seleccionado
 			const fullStages = await db
 				.select({ id: salesStages.id })
 				.from(salesStages)
@@ -1001,15 +1012,18 @@ export const crmRouter = {
 			const fullStageIds = fullStages.map((s) => s.id);
 
 			if (fullStageIds.length > 0) {
+				const historyConditions = [
+					inArray(opportunityStageHistory.toStageId, fullStageIds),
+					gte(opportunityStageHistory.changedAt, startOfMonth),
+				];
+				if (endOfMonth) {
+					historyConditions.push(lt(opportunityStageHistory.changedAt, endOfMonth));
+				}
+
 				const thisMonthFullOpps = await db
 					.select({ opportunityId: opportunityStageHistory.opportunityId })
 					.from(opportunityStageHistory)
-					.where(
-						and(
-							inArray(opportunityStageHistory.toStageId, fullStageIds),
-							gte(opportunityStageHistory.changedAt, startOfMonth),
-						),
-					);
+					.where(and(...historyConditions));
 
 				const thisMonthOppIds = thisMonthFullOpps.map((o) => o.opportunityId);
 
@@ -1021,6 +1035,47 @@ export const crmRouter = {
 							: []),
 					),
 				);
+			}
+
+			// Cuando se filtra por mes/año, también filtrar oportunidades colocadas (>= 90%)
+			// que llegaron a ese stage en el mes seleccionado
+			if (filterMonth && filterYear && endOfMonth) {
+				const PLACED_STAGE_THRESHOLD = 90;
+				const placedStages = await db
+					.select({ id: salesStages.id })
+					.from(salesStages)
+					.where(
+						and(
+							gte(salesStages.closurePercentage, PLACED_STAGE_THRESHOLD),
+							lt(salesStages.closurePercentage, 100),
+						),
+					);
+				const placedStageIds = placedStages.map((s) => s.id);
+
+				if (placedStageIds.length > 0) {
+					const placedThisMonth = await db
+						.select({ opportunityId: opportunityStageHistory.opportunityId })
+						.from(opportunityStageHistory)
+						.where(
+							and(
+								inArray(opportunityStageHistory.toStageId, placedStageIds),
+								gte(opportunityStageHistory.changedAt, startOfMonth),
+								lt(opportunityStageHistory.changedAt, endOfMonth),
+							),
+						);
+
+					const placedOppIds = placedThisMonth.map((o) => o.opportunityId);
+
+					// Filtrar: oportunidades en stages colocados (90-99%) solo si llegaron ahí en el mes
+					conditions.push(
+						or(
+							not(inArray(opportunities.stageId, placedStageIds)),
+							...(placedOppIds.length > 0
+								? [inArray(opportunities.id, placedOppIds)]
+								: []),
+						),
+					);
+				}
 			}
 
 			// Role-based filter: admin and sales_supervisor can see all, others only their own
@@ -2929,6 +2984,8 @@ export const crmRouter = {
 			const endOfMonth = new Date(input.year, input.month, 1);
 
 			// Helper: get placed credits stats (stage >= threshold) with optional user filter
+			// Uses opportunityStageHistory.changedAt to determine when an opportunity
+			// reached a placed stage, instead of opportunities.createdAt
 			const getPlacedCreditsStats = async (userId?: string) => {
 				const placedStages = await db
 					.select({ id: salesStages.id })
@@ -2941,10 +2998,29 @@ export const crmRouter = {
 					return { placedCount: 0, placedAmount: 0 };
 				}
 
+				// Find opportunities that moved to a placed stage within this month
+				const placedThisMonth = await db
+					.select({ opportunityId: opportunityStageHistory.opportunityId })
+					.from(opportunityStageHistory)
+					.where(
+						and(
+							inArray(opportunityStageHistory.toStageId, placedStageIds),
+							gte(opportunityStageHistory.changedAt, startOfMonth),
+							lt(opportunityStageHistory.changedAt, endOfMonth),
+						),
+					);
+
+				const placedOppIds = [
+					...new Set(placedThisMonth.map((o) => o.opportunityId)),
+				];
+
+				if (placedOppIds.length === 0) {
+					return { placedCount: 0, placedAmount: 0 };
+				}
+
 				const conditions = [
+					inArray(opportunities.id, placedOppIds),
 					inArray(opportunities.stageId, placedStageIds),
-					gte(opportunities.createdAt, startOfMonth),
-					lt(opportunities.createdAt, endOfMonth),
 					not(eq(opportunities.status, "migrate")),
 				];
 				if (userId) {
@@ -5246,8 +5322,7 @@ export const crmRouter = {
 					inv.porcentaje_participacion > 100
 				) {
 					throw new ORPCError("BAD_REQUEST", {
-						message:
-							"El porcentaje de participación debe estar entre 0 y 100",
+						message: "El porcentaje de participación debe estar entre 0 y 100",
 					});
 				}
 				if (
@@ -5255,8 +5330,7 @@ export const crmRouter = {
 					(inv.porcentaje_cash_in < 0 || inv.porcentaje_cash_in > 100)
 				) {
 					throw new ORPCError("BAD_REQUEST", {
-						message:
-							"El porcentaje de cash-in debe estar entre 0 y 100",
+						message: "El porcentaje de cash-in debe estar entre 0 y 100",
 					});
 				}
 			}
@@ -5665,6 +5739,7 @@ export const crmRouter = {
 			}));
 
 			// 2) Ranking vendedores por monto colocado (stage >= threshold)
+			// Uses opportunityStageHistory.changedAt to determine when placement happened
 			const placedStages = await db
 				.select({ id: salesStages.id })
 				.from(salesStages)
@@ -5673,29 +5748,48 @@ export const crmRouter = {
 
 			let ranking: { name: string; monto: number }[] = [];
 			if (placedStageIds.length > 0) {
-				const rankingRows = await db
-					.select({
-						userName: user.name,
-						monto: sql<string>`coalesce(sum(${opportunities.value}), 0)`,
-					})
-					.from(opportunities)
-					.innerJoin(user, eq(opportunities.assignedTo, user.id))
+				// Find opportunities that moved to a placed stage within this month
+				const placedThisMonth = await db
+					.select({ opportunityId: opportunityStageHistory.opportunityId })
+					.from(opportunityStageHistory)
 					.where(
 						and(
-							inArray(opportunities.stageId, placedStageIds),
-							gte(opportunities.createdAt, startOfMonth),
-							lt(opportunities.createdAt, endOfMonth),
-							not(eq(opportunities.status, "migrate")),
-							userFilter ? eq(opportunities.assignedTo, userFilter) : undefined,
+							inArray(opportunityStageHistory.toStageId, placedStageIds),
+							gte(opportunityStageHistory.changedAt, startOfMonth),
+							lt(opportunityStageHistory.changedAt, endOfMonth),
 						),
-					)
-					.groupBy(user.id, user.name)
-					.orderBy(desc(sql`sum(${opportunities.value})`));
+					);
 
-				ranking = rankingRows.map((r) => ({
-					name: r.userName || "Sin asignar",
-					monto: Number.parseFloat(r.monto) || 0,
-				}));
+				const placedOppIds = [
+					...new Set(placedThisMonth.map((o) => o.opportunityId)),
+				];
+
+				if (placedOppIds.length > 0) {
+					const rankingConditions = [
+						inArray(opportunities.id, placedOppIds),
+						inArray(opportunities.stageId, placedStageIds),
+						not(eq(opportunities.status, "migrate")),
+					];
+					if (userFilter) {
+						rankingConditions.push(eq(opportunities.assignedTo, userFilter));
+					}
+
+					const rankingRows = await db
+						.select({
+							userName: user.name,
+							monto: sql<string>`coalesce(sum(${opportunities.value}), 0)`,
+						})
+						.from(opportunities)
+						.innerJoin(user, eq(opportunities.assignedTo, user.id))
+						.where(and(...rankingConditions))
+						.groupBy(user.id, user.name)
+						.orderBy(desc(sql`sum(${opportunities.value})`));
+
+					ranking = rankingRows.map((r) => ({
+						name: r.userName || "Sin asignar",
+						monto: Number.parseFloat(r.monto) || 0,
+					}));
+				}
 			}
 
 			// 3) Actividad por vendedor: open vs cerradas (won + lost)

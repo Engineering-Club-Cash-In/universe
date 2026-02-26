@@ -263,21 +263,18 @@ export const inspectionChecklistItems = pgTable("inspection_checklist_items", {
  * Stores multimedia evidence (photos/videos) linked to checklist items.
  * Uses a cascade deletion strategy ensuring evidence is removed if the root checklist point is deleted.
  */
-export const checklistItemEvidence = pgTable(
-	"checklist_item_evidence",
-	{
-		id: uuid("id").defaultRandom().primaryKey(),
-		itemId: uuid("item_id")
-			.references(() => inspectionChecklistItems.id, { onDelete: "cascade" })
-			.notNull(),
+export const checklistItemEvidence = pgTable("checklist_item_evidence", {
+	id: uuid("id").defaultRandom().primaryKey(),
+	itemId: uuid("item_id")
+		.references(() => inspectionChecklistItems.id, { onDelete: "cascade" })
+		.notNull(),
 
-		url: text("url").notNull(),
-		mimeType: text("mime_type").notNull(),
-		originalName: text("original_name").notNull(),
+	url: text("url").notNull(),
+	mimeType: text("mime_type").notNull(),
+	originalName: text("original_name").notNull(),
 
-		createdAt: timestamp("created_at").defaultNow().notNull(),
-	},
-);
+	createdAt: timestamp("created_at").defaultNow().notNull(),
+});
 
 // Vehicle Documents table - Documents specific to vehicles (registration, title, etc.)
 export const vehicleDocuments = pgTable("vehicle_documents", {
@@ -455,8 +452,7 @@ export type InspectionChecklistItem =
 export type NewInspectionChecklistItem =
 	typeof inspectionChecklistItems.$inferInsert;
 
-export type ChecklistItemEvidence =
-	typeof checklistItemEvidence.$inferSelect;
+export type ChecklistItemEvidence = typeof checklistItemEvidence.$inferSelect;
 export type NewChecklistItemEvidence =
 	typeof checklistItemEvidence.$inferInsert;
 

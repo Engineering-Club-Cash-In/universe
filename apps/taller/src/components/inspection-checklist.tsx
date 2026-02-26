@@ -331,55 +331,64 @@ export default function InspectionChecklist({
   }, []);
 
   const handleItemEvidenceUpload = async (itemId: string, event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    if (file.size > MAX_FILE_SIZE) {
-      toast.error("File exceeds the maximum limit of 10MB.");
-      event.target.value = '';
-      return;
-    }
-
-    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
-      toast.error("Invalid format. Use JPG, PNG or WEBP.");
-      event.target.value = '';
-      return;
-    }
+    const files = Array.from(event.target.files || []);
+    if (files.length === 0) return;
 
     setIsUploadingItemEvidence(prev => ({ ...prev, [itemId]: true }));
-    const formData = new FormData();
-    formData.append("file", file);
-    const vId = contextFormData?.id || `temp-${Date.now()}`;
-    formData.append("vehicleId", vId);
-    formData.append("category", "checklist_evidence");
-    formData.append("photoType", "checklist_item_proof");
-    formData.append("title", "Evidencia de inspección");
+
+    const uploadPromises = files.map(async (file) => {
+      if (file.size > MAX_FILE_SIZE) {
+        toast.error(`El archivo ${file.name} excede el límite de 10MB.`);
+        return null;
+      }
+
+      if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+        toast.error(`Formato inválido para ${file.name}. Use JPG, PNG o WEBP.`);
+        return null;
+      }
+
+      const formData = new FormData();
+      formData.append("file", file);
+      const vId = contextFormData?.id || `temp-${Date.now()}`;
+      formData.append("vehicleId", vId);
+      formData.append("category", "checklist_evidence");
+      formData.append("photoType", "checklist_item_proof");
+      formData.append("title", "Evidencia de inspección");
+
+      try {
+        const response = await fetch(`${import.meta.env.VITE_SERVER_URL || 'http://localhost:3000'}/api/upload-vehicle-photo`, {
+          method: "POST",
+          credentials: "include",
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error || `Error subiendo ${file.name}`);
+        }
+
+        const result = await response.json();
+        const url = result.data?.url || result.url;
+
+        return url ? { url, mimeType: file.type, originalName: file.name } : null;
+      } catch (error: any) {
+        console.error("Item evidence upload error:", error);
+        toast.error(error.message || `No se pudo subir ${file.name}.`);
+        return null;
+      }
+    });
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_SERVER_URL || 'http://localhost:3000'}/api/upload-vehicle-photo`, {
-        method: "POST",
-        credentials: "include",
-        body: formData,
-      });
+      const results = await Promise.all(uploadPromises);
+      const successfulUploads = results.filter((res): res is { url: string; mimeType: string; originalName: string } => res !== null);
 
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || "Failed to upload file");
-      }
-
-      const result = await response.json();
-      const url = result.data?.url || result.url;
-
-      if (url) {
+      if (successfulUploads.length > 0) {
         setItemEvidence((prev) => ({
             ...prev,
-            [itemId]: [...(prev[itemId] || []), { url, mimeType: file.type, originalName: file.name }]
+            [itemId]: [...(prev[itemId] || []), ...successfulUploads]
         }));
-        toast.success("Evidence attached to item successfully");
+        toast.success(`Se adjuntaron ${successfulUploads.length} evidencia(s) exitosamente`);
       }
-    } catch (error: any) {
-      console.error("Item evidence upload error:", error);
-      toast.error(error.message || "Failed to upload item evidence. Please try again.");
     } finally {
       setIsUploadingItemEvidence(prev => ({ ...prev, [itemId]: false }));
       event.target.value = '';
@@ -771,6 +780,7 @@ export default function InspectionChecklist({
                                       <input 
                                         type="file" 
                                         accept="image/*" 
+                                        multiple
                                         className="hidden" 
                                         onChange={(e) => handleItemEvidenceUpload(item.id, e)}
                                         disabled={isUploadingItemEvidence[item.id]}

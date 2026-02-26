@@ -11,6 +11,8 @@ import {
 	Calculator,
 	Calendar,
 	Car,
+	ChevronLeft,
+	ChevronRight,
 	Clock,
 	ExternalLink,
 	FileSignature,
@@ -92,6 +94,21 @@ import {
 } from "@/lib/vehicle-utils";
 import { isVehicleAvailable } from "@/utils/constants";
 import { client, orpc } from "@/utils/orpc";
+
+const MONTH_NAMES = [
+	"Enero",
+	"Febrero",
+	"Marzo",
+	"Abril",
+	"Mayo",
+	"Junio",
+	"Julio",
+	"Agosto",
+	"Septiembre",
+	"Octubre",
+	"Noviembre",
+	"Diciembre",
+];
 
 // Simple draggable opportunity card component
 function DraggableOpportunityCard({
@@ -354,6 +371,28 @@ function RouteComponent() {
 	const processedOpportunityIdRef = useRef<string | null>(null);
 	const prevOpenRef = useRef(isCreateDialogOpen);
 	const prevDetailsOpenRef = useRef(isDetailsDialogOpen);
+
+	// Month/year filter for placed amounts alignment with dashboard
+	const [month, setMonth] = useState(() => new Date().getMonth() + 1);
+	const [year, setYear] = useState(() => new Date().getFullYear());
+
+	const goToPreviousMonth = () => {
+		if (month === 1) {
+			setMonth(12);
+			setYear((y) => y - 1);
+		} else {
+			setMonth((m) => m - 1);
+		}
+	};
+
+	const goToNextMonth = () => {
+		if (month === 12) {
+			setMonth(1);
+			setYear((y) => y + 1);
+		} else {
+			setMonth((m) => m + 1);
+		}
+	};
 
 	// Constante para el mínimo de reserva
 	const MIN_RESERVA = 600;
@@ -640,13 +679,21 @@ function RouteComponent() {
 		...orpc.getOpportunities.queryOptions({
 			input: {
 				excludeStatuses: ["migrate"],
+				month,
+				year,
 			},
 		}),
 		enabled:
 			!!userProfile.data?.role &&
 			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
 			!!session?.user?.id,
-		queryKey: ["getOpportunities", session?.user?.id, userProfile.data?.role],
+		queryKey: [
+			"getOpportunities",
+			session?.user?.id,
+			userProfile.data?.role,
+			month,
+			year,
+		],
 	});
 	const salesStagesQuery = useQuery({
 		...orpc.getSalesStages.queryOptions(),
@@ -1296,11 +1343,24 @@ function RouteComponent() {
 
 	return (
 		<div className="container mx-auto space-y-6 p-6">
-			<div>
-				<h1 className="font-bold text-3xl">Oportunidades</h1>
-				<p className="text-muted-foreground">
-					Rastrea las oportunidades a través de tu proceso de ventas
-				</p>
+			<div className="flex items-center justify-between">
+				<div>
+					<h1 className="font-bold text-3xl">Oportunidades</h1>
+					<p className="text-muted-foreground">
+						Rastrea las oportunidades a través de tu proceso de ventas
+					</p>
+				</div>
+				<div className="flex items-center gap-2">
+					<Button variant="outline" size="icon" onClick={goToPreviousMonth}>
+						<ChevronLeft className="h-4 w-4" />
+					</Button>
+					<span className="min-w-[140px] text-center font-medium">
+						{MONTH_NAMES[month - 1]} {year}
+					</span>
+					<Button variant="outline" size="icon" onClick={goToNextMonth}>
+						<ChevronRight className="h-4 w-4" />
+					</Button>
+				</div>
 			</div>
 
 			{/* Stats Cards */}

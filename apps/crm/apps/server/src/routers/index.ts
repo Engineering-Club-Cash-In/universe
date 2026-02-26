@@ -281,4 +281,9 @@ export const appRouter = {
 	createBoleta: accountingRouter.createBoleta,
 };
 
+// Investment routes exported separately to avoid TS7056 with declaration emit.
+// The investmentsRouter type is too complex for TypeScript to serialize in a
+// single appRouter declaration. Client merges both types.
+// See: https://orpc.dev/docs/advanced/exceeds-the-maximum-length-problem
+
 export type AppRouter = typeof appRouter;

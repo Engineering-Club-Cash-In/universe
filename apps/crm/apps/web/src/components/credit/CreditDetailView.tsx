@@ -277,17 +277,17 @@ export function CreditDetailView({
 		enabled: !!opportunity.vehicle?.id,
 	});
 
-	// Query para obtener el análisis de crédito del lead
-	const creditAnalysisQuery = useQuery({
-		queryKey: ["getCreditAnalysisByLeadId", opportunity.lead?.id],
+	// Query para obtener el análisis de crédito consolidado (lead + co-firmantes)
+	const consolidatedCreditQuery = useQuery({
+		queryKey: ["getConsolidatedCreditAnalysis", opportunityId],
 		queryFn: () =>
-			client.getCreditAnalysisByLeadId({ leadId: opportunity.lead!.id }),
-		enabled: !!opportunity.lead?.id,
+			client.getConsolidatedCreditAnalysis({ opportunityId }),
+		enabled: !!opportunityId,
 	});
 
 	// Datos de inspección y análisis de crédito
 	const vehicleInspection = vehicleInspectionQuery.data;
-	const creditAnalysis = creditAnalysisQuery.data;
+	const creditAnalysis = consolidatedCreditQuery.data?.consolidated;
 
 	// Query para obtener el vendor del vehículo (solo para Autocompras)
 	const vendorQuery = useQuery({

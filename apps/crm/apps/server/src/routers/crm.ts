@@ -59,6 +59,7 @@ import {
 	deleteFileFromR2,
 	generateUniqueFilename,
 	getFileUrl,
+	resolveMimeType,
 	uploadFileToR2,
 	validateFile,
 } from "../lib/storage";
@@ -2944,6 +2945,7 @@ export const crmRouter = {
 					inArray(opportunities.stageId, placedStageIds),
 					gte(opportunities.createdAt, startOfMonth),
 					lt(opportunities.createdAt, endOfMonth),
+					not(eq(opportunities.status, "migrate")),
 				];
 				if (userId) {
 					conditions.push(eq(opportunities.assignedTo, userId));
@@ -2980,6 +2982,7 @@ export const crmRouter = {
 						and(
 							gte(opportunities.createdAt, startOfMonth),
 							lt(opportunities.createdAt, endOfMonth),
+							not(eq(opportunities.status, "migrate")),
 						),
 					);
 				const [totalClients] = await db
@@ -3019,6 +3022,7 @@ export const crmRouter = {
 						and(
 							gte(opportunities.createdAt, startOfMonth),
 							lt(opportunities.createdAt, endOfMonth),
+							not(eq(opportunities.status, "migrate")),
 						),
 					);
 				const [totalClients] = await db
@@ -3060,6 +3064,7 @@ export const crmRouter = {
 						eq(opportunities.assignedTo, context.userId),
 						gte(opportunities.createdAt, startOfMonth),
 						lt(opportunities.createdAt, endOfMonth),
+						not(eq(opportunities.status, "migrate")),
 					),
 				);
 			const [myClients] = await db
@@ -3195,14 +3200,21 @@ export const crmRouter = {
 				});
 			}
 
+			// Resolver MIME type (fallback por extensión para archivos con extensión en mayúsculas)
+			const resolvedMimeType = resolveMimeType({
+				type: input.file.type,
+				name: input.file.name,
+			} as File);
+
 			// Crear un File/Blob desde los datos
 			const fileBuffer = Buffer.from(input.file.data, "base64");
-			const fileBlob = new Blob([fileBuffer], { type: input.file.type });
+			const fileBlob = new Blob([fileBuffer], { type: resolvedMimeType });
 
 			// Validar archivo
 			const validation = validateFile({
-				type: input.file.type,
+				type: resolvedMimeType,
 				size: input.file.size,
+				name: input.file.name,
 			} as File);
 
 			if (!validation.valid) {
@@ -3226,7 +3238,7 @@ export const crmRouter = {
 					opportunityId: input.opportunityId,
 					filename: uniqueFilename,
 					originalName: input.file.name,
-					mimeType: input.file.type,
+					mimeType: resolvedMimeType,
 					size: input.file.size,
 					documentType: input.documentType,
 					description: input.description,
@@ -3248,7 +3260,7 @@ export const crmRouter = {
 						vehicleId: opportunity[0].vehicleId,
 						filename: uniqueFilename,
 						originalName: input.file.name,
-						mimeType: input.file.type,
+						mimeType: resolvedMimeType,
 						size: input.file.size,
 						documentType: input.documentType,
 						description: input.description,
@@ -3779,6 +3791,16 @@ export const crmRouter = {
 									required: true,
 									completed: false,
 								},
+								...(vehicle.isNew
+									? [
+											{
+												name: "Factura del vehículo nuevo",
+												type: "factura_vehiculo_nuevo",
+												required: true,
+												completed: false,
+											},
+										]
+									: []),
 							],
 						},
 					},
@@ -5145,6 +5167,115 @@ export const crmRouter = {
 			};
 		}),
 
+	updateOpportunityInvestors: analystProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				inversionistas: z.string(), // JSON string with full investors array
+			}),
+		)
+		.handler(async ({ input }) => {
+			// Get the opportunity
+			const [opportunity] = await db
+				.select()
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
+			}
+
+			// Validate opportunity is at 50%
+			const [currentStage] = await db
+				.select()
+				.from(salesStages)
+				.where(eq(salesStages.id, opportunity.stageId))
+				.limit(1);
+
+			if (!currentStage || currentStage.closurePercentage !== 50) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Solo se pueden editar inversionistas en la etapa del 50%",
+				});
+			}
+
+			// Parse and validate investors
+			let parsedInvestors: Array<{
+				inversionista_id: number;
+				nombre: string;
+				monto_aportado: number;
+				porcentaje_participacion: number;
+				porcentaje_cash_in?: number;
+			}>;
+
+			try {
+				parsedInvestors = JSON.parse(input.inversionistas);
+				if (!Array.isArray(parsedInvestors)) {
+					throw new Error("Not an array");
+				}
+			} catch {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Formato de inversionistas inválido",
+				});
+			}
+
+			if (parsedInvestors.length === 0) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Debe haber al menos un inversionista",
+				});
+			}
+
+			if (parsedInvestors.length > 20) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "No se pueden asignar más de 20 inversionistas",
+				});
+			}
+
+			// Validate each investor has required fields
+			for (const inv of parsedInvestors) {
+				if (!inv.inversionista_id || !inv.nombre || inv.monto_aportado <= 0) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Cada inversionista debe tener ID, nombre y monto mayor a 0",
+					});
+				}
+				if (
+					inv.porcentaje_participacion < 0 ||
+					inv.porcentaje_participacion > 100
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"El porcentaje de participación debe estar entre 0 y 100",
+					});
+				}
+				if (
+					inv.porcentaje_cash_in !== undefined &&
+					(inv.porcentaje_cash_in < 0 || inv.porcentaje_cash_in > 100)
+				) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"El porcentaje de cash-in debe estar entre 0 y 100",
+					});
+				}
+			}
+
+			// Update
+			await db
+				.update(opportunities)
+				.set({
+					inversionistas: JSON.stringify(parsedInvestors),
+					updatedAt: new Date(),
+				})
+				.where(eq(opportunities.id, input.opportunityId));
+
+			return {
+				success: true,
+				message: "Inversionistas actualizados correctamente",
+			};
+		}),
+
 	// ── Credit Scoring ──────────────────────────────────────────────────
 	scoreLead: crmProcedure
 		.input(
@@ -5554,6 +5685,7 @@ export const crmRouter = {
 							inArray(opportunities.stageId, placedStageIds),
 							gte(opportunities.createdAt, startOfMonth),
 							lt(opportunities.createdAt, endOfMonth),
+							not(eq(opportunities.status, "migrate")),
 							userFilter ? eq(opportunities.assignedTo, userFilter) : undefined,
 						),
 					)

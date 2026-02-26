@@ -1,10 +1,10 @@
 import { useState, useMemo } from 'react';
-import { useInspection } from '../contexts/InspectionContext';
+import { useInspection, InspectionStatus } from '../contexts/InspectionContext';
 import { INSPECTION_AREAS } from '../lib/inspection-data';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
-import { CheckCircle2, XCircle, AlertCircle, ChevronDown, ChevronRight, Activity } from 'lucide-react';
+import { CheckCircle2, XCircle, AlertCircle, ChevronDown, ChevronRight, Activity, MinusCircle, AlertTriangle } from 'lucide-react';
 import { Badge } from './ui/badge';
 import { Label } from './ui/label';
 import {
@@ -53,17 +53,46 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
             "Pieza faltante",
             "Daño físico evidente"
         ];
+        
+        // Sesgo para datos dummy
+        const statuses: InspectionStatus[] = [
+            InspectionStatus.GOOD, InspectionStatus.GOOD, InspectionStatus.GOOD, InspectionStatus.GOOD, 
+            InspectionStatus.REGULAR, InspectionStatus.BAD, InspectionStatus.NA
+        ];
+
+        const MIN_COMPRESSION_PSI = 110;
+        const MAX_COMPRESSION_PSI = 150;
+        const generateRandomCompression = () => Math.floor(Math.random() * (MAX_COMPRESSION_PSI - MIN_COMPRESSION_PSI + 1) + MIN_COMPRESSION_PSI);
 
         INSPECTION_AREAS.forEach(area => {
             area.points.forEach(point => {
-                // 10% chance of failure
-                const isBad = Math.random() < 0.1;
-                newItems.push({
-                    category: area.id,
-                    item: point.label,
-                    status: isBad ? 'bad' : 'ok',
-                    notes: isBad ? failureMessages[Math.floor(Math.random() * failureMessages.length)] : undefined
-                });
+                const randomStatus = statuses[Math.floor(Math.random() * statuses.length)];
+                const isFail = randomStatus === InspectionStatus.BAD || randomStatus === InspectionStatus.REGULAR;
+                
+                if (point.id === 'compresiones') {
+                    newItems.push({
+                        category: area.id,
+                        item: point.label,
+                        status: InspectionStatus.GOOD,
+                        metadata: {
+                            cilindro_1: generateRandomCompression(),
+                            cilindro_2: generateRandomCompression(),
+                            cilindro_3: generateRandomCompression(),
+                            cilindro_4: generateRandomCompression(),
+                            cilindro_5: generateRandomCompression(),
+                            cilindro_6: generateRandomCompression(),
+                            cilindro_7: 0,
+                            cilindro_8: 0,
+                        }
+                    });
+                } else {
+                    newItems.push({
+                        category: area.id,
+                        item: point.label,
+                        status: randomStatus,
+                        notes: isFail ? failureMessages[Math.floor(Math.random() * failureMessages.length)] : undefined
+                    });
+                }
             });
         });
         setItems360(newItems);
@@ -71,7 +100,7 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
         setOpenSections(allOpen);
     };
 
-    const handleStatusChange = (category: string, itemLabel: string, status: 'ok' | 'bad') => {
+    const handleStatusChange = (category: string, itemLabel: string, status: InspectionStatus) => {
         const existing = items360.slice();
         const existingIndex = existing.findIndex(i => i.item === itemLabel && i.category === category);
 
@@ -79,7 +108,7 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
             existing[existingIndex] = {
                 ...existing[existingIndex],
                 status,
-                notes: status === 'ok' ? undefined : existing[existingIndex].notes
+                // Si cambia de estado, no borramos las notas para que el usuario siempre las tenga
             };
             setItems360(existing);
         } else {
@@ -93,6 +122,42 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
         if (existingIndex >= 0) {
             existing[existingIndex] = { ...existing[existingIndex], notes };
             setItems360(existing);
+        } else {
+             setItems360([...existing, { category, item: itemLabel, status: InspectionStatus.NA, notes }]);
+        }
+    };
+
+    const handleMetadataChange = (category: string, itemLabel: string, metadataKey: string, rawValue: string) => {
+        let metadataValue: any = rawValue;
+
+        // Validation para los inputs de compresión (cilindro_X)
+        if (metadataKey.startsWith('cilindro_')) {
+            if (rawValue === '') {
+                metadataValue = 0; // Si está vacío, por defecto es 0 para evitar fallos matemáticos
+            } else {
+                const num = parseInt(rawValue, 10);
+                if (isNaN(num)) {
+                    return; // Ignorar si escriben letras
+                }
+                // Limitar entre 0 y 300 PSI
+                metadataValue = Math.max(0, Math.min(300, num));
+            }
+        }
+
+        const existing = items360.slice();
+        const existingIndex = existing.findIndex(i => i.item === itemLabel && i.category === category);
+        if (existingIndex >= 0) {
+            existing[existingIndex] = { 
+                ...existing[existingIndex], 
+                metadata: {
+                    ...(existing[existingIndex].metadata || {}),
+                    [metadataKey]: metadataValue
+                }
+            };
+            setItems360(existing);
+        } else {
+            // Default to 'bueno' explicitly if they start typing compressions without selecting status
+            setItems360([...existing, { category, item: itemLabel, status: InspectionStatus.GOOD, metadata: { [metadataKey]: metadataValue } }]);
         }
     };
 
@@ -101,10 +166,48 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
     };
 
     const totalPoints = useMemo(() => INSPECTION_AREAS.reduce((acc, area) => acc + area.points.length, 0), []);
-    const completedPoints = items360.length;
-    const progressPercentage = Math.round((completedPoints / totalPoints) * 100);
-    const isComplete = completedPoints === totalPoints;
-    const failedItemsCount = items360.filter(i => i.status === 'bad').length;
+    
+    // Todo envuelto permanentemente en useMemo para evitar re-cálculos si items360 no cambia
+    const { 
+        completedPoints, 
+        progressPercentage, 
+        isComplete, 
+        failedItemsCount, 
+        okItemsCount, 
+        healthScore 
+    } = useMemo(() => {
+        const completed = items360.length;
+        const _failedItemsCount = items360.filter(i => [InspectionStatus.LEGACY_BAD, InspectionStatus.REGULAR, InspectionStatus.BAD].includes(i.status as InspectionStatus)).length;
+        const _okItemsCount = items360.filter(i => [InspectionStatus.OK, InspectionStatus.GOOD, InspectionStatus.NA].includes(i.status as InspectionStatus)).length;
+        
+        // Calcular Salud
+        let _healthScore = 0;
+        if (completed > 0) {
+            const countableItems = items360.filter(i => i.status !== InspectionStatus.NA);
+            if (countableItems.length === 0) {
+                _healthScore = 100;
+            } else {
+                let totalScore = 0;
+                countableItems.forEach(item => {
+                    if (item.status === InspectionStatus.OK || item.status === InspectionStatus.GOOD) {
+                        totalScore += 100;
+                    } else if (item.status === InspectionStatus.REGULAR) {
+                        totalScore += 50;
+                    }
+                });
+                _healthScore = Math.round(totalScore / countableItems.length);
+            }
+        }
+
+        return {
+            completedPoints: completed,
+            progressPercentage: Math.round((completed / totalPoints) * 100),
+            isComplete: completed === totalPoints,
+            failedItemsCount: _failedItemsCount,
+            okItemsCount: _okItemsCount,
+            healthScore: _healthScore
+        };
+    }, [items360, totalPoints]);
 
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
@@ -135,17 +238,22 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
 
                 <Card className="bg-slate-50 border-slate-200">
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-lg">Resumen de Estado</CardTitle>
+                        <CardTitle className="text-lg flex justify-between">
+                            Resumen de Estado
+                            <Badge variant={healthScore >= 70 ? "default" : healthScore >= 40 ? "secondary" : "destructive"}>
+                                Salud: {healthScore}%
+                            </Badge>
+                        </CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="flex gap-4">
                             <div className="flex items-center gap-2 text-green-600">
                                 <CheckCircle2 className="h-5 w-5" />
-                                <span className="font-bold">{items360.filter(i => i.status === 'ok').length}</span> OK
+                                <span className="font-bold">{okItemsCount}</span> OK / N/A
                             </div>
                             <div className="flex items-center gap-2 text-red-600">
                                 <XCircle className="h-5 w-5" />
-                                <span className="font-bold">{failedItemsCount}</span> Fallos
+                                <span className="font-bold">{failedItemsCount}</span> Regular / Malo
                             </div>
                         </div>
                     </CardContent>
@@ -216,63 +324,126 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
 
                                     {area.points.map((point) => {
                                         const state = getItemState(area.id, point.label);
-                                        const isOk = state?.status === 'ok';
-                                        const isFail = state?.status === 'bad';
+                                        const isNa = state?.status === InspectionStatus.NA;
+                                        const isBueno = state?.status === InspectionStatus.GOOD || state?.status === InspectionStatus.OK; // Fallback a ok
+                                        const isRegular = state?.status === InspectionStatus.REGULAR;
+                                        const isMalo = state?.status === InspectionStatus.BAD || state?.status === InspectionStatus.LEGACY_BAD; // Fallback a bad
+                                        
+                                        const hasWarning = isRegular || isMalo;
 
                                         return (
                                             <div key={point.id} className={cn(
                                                 "p-3 rounded-md border transition-all duration-200",
-                                                "bg-white border-slate-200 hover:border-slate-300"
+                                                "bg-white border-slate-200 hover:border-slate-300 flex flex-col gap-3"
                                             )}>
-                                                <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+                                                <div className="flex flex-col lg:flex-row justify-between lg:items-center gap-3">
                                                     <div className="flex-1">
                                                         <Label htmlFor={`btn-${point.id}`} className="text-sm font-medium text-slate-700 cursor-pointer">
                                                             {point.label}
                                                         </Label>
                                                     </div>
 
-                                                    <div className="flex items-center gap-2 shrink-0">
+                                                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                                                        {/* Nuevos botones: N/A, Bueno, Regular, Malo */}
                                                         <Button
                                                             variant="outline"
                                                             size="sm"
-                                                            onClick={() => handleStatusChange(area.id, point.label, 'ok')}
+                                                            onClick={() => handleStatusChange(area.id, point.label, InspectionStatus.NA)}
                                                             className={cn(
-                                                                "h-8 px-3 gap-1.5 min-w-[80px] transition-all",
-                                                                isOk
+                                                                "h-8 px-3 gap-1.5 min-w-[70px] transition-all",
+                                                                isNa
                                                                     ? "bg-slate-200 text-slate-900 border-slate-400 font-medium hover:bg-slate-300"
-                                                                    : "text-slate-700 border-slate-400 hover:bg-slate-100 hover:text-slate-900"
+                                                                    : "text-slate-700 border-slate-300 hover:bg-slate-100 hover:text-slate-900"
                                                             )}
                                                         >
-                                                            <CheckCircle2 className={cn("h-3.5 w-3.5", isOk ? "text-green-600" : "text-slate-500")} />
-                                                            OK
+                                                            <MinusCircle className={cn("h-3.5 w-3.5", isNa ? "text-slate-700" : "text-slate-400")} />
+                                                            N/A
                                                         </Button>
+                                                        
                                                         <Button
                                                             variant="outline"
                                                             size="sm"
-                                                            onClick={() => handleStatusChange(area.id, point.label, 'bad')}
+                                                            onClick={() => handleStatusChange(area.id, point.label, InspectionStatus.GOOD)}
                                                             className={cn(
                                                                 "h-8 px-3 gap-1.5 min-w-[80px] transition-all",
-                                                                isFail
+                                                                isBueno
                                                                     ? "bg-slate-200 text-slate-900 border-slate-400 font-medium hover:bg-slate-300"
-                                                                    : "text-slate-700 border-slate-400 hover:bg-slate-100 hover:text-slate-900"
+                                                                    : "text-slate-700 border-slate-300 hover:bg-slate-100 hover:text-slate-900"
                                                             )}
                                                         >
-                                                            <XCircle className={cn("h-3.5 w-3.5", isFail ? "text-red-600" : "text-slate-500")} />
-                                                            Fallo
+                                                            <CheckCircle2 className={cn("h-3.5 w-3.5", isBueno ? "text-green-600" : "text-slate-400")} />
+                                                            Bueno
+                                                        </Button>
+
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={() => handleStatusChange(area.id, point.label, InspectionStatus.REGULAR)}
+                                                            className={cn(
+                                                                "h-8 px-3 gap-1.5 min-w-[80px] transition-all",
+                                                                isRegular
+                                                                    ? "bg-slate-200 text-slate-900 border-slate-400 font-medium hover:bg-slate-300"
+                                                                    : "text-slate-700 border-slate-300 hover:bg-slate-100 hover:text-slate-900"
+                                                            )}
+                                                        >
+                                                            <AlertTriangle className={cn("h-3.5 w-3.5", isRegular ? "text-amber-500" : "text-slate-400")} />
+                                                            Regular
+                                                        </Button>
+
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={() => handleStatusChange(area.id, point.label, InspectionStatus.BAD)}
+                                                            className={cn(
+                                                                "h-8 px-3 gap-1.5 min-w-[80px] transition-all",
+                                                                isMalo
+                                                                    ? "bg-slate-200 text-slate-900 border-slate-400 font-medium hover:bg-slate-300"
+                                                                    : "text-slate-700 border-slate-300 hover:bg-slate-100 hover:text-slate-900"
+                                                            )}
+                                                        >
+                                                            <XCircle className={cn("h-3.5 w-3.5", isMalo ? "text-red-600" : "text-slate-400")} />
+                                                            Malo
                                                         </Button>
                                                     </div>
                                                 </div>
-
-                                                {isFail && (
-                                                    <div className="mt-3 pl-0 sm:pl-3 border-l-0 sm:border-l-2 border-slate-200 animate-in slide-in-from-top-1 fade-in duration-200">
-                                                        <Textarea
-                                                            placeholder="Describa el problema encontrado..."
-                                                            value={state?.notes || ''}
-                                                            onChange={(e) => handleObservationChange(area.id, point.label, e.target.value)}
-                                                            className="min-h-[60px] bg-slate-50 border-slate-200 focus-visible:ring-slate-400 text-sm resize-none"
-                                                        />
+                                                
+                                                {/* Sección especial de compresiones */}
+                                                {point.id === 'compresiones' && (
+                                                    <div className="grid grid-cols-4 md:grid-cols-8 gap-2 bg-slate-50 p-3 rounded-md border border-slate-200">
+                                                        <div className="col-span-4 md:col-span-8 mb-2">
+                                                            <Label className="text-xs text-slate-500 font-semibold mb-1 uppercase text-center block w-full border-b pb-1">Tabla de Presión (PSI) por cilindro</Label>
+                                                        </div>
+                                                        {[1, 2, 3, 4, 5, 6, 7, 8].map(cyl => (
+                                                            <div key={cyl} className="flex flex-col gap-1 items-center">
+                                                                <Label className="text-[10px] text-muted-foreground">Cilindro {cyl}</Label>
+                                                                <div className="relative">
+                                                                    <input 
+                                                                        type="number"
+                                                                        min="0"
+                                                                        placeholder="0"
+                                                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 text-center font-mono"
+                                                                        value={state?.metadata?.[`cilindro_${cyl}`] || ''}
+                                                                        onChange={(e) => handleMetadataChange(area.id, point.label, `cilindro_${cyl}`, e.target.value)}
+                                                                    />
+                                                                </div>
+                                                            </div>
+                                                        ))}
                                                     </div>
                                                 )}
+
+                                                {/* Textarea ahora siempre está disponible pero con highlight si hay un warning/malo */}
+                                                <div className={cn("pl-0 sm:pl-3 w-full transition-all mt-1", hasWarning ? "border-l-2 border-amber-400" : "border-l-2 border-transparent")}>
+                                                    <Textarea
+                                                        placeholder={hasWarning ? "Por favor describa el problema encontrado..." : "Comentarios u observaciones adicionales (opcional)..."}
+                                                        value={state?.notes || ''}
+                                                        onChange={(e) => handleObservationChange(area.id, point.label, e.target.value)}
+                                                        maxLength={1000}
+                                                        className={cn(
+                                                            "min-h-[60px] text-sm resize-none",
+                                                            hasWarning ? "bg-amber-50/50 border-amber-200 focus-visible:ring-amber-400" : "bg-slate-50 border-slate-200 focus-visible:ring-slate-300"
+                                                        )}
+                                                    />
+                                                </div>
                                             </div>
                                         );
                                     })}

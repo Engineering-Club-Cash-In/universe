@@ -83,6 +83,7 @@ export const appRouter = {
 	// Investment assignment (50% → 80%)
 	getOpportunitiesForInvestment: crmRouter.getOpportunitiesForInvestment,
 	assignInvestorAndAdvance: crmRouter.assignInvestorAndAdvance,
+	updateOpportunityInvestors: crmRouter.updateOpportunityInvestors,
 	getClients: crmRouter.getClients,
 	getClientsStats: crmRouter.getClientsStats,
 	getLeadsAsClients: crmRouter.getLeadsAsClients,
@@ -150,10 +151,15 @@ export const appRouter = {
 	getInversionistasDelCredito: cobrosRouter.getInversionistasDelCredito,
 	getAsesores: cobrosRouter.getAsesores,
 	updateContactInfoCobros: cobrosRouter.updateContactInfoCobros,
+	updateEtiquetasCobros: cobrosRouter.updateEtiquetasCobros,
 	getReferencias: cobrosRouter.getReferencias,
 	createReferencia: cobrosRouter.createReferencia,
 	updateReferencia: cobrosRouter.updateReferencia,
 	deleteReferencia: cobrosRouter.deleteReferencia,
+	// Metas de mora
+	getMetasMora: cobrosRouter.getMetasMora,
+	getMetasMoraAnual: cobrosRouter.getMetasMoraAnual,
+	upsertMetasMora: cobrosRouter.upsertMetasMora,
 
 	// Legal Contracts routes (Jurídico)
 	createLegalContract: legalContractsRouter.createLegalContract,

@@ -48,6 +48,12 @@ export interface ChecklistItem {
   item: string;
   checked: boolean;
   severity?: string;
+  notes?: string;
+  evidence?: Array<{
+    url: string;
+    mimeType: string;
+    originalName: string;
+  }>;
 }
 
 export interface PhotoData {
@@ -63,8 +69,9 @@ export interface PhotoData {
 export interface Inspection360Item {
   category: string;
   item: string;
-  status: 'ok' | 'bad';
+  status: 'GOOD' | 'REGULAR' | 'BAD' | 'NA' | 'OK' | 'LEGACY_BAD';
   notes?: string;
+  metadata?: Record<string, any>;
 }
 
 // Main function to create a full vehicle inspection
@@ -84,8 +91,9 @@ export const createFullInspection = async (
       inspection360Items: items360?.map(item => ({
         area: item.category,
         checkpoint: item.item,
-        status: item.status,
-        comment: item.notes
+        status: item.status as 'GOOD' | 'REGULAR' | 'BAD' | 'NA' | 'OK' | 'LEGACY_BAD',
+        comment: item.notes,
+        metadata: item.metadata,
       }))
     });
 

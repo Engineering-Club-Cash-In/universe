@@ -17,6 +17,7 @@ import {
 	MessageSquare,
 	Scale,
 	Settings,
+	Target,
 	TrendingUp,
 	UserCircle,
 	Users,
@@ -203,18 +204,37 @@ export default function Header() {
 							</DropdownMenu>
 						)}
 
-						{/* Cobros */}
+						{/* Cobros Dropdown */}
 						{session && userRole && PERMISSIONS.canAccessCobros(userRole) && (
-							<Button
-								variant={isActive("/cobros") ? "secondary" : "ghost"}
-								size="sm"
-								asChild
-							>
-								<Link to="/cobros">
-									<Banknote className="mr-2 h-4 w-4" />
-									Cobros
-								</Link>
-							</Button>
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									<Button
+										variant={isActive("/cobros") ? "secondary" : "ghost"}
+										size="sm"
+										className="gap-1"
+									>
+										<Banknote className="h-4 w-4" />
+										Cobros
+										<ChevronDown className="h-3 w-3 opacity-50" />
+									</Button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="start" className="w-48">
+									<DropdownMenuItem asChild>
+										<Link to="/cobros" className="cursor-pointer">
+											<Banknote className="mr-2 h-4 w-4" />
+											Dashboard
+										</Link>
+									</DropdownMenuItem>
+									{PERMISSIONS.canAssignCobros(userRole) && (
+										<DropdownMenuItem asChild>
+											<Link to="/cobros/metas" className="cursor-pointer">
+												<Target className="mr-2 h-4 w-4" />
+												Metas de Mora
+											</Link>
+										</DropdownMenuItem>
+									)}
+								</DropdownMenuContent>
+							</DropdownMenu>
 						)}
 
 						{/* Análisis */}
@@ -252,9 +272,7 @@ export default function Header() {
 								<DropdownMenu>
 									<DropdownMenuTrigger asChild>
 										<Button
-											variant={
-												isActive("/accounting") ? "secondary" : "ghost"
-											}
+											variant={isActive("/accounting") ? "secondary" : "ghost"}
 											size="sm"
 											className="gap-1"
 										>
@@ -360,7 +378,7 @@ function NotificationBell() {
 		>
 			<Bell className="h-5 w-5" />
 			{count > 0 && (
-				<span className="-top-1 -right-1 absolute flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 font-bold text-[10px] text-white">
+				<span className="absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 font-bold text-[10px] text-white">
 					{count > 99 ? "99+" : count}
 				</span>
 			)}

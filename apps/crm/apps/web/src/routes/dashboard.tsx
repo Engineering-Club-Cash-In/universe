@@ -732,7 +732,11 @@ function RouteComponent() {
 											angle={-45}
 											textAnchor="end"
 											height={100}
-											fontSize={12}
+											fontSize={11}
+											interval={0}
+											tickFormatter={(name: string) =>
+												name.length > 20 ? `${name.slice(0, 18)}…` : name
+											}
 										/>
 										<YAxis
 											tickFormatter={(v: number) =>

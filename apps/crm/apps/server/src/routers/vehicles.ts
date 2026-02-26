@@ -1,14 +1,17 @@
 import { openai } from "@ai-sdk/openai";
 import { ORPCError } from "@orpc/server";
 import { generateObject } from "ai";
-import { and, desc, eq, ilike, not, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, not, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import {
 	casosCobros,
+	checklistItemEvidence,
 	contratosFinanciamiento,
 	conveniosPago,
+	INSPECTION_360_STATUSES,
 	inspectionChecklistItems,
+	type NewChecklistItemEvidence,
 	type NewInspectionChecklistItem,
 	type NewVehicle,
 	type NewVehicleInspection,
@@ -35,6 +38,7 @@ import {
 	deleteFileFromR2,
 	generateUniqueFilename,
 	getFileUrl,
+	resolveMimeType,
 	uploadFileToR2,
 	validateFile,
 } from "../lib/storage";
@@ -42,6 +46,17 @@ import {
 	prepareValuationContext,
 	vehicleValuationSchema,
 } from "../lib/valuation-schema";
+
+// Configuration Constants for Evidence Uploads
+const MAX_EVIDENCE_FILES_PER_ITEM = 10;
+const MAX_FILE_SIZE_MB = 50; // Reference for frontend/upload API
+const ALLOWED_MIME_TYPES = [
+	"image/jpeg",
+	"image/jpg",
+	"image/png",
+	"video/mp4",
+	"video/quicktime",
+];
 
 export const vehiclesRouter = {
 	// Get all vehicles with their latest inspection and photos
@@ -319,6 +334,24 @@ export const vehiclesRouter = {
 						.where(eq(inspectionChecklistItems.inspectionId, inspection.id))
 						.orderBy(inspectionChecklistItems.category);
 
+					let evidenceData: (typeof checklistItemEvidence.$inferSelect)[] = [];
+					if (checklistItems.length > 0) {
+						evidenceData = await db
+							.select()
+							.from(checklistItemEvidence)
+							.where(
+								inArray(
+									checklistItemEvidence.itemId,
+									checklistItems.map((i) => i.id),
+								),
+							);
+					}
+
+					const itemsWithEvidence = checklistItems.map((item) => ({
+						...item,
+						evidence: evidenceData.filter((ev) => ev.itemId === item.id),
+					}));
+
 					const inspection360ItemsData = await db
 						.select()
 						.from(vehicleInspection360Items)
@@ -327,7 +360,7 @@ export const vehiclesRouter = {
 
 					return {
 						...inspection,
-						checklistItems,
+						checklistItems: itemsWithEvidence,
 						inspection360Items: inspection360ItemsData,
 					};
 				}),
@@ -719,9 +752,34 @@ export const vehiclesRouter = {
 				.from(vehiclePhotos)
 				.where(eq(vehiclePhotos.inspectionId, input.id));
 
+			const checklistItems = await db
+				.select()
+				.from(inspectionChecklistItems)
+				.where(eq(inspectionChecklistItems.inspectionId, input.id))
+				.orderBy(inspectionChecklistItems.category);
+
+			let evidenceData: (typeof checklistItemEvidence.$inferSelect)[] = [];
+			if (checklistItems.length > 0) {
+				evidenceData = await db
+					.select()
+					.from(checklistItemEvidence)
+					.where(
+						inArray(
+							checklistItemEvidence.itemId,
+							checklistItems.map((i) => i.id),
+						),
+					);
+			}
+
+			const itemsWithEvidence = checklistItems.map((item) => ({
+				...item,
+				evidence: evidenceData.filter((ev) => ev.itemId === item.id),
+			}));
+
 			return {
 				...inspection,
 				photos,
+				checklistItems: itemsWithEvidence,
 			};
 		}),
 
@@ -834,6 +892,23 @@ export const vehiclesRouter = {
 						item: z.string(),
 						checked: z.boolean(),
 						severity: z.string().optional().default("critical"),
+						notes: z.string().optional(),
+						evidence: z
+							.array(
+								z.object({
+									url: z
+										.string()
+										.url({ message: "Evidence URL must be valid" }),
+									mimeType: z.string().regex(/^(image|video)\//, {
+										message: "File must be an image or video",
+									}),
+									originalName: z.string().min(1).max(255),
+								}),
+							)
+							.max(MAX_EVIDENCE_FILES_PER_ITEM, {
+								message: `Maximum ${MAX_EVIDENCE_FILES_PER_ITEM} evidence files allowed per checklist item`,
+							})
+							.optional(),
 					}),
 				),
 				// 360 Inspection Items
@@ -842,8 +917,9 @@ export const vehiclesRouter = {
 						z.object({
 							area: z.string(),
 							checkpoint: z.string(),
-							status: z.enum(["ok", "bad"]),
+							status: z.enum(INSPECTION_360_STATUSES),
 							comment: z.string().optional(),
+							metadata: z.record(z.any()).optional(),
 						}),
 					)
 					.optional()
@@ -933,15 +1009,57 @@ export const vehiclesRouter = {
 
 					// 3. Create checklist items
 					if (input.checklistItems.length > 0) {
-						await tx.insert(inspectionChecklistItems).values(
-							input.checklistItems.map(
-								(item) =>
-									({
-										inspectionId: newInspection.id,
-										...item,
-									}) as NewInspectionChecklistItem,
-							),
-						);
+						const insertedChecklistItems = await tx
+							.insert(inspectionChecklistItems)
+							.values(
+								input.checklistItems.map(
+									(item) =>
+										({
+											inspectionId: newInspection.id,
+											category: item.category,
+											item: item.item,
+											checked: item.checked,
+											severity: item.severity,
+											notes: item.notes,
+										}) as NewInspectionChecklistItem,
+								),
+							)
+							.returning({
+								id: inspectionChecklistItems.id,
+								category: inspectionChecklistItems.category,
+								item: inspectionChecklistItems.item,
+							});
+
+						const evidenceToInsert: NewChecklistItemEvidence[] = [];
+
+						for (const inputItem of input.checklistItems) {
+							if (inputItem.evidence && inputItem.evidence.length > 0) {
+								const insertedItem = insertedChecklistItems.find(
+									(i) =>
+										i.category === inputItem.category &&
+										i.item === inputItem.item,
+								);
+
+								if (insertedItem) {
+									for (const ev of inputItem.evidence) {
+										evidenceToInsert.push({
+											itemId: insertedItem.id,
+											url: ev.url,
+											mimeType: ev.mimeType,
+											originalName: ev.originalName,
+										});
+									}
+								} else {
+									throw new ORPCError("INTERNAL_SERVER_ERROR", {
+										message: `Failed to link evidence to checklist item: ${inputItem.category} - ${inputItem.item}`,
+									});
+								}
+							}
+						}
+
+						if (evidenceToInsert.length > 0) {
+							await tx.insert(checklistItemEvidence).values(evidenceToInsert);
+						}
 					}
 
 					// 4. Create 360 Inspection Items
@@ -1163,7 +1281,7 @@ REGLAS IMPORTANTES:
 				);
 
 				const { object } = await generateObject({
-					model: openai("gpt-4o-mini"),
+					model: openai("gpt-5-mini"),
 					schema: vehicleValuationSchema,
 					messages: [
 						{
@@ -1365,14 +1483,21 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 				});
 			}
 
+			// Resolver MIME type (fallback por extensión)
+			const resolvedMimeType = resolveMimeType({
+				type: input.file.type,
+				name: input.file.name,
+			} as File);
+
 			// Create File/Blob from data
 			const fileBuffer = Buffer.from(input.file.data, "base64");
-			const fileBlob = new Blob([fileBuffer], { type: input.file.type });
+			const fileBlob = new Blob([fileBuffer], { type: resolvedMimeType });
 
 			// Validate file
 			const validation = validateFile({
-				type: input.file.type,
+				type: resolvedMimeType,
 				size: input.file.size,
+				name: input.file.name,
 			} as File);
 
 			if (!validation.valid) {
@@ -1395,7 +1520,7 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 					vehicleId: input.vehicleId,
 					filename: uniqueFilename,
 					originalName: input.file.name,
-					mimeType: input.file.type,
+					mimeType: resolvedMimeType,
 					size: input.file.size,
 					documentType: input.documentType,
 					description: input.description || undefined,

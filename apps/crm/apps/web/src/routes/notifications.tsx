@@ -150,6 +150,13 @@ const REDIRECT_CONFIG: Record<
 			to: "/accounting/pay-investors",
 		}),
 	},
+	cobros_detail: {
+		label: "Ver caso de cobro",
+		getRoute: (id) => ({
+			to: "/cobros/$id",
+			params: { id },
+		}),
+	},
 };
 
 const PAGE_SIZE = 20;
@@ -626,7 +633,10 @@ function NotificationCard({
 		if (!config) return null;
 
 		// Algunas notificaciones (como pay_investors) no necesitan relatedEntityId
-		if (!notification.relatedEntityId && notification.redirectPage !== "pay_investors")
+		if (
+			!notification.relatedEntityId &&
+			notification.redirectPage !== "pay_investors"
+		)
 			return null;
 
 		const route = config.getRoute(notification.relatedEntityId ?? "");

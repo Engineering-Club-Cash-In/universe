@@ -24,7 +24,7 @@ export const NavBar = () => {
 
   const matchRoute = useMatchRoute();
   const isInvestorPage = !!matchRoute({ to: "/invest" });
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
 
   const defaultNavItems = [
     { label: "Solicita tu crédito", href: "/credit" },
@@ -43,28 +43,42 @@ export const NavBar = () => {
   ];
 
   // Items del menú de perfil (cuando está autenticado)
-  const profileMenuItems = [
+  const allProfileMenuItems = [
     {
       id: "/profile",
       label: "Mi Perfil",
       icon: <IconPerson width="24" height="24" />,
+      roles: ["CLIENT", "INVESTOR"],
     },
     {
       id: "/investments",
       label: "Mis Inversiones",
       icon: <IconArrow width="24" height="24" />,
+      roles: ["INVESTOR"],
     },
     {
       id: "/loans",
       label: "Mis Préstamos",
       icon: <IconCar2 width="24" height="24" />,
+      roles: ["CLIENT"],
     },
     {
       id: "/documents",
       label: "Documentos",
       icon: <IconDocument width="24" height="24" />,
+      roles: ["CLIENT"],
     },
   ];
+
+  // Filtrar por rol del usuario
+  const filteredProfileItems = allProfileMenuItems.filter((item) =>
+    item.roles.includes(user?.role || "CLIENT")
+  );
+
+  // Si no tiene DPI, solo mostrar "Mi Perfil"
+  const profileMenuItems = !user?.dpi
+    ? filteredProfileItems.filter((item) => item.id === "/profile")
+    : filteredProfileItems;
 
   const handleLogout = async () => {
     try {

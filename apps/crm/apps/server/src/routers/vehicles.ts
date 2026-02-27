@@ -86,6 +86,8 @@ export const vehiclesRouter = {
 
 			// Build conditions
 			const conditions = [];
+			const isInspectionStatus = status === "approved" || status === "rejected";
+
 			if (query) {
 				conditions.push(
 					or(
@@ -96,8 +98,14 @@ export const vehiclesRouter = {
 					),
 				);
 			}
+
 			if (status && status !== "all") {
-				conditions.push(eq(vehicles.status, status as any));
+				if (isInspectionStatus) {
+					conditions.push(eq(vehicleInspections.status, status as any));
+				} else {
+					// Fallback to vehicle status for: pending, available, sold, maintenance, auction
+					conditions.push(eq(vehicles.status, status as any));
+				}
 			}
 
 			// Excluir vehículos con cierto status
@@ -117,11 +125,12 @@ export const vehiclesRouter = {
 			}
 
 			// 1. Get total count and paginated IDs
-			// We need to join if we are filtering by inspection properties
+			// We need to join if we are filtering by inspection properties or status
 			const needsJoin =
 				category === "commercial" ||
 				category === "non-commercial" ||
-				category === "alerts";
+				category === "alerts" ||
+				isInspectionStatus;
 
 			const idsQueryBase = db
 				.selectDistinct({ id: vehicles.id, createdAt: vehicles.createdAt })
@@ -297,12 +306,12 @@ export const vehiclesRouter = {
 					),
 				}));
 
-			return {
-				data: vehiclesWithConvenios,
-				total,
-				limit,
-				offset,
-			};
+				return {
+					data: vehiclesWithConvenios,
+					total,
+					limit,
+					offset,
+				};
 		}),
 
 	// Get vehicle by ID with all related data

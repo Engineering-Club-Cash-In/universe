@@ -6,7 +6,7 @@ import { leads, opportunities } from "../db/schema/crm";
 import { opportunityDocuments } from "../db/schema/documents";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { vehiclePhotos, vehicles } from "../db/schema/vehicles";
-import { getFileUrl } from "../lib/storage";
+import { getFileUrl, getFileUrlWithBucketInKey } from "../lib/storage";
 import { getRenapInfoController } from "./bot";
 
 /**
@@ -429,9 +429,37 @@ export async function getLeadLegalContracts(c: Context) {
 			.where(eq(generatedLegalContracts.leadId, lead.id))
 			.orderBy(generatedLegalContracts.generatedAt);
 
+		// Generar URLs firmadas temporales para los PDFs
+		const contractsWithUrls = await Promise.all(
+			contracts.map(async (contractData) => {
+				let pdfLinkUrl = contractData.contract.pdfLink;
+
+				if (pdfLinkUrl && !pdfLinkUrl.startsWith("http")) {
+					try {
+						pdfLinkUrl = pdfLinkUrl.includes("legal-documents")
+							? await getFileUrlWithBucketInKey(pdfLinkUrl)
+							: await getFileUrl(pdfLinkUrl);
+					} catch (error) {
+						console.error(
+							`Error generando URL para contrato ${contractData.contract.id}:`,
+							error,
+						);
+					}
+				}
+
+				return {
+					...contractData,
+					contract: {
+						...contractData.contract,
+						pdfLink: pdfLinkUrl,
+					},
+				};
+			}),
+		);
+
 		return c.json({
 			success: true,
-			data: contracts,
+			data: contractsWithUrls,
 		});
 	} catch (error: any) {
 		console.error("[ERROR] getLeadLegalContracts:", error);

@@ -90,6 +90,12 @@ export function prepareValuationContext(
 	trim: string;
 	traction: string;
 	tiresCondition: string;
+	tireConditionFrontLeft: string;
+	tireConditionFrontRight: string;
+	tireConditionRearLeft: string;
+	tireConditionRearRight: string;
+	hasSpareTire: boolean;
+	tireConditionSpare: string;
 	paintCondition: string;
 	hasAgencyHistory: string;
 } {
@@ -174,10 +180,26 @@ export function prepareValuationContext(
 		tiresCondition: vehicleData.tiresCondition
 			? `${vehicleData.tiresCondition}%`
 			: "No especificado",
+		tireConditionFrontLeft: vehicleData.tireConditionFrontLeft
+			? `${vehicleData.tireConditionFrontLeft}%`
+			: "No especificado",
+		tireConditionFrontRight: vehicleData.tireConditionFrontRight
+			? `${vehicleData.tireConditionFrontRight}%`
+			: "No especificado",
+		tireConditionRearLeft: vehicleData.tireConditionRearLeft
+			? `${vehicleData.tireConditionRearLeft}%`
+			: "No especificado",
+		tireConditionRearRight: vehicleData.tireConditionRearRight
+			? `${vehicleData.tireConditionRearRight}%`
+			: "No especificado",
+		hasSpareTire: vehicleData.hasSpareTire === "Sí" || vehicleData.hasSpareTire === true,
+		tireConditionSpare: vehicleData.tireConditionSpare
+			? `${vehicleData.tireConditionSpare}%`
+			: "No especificado",
 		paintCondition: vehicleData.paintCondition
 			? `${vehicleData.paintCondition}%`
 			: "No especificado",
-		hasAgencyHistory: vehicleData.hasAgencyHistory ? "Sí" : "No",
+		hasAgencyHistory: vehicleData.hasAgencyHistory === "Sí" || vehicleData.hasAgencyHistory === true ? "Sí" : "No",
 
 		// Issues and condition
 		criticalIssues: criticalIssues.map((item) => item.item),

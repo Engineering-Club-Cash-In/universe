@@ -58,8 +58,8 @@ export const IconCalendar = ({ ...props }: React.SVGProps<SVGSVGElement>) => (
         y2="46.2004"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint1_linear_2377_14168"
@@ -69,8 +69,8 @@ export const IconCalendar = ({ ...props }: React.SVGProps<SVGSVGElement>) => (
         y2="5.4"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint2_linear_2377_14168"
@@ -80,8 +80,8 @@ export const IconCalendar = ({ ...props }: React.SVGProps<SVGSVGElement>) => (
         y2="5.4"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint3_linear_2377_14168"
@@ -91,8 +91,8 @@ export const IconCalendar = ({ ...props }: React.SVGProps<SVGSVGElement>) => (
         y2="37.1329"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint4_linear_2377_14168"
@@ -102,8 +102,8 @@ export const IconCalendar = ({ ...props }: React.SVGProps<SVGSVGElement>) => (
         y2="28.0665"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint5_linear_2377_14168"
@@ -113,8 +113,8 @@ export const IconCalendar = ({ ...props }: React.SVGProps<SVGSVGElement>) => (
         y2="37.1329"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint6_linear_2377_14168"
@@ -124,8 +124,8 @@ export const IconCalendar = ({ ...props }: React.SVGProps<SVGSVGElement>) => (
         y2="28.0665"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint7_linear_2377_14168"
@@ -135,8 +135,8 @@ export const IconCalendar = ({ ...props }: React.SVGProps<SVGSVGElement>) => (
         y2="37.1329"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint8_linear_2377_14168"
@@ -146,8 +146,8 @@ export const IconCalendar = ({ ...props }: React.SVGProps<SVGSVGElement>) => (
         y2="28.0665"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
     </defs>
   </svg>

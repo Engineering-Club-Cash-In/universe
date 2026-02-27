@@ -91,7 +91,7 @@ export const BuyCar = () => {
           {items.map((item, index) => (
             <div key={index} className="flex gap-6">
               {/* Contenedor del icono */}
-              <div className="flex w-10 h-10 lg:w-16 lg:h-16 p-2 lg:p-4 justify-center items-center shrink-0 rounded-[11.252px] bg-primary/10">
+              <div className="flex text-secondary w-10 h-10 lg:w-16 lg:h-16 p-2 lg:p-4 justify-center items-center shrink-0 rounded-[11.252px] bg-primary/10">
                 {item.icon}
               </div>
 

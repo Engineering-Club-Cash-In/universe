@@ -360,6 +360,7 @@
     traspaso: numeric("traspaso", { precision: 18, scale: 2 }).default("0"),
     garantia_mobiliaria: numeric("garantia_mobiliaria", { precision: 18, scale: 2 }).default("0"),
     otros: numeric("otros", { precision: 18, scale: 2 }).default("0"),
+    cuotas_atrasadas: integer("cuotas_atrasadas").notNull().default(0),
     created_at: timestamp("created_at", { withTimezone: true }).default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
   });
 

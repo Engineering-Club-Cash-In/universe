@@ -13,6 +13,7 @@ import {
 	FileText,
 	Gavel,
 	Key,
+	Landmark,
 	LayoutDashboard,
 	MessageSquare,
 	Scale,
@@ -264,6 +265,22 @@ export default function Header() {
 								</Link>
 							</Button>
 						)}
+
+						{/* Inversiones */}
+						{session &&
+							userRole &&
+							PERMISSIONS.canAccessInvestments(userRole) && (
+								<Button
+									variant={isActive("/inversiones") ? "secondary" : "ghost"}
+									size="sm"
+									asChild
+								>
+									<Link to="/inversiones">
+										<TrendingUp className="mr-2 h-4 w-4" />
+										Inversiones
+									</Link>
+								</Button>
+							)}
 
 						{/* Contabilidad Dropdown */}
 						{session &&

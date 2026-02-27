@@ -35,7 +35,7 @@ import {
   ne,
   isNull,
 } from "drizzle-orm";
-import { getPagosDelMesActual } from "./payments";
+import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./payments";
 import { Context } from "elysia/dist/context";
 
 export const getCreditoByNumero = async (numero_credito_sifco: string) => {
@@ -1183,62 +1183,8 @@ export async function cancelCredit(creditId: number) {
     if (!credit) {
       return { message: "Crédito no encontrado." };
     }
-    const hoy = new Date();
 
-    // 2. Obtener cuotas pendientes (vencidas y no pagadas)
-    const cuotasPendientes = await db
-      .select({
-        cuota_id: cuotas_credito.cuota_id,
-        credito_id: cuotas_credito.credito_id,
-        numero_cuota: cuotas_credito.numero_cuota,
-        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
-        pagado: cuotas_credito.pagado,
-        createdAt: cuotas_credito.createdAt,
-        validationStatus: pagos_credito.validationStatus,
-      })
-      .from(cuotas_credito)
-      .innerJoin(
-        pagos_credito,
-        eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
-      )
-      .where(
-        and(
-          eq(cuotas_credito.credito_id, creditId),
-          eq(cuotas_credito.pagado, false),
-          lt(cuotas_credito.fecha_vencimiento, hoy.toISOString().slice(0, 10))
-        )
-      )
-      .orderBy(asc(cuotas_credito.numero_cuota));
-
-    // 3. Obtener la cuota actual (primera cuota con fecha >= hoy)
-    const [cuotaActual] = await db
-      .select({
-        cuota_id: cuotas_credito.cuota_id,
-        numero_cuota: cuotas_credito.numero_cuota,
-        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
-        // 🔥 RESTANTES de la cuota actual
-        capital_restante: pagos_credito.capital_restante,
-        interes_restante: pagos_credito.interes_restante,
-        iva_12_restante: pagos_credito.iva_12_restante,
-        seguro_restante: pagos_credito.seguro_restante,
-        gps_restante: pagos_credito.gps_restante,
-        membresias_restante: pagos_credito.membresias,
-      })
-      .from(cuotas_credito)
-      .innerJoin(
-        pagos_credito,
-        eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
-      )
-      .where(
-        and(
-          eq(cuotas_credito.credito_id, creditId),
-          gt(cuotas_credito.numero_cuota, 0),
-          gte(cuotas_credito.fecha_vencimiento, hoy.toISOString().slice(0, 10))
-        )
-      )
-      .orderBy(cuotas_credito.fecha_vencimiento)
-      .limit(1);
-
+    // 2. Mora activa
     const [morasCredito] = await db
       .select()
       .from(moras_credito)
@@ -1248,62 +1194,18 @@ export async function cancelCredit(creditId: number) {
           eq(moras_credito.activa, true)
         )
       );
-    const numeroCuotasPendientes = cuotasPendientes.length;
 
-    // 4. Calcular montos base (cuotas vencidas)
-    const capitalActual = new Big(credit.capital ?? 0);
-    const cuotaInteres = new Big(credit.cuota_interes ?? 0);
-    const membresiasPago = new Big(credit.membresias ?? 0);
-    const seguro10Cuotas = new Big(credit.seguro_10_cuotas ?? 0);
-    const iva12 = new Big(credit.iva_12 ?? 0);
-
-    const totalInteresesPendientes = cuotaInteres.times(numeroCuotasPendientes);
-    const totalMembresiasPendientes = membresiasPago.times(numeroCuotasPendientes);
-    const totalSeguroPendiente = seguro10Cuotas.times(numeroCuotasPendientes);
-    const totalIvaPendiente = iva12.times(numeroCuotasPendientes);
-
-    // 5. Obtener restantes de la cuota actual
-    const restantesCuotaActual = {
-      capital: new Big(cuotaActual?.capital_restante ?? 0),
-      interes: new Big(cuotaActual?.interes_restante ?? 0),
-      iva: new Big(cuotaActual?.iva_12_restante ?? 0),
-      seguro: new Big(cuotaActual?.seguro_restante ?? 0),
-      gps: new Big(cuotaActual?.gps_restante ?? 0),
-      membresias: new Big(cuotaActual?.membresias_restante ?? 0),
-    };
-
-    // 6. Sumar restantes de cuota actual a los totales
-    const totalInteresesConRestante = totalInteresesPendientes.plus(restantesCuotaActual.interes);
-    const totalMembresiaConRestante = totalMembresiasPendientes.plus(restantesCuotaActual.membresias);
-    const totalSeguroConRestante = totalSeguroPendiente.plus(restantesCuotaActual.seguro);
-    const totalIvaConRestante = totalIvaPendiente.plus(restantesCuotaActual.iva);
-    const totalGpsRestante = restantesCuotaActual.gps;
-
-    // 7. Devolver la info
+    // 3. Devolver valores unitarios por cuota (fijos del crédito)
     return {
       message: "Resumen del crédito a cancelar",
       credito: {
-        capital_actual: capitalActual.toFixed(2),
-        total_intereses_pendientes: totalInteresesConRestante.toFixed(2),
-        total_membresias_pendientes: totalMembresiaConRestante.toFixed(2),
-        total_seguro_pendiente: totalSeguroConRestante.toFixed(2),
-        total_iva_pendiente: totalIvaConRestante.toFixed(2),
-        total_gps_pendiente: totalGpsRestante.toFixed(2),
-        cuotas_pendientes: cuotasPendientes.length,
-        mora: morasCredito ? morasCredito.monto_mora : 0,
-        // 🔥 Info de la cuota actual (para debug/referencia)
-        cuota_actual: cuotaActual ? {
-          numero_cuota: cuotaActual.numero_cuota,
-          fecha_vencimiento: cuotaActual.fecha_vencimiento,
-          restantes: {
-            capital: restantesCuotaActual.capital.toFixed(2),
-            interes: restantesCuotaActual.interes.toFixed(2),
-            iva: restantesCuotaActual.iva.toFixed(2),
-            seguro: restantesCuotaActual.seguro.toFixed(2),
-            gps: restantesCuotaActual.gps.toFixed(2),
-            membresias: restantesCuotaActual.membresias.toFixed(2),
-          },
-        } : null,
+        capital: credit.capital ?? "0",
+        interes: credit.cuota_interes ?? "0",
+        iva: credit.iva_12 ?? "0",
+        membresias: credit.membresias ?? "0",
+        seguro: credit.seguro_10_cuotas ?? "0",
+        gps: credit.gps ?? "0",
+        mora: morasCredito ? morasCredito.monto_mora : "0",
       },
     };
   } catch (error) {
@@ -1336,6 +1238,7 @@ const AccionCreditoParamsSchema = z.object({
   traspaso: z.number().optional(),
   garantia_mobiliaria: z.number().optional(),
   otros: z.number().optional(),
+  cuotas_atrasadas: z.number().int().min(0).optional(),
 });
 
 const STATUS_MAP = {
@@ -1365,6 +1268,7 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
     traspaso,
     garantia_mobiliaria,
     otros,
+    cuotas_atrasadas,
   } = AccionCreditoParamsSchema.parse(input);
 
   // Guard rails for actions that require motivo + monto
@@ -1419,6 +1323,7 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
           traspaso: (traspaso ?? 0).toString(),
           garantia_mobiliaria: (garantia_mobiliaria ?? 0).toString(),
           otros: (otros ?? 0).toString(),
+          cuotas_atrasadas: cuotas_atrasadas ?? 0,
         });
 
         return {
@@ -1600,9 +1505,9 @@ export async function resetCredit({
   numeroAutorizacion?: string;
 }) {
   try {
-    // 🚨 1. Verificar si existe una mora activa para el crédito
-    const moraActiva = await db
-      .select()
+    // 1. Jalar mora activa (si existe, se incluye en el pago de cierre)
+    const [moraActiva] = await db
+      .select({ monto_mora: moras_credito.monto_mora })
       .from(moras_credito)
       .where(
         and(
@@ -1612,13 +1517,18 @@ export async function resetCredit({
       )
       .limit(1);
 
-    if (moraActiva.length > 0) {
-      throw new Error(
-        "No se puede reiniciar el crédito porque tiene una mora activa."
-      );
+    const moraBig = new Big(moraActiva?.monto_mora as unknown as string ?? "0");
+
+    // 2. Consultar crédito ANTES de resetearlo (necesitamos los valores originales)
+    const [credito] = await db
+      .select()
+      .from(creditos)
+      .where(eq(creditos.credito_id, creditId));
+    if (!credito) {
+      throw new Error("Crédito no encontrado.");
     }
 
-    // 2. Determinar el estado del crédito
+    // 3. Determinar el estado del crédito
     const statusCredit =
       typeof montoIncobrable !== "undefined" &&
       montoIncobrable > 0 &&
@@ -1626,7 +1536,169 @@ export async function resetCredit({
         ? "INCOBRABLE"
         : "CANCELADO";
 
-    // 3. Reinicia el crédito poniendo todos los montos a cero y el estado
+    // 4. Jalar la cancelación para obtener cuotas_atrasadas, garantía, traspaso, otros
+    const [cancelacion] = await db
+      .select()
+      .from(credit_cancelations)
+      .where(eq(credit_cancelations.credit_id, creditId))
+      .limit(1);
+
+    const n = cancelacion?.cuotas_atrasadas ?? 0;
+
+    // 5. Jalar extras (montos_adicionales)
+    const extrasRows = await db
+      .select({ monto: montos_adicionales.monto })
+      .from(montos_adicionales)
+      .where(eq(montos_adicionales.credit_id, creditId));
+
+    const totalExtras = extrasRows.reduce(
+      (acc, row) => acc.plus(row.monto as unknown as string),
+      new Big(0)
+    );
+
+    // 6. Calcular abonos reales
+    const abonoCapital = new Big(credito.capital ?? "0");
+    const abonoInteres = new Big(credito.cuota_interes ?? "0").times(n);
+    const abonoIva = new Big(credito.iva_12 ?? "0").times(n);
+    const abonoSeguro = new Big(credito.seguro_10_cuotas ?? "0").times(n);
+    const abonoGps = new Big(credito.gps ?? "0").times(n);
+    const abonoMembresias = new Big(credito.membresias ?? "0").times(n);
+
+    const otrosCancelacion = new Big(cancelacion?.garantia_mobiliaria ?? "0")
+      .plus(cancelacion?.traspaso ?? "0")
+      .plus(cancelacion?.otros ?? "0")
+      .plus(totalExtras);
+
+    const totalMontoPago = abonoCapital
+      .plus(abonoInteres)
+      .plus(abonoIva)
+      .plus(abonoSeguro)
+      .plus(abonoGps)
+      .plus(abonoMembresias)
+      .plus(otrosCancelacion)
+      .plus(moraBig);
+
+    // 7. Construir URLs de boletas
+    const r2BaseUrl = import.meta.env.URL_PUBLIC_R2 ?? "";
+    const urlCompletas = construirUrlBoletas(url_boletas, r2BaseUrl);
+
+    // 8. Obtener pagos del mes + monto de boleta
+    const pago_del_mes = await getPagosDelMesActual(credito.credito_id);
+    const pago_del_mesBig = new Big(pago_del_mes ?? 0).add(montoBoleta ?? 0);
+
+    // 9. Buscar cuota_id correspondiente
+    const [cuotaEncontrada] = await db
+      .select({ cuota_id: cuotas_credito.cuota_id })
+      .from(cuotas_credito)
+      .where(
+        and(
+          eq(cuotas_credito.credito_id, credito.credito_id),
+          eq(cuotas_credito.numero_cuota, cuota)
+        )
+      )
+      .limit(1);
+
+    const cuotaId = cuotaEncontrada?.cuota_id;
+
+    // 10. Insertar pago de cierre con abonos reales
+    const [nuevoPago] = await db
+      .insert(pagos_credito)
+      .values({
+        credito_id: credito.credito_id,
+        cuota_id: cuotaId,
+        cuota: credito.cuota?.toString() ?? "0",
+        cuota_interes: credito.cuota_interes?.toString() ?? "0",
+        abono_capital: abonoCapital.toString(),
+        abono_interes: abonoInteres.toString(),
+        abono_iva_12: abonoIva.toString(),
+        abono_interes_ci: "0",
+        abono_iva_ci: "0",
+        abono_seguro: abonoSeguro.toString(),
+        abono_gps: abonoGps.toString(),
+        pago_del_mes: pago_del_mesBig.toString(),
+        monto_boleta: montoBoleta.toString(),
+        capital_restante: "0",
+        interes_restante: "0",
+        iva_12_restante: "0",
+        seguro_restante: "0",
+        gps_restante: "0",
+        total_restante: "0",
+        llamada: "",
+        renuevo_o_nuevo: "renuevo",
+        membresias: "0",
+        membresias_pago: abonoMembresias.toString(),
+        membresias_mes: abonoMembresias.toString(),
+        otros: otrosCancelacion.toString(),
+        mora: moraBig.toString(),
+        monto_boleta_cuota: montoBoleta.toString(),
+        seguro_total: credito.seguro_10_cuotas?.toString() ?? "0",
+        pagado: true,
+        facturacion: "si",
+        mes_pagado: "",
+        seguro_facturado: abonoSeguro.toString(),
+        gps_facturado: abonoGps.toString(),
+        reserva: "0",
+        observaciones: "",
+        validationStatus: "reset" as const,
+        banco_id: banco_id ?? 0,
+        numeroAutorizacion: numeroAutorizacion ?? "",
+        registerBy: "system_reset",
+        pagoConvenio: "0",
+        monto_aplicado: totalMontoPago.toString(),
+      })
+      .returning();
+
+    // 11. Eliminar pagos no pagados
+    await db
+      .delete(pagos_credito)
+      .where(
+        and(
+          eq(pagos_credito.credito_id, credito.credito_id),
+          eq(pagos_credito.pagado, false)
+        )
+      );
+
+    // 12. Eliminar cuotas del crédito
+    await db
+      .delete(cuotas_credito)
+      .where(eq(cuotas_credito.credito_id, credito.credito_id));
+
+    // 13. Distribuir pago entre inversionistas (ANTES de reiniciar, necesita monto_aportado)
+    if (nuevoPago?.pago_id) {
+      await insertPagosCreditoInversionistasV2(
+        nuevoPago.pago_id,
+        credito.credito_id
+      );
+    }
+
+    // 14. Reiniciar creditos_inversionistas (no espejo)
+    await db
+      .update(creditos_inversionistas)
+      .set({
+        monto_aportado: "0",
+        monto_inversionista: "0",
+        monto_cash_in: "0",
+        iva_inversionista: "0",
+        iva_cash_in: "0",
+      })
+      .where(eq(creditos_inversionistas.credito_id, credito.credito_id));
+
+    // 15. Insertar boletas si existen
+    if (
+      urlCompletas &&
+      urlCompletas.length > 0 &&
+      nuevoPago &&
+      nuevoPago?.pago_id
+    ) {
+      await db.insert(boletas).values(
+        urlCompletas.map((url) => ({
+          pago_id: nuevoPago?.pago_id,
+          url_boleta: url,
+        }))
+      );
+    }
+
+    // 16. Al final: zerear el crédito y ponerle el status
     await db
       .update(creditos)
       .set({
@@ -1648,111 +1720,7 @@ export async function resetCredit({
       })
       .where(eq(creditos.credito_id, creditId));
 
-    // 4. Consulta el crédito para validar que existe
-    const [credito] = await db
-      .select()
-      .from(creditos)
-      .where(eq(creditos.credito_id, creditId));
-    if (!credito) {
-      throw new Error("Crédito no encontrado.");
-    }
-
-    // 5. Construir URLs de boletas
-    const r2BaseUrl = import.meta.env.URL_PUBLIC_R2 ?? "";
-    const urlCompletas = construirUrlBoletas(url_boletas, r2BaseUrl);
-
-    // 6. Obtener pagos del mes + monto de boleta
-    const pago_del_mes = await getPagosDelMesActual(credito.credito_id);
-    const pago_del_mesBig = new Big(pago_del_mes ?? 0).add(montoBoleta ?? 0);
-
-    // 7. Buscar cuota_id correspondiente
-    const [cuotaEncontrada] = await db
-      .select({ cuota_id: cuotas_credito.cuota_id })
-      .from(cuotas_credito)
-      .where(
-        and(
-          eq(cuotas_credito.credito_id, credito.credito_id),
-          eq(cuotas_credito.numero_cuota, cuota)
-        )
-      )
-      .limit(1);
-
-    const cuotaId = cuotaEncontrada?.cuota_id;
-
-    // 8. Insertar nuevo pago
-    const [nuevoPago] = await db
-      .insert(pagos_credito)
-      .values({
-        credito_id: credito.credito_id,
-        cuota_id: cuotaId,
-        cuota: credito.cuota?.toString() ?? "0",
-        cuota_interes: credito.cuota_interes?.toString() ?? "0",
-        abono_capital: "0",
-        abono_interes: "0",
-        abono_iva_12: "0",
-        abono_interes_ci: "0",
-        abono_iva_ci: "0",
-        abono_seguro: "0",
-        abono_gps: "0",
-        pago_del_mes: pago_del_mesBig.toString(),
-        monto_boleta: montoBoleta.toString(),
-        capital_restante: credito.capital?.toString() ?? "0",
-        interes_restante: credito.cuota_interes?.toString() ?? "0",
-        iva_12_restante: credito.iva_12?.toString() ?? "0",
-        seguro_restante: credito.seguro_10_cuotas?.toString() ?? "0",
-        gps_restante: credito.gps?.toString() ?? "0",
-        total_restante: credito.deudatotal?.toString() ?? "0",
-        llamada: "",
-        renuevo_o_nuevo: "renuevo",
-        membresias: credito.membresias_pago?.toString() ?? "",
-        membresias_pago: credito.membresias_pago?.toString() ?? "",
-        membresias_mes: credito.membresias_pago?.toString() ?? "",
-        otros: "0",
-        mora: "0",
-        monto_boleta_cuota: montoBoleta.toString(),
-        seguro_total: credito.seguro_10_cuotas?.toString() ?? "0",
-        pagado: true,
-        facturacion: "si",
-        mes_pagado: "",
-        seguro_facturado: credito.seguro_10_cuotas?.toString() ?? "0",
-        gps_facturado: credito.gps?.toString() ?? "0",
-        reserva: "0",
-        observaciones: "",
-        validationStatus: "reset" as const,
-        banco_id: banco_id ?? 0,
-        numeroAutorizacion: numeroAutorizacion ?? "",
-        registerBy: "system_reset",
-        pagoConvenio: "0",
-        monto_aplicado: montoBoleta.toString(),
-      })
-      .returning();
-
-    // 9. Eliminar pagos no pagados
-    await db
-      .delete(pagos_credito)
-      .where(
-        and(
-          eq(pagos_credito.credito_id, credito.credito_id),
-          eq(pagos_credito.pagado, false)
-        )
-      );
-
-    // 10. Insertar boletas si existen
-    if (
-      urlCompletas &&
-      urlCompletas.length > 0 &&
-      nuevoPago &&
-      nuevoPago?.pago_id
-    ) {
-      await db.insert(boletas).values(
-        urlCompletas.map((url) => ({
-          pago_id: nuevoPago?.pago_id,
-          url_boleta: url,
-        }))
-      );
-    }
-
-    // 11. Retorno OK
+    // 17. Retorno OK
     return {
       ok: true,
       message: "Crédito reiniciado y pago creado exitosamente.",

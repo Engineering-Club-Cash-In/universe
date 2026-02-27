@@ -13,7 +13,7 @@ interface SelectProps {
   onChange: (value: string) => void;
   placeholder?: string;
   color?: string;
-  variant?: "dark" | "light";
+  variant?: "dark" | "light" | "secondary";
 }
 
 export const Select = ({
@@ -32,34 +32,47 @@ export const Select = ({
 
   // Estilos según variante
   const isLight = variant === "light";
-  
-  const buttonStyles = isLight
-    ? {
-        background: "#F9FAFB",
-        color: selectedOption ? "#6B7280" : "#9CA3AF",
-        border: "0 solid #E5E7EB",
-      }
-    : {
-        background: "rgba(0, 0, 0, 0.00)",
-        color: selectedOption ? "#FFFFFF" : "#9CA3AF",
-        border: "0.86px solid #374151",
-      };
+  const isSecondary = variant === "secondary";
 
-  const dropdownStyles = isLight
+  const buttonStyles = isSecondary
     ? {
-        background: "#FFFFFF",
-        border: "1px solid #E5E7EB",
-        boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+        background: "#D9D9D9",
+        color: selectedOption ? "#000000" : "#6B7280",
+        border: "0 solid transparent",
       }
-    : {
-        background: "#0F0F0F",
-        border: "1px solid #364050",
-        boxShadow: "0 4px 6px rgba(0, 0, 0, 0.3)",
-      };
+    : isLight
+      ? {
+          background: "#F9FAFB",
+          color: selectedOption ? "#6B7280" : "#9CA3AF",
+          border: "0 solid #E5E7EB",
+        }
+      : {
+          background: "rgba(0, 0, 0, 0.00)",
+          color: selectedOption ? "#FFFFFF" : "#9CA3AF",
+          border: "0.86px solid #374151",
+        };
 
-  const optionTextColor = isLight ? "#6B7280" : "#FFFFFF";
-  const optionHoverBg = isLight ? "#F3F4F6" : "#1F2937";
-  const optionSelectedBg = isLight ? "#E5E7EB" : "#1F2937";
+  const dropdownStyles = isSecondary
+    ? {
+        background: "#D9D9D9",
+        border: "1px solid #BFBFBF",
+        boxShadow: "0 4px 6px rgba(0, 0, 0, 0.15)",
+      }
+    : isLight
+      ? {
+          background: "#FFFFFF",
+          border: "1px solid #E5E7EB",
+          boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+        }
+      : {
+          background: "#0F0F0F",
+          border: "1px solid #364050",
+          boxShadow: "0 4px 6px rgba(0, 0, 0, 0.3)",
+        };
+
+  const optionTextColor = isSecondary ? "#000000" : isLight ? "#6B7280" : "#FFFFFF";
+  const optionHoverBg = isSecondary ? "#C4C4C4" : isLight ? "#F3F4F6" : "#1F2937";
+  const optionSelectedBg = isSecondary ? "#BFBFBF" : isLight ? "#E5E7EB" : "#1F2937";
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -86,9 +99,9 @@ export const Select = ({
         onClick={() => setIsOpen(!isOpen)}
         style={{
           width: "100%",
-          height: isLight ? "58px" : "50px",
-          borderRadius: isLight ? "8px" : "6.882px",
-          padding: isLight ? "16px" : "0 16px",
+          height: isSecondary ? "auto" : isLight ? "58px" : "50px",
+          borderRadius: isSecondary ? "8px" : isLight ? "8px" : "6.882px",
+          padding: isSecondary ? "16px" : isLight ? "16px" : "0 16px",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
@@ -99,12 +112,12 @@ export const Select = ({
           ...buttonStyles,
         }}
         onMouseEnter={(e) => {
-          if (!isLight) {
+          if (!isLight && !isSecondary) {
             e.currentTarget.style.borderColor = "#4B5563";
           }
         }}
         onMouseLeave={(e) => {
-          if (!isLight) {
+          if (!isLight && !isSecondary) {
             e.currentTarget.style.borderColor = "#374151";
           }
         }}
@@ -130,7 +143,7 @@ export const Select = ({
             top: "calc(100% + 4px)",
             left: 0,
             right: 0,
-            borderRadius: isLight ? "8px" : "6.88px",
+            borderRadius: isSecondary ? "8px" : isLight ? "8px" : "6.88px",
             opacity: 0.99,
             zIndex: 1000,
             maxHeight: "300px",

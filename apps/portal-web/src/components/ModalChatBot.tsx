@@ -88,7 +88,11 @@ export const ModalChatBot: React.FC<ModalChatBotProps> = ({
                       {option.description}
                     </p>
                     <div>
-                      <Button onClick={option.buttonAction} size="md">
+                      <Button
+                        onClick={option.buttonAction}
+                        size="md"
+                        variant={option.type === "whatsapp" ? "whatsapp" : "default"}
+                      >
                         {option.buttonText}
                       </Button>
                     </div>

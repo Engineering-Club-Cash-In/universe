@@ -9,6 +9,7 @@ interface CheckBoxProps {
   className?: string;
   isLabelLink?: boolean;
   labelHref?: string;
+  onLabelClick?: () => void;
 }
 
 export const CheckBox: React.FC<CheckBoxProps> = ({
@@ -18,6 +19,7 @@ export const CheckBox: React.FC<CheckBoxProps> = ({
   className = "",
   isLabelLink = false,
   labelHref,
+  onLabelClick,
 }) => {
   
   const handleToggle = (e: React.MouseEvent) => {
@@ -52,7 +54,17 @@ export const CheckBox: React.FC<CheckBoxProps> = ({
       </motion.div>
       {label && (
         <>
-          {isLabelLink && labelHref ? (
+          {isLabelLink && onLabelClick ? (
+            <span
+              className="font-[Hero] text-[16px] select-none underline cursor-pointer hover:text-white/80 transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                onLabelClick();
+              }}
+            >
+              {label}
+            </span>
+          ) : isLabelLink && labelHref ? (
             <a
               href={labelHref}
               target="_blank"

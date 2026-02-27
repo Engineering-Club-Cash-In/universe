@@ -4,9 +4,7 @@ import {
   IconDollar,
   IconSearch,
   IconSettings,
-  Button,
 } from "@/components";
-import { Link } from "@tanstack/react-router";
 import { useIsMobile } from "@/hooks";
 
 interface items {
@@ -123,10 +121,7 @@ export const HowSellOrBuy = () => {
           ))}
         </div>
         <div className="flex justify-center mt-12">
-          {/* TODO: devolver a "/marketplace" cuando esté habilitado */}
-          <Link to="/credit">
-            <Button size={isMobile ? "sm" : "lg"}>Comprar un auto</Button>
-          </Link>
+          <span className="text-primary" style={{ fontSize: "22px" }}>Próximamente</span>
         </div>
       </div>
 
@@ -153,9 +148,7 @@ export const HowSellOrBuy = () => {
           ))}
         </div>
         <div className="flex justify-center mt-12">
-          <Link to="/sell">
-            <Button size={isMobile ? "sm" : "lg"}>Vender mi auto</Button>
-          </Link>
+          <span className="text-primary" style={{ fontSize: "22px" }}>Próximamente</span>
         </div>
       </div>
     </section>

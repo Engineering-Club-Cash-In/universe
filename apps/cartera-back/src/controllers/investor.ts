@@ -3540,31 +3540,31 @@ export async function getLiquidaciones({
       // 💳 Traer pagos de esta liquidación
       const pagos = await db
         .select({
-          pago_id: pagos_credito_inversionistas.id,
-          pago_credito_id: pagos_credito_inversionistas.pago_id,
-          credito_id: pagos_credito_inversionistas.credito_id,
-          abono_capital: pagos_credito_inversionistas.abono_capital,
-          abono_interes: pagos_credito_inversionistas.abono_interes,
-          abono_iva: pagos_credito_inversionistas.abono_iva_12,
+          pago_id: pagos_credito_inversionistas_espejo.id,
+          pago_credito_id: pagos_credito_inversionistas_espejo.pago_id,
+          credito_id: pagos_credito_inversionistas_espejo.credito_id,
+          abono_capital: pagos_credito_inversionistas_espejo.abono_capital,
+          abono_interes: pagos_credito_inversionistas_espejo.abono_interes,
+          abono_iva: pagos_credito_inversionistas_espejo.abono_iva_12,
           porcentaje_participacion:
-            pagos_credito_inversionistas.porcentaje_participacion,
-          fecha_pago: pagos_credito_inversionistas.fecha_pago,
-          cuota: pagos_credito_inversionistas.cuota,
+            pagos_credito_inversionistas_espejo.porcentaje_participacion,
+          fecha_pago: pagos_credito_inversionistas_espejo.fecha_pago,
+          cuota: pagos_credito_inversionistas_espejo.cuota,
           // Info del crédito
           numero_credito_sifco: creditos.numero_credito_sifco,
           nombre_cliente: usuarios.nombre,
           nit_cliente: usuarios.nit,
         })
-        .from(pagos_credito_inversionistas)
+        .from(pagos_credito_inversionistas_espejo)
         .leftJoin(
           creditos,
-          eq(pagos_credito_inversionistas.credito_id, creditos.credito_id)
+          eq(pagos_credito_inversionistas_espejo.credito_id, creditos.credito_id)
         )
         .leftJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
         .where(
-          eq(pagos_credito_inversionistas.liquidacion_id, liq.liquidacion_id)
+          eq(pagos_credito_inversionistas_espejo.liquidacion_id, liq.liquidacion_id)
         )
-        .orderBy(pagos_credito_inversionistas.fecha_pago);
+        .orderBy(pagos_credito_inversionistas_espejo.fecha_pago);
 
       // 💰 Calcular ISR por pago
       const pagosConISR = pagos.map((pago) => {
@@ -3639,14 +3639,14 @@ export async function getInvestorPerformance(dpi: string) {
   // 2️⃣ Obtener todas las inversiones del inversionista
   const inversiones = await db
     .select({
-      credito_id: creditos_inversionistas.credito_id,
-      monto_aportado: creditos_inversionistas.monto_aportado,
-      cuota_inversionista: creditos_inversionistas.cuota_inversionista,
+      credito_id: creditos_inversionistas_espejo.credito_id,
+      monto_aportado: creditos_inversionistas_espejo.monto_aportado,
+      cuota_inversionista: creditos_inversionistas_espejo.cuota_inversionista,
     })
-    .from(creditos_inversionistas)
+    .from(creditos_inversionistas_espejo)
     .where(
       eq(
-        creditos_inversionistas.inversionista_id,
+        creditos_inversionistas_espejo.inversionista_id,
         inversionista.inversionista_id
       )
     );
@@ -3664,17 +3664,17 @@ export async function getInvestorPerformance(dpi: string) {
     // Buscar cuotas LIQUIDADAS de este crédito para este inversionista
     const pagosLiquidados = await db
       .select({
-        cuota: pagos_credito_inversionistas.cuota,
+        cuota: pagos_credito_inversionistas_espejo.cuota,
       })
-      .from(pagos_credito_inversionistas)
+      .from(pagos_credito_inversionistas_espejo)
       .where(
         and(
           eq(
-            pagos_credito_inversionistas.inversionista_id,
+            pagos_credito_inversionistas_espejo.inversionista_id,
             inversionista.inversionista_id
           ),
-          eq(pagos_credito_inversionistas.credito_id, inv.credito_id),
-          eq(pagos_credito_inversionistas.estado_liquidacion, "LIQUIDADO")
+          eq(pagos_credito_inversionistas_espejo.credito_id, inv.credito_id),
+          eq(pagos_credito_inversionistas_espejo.estado_liquidacion, "LIQUIDADO")
         )
       );
 

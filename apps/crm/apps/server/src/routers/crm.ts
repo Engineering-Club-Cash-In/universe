@@ -1352,8 +1352,8 @@ export const crmRouter = {
 								});
 							}
 
-							// Para vehículos nuevos, validar campos adicionales para 100%
-							if (vehicleForValidation[0].isNew) {
+							// Para vehículos nuevos, validar campos adicionales solo al cerrar al 100%
+							if (vehicleForValidation[0].isNew && toPercentage === 100) {
 								const missingForCompletion = getMissingFieldsForCompletion(
 									vehicleForValidation[0],
 								);

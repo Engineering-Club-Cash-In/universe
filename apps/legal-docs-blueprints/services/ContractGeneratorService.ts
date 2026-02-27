@@ -567,16 +567,14 @@ export class ContractGeneratorService {
         }
       }
 
-      // 11.5. Subir PDF a R2 solo si NO hay flujo de firma (evitar uploads redundantes)
+      // 11.5. Subir PDF a R2 siempre (garantiza r2Key independiente de firma)
       let r2KeyDirect: string | undefined;
-      const hasSigningFlow = options.emails && options.emails.length > 0;
-      if (pdfBuffer && !hasSigningFlow) {
+      if (pdfBuffer) {
         try {
           const result = await uploadPdfToR2(pdfBuffer, baseFilename);
           r2KeyDirect = result.r2Key;
         } catch (error) {
-          console.error('Error al subir PDF a R2:', error);
-          // No fallar - continuamos con el flujo normal
+          console.error('⚠️ ALERTA: No se pudo subir PDF a R2. El contrato NO tendrá r2Key:', error);
         }
       }
 
@@ -642,7 +640,7 @@ export class ContractGeneratorService {
       }
 
       // 13. Limpiar archivos locales si se subieron exitosamente a R2
-      if (shouldCleanupFiles) {
+      if (shouldCleanupFiles || r2KeyDirect) {
         try {
           await this.cleanupLocalFiles(docxPath, pdfPath);
           console.log(`🗑️  Archivos locales eliminados (ya están en R2)`);
@@ -728,7 +726,7 @@ export class ContractGeneratorService {
         signing_links: signingLinks,
         linkDocument: signing?.linkDocument || '',
         signingProvider,
-        r2Key: signing?.r2Key || r2KeyDirect,
+        r2Key: r2KeyDirect || signing?.r2Key,
         // Campos adicionales para backward compatibility
         contractType,
         docx_path: docxPath,

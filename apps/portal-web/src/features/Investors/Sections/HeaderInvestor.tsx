@@ -40,7 +40,7 @@ export const HeaderInvestor = () => {
           {/* Botones */}
           <div className="flex gap-6 mt-4  w-full xl:w-3/4">
             <motion.button
-              className="flex items-center p-4 justify-center gap-4 w-full text-secondary  rounded-xl border border-secondary/50 hover:bg-secondary/10 transition-colors"
+              className="flex items-center p-4 justify-center gap-4 w-full text-primary  rounded-xl border border-primary/50 hover:bg-primary/10 transition-colors"
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               transition={{ type: "spring", stiffness: 400, damping: 17 }}
@@ -55,7 +55,7 @@ export const HeaderInvestor = () => {
             </motion.button>
 
             <motion.button
-              className="flex items-center p-4 justify-center text-secondary gap-4 w-full  rounded-xl border border-secondary/50 hover:bg-secondary/10 transition-colors"
+              className="flex items-center p-4 justify-center text-primary gap-4 w-full  rounded-xl border border-primary/50 hover:bg-primary/10 transition-colors"
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               transition={{ type: "spring", stiffness: 400, damping: 17 }}

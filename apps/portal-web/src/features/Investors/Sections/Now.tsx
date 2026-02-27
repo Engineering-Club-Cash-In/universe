@@ -11,18 +11,17 @@ export const Now = () => {
       <div className="w-full lg:w-3/4 xl:w-1/2 mx-auto">
         {/* Contenedor principal con estilos especificados */}
         <div
-          className="relative overflow-hidden"
+          className="relative overflow-hidden border border-gray/60"
           style={{
             borderRadius: "24px",
-            border: "2px solid rgba(212, 175, 55, 0.30)",
             background:
-              "linear-gradient(135deg, rgba(212, 175, 55, 0.15) 25%, rgba(212, 175, 55, 0.15) 60.36%, rgba(0, 0, 0, 0.15) 95.71%)",
+              "linear-gradient(133deg, rgba(23, 23, 23, 0.15) 1.88%, rgba(78, 87, 234, 0.15) 49.37%, rgba(23, 23, 23, 0.15) 97.39%)",
           }}
         >
           <div className="p-8 md:p-12 flex flex-col items-center text-center">
             {/* Badge/Bottom Sheet con icono */}
             <motion.div
-              className="text-secondary inline-flex items-center gap-4 bg-secondary/20 px-4 py-2 rounded-full mb-6"
+              className="text-primary inline-flex items-center gap-4 bg-primary/20 px-4 py-2 rounded-full mb-6"
               initial={{ opacity: 0, y: 20 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
@@ -47,19 +46,29 @@ export const Now = () => {
             </motion.h2>
 
             {/* Descripción */}
+            <motion.p
+              className="text-gray mb-8 lg:mb-12 leading-8"
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.5, delay: 0.2 }}
+            >
+             Únete a miles de inversionistas que ya están construyendo su patrimonio
+               con nosotros. Seguridad, rendimientos y el respaldo de expertos. 
+            </motion.p>
             
 
             {/* Botón Invierte Ahora con motion */}
             <motion.button
               onClick={() => navigate({ to: "/leadInvestor" })}
-              className="mt-4 lg:mt-0 px-12 lg:px-16 py-4 lg:py-6 rounded-xl font-semibold text-secondary border border-secondary text-2xl mb-8 lg:mb-12"
+              className="mt-4 lg:mt-0 px-12 lg:px-16 py-4 lg:py-6 rounded-xl font-semibold text-primary border border-primary text-2xl mb-8 lg:mb-12"
               initial={{ opacity: 0, scale: 0.9 }}
               whileInView={{ opacity: 1, scale: 1 }}
               viewport={{ once: true }}
               transition={{ duration: 0.5, delay: 0.3 }}
               whileHover={{
                 scale: 1.05,
-                boxShadow: "0 6px 30px rgba(212, 175, 55, 0.6)",
+                boxShadow: "0 6px 30px rgba(216, 229, 74, 0.6)",
               }}
               whileTap={{ scale: 0.95 }}
             >

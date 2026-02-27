@@ -95,10 +95,10 @@ export const FAQ = () => {
         {items.map((item, index) => (
           <div
             key={index}
+            className="border border-secondary/50"
             style={{
               borderRadius: "12px",
-              border: "1px solid rgba(212, 175, 55, 0.50)",
-              background: "linear-gradient(180deg, #0A0A0A 0%, #000 100%)",
+              background: " linear-gradient(0deg, rgba(208, 208, 208, 0.05) 0%, rgba(208, 208, 208, 0.05) 100%), linear-gradient(180deg, #171717 0%, #0C0C0C 100%)",
             }}
           >
             {/* Botón de pregunta */}

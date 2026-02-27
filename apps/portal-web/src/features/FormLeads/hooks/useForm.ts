@@ -5,7 +5,10 @@ import { useState } from "react";
 import { useLead } from "../store/useLead";
 import { sendLead } from "../service/serviceLead";
 
+export type CreditType = "autocompra" | "sobre_vehiculo";
+
 export interface FormLeadsValues {
+  creditType: CreditType | "";
   nombreCompleto: string;
   correo: string;
   telefono: string;
@@ -14,6 +17,9 @@ export interface FormLeadsValues {
 }
 
 const validationSchema = Yup.object({
+  creditType: Yup.string()
+    .oneOf(["autocompra", "sobre_vehiculo"], "Selecciona un tipo de crédito")
+    .required("El tipo de crédito es requerido"),
   nombreCompleto: Yup.string()
     .required("El nombre completo es requerido")
     .test("dos-palabras", "Debes ingresar al menos nombre y apellido", (value) => {
@@ -42,6 +48,7 @@ const validationSchema = Yup.object({
 });
 
 const initialValues: FormLeadsValues = {
+  creditType: "",
   nombreCompleto: "",
   correo: "",
   telefono: "",
@@ -82,8 +89,10 @@ export const useFormLeads = () => {
     touched: formik.touched,
     handleChange: (field: keyof FormLeadsValues) => (value: string) => {
       formik.setFieldValue(field, value);
-      if (serverError) setServerError(""); // Limpiar error del servidor al editar
+      if (serverError) setServerError("");
     },
+    setFieldValue: formik.setFieldValue,
+    setFieldTouched: formik.setFieldTouched,
     handleBlur: formik.handleBlur,
     handleSubmit: formik.handleSubmit,
     isValid: formik.isValid,

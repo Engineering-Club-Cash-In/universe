@@ -16,6 +16,7 @@ interface DatosFactura {
   receptor: {
     nit: string;
     nombre: string;
+    direccion?: string;
   };
   items: Array<{
     numeroLinea: string;
@@ -460,6 +461,7 @@ export function generarHTMLFacturaPro(
                 <div class="party-name">${datos.receptor.nombre}</div>
                 <div class="party-details">
                     <p>NIT: ${datos.receptor.nit}</p>
+                    <p>${datos.receptor.direccion || "Ciudad de Guatemala"}</p>
                 </div>
             </div>
         </section>

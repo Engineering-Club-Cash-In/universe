@@ -99,7 +99,6 @@ export function getMissingFields(
 		Vehicle,
 		| "isNew"
 		| "vinNumber"
-		| "licensePlate"
 		| "origin"
 		| "fuelType"
 		| "transmission"

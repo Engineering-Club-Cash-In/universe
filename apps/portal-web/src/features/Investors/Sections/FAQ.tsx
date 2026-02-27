@@ -56,7 +56,7 @@ export const FAQ = () => {
     },
     {
       question: "¿Cuál es la inversión mínima?",
-      answer: `Puedes comenzar a invertir desde Q3,000. Ofrecemos diferentes modelos adaptados a distintos perfiles y capacidades de inversión, para que todos puedan acceder a oportunidades de crecimiento financiero.`,
+      answer: `Puedes comenzar a invertir desde Q25,000. Ofrecemos diferentes modelos adaptados a distintos perfiles y capacidades de inversión, para que todos puedan acceder a oportunidades de crecimiento financiero.`,
     },
     {
       question: "¿Cuándo puedo retirar mi dinero?",

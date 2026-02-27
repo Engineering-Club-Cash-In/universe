@@ -1,16 +1,13 @@
 import { InvestorsLogo } from "@/features/footer/icons";
-import { IconArrow, IconInfo, ModalChatBot } from "@/components";
+import { IconArrow, IconInfo } from "@/components";
 import { motion } from "framer-motion";
-import { useModalOptionsCall, useIsMobile } from "@/hooks";
+import { useIsMobile } from "@/hooks";
+import { useNavigate } from "@tanstack/react-router";
 
 const imgUrl = import.meta.env.VITE_IMAGE_URL + "/investors.jpg";
 
 export const HeaderInvestor = () => {
-  const {
-    isModalOpen,
-    modalOptionsInvestors: modalOptions,
-    setIsModalOpen,
-  } = useModalOptionsCall();
+  const navigate = useNavigate();
   const isMobile = useIsMobile();
 
   return (
@@ -47,7 +44,7 @@ export const HeaderInvestor = () => {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               transition={{ type: "spring", stiffness: 400, damping: 17 }}
-              onClick={() => setIsModalOpen(true)}
+              onClick={() => navigate({ to: "/leadInvestor" })}
             >
               <div>
                 <IconArrow width={isMobile ? 16 : 24} height={isMobile ? 16 : 24} />
@@ -87,11 +84,6 @@ export const HeaderInvestor = () => {
           />
         </div>
       </div>
-      <ModalChatBot
-        open={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        options={modalOptions}
-      />
     </section>
   );
 };

@@ -119,7 +119,7 @@ export const BuyCar = () => {
       <ModalChatBot
         open={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        options={[optionsCredit.buy]}
+        options={optionsCredit.buy}
       />
     </section>
   );

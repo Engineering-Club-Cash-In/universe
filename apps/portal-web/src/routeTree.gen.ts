@@ -18,6 +18,7 @@ import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as LoansRouteImport } from './routes/loans'
 import { Route as LeadsRouteImport } from './routes/leads'
+import { Route as LeadInvestorRouteImport } from './routes/leadInvestor'
 import { Route as InvestmentsRouteImport } from './routes/investments'
 import { Route as InvestRouteImport } from './routes/invest'
 import { Route as DocumentsRouteImport } from './routes/documents'
@@ -73,6 +74,11 @@ const LeadsRoute = LeadsRouteImport.update({
   path: '/leads',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LeadInvestorRoute = LeadInvestorRouteImport.update({
+  id: '/leadInvestor',
+  path: '/leadInvestor',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const InvestmentsRoute = InvestmentsRouteImport.update({
   id: '/investments',
   path: '/investments',
@@ -126,6 +132,7 @@ export interface FileRoutesByFullPath {
   '/documents': typeof DocumentsRoute
   '/invest': typeof InvestRoute
   '/investments': typeof InvestmentsRoute
+  '/leadInvestor': typeof LeadInvestorRoute
   '/leads': typeof LeadsRoute
   '/loans': typeof LoansRoute
   '/login': typeof LoginRoute
@@ -146,6 +153,7 @@ export interface FileRoutesByTo {
   '/documents': typeof DocumentsRoute
   '/invest': typeof InvestRoute
   '/investments': typeof InvestmentsRoute
+  '/leadInvestor': typeof LeadInvestorRoute
   '/leads': typeof LeadsRoute
   '/loans': typeof LoansRoute
   '/login': typeof LoginRoute
@@ -167,6 +175,7 @@ export interface FileRoutesById {
   '/documents': typeof DocumentsRoute
   '/invest': typeof InvestRoute
   '/investments': typeof InvestmentsRoute
+  '/leadInvestor': typeof LeadInvestorRoute
   '/leads': typeof LeadsRoute
   '/loans': typeof LoansRoute
   '/login': typeof LoginRoute
@@ -189,6 +198,7 @@ export interface FileRouteTypes {
     | '/documents'
     | '/invest'
     | '/investments'
+    | '/leadInvestor'
     | '/leads'
     | '/loans'
     | '/login'
@@ -209,6 +219,7 @@ export interface FileRouteTypes {
     | '/documents'
     | '/invest'
     | '/investments'
+    | '/leadInvestor'
     | '/leads'
     | '/loans'
     | '/login'
@@ -229,6 +240,7 @@ export interface FileRouteTypes {
     | '/documents'
     | '/invest'
     | '/investments'
+    | '/leadInvestor'
     | '/leads'
     | '/loans'
     | '/login'
@@ -250,6 +262,7 @@ export interface RootRouteChildren {
   DocumentsRoute: typeof DocumentsRoute
   InvestRoute: typeof InvestRoute
   InvestmentsRoute: typeof InvestmentsRoute
+  LeadInvestorRoute: typeof LeadInvestorRoute
   LeadsRoute: typeof LeadsRoute
   LoansRoute: typeof LoansRoute
   LoginRoute: typeof LoginRoute
@@ -329,6 +342,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LeadsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/leadInvestor': {
+      id: '/leadInvestor'
+      path: '/leadInvestor'
+      fullPath: '/leadInvestor'
+      preLoaderRoute: typeof LeadInvestorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/investments': {
       id: '/investments'
       path: '/investments'
@@ -402,6 +422,7 @@ const rootRouteChildren: RootRouteChildren = {
   DocumentsRoute: DocumentsRoute,
   InvestRoute: InvestRoute,
   InvestmentsRoute: InvestmentsRoute,
+  LeadInvestorRoute: LeadInvestorRoute,
   LeadsRoute: LeadsRoute,
   LoansRoute: LoansRoute,
   LoginRoute: LoginRoute,

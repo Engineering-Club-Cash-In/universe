@@ -16,6 +16,7 @@ import { documensoService } from './DocumensoService';
 import { WeeTrustService } from './WeeTrustService';
 import { getRequiredEmailCount } from '../config/docusealConfig';
 import { crmApiService } from './CrmApiService';
+import { uploadPdfToR2 } from './R2Service';
 
 // Instancia de WeeTrust (servicio principal de firma)
 const weeTrustService = new WeeTrustService();
@@ -566,6 +567,19 @@ export class ContractGeneratorService {
         }
       }
 
+      // 11.5. Subir PDF a R2 solo si NO hay flujo de firma (evitar uploads redundantes)
+      let r2KeyDirect: string | undefined;
+      const hasSigningFlow = options.emails && options.emails.length > 0;
+      if (pdfBuffer && !hasSigningFlow) {
+        try {
+          const result = await uploadPdfToR2(pdfBuffer, baseFilename);
+          r2KeyDirect = result.r2Key;
+        } catch (error) {
+          console.error('Error al subir PDF a R2:', error);
+          // No fallar - continuamos con el flujo normal
+        }
+      }
+
       // 12. Integración con firma electrónica (WeeTrust principal, Documenso fallback)
       let signing: {
         signs: string[];
@@ -714,7 +728,7 @@ export class ContractGeneratorService {
         signing_links: signingLinks,
         linkDocument: signing?.linkDocument || '',
         signingProvider,
-        r2Key: signing?.r2Key,
+        r2Key: signing?.r2Key || r2KeyDirect,
         // Campos adicionales para backward compatibility
         contractType,
         docx_path: docxPath,

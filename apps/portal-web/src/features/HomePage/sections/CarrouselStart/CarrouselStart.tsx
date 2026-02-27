@@ -13,6 +13,7 @@ interface CarouselSlide {
   description?: string;
   buttonText: string;
   buttonLink: string;
+  disabled?: boolean;
 }
 
 const isVideo = (url: string) => {
@@ -32,22 +33,24 @@ const slides: CarouselSlide[] = [
     id: 2,
     imageUrl: url + "/familia-joven-disfrutando-de-su-viaje.jpg",
     title: "Tenemos el auto ideal para darte momentos inolvidables",
-    buttonText: "Solicita tu crédito", // TODO: devolver a "Ver marketplace" y "/marketplace" cuando esté habilitado
-    buttonLink: "/credit",
+    buttonText: "Ver marketplace",
+    buttonLink: "/marketplace",
+    disabled: true,
   },
   {
     id: 3,
-    imageUrl: url + "/team-chart-accountant-business-paper-talking.jpg",
+    imageUrl: url + "/IMG_6704.JPG.jpeg",
     title: "Hagamos una inversión segura",
     buttonText: "Invierte",
     buttonLink: "/invest",
   },
   {
     id: 4,
-    imageUrl: url + "/team-chart.png",
+    imageUrl: url + "/IMG_6693.JPG.jpeg",
     title: "¿Quieres vender tu auto? Nosotros nos encargamos",
     buttonText: "Vende tu auto",
     buttonLink: "/sell",
+    disabled: true,
   },
 ];
 
@@ -148,15 +151,26 @@ export const CarrouselStart: React.FC = () => {
                 {slide.title}
               </h1>
 
-              <motion.a
-                href={slide.buttonLink}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                <Button size={isMobile ? "sm" : "lg"}>
-                  {slide.buttonText}
-                </Button>
-              </motion.a>
+              {slide.disabled ? (
+                <motion.span
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.4, duration: 0.5 }}
+                  className="text-primary text-lg lg:text-2xl font-semibold"
+                >
+                  Próximamente
+                </motion.span>
+              ) : (
+                <motion.a
+                  href={slide.buttonLink}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  <Button size={isMobile ? "sm" : "lg"}>
+                    {slide.buttonText}
+                  </Button>
+                </motion.a>
+              )}
             </motion.div>
           </div>
         </motion.div>

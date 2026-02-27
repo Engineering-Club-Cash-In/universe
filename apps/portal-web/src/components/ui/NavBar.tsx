@@ -16,6 +16,7 @@ import {
 import { useIsMobile } from "@/hooks";
 import { useAuth } from "@/lib/useAuth";
 import { authClient } from "@/lib/auth";
+import { IconCCI } from "../IconCCI";
 
 export const NavBar = () => {
   const [isUserMenuOpen, setIsUserMenuOpen] = React.useState(false);
@@ -23,12 +24,12 @@ export const NavBar = () => {
 
   const matchRoute = useMatchRoute();
   const isInvestorPage = !!matchRoute({ to: "/invest" });
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
 
   const defaultNavItems = [
     { label: "Solicita tu crédito", href: "/credit" },
     { label: "Autos en venta", href: "/marketplace", disabled: true },
-    { label: "Vendemos tu auto", href: "/sell" },
+    { label: "Vendemos tu auto", href: "/sell", disabled: true },
     {
       label: "Invierte con nosotros",
       href: "/invest",
@@ -42,28 +43,42 @@ export const NavBar = () => {
   ];
 
   // Items del menú de perfil (cuando está autenticado)
-  const profileMenuItems = [
+  const allProfileMenuItems = [
     {
       id: "/profile",
       label: "Mi Perfil",
       icon: <IconPerson width="24" height="24" />,
+      roles: ["CLIENT", "INVESTOR"],
     },
     {
       id: "/investments",
       label: "Mis Inversiones",
       icon: <IconArrow width="24" height="24" />,
+      roles: ["INVESTOR"],
     },
     {
       id: "/loans",
       label: "Mis Préstamos",
       icon: <IconCar2 width="24" height="24" />,
+      roles: ["CLIENT"],
     },
     {
       id: "/documents",
       label: "Documentos",
       icon: <IconDocument width="24" height="24" />,
+      roles: ["CLIENT"],
     },
   ];
+
+  // Filtrar por rol del usuario
+  const filteredProfileItems = allProfileMenuItems.filter((item) =>
+    item.roles.includes(user?.role || "CLIENT")
+  );
+
+  // Si no tiene DPI, solo mostrar "Mi Perfil"
+  const profileMenuItems = !user?.dpi
+    ? filteredProfileItems.filter((item) => item.id === "/profile")
+    : filteredProfileItems;
 
   const handleLogout = async () => {
     try {
@@ -98,11 +113,7 @@ export const NavBar = () => {
         {/* Mobile: Logo a la izquierda */}
         <Link href={"/"} className="lg:hidden font-semibold text-lg flex gap-2">
           <div className="w-6 h-6">
-            <img
-              src="/logo1.png"
-              alt="CashIn company logo"
-              className="w-full h-full object-contain"
-            />
+            <IconCCI />
           </div>
           CashIn
         </Link>
@@ -145,9 +156,33 @@ export const NavBar = () => {
                   </span>
                 )}
                 {item.disabled ? (
-                  <span className="text-light/40 cursor-not-allowed">
-                    {item.label}
-                  </span>
+                  <motion.div
+                    className="flex flex-col items-center cursor-not-allowed relative"
+                    initial="rest"
+                    whileHover="hover"
+                    animate="rest"
+                  >
+                    <motion.span
+                      className="text-light text-sm lg:text-base"
+                      variants={{
+                        rest: { y: 0 },
+                        hover: { y: -8 },
+                      }}
+                      transition={{ duration: 0.3 }}
+                    >
+                      {item.label}
+                    </motion.span>
+                    <motion.span
+                      className="text-primary text-xs absolute"
+                      variants={{
+                        rest: { opacity: 0, y: 10 },
+                        hover: { opacity: 1, y: 12 },
+                      }}
+                      transition={{ duration: 0.3 }}
+                    >
+                      (Próximamente)
+                    </motion.span>
+                  </motion.div>
                 ) : (
                   <Link href={item.href} className={item.className}>
                     {item.label}
@@ -165,11 +200,9 @@ export const NavBar = () => {
             {isInvestorPage ? (
               <InvestorsLogo />
             ) : (
-              <img
-                src="/logo1.png"
-                alt="CashIn company logo"
-                className="w-full h-full object-contain"
-              />
+              <div className="w-full h-full">
+                <IconCCI />
+              </div>
             )}
           </div>
         </div>
@@ -279,11 +312,36 @@ export const NavBar = () => {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.1 }}
+                  className="flex flex-col items-center"
                 >
                   {item.disabled ? (
-                    <span className="text-2xl font-medium text-light/40 cursor-not-allowed">
-                      {item.label}
-                    </span>
+                    <motion.div
+                      className="flex flex-col items-center cursor-not-allowed relative"
+                      initial="rest"
+                      whileHover="hover"
+                      animate="rest"
+                    >
+                      <motion.span
+                        className="text-2xl font-medium text-light"
+                        variants={{
+                          rest: { y: 0 },
+                          hover: { y: -12 },
+                        }}
+                        transition={{ duration: 0.3 }}
+                      >
+                        {item.label}
+                      </motion.span>
+                      <motion.span
+                        className="text-base text-primary absolute"
+                        variants={{
+                          rest: { opacity: 0, y: 20 },
+                          hover: { opacity: 1, y: 32 },
+                        }}
+                        transition={{ duration: 0.3 }}
+                      >
+                        (Próximamente)
+                      </motion.span>
+                    </motion.div>
                   ) : (
                     <Link
                       href={item.href}

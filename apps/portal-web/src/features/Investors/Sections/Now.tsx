@@ -1,14 +1,9 @@
 import { IconStart } from "@/components";
-import { ModalChatBot } from "@/components/ModalChatBot";
-import { useModalOptionsCall } from "@/hooks";
 import { motion } from "framer-motion";
+import { useNavigate } from "@tanstack/react-router";
 
 export const Now = () => {
-  const {
-    isModalOpen,
-    modalOptionsInvestors: modalOptions,
-    setIsModalOpen,
-  } = useModalOptionsCall();
+  const navigate = useNavigate();
 
 
   return (
@@ -56,7 +51,7 @@ export const Now = () => {
 
             {/* Botón Invierte Ahora con motion */}
             <motion.button
-              onClick={() => setIsModalOpen(true)}
+              onClick={() => navigate({ to: "/leadInvestor" })}
               className="mt-4 lg:mt-0 px-12 lg:px-16 py-4 lg:py-6 rounded-xl font-semibold text-secondary border border-secondary text-2xl mb-8 lg:mb-12"
               initial={{ opacity: 0, scale: 0.9 }}
               whileInView={{ opacity: 1, scale: 1 }}
@@ -108,11 +103,6 @@ export const Now = () => {
         </div>
       </div>
 
-      <ModalChatBot
-        open={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        options={modalOptions}
-      />
     </section>
   );
 };

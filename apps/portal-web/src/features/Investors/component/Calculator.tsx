@@ -16,11 +16,8 @@ export const Calculator: React.FC = () => {
   const [term, setTerm] = useState("");
   const [investmentType, setInvestmentType] = useState("tradicional");
 
-  // Generar opciones de monto (Q3,000 a Q1,000,000)
+  // Generar opciones de monto (Q25,000 a Q1,000,000)
   const amountOptions = [
-    { value: "3000", label: "Q3,000" },
-    { value: "5000", label: "Q5,000" },
-    { value: "10000", label: "Q10,000" },
     { value: "25000", label: "Q25,000" },
     { value: "50000", label: "Q50,000" },
     { value: "100000", label: "Q100,000" },

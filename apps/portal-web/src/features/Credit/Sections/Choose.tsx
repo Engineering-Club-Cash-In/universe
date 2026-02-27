@@ -150,7 +150,7 @@ export const Choose = () => {
       <ModalChatBot
         open={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        options={[optionsCredit[type]]}
+        options={optionsCredit[type]}
       />
     </section>
   );

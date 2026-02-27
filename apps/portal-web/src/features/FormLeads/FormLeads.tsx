@@ -6,7 +6,7 @@ import { useLead } from "./store/useLead";
 const urlImage = import.meta.env.VITE_IMAGE_URL;
 
 export const IconCashIn = () => (
-  <div className="flex items-center gap-2 lg:gap-6 lg:px-12">
+  <div className="flex items-center gap-2 lg:gap-6 lg:px-12 z-50">
     <h1 className="text-4xl font-bold lg:text-header-3">Cash In</h1>
     <img
       src="/logo1.png"
@@ -77,7 +77,7 @@ export const FormLeads = () => {
             </Button>
           </div>
         </div>
-        <div className="py-16 lg:py-26 px-10 lg:px-30 xl:px-40">
+        <div className="py-16 lg:py-2 px-10 lg:px-30 xl:px-40">
           <Formulario />
         </div>
         <div className="pt-12 lg:pt-26 px-10 lg:px-30" id="info-lead">

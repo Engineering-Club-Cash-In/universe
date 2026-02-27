@@ -93,6 +93,7 @@ export interface Contract {
     additionalSigningLinks: string | null;
     templateId: number;
     apiResponse: any;
+    pdfLink: string | null;
     status: ContractStatus;
     generatedBy: string;
     generatedAt: string;

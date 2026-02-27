@@ -434,6 +434,7 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 				status: "new",
 				age: age ?? existingLead[0].age,
 				updatedAt: new Date(),
+				livenessValidated:false
 			})
 			.where(eq(leads.dpi, dpi));
 		leadId = existingLead[0].id;

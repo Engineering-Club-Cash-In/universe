@@ -2208,7 +2208,7 @@ function RouteComponent() {
 													).length > 0 && (
 														<div className="mt-2 text-amber-600 text-sm">
 															<span className="font-medium">
-																Campos pendientes:{" "}
+																Campos pendientes para cierre (100%):{" "}
 															</span>
 															{getMissingFieldsForNewVehicle(
 																selectedOpportunity.vehicle,

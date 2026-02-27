@@ -28,14 +28,24 @@ export async function generarPDFBuffer(
   logoUrl: string = ""
 ): Promise<Buffer> {
   const html = generarHTMLReporte(inversionista, logoUrl);
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+    ],
+  });
   const page = await browser.newPage();
   await page.setContent(html, { waitUntil: "networkidle0" });
+  
   const pdfData = await page.pdf({
-    format: "A4",
-    landscape: true,
     printBackground: true,
-    margin: { top: 20, bottom: 20, left: 12, right: 12 },
+    width: "2500px",
+    height: "980px",
+    landscape: false,
+    margin: { top: 20, bottom: 20, left: 8, right: 8 },
   });
 
   await browser.close();
@@ -50,7 +60,7 @@ export async function generarYSubirPDFInversionista(
   inversionista: InversionistaReporte,
   filename: string,
   logoUrl: string = ""
-): Promise<string> {
+): Promise<{ url: string; pdfBuffer: Buffer }> {
   const html = generarHTMLReporte(inversionista, logoUrl);
 
   const browser = await puppeteer.launch({
@@ -94,7 +104,10 @@ export async function generarYSubirPDFInversionista(
     })
   );
 
-  return `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
+  return {
+    url: `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`,
+    pdfBuffer: Buffer.from(pdfBuffer),
+  };
 }
 
 function gtq(n: string | number) {

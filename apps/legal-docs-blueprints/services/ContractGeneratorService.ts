@@ -16,6 +16,7 @@ import { documensoService } from './DocumensoService';
 import { WeeTrustService } from './WeeTrustService';
 import { getRequiredEmailCount } from '../config/docusealConfig';
 import { crmApiService } from './CrmApiService';
+import { uploadPdfToR2 } from './R2Service';
 
 // Instancia de WeeTrust (servicio principal de firma)
 const weeTrustService = new WeeTrustService();
@@ -566,6 +567,13 @@ export class ContractGeneratorService {
         }
       }
 
+      // 11.5. Subir PDF a R2 siempre (garantiza r2Key independiente de firma)
+      let r2KeyDirect: string | undefined;
+      if (pdfBuffer) {
+        const result = await uploadPdfToR2(pdfBuffer, baseFilename);
+        r2KeyDirect = result.r2Key;
+      }
+
       // 12. Integración con firma electrónica (WeeTrust principal, Documenso fallback)
       let signing: {
         signs: string[];
@@ -628,7 +636,7 @@ export class ContractGeneratorService {
       }
 
       // 13. Limpiar archivos locales si se subieron exitosamente a R2
-      if (shouldCleanupFiles) {
+      if (shouldCleanupFiles || r2KeyDirect) {
         try {
           await this.cleanupLocalFiles(docxPath, pdfPath);
           console.log(`🗑️  Archivos locales eliminados (ya están en R2)`);
@@ -714,7 +722,7 @@ export class ContractGeneratorService {
         signing_links: signingLinks,
         linkDocument: signing?.linkDocument || '',
         signingProvider,
-        r2Key: signing?.r2Key,
+        r2Key: r2KeyDirect || signing?.r2Key,
         // Campos adicionales para backward compatibility
         contractType,
         docx_path: docxPath,

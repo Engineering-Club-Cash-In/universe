@@ -1172,10 +1172,12 @@ export async function creditAction(payload: CreditActionPayload): Promise<Credit
 
 export interface ResetCreditParams {
   creditId: number;
-  montoIncobrable?: number;
   montoBoleta: number | string;
   url_boletas: string[];
   cuota: number;
+  banco_id: number;
+  montoIncobrable?: number;
+  numeroAutorizacion?: string;
 }
 
 export async function resetCreditService(params: ResetCreditParams) {

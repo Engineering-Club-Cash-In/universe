@@ -334,15 +334,17 @@ export const insertInvestor = async ({ body, set }: any) => {
       let existente = null;
 
       if (inv.dpi) {
-        // Buscar por DPI
+        // Buscar por DPI primero
         const result = await db
           .select()
           .from(inversionistas)
           .where(eq(inversionistas.dpi, inv.dpi))
           .limit(1);
         existente = result[0] || null;
-      } else if (inv.nombre?.trim()) {
-        // Buscar por nombre
+      }
+
+      // Si no lo encontro por DPI, buscar por nombre
+      if (!existente && inv.nombre?.trim()) {
         const result = await db
           .select()
           .from(inversionistas)
@@ -631,7 +633,7 @@ export async function processAndReplaceCreditInvestors(
   updateMirror: boolean = false
 ) {
 
-  
+
   // 1. Fetch credit details
   const credit = await db.query.creditos.findFirst({
     where: (c, { eq }) => eq(c.credito_id, credito_id),
@@ -3454,6 +3456,9 @@ export async function getLiquidaciones({
       total_iva: liquidaciones.total_iva,
       total_isr: liquidaciones.total_isr,
       total_cuota: liquidaciones.total_cuota,
+      reinversion_capital: liquidaciones.reinversion_capital,
+      reinversion_interes: liquidaciones.reinversion_interes,
+      reinversion_total: liquidaciones.reinversion_total,
       reporte_liquidacion: liquidaciones.reporte_liquidacion_url,
       fecha_liquidacion: liquidaciones.fecha_liquidacion,
       // Datos del inversionista
@@ -3587,10 +3592,10 @@ export async function getLiquidaciones({
         nombre_inversionista: liq.nombre_inversionista ?? "TODOS",
         emite_factura: liq.emite_factura,
         dpi: liq.dpi,
-        
+
         // 🔥 BOLETA ASOCIADA
         boleta: boletaData,
-        
+
         totales: {
           total_pagos_liquidados: liq.total_pagos_liquidados,
           total_capital: Number(liq.total_capital),
@@ -3598,6 +3603,11 @@ export async function getLiquidaciones({
           total_iva: Number(liq.total_iva),
           total_isr: Number(liq.total_isr),
           total_cuota: Number(liq.total_cuota),
+        },
+        reinversion: {
+          reinversion_capital: Number(liq.reinversion_capital),
+          reinversion_interes: Number(liq.reinversion_interes),
+          reinversion_total: Number(liq.reinversion_total),
         },
         reporte_liquidacion: liq.reporte_liquidacion,
         fecha_liquidacion: liq.fecha_liquidacion,

@@ -2479,7 +2479,7 @@ const fechaHoraEmision = fechaGuatemala.toISOString().substring(0, 19);
       
       // Si la fecha no tiene zona horaria explícita, JavaScript la interpreta como UTC
       // Entonces restamos 6 horas para obtener hora de Guatemala
-      fecha.setHours(fecha.getHours()  );
+      fecha.setHours(fecha.getHours() - 6);
       
       console.log(`   🔄 Conversión: ${fechaSAT} (SAT) -> ${fecha.toISOString()} (Guatemala GMT-6)`);
       

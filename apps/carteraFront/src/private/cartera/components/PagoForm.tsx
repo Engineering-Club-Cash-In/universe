@@ -146,27 +146,79 @@ export function PagoForm() {
 <Dialog open={modalConfirmacionOpen} onOpenChange={setModalConfirmacionOpen}>
   <DialogContent className="max-w-xl bg-white">
     <DialogHeader>
-      <DialogTitle className="text-2xl font-bold text-blue-700 flex items-center gap-2">
+      <DialogTitle className={`text-2xl font-bold flex items-center gap-2 ${creditoCanceladoInfo ? "text-red-700" : "text-blue-700"}`}>
         <CheckCircle2 className="w-7 h-7" />
-        Confirmar Registro de Pago
+        {creditoCanceladoInfo ? "Confirmar Cancelacion de Credito" : "Confirmar Registro de Pago"}
       </DialogTitle>
     </DialogHeader>
 
     <div className="space-y-4">
-      {/* 🎯 DISTRIBUCIÓN DEL PAGO */}
-      {(() => {
+      {creditoCanceladoInfo ? (
+        /* MODAL DE CONFIRMACION PARA CANCELACION */
+        (() => {
+          const montoBoleta = Number(formik.values.monto_boleta) || 0;
+          const montoCancelacion = Number(creditoCanceladoInfo.cancelacion?.monto_cancelacion) || 0;
+          const incobrable = montoBaseBadDebt || 0;
+          const diferencia = montoCancelacion - montoBoleta;
+
+          return (
+            <div className="bg-gradient-to-br from-red-50 to-orange-50 rounded-xl p-5 border-2 border-red-200">
+              <h3 className="font-bold text-lg text-red-900 mb-4 flex items-center gap-2">
+                <FileText className="w-5 h-5" />
+                Resumen de Cancelacion
+              </h3>
+
+              <div className="space-y-3">
+                <div className="flex justify-between items-center py-2 px-3 border-b border-red-200">
+                  <span className="text-gray-700 font-medium">Monto de Cancelacion:</span>
+                  <span className="font-bold text-red-700 text-lg">Q{montoCancelacion.toFixed(2)}</span>
+                </div>
+
+                <div className="flex justify-between items-center py-2 px-3 border-b border-red-200">
+                  <span className="text-gray-700 font-medium">Monto Boleta:</span>
+                  <span className="font-bold text-green-700 text-lg">Q{montoBoleta.toFixed(2)}</span>
+                </div>
+
+                {incobrable > 0 && (
+                  <div className="flex justify-between items-center py-2 px-3 border-b border-red-200">
+                    <span className="text-gray-700 font-medium">Incobrable:</span>
+                    <span className="font-bold text-yellow-700 text-lg">Q{incobrable.toFixed(2)}</span>
+                  </div>
+                )}
+
+                <div className="flex justify-between items-center py-3 px-3 mt-2 bg-white/60 rounded-lg border border-red-300">
+                  <span className="text-red-900 font-bold text-base">
+                    {diferencia > 0 ? "Faltante:" : diferencia < 0 ? "Excedente:" : "Cubierto:"}
+                  </span>
+                  <span className={`font-extrabold text-xl ${diferencia > 0 ? "text-red-600" : diferencia < 0 ? "text-green-600" : "text-green-700"}`}>
+                    Q{Math.abs(diferencia).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+
+              {creditoCanceladoInfo.cancelacion?.motivo && (
+                <div className="mt-4 pt-3 border-t border-red-200 text-sm text-gray-600">
+                  <span className="font-semibold">Motivo:</span> {creditoCanceladoInfo.cancelacion.motivo}
+                </div>
+              )}
+            </div>
+          );
+        })()
+      ) : (
+      /* MODAL DE CONFIRMACION PARA PAGO NORMAL */
+      (() => {
         const montoBoleta = Number(formik.values.monto_boleta) || 0;
         const otros = Number(formik.values.otros) || 0;
         const moraMonto = mora || 0;
         const cuotaConvenio = Number(convenioActivoInfo?.cuotaConvenioAPagar) || 0;
         const saldoAFavor = Number(dataCredito?.usuario?.saldo_a_favor) || 0;
-        
-        // 🔥 Total disponible = Boleta + Saldo a Favor
+
+        // Total disponible = Boleta + Saldo a Favor
         let montoRestante = montoBoleta;
-        
+
         const distribucion: { concepto: string; monto: number }[] = [];
 
-        // 1️⃣ Otros
+        // 1 Otros
         if (otros > 0) {
           const montoOtros = Math.min(montoRestante, otros);
           montoRestante -= montoOtros;
@@ -176,7 +228,7 @@ export function PagoForm() {
           });
         }
 
-        // 2️⃣ Mora
+        // 2 Mora
         if (moraMonto > 0) {
           const montoMora = Math.min(montoRestante, moraMonto);
           montoRestante -= montoMora;
@@ -186,7 +238,7 @@ export function PagoForm() {
           });
         }
 
-        // 3️⃣ Convenio
+        // 3 Convenio
         if (cuotaConvenio > 0) {
           const montoConv = Math.min(montoRestante, cuotaConvenio);
           montoRestante -= montoConv;
@@ -196,7 +248,7 @@ export function PagoForm() {
           });
         }
 
-        // 4️⃣ Cuota Normal (restando abonos ya realizados desde endpoint)
+        // 4 Cuota Normal (restando abonos ya realizados desde endpoint)
         const cuotaBase = Number(dataCredito?.credito?.cuota) || 0;
         const abonosYaHechos = abonosCuota ? (
           Number(abonosCuota.abono_capital || 0) +
@@ -220,9 +272,9 @@ export function PagoForm() {
           <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl p-5 border-2 border-green-200">
             <h3 className="font-bold text-lg text-green-900 mb-4 flex items-center gap-2">
               <FileText className="w-5 h-5" />
-              Distribución del Pago
+              Distribucion del Pago
             </h3>
-            
+
             <div className="space-y-3">
               {distribucion.map((item, idx) => (
                 <div
@@ -237,13 +289,12 @@ export function PagoForm() {
                   </span>
                 </div>
               ))}
-              
-              {/* 💡 EXCEDENTE */}
+
               {montoRestante > 0.01 && (
                 <div className="flex flex-col gap-2 py-3 mt-2 bg-gradient-to-r from-yellow-50 to-amber-50 px-4 rounded-lg border-2 border-yellow-300">
                   <div className="flex justify-between items-center">
                     <span className="text-yellow-800 font-bold flex items-center gap-2">
-                      <span className="text-xl">💡</span>
+                      <span className="text-xl">!</span>
                       Excedente (nuevo saldo a favor):
                     </span>
                     <span className="font-bold text-yellow-700 text-xl">
@@ -251,13 +302,12 @@ export function PagoForm() {
                     </span>
                   </div>
                   <p className="text-xs text-yellow-700 italic">
-                    Este monto se guardará como saldo a favor para futuros pagos
+                    Este monto se guardara como saldo a favor para futuros pagos
                   </p>
                 </div>
               )}
             </div>
 
-            {/* 📊 FÓRMULA: Boleta + Saldo - Conceptos = Disponible */}
           <div className="mt-4 pt-4 border-t-2 border-green-300 space-y-2">
   <div className="flex justify-between items-center text-sm">
     <span className="text-gray-700 font-medium">
@@ -267,7 +317,7 @@ export function PagoForm() {
       Q{Number(montoBoleta).toFixed(2)}
     </span>
   </div>
-  
+
   {saldoAFavor > 0 && (
     <div className="flex justify-between items-center text-sm">
       <span className="text-purple-600 font-medium">
@@ -311,7 +361,7 @@ export function PagoForm() {
       </span>
     </div>
   )}
-  
+
   <div className="flex justify-between items-center text-base pt-2 border-t border-green-200">
     <span className="text-green-900 font-bold">
       = Total Disponible:
@@ -323,7 +373,8 @@ export function PagoForm() {
 </div>
           </div>
         );
-      })()}
+      })()
+      )}
     </div>
 
     <DialogFooter className="gap-2 mt-6">
@@ -337,9 +388,9 @@ export function PagoForm() {
       <Button
         onClick={handleConfirmarPago}
         disabled={formik.isSubmitting}
-        className="bg-blue-600 hover:bg-blue-700 px-8 py-2 text-base font-bold"
+        className={`px-8 py-2 text-base font-bold ${creditoCanceladoInfo ? "bg-red-600 hover:bg-red-700" : "bg-blue-600 hover:bg-blue-700"}`}
       >
-        {formik.isSubmitting ? "Procesando..." : "✓ Confirmar Pago"}
+        {formik.isSubmitting ? "Procesando..." : creditoCanceladoInfo ? "Confirmar Cancelacion" : "Confirmar Pago"}
       </Button>
     </DialogFooter>
   </DialogContent>

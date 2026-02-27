@@ -152,14 +152,7 @@ export const CarrouselStart: React.FC = () => {
               </h1>
 
               {slide.disabled ? (
-                <motion.span
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.4, duration: 0.5 }}
-                  className="text-primary text-lg lg:text-2xl font-semibold"
-                >
-                  Próximamente
-                </motion.span>
+                <></>
               ) : (
                 <motion.a
                   href={slide.buttonLink}

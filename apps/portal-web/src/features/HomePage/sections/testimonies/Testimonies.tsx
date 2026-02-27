@@ -45,7 +45,7 @@ const Stars = () => (
         width="20"
         height="20"
         viewBox="0 0 24 24"
-        fill="#F5A623"
+        fill="currentColor"
         xmlns="http://www.w3.org/2000/svg"
       >
         <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
@@ -130,7 +130,7 @@ export const Testimonies = () => {
                 "linear-gradient(90deg, rgba(22, 38, 61, 0.25) 0%, rgba(14, 22, 36, 0.25) 100%)",
             }}
           >
-            <div>
+            <div className="text-primary">
               <Stars />
               <p className="text-white/80 text-sm leading-6 mt-4">
                 "{testimony.testimony}"

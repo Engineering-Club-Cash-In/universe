@@ -100,8 +100,8 @@ export const HowSellOrBuy = () => {
 
       {/* Sección de Compras */}
       <div className="relative z-10">
-        <h2 className="text-2xl lg:text-header-4 mb-8 text-primary text-center">
-          ¿Cómo comprar tu auto?
+        <h2 className="text-2xl lg:text-header-4 mb-8 text-white text-center font-bold">
+          ¿Cómo <span className="text-primary">comprar</span> tu auto?
         </h2>
         <div className="flex flex-col gap-12">
           {buys.map((item, index) => (
@@ -121,14 +121,14 @@ export const HowSellOrBuy = () => {
           ))}
         </div>
         <div className="flex justify-center mt-12">
-          <span className="text-primary" style={{ fontSize: "22px" }}>Próximamente</span>
+          <span className="text-primary" style={{ fontSize: "22px" }}></span>
         </div>
       </div>
 
       {/* Sección de Ventas */}
       <div className="relative z-10">
-        <h2 className="text-2xl lg:text-header-4 mb-8 text-primary text-center">
-          ¿Cómo vender tu auto?
+        <h2 className="text-2xl lg:text-header-4 mb-8 text-white text-center font-bold">
+          ¿Cómo <span className="text-primary">vender</span> tu auto?
         </h2>
         <div className="flex flex-col gap-12 ">
           {sales.map((item, index) => (
@@ -148,7 +148,7 @@ export const HowSellOrBuy = () => {
           ))}
         </div>
         <div className="flex justify-center mt-12">
-          <span className="text-primary" style={{ fontSize: "22px" }}>Próximamente</span>
+          <span className="text-primary" style={{ fontSize: "22px" }}></span>
         </div>
       </div>
     </section>

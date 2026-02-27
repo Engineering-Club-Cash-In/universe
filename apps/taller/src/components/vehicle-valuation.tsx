@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { DollarSign, Sparkles, Loader2, TrendingUp } from 'lucide-react';
+import { Sparkles, Loader2, TrendingUp } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -31,6 +31,12 @@ import { toast } from 'sonner';
 import { client } from '../utils/orpc';
 import { useInspection } from '../contexts/InspectionContext';
 
+const QuetzalIcon = ({ className }: { className?: string }) => (
+  <div className={`flex items-center justify-center font-bold text-xs border-2 border-current rounded-full w-5 h-5 ${className}`}>
+    Q
+  </div>
+);
+
 const valuationSchema = z.object({
   vehicleRating: z.enum(["Comercial", "No comercial"], {
     message: "La calificación es requerida",
@@ -45,19 +51,27 @@ const valuationSchema = z.object({
   scannerUsed: z.enum(["Sí", "No"], {
     message: "Esta información es requerida",
   }),
-  scannerResult: z.instanceof(File).optional(),
+  scannerResult: z.any().optional(),
   airbagWarning: z.enum(["Sí", "No"], {
     message: "Esta información es requerida",
   }),
   missingAirbag: z.string().optional(),
   tiresCondition: z.string().optional(),
+  tireConditionFrontLeft: z.string().optional(),
+  tireConditionFrontRight: z.string().optional(),
+  tireConditionRearLeft: z.string().optional(),
+  tireConditionRearRight: z.string().optional(),
+  hasSpareTire: z.enum(["Sí", "No"]).optional(),
+  tireConditionSpare: z.string().optional(),
   paintCondition: z.string().optional(),
   hasAgencyHistory: z.string().optional(),
 });
 
+type ValuationFormValues = z.infer<typeof valuationSchema>;
+
 interface VehicleValuationProps {
   vehicleData: any; // Data from previous steps
-  onComplete: (valuationData: z.infer<typeof valuationSchema>) => void;
+  onComplete: (valuationData: ValuationFormValues, aiValuation?: AIValuationResult) => void;
   isWizardMode?: boolean;
   isSubmitting?: boolean;
 }
@@ -85,23 +99,28 @@ export default function VehicleValuation({
   const [aiFailed, setAiFailed] = useState(false);
   const [scannerFile, setScannerFile] = useState<File | null>(null);
 
-  // New states for AI Context
-  const [tiresCondition, setTiresCondition] = useState<string>("");
-  const [paintCondition, setPaintCondition] = useState<string>("");
-  const [hasAgencyHistory, setHasAgencyHistory] = useState<string>("");
 
-  const form = useForm<z.infer<typeof valuationSchema>>({
+
+  const form = useForm<ValuationFormValues>({
     resolver: zodResolver(valuationSchema),
     defaultValues: {
-      vehicleRating: undefined,
+      vehicleRating: "Comercial",
       currentConditionValue: "",
       vehicleEquipment: "",
       importantConsiderations: "",
-      scannerUsed: undefined,
-      airbagWarning: undefined,
+      scannerUsed: "No",
+      airbagWarning: "No",
       tiresCondition: "",
+      tireConditionFrontLeft: "",
+      tireConditionFrontRight: "",
+      tireConditionRearLeft: "",
+      tireConditionRearRight: "",
+      hasSpareTire: "No",
+      tireConditionSpare: "",
       paintCondition: "",
       hasAgencyHistory: "",
+      scannerResult: undefined,
+      missingAirbag: "",
     },
   });
 
@@ -117,19 +136,41 @@ export default function VehicleValuation({
     }
   };
 
+  // AI valuation logic
   const getAIValuation = async () => {
     setLoadingAI(true);
     setAiAttemptCount(prev => prev + 1);
     setAiFailed(false);
 
+    const values = form.getValues();
+    
+    // Calculate average tire condition
+    const tireSum = 
+      parseInt(values.tireConditionFrontLeft || "0") + 
+      parseInt(values.tireConditionFrontRight || "0") + 
+      parseInt(values.tireConditionRearLeft || "0") + 
+      parseInt(values.tireConditionRearRight || "0");
+    const avgTires = Math.round(tireSum / 4).toString();
+
     try {
-      // Call AI valuation endpoint with complete context (optional fields included if set)
+      // Call AI valuation endpoint with complete context
       const result = await client.getAIVehicleValuation({
         vehicleData: {
           ...vehicleData,
-          tiresCondition,
-          paintCondition,
-          hasAgencyHistory
+          tiresCondition: avgTires,
+          tireConditionFrontLeft: values.tireConditionFrontLeft,
+          tireConditionFrontRight: values.tireConditionFrontRight,
+          tireConditionRearLeft: values.tireConditionRearLeft,
+          tireConditionRearRight: values.tireConditionRearRight,
+          hasSpareTire: values.hasSpareTire,
+          tireConditionSpare: values.tireConditionSpare,
+          paintCondition: values.paintCondition,
+          hasAgencyHistory: values.hasAgencyHistory,
+          vehicleEquipment: values.vehicleEquipment,
+          importantConsiderations: values.importantConsiderations,
+          scannerUsed: values.scannerUsed,
+          airbagWarning: values.airbagWarning,
+          missingAirbag: values.missingAirbag,
         },
         checklistItems,
         photos
@@ -165,14 +206,15 @@ export default function VehicleValuation({
     }
   };
 
-  const onSubmit = (values: z.infer<typeof valuationSchema>) => {
-    onComplete(values);
+  const onSubmit = (values: ValuationFormValues) => {
+    onComplete(values, aiValuation || undefined);
   };
 
   return (
-    <div className="space-y-6">
+    <Form {...form}>
+      <div className="space-y-6">
       {/* AI Valuation Section */}
-      <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
+      <Card className="bg-linear-to-r from-blue-50 to-indigo-50 border-blue-200">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-blue-600" />
@@ -182,82 +224,226 @@ export default function VehicleValuation({
             Obtenga una valoración estimada del vehículo basada en IA
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-white rounded-lg border border-blue-100">
-            <FormField
-              control={form.control}
-              name="tiresCondition"
-              render={({ field }) => (
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium">Condición de Llantas</Label>
-                  <Select value={field.value} onValueChange={(val) => {
-                    field.onChange(val);
-                    setTiresCondition(val); // Keep local state for AI context
-                  }}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Seleccione estado" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="100">Nuevas (100%)</SelectItem>
-                      <SelectItem value="75">Buenas (75%)</SelectItem>
-                      <SelectItem value="50">Media Vida (50%)</SelectItem>
-                      <SelectItem value="25">Desgastadas (25%)</SelectItem>
-                      <SelectItem value="0">Para cambio (0%)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="paintCondition"
-              render={({ field }) => (
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium">Estado de Pintura</Label>
-                  <Select value={field.value} onValueChange={(val) => {
-                    field.onChange(val);
-                    setPaintCondition(val); // Keep local state for AI context
-                  }}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Seleccione estado" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="100">Excelente (Sin detalles)</SelectItem>
-                      <SelectItem value="75">Bueno (Detalles menores)</SelectItem>
-                      <SelectItem value="50">Regular (Rayones visibles)</SelectItem>
-                      <SelectItem value="25">Malo (Requiere pintura)</SelectItem>
-                      <SelectItem value="0">Pésimo (Daño mayor)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="hasAgencyHistory"
-              render={({ field }) => (
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium">Historial de Agencia</Label>
-                  <Select value={field.value} onValueChange={(val) => {
-                    field.onChange(val);
-                    setHasAgencyHistory(val); // Keep local state for AI context
-                  }}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="¿Tiene récord?" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Sí">Sí</SelectItem>
-                      <SelectItem value="No">No</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            />
+        <CardContent className="space-y-6">
+          <div className="p-4 sm:p-6 bg-white rounded-xl border border-blue-100 shadow-sm space-y-8">
+            {/* Sección: Condición de Llantas */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-blue-600 bg-blue-50 px-2 py-1 rounded">Llantas</span>
+                <div className="h-px bg-slate-100 flex-1"></div>
+              </div>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                <FormField
+                  control={form.control}
+                  name="tireConditionFrontLeft"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs text-slate-500">Frontal Izquierda</FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Estado" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="100">100% (Nueva)</SelectItem>
+                          <SelectItem value="75">75% (Buena)</SelectItem>
+                          <SelectItem value="50">50% (Media)</SelectItem>
+                          <SelectItem value="25">25% (Gasta)</SelectItem>
+                          <SelectItem value="0">0% (Cambio)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="tireConditionFrontRight"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs text-slate-500">Frontal Derecha</FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Estado" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="100">100%</SelectItem>
+                          <SelectItem value="75">75%</SelectItem>
+                          <SelectItem value="50">50%</SelectItem>
+                          <SelectItem value="25">25%</SelectItem>
+                          <SelectItem value="0">0%</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="tireConditionRearLeft"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs text-slate-500">Trasera Izquierda</FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Estado" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="100">100%</SelectItem>
+                          <SelectItem value="75">75%</SelectItem>
+                          <SelectItem value="50">50%</SelectItem>
+                          <SelectItem value="25">25%</SelectItem>
+                          <SelectItem value="0">0%</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="tireConditionRearRight"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs text-slate-500">Trasera Derecha</FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Estado" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="100">100%</SelectItem>
+                          <SelectItem value="75">75%</SelectItem>
+                          <SelectItem value="50">50%</SelectItem>
+                          <SelectItem value="25">25%</SelectItem>
+                          <SelectItem value="0">0%</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                <FormField
+                  control={form.control}
+                  name="hasSpareTire"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs text-slate-500">¿Tiene llanta de repuesto?</FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="¿Tiene?" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="Sí">Sí</SelectItem>
+                          <SelectItem value="No">No</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                {form.watch("hasSpareTire") === "Sí" && (
+                  <FormField
+                    control={form.control}
+                    name="tireConditionSpare"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs text-slate-500">Estado Repuesto</FormLabel>
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Estado" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="100">100%</SelectItem>
+                            <SelectItem value="75">75%</SelectItem>
+                            <SelectItem value="50">50%</SelectItem>
+                            <SelectItem value="25">25%</SelectItem>
+                            <SelectItem value="0">0%</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* Sección: Estado General */}
+            <div className="space-y-4 pt-2">
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-blue-600 bg-blue-50 px-2 py-1 rounded">Estado General</span>
+                <div className="h-px bg-slate-100 flex-1"></div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <FormField
+                  control={form.control}
+                  name="paintCondition"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs text-slate-500">Estado de Pintura</FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Seleccione estado" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="100">Excelente (Sin detalles)</SelectItem>
+                          <SelectItem value="75">Bueno (Detalles menores)</SelectItem>
+                          <SelectItem value="50">Regular (Rayones visibles)</SelectItem>
+                          <SelectItem value="25">Malo (Requiere pintura)</SelectItem>
+                          <SelectItem value="0">Pésimo (Daño mayor)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="hasAgencyHistory"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs text-slate-500">Historial de Agencia</FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="¿Tiene récord?" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="Sí">Sí</SelectItem>
+                          <SelectItem value="No">No</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+            </div>
           </div>
 
           {!aiValuation ? (
             <>
               <Button
+                type="button"
                 onClick={getAIValuation}
                 disabled={loadingAI || aiAttemptCount >= 2}
                 className="w-full"
@@ -283,7 +469,7 @@ export default function VehicleValuation({
           ) : (
             <div className="space-y-4">
               <Alert className="border-green-200 bg-green-50">
-                <DollarSign className="h-4 w-4 text-green-600" />
+                <QuetzalIcon className="text-green-600 mr-2" />
                 <AlertDescription className="text-green-800">
                   <strong>Valoración Sugerida: Q{aiValuation.suggestedValue.toLocaleString()}</strong>
                 </AlertDescription>
@@ -309,8 +495,7 @@ export default function VehicleValuation({
       </Card>
 
       {/* Manual Valuation Form */}
-      <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
           {/* Valuation Section */}
           <Card>
             <CardHeader>
@@ -482,7 +667,7 @@ export default function VehicleValuation({
                           accept=".pdf"
                           onChange={(e) => {
                             handleScannerUpload(e);
-                            field.onChange(e.target.files?.[0] || null);
+                            field.onChange(e.target.files?.[0] || undefined);
                           }}
                           className="flex-1"
                         />
@@ -563,7 +748,7 @@ export default function VehicleValuation({
             </Button>
           )}
         </form>
-      </Form>
-    </div>
+      </div>
+    </Form>
   );
 }

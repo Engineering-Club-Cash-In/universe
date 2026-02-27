@@ -7,6 +7,10 @@ import {
 	CheckCircle,
 	Eye,
 	XCircle,
+	Wrench,
+	Sparkles,
+	Info,
+	FileText
 } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -38,6 +42,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { renderInspectionStatusBadge } from "@/lib/vehicle-utils";
+import { Inspection360View } from "@/components/vehicles/inspection-360-view";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/vehicles/auction-vehicles")({
@@ -51,6 +56,11 @@ function AuctionsDashboard() {
 	const [isPhotosOpen, setIsPhotosOpen] = useState(false);
 	const [photosVehicle, setPhotosVehicle] = useState<any>(null);
 	const queryClient = useQueryClient();
+
+	// Evidence modal state
+	const [selectedEvidence, setSelectedEvidence] = useState<any[]>([]);
+	const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
+	const [evidenceItemName, setEvidenceItemName] = useState("");
 
 	// Fetch auctions
 	const { data: auctions, isLoading } = useQuery(
@@ -391,33 +401,159 @@ function AuctionsDashboard() {
 															: "N/A"}
 													</DialogDescription>
 												</CardHeader>
-												<CardContent>
-													<div className="grid grid-cols-1 gap-4 text-sm md:grid-cols-2">
-														<p>
-															<strong>Valor mercado:</strong> Q
-															{Number(inspection.marketValue).toLocaleString(
-																"es-GT",
+												<CardContent className="space-y-6">
+													<div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+														<div className="space-y-4">
+															<div className="grid grid-cols-2 gap-2 text-sm">
+																<p>
+																	<strong>Valor mercado:</strong> Q
+																	{Number(inspection.marketValue).toLocaleString(
+																		"es-GT",
+																	)}
+																</p>
+																<p>
+																	<strong>Valor comercial:</strong> Q
+																	{Number(
+																		inspection.suggestedCommercialValue,
+																	).toLocaleString("es-GT")}
+																</p>
+																<p>
+																	<strong>Valor bancario:</strong> Q
+																	{Number(inspection.bankValue).toLocaleString(
+																		"es-GT",
+																	)}
+																</p>
+																<p>
+																	<strong>Calificación:</strong> {inspection.rating || inspection.vehicleRating}
+																</p>
+															</div>
+
+															{inspection.aiSuggestedValue && (
+																<div className="rounded-lg border border-blue-100 bg-blue-50/50 p-3">
+																	<div className="flex items-center gap-2 mb-1 text-blue-700">
+																		<Sparkles className="h-3.5 w-3.5" />
+																		<h4 className="font-semibold text-xs">Valoración por IA</h4>
+																	</div>
+																	<div className="space-y-2 text-[13px]">
+																		<div>
+																			<p className="font-medium text-blue-900 leading-tight">Sugerencia:</p>
+																			<p className="text-blue-800 font-bold">Q{Number(inspection.aiSuggestedValue).toLocaleString("es-GT")}</p>
+																		</div>
+																		{inspection.aiReasoning && (
+																			<p className="text-blue-800 text-[11px] leading-tight italic line-clamp-2">{inspection.aiReasoning}</p>
+																		)}
+																	</div>
+																</div>
 															)}
-														</p>
-														<p>
-															<strong>Valor comercial:</strong> Q
-															{Number(
-																inspection.suggestedCommercialValue,
-															).toLocaleString("es-GT")}
-														</p>
-														<p>
-															<strong>Valor bancario:</strong> Q
-															{Number(inspection.bankValue).toLocaleString(
-																"es-GT",
+
+															<div>
+																<h4 className="mb-2 font-semibold text-xs border-b pb-1">Condición y Diagnóstico</h4>
+																<div className="grid grid-cols-2 gap-y-1 text-xs">
+																	<span className="text-muted-foreground">Pintura:</span>
+																	<span>{inspection.paintCondition ? `${inspection.paintCondition}%` : "N/A"}</span>
+																	<span className="text-muted-foreground">Historial Agencia:</span>
+																	<span>{inspection.hasAgencyHistory === true ? "Sí" : "No"}</span>
+																	<span className="text-muted-foreground whitespace-nowrap">Llantas F (I/D):</span>
+																	<span>{inspection.tireConditionFrontLeft || 0}% / {inspection.tireConditionFrontRight || 0}%</span>
+																	<span className="text-muted-foreground whitespace-nowrap">Llantas T (I/D):</span>
+																	<span>{inspection.tireConditionRearLeft || 0}% / {inspection.tireConditionRearRight || 0}%</span>
+																</div>
+															</div>
+														</div>
+
+														<div className="space-y-4">
+															<div>
+																<h4 className="mb-1 font-semibold text-xs flex items-center gap-1">
+																	<FileText className="h-3 w-3" /> Resultado
+																</h4>
+																<p className="text-xs bg-muted/30 p-2 rounded italic">
+																	{inspection.result || inspection.inspectionResult}
+																</p>
+															</div>
+															{inspection.alerts && inspection.alerts.length > 0 && (
+																<div>
+																	<h4 className="mb-1 font-semibold text-xs text-red-600 flex items-center gap-1">
+																		<AlertTriangle className="h-3 w-3" /> Alertas
+																	</h4>
+																	<div className="flex flex-wrap gap-1">
+																		{inspection.alerts.map((alert: string, idx: number) => (
+																			<Badge key={idx} variant="destructive" className="text-[9px] py-0 px-1 font-normal">
+																				{alert}
+																			</Badge>
+																		))}
+																	</div>
+																</div>
 															)}
-														</p>
-														<p>
-															<strong>Calificación:</strong> {inspection.rating}
-														</p>
-														<p>
-															<strong>Resultado:</strong> {inspection.result}
-														</p>
+														</div>
 													</div>
+
+													{/* Inspection 360 Section */}
+													{inspection.inspection360Items && inspection.inspection360Items.length > 0 && (
+														<div className="mt-4 border-t pt-4">
+															<div className="flex items-center gap-2 mb-3">
+																<Wrench className="h-4 w-4 text-primary" />
+																<h4 className="font-bold text-sm">Inspección Técnica 360°</h4>
+															</div>
+															<Inspection360View items={inspection.inspection360Items} />
+														</div>
+													)}
+
+													{/* Checklist Section */}
+													{inspection.checklistItems && inspection.checklistItems.length > 0 && (
+														<div className="mt-6 border-t pt-6">
+															<div className="flex items-center gap-2 mb-3">
+																<CheckCircle className="h-4 w-4 text-green-600" />
+																<h4 className="font-bold text-sm">Evaluación de Criterios (Checklist)</h4>
+															</div>
+															<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+																{Object.entries(
+																	inspection.checklistItems.reduce((acc: any, item: any) => {
+																		if (!acc[item.category]) acc[item.category] = [];
+																		acc[item.category].push(item);
+																		return acc;
+																	}, {})
+																).map(([category, items]: [string, any]) => (
+																	<div key={category} className="space-y-2 rounded-md border p-3 bg-muted/5">
+																		<h5 className="font-bold text-primary text-[10px] uppercase tracking-wider">
+																			{category.replace(/_/g, " ")}
+																		</h5>
+																		<div className="space-y-1.5">
+																			{items.map((item: any, idx: number) => (
+																				<div key={idx} className="flex items-start justify-between gap-3 py-1 border-b border-muted/50 last:border-0">
+																					<div className="space-y-0.5">
+																						<p className="text-[13px] font-medium leading-tight">{item.item}</p>
+																						{item.notes && <p className="text-[11px] text-muted-foreground italic">{item.notes}</p>}
+																					</div>
+																					<div className="flex items-center gap-1.5">
+																						{item.evidence && item.evidence.length > 0 && (
+																							<Button
+																								variant="outline"
+																								size="icon"
+																								className="h-6 w-6 text-blue-600 border-blue-200 hover:bg-blue-50"
+																								onClick={() => {
+																									setSelectedEvidence(item.evidence);
+																									setEvidenceItemName(item.item);
+																									setIsEvidenceOpen(true);
+																								}}
+																							>
+																								<Camera className="h-3 w-3" />
+																							</Button>
+																						)}
+																						<Badge 
+																							variant={item.checked ? "default" : (!item.checked && item.severity === "critical" ? "destructive" : "secondary")}
+																							className="text-[9px] h-4.5 px-1 shrink-0"
+																						>
+																							{item.checked ? "Cumple" : "No cumple"}
+																						</Badge>
+																					</div>
+																				</div>
+																			))}
+																		</div>
+																	</div>
+																))}
+															</div>
+														</div>
+													)}
 												</CardContent>
 											</Card>
 										),
@@ -439,6 +575,52 @@ function AuctionsDashboard() {
 						<Button variant="outline" onClick={() => setIsPhotosOpen(false)}>
 							Cerrar
 						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			{/* Evidence Photos Modal */}
+			<Dialog open={isEvidenceOpen} onOpenChange={setIsEvidenceOpen}>
+				<DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
+					<DialogHeader>
+						<DialogTitle className="flex items-center gap-2 text-xl font-bold">
+							<Camera className="h-5 w-5 text-blue-600" />
+							Evidencia: {evidenceItemName}
+						</DialogTitle>
+						<DialogDescription>
+							Fotografías adjuntas a este punto de inspección
+						</DialogDescription>
+					</DialogHeader>
+					<div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+						{selectedEvidence.map((ev, idx) => (
+							<div key={idx} className="space-y-2 group">
+								<div className="relative aspect-video overflow-hidden rounded-lg border bg-muted">
+									<img
+										src={ev.url}
+										alt={`Evidencia ${idx + 1}`}
+										className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+									/>
+									<a
+										href={ev.url}
+										target="_blank"
+										rel="noreferrer"
+										className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity"
+									>
+										<Button variant="secondary" size="sm">
+											<Eye className="h-4 w-4 mr-2" />
+											Ver original
+										</Button>
+									</a>
+								</div>
+								<div className="flex items-center justify-between text-[10px] text-muted-foreground bg-muted/30 px-2 py-1 rounded">
+									<span className="truncate max-w-[150px]">{ev.originalName}</span>
+									<span className="uppercase">{ev.mimeType.split("/")[1]}</span>
+								</div>
+							</div>
+						))}
+					</div>
+					<DialogFooter className="mt-6 border-t pt-4">
+						<Button onClick={() => setIsEvidenceOpen(false)}>Cerrar</Button>
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>

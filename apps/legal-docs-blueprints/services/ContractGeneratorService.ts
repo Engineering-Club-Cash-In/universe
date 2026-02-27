@@ -570,12 +570,8 @@ export class ContractGeneratorService {
       // 11.5. Subir PDF a R2 siempre (garantiza r2Key independiente de firma)
       let r2KeyDirect: string | undefined;
       if (pdfBuffer) {
-        try {
-          const result = await uploadPdfToR2(pdfBuffer, baseFilename);
-          r2KeyDirect = result.r2Key;
-        } catch (error) {
-          console.error('⚠️ ALERTA: No se pudo subir PDF a R2. El contrato NO tendrá r2Key:', error);
-        }
+        const result = await uploadPdfToR2(pdfBuffer, baseFilename);
+        r2KeyDirect = result.r2Key;
       }
 
       // 12. Integración con firma electrónica (WeeTrust principal, Documenso fallback)

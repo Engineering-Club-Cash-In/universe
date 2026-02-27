@@ -12,7 +12,7 @@ export const useModalOptionsCall = () => {
   const openWhatsApp = (defaultMessage: string) => {
     globalThis.open(
       `https://api.whatsapp.com/send/?phone=${WAphoneNumber}&text=${encodeURIComponent(defaultMessage)}&type=phone_number&app_absent=0`,
-      "_blank"
+      "_blank",
     );
     setIsModalOpen(false);
   };
@@ -36,7 +36,7 @@ export const useModalOptionsCall = () => {
       buttonText: "WhatsApp",
       buttonAction: () =>
         openWhatsApp(
-          "Hola, estoy interesado en obtener más información sobre las oportunidades de inversión."
+          "Hola, estoy interesado en obtener más información sobre las oportunidades de inversión.",
         ),
     },
     {
@@ -52,30 +52,32 @@ export const useModalOptionsCall = () => {
     },
   ];
 
-  const optionCreditBuy: ModalOption = {
-    type: "whatsapp",
-    title:
-      "Puedes obtener más información y realizar el proceso para obtener tu crédito vehicular a través de nuestro WhatsApp.",
-    description: "",
-    buttonText: "WhatsApp",
-    buttonAction: () =>
-      openWhatsApp(
-        "Hola, estoy interesado en obtener más información sobre el crédito vehicular."
-      ),
-  };
-
-  const optionCreditSell: ModalOption[] = [
+  const optionCreditBuy: ModalOption[] = [
     {
       type: "whatsapp",
       title:
-        "Puedes obtener más información y realizar el proceso para vender tu auto a través de nuestro WhatsApp.",
+        "Puedes obtener más información y realizar el proceso para obtener tu crédito vehicular a través de nuestro WhatsApp.",
       description: "",
       buttonText: "WhatsApp",
       buttonAction: () =>
         openWhatsApp(
-          "Hola, estoy interesado en obtener más información sobre la venta de mi auto."
+          "Hola, estoy interesado en obtener más información sobre el crédito vehicular.",
         ),
     },
+    {
+      type: "form",
+      title:
+        "También puedes completar nuestro formulario y un asesor se pondrá en contacto contigo.",
+      description: "",
+      buttonText: "Ir al formulario",
+      buttonAction: () => {
+        setIsModalOpen(false);
+        globalThis.location.href = "/leads";
+      },
+    },
+  ];
+
+  const optionCreditSell: ModalOption[] = [
     {
       type: "form",
       title:
@@ -96,7 +98,9 @@ export const useModalOptionsCall = () => {
     description: "",
     buttonText: "WhatsApp",
     buttonAction: () =>
-      openWhatsApp("Hola, tengo algunas preguntas sobre los créditos que ofrecen."),
+      openWhatsApp(
+        "Hola, tengo algunas preguntas sobre los créditos que ofrecen.",
+      ),
   };
 
   const optionInspection: ModalOption = {
@@ -116,7 +120,7 @@ export const useModalOptionsCall = () => {
     buttonText: "WhatsApp",
     buttonAction: () =>
       openWhatsApp(
-        "Hola, me gustaría agendar una cita para inspeccionar mi vehículo y obtener más información sobre sus créditos."
+        "Hola, me gustaría agendar una cita para inspeccionar mi vehículo y obtener más información sobre sus créditos.",
       ),
   };
 
@@ -128,7 +132,9 @@ export const useModalOptionsCall = () => {
       description: "",
       buttonText: "WhatsApp",
       buttonAction: () =>
-        openWhatsApp("Hola, tengo algunas preguntas sobre la venta de mi auto."),
+        openWhatsApp(
+          "Hola, tengo algunas preguntas sobre la venta de mi auto.",
+        ),
     },
     {
       type: "call",
@@ -158,14 +164,15 @@ export const useModalOptionsCall = () => {
     buttonText: "WhatsApp",
     buttonAction: () =>
       openWhatsApp(
-        "Hola, estoy interesado en obtener más información sobre el crédito vehicular."
+        "Hola, estoy interesado en obtener más información sobre el crédito vehicular.",
       ),
   };
-  
+
   return {
     isModalOpen,
     setIsModalOpen,
     modalOptionsInvestors,
+    optionCreditBuy,
     optionsCredit: {
       buy: optionCreditBuy,
       sell: optionCreditSell,
@@ -179,6 +186,6 @@ export const useModalOptionsCall = () => {
     optionPayment,
     optionCreditVehicle,
     openWhatsApp,
-    makeCall
+    makeCall,
   };
 };

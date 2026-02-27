@@ -7,6 +7,7 @@ interface LeadPayload {
   email: string;
   phone: string;
   dpi: string;
+  creditType: string;
   loanPurpose: string;
   notes: string;
 }
@@ -23,6 +24,7 @@ export const sendLead = async (data: FormLeadsValues) => {
     email: data.correo,
     phone: data.telefono,
     dpi: data.dpi,
+    creditType: data.creditType,
     loanPurpose: "personal",
     notes: data.descripcion || "",
   };

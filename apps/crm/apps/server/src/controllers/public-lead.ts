@@ -137,6 +137,7 @@ async function createOpportunityForLead(
 		| "event"
 		| "other",
 	loanPurpose?: "personal" | "business",
+	creditType?: "autocompra" | "sobre_vehiculo",
 ) {
 	const [firstStage] = await db
 		.select()
@@ -164,6 +165,7 @@ async function createOpportunityForLead(
 			notes: notes,
 			source: source,
 			loanPurpose: loanPurpose,
+			creditType: creditType ?? "autocompra",
 		})
 		.returning();
 
@@ -185,6 +187,7 @@ export async function createPublicLead(c: Context) {
 			);
 		}
 
+		const creditType = body.creditType || "autocompra";
 		const hasDpi = body.dpi && body.dpi.trim() !== "";
 
 		// Si no tiene DPI, solo verificar por email y crear lead sin oportunidad
@@ -292,6 +295,7 @@ export async function createPublicLead(c: Context) {
 					body.notes ?? "",
 					body.source || lead.source || "website",
 					body.loanPurpose,
+					creditType,
 				);
 			}
 
@@ -402,6 +406,7 @@ export async function createPublicLead(c: Context) {
 			body.notes ?? "",
 			body.source || "website",
 			body.loanPurpose,
+			creditType,
 		);
 
 		return c.json({

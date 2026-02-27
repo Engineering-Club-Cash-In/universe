@@ -2,6 +2,8 @@ import { Input, ButtonIcon, CheckBox, Button, Link } from "@components/ui";
 import { IconGoogle } from "@components/icons";
 import { useRegister } from "../hook/useRegister";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useState } from "react";
+import { ModalTerms } from "./ModalTerms";
 
 export const FormRegister = () => {
   const {
@@ -13,6 +15,7 @@ export const FormRegister = () => {
     nextStep,
   } = useRegister();
   const isMobile = useIsMobile();
+  const [isTermsOpen, setIsTermsOpen] = useState(false);
 
   const handleStep1Next = () => {
     // Validar tipo de usuario y DPI antes de continuar
@@ -246,9 +249,9 @@ export const FormRegister = () => {
                 onChange={(checked) =>
                   formik.setFieldValue("acceptTerms", checked)
                 }
-                labelHref="/terms&conditions"
                 label="Acepto los términos y condiciones"
                 isLabelLink={true}
+                onLabelClick={() => setIsTermsOpen(true)}
               />
               {formik.touched.acceptTerms && formik.errors.acceptTerms && (
                 <p className="text-red-500 text-sm -mt-4">
@@ -278,6 +281,15 @@ export const FormRegister = () => {
           </div>
         )}
       </div>
+
+      <ModalTerms
+        open={isTermsOpen}
+        onClose={() => setIsTermsOpen(false)}
+        onAccept={() => {
+          formik.setFieldValue("acceptTerms", true);
+          setIsTermsOpen(false);
+        }}
+      />
     </div>
   );
 };

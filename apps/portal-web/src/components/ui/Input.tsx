@@ -45,7 +45,7 @@ export const Input = ({
     outline-none
     focus:ring-2
     focus:ring-gray-400
-    ${hasError ? "text-red-500 placeholder:text-red-500 pr-[55px]" : ""}
+    ${hasError ? "text-[#FD5353] placeholder:text-[#FD5353] pr-[55px]" : ""}
     ${className}
   `;
 
@@ -86,7 +86,7 @@ export const Input = ({
         </div>
       )}
       {error && (
-        <p className="text-red-500 text-sm mt-2 text-left px-2">{error}</p>
+        <p className="text-[#FD5353] text-sm mt-2 text-left px-2">{error}</p>
       )}
     </div>
   );

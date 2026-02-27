@@ -136,31 +136,45 @@ export const MyDocuments = () => {
                         Generado: {formatDate(item.contract.generatedAt)}
                       </p>
 
-                      {/* Botón de firma o descarga */}
-                      {item.contract.clientSigningLink ? (
-                        <motion.button
-                          onClick={() =>
-                            handleDownload(item.contract.clientSigningLink!)
-                          }
-                          className="w-full px-4 py-2 text-sm lg:text-base text-primary border border-primary/30 font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
-                          style={{
-                            background:
-                              "linear-gradient(180deg, rgba(148, 153, 236, 0.25) 0%, rgba(84, 87, 134, 0.25) 100%)",
-                          }}
-                          whileHover={{ scale: 1.02 }}
-                          whileTap={{ scale: 0.98 }}
-                        >
-                          <IconDownload
-                            width={isMobile ? 18 : 24}
-                            height={isMobile ? 18 : 24}
-                          />
-                          {item.contract.status === "pending"
-                            ? "Firmar Contrato"
-                            : "Ver Contrato"}
-                        </motion.button>
-                      ) : (
-                        <div className="w-full px-4 py-2 text-sm text-white/40 border border-white/10 rounded-lg text-center">
-                          No disponible
+                      {/* Botones de firma y/o descarga */}
+                      {(item.contract.clientSigningLink || item.contract.pdfLink) && (
+                        <div className="flex gap-2">
+                          {item.contract.status === "pending" && item.contract.clientSigningLink && (
+                            <motion.button
+                              onClick={() =>
+                                handleDownload(item.contract.clientSigningLink!)
+                              }
+                              className="flex-1 px-4 py-2 text-sm lg:text-base text-primary border border-primary/30 font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
+                              style={{
+                                background:
+                                  "linear-gradient(180deg, rgba(148, 153, 236, 0.25) 0%, rgba(84, 87, 134, 0.25) 100%)",
+                              }}
+                              whileHover={{ scale: 1.02 }}
+                              whileTap={{ scale: 0.98 }}
+                            >
+                              <IconDownload
+                                width={isMobile ? 18 : 24}
+                                height={isMobile ? 18 : 24}
+                              />
+                              Firmar Contrato
+                            </motion.button>
+                          )}
+                          {item.contract.pdfLink && (
+                            <motion.button
+                              onClick={() =>
+                                handleDownload(item.contract.pdfLink!)
+                              }
+                              className="flex-1 px-4 py-2 text-sm lg:text-base text-white/80 border border-white/20 font-semibold rounded-lg transition-colors flex items-center justify-center gap-2 hover:border-white/40"
+                              whileHover={{ scale: 1.02 }}
+                              whileTap={{ scale: 0.98 }}
+                            >
+                              <IconDownload
+                                width={isMobile ? 18 : 24}
+                                height={isMobile ? 18 : 24}
+                              />
+                              Ver PDF
+                            </motion.button>
+                          )}
                         </div>
                       )}
                     </div>

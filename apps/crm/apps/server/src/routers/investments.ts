@@ -17,6 +17,7 @@ import {
 	calculateGoal,
 	calculateInvestment,
 } from "../lib/investment-calculator";
+import { createInvestmentLeadWithOpportunity } from "../controllers/investment-lead";
 import {
 	analystProcedure,
 	investmentManagerProcedure,
@@ -75,49 +76,14 @@ export const investmentsRouter = {
 				proposedAmount: z.number().positive().optional(),
 				assignedTo: z.string().optional(),
 				userId: z.string().optional(),
+				companyName: z.string().optional(),
+				dpi: z.string().optional(),
+				investmentExperience: z.string().optional(),
 				notes: z.string().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			const { proposedAmount, assignedTo: inputAssignedTo, ...rest } = input;
-			const assignedTo = inputAssignedTo ?? context.userId;
-
-			const [lead] = await db
-				.insert(investmentLeads)
-				.values({
-					...rest,
-					assignedTo,
-					proposedAmount: proposedAmount?.toString(),
-				})
-				.returning();
-
-			// Crear oportunidad automaticamente en etapa Prospeccion
-			const [opportunity] = await db
-				.insert(investmentOpportunities)
-				.values({
-					investmentLeadId: lead.id,
-					assignedAdvisorId: assignedTo,
-					stage: "prospecting",
-					status: "open",
-				})
-				.returning();
-
-			// Registrar en auditoria
-			await db.insert(investmentAuditLog).values({
-				investmentOpportunityId: opportunity.id,
-				action: "lead_created",
-				details: { leadId: lead.id, source: input.source },
-				performedBy: context.userId,
-			});
-
-			// Registrar stage history
-			await db.insert(investmentStageHistory).values({
-				investmentOpportunityId: opportunity.id,
-				toStage: "prospecting",
-				changedBy: context.userId,
-			});
-
-			return { lead, opportunity };
+			return createInvestmentLeadWithOpportunity(input, context.userId);
 		}),
 
 	updateInvestmentLead: investmentProcedure

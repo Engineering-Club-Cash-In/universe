@@ -3,12 +3,11 @@ import { apiCRM } from "@/lib/api/apiCRM";
 
 interface LeadInvestorPayload {
   profileType: string;
-  firstName: string;
-  lastName: string;
+  name?: string;
   companyName?: string;
   legalRepresentative?: string;
   email: string;
-  phone: string;
+  phones: string;
   dpi: string;
   investmentExperience: string;
   notes: string;
@@ -17,24 +16,21 @@ interface LeadInvestorPayload {
 export const sendLeadInvestor = async (data: FormInvestorValues) => {
   const payload: LeadInvestorPayload = {
     profileType: data.profileType,
-    firstName: "",
-    lastName: "",
+    name: data.nombreCompleto,
     email: data.correo,
-    phone: data.telefono,
+    phones: data.telefono,
     dpi: data.dpi,
     investmentExperience: data.experiencia,
     notes: data.mensaje || "",
   };
 
   if (data.profileType === "individual") {
-    const nameParts = data.nombreCompleto.trim().split(" ");
-    payload.firstName = nameParts[0] || "";
-    payload.lastName = nameParts.slice(1).join(" ") || "";
+    payload.name = data.nombreCompleto;
   } else {
     payload.companyName = data.nombreSociedad;
-    payload.legalRepresentative = data.representanteLegal;
+    payload.name = data.representanteLegal;
   }
 
-  const response = await apiCRM.post("/api/public/lead-investor", payload);
+  const response = await apiCRM.post("/api/public/investment-lead", payload);
   return response.data;
 };

@@ -45,13 +45,18 @@ const validationSchema = Yup.object({
     then: (schema) => schema.required("El nombre del representante legal es requerido"),
     otherwise: (schema) => schema.notRequired(),
   }),
-  dpi: Yup.string()
-    .matches(/^\d{13}$/, "El DPI debe tener 13 dígitos sin espacios")
-    .test("solo-numeros", "Solo se permiten números", (value) => {
-      if (!value) return true;
-      return /^\d+$/.test(value);
-    })
-    .required("El DPI es requerido"),
+  dpi: Yup.string().when("profileType", {
+    is: "individual",
+    then: (schema) =>
+      schema
+        .matches(/^\d{13}$/, "El DPI debe tener 13 dígitos sin espacios")
+        .test("solo-numeros", "Solo se permiten números", (value) => {
+          if (!value) return true;
+          return /^\d+$/.test(value);
+        })
+        .required("El DPI es requerido"),
+    otherwise: (schema) => schema.notRequired(),
+  }),
   correo: Yup.string()
     .email("Correo electrónico inválido")
     .required("El correo es requerido"),

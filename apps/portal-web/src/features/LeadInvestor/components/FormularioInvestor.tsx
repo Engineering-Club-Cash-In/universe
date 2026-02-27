@@ -171,7 +171,7 @@ export const FormularioInvestor = () => {
             options={EXPERIENCE_OPTIONS}
             value={values.experiencia}
             onChange={(value) => {
-              setFieldValue("experiencia", value, false);
+              setFieldValue("experiencia", value);
               setFieldTouched("experiencia", true, false);
             }}
             placeholder="Tu experiencia en inversión"

@@ -1,5 +1,6 @@
 import { Elysia, t } from "elysia";
 import { sendSimpleEmail } from "@cci/email";
+import { testUploadAndEmail } from "../controllers/investor";
 
 const defaultRouter = new Elysia();
 
@@ -15,6 +16,18 @@ defaultRouter.get("/test-email", async ({ query }) => {
     return result;
 }, {
     query: t.Object({
+        email: t.String()
+    })
+});
+
+defaultRouter.get("/test-email-r2", async ({ query }) => {
+    const { investor_id, email } = query;
+    if (!investor_id || !email) return { error: "investor_id and email are required" };
+    
+    return await testUploadAndEmail(Number(investor_id), email);
+}, {
+    query: t.Object({
+        investor_id: t.String(),
         email: t.String()
     })
 });

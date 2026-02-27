@@ -333,7 +333,7 @@ export const inversionistasRouter = new Elysia()
 
     const logoUrl = import.meta.env.LOGO_URL || "";
     const filename = `reporte_inversionista_${id}.pdf`;
-    const url = await generarYSubirPDFInversionista(
+    const { url } = await generarYSubirPDFInversionista(
       inversionista as any,
       filename,
       logoUrl

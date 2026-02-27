@@ -154,6 +154,8 @@ export interface GetCreditDTO {
     saldo_total: string;
     extras_total: string;
     saldo_total_con_extras: string;
+    tipo_credito: string;
+    observaciones: string | null;
   };
   closure: ClosureInfo;
   cuotas_atrasadas: {

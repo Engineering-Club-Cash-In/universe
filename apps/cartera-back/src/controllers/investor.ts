@@ -1,7 +1,7 @@
 // app.ts (o donde declares tus rutas Elysia)
 import { z } from "zod";
 import { formatToUSD } from "../utils/functions/currencyConverter";
-import { generarYSubirPDFInversionista } from "../utils/functions/generalFunctions";
+import { generarYSubirPDFInversionista, generarPDFBuffer } from "../utils/functions/generalFunctions";
 import { db } from "../database/index";
 import {
   bancos,
@@ -22,7 +22,7 @@ import {
 import { eq, and, sql, inArray, ilike, like, desc, count, SQL } from "drizzle-orm";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import Big from "big.js";
-import { sendLiquidationEmail } from "@cci/email";
+import { sendLiquidationEmail, sendSimpleEmail } from "@cci/email";
 
 // ============================================
 // 🆕 TIPOS Y CONFIGURACIÓN PARA CONSULTAS ORIGINALES/ESPEJO
@@ -2362,7 +2362,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
 
       const logoUrl = process.env.LOGO_URL || "";
       const filename = `liquidacion_${liquidacion.liquidacion_id}_${Date.now()}.pdf`;
-      const url = await generarYSubirPDFInversionista(
+      const { url, pdfBuffer } = await generarYSubirPDFInversionista(
         inversionista as any,
         filename,
         logoUrl
@@ -3783,4 +3783,46 @@ export async function deletePagosEspejoNoLiquidados(inversionistaId: number) {
     console.error("Error eliminando pagos no liquidados:", error);
     throw error;
   }
+}
+
+// ============================================
+// 🧪 PRUEBA DE ENVÍO Y SUBIDA A R2
+// ============================================
+export async function testUploadAndEmail(investorId: number, testEmail: string) {
+    console.log(`🧪 Iniciando prueba de envío (PDF Adjunto) para inversionista ${investorId}...`);
+    
+    // 1. Obtener datos
+    const result = await resumeInvestor(investorId, 1, 999);
+    if (!result.inversionistas.length) {
+        throw new Error("Inversionista no encontrado");
+    }
+    const inversionista = result.inversionistas[0];
+
+    // 2. Generar PDF Buffer (Sin subir a R2)
+    const logoUrl = process.env.LOGO_URL || "";
+    console.log(`  📄 Generando PDF en memoria...`);
+    const pdfBuffer = await generarPDFBuffer(
+        inversionista as any,
+        logoUrl
+    );
+
+    // 3. Enviar correo con el PDF adjunto
+    console.log(`  📧 Enviando correo a ${testEmail} con PDF adjunto`);
+    await sendLiquidationEmail({
+        to: testEmail,
+        investorName: inversionista.nombre_inversionista,
+        amount: inversionista.subtotal.total_cuota.toString(),
+        creditNumber: "DIAGNOSTIC-TEST",
+        date: dayjs().format("DD/MM/YYYY"),
+        currencySymbol: inversionista.moneda === "dolares" ? "$" : "Q.",
+        attachment: {
+            filename: `Test_Liquidacion_${inversionista.nombre_inversionista.replace(/\s+/g, '_')}.pdf`,
+            content: pdfBuffer,
+        }
+    });
+
+    return {
+        success: true,
+        message: `Prueba completada. PDF generado y enviado como adjunto a ${testEmail}. Se saltó la subida a R2 para evitar errores de autorización.`
+    };
 }

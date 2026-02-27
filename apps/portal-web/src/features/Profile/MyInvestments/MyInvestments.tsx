@@ -122,7 +122,7 @@ export const MyInvestments = () => {
 
           {/* Estadísticas */}
           {stats && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-12 mb-12">
+            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-12 mb-12">
               {/* Total Invertido */}
               <div
                 className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-4 lg:p-6"

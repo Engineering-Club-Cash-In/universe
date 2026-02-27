@@ -128,7 +128,7 @@ export const WhoWeAre = () => {
 
   return (
     <section className="w-full mt-36">
-      <div className="grid grid-cols-1 lg:grid-cols-2">
+      <div className="grid grid-cols-1 xl:grid-cols-2">
         {/* Primera parte */}
         <div className="relative flex flex-col justify-center -ml-8 py-16 lg:pt-16 lg:pb-46 overflow-hidden">
           <p className="relative z-10 ml-16 lg:ml-36">

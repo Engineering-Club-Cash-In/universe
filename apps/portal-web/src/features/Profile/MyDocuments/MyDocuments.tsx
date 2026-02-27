@@ -159,7 +159,7 @@ export const MyDocuments = () => {
                               Firmar Contrato
                             </motion.button>
                           )}
-                          {item.contract.pdfLink && (
+                          {item.contract.pdfLink && !item.contract.pdfLink.includes("documeso") && (
                             <motion.button
                               onClick={() =>
                                 handleDownload(item.contract.pdfLink!)

@@ -184,9 +184,23 @@ export const vehicleInspections = pgTable("vehicle_inspections", {
 	}).notNull(),
 
 	// Detailed Conditions (Resumen final de la inspección)
-	tiresCondition: integer("tires_condition"), // Vida útil neumáticos %
-	paintCondition: integer("paint_condition"), // Estado pintura %
-	hasAgencyHistory: boolean("has_agency_history"), // Historial agencia
+	tiresCondition: integer("tires_condition"), // Vida útil neumáticos % (Promedio)
+	// tireConditionFrontLeft: integer("tire_condition_front_left"),
+	// tireConditionFrontRight: integer("tire_condition_front_right"),
+	// tireConditionRearLeft: integer("tire_condition_rear_left"),
+	// tireConditionRearRight: integer("tire_condition_rear_right"),
+	// hasSpareTire: boolean("has_spare_tire").default(false),
+	// tireConditionSpare: integer("tire_condition_spare"),
+	// paintCondition: integer("paint_condition"), // Estado pintura %
+	// hasAgencyHistory: boolean("has_agency_history"), // Historial agencia
+
+	// AI Valuation Results (Persistencia de lo que recomendó la IA)
+	// aiSuggestedValue: decimal("ai_suggested_value", { precision: 12, scale: 2 }),
+	// aiMarketAnalysis: text("ai_market_analysis"),
+	// aiDepreciationFactors: json("ai_depreciation_factors"),
+	// aiConfidence: text("ai_confidence"),
+	// aiCommercialClassification: text("ai_commercial_classification"),
+	// aiReasoning: text("ai_reasoning"),
 
 	// Equipment and considerations
 	vehicleEquipment: text("vehicle_equipment").notNull(),

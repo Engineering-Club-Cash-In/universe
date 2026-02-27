@@ -235,6 +235,44 @@ export const vehiclesRouter = {
 				checklistByInspection.get(item.inspectionId).push(item);
 			});
 
+			// Get all check item evidence for these checklist items
+			const checklistItemIds = allChecklistItems.map((item) => item.id);
+			const allEvidence =
+				checklistItemIds.length > 0
+					? await db
+							.select()
+							.from(checklistItemEvidence)
+							.where(inArray(checklistItemEvidence.itemId, checklistItemIds))
+					: [];
+
+			// Group evidence by checklist item ID
+			const evidenceByChecklistItem = new Map();
+			allEvidence.forEach((ev) => {
+				if (!evidenceByChecklistItem.has(ev.itemId)) {
+					evidenceByChecklistItem.set(ev.itemId, []);
+				}
+				evidenceByChecklistItem.get(ev.itemId).push(ev);
+			});
+
+			// Get 360 items for these inspections
+			const all360Items =
+				allInspectionIds.length > 0
+					? await db
+							.select()
+							.from(vehicleInspection360Items)
+							.where(inArray(vehicleInspection360Items.inspectionId, allInspectionIds))
+							.orderBy(vehicleInspection360Items.area)
+					: [];
+
+			// Group 360 items by inspection ID
+			const items360ByInspection = new Map();
+			all360Items.forEach((item) => {
+				if (!items360ByInspection.has(item.inspectionId)) {
+					items360ByInspection.set(item.inspectionId, []);
+				}
+				items360ByInspection.get(item.inspectionId).push(item);
+			});
+
 			// Group vehicles with their inspections and photos
 			const vehiclesMap = new Map();
 
@@ -257,12 +295,18 @@ export const vehiclesRouter = {
 				}
 
 				if (row.vehicle_inspections) {
-					const inspectionWithChecklist = {
+					const inspectionId = row.vehicle_inspections.id;
+					const inspectionWithDetails = {
 						...row.vehicle_inspections,
-						checklistItems:
-							checklistByInspection.get(row.vehicle_inspections.id) || [],
+						checklistItems: (checklistByInspection.get(inspectionId) || []).map(
+							(item: any) => ({
+								...item,
+								evidence: evidenceByChecklistItem.get(item.id) || [],
+							}),
+						),
+						inspection360Items: items360ByInspection.get(inspectionId) || [],
 					};
-					vehiclesMap.get(vehicleId).inspections.push(inspectionWithChecklist);
+					vehiclesMap.get(vehicleId).inspections.push(inspectionWithDetails);
 				}
 			});
 
@@ -890,6 +934,12 @@ export const vehiclesRouter = {
 					noTestDriveReason: z.string().optional(),
 					sectionTimes: z.record(z.string(), z.number()).optional().default({}),
 					tiresCondition: z.number().optional(),
+					tireConditionFrontLeft: z.number().optional(),
+					tireConditionFrontRight: z.number().optional(),
+					tireConditionRearLeft: z.number().optional(),
+					tireConditionRearRight: z.number().optional(),
+					hasSpareTire: z.boolean().optional(),
+					tireConditionSpare: z.number().optional(),
 					paintCondition: z.number().optional(),
 					hasAgencyHistory: z.boolean().optional(),
 					rejectionEvidenceUrl: z.string().optional(),
@@ -944,6 +994,18 @@ export const vehiclesRouter = {
 							url: z.string(),
 						}),
 					)
+					.optional(),
+				// AI Recommendation storage
+				aiValuation: z
+					.object({
+						suggestedValue: z.number(),
+						reasoning: z.string(),
+						marketAnalysis: z.string(),
+						depreciationFactors: z.array(z.string()),
+						confidence: z.string(),
+						commercialClassification: z.string(),
+						commercialClassificationReasoning: z.string(),
+					})
 					.optional(),
 			}),
 		)
@@ -1011,6 +1073,13 @@ export const vehiclesRouter = {
 							currentConditionValue: cleanValue(
 								input.inspection.currentConditionValue,
 							),
+							// Save AI recommendations if provided
+							aiSuggestedValue: input.aiValuation?.suggestedValue?.toString(),
+							aiReasoning: input.aiValuation?.reasoning,
+							aiMarketAnalysis: input.aiValuation?.marketAnalysis,
+							aiDepreciationFactors: input.aiValuation?.depreciationFactors,
+							aiConfidence: input.aiValuation?.confidence,
+							aiCommercialClassification: input.aiValuation?.commercialClassification,
 							status: "pending",
 							alerts: [],
 						} as NewVehicleInspection)
@@ -1350,7 +1419,13 @@ CONDICIÓN Y ESTADO:
 - Fecha de inspección: ${context.inspectionDate}
 - Técnico: ${context.technicianName}
 - Observaciones generales: ${context.inspectionResult}
-- Vida útil de neumáticos: ${context.tiresCondition}
+- Vida útil de neumáticos (Promedio): ${context.tiresCondition}
+- Detalle de neumáticos: 
+  * Frontal Izquierda: ${context.tireConditionFrontLeft}
+  * Frontal Derecha: ${context.tireConditionFrontRight}
+  * Trasera Izquierda: ${context.tireConditionRearLeft}
+  * Trasera Derecha: ${context.tireConditionRearRight}
+${context.hasSpareTire ? `- Llanta de repuesto: ${context.tireConditionSpare}` : "- Sin llanta de repuesto"}
 - Estado general de la pintura: ${context.paintCondition}
 - ¿Tiene historial de agencia?: ${context.hasAgencyHistory}
 - Problemas críticos encontrados: ${context.criticalIssueCount} (${context.criticalIssues.join(", ") || "Ninguno"})

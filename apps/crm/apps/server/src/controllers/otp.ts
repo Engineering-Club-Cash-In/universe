@@ -74,7 +74,6 @@ export class OTPController {
 					otpId: newOtp.id,
 					expiresAt: newOtp.expiresAt,
 					phoneNumber: phoneNumber,
-					code: code, // 🔥 Solo para desarrollo - remover en producción
 				},
 				status: 200 as const,
 			};

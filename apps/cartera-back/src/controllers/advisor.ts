@@ -1,6 +1,6 @@
 // controllers/advisors.ts
 import { db } from '../database/index';
-import { asesores, creditos, moras_credito, platform_users } from '../database/db/schema';
+import { asesores, creditos, moras_credito, platform_users, usuarios } from '../database/db/schema';
 import { and, eq, like, or, sql } from 'drizzle-orm';
 import bcrypt from "bcrypt";
 import Big from 'big.js';
@@ -511,3 +511,86 @@ export async function getAsesorConMenorCarga(): Promise<number> {
     throw new Error(`Error en load balancing de asesores: ${error}`);
   }
 }
+
+export const getCreditosCRM = async ({ set }: any) => {
+  try {
+    const resultado = await db
+      .select({
+        credito_id: creditos.credito_id,
+        numero_credito_sifco: creditos.numero_credito_sifco,
+        nombre_cliente: usuarios.nombre,
+        asesor_id: creditos.asesor_id,
+        asesor_nombre: asesores.nombre,
+      })
+      .from(creditos)
+      .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+      .innerJoin(asesores, eq(creditos.asesor_id, asesores.asesor_id))
+      .where(
+        and(
+          like(creditos.numero_credito_sifco, "%CRM%"),
+          eq(asesores.nombre, "Gerencia"),
+          or(
+            eq(creditos.statusCredit, "ACTIVO"),
+            eq(creditos.statusCredit, "MOROSO"),
+            eq(creditos.statusCredit, "PENDIENTE_CANCELACION"),
+            eq(creditos.statusCredit, "EN_CONVENIO")
+          )
+        )
+      );
+
+    set.status = 200;
+    return {
+      success: true,
+      total: resultado.length,
+      data: resultado,
+    };
+  } catch (error) {
+    console.error("❌ Error getCreditosCRM:", error);
+    set.status = 500;
+    return { success: false, message: "Error obteniendo créditos CRM", error: String(error) };
+  }
+};
+
+export const updateCreditAdvisor = async ({ body, set }: any) => {
+  try {
+    const { credito_id, nombre_asesor } = body;
+
+    if (!credito_id || !nombre_asesor) {
+      set.status = 400;
+      return { success: false, message: "credito_id y nombre_asesor son requeridos" };
+    }
+
+    const asesor = await findOrCreateAdvisorByName(nombre_asesor);
+    if (!asesor) {
+      set.status = 404;
+      return { success: false, message: `No se pudo encontrar/crear asesor: ${nombre_asesor}` };
+    }
+
+    const updated = await db
+      .update(creditos)
+      .set({ asesor_id: asesor.asesor_id })
+      .where(
+        and(
+          eq(creditos.credito_id, credito_id),
+          like(creditos.numero_credito_sifco, "%CRM%")
+        )
+      )
+      .returning({ credito_id: creditos.credito_id, asesor_id: creditos.asesor_id });
+
+    if (updated.length === 0) {
+      set.status = 404;
+      return { success: false, message: `Crédito ${credito_id} no encontrado o no es CRM` };
+    }
+
+    set.status = 200;
+    return {
+      success: true,
+      message: `Asesor actualizado a "${asesor.nombre}" para crédito ${credito_id}`,
+      data: updated[0],
+    };
+  } catch (error) {
+    console.error("❌ Error updateCreditAdvisor:", error);
+    set.status = 500;
+    return { success: false, message: "Error actualizando asesor", error: String(error) };
+  }
+};

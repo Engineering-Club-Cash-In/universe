@@ -3,6 +3,8 @@ import { Elysia, t } from "elysia";
 import {
   getAdvisors,
   getCreditosPorAsesorController,
+  getCreditosCRM,
+  updateCreditAdvisor,
   insertAdvisor,
   updateAdvisor,
 } from "../controllers/advisor";
@@ -13,6 +15,13 @@ export const advisorRouter = new Elysia()
   .post("/advisor", insertAdvisor)
   .post("/updateAdvisor", updateAdvisor)
   .get("/advisor", getAdvisors)
+  .get("/creditos-crm", getCreditosCRM)
+  .post("/updateCreditAdvisor", updateCreditAdvisor, {
+    body: t.Object({
+      credito_id: t.Number(),
+      nombre_asesor: t.String(),
+    }),
+  })
 .get(
   "/creditos-por-asesor",
   async ({ query, set }) => {

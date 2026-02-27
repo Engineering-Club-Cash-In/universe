@@ -75,7 +75,7 @@ export const Choose = () => {
           className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full lg:h-[60px]"
           style={{
             background:
-              "linear-gradient(90deg, rgba(15, 15, 15, 0) 0%, rgba(154, 159, 245, 0.7) 50%, rgba(15, 15, 15, 0) 100%)",
+              "linear-gradient(90deg, #0F0F0F 0%, #D8E54A 50%, #0F0F0F 100%)",
             zIndex: 0,
           }}
         />
@@ -91,8 +91,10 @@ export const Choose = () => {
               className="flex flex-col justify-between w-full lg:w-auto lg:min-w-1/4  gap-6 p-8"
               style={{
                 borderRadius: "16px",
-                border: "1px solid rgba(154, 159, 245, 0.50)",
-                background: "#0F0F0F",
+                border: "1px solid #4E57EA",
+                background:
+                  "linear-gradient(133deg, rgba(78, 87, 234, 0.25) 2.68%, rgba(23, 23, 23, 0.25) 50%), #171717",
+                boxShadow: "0 0 0 0 rgba(0, 0, 0, 0.00)",
                 flexShrink: 0,
               }}
               initial={{ opacity: 0, y: 20 }}
@@ -110,7 +112,7 @@ export const Choose = () => {
                 <ul className="space-y-3">
                   {feature.list.map((item, itemIndex) => (
                     <li key={itemIndex} className="flex items-start gap-3">
-                      <div className="mt-1 shrink-0">
+                      <div className="mt-1 shrink-0 text-primary">
                         <IconCheckList />
                       </div>
                       <span className="text-gray">{item}</span>

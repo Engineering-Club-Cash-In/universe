@@ -67,8 +67,8 @@ export const BuyCar = () => {
             className="w-full h-full  object-cover rounded-2xl relative"
           />
           {/* Badge en esquina superior derecha */}
-          <div className="absolute top-6 right-6 bg-primary px-2  py-1 lg:px-6 lg:py-3 rounded-3xl z-20">
-            <span className="text-black font-semibold lg:text-base text-xs">
+          <div className="absolute top-6 right-6 bg-secondary/80 px-2  py-1 lg:px-6 lg:py-3 rounded-3xl z-20">
+            <span className="text-white font-semibold lg:text-base text-xs">
               Crédito Vehicular
             </span>
           </div>
@@ -91,7 +91,7 @@ export const BuyCar = () => {
           {items.map((item, index) => (
             <div key={index} className="flex gap-6">
               {/* Contenedor del icono */}
-              <div className="flex text-secondary w-10 h-10 lg:w-16 lg:h-16 p-2 lg:p-4 justify-center items-center shrink-0 rounded-[11.252px] bg-primary/10">
+              <div className="flex text-secondary w-10 h-10 lg:w-16 lg:h-16 p-2 lg:p-4 justify-center items-center shrink-0 rounded-[11.252px] bg-secondary/10">
                 {item.icon}
               </div>
 

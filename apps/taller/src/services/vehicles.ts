@@ -39,8 +39,23 @@ export interface InspectionData {
   sectionTimes?: Record<string, number>;
   rejectionEvidenceUrl?: string;
   tiresCondition?: number;
+  tireConditionFrontLeft?: number;
+  tireConditionFrontRight?: number;
+  tireConditionRearLeft?: number;
+  tireConditionRearRight?: number;
+  hasSpareTire?: boolean;
+  tireConditionSpare?: number;
   paintCondition?: number;
   hasAgencyHistory?: boolean;
+  aiValuation?: {
+    suggestedValue: number;
+    reasoning: string;
+    marketAnalysis: string;
+    depreciationFactors: string[];
+    confidence: string;
+    commercialClassification: string;
+    commercialClassificationReasoning: string;
+  };
 }
 
 export interface ChecklistItem {
@@ -93,8 +108,9 @@ export const createFullInspection = async (
         checkpoint: item.item,
         status: item.status as 'GOOD' | 'REGULAR' | 'BAD' | 'NA' | 'OK' | 'LEGACY_BAD',
         comment: item.notes,
-        metadata: item.metadata,
-      }))
+        metadata: item.metadata
+      })),
+      aiValuation: inspectionData.aiValuation,
     });
 
     return {
@@ -111,7 +127,7 @@ export const createFullInspection = async (
 };
 
 // Helper function to convert form data to API format
-export const prepareInspectionData = (formData: any, sectionTimes?: Record<string, number>, rejectionEvidenceUrl?: string) => {
+export const prepareInspectionData = (formData: any, sectionTimes?: Record<string, number>, rejectionEvidenceUrl?: string, aiValuation?: any) => {
   const vehicleData: VehicleData = {
     make: formData.vehicleMake,
     model: formData.vehicleModel,
@@ -148,9 +164,24 @@ export const prepareInspectionData = (formData: any, sectionTimes?: Record<strin
     noTestDriveReason: formData.noTestDriveReason,
     sectionTimes: sectionTimes || {},
     rejectionEvidenceUrl: rejectionEvidenceUrl,
-    tiresCondition: formData.tiresCondition ? parseInt(formData.tiresCondition) : undefined,
+    tiresCondition: formData.tiresCondition ? parseInt(formData.tiresCondition) : (
+      formData.tireConditionFrontLeft || formData.tireConditionFrontRight || formData.tireConditionRearLeft || formData.tireConditionRearRight ? 
+      Math.round((
+        parseInt(formData.tireConditionFrontLeft || "0") + 
+        parseInt(formData.tireConditionFrontRight || "0") + 
+        parseInt(formData.tireConditionRearLeft || "0") + 
+        parseInt(formData.tireConditionRearRight || "0")
+      ) / 4) : undefined
+    ),
+    tireConditionFrontLeft: formData.tireConditionFrontLeft ? parseInt(formData.tireConditionFrontLeft) : undefined,
+    tireConditionFrontRight: formData.tireConditionFrontRight ? parseInt(formData.tireConditionFrontRight) : undefined,
+    tireConditionRearLeft: formData.tireConditionRearLeft ? parseInt(formData.tireConditionRearLeft) : undefined,
+    tireConditionRearRight: formData.tireConditionRearRight ? parseInt(formData.tireConditionRearRight) : undefined,
+    hasSpareTire: formData.hasSpareTire === 'Sí',
+    tireConditionSpare: formData.hasSpareTire === 'Sí' && formData.tireConditionSpare ? parseInt(formData.tireConditionSpare) : undefined,
     paintCondition: formData.paintCondition ? parseInt(formData.paintCondition) : undefined,
     hasAgencyHistory: formData.hasAgencyHistory === 'Sí' ? true : (formData.hasAgencyHistory === 'No' ? false : undefined),
+    aiValuation: aiValuation,
   };
 
   return { vehicleData, inspectionData };

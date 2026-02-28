@@ -216,9 +216,9 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Card className="bg-slate-50 border-slate-200">
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-lg flex justify-between">
-                            Progreso de Inspección
-                            <Badge variant={isComplete ? "default" : "secondary"}>
+                        <CardTitle className="text-base sm:text-lg flex flex-col sm:flex-row sm:justify-between gap-2">
+                            <span>Progreso de Inspección</span>
+                            <Badge variant={isComplete ? "default" : "secondary"} className="w-fit">
                                 {progressPercentage}% Completado
                             </Badge>
                         </CardTitle>
@@ -238,21 +238,21 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
 
                 <Card className="bg-slate-50 border-slate-200">
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-lg flex justify-between">
-                            Resumen de Estado
-                            <Badge variant={healthScore >= 70 ? "default" : healthScore >= 40 ? "secondary" : "destructive"}>
+                        <CardTitle className="text-base sm:text-lg flex flex-col sm:flex-row sm:justify-between gap-2">
+                            <span>Resumen de Estado</span>
+                            <Badge variant={healthScore >= 70 ? "default" : healthScore >= 40 ? "secondary" : "destructive"} className="w-fit">
                                 Salud: {healthScore}%
                             </Badge>
                         </CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="flex gap-4">
-                            <div className="flex items-center gap-2 text-green-600">
-                                <CheckCircle2 className="h-5 w-5" />
+                        <div className="flex flex-wrap gap-x-4 gap-y-2">
+                            <div className="flex items-center gap-2 text-green-600 text-sm sm:text-base">
+                                <CheckCircle2 className="h-4 w-4 sm:h-5 sm:w-5" />
                                 <span className="font-bold">{okItemsCount}</span> OK / N/A
                             </div>
-                            <div className="flex items-center gap-2 text-red-600">
-                                <XCircle className="h-5 w-5" />
+                            <div className="flex items-center gap-2 text-red-600 text-sm sm:text-base">
+                                <XCircle className="h-4 w-4 sm:h-5 sm:w-5" />
                                 <span className="font-bold">{failedItemsCount}</span> Regular / Malo
                             </div>
                         </div>
@@ -292,27 +292,27 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
                             onOpenChange={() => toggleSection(area.id)}
                             className="border rounded-lg bg-white shadow-sm"
                         >
-                            <div className="flex items-center justify-between p-4">
+                            <div className="flex items-start justify-between p-3 sm:p-4 gap-3">
                                 <CollapsibleTrigger asChild>
-                                    <Button variant="ghost" className="p-0 hover:bg-transparent flex-1 justify-start h-auto font-normal">
-                                        <div className="flex items-center gap-2 w-full">
+                                    <Button variant="ghost" className="p-0 hover:bg-transparent flex-1 justify-start h-auto font-normal text-left">
+                                        <div className="flex items-start gap-2 w-full">
                                             {isOpen ? (
-                                                <ChevronDown className="h-5 w-5 text-slate-500" />
+                                                <ChevronDown className="h-5 w-5 text-slate-500 shrink-0 mt-0.5" />
                                             ) : (
-                                                <ChevronRight className="h-5 w-5 text-slate-500" />
+                                                <ChevronRight className="h-5 w-5 text-slate-500 shrink-0 mt-0.5" />
                                             )}
-                                            <span className="font-semibold text-lg text-slate-800">{area.title}</span>
+                                            <span className="font-semibold text-base sm:text-lg text-slate-800 leading-tight whitespace-normal">{area.title}</span>
                                         </div>
                                     </Button>
                                 </CollapsibleTrigger>
 
-                                <div className="flex items-center gap-3">
+                                <div className="flex items-center gap-1.5 sm:gap-3 shrink-0 mt-1">
                                     {areaFails > 0 && (
-                                        <Badge variant="secondary" className="gap-1 flex items-center bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200">
+                                        <Badge variant="secondary" className="gap-1 flex items-center bg-slate-100 text-slate-600 hover:bg-slate-200 border-slate-200 px-1.5 sm:px-2.5">
                                             <AlertCircle className="h-3 w-3" /> {areaFails}
                                         </Badge>
                                     )}
-                                    <Badge variant={areaCompleted === areaTotal ? "outline" : "secondary"} className="text-xs">
+                                    <Badge variant={areaCompleted === areaTotal ? "outline" : "secondary"} className="text-[10px] sm:text-xs px-1.5 sm:px-2">
                                         {areaCompleted}/{areaTotal}
                                     </Badge>
                                 </div>
@@ -336,27 +336,27 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
                                                 "p-3 rounded-md border transition-all duration-200",
                                                 "bg-white border-slate-200 hover:border-slate-300 flex flex-col gap-3"
                                             )}>
-                                                <div className="flex flex-col lg:flex-row justify-between lg:items-center gap-3">
+                                                <div className="flex flex-col md:flex-row justify-between md:items-center gap-2 sm:gap-3">
                                                     <div className="flex-1">
-                                                        <Label htmlFor={`btn-${point.id}`} className="text-sm font-medium text-slate-700 cursor-pointer">
+                                                        <Label htmlFor={`btn-${point.id}`} className="text-sm font-medium text-slate-700 cursor-pointer whitespace-normal">
                                                             {point.label}
                                                         </Label>
                                                     </div>
 
-                                                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                                                    <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 shrink-0">
                                                         {/* Nuevos botones: N/A, Bueno, Regular, Malo */}
                                                         <Button
                                                             variant="outline"
                                                             size="sm"
                                                             onClick={() => handleStatusChange(area.id, point.label, InspectionStatus.NA)}
                                                             className={cn(
-                                                                "h-8 px-3 gap-1.5 min-w-[70px] transition-all",
+                                                                "h-7 sm:h-8 px-2 sm:px-3 gap-1 sm:gap-1.5 min-w-[60px] sm:min-w-[70px] text-[10px] sm:text-sm transition-all",
                                                                 isNa
                                                                     ? "bg-slate-200 text-slate-900 border-slate-400 font-medium hover:bg-slate-300"
                                                                     : "text-slate-700 border-slate-300 hover:bg-slate-100 hover:text-slate-900"
                                                             )}
                                                         >
-                                                            <MinusCircle className={cn("h-3.5 w-3.5", isNa ? "text-slate-700" : "text-slate-400")} />
+                                                            <MinusCircle className={cn("h-3 w-3 sm:h-3.5 sm:w-3.5", isNa ? "text-slate-700" : "text-slate-400")} />
                                                             N/A
                                                         </Button>
                                                         
@@ -365,13 +365,13 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
                                                             size="sm"
                                                             onClick={() => handleStatusChange(area.id, point.label, InspectionStatus.GOOD)}
                                                             className={cn(
-                                                                "h-8 px-3 gap-1.5 min-w-[80px] transition-all",
+                                                                "h-7 sm:h-8 px-2 sm:px-3 gap-1 sm:gap-1.5 min-w-[70px] sm:min-w-[80px] text-[10px] sm:text-sm transition-all",
                                                                 isBueno
                                                                     ? "bg-slate-200 text-slate-900 border-slate-400 font-medium hover:bg-slate-300"
                                                                     : "text-slate-700 border-slate-300 hover:bg-slate-100 hover:text-slate-900"
                                                             )}
                                                         >
-                                                            <CheckCircle2 className={cn("h-3.5 w-3.5", isBueno ? "text-green-600" : "text-slate-400")} />
+                                                            <CheckCircle2 className={cn("h-3 w-3 sm:h-3.5 sm:w-3.5", isBueno ? "text-green-600" : "text-slate-400")} />
                                                             Bueno
                                                         </Button>
 
@@ -380,13 +380,13 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
                                                             size="sm"
                                                             onClick={() => handleStatusChange(area.id, point.label, InspectionStatus.REGULAR)}
                                                             className={cn(
-                                                                "h-8 px-3 gap-1.5 min-w-[80px] transition-all",
+                                                                "h-7 sm:h-8 px-2 sm:px-3 gap-1 sm:gap-1.5 min-w-[75px] sm:min-w-[80px] text-[10px] sm:text-sm transition-all",
                                                                 isRegular
                                                                     ? "bg-slate-200 text-slate-900 border-slate-400 font-medium hover:bg-slate-300"
                                                                     : "text-slate-700 border-slate-300 hover:bg-slate-100 hover:text-slate-900"
                                                             )}
                                                         >
-                                                            <AlertTriangle className={cn("h-3.5 w-3.5", isRegular ? "text-amber-500" : "text-slate-400")} />
+                                                            <AlertTriangle className={cn("h-3 w-3 sm:h-3.5 sm:w-3.5", isRegular ? "text-amber-500" : "text-slate-400")} />
                                                             Regular
                                                         </Button>
 
@@ -395,13 +395,13 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
                                                             size="sm"
                                                             onClick={() => handleStatusChange(area.id, point.label, InspectionStatus.BAD)}
                                                             className={cn(
-                                                                "h-8 px-3 gap-1.5 min-w-[80px] transition-all",
+                                                                "h-7 sm:h-8 px-2 sm:px-3 gap-1 sm:gap-1.5 min-w-[65px] sm:min-w-[80px] text-[10px] sm:text-sm transition-all",
                                                                 isMalo
                                                                     ? "bg-slate-200 text-slate-900 border-slate-400 font-medium hover:bg-slate-300"
                                                                     : "text-slate-700 border-slate-300 hover:bg-slate-100 hover:text-slate-900"
                                                             )}
                                                         >
-                                                            <XCircle className={cn("h-3.5 w-3.5", isMalo ? "text-red-600" : "text-slate-400")} />
+                                                            <XCircle className={cn("h-3 w-3 sm:h-3.5 sm:w-3.5", isMalo ? "text-red-600" : "text-slate-400")} />
                                                             Malo
                                                         </Button>
                                                     </div>
@@ -454,16 +454,71 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
                 })}
             </div>
 
-            <div className="flex justify-center pt-8">
-                <Button
-                    size="lg"
-                    onClick={onComplete}
-                    disabled={!isComplete}
-                    className="w-full sm:w-auto gap-2 px-8 min-w-[200px]"
-                >
-                    <CheckCircle2 className="h-5 w-5" />
-                    Confirmar y Continuar
-                </Button>
+            <div className="mt-12 space-y-4">
+                <div className="relative overflow-hidden rounded-2xl border bg-white p-6 shadow-md transition-all hover:shadow-lg">
+                    {/* Decorative side bar */}
+                    <div className={cn(
+                        "absolute left-0 top-0 h-full w-1.5",
+                        healthScore >= 70 ? "bg-green-500" : healthScore >= 40 ? "bg-amber-500" : "bg-red-500"
+                    )} />
+                    
+                    <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+                        <div className="flex flex-wrap justify-center md:justify-start gap-4 sm:gap-8 flex-1">
+                            <div className="text-center md:text-left">
+                                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Puntos Correctos</p>
+                                <div className="flex items-center justify-center md:justify-start gap-2 mt-0.5">
+                                    <CheckCircle2 className="h-5 w-5 text-green-500" />
+                                    <span className="text-2xl font-bold text-slate-700">{okItemsCount}</span>
+                                </div>
+                            </div>
+
+                            <div className="hidden sm:block h-10 w-px bg-slate-100 mt-2" />
+
+                            <div className="text-center md:text-left">
+                                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Gravedad / Fallos</p>
+                                <div className="flex items-center justify-center md:justify-start gap-2 mt-0.5">
+                                    <XCircle className="h-5 w-5 text-red-500" />
+                                    <span className="text-2xl font-bold text-slate-700">{failedItemsCount}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex flex-col items-center md:items-end pr-0 md:pr-4">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Puntuación de Salud</p>
+                            <div className="flex items-baseline gap-1">
+                                <span className={cn(
+                                    "text-5xl font-black tracking-tighter leading-none transition-colors duration-700",
+                                    healthScore >= 70 ? "text-green-600" : healthScore >= 40 ? "text-amber-600" : "text-red-600"
+                                )}>
+                                    {healthScore}
+                                </span>
+                                <span className="text-xl font-bold text-slate-400">%</span>
+                            </div>
+                        </div>
+
+                        <Button
+                            size="lg"
+                            onClick={onComplete}
+                            disabled={!isComplete}
+                            className={cn(
+                                "w-full md:w-auto px-10 py-7 text-lg font-bold rounded-xl shadow-lg transition-all",
+                                isComplete 
+                                    ? "bg-slate-900 border-none hover:bg-black hover:scale-[1.03] active:scale-95" 
+                                    : "bg-slate-100 text-slate-400 border-slate-200"
+                            )}
+                        >
+                            <CheckCircle2 className="mr-2 h-6 w-6 text-green-400" />
+                            Finalizar 360°
+                        </Button>
+                    </div>
+                </div>
+                
+                {!isComplete && (
+                    <div className="flex items-center justify-center gap-2 text-xs text-amber-600 font-semibold animate-in slide-in-from-bottom-2">
+                        <AlertCircle className="h-3 w-3" />
+                        <span>Faltan {(totalPoints - completedPoints)} puntos por inspeccionar para poder confirmar</span>
+                    </div>
+                )}
             </div>
         </div>
     );

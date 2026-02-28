@@ -109,7 +109,7 @@ export default function VehicleInspectionWizard() {
     }
   };
 
-  const handleCompleteInspection = async (photosFromPictures?: any[], dataOverride?: any) => {
+  const handleCompleteInspection = async (photosFromPictures?: any[], dataOverride?: any, aiValuation?: any) => {
     // Usar las fotos pasadas directamente o las del contexto
     const photosToUse = photosFromPictures || photos;
     // Use dataOverride if provided (from valuation step), otherwise use formData from context
@@ -127,7 +127,7 @@ export default function VehicleInspectionWizard() {
 
     try {
       // Prepare data for submission
-      const { vehicleData, inspectionData } = prepareInspectionData(dataToUse, sectionTimes, rejectionEvidenceUrl);
+      const { vehicleData, inspectionData } = prepareInspectionData(dataToUse, sectionTimes, rejectionEvidenceUrl, aiValuation);
 
       // Map items360 to match API service interface (the backend expects uppercase enums: 'GOOD', 'BAD', etc)
       const apiItems360 = items360.map(item => ({
@@ -253,7 +253,7 @@ export default function VehicleInspectionWizard() {
                     </div>
                     <div className="text-center">
                       <div className={cn(
-                        "text-sm font-medium",
+                        "text-[10px] sm:text-sm font-medium leading-tight",
                         !isActive && !isPast && "text-gray-400"
                       )}>
                         {step.title}
@@ -331,6 +331,25 @@ export default function VehicleInspectionWizard() {
                       }, 100);
                     }
                   }}
+                  onReject={() => {
+                    if (window.confirm("¿Está seguro de querer rechazar el vehículo y finalizar la inspección ahora? Esto guardará el registro como RECHAZADO y lo enviará al dashboard.")) {
+                      setChecklistCompleted(true);
+                      
+                      // Preparar datos mínimos requeridos para una inspección rechazada
+                      const rejectionData = {
+                        ...formData,
+                        vehicleRating: "No comercial",
+                        currentConditionValue: "0",
+                        vehicleEquipment: "Inspección finalizada por rechazo técnico.",
+                        scannerUsed: "No",
+                        airbagWarning: "No",
+                        testDrive: "No",
+                        inspectionResult: formData.inspectionResult || "VEHÍCULO RECHAZADO: Se detectaron criterios críticos de rechazo durante la evaluación."
+                      };
+                      
+                      handleCompleteInspection([], rejectionData);
+                    }
+                  }}
                   isWizardMode={true}
                 />
               </div>
@@ -354,11 +373,11 @@ export default function VehicleInspectionWizard() {
               <div>
                 <VehicleValuation
                   vehicleData={formData}
-                  onComplete={(valuationData) => {
+                  onComplete={(valuationData, aiValuation) => {
                     setValuationCompleted(true);
                     // Merge valuation data with existing form data
                     const completeData = { ...formData, ...valuationData };
-                    handleCompleteInspection(photos, completeData);
+                    handleCompleteInspection(photos, completeData, aiValuation);
                   }}
                   isWizardMode={true}
                   isSubmitting={isSubmitting}

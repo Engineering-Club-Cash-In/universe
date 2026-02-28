@@ -18,6 +18,8 @@ import {
   AlertTriangle,
   CheckCircle2,
   Sparkles,
+  LayoutGrid,
+  ListChecks,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -280,6 +282,7 @@ export default function VehiclePictures({
   const { setPhotos: setContextPhotos, photos: contextPhotos } = useInspection();
   const [activeStep, setActiveStep] = useState(inspectionSteps[0].id);
   const [photoIndex, setPhotoIndex] = useState(0);
+  const [viewMode, setViewMode] = useState<'wizard' | 'gallery'>('wizard');
   
   // Create a single temporary vehicle ID for this inspection session
   const [tempVehicleId] = useState(() => 'temp-' + Date.now());
@@ -292,32 +295,26 @@ export default function VehiclePictures({
         initialState[step.id][photo.id] = null;
       });
     });
+
+    // Sync with context if it has data
+    if (contextPhotos && contextPhotos.length > 0) {
+      contextPhotos.forEach((cp) => {
+        if (initialState[cp.category] && initialState[cp.category][cp.photoType] !== undefined) {
+          initialState[cp.category][cp.photoType] = {
+            file: null as unknown as File,
+            preview: cp.url,
+            uploadStatus: 'uploaded' as const,
+            serverUrl: cp.url,
+            valuatorComment: cp.valuatorComment,
+            noCommentsChecked: cp.noCommentsChecked,
+          };
+        }
+      });
+    }
     return initialState;
   });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Restaurar fotos del contexto al montar (después de recarga o navegación)
-  useEffect(() => {
-    if (contextPhotos && contextPhotos.length > 0) {
-      setPhotos((prev) => {
-        const updated = { ...prev };
-        contextPhotos.forEach((cp) => {
-          if (updated[cp.category] && updated[cp.category][cp.photoType] !== undefined && cp.url) {
-            updated[cp.category][cp.photoType] = {
-              file: null as unknown as File,
-              preview: cp.url,
-              uploadStatus: 'uploaded' as const,
-              serverUrl: cp.url,
-              valuatorComment: cp.valuatorComment,
-              noCommentsChecked: cp.noCommentsChecked,
-            };
-          }
-        });
-        return updated;
-      });
-    }
-  }, []); // Solo al montar
 
   // Sincronizar fotos al contexto cuando cambian (para preservar al navegar)
   useEffect(() => {
@@ -349,10 +346,8 @@ export default function VehiclePictures({
       }
     }
 
-    // Solo actualizar si hay fotos para guardar
-    if (photoDataForContext.length > 0) {
-      setContextPhotos(photoDataForContext);
-    }
+    // Siempre sincronizar con el contexto, incluso si está vacío (para manejar borrados)
+    setContextPhotos(photoDataForContext);
   }, [photos, setContextPhotos]);
 
   // Check if dev mode is enabled
@@ -854,351 +849,460 @@ export default function VehiclePictures({
           )}
 
           <div className="flex flex-col gap-4 mt-4">
-            <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-4">
+            <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
-                <Progress value={progress} className="w-40 h-2" />
-                <span className="text-sm text-muted-foreground">
+                <Progress value={progress} className="w-32 sm:w-40 h-2" />
+                <span className="text-sm text-muted-foreground whitespace-nowrap">
                   {completedPhotos}/{totalPhotos} fotos
                 </span>
               </div>
 
-              <Button
-                onClick={handleFinish}
-                disabled={!isComplete}
-                size="sm"
-                className={cn(
-                  "transition-all",
-                  isComplete
-                    ? "bg-green-600 hover:bg-green-700 text-white"
-                    : "bg-muted text-muted-foreground"
-                )}
-              >
-                <CheckCircle2 className="mr-1 h-3 w-3" />
-                <span className="hidden sm:inline">Continuar a Valuación</span>
-                <span className="sm:hidden">Continuar</span>
-              </Button>
+              <div className="flex items-center p-1 bg-muted rounded-lg border">
+                <Button
+                  variant={viewMode === 'wizard' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  className="h-7 px-3 text-xs gap-1.5"
+                  onClick={() => setViewMode('wizard')}
+                >
+                  <ListChecks className="h-3.5 w-3.5" />
+                  Asistente
+                </Button>
+                <Button
+                  variant={viewMode === 'gallery' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  className="h-7 px-3 text-xs gap-1.5"
+                  onClick={() => setViewMode('gallery')}
+                >
+                  <LayoutGrid className="h-3.5 w-3.5" />
+                  Galería
+                </Button>
+              </div>
             </div>
+
+            <Button
+              onClick={handleFinish}
+              disabled={!isComplete}
+              size="sm"
+              className={cn(
+                "transition-all",
+                isComplete
+                  ? "bg-green-600 hover:bg-green-700 text-white"
+                  : "bg-muted text-muted-foreground"
+              )}
+            >
+              <CheckCircle2 className="mr-1 h-3 w-3" />
+              <span className="hidden sm:inline">Continuar a Valuación</span>
+              <span className="sm:hidden">Continuar</span>
+            </Button>
           </div>
         </div>
+      </div>
 
-        {/* Mobile Category Selector */}
-        <div className="md:hidden">
-          <Select value={activeStep} onValueChange={handleStepChange}>
-            <SelectTrigger className="w-full">
-              <SelectValue>
-                <div className="flex items-center gap-2">
-                  <CurrentStepIcon className="h-4 w-4" />
-                  <span>{currentStep.title}</span>
-                  <span className="ml-auto text-xs text-muted-foreground">
-                    {stepCompletionStatus.find((s) => s.id === activeStep)
-                      ?.completed || 0}
-                    /
-                    {stepCompletionStatus.find((s) => s.id === activeStep)
-                      ?.total || 0}
-                  </span>
-                </div>
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {inspectionSteps.map((step) => {
-                const status = stepCompletionStatus.find(
-                  (s) => s.id === step.id
-                );
-                const StepIcon = step.icon;
-                return (
-                  <SelectItem key={step.id} value={step.id}>
-                    <div className="flex items-center gap-2 w-full">
-                      <StepIcon className="h-4 w-4" />
-                      <span>{step.title}</span>
+        {viewMode === 'wizard' ? (
+          <>
+            {/* Mobile Category Selector */}
+            <div className="md:hidden">
+              <Select value={activeStep} onValueChange={handleStepChange}>
+                <SelectTrigger className="w-full">
+                  <SelectValue>
+                    <div className="flex items-center gap-2">
+                      <CurrentStepIcon className="h-4 w-4" />
+                      <span>{currentStep.title}</span>
                       <span className="ml-auto text-xs text-muted-foreground">
-                        {status?.completed || 0}/{status?.total || 0}
+                        {stepCompletionStatus.find((s) => s.id === activeStep)
+                          ?.completed || 0}
+                        /
+                        {stepCompletionStatus.find((s) => s.id === activeStep)
+                          ?.total || 0}
                       </span>
                     </div>
-                  </SelectItem>
-                );
-              })}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Desktop Tabs */}
-        <div className="hidden md:block">
-          <Tabs
-            value={activeStep}
-            onValueChange={handleStepChange}
-            className="w-full"
-          >
-            <TabsList className="flex w-full">
-              {inspectionSteps.map((step) => {
-                const status = stepCompletionStatus.find(
-                  (s) => s.id === step.id
-                );
-                const StepIcon = step.icon;
-                return (
-                  <TabsTrigger
-                    key={step.id}
-                    value={step.id}
-                    className="flex items-center gap-2 py-2 px-3 flex-1"
-                  >
-                    <StepIcon className="h-4 w-4" />
-                    <span className="text-xs whitespace-nowrap">
-                      {step.title}
-                    </span>
-                    <span className="ml-auto text-xs text-muted-foreground">
-                      {status?.completed || 0}/{status?.total || 0}
-                    </span>
-                  </TabsTrigger>
-                );
-              })}
-            </TabsList>
-          </Tabs>
-        </div>
-
-        {/* Photo Content */}
-        <Card>
-          <CardHeader className="px-4 py-3 sm:px-6 sm:py-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-base sm:text-lg">
-                  {currentPhoto.title}
-                </CardTitle>
-                <CardDescription className="text-xs sm:text-sm">
-                  {currentPhoto.description}
-                </CardDescription>
-              </div>
-              <div className="text-xs sm:text-sm text-muted-foreground">
-                Foto {photoIndex + 1} de {currentStep.photos.length}
-              </div>
-            </div>
-          </CardHeader>
-
-          <CardContent className="px-4 py-3 sm:px-6 sm:py-4">
-            <div className="flex flex-col items-center justify-center">
-              {currentPhotoData ? (
-                <div className="relative w-full max-w-md aspect-[4/3] bg-muted rounded-lg overflow-hidden">
-                  <img
-                    src={currentPhotoData.preview || "/placeholder.svg"}
-                    alt={currentPhoto.title}
-                    className="object-cover w-full h-full"
-                  />
-                  <div className="absolute top-2 right-2 flex gap-1">
-                    {/* Upload status indicator */}
-                    <div className={cn(
-                      "rounded-full p-1",
-                      currentPhotoData.uploadStatus === 'uploaded' ? "bg-green-500" :
-                      currentPhotoData.uploadStatus === 'failed' ? "bg-red-500" :
-                      currentPhotoData.uploadStatus === 'uploading' ? "bg-yellow-500" :
-                      "bg-blue-500"
-                    )}>
-                      {currentPhotoData.uploadStatus === 'uploaded' ? (
-                        <Check className="h-3 w-3 text-white" />
-                      ) : currentPhotoData.uploadStatus === 'failed' ? (
-                        <X className="h-3 w-3 text-white" />
-                      ) : currentPhotoData.uploadStatus === 'uploading' ? (
-                        <div className="h-3 w-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      ) : (
-                        <Check className="h-3 w-3 text-white" />
-                      )}
-                    </div>
-                    
-                    {/* Remove button */}
-                    <Button
-                      variant="destructive"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={removePhoto}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div
-                  className="flex flex-col items-center justify-center w-full max-w-md aspect-[4/3] bg-muted rounded-lg border-2 border-dashed border-muted-foreground/25 cursor-pointer hover:bg-muted/80 transition-colors"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <Camera className="h-10 w-10 text-muted-foreground mb-2" />
-                  <p className="text-sm text-muted-foreground">
-                    Clic para tomar o seleccionar una foto
-                  </p>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={handleFileUpload}
-                  />
-                </div>
-              )}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {inspectionSteps.map((step) => {
+                    const status = stepCompletionStatus.find(
+                      (s) => s.id === step.id
+                    );
+                    const StepIcon = step.icon;
+                    return (
+                      <SelectItem key={step.id} value={step.id}>
+                        <div className="flex items-center gap-2 w-full">
+                          <StepIcon className="h-4 w-4" />
+                          <span>{step.title}</span>
+                          <span className="ml-auto text-xs text-muted-foreground">
+                            {status?.completed || 0}/{status?.total || 0}
+                          </span>
+                        </div>
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
             </div>
 
-            {/* Comments section - only show if photo exists */}
-            {currentPhotoData && (
-              <div className="mt-6 border-t pt-4 space-y-4">
-                <div className="space-y-3">
-                  <Label className="text-sm font-medium">
-                    Comentarios de inspección <span className="text-red-500">*</span>
-                  </Label>
-                  
-                  <Textarea
-                    placeholder="Describe cualquier observación sobre esta fotografía (daños, desgaste, condiciones especiales, etc.)"
-                    value={currentPhotoData.valuatorComment || ''}
-                    onChange={(e) => {
-                      setPhotos((prev) => ({
-                        ...prev,
-                        [activeStep]: {
-                          ...prev[activeStep],
-                          [currentPhoto.id]: {
-                            ...prev[activeStep][currentPhoto.id]!,
-                            valuatorComment: e.target.value,
-                            // Clear checkbox if user starts typing
-                            noCommentsChecked: e.target.value ? false : prev[activeStep][currentPhoto.id]?.noCommentsChecked || false,
-                          },
-                        },
-                      }));
-                    }}
-                    className="min-h-[80px]"
-                    disabled={currentPhotoData.noCommentsChecked}
-                  />
-                  
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="no-comments"
-                      checked={currentPhotoData.noCommentsChecked || false}
-                      onCheckedChange={(checked) => {
-                        setPhotos((prev) => ({
-                          ...prev,
-                          [activeStep]: {
-                            ...prev[activeStep],
-                            [currentPhoto.id]: {
-                              ...prev[activeStep][currentPhoto.id]!,
-                              noCommentsChecked: checked as boolean,
-                              // Clear comment if checkbox is checked
-                              valuatorComment: checked ? '' : prev[activeStep][currentPhoto.id]?.valuatorComment || '',
-                            },
-                          },
-                        }));
-                      }}
-                    />
-                    <Label 
-                      htmlFor="no-comments" 
-                      className="text-sm text-muted-foreground cursor-pointer"
-                    >
-                      Sin comentarios - Esta fotografía no presenta observaciones relevantes
-                    </Label>
+            {/* Desktop Tabs */}
+            <div className="hidden md:block">
+              <Tabs
+                value={activeStep}
+                onValueChange={handleStepChange}
+                className="w-full"
+              >
+                <TabsList className="flex w-full">
+                  {inspectionSteps.map((step) => {
+                    const status = stepCompletionStatus.find(
+                      (s) => s.id === step.id
+                    );
+                    const StepIcon = step.icon;
+                    return (
+                      <TabsTrigger
+                        key={step.id}
+                        value={step.id}
+                        className="flex items-center gap-2 py-2 px-3 flex-1"
+                      >
+                        <StepIcon className="h-4 w-4" />
+                        <span className="text-xs whitespace-nowrap">
+                          {step.title}
+                        </span>
+                        <span className="ml-auto text-xs text-muted-foreground">
+                          {status?.completed || 0}/{status?.total || 0}
+                        </span>
+                      </TabsTrigger>
+                    );
+                  })}
+                </TabsList>
+              </Tabs>
+            </div>
+
+            {/* Photo Content */}
+            <Card>
+              <CardHeader className="px-4 py-3 sm:px-6 sm:py-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-base sm:text-lg">
+                      {currentPhoto.title}
+                    </CardTitle>
+                    <CardDescription className="text-xs sm:text-sm">
+                      {currentPhoto.description}
+                    </CardDescription>
                   </div>
-                  
-                  {/* Validation indicator */}
-                  <div className="flex items-center gap-2">
-                    {(currentPhotoData.valuatorComment?.trim() || currentPhotoData.noCommentsChecked) ? (
-                      <div className="flex items-center text-green-600 text-sm">
-                        <Check className="h-4 w-4 mr-1" />
-                        Validación completa
+                  <div className="text-xs sm:text-sm text-muted-foreground">
+                    Foto {photoIndex + 1} de {currentStep.photos.length}
+                  </div>
+                </div>
+              </CardHeader>
+
+              <CardContent className="px-4 py-3 sm:px-6 sm:py-4">
+                <div className="flex flex-col items-center justify-center">
+                  {currentPhotoData ? (
+                    <div className="relative w-full max-w-md aspect-4/3 bg-muted rounded-lg overflow-hidden">
+                      <img
+                        src={currentPhotoData.preview || "/placeholder.svg"}
+                        alt={currentPhoto.title}
+                        className="object-cover w-full h-full"
+                      />
+                      <div className="absolute top-2 right-2 flex gap-1">
+                        {/* Upload status indicator */}
+                        <div className={cn(
+                          "rounded-full p-1",
+                          currentPhotoData.uploadStatus === 'uploaded' ? "bg-green-500" :
+                          currentPhotoData.uploadStatus === 'failed' ? "bg-red-500" :
+                          currentPhotoData.uploadStatus === 'uploading' ? "bg-yellow-500" :
+                          "bg-blue-500"
+                        )}>
+                          {currentPhotoData.uploadStatus === 'uploaded' ? (
+                            <Check className="h-3 w-3 text-white" />
+                          ) : currentPhotoData.uploadStatus === 'failed' ? (
+                            <X className="h-3 w-3 text-white" />
+                          ) : currentPhotoData.uploadStatus === 'uploading' ? (
+                            <div className="h-3 w-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <Check className="h-3 w-3 text-white" />
+                          )}
+                        </div>
+                        
+                        {/* Remove button */}
+                        <Button
+                          variant="destructive"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={removePhoto}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
                       </div>
+                    </div>
+                  ) : (
+                    <div
+                      className="flex flex-col items-center justify-center w-full max-w-md aspect-4/3 bg-muted rounded-lg border-2 border-dashed border-muted-foreground/25 cursor-pointer hover:bg-muted/80 transition-colors"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <Camera className="h-10 w-10 text-muted-foreground mb-2" />
+                      <p className="text-sm text-muted-foreground">
+                        Clic para tomar o seleccionar una foto
+                      </p>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleFileUpload}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Comments section - only show if photo exists */}
+                {currentPhotoData && (
+                  <div className="mt-6 border-t pt-4 space-y-4">
+                    <div className="space-y-3">
+                      <Label className="text-sm font-medium">
+                        Comentarios de inspección <span className="text-red-500">*</span>
+                      </Label>
+                      
+                      <Textarea
+                        placeholder="Describe cualquier observación sobre esta fotografía (daños, desgaste, condiciones especiales, etc.)"
+                        value={currentPhotoData.valuatorComment || ''}
+                        onChange={(e) => {
+                          setPhotos((prev) => ({
+                            ...prev,
+                            [activeStep]: {
+                              ...prev[activeStep],
+                              [currentPhoto.id]: {
+                                ...prev[activeStep][currentPhoto.id]!,
+                                valuatorComment: e.target.value,
+                                // Clear checkbox if user starts typing
+                                noCommentsChecked: e.target.value ? false : prev[activeStep][currentPhoto.id]?.noCommentsChecked || false,
+                              },
+                            },
+                          }));
+                        }}
+                        className="min-h-[80px]"
+                        disabled={currentPhotoData.noCommentsChecked}
+                      />
+                      
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="no-comments"
+                          checked={currentPhotoData.noCommentsChecked || false}
+                          onCheckedChange={(checked) => {
+                            setPhotos((prev) => ({
+                              ...prev,
+                              [activeStep]: {
+                                ...prev[activeStep],
+                                [currentPhoto.id]: {
+                                  ...prev[activeStep][currentPhoto.id]!,
+                                  noCommentsChecked: checked as boolean,
+                                  // Clear comment if checkbox is checked
+                                  valuatorComment: checked ? '' : prev[activeStep][currentPhoto.id]?.valuatorComment || '',
+                                },
+                              },
+                            }));
+                          }}
+                        />
+                        <Label 
+                          htmlFor="no-comments" 
+                          className="text-sm text-muted-foreground cursor-pointer"
+                        >
+                          Sin comentarios - Esta fotografía no presenta observaciones relevantes
+                        </Label>
+                      </div>
+                      
+                      {/* Validation indicator */}
+                      <div className="flex items-center gap-2">
+                        {(currentPhotoData.valuatorComment?.trim() || currentPhotoData.noCommentsChecked) ? (
+                          <div className="flex items-center text-green-600 text-sm">
+                            <Check className="h-4 w-4 mr-1" />
+                            Validación completa
+                          </div>
+                        ) : (
+                          <div className="flex items-center text-orange-600 text-sm">
+                            <AlertTriangle className="h-4 w-4 mr-1" />
+                            Requiere comentario o marcar "Sin comentarios"
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+
+              <CardFooter className="flex justify-between px-4 py-3 sm:px-6 sm:py-4">
+                <Button
+                  variant="outline"
+                  onClick={goToPrevPhoto}
+                  disabled={isFirstPhoto}
+                  className="h-10"
+                >
+                  <ChevronLeft className="mr-2 h-4 w-4" />
+                  <span className="sm:inline">Anterior</span>
+                </Button>
+
+                <Button
+                  onClick={() => {
+                    if (currentPhotoData) {
+                      goToNextPhoto();
+                    } else {
+                      // Abre el selector de archivo por defecto
+                      fileInputRef.current?.click();
+                    }
+                  }}
+                  disabled={isLastPhoto && currentPhotoData === null}
+                  className="h-10"
+                >
+                  {currentPhotoData ? (
+                    <>
+                      <span className="sm:inline">Siguiente</span>
+                      <ChevronRight className="ml-2 h-4 w-4" />
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="mr-2 h-4 w-4" />
+                      <span className="sm:inline">Agregar</span>
+                    </>
+                  )}
+                </Button>
+              </CardFooter>
+            </Card>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 sm:gap-4 mt-4 sm:mt-6">
+              {currentStep.photos.map((photo, idx) => {
+                const photoData = photos[activeStep][photo.id];
+                return (
+                  <div
+                    key={photo.id}
+                    className={cn(
+                      "relative aspect-square rounded-lg overflow-hidden border cursor-pointer",
+                      photoIndex === idx ? "ring-2 ring-primary" : "",
+                      photoData ? "bg-muted" : "bg-muted/50"
+                    )}
+                    onClick={() => setPhotoIndex(idx)}
+                  >
+                    {photoData ? (
+                      <>
+                        <img
+                          src={photoData.preview || "/placeholder.svg"}
+                          alt={photo.title}
+                          className="object-cover w-full h-full"
+                        />
+                        <div className={cn(
+                          "absolute top-1 right-1 rounded-full p-0.5",
+                          photoData.uploadStatus === 'uploaded' ? "bg-green-500" :
+                          photoData.uploadStatus === 'failed' ? "bg-red-500" :
+                          photoData.uploadStatus === 'uploading' ? "bg-yellow-500" :
+                          "bg-blue-500"
+                        )}>
+                          {photoData.uploadStatus === 'uploaded' ? (
+                            <Check className="h-3 w-3 text-white" />
+                          ) : photoData.uploadStatus === 'failed' ? (
+                            <X className="h-3 w-3 text-white" />
+                          ) : photoData.uploadStatus === 'uploading' ? (
+                            <div className="h-3 w-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <Check className="h-3 w-3 text-white" />
+                          )}
+                        </div>
+                      </>
                     ) : (
-                      <div className="flex items-center text-orange-600 text-sm">
-                        <AlertTriangle className="h-4 w-4 mr-1" />
-                        Requiere comentario o marcar "Sin comentarios"
+                      <div className="relative aspect-4/3 bg-slate-100 flex items-center justify-center overflow-hidden h-full w-full">
+                        <Camera className="h-6 w-6 text-muted-foreground" />
                       </div>
                     )}
-                  </div>
-                </div>
-              </div>
-            )}
-          </CardContent>
-
-          <CardFooter className="flex justify-between px-4 py-3 sm:px-6 sm:py-4">
-            <Button
-              variant="outline"
-              onClick={goToPrevPhoto}
-              disabled={isFirstPhoto}
-              className="h-10"
-            >
-              <ChevronLeft className="mr-2 h-4 w-4" />
-              <span className="sm:inline">Anterior</span>
-            </Button>
-
-            <Button
-              onClick={() => {
-                if (currentPhotoData) {
-                  goToNextPhoto();
-                } else {
-                  // Abre el selector de archivo por defecto
-                  fileInputRef.current?.click();
-                }
-              }}
-              disabled={isLastPhoto && currentPhotoData === null}
-              className="h-10"
-            >
-              {currentPhotoData ? (
-                <>
-                  <span className="sm:inline">Siguiente</span>
-                  <ChevronRight className="ml-2 h-4 w-4" />
-                </>
-              ) : (
-                <>
-                  <Upload className="mr-2 h-4 w-4" />
-                  <span className="sm:inline">Agregar</span>
-                </>
-              )}
-            </Button>
-          </CardFooter>
-        </Card>
-
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 sm:gap-4 mt-4 sm:mt-6">
-          {currentStep.photos.map((photo, idx) => {
-            const photoData = photos[activeStep][photo.id];
-            return (
-              <div
-                key={photo.id}
-                className={cn(
-                  "relative aspect-square rounded-lg overflow-hidden border cursor-pointer",
-                  photoIndex === idx ? "ring-2 ring-primary" : "",
-                  photoData ? "bg-muted" : "bg-muted/50"
-                )}
-                onClick={() => setPhotoIndex(idx)}
-              >
-                {photoData ? (
-                  <>
-                    <img
-                      src={photoData.preview || "/placeholder.svg"}
-                      alt={photo.title}
-                      className="object-cover w-full h-full"
-                    />
-                    <div className={cn(
-                      "absolute top-1 right-1 rounded-full p-0.5",
-                      photoData.uploadStatus === 'uploaded' ? "bg-green-500" :
-                      photoData.uploadStatus === 'failed' ? "bg-red-500" :
-                      photoData.uploadStatus === 'uploading' ? "bg-yellow-500" :
-                      "bg-blue-500"
-                    )}>
-                      {photoData.uploadStatus === 'uploaded' ? (
-                        <Check className="h-3 w-3 text-white" />
-                      ) : photoData.uploadStatus === 'failed' ? (
-                        <X className="h-3 w-3 text-white" />
-                      ) : photoData.uploadStatus === 'uploading' ? (
-                        <div className="h-3 w-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      ) : (
-                        <Check className="h-3 w-3 text-white" />
-                      )}
+                    <div className="absolute bottom-0 left-0 right-0 bg-black/60 p-1">
+                      <p className="text-xs text-white truncate text-center font-medium">
+                        {photo.title}
+                      </p>
                     </div>
-                  </>
-                ) : (
-                  <div className="flex items-center justify-center h-full">
-                    <Camera className="h-6 w-6 text-muted-foreground" />
                   </div>
-                )}
-                <div className="absolute bottom-0 left-0 right-0 bg-black/60 p-1">
-                  <p className="text-xs text-white truncate text-center">
-                    {photo.title}
-                  </p>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <div className="space-y-8">
+            {inspectionSteps.map((step) => {
+              const status = stepCompletionStatus.find((s) => s.id === step.id);
+              const StepIcon = step.icon;
+              return (
+                <div key={step.id} className="space-y-4">
+                  <div className="flex items-center justify-between border-b pb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 bg-primary/10 rounded-md">
+                        <StepIcon className="h-5 w-5 text-primary" />
+                      </div>
+                      <h3 className="text-lg font-semibold">{step.title}</h3>
+                    </div>
+                    <span className="text-sm text-muted-foreground font-medium">
+                      {status?.completed || 0}/{status?.total || 0} completas
+                    </span>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                    {step.photos.map((photo, idx) => {
+                      const photoData = photos[step.id][photo.id];
+                      return (
+                        <div
+                          key={photo.id}
+                          className={cn(
+                            "relative aspect-square rounded-lg overflow-hidden border cursor-pointer group hover:ring-2 hover:ring-primary/50 transition-all",
+                            photoData ? "bg-muted" : "bg-muted/30 border-dashed"
+                          )}
+                          onClick={() => {
+                            setActiveStep(step.id);
+                            setPhotoIndex(idx);
+                            setViewMode('wizard');
+                            window.scrollTo({ top: 0, behavior: "smooth" });
+                          }}
+                        >
+                          {photoData ? (
+                            <>
+                              <img
+                                src={photoData.preview || "/placeholder.svg"}
+                                alt={photo.title}
+                                className="object-cover w-full h-full"
+                              />
+                              {/* Overlay for "Edit" intent */}
+                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 flex items-center justify-center transition-all">
+                                <span className="text-white opacity-0 group-hover:opacity-100 text-[10px] font-bold bg-black/40 px-2 py-1 rounded">
+                                  Editar
+                                </span>
+                              </div>
+                              <div className={cn(
+                                "absolute top-1 right-1 rounded-full p-0.5 shadow-sm",
+                                photoData.uploadStatus === 'uploaded' ? "bg-green-500" :
+                                photoData.uploadStatus === 'failed' ? "bg-red-500" :
+                                "bg-yellow-500"
+                              )}>
+                                {photoData.uploadStatus === 'uploaded' ? (
+                                  <Check className="h-2.5 w-2.5 text-white" />
+                                ) : (
+                                  <Upload className="h-2.5 w-2.5 text-white" />
+                                )}
+                              </div>
+                            </>
+                          ) : (
+                            <div className="flex flex-col items-center justify-center h-full w-full gap-1 opacity-50 group-hover:opacity-100">
+                              <Camera className="h-5 w-5 text-muted-foreground" />
+                              <span className="text-[10px] text-muted-foreground font-medium">Pendiente</span>
+                            </div>
+                          )}
+                          <div className="absolute bottom-0 left-0 right-0 bg-black/60 p-1">
+                            <p className="text-[10px] text-white truncate text-center font-medium">
+                              {photo.title}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
       <Toaster />
     </div>
+
   );
 }

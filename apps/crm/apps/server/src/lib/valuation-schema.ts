@@ -35,11 +35,64 @@ export const vehicleValuationSchema = z.object({
 
 export type VehicleValuation = z.infer<typeof vehicleValuationSchema>;
 
+// Basic interfaces for data structures
+export interface ValuationVehicleData {
+	vehicleMake?: string;
+	vehicleModel?: string;
+	vehicleYear?: string;
+	trim?: string;
+	licensePlate?: string;
+	vinNumber?: string;
+	color?: string;
+	vehicleType?: string;
+	cylinders?: string;
+	engineCC?: string;
+	fuelType?: string;
+	transmission?: string;
+	origin?: string;
+	traction?: string;
+	kmMileage?: string;
+	milesMileage?: string;
+	technicianName?: string;
+	inspectionDate?: Date | string;
+	inspectionResult?: string;
+	tiresCondition?: number;
+	tireConditionFrontLeft?: number;
+	tireConditionFrontRight?: number;
+	tireConditionRearLeft?: number;
+	tireConditionRearRight?: number;
+	hasSpareTire?: boolean | string;
+	tireConditionSpare?: number;
+	paintCondition?: number;
+	hasAgencyHistory?: boolean | string;
+	vehicleEquipment?: string;
+	importantConsiderations?: string;
+	scannerUsed?: string | boolean;
+	airbagWarning?: string | boolean;
+	missingAirbag?: string;
+	testDrive?: string | boolean;
+	noTestDriveReason?: string;
+}
+
+export interface ValuationChecklistItem {
+	item: string;
+	checked: boolean;
+	severity: "critical" | "warning" | "good" | "standard";
+}
+
+export interface ValuationPhoto {
+	category: string;
+	photoType: string;
+	title: string;
+	valuatorComment?: string;
+	noCommentsChecked?: boolean;
+}
+
 // Helper to prepare context for AI valuation
 export function prepareValuationContext(
-	vehicleData: any,
-	checklistItems: any[],
-	photos: any[],
+	vehicleData: ValuationVehicleData,
+	checklistItems: ValuationChecklistItem[],
+	photos: ValuationPhoto[],
 ): {
 	location: string;
 	evaluationDate: string;
@@ -130,15 +183,17 @@ export function prepareValuationContext(
 				category: photo.category,
 				photoType: photo.photoType,
 				title: photo.title,
-				comment: photo.valuatorComment,
+				comment: photo.valuatorComment!,
 			})) || [];
 
 	// Count photos by category
-	const photoCategories =
-		photos?.reduce((acc, photo) => {
+	const photoCategories = (photos || []).reduce(
+		(acc: Record<string, number>, photo) => {
 			acc[photo.category] = (acc[photo.category] || 0) + 1;
 			return acc;
-		}, {}) || {};
+		},
+		{} as Record<string, number>,
+	);
 
 	return {
 		// Location context
@@ -221,10 +276,10 @@ export function prepareValuationContext(
 		// Documentation
 		photoCount: photos?.length || 0,
 		photoCategories,
-		hasExteriorPhotos: (photoCategories.exterior || 0) > 0,
-		hasInteriorPhotos: (photoCategories.interior || 0) > 0,
-		hasEnginePhotos: (photoCategories.engine || 0) > 0,
-		hasDamagePhotos: (photoCategories.damage || 0) > 0,
+		hasExteriorPhotos: (photoCategories["exterior"] || 0) > 0,
+		hasInteriorPhotos: (photoCategories["interior"] || 0) > 0,
+		hasEnginePhotos: (photoCategories["engine"] || 0) > 0,
+		hasDamagePhotos: (photoCategories["damage"] || 0) > 0,
 
 		// Photo valuator comments (key insights from photos)
 		photoComments,

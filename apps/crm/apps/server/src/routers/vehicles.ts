@@ -206,73 +206,6 @@ export const vehiclesRouter = {
 				photosByVehicle.get(photo.vehicleId).push(photo);
 			});
 
-			// Get all checklist items for all inspections of these vehicles
-			const allInspectionIds = result
-				.filter((row) => row.vehicle_inspections)
-				.map((row) => row.vehicle_inspections!.id);
-
-			const allChecklistItems =
-				allInspectionIds.length > 0
-					? await db
-							.select()
-							.from(inspectionChecklistItems)
-							.where(
-								or(
-									...allInspectionIds.map((id) =>
-										eq(inspectionChecklistItems.inspectionId, id),
-									),
-								),
-							)
-							.orderBy(inspectionChecklistItems.category)
-					: [];
-
-			// Group checklist items by inspection ID
-			const checklistByInspection = new Map();
-			allChecklistItems.forEach((item) => {
-				if (!checklistByInspection.has(item.inspectionId)) {
-					checklistByInspection.set(item.inspectionId, []);
-				}
-				checklistByInspection.get(item.inspectionId).push(item);
-			});
-
-			// Get all check item evidence for these checklist items
-			const checklistItemIds = allChecklistItems.map((item) => item.id);
-			const allEvidence =
-				checklistItemIds.length > 0
-					? await db
-							.select()
-							.from(checklistItemEvidence)
-							.where(inArray(checklistItemEvidence.itemId, checklistItemIds))
-					: [];
-
-			// Group evidence by checklist item ID
-			const evidenceByChecklistItem = new Map();
-			allEvidence.forEach((ev) => {
-				if (!evidenceByChecklistItem.has(ev.itemId)) {
-					evidenceByChecklistItem.set(ev.itemId, []);
-				}
-				evidenceByChecklistItem.get(ev.itemId).push(ev);
-			});
-
-			// Get 360 items for these inspections
-			const all360Items =
-				allInspectionIds.length > 0
-					? await db
-							.select()
-							.from(vehicleInspection360Items)
-							.where(inArray(vehicleInspection360Items.inspectionId, allInspectionIds))
-							.orderBy(vehicleInspection360Items.area)
-					: [];
-
-			// Group 360 items by inspection ID
-			const items360ByInspection = new Map();
-			all360Items.forEach((item) => {
-				if (!items360ByInspection.has(item.inspectionId)) {
-					items360ByInspection.set(item.inspectionId, []);
-				}
-				items360ByInspection.get(item.inspectionId).push(item);
-			});
-
 			// Group vehicles with their inspections and photos
 			const vehiclesMap = new Map();
 
@@ -295,18 +228,7 @@ export const vehiclesRouter = {
 				}
 
 				if (row.vehicle_inspections) {
-					const inspectionId = row.vehicle_inspections.id;
-					const inspectionWithDetails = {
-						...row.vehicle_inspections,
-						checklistItems: (checklistByInspection.get(inspectionId) || []).map(
-							(item: any) => ({
-								...item,
-								evidence: evidenceByChecklistItem.get(item.id) || [],
-							}),
-						),
-						inspection360Items: items360ByInspection.get(inspectionId) || [],
-					};
-					vehiclesMap.get(vehicleId).inspections.push(inspectionWithDetails);
+					vehiclesMap.get(vehicleId).inspections.push(row.vehicle_inspections);
 				}
 			});
 

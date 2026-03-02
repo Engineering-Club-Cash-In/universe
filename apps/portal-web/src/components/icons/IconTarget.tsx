@@ -32,8 +32,8 @@ export const IconTarget = (props: React.SVGProps<SVGSVGElement>) => (
         y2="17.8267"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint1_linear_2397_31989"
@@ -43,8 +43,8 @@ export const IconTarget = (props: React.SVGProps<SVGSVGElement>) => (
         y2="10.3828"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <clipPath id="clip0_2397_31989">
         <rect width="22.5176" height="22.5176" fill="white" />

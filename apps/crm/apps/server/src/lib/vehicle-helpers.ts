@@ -97,11 +97,7 @@ export function isNewVehicleDataComplete(
 export function getMissingFields(
 	vehicle: Pick<
 		Vehicle,
-		| "isNew"
-		| "vinNumber"
-		| "origin"
-		| "fuelType"
-		| "transmission"
+		"isNew" | "vinNumber" | "origin" | "fuelType" | "transmission"
 	>,
 ): string[] {
 	// Vehículos usados no tienen campos faltantes

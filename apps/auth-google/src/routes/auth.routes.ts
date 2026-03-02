@@ -39,24 +39,10 @@ authRoutes.all("/*", async (c) => {
       body: body,
     });
 
-    // Procesar con Better Auth
-    const authResponse = await auth.handler(authRequest);
-
-    // Convertir Response de Better Auth a Response de Hono
-    const responseBody = await authResponse.text();
-
-    // Copiar headers incluyendo Set-Cookie
-    const responseHeaders: Record<string, string> = {};
-    authResponse.headers.forEach((value, key) => {
-      responseHeaders[key] = value;
-    });
-
-    // Asegurar que el content-type sea application/json para respuestas JSON
-    if (!responseHeaders["content-type"] && responseBody !== "") {
-      responseHeaders["content-type"] = "application/json";
-    }
-
-    return c.text(responseBody, authResponse.status as any, responseHeaders);
+    // Retornar la respuesta de Better Auth directamente para preservar
+    // todos los Set-Cookie headers (session_token, dont_remember, etc.)
+    // Reconstruir en Record<string,string> solo guarda el último Set-Cookie.
+    return await auth.handler(authRequest);
   } catch (error) {
     console.error("Auth route error:", error);
     return c.json(

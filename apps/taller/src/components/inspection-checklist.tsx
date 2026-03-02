@@ -15,6 +15,8 @@ import {
   FileText,
   Camera,
   Upload,
+  Trash2,
+  ArrowRight
 } from "lucide-react";
 import { useInspection, type SectionTimes } from "../contexts/InspectionContext";
 import { cn } from "@/lib/utils";
@@ -37,6 +39,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { toast } from "sonner";
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg'];
+const MAX_IMAGES_PER_ITEM = 5;
 
 // ==========================================
 // CRITERIOS DE RECHAZO (Causales de rechazo)
@@ -222,23 +225,68 @@ const inspectionCategories = [...rejectionCriteria, ...additionalInspectionPoint
 
 interface InspectionChecklistProps {
   onComplete?: () => void;
+  onReject?: () => void;
   isWizardMode?: boolean;
 }
 
 export default function InspectionChecklist({
   onComplete,
+  onReject,
   isWizardMode = false
 }: InspectionChecklistProps) {
-  const { setChecklistItems, setSectionTimes, setRejectionEvidenceUrl, rejectionEvidenceUrl, formData: contextFormData } = useInspection();
+  const { checklistItems, setChecklistItems, setSectionTimes, setRejectionEvidenceUrl, rejectionEvidenceUrl, formData: contextFormData } = useInspection();
 
   // Local state for evidence upload
   const [isUploadingEvidence, setIsUploadingEvidence] = useState(false);
   const evidenceInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
-  const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
-  const [itemNotes, setItemNotes] = useState<Record<string, string>>({});
-  const [itemEvidence, setItemEvidence] = useState<Record<string, Array<{url: string, mimeType: string, originalName: string}>>>({});
+  // Initialize state from context to preserve data during navigation
+  const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {};
+    if (checklistItems && checklistItems.length > 0) {
+      inspectionCategories.forEach((category) => {
+        category.items.forEach((item) => {
+          const savedItem = checklistItems.find(
+            (ci) => ci.category === category.id && (ci.item === item.label || ci.item === item.id)
+          );
+          if (savedItem) initial[item.id] = savedItem.checked;
+        });
+      });
+    }
+    return initial;
+  });
+
+  const [itemNotes, setItemNotes] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {};
+    if (checklistItems && checklistItems.length > 0) {
+      inspectionCategories.forEach((category) => {
+        category.items.forEach((item) => {
+          const savedItem = checklistItems.find(
+            (ci) => ci.category === category.id && (ci.item === item.label || ci.item === item.id)
+          );
+          if (savedItem?.notes) initial[item.id] = savedItem.notes;
+        });
+      });
+    }
+    return initial;
+  });
+
+  const [itemEvidence, setItemEvidence] = useState<Record<string, Array<{ url: string; mimeType: string; originalName: string }>>>(() => {
+    const initial: Record<string, Array<{ url: string; mimeType: string; originalName: string }>> = {};
+    if (checklistItems && checklistItems.length > 0) {
+      inspectionCategories.forEach((category) => {
+        category.items.forEach((item) => {
+          const savedItem = checklistItems.find(
+            (ci) => ci.category === category.id && (ci.item === item.label || ci.item === item.id)
+          );
+          if (savedItem?.evidence) initial[item.id] = savedItem.evidence;
+        });
+      });
+    }
+    return initial;
+  });
+
   const [isUploadingItemEvidence, setIsUploadingItemEvidence] = useState<Record<string, boolean>>({});
   const [expandedCategories, setExpandedCategories] = useState<
     Record<string, boolean>
@@ -336,9 +384,24 @@ export default function InspectionChecklist({
     const files = Array.from(event.target.files || []);
     if (files.length === 0) return;
 
+    const currentCount = itemEvidence[itemId]?.length || 0;
+    if (currentCount >= MAX_IMAGES_PER_ITEM) {
+        toast.error(`Ya has alcanzado el límite máximo de ${MAX_IMAGES_PER_ITEM} imágenes.`);
+        event.target.value = '';
+        return;
+    }
+
+    // Filtrar si intentan subir más de los que caben
+    let filesToUpload = files;
+    if (currentCount + files.length > MAX_IMAGES_PER_ITEM) {
+        const remaining = MAX_IMAGES_PER_ITEM - currentCount;
+        toast.warning(`Solo se permite un máximo de ${MAX_IMAGES_PER_ITEM} imágenes. Se subirán solo las primeras ${remaining}.`);
+        filesToUpload = files.slice(0, remaining);
+    }
+
     setIsUploadingItemEvidence(prev => ({ ...prev, [itemId]: true }));
 
-    const uploadPromises = files.map(async (file) => {
+    const uploadPromises = filesToUpload.map(async (file) => {
       if (file.size > MAX_FILE_SIZE) {
         toast.error(`El archivo ${file.name} excede el límite de 10MB.`);
         return null;
@@ -572,32 +635,32 @@ export default function InspectionChecklist({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-            <div className="flex items-center justify-between p-3 border rounded-lg">
-              <span className="text-sm text-muted-foreground">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-4">
+            <div className="flex items-center justify-between p-2.5 sm:p-3 border rounded-lg">
+              <span className="text-xs sm:text-sm text-muted-foreground">
                 Items Revisados
               </span>
-              <div className="flex items-center gap-2">
-                <CheckCircle className="h-4 w-4 text-green-500" />
-                <span className="font-semibold">
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <CheckCircle className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-green-500" />
+                <span className="text-sm sm:font-semibold">
                   {stats.checkedCount}/{stats.totalItems}
                 </span>
               </div>
             </div>
-            <div className="flex items-center justify-between p-3 border rounded-lg">
-              <span className="text-sm text-muted-foreground">
+            <div className="flex items-center justify-between p-2.5 sm:p-3 border rounded-lg">
+              <span className="text-xs sm:text-sm text-muted-foreground">
                 Problemas Críticos
               </span>
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-yellow-500" />
-                <span className="font-semibold">{stats.criticalIssues}</span>
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <AlertTriangle className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-yellow-500" />
+                <span className="text-sm sm:font-semibold">{stats.criticalIssues}</span>
               </div>
             </div>
-            <div className="flex items-center justify-between p-3 border rounded-lg">
-              <span className="text-sm text-muted-foreground">Estado</span>
+            <div className="flex items-center justify-between p-2.5 sm:p-3 border rounded-lg">
+              <span className="text-xs sm:text-sm text-muted-foreground">Estado</span>
               <Badge
                 variant={hasRejectionCriteria ? "destructive" : "default"}
-                className="gap-1"
+                className="gap-1 text-[10px] sm:text-xs"
               >
                 {hasRejectionCriteria ? (
                   <>
@@ -673,14 +736,14 @@ export default function InspectionChecklist({
               >
                 <CollapsibleTrigger className="w-full">
                   <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <CategoryIcon className="h-5 w-5 text-muted-foreground" />
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-start gap-2 sm:gap-3">
+                        <CategoryIcon className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
                         <div className="text-left">
-                          <CardTitle className="text-base">
-                            {category.title}
+                          <CardTitle className="text-sm sm:text-base leading-tight whitespace-normal">
+                             {category.title}
                           </CardTitle>
-                          <CardDescription className="text-xs mt-1">
+                          <CardDescription className="text-[10px] sm:text-xs mt-1">
                             {categoryIssues} de {category.items.length} problemas
                             detectados
                           </CardDescription>
@@ -772,31 +835,38 @@ export default function InspectionChecklist({
                                     </div>
                                   ))}
                                   
-                                  <div className="flex gap-2">
-                                    <label title="Tomar Foto" className={cn("cursor-pointer flex items-center justify-center w-16 h-16 rounded-md border border-dashed border-muted-foreground/50 hover:bg-muted/50 transition-colors text-muted-foreground/70 hover:text-foreground", isUploadingItemEvidence[item.id] && "opacity-50 cursor-not-allowed")}>
-                                      <input 
-                                        type="file" 
-                                        accept="image/*" 
-                                        capture="environment" 
-                                        className="hidden" 
-                                        onChange={(e) => handleItemEvidenceUpload(item.id, e)}
-                                        disabled={isUploadingItemEvidence[item.id]}
-                                      />
-                                      <Camera className="h-6 w-6" />
-                                    </label>
-                                    
-                                    <label title="Subir Archivo" className={cn("cursor-pointer flex items-center justify-center w-16 h-16 rounded-md border border-dashed border-muted-foreground/50 hover:bg-muted/50 transition-colors text-muted-foreground/70 hover:text-foreground", isUploadingItemEvidence[item.id] && "opacity-50 cursor-not-allowed")}>
-                                      <input 
-                                        type="file" 
-                                        accept="image/*" 
-                                        multiple
-                                        className="hidden" 
-                                        onChange={(e) => handleItemEvidenceUpload(item.id, e)}
-                                        disabled={isUploadingItemEvidence[item.id]}
-                                      />
-                                      <Upload className="h-6 w-6" />
-                                    </label>
-                                  </div>
+                                   { (itemEvidence[item.id]?.length || 0) < MAX_IMAGES_PER_ITEM && (
+                                    <div className="flex gap-2">
+                                      <label title="Tomar Foto" className={cn("cursor-pointer flex items-center justify-center w-16 h-16 rounded-md border border-dashed border-muted-foreground/50 hover:bg-muted/50 transition-colors text-muted-foreground/70 hover:text-foreground", isUploadingItemEvidence[item.id] && "opacity-50 cursor-not-allowed")}>
+                                        <input 
+                                          type="file" 
+                                          accept="image/*" 
+                                          capture="environment" 
+                                          className="hidden" 
+                                          onChange={(e) => handleItemEvidenceUpload(item.id, e)}
+                                          disabled={isUploadingItemEvidence[item.id]}
+                                        />
+                                        <Camera className="h-6 w-6" />
+                                      </label>
+                                      
+                                      <label title="Subir Archivo" className={cn("cursor-pointer flex items-center justify-center w-16 h-16 rounded-md border border-dashed border-muted-foreground/50 hover:bg-muted/50 transition-colors text-muted-foreground/70 hover:text-foreground", isUploadingItemEvidence[item.id] && "opacity-50 cursor-not-allowed")}>
+                                        <input 
+                                          type="file" 
+                                          accept="image/*" 
+                                          multiple
+                                          className="hidden" 
+                                          onChange={(e) => handleItemEvidenceUpload(item.id, e)}
+                                          disabled={isUploadingItemEvidence[item.id]}
+                                        />
+                                        <Upload className="h-6 w-6" />
+                                      </label>
+                                    </div>
+                                   )}
+                                   { (itemEvidence[item.id]?.length || 0) >= MAX_IMAGES_PER_ITEM && (
+                                     <div className="flex items-center justify-center w-16 h-16 rounded-md bg-slate-50 border border-slate-200 text-[10px] text-center text-slate-400 font-medium leading-tight p-1">
+                                       Límite alcanzado (5/5)
+                                     </div>
+                                   )}
                                 </div>
                                 {isUploadingItemEvidence[item.id] && (
                                   <p className="text-[10px] text-muted-foreground animate-pulse mt-1">
@@ -908,16 +978,30 @@ export default function InspectionChecklist({
                 </div>
               )}
 
-              {/* Action Button */}
-              <Button
-                onClick={onComplete}
-                size="lg"
-                className="mt-4"
-                variant={hasRejectionCriteria ? "destructive" : "default"}
-              >
-                <CheckCircle className="mr-2 h-5 w-5" />
-                Confirmar Evaluación y Continuar
-              </Button>
+              {/* Action Buttons */}
+              <div className="flex flex-col sm:flex-row gap-3 w-full max-w-md">
+                <Button
+                  onClick={onComplete}
+                  size="lg"
+                  className="flex-1"
+                  variant="outline"
+                >
+                  <ArrowRight className="mr-2 h-5 w-5" />
+                  Continuar a Fotos
+                </Button>
+
+                {hasRejectionCriteria && onReject && (
+                  <Button
+                    onClick={onReject}
+                    size="lg"
+                    className="flex-1"
+                    variant="destructive"
+                  >
+                    <XCircle className="mr-2 h-5 w-5" />
+                    Rechazar y Finalizar
+                  </Button>
+                )}
+              </div>
             </div>
           </CardContent>
         </Card>

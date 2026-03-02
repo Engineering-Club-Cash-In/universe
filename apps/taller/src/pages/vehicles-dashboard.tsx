@@ -20,6 +20,10 @@ import {
   Gauge,
   Fuel,
   Palette,
+  Sparkles,
+  ShieldCheck,
+  CircleDot,
+  History,
   Hash,
   ExternalLink,
 } from "lucide-react";
@@ -37,6 +41,15 @@ type VehicleWithRelations = Vehicle & {
       evidence?: ChecklistItemEvidence[];
     })[];
     inspection360Items?: VehicleInspection360Item[];
+    aiValuation?: {
+      suggestedValue?: number;
+      reasoning?: string;
+      marketAnalysis?: string;
+      depreciationFactors?: string[];
+      confidence?: string;
+      commercialClassification?: string;
+      commercialClassificationReasoning?: string;
+    };
   })[];
   photos: VehiclePhoto[];
 };
@@ -70,11 +83,26 @@ interface DashboardVehicle {
   trim: string;
   traction: string;
   tiresCondition: number | null;
+  tireConditionFrontLeft?: number;
+  tireConditionFrontRight?: number;
+  tireConditionRearLeft?: number;
+  tireConditionRearRight?: number;
+  hasSpareTire?: boolean;
+  tireConditionSpare?: number;
   paintCondition: number | null;
   hasAgencyHistory: boolean | null;
   failedChecks: { area: string; checkpoint: string; status?: string; comment?: string | null }[];
   checklistIssues?: { id?: string; item: string; severity: string; notes?: string | null; evidence?: any[] }[];
   rejectionEvidenceUrl?: string | null;
+  aiValuation?: {
+    aiSuggestedValue?: number | null;
+    aiMarketAnalysis?: string | null;
+    aiDepreciationFactors?: string[] | null;
+    aiConfidence?: string | number | null;
+    aiCommercialClassification?: string | null;
+    aiReasoning?: string | null;
+    aiCommercialClassificationReasoning?: string | null;
+  } | null;
 }
 
 import { Button } from "@/components/ui/button";
@@ -114,6 +142,7 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
 
 // Sample data based on the inspection schema
 const sampleVehicles = [
@@ -334,6 +363,7 @@ export default function VehiclesDashboard() {
   const [selectedVehicle, setSelectedVehicle] = useState<DashboardVehicle | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("details");
+  const [photoGalleryFilter, setPhotoGalleryFilter] = useState("all");
 
   // Pagination state
   const [page, setPage] = useState(1);
@@ -355,8 +385,20 @@ export default function VehiclesDashboard() {
   });
 
   const transformVehicleData = useCallback((vehicle: VehicleWithRelations): DashboardVehicle => {
-    // Get the latest inspection if available
-    const latestInspection = vehicle.inspections?.[0] || null;
+    // Get the latest inspection if available - sorted by date/createdAt descending
+    const latestInspection = vehicle.inspections && vehicle.inspections.length > 0
+      ? [...vehicle.inspections].sort((a, b) => {
+          const dateA = a.inspectionDate ? new Date(a.inspectionDate).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+          const dateB = b.inspectionDate ? new Date(b.inspectionDate).getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+          return dateB - dateA;
+        })[0]
+      : null;
+
+    const aiVal = latestInspection ? (
+      (latestInspection as any).aiSuggestedValue ?? 
+      (latestInspection as any).ai_suggested_value ?? 
+      latestInspection.aiValuation?.suggestedValue
+    ) : null;
 
     return {
       id: vehicle.id,
@@ -386,8 +428,25 @@ export default function VehiclesDashboard() {
       trim: vehicle.trim || '',
       traction: vehicle.traction || '',
       tiresCondition: latestInspection?.tiresCondition ?? null,
+      tireConditionFrontLeft: latestInspection?.tireConditionFrontLeft ?? undefined,
+      tireConditionFrontRight: latestInspection?.tireConditionFrontRight ?? undefined,
+      tireConditionRearLeft: latestInspection?.tireConditionRearLeft ?? undefined,
+      tireConditionRearRight: latestInspection?.tireConditionRearRight ?? undefined,
+      hasSpareTire: latestInspection?.hasSpareTire ?? undefined,
+      tireConditionSpare: latestInspection?.tireConditionSpare ?? undefined,
       paintCondition: latestInspection?.paintCondition ?? null,
       hasAgencyHistory: latestInspection?.hasAgencyHistory ?? null,
+      aiValuation: latestInspection && aiVal != null
+        ? {
+            aiSuggestedValue: aiVal != null ? Number(aiVal) : null,
+            aiMarketAnalysis: (latestInspection as any).aiMarketAnalysis ?? (latestInspection as any).ai_market_analysis ?? latestInspection.aiValuation?.marketAnalysis ?? null,
+            aiDepreciationFactors: (latestInspection as any).aiDepreciationFactors ?? (latestInspection as any).ai_depreciation_factors ?? latestInspection.aiValuation?.depreciationFactors ?? null,
+            aiConfidence: (latestInspection as any).aiConfidence ?? (latestInspection as any).ai_confidence ?? latestInspection.aiValuation?.confidence ?? null,
+            aiCommercialClassification: (latestInspection as any).aiCommercialClassification ?? (latestInspection as any).ai_commercial_classification ?? latestInspection.aiValuation?.commercialClassification ?? null,
+            aiReasoning: (latestInspection as any).aiReasoning ?? (latestInspection as any).ai_reasoning ?? latestInspection.aiValuation?.reasoning ?? null,
+            aiCommercialClassificationReasoning: (latestInspection as any).aiCommercialClassificationReasoning ?? (latestInspection as any).ai_commercial_classification_reasoning ?? latestInspection.aiValuation?.commercialClassificationReasoning ?? null,
+          }
+        : null,
       failedChecks: latestInspection?.inspection360Items
         ? latestInspection.inspection360Items
           .filter(item => item.status !== 'OK' && item.status !== 'GOOD')
@@ -488,6 +547,7 @@ export default function VehiclesDashboard() {
     setIsDetailsOpen(true);
     setIsModalLoading(true);
     setActiveTab("details");
+    setPhotoGalleryFilter("all");
 
     // Initialize edit form with current values
     setEditForm({
@@ -717,9 +777,9 @@ export default function VehiclesDashboard() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="flex justify-between mb-4">
-                <div className="flex gap-2 w-full md:w-auto">
-                  <div className="relative">
+              <div className="flex flex-col md:flex-row justify-between gap-4 mb-4">
+                <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+                  <div className="relative w-full sm:w-auto">
                     <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                     <Input
                       type="search"
@@ -730,7 +790,7 @@ export default function VehiclesDashboard() {
                     />
                   </div>
                   <Select value={filterStatus} onValueChange={setFilterStatus}>
-                    <SelectTrigger className="w-[180px]">
+                    <SelectTrigger className="w-full sm:w-[180px]">
                       <SelectValue placeholder="Filtrar por estado" />
                     </SelectTrigger>
                     <SelectContent>
@@ -741,7 +801,7 @@ export default function VehiclesDashboard() {
                     </SelectContent>
                   </Select>
                 </div>
-                <Button>
+                <Button className="w-full md:w-auto" asChild>
                   <a href="/vehicle-inspection" target="_blank" rel="noopener noreferrer">
                     Nueva Inspección
                   </a>
@@ -1453,58 +1513,89 @@ export default function VehiclesDashboard() {
 
                           </div>
 
-                          <div className="pt-3 border-t grid grid-cols-3 gap-3 text-center">
-                            <div className="flex flex-col gap-1.5">
-                              <div className="flex justify-between items-end px-1">
-                                <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Llantas</span>
-                                <span className={cn("text-sm font-bold", selectedVehicle.tiresCondition === null && "text-muted-foreground font-normal")}>
-                                  {selectedVehicle.tiresCondition !== null ? `${selectedVehicle.tiresCondition}%` : "N/A"}
-                                </span>
+                          <div className="pt-3 border-t space-y-6">
+                            {/* Estado de Neumáticos */}
+                            <div className="space-y-3">
+                              <div className="flex items-center gap-2 border-b border-blue-100 pb-1">
+                                <CircleDot className="h-4 w-4 text-blue-500" />
+                                <h4 className="text-[10px] font-bold uppercase tracking-wider text-blue-600/80">Estado de Neumáticos</h4>
                               </div>
-                              <div className="w-full bg-secondary/50 h-2 rounded-full overflow-hidden">
-                                <div
-                                  className={cn("h-full rounded-full transition-all duration-500 ease-out",
-                                    selectedVehicle.tiresCondition === null ? "bg-muted" :
-                                      selectedVehicle.tiresCondition >= 70 ? "bg-green-500" :
-                                        selectedVehicle.tiresCondition >= 40 ? "bg-yellow-500" : "bg-red-500"
-                                  )}
-                                  style={{ width: selectedVehicle.tiresCondition !== null ? `${selectedVehicle.tiresCondition}%` : "100%" }}
-                                />
-                              </div>
-                            </div>
-
-                            <div className="flex flex-col gap-1.5">
-                              <div className="flex justify-between items-end px-1">
-                                <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Pintura</span>
-                                <span className={cn("text-sm font-bold", selectedVehicle.paintCondition === null && "text-muted-foreground font-normal")}>
-                                  {selectedVehicle.paintCondition !== null ? `${selectedVehicle.paintCondition}%` : "N/A"}
-                                </span>
-                              </div>
-                              <div className="w-full bg-secondary/50 h-2 rounded-full overflow-hidden">
-                                <div
-                                  className={cn("h-full rounded-full transition-all duration-500 ease-out",
-                                    selectedVehicle.paintCondition === null ? "bg-muted" :
-                                      selectedVehicle.paintCondition >= 70 ? "bg-green-500" :
-                                        selectedVehicle.paintCondition >= 40 ? "bg-yellow-500" : "bg-red-500"
-                                  )}
-                                  style={{ width: selectedVehicle.paintCondition !== null ? `${selectedVehicle.paintCondition}%` : "100%" }}
-                                />
-                              </div>
-                            </div>
-
-                            <div className="flex flex-col items-center justify-center gap-1">
-                              <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-0.5">De Agencia</span>
-                              <Badge
-                                variant={selectedVehicle.hasAgencyHistory === true ? "default" : selectedVehicle.hasAgencyHistory === false ? "secondary" : "outline"}
-                                className={cn(
-                                  "text-xs px-2.5 py-0.5",
-                                  selectedVehicle.hasAgencyHistory === true ? "bg-green-600 hover:bg-green-700" :
-                                    selectedVehicle.hasAgencyHistory === false ? "text-muted-foreground bg-muted" :
-                                      "text-yellow-600 border-yellow-200 bg-yellow-50"
+                              <div className="grid grid-cols-2 gap-x-6 gap-y-3 pt-1">
+                                <div className="space-y-1">
+                                  <div className="flex justify-between text-[10px] font-medium px-0.5 text-muted-foreground uppercase">
+                                    <span>Frontal Izquierda</span>
+                                    <span className="font-bold text-foreground">{selectedVehicle.tireConditionFrontLeft || 0}%</span>
+                                  </div>
+                                  <Progress value={selectedVehicle.tireConditionFrontLeft || 0} className="h-1.5 bg-slate-100 [&>div]:bg-slate-900" />
+                                </div>
+                                <div className="space-y-1">
+                                  <div className="flex justify-between text-[10px] font-medium px-0.5 text-muted-foreground uppercase">
+                                    <span>Frontal Derecha</span>
+                                    <span className="font-bold text-foreground">{selectedVehicle.tireConditionFrontRight || 0}%</span>
+                                  </div>
+                                  <Progress value={selectedVehicle.tireConditionFrontRight || 0} className="h-1.5 bg-slate-100 [&>div]:bg-slate-900" />
+                                </div>
+                                <div className="space-y-1">
+                                  <div className="flex justify-between text-[10px] font-medium px-0.5 text-muted-foreground uppercase">
+                                    <span>Trasera Izquierda</span>
+                                    <span className="font-bold text-foreground">{selectedVehicle.tireConditionRearLeft || 0}%</span>
+                                  </div>
+                                  <Progress value={selectedVehicle.tireConditionRearLeft || 0} className="h-1.5 bg-slate-100 [&>div]:bg-slate-900" />
+                                </div>
+                                <div className="space-y-1">
+                                  <div className="flex justify-between text-[10px] font-medium px-0.5 text-muted-foreground uppercase">
+                                    <span>Trasera Derecha</span>
+                                    <span className="font-bold text-foreground">{selectedVehicle.tireConditionRearRight || 0}%</span>
+                                  </div>
+                                  <Progress value={selectedVehicle.tireConditionRearRight || 0} className="h-1.5 bg-slate-100 [&>div]:bg-slate-900" />
+                                </div>
+                                {selectedVehicle.hasSpareTire && (
+                                  <div className="space-y-1">
+                                    <div className="flex justify-between text-[10px] font-medium px-0.5 text-muted-foreground uppercase">
+                                      <span>Neumático de Repuesto</span>
+                                      <span className="font-bold text-foreground">{selectedVehicle.tireConditionSpare || 0}%</span>
+                                    </div>
+                                    <Progress value={selectedVehicle.tireConditionSpare || 0} className="h-1.5 bg-slate-100 [&>div]:bg-slate-900" />
+                                  </div>
                                 )}
-                              >
-                                {selectedVehicle.hasAgencyHistory === true ? "Sí" : selectedVehicle.hasAgencyHistory === false ? "No" : "N/A"}
-                              </Badge>
+                              </div>
+                            </div>
+
+                            {/* Condiciones Generales */}
+                            <div className="space-y-3">
+                              <div className="flex items-center gap-2 border-b border-blue-100 pb-1">
+                                <History className="h-4 w-4 text-blue-500" />
+                                <h4 className="text-[10px] font-bold uppercase tracking-wider text-blue-600/80">Condiciones Generales</h4>
+                              </div>
+                              <div className="grid grid-cols-2 gap-6 pt-1">
+                                <div className="space-y-1.5">
+                                  <div className="flex justify-between items-end">
+                                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-tight">Pintura</span>
+                                    <span className="text-xs font-bold">{selectedVehicle.paintCondition || 0}%</span>
+                                  </div>
+                                  <Progress
+                                    value={selectedVehicle.paintCondition || 0}
+                                    className="h-1.5 bg-slate-100 [&>div]:bg-slate-900"
+                                  />
+                                </div>
+                                <div className="flex flex-col gap-1.5">
+                                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-tight">Historial Agencia</span>
+                                  <div className="flex items-center gap-2">
+                                    <Badge
+                                      variant={selectedVehicle.hasAgencyHistory === true ? "default" : selectedVehicle.hasAgencyHistory === false ? "secondary" : "outline"}
+                                      className={cn(
+                                        "text-[10px] px-2 py-0 font-bold",
+                                        selectedVehicle.hasAgencyHistory === true ? "bg-green-600 hover:bg-green-700" :
+                                          selectedVehicle.hasAgencyHistory === false ? "text-muted-foreground bg-muted" :
+                                            "text-yellow-600 border-yellow-200 bg-yellow-50"
+                                      )}
+                                    >
+                                      {selectedVehicle.hasAgencyHistory === true ? "CON HISTORIAL" : selectedVehicle.hasAgencyHistory === false ? "SIN HISTORIAL" : "N/A"}
+                                    </Badge>
+                                    {selectedVehicle.hasAgencyHistory === true && <ShieldCheck className="h-4 w-4 text-green-600" />}
+                                  </div>
+                                </div>
+                              </div>
                             </div>
                           </div>
                         </CardContent>
@@ -1523,36 +1614,81 @@ export default function VehiclesDashboard() {
                             <div className="flex justify-between items-center">
                               <span className="text-sm text-muted-foreground">Valor de mercado</span>
                               <span className="text-lg font-semibold">
-                                {Number(selectedVehicle.marketValue).toLocaleString("es-GT", {
-                                  style: "currency",
-                                  currency: "GTQ",
-                                  minimumFractionDigits: 0,
-                                  maximumFractionDigits: 0,
-                                })}
+                                {selectedVehicle.marketValue && !isNaN(Number(selectedVehicle.marketValue))
+                                  ? Number(selectedVehicle.marketValue).toLocaleString("es-GT", {
+                                      style: "currency",
+                                      currency: "GTQ",
+                                      minimumFractionDigits: 0,
+                                      maximumFractionDigits: 0,
+                                    })
+                                  : "N/A"}
                               </span>
                             </div>
                             <div className="flex justify-between items-center">
                               <span className="text-sm text-muted-foreground">Valor comercial sugerido</span>
                               <span className="text-lg font-semibold text-primary">
-                                {Number(selectedVehicle.suggestedCommercialValue).toLocaleString("es-GT", {
-                                  style: "currency",
-                                  currency: "GTQ",
-                                  minimumFractionDigits: 0,
-                                  maximumFractionDigits: 0,
-                                })}
+                                {selectedVehicle.suggestedCommercialValue && !isNaN(Number(selectedVehicle.suggestedCommercialValue))
+                                  ? Number(selectedVehicle.suggestedCommercialValue).toLocaleString("es-GT", {
+                                      style: "currency",
+                                      currency: "GTQ",
+                                      minimumFractionDigits: 0,
+                                      maximumFractionDigits: 0,
+                                    })
+                                  : "N/A"}
                               </span>
                             </div>
                             <div className="flex justify-between items-center">
                               <span className="text-sm text-muted-foreground">Valor actual condición</span>
                               <span className="text-lg font-semibold">
-                                {Number(selectedVehicle.currentConditionValue).toLocaleString("es-GT", {
-                                  style: "currency",
-                                  currency: "GTQ",
-                                  minimumFractionDigits: 0,
-                                  maximumFractionDigits: 0,
-                                })}
+                                {selectedVehicle.currentConditionValue && !isNaN(Number(selectedVehicle.currentConditionValue))
+                                  ? Number(selectedVehicle.currentConditionValue).toLocaleString("es-GT", {
+                                      style: "currency",
+                                      currency: "GTQ",
+                                      minimumFractionDigits: 0,
+                                      maximumFractionDigits: 0,
+                                    })
+                                  : "N/A"}
                               </span>
                             </div>
+                          </div>
+
+                          {/* IA Valuation Section */}
+                          <div>
+                            {selectedVehicle.aiValuation ? (
+                              <div className="pt-3 border-t border-dashed border-slate-200">
+                                <>
+                                  <div className="mb-2 flex items-center gap-1.5">
+                                    <Sparkles className="h-4 w-4 text-slate-950" />
+                                    <span className="font-bold text-xs uppercase tracking-tight text-slate-950">Valoración IA</span>
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-4">
+                                    <div className="flex flex-col gap-1">
+                                      <span className="text-[10px] font-bold text-slate-600 uppercase tracking-tight">Valor de Mercado</span>
+                                      <span className="font-bold text-lg text-slate-950">
+                                        {selectedVehicle.aiValuation.aiSuggestedValue && !isNaN(Number(selectedVehicle.aiValuation.aiSuggestedValue))
+                                          ? Number(selectedVehicle.aiValuation.aiSuggestedValue).toLocaleString("es-GT", {
+                                              style: "currency",
+                                              currency: "GTQ",
+                                              minimumFractionDigits: 0,
+                                              maximumFractionDigits: 0,
+                                            })
+                                          : "N/A"}
+                                      </span>
+                                    </div>
+                                    <div className="flex flex-col gap-1 items-end">
+                                      <span className="text-[10px] font-bold text-slate-600 uppercase tracking-tight mb-1">Clasificación</span>
+                                      <Badge variant="outline" className="font-bold uppercase text-[10px] border-slate-300 text-slate-900 bg-slate-50">
+                                        {selectedVehicle.aiValuation.aiCommercialClassification || "N/A"}
+                                      </Badge>
+                                    </div>
+                                  </div>
+                                </>
+                              </div>
+                            ) : (
+                              <div className="p-4 rounded-lg border border-slate-100 bg-slate-50 text-slate-700 text-sm text-center">
+                                Sin información de IA disponible
+                              </div>
+                            )}
                           </div>
                         </CardContent>
                       </Card>
@@ -1694,24 +1830,91 @@ export default function VehiclesDashboard() {
               </TabsContent>
 
               <TabsContent value="photos" className="mt-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 py-4">
-                  {(() => {
-                    const rawVehicle = rawVehiclesData.find(v => v.id === selectedVehicle?.id);
-                    const vehiclePhotos = rawVehicle?.photos || [];
+                <div className="py-2">
+                  <div className="flex flex-wrap gap-2 mb-6 border-b pb-4">
+                    {[
+                      { id: "all", label: "Todos" },
+                      { id: "exterior", label: "Exterior" },
+                      { id: "wheels", label: "Llantas" },
+                      { id: "interior", label: "Interior" },
+                      { id: "engine", label: "Motor" },
+                      { id: "damage", label: "Daños" },
+                    ].map((btn) => (
+                      <Button
+                        key={btn.id}
+                        variant={photoGalleryFilter === btn.id ? "secondary" : "ghost"}
+                        size="sm"
+                        className={cn(
+                          "h-8 px-3 text-xs font-medium rounded-full",
+                          photoGalleryFilter === btn.id ? "bg-primary/10 text-primary hover:bg-primary/20" : ""
+                        )}
+                        onClick={() => setPhotoGalleryFilter(btn.id)}
+                      >
+                        {btn.label}
+                      </Button>
+                    ))}
+                  </div>
 
-                    if (vehiclePhotos.length === 0) {
-                      return (
-                        <div className="col-span-full text-center py-8">
-                          <Camera className="h-16 w-16 mx-auto text-muted-foreground opacity-50" />
-                          <p className="text-muted-foreground mt-2">No hay fotos disponibles para este vehículo</p>
+                  <div className="space-y-8">
+                    {(() => {
+                      const rawVehicle = rawVehiclesData.find(v => v.id === selectedVehicle?.id);
+                      const vehiclePhotos = rawVehicle?.photos || [];
+
+                      if (vehiclePhotos.length === 0) {
+                        return (
+                          <div className="col-span-full text-center py-12 border border-dashed rounded-lg bg-muted/20">
+                            <Camera className="h-16 w-16 mx-auto text-muted-foreground opacity-30 mb-4" />
+                            <p className="text-muted-foreground font-medium">No hay fotos disponibles para este vehículo</p>
+                          </div>
+                        );
+                      }
+
+                      // Group photos by category
+                      const groupedPhotos = vehiclePhotos.reduce((acc: any, photo: any) => {
+                        const cat = photo.category || "other";
+                        if (!acc[cat]) acc[cat] = [];
+                        acc[cat].push(photo);
+                        return acc;
+                      }, {});
+
+                      const categoriesToShow = photoGalleryFilter === 'all' 
+                        ? Object.entries(groupedPhotos)
+                        : Object.entries(groupedPhotos).filter(([cat]) => cat === photoGalleryFilter);
+
+                      if (categoriesToShow.length === 0 && photoGalleryFilter !== 'all') {
+                        return (
+                          <div className="text-center py-12">
+                            <Camera className="h-12 w-12 mx-auto text-muted-foreground opacity-20 mb-2" />
+                            <p className="text-muted-foreground">No hay fotos en la categoría "{photoGalleryFilter}"</p>
+                          </div>
+                        );
+                      }
+
+                      return categoriesToShow.map(([category, catPhotos]: [string, any]) => (
+                        <div key={category} className="space-y-4">
+                          <div className="flex items-center gap-2 border-b pb-2">
+                            <Camera className="h-4 w-4 text-primary" />
+                            <h3 className="font-semibold text-lg capitalize">
+                              {category === "exterior" ? "Exterior" :
+                               category === "wheels" ? "Llantas y Rines" :
+                               category === "interior" ? "Interior" :
+                               category === "engine" ? "Motor" :
+                               category === "damage" ? "Daños y Detalles" :
+                               category.replace(/_/g, " ")}
+                            </h3>
+                            <Badge variant="secondary" className="ml-auto">
+                              {catPhotos.length} {catPhotos.length === 1 ? "foto" : "fotos"}
+                            </Badge>
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                            {catPhotos.map((photo: any, index: number) => (
+                              <VehiclePhoto photo={photo} index={index} key={photo.id || index} />
+                            ))}
+                          </div>
                         </div>
-                      );
-                    }
-
-                    return vehiclePhotos.map((photo: any, index: number) => (
-                      <VehiclePhoto photo={photo} index={index} key={photo.id || index} />
-                    ));
-                  })()}
+                      ));
+                    })()}
+                  </div>
                 </div>
               </TabsContent>
 

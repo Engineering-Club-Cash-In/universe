@@ -401,13 +401,15 @@ export const creditRouter = new Elysia()
   })
   .post("/resetCredit", async ({ body, set }) => {
     // Valida los parámetros
-    const { creditId, montoIncobrable, montoBoleta, url_boletas, cuota } =
+    const { creditId, montoIncobrable, montoBoleta, url_boletas, cuota, banco_id, numeroAutorizacion } =
       body as {
         creditId?: number;
         montoIncobrable?: number;
         montoBoleta?: number | string;
         url_boletas?: string[];
         cuota?: number;
+        banco_id?: number;
+        numeroAutorizacion?: string;
       };
 
     // Validaciones mínimas
@@ -418,7 +420,9 @@ export const creditRouter = new Elysia()
       isNaN(Number(montoBoleta)) ||
       !Array.isArray(url_boletas) ||
       cuota === undefined ||
-      isNaN(Number(cuota))
+      isNaN(Number(cuota)) ||
+      !banco_id ||
+      isNaN(Number(banco_id))
     ) {
       set.status = 400;
       return { message: "Faltan o son inválidos los parámetros requeridos." };
@@ -432,6 +436,8 @@ export const creditRouter = new Elysia()
         montoBoleta: montoBoleta,
         url_boletas: url_boletas,
         cuota: Number(cuota),
+        banco_id: Number(banco_id),
+        numeroAutorizacion,
       });
       set.status = 200;
       return result;

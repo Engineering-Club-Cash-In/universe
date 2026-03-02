@@ -337,14 +337,6 @@ export const MyInvestments = () => {
                                   {liquidacion.boleta.estado}
                                 </span>
                               </div>
-                              {liquidacion.boleta.fecha_procesado && (
-                                <div>
-                                  <span className="text-white/50 block text-xs">Procesado</span>
-                                  <span className="text-white/80">
-                                    {formatShortDate(liquidacion.boleta.fecha_procesado)}
-                                  </span>
-                                </div>
-                              )}
                               <div>
                                 <span className="text-white/50 block text-xs">Subida</span>
                                 <span className="text-white/80">

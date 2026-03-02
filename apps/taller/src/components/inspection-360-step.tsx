@@ -19,7 +19,14 @@ interface Inspection360StepProps {
 }
 
 export default function Inspection360Step({ onComplete }: Inspection360StepProps) {
-    const { items360, setItems360 } = useInspection();
+    const { items360, setItems360, formData } = useInspection();
+
+    // Determinar cantidad de cilindros (mínimo 1, máximo 8, default 4)
+    const cylinderCount = useMemo(() => {
+        const cyls = parseInt(formData?.cylinders || '4', 10);
+        if (isNaN(cyls)) return 4;
+        return Math.max(1, Math.min(8, cyls));
+    }, [formData?.cylinders]);
 
     // Estado local para manejar qué secciones están abiertas
     const [openSections, setOpenSections] = useState<Record<string, boolean>>({
@@ -70,20 +77,17 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
                 const isFail = randomStatus === InspectionStatus.BAD || randomStatus === InspectionStatus.REGULAR;
                 
                 if (point.id === 'compresiones') {
+                    const compressionMetadata: Record<string, number> = {};
+                    // Solo generar para la cantidad de cilindros configurada
+                    for (let i = 1; i <= 8; i++) {
+                        compressionMetadata[`cilindro_${i}`] = i <= cylinderCount ? generateRandomCompression() : 0;
+                    }
+
                     newItems.push({
                         category: area.id,
                         item: point.label,
                         status: InspectionStatus.GOOD,
-                        metadata: {
-                            cilindro_1: generateRandomCompression(),
-                            cilindro_2: generateRandomCompression(),
-                            cilindro_3: generateRandomCompression(),
-                            cilindro_4: generateRandomCompression(),
-                            cilindro_5: generateRandomCompression(),
-                            cilindro_6: generateRandomCompression(),
-                            cilindro_7: 0,
-                            cilindro_8: 0,
-                        }
+                        metadata: compressionMetadata
                     });
                 } else {
                     newItems.push({
@@ -409,25 +413,27 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
                                                 
                                                 {/* Sección especial de compresiones */}
                                                 {point.id === 'compresiones' && (
-                                                    <div className="grid grid-cols-4 md:grid-cols-8 gap-2 bg-slate-50 p-3 rounded-md border border-slate-200">
-                                                        <div className="col-span-4 md:col-span-8 mb-2">
+                                                    <div className="flex flex-col gap-2 bg-slate-50 p-3 rounded-md border border-slate-200">
+                                                        <div className="mb-2">
                                                             <Label className="text-xs text-slate-500 font-semibold mb-1 uppercase text-center block w-full border-b pb-1">Tabla de Presión (PSI) por cilindro</Label>
                                                         </div>
-                                                        {[1, 2, 3, 4, 5, 6, 7, 8].map(cyl => (
-                                                            <div key={cyl} className="flex flex-col gap-1 items-center">
-                                                                <Label className="text-[10px] text-muted-foreground">Cilindro {cyl}</Label>
-                                                                <div className="relative">
-                                                                    <input 
-                                                                        type="number"
-                                                                        min="0"
-                                                                        placeholder="0"
-                                                                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 text-center font-mono"
-                                                                        value={state?.metadata?.[`cilindro_${cyl}`] || ''}
-                                                                        onChange={(e) => handleMetadataChange(area.id, point.label, `cilindro_${cyl}`, e.target.value)}
-                                                                    />
+                                                        <div className="flex flex-wrap gap-2 sm:gap-4 justify-between">
+                                                            {Array.from({ length: cylinderCount }, (_, i) => i + 1).map(cyl => (
+                                                                <div key={cyl} className="flex flex-col gap-1 items-center flex-1 min-w-[30%] sm:min-w-[120px]">
+                                                                    <Label className="text-[10px] text-muted-foreground">Cilindro {cyl}</Label>
+                                                                    <div className="relative w-full">
+                                                                        <input 
+                                                                            type="number"
+                                                                            min="0"
+                                                                            placeholder="0"
+                                                                            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 text-center font-mono"
+                                                                            value={state?.metadata?.[`cilindro_${cyl}`] || ''}
+                                                                            onChange={(e) => handleMetadataChange(area.id, point.label, `cilindro_${cyl}`, e.target.value)}
+                                                                        />
+                                                                    </div>
                                                                 </div>
-                                                            </div>
-                                                        ))}
+                                                            ))}
+                                                        </div>
                                                     </div>
                                                 )}
 

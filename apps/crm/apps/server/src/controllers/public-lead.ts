@@ -20,7 +20,7 @@ export async function getSalesUserWithLeastOpportunities() {
 			role: user.role,
 		})
 		.from(user)
-		.where(eq(user.role, "sales"));
+		.where(and(eq(user.role, "sales"), eq(user.assignLeads, true)));
 
 	if (salesUsers.length === 0) {
 		return null;
@@ -74,7 +74,7 @@ export async function getSalesUserWithLeastLeads() {
 			role: user.role,
 		})
 		.from(user)
-		.where(eq(user.role, "sales"));
+		.where(and(eq(user.role, "sales"), eq(user.assignLeads, true)));
 
 	if (salesUsers.length === 0) {
 		return null;

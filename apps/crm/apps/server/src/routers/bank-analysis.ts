@@ -55,7 +55,7 @@ export const bankAnalysisRouter = {
 					annualRate: z.number().default(0.18),
 					termMonths: z.number().int().min(12).max(120).default(60),
 					maxDebtRatio: z.number().min(0).max(1).default(0.2),
-					maxVariableDebtRatio: z.number().min(0).max(1).default(0.3),
+					maxVariableDebtRatio: z.number().min(0).max(1).default(0.2),
 				})
 				.refine((data) => data.leadId || data.coDebtorId, {
 					message: "Debe proporcionar leadId o coDebtorId",
@@ -295,9 +295,7 @@ export const bankAnalysisRouter = {
 						analysis.promedio_mensual.promedio_gastos_variables.toString(),
 					economicAvailability:
 						analysis.promedio_mensual.disponibilidad_economica.toString(),
-					minPayment: creditCapacity.minPayment.toString(),
 					maxPayment: creditCapacity.maxPayment.toString(),
-					adjustedPayment: creditCapacity.adjustedPayment.toString(),
 					maxCreditAmount: creditCapacity.maxCreditAmount.toString(),
 					analyzedAt: new Date(),
 					updatedAt: new Date(),

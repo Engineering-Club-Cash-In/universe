@@ -140,9 +140,7 @@ function CoDebtorCard({
 		monthlyFixedExpenses: "",
 		monthlyVariableExpenses: "",
 		economicAvailability: "",
-		minPayment: "",
 		maxPayment: "",
-		adjustedPayment: "",
 		maxCreditAmount: "",
 	});
 	const queryClient = useQueryClient();
@@ -163,9 +161,7 @@ function CoDebtorCard({
 			monthlyFixedExpenses?: number;
 			monthlyVariableExpenses?: number;
 			economicAvailability?: number;
-			minPayment?: number;
 			maxPayment?: number;
-			adjustedPayment?: number;
 			maxCreditAmount?: number;
 		}) => client.upsertCreditAnalysis(data),
 		onSuccess: () => {
@@ -188,9 +184,7 @@ function CoDebtorCard({
 			monthlyFixedExpenses: data?.monthlyFixedExpenses?.toString() || "",
 			monthlyVariableExpenses: data?.monthlyVariableExpenses?.toString() || "",
 			economicAvailability: data?.economicAvailability?.toString() || "",
-			minPayment: data?.minPayment?.toString() || "",
 			maxPayment: data?.maxPayment?.toString() || "",
-			adjustedPayment: data?.adjustedPayment?.toString() || "",
 			maxCreditAmount: data?.maxCreditAmount?.toString() || "",
 		});
 		setIsEditingAnalysis(true);
@@ -214,14 +208,8 @@ function CoDebtorCard({
 			economicAvailability: analysisForm.economicAvailability
 				? Number(analysisForm.economicAvailability)
 				: undefined,
-			minPayment: analysisForm.minPayment
-				? Number(analysisForm.minPayment)
-				: undefined,
 			maxPayment: analysisForm.maxPayment
 				? Number(analysisForm.maxPayment)
-				: undefined,
-			adjustedPayment: analysisForm.adjustedPayment
-				? Number(analysisForm.adjustedPayment)
 				: undefined,
 			maxCreditAmount: analysisForm.maxCreditAmount
 				? Number(analysisForm.maxCreditAmount)
@@ -468,21 +456,6 @@ function CoDebtorCard({
 									{/* Capacidad de pago */}
 									<div className="grid grid-cols-2 gap-2">
 										<div>
-											<Label className="text-xs">Pago Mínimo</Label>
-											<Input
-												type="number"
-												step="0.01"
-												placeholder="0.00"
-												value={analysisForm.minPayment}
-												onChange={(e) =>
-													setAnalysisForm((prev) => ({
-														...prev,
-														minPayment: e.target.value,
-													}))
-												}
-											/>
-										</div>
-										<div>
 											<Label className="text-xs">Pago Máximo</Label>
 											<Input
 												type="number"
@@ -493,21 +466,6 @@ function CoDebtorCard({
 													setAnalysisForm((prev) => ({
 														...prev,
 														maxPayment: e.target.value,
-													}))
-												}
-											/>
-										</div>
-										<div>
-											<Label className="text-xs">Pago Ajustado</Label>
-											<Input
-												type="number"
-												step="0.01"
-												placeholder="0.00"
-												value={analysisForm.adjustedPayment}
-												onChange={(e) =>
-													setAnalysisForm((prev) => ({
-														...prev,
-														adjustedPayment: e.target.value,
 													}))
 												}
 											/>
@@ -596,21 +554,7 @@ function CoDebtorCard({
 									</div>
 
 									{/* Capacidad de pago */}
-									<div className="grid grid-cols-4 gap-2 text-center text-xs">
-										<div className="rounded border p-2">
-											<p className="text-muted-foreground">Pago Mín</p>
-											<p className="font-semibold text-orange-600">
-												{formatCurrency(creditAnalysisQuery.data?.minPayment)}
-											</p>
-										</div>
-										<div className="rounded border p-2">
-											<p className="text-muted-foreground">Pago Ajust</p>
-											<p className="font-semibold text-blue-600">
-												{formatCurrency(
-													creditAnalysisQuery.data?.adjustedPayment,
-												)}
-											</p>
-										</div>
+									<div className="grid grid-cols-2 gap-2 text-center text-xs">
 										<div className="rounded border p-2">
 											<p className="text-muted-foreground">Pago Máx</p>
 											<p className="font-semibold text-green-600">

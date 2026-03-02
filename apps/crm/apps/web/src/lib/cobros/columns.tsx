@@ -182,7 +182,10 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 				>
 					{numero || "-"}
 					{isPool && (
-						<Badge variant="secondary" className="ml-2 bg-indigo-100 text-indigo-800">
+						<Badge
+							variant="secondary"
+							className="ml-2 bg-indigo-100 text-indigo-800"
+						>
 							Pool
 						</Badge>
 					)}

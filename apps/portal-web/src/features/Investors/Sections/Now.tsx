@@ -60,7 +60,7 @@ export const Now = () => {
 
             {/* Botón Invierte Ahora con motion */}
             <motion.button
-              onClick={() => navigate({ to: "/leadInvestor" })}
+              onClick={() => navigate({ to: "/leadInvestor", search: { amount: undefined } })}
               className="mt-4 lg:mt-0 px-12 lg:px-16 py-4 lg:py-6 rounded-xl font-semibold text-primary border border-primary text-2xl mb-8 lg:mb-12"
               initial={{ opacity: 0, scale: 0.9 }}
               whileInView={{ opacity: 1, scale: 1 }}

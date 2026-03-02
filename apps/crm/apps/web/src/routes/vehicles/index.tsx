@@ -260,9 +260,11 @@ function VehiclesDashboard() {
 				processedVehicleIdRef.current = null;
 				processedInspectionIdRef.current = null;
 				navigate({
-					search: (prev) => {
-						const { vehicleId, inspectionId, tab, ...rest } = prev;
-						return rest;
+					to: "/vehicles",
+					search: {
+						vehicleId: undefined,
+						inspectionId: undefined,
+						tab: undefined,
 					},
 					replace: true,
 				});
@@ -714,11 +716,12 @@ function VehiclesDashboard() {
 																	<DropdownMenuItem
 																		onClick={() => {
 																			navigate({
-																				search: (prev) => ({
-																					...prev,
+																				to: "/vehicles",
+																				search: {
 																					vehicleId: vehicle.id,
+																					inspectionId: undefined,
 																					tab: "general",
-																				}),
+																				},
 																			});
 																		}}
 																	>
@@ -765,11 +768,12 @@ function VehiclesDashboard() {
 																	<DropdownMenuItem
 																		onClick={() => {
 																			navigate({
-																				search: (prev) => ({
-																					...prev,
+																				to: "/vehicles",
+																				search: {
 																					vehicleId: vehicle.id,
+																					inspectionId: undefined,
 																					tab: "photos",
-																				}),
+																				},
 																			});
 																		}}
 																	>
@@ -779,11 +783,12 @@ function VehiclesDashboard() {
 																	<DropdownMenuItem
 																		onClick={() => {
 																			navigate({
-																				search: (prev) => ({
-																					...prev,
+																				to: "/vehicles",
+																				search: {
 																					vehicleId: vehicle.id,
+																					inspectionId: undefined,
 																					tab: "documents",
-																				}),
+																				},
 																			});
 																		}}
 																	>

@@ -44,7 +44,7 @@ export const HeaderInvestor = () => {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               transition={{ type: "spring", stiffness: 400, damping: 17 }}
-              onClick={() => navigate({ to: "/leadInvestor" })}
+              onClick={() => navigate({ to: "/leadInvestor", search: { amount: undefined } })}
             >
               <div>
                 <IconArrow width={isMobile ? 16 : 24} height={isMobile ? 16 : 24} />

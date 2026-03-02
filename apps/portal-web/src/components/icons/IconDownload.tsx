@@ -37,8 +37,8 @@ export const IconDownload =(props: React.SVGProps<SVGSVGElement>) => (
         y2="14.0733"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint1_linear_2454_25066"
@@ -48,8 +48,8 @@ export const IconDownload =(props: React.SVGProps<SVGSVGElement>) => (
         y2="19.7027"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint2_linear_2454_25066"
@@ -59,8 +59,8 @@ export const IconDownload =(props: React.SVGProps<SVGSVGElement>) => (
         y2="14.074"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
     </defs>
   </svg>

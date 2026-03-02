@@ -21,6 +21,8 @@ export const MyInvestments = () => {
   );
   const [currentPage, setCurrentPage] = useState(1);
   const perPage = 10;
+  const [pagosPage, setPagosPage] = useState(1);
+  const pagosPerPage = 25;
 
   const { isModalOpen, modalOptionsInvestors, setIsModalOpen } =
     useModalOptionsCall();
@@ -52,6 +54,7 @@ export const MyInvestments = () => {
 
   const toggleExpand = (id: number) => {
     setExpandedLiquidacion(expandedLiquidacion === id ? null : id);
+    setPagosPage(1);
   };
 
   const formatCurrency = (amount: number) => {
@@ -309,6 +312,89 @@ export const MyInvestments = () => {
                         </div>
                       </div>
 
+                      {/* Boleta y Reinversión */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        {/* Boleta */}
+                        {liquidacion.boleta && (
+                          <div className="bg-white/5 rounded-xl p-4 border border-white/5">
+                            <h4 className="text-sm font-semibold text-white/80 mb-3">
+                              Boleta
+                            </h4>
+                            <div className="grid grid-cols-2 gap-3 text-sm">
+                              <div>
+                                <span className="text-white/50 block text-xs">Monto</span>
+                                <span className="font-semibold">
+                                  {formatCurrency(Math.abs(liquidacion.boleta.monto_boleta))}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-white/50 block text-xs">Estado</span>
+                                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${
+                                  liquidacion.boleta.estado === "PROCESADO"
+                                    ? "text-green-400 bg-green-500/10 border-green-500/30"
+                                    : "text-yellow-400 bg-yellow-500/10 border-yellow-500/30"
+                                }`}>
+                                  {liquidacion.boleta.estado}
+                                </span>
+                              </div>
+                              {liquidacion.boleta.fecha_procesado && (
+                                <div>
+                                  <span className="text-white/50 block text-xs">Procesado</span>
+                                  <span className="text-white/80">
+                                    {formatShortDate(liquidacion.boleta.fecha_procesado)}
+                                  </span>
+                                </div>
+                              )}
+                              <div>
+                                <span className="text-white/50 block text-xs">Subida</span>
+                                <span className="text-white/80">
+                                  {formatShortDate(liquidacion.boleta.fecha_subida)}
+                                </span>
+                              </div>
+                            </div>
+                            {liquidacion.boleta.boleta_url && (
+                              <a
+                                href={liquidacion.boleta.boleta_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-primary hover:text-primary/80 hover:underline text-xs font-medium mt-3 inline-block"
+                              >
+                                Ver boleta →
+                              </a>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Reinversión */}
+                        {liquidacion.reinversion && (
+                          <div className="bg-white/5 rounded-xl p-4 border border-white/5">
+                            <h4 className="text-sm font-semibold text-white/80 mb-3">
+                              Reinversión
+                            </h4>
+                            <div className="grid grid-cols-2 gap-3 text-sm">
+                              <div>
+                                <span className="text-white/50 block text-xs">Capital</span>
+                                <span className="text-primary font-semibold">
+                                  {formatCurrency(liquidacion.reinversion.reinversion_capital)}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-white/50 block text-xs">Interés</span>
+                                <span className="text-green-400 font-semibold">
+                                  {formatCurrency(liquidacion.reinversion.reinversion_interes)}
+                                </span>
+                              </div>
+                              <div className="col-span-2">
+                                <span className="text-white/50 block text-xs">Total Reinvertido</span>
+                                <span className="text-lg font-bold">
+                                  {formatCurrency(liquidacion.reinversion.reinversion_total)}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
                       {/* Footer con botón expandir y link de reporte */}
                       <div className="border-t border-white/10 pt-4 flex justify-between items-center">
                         <button
@@ -368,10 +454,12 @@ export const MyInvestments = () => {
                         >
                           <div className="bg-white/5 border-t border-white/10 p-6">
                             <h4 className="text-sm font-semibold text-white/80 mb-4">
-                              Detalle de Pagos
+                              Detalle de Pagos ({liquidacion.pagos.length})
                             </h4>
                             <div className="space-y-3">
-                              {liquidacion.pagos.map((pago) => (
+                              {liquidacion.pagos
+                                .slice((pagosPage - 1) * pagosPerPage, pagosPage * pagosPerPage)
+                                .map((pago) => (
                                 <div
                                   key={pago.pago_id}
                                   className="bg-white/5 rounded-xl p-4 border border-white/5"
@@ -434,6 +522,45 @@ export const MyInvestments = () => {
                                 </div>
                               ))}
                             </div>
+
+                            {/* Paginación de pagos (client-side, 25 por página) */}
+                            {liquidacion.pagos.length > pagosPerPage && (() => {
+                              const pagosTotalPages = Math.ceil(liquidacion.pagos.length / pagosPerPage);
+                              return (
+                                <div className="flex items-center justify-between mt-4 pt-4 border-t border-white/5">
+                                  <p className="text-xs text-white/50">
+                                    Mostrando {Math.min(pagosPage * pagosPerPage, liquidacion.pagos.length)} de {liquidacion.pagos.length} pagos
+                                  </p>
+                                  <div className="flex items-center gap-3">
+                                    <button
+                                      onClick={() => setPagosPage((p) => Math.max(1, p - 1))}
+                                      disabled={pagosPage === 1}
+                                      className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+                                        pagosPage === 1
+                                          ? "bg-white/5 text-white/30 cursor-not-allowed"
+                                          : "bg-white/10 text-white hover:bg-white/20"
+                                      }`}
+                                    >
+                                      ← Anterior
+                                    </button>
+                                    <span className="text-xs text-white/60">
+                                      {pagosPage} / {pagosTotalPages}
+                                    </span>
+                                    <button
+                                      onClick={() => setPagosPage((p) => Math.min(pagosTotalPages, p + 1))}
+                                      disabled={pagosPage === pagosTotalPages}
+                                      className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+                                        pagosPage === pagosTotalPages
+                                          ? "bg-white/5 text-white/30 cursor-not-allowed"
+                                          : "bg-white/10 text-white hover:bg-white/20"
+                                      }`}
+                                    >
+                                      Siguiente →
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })()}
                           </div>
                         </motion.div>
                       )}

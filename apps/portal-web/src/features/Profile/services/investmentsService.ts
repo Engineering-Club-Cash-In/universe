@@ -33,13 +33,33 @@ export interface LiquidacionTotales {
   total_cuota: number;
 }
 
+export interface LiquidacionBoleta {
+  boleta_id: number;
+  inversionista_id: number;
+  boleta_url: string;
+  estado: string;
+  monto_boleta: number;
+  notas: string | null;
+  fecha_subida: string;
+  fecha_procesado: string | null;
+  subido_por: string;
+}
+
+export interface LiquidacionReinversion {
+  reinversion_capital: number;
+  reinversion_interes: number;
+  reinversion_total: number;
+}
+
 export interface Liquidacion {
   liquidacion_id: number;
   inversionista_id: number | null;
   nombre_inversionista: string;
   emite_factura: boolean;
   dpi: string;
+  boleta: LiquidacionBoleta | null;
   totales: LiquidacionTotales;
+  reinversion: LiquidacionReinversion | null;
   reporte_liquidacion: string;
   fecha_liquidacion: string;
   pagos: LiquidacionPago[];

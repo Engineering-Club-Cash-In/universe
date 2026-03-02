@@ -1,5 +1,6 @@
 import { IconCashIn } from "../FormLeads";
 import { SOCIAL_CONTACTS } from "@/features/footer";
+import { Link } from "@tanstack/react-router";
 
 export const Thanks = () => {
   return (
@@ -16,9 +17,9 @@ export const Thanks = () => {
 
       <div className="text-center flex flex-col justify-center mt-40 items-center w-full relative z-10 ">
         {/* Icono de éxito */}
-        <div className="mb-16 lg:mb-24">
+        <Link to="/" className="mb-16 lg:mb-24 cursor-pointer">
           <IconCashIn />
-        </div>
+        </Link>
 
         {/* Título */}
         <h1 className="font-bold text-4xl lg:text-header-3  mb-6">

@@ -42,7 +42,7 @@ export const registerExternalUser = async (
   const { userType, fullName, email, dpi, phone } = payload;
 
   try {
-    /*if (userType === "CLIENT") {
+    if (userType === "CLIENT") {
       // Crear lead en CRM
       const result = await sendLead({
         nombreCompleto: fullName,
@@ -80,13 +80,7 @@ export const registerExternalUser = async (
       };
     } else {
       throw new Error(`Tipo de usuario no válido: ${userType}`);
-    }*/
-   return {
-        success: true,
-        message: "Cliente registrado exitosamente",
-        userType,
-        data: "",
-      };
+    }
   } catch (error) {
     console.error(`Error al registrar usuario externo (${userType}):`, error);
     throw error;

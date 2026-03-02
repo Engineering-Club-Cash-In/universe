@@ -53,10 +53,10 @@ app.use(
 				return origin;
 			}
 
-			// Permitir subdominios de devteamatcci.site y servicioscashin.com (wildcard)
+			// Permitir subdominios de devteamatcci.site, servicioscashin.com y clubcashin.com (wildcard)
 			if (
 				origin?.match(
-					/^https?:\/\/.*\.(devteamatcci\.site|servicioscashin\.com)$/,
+					/^https?:\/\/(.*\.)?(devteamatcci\.site|servicioscashin\.com|clubcashin\.com)$/,
 				)
 			) {
 				return origin;

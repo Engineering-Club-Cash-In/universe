@@ -1,5 +1,5 @@
 import { IconCCI } from "@/components/IconCCI";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useIsMobile } from "@/hooks";
 
@@ -23,6 +23,11 @@ const featureCards = [
   },
 ];
 
+const OVERLAP = 32; // ml-8 = 32px
+const MAX_INACTIVE = 250;
+const MAX_ACTIVE = 415;
+const ACTIVE_RATIO = MAX_ACTIVE / MAX_INACTIVE; // ~1.66
+
 const FeatureCard = ({
   label,
   description,
@@ -30,6 +35,8 @@ const FeatureCard = ({
   onClick,
   className,
   isMobile,
+  inactiveWidth,
+  activeWidth,
 }: {
   label: string;
   description: string;
@@ -37,6 +44,8 @@ const FeatureCard = ({
   onClick: () => void;
   className?: string;
   isMobile: boolean;
+  inactiveWidth: number;
+  activeWidth: number;
 }) => (
   <motion.div
     className={`flex flex-col items-start shrink-0 cursor-pointer overflow-hidden ${className ?? ""}`}
@@ -44,7 +53,7 @@ const FeatureCard = ({
     animate={
       isMobile
         ? { height: isActive ? 250 : 110 }
-        : { width: isActive ? 415 : 250, height: isActive ? 380 : 355 }
+        : { width: isActive ? activeWidth : inactiveWidth, height: isActive ? 380 : 355 }
     }
     whileHover={isMobile ? undefined : { y: -8 }}
     transition={{ type: "spring", stiffness: 300, damping: 25 }}
@@ -125,6 +134,26 @@ const FeatureCard = ({
 export const WhoWeAre = () => {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const isMobile = useIsMobile();
+  const cardsContainerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  useEffect(() => {
+    const el = cardsContainerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setContainerWidth(el.clientWidth));
+    ro.observe(el);
+    setContainerWidth(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
+
+  // Calcula los anchos para que 3 tarjetas con overlap de 32px quepan en el contenedor.
+  // Total cuando una está activa: activeW + 2*(inactiveW - OVERLAP) ≤ containerWidth
+  // Con ratio activeW = inactiveW * ACTIVE_RATIO:
+  // inactiveW ≤ (containerWidth + 2*OVERLAP) / (ACTIVE_RATIO + 2)
+  const inactiveWidth = containerWidth
+    ? Math.min(MAX_INACTIVE, Math.floor((containerWidth + 2 * OVERLAP) / (ACTIVE_RATIO + 2)))
+    : MAX_INACTIVE;
+  const activeWidth = Math.min(MAX_ACTIVE, Math.floor(inactiveWidth * ACTIVE_RATIO));
 
   return (
     <section className="w-full mt-36">
@@ -134,7 +163,7 @@ export const WhoWeAre = () => {
           <p className="relative z-10 ml-16 lg:ml-36">
             <span
               className="font-bold text-white leading-tight text-2xl lg:text-5xl"
-             
+
             >
               Financiar, comprar e invertir en vehículos,
             </span>
@@ -159,6 +188,7 @@ export const WhoWeAre = () => {
 
         {/* Segunda parte - Feature cards */}
         <div
+          ref={cardsContainerRef}
           className={
             isMobile
               ? "flex flex-col items-center gap-[-8px] py-8 px-6"
@@ -174,6 +204,8 @@ export const WhoWeAre = () => {
               onClick={() => setActiveIndex(activeIndex === index ? null : index)}
               className={isMobile ? (index > 0 ? "-mt-3" : "") : (index > 0 ? "-ml-8" : "")}
               isMobile={isMobile}
+              inactiveWidth={inactiveWidth}
+              activeWidth={activeWidth}
             />
           ))}
         </div>

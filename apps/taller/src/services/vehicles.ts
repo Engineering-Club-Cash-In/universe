@@ -38,6 +38,7 @@ export interface InspectionData {
   noTestDriveReason?: string;
   sectionTimes?: Record<string, number>;
   rejectionEvidenceUrl?: string;
+  status?: 'pending' | 'approved' | 'rejected' | 'auction';
   tiresCondition?: number;
   tireConditionFrontLeft?: number;
   tireConditionFrontRight?: number;
@@ -182,6 +183,7 @@ export const prepareInspectionData = (formData: any, sectionTimes?: Record<strin
     paintCondition: formData.paintCondition ? parseInt(formData.paintCondition) : undefined,
     hasAgencyHistory: formData.hasAgencyHistory === 'Sí' ? true : (formData.hasAgencyHistory === 'No' ? false : undefined),
     aiValuation: aiValuation,
+    status: formData.status,
   };
 
   return { vehicleData, inspectionData };

@@ -27,19 +27,19 @@ export interface Inspection360Item {
 
 interface InspectionContextType {
   formData: any;
-  setFormData: (data: any) => void;
+  setFormData: (data: any | ((prev: any) => any)) => void;
   checklistItems: ChecklistItem[];
-  setChecklistItems: (items: ChecklistItem[]) => void;
+  setChecklistItems: (items: ChecklistItem[] | ((prev: ChecklistItem[]) => ChecklistItem[])) => void;
   items360: Inspection360Item[];
-  setItems360: (items: Inspection360Item[]) => void;
+  setItems360: (items: Inspection360Item[] | ((prev: Inspection360Item[]) => Inspection360Item[])) => void;
   photos: PhotoData[];
-  setPhotos: (photos: PhotoData[]) => void;
+  setPhotos: (photos: PhotoData[] | ((prev: PhotoData[]) => PhotoData[])) => void;
   sectionTimes: SectionTimes;
   setSectionTimes: (times: SectionTimes | ((prev: SectionTimes) => SectionTimes)) => void;
   rejectionEvidenceUrl?: string;
-  setRejectionEvidenceUrl: (url: string | undefined) => void;
+  setRejectionEvidenceUrl: (url: string | undefined | ((prev: string | undefined) => string | undefined)) => void;
   currentStep: number;
-  setCurrentStep: (step: number) => void;
+  setCurrentStep: (step: number | ((prev: number) => number)) => void;
   resetInspection: () => void;
 }
 

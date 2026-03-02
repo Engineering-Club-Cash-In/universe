@@ -15,6 +15,7 @@ import { getRenapData } from "@/functions/getRenapInfo";
 import { generateUniqueFilename, uploadFileFromUrlToR2 } from "@/lib/storage";
 import { db } from "../db";
 import { otpController } from "./otp";
+import { salesUser } from "@/utils/constants";
 
 // Type for document type enum
 type DocumentType = (typeof documentTypeEnum.enumValues)[number];
@@ -383,12 +384,6 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 	// ========================
 	// 3. Insert or Update leads
 	// ========================
-	const salesUsers = await db.select().from(user).where(eq(user.role, "sales"));
-
-	if (salesUsers.length === 0) {
-		throw new Error("[ERROR] No hay usuarios con rol 'sales' disponibles.");
-	}
-	const randomUser = salesUsers[Math.floor(Math.random() * salesUsers.length)];
 	const existingLead = await db
 		.select()
 		.from(leads)
@@ -410,18 +405,19 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 				lastName: renapData.firstLastName,
 				dpi: renapData.dpi,
 				maritalStatus: mapCivilStatusToEnum(renapData.civil_status),
-				assignedTo: randomUser.id,
+				assignedTo: salesUser,
 				age: age ?? undefined,
-				source: "other",
+				source: "Whatsapp",
 				email: "",
 				phone: phone,
-				createdBy: randomUser.id,
+				createdBy: salesUser,
 				status: "new",
+
 			})
 			.returning({ id: leads.id });
 		leadId = newLead[0].id;
-		assignedUserId = randomUser.id;
-		createdByUserId = randomUser.id;
+		assignedUserId = salesUser
+		createdByUserId = salesUser
 	} else {
 		console.log("[DEBUG] DPI found in leads. Updating existing lead.");
 		await db
@@ -500,7 +496,7 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 			createdBy: createdByUserId,
 			title: `Oportunidad de crédito para ${renapData.firstName} ${renapData.firstLastName}`,
 			stageId: firstStage.id,
-			source: "other", // Bot source
+			source: "Whatsapp", // Bot source
 		})
 		.returning();
 

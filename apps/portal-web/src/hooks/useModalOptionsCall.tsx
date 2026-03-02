@@ -72,7 +72,7 @@ export const useModalOptionsCall = () => {
       buttonText: "Ir al formulario",
       buttonAction: () => {
         setIsModalOpen(false);
-        globalThis.location.href = "/leads";
+        globalThis.location.href = "/leads?type=buy";
       },
     },
   ];
@@ -86,7 +86,7 @@ export const useModalOptionsCall = () => {
       buttonText: "Ir al formulario",
       buttonAction: () => {
         setIsModalOpen(false);
-        globalThis.location.href = "/leads";
+        globalThis.location.href = "/leads?type=sell";
       },
     },
   ];

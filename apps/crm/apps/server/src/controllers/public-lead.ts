@@ -1,4 +1,4 @@
-import { asc, count, eq, or, sql } from "drizzle-orm";
+import { and, asc, count, eq, gte, or } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -286,7 +286,34 @@ export async function createPublicLead(c: Context) {
 			let newOpportunity = null;
 
 			if (!body.isRegister) {
-				// Crear oportunidad vinculada al lead existente si no es un registro
+				// Verificar si ya tiene una oportunidad creada en las últimas 24 horas
+				const twentyFourHoursAgo = new Date(
+					Date.now() - 24 * 60 * 60 * 1000,
+				);
+				const [recentOpportunity] = await db
+					.select({ id: opportunities.id })
+					.from(opportunities)
+					.where(
+						and(
+							eq(opportunities.leadId, lead.id),
+							gte(opportunities.createdAt, twentyFourHoursAgo),
+						),
+					)
+					.limit(1);
+
+				if (recentOpportunity) {
+					return c.json(
+						{
+							success: true,
+							data: lead,
+							message:
+								"Lead ya tiene una oportunidad reciente (últimas 24 horas)",
+						},
+						200,
+					);
+				}
+
+				// Crear oportunidad vinculada al lead existente
 				newOpportunity = await createOpportunityForLead(
 					lead.id,
 					lead.firstName,

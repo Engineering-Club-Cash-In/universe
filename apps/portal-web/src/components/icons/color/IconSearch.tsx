@@ -22,8 +22,8 @@ export const IconSearch = ({ ...props }: React.SVGProps<SVGSVGElement>) => (
         y2="51"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stopColor="#9499EC" />
-        <stop offset="1" stopColor="#545786" />
+        <stop stopColor="currentColor" />
+        <stop offset="1" stopColor="currentColor" />
       </linearGradient>
     </defs>
   </svg>

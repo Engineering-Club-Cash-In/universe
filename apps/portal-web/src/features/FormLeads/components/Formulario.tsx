@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+import { useSearch } from "@tanstack/react-router";
 import { Input, Button } from "@/components";
 import { IconCar } from "@/components/icons/IconCar";
 import { IconLockClose } from "@/components/icons/IconLockClose";
@@ -5,6 +7,11 @@ import { useFormLeads } from "../hooks/useForm";
 import { useIsMobile } from "@/hooks";
 import type { CreditType } from "../hooks/useForm";
 import { IconTarget2 } from "@/components/icons/IconTarget2";
+
+const PARAM_TO_CREDIT: Record<string, CreditType> = {
+  buy: "autocompra",
+  sell: "sobre_vehiculo",
+};
 
 const CREDIT_OPTIONS: {
   value: CreditType;
@@ -34,6 +41,7 @@ const CREDIT_OPTIONS: {
 ];
 
 export const Formulario = () => {
+  const { type } = useSearch({ from: "/leads" });
   const {
     values,
     errors,
@@ -47,6 +55,12 @@ export const Formulario = () => {
     serverError,
   } = useFormLeads();
   const isMobile = useIsMobile();
+
+  // Preseleccionar tipo de crédito según param de URL (?type=buy | ?type=sell)
+  useEffect(() => {
+    const creditType = PARAM_TO_CREDIT[type ?? ""] ?? "autocompra";
+    setFieldValue("creditType", creditType);
+  }, [type, setFieldValue]);
 
   const handleCreditTypeSelect = (type: CreditType) => {
     setFieldValue("creditType", type);
@@ -93,6 +107,7 @@ export const Formulario = () => {
         value={values.nombreCompleto}
         onChange={handleChange("nombreCompleto")}
         onBlur={handleBlur}
+        sanitize="name"
         error={
           touched.nombreCompleto && errors.nombreCompleto
             ? errors.nombreCompleto
@@ -107,6 +122,8 @@ export const Formulario = () => {
         value={values.dpi}
         onChange={handleChange("dpi")}
         onBlur={handleBlur}
+        sanitize="numeric"
+        maxLength={13}
         error={touched.dpi && errors.dpi ? errors.dpi : undefined}
       />
 
@@ -126,6 +143,8 @@ export const Formulario = () => {
         value={values.telefono}
         onChange={handleChange("telefono")}
         onBlur={handleBlur}
+        sanitize="numeric"
+        maxLength={8}
         error={
           touched.telefono && errors.telefono ? errors.telefono : undefined
         }
@@ -139,6 +158,8 @@ export const Formulario = () => {
         value={values.descripcion}
         onChange={handleChange("descripcion")}
         onBlur={handleBlur}
+        sanitize="safe-text"
+        maxLength={500}
       />
 
       {serverError && (

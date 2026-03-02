@@ -14,6 +14,7 @@ import { ContainerMenu } from "../components/ContainerMenu";
 import { useStoreProfile } from "../store/useStoreProfile";
 import { useAuth } from "@/lib";
 import { useEffect } from "react";
+import { CuotasList } from "./CuotasList";
 
 export const MyLoans = () => {
   const { optionPayment, isModalOpen, setIsModalOpen } = useModalOptionsCall();
@@ -189,16 +190,22 @@ export const MyLoans = () => {
                     key={creditData.credito.credito_id}
                     className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl overflow-hidden hover:border-primary/30 transition-colors"
                   >
-                    <div className={`grid grid-cols-1 ${showVehicleInfo && vehicleImage ? 'lg:grid-cols-12' : ''} gap-4 lg:gap-6`}>
-                      {/* Imagen del vehículo - Solo si existe */}
-                      {showVehicleInfo && vehicleImage && (
+                    <div className={`grid grid-cols-1 ${showVehicleInfo ? 'lg:grid-cols-12' : ''} gap-4 lg:gap-6`}>
+                      {/* Imagen del vehículo o placeholder */}
+                      {showVehicleInfo && (
                         <div className="lg:col-span-4">
                           <div className="relative h-[475px] lg:min-h-full">
-                            <img
-                              src={vehicleImage}
-                              alt={`${opportunity.vehicle.make} ${opportunity.vehicle.model}`}
-                              className="w-full h-full object-cover"
-                            />
+                            {vehicleImage ? (
+                              <img
+                                src={vehicleImage}
+                                alt={`${opportunity.vehicle.make} ${opportunity.vehicle.model}`}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full bg-linear-to-br from-primary/20 to-primary/5 flex items-center justify-center">
+                                <IconCar2 className="w-20 h-20 text-white/20" />
+                              </div>
+                            )}
                             <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
                             <div className="absolute bottom-4 left-4 right-4">
                               <div className="flex items-center gap-2 mb-2">
@@ -220,7 +227,7 @@ export const MyLoans = () => {
                       )}
 
                       {/* Información del crédito */}
-                      <div className={`${showVehicleInfo && vehicleImage ? 'lg:col-span-8' : ''} p-4 lg:p-6`}>
+                      <div className={`${showVehicleInfo ? 'lg:col-span-8' : ''} p-4 lg:p-6`}>
                         {/* Header con número SIFCO y estado */}
                         <div className="flex justify-between items-start mb-6">
                           <div>
@@ -319,11 +326,11 @@ export const MyLoans = () => {
                           )}
                         </div>
 
-                        {/* Fecha de Creación y Próximo Vencimiento - Fuera del grid */}
+                        {/* Fecha de Creación y Próximo Vencimiento */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                           {/* Fecha de Creación */}
                           <div className="flex items-center gap-4">
-                            <div className="flex items-center justify-center shrink-0">
+                            <div className="flex items-center justify-center shrink-0 text-primary">
                               <IconCalendarSmall
                                 width={isMobile ? 18 : 24}
                                 height={isMobile ? 18 : 24}
@@ -333,14 +340,14 @@ export const MyLoans = () => {
                               <p className="text-sm lg:text-base text-white/65 mb-1">
                                 Fecha de Creación
                               </p>
-                              <p className="">
+                              <p>
                                 {formatDate(creditData.credito.fecha_creacion)}
                               </p>
                             </div>
                           </div>
 
-                          {/* Próxima Cuota */}
-                          {creditData.cuotasPendientes.length > 0 && (
+                          {/* Próximo Vencimiento con cuotaActual */}
+                          {creditData.cuotaActual && (
                             <div className="flex items-center gap-4">
                               <div className="flex items-center justify-center shrink-0">
                                 <div className="text-primary">
@@ -354,34 +361,31 @@ export const MyLoans = () => {
                                 <p className="text-sm lg:text-base text-white/65 mb-1">
                                   Próximo Vencimiento
                                 </p>
-                                <p className="">
-                                  {formatDate(
-                                    creditData.cuotasPendientes[0]
-                                      .fecha_vencimiento
-                                  )}
+                                <p>
+                                  {formatDate(creditData.cuotaActual.fecha_vencimiento)}
+                                  <span className="ml-2 text-sm text-white/50">
+                                    Cuota #{creditData.cuotaActual.numero_cuota} de {creditData.credito.plazo}
+                                  </span>
                                 </p>
                               </div>
                             </div>
                           )}
                         </div>
 
-                        {/* Observaciones */}
-                        {/*creditData.credito.observaciones && (
-                          <div className="mb-6 p-3 bg-white/5 rounded-lg">
-                            <p className="text-sm text-white/65 mb-1">
-                              Observaciones
-                            </p>
-                            <p className="text-sm text-white/80">
-                              {creditData.credito.observaciones}
-                            </p>
-                          </div>
-                        )*/}
+                        {/* Detalle de Cuotas */}
+                        <CuotasList
+                          cuotasPendientes={creditData.cuotasPendientes}
+                          cuotasAtrasadas={creditData.cuotasAtrasadas}
+                          cuotasPagadas={creditData.cuotasPagadas}
+                          formatCurrency={formatCurrency}
+                          formatDate={formatDate}
+                        />
 
                         {/* Botón de realizar pago */}
                         {creditData.credito.statusCredit !== "CANCELADO" && (
                           <div className="flex justify-end pt-4 border-t border-white/10">
                             <button
-                              className="px-6 py-2 lg:py-3 bg-primary hover:bg-primary/90 text-white font-semibold rounded-lg transition-colors flex items-center gap-2"
+                              className="px-6 py-2 lg:py-3 bg-secondary hover:bg-primary/90 text-white font-semibold rounded-lg transition-colors flex items-center gap-2"
                               onClick={() => {
                                 handleContactAsesor(
                                   creditData.credito.asesor_id,

@@ -94,9 +94,9 @@ export const Calculator: React.FC = () => {
         {/* Primer Grid - Inputs */}
         <div className="flex flex-col gap-6">
           <div className="lg:w-1/2 flex items-center justify-center lg:justify-start">
-            <div className="bg-secondary/20 w-auto px-4 py-2 rounded-2xl  border-secondary flex gap-2 items-center">
+            <div className="bg-secondary/20 w-auto px-4 py-2 rounded-2xl  border-white flex gap-2 items-center">
               <IconCalculator />
-              <span className="text-secondary text-xs font-semibold">
+              <span className="text-white text-xs font-semibold">
                 Simulador Interactivo
               </span>
             </div>
@@ -134,17 +134,11 @@ export const Calculator: React.FC = () => {
                 <button
                   key={option.value}
                   onClick={() => setInvestmentType(option.value)}
-                  className="rounded-md py-2 px-4 lg:py-3 text-white text-start  lg:text-center cursor-pointer transition-all text-xs flex-1 min-w-[120px]"
-                  style={{
-                    border:
-                      investmentType === option.value
-                        ? "1px solid #D4AF37"
-                        : "1px solid #374151",
-                    background:
-                      investmentType === option.value
-                        ? "rgba(212, 175, 55, 0.10)"
-                        : "transparent",
-                  }}
+                  className={`rounded-md py-2 px-4 lg:py-3 text-white text-start lg:text-center cursor-pointer transition-all text-xs flex-1 min-w-[120px] border ${
+                    investmentType === option.value
+                      ? "border-secondary bg-secondary/10"
+                      : "border-gray-700 bg-transparent"
+                  }`}
                 >
                   {option.label}
                 </button>
@@ -168,9 +162,9 @@ export const Calculator: React.FC = () => {
           className="flex flex-col gap-4 justify-center p-4 lg:p-8"
           style={{
             borderRadius: "13.765px",
-            border: "1.721px solid rgba(212, 175, 55, 0.30)",
+            border: "1.721px solid rgba(78, 87, 234, 0.30)",
             background:
-              "linear-gradient(135deg, rgba(212, 175, 55, 0.15) 25%, rgba(0, 0, 0, 0.02) 95.71%)",
+              "linear-gradient(135deg, rgba(78, 87, 234, 0.15) 25%, rgba(0, 0, 0, 0.02) 95.71%)",
           }}
         >
           <div className="flex gap-2 text-sm text-secondary">
@@ -225,6 +219,9 @@ export const Calculator: React.FC = () => {
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 transition={{ duration: 0.2 }}
+                onClick={() => {
+                     globalThis.location.href = "/leadInvestor?amount=" + amount + "&term=" + term + "&type=" + investmentType;
+                }}
               >
                 Contáctanos para Invertir
               </motion.button>

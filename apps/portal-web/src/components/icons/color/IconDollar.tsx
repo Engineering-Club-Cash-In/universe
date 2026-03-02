@@ -39,8 +39,8 @@ export const IconDollar =  ({ ...props }: React.SVGProps<SVGSVGElement>) => (
         y2="40.4768"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint1_linear_2377_14175"
@@ -50,8 +50,8 @@ export const IconDollar =  ({ ...props }: React.SVGProps<SVGSVGElement>) => (
         y2="43.3322"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint2_linear_2377_14175"
@@ -61,8 +61,8 @@ export const IconDollar =  ({ ...props }: React.SVGProps<SVGSVGElement>) => (
         y2="49.6914"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint3_linear_2377_14175"
@@ -72,8 +72,8 @@ export const IconDollar =  ({ ...props }: React.SVGProps<SVGSVGElement>) => (
         y2="17"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
     </defs>
   </svg>

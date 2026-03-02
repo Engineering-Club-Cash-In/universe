@@ -79,8 +79,8 @@ export const GetMoney = () => {
               className="w-full h-full object-cover rounded-2xl relative"
             />
             {/* Badge en esquina superior derecha */}
-            <div className="absolute top-6 right-6 bg-primary px-2 py-1 lg:px-6 lg:py-3 rounded-2xl z-20">
-              <span className="text-black font-semibold lg:text-base text-xs">
+            <div className="absolute top-6 right-6 bg-secondary/80 px-2 py-1 lg:px-6 lg:py-3 rounded-2xl z-20">
+              <span className="text-white font-semibold lg:text-base text-xs">
                 Préstamo con Garantía
               </span>
             </div>
@@ -99,10 +99,10 @@ export const GetMoney = () => {
           {items.map((item, index) => (
             <div
               key={index}
-              className="flex flex-col   p-6 rounded-xl border border-primary/20 bg-primary/5"
+              className="flex flex-col   p-6 rounded-xl border border-secondary/20 bg-secondary/5"
             >
               {/* Icono */}
-              <div className="mb-4 w-8 text-primary">{item.icon}</div>
+              <div className="mb-4 w-8 text-secondary">{item.icon}</div>
 
               {/* Título */}
               <h3 className="text-sm lg:text-base mb-2 font-bold">{item.title}</h3>
@@ -133,8 +133,8 @@ export const GetMoney = () => {
             className="w-full h-full object-cover rounded-2xl"
           />
           {/* Badge en esquina superior derecha */}
-          <div className="absolute top-6 right-6 bg-primary px-6 py-3 rounded-2xl">
-            <span className="text-black font-semibold">
+          <div className="absolute top-6 right-6 bg-secondary/80 px-6 py-3 rounded-2xl">
+            <span className="text-white font-semibold">
               Préstamo con Garantía
             </span>
           </div>

@@ -1,5 +1,6 @@
 import { IconCashIn } from "@/features/FormLeads/FormLeads";
 import { SOCIAL_CONTACTS } from "@/features/footer";
+import { Link } from "@tanstack/react-router";
 
 export const ThanksInvestor = () => {
   return (
@@ -14,9 +15,9 @@ export const ThanksInvestor = () => {
       />
 
       <div className="text-center flex flex-col justify-center mt-40 items-center w-full relative z-10">
-        <div className="mb-16 lg:mb-24">
+        <Link to="/" className="mb-16 lg:mb-24 cursor-pointer">
           <IconCashIn />
-        </div>
+        </Link>
 
         <h1 className="font-bold text-4xl lg:text-header-3 mb-6">
           ¡Gracias por tu interés en invertir!

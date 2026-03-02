@@ -87,12 +87,12 @@ export const MyDocuments = () => {
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_10px_1fr] gap-12 lg:gap-8">
             {/* Sección de Contratos */}
             <div className="lg:pr-8">
-              <div className="flex items-center gap-3 mb-4 lg:mb-6">
+              <div className="flex items-center gap-3 mb-4 lg:mb-6 text-primary">
                 <IconTarget
                   width={isMobile ? 20 : 24}
                   height={isMobile ? 20 : 24}
                 />
-                <h2 className="lg:text-2xl font-bold">Contratos</h2>
+                <h2 className="lg:text-2xl font-bold text-white">Contratos</h2>
               </div>
 
               {contracts && contracts.length > 0 ? (
@@ -144,7 +144,7 @@ export const MyDocuments = () => {
                               onClick={() =>
                                 handleDownload(item.contract.clientSigningLink!)
                               }
-                              className="flex-1 px-4 py-2 text-sm lg:text-base text-primary border border-primary/30 font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
+                              className="flex-1 px-4 py-2 text-sm lg:text-base text-secondary border border-secondary/30 font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
                               style={{
                                 background:
                                   "linear-gradient(180deg, rgba(148, 153, 236, 0.25) 0%, rgba(84, 87, 134, 0.25) 100%)",
@@ -159,7 +159,7 @@ export const MyDocuments = () => {
                               Firmar Contrato
                             </motion.button>
                           )}
-                          {item.contract.pdfLink && (
+                          {item.contract.pdfLink && !item.contract.pdfLink.includes("documenso") && (
                             <motion.button
                               onClick={() =>
                                 handleDownload(item.contract.pdfLink!)
@@ -236,7 +236,7 @@ export const MyDocuments = () => {
                               </div>
                               <motion.button
                                 onClick={() => handleDownload(doc.url)}
-                                className="p-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-lg transition-colors ml-4"
+                                className="p-2 bg-secondary/10 hover:bg-secondaryy/20 text-secondary rounded-lg transition-colors ml-4"
                                 whileHover={{ scale: 1.05 }}
                                 whileTap={{ scale: 0.95 }}
                               >

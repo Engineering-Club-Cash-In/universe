@@ -280,8 +280,7 @@ export function CreditDetailView({
 	// Query para obtener el análisis de crédito consolidado (lead + co-firmantes)
 	const consolidatedCreditQuery = useQuery({
 		queryKey: ["getConsolidatedCreditAnalysis", opportunityId],
-		queryFn: () =>
-			client.getConsolidatedCreditAnalysis({ opportunityId }),
+		queryFn: () => client.getConsolidatedCreditAnalysis({ opportunityId }),
 		enabled: !!opportunityId,
 	});
 
@@ -1175,14 +1174,6 @@ export function CreditDetailView({
 									</div>
 									<div>
 										<Label className="text-muted-foreground text-xs">
-											Capacidad de Pago Mínima
-										</Label>
-										<p className="font-medium">
-											{formatCurrency(creditAnalysis?.minPayment)}
-										</p>
-									</div>
-									<div>
-										<Label className="text-muted-foreground text-xs">
 											Capacidad de Pago Máxima
 										</Label>
 										<p className="font-medium">
@@ -1983,12 +1974,6 @@ export function CreditDetailView({
 													Capacidad de Pago
 												</TableCell>
 												<TableCell />
-											</TableRow>
-											<TableRow>
-												<TableCell>Mínima</TableCell>
-												<TableCell className="text-right">
-													{formatCurrency(creditAnalysis?.minPayment)}
-												</TableCell>
 											</TableRow>
 											<TableRow>
 												<TableCell>Máxima</TableCell>

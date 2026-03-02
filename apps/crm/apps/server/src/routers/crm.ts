@@ -719,9 +719,7 @@ export const crmRouter = {
 					monthlyFixedExpenses: z.number().min(0).optional(),
 					monthlyVariableExpenses: z.number().min(0).optional(),
 					economicAvailability: z.number().optional(),
-					minPayment: z.number().min(0).optional(),
 					maxPayment: z.number().min(0).optional(),
-					adjustedPayment: z.number().min(0).optional(),
 					maxCreditAmount: z.number().min(0).optional(),
 				})
 				.refine((data) => data.leadId || data.coDebtorId, {
@@ -739,9 +737,7 @@ export const crmRouter = {
 				monthlyVariableExpenses:
 					analysisData.monthlyVariableExpenses?.toString(),
 				economicAvailability: analysisData.economicAvailability?.toString(),
-				minPayment: analysisData.minPayment?.toString(),
 				maxPayment: analysisData.maxPayment?.toString(),
-				adjustedPayment: analysisData.adjustedPayment?.toString(),
 				maxCreditAmount: analysisData.maxCreditAmount?.toString(),
 			};
 
@@ -2772,9 +2768,7 @@ export const crmRouter = {
 								monthlyFixedExpenses: creditAnalysis.monthlyFixedExpenses,
 								monthlyVariableExpenses: creditAnalysis.monthlyVariableExpenses,
 								economicAvailability: creditAnalysis.economicAvailability,
-								minPayment: creditAnalysis.minPayment,
 								maxPayment: creditAnalysis.maxPayment,
-								adjustedPayment: creditAnalysis.adjustedPayment,
 								maxCreditAmount: creditAnalysis.maxCreditAmount,
 								analyzedAt: creditAnalysis.analyzedAt,
 							})
@@ -5584,9 +5578,7 @@ export const crmRouter = {
 					leadAnalysis?.monthlyVariableExpenses,
 				),
 				economicAvailability: parseDecimal(leadAnalysis?.economicAvailability),
-				minPayment: parseDecimal(leadAnalysis?.minPayment),
 				maxPayment: parseDecimal(leadAnalysis?.maxPayment),
-				adjustedPayment: parseDecimal(leadAnalysis?.adjustedPayment),
 				maxCreditAmount: parseDecimal(leadAnalysis?.maxCreditAmount),
 				hasAnalysis: leadAnalysis?.analyzedAt != null,
 			};
@@ -5608,9 +5600,7 @@ export const crmRouter = {
 						acc.economicAvailability += parseDecimal(
 							analysis.economicAvailability,
 						);
-						acc.minPayment += parseDecimal(analysis.minPayment);
 						acc.maxPayment += parseDecimal(analysis.maxPayment);
-						acc.adjustedPayment += parseDecimal(analysis.adjustedPayment);
 						acc.maxCreditAmount += parseDecimal(analysis.maxCreditAmount);
 						acc.count += 1;
 					}
@@ -5622,9 +5612,7 @@ export const crmRouter = {
 					monthlyFixedExpenses: 0,
 					monthlyVariableExpenses: 0,
 					economicAvailability: 0,
-					minPayment: 0,
 					maxPayment: 0,
-					adjustedPayment: 0,
 					maxCreditAmount: 0,
 					count: 0,
 				},
@@ -5644,10 +5632,7 @@ export const crmRouter = {
 					coDebtorsTotals.monthlyVariableExpenses,
 				economicAvailability:
 					leadData.economicAvailability + coDebtorsTotals.economicAvailability,
-				minPayment: leadData.minPayment + coDebtorsTotals.minPayment,
 				maxPayment: leadData.maxPayment + coDebtorsTotals.maxPayment,
-				adjustedPayment:
-					leadData.adjustedPayment + coDebtorsTotals.adjustedPayment,
 				maxCreditAmount:
 					leadData.maxCreditAmount + coDebtorsTotals.maxCreditAmount,
 				totalIncome:
@@ -5677,9 +5662,7 @@ export const crmRouter = {
 						analysis?.monthlyVariableExpenses,
 					),
 					economicAvailability: parseDecimal(analysis?.economicAvailability),
-					minPayment: parseDecimal(analysis?.minPayment),
 					maxPayment: parseDecimal(analysis?.maxPayment),
-					adjustedPayment: parseDecimal(analysis?.adjustedPayment),
 					maxCreditAmount: parseDecimal(analysis?.maxCreditAmount),
 				})),
 				coDebtorsCount: coDebtorsList.length,

@@ -744,23 +744,7 @@ export function LeadDetailModal({
 							)}
 
 							{/* Payment Capacity */}
-							<div className="grid grid-cols-4 gap-4">
-								{creditAnalysisQuery.data.minPayment && (
-									<div className="rounded-lg border p-3 text-center">
-										<Label className="text-xs">Pago Mínimo</Label>
-										<p className="font-bold text-green-600">
-											{formatCurrency(creditAnalysisQuery.data.minPayment)}
-										</p>
-									</div>
-								)}
-								{creditAnalysisQuery.data.adjustedPayment && (
-									<div className="rounded-lg border p-3 text-center">
-										<Label className="text-xs">Pago Ajustado</Label>
-										<p className="font-bold text-blue-600">
-											{formatCurrency(creditAnalysisQuery.data.adjustedPayment)}
-										</p>
-									</div>
-								)}
+							<div className="grid grid-cols-2 gap-4">
 								{creditAnalysisQuery.data.maxPayment && (
 									<div className="rounded-lg border p-3 text-center">
 										<Label className="text-xs">Pago Máximo</Label>

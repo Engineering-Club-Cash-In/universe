@@ -152,9 +152,7 @@ type CreditAnalysisData = {
 	monthlyFixedExpenses: string | null;
 	monthlyVariableExpenses: string | null;
 	economicAvailability: string | null;
-	minPayment: string | null;
 	maxPayment: string | null;
-	adjustedPayment: string | null;
 	maxCreditAmount: string | null;
 	analyzedAt: Date;
 } | null;
@@ -1382,31 +1380,7 @@ function RouteComponent() {
 									</div>
 
 									{/* Capacidad de Pago */}
-									<div className="grid grid-cols-4 gap-3">
-										<div className="rounded-lg border p-3 text-center">
-											<p className="text-muted-foreground text-xs">
-												Pago Mínimo
-											</p>
-											<p className="mt-1 font-bold text-orange-600">
-												{selectedClient.creditAnalysis.minPayment
-													? formatCurrency(
-															selectedClient.creditAnalysis.minPayment,
-														)
-													: "-"}
-											</p>
-										</div>
-										<div className="rounded-lg border p-3 text-center">
-											<p className="text-muted-foreground text-xs">
-												Pago Ajustado
-											</p>
-											<p className="mt-1 font-bold text-blue-600">
-												{selectedClient.creditAnalysis.adjustedPayment
-													? formatCurrency(
-															selectedClient.creditAnalysis.adjustedPayment,
-														)
-													: "-"}
-											</p>
-										</div>
+									<div className="grid grid-cols-2 gap-3">
 										<div className="rounded-lg border p-3 text-center">
 											<p className="text-muted-foreground text-xs">
 												Pago Máximo

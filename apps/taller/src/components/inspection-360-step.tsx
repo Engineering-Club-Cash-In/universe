@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useInspection, InspectionStatus } from '../contexts/InspectionContext';
 import { INSPECTION_AREAS } from '../lib/inspection-data';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
@@ -27,6 +27,37 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
         if (isNaN(cyls)) return 4;
         return Math.max(1, Math.min(8, cyls));
     }, [formData?.cylinders]);
+
+    // Limpiar metadatos de cilindros que ya no existen si bajó la cantidad
+    useEffect(() => {
+        setItems360(prevItems => {
+            let overallChanged = false;
+            const updatedItems = prevItems.map(item => {
+                if (!item.metadata) return item;
+                
+                const newMetadata = { ...item.metadata };
+                let itemChanged = false;
+                
+                Object.keys(newMetadata).forEach(key => {
+                    if (key.startsWith('cilindro_')) {
+                        const cylNum = parseInt(key.replace('cilindro_', ''), 10);
+                        if (cylNum > cylinderCount) {
+                            delete newMetadata[key];
+                            itemChanged = true;
+                        }
+                    }
+                });
+                
+                if (itemChanged) {
+                    overallChanged = true;
+                    return { ...item, metadata: newMetadata };
+                }
+                return item;
+            });
+            
+            return overallChanged ? updatedItems : prevItems;
+        });
+    }, [cylinderCount, setItems360]);
 
     // Estado local para manejar qué secciones están abiertas
     const [openSections, setOpenSections] = useState<Record<string, boolean>>({
@@ -427,7 +458,7 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
                                                                             min="0"
                                                                             placeholder="0"
                                                                             className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 text-center font-mono"
-                                                                            value={state?.metadata?.[`cilindro_${cyl}`] || ''}
+                                                                            value={String(state?.metadata?.[`cilindro_${cyl}`] || '')}
                                                                             onChange={(e) => handleMetadataChange(area.id, point.label, `cilindro_${cyl}`, e.target.value)}
                                                                         />
                                                                     </div>

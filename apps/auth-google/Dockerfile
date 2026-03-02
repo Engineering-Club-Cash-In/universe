@@ -19,6 +19,13 @@ RUN rm -rf node_modules/@cci/email && \
     mkdir -p node_modules/@cci && \
     cp -r /usr/src/app/packages/email node_modules/@cci/email
 
+# Instalar las dependencias de @cci/email (resend, react, zod, etc.) dentro del paquete,
+# porque el lockfile las espera en node_modules/@cci/email/node_modules/ (no hoisted)
+WORKDIR /usr/src/app/apps/auth-google/node_modules/@cci/email
+RUN bun install --production
+
+WORKDIR /usr/src/app/apps/auth-google
+
 # Usuario no-root para seguridad
 USER bun
 

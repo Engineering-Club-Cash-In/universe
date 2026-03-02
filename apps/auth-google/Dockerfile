@@ -1,29 +1,23 @@
-# Imagen base de Bun
-FROM docker.io/oven/bun:1 AS base
+FROM docker.io/oven/bun:1
+
+# Preparar el Monorepo
 WORKDIR /usr/src/app
 
-# =========================
-# Etapa: instalar dependencias
-# =========================
-FROM base AS install
+# Copiar archivos de configuración de la raíz para que Bun reconozca el monorepo
+COPY package.json bun.lockb* ./
 
-# Copiamos archivos de dependencias
-COPY package.json bun.lock* ./
+# Copiar el paquete compartido y la app
+COPY packages/email ./packages/email
+COPY apps/auth-google ./apps/auth-google
 
-# Instalamos solo dependencias de producción
-RUN bun install --frozen-lockfile --production
+# Instalamos desde la raíz para que resuelva los workspaces correctamente
+RUN bun install
 
-# =========================
-# Etapa: runner final
-# =========================
-FROM base AS runner
-WORKDIR /usr/src/app
-
-# Copiamos dependencias
-COPY --from=install /usr/src/app/node_modules ./node_modules
-
-# Copiamos el código fuente
-COPY . .
+# Nos aseguramos de que el link en node_modules sea el código real físicamente
+WORKDIR /usr/src/app/apps/auth-google
+RUN rm -rf node_modules/@cci/email && \
+    mkdir -p node_modules/@cci && \
+    cp -r /usr/src/app/packages/email node_modules/@cci/email
 
 # Usuario no-root para seguridad
 USER bun

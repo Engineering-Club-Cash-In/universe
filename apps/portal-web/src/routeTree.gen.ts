@@ -21,6 +21,7 @@ import { Route as LeadsRouteImport } from './routes/leads'
 import { Route as LeadInvestorRouteImport } from './routes/leadInvestor'
 import { Route as InvestmentsRouteImport } from './routes/investments'
 import { Route as InvestRouteImport } from './routes/invest'
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as DocumentsRouteImport } from './routes/documents'
 import { Route as CreditRouteImport } from './routes/credit'
 import { Route as AboutRouteImport } from './routes/about'
@@ -89,6 +90,11 @@ const InvestRoute = InvestRouteImport.update({
   path: '/invest',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DocumentsRoute = DocumentsRouteImport.update({
   id: '/documents',
   path: '/documents',
@@ -130,6 +136,7 @@ export interface FileRoutesByFullPath {
   '/about': typeof AboutRoute
   '/credit': typeof CreditRoute
   '/documents': typeof DocumentsRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/invest': typeof InvestRoute
   '/investments': typeof InvestmentsRoute
   '/leadInvestor': typeof LeadInvestorRoute
@@ -151,6 +158,7 @@ export interface FileRoutesByTo {
   '/about': typeof AboutRoute
   '/credit': typeof CreditRoute
   '/documents': typeof DocumentsRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/invest': typeof InvestRoute
   '/investments': typeof InvestmentsRoute
   '/leadInvestor': typeof LeadInvestorRoute
@@ -173,6 +181,7 @@ export interface FileRoutesById {
   '/about': typeof AboutRoute
   '/credit': typeof CreditRoute
   '/documents': typeof DocumentsRoute
+  '/forgot-password': typeof ForgotPasswordRoute
   '/invest': typeof InvestRoute
   '/investments': typeof InvestmentsRoute
   '/leadInvestor': typeof LeadInvestorRoute
@@ -196,6 +205,7 @@ export interface FileRouteTypes {
     | '/about'
     | '/credit'
     | '/documents'
+    | '/forgot-password'
     | '/invest'
     | '/investments'
     | '/leadInvestor'
@@ -217,6 +227,7 @@ export interface FileRouteTypes {
     | '/about'
     | '/credit'
     | '/documents'
+    | '/forgot-password'
     | '/invest'
     | '/investments'
     | '/leadInvestor'
@@ -238,6 +249,7 @@ export interface FileRouteTypes {
     | '/about'
     | '/credit'
     | '/documents'
+    | '/forgot-password'
     | '/invest'
     | '/investments'
     | '/leadInvestor'
@@ -260,6 +272,7 @@ export interface RootRouteChildren {
   AboutRoute: typeof AboutRoute
   CreditRoute: typeof CreditRoute
   DocumentsRoute: typeof DocumentsRoute
+  ForgotPasswordRoute: typeof ForgotPasswordRoute
   InvestRoute: typeof InvestRoute
   InvestmentsRoute: typeof InvestmentsRoute
   LeadInvestorRoute: typeof LeadInvestorRoute
@@ -363,6 +376,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InvestRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/forgot-password': {
+      id: '/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/forgot-password'
+      preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/documents': {
       id: '/documents'
       path: '/documents'
@@ -420,6 +440,7 @@ const rootRouteChildren: RootRouteChildren = {
   AboutRoute: AboutRoute,
   CreditRoute: CreditRoute,
   DocumentsRoute: DocumentsRoute,
+  ForgotPasswordRoute: ForgotPasswordRoute,
   InvestRoute: InvestRoute,
   InvestmentsRoute: InvestmentsRoute,
   LeadInvestorRoute: LeadInvestorRoute,

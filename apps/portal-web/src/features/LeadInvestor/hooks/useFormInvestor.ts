@@ -16,6 +16,7 @@ export interface FormInvestorValues {
   correo: string;
   telefono: string;
   experiencia: string;
+  proposedAmount: string;
   mensaje: string;
 }
 
@@ -68,10 +69,13 @@ const validationSchema = Yup.object({
     })
     .required("El número telefónico es requerido"),
   experiencia: Yup.string().required("Selecciona tu experiencia en inversión"),
+  proposedAmount: Yup.string().required("Selecciona un monto propuesto"),
   mensaje: Yup.string(),
 });
 
-const initialValues: FormInvestorValues = {
+const VALID_AMOUNTS = ["25000", "50000", "100000", "250000", "500000", "1000000"];
+
+const buildInitialValues = (amount?: string): FormInvestorValues => ({
   profileType: "individual",
   nombreCompleto: "",
   nombreSociedad: "",
@@ -80,10 +84,11 @@ const initialValues: FormInvestorValues = {
   correo: "",
   telefono: "",
   experiencia: "",
+  proposedAmount: amount && VALID_AMOUNTS.includes(amount) ? amount : "",
   mensaje: "",
-};
+});
 
-export const useFormInvestor = () => {
+export const useFormInvestor = (initialAmount?: string) => {
   const setSubmitted = useLeadInvestor((state) => state.setSubmitted);
   const [serverError, setServerError] = useState<string>("");
 
@@ -103,7 +108,7 @@ export const useFormInvestor = () => {
   });
 
   const formik = useFormik<FormInvestorValues>({
-    initialValues,
+    initialValues: buildInitialValues(initialAmount),
     validationSchema,
     onSubmit: async (values) => {
       mutation.mutate(values);

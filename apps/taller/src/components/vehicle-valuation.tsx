@@ -32,7 +32,7 @@ import { client } from '../utils/orpc';
 import { useInspection } from '../contexts/InspectionContext';
 
 const QuetzalIcon = ({ className }: { className?: string }) => (
-  <div className={`flex items-center justify-center font-bold text-xs border-2 border-current rounded-full w-5 h-5 ${className}`}>
+  <div className={`flex items-center justify-center font-bold text-[10px] sm:text-xs border-2 border-current rounded-full w-4 h-4 sm:w-5 sm:h-5 ${className}`}>
     Q
   </div>
 );
@@ -216,11 +216,11 @@ export default function VehicleValuation({
       {/* AI Valuation Section */}
       <Card className="bg-linear-to-r from-blue-50 to-indigo-50 border-blue-200">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-blue-600" />
+          <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+            <Sparkles className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600" />
             Valoración Inteligente
           </CardTitle>
-          <CardDescription>
+          <CardDescription className="text-xs sm:text-sm">
             Obtenga una valoración estimada del vehículo basada en IA
           </CardDescription>
         </CardHeader>
@@ -468,21 +468,21 @@ export default function VehicleValuation({
             </>
           ) : (
             <div className="space-y-4">
-              <Alert className="border-green-200 bg-green-50">
-                <QuetzalIcon className="text-green-600 mr-2" />
-                <AlertDescription className="text-green-800">
+              <Alert className="border-green-200 bg-green-50 grid-cols-[auto_1fr]! gap-x-2 items-center py-2 sm:py-3">
+                <QuetzalIcon className="text-green-600" />
+                <AlertDescription className="text-green-800 text-xs sm:text-sm col-start-auto!">
                   <strong>Valoración Sugerida: Q{aiValuation.suggestedValue.toLocaleString()}</strong>
                 </AlertDescription>
               </Alert>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs sm:text-sm">
                 <div>
-                  <h4 className="font-medium mb-2">Análisis de Mercado:</h4>
-                  <p className="text-muted-foreground">{aiValuation.marketAnalysis}</p>
+                  <h4 className="font-medium mb-1 sm:mb-2">Análisis de Mercado:</h4>
+                  <p className="text-muted-foreground leading-relaxed">{aiValuation.marketAnalysis}</p>
                 </div>
                 <div>
-                  <h4 className="font-medium mb-2">Factores de Depreciación:</h4>
-                  <ul className="text-muted-foreground space-y-1">
+                  <h4 className="font-medium mb-1 sm:mb-2">Factores de Depreciación:</h4>
+                  <ul className="text-muted-foreground space-y-0.5 sm:space-y-1">
                     {aiValuation.depreciationFactors.map((factor, idx) => (
                       <li key={idx}>• {factor}</li>
                     ))}

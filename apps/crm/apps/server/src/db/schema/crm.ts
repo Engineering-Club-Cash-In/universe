@@ -31,6 +31,7 @@ export const leadSourceEnum = pgEnum("lead_source", [
 	"facebook",
 	"instagram",
 	"google",
+	"Whatsapp"
 ]);
 export const maritalStatusEnum = pgEnum("marital_status", [
 	"single",

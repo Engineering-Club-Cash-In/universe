@@ -24,7 +24,6 @@ import { updateInstallments } from "./updateCredit";
 export const reversePaymentSchema = z.object({
   credito_id: z.number().int().positive(),
   pago_id: z.number().int().positive(),
-  reverseAccounting: z.boolean().optional().default(true),
 });
 
 // ============================================================================
@@ -59,7 +58,7 @@ export const reversePayment = async ({ body, set }: any) => {
         errors: parseResult.error.flatten().fieldErrors,
       };
     }
-    const { credito_id, pago_id, reverseAccounting } = parseResult.data;
+    const { credito_id, pago_id } = parseResult.data;
     console.log(`📋 Crédito ID: ${credito_id}`);
     console.log(`🧾 Pago ID: ${pago_id}`);
 
@@ -85,7 +84,9 @@ export const reversePayment = async ({ body, set }: any) => {
         throw new Error("Payment not found");
       }
 
-      console.log("✅ Pago encontrado y marcado como pagado");
+      const pagoValidado = pago.validationStatus === "validated";
+
+      console.log(`✅ Pago encontrado | Validado: ${pagoValidado}`);
 
       // ======================================================================
       // 3️⃣ OBTENER DATOS DEL CRÉDITO
@@ -128,39 +129,48 @@ export const reversePayment = async ({ body, set }: any) => {
       console.log("✅ Usuario encontrado");
 
       // ======================================================================
-      // 5️⃣ RECALCULAR VALORES DEL CRÉDITO (devolver capital)
+      // 5️⃣ RECALCULAR VALORES DEL CRÉDITO (solo si cuota está pagada)
       // ======================================================================
-      console.log(
-        "\n📊 ========== RECALCULANDO VALORES DEL CRÉDITO ==========",
-      );
+      let nuevoCapital = new Big(creditData.creditos.capital ?? 0);
+      let cuota_interes = new Big(creditData.creditos.cuota_interes ?? 0);
+      let iva_12 = new Big(creditData.creditos.iva_12 ?? 0);
+      let deudatotal = new Big(creditData.creditos.deudatotal ?? 0);
 
-      const capitalActual = new Big(creditData.creditos.capital ?? 0);
-      const abonoCapital = new Big(pago.abono_capital ?? 0);
-      const nuevoCapital = capitalActual.plus(abonoCapital);
+      if (pagoValidado) {
+        console.log(
+          "\n📊 ========== RECALCULANDO VALORES DEL CRÉDITO ==========",
+        );
 
-      console.log(`💰 Capital actual: ${capitalActual.toString()}`);
-      console.log(`💵 Abono capital a reversar: ${abonoCapital.toString()}`);
-      console.log(`✅ Nuevo capital: ${nuevoCapital.toString()}`);
+        const capitalActual = new Big(creditData.creditos.capital ?? 0);
+        const abonoCapital = new Big(pago.abono_capital ?? 0);
+        nuevoCapital = capitalActual.plus(abonoCapital);
 
-      // Recalcular interés e IVA basado en el nuevo capital
-      const porcentajeInteres = new Big(
-        creditData.creditos.porcentaje_interes ?? 0,
-      ).div(100);
-      const cuota_interes = nuevoCapital.times(porcentajeInteres).round(2);
-      const iva_12 = cuota_interes.times(0.12).round(2);
+        console.log(`💰 Capital actual: ${capitalActual.toString()}`);
+        console.log(`💵 Abono capital a reversar: ${abonoCapital.toString()}`);
+        console.log(`✅ Nuevo capital: ${nuevoCapital.toString()}`);
 
-      console.log(`🔢 Nuevo interés: ${cuota_interes.toString()}`);
-      console.log(`🔢 Nuevo IVA: ${iva_12.toString()}`);
+        // Recalcular interés e IVA basado en el nuevo capital
+        const porcentajeInteres = new Big(
+          creditData.creditos.porcentaje_interes ?? 0,
+        ).div(100);
+        cuota_interes = nuevoCapital.times(porcentajeInteres).round(2);
+        iva_12 = cuota_interes.times(0.12).round(2);
 
-      // Recalcular deuda total
-      const deudatotal = nuevoCapital
-        .plus(cuota_interes)
-        .plus(iva_12)
-        .plus(creditData.creditos.seguro_10_cuotas ?? 0)
-        .plus(creditData.creditos.gps ?? 0)
-        .plus(creditData.creditos.membresias_pago ?? 0);
+        console.log(`🔢 Nuevo interés: ${cuota_interes.toString()}`);
+        console.log(`🔢 Nuevo IVA: ${iva_12.toString()}`);
 
-      console.log(`💳 Nueva deuda total: ${deudatotal.toString()}`);
+        // Recalcular deuda total
+        deudatotal = nuevoCapital
+          .plus(cuota_interes)
+          .plus(iva_12)
+          .plus(creditData.creditos.seguro_10_cuotas ?? 0)
+          .plus(creditData.creditos.gps ?? 0)
+          .plus(creditData.creditos.membresias_pago ?? 0);
+
+        console.log(`💳 Nueva deuda total: ${deudatotal.toString()}`);
+      } else {
+        console.log("⏭️ Cuota no pagada — se omite recálculo de capital/interés/IVA");
+      }
 
       // ======================================================================
       // 6️⃣ REVERSAR MORA SI EXISTÍA
@@ -192,7 +202,7 @@ export const reversePayment = async ({ body, set }: any) => {
       // ======================================================================
       // 7️⃣ ACTUALIZAR EL CRÉDITO CON LOS NUEVOS VALORES
       // ======================================================================
-      if (reverseAccounting) {
+      if (pagoValidado) {
         await tx
           .update(creditos)
           .set({
@@ -205,7 +215,7 @@ export const reversePayment = async ({ body, set }: any) => {
 
         console.log("✅ Crédito actualizado con nuevos valores");
       } else {
-        console.log("⏭️ Crédito NO actualizado (reverseAccounting = false)");
+        console.log(`⏭️ Crédito NO actualizado (pagoValidado=${pagoValidado})`);
       }
 
       // ======================================================================

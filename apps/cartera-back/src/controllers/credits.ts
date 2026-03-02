@@ -1501,7 +1501,7 @@ export async function resetCredit({
   montoBoleta: number | string;
   url_boletas: string[];
   cuota: number;
-  banco_id?: number;
+  banco_id: number;
   numeroAutorizacion?: string;
 }) {
   try {
@@ -1640,7 +1640,7 @@ export async function resetCredit({
         reserva: "0",
         observaciones: "",
         validationStatus: "reset" as const,
-        banco_id: banco_id ?? 0,
+        banco_id: banco_id,
         numeroAutorizacion: numeroAutorizacion ?? "",
         registerBy: "system_reset",
         pagoConvenio: "0",
@@ -1657,6 +1657,12 @@ export async function resetCredit({
           eq(pagos_credito.pagado, false)
         )
       );
+
+    // 11.5 Desvincular cuota_id de pagos restantes para poder borrar cuotas
+    await db
+      .update(pagos_credito)
+      .set({ cuota_id: null })
+      .where(eq(pagos_credito.credito_id, credito.credito_id));
 
     // 12. Eliminar cuotas del crédito
     await db

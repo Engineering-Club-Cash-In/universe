@@ -556,7 +556,7 @@ export function generarHTMLFacturaPro(
             <div class="cert-info">
                 Certificado por: ${datos.certificador.nombre} | NIT: ${datos.certificador.nit}
             </div>
-            <p>Documento certificado electrónicamente por SAT Guatemala</p>
+
             <p class="legal-notice">
                Sujeto a retención definitiva ISR. Factura electrónica emitida en línea.
                 Válida sin sello ni firma.

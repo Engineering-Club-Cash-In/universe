@@ -343,7 +343,17 @@ export const insertInvestor = async ({ body, set }: any) => {
         existente = result[0] || null;
       }
 
-      // Si no lo encontro por DPI, buscar por nombre
+      // Si no lo encontro por DPI, buscar por email
+      if (!existente && inv.email?.trim()) {
+        const result = await db
+          .select()
+          .from(inversionistas)
+          .where(eq(inversionistas.email, inv.email.trim().toLowerCase()))
+          .limit(1);
+        existente = result[0] || null;
+      }
+
+      // Si no lo encontro por email, buscar por nombre
       if (!existente && inv.nombre?.trim()) {
         const result = await db
           .select()
@@ -3171,7 +3181,15 @@ export async function resumenGlobalInversionistas(
         WHEN 'reinversion_total' THEN COALESCE(SUM(${pe.abono_capital} + ${pe.abono_interes}), 0)
         WHEN 'reinversion_variable' THEN LEAST(
           COALESCE(${inversionistas.monto_reinversion}, 0)::numeric,
-          COALESCE(SUM(${pe.abono_capital} + ${pe.abono_interes}), 0)
+          COALESCE(SUM(
+            ${pe.abono_capital}
+            + ${pe.abono_interes}
+            + CASE
+                WHEN ${inversionistas.emite_factura}
+                  THEN ${pe.abono_iva_12}
+                ELSE -(${pe.abono_interes} * 0.07)
+              END
+          ), 0)
         )
         ELSE 0
       END`,
@@ -3194,7 +3212,15 @@ export async function resumenGlobalInversionistas(
             WHEN 'reinversion_total' THEN COALESCE(SUM(${pe.abono_capital} + ${pe.abono_interes}), 0)
             WHEN 'reinversion_variable' THEN LEAST(
               COALESCE(${inversionistas.monto_reinversion}, 0)::numeric,
-              COALESCE(SUM(${pe.abono_capital} + ${pe.abono_interes}), 0)
+              COALESCE(SUM(
+                ${pe.abono_capital}
+                + ${pe.abono_interes}
+                + CASE
+                    WHEN ${inversionistas.emite_factura}
+                      THEN ${pe.abono_iva_12}
+                    ELSE -(${pe.abono_interes} * 0.07)
+                  END
+              ), 0)
             )
             ELSE 0
           END`,

@@ -17,6 +17,7 @@ import { livenessController } from "./controllers/liveness";
 import { loadCarsController } from "./controllers/load-cars";
 import { otpController } from "./controllers/otp";
 import {
+	createPortalRegisterLead,
 	getLeadByEmail,
 	getLeadLegalContracts,
 	getLeadOpportunityDocuments,
@@ -778,6 +779,8 @@ app.post("/api/notifications/pay-investors", async (c) => {
 // REST endpoint for public lead creation (for external web forms)
 app.post("/api/public/lead", createPublicLead);
 
+
+
 // REST endpoint for investment lead creation (for external APIs)
 app.post("/api/public/investment-lead", async (c) => {
 	const { createInvestmentLeadController } = await import(
@@ -791,6 +794,8 @@ app.post("/api/load-cars", loadCarsController);
 
 // Portal endpoints (protected with BETTER_SECRET_PORTAL token)
 app.get("/api/portal/lead", validatePortalToken, getLeadByEmail);
+// REST endpoint for portal registration: finds lead by DPI or creates new one without duplicate opportunities
+app.post("/api/portal/lead", validatePortalToken, createPortalRegisterLead);
 app.post("/api/portal/lead/update", validatePortalToken, updateLeadByEmail);
 app.get(
 	"/api/portal/lead/documents",

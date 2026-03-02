@@ -29,7 +29,20 @@ const EXPERIENCE_OPTIONS = [
   { value: "avanzada", label: "Avanzada" },
 ];
 
-export const FormularioInvestor = () => {
+const AMOUNT_OPTIONS = [
+  { value: "25000", label: "Q25,000" },
+  { value: "50000", label: "Q50,000" },
+  { value: "100000", label: "Q100,000" },
+  { value: "250000", label: "Q250,000" },
+  { value: "500000", label: "Q500,000" },
+  { value: "1000000", label: "Q1,000,000" },
+];
+
+interface FormularioInvestorProps {
+  initialAmount?: string;
+}
+
+export const FormularioInvestor = ({ initialAmount }: FormularioInvestorProps) => {
   const {
     values,
     errors,
@@ -41,7 +54,7 @@ export const FormularioInvestor = () => {
     handleSubmit,
     isSubmitting,
     serverError,
-  } = useFormInvestor();
+  } = useFormInvestor(initialAmount);
   const isMobile = useIsMobile();
 
   const handleProfileSelect = (type: ProfileType) => {
@@ -186,6 +199,20 @@ export const FormularioInvestor = () => {
           />
           {touched.experiencia && errors.experiencia && (
             <p className="text-[#FD5353] text-sm text-left -mt-2">{errors.experiencia}</p>
+          )}
+
+          <Select
+            options={AMOUNT_OPTIONS}
+            value={values.proposedAmount}
+            onChange={(value) => {
+              setFieldValue("proposedAmount", value);
+              setFieldTouched("proposedAmount", true, false);
+            }}
+            placeholder="Monto propuesto"
+            variant="secondary"
+          />
+          {touched.proposedAmount && errors.proposedAmount && (
+            <p className="text-[#FD5353] text-sm text-left -mt-2">{errors.proposedAmount}</p>
           )}
 
           <Input

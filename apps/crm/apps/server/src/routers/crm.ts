@@ -719,9 +719,7 @@ export const crmRouter = {
 					monthlyFixedExpenses: z.number().min(0).optional(),
 					monthlyVariableExpenses: z.number().min(0).optional(),
 					economicAvailability: z.number().optional(),
-					minPayment: z.number().min(0).optional(),
 					maxPayment: z.number().min(0).optional(),
-					adjustedPayment: z.number().min(0).optional(),
 					maxCreditAmount: z.number().min(0).optional(),
 				})
 				.refine((data) => data.leadId || data.coDebtorId, {
@@ -739,9 +737,7 @@ export const crmRouter = {
 				monthlyVariableExpenses:
 					analysisData.monthlyVariableExpenses?.toString(),
 				economicAvailability: analysisData.economicAvailability?.toString(),
-				minPayment: analysisData.minPayment?.toString(),
 				maxPayment: analysisData.maxPayment?.toString(),
-				adjustedPayment: analysisData.adjustedPayment?.toString(),
 				maxCreditAmount: analysisData.maxCreditAmount?.toString(),
 			};
 
@@ -993,64 +989,63 @@ export const crmRouter = {
 				);
 			}
 
-			// Determinar rango de mes para filtros basados en historial de stages
+			// Filtros de stage/fecha solo aplican cuando se pasan month/year explícitamente
 			const filterMonth = input?.month;
 			const filterYear = input?.year;
-			const now = new Date();
-			const startOfMonth =
-				filterMonth && filterYear
-					? new Date(filterYear, filterMonth - 1, 1)
-					: new Date(now.getFullYear(), now.getMonth(), 1);
-			const endOfMonth =
-				filterMonth && filterYear
-					? new Date(filterYear, filterMonth, 1)
-					: undefined;
 
-			// Solo mostrar oportunidades al 100% que llegaron ahí en el mes seleccionado
-			const fullStages = await db
-				.select({ id: salesStages.id })
-				.from(salesStages)
-				.where(eq(salesStages.closurePercentage, 100));
-			const fullStageIds = fullStages.map((s) => s.id);
+			if (filterMonth && filterYear) {
+				const startOfMonth = new Date(filterYear, filterMonth - 1, 1);
+				const endOfMonth = new Date(filterYear, filterMonth, 1);
 
-			if (fullStageIds.length > 0) {
-				const historyConditions = [
-					inArray(opportunityStageHistory.toStageId, fullStageIds),
-					gte(opportunityStageHistory.changedAt, startOfMonth),
-				];
-				if (endOfMonth) {
-					historyConditions.push(
-						lt(opportunityStageHistory.changedAt, endOfMonth),
+				// Solo mostrar oportunidades al 100% que llegaron ahí en el mes seleccionado
+				const fullStages = await db
+					.select({ id: salesStages.id })
+					.from(salesStages)
+					.where(eq(salesStages.closurePercentage, 100));
+				const fullStageIds = fullStages.map((s) => s.id);
+
+				if (fullStageIds.length > 0) {
+					const thisMonthFullOpps = await db
+						.select({
+							opportunityId: opportunityStageHistory.opportunityId,
+						})
+						.from(opportunityStageHistory)
+						.where(
+							and(
+								inArray(
+									opportunityStageHistory.toStageId,
+									fullStageIds,
+								),
+								gte(opportunityStageHistory.changedAt, startOfMonth),
+								lt(opportunityStageHistory.changedAt, endOfMonth),
+							),
+						);
+
+					const thisMonthOppIds = thisMonthFullOpps.map(
+						(o) => o.opportunityId,
+					);
+
+					conditions.push(
+						or(
+							not(inArray(opportunities.stageId, fullStageIds)),
+							...(thisMonthOppIds.length > 0
+								? [inArray(opportunities.id, thisMonthOppIds)]
+								: []),
+						),
 					);
 				}
 
-				const thisMonthFullOpps = await db
-					.select({ opportunityId: opportunityStageHistory.opportunityId })
-					.from(opportunityStageHistory)
-					.where(and(...historyConditions));
-
-				const thisMonthOppIds = thisMonthFullOpps.map((o) => o.opportunityId);
-
-				conditions.push(
-					or(
-						not(inArray(opportunities.stageId, fullStageIds)),
-						...(thisMonthOppIds.length > 0
-							? [inArray(opportunities.id, thisMonthOppIds)]
-							: []),
-					),
-				);
-			}
-
-			// Cuando se filtra por mes/año, también filtrar oportunidades colocadas (>= 90%)
-			// que llegaron a ese stage en el mes seleccionado
-			if (filterMonth && filterYear && endOfMonth) {
+				// Filtrar oportunidades colocadas (>= 90%) que llegaron a ese stage en el mes
 				const PLACED_STAGE_THRESHOLD = 90;
 				const placedStages = await db
 					.select({ id: salesStages.id })
 					.from(salesStages)
 					.where(
 						and(
-							gte(salesStages.closurePercentage, PLACED_STAGE_THRESHOLD),
+							gte(
+								salesStages.closurePercentage,
+								PLACED_STAGE_THRESHOLD,
+							),
 							lt(salesStages.closurePercentage, 100),
 						),
 					);
@@ -1058,19 +1053,25 @@ export const crmRouter = {
 
 				if (placedStageIds.length > 0) {
 					const placedThisMonth = await db
-						.select({ opportunityId: opportunityStageHistory.opportunityId })
+						.select({
+							opportunityId: opportunityStageHistory.opportunityId,
+						})
 						.from(opportunityStageHistory)
 						.where(
 							and(
-								inArray(opportunityStageHistory.toStageId, placedStageIds),
+								inArray(
+									opportunityStageHistory.toStageId,
+									placedStageIds,
+								),
 								gte(opportunityStageHistory.changedAt, startOfMonth),
 								lt(opportunityStageHistory.changedAt, endOfMonth),
 							),
 						);
 
-					const placedOppIds = placedThisMonth.map((o) => o.opportunityId);
+					const placedOppIds = placedThisMonth.map(
+						(o) => o.opportunityId,
+					);
 
-					// Filtrar: oportunidades en stages colocados (90-99%) solo si llegaron ahí en el mes
 					conditions.push(
 						or(
 							not(inArray(opportunities.stageId, placedStageIds)),
@@ -2772,9 +2773,7 @@ export const crmRouter = {
 								monthlyFixedExpenses: creditAnalysis.monthlyFixedExpenses,
 								monthlyVariableExpenses: creditAnalysis.monthlyVariableExpenses,
 								economicAvailability: creditAnalysis.economicAvailability,
-								minPayment: creditAnalysis.minPayment,
 								maxPayment: creditAnalysis.maxPayment,
-								adjustedPayment: creditAnalysis.adjustedPayment,
 								maxCreditAmount: creditAnalysis.maxCreditAmount,
 								analyzedAt: creditAnalysis.analyzedAt,
 							})
@@ -5584,9 +5583,7 @@ export const crmRouter = {
 					leadAnalysis?.monthlyVariableExpenses,
 				),
 				economicAvailability: parseDecimal(leadAnalysis?.economicAvailability),
-				minPayment: parseDecimal(leadAnalysis?.minPayment),
 				maxPayment: parseDecimal(leadAnalysis?.maxPayment),
-				adjustedPayment: parseDecimal(leadAnalysis?.adjustedPayment),
 				maxCreditAmount: parseDecimal(leadAnalysis?.maxCreditAmount),
 				hasAnalysis: leadAnalysis?.analyzedAt != null,
 			};
@@ -5608,9 +5605,7 @@ export const crmRouter = {
 						acc.economicAvailability += parseDecimal(
 							analysis.economicAvailability,
 						);
-						acc.minPayment += parseDecimal(analysis.minPayment);
 						acc.maxPayment += parseDecimal(analysis.maxPayment);
-						acc.adjustedPayment += parseDecimal(analysis.adjustedPayment);
 						acc.maxCreditAmount += parseDecimal(analysis.maxCreditAmount);
 						acc.count += 1;
 					}
@@ -5622,9 +5617,7 @@ export const crmRouter = {
 					monthlyFixedExpenses: 0,
 					monthlyVariableExpenses: 0,
 					economicAvailability: 0,
-					minPayment: 0,
 					maxPayment: 0,
-					adjustedPayment: 0,
 					maxCreditAmount: 0,
 					count: 0,
 				},
@@ -5644,10 +5637,7 @@ export const crmRouter = {
 					coDebtorsTotals.monthlyVariableExpenses,
 				economicAvailability:
 					leadData.economicAvailability + coDebtorsTotals.economicAvailability,
-				minPayment: leadData.minPayment + coDebtorsTotals.minPayment,
 				maxPayment: leadData.maxPayment + coDebtorsTotals.maxPayment,
-				adjustedPayment:
-					leadData.adjustedPayment + coDebtorsTotals.adjustedPayment,
 				maxCreditAmount:
 					leadData.maxCreditAmount + coDebtorsTotals.maxCreditAmount,
 				totalIncome:
@@ -5677,9 +5667,7 @@ export const crmRouter = {
 						analysis?.monthlyVariableExpenses,
 					),
 					economicAvailability: parseDecimal(analysis?.economicAvailability),
-					minPayment: parseDecimal(analysis?.minPayment),
 					maxPayment: parseDecimal(analysis?.maxPayment),
-					adjustedPayment: parseDecimal(analysis?.adjustedPayment),
 					maxCreditAmount: parseDecimal(analysis?.maxCreditAmount),
 				})),
 				coDebtorsCount: coDebtorsList.length,

@@ -83,7 +83,7 @@ export function calculateCreditCapacity(
 		annualRate: 0.18,
 		termMonths: 60,
 		maxDebtRatio: 0.2,
-		maxVariableDebtRatio: 0.3,
+		maxVariableDebtRatio: 0.2,
 	},
 ) {
 	const months = analysis.resumen_mensual;
@@ -91,46 +91,40 @@ export function calculateCreditCapacity(
 
 	let guaranteedIncome = 0;
 	let fixedExpenses = 0;
+	let variableExpenses = 0;
 	for (const month of months) {
 		guaranteedIncome += month.total_creditos;
 		fixedExpenses += month.total_debitos;
+		variableExpenses += month.gastos.variables;
 	}
 	guaranteedIncome = guaranteedIncome / monthCount;
 	fixedExpenses = fixedExpenses / monthCount;
+	variableExpenses = variableExpenses / monthCount;
 
 	// Método 1: Flujo libre
 	const freeFlux = guaranteedIncome - fixedExpenses;
 
-	// Método 2: Basado en ingresos
-	const method2MaxAmount = params.maxDebtRatio * (guaranteedIncome * 0.5);
+	// Método 2: Basado en ingresos (20% del ingreso garantizado)
+	const method2MaxAmount = params.maxDebtRatio * guaranteedIncome;
 
-	// Método 3: Basado en gastos variables
-	const method3MaxAmount = params.maxVariableDebtRatio * fixedExpenses;
+	// Método 3: Basado en gastos variables (20% de gastos variables)
+	const method3MaxAmount = params.maxVariableDebtRatio * variableExpenses;
 
-	// Estimación de capacidad
-	const minPayment = Math.min(method2MaxAmount, method3MaxAmount);
+	// Capacidad de pago: máximo entre ambos métodos
 	const maxPayment = Math.max(method2MaxAmount, method3MaxAmount);
-	const adjustedPayment = (freeFlux + method2MaxAmount + method3MaxAmount) / 3;
 
 	const maxCreditAmount = Math.abs(
-		PV(
-			params.annualRate / 12,
-			params.termMonths,
-			method2MaxAmount,
-			undefined,
-			0,
-		),
+		PV(params.annualRate / 12, params.termMonths, maxPayment, undefined, 0),
 	);
 
 	return {
 		guaranteedIncome,
 		fixedExpenses,
+		variableExpenses,
 		freeFlux,
 		method2MaxAmount,
 		method3MaxAmount,
-		minPayment,
 		maxPayment,
-		adjustedPayment,
 		maxCreditAmount,
 	};
 }

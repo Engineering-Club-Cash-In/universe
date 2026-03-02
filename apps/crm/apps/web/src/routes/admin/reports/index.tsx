@@ -320,9 +320,7 @@ function RouteComponent() {
 								<YAxis yAxisId="right" orientation="right" />
 								<Tooltip
 									formatter={(value, name) =>
-										name === "monto"
-											? formatCurrency(Number(value))
-											: value
+										name === "monto" ? formatCurrency(Number(value)) : value
 									}
 								/>
 								<Legend />

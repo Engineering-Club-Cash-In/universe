@@ -1354,9 +1354,7 @@ const creditAnalysisData = [
 		monthlyFixedExpenses: "15000.00",
 		monthlyVariableExpenses: "8000.00",
 		economicAvailability: "17000.00",
-		minPayment: "3000.00",
 		maxPayment: "8500.00",
-		adjustedPayment: "5500.00",
 		maxCreditAmount: "350000.00",
 		fullAnalysis: JSON.stringify({
 			datos_generales: {
@@ -1391,9 +1389,7 @@ const creditAnalysisData = [
 		monthlyFixedExpenses: "18000.00",
 		monthlyVariableExpenses: "12000.00",
 		economicAvailability: "25000.00",
-		minPayment: "5000.00",
 		maxPayment: "12500.00",
-		adjustedPayment: "8000.00",
 		maxCreditAmount: "500000.00",
 		fullAnalysis: JSON.stringify({
 			datos_generales: {
@@ -1418,9 +1414,7 @@ const creditAnalysisData = [
 		monthlyFixedExpenses: "20000.00",
 		monthlyVariableExpenses: "5000.00",
 		economicAvailability: "10000.00",
-		minPayment: "2000.00",
 		maxPayment: "5000.00",
-		adjustedPayment: "3500.00",
 		maxCreditAmount: "200000.00",
 		fullAnalysis: JSON.stringify({
 			datos_generales: {
@@ -1437,9 +1431,7 @@ const creditAnalysisData = [
 		monthlyFixedExpenses: "22000.00",
 		monthlyVariableExpenses: "8000.00",
 		economicAvailability: "18000.00",
-		minPayment: "3500.00",
 		maxPayment: "9000.00",
-		adjustedPayment: "6000.00",
 		maxCreditAmount: "400000.00",
 		fullAnalysis: JSON.stringify({
 			datos_generales: {

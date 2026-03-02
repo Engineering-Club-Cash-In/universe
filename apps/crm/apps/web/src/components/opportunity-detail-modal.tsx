@@ -401,6 +401,7 @@ export function OpportunityDetailModal({
 												search={{
 													vehicleId: opportunity.vehicle.id,
 													inspectionId: undefined,
+													tab: undefined,
 												}}
 												className="font-medium text-primary hover:underline"
 												onClick={() => onOpenChange(false)}
@@ -539,6 +540,7 @@ export function OpportunityDetailModal({
 															search={{
 																vehicleId: quotation.vehicleId,
 																inspectionId: undefined,
+																tab: undefined,
 															}}
 															className="flex items-center gap-1 font-medium text-primary text-sm hover:underline"
 														>

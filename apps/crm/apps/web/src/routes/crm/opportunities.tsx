@@ -2165,6 +2165,7 @@ function RouteComponent() {
 																	search: {
 																		vehicleId: selectedOpportunity.vehicle?.id,
 																		inspectionId: undefined,
+																		tab: undefined,
 																	},
 																});
 															}}
@@ -2178,6 +2179,7 @@ function RouteComponent() {
 																			vehicleId:
 																				selectedOpportunity.vehicle?.id,
 																			inspectionId: undefined,
+																			tab: undefined,
 																		},
 																	});
 																}

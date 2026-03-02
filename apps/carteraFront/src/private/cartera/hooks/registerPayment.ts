@@ -623,25 +623,33 @@ async function handleResetCredito() {
         }
 
   resetCredit({
-    creditId: Number(creditoCanceladoInfo?.credito.credito_id), // o el ID real que usas
-    montoIncobrable: montoBaseBadDebt,  
+    creditId: Number(creditoCanceladoInfo?.credito.credito_id),
     montoBoleta: formik.values.monto_boleta,
-    url_boletas: url_boletas ,
+    url_boletas: url_boletas,
     cuota: cuotaActualInfo?.numero || 0,
+    banco_id: formik.values.banco_id,
+    montoIncobrable: montoBaseBadDebt,
+    numeroAutorizacion: formik.values.numeroAutorizacion || undefined,
   }, {
     onSuccess: (data) => {
-      toast.success(data.message || "Crédito reiniciado y pago creado exitosamente");
+      toast.success(data.message || "Cancelacion realizada exitosamente");
 
         formik.resetForm();
-        setDataCredito(null); // Limpiar datos del crédito
+        setDataCredito(null);
         setCuotaActualInfo(null);
         setCuotasAtrasadasInfo(null);
         setCuotasPendientesInfo(null);
-        setModalExcesoOpen(false); // Cerrar modal de exceso
-        setExcedente(0); // Reiniciar excedente
-        setCuotaActualInfo(null); // Reiniciar cuota actual
-        setFileToUpload(null); // Reiniciar archivo a subir
-      // Puedes hacer un refetch o limpiar el form aquí
+        setModalExcesoOpen(false);
+        setExcedente(0);
+        setFileToUpload(null);
+        setArchivosParaSubir([]);
+        setCreditoCanceladoInfo(null);
+        setResetBuscador(true);
+
+        // Refetch del credito para ver el estado actualizado
+        if (formik.values.credito_sifco) {
+          fetchCredito(formik.values.credito_sifco);
+        }
     },
     onError: (error) => {
       toast.error("Error al reiniciar crédito: " + (error?.message || error));

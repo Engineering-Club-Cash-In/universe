@@ -865,6 +865,10 @@ export const vehiclesRouter = {
 					paintCondition: z.number().optional(),
 					hasAgencyHistory: z.boolean().optional(),
 					rejectionEvidenceUrl: z.string().optional(),
+					status: z
+						.enum(["pending", "approved", "rejected", "auction"])
+						.optional()
+						.default("pending"),
 				}),
 				// Checklist items
 				checklistItems: z.array(
@@ -1089,12 +1093,20 @@ export const vehiclesRouter = {
 						);
 					}
 
-					// 5. Update vehicle status based on checklist
+					// 5. Update vehicle and inspection status
 					const criticalIssues = input.checklistItems.filter(
 						(item) => item.checked && item.severity === "critical",
 					);
 
-					if (criticalIssues.length > 0) {
+					// Prioritize rejection if there are critical issues
+					const finalStatus =
+						criticalIssues.length > 0 || input.inspection.status === "rejected"
+							? "rejected"
+							: input.inspection.status === "approved"
+								? "approved"
+								: "pending";
+
+					if (finalStatus === "rejected") {
 						await tx
 							.update(vehicles)
 							.set({
@@ -1103,7 +1115,6 @@ export const vehiclesRouter = {
 							})
 							.where(eq(vehicles.id, vehicleId));
 
-						// Safely handle alerts array - ensure proper JSON serialization
 						const alertsArray = criticalIssues.map((item) => item.item);
 
 						await tx
@@ -1111,6 +1122,22 @@ export const vehiclesRouter = {
 							.set({
 								status: "rejected",
 								alerts: alertsArray,
+								updatedAt: new Date(),
+							})
+							.where(eq(vehicleInspections.id, newInspection.id));
+					} else if (finalStatus === "approved") {
+						await tx
+							.update(vehicles)
+							.set({
+								status: "available",
+								updatedAt: new Date(),
+							})
+							.where(eq(vehicles.id, vehicleId));
+
+						await tx
+							.update(vehicleInspections)
+							.set({
+								status: "approved",
 								updatedAt: new Date(),
 							})
 							.where(eq(vehicleInspections.id, newInspection.id));

@@ -53,7 +53,12 @@ const formSchema = z.object({
   origin: z.enum(["Nacional", "Importado"], { message: "La procedencia es requerida" }),
   vehicleType: z.string({ message: "El tipo de vehículo es requerido" }).min(1, { message: "El tipo de vehículo es requerido" }),
   color: z.string({ message: "El color es requerido" }).min(1, { message: "El color es requerido" }),
-  cylinders: z.string({ message: "Los cilindros son requeridos" }).min(1, { message: "Los cilindros son requeridos" }),
+  cylinders: z.string({ message: "Los cilindros son requeridos" })
+    .min(1, { message: "Los cilindros son requeridos" })
+    .refine((val) => {
+      const num = parseInt(val, 10);
+      return !isNaN(num) && num >= 1 && num <= 8;
+    }, { message: "El número de cilindros debe estar entre 1 y 8" }),
   engineCC: z.string({ message: "El motor (CC) es requerido" }).min(1, { message: "El motor (CC) es requerido" }),
   fuelType: z.enum(["Gasolina", "Diesel", "Eléctrico", "Híbrido"], { message: "El tipo de combustible es requerido" }),
   transmission: z.enum(["Automático", "Manual"], { message: "La transmisión es requerida" }),

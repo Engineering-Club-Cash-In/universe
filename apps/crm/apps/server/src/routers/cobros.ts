@@ -737,8 +737,12 @@ export const cobrosRouter = {
 								numeroCredito: numeroSifco || null,
 								etiquetas: null as string[] | null,
 								isPool:
-									credito.creditos.formato_credito?.toUpperCase().includes("POOL") ||
-									credito.creditos.tipoCredito?.toUpperCase().includes("POOL") ||
+									credito.creditos.formato_credito
+										?.toUpperCase()
+										.includes("POOL") ||
+									credito.creditos.tipoCredito
+										?.toUpperCase()
+										.includes("POOL") ||
 									(Array.isArray(credito.inversionistas) &&
 										credito.inversionistas.length > 1),
 							};

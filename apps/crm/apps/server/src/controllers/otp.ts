@@ -50,7 +50,7 @@ export class OTPController {
 			// 5. Enviar SMS
 			const smsClient = new SMSClient({
 				token: process.env.SMS_TOKEN!,
-				apiKey: parseInt(process.env.SMS_API_KEY!),
+				apiKey: Number.parseInt(process.env.SMS_API_KEY!),
 			});
 
 			const message = `Tu código de verificación es: ${code}. Válido por 5 minutos.`;

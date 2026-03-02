@@ -989,64 +989,63 @@ export const crmRouter = {
 				);
 			}
 
-			// Determinar rango de mes para filtros basados en historial de stages
+			// Filtros de stage/fecha solo aplican cuando se pasan month/year explícitamente
 			const filterMonth = input?.month;
 			const filterYear = input?.year;
-			const now = new Date();
-			const startOfMonth =
-				filterMonth && filterYear
-					? new Date(filterYear, filterMonth - 1, 1)
-					: new Date(now.getFullYear(), now.getMonth(), 1);
-			const endOfMonth =
-				filterMonth && filterYear
-					? new Date(filterYear, filterMonth, 1)
-					: undefined;
 
-			// Solo mostrar oportunidades al 100% que llegaron ahí en el mes seleccionado
-			const fullStages = await db
-				.select({ id: salesStages.id })
-				.from(salesStages)
-				.where(eq(salesStages.closurePercentage, 100));
-			const fullStageIds = fullStages.map((s) => s.id);
+			if (filterMonth && filterYear) {
+				const startOfMonth = new Date(filterYear, filterMonth - 1, 1);
+				const endOfMonth = new Date(filterYear, filterMonth, 1);
 
-			if (fullStageIds.length > 0) {
-				const historyConditions = [
-					inArray(opportunityStageHistory.toStageId, fullStageIds),
-					gte(opportunityStageHistory.changedAt, startOfMonth),
-				];
-				if (endOfMonth) {
-					historyConditions.push(
-						lt(opportunityStageHistory.changedAt, endOfMonth),
+				// Solo mostrar oportunidades al 100% que llegaron ahí en el mes seleccionado
+				const fullStages = await db
+					.select({ id: salesStages.id })
+					.from(salesStages)
+					.where(eq(salesStages.closurePercentage, 100));
+				const fullStageIds = fullStages.map((s) => s.id);
+
+				if (fullStageIds.length > 0) {
+					const thisMonthFullOpps = await db
+						.select({
+							opportunityId: opportunityStageHistory.opportunityId,
+						})
+						.from(opportunityStageHistory)
+						.where(
+							and(
+								inArray(
+									opportunityStageHistory.toStageId,
+									fullStageIds,
+								),
+								gte(opportunityStageHistory.changedAt, startOfMonth),
+								lt(opportunityStageHistory.changedAt, endOfMonth),
+							),
+						);
+
+					const thisMonthOppIds = thisMonthFullOpps.map(
+						(o) => o.opportunityId,
+					);
+
+					conditions.push(
+						or(
+							not(inArray(opportunities.stageId, fullStageIds)),
+							...(thisMonthOppIds.length > 0
+								? [inArray(opportunities.id, thisMonthOppIds)]
+								: []),
+						),
 					);
 				}
 
-				const thisMonthFullOpps = await db
-					.select({ opportunityId: opportunityStageHistory.opportunityId })
-					.from(opportunityStageHistory)
-					.where(and(...historyConditions));
-
-				const thisMonthOppIds = thisMonthFullOpps.map((o) => o.opportunityId);
-
-				conditions.push(
-					or(
-						not(inArray(opportunities.stageId, fullStageIds)),
-						...(thisMonthOppIds.length > 0
-							? [inArray(opportunities.id, thisMonthOppIds)]
-							: []),
-					),
-				);
-			}
-
-			// Cuando se filtra por mes/año, también filtrar oportunidades colocadas (>= 90%)
-			// que llegaron a ese stage en el mes seleccionado
-			if (filterMonth && filterYear && endOfMonth) {
+				// Filtrar oportunidades colocadas (>= 90%) que llegaron a ese stage en el mes
 				const PLACED_STAGE_THRESHOLD = 90;
 				const placedStages = await db
 					.select({ id: salesStages.id })
 					.from(salesStages)
 					.where(
 						and(
-							gte(salesStages.closurePercentage, PLACED_STAGE_THRESHOLD),
+							gte(
+								salesStages.closurePercentage,
+								PLACED_STAGE_THRESHOLD,
+							),
 							lt(salesStages.closurePercentage, 100),
 						),
 					);
@@ -1054,19 +1053,25 @@ export const crmRouter = {
 
 				if (placedStageIds.length > 0) {
 					const placedThisMonth = await db
-						.select({ opportunityId: opportunityStageHistory.opportunityId })
+						.select({
+							opportunityId: opportunityStageHistory.opportunityId,
+						})
 						.from(opportunityStageHistory)
 						.where(
 							and(
-								inArray(opportunityStageHistory.toStageId, placedStageIds),
+								inArray(
+									opportunityStageHistory.toStageId,
+									placedStageIds,
+								),
 								gte(opportunityStageHistory.changedAt, startOfMonth),
 								lt(opportunityStageHistory.changedAt, endOfMonth),
 							),
 						);
 
-					const placedOppIds = placedThisMonth.map((o) => o.opportunityId);
+					const placedOppIds = placedThisMonth.map(
+						(o) => o.opportunityId,
+					);
 
-					// Filtrar: oportunidades en stages colocados (90-99%) solo si llegaron ahí en el mes
 					conditions.push(
 						or(
 							not(inArray(opportunities.stageId, placedStageIds)),

@@ -77,6 +77,7 @@ export async function createInvestmentLeadWithOpportunity(
 		.values({
 			...rest,
 			assignedTo,
+			source: input.source ?? "website",
 			proposedAmount: proposedAmount?.toString(),
 		})
 		.returning();

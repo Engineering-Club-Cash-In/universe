@@ -10,6 +10,7 @@ interface LeadInvestorPayload {
   phones: string;
   dpi: string;
   investmentExperience: string;
+  proposedAmount: number;
   notes: string;
 }
 
@@ -21,6 +22,7 @@ export const sendLeadInvestor = async (data: FormInvestorValues) => {
     phones: data.telefono,
     dpi: data.dpi,
     investmentExperience: data.experiencia,
+    proposedAmount: Number(data.proposedAmount),
     notes: data.mensaje || "",
   };
 

@@ -8,6 +8,11 @@ import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { vehiclePhotos, vehicles } from "../db/schema/vehicles";
 import { getFileUrl, getFileUrlWithBucketInKey } from "../lib/storage";
 import { getRenapInfoController } from "./bot";
+import {
+	createOpportunityForLead,
+	getSalesUserWithLeastLeads,
+	getSalesUserWithLeastOpportunities,
+} from "./public-lead";
 
 /**
  * Función auxiliar para encontrar un lead por email o DPI
@@ -576,6 +581,144 @@ export async function getSifcoNumbersByDpi(c: Context) {
 			{
 				success: false,
 				error: error.message || "Error al obtener los números SIFCO",
+			},
+			500,
+		);
+	}
+}
+
+/**
+ * Endpoint de registro del portal: verifica si el lead existe por DPI.
+ * - Si existe → retorna el lead SIN crear oportunidad (solo está logueando).
+ * - Si no existe → crea lead + oportunidad (registro nuevo).
+ */
+export async function createPortalRegisterLead(c: Context) {
+	try {
+		const body = await c.req.json();
+
+		if (!body.nombreCompleto || !body.correo || !body.dpi) {
+			return c.json(
+				{
+					success: false,
+					error: "Faltan campos requeridos: nombreCompleto, correo o dpi",
+				},
+				400,
+			);
+		}
+
+		// Separar nombre completo en firstName y lastName por el primer espacio
+		const [firstName, ...rest] = (body.nombreCompleto as string).trim().split(" ");
+		const lastName = rest.join(" ") || "-";
+
+		const email: string = body.correo.trim();
+		const dpi: string = body.dpi.trim();
+		const phone: string | undefined = body.telefono?.trim();
+		const notes: string | undefined = body.descripcion?.trim();
+
+		// Verificar si ya existe un lead con ese DPI (o email)
+		const [existingLead] = await db
+			.select()
+			.from(leads)
+			.where(or(eq(leads.email, email), eq(leads.dpi, dpi)))
+			.limit(1);
+
+		if (existingLead) {
+			// Lead ya existe → solo retornar sin crear oportunidad
+			const isEmptyEmail =
+				!existingLead.email || existingLead.email.trim() === "";
+
+			if (existingLead.dpi === dpi && isEmptyEmail) {
+				const [updatedLead] = await db
+					.update(leads)
+					.set({ email, updatedAt: new Date() })
+					.where(eq(leads.id, existingLead.id))
+					.returning();
+
+				return c.json({
+					success: true,
+					data: updatedLead,
+					message: "Lead encontrado por DPI, email actualizado",
+				});
+			}
+
+			return c.json({
+				success: true,
+				data: existingLead,
+				message: "Lead ya existe, acceso autorizado sin nueva oportunidad",
+			});
+		}
+
+		// Lead no existe → registro nuevo: crear lead + oportunidad
+		const salesUserForLead = await getSalesUserWithLeastLeads();
+		if (!salesUserForLead) {
+			return c.json(
+				{
+					success: false,
+					error: "No hay usuario de ventas disponible para asignar",
+				},
+				500,
+			);
+		}
+
+		const salesUserForOpportunity = await getSalesUserWithLeastOpportunities();
+		if (!salesUserForOpportunity) {
+			return c.json(
+				{
+					success: false,
+					error: "No hay usuario de ventas disponible para asignar oportunidad",
+				},
+				500,
+			);
+		}
+
+		const [newLead] = await db
+			.insert(leads)
+			.values({
+				firstName,
+				lastName,
+				email,
+				phone,
+				dpi,
+				notes,
+				source: "website",
+				status: "new",
+				clientType: "individual",
+				dependents: 0,
+				ownsHome: false,
+				ownsVehicle: false,
+				hasCreditCard: false,
+				assignedTo: salesUserForLead.id,
+				createdBy: salesUserForLead.id,
+				updatedAt: new Date(),
+			})
+			.returning();
+
+		let renapInfo = null;
+		if (phone) {
+			renapInfo = await getRenapInfoController(dpi, phone);
+		}
+
+		const newOpportunity = await createOpportunityForLead(
+			newLead.id,
+			newLead.firstName,
+			newLead.lastName,
+			salesUserForOpportunity.id,
+			notes ?? "",
+			"website",
+		);
+
+		return c.json({
+			success: true,
+			data: newLead,
+			renapInfo,
+			opportunity: newOpportunity,
+		});
+	} catch (error: any) {
+		console.error("[ERROR] createPortalRegisterLead:", error);
+		return c.json(
+			{
+				success: false,
+				error: error.message || "Error al procesar el registro",
 			},
 			500,
 		);

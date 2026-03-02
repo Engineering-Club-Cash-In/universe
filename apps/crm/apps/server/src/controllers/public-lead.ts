@@ -10,7 +10,7 @@ import { getRenapInfoController } from "./bot";
  * Si hay empate, retorna el primero encontrado.
  * Si no hay usuarios de ventas, retorna null.
  */
-async function getSalesUserWithLeastOpportunities() {
+export async function getSalesUserWithLeastOpportunities() {
 	// Obtener todos los usuarios de ventas activos (no baneados)
 	const salesUsers = await db
 		.select({
@@ -64,7 +64,7 @@ async function getSalesUserWithLeastOpportunities() {
  * Si hay empate, retorna el primero encontrado.
  * Si no hay usuarios de ventas, retorna null.
  */
-async function getSalesUserWithLeastLeads() {
+export async function getSalesUserWithLeastLeads() {
 	// Obtener todos los usuarios de ventas activos (no baneados)
 	const salesUsers = await db
 		.select({
@@ -122,7 +122,7 @@ async function getSalesUserWithLeastLeads() {
 /**
  * Crea una nueva oportunidad vinculada a un lead
  */
-async function createOpportunityForLead(
+export async function createOpportunityForLead(
 	leadId: string,
 	firstName: string,
 	lastName: string,

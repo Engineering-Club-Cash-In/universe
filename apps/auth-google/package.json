@@ -22,17 +22,16 @@
   "license": "ISC",
   "packageManager": "pnpm@10.18.1",
   "dependencies": {
+    "@cci/email": "workspace:*",
     "better-auth": "^1.0.0",
     "dotenv": "^16.4.5",
     "drizzle-orm": "^0.33.0",
     "hono": "^4.10.4",
-    "nodemailer": "^7.0.11",
     "pg": "^8.12.0",
     "postgres": "^3.4.4"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",
-    "@types/nodemailer": "^7.0.4",
     "@types/pg": "^8.11.6",
     "drizzle-kit": "^0.24.0",
     "tsx": "^4.7.1",

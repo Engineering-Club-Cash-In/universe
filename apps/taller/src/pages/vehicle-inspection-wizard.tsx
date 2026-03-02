@@ -115,8 +115,9 @@ export default function VehicleInspectionWizard() {
     // Use dataOverride if provided (from valuation step), otherwise use formData from context
     const dataToUse = dataOverride || formData;
 
-    // Verificar que las fotos estén disponibles
-    if (!photosToUse || photosToUse.length === 0) {
+    // Verificar que las fotos estén disponibles (a menos que sea rechazo explícito)
+    const isRejected = (dataToUse?.status === 'rejected');
+    if (!isRejected && (!photosToUse || photosToUse.length === 0)) {
       console.error("No hay fotos disponibles");
       toast.error("Error: Las fotos no se cargaron correctamente. Intente nuevamente.");
       return;
@@ -344,7 +345,8 @@ export default function VehicleInspectionWizard() {
                         scannerUsed: "No",
                         airbagWarning: "No",
                         testDrive: "No",
-                        inspectionResult: formData.inspectionResult || "VEHÍCULO RECHAZADO: Se detectaron criterios críticos de rechazo durante la evaluación."
+                        inspectionResult: formData.inspectionResult || "VEHÍCULO RECHAZADO: Se detectaron criterios críticos de rechazo durante la evaluación.",
+                        status: "rejected"
                       };
                       
                       handleCompleteInspection([], rejectionData);
@@ -375,8 +377,8 @@ export default function VehicleInspectionWizard() {
                   vehicleData={formData}
                   onComplete={(valuationData, aiValuation) => {
                     setValuationCompleted(true);
-                    // Merge valuation data with existing form data
-                    const completeData = { ...formData, ...valuationData };
+                    // Merge valuation data with existing form data and set approved status
+                    const completeData = { ...formData, ...valuationData, status: 'approved' };
                     handleCompleteInspection(photos, completeData, aiValuation);
                   }}
                   isWizardMode={true}

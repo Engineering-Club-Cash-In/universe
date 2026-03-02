@@ -10,8 +10,6 @@ export const FormLogin = () => {
     isLoading,
     isGoogleLoading,
     errorMessage,
-    handleResetPassword,
-    successMessage,
   } = useLogin();
   const isMobile = useIsMobile();
 
@@ -78,17 +76,9 @@ export const FormLogin = () => {
             >
               Iniciar sesión
             </Button>
-            <Link href="#" onClick={handleResetPassword} underline>
+            <Link href="/forgot-password" underline>
               ¿Olvidaste tu contraseña?
             </Link>
-            {successMessage && (
-              <div
-                className="bg-green-50 border border-green-400 text-green-700 px-4 py-3 rounded relative"
-                role="alert"
-              >
-                <span className="block sm:inline">{successMessage}</span>
-              </div>
-            )}
             <div className="flex justify-center items-center flex-col">
               <span>¿No tienes una cuenta?</span>
               <Link href="/register" underline>

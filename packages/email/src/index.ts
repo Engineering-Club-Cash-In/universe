@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 import LiquidationEmail from "./templates/LiquidationTemplate";
+import PasswordResetEmail from "./templates/PasswordResetTemplate";
 import * as React from "react";
 
 import { z } from "zod";
@@ -74,6 +75,30 @@ export const sendLiquidationEmail = async ({
     return { success: true, data };
   } catch (err) {
     console.error("[sendLiquidationEmail] Unexpected Error:", err);
+    return { success: false, error: err };
+  }
+};
+
+export const sendPasswordResetEmail = async (to: string, resetUrl: string) => {
+  emailSchema.parse(to);
+
+  try {
+    const { data, error } = await resend.emails.send({
+      from: `Club Cash In <no-reply@${domain}>`,
+      to: [to],
+      subject: "Restablecer contraseña - CashIn",
+      react: React.createElement(PasswordResetEmail, { resetUrl }),
+    });
+
+    if (error) {
+      console.error("[sendPasswordResetEmail] Resend API Error:", error);
+      return { success: false, error };
+    }
+
+    console.log(`[sendPasswordResetEmail] Password reset email sent to ${to}. ID: ${data?.id}`);
+    return { success: true, data };
+  } catch (err) {
+    console.error("[sendPasswordResetEmail] Unexpected Error:", err);
     return { success: false, error: err };
   }
 };

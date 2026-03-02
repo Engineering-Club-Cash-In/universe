@@ -11,12 +11,6 @@ export interface EnvConfig {
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
   CORS_ORIGIN: string;
-  // SMTP Config
-  SMTP_HOST: string;
-  SMTP_PORT: number;
-  SMTP_USER: string;
-  SMTP_PASSWORD: string;
-  SMTP_FROM: string;
   // Frontend URL for password reset
   FRONTEND_URL: string;
   // Cartera API Config
@@ -33,11 +27,6 @@ function validateEnv(): EnvConfig {
     "BETTER_AUTH_SECRET",
     "GOOGLE_CLIENT_ID",
     "GOOGLE_CLIENT_SECRET",
-    "SMTP_HOST",
-    "SMTP_PORT",
-    "SMTP_USER",
-    "SMTP_PASSWORD",
-    "SMTP_FROM",
   ];
 
   const missing = requiredVars.filter((varName) => !process.env[varName]);
@@ -63,12 +52,6 @@ function validateEnv(): EnvConfig {
     );
   }
 
-  // Validar puerto SMTP
-  const smtpPort = parseInt(process.env.SMTP_PORT || "587", 10);
-  if (isNaN(smtpPort) || smtpPort < 1 || smtpPort > 65535) {
-    throw new Error(`❌ Invalid SMTP_PORT value: ${process.env.SMTP_PORT}`);
-  }
-
   return {
     DATABASE_URL: dbUrl,
     PORT: port,
@@ -79,12 +62,6 @@ function validateEnv(): EnvConfig {
     GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID!,
     GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET!,
     CORS_ORIGIN: process.env.CORS_ORIGIN || "http://localhost:5173",
-    // SMTP
-    SMTP_HOST: process.env.SMTP_HOST!,
-    SMTP_PORT: smtpPort,
-    SMTP_USER: process.env.SMTP_USER!,
-    SMTP_PASSWORD: process.env.SMTP_PASSWORD!,
-    SMTP_FROM: process.env.SMTP_FROM!,
     // Frontend
     FRONTEND_URL: process.env.FRONTEND_URL || process.env.CORS_ORIGIN || "http://localhost:5173",
     // Cartera API

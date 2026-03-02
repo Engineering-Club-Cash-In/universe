@@ -5,7 +5,11 @@ import { IconCashIn } from "@/features/FormLeads/FormLeads";
 
 const urlImage = import.meta.env.VITE_IMAGE_URL;
 
-export const LeadInvestor = () => {
+interface LeadInvestorProps {
+  initialAmount?: string;
+}
+
+export const LeadInvestor = ({ initialAmount }: LeadInvestorProps) => {
   const imageUrl = urlImage + "/Frame 1321315308.png";
   const isMobile = useIsMobile();
   const isSubmitted = useLeadInvestor((state) => state.isSubmitted);
@@ -46,7 +50,7 @@ export const LeadInvestor = () => {
           </div>
         </div>
         <div className="py-12 lg:py-0 lg:-mt-6 px-10 lg:px-30 xl:px-40">
-          <FormularioInvestor />
+          <FormularioInvestor initialAmount={initialAmount} />
         </div>
       </div>
     </div>

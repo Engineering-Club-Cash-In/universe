@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { useInspection, InspectionStatus } from '../contexts/InspectionContext';
+import { useInspection, InspectionStatus, type Inspection360Item } from '../contexts/InspectionContext';
 import { INSPECTION_AREAS } from '../lib/inspection-data';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
@@ -30,7 +30,7 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
 
     // Limpiar metadatos de cilindros que ya no existen si bajó la cantidad
     useEffect(() => {
-        setItems360(prevItems => {
+        setItems360((prevItems: Inspection360Item[]) => {
             let overallChanged = false;
             const updatedItems = prevItems.map(item => {
                 if (!item.metadata) return item;
@@ -81,7 +81,7 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
     };
 
     const fillWithDummyData = () => {
-        const newItems: any[] = [];
+        const newItems: Inspection360Item[] = [];
         const failureMessages = [
             "Desgaste excesivo visible",
             "Fuga de fluidos detectada",

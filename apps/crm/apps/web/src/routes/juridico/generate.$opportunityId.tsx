@@ -403,6 +403,7 @@ function RouteComponent() {
 												search: {
 													vehicleId: opportunity?.vehicle?.id,
 													inspectionId: undefined,
+													tab: undefined,
 												},
 											})
 										}

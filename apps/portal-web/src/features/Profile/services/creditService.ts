@@ -63,12 +63,43 @@ export interface Cuota {
   fecha_liquidacion_inversionistas?: string | null;
   createdAt: string;
   pago_id?: number;
+  monto_boleta?: string;
+  fecha_pago?: string;
+  validationStatus?: string;
+}
+
+export interface CuotaActual {
+  cuota_id: number;
+  credito_id: number;
+  numero_cuota: number;
+  fecha_vencimiento: string;
+  pagado: boolean;
+  createdAt: string;
+  validationStatus?: string;
+  pago_id?: number;
+  monto_boleta?: string;
+  abono_capital?: string;
+  abono_interes?: string;
+  abono_iva_12?: string;
+  abono_interes_ci?: string;
+  abono_iva_ci?: string;
+  abono_seguro?: string;
+  abono_gps?: string;
+  abono_membresias?: string;
+  capital_restante?: string;
+  interes_restante?: string;
+  iva_12_restante?: string;
+  seguro_restante?: string;
+  gps_restante?: string;
+  membresias_restante?: string;
+  pago_mora?: string;
+  pago_otros?: string;
 }
 
 export interface CreditoResponse {
   credito: Credito;
   usuario: Usuario;
-  cuotaActual: number;
+  cuotaActual: CuotaActual;
   cuotaActualPagada: boolean;
   cuotaActualStatus: CuotaStatus;
   cuotasPendientes: Cuota[];

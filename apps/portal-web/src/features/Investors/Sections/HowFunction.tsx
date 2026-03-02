@@ -18,14 +18,18 @@ export const HowFunction = () => {
       title: "Crea tu perfil inversor",
       description:
         "Inicia tu camino a través de nuestro WhatsApp o un agente. Te ayudaremos a registrarte y resolveremos todas tus dudas, paso a paso.",
-      icon: <IconAddUser width={isMobile ? 24 : 32} height={isMobile ? 24 : 32} />,
+      icon: (
+        <IconAddUser width={isMobile ? 24 : 32} height={isMobile ? 24 : 32} />
+      ),
     },
     {
       step: "Paso 2",
       title: "Elige tu estrategia",
       description:
         "Selecciona el modelo que mejor se adapte a ti y define el monto que deseas invertir. El proceso es transparente y seguro desde el primer momento.",
-      icon: <IconWallet width={isMobile ? 24 : 32} height={isMobile ? 24 : 32} />,
+      icon: (
+        <IconWallet width={isMobile ? 24 : 32} height={isMobile ? 24 : 32} />
+      ),
     },
     {
       step: "Paso 3",
@@ -42,10 +46,11 @@ export const HowFunction = () => {
       className="pt-24 lg:pt-56 lg:mb-24 px-8 lg:px-20 flex flex-col-reverse lg:flex-row gap-16  xl:gap-40 items-center w-full"
     >
       <div className="w-full lg:w-2/5 flex flex-col lg:gap-8 gap-6">
-        <h2 className="text-xl lg:text-header-body font-bold text-center text-secondary">
-          ¿Cómo funciona?
-        </h2>
-        <p className="lg:text-body text-center">
+        <p className="text-xl lg:text-header-body font-bold text-center text-white">
+          ¿Cómo
+          <span className="text-secondary"> funciona</span>?
+        </p>
+        <p className="lg:text-body text-center text-white/80">
           Comenzar a invertir con nosotros es sencillo y rápido. Solo sigue
           estos tres pasos:
         </p>
@@ -60,7 +65,9 @@ export const HowFunction = () => {
                   {item.step}
                 </span>
                 <h3 className="lg:text-lg font-bold">{item.title}</h3>
-                <p className="text-gray text-xs lg:text-sm">{item.description}</p>
+                <p className="text-gray text-xs lg:text-sm ">
+                  {item.description}
+                </p>
               </div>
             </div>
           ))}

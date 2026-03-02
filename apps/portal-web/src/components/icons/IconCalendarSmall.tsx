@@ -48,8 +48,8 @@ export const IconCalendarSmall = ({
         y2="5.4573"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint1_linear_2395_26716"
@@ -59,8 +59,8 @@ export const IconCalendarSmall = ({
         y2="5.4573"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint2_linear_2395_26716"
@@ -70,8 +70,8 @@ export const IconCalendarSmall = ({
         y2="20.0032"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <linearGradient
         id="paint3_linear_2395_26716"
@@ -81,8 +81,8 @@ export const IconCalendarSmall = ({
         y2="10.0918"
         gradientUnits="userSpaceOnUse"
       >
-        <stop stop-color="#9499EC" />
-        <stop offset="1" stop-color="#545786" />
+        <stop stop-color="currentColor" />
+        <stop offset="1" stop-color="currentColor" />
       </linearGradient>
       <clipPath id="clip0_2395_26716">
         <rect width="21.8219" height="21.8219" fill="white" />

@@ -97,6 +97,7 @@ export const FormularioInvestor = () => {
             onChange={handleChange("nombreCompleto")}
             onBlur={handleBlur}
             variant="secondary"
+            sanitize="name"
             error={
               touched.nombreCompleto && errors.nombreCompleto
                 ? errors.nombreCompleto
@@ -109,6 +110,8 @@ export const FormularioInvestor = () => {
             value={values.dpi}
             onChange={handleChange("dpi")}
             onBlur={handleBlur}
+            sanitize="numeric"
+            maxLength={13}
             error={touched.dpi && errors.dpi ? errors.dpi : undefined}
           />
         </>
@@ -122,6 +125,7 @@ export const FormularioInvestor = () => {
             value={values.nombreSociedad}
             onChange={handleChange("nombreSociedad")}
             onBlur={handleBlur}
+            sanitize="safe-text"
             error={
               touched.nombreSociedad && errors.nombreSociedad
                 ? errors.nombreSociedad
@@ -134,6 +138,7 @@ export const FormularioInvestor = () => {
             value={values.representanteLegal}
             onChange={handleChange("representanteLegal")}
             onBlur={handleBlur}
+            sanitize="name"
             error={
               touched.representanteLegal && errors.representanteLegal
                 ? errors.representanteLegal
@@ -162,6 +167,8 @@ export const FormularioInvestor = () => {
             value={values.telefono}
             onChange={handleChange("telefono")}
             onBlur={handleBlur}
+            sanitize="numeric"
+            maxLength={8}
             error={
               touched.telefono && errors.telefono ? errors.telefono : undefined
             }
@@ -188,6 +195,8 @@ export const FormularioInvestor = () => {
             value={values.mensaje}
             onChange={handleChange("mensaje")}
             onBlur={handleBlur}
+            sanitize="safe-text"
+            maxLength={500}
           />
 
           <p className="text-xs text-[#7A7A8A] text-left">* Campos obligatorios</p>

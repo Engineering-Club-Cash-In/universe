@@ -1,6 +1,19 @@
 import { useIsMobile } from "@/hooks";
 import { IconX } from "@components/icons";
 
+type SanitizeType = "name" | "numeric" | "safe-text";
+
+const SANITIZE_PATTERNS: Record<SanitizeType, RegExp> = {
+  name: /[^a-zA-ZáéíóúÁÉÍÓÚñÑüÜàèìòùÀÈÌÒÙäëïöüÄËÏÖÜçÇ\s''-]/g,
+  numeric: /[^0-9]/g,
+  "safe-text": /[<>{}]/g,
+};
+
+const applySanitize = (value: string, sanitize?: SanitizeType): string => {
+  if (!sanitize) return value;
+  return value.replace(SANITIZE_PATTERNS[sanitize], "");
+};
+
 interface InputProps {
   value: string;
   onChange: (value: string) => void;
@@ -14,6 +27,8 @@ interface InputProps {
   className?: string;
   error?: string;
   size?: "small" | "medium" | "large";
+  sanitize?: SanitizeType;
+  maxLength?: number;
 }
 
 export const Input = ({
@@ -26,6 +41,8 @@ export const Input = ({
   className = "",
   error,
   variant = "secondary",
+  sanitize,
+  maxLength,
 }: InputProps) => {
   const hasError = !!error;
 
@@ -57,7 +74,8 @@ export const Input = ({
           className={`${baseClasses} min-h-[150px] resize-y`}
           placeholder={placeholder}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          maxLength={maxLength}
+          onChange={(e) => onChange(applySanitize(e.target.value, sanitize))}
           onBlur={onBlur}
         />
         {hasError && (
@@ -77,7 +95,8 @@ export const Input = ({
         placeholder={placeholder}
         type={type}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        maxLength={maxLength}
+        onChange={(e) => onChange(applySanitize(e.target.value, sanitize))}
         onBlur={onBlur}
       />
       {hasError && (

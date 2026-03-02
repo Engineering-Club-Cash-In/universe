@@ -36,7 +36,7 @@ export const StartToday = () => {
           style={{
             height: "59.2px",
             borderRadius: "8px",
-            border: "1px solid rgba(154, 159, 245, 0.50)",
+            border: "1px solid #D8E54A",
             background: "rgba(0, 0, 0, 0.00)",
           }}
           whileHover={{

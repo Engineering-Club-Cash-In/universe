@@ -88,7 +88,7 @@ export const Menu = () => {
                   ? "rounded-[13.524px] text-white"
                   : "rounded-2xl text-white/70 hover:bg-white/10 hover:text-white"
               }`}
-              style={isActive ? { background: "#9499EC" } : {}}
+              style={isActive ? { background: "#4E57EA" } : {}}
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               transition={{ type: "spring", stiffness: 400, damping: 17 }}

@@ -142,9 +142,7 @@ function RouteComponent() {
 		monthlyFixedExpenses: "",
 		monthlyVariableExpenses: "",
 		economicAvailability: "",
-		minPayment: "",
 		maxPayment: "",
-		adjustedPayment: "",
 		maxCreditAmount: "",
 	});
 	const pageSize = 20;
@@ -425,9 +423,7 @@ function RouteComponent() {
 			monthlyFixedExpenses?: number;
 			monthlyVariableExpenses?: number;
 			economicAvailability?: number;
-			minPayment?: number;
 			maxPayment?: number;
-			adjustedPayment?: number;
 			maxCreditAmount?: number;
 		}) => client.upsertCreditAnalysis(input),
 		onSuccess: () => {
@@ -2600,10 +2596,7 @@ function RouteComponent() {
 														data?.monthlyVariableExpenses?.toString() || "",
 													economicAvailability:
 														data?.economicAvailability?.toString() || "",
-													minPayment: data?.minPayment?.toString() || "",
 													maxPayment: data?.maxPayment?.toString() || "",
-													adjustedPayment:
-														data?.adjustedPayment?.toString() || "",
 													maxCreditAmount:
 														data?.maxCreditAmount?.toString() || "",
 												});
@@ -2660,14 +2653,8 @@ function RouteComponent() {
 													creditAnalysisForm.economicAvailability
 														? Number(creditAnalysisForm.economicAvailability)
 														: undefined,
-												minPayment: creditAnalysisForm.minPayment
-													? Number(creditAnalysisForm.minPayment)
-													: undefined,
 												maxPayment: creditAnalysisForm.maxPayment
 													? Number(creditAnalysisForm.maxPayment)
-													: undefined,
-												adjustedPayment: creditAnalysisForm.adjustedPayment
-													? Number(creditAnalysisForm.adjustedPayment)
 													: undefined,
 												maxCreditAmount: creditAnalysisForm.maxCreditAmount
 													? Number(creditAnalysisForm.maxCreditAmount)
@@ -2787,39 +2774,7 @@ function RouteComponent() {
 											<h4 className="font-medium text-base">
 												Capacidad de Pago
 											</h4>
-											<div className="grid grid-cols-4 gap-4">
-												<div className="space-y-2">
-													<Label className="text-xs">Pago Mínimo</Label>
-													<Input
-														type="number"
-														step="0.01"
-														min="0"
-														placeholder="0.00"
-														value={creditAnalysisForm.minPayment}
-														onChange={(e) =>
-															setCreditAnalysisForm((prev) => ({
-																...prev,
-																minPayment: e.target.value,
-															}))
-														}
-													/>
-												</div>
-												<div className="space-y-2">
-													<Label className="text-xs">Pago Ajustado</Label>
-													<Input
-														type="number"
-														step="0.01"
-														min="0"
-														placeholder="0.00"
-														value={creditAnalysisForm.adjustedPayment}
-														onChange={(e) =>
-															setCreditAnalysisForm((prev) => ({
-																...prev,
-																adjustedPayment: e.target.value,
-															}))
-														}
-													/>
-												</div>
+											<div className="grid grid-cols-2 gap-4">
 												<div className="space-y-2">
 													<Label className="text-xs">Pago Máximo</Label>
 													<Input
@@ -3014,31 +2969,7 @@ function RouteComponent() {
 											<h4 className="font-medium text-base">
 												Capacidad de Pago
 											</h4>
-											<div className="grid grid-cols-4 gap-4">
-												<div className="rounded-lg border p-4 text-center">
-													<Label className="text-muted-foreground text-xs">
-														Pago Mínimo
-													</Label>
-													<p className="mt-1 font-bold text-lg text-orange-600">
-														{creditAnalysisQuery.data.minPayment
-															? formatCurrency(
-																	creditAnalysisQuery.data.minPayment,
-																)
-															: "-"}
-													</p>
-												</div>
-												<div className="rounded-lg border p-4 text-center">
-													<Label className="text-muted-foreground text-xs">
-														Pago Ajustado
-													</Label>
-													<p className="mt-1 font-bold text-blue-600 text-lg">
-														{creditAnalysisQuery.data.adjustedPayment
-															? formatCurrency(
-																	creditAnalysisQuery.data.adjustedPayment,
-																)
-															: "-"}
-													</p>
-												</div>
+											<div className="grid grid-cols-2 gap-4">
 												<div className="rounded-lg border p-4 text-center">
 													<Label className="text-muted-foreground text-xs">
 														Pago Máximo
@@ -3086,9 +3017,7 @@ function RouteComponent() {
 													monthlyFixedExpenses: "",
 													monthlyVariableExpenses: "",
 													economicAvailability: "",
-													minPayment: "",
 													maxPayment: "",
-													adjustedPayment: "",
 													maxCreditAmount: "",
 												});
 												setIsEditingCreditAnalysis(true);

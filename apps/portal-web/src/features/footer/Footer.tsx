@@ -129,7 +129,7 @@ export const Footer: React.FC<FooterProps> = ({ notShowRedirects = false }) => {
 
           {/* Social media and contact */}
           <div
-            className={`order-1 lg:order-2 w-full col-span-2 lg:col-span-3 flex  ${notShowRedirects ? "" : "lg:justify-end lg:pr-14"} gap-4 lg:gap-8 `}
+            className={`order-1 lg:order-2 w-full col-span-2 lg:col-span-3 flex ${notShowRedirects ? "" : "lg:justify-end lg:pr-14"} gap-4 lg:gap-8 `}
           >
             {SOCIAL_CONTACTS.filter(contact => notShowRedirects ? contact.lead !== false : true).map((contact) => {
               const IconComponent = contact.icon;
@@ -142,7 +142,7 @@ export const Footer: React.FC<FooterProps> = ({ notShowRedirects = false }) => {
                   className={`flex flex-col items-center gap-1 text-[14px] font-normal transition-all hover:scale-110 hover:text-gray-300 cursor-pointer ${contact.className || ""}`}
                 >
                   <IconComponent />
-                  <div className="hidden lg:block">{contact.label}</div>
+                  <div className={`hidden lg:block text-[14px] ${contact.className ? "" : "whitespace-nowrap"}`}>{contact.label}</div>
                 </a>
               );
             })}

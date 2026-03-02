@@ -172,11 +172,28 @@ export async function createOpportunityForLead(
 	return newOpportunity;
 }
 
+/**
+ * Verifica si un lead ya tiene una oportunidad creada en las últimas 24 horas.
+ */
+export async function hasRecentOpportunity(leadId: string): Promise<boolean> {
+	const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+	const [recent] = await db
+		.select({ id: opportunities.id })
+		.from(opportunities)
+		.where(
+			and(
+				eq(opportunities.leadId, leadId),
+				gte(opportunities.createdAt, twentyFourHoursAgo),
+			),
+		)
+		.limit(1);
+	return !!recent;
+}
+
 export async function createPublicLead(c: Context) {
 	try {
 		const body = await c.req.json();
 
-		// Validate required fields (DPI es opcional)
 		if (!body.firstName || !body.lastName || !body.email) {
 			return c.json(
 				{
@@ -188,32 +205,42 @@ export async function createPublicLead(c: Context) {
 		}
 
 		const creditType = body.creditType || "autocompra";
-		const hasDpi = body.dpi && body.dpi.trim() !== "";
+		const hasDpi = !!(body.dpi && body.dpi.trim() !== "");
 
-		// Si no tiene DPI, solo verificar por email y crear lead sin oportunidad
-		if (!hasDpi) {
-			// Verificar si ya existe un lead con el mismo email
-			const existingLeadByEmail = await db
-				.select()
-				.from(leads)
-				.where(eq(leads.email, body.email))
-				.limit(1);
+		// Buscar lead existente: por email+DPI si hay DPI, solo por email si no
+		const whereClause = hasDpi
+			? or(eq(leads.email, body.email), eq(leads.dpi, body.dpi))
+			: eq(leads.email, body.email);
 
-			if (existingLeadByEmail.length > 0) {
+		const [existingLead] = await db
+			.select()
+			.from(leads)
+			.where(whereClause)
+			.limit(1);
+
+		// --- Lead existente ---
+		if (existingLead) {
+			if (body.isRegister) {
+				return c.json(
+					{ success: true, data: existingLead, message: "Lead ya existe" },
+					200,
+				);
+			}
+
+			// Verificar oportunidad reciente antes de crear una nueva
+			if (await hasRecentOpportunity(existingLead.id)) {
 				return c.json(
 					{
 						success: true,
-						data: existingLeadByEmail[0],
-						message: "Lead ya existe con el mismo email",
+						data: existingLead,
+						message: "Lead ya tiene una oportunidad reciente (últimas 24 horas)",
 					},
 					200,
 				);
 			}
 
-			// Obtener usuario de ventas con menos leads asignados
-			const salesUserForLead = await getSalesUserWithLeastLeads();
-
-			if (!salesUserForLead) {
+			const salesUser = await getSalesUserWithLeastOpportunities();
+			if (!salesUser) {
 				return c.json(
 					{
 						success: false,
@@ -223,121 +250,27 @@ export async function createPublicLead(c: Context) {
 				);
 			}
 
-			// Crear el lead sin oportunidad (para importación masiva)
-			const [newLead] = await db
-				.insert(leads)
-				.values({
-					firstName: body.firstName,
-					lastName: body.lastName,
-					email: body.email,
-					phone: body.phone,
-					age: body.age,
-					dpi: null,
-					clientType: body.clientType || "individual",
-					maritalStatus: body.maritalStatus,
-					dependents: body.dependents ?? 0,
-					monthlyIncome: body.monthlyIncome?.toString(),
-					loanAmount: body.loanAmount?.toString(),
-					occupation: body.occupation,
-					workTime: body.workTime,
-					ownsHome: body.ownsHome ?? false,
-					ownsVehicle: body.ownsVehicle ?? false,
-					hasCreditCard: body.hasCreditCard ?? false,
-					jobTitle: body.jobTitle,
-					notes: body.notes,
-					source: body.source || "website",
-					status: "new",
-					assignedTo: salesUserForLead.id,
-					createdBy: salesUserForLead.id,
-					updatedAt: new Date(),
-				})
-				.returning();
+			const opportunity = await createOpportunityForLead(
+				existingLead.id,
+				existingLead.firstName,
+				existingLead.lastName,
+				salesUser.id,
+				body.notes ?? "",
+				body.source || existingLead.source || "website",
+				body.loanPurpose,
+				creditType,
+			);
 
-			return c.json({
-				success: true,
-				data: newLead,
-				message: "Lead creado sin DPI (importación)",
-			});
-		}
-
-		// Check if lead already exists with same email or DPI
-		const existingLead = await db
-			.select()
-			.from(leads)
-			.where(or(eq(leads.email, body.email), eq(leads.dpi, body.dpi)))
-			.limit(1);
-
-		if (existingLead.length > 0) {
-			const lead = existingLead[0];
-
-			// Obtener usuario de ventas con menos oportunidades asignadas
-			const salesUserForOpportunity =
-				await getSalesUserWithLeastOpportunities();
-
-			if (!salesUserForOpportunity) {
-				return c.json(
-					{
-						success: false,
-						error: "No hay usuario de ventas disponible para asignar",
-					},
-					500,
-				);
-			}
-			let newOpportunity = null;
-
-			if (!body.isRegister) {
-				// Verificar si ya tiene una oportunidad creada en las últimas 24 horas
-				const twentyFourHoursAgo = new Date(
-					Date.now() - 24 * 60 * 60 * 1000,
-				);
-				const [recentOpportunity] = await db
-					.select({ id: opportunities.id })
-					.from(opportunities)
-					.where(
-						and(
-							eq(opportunities.leadId, lead.id),
-							gte(opportunities.createdAt, twentyFourHoursAgo),
-						),
-					)
-					.limit(1);
-
-				if (recentOpportunity) {
-					return c.json(
-						{
-							success: true,
-							data: lead,
-							message:
-								"Lead ya tiene una oportunidad reciente (últimas 24 horas)",
-						},
-						200,
-					);
-				}
-
-				// Crear oportunidad vinculada al lead existente
-				newOpportunity = await createOpportunityForLead(
-					lead.id,
-					lead.firstName,
-					lead.lastName,
-					salesUserForOpportunity.id,
-					body.notes ?? "",
-					body.source || lead.source || "website",
-					body.loanPurpose,
-					creditType,
-				);
-			}
-
-			const isEmptyEmail = !lead.email || lead.email.trim() === "";
-
-			// Si encontró el lead por DPI y no tiene email
-			if (lead.dpi === body.dpi && isEmptyEmail) {
-				// Actualizar el email del lead existente
+			// Si se encontró por DPI y no tenía email, actualizarlo
+			if (
+				hasDpi &&
+				existingLead.dpi === body.dpi &&
+				(!existingLead.email || existingLead.email.trim() === "")
+			) {
 				const [updatedLead] = await db
 					.update(leads)
-					.set({
-						email: body.email,
-						updatedAt: new Date(),
-					})
-					.where(eq(leads.id, lead.id))
+					.set({ email: body.email, updatedAt: new Date() })
+					.where(eq(leads.id, existingLead.id))
 					.returning();
 
 				return c.json(
@@ -345,7 +278,7 @@ export async function createPublicLead(c: Context) {
 						success: true,
 						data: updatedLead,
 						message: "Lead encontrado por DPI, email actualizado",
-						opportunity: newOpportunity,
+						opportunity,
 					},
 					200,
 				);
@@ -354,16 +287,19 @@ export async function createPublicLead(c: Context) {
 			return c.json(
 				{
 					success: true,
-					data: lead,
+					data: existingLead,
 					message: "Lead ya existe con el mismo email o DPI",
-					opportunity: newOpportunity,
+					opportunity,
 				},
 				200,
 			);
 		}
 
-		// Obtener usuario de ventas con menos leads asignados
-		const salesUserForLead = await getSalesUserWithLeastLeads();
+		// --- Lead nuevo ---
+		const [salesUserForLead, salesUserForOpportunity] = await Promise.all([
+			getSalesUserWithLeastLeads(),
+			getSalesUserWithLeastOpportunities(),
+		]);
 
 		if (!salesUserForLead) {
 			return c.json(
@@ -374,10 +310,6 @@ export async function createPublicLead(c: Context) {
 				500,
 			);
 		}
-
-		// Obtener usuario de ventas con menos oportunidades para la oportunidad
-		const salesUserForOpportunity = await getSalesUserWithLeastOpportunities();
-
 		if (!salesUserForOpportunity) {
 			return c.json(
 				{
@@ -388,7 +320,6 @@ export async function createPublicLead(c: Context) {
 			);
 		}
 
-		// Create the lead
 		const [newLead] = await db
 			.insert(leads)
 			.values({
@@ -397,7 +328,7 @@ export async function createPublicLead(c: Context) {
 				email: body.email,
 				phone: body.phone,
 				age: body.age,
-				dpi: body.dpi,
+				dpi: hasDpi ? body.dpi : null,
 				clientType: body.clientType || "individual",
 				maritalStatus: body.maritalStatus,
 				dependents: body.dependents ?? 0,
@@ -418,14 +349,13 @@ export async function createPublicLead(c: Context) {
 			})
 			.returning();
 
-		// INSERT RENAP INFO IF DPI AND PHONE ARE PROVIDED
-		let renapInfo = null;
-		if (body.dpi && body.dpi.trim() !== "" && body.phone) {
-			renapInfo = await getRenapInfoController(body.dpi, body.phone);
-		}
+		// RENAP solo si tiene DPI y teléfono
+		const renapInfo =
+			hasDpi && body.phone
+				? await getRenapInfoController(body.dpi, body.phone)
+				: null;
 
-		// Crear oportunidad vinculada al lead
-		const newOpportunity = await createOpportunityForLead(
+		const opportunity = await createOpportunityForLead(
 			newLead.id,
 			newLead.firstName,
 			newLead.lastName,
@@ -436,19 +366,11 @@ export async function createPublicLead(c: Context) {
 			creditType,
 		);
 
-		return c.json({
-			success: true,
-			data: newLead,
-			renapInfo,
-			opportunity: newOpportunity,
-		});
+		return c.json({ success: true, data: newLead, renapInfo, opportunity });
 	} catch (error: any) {
 		console.error("[ERROR] createPublicLead:", error);
 		return c.json(
-			{
-				success: false,
-				error: error.message || "Error al crear el lead",
-			},
+			{ success: false, error: error.message || "Error al crear el lead" },
 			500,
 		);
 	}

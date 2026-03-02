@@ -91,7 +91,7 @@ export const auth = betterAuth({
     },
     useSecureCookies: env.NODE_ENV === "production",
     cookies: {
-      sameSite: env.NODE_ENV === "production" ? "strict" : "lax" as const,
+      sameSite: env.NODE_ENV === "production" ? "none" : "lax" as const,
     },
   },
   secret: env.BETTER_AUTH_SECRET,

@@ -11,7 +11,6 @@ import { getOnlyRenapInfoController } from "./bot";
 import {
 	createOpportunityForLead,
 	getSalesUserWithLeastLeads,
-	getSalesUserWithLeastOpportunities,
 } from "./public-lead";
 
 /**
@@ -606,7 +605,9 @@ export async function createPortalRegisterLead(c: Context) {
 		}
 
 		// Separar nombre completo en firstName y lastName por el primer espacio
-		const [firstName, ...rest] = (body.nombreCompleto as string).trim().split(" ");
+		const [firstName, ...rest] = (body.nombreCompleto as string)
+			.trim()
+			.split(" ");
 		const lastName = rest.join(" ") || "-";
 
 		const email: string = body.correo.trim();
@@ -659,16 +660,6 @@ export async function createPortalRegisterLead(c: Context) {
 			);
 		}
 
-		const salesUserForOpportunity = await getSalesUserWithLeastOpportunities();
-		if (!salesUserForOpportunity) {
-			return c.json(
-				{
-					success: false,
-					error: "No hay usuario de ventas disponible para asignar oportunidad",
-				},
-				500,
-			);
-		}
 
 		const [newLead] = await db
 			.insert(leads)
@@ -701,7 +692,7 @@ export async function createPortalRegisterLead(c: Context) {
 			newLead.id,
 			newLead.firstName,
 			newLead.lastName,
-			salesUserForOpportunity.id,
+			salesUserForLead.id,
 			notes ?? "",
 			"website",
 		);

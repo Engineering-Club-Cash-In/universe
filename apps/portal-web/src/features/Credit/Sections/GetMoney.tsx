@@ -99,7 +99,7 @@ export const GetMoney = () => {
           {items.map((item, index) => (
             <div
               key={index}
-              className="flex flex-col   p-6 rounded-xl border border-secondary/20 bg-secondary/5"
+              className="flex flex-col items-center p-6 rounded-xl border border-secondary/20 bg-secondary/5"
             >
               {/* Icono */}
               <div className="mb-4 w-8 text-secondary">{item.icon}</div>

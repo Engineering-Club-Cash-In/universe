@@ -4,11 +4,7 @@ import { carteraBackClient } from "../services/cartera-back-client";
 
 export const accountingRouter = {
 	getResumenGlobalInversionistas: crmProcedure.handler(async () => {
-		const data = await carteraBackClient.getResumenGlobalInversionistas();
-		return data.filter(
-			(item: { total_a_recibir_con_reinversion: string }) =>
-				Number(item.total_a_recibir_con_reinversion) > 0,
-		);
+		return await carteraBackClient.getResumenGlobalInversionistas()
 	}),
 
 	createBoleta: crmProcedure

@@ -535,6 +535,7 @@ export const crmRouter = {
 				const [existingLead] = await db
 					.select({
 						id: leads.id,
+						assignedTo: leads.assignedTo,
 						assignedToName: user.name,
 					})
 					.from(leads)
@@ -543,9 +544,56 @@ export const crmRouter = {
 					.limit(1);
 
 				if (existingLead) {
-					throw new ORPCError("CONFLICT", {
-						message: `Ya existe un lead con este DPI, asignado al asesor: ${existingLead.assignedToName}`,
-					});
+					// Verificar si tiene oportunidades activas (open o on_hold)
+					const [activeOpportunity] = await db
+						.select({ id: opportunities.id })
+						.from(opportunities)
+						.where(
+							and(
+								eq(opportunities.leadId, existingLead.id),
+								inArray(opportunities.status, ["open", "on_hold"]),
+							),
+						)
+						.limit(1);
+
+					if (activeOpportunity) {
+						throw new ORPCError("CONFLICT", {
+							message: `Ya existe un lead con este DPI y tiene un proceso activo, asignado al asesor: ${existingLead.assignedToName}`,
+						});
+					}
+
+					// Lead existe pero sin procesos activos → reasignar al nuevo asesor
+					const [reassignedLead] = await db
+						.update(leads)
+						.set({
+							assignedTo,
+							status: "new",
+							updatedAt: new Date(),
+						})
+						.where(eq(leads.id, existingLead.id))
+						.returning();
+
+					// Crear nueva oportunidad en el primer stage
+					const [firstStage] = await db
+						.select({ id: salesStages.id })
+						.from(salesStages)
+						.orderBy(salesStages.order)
+						.limit(1);
+
+					if (firstStage) {
+						await db.insert(opportunities).values({
+							title: `${input.firstName} ${input.lastName}`,
+							leadId: existingLead.id,
+							creditType: "autocompra",
+							stageId: firstStage.id,
+							probability: 1,
+							assignedTo,
+							createdBy: context.userId,
+							source: input.source,
+						});
+					}
+
+					return reassignedLead;
 				}
 			}
 

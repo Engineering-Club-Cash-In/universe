@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import {
 	Calculator,
+	ChevronDown,
 	Eye,
 	FileText,
 	Loader2,
@@ -11,6 +12,7 @@ import {
 	Send,
 	Target,
 	Trash2,
+	UserCheck,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -25,6 +27,12 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Combobox } from "@/components/ui/combobox";
 import {
 	Dialog,
@@ -1243,20 +1251,19 @@ function QuoterPage() {
 		setIsViewDialogOpen(true);
 	};
 
-	const handleGeneratePdf = () => {
+	const getQuotationPdfData = () => {
 		if (calculatedValues.monthlyPayment <= 0) {
 			toast.error("Completa todos los campos para generar el PDF");
-			return;
+			return null;
 		}
 
 		const values = quoterForm.state.values;
-		// Calculate down payment percentage
 		const downPaymentPercentage =
 			values.vehicleValue > 0
 				? (values.downPayment / values.vehicleValue) * 100
 				: 0;
 
-		const quotationData = {
+		return {
 			vehicleBrand: values.vehicleBrand,
 			vehicleLine: values.vehicleLine,
 			vehicleModel: values.vehicleModel,
@@ -1275,8 +1282,11 @@ function QuoterPage() {
 			membershipCost: values.membershipCost,
 			amortizationTable: amortizationTable,
 		};
+	};
 
-		generateQuotationPdf(quotationData);
+	const handleGeneratePdf = (clientVersion = false) => {
+		const data = getQuotationPdfData();
+		if (data) generateQuotationPdf(data, { clientVersion });
 	};
 
 	const statusLabels = {
@@ -2020,15 +2030,33 @@ function QuoterPage() {
 											? "Guardando..."
 											: "Guardar Cotización"}
 									</Button>
-									<Button
-										type="button"
-										variant="outline"
-										className="gap-2"
-										onClick={handleGeneratePdf}
-									>
-										<FileText className="h-4 w-4" />
-										Generar PDF
-									</Button>
+									<DropdownMenu>
+										<DropdownMenuTrigger asChild>
+											<Button
+												type="button"
+												variant="outline"
+												className="gap-2"
+											>
+												<FileText className="h-4 w-4" />
+												Generar PDF
+												<ChevronDown className="h-3 w-3" />
+											</Button>
+										</DropdownMenuTrigger>
+										<DropdownMenuContent>
+											<DropdownMenuItem
+												onClick={() => handleGeneratePdf(false)}
+											>
+												<FileText className="h-4 w-4 mr-2" />
+												PDF Interno
+											</DropdownMenuItem>
+											<DropdownMenuItem
+												onClick={() => handleGeneratePdf(true)}
+											>
+												<UserCheck className="h-4 w-4 mr-2" />
+												PDF Cliente
+											</DropdownMenuItem>
+										</DropdownMenuContent>
+									</DropdownMenu>
 								</div>
 							</CardContent>
 						</Card>
@@ -2232,7 +2260,7 @@ function QuotationDetailDialog({
 		enabled: isOpen && !!quotationId,
 	});
 
-	const handleGeneratePdf = () => {
+	const handleGeneratePdf = (clientVersion = false) => {
 		if (!quotationQuery.data) return;
 
 		const quotation = quotationQuery.data;
@@ -2262,7 +2290,7 @@ function QuotationDetailDialog({
 			})),
 		};
 
-		generateQuotationPdf(quotationData);
+		generateQuotationPdf(quotationData, { clientVersion });
 	};
 
 	if (!quotationQuery.data) {
@@ -2292,14 +2320,32 @@ function QuotationDetailDialog({
 								{quotation.vehicleModel}
 							</DialogDescription>
 						</div>
-						<Button
-							variant="outline"
-							className="gap-2"
-							onClick={handleGeneratePdf}
-						>
-							<FileText className="h-4 w-4" />
-							Generar PDF
-						</Button>
+						<DropdownMenu>
+							<DropdownMenuTrigger asChild>
+								<Button
+									variant="outline"
+									className="gap-2"
+								>
+									<FileText className="h-4 w-4" />
+									Generar PDF
+									<ChevronDown className="h-3 w-3" />
+								</Button>
+							</DropdownMenuTrigger>
+							<DropdownMenuContent>
+								<DropdownMenuItem
+									onClick={() => handleGeneratePdf(false)}
+								>
+									<FileText className="h-4 w-4 mr-2" />
+									PDF Interno
+								</DropdownMenuItem>
+								<DropdownMenuItem
+									onClick={() => handleGeneratePdf(true)}
+								>
+									<UserCheck className="h-4 w-4 mr-2" />
+									PDF Cliente
+								</DropdownMenuItem>
+							</DropdownMenuContent>
+						</DropdownMenu>
 					</div>
 				</DialogHeader>
 

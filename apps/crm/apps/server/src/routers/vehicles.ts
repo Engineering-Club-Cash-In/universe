@@ -272,12 +272,12 @@ export const vehiclesRouter = {
 					),
 				}));
 
-				return {
-					data: vehiclesWithConvenios,
-					total,
-					limit,
-					offset,
-				};
+			return {
+				data: vehiclesWithConvenios,
+				total,
+				limit,
+				offset,
+			};
 		}),
 
 	// Get vehicle by ID with all related data
@@ -1005,7 +1005,8 @@ export const vehiclesRouter = {
 							aiMarketAnalysis: input.aiValuation?.marketAnalysis,
 							aiDepreciationFactors: input.aiValuation?.depreciationFactors,
 							aiConfidence: input.aiValuation?.confidence,
-							aiCommercialClassification: input.aiValuation?.commercialClassification,
+							aiCommercialClassification:
+								input.aiValuation?.commercialClassification,
 							status: "pending",
 							alerts: [],
 						} as NewVehicleInspection)

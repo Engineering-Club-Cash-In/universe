@@ -3092,8 +3092,8 @@ export const crmRouter = {
 					return { placedCount: 0, placedAmount: 0 };
 				}
 
-				// Find opportunities that moved to a placed stage within this month
-				const placedThisMonth = await db
+				// Find opportunities that FIRST reached a placed stage within this month
+				const movedToPlacedThisMonth = await db
 					.select({ opportunityId: opportunityStageHistory.opportunityId })
 					.from(opportunityStageHistory)
 					.where(
@@ -3104,9 +3104,43 @@ export const crmRouter = {
 						),
 					);
 
-				const placedOppIds = [
-					...new Set(placedThisMonth.map((o) => o.opportunityId)),
+				const candidateIds = [
+					...new Set(movedToPlacedThisMonth.map((o) => o.opportunityId)),
 				];
+
+				// Exclude opportunities that already reached placed before this month
+				const alreadyPlacedBefore =
+					candidateIds.length > 0
+						? await db
+								.select({
+									opportunityId:
+										opportunityStageHistory.opportunityId,
+								})
+								.from(opportunityStageHistory)
+								.where(
+									and(
+										inArray(
+											opportunityStageHistory.opportunityId,
+											candidateIds,
+										),
+										inArray(
+											opportunityStageHistory.toStageId,
+											placedStageIds,
+										),
+										lt(
+											opportunityStageHistory.changedAt,
+											startOfMonth,
+										),
+									),
+								)
+						: [];
+
+				const alreadyPlacedIds = new Set(
+					alreadyPlacedBefore.map((o) => o.opportunityId),
+				);
+				const placedOppIds = candidateIds.filter(
+					(id) => !alreadyPlacedIds.has(id),
+				);
 
 				if (placedOppIds.length === 0) {
 					return { placedCount: 0, placedAmount: 0 };
@@ -3155,6 +3189,26 @@ export const crmRouter = {
 							not(eq(opportunities.status, "migrate")),
 						),
 					);
+				const [wonOpportunities] = await db
+					.select({ count: count() })
+					.from(opportunities)
+					.where(
+						and(
+							eq(opportunities.status, "won"),
+							gte(opportunities.createdAt, startOfMonth),
+							lt(opportunities.createdAt, endOfMonth),
+						),
+					);
+				const [totalValue] = await db
+					.select({ total: sum(opportunities.value) })
+					.from(opportunities)
+					.where(
+						and(
+							gte(opportunities.createdAt, startOfMonth),
+							lt(opportunities.createdAt, endOfMonth),
+							not(eq(opportunities.status, "migrate")),
+						),
+					);
 				const [totalClients] = await db
 					.select({ count: count() })
 					.from(clients)
@@ -3169,6 +3223,8 @@ export const crmRouter = {
 				return {
 					totalLeads: totalLeads?.count || 0,
 					totalOpportunities: totalOpportunities?.count || 0,
+					wonOpportunities: wonOpportunities?.count || 0,
+					totalValue: Number.parseFloat(totalValue?.total ?? "0"),
 					totalClients: totalClients?.count || 0,
 					placedCount: placed.placedCount,
 					placedAmount: placed.placedAmount,
@@ -3195,6 +3251,26 @@ export const crmRouter = {
 							not(eq(opportunities.status, "migrate")),
 						),
 					);
+				const [wonOpportunities] = await db
+					.select({ count: count() })
+					.from(opportunities)
+					.where(
+						and(
+							eq(opportunities.status, "won"),
+							gte(opportunities.createdAt, startOfMonth),
+							lt(opportunities.createdAt, endOfMonth),
+						),
+					);
+				const [totalValue] = await db
+					.select({ total: sum(opportunities.value) })
+					.from(opportunities)
+					.where(
+						and(
+							gte(opportunities.createdAt, startOfMonth),
+							lt(opportunities.createdAt, endOfMonth),
+							not(eq(opportunities.status, "migrate")),
+						),
+					);
 				const [totalClients] = await db
 					.select({ count: count() })
 					.from(clients)
@@ -3209,6 +3285,8 @@ export const crmRouter = {
 				return {
 					teamLeads: totalLeads?.count || 0,
 					teamOpportunities: totalOpportunities?.count || 0,
+					wonOpportunities: wonOpportunities?.count || 0,
+					totalValue: Number.parseFloat(totalValue?.total ?? "0"),
 					teamClients: totalClients?.count || 0,
 					placedCount: placed.placedCount,
 					placedAmount: placed.placedAmount,
@@ -3237,6 +3315,28 @@ export const crmRouter = {
 						not(eq(opportunities.status, "migrate")),
 					),
 				);
+			const [myWonOpportunities] = await db
+				.select({ count: count() })
+				.from(opportunities)
+				.where(
+					and(
+						eq(opportunities.assignedTo, context.userId),
+						eq(opportunities.status, "won"),
+						gte(opportunities.createdAt, startOfMonth),
+						lt(opportunities.createdAt, endOfMonth),
+					),
+				);
+			const [myTotalValue] = await db
+				.select({ total: sum(opportunities.value) })
+				.from(opportunities)
+				.where(
+					and(
+						eq(opportunities.assignedTo, context.userId),
+						gte(opportunities.createdAt, startOfMonth),
+						lt(opportunities.createdAt, endOfMonth),
+						not(eq(opportunities.status, "migrate")),
+					),
+				);
 			const [myClients] = await db
 				.select({ count: count() })
 				.from(clients)
@@ -3252,6 +3352,8 @@ export const crmRouter = {
 			return {
 				myLeads: myLeads?.count || 0,
 				myOpportunities: myOpportunities?.count || 0,
+				wonOpportunities: myWonOpportunities?.count || 0,
+				totalValue: Number.parseFloat(myTotalValue?.total ?? "0"),
 				myClients: myClients?.count || 0,
 				placedCount: placed.placedCount,
 				placedAmount: placed.placedAmount,

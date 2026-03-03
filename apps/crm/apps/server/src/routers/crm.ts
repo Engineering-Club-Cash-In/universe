@@ -527,10 +527,33 @@ export const crmRouter = {
 				});
 			}
 
+			// Normalizar DPI: quitar espacios en blanco
+			const normalizedDpi = input.dpi?.replace(/\s/g, "") || undefined;
+
+			// Validar DPI duplicado
+			if (normalizedDpi) {
+				const [existingLead] = await db
+					.select({
+						id: leads.id,
+						assignedToName: user.name,
+					})
+					.from(leads)
+					.innerJoin(user, eq(leads.assignedTo, user.id))
+					.where(eq(leads.dpi, normalizedDpi))
+					.limit(1);
+
+				if (existingLead) {
+					throw new ORPCError("CONFLICT", {
+						message: `Ya existe un lead con este DPI, asignado al asesor: ${existingLead.assignedToName}`,
+					});
+				}
+			}
+
 			const newLead = await db
 				.insert(leads)
 				.values({
 					...input,
+					dpi: normalizedDpi,
 					monthlyIncome: input.monthlyIncome?.toString(),
 					loanAmount: input.loanAmount?.toString(),
 					assignedTo,

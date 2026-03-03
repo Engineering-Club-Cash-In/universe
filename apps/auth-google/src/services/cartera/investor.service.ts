@@ -85,12 +85,12 @@ export const createInvestor = async (
 /**
  * Obtener perfil de inversionista por DPI
  */
-export const getInvestorProfile = async (dpi: string): Promise<InvestorProfile> => {
+export const getInvestorProfile = async (dpi: string, email: string): Promise<InvestorProfile> => {
   try {
     // Asegurar autenticación
     const token = await ensureCarteraAuth();
 
-    const response = await fetch(`${env.CARTERA_API_URL}/investor?dpi=${dpi}`, {
+    const response = await fetch(`${env.CARTERA_API_URL}/investor?dpi=${dpi}&email=${email}`, {
       headers: {
         // Authorization: `Bearer ${token}`,
       },

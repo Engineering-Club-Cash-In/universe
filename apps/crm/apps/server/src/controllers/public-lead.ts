@@ -3,7 +3,7 @@ import type { Context } from "hono";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { leads, opportunities, salesStages } from "../db/schema/crm";
-import { getRenapInfoController } from "./bot";
+import { getOnlyRenapInfoController } from "./bot";
 
 /**
  * Encuentra al usuario de ventas con menos oportunidades asignadas.
@@ -351,9 +351,7 @@ export async function createPublicLead(c: Context) {
 
 		// RENAP solo si tiene DPI y teléfono
 		const renapInfo =
-			hasDpi && body.phone
-				? await getRenapInfoController(body.dpi, body.phone)
-				: null;
+			hasDpi ? await getOnlyRenapInfoController(body.dpi) : null;
 
 		const opportunity = await createOpportunityForLead(
 			newLead.id,

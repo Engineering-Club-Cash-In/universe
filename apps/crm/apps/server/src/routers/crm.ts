@@ -563,25 +563,32 @@ export const crmRouter = {
 					}
 
 					// Lead existe pero sin procesos activos → reasignar al nuevo asesor
-					const [reassignedLead] = await db
-						.update(leads)
-						.set({
-							assignedTo,
-							status: "new",
-							updatedAt: new Date(),
-						})
-						.where(eq(leads.id, existingLead.id))
-						.returning();
+					const reassignedLead = await db.transaction(async (tx) => {
+						const [lead] = await tx
+							.update(leads)
+							.set({
+								assignedTo,
+								status: "new",
+								updatedAt: new Date(),
+							})
+							.where(eq(leads.id, existingLead.id))
+							.returning();
 
-					// Crear nueva oportunidad en el primer stage
-					const [firstStage] = await db
-						.select({ id: salesStages.id })
-						.from(salesStages)
-						.orderBy(salesStages.order)
-						.limit(1);
+						// Crear nueva oportunidad en el primer stage
+						const [firstStage] = await tx
+							.select({ id: salesStages.id })
+							.from(salesStages)
+							.orderBy(salesStages.order)
+							.limit(1);
 
-					if (firstStage) {
-						await db.insert(opportunities).values({
+						if (!firstStage) {
+							throw new ORPCError("INTERNAL_SERVER_ERROR", {
+								message:
+									"No se encontró el primer stage de ventas",
+							});
+						}
+
+						await tx.insert(opportunities).values({
 							title: `${input.firstName} ${input.lastName}`,
 							leadId: existingLead.id,
 							creditType: "autocompra",
@@ -591,7 +598,9 @@ export const crmRouter = {
 							createdBy: context.userId,
 							source: input.source,
 						});
-					}
+
+						return lead;
+					});
 
 					return reassignedLead;
 				}

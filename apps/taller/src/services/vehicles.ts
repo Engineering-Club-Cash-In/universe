@@ -261,3 +261,22 @@ export const getVehicleStatistics = async () => {
     };
   }
 };
+// Validate vehicle plate uniqueness
+export const validateVehiclePlate = async (licensePlate: string, vinNumber?: string) => {
+  try {
+    const result = await client.validateLicensePlate({
+      licensePlate,
+      vinNumber
+    });
+    return {
+      success: true,
+      data: result
+    };
+  } catch (error) {
+    console.error('Error validating license plate:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Error desconocido'
+    };
+  }
+};

@@ -216,23 +216,26 @@ export function OpportunityDocumentUpload({
 				"estados_cuenta_1",
 				"estados_cuenta_2",
 				"estados_cuenta_3",
-			];
-			Promise.allSettled(
-				types.map((type) =>
-					uploadMutation.mutateAsync({
-						file: selectedFile,
-						documentType: type,
-					}),
-				),
-			).then((results) => {
-				const failed = results.filter((r) => r.status === "rejected");
-				if (failed.length > 0) {
+			] as const;
+			let failed = 0;
+			(async () => {
+				for (const type of types) {
+					try {
+						await uploadMutation.mutateAsync({
+							file: selectedFile,
+							documentType: type,
+						});
+					} catch {
+						failed++;
+					}
+				}
+				if (failed > 0) {
 					toast.error(
-						`${failed.length} de 3 estados de cuenta fallaron al subir`,
+						`${failed} de 3 estados de cuenta fallaron al subir`,
 					);
 				}
 				setIncludeAll3Months(false);
-			});
+			})();
 		} else {
 			uploadMutation.mutate({ file: selectedFile, documentType });
 		}

@@ -76,7 +76,6 @@ export default function VehicleInspectionWizard() {
       if (vehicleFormRef.current) {
         const isValid = await vehicleFormRef.current.triggerValidation();
         if (!isValid) {
-          toast.error("Por favor complete los campos marcados en rojo");
           return;
         }
       } else {

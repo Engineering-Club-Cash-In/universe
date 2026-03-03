@@ -356,6 +356,13 @@ function RouteComponent() {
 	const [showLostOpportunities, setShowLostOpportunities] = useState(false);
 	const [boardSearch, setBoardSearch] = useState("");
 	const [salespersonFilter, setSalespersonFilter] = useState<string>("all");
+	const [sourceFilter, setSourceFilter] = useState<string>("all");
+	const [createdMonth, setCreatedMonth] = useState(
+		() => new Date().getMonth() + 1,
+	);
+	const [createdYear, setCreatedYear] = useState(() =>
+		new Date().getFullYear(),
+	);
 	const debouncedBoardSearch = useDeferredValue(boardSearch);
 	// View toggle: "kanban" or "table" - persist in localStorage
 	const [viewMode, setViewMode] = useState<"kanban" | "table">(() => {
@@ -681,6 +688,9 @@ function RouteComponent() {
 				excludeStatuses: ["migrate"],
 				month,
 				year,
+				...(sourceFilter !== "all" ? { source: sourceFilter as any } : {}),
+				createdMonth,
+				createdYear,
 			},
 		}),
 		enabled:
@@ -693,6 +703,9 @@ function RouteComponent() {
 			userProfile.data?.role,
 			month,
 			year,
+			sourceFilter,
+			createdMonth,
+			createdYear,
 		],
 	});
 	const salesStagesQuery = useQuery({
@@ -1515,6 +1528,64 @@ function RouteComponent() {
 							))}
 						</SelectContent>
 					</Select>
+					<Select value={sourceFilter} onValueChange={setSourceFilter}>
+						<SelectTrigger className="w-52">
+							<Filter className="mr-2 h-4 w-4" />
+							<SelectValue placeholder="Filtrar por fuente" />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="all">Todas las Fuentes</SelectItem>
+							<SelectItem value="facebook">Facebook</SelectItem>
+							<SelectItem value="instagram">Instagram</SelectItem>
+							<SelectItem value="google">Google</SelectItem>
+							<SelectItem value="Whatsapp">WhatsApp</SelectItem>
+							<SelectItem value="website">Sitio Web</SelectItem>
+							<SelectItem value="referral">Referencia</SelectItem>
+							<SelectItem value="cold_call">Llamada en Frío</SelectItem>
+							<SelectItem value="email">Correo Electrónico</SelectItem>
+							<SelectItem value="social_media">Redes Sociales</SelectItem>
+							<SelectItem value="event">Evento</SelectItem>
+							<SelectItem value="other">Otro</SelectItem>
+						</SelectContent>
+					</Select>
+					<div className="flex items-center gap-1">
+						<Select
+							value={String(createdMonth)}
+							onValueChange={(v) => setCreatedMonth(Number(v))}
+						>
+							<SelectTrigger className="w-36">
+								<Calendar className="mr-2 h-4 w-4" />
+								<SelectValue placeholder="Mes" />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="1">Enero</SelectItem>
+								<SelectItem value="2">Febrero</SelectItem>
+								<SelectItem value="3">Marzo</SelectItem>
+								<SelectItem value="4">Abril</SelectItem>
+								<SelectItem value="5">Mayo</SelectItem>
+								<SelectItem value="6">Junio</SelectItem>
+								<SelectItem value="7">Julio</SelectItem>
+								<SelectItem value="8">Agosto</SelectItem>
+								<SelectItem value="9">Septiembre</SelectItem>
+								<SelectItem value="10">Octubre</SelectItem>
+								<SelectItem value="11">Noviembre</SelectItem>
+								<SelectItem value="12">Diciembre</SelectItem>
+							</SelectContent>
+						</Select>
+						<Select
+							value={String(createdYear)}
+							onValueChange={(v) => setCreatedYear(Number(v))}
+						>
+							<SelectTrigger className="w-24">
+								<SelectValue placeholder="Año" />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="2025">2025</SelectItem>
+								<SelectItem value="2026">2026</SelectItem>
+								<SelectItem value="2027">2027</SelectItem>
+							</SelectContent>
+						</Select>
+					</div>
 					<Button
 						variant={showLostOpportunities ? "default" : "outline"}
 						size="sm"

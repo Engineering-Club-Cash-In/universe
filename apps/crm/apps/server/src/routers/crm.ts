@@ -861,6 +861,25 @@ export const crmRouter = {
 					// Filtro por mes/año para alinear con dashboard
 					month: z.number().min(1).max(12).optional(),
 					year: z.number().optional(),
+					// NEW: Filtro por fecha de creación
+					createdMonth: z.number().min(1).max(12).optional(),
+					createdYear: z.number().optional(),
+					// NEW: Filtro por fuente/medio
+					source: z
+						.enum([
+							"website",
+							"referral",
+							"cold_call",
+							"email",
+							"social_media",
+							"event",
+							"other",
+							"facebook",
+							"instagram",
+							"google",
+							"Whatsapp",
+						])
+						.optional(),
 				})
 				.optional(),
 		)
@@ -902,6 +921,7 @@ export const crmRouter = {
 				membresiaPago: opportunities.membresiaPago,
 				inversionistas: opportunities.inversionistas,
 				asesorId: opportunities.asesorId,
+				source: opportunities.source,
 				rubros: opportunities.rubros,
 				loanPurpose: opportunities.loanPurpose,
 				company: {
@@ -987,6 +1007,27 @@ export const crmRouter = {
 				conditions.push(
 					not(inArray(opportunities.status, input.excludeStatuses)),
 				);
+			}
+
+			// Filtro por fuente/medio de la oportunidad
+			if (input?.source) {
+				conditions.push(eq(opportunities.source, input.source));
+			}
+
+			// Filtro por mes/año de creación de la oportunidad
+			if (input?.createdMonth && input?.createdYear) {
+				const createdStart = new Date(
+					input.createdYear,
+					input.createdMonth - 1,
+					1,
+				);
+				const createdEnd = new Date(
+					input.createdYear,
+					input.createdMonth,
+					1,
+				);
+				conditions.push(gte(opportunities.createdAt, createdStart));
+				conditions.push(lt(opportunities.createdAt, createdEnd));
 			}
 
 			// Filtros de stage/fecha solo aplican cuando se pasan month/year explícitamente

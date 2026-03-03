@@ -1,10 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ClipboardCopy, FileText, Link2, Loader2 } from "lucide-react";
+import { Check, ClipboardCopy, Download, FileText, Link2, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+	generateCreditApplicationPdf,
+	generateFinancialStatementPdf,
+} from "@/lib/generate-client-form-pdfs";
 import { client } from "@/utils/orpc";
 
 interface ClientFormsSectionProps {
@@ -174,13 +178,23 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 				</div>
 			</div>
 
-			{/* PDF Downloads (Task 9 will wire these) */}
-			{isComplete && (
+			{/* PDF Downloads */}
+			{isComplete && formData && (
 				<div className="flex gap-3">
-					<Button variant="outline" size="sm" id="download-credit-pdf">
+					<Button
+						variant="outline"
+						size="sm"
+						onClick={() => generateCreditApplicationPdf(formData.creditApplication as Record<string, unknown>)}
+					>
+						<Download className="mr-2 h-4 w-4" />
 						Descargar Solicitud PDF
 					</Button>
-					<Button variant="outline" size="sm" id="download-financial-pdf">
+					<Button
+						variant="outline"
+						size="sm"
+						onClick={() => generateFinancialStatementPdf(formData.financialStatement as Record<string, unknown>)}
+					>
+						<Download className="mr-2 h-4 w-4" />
 						Descargar Estado Patrimonial PDF
 					</Button>
 				</div>

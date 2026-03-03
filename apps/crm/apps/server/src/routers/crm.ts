@@ -846,6 +846,46 @@ export const crmRouter = {
 			});
 		}),
 
+	resetCreditAnalysis: crmProcedure
+		.input(
+			z
+				.object({
+					leadId: z.string().uuid().optional(),
+					coDebtorId: z.string().uuid().optional(),
+				})
+				.refine((data) => data.leadId || data.coDebtorId, {
+					message: "Debe proporcionar leadId o coDebtorId",
+				}),
+		)
+		.handler(async ({ input, context }) => {
+			if (
+				context.userRole !== "admin" &&
+				context.userRole !== "sales_supervisor" &&
+				context.userRole !== "analyst"
+			) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para resetear análisis crediticios",
+				});
+			}
+
+			const whereCondition = input.leadId
+				? eq(creditAnalysis.leadId, input.leadId)
+				: eq(creditAnalysis.coDebtorId, input.coDebtorId!);
+
+			const deleted = await db
+				.delete(creditAnalysis)
+				.where(whereCondition)
+				.returning({ id: creditAnalysis.id });
+
+			if (deleted.length === 0) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "No se encontró análisis crediticio para resetear",
+				});
+			}
+
+			return { success: true };
+		}),
+
 	// Opportunities
 	getOpportunities: crmProcedure
 		.input(
@@ -1035,7 +1075,7 @@ export const crmRouter = {
 				const startOfMonth = new Date(filterYear, filterMonth - 1, 1);
 				const endOfMonth = new Date(filterYear, filterMonth, 1);
 
-				// Solo mostrar oportunidades al 100% que llegaron ahí en el mes seleccionado
+				// Solo mostrar oportunidades al 100% que se cerraron en el mes seleccionado
 				const fullStages = await db
 					.select({ id: salesStages.id })
 					.from(salesStages)
@@ -1043,32 +1083,19 @@ export const crmRouter = {
 				const fullStageIds = fullStages.map((s) => s.id);
 
 				if (fullStageIds.length > 0) {
-					const thisMonthFullOpps = await db
-						.select({
-							opportunityId: opportunityStageHistory.opportunityId,
-						})
-						.from(opportunityStageHistory)
-						.where(
-							and(
-								inArray(opportunityStageHistory.toStageId, fullStageIds),
-								gte(opportunityStageHistory.changedAt, startOfMonth),
-								lt(opportunityStageHistory.changedAt, endOfMonth),
-							),
-						);
-
-					const thisMonthOppIds = thisMonthFullOpps.map((o) => o.opportunityId);
-
 					conditions.push(
 						or(
 							not(inArray(opportunities.stageId, fullStageIds)),
-							...(thisMonthOppIds.length > 0
-								? [inArray(opportunities.id, thisMonthOppIds)]
-								: []),
+							and(
+								inArray(opportunities.stageId, fullStageIds),
+								gte(opportunities.actualCloseDate, startOfMonth),
+								lt(opportunities.actualCloseDate, endOfMonth),
+							),
 						),
 					);
 				}
 
-				// Filtrar oportunidades colocadas (>= 90%) que llegaron a ese stage en el mes
+				// Filtrar oportunidades colocadas (>= 90%) que se cerraron en el mes
 				const PLACED_STAGE_THRESHOLD = 90;
 				const placedStages = await db
 					.select({ id: salesStages.id })
@@ -1082,27 +1109,14 @@ export const crmRouter = {
 				const placedStageIds = placedStages.map((s) => s.id);
 
 				if (placedStageIds.length > 0) {
-					const placedThisMonth = await db
-						.select({
-							opportunityId: opportunityStageHistory.opportunityId,
-						})
-						.from(opportunityStageHistory)
-						.where(
-							and(
-								inArray(opportunityStageHistory.toStageId, placedStageIds),
-								gte(opportunityStageHistory.changedAt, startOfMonth),
-								lt(opportunityStageHistory.changedAt, endOfMonth),
-							),
-						);
-
-					const placedOppIds = placedThisMonth.map((o) => o.opportunityId);
-
 					conditions.push(
 						or(
 							not(inArray(opportunities.stageId, placedStageIds)),
-							...(placedOppIds.length > 0
-								? [inArray(opportunities.id, placedOppIds)]
-								: []),
+							and(
+								inArray(opportunities.stageId, placedStageIds),
+								gte(opportunities.actualCloseDate, startOfMonth),
+								lt(opportunities.actualCloseDate, endOfMonth),
+							),
 						),
 					);
 				}

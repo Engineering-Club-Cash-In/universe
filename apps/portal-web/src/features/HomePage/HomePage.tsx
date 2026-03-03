@@ -1,5 +1,5 @@
 import { NavBar } from "@components/ui";
-import { CarrouselStart, HowItWorks, Testimonies, GraphLine } from "./sections";
+import { CarrouselStart, HowItWorks, GraphLine } from "./sections";
 import { WhoWeAre } from "./sections/whoWeAre/WhoWeAre";
 import { HowSellOrBuy } from "./sections/howSellOrBuy/HowSellOrBuy";
 

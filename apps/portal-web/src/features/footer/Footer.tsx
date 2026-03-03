@@ -95,12 +95,7 @@ export const Footer: React.FC<FooterProps> = ({ notShowRedirects = false }) => {
       <div className="flex justify-end flex-col gap-6 h-full p-8 lg:px-40 lg:py-20 z-10 relative">
         {/* Logo section */}
         <div className="flex flex-col lg:flex-row gap-6 lg:gap-10 lg:items-center">
-          <h1 className="text-3xl lg:text-header-3">Cashin</h1>
-          <div className="flex gap-6 lg:gap-10">
-            <Investors />
-            <Tranki />
-            <Listo />
-          </div>
+          <Link href="/"><h1 className="text-3xl lg:text-header-3">Cashin</h1></Link>
         </div>
 
         <div className="border-t border-white border-2"></div>
@@ -129,7 +124,7 @@ export const Footer: React.FC<FooterProps> = ({ notShowRedirects = false }) => {
 
           {/* Social media and contact */}
           <div
-            className={`order-1 lg:order-2 w-full col-span-2 lg:col-span-3 flex  ${notShowRedirects ? "" : "lg:justify-end lg:pr-14"} gap-4 lg:gap-8 `}
+            className={`order-1 lg:order-2 w-full col-span-2 lg:col-span-3 flex ${notShowRedirects ? "" : "lg:justify-end lg:pr-14"} gap-4 lg:gap-8 `}
           >
             {SOCIAL_CONTACTS.filter(contact => notShowRedirects ? contact.lead !== false : true).map((contact) => {
               const IconComponent = contact.icon;
@@ -142,7 +137,7 @@ export const Footer: React.FC<FooterProps> = ({ notShowRedirects = false }) => {
                   className={`flex flex-col items-center gap-1 text-[14px] font-normal transition-all hover:scale-110 hover:text-gray-300 cursor-pointer ${contact.className || ""}`}
                 >
                   <IconComponent />
-                  <div className="hidden lg:block">{contact.label}</div>
+                  <div className={`hidden lg:block text-[14px] ${contact.className ? "" : "whitespace-nowrap"}`}>{contact.label}</div>
                 </a>
               );
             })}

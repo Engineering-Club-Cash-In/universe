@@ -20,6 +20,7 @@ import {
 	Users,
 } from "lucide-react";
 import { useState } from "react";
+import { ClientFormsSection } from "@/components/client-forms/ClientFormsSection";
 import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
 import { OpportunityDocumentUpload } from "@/components/opportunity-document-upload";
@@ -203,12 +204,13 @@ export function OpportunityDetailModal({
 					}}
 				>
 					<TabsList
-						className={`grid w-full ${readOnly ? "grid-cols-4" : "grid-cols-5"}`}
+						className={`grid w-full ${readOnly ? "grid-cols-5" : "grid-cols-6"}`}
 					>
 						<TabsTrigger value="details">Detalles</TabsTrigger>
 						<TabsTrigger value="documents">Documentos</TabsTrigger>
 						<TabsTrigger value="coDebtors">Co-firmantes</TabsTrigger>
 						<TabsTrigger value="credit">Crédito</TabsTrigger>
+						<TabsTrigger value="forms">Formularios</TabsTrigger>
 						{!readOnly && <TabsTrigger value="history">Historial</TabsTrigger>}
 					</TabsList>
 
@@ -722,6 +724,12 @@ export function OpportunityDetailModal({
 								/>
 							);
 						})()}
+					</TabsContent>
+
+					<TabsContent value="forms" className="mt-6 space-y-4">
+						{opportunity && (
+							<ClientFormsSection opportunityId={opportunity.id} />
+						)}
 					</TabsContent>
 
 					{!readOnly && (

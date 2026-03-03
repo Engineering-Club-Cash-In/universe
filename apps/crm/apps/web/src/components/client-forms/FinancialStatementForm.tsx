@@ -1,13 +1,18 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { type SubmitHandler, useFieldArray, useForm, useWatch } from "react-hook-form";
 import { useMemo } from "react";
+import {
+	type SubmitHandler,
+	useFieldArray,
+	useForm,
+	useWatch,
+} from "react-hook-form";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-	financialStatementSchema,
 	type FinancialStatementFormData,
+	financialStatementSchema,
 } from "./form-schemas";
 
 interface FinancialStatementFormProps {
@@ -90,10 +95,16 @@ export function FinancialStatementForm({
 		},
 	});
 
-	const { fields: anexoInmueblesFields, append: appendInmueble, remove: removeInmueble } =
-		useFieldArray({ control, name: "anexoInmuebles" });
-	const { fields: anexoVehiculosFields, append: appendVehiculo, remove: removeVehiculo } =
-		useFieldArray({ control, name: "anexoVehiculos" });
+	const {
+		fields: anexoInmueblesFields,
+		append: appendInmueble,
+		remove: removeInmueble,
+	} = useFieldArray({ control, name: "anexoInmuebles" });
+	const {
+		fields: anexoVehiculosFields,
+		append: appendVehiculo,
+		remove: removeVehiculo,
+	} = useFieldArray({ control, name: "anexoVehiculos" });
 
 	// Watch values for totals calculation
 	const watchedValues = useWatch({ control });
@@ -139,7 +150,14 @@ export function FinancialStatementForm({
 
 		const diferencia = totalIngresos - totalEgresos;
 
-		return { totalActivos, totalPasivos, patrimonio, totalIngresos, totalEgresos, diferencia };
+		return {
+			totalActivos,
+			totalPasivos,
+			patrimonio,
+			totalIngresos,
+			totalEgresos,
+			diferencia,
+		};
 	}, [watchedValues]);
 
 	const submit: SubmitHandler<FinancialStatementFormData> = (data) =>
@@ -202,9 +220,14 @@ export function FinancialStatementForm({
 					</div>
 
 					<div>
-						<Label className="mb-2 block font-medium">Depósitos Bancarios</Label>
+						<Label className="mb-2 block font-medium">
+							Depósitos Bancarios
+						</Label>
 						{[0, 1, 2].map((i) => (
-							<div key={i} className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+							<div
+								key={i}
+								className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2"
+							>
 								<Input
 									placeholder="Descripción"
 									{...register(`depositosBancarios.${i}.descripcion`)}
@@ -222,15 +245,27 @@ export function FinancialStatementForm({
 					<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 						<div className="space-y-2">
 							<Label>Cuentas por Cobrar (Amigos/Parientes) (Q)</Label>
-							<Input type="number" step="0.01" {...register("cuentasCobrarAmigos")} />
+							<Input
+								type="number"
+								step="0.01"
+								{...register("cuentasCobrarAmigos")}
+							/>
 						</div>
 						<div className="space-y-2">
 							<Label>Cuentas por Cobrar (Otros) (Q)</Label>
-							<Input type="number" step="0.01" {...register("cuentasCobrarOtros")} />
+							<Input
+								type="number"
+								step="0.01"
+								{...register("cuentasCobrarOtros")}
+							/>
 						</div>
 						<div className="space-y-2">
 							<Label>Documentos por Cobrar (Q)</Label>
-							<Input type="number" step="0.01" {...register("documentosCobrar")} />
+							<Input
+								type="number"
+								step="0.01"
+								{...register("documentosCobrar")}
+							/>
 						</div>
 					</div>
 
@@ -241,7 +276,11 @@ export function FinancialStatementForm({
 						</div>
 						<div className="space-y-2">
 							<Label>Bienes Inmuebles - Valor (Q)</Label>
-							<Input type="number" step="0.01" {...register("bienesInmueblesValor")} />
+							<Input
+								type="number"
+								step="0.01"
+								{...register("bienesInmueblesValor")}
+							/>
 						</div>
 						<div className="space-y-2">
 							<Label>Vehículos - Cantidad</Label>
@@ -249,7 +288,11 @@ export function FinancialStatementForm({
 						</div>
 						<div className="space-y-2">
 							<Label>Vehículos - Valor (Q)</Label>
-							<Input type="number" step="0.01" {...register("vehiculosValor")} />
+							<Input
+								type="number"
+								step="0.01"
+								{...register("vehiculosValor")}
+							/>
 						</div>
 						<div className="space-y-2">
 							<Label>Maquinaria (Q)</Label>
@@ -268,7 +311,10 @@ export function FinancialStatementForm({
 					<div>
 						<Label className="mb-2 block font-medium">Otros Activos</Label>
 						{[0, 1, 2].map((i) => (
-							<div key={i} className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+							<div
+								key={i}
+								className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2"
+							>
 								<Input
 									placeholder="Descripción"
 									{...register(`otrosActivos.${i}.descripcion`)}
@@ -298,11 +344,19 @@ export function FinancialStatementForm({
 					<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 						<div className="space-y-2">
 							<Label>Cuentas por Pagar (Amigos/Parientes) (Q)</Label>
-							<Input type="number" step="0.01" {...register("cuentasPagarAmigos")} />
+							<Input
+								type="number"
+								step="0.01"
+								{...register("cuentasPagarAmigos")}
+							/>
 						</div>
 						<div className="space-y-2">
 							<Label>Cuentas por Pagar (Otros) (Q)</Label>
-							<Input type="number" step="0.01" {...register("cuentasPagarOtros")} />
+							<Input
+								type="number"
+								step="0.01"
+								{...register("cuentasPagarOtros")}
+							/>
 						</div>
 						<div className="space-y-2">
 							<Label>Letras por Pagar (Q)</Label>
@@ -321,7 +375,10 @@ export function FinancialStatementForm({
 						<div key={fieldName}>
 							<Label className="mb-2 block font-medium">{label}</Label>
 							{[0, 1].map((i) => (
-								<div key={i} className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+								<div
+									key={i}
+									className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2"
+								>
 									<Input
 										placeholder="Descripción"
 										{...register(`${fieldName}.${i}.descripcion`)}
@@ -349,7 +406,7 @@ export function FinancialStatementForm({
 					<CardTitle>Patrimonio</CardTitle>
 				</CardHeader>
 				<CardContent>
-					<div className="rounded-lg border bg-primary/5 p-4 text-center text-lg font-bold">
+					<div className="rounded-lg border bg-primary/5 p-4 text-center font-bold text-lg">
 						Patrimonio (Activos - Pasivos): {formatQ(totals.patrimonio)}
 					</div>
 				</CardContent>
@@ -370,17 +427,28 @@ export function FinancialStatementForm({
 							</div>
 							<div className="space-y-2">
 								<Label>Bonificaciones (Q)</Label>
-								<Input type="number" step="0.01" {...register("bonificaciones")} />
+								<Input
+									type="number"
+									step="0.01"
+									{...register("bonificaciones")}
+								/>
 							</div>
 							<div className="space-y-2">
 								<Label>Arrendamientos (Q)</Label>
-								<Input type="number" step="0.01" {...register("arrendamientos")} />
+								<Input
+									type="number"
+									step="0.01"
+									{...register("arrendamientos")}
+								/>
 							</div>
 						</div>
 						<div className="mt-3">
 							<Label className="mb-2 block font-medium">Otros Ingresos</Label>
 							{[0, 1, 2].map((i) => (
-								<div key={i} className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+								<div
+									key={i}
+									className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2"
+								>
 									<Input
 										placeholder="Descripción"
 										{...register(`otrosIngresos.${i}.descripcion`)}
@@ -404,7 +472,11 @@ export function FinancialStatementForm({
 						<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 							<div className="space-y-2">
 								<Label>Gastos Personales (Q)</Label>
-								<Input type="number" step="0.01" {...register("gastosPersonales")} />
+								<Input
+									type="number"
+									step="0.01"
+									{...register("gastosPersonales")}
+								/>
 							</div>
 							<div className="space-y-2">
 								<Label>Alquileres (Q)</Label>
@@ -412,17 +484,28 @@ export function FinancialStatementForm({
 							</div>
 							<div className="space-y-2">
 								<Label>Amortización Vivienda (Q)</Label>
-								<Input type="number" step="0.01" {...register("amortizacionVivienda")} />
+								<Input
+									type="number"
+									step="0.01"
+									{...register("amortizacionVivienda")}
+								/>
 							</div>
 							<div className="space-y-2">
 								<Label>Deudas Personales (Q)</Label>
-								<Input type="number" step="0.01" {...register("deudasPersonales")} />
+								<Input
+									type="number"
+									step="0.01"
+									{...register("deudasPersonales")}
+								/>
 							</div>
 						</div>
 						<div className="mt-3">
 							<Label className="mb-2 block font-medium">Otros Egresos</Label>
 							{[0, 1, 2].map((i) => (
-								<div key={i} className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+								<div
+									key={i}
+									className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2"
+								>
 									<Input
 										placeholder="Descripción"
 										{...register(`otrosEgresos.${i}.descripcion`)}
@@ -441,7 +524,7 @@ export function FinancialStatementForm({
 						</div>
 					</div>
 
-					<div className="rounded-lg border bg-primary/5 p-4 text-center text-lg font-bold">
+					<div className="rounded-lg border bg-primary/5 p-4 text-center font-bold text-lg">
 						Diferencia (Ingresos - Egresos): {formatQ(totals.diferencia)}
 					</div>
 				</CardContent>
@@ -495,14 +578,14 @@ export function FinancialStatementForm({
 				</CardHeader>
 				<CardContent className="space-y-4">
 					{anexoInmueblesFields.length === 0 && (
-						<p className="text-sm text-muted-foreground">
+						<p className="text-muted-foreground text-sm">
 							No hay inmuebles agregados
 						</p>
 					)}
 					{anexoInmueblesFields.map((field, index) => (
 						<div key={field.id} className="rounded-lg border p-4">
 							<div className="mb-2 flex items-center justify-between">
-								<span className="text-sm font-medium">
+								<span className="font-medium text-sm">
 									Inmueble {index + 1}
 								</span>
 								<Button
@@ -541,7 +624,7 @@ export function FinancialStatementForm({
 										className="h-4 w-4 rounded border-input"
 										{...register(`anexoInmuebles.${index}.hipotecada`)}
 									/>
-									<Label className="text-xs font-normal">Hipotecada</Label>
+									<Label className="font-normal text-xs">Hipotecada</Label>
 								</div>
 								<div className="space-y-1">
 									<Label className="text-xs">A Favor De</Label>
@@ -580,14 +663,14 @@ export function FinancialStatementForm({
 				</CardHeader>
 				<CardContent className="space-y-4">
 					{anexoVehiculosFields.length === 0 && (
-						<p className="text-sm text-muted-foreground">
+						<p className="text-muted-foreground text-sm">
 							No hay vehículos agregados
 						</p>
 					)}
 					{anexoVehiculosFields.map((field, index) => (
 						<div key={field.id} className="rounded-lg border p-4">
 							<div className="mb-2 flex items-center justify-between">
-								<span className="text-sm font-medium">
+								<span className="font-medium text-sm">
 									Vehículo {index + 1}
 								</span>
 								<Button

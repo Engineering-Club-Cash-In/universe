@@ -23,7 +23,7 @@ export const HomePage = () => {
         <HowItWorks />
         <GraphLine />
         <HowSellOrBuy />
-        <Testimonies />
+        {/* <Testimonies /> TODO: Reemplazar con reseñas reales */}
       </div>
     </div>
   );

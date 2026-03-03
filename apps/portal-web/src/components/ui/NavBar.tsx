@@ -198,11 +198,15 @@ export const NavBar = () => {
             `}
           >
             {isInvestorPage ? (
-              <InvestorsLogo />
+              <Link href="/invest">
+                <InvestorsLogo />
+              </Link>
             ) : (
-              <div className="w-full h-full">
-                <IconCCI />
-              </div>
+              <Link href="/">
+                <div className="w-full h-full">
+                  <IconCCI />
+                </div>
+              </Link>
             )}
           </div>
         </div>

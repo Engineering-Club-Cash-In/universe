@@ -358,12 +358,6 @@ function RouteComponent() {
 	const [boardSearch, setBoardSearch] = useState("");
 	const [salespersonFilter, setSalespersonFilter] = useState<string>("all");
 	const [sourceFilter, setSourceFilter] = useState<string>("all");
-	const [createdMonthOverride, setCreatedMonthOverride] = useState<
-		number | null
-	>(null);
-	const [createdYearOverride, setCreatedYearOverride] = useState<
-		number | null
-	>(null);
 	const debouncedBoardSearch = useDeferredValue(boardSearch);
 	// View toggle: "kanban" or "table" - persist in localStorage
 	const [viewMode, setViewMode] = useState<"kanban" | "table">(() => {
@@ -384,13 +378,7 @@ function RouteComponent() {
 	const [month, setMonth] = useState(() => new Date().getMonth() + 1);
 	const [year, setYear] = useState(() => new Date().getFullYear());
 
-	// createdMonth/createdYear follow the main month/year selector unless overridden
-	const createdMonth = createdMonthOverride ?? month;
-	const createdYear = createdYearOverride ?? year;
-
 	const goToPreviousMonth = () => {
-		setCreatedMonthOverride(null);
-		setCreatedYearOverride(null);
 		if (month === 1) {
 			setMonth(12);
 			setYear((y) => y - 1);
@@ -400,8 +388,6 @@ function RouteComponent() {
 	};
 
 	const goToNextMonth = () => {
-		setCreatedMonthOverride(null);
-		setCreatedYearOverride(null);
 		if (month === 12) {
 			setMonth(1);
 			setYear((y) => y + 1);
@@ -696,9 +682,7 @@ function RouteComponent() {
 		...orpc.getOpportunities.queryOptions({
 			input: {
 				excludeStatuses: ["migrate"],
-				...(!isSales
-					? { month, year, createdMonth, createdYear }
-					: {}),
+				...(!isSales ? { createdMonth: month, createdYear: year } : {}),
 				...(sourceFilter !== "all" ? { source: sourceFilter as any } : {}),
 			},
 		}),
@@ -710,7 +694,7 @@ function RouteComponent() {
 			"getOpportunities",
 			session?.user?.id,
 			userProfile.data?.role,
-			...(isSales ? [] : [month, year, createdMonth, createdYear]),
+			...(isSales ? [] : [month, year]),
 			sourceFilter,
 		],
 	});
@@ -1596,47 +1580,7 @@ function RouteComponent() {
 							<SelectItem value="other">Otro</SelectItem>
 						</SelectContent>
 					</Select>
-					{!isSales && (
-						<div className="flex items-center gap-1">
-							<Select
-								value={String(createdMonth)}
-								onValueChange={(v) => setCreatedMonthOverride(Number(v))}
-							>
-								<SelectTrigger className="w-36">
-									<Calendar className="mr-2 h-4 w-4" />
-									<SelectValue placeholder="Mes" />
-								</SelectTrigger>
-								<SelectContent>
-									<SelectItem value="1">Enero</SelectItem>
-									<SelectItem value="2">Febrero</SelectItem>
-									<SelectItem value="3">Marzo</SelectItem>
-									<SelectItem value="4">Abril</SelectItem>
-									<SelectItem value="5">Mayo</SelectItem>
-									<SelectItem value="6">Junio</SelectItem>
-									<SelectItem value="7">Julio</SelectItem>
-									<SelectItem value="8">Agosto</SelectItem>
-									<SelectItem value="9">Septiembre</SelectItem>
-									<SelectItem value="10">Octubre</SelectItem>
-									<SelectItem value="11">Noviembre</SelectItem>
-									<SelectItem value="12">Diciembre</SelectItem>
-								</SelectContent>
-							</Select>
-							<Select
-								value={String(createdYear)}
-								onValueChange={(v) => setCreatedYearOverride(Number(v))}
-							>
-								<SelectTrigger className="w-24">
-									<SelectValue placeholder="Año" />
-								</SelectTrigger>
-								<SelectContent>
-									<SelectItem value="2025">2025</SelectItem>
-									<SelectItem value="2026">2026</SelectItem>
-									<SelectItem value="2027">2027</SelectItem>
-								</SelectContent>
-							</Select>
-						</div>
-					)}
-					<Button
+						<Button
 						variant={showLostOpportunities ? "default" : "outline"}
 						size="sm"
 						onClick={() => setShowLostOpportunities(!showLostOpportunities)}

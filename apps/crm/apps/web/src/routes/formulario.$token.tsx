@@ -1,9 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { CreditApplicationForm } from "@/components/client-forms/CreditApplicationForm";
+import { FinancialStatementForm } from "@/components/client-forms/FinancialStatementForm";
+import { SignatureConsent } from "@/components/client-forms/SignatureConsent";
+import type { CreditApplicationFormData } from "@/components/client-forms/form-schemas";
+import type { FinancialStatementFormData } from "@/components/client-forms/form-schemas";
 import { client } from "@/utils/orpc";
 
-type FormStep = "loading" | "credit" | "financial" | "success" | "error";
+type FormStep =
+	| "loading"
+	| "credit"
+	| "financial"
+	| "signature"
+	| "success"
+	| "error";
 
 interface ValidatedData {
 	opportunityId: string;
@@ -21,27 +32,28 @@ function FormularioPage() {
 	const { token } = Route.useParams();
 	const [step, setStep] = useState<FormStep>("loading");
 	const [errorMessage, setErrorMessage] = useState("");
+	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [validatedData, setValidatedData] = useState<ValidatedData | null>(
 		null,
 	);
+	// Store credit data to pre-fill financial statement personal fields
+	const creditDataRef = useRef<CreditApplicationFormData | null>(null);
+	const financialDataRef = useRef<FinancialStatementFormData | null>(null);
 
 	useEffect(() => {
 		const validate = async () => {
 			try {
 				const result = await client.validateFormToken({ token });
 				setValidatedData(result);
-				// If credit app already exists, go to financial
-				if (result.creditApplicationExists) {
-					setStep("financial");
-				} else {
-					setStep("credit");
-				}
-				// If both exist, show success
 				if (
 					result.creditApplicationExists &&
 					result.financialStatementExists
 				) {
 					setStep("success");
+				} else if (result.creditApplicationExists) {
+					setStep("financial");
+				} else {
+					setStep("credit");
 				}
 			} catch (error) {
 				const msg =
@@ -55,25 +67,81 @@ function FormularioPage() {
 		validate();
 	}, [token]);
 
-	const handleCreditSubmit = async (data: Record<string, unknown>) => {
+	const handleCreditSubmit = async (data: CreditApplicationFormData) => {
+		setIsSubmitting(true);
 		try {
-			await client.submitCreditApplication({ token, data });
+			await client.submitCreditApplication({ token, data: data as Record<string, unknown> });
+			creditDataRef.current = data;
 			toast.success("Solicitud de crédito guardada");
 			setStep("financial");
-		} catch (error) {
+		} catch {
 			toast.error("Error al guardar la solicitud");
+		} finally {
+			setIsSubmitting(false);
 		}
 	};
 
-	const handleFinancialSubmit = async (data: Record<string, unknown>) => {
+	const handleFinancialSubmit = async (data: FinancialStatementFormData) => {
+		financialDataRef.current = data;
+		setStep("signature");
+	};
+
+	const handleSignatureComplete = async (signatureDataUrl: string) => {
+		if (!financialDataRef.current) return;
+		setIsSubmitting(true);
 		try {
-			await client.submitFinancialStatement({ token, data });
-			toast.success("Estado patrimonial guardado");
+			const now = new Date();
+			const dataWithSignature = {
+				...financialDataRef.current,
+				firmaImagen: signatureDataUrl,
+				fechaFirma: now.toISOString().split("T")[0],
+			};
+			await client.submitFinancialStatement({
+				token,
+				data: dataWithSignature as Record<string, unknown>,
+			});
+			toast.success("Formularios completados exitosamente");
 			setStep("success");
-		} catch (error) {
-			toast.error("Error al guardar el estado patrimonial");
+		} catch {
+			toast.error("Error al enviar el formulario");
+		} finally {
+			setIsSubmitting(false);
 		}
 	};
+
+	// Build pre-fill defaults from lead data
+	const creditDefaults = validatedData?.lead
+		? {
+				primerNombre: (validatedData.lead.firstName as string) || "",
+				segundoNombre: (validatedData.lead.middleName as string) || "",
+				primerApellido: (validatedData.lead.lastName as string) || "",
+				segundoApellido: (validatedData.lead.secondLastName as string) || "",
+				dpi: (validatedData.lead.dpi as string) || "",
+				nit: (validatedData.lead.nit as string) || "",
+				email: (validatedData.lead.email as string) || "",
+				telMovil: (validatedData.lead.phone as string) || "",
+				direccionResidencia: (validatedData.lead.direccion as string) || "",
+				vehiculoMarca: (validatedData.vehicle?.make as string) || "",
+				vehiculoLinea: (validatedData.vehicle?.model as string) || "",
+				vehiculoModelo: (validatedData.vehicle?.year as string) || "",
+			}
+		: undefined;
+
+	const financialDefaults = creditDataRef.current
+		? {
+				primerNombre: creditDataRef.current.primerNombre,
+				segundoNombre: creditDataRef.current.segundoNombre,
+				primerApellido: creditDataRef.current.primerApellido,
+				segundoApellido: creditDataRef.current.segundoApellido,
+				apellidoCasada: creditDataRef.current.apellidoCasada,
+				dpi: creditDataRef.current.dpi,
+				nit: creditDataRef.current.nit,
+			}
+		: undefined;
+
+	const signatureFullName = creditDataRef.current
+		? `${creditDataRef.current.primerNombre} ${creditDataRef.current.segundoNombre || ""} ${creditDataRef.current.primerApellido} ${creditDataRef.current.segundoApellido || ""}`.trim()
+		: "";
 
 	if (step === "loading") {
 		return (
@@ -141,6 +209,17 @@ function FormularioPage() {
 		);
 	}
 
+	const stepNumber =
+		step === "credit" ? 1 : step === "financial" ? 2 : 3;
+	const stepLabel =
+		step === "credit"
+			? "Paso 1: Solicitud de Crédito"
+			: step === "financial"
+				? "Paso 2: Estado Patrimonial"
+				: "Paso 3: Firma y Consentimiento";
+	const progressWidth =
+		step === "credit" ? "33%" : step === "financial" ? "66%" : "100%";
+
 	return (
 		<div className="min-h-screen bg-background">
 			{/* Progress bar */}
@@ -149,21 +228,13 @@ function FormularioPage() {
 					<div className="flex items-center gap-3">
 						<div className="flex-1">
 							<div className="flex items-center justify-between text-sm">
-								<span className="font-medium">
-									{step === "credit"
-										? "Paso 1: Solicitud de Crédito"
-										: "Paso 2: Estado Patrimonial"}
-								</span>
-								<span className="text-muted-foreground">
-									{step === "credit" ? "1/2" : "2/2"}
-								</span>
+								<span className="font-medium">{stepLabel}</span>
+								<span className="text-muted-foreground">{stepNumber}/3</span>
 							</div>
 							<div className="mt-1 h-2 w-full rounded-full bg-muted">
 								<div
 									className="h-full rounded-full bg-primary transition-all"
-									style={{
-										width: step === "credit" ? "50%" : "100%",
-									}}
+									style={{ width: progressWidth }}
 								/>
 							</div>
 						</div>
@@ -171,23 +242,30 @@ function FormularioPage() {
 				</div>
 			</div>
 
-			{/* Form content - placeholder, will be wired in Task 7 */}
+			{/* Form content */}
 			<div className="mx-auto max-w-3xl px-4 py-6">
 				{step === "credit" && (
-					<div>
-						<h1 className="text-2xl font-bold">Solicitud de Crédito</h1>
-						<p className="text-muted-foreground">
-							Formulario de solicitud de crédito - componente pendiente
-						</p>
-					</div>
+					<CreditApplicationForm
+						defaultValues={creditDefaults}
+						onSubmit={handleCreditSubmit}
+						isSubmitting={isSubmitting}
+					/>
 				)}
 				{step === "financial" && (
-					<div>
-						<h1 className="text-2xl font-bold">Estado Patrimonial</h1>
-						<p className="text-muted-foreground">
-							Estado patrimonial - componente pendiente
-						</p>
-					</div>
+					<FinancialStatementForm
+						defaultValues={financialDefaults}
+						onSubmit={handleFinancialSubmit}
+						isSubmitting={isSubmitting}
+					/>
+				)}
+				{step === "signature" && (
+					<SignatureConsent
+						onComplete={handleSignatureComplete}
+						fullName={signatureFullName}
+						dpi={creditDataRef.current?.dpi || ""}
+						nit={creditDataRef.current?.nit}
+						isSubmitting={isSubmitting}
+					/>
 				)}
 			</div>
 		</div>

@@ -247,14 +247,19 @@ export function prepareValuationContext(
 		tireConditionRearRight: vehicleData.tireConditionRearRight
 			? `${vehicleData.tireConditionRearRight}%`
 			: "No especificado",
-		hasSpareTire: vehicleData.hasSpareTire === "Sí" || vehicleData.hasSpareTire === true,
+		hasSpareTire:
+			vehicleData.hasSpareTire === "Sí" || vehicleData.hasSpareTire === true,
 		tireConditionSpare: vehicleData.tireConditionSpare
 			? `${vehicleData.tireConditionSpare}%`
 			: "No especificado",
 		paintCondition: vehicleData.paintCondition
 			? `${vehicleData.paintCondition}%`
 			: "No especificado",
-		hasAgencyHistory: vehicleData.hasAgencyHistory === "Sí" || vehicleData.hasAgencyHistory === true ? "Sí" : "No",
+		hasAgencyHistory:
+			vehicleData.hasAgencyHistory === "Sí" ||
+			vehicleData.hasAgencyHistory === true
+				? "Sí"
+				: "No",
 
 		// Issues and condition
 		criticalIssues: criticalIssues.map((item) => item.item),

@@ -4,6 +4,7 @@ import {
 	ChevronUp,
 	FileText,
 	Loader2,
+	RotateCcw,
 	Trash2,
 	Upload,
 } from "lucide-react";
@@ -19,7 +20,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { client } from "@/utils/orpc";
+import { client, orpc } from "@/utils/orpc";
 
 const MAX_AI_ATTEMPTS = 2;
 
@@ -62,6 +63,27 @@ export function BankStatementAnalysis({
 		existingAnalysis != null && existingAnalysis.analyzedAt != null;
 	const attemptCount = existingAnalysis?.attemptCount ?? 0;
 	const canAnalyze = !hasSuccessfulAnalysis && attemptCount < MAX_AI_ATTEMPTS;
+
+	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
+	const canReset =
+		userProfile.data?.role === "admin" ||
+		userProfile.data?.role === "sales_supervisor" ||
+		userProfile.data?.role === "analyst";
+
+	const resetMutation = useMutation({
+		mutationFn: () =>
+			client.resetCreditAnalysis(
+				leadId ? { leadId } : { coDebtorId: coDebtorId! },
+			),
+		onSuccess: () => {
+			toast.success("Análisis reseteado. Puede volver a subir estados de cuenta.");
+			queryClient.invalidateQueries({ queryKey });
+			onAnalysisComplete?.();
+		},
+		onError: (error) => {
+			toast.error(`Error al resetear: ${error.message}`);
+		},
+	});
 
 	const analyzeMutation = useMutation({
 		mutationFn: async () => {
@@ -297,15 +319,71 @@ export function BankStatementAnalysis({
 					)}
 				</Button>
 				{hasSuccessfulAnalysis && (
-					<p className="text-center text-green-600 text-xs">
-						Análisis completado exitosamente.
-					</p>
+					<div className="space-y-2">
+						<p className="text-center text-green-600 text-xs">
+							Análisis completado exitosamente.
+						</p>
+						{canReset && (
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								className="w-full text-destructive hover:text-destructive"
+								onClick={() => {
+									if (
+										window.confirm(
+											"¿Está seguro? Esto eliminará el análisis actual y permitirá volver a subir estados de cuenta.",
+										)
+									) {
+										resetMutation.mutate();
+									}
+								}}
+								disabled={resetMutation.isPending}
+							>
+								{resetMutation.isPending ? (
+									<>
+										<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+										Reseteando...
+									</>
+								) : (
+									<>
+										<RotateCcw className="mr-2 h-4 w-4" />
+										Resetear Análisis
+									</>
+								)}
+							</Button>
+						)}
+					</div>
 				)}
 				{!hasSuccessfulAnalysis && attemptCount >= MAX_AI_ATTEMPTS && (
-					<p className="text-center text-muted-foreground text-xs">
-						Se alcanzó el límite de {MAX_AI_ATTEMPTS} intentos. Contacte al
-						administrador.
-					</p>
+					<div className="space-y-2">
+						<p className="text-center text-muted-foreground text-xs">
+							Se alcanzó el límite de {MAX_AI_ATTEMPTS} intentos. Contacte al
+							administrador.
+						</p>
+						{canReset && (
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								className="w-full text-destructive hover:text-destructive"
+								onClick={() => resetMutation.mutate()}
+								disabled={resetMutation.isPending}
+							>
+								{resetMutation.isPending ? (
+									<>
+										<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+										Reseteando...
+									</>
+								) : (
+									<>
+										<RotateCcw className="mr-2 h-4 w-4" />
+										Resetear Intentos
+									</>
+								)}
+							</Button>
+						)}
+					</div>
 				)}
 			</CardContent>
 		</Card>

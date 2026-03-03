@@ -39,6 +39,7 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import invariant from "tiny-invariant";
 import { z } from "zod";
+import { ClientFormsSection } from "@/components/client-forms/ClientFormsSection";
 import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
 import { ConsolidatedCreditSummary } from "@/components/credit/ConsolidatedCreditSummary";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
@@ -1975,11 +1976,12 @@ function RouteComponent() {
 									}
 								}}
 							>
-								<TabsList className="grid w-full grid-cols-5">
+								<TabsList className="grid w-full grid-cols-6">
 									<TabsTrigger value="details">Detalles</TabsTrigger>
 									<TabsTrigger value="documents">Documentos</TabsTrigger>
 									<TabsTrigger value="coDebtors">Co-firmantes</TabsTrigger>
 									<TabsTrigger value="credit">Credito</TabsTrigger>
+									<TabsTrigger value="forms">Formularios</TabsTrigger>
 									<TabsTrigger value="history">Historial</TabsTrigger>
 								</TabsList>
 								<TabsContent value="details" className="mt-6 space-y-6">
@@ -2469,6 +2471,12 @@ function RouteComponent() {
 											Cambiar Etapa
 										</Button>
 									</div>
+								</TabsContent>
+
+								<TabsContent value="forms" className="mt-6 space-y-4">
+									{selectedOpportunity && (
+										<ClientFormsSection opportunityId={selectedOpportunity.id} />
+									)}
 								</TabsContent>
 
 								<TabsContent value="history" className="mt-6 space-y-4">

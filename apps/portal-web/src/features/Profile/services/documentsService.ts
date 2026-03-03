@@ -131,7 +131,7 @@ export interface ContractsResponse {
  */
 export const getPersonalDocuments = async (
   email: string,
-  dpi: string
+  dpi: string = ""
 ): Promise<Document[]> => {
   try {
     const response = await apiAuth.get<DocumentsResponse>(
@@ -151,7 +151,7 @@ export const getPersonalDocuments = async (
  */
 export const getContracts = async (
   email: string,
-  dpi: string
+  dpi: string = ""
 ): Promise<Contract[]> => {
   try {
     const response = await apiAuth.get<ContractsResponse>(

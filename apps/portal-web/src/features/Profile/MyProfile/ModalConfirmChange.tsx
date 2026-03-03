@@ -51,11 +51,12 @@ export const ModalConfirmChange = ({
       const dpi = user?.dpi;
 
       // Si es campo de inversionista, actualizar en Cartera
-      if (isInvestorField) {
-        if (!dpi) throw new Error("DPI no disponible");
+      if (isInvestorField || user?.role === "INVESTOR") {
+       // if (!dpi) throw new Error("DPI no disponible");
 
         const payload: any = {
-          dpi: parseInt(dpi),
+          dpi: dpi ? parseInt(dpi) : undefined,
+          email,
         };
 
         // Solo enviar el campo que se está actualizando

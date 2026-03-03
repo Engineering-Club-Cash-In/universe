@@ -97,12 +97,13 @@ carteraRoutes.post("/investor", async (c) => {
 carteraRoutes.get("/investor", async (c) => {
   try {
     const dpi = c.req.query("dpi");
+    const email = c.req.query("email");
 
-    if (!dpi) {
-      throw new HTTPException(400, { message: "El parámetro dpi es requerido" });
+    if (!dpi && !email) {
+      throw new HTTPException(400, { message: "Se requiere dpi o email" });
     }
 
-    const profile = await getInvestorProfile(dpi);
+    const profile = await getInvestorProfile(dpi || "", email || "");
 
     return c.json({
       success: true,
@@ -151,14 +152,15 @@ carteraRoutes.get("/bancos", async (c) => {
 carteraRoutes.get("/liquidaciones", async (c) => {
   try {
     const dpi = c.req.query("dpi");
+    const email = c.req.query("email");
     const page = parseInt(c.req.query("page") || "1", 10);
     const perPage = parseInt(c.req.query("perPage") || "10", 10);
 
-    if (!dpi) {
-      throw new HTTPException(400, { message: "El parámetro dpi es requerido" });
+    if (!dpi && !email) {
+      throw new HTTPException(400, { message: "Se requiere dpi o email" });
     }
 
-    const liquidaciones = await getLiquidaciones(dpi, page, perPage);
+    const liquidaciones = await getLiquidaciones(dpi || "", email || "", page, perPage);
 
     return c.json({
       success: true,
@@ -181,12 +183,13 @@ carteraRoutes.get("/liquidaciones", async (c) => {
 carteraRoutes.get("/investments/stats", async (c) => {
   try {
     const dpi = c.req.query("dpi");
+    const email = c.req.query("email");
 
-    if (!dpi) {
-      throw new HTTPException(400, { message: "El parámetro dpi es requerido" });
+    if (!dpi && !email) {
+      throw new HTTPException(400, { message: "Se requiere dpi o email" });
     }
 
-    const stats = await getInvestmentsStats(dpi);
+    const stats = await getInvestmentsStats(dpi || "", email || "");
 
     return c.json({
       success: true,

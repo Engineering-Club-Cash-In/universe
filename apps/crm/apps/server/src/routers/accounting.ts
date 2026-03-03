@@ -37,4 +37,17 @@ export const accountingRouter = {
 			});
 			return boleta;
 		}),
+
+	liquidateInversionista: crmProcedure
+		.input(
+			z.object({
+				inversionista_id: z.number().int().positive(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const result = await carteraBackClient.liquidateInversionista(
+				input.inversionista_id,
+			);
+			return result;
+		}),
 };

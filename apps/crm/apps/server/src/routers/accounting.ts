@@ -3,9 +3,20 @@ import { crmProcedure } from "../lib/orpc";
 import { carteraBackClient } from "../services/cartera-back-client";
 
 export const accountingRouter = {
-	getResumenGlobalInversionistas: crmProcedure.handler(async () => {
-		return await carteraBackClient.getResumenGlobalInversionistas()
-	}),
+	getResumenGlobalInversionistas: crmProcedure
+		.output(z.array(z.any()))
+		.handler(async () => {
+			try {
+				const data = await carteraBackClient.getResumenGlobalInversionistas();
+				const filtered = data.filter(
+					(item) => Number(item.total_a_recibir_con_reinversion) >= 0,
+				);
+				return filtered;
+			} catch (error) {
+				console.error("[ORPC] getResumenGlobalInversionistas error:", error);
+				throw error;
+			}
+		}),
 
 	createBoleta: crmProcedure
 		.input(

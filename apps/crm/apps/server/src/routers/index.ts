@@ -279,6 +279,7 @@ export const appRouter = {
 	getResumenGlobalInversionistas:
 		accountingRouter.getResumenGlobalInversionistas,
 	createBoleta: accountingRouter.createBoleta,
+	liquidateInversionista: accountingRouter.liquidateInversionista,
 };
 
 // Investment routes exported separately to avoid TS7056 with declaration emit.

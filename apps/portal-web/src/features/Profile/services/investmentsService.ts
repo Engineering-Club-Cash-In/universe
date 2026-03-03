@@ -77,8 +77,8 @@ export interface LiquidacionesResponse {
  * Obtener liquidaciones del inversionista por DPI con paginación
  */
 export const getLiquidaciones = async (
-  dpi: string,
-  email: string,
+  dpi: string = "",
+  email: string = "",
   page: number = 1,
   perPage: number = 10
 ): Promise<LiquidacionesResponse> => {
@@ -156,7 +156,7 @@ export interface InvestmentsStatsResponse {
 /**
  * Obtener estadísticas de inversiones desde la API de Cartera
  */
-export const getInvestmentsStats = async (dpi: string, email: string): Promise<InvestmentsStats> => {
+export const getInvestmentsStats = async (dpi: string = "", email: string = ""): Promise<InvestmentsStats> => {
   try {
     const response = await apiAuth.get<InvestmentsStatsResponse>(
       `/api/cartera/investments/stats?dpi=${encodeURIComponent(dpi)}&email=${encodeURIComponent(email)}`

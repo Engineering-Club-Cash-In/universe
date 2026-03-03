@@ -271,6 +271,23 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 	const [dialogOpen, setDialogOpen] = useState(false);
 	const tieneBoleta = inv.boleta_pendiente != null;
 
+	const liquidateMutation = useMutation({
+		...orpc.liquidateInversionista.mutationOptions(),
+		onSuccess: (res) => {
+			if (res.success) {
+				toast.success("Liquidación completada correctamente");
+				queryClient.invalidateQueries({
+					queryKey: orpc.getResumenGlobalInversionistas.queryOptions().queryKey,
+				});
+			} else {
+				toast.error(res.message || "Error al liquidar");
+			}
+		},
+		onError: (err) => {
+			toast.error(err instanceof Error ? err.message : "Error al liquidar");
+		},
+	});
+
 	return (
 		<>
 			<Card className="group gap-0 overflow-hidden py-0 transition-all hover:shadow-md">
@@ -344,30 +361,49 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 				</div>
 
 				{/* Acción */}
-				<div className="px-4 pt-1 pb-4">
+				<div className="flex gap-2 px-4 pt-1 pb-4">
 					{tieneBoleta ? (
 						<Button
 							variant="ghost"
 							size="sm"
-							className="h-8 w-full gap-1.5 text-xs"
+							className="h-8 flex-1 gap-1.5 text-xs"
 							onClick={() =>
 								window.open(inv.boleta_pendiente!.boleta_url, "_blank")
 							}
 						>
 							<Eye className="h-3.5 w-3.5" />
-							Ver boleta
+							Ver
 						</Button>
 					) : (
 						<Button
 							variant="outline"
 							size="sm"
-							className="h-8 w-full gap-1.5 text-xs"
+							className="h-8 flex-1 gap-1.5 text-xs"
 							onClick={() => setDialogOpen(true)}
 						>
 							<Upload className="h-3.5 w-3.5" />
-							Subir boleta
+							Subir
 						</Button>
 					)}
+
+					<Button
+						variant="default"
+						size="sm"
+						className="h-8 flex-1 gap-1.5 bg-emerald-600 text-xs hover:bg-emerald-700"
+						disabled={liquidateMutation.isPending}
+						onClick={() =>
+							liquidateMutation.mutate({
+								inversionista_id: inv.inversionista_id,
+							})
+						}
+					>
+						{liquidateMutation.isPending ? (
+							<Loader2 className="h-3.5 w-3.5 animate-spin" />
+						) : (
+							<Banknote className="h-3.5 w-3.5" />
+						)}
+						Liquidar
+					</Button>
 				</div>
 			</Card>
 

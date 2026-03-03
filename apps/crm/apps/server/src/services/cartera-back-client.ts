@@ -742,6 +742,20 @@ export class CarteraBackClient {
 		return response;
 	}
 
+	async liquidateInversionista(
+		inversionista_id: number,
+	): Promise<Record<string, any>> {
+		const response = await this.request<Record<string, any>>(
+			"/liquidate-inversionista-pagos",
+			{
+				method: "POST",
+				body: JSON.stringify({ inversionista_id }),
+			},
+		);
+		this.cache.invalidate("resumen-global");
+		return response;
+	}
+
 	// ========================================================================
 	// CACHE MANAGEMENT
 	// ========================================================================

@@ -23,6 +23,7 @@ import {
 	Kanban,
 	List,
 	Mail,
+	Phone,
 	Plus,
 	RefreshCw,
 	Search,
@@ -690,15 +691,15 @@ function RouteComponent() {
 	};
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
+	const isSales = userProfile.data?.role === "sales";
 	const opportunitiesQuery = useQuery({
 		...orpc.getOpportunities.queryOptions({
 			input: {
 				excludeStatuses: ["migrate"],
-				month,
-				year,
+				...(!isSales
+					? { month, year, createdMonth, createdYear }
+					: {}),
 				...(sourceFilter !== "all" ? { source: sourceFilter as any } : {}),
-				createdMonth,
-				createdYear,
 			},
 		}),
 		enabled:
@@ -709,11 +710,8 @@ function RouteComponent() {
 			"getOpportunities",
 			session?.user?.id,
 			userProfile.data?.role,
-			month,
-			year,
+			...(isSales ? [] : [month, year, createdMonth, createdYear]),
 			sourceFilter,
-			createdMonth,
-			createdYear,
 		],
 	});
 	const salesStagesQuery = useQuery({
@@ -2158,6 +2156,12 @@ function RouteComponent() {
 													<div className="flex items-center gap-3 text-muted-foreground text-sm">
 														<Mail className="h-5 w-5" />
 														<span>{selectedOpportunity.lead.email}</span>
+													</div>
+												)}
+												{selectedOpportunity.lead.phone && (
+													<div className="flex items-center gap-3 text-muted-foreground text-sm">
+														<Phone className="h-5 w-5" />
+														<span>{selectedOpportunity.lead.phone}</span>
 													</div>
 												)}
 											</div>

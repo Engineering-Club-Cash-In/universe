@@ -20,42 +20,52 @@ stage_ganada AS (
     GROUP BY osh.opportunity_id
 )
 SELECT
+    -- 1-4: Identificación
     EXTRACT(YEAR FROM o.created_at)::integer AS anio,
     EXTRACT(MONTH FROM o.created_at)::integer AS mes,
     o.created_at AS fecha,
     o.id AS codigo_oportunidad,
+    -- 5-6: Personas
     CONCAT(l.first_name, ' ', l.last_name) AS nombre_cliente,
     u.name AS asesor,
+    -- 7-10: Clasificación
     o.credit_type AS descripcion_tipo_prestamo,
     ss.closure_percentage AS porcentaje_etapa,
     COALESCE(o.source::text, l.source::text) AS descripcion_medio,
-    ss.name AS descripcion_etapa,
     o.status AS estado,
+    -- 11: Monto
     o.value AS monto_colocado,
-    -- Vehículo
+    -- 12-14: Vehículo
     v.make AS marca,
     v.model AS linea,
     v.year AS modelo,
-    v.license_plate AS placa,
-    -- Extras
+    -- 15: Comisionista (pendiente)
+    NULL::text AS comisionista,
+    -- 16-18: Extras
     o.notes AS razon,
+    v.license_plate AS placa,
     o.royalti AS royalti,
-    -- Inicio (primera vez en etapa order=2)
+    -- 19-20: Período
+    EXTRACT(QUARTER FROM o.created_at)::integer AS semestre,
+    EXTRACT(QUARTER FROM o.created_at)::integer AS trimestre,
+    -- 21-22: Inicio
     EXTRACT(MONTH FROM si.dia_inicio)::integer AS mes_inicio,
     si.dia_inicio AS dia_inicio,
-    -- Ganada (penúltima etapa, solo si won)
+    -- 23-24: Ganada
     CASE WHEN o.status = 'won' THEN EXTRACT(MONTH FROM sg.dia_ganada)::integer END AS mes_ganada,
     CASE WHEN o.status = 'won' THEN sg.dia_ganada END AS dia_ganada,
-    -- Días hasta el cierre
+    -- 25-26: Cierre
     CASE
         WHEN o.status = 'won' AND si.dia_inicio IS NOT NULL AND sg.dia_ganada IS NOT NULL
         THEN (sg.dia_ganada::date - si.dia_inicio::date)
     END AS dias_hasta_el_cierre,
-    -- Semana del inicio
     EXTRACT(WEEK FROM si.dia_inicio)::integer AS semana,
-    -- Stage actual
+    -- 27-28: Stage actual
     ss."order" AS orden_etapa,
-    ss.name AS etapa
+    ss.name AS etapa,
+    -- 29-30: Pendientes
+    NULL::decimal AS meta,
+    NULL::decimal AS royalti_f
 FROM opportunities o
 LEFT JOIN leads l ON o.lead_id = l.id
 LEFT JOIN "user" u ON o.assigned_to = u.id

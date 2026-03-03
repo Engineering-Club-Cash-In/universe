@@ -16,7 +16,7 @@ import {
 	User,
 	X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import type { vehicleTypeEnum } from "server/src/db/schema/quotations";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -2531,68 +2531,78 @@ export function CreditDetailView({
 								</div>
 							) : (
 								<div className="space-y-4">
-									<div className="overflow-x-auto">
-										<Table>
-											<TableHeader>
-												<TableRow>
-													<TableHead>Fecha</TableHead>
-													<TableHead>Emisor</TableHead>
-													<TableHead>Banco</TableHead>
-													<TableHead>Beneficiario</TableHead>
-													<TableHead>No. Cuenta</TableHead>
-													<TableHead>Tipo</TableHead>
-													<TableHead>Tipo Cuenta</TableHead>
-													<TableHead>Banco Benef.</TableHead>
-													<TableHead>Concepto</TableHead>
-													<TableHead className="text-right">Monto</TableHead>
-													<TableHead className="w-10" />
-												</TableRow>
-											</TableHeader>
-											<TableBody>
-												{checks.map((check) => (
-													<TableRow key={check.id}>
-														<TableCell className="whitespace-nowrap">
-															{formatDate(check.checkDate)}
-														</TableCell>
-														<TableCell>{check.issuer}</TableCell>
-														<TableCell>{check.issuerBank || "-"}</TableCell>
-														<TableCell>{check.beneficiary}</TableCell>
-														<TableCell>{check.accountNumber || "-"}</TableCell>
-														<TableCell>{check.transferType}</TableCell>
-														<TableCell>{check.accountType || "-"}</TableCell>
-														<TableCell>
-															{check.beneficiaryBank || "-"}
-														</TableCell>
-														<TableCell>{check.concept}</TableCell>
-														<TableCell className="whitespace-nowrap text-right font-medium">
+									<div className="grid gap-3 sm:grid-cols-2">
+										{checks.map((check) => (
+											<div
+												key={check.id}
+												className="rounded-lg border bg-card p-4 space-y-3"
+											>
+												<div className="flex items-start justify-between">
+													<div>
+														<p className="font-semibold text-lg">
 															{check.currency}{" "}
 															{Number.parseFloat(check.amount).toLocaleString(
 																"es-GT",
 																{ minimumFractionDigits: 2 },
 															)}
-														</TableCell>
-														<TableCell>
-															<Button
-																variant="ghost"
-																size="icon"
-																className="h-8 w-8 text-destructive"
-																onClick={() => {
-																	if (
-																		confirm(
-																			"¿Estás seguro de eliminar este cheque?",
-																		)
-																	) {
-																		deleteCheckMutation.mutate(check.id);
-																	}
-																}}
-															>
-																<Trash2 className="h-4 w-4" />
-															</Button>
-														</TableCell>
-													</TableRow>
-												))}
-											</TableBody>
-										</Table>
+														</p>
+														<p className="text-sm text-muted-foreground">
+															{formatDate(check.checkDate)}
+														</p>
+													</div>
+													<Button
+														variant="ghost"
+														size="icon"
+														className="h-8 w-8 text-destructive"
+														onClick={() => {
+															if (
+																confirm(
+																	"¿Estás seguro de eliminar este cheque?",
+																)
+															) {
+																deleteCheckMutation.mutate(check.id);
+															}
+														}}
+													>
+														<Trash2 className="h-4 w-4" />
+													</Button>
+												</div>
+												<div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+													<div>
+														<span className="text-muted-foreground">Emisor: </span>
+														<span>{check.issuer}</span>
+													</div>
+													<div>
+														<span className="text-muted-foreground">Banco: </span>
+														<span>{check.issuerBank || "-"}</span>
+													</div>
+													<div>
+														<span className="text-muted-foreground">Beneficiario: </span>
+														<span>{check.beneficiary}</span>
+													</div>
+													<div>
+														<span className="text-muted-foreground">Banco Benef.: </span>
+														<span>{check.beneficiaryBank || "-"}</span>
+													</div>
+													<div>
+														<span className="text-muted-foreground">No. Cuenta: </span>
+														<span>{check.accountNumber || "-"}</span>
+													</div>
+													<div>
+														<span className="text-muted-foreground">Tipo: </span>
+														<span>{check.transferType}</span>
+													</div>
+													<div>
+														<span className="text-muted-foreground">Tipo Cuenta: </span>
+														<span>{check.accountType || "-"}</span>
+													</div>
+													<div>
+														<span className="text-muted-foreground">Concepto: </span>
+														<span>{check.concept}</span>
+													</div>
+												</div>
+											</div>
+										))}
 									</div>
 
 									<Separator />
@@ -2607,17 +2617,17 @@ export function CreditDetailView({
 									</div>
 
 									{/* Validación */}
-									{Math.abs(totalCheques - liquidoARecibir) > 0.01 && (
+									{Math.abs(totalCheques - montoTotalFinanciar) > 0.01 && (
 										<div className="rounded-lg border border-yellow-500 bg-yellow-50 p-4 dark:bg-yellow-950/20">
 											<p className="font-medium text-yellow-800 dark:text-yellow-200">
 												Advertencia: El total de cheques (
 												{formatCurrency(totalCheques)}) no coincide con el
-												líquido a recibir ({formatCurrency(liquidoARecibir)})
+												monto total a financiar ({formatCurrency(montoTotalFinanciar)})
 											</p>
 											<p className="text-sm text-yellow-700 dark:text-yellow-300">
 												Diferencia:{" "}
 												{formatCurrency(
-													Math.abs(totalCheques - liquidoARecibir),
+													Math.abs(totalCheques - montoTotalFinanciar),
 												)}
 											</p>
 										</div>

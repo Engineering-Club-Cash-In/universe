@@ -484,7 +484,7 @@ export const inversionistasRouter = new Elysia()
     "/liquidaciones",
     async ({ query, set }) => {
       try {
-        const { inversionista_id, liquidacion_id, dpi, page, perPage } = query;
+        const { inversionista_id, liquidacion_id, dpi,email, page, perPage } = query;
 
         const result = await getLiquidaciones({
           inversionista_id: inversionista_id
@@ -492,6 +492,7 @@ export const inversionistasRouter = new Elysia()
             : undefined,
           liquidacion_id: liquidacion_id ? Number(liquidacion_id) : undefined,
           dpi: dpi || undefined,
+          email: email || undefined,
           page: page ? Number(page) : 1,
           perPage: perPage ? Number(perPage) : 10,
         });
@@ -512,6 +513,7 @@ export const inversionistasRouter = new Elysia()
         inversionista_id: t.Optional(t.String()),
         liquidacion_id: t.Optional(t.String()),
         dpi: t.Optional(t.String()),
+        email: t.Optional(t.String()),
         page: t.Optional(t.String()),
         perPage: t.Optional(t.String()),
       }),

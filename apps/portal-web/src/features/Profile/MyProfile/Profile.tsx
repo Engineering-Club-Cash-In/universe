@@ -1,24 +1,23 @@
 import { NavBar } from "@components/ui";
 import { InfoPerson } from "./InfoPerson";
-import { CompleteProfileForm } from "./CompleteProfileForm";
 import { ContainerMenu } from "../components/ContainerMenu";
 import { useProfile } from "../hooks/useProfile";
-import { useState } from "react";
+//import { useState } from "react";
 
 export const Profile = () => {
   const { user, isLoading } = useProfile();
-  const [isCompletingProfile, setIsCompletingProfile] = useState(false);
+  //const [isCompletingProfile, setIsCompletingProfile] = useState(false);
 
-  const needsProfileCompletion = !user?.dpi && !isCompletingProfile;
+  /*const needsProfileCompletion = !user?.dpi && !isCompletingProfile;
 
   const handleProfileCompleted = () => {
     // Activar estado de carga antes de recargar
     setIsCompletingProfile(true);
     // Recargar la página para actualizar el contexto de autenticación
     window.location.reload();
-  };
+  };*/
 
-  if (isLoading || isCompletingProfile) {
+  if (isLoading) {
     return (
       <div>
         <div className="w-full mt-4 ">
@@ -41,11 +40,7 @@ export const Profile = () => {
         <NavBar />
         <ContainerMenu>
           {/* Si necesita completar perfil, mostrar formulario especial */}
-          {needsProfileCompletion ? (
-            <div className="py-12">
-              <CompleteProfileForm onSuccess={handleProfileCompleted} />
-            </div>
-          ) : (
+          
             <>
               {/* Header - Mi Perfil */}
               <div className="mb-12">
@@ -83,7 +78,7 @@ export const Profile = () => {
                 </div>
               )}
             </>
-          )}
+        
         </ContainerMenu>
       </div>
     </div>

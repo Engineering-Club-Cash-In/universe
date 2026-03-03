@@ -51,9 +51,9 @@ export const InfoPerson = () => {
     isLoading: isLoadingInvestor,
     refetch: refetchInvestor,
   } = useQuery({
-    queryKey: ["investor-profile", user?.dpi],
+    queryKey: ["investor-profile", user?.id],
     queryFn: () => getInvestorProfile(user?.dpi || "", user?.email || ""),
-    enabled: !!user?.dpi && isInvestor,
+    enabled: !!user?.id && isInvestor,
   });
 
   // Obtener catálogo de bancos - solo si es INVESTOR
@@ -318,6 +318,8 @@ export const InfoPerson = () => {
                   onChange={(value) => setTipoCuenta(value)}
                   options={[
                     { value: "MONETARIA", label: "Monetaria" },
+                    { value: "MONETARIA Q", label: "Monetaria Q" },
+                    { value: "MONETARIA $", label: "Monetaria $" },
                     { value: "AHORRO", label: "Ahorro" },
                   ]}
                   placeholder="Selecciona tipo de cuenta"

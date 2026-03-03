@@ -11,7 +11,7 @@ export interface RegisterExternalUserPayload {
   userType: UserType;
   fullName: string;
   email: string;
-  dpi: string;
+  dpi?: string;
   phone?: string;
 }
 

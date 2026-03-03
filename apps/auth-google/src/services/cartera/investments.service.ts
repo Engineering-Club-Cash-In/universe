@@ -122,6 +122,7 @@ export interface AsesorResponse {
  */
 export const getLiquidaciones = async (
   dpi: string,
+  email: string,
   page: number = 1,
   perPage: number = 10
 ): Promise<LiquidacionesResponse> => {
@@ -130,7 +131,7 @@ export const getLiquidaciones = async (
     const token = await ensureCarteraAuth();
 
     const response = await fetch(
-      `${env.CARTERA_API_URL}/liquidaciones?dpi=${dpi}&page=${page}&perPage=${perPage}`,
+      `${env.CARTERA_API_URL}/liquidaciones?dpi=${dpi}&email=${email}&page=${page}&perPage=${perPage}`,
       {
         headers: {
          // Authorization: `Bearer ${token}`,
@@ -153,13 +154,13 @@ export const getLiquidaciones = async (
 /**
  * Obtener estadísticas de inversiones desde la API de Cartera
  */
-export const getInvestmentsStats = async (dpi: string): Promise<InvestmentsStats> => {
+export const getInvestmentsStats = async (dpi: string, email: string): Promise<InvestmentsStats> => {
   try {
     // Asegurar autenticación
     const token = await ensureCarteraAuth();
 
     const response = await fetch(
-      `${env.CARTERA_API_URL}/inversionistas/rendimiento?dpi=${dpi}`,
+      `${env.CARTERA_API_URL}/inversionistas/rendimiento?dpi=${dpi}&email=${email}`,
       {
         headers: {
           // Authorization: `Bearer ${token}`,

@@ -7,7 +7,7 @@ import { opportunityDocuments } from "../db/schema/documents";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { vehiclePhotos, vehicles } from "../db/schema/vehicles";
 import { getFileUrl, getFileUrlWithBucketInKey } from "../lib/storage";
-import { getRenapInfoController } from "./bot";
+import { getOnlyRenapInfoController } from "./bot";
 import {
 	createOpportunityForLead,
 	getSalesUserWithLeastLeads,
@@ -263,8 +263,7 @@ export async function updateLeadByEmail(c: Context) {
 		// If DPI was updated, call RENAP to get information
 		let renapInfo = null;
 		if (dpi !== undefined && dpi.trim() !== "" && updatedLead) {
-			const phoneToUse = phone ?? existingLead.phone ?? "";
-			renapInfo = await getRenapInfoController(dpi, phoneToUse);
+			renapInfo = await getOnlyRenapInfoController(dpi);
 		}
 
 		return c.json({
@@ -684,8 +683,8 @@ export async function createPortalRegisterLead(c: Context) {
 			.returning();
 
 		let renapInfo = null;
-		if (phone) {
-			renapInfo = await getRenapInfoController(dpi, phone);
+		if (dpi) {
+			renapInfo = await getOnlyRenapInfoController(dpi);
 		}
 
 		const newOpportunity = await createOpportunityForLead(

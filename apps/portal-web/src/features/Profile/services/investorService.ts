@@ -7,7 +7,7 @@ import apiAuth from "@/lib/api/apiAuth";
 // Interfaces
 export interface CreateInvestorPayload {
   nombre?: string;
-  dpi: number;
+  dpi?: number;
   email?: string;
   emite_factura?: boolean;
   tipo_reinversion: string;
@@ -62,11 +62,12 @@ export const createInvestor = async (
  * Obtener perfil de inversionista por DPI
  */
 export const getInvestorProfile = async (
-  dpi: string
+  dpi: string = "",
+  email: string = ""
 ): Promise<InvestorProfile> => {
   try {
     const response = await apiAuth.get<{ data: InvestorProfile }>(
-      `/api/cartera/investor?dpi=${encodeURIComponent(dpi)}`
+      `/api/cartera/investor?dpi=${encodeURIComponent(dpi)}&email=${encodeURIComponent(email)}`
     );
     return response.data.data;
   } catch (error) {

@@ -233,20 +233,10 @@ export async function createPublicLead(c: Context) {
 					{
 						success: true,
 						data: existingLead,
-						message: "Lead ya tiene una oportunidad reciente (últimas 24 horas)",
+						message:
+							"Lead ya tiene una oportunidad reciente (últimas 24 horas)",
 					},
 					200,
-				);
-			}
-
-			const salesUser = await getSalesUserWithLeastOpportunities();
-			if (!salesUser) {
-				return c.json(
-					{
-						success: false,
-						error: "No hay usuario de ventas disponible para asignar",
-					},
-					500,
 				);
 			}
 
@@ -254,7 +244,7 @@ export async function createPublicLead(c: Context) {
 				existingLead.id,
 				existingLead.firstName,
 				existingLead.lastName,
-				salesUser.id,
+				existingLead.assignedTo,
 				body.notes ?? "",
 				body.source || existingLead.source || "website",
 				body.loanPurpose,
@@ -295,26 +285,14 @@ export async function createPublicLead(c: Context) {
 			);
 		}
 
-		// --- Lead nuevo ---
-		const [salesUserForLead, salesUserForOpportunity] = await Promise.all([
-			getSalesUserWithLeastLeads(),
-			getSalesUserWithLeastOpportunities(),
-		]);
+		// --- Lead nuevo: mismo asesor para lead y oportunidad ---
+		const salesUserForLead = await getSalesUserWithLeastLeads();
 
 		if (!salesUserForLead) {
 			return c.json(
 				{
 					success: false,
 					error: "No hay usuario de ventas disponible para asignar",
-				},
-				500,
-			);
-		}
-		if (!salesUserForOpportunity) {
-			return c.json(
-				{
-					success: false,
-					error: "No hay usuario de ventas disponible para asignar oportunidad",
 				},
 				500,
 			);
@@ -359,7 +337,7 @@ export async function createPublicLead(c: Context) {
 			newLead.id,
 			newLead.firstName,
 			newLead.lastName,
-			salesUserForOpportunity.id,
+			salesUserForLead.id,
 			body.notes ?? "",
 			body.source || "website",
 			body.loanPurpose,

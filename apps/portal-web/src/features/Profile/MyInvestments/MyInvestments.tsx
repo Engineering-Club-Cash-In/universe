@@ -27,11 +27,11 @@ export const MyInvestments = () => {
   const { isModalOpen, modalOptionsInvestors, setIsModalOpen } =
     useModalOptionsCall();
 
-  // Obtener estadísticas usando DPI del perfil
+  // Obtener estadísticas usando email o DPI del perfil
   const { data: stats, isLoading: loadingStats } = useQuery({
-    queryKey: ["investments-stats", user?.dpi],
+    queryKey: ["investments-stats", user?.id],
     queryFn: () => getInvestmentsStats(user?.dpi || "", user?.email || ""),
-    enabled: !!user?.dpi,
+    enabled: !!user?.id,
   });
 
   // Obtener liquidaciones con paginación
@@ -40,10 +40,10 @@ export const MyInvestments = () => {
     isLoading: loadingLiquidaciones,
     isFetching: fetchingLiquidaciones,
   } = useQuery({
-    queryKey: ["liquidaciones", user?.dpi, currentPage, perPage],
+    queryKey: ["liquidaciones", user?.id, currentPage, perPage],
     queryFn: () =>
       getLiquidaciones(user?.dpi || "", user?.email || "", currentPage, perPage),
-    enabled: !!user?.dpi,
+    enabled: !!user?.id,
   });
 
   // Solo mostrar loading de página completa en la carga inicial

@@ -61,9 +61,7 @@ export const Menu = () => {
   );
 
   // Si no tiene DPI, solo mostrar "Mi Perfil"
-  const displayItems = !user?.dpi
-    ? menuItems.filter((item) => item.id === "/profile")
-    : menuItems;
+  const displayItems = menuItems;
 
   return (
     <div

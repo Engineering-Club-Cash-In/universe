@@ -51,9 +51,9 @@ export const InfoPerson = () => {
     isLoading: isLoadingInvestor,
     refetch: refetchInvestor,
   } = useQuery({
-    queryKey: ["investor-profile", user?.dpi],
+    queryKey: ["investor-profile", user?.id],
     queryFn: () => getInvestorProfile(user?.dpi || "", user?.email || ""),
-    enabled: !!user?.dpi && isInvestor,
+    enabled: !!user?.id && isInvestor,
   });
 
   // Obtener catálogo de bancos - solo si es INVESTOR

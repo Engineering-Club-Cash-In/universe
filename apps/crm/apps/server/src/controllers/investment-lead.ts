@@ -130,10 +130,10 @@ export async function createInvestmentLeadController(c: Context) {
 				name: body.name,
 				email: body.email,
 				phones: body.phones
-				? Array.isArray(body.phones)
-					? body.phones
-					: [body.phones]
-				: undefined,
+					? Array.isArray(body.phones)
+						? body.phones
+						: [body.phones]
+					: undefined,
 				source: body.source,
 				proposedAmount: body.proposedAmount,
 				assignedTo: assignedAdvisorId,

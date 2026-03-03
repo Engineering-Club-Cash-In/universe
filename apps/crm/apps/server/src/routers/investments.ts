@@ -1,6 +1,7 @@
 import { ORPCError } from "@orpc/server";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
+import { createInvestmentLeadWithOpportunity } from "../controllers/investment-lead";
 import { db } from "../db";
 import {
 	investmentAuditLog,
@@ -17,7 +18,6 @@ import {
 	calculateGoal,
 	calculateInvestment,
 } from "../lib/investment-calculator";
-import { createInvestmentLeadWithOpportunity } from "../controllers/investment-lead";
 import {
 	analystProcedure,
 	investmentManagerProcedure,

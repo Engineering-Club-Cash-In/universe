@@ -185,7 +185,11 @@ export default function Header() {
 									<DropdownMenuItem asChild>
 										<Link
 											to="/vehicles"
-											search={{ vehicleId: undefined, inspectionId: undefined, tab: undefined }}
+											search={{
+												vehicleId: undefined,
+												inspectionId: undefined,
+												tab: undefined,
+											}}
 											className="cursor-pointer"
 										>
 											<Car className="mr-2 h-4 w-4" />

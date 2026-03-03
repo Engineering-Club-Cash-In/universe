@@ -779,8 +779,6 @@ app.post("/api/notifications/pay-investors", async (c) => {
 // REST endpoint for public lead creation (for external web forms)
 app.post("/api/public/lead", createPublicLead);
 
-
-
 // REST endpoint for investment lead creation (for external APIs)
 app.post("/api/public/investment-lead", async (c) => {
 	const { createInvestmentLeadController } = await import(

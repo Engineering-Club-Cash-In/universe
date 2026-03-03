@@ -661,7 +661,6 @@ export async function createPortalRegisterLead(c: Context) {
 			);
 		}
 
-
 		const [newLead] = await db
 			.insert(leads)
 			.values({

@@ -13,9 +13,9 @@ import {
 import type { documentTypeEnum } from "@/db/schema/documents";
 import { getRenapData } from "@/functions/getRenapInfo";
 import { generateUniqueFilename, uploadFileFromUrlToR2 } from "@/lib/storage";
+import { salesUser } from "@/utils/constants";
 import { db } from "../db";
 import { otpController } from "./otp";
-import { salesUser } from "@/utils/constants";
 
 // Type for document type enum
 type DocumentType = (typeof documentTypeEnum.enumValues)[number];
@@ -412,12 +412,11 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 				phone: phone,
 				createdBy: salesUser,
 				status: "new",
-
 			})
 			.returning({ id: leads.id });
 		leadId = newLead[0].id;
-		assignedUserId = salesUser
-		createdByUserId = salesUser
+		assignedUserId = salesUser;
+		createdByUserId = salesUser;
 	} else {
 		console.log("[DEBUG] DPI found in leads. Updating existing lead.");
 		await db
@@ -430,7 +429,7 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 				status: "new",
 				age: age ?? existingLead[0].age,
 				updatedAt: new Date(),
-				livenessValidated:false
+				livenessValidated: false,
 			})
 			.where(eq(leads.dpi, dpi));
 		leadId = existingLead[0].id;

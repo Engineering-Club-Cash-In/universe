@@ -1,5 +1,5 @@
-import SignaturePad from "signature_pad";
 import { useEffect, useRef, useState } from "react";
+import SignaturePad from "signature_pad";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -80,7 +80,7 @@ export function SignatureConsent({
 					<CardTitle>Cláusula de Consentimiento</CardTitle>
 				</CardHeader>
 				<CardContent>
-					<div className="max-h-64 overflow-y-auto rounded-lg border bg-muted/30 p-4 text-sm leading-relaxed text-muted-foreground">
+					<div className="max-h-64 overflow-y-auto rounded-lg border bg-muted/30 p-4 text-muted-foreground text-sm leading-relaxed">
 						<p className="mb-3">
 							Yo, <strong>{fullName || "_______________"}</strong>, con DPI{" "}
 							<strong>{dpi || "_______________"}</strong>
@@ -127,18 +127,23 @@ export function SignatureConsent({
 			<Card>
 				<CardHeader className="flex flex-row items-center justify-between">
 					<CardTitle>Firma</CardTitle>
-					<Button type="button" variant="outline" size="sm" onClick={handleClear}>
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						onClick={handleClear}
+					>
 						Limpiar
 					</Button>
 				</CardHeader>
 				<CardContent>
-					<div className="rounded-lg border-2 border-dashed border-muted-foreground/30">
+					<div className="rounded-lg border-2 border-muted-foreground/30 border-dashed">
 						<canvas
 							ref={canvasRef}
 							className="h-48 w-full cursor-crosshair touch-none"
 						/>
 					</div>
-					<p className="mt-2 text-center text-xs text-muted-foreground">
+					<p className="mt-2 text-center text-muted-foreground text-xs">
 						Firme dentro del recuadro
 					</p>
 				</CardContent>

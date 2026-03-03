@@ -30,7 +30,7 @@ export const MyInvestments = () => {
   // Obtener estadísticas usando DPI del perfil
   const { data: stats, isLoading: loadingStats } = useQuery({
     queryKey: ["investments-stats", user?.dpi],
-    queryFn: () => getInvestmentsStats(user?.dpi || ""),
+    queryFn: () => getInvestmentsStats(user?.dpi || "", user?.email || ""),
     enabled: !!user?.dpi,
   });
 
@@ -42,7 +42,7 @@ export const MyInvestments = () => {
   } = useQuery({
     queryKey: ["liquidaciones", user?.dpi, currentPage, perPage],
     queryFn: () =>
-      getLiquidaciones(user?.dpi || "", currentPage, perPage),
+      getLiquidaciones(user?.dpi || "", user?.email || "", currentPage, perPage),
     enabled: !!user?.dpi,
   });
 

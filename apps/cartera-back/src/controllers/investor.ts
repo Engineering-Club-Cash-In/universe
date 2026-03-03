@@ -343,7 +343,17 @@ export const insertInvestor = async ({ body, set }: any) => {
         existente = result[0] || null;
       }
 
-      // Si no lo encontro por DPI, buscar por nombre
+      // Si no lo encontro por DPI, buscar por email
+      if (!existente && inv.email?.trim()) {
+        const result = await db
+          .select()
+          .from(inversionistas)
+          .where(eq(inversionistas.email, inv.email.trim().toLowerCase()))
+          .limit(1);
+        existente = result[0] || null;
+      }
+
+      // Si no lo encontro por email, buscar por nombre
       if (!existente && inv.nombre?.trim()) {
         const result = await db
           .select()
@@ -461,6 +471,16 @@ export const getInvestors = async ({ query, set }: any) => {
       return result.length
         ? result[0]
         : { message: "Inversionista no encontrado" };
+    }
+    if(query.email){  
+      const result = await db
+        .select()
+        .from(inversionistas)
+        .where(eq(inversionistas.email, query.email));
+      set.status = result.length ? 200 : 404;
+      return result.length
+        ? result[0]
+        : { message: "Inversionista no encontrado con ese email" };
     }
 
     // Buscar por DPI
@@ -3100,32 +3120,38 @@ export async function resumenGlobalInversionistas(
 ): Promise<
   InversionistaResumen[] | { success: boolean; url: string; filename: string }
 > {
-  // 🔎 Condiciones dinámicas — ahora sobre tablas ESPEJO
-  const condiciones: any[] = [
-    eq(pagos_credito_inversionistas_espejo.estado_liquidacion, "NO_LIQUIDADO"),
+  // 🔎 Condiciones sobre inversionistas (van en WHERE)
+  const condicionesWhere: any[] = [
     eq(inversionistas.permite_distribucion, false) // Solo inversionistas que NO permiten distribución (es decir, que se les paga directamente)
   ];
 
   if (inversionistaId) {
-    condiciones.push(
-      eq(pagos_credito_inversionistas_espejo.inversionista_id, inversionistaId)
+    condicionesWhere.push(
+      eq(inversionistas.inversionista_id, inversionistaId)
     );
   }
 
+  // 🔎 Condiciones sobre pagos espejo (van en el ON del LEFT JOIN)
+  const pe = pagos_credito_inversionistas_espejo; // alias corto
+
+  const condicionesJoinPagos: any[] = [
+    eq(inversionistas.inversionista_id, pe.inversionista_id),
+    eq(pe.estado_liquidacion, "NO_LIQUIDADO"),
+  ];
+
   if (mes) {
-    condiciones.push(
-      sql`EXTRACT(MONTH FROM ${pagos_credito_inversionistas_espejo.fecha_pago}) = ${mes}`
+    condicionesJoinPagos.push(
+      sql`EXTRACT(MONTH FROM ${pe.fecha_pago}) = ${mes}`
     );
   }
 
   if (anio) {
-    condiciones.push(
-      sql`EXTRACT(YEAR FROM ${pagos_credito_inversionistas_espejo.fecha_pago}) = ${anio}`
+    condicionesJoinPagos.push(
+      sql`EXTRACT(YEAR FROM ${pe.fecha_pago}) = ${anio}`
     );
   }
 
   // 📊 Query agregada usando tablas ESPEJO (misma lógica que getInvestorMirrorSummary)
-  const pe = pagos_credito_inversionistas_espejo; // alias corto
 
   const result = await db
     .select({
@@ -3171,7 +3197,15 @@ export async function resumenGlobalInversionistas(
         WHEN 'reinversion_total' THEN COALESCE(SUM(${pe.abono_capital} + ${pe.abono_interes}), 0)
         WHEN 'reinversion_variable' THEN LEAST(
           COALESCE(${inversionistas.monto_reinversion}, 0)::numeric,
-          COALESCE(SUM(${pe.abono_capital} + ${pe.abono_interes}), 0)
+          COALESCE(SUM(
+            ${pe.abono_capital}
+            + ${pe.abono_interes}
+            + CASE
+                WHEN ${inversionistas.emite_factura}
+                  THEN ${pe.abono_iva_12}
+                ELSE -(${pe.abono_interes} * 0.07)
+              END
+          ), 0)
         )
         ELSE 0
       END`,
@@ -3194,7 +3228,15 @@ export async function resumenGlobalInversionistas(
             WHEN 'reinversion_total' THEN COALESCE(SUM(${pe.abono_capital} + ${pe.abono_interes}), 0)
             WHEN 'reinversion_variable' THEN LEAST(
               COALESCE(${inversionistas.monto_reinversion}, 0)::numeric,
-              COALESCE(SUM(${pe.abono_capital} + ${pe.abono_interes}), 0)
+              COALESCE(SUM(
+                ${pe.abono_capital}
+                + ${pe.abono_interes}
+                + CASE
+                    WHEN ${inversionistas.emite_factura}
+                      THEN ${pe.abono_iva_12}
+                    ELSE -(${pe.abono_interes} * 0.07)
+                  END
+              ), 0)
             )
             ELSE 0
           END`,
@@ -3206,9 +3248,9 @@ export async function resumenGlobalInversionistas(
     )
     .leftJoin(
       pe,
-      eq(inversionistas.inversionista_id, pe.inversionista_id)
+      and(...condicionesJoinPagos)
     )
-    .where(and(...condiciones))
+    .where(and(...condicionesWhere))
     .groupBy(
       inversionistas.inversionista_id,
       inversionistas.nombre,
@@ -3226,6 +3268,9 @@ export async function resumenGlobalInversionistas(
         ? undefined
         : sql`COUNT(${pe.id}) > 0`
     );
+
+  console.log("resumen-global result IDs:", result.map(r => r.inversionista_id));
+  console.log("resumen-global total:", result.length, "inversionistas");
 
   // 📂 Si excel = true → generar archivo, subir a R2 y devolver URL
   if (excel) {
@@ -3410,12 +3455,14 @@ export async function getLiquidaciones({
   inversionista_id,
   liquidacion_id,
   dpi,
+  email,
   page = 1,
   perPage = 10,
 }: {
   inversionista_id?: number;
   liquidacion_id?: number;
   dpi?: string;
+  email?: string;
   page?: number;
   perPage?: number;
 }) {
@@ -3442,6 +3489,9 @@ export async function getLiquidaciones({
   if (dpi) {
     conditions.push(eq(inversionistas.dpi, parseInt(dpi)));
   }
+  if (email) {
+    conditions.push(eq(inversionistas.email, email));
+  }
 
   // 📊 Query principal con joins
   const query = db
@@ -3465,6 +3515,7 @@ export async function getLiquidaciones({
       nombre_inversionista: inversionistas.nombre,
       emite_factura: inversionistas.emite_factura,
       dpi: inversionistas.dpi,
+      email: inversionistas.email,
     })
     .from(liquidaciones)
     .leftJoin(

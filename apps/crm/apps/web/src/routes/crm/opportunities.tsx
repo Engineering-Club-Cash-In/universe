@@ -1382,17 +1382,19 @@ function RouteComponent() {
 						Rastrea las oportunidades a través de tu proceso de ventas
 					</p>
 				</div>
-				<div className="flex items-center gap-2">
-					<Button variant="outline" size="icon" onClick={goToPreviousMonth}>
-						<ChevronLeft className="h-4 w-4" />
-					</Button>
-					<span className="min-w-[140px] text-center font-medium">
-						{MONTH_NAMES[month - 1]} {year}
-					</span>
-					<Button variant="outline" size="icon" onClick={goToNextMonth}>
-						<ChevronRight className="h-4 w-4" />
-					</Button>
-				</div>
+				{!isSales && (
+					<div className="flex items-center gap-2">
+						<Button variant="outline" size="icon" onClick={goToPreviousMonth}>
+							<ChevronLeft className="h-4 w-4" />
+						</Button>
+						<span className="min-w-[140px] text-center font-medium">
+							{MONTH_NAMES[month - 1]} {year}
+						</span>
+						<Button variant="outline" size="icon" onClick={goToNextMonth}>
+							<ChevronRight className="h-4 w-4" />
+						</Button>
+					</div>
+				)}
 			</div>
 
 			{/* Stats Cards */}
@@ -1594,44 +1596,46 @@ function RouteComponent() {
 							<SelectItem value="other">Otro</SelectItem>
 						</SelectContent>
 					</Select>
-					<div className="flex items-center gap-1">
-						<Select
-							value={String(createdMonth)}
-							onValueChange={(v) => setCreatedMonthOverride(Number(v))}
-						>
-							<SelectTrigger className="w-36">
-								<Calendar className="mr-2 h-4 w-4" />
-								<SelectValue placeholder="Mes" />
-							</SelectTrigger>
-							<SelectContent>
-								<SelectItem value="1">Enero</SelectItem>
-								<SelectItem value="2">Febrero</SelectItem>
-								<SelectItem value="3">Marzo</SelectItem>
-								<SelectItem value="4">Abril</SelectItem>
-								<SelectItem value="5">Mayo</SelectItem>
-								<SelectItem value="6">Junio</SelectItem>
-								<SelectItem value="7">Julio</SelectItem>
-								<SelectItem value="8">Agosto</SelectItem>
-								<SelectItem value="9">Septiembre</SelectItem>
-								<SelectItem value="10">Octubre</SelectItem>
-								<SelectItem value="11">Noviembre</SelectItem>
-								<SelectItem value="12">Diciembre</SelectItem>
-							</SelectContent>
-						</Select>
-						<Select
-							value={String(createdYear)}
-							onValueChange={(v) => setCreatedYearOverride(Number(v))}
-						>
-							<SelectTrigger className="w-24">
-								<SelectValue placeholder="Año" />
-							</SelectTrigger>
-							<SelectContent>
-								<SelectItem value="2025">2025</SelectItem>
-								<SelectItem value="2026">2026</SelectItem>
-								<SelectItem value="2027">2027</SelectItem>
-							</SelectContent>
-						</Select>
-					</div>
+					{!isSales && (
+						<div className="flex items-center gap-1">
+							<Select
+								value={String(createdMonth)}
+								onValueChange={(v) => setCreatedMonthOverride(Number(v))}
+							>
+								<SelectTrigger className="w-36">
+									<Calendar className="mr-2 h-4 w-4" />
+									<SelectValue placeholder="Mes" />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="1">Enero</SelectItem>
+									<SelectItem value="2">Febrero</SelectItem>
+									<SelectItem value="3">Marzo</SelectItem>
+									<SelectItem value="4">Abril</SelectItem>
+									<SelectItem value="5">Mayo</SelectItem>
+									<SelectItem value="6">Junio</SelectItem>
+									<SelectItem value="7">Julio</SelectItem>
+									<SelectItem value="8">Agosto</SelectItem>
+									<SelectItem value="9">Septiembre</SelectItem>
+									<SelectItem value="10">Octubre</SelectItem>
+									<SelectItem value="11">Noviembre</SelectItem>
+									<SelectItem value="12">Diciembre</SelectItem>
+								</SelectContent>
+							</Select>
+							<Select
+								value={String(createdYear)}
+								onValueChange={(v) => setCreatedYearOverride(Number(v))}
+							>
+								<SelectTrigger className="w-24">
+									<SelectValue placeholder="Año" />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="2025">2025</SelectItem>
+									<SelectItem value="2026">2026</SelectItem>
+									<SelectItem value="2027">2027</SelectItem>
+								</SelectContent>
+							</Select>
+						</div>
+					)}
 					<Button
 						variant={showLostOpportunities ? "default" : "outline"}
 						size="sm"

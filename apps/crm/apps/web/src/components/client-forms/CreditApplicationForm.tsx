@@ -5,8 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-	creditApplicationSchema,
 	type CreditApplicationFormData,
+	creditApplicationSchema,
 } from "./form-schemas";
 
 interface CreditApplicationFormProps {
@@ -17,7 +17,7 @@ interface CreditApplicationFormProps {
 
 function FieldError({ message }: { message?: string }) {
 	if (!message) return null;
-	return <p className="text-sm text-destructive">{message}</p>;
+	return <p className="text-destructive text-sm">{message}</p>;
 }
 
 export function CreditApplicationForm({
@@ -236,11 +236,7 @@ export function CreditApplicationForm({
 					</div>
 					<div className="space-y-2">
 						<Label>Monto Solicitado (Q)</Label>
-						<Input
-							type="number"
-							step="0.01"
-							{...register("montoSolicitado")}
-						/>
+						<Input type="number" step="0.01" {...register("montoSolicitado")} />
 					</div>
 					<div className="flex items-center gap-2 pt-6">
 						<input
@@ -320,10 +316,7 @@ export function CreditApplicationForm({
 					</div>
 					<div className="space-y-2">
 						<Label>Horarios</Label>
-						<Input
-							placeholder="Ej: 8:00 - 17:00"
-							{...register("horarios")}
-						/>
+						<Input placeholder="Ej: 8:00 - 17:00" {...register("horarios")} />
 					</div>
 					<div className="space-y-2">
 						<Label>Tel. Trabajo</Label>
@@ -397,9 +390,7 @@ export function CreditApplicationForm({
 						<div key={i} className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 							<div className="space-y-2">
 								<Label>Nombre {i + 1}</Label>
-								<Input
-									{...register(`referenciasCrediticias.${i}.nombre`)}
-								/>
+								<Input {...register(`referenciasCrediticias.${i}.nombre`)} />
 							</div>
 							<div className="space-y-2">
 								<Label>Teléfono {i + 1}</Label>
@@ -455,15 +446,11 @@ export function CreditApplicationForm({
 						<div key={i} className="grid grid-cols-1 gap-4 sm:grid-cols-3">
 							<div className="space-y-2">
 								<Label>Nombre {i + 1}</Label>
-								<Input
-									{...register(`referenciasPersonales.${i}.nombre`)}
-								/>
+								<Input {...register(`referenciasPersonales.${i}.nombre`)} />
 							</div>
 							<div className="space-y-2">
 								<Label>Relación</Label>
-								<Input
-									{...register(`referenciasPersonales.${i}.relacion`)}
-								/>
+								<Input {...register(`referenciasPersonales.${i}.relacion`)} />
 							</div>
 							<div className="space-y-2">
 								<Label>Teléfono</Label>

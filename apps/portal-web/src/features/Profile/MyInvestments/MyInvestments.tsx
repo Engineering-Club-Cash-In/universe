@@ -176,7 +176,7 @@ export const MyInvestments = () => {
                   </div>
                   <div>
                     <p className="text-sm lg:text-base  mb-1">
-                      Rendimiento Estimado
+                      Rendimiento obtenido hasta ahora
                     </p>
                     <p className="text-lg lg:text-2xl font-bold">
                       {formatCurrency(stats.rendimiento_estimado)}
@@ -205,7 +205,7 @@ export const MyInvestments = () => {
                   </div>
                   <div>
                     <p className="text-sm lg:text-base  mb-1">
-                      Cantidad de Inversiones
+                      Créditos Financiados Activos
                     </p>
                     <p className="text-lg lg:text-2xl font-bold">
                       {stats.cantidad_inversiones}
@@ -445,7 +445,7 @@ export const MyInvestments = () => {
                           className="overflow-hidden"
                         >
                           <div className="bg-white/5 border-t border-white/10 p-6">
-                            <h4 className="text-sm font-semibold text-white/80 mb-4">
+                            <h4 className="text-base lg:text-lg font-bold text-white mb-4">
                               Detalle de Pagos ({liquidacion.pagos.length})
                             </h4>
                             <div className="space-y-3">
@@ -454,56 +454,54 @@ export const MyInvestments = () => {
                                 .map((pago) => (
                                 <div
                                   key={pago.pago_id}
-                                  className="bg-white/5 rounded-xl p-4 border border-white/5"
+                                  className="bg-white/5 rounded-xl p-5 border border-white/10"
                                 >
-                                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
+                                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
                                     <div>
-                                      <p className="font-semibold text-white">
+                                      <p className="text-base lg:text-lg font-bold text-white">
                                         {pago.nombre_cliente}
                                       </p>
-                                      <p className="text-xs text-white/50">
-                                        Crédito: {pago.numero_credito_sifco}
+                                      <p className="text-sm text-white/50">
+                                        Crédito: {pago.numero_credito_sifco} &middot; {formatShortDate(pago.fecha_pago)}
                                       </p>
                                     </div>
-                                    <div className="text-right">
-                                      <p className="text-primary font-bold">
+                                    <div className="flex items-center gap-2 md:text-right">
+                                      <span className="text-sm text-white/50">Cuota:</span>
+                                      <span className="text-xl lg:text-2xl text-primary font-bold">
                                         {formatCurrency(pago.cuota)}
-                                      </p>
-                                      <p className="text-xs text-white/50">
-                                        {formatShortDate(pago.fecha_pago)}
-                                      </p>
+                                      </span>
                                     </div>
                                   </div>
-                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                     <div>
-                                      <span className="text-white/50 block text-xs">
+                                      <span className="text-white/50 block text-xs mb-1">
                                         Capital
                                       </span>
-                                      <span className="text-white/80">
+                                      <span className="text-base font-semibold text-white/90">
                                         {formatCurrency(pago.abono_capital)}
                                       </span>
                                     </div>
                                     <div>
-                                      <span className="text-white/50 block text-xs">
+                                      <span className="text-white/50 block text-xs mb-1">
                                         Interés
                                       </span>
-                                      <span className="text-green-400">
+                                      <span className="text-base font-semibold text-green-400">
                                         {formatCurrency(pago.abono_interes)}
                                       </span>
                                     </div>
                                     <div>
-                                      <span className="text-white/50 block text-xs">
+                                      <span className="text-white/50 block text-xs mb-1">
                                         IVA
                                       </span>
-                                      <span className="text-white/80">
+                                      <span className="text-base font-semibold text-white/90">
                                         {formatCurrency(pago.abono_iva)}
                                       </span>
                                     </div>
                                     <div>
-                                      <span className="text-white/50 block text-xs">
+                                      <span className="text-white/50 block text-xs mb-1">
                                         Participación
                                       </span>
-                                      <span className="text-white/80">
+                                      <span className="text-base font-semibold text-white/90">
                                         {pago.porcentaje_participacion
                                           ? pago?.porcentaje_participacion
                                           : ""}

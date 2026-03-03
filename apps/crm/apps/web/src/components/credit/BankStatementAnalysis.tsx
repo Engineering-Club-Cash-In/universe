@@ -39,7 +39,7 @@ export function BankStatementAnalysis({
 	const [annualRate, setAnnualRate] = useState("0.18");
 	const [termMonths, setTermMonths] = useState("60");
 	const [maxDebtRatio, setMaxDebtRatio] = useState("0.2");
-	const [maxVariableDebtRatio, setMaxVariableDebtRatio] = useState("0.3");
+	const [maxVariableDebtRatio, setMaxVariableDebtRatio] = useState("0.2");
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const queryClient = useQueryClient();
 

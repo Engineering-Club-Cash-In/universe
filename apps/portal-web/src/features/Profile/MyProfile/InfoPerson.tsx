@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   InputIcon,
   IconAddress,
@@ -131,14 +131,17 @@ export const InfoPerson = () => {
     </svg>
   );
 
-  const isProfileComplete = isInvestor
-    ? !!(
-        profileData?.dpi &&
-        profileData?.banco &&
-        profileData?.tipo_cuenta &&
-        profileData?.numero_cuenta
-      )
-    : !!(profileData?.dpi && profileData?.phone);
+  const isProfileComplete = useMemo(() => {
+    if (!profileData) return false;
+    return isInvestor
+      ? !!(
+          profileData.dpi &&
+          profileData.banco_id &&
+          profileData.tipo_cuenta &&
+          profileData.numero_cuenta
+        )
+      : !!(profileData.dpi && profileData.phone);
+  }, [profileData, isInvestor]);
 
   if (isLoading) {
     return <Loading />;

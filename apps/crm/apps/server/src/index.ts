@@ -82,7 +82,7 @@ app.on(["POST", "GET"], "/api/auth/**", (c) => auth.handler(c.req.raw));
 // External contracts endpoint (requires service account authentication)
 app.route("/api/contracts/external", externalContractsRouter);
 
-const handler = new RPCHandler({ ...appRouter, ...investmentsRouter });
+const handler = new RPCHandler({ ...appRouter, ...investmentsRouter } as typeof appRouter & typeof investmentsRouter);
 app.use("/rpc/*", async (c, next) => {
 	const context = await createContext({ context: c });
 	const { matched, response } = await handler.handle(c.req.raw, {

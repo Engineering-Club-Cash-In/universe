@@ -1,5 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ClipboardCopy, Download, FileText, Link2, Loader2 } from "lucide-react";
+import {
+	Check,
+	ClipboardCopy,
+	Download,
+	FileText,
+	Link2,
+	Loader2,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -20,19 +27,13 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 	const [copied, setCopied] = useState(false);
 
 	// Check if token exists
-	const {
-		data: tokenData,
-		isLoading: isLoadingToken,
-	} = useQuery({
+	const { data: tokenData, isLoading: isLoadingToken } = useQuery({
 		queryKey: ["formToken", opportunityId],
 		queryFn: () => client.getFormTokenByOpportunity({ opportunityId }),
 	});
 
 	// Get form data
-	const {
-		data: formData,
-		isLoading: isLoadingForms,
-	} = useQuery({
+	const { data: formData, isLoading: isLoadingForms } = useQuery({
 		queryKey: ["clientFormData", opportunityId],
 		queryFn: () => client.getClientFormData({ opportunityId }),
 	});
@@ -88,8 +89,8 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 			</div>
 
 			{/* Link Generation / Display */}
-			<div className="rounded-lg border p-4 space-y-3">
-				<div className="flex items-center gap-2 text-sm font-medium">
+			<div className="space-y-3 rounded-lg border p-4">
+				<div className="flex items-center gap-2 font-medium text-sm">
 					<Link2 className="h-4 w-4" />
 					Enlace del Formulario
 				</div>
@@ -128,7 +129,7 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 								)}
 							</Button>
 						</div>
-						<div className="flex items-center gap-4 text-xs text-muted-foreground">
+						<div className="flex items-center gap-4 text-muted-foreground text-xs">
 							<span>
 								Expira:{" "}
 								{new Date(tokenData.expiresAt).toLocaleDateString("es-GT")}
@@ -149,7 +150,7 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 					<div className="flex items-center justify-between">
 						<div className="flex items-center gap-2">
 							<FileText className="h-4 w-4 text-muted-foreground" />
-							<span className="text-sm font-medium">Solicitud de Crédito</span>
+							<span className="font-medium text-sm">Solicitud de Crédito</span>
 						</div>
 						{hasCreditApp ? (
 							<Badge variant="default" className="bg-green-600">
@@ -165,7 +166,7 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 					<div className="flex items-center justify-between">
 						<div className="flex items-center gap-2">
 							<FileText className="h-4 w-4 text-muted-foreground" />
-							<span className="text-sm font-medium">Estado Patrimonial</span>
+							<span className="font-medium text-sm">Estado Patrimonial</span>
 						</div>
 						{hasFinancialStmt ? (
 							<Badge variant="default" className="bg-green-600">
@@ -184,7 +185,11 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 					<Button
 						variant="outline"
 						size="sm"
-						onClick={() => generateCreditApplicationPdf(formData.creditApplication as Record<string, unknown>)}
+						onClick={() =>
+							generateCreditApplicationPdf(
+								formData.creditApplication as Record<string, unknown>,
+							)
+						}
 					>
 						<Download className="mr-2 h-4 w-4" />
 						Descargar Solicitud PDF
@@ -192,7 +197,11 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 					<Button
 						variant="outline"
 						size="sm"
-						onClick={() => generateFinancialStatementPdf(formData.financialStatement as Record<string, unknown>)}
+						onClick={() =>
+							generateFinancialStatementPdf(
+								formData.financialStatement as Record<string, unknown>,
+							)
+						}
 					>
 						<Download className="mr-2 h-4 w-4" />
 						Descargar Estado Patrimonial PDF

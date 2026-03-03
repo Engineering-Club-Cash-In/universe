@@ -52,7 +52,7 @@ export const InfoPerson = () => {
     refetch: refetchInvestor,
   } = useQuery({
     queryKey: ["investor-profile", user?.dpi],
-    queryFn: () => getInvestorProfile(user?.dpi || ""),
+    queryFn: () => getInvestorProfile(user?.dpi || "", user?.email || ""),
     enabled: !!user?.dpi && isInvestor,
   });
 

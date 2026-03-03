@@ -78,6 +78,7 @@ export interface LiquidacionesResponse {
  */
 export const getLiquidaciones = async (
   dpi: string,
+  email: string,
   page: number = 1,
   perPage: number = 10
 ): Promise<LiquidacionesResponse> => {
@@ -90,7 +91,7 @@ export const getLiquidaciones = async (
       totalItems: number;
       totalPages: number;
     }>(
-      `/api/cartera/liquidaciones?dpi=${encodeURIComponent(dpi)}&page=${page}&perPage=${perPage}`
+      `/api/cartera/liquidaciones?dpi=${encodeURIComponent(dpi)}&email=${encodeURIComponent(email)}&page=${page}&perPage=${perPage}`
     );
 
     const result = response.data;
@@ -155,10 +156,10 @@ export interface InvestmentsStatsResponse {
 /**
  * Obtener estadísticas de inversiones desde la API de Cartera
  */
-export const getInvestmentsStats = async (dpi: string): Promise<InvestmentsStats> => {
+export const getInvestmentsStats = async (dpi: string, email: string): Promise<InvestmentsStats> => {
   try {
     const response = await apiAuth.get<InvestmentsStatsResponse>(
-      `/api/cartera/investments/stats?dpi=${encodeURIComponent(dpi)}`
+      `/api/cartera/investments/stats?dpi=${encodeURIComponent(dpi)}&email=${encodeURIComponent(email)}`
     );
     return response.data.data;
   } catch (error) {

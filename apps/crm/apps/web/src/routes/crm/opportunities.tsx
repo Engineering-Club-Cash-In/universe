@@ -23,6 +23,7 @@ import {
 	Kanban,
 	List,
 	Mail,
+	Phone,
 	Plus,
 	RefreshCw,
 	Search,
@@ -357,12 +358,12 @@ function RouteComponent() {
 	const [boardSearch, setBoardSearch] = useState("");
 	const [salespersonFilter, setSalespersonFilter] = useState<string>("all");
 	const [sourceFilter, setSourceFilter] = useState<string>("all");
-	const [createdMonth, setCreatedMonth] = useState(
-		() => new Date().getMonth() + 1,
-	);
-	const [createdYear, setCreatedYear] = useState(() =>
-		new Date().getFullYear(),
-	);
+	const [createdMonthOverride, setCreatedMonthOverride] = useState<
+		number | null
+	>(null);
+	const [createdYearOverride, setCreatedYearOverride] = useState<
+		number | null
+	>(null);
 	const debouncedBoardSearch = useDeferredValue(boardSearch);
 	// View toggle: "kanban" or "table" - persist in localStorage
 	const [viewMode, setViewMode] = useState<"kanban" | "table">(() => {
@@ -383,7 +384,13 @@ function RouteComponent() {
 	const [month, setMonth] = useState(() => new Date().getMonth() + 1);
 	const [year, setYear] = useState(() => new Date().getFullYear());
 
+	// createdMonth/createdYear follow the main month/year selector unless overridden
+	const createdMonth = createdMonthOverride ?? month;
+	const createdYear = createdYearOverride ?? year;
+
 	const goToPreviousMonth = () => {
+		setCreatedMonthOverride(null);
+		setCreatedYearOverride(null);
 		if (month === 1) {
 			setMonth(12);
 			setYear((y) => y - 1);
@@ -393,6 +400,8 @@ function RouteComponent() {
 	};
 
 	const goToNextMonth = () => {
+		setCreatedMonthOverride(null);
+		setCreatedYearOverride(null);
 		if (month === 12) {
 			setMonth(1);
 			setYear((y) => y + 1);
@@ -682,15 +691,15 @@ function RouteComponent() {
 	};
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
+	const isSales = userProfile.data?.role === "sales";
 	const opportunitiesQuery = useQuery({
 		...orpc.getOpportunities.queryOptions({
 			input: {
 				excludeStatuses: ["migrate"],
-				month,
-				year,
+				...(!isSales
+					? { month, year, createdMonth, createdYear }
+					: {}),
 				...(sourceFilter !== "all" ? { source: sourceFilter as any } : {}),
-				createdMonth,
-				createdYear,
 			},
 		}),
 		enabled:
@@ -701,11 +710,8 @@ function RouteComponent() {
 			"getOpportunities",
 			session?.user?.id,
 			userProfile.data?.role,
-			month,
-			year,
+			...(isSales ? [] : [month, year, createdMonth, createdYear]),
 			sourceFilter,
-			createdMonth,
-			createdYear,
 		],
 	});
 	const salesStagesQuery = useQuery({
@@ -1487,47 +1493,87 @@ function RouteComponent() {
 			)}
 
 			{/* Actions Bar */}
-			<div className="flex items-center justify-between">
-				<div className="flex gap-4">
-					<div className="relative">
-						<Search className="absolute top-2.5 left-2.5 h-4 w-4 text-muted-foreground" />
-						<Input
-							placeholder="Buscar por nombre, título..."
-							value={boardSearch}
-							onChange={(e) => setBoardSearch(e.target.value)}
-							className="h-9 w-[280px] pl-9"
-						/>
+			<div className="space-y-3">
+				<div className="flex items-center justify-between">
+					<div className="flex items-center gap-3">
+						<div className="relative">
+							<Search className="absolute top-2.5 left-2.5 h-4 w-4 text-muted-foreground" />
+							<Input
+								placeholder="Buscar por nombre, título..."
+								value={boardSearch}
+								onChange={(e) => setBoardSearch(e.target.value)}
+								className="h-9 w-[280px] pl-9"
+							/>
+						</div>
+						<Select value={stageFilter} onValueChange={setStageFilter}>
+							<SelectTrigger className="w-52">
+								<Filter className="mr-2 h-4 w-4" />
+								<SelectValue placeholder="Filtrar por estado" />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="all">Todos los Estados</SelectItem>
+								<SelectItem value="open">Abierto</SelectItem>
+								<SelectItem value="won">Ganado</SelectItem>
+								<SelectItem value="lost">Perdido</SelectItem>
+								<SelectItem value="on_hold">En Espera</SelectItem>
+							</SelectContent>
+						</Select>
+						<Select
+							value={salespersonFilter}
+							onValueChange={setSalespersonFilter}
+						>
+							<SelectTrigger className="w-56">
+								<Users className="mr-2 h-4 w-4" />
+								<SelectValue placeholder="Filtrar por asesor" />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="all">Todos los Asesores</SelectItem>
+								{salespeople.map((sp) => (
+									<SelectItem key={sp.id} value={sp.id}>
+										{sp.name}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
 					</div>
-					<Select value={stageFilter} onValueChange={setStageFilter}>
-						<SelectTrigger className="w-52">
-							<Filter className="mr-2 h-4 w-4" />
-							<SelectValue placeholder="Filtrar por estado" />
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="all">Todos los Estados</SelectItem>
-							<SelectItem value="open">Abierto</SelectItem>
-							<SelectItem value="won">Ganado</SelectItem>
-							<SelectItem value="lost">Perdido</SelectItem>
-							<SelectItem value="on_hold">En Espera</SelectItem>
-						</SelectContent>
-					</Select>
-					<Select
-						value={salespersonFilter}
-						onValueChange={setSalespersonFilter}
-					>
-						<SelectTrigger className="w-56">
-							<Users className="mr-2 h-4 w-4" />
-							<SelectValue placeholder="Filtrar por asesor" />
-						</SelectTrigger>
-						<SelectContent>
-							<SelectItem value="all">Todos los Asesores</SelectItem>
-							{salespeople.map((sp) => (
-								<SelectItem key={sp.id} value={sp.id}>
-									{sp.name}
-								</SelectItem>
-							))}
-						</SelectContent>
-					</Select>
+					<div className="flex items-center gap-3">
+						{/* View Toggle */}
+						<div
+							className="flex rounded-md border"
+							role="group"
+							aria-label="Cambiar vista"
+						>
+							<Button
+								variant={viewMode === "kanban" ? "default" : "ghost"}
+								size="sm"
+								onClick={() => handleViewModeChange("kanban")}
+								className="rounded-r-none"
+								aria-label="Vista Kanban"
+								aria-pressed={viewMode === "kanban"}
+							>
+								<Kanban className="h-4 w-4" aria-hidden="true" />
+							</Button>
+							<Button
+								variant={viewMode === "table" ? "default" : "ghost"}
+								size="sm"
+								onClick={() => handleViewModeChange("table")}
+								className="rounded-l-none border-l"
+								aria-label="Vista Tabla"
+								aria-pressed={viewMode === "table"}
+							>
+								<List className="h-4 w-4" aria-hidden="true" />
+							</Button>
+						</div>
+						{userProfile.data?.role &&
+							PERMISSIONS.canCreateOpportunities(userProfile.data.role) && (
+								<Button onClick={() => setIsCreateDialogOpen(true)}>
+									<Plus className="mr-2 h-4 w-4" />
+									Agregar Oportunidad
+								</Button>
+							)}
+					</div>
+				</div>
+				<div className="flex items-center gap-3">
 					<Select value={sourceFilter} onValueChange={setSourceFilter}>
 						<SelectTrigger className="w-52">
 							<Filter className="mr-2 h-4 w-4" />
@@ -1551,7 +1597,7 @@ function RouteComponent() {
 					<div className="flex items-center gap-1">
 						<Select
 							value={String(createdMonth)}
-							onValueChange={(v) => setCreatedMonth(Number(v))}
+							onValueChange={(v) => setCreatedMonthOverride(Number(v))}
 						>
 							<SelectTrigger className="w-36">
 								<Calendar className="mr-2 h-4 w-4" />
@@ -1574,7 +1620,7 @@ function RouteComponent() {
 						</Select>
 						<Select
 							value={String(createdYear)}
-							onValueChange={(v) => setCreatedYear(Number(v))}
+							onValueChange={(v) => setCreatedYearOverride(Number(v))}
 						>
 							<SelectTrigger className="w-24">
 								<SelectValue placeholder="Año" />
@@ -1598,64 +1644,28 @@ function RouteComponent() {
 						/>
 						{showLostOpportunities ? "Ocultando perdidas" : "Mostrar perdidas"}
 					</Button>
-					{/* View Toggle */}
-					<div
-						className="flex rounded-md border"
-						role="group"
-						aria-label="Cambiar vista"
-					>
-						<Button
-							variant={viewMode === "kanban" ? "default" : "ghost"}
-							size="sm"
-							onClick={() => handleViewModeChange("kanban")}
-							className="rounded-r-none"
-							aria-label="Vista Kanban"
-							aria-pressed={viewMode === "kanban"}
-						>
-							<Kanban className="h-4 w-4" aria-hidden="true" />
-						</Button>
-						<Button
-							variant={viewMode === "table" ? "default" : "ghost"}
-							size="sm"
-							onClick={() => handleViewModeChange("table")}
-							className="rounded-l-none border-l"
-							aria-label="Vista Tabla"
-							aria-pressed={viewMode === "table"}
-						>
-							<List className="h-4 w-4" aria-hidden="true" />
-						</Button>
-					</div>
 				</div>
+			</div>
 
-				<Dialog
-					open={isCreateDialogOpen}
-					onOpenChange={(open) => {
-						setIsCreateDialogOpen(open);
-						setLeadsSearch("");
-						setDebouncedLeadsSearch("");
-						if (open) {
-							// Inicializar con la etapa de menor porcentaje (1%)
-							const initialStage = salesStagesQuery.data?.find(
-								(s) => s.closurePercentage === 1,
-							);
-							if (initialStage) {
-								createOpportunityForm.setFieldValue("stageId", initialStage.id);
-							}
-						} else {
-							createOpportunityForm.reset();
+			<Dialog
+				open={isCreateDialogOpen}
+				onOpenChange={(open) => {
+					setIsCreateDialogOpen(open);
+					setLeadsSearch("");
+					setDebouncedLeadsSearch("");
+					if (open) {
+						const initialStage = salesStagesQuery.data?.find(
+							(s) => s.closurePercentage === 1,
+						);
+						if (initialStage) {
+							createOpportunityForm.setFieldValue("stageId", initialStage.id);
 						}
-					}}
-				>
-					{userProfile.data?.role &&
-						PERMISSIONS.canCreateOpportunities(userProfile.data.role) && (
-							<DialogTrigger asChild>
-								<Button>
-									<Plus className="mr-2 h-4 w-4" />
-									Agregar Oportunidad
-								</Button>
-							</DialogTrigger>
-						)}
-					<DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+					} else {
+						createOpportunityForm.reset();
+					}
+				}}
+			>
+				<DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
 						<DialogHeader>
 							<DialogTitle>Crear Nueva Oportunidad</DialogTitle>
 						</DialogHeader>
@@ -2146,6 +2156,12 @@ function RouteComponent() {
 													<div className="flex items-center gap-3 text-muted-foreground text-sm">
 														<Mail className="h-5 w-5" />
 														<span>{selectedOpportunity.lead.email}</span>
+													</div>
+												)}
+												{selectedOpportunity.lead.phone && (
+													<div className="flex items-center gap-3 text-muted-foreground text-sm">
+														<Phone className="h-5 w-5" />
+														<span>{selectedOpportunity.lead.phone}</span>
 													</div>
 												)}
 											</div>
@@ -3210,7 +3226,6 @@ function RouteComponent() {
 						)}
 					</DialogContent>
 				</Dialog>
-			</div>
 
 			{/* Conditional View: Kanban or Table */}
 			{viewMode === "kanban" ? (

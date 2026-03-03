@@ -21,6 +21,7 @@ import { Route as VehiclesInspectionRouteImport } from './routes/vehicles/inspec
 import { Route as VehiclesAuctionVehiclesRouteImport } from './routes/vehicles/auction-vehicles'
 import { Route as JuridicoLeadIdRouteImport } from './routes/juridico/$leadId'
 import { Route as InversionesOpportunityIdRouteImport } from './routes/inversiones/$opportunityId'
+import { Route as FormularioTokenRouteImport } from './routes/formulario.$token'
 import { Route as CrmWhatsappRouteImport } from './routes/crm/whatsapp'
 import { Route as CrmVendorsRouteImport } from './routes/crm/vendors'
 import { Route as CrmQuoterRouteImport } from './routes/crm/quoter'
@@ -101,6 +102,11 @@ const InversionesOpportunityIdRoute =
     path: '/inversiones/$opportunityId',
     getParentRoute: () => rootRouteImport,
   } as any)
+const FormularioTokenRoute = FormularioTokenRouteImport.update({
+  id: '/formulario/$token',
+  path: '/formulario/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CrmWhatsappRoute = CrmWhatsappRouteImport.update({
   id: '/crm/whatsapp',
   path: '/crm/whatsapp',
@@ -212,6 +218,7 @@ export interface FileRoutesByFullPath {
   '/crm/quoter': typeof CrmQuoterRoute
   '/crm/vendors': typeof CrmVendorsRoute
   '/crm/whatsapp': typeof CrmWhatsappRoute
+  '/formulario/$token': typeof FormularioTokenRoute
   '/inversiones/$opportunityId': typeof InversionesOpportunityIdRoute
   '/juridico/$leadId': typeof JuridicoLeadIdRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
@@ -244,6 +251,7 @@ export interface FileRoutesByTo {
   '/crm/quoter': typeof CrmQuoterRoute
   '/crm/vendors': typeof CrmVendorsRoute
   '/crm/whatsapp': typeof CrmWhatsappRoute
+  '/formulario/$token': typeof FormularioTokenRoute
   '/inversiones/$opportunityId': typeof InversionesOpportunityIdRoute
   '/juridico/$leadId': typeof JuridicoLeadIdRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
@@ -277,6 +285,7 @@ export interface FileRoutesById {
   '/crm/quoter': typeof CrmQuoterRoute
   '/crm/vendors': typeof CrmVendorsRoute
   '/crm/whatsapp': typeof CrmWhatsappRoute
+  '/formulario/$token': typeof FormularioTokenRoute
   '/inversiones/$opportunityId': typeof InversionesOpportunityIdRoute
   '/juridico/$leadId': typeof JuridicoLeadIdRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
@@ -311,6 +320,7 @@ export interface FileRouteTypes {
     | '/crm/quoter'
     | '/crm/vendors'
     | '/crm/whatsapp'
+    | '/formulario/$token'
     | '/inversiones/$opportunityId'
     | '/juridico/$leadId'
     | '/vehicles/auction-vehicles'
@@ -343,6 +353,7 @@ export interface FileRouteTypes {
     | '/crm/quoter'
     | '/crm/vendors'
     | '/crm/whatsapp'
+    | '/formulario/$token'
     | '/inversiones/$opportunityId'
     | '/juridico/$leadId'
     | '/vehicles/auction-vehicles'
@@ -375,6 +386,7 @@ export interface FileRouteTypes {
     | '/crm/quoter'
     | '/crm/vendors'
     | '/crm/whatsapp'
+    | '/formulario/$token'
     | '/inversiones/$opportunityId'
     | '/juridico/$leadId'
     | '/vehicles/auction-vehicles'
@@ -408,6 +420,7 @@ export interface RootRouteChildren {
   CrmQuoterRoute: typeof CrmQuoterRoute
   CrmVendorsRoute: typeof CrmVendorsRoute
   CrmWhatsappRoute: typeof CrmWhatsappRoute
+  FormularioTokenRoute: typeof FormularioTokenRoute
   InversionesOpportunityIdRoute: typeof InversionesOpportunityIdRoute
   JuridicoLeadIdRoute: typeof JuridicoLeadIdRoute
   VehiclesAuctionVehiclesRoute: typeof VehiclesAuctionVehiclesRoute
@@ -507,6 +520,13 @@ declare module '@tanstack/react-router' {
       path: '/inversiones/$opportunityId'
       fullPath: '/inversiones/$opportunityId'
       preLoaderRoute: typeof InversionesOpportunityIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/formulario/$token': {
+      id: '/formulario/$token'
+      path: '/formulario/$token'
+      fullPath: '/formulario/$token'
+      preLoaderRoute: typeof FormularioTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/crm/whatsapp': {
@@ -656,6 +676,7 @@ const rootRouteChildren: RootRouteChildren = {
   CrmQuoterRoute: CrmQuoterRoute,
   CrmVendorsRoute: CrmVendorsRoute,
   CrmWhatsappRoute: CrmWhatsappRoute,
+  FormularioTokenRoute: FormularioTokenRoute,
   InversionesOpportunityIdRoute: InversionesOpportunityIdRoute,
   JuridicoLeadIdRoute: JuridicoLeadIdRoute,
   VehiclesAuctionVehiclesRoute: VehiclesAuctionVehiclesRoute,

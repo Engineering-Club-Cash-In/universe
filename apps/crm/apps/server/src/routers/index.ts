@@ -7,6 +7,7 @@ import { auctionRouter } from "./auctionVehicles"; // Import the auction router
 import { authRouter } from "./auth";
 import { bankAnalysisRouter } from "./bank-analysis";
 import { checksRouter } from "./checks";
+import { clientFormsRouter } from "./client-forms";
 import { cobrosRouter } from "./cobros";
 import { contractGenerationRouter } from "./contract-generation";
 import { crmRouter } from "./crm";
@@ -99,6 +100,14 @@ export const appRouter = {
 	updateCoDebtor: crmRouter.updateCoDebtor,
 	deleteCoDebtor: crmRouter.deleteCoDebtor,
 	getConsolidatedCreditAnalysis: crmRouter.getConsolidatedCreditAnalysis,
+
+	// Client Forms routes (Formularios del cliente - link público)
+	generateFormToken: clientFormsRouter.generateFormToken,
+	validateFormToken: clientFormsRouter.validateFormToken,
+	submitCreditApplication: clientFormsRouter.submitCreditApplication,
+	submitFinancialStatement: clientFormsRouter.submitFinancialStatement,
+	getClientFormData: clientFormsRouter.getClientFormData,
+	getFormTokenByOpportunity: clientFormsRouter.getFormTokenByOpportunity,
 
 	// Bank Analysis routes (Análisis de estados de cuenta)
 	analyzeBankStatements: bankAnalysisRouter.analyzeBankStatements,
@@ -279,6 +288,7 @@ export const appRouter = {
 	getResumenGlobalInversionistas:
 		accountingRouter.getResumenGlobalInversionistas,
 	createBoleta: accountingRouter.createBoleta,
+	liquidateInversionista: accountingRouter.liquidateInversionista,
 };
 
 // Investment routes exported separately to avoid TS7056 with declaration emit.

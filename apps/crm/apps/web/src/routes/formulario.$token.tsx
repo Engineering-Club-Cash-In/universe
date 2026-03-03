@@ -3,9 +3,11 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { CreditApplicationForm } from "@/components/client-forms/CreditApplicationForm";
 import { FinancialStatementForm } from "@/components/client-forms/FinancialStatementForm";
+import type {
+	CreditApplicationFormData,
+	FinancialStatementFormData,
+} from "@/components/client-forms/form-schemas";
 import { SignatureConsent } from "@/components/client-forms/SignatureConsent";
-import type { CreditApplicationFormData } from "@/components/client-forms/form-schemas";
-import type { FinancialStatementFormData } from "@/components/client-forms/form-schemas";
 import { client } from "@/utils/orpc";
 
 type FormStep =
@@ -45,10 +47,7 @@ function FormularioPage() {
 			try {
 				const result = await client.validateFormToken({ token });
 				setValidatedData(result);
-				if (
-					result.creditApplicationExists &&
-					result.financialStatementExists
-				) {
+				if (result.creditApplicationExists && result.financialStatementExists) {
 					setStep("success");
 				} else if (result.creditApplicationExists) {
 					setStep("financial");
@@ -57,9 +56,7 @@ function FormularioPage() {
 				}
 			} catch (error) {
 				const msg =
-					error instanceof Error
-						? error.message
-						: "Error al validar el enlace";
+					error instanceof Error ? error.message : "Error al validar el enlace";
 				setErrorMessage(msg);
 				setStep("error");
 			}
@@ -70,7 +67,10 @@ function FormularioPage() {
 	const handleCreditSubmit = async (data: CreditApplicationFormData) => {
 		setIsSubmitting(true);
 		try {
-			await client.submitCreditApplication({ token, data: data as Record<string, unknown> });
+			await client.submitCreditApplication({
+				token,
+				data: data as Record<string, unknown>,
+			});
 			creditDataRef.current = data;
 			toast.success("Solicitud de crédito guardada");
 			setStep("financial");
@@ -173,7 +173,7 @@ function FormularioPage() {
 							/>
 						</svg>
 					</div>
-					<h1 className="text-2xl font-bold">Enlace inválido</h1>
+					<h1 className="font-bold text-2xl">Enlace inválido</h1>
 					<p className="mt-2 text-muted-foreground">{errorMessage}</p>
 				</div>
 			</div>
@@ -199,7 +199,7 @@ function FormularioPage() {
 							/>
 						</svg>
 					</div>
-					<h1 className="text-2xl font-bold">Formularios completados</h1>
+					<h1 className="font-bold text-2xl">Formularios completados</h1>
 					<p className="mt-2 text-muted-foreground">
 						Gracias por completar sus formularios. Su asesor se pondrá en
 						contacto con usted.
@@ -209,8 +209,7 @@ function FormularioPage() {
 		);
 	}
 
-	const stepNumber =
-		step === "credit" ? 1 : step === "financial" ? 2 : 3;
+	const stepNumber = step === "credit" ? 1 : step === "financial" ? 2 : 3;
 	const stepLabel =
 		step === "credit"
 			? "Paso 1: Solicitud de Crédito"

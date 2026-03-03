@@ -36,9 +36,14 @@ export function generateCreditApplicationPdf(data: FormData) {
 	// Title
 	doc.setFontSize(14);
 	doc.setFont("helvetica", "bold");
-	doc.text("FORMULARIO SOLICITUD DE CRÉDITO SOBRE VEHÍCULOS", pageWidth / 2, y, {
-		align: "center",
-	});
+	doc.text(
+		"FORMULARIO SOLICITUD DE CRÉDITO SOBRE VEHÍCULOS",
+		pageWidth / 2,
+		y,
+		{
+			align: "center",
+		},
+	);
 	y += 5;
 	doc.setFontSize(9);
 	doc.setFont("helvetica", "normal");
@@ -58,15 +63,35 @@ export function generateCreditApplicationPdf(data: FormData) {
 		headStyles: { fillColor: [60, 60, 60] },
 		columnStyles: { 0: { fontStyle: "bold", cellWidth: 40 } },
 		body: [
-			["Primer Apellido", val(data.primerApellido), "Segundo Apellido", val(data.segundoApellido)],
-			["Apellido Casada", val(data.apellidoCasada), "Primer Nombre", val(data.primerNombre)],
+			[
+				"Primer Apellido",
+				val(data.primerApellido),
+				"Segundo Apellido",
+				val(data.segundoApellido),
+			],
+			[
+				"Apellido Casada",
+				val(data.apellidoCasada),
+				"Primer Nombre",
+				val(data.primerNombre),
+			],
 			["Segundo Nombre", val(data.segundoNombre), "DPI", val(data.dpi)],
 			["NIT", val(data.nit), "No. Licencia", val(data.licenciaNo)],
 			["Edad", val(data.edad), "Estado Civil", val(data.estadoCivil)],
-			["Dependientes", val(data.dependientes), "Fecha Nac.", val(data.fechaNacimiento)],
+			[
+				"Dependientes",
+				val(data.dependientes),
+				"Fecha Nac.",
+				val(data.fechaNacimiento),
+			],
 			["Sexo", val(data.sexo), "Nacionalidad", val(data.nacionalidad)],
 			["Dirección", { content: val(data.direccionResidencia), colSpan: 3 }],
-			["Tel. Residencia", val(data.telResidencia), "Tel. Móvil", val(data.telMovil)],
+			[
+				"Tel. Residencia",
+				val(data.telResidencia),
+				"Tel. Móvil",
+				val(data.telMovil),
+			],
 			["Tel. Emergencia", val(data.telEmergencia), "Email", val(data.email)],
 		],
 	});
@@ -86,8 +111,18 @@ export function generateCreditApplicationPdf(data: FormData) {
 		columnStyles: { 0: { fontStyle: "bold", cellWidth: 40 } },
 		body: [
 			["Marca", val(data.vehiculoMarca), "Línea", val(data.vehiculoLinea)],
-			["Modelo/Año", val(data.vehiculoModelo), "Valor Estimado", formatQ(data.valorEstimado)],
-			["Monto Solicitado", formatQ(data.montoSolicitado), "Uso Uber", data.usoUber ? "Sí" : "No"],
+			[
+				"Modelo/Año",
+				val(data.vehiculoModelo),
+				"Valor Estimado",
+				formatQ(data.valorEstimado),
+			],
+			[
+				"Monto Solicitado",
+				formatQ(data.montoSolicitado),
+				"Uso Uber",
+				data.usoUber ? "Sí" : "No",
+			],
 		],
 	});
 
@@ -106,11 +141,26 @@ export function generateCreditApplicationPdf(data: FormData) {
 		columnStyles: { 0: { fontStyle: "bold", cellWidth: 40 } },
 		body: [
 			["Profesión", val(data.profesion), "Puesto", val(data.puesto)],
-			["Sueldo", formatQ(data.sueldo), "Periodicidad", val(data.sueldoPeriodicidad)],
-			["Egresos", formatQ(data.egresos), "Periodicidad", val(data.egresosPeriodicidad)],
+			[
+				"Sueldo",
+				formatQ(data.sueldo),
+				"Periodicidad",
+				val(data.sueldoPeriodicidad),
+			],
+			[
+				"Egresos",
+				formatQ(data.egresos),
+				"Periodicidad",
+				val(data.egresosPeriodicidad),
+			],
 			["Prox. Pago", val(data.fechaProximoPago), "Empresa", val(data.empresa)],
 			["Dir. Trabajo", { content: val(data.direccionTrabajo), colSpan: 3 }],
-			["Inicio Labores", val(data.fechaInicioLabores), "Tiempo", val(data.tiempoTrabajado)],
+			[
+				"Inicio Labores",
+				val(data.fechaInicioLabores),
+				"Tiempo",
+				val(data.tiempoTrabajado),
+			],
 			["Horarios", val(data.horarios), "Tel. Trabajo", val(data.telTrabajo)],
 			["Supervisor", val(data.supervisor), "RRHH", val(data.rrhh)],
 			["Banco Pago", val(data.bancoPago), "No. Cuenta", val(data.numCuenta)],
@@ -139,15 +189,28 @@ export function generateCreditApplicationPdf(data: FormData) {
 		columnStyles: { 0: { fontStyle: "bold", cellWidth: 40 } },
 		body: [
 			["Nombre", { content: val(data.conyugeNombre), colSpan: 3 }],
-			["Empresa", val(data.conyugeEmpresa), "Dirección", val(data.conyugeDireccion)],
-			["Tel. Oficina", val(data.conyugeTelOficina), "Tel. Móvil", val(data.conyugeTelMovil)],
+			[
+				"Empresa",
+				val(data.conyugeEmpresa),
+				"Dirección",
+				val(data.conyugeDireccion),
+			],
+			[
+				"Tel. Oficina",
+				val(data.conyugeTelOficina),
+				"Tel. Móvil",
+				val(data.conyugeTelMovil),
+			],
 		],
 	});
 
 	y = (doc as any).lastAutoTable.finalY + 8;
 
 	// Section: Referencias Crediticias
-	if (Array.isArray(data.referenciasCrediticias) && data.referenciasCrediticias.length > 0) {
+	if (
+		Array.isArray(data.referenciasCrediticias) &&
+		data.referenciasCrediticias.length > 0
+	) {
 		doc.setFontSize(11);
 		doc.setFont("helvetica", "bold");
 		doc.text("REFERENCIAS CREDITICIAS", 14, y);
@@ -168,8 +231,14 @@ export function generateCreditApplicationPdf(data: FormData) {
 	}
 
 	// Section: Cuentas Bancarias
-	if (Array.isArray(data.cuentasBancarias) && data.cuentasBancarias.length > 0) {
-		if (y > 250) { doc.addPage(); y = 15; }
+	if (
+		Array.isArray(data.cuentasBancarias) &&
+		data.cuentasBancarias.length > 0
+	) {
+		if (y > 250) {
+			doc.addPage();
+			y = 15;
+		}
 		doc.setFontSize(11);
 		doc.setFont("helvetica", "bold");
 		doc.text("OTRAS CUENTAS BANCARIAS", 14, y);
@@ -183,15 +252,26 @@ export function generateCreditApplicationPdf(data: FormData) {
 			headStyles: { fillColor: [60, 60, 60] },
 			body: data.cuentasBancarias
 				.filter((c: any) => c.numero || c.banco)
-				.map((c: any, i: number) => [i + 1, val(c.numero), val(c.tipo), val(c.banco)]),
+				.map((c: any, i: number) => [
+					i + 1,
+					val(c.numero),
+					val(c.tipo),
+					val(c.banco),
+				]),
 		});
 
 		y = (doc as any).lastAutoTable.finalY + 8;
 	}
 
 	// Section: Referencias Personales
-	if (Array.isArray(data.referenciasPersonales) && data.referenciasPersonales.length > 0) {
-		if (y > 250) { doc.addPage(); y = 15; }
+	if (
+		Array.isArray(data.referenciasPersonales) &&
+		data.referenciasPersonales.length > 0
+	) {
+		if (y > 250) {
+			doc.addPage();
+			y = 15;
+		}
 		doc.setFontSize(11);
 		doc.setFont("helvetica", "bold");
 		doc.text("REFERENCIAS PERSONALES", 14, y);
@@ -205,14 +285,22 @@ export function generateCreditApplicationPdf(data: FormData) {
 			headStyles: { fillColor: [60, 60, 60] },
 			body: data.referenciasPersonales
 				.filter((r: any) => r.nombre || r.telefono)
-				.map((r: any, i: number) => [i + 1, val(r.nombre), val(r.relacion), val(r.telefono)]),
+				.map((r: any, i: number) => [
+					i + 1,
+					val(r.nombre),
+					val(r.relacion),
+					val(r.telefono),
+				]),
 		});
 
 		y = (doc as any).lastAutoTable.finalY + 8;
 	}
 
 	// Section: Control Interno
-	if (y > 250) { doc.addPage(); y = 15; }
+	if (y > 250) {
+		doc.addPage();
+		y = 15;
+	}
 	doc.setFontSize(11);
 	doc.setFont("helvetica", "bold");
 	doc.text("CONTROL INTERNO", 14, y);
@@ -233,7 +321,10 @@ export function generateCreditApplicationPdf(data: FormData) {
 	y = (doc as any).lastAutoTable.finalY + 15;
 
 	// Signature
-	if (y > 230) { doc.addPage(); y = 15; }
+	if (y > 230) {
+		doc.addPage();
+		y = 15;
+	}
 	if (data.firmaImagen) {
 		try {
 			doc.addImage(data.firmaImagen, "PNG", 14, y, 60, 30);
@@ -248,7 +339,11 @@ export function generateCreditApplicationPdf(data: FormData) {
 	doc.text("Firma del Solicitante", 14, y);
 	y += 4;
 	if (data.fechaFirma) {
-		doc.text(`Fecha: ${val(data.fechaFirma)}  Hora: ${val(data.horaFirma)}`, 14, y);
+		doc.text(
+			`Fecha: ${val(data.fechaFirma)}  Hora: ${val(data.horaFirma)}`,
+			14,
+			y,
+		);
 	}
 
 	// Footer
@@ -302,7 +397,12 @@ export function generateFinancialStatementPdf(data: FormData) {
 		styles: { fontSize: 8, cellPadding: 2 },
 		columnStyles: { 0: { fontStyle: "bold", cellWidth: 40 } },
 		body: [
-			["Nombre", `${val(data.primerNombre)} ${val(data.segundoNombre)}`, "Apellidos", `${val(data.primerApellido)} ${val(data.segundoApellido)}`],
+			[
+				"Nombre",
+				`${val(data.primerNombre)} ${val(data.segundoNombre)}`,
+				"Apellidos",
+				`${val(data.primerApellido)} ${val(data.segundoApellido)}`,
+			],
 			["Apellido Casada", val(data.apellidoCasada), "DPI", val(data.dpi)],
 			["DPI Extendido en", val(data.dpiExtendidoEn), "NIT", val(data.nit)],
 		],
@@ -361,14 +461,15 @@ export function generateFinancialStatementPdf(data: FormData) {
 	doc.text("DETALLE DE ACTIVOS", 14, y);
 	y += 2;
 
-	const activosRows: string[][] = [
-		["Efectivo", formatQ(data.efectivo)],
-	];
+	const activosRows: string[][] = [["Efectivo", formatQ(data.efectivo)]];
 
 	if (Array.isArray(data.depositosBancarios)) {
 		for (const dep of data.depositosBancarios) {
 			if (dep.monto && parseNum(dep.monto) > 0) {
-				activosRows.push([`Depósito: ${val(dep.descripcion)}`, formatQ(dep.monto)]);
+				activosRows.push([
+					`Depósito: ${val(dep.descripcion)}`,
+					formatQ(dep.monto),
+				]);
 			}
 		}
 	}
@@ -377,8 +478,14 @@ export function generateFinancialStatementPdf(data: FormData) {
 		["Ctas. Cobrar (Amigos)", formatQ(data.cuentasCobrarAmigos)],
 		["Ctas. Cobrar (Otros)", formatQ(data.cuentasCobrarOtros)],
 		["Documentos por Cobrar", formatQ(data.documentosCobrar)],
-		[`Bienes Inmuebles (${val(data.bienesInmueblesCantidad)})`, formatQ(data.bienesInmueblesValor)],
-		[`Vehículos (${val(data.vehiculosCantidad)})`, formatQ(data.vehiculosValor)],
+		[
+			`Bienes Inmuebles (${val(data.bienesInmueblesCantidad)})`,
+			formatQ(data.bienesInmueblesValor),
+		],
+		[
+			`Vehículos (${val(data.vehiculosCantidad)})`,
+			formatQ(data.vehiculosValor),
+		],
 		["Maquinaria", formatQ(data.maquinaria)],
 		["Muebles", formatQ(data.muebles)],
 		["Menaje", formatQ(data.menaje)],
@@ -387,7 +494,10 @@ export function generateFinancialStatementPdf(data: FormData) {
 	if (Array.isArray(data.otrosActivos)) {
 		for (const item of data.otrosActivos) {
 			if (item.monto && parseNum(item.monto) > 0) {
-				activosRows.push([`Otro: ${val(item.descripcion)}`, formatQ(item.monto)]);
+				activosRows.push([
+					`Otro: ${val(item.descripcion)}`,
+					formatQ(item.monto),
+				]);
 			}
 		}
 	}
@@ -405,7 +515,10 @@ export function generateFinancialStatementPdf(data: FormData) {
 	y = (doc as any).lastAutoTable.finalY + 8;
 
 	// Pasivos Detail
-	if (y > 230) { doc.addPage(); y = 15; }
+	if (y > 230) {
+		doc.addPage();
+		y = 15;
+	}
 	doc.setFontSize(11);
 	doc.setFont("helvetica", "bold");
 	doc.text("DETALLE DE PASIVOS", 14, y);
@@ -428,7 +541,10 @@ export function generateFinancialStatementPdf(data: FormData) {
 		if (Array.isArray(data[field])) {
 			for (const item of data[field]) {
 				if (item.monto && parseNum(item.monto) > 0) {
-					pasivosRows.push([`${label}: ${val(item.descripcion)}`, formatQ(item.monto)]);
+					pasivosRows.push([
+						`${label}: ${val(item.descripcion)}`,
+						formatQ(item.monto),
+					]);
 				}
 			}
 		}
@@ -447,14 +563,21 @@ export function generateFinancialStatementPdf(data: FormData) {
 	y = (doc as any).lastAutoTable.finalY + 8;
 
 	// Ingresos y Egresos
-	if (y > 200) { doc.addPage(); y = 15; }
+	if (y > 200) {
+		doc.addPage();
+		y = 15;
+	}
 
 	const totalIngresos =
-		parseNum(data.sueldos) + parseNum(data.bonificaciones) +
-		parseNum(data.arrendamientos) + sumArray(data.otrosIngresos);
+		parseNum(data.sueldos) +
+		parseNum(data.bonificaciones) +
+		parseNum(data.arrendamientos) +
+		sumArray(data.otrosIngresos);
 	const totalEgresos =
-		parseNum(data.gastosPersonales) + parseNum(data.alquileres) +
-		parseNum(data.amortizacionVivienda) + parseNum(data.deudasPersonales) +
+		parseNum(data.gastosPersonales) +
+		parseNum(data.alquileres) +
+		parseNum(data.amortizacionVivienda) +
+		parseNum(data.deudasPersonales) +
 		sumArray(data.otrosEgresos);
 
 	doc.setFontSize(11);
@@ -508,7 +631,10 @@ export function generateFinancialStatementPdf(data: FormData) {
 
 	// Origen de Ingresos
 	if (data.origenIngresos || data.comoAcreditanIngresos) {
-		if (y > 240) { doc.addPage(); y = 15; }
+		if (y > 240) {
+			doc.addPage();
+			y = 15;
+		}
 		doc.setFontSize(11);
 		doc.setFont("helvetica", "bold");
 		doc.text("ORIGEN DE INGRESOS", 14, y);
@@ -516,18 +642,25 @@ export function generateFinancialStatementPdf(data: FormData) {
 		doc.setFontSize(8);
 		doc.setFont("helvetica", "normal");
 		if (data.origenIngresos) {
-			doc.text(`Origen: ${val(data.origenIngresos)}`, 14, y, { maxWidth: pageWidth - 28 });
+			doc.text(`Origen: ${val(data.origenIngresos)}`, 14, y, {
+				maxWidth: pageWidth - 28,
+			});
 			y += 8;
 		}
 		if (data.comoAcreditanIngresos) {
-			doc.text(`Acreditación: ${val(data.comoAcreditanIngresos)}`, 14, y, { maxWidth: pageWidth - 28 });
+			doc.text(`Acreditación: ${val(data.comoAcreditanIngresos)}`, 14, y, {
+				maxWidth: pageWidth - 28,
+			});
 			y += 8;
 		}
 	}
 
 	// Anexo Inmuebles
 	if (Array.isArray(data.anexoInmuebles) && data.anexoInmuebles.length > 0) {
-		if (y > 220) { doc.addPage(); y = 15; }
+		if (y > 220) {
+			doc.addPage();
+			y = 15;
+		}
 		doc.setFontSize(11);
 		doc.setFont("helvetica", "bold");
 		doc.text("ANEXO: BIENES INMUEBLES", 14, y);
@@ -537,12 +670,26 @@ export function generateFinancialStatementPdf(data: FormData) {
 			startY: y,
 			theme: "grid",
 			styles: { fontSize: 7, cellPadding: 2 },
-			head: [["Finca", "Folio", "Libro", "Valor", "Hipotecada", "A Favor De", "Dirección"]],
+			head: [
+				[
+					"Finca",
+					"Folio",
+					"Libro",
+					"Valor",
+					"Hipotecada",
+					"A Favor De",
+					"Dirección",
+				],
+			],
 			headStyles: { fillColor: [60, 60, 60] },
 			body: data.anexoInmuebles.map((item: any) => [
-				val(item.finca), val(item.folio), val(item.libro),
-				formatQ(item.valor), item.hipotecada ? "Sí" : "No",
-				val(item.aFavorDe), val(item.direccion),
+				val(item.finca),
+				val(item.folio),
+				val(item.libro),
+				formatQ(item.valor),
+				item.hipotecada ? "Sí" : "No",
+				val(item.aFavorDe),
+				val(item.direccion),
 			]),
 		});
 		y = (doc as any).lastAutoTable.finalY + 8;
@@ -550,7 +697,10 @@ export function generateFinancialStatementPdf(data: FormData) {
 
 	// Anexo Vehículos
 	if (Array.isArray(data.anexoVehiculos) && data.anexoVehiculos.length > 0) {
-		if (y > 230) { doc.addPage(); y = 15; }
+		if (y > 230) {
+			doc.addPage();
+			y = 15;
+		}
 		doc.setFontSize(11);
 		doc.setFont("helvetica", "bold");
 		doc.text("ANEXO: VEHÍCULOS", 14, y);
@@ -563,15 +713,21 @@ export function generateFinancialStatementPdf(data: FormData) {
 			head: [["Marca", "Línea", "Placa", "Modelo/Año", "Valor"]],
 			headStyles: { fillColor: [60, 60, 60] },
 			body: data.anexoVehiculos.map((item: any) => [
-				val(item.marca), val(item.linea), val(item.placa),
-				val(item.modeloAnio), formatQ(item.valor),
+				val(item.marca),
+				val(item.linea),
+				val(item.placa),
+				val(item.modeloAnio),
+				formatQ(item.valor),
 			]),
 		});
 		y = (doc as any).lastAutoTable.finalY + 8;
 	}
 
 	// Signature
-	if (y > 230) { doc.addPage(); y = 15; }
+	if (y > 230) {
+		doc.addPage();
+		y = 15;
+	}
 	y += 5;
 	if (data.firmaImagen) {
 		try {
@@ -595,7 +751,9 @@ export function generateFinancialStatementPdf(data: FormData) {
 	doc.setTextColor(128);
 	doc.text(
 		"Declaro bajo juramento que la información aquí consignada es verídica y que los bienes declarados son de mi legítima propiedad.",
-		14, y, { maxWidth: pageWidth - 28 },
+		14,
+		y,
+		{ maxWidth: pageWidth - 28 },
 	);
 	doc.setTextColor(0);
 

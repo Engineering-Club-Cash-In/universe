@@ -1,8 +1,5 @@
 import Map from "./assets/Map.png";
 import {
-  InvestorsLogo as Investors,
-  Tranki,
-  Listo,
   Facebook,
   Instagram,
   Linkedin,

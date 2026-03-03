@@ -318,6 +318,8 @@ export const InfoPerson = () => {
                   onChange={(value) => setTipoCuenta(value)}
                   options={[
                     { value: "MONETARIA", label: "Monetaria" },
+                    { value: "MONETARIA Q", label: "Monetaria Q" },
+                    { value: "MONETARIA $", label: "Monetaria $" },
                     { value: "AHORRO", label: "Ahorro" },
                   ]}
                   placeholder="Selecciona tipo de cuenta"

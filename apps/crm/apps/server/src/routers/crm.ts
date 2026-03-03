@@ -933,6 +933,7 @@ export const crmRouter = {
 					firstName: leads.firstName,
 					lastName: leads.lastName,
 					email: leads.email,
+					phone: leads.phone,
 					age: leads.age,
 					direccion: leads.direccion,
 					departamento: leads.departamento,
@@ -1021,11 +1022,7 @@ export const crmRouter = {
 					input.createdMonth - 1,
 					1,
 				);
-				const createdEnd = new Date(
-					input.createdYear,
-					input.createdMonth,
-					1,
-				);
+				const createdEnd = new Date(input.createdYear, input.createdMonth, 1);
 				conditions.push(gte(opportunities.createdAt, createdStart));
 				conditions.push(lt(opportunities.createdAt, createdEnd));
 			}
@@ -1053,18 +1050,13 @@ export const crmRouter = {
 						.from(opportunityStageHistory)
 						.where(
 							and(
-								inArray(
-									opportunityStageHistory.toStageId,
-									fullStageIds,
-								),
+								inArray(opportunityStageHistory.toStageId, fullStageIds),
 								gte(opportunityStageHistory.changedAt, startOfMonth),
 								lt(opportunityStageHistory.changedAt, endOfMonth),
 							),
 						);
 
-					const thisMonthOppIds = thisMonthFullOpps.map(
-						(o) => o.opportunityId,
-					);
+					const thisMonthOppIds = thisMonthFullOpps.map((o) => o.opportunityId);
 
 					conditions.push(
 						or(
@@ -1083,10 +1075,7 @@ export const crmRouter = {
 					.from(salesStages)
 					.where(
 						and(
-							gte(
-								salesStages.closurePercentage,
-								PLACED_STAGE_THRESHOLD,
-							),
+							gte(salesStages.closurePercentage, PLACED_STAGE_THRESHOLD),
 							lt(salesStages.closurePercentage, 100),
 						),
 					);
@@ -1100,18 +1089,13 @@ export const crmRouter = {
 						.from(opportunityStageHistory)
 						.where(
 							and(
-								inArray(
-									opportunityStageHistory.toStageId,
-									placedStageIds,
-								),
+								inArray(opportunityStageHistory.toStageId, placedStageIds),
 								gte(opportunityStageHistory.changedAt, startOfMonth),
 								lt(opportunityStageHistory.changedAt, endOfMonth),
 							),
 						);
 
-					const placedOppIds = placedThisMonth.map(
-						(o) => o.opportunityId,
-					);
+					const placedOppIds = placedThisMonth.map((o) => o.opportunityId);
 
 					conditions.push(
 						or(

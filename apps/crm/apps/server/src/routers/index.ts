@@ -233,12 +233,6 @@ export const appRouter = {
 	addDocumentToNotification: notificationsRouter.addDocumentToNotification,
 	getAccountDocumentsByOpportunities:
 		notificationsRouter.getAccountDocumentsByOpportunities,
-	getDisbursementForOpportunity:
-		notificationsRouter.getDisbursementForOpportunity,
-	deleteNotificationDocument:
-		notificationsRouter.deleteNotificationDocument,
-	notifyDisbursementCompleted:
-		notificationsRouter.notifyDisbursementCompleted,
 	markAllNotificationsAsRead: notificationsRouter.markAllNotificationsAsRead,
 
 	// Quotations routes
@@ -303,5 +297,15 @@ export const appRouter = {
 // The investmentsRouter type is too complex for TypeScript to serialize in a
 // single appRouter declaration. Client merges both types.
 // See: https://orpc.dev/docs/advanced/exceeds-the-maximum-length-problem
+
+// Disbursement routes exported separately to avoid TS7056 with declaration emit.
+export const disbursementRouter = {
+	getDisbursementForOpportunity:
+		notificationsRouter.getDisbursementForOpportunity,
+	deleteNotificationDocument:
+		notificationsRouter.deleteNotificationDocument,
+	notifyDisbursementCompleted:
+		notificationsRouter.notifyDisbursementCompleted,
+};
 
 export type AppRouter = typeof appRouter;

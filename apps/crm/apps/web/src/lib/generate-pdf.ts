@@ -88,7 +88,10 @@ interface QuotationData {
 	}[];
 }
 
-export function generateQuotationPdf(quotation: QuotationData) {
+export function generateQuotationPdf(
+	quotation: QuotationData,
+	options?: { clientVersion?: boolean },
+) {
 	const doc = new jsPDF();
 
 	// Helper function to format currency
@@ -177,9 +180,11 @@ export function generateQuotationPdf(quotation: QuotationData) {
 	doc.text("Gastos administrativos:", leftCol, y);
 	doc.text(formatCurrency(quotation.adminCost), leftValueCol, y);
 
-	y += 7;
-	doc.text("Membresía:", leftCol, y);
-	doc.text(formatCurrency(quotation.membershipCost), leftValueCol, y);
+	if (!options?.clientVersion) {
+		y += 7;
+		doc.text("Membresía:", leftCol, y);
+		doc.text(formatCurrency(quotation.membershipCost), leftValueCol, y);
+	}
 
 	// Total financed and monthly payment - highlighted
 	y += 12;

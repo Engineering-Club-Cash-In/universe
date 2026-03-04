@@ -41,7 +41,7 @@ export const clientFormsRouter = {
 				})
 				.returning();
 
-			const url = `${process.env.CORS_ORIGIN}/formulario/${tokenRow.token}`;
+			const url = `${process.env.FRONT_URL}/formulario/${tokenRow.token}`;
 			return { token: tokenRow.token, url };
 		}),
 
@@ -279,7 +279,7 @@ export const clientFormsRouter = {
 
 			return {
 				token: tokenRow.token,
-				url: `${process.env.CORS_ORIGIN}/formulario/${tokenRow.token}`,
+				url: `${process.env.FRONT_URL}/formulario/${tokenRow.token}`,
 				expiresAt: tokenRow.expiresAt,
 				used: tokenRow.used,
 			};

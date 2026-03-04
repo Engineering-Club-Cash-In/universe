@@ -9,10 +9,10 @@ const urlImage = import.meta.env.VITE_IMAGE_URL;
 
 export const IconCashIn = () => (
   <Link href="/" className="flex items-center gap-2 lg:gap-6 lg:px-12 z-50">
-    <h1 className="text-4xl font-bold lg:text-header-3">CashIn</h1>
     <div className="w-8 h-8">
       <IconCCI />
     </div>
+    <h1 className="text-4xl font-bold lg:text-header-3">CashIn</h1>
   </Link>
 );
 

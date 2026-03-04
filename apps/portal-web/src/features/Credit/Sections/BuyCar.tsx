@@ -15,17 +15,17 @@ export const BuyCar = () => {
   const items = [
     {
       icon: <IconCheckDoc width={isMobile ? 20 : 34} />,
-      title: "Aplica",
+      title: "Tú aplicas",
       description: "Completa tu solicitud en minutos",
     },
     {
       icon: <IconSearch width={isMobile ? 20 : 34} />,
-      title: "Evaluamos",
+      title: "Nosotros evaluamos",
       description: "Analizamos tu perfil y el vehículo que deseas",
     },
     {
       icon: <IconKey width={isMobile ? 20 : 34} />,
-      title: "Estrenas tu auto",
+      title: "Y estrenas tu auto",
       description: "Recibe tu préstamo y disfruta",
     },
   ];

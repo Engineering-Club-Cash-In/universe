@@ -36,25 +36,25 @@ export const SOCIAL_CONTACTS = [
   {
     icon: Whatsapp,
     lead: false,
-    label: "+502 2234-1368",
-    href: "https://wa.me/50222341368",
+    label: "+502 3484-9518",
+    href: "https://wa.me/50234849518",
   },
   {
     icon: Facebook,
-    label: "Clubcashin",
-    href: "https://facebook.com/clubcashin",
+    label: "ClubCashIn",
+    href: "https://facebook.com/ClubCashIn",
   },
   {
     icon: Linkedin,
-    label: "clubcashin-com",
-    href: "https://linkedin.com/company/clubcashin-com",
+    label: "Club Cash In",
+    href: "https://linkedin.com/company/club-cash-in",
   },
   {
     icon: Location,
     lead: false,
-    label: '3a avenida "A" 13-78, Colonia Lomas de Pamplona zona 13',
+    label: "Km 16.5, Centro Comercial Muxbal, Guatemala",
     className: "max-w-[280px] text-center",
-    href: "https://www.google.com/maps/place/Club+Cash+In/@14.5992026,-90.5374228,873m/data=!3m2!1e3!4b1!4m6!3m5!1s0x8589a1a13ede014d:0xcc9c190a50d9f749!8m2!3d14.5992026!4d-90.5348479!16s%2Fg%2F11k0wwn0rc!5m1!1e1?entry=ttu&g_ep=EgoyMDI1MTExNi4wIKXMDSoASAFQAw%3D%3D",
+    href: "https://www.google.com/maps/search/Centro+Comercial+Muxbal+Guatemala",
   },
 ];
 

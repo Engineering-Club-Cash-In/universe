@@ -76,9 +76,7 @@ export const NavBar = () => {
   );
 
   // Si no tiene DPI, solo mostrar "Mi Perfil"
-  const profileMenuItems = !user?.dpi
-    ? filteredProfileItems.filter((item) => item.id === "/profile")
-    : filteredProfileItems;
+  const profileMenuItems =  filteredProfileItems;
 
   const handleLogout = async () => {
     try {

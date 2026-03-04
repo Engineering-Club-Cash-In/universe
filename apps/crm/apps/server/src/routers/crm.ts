@@ -5932,6 +5932,9 @@ export const crmRouter = {
 			const placedStageIds = placedStages.map((s) => s.id);
 
 			let ranking: { name: string; monto: number }[] = [];
+			let byTipoCredito: { name: string; monto: number }[] = [];
+			let byMarca: { name: string; monto: number; cantidad: number }[] = [];
+			let byMedio: { name: string; monto: number }[] = [];
 			if (placedStageIds.length > 0) {
 				// Find opportunities that moved to a placed stage within this month
 				const placedThisMonth = await db
@@ -5972,6 +5975,104 @@ export const crmRouter = {
 
 					ranking = rankingRows.map((r) => ({
 						name: r.userName || "Sin asignar",
+						monto: Number.parseFloat(r.monto) || 0,
+					}));
+
+					// 4) Monto colocado por tipo de crédito
+					const tipoCreditoConditions = [
+						inArray(opportunities.id, placedOppIds),
+						inArray(opportunities.stageId, placedStageIds),
+						not(eq(opportunities.status, "migrate")),
+					];
+					if (userFilter) {
+						tipoCreditoConditions.push(
+							eq(opportunities.assignedTo, userFilter),
+						);
+					}
+					const tipoCreditoRows = await db
+						.select({
+							creditType: opportunities.creditType,
+							monto: sql<string>`coalesce(sum(${opportunities.value}), 0)`,
+						})
+						.from(opportunities)
+						.where(and(...tipoCreditoConditions))
+						.groupBy(opportunities.creditType);
+
+					const CREDIT_TYPE_LABELS: Record<string, string> = {
+						autocompra: "Autocompra",
+						sobre_vehiculo: "Sobre Vehículo",
+					};
+					byTipoCredito = tipoCreditoRows.map((r) => ({
+						name: CREDIT_TYPE_LABELS[r.creditType] || r.creditType,
+						monto: Number.parseFloat(r.monto) || 0,
+					}));
+
+					// 5) Monto colocado y cantidad por marca de vehículo
+					const marcaConditions = [
+						inArray(opportunities.id, placedOppIds),
+						inArray(opportunities.stageId, placedStageIds),
+						not(eq(opportunities.status, "migrate")),
+						isNotNull(opportunities.vehicleId),
+					];
+					if (userFilter) {
+						marcaConditions.push(
+							eq(opportunities.assignedTo, userFilter),
+						);
+					}
+					const marcaRows = await db
+						.select({
+							make: vehicles.make,
+							monto: sql<string>`coalesce(sum(${opportunities.value}), 0)`,
+							cantidad: count(),
+						})
+						.from(opportunities)
+						.innerJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+						.where(and(...marcaConditions))
+						.groupBy(vehicles.make)
+						.orderBy(desc(sql`sum(${opportunities.value})`));
+
+					byMarca = marcaRows.map((r) => ({
+						name: r.make || "Sin marca",
+						monto: Number.parseFloat(r.monto) || 0,
+						cantidad: r.cantidad,
+					}));
+
+					// 6) Monto colocado por medio/fuente
+					const medioConditions = [
+						inArray(opportunities.id, placedOppIds),
+						inArray(opportunities.stageId, placedStageIds),
+						not(eq(opportunities.status, "migrate")),
+					];
+					if (userFilter) {
+						medioConditions.push(
+							eq(opportunities.assignedTo, userFilter),
+						);
+					}
+					const medioRows = await db
+						.select({
+							source: opportunities.source,
+							monto: sql<string>`coalesce(sum(${opportunities.value}), 0)`,
+						})
+						.from(opportunities)
+						.where(and(...medioConditions))
+						.groupBy(opportunities.source)
+						.orderBy(desc(sql`sum(${opportunities.value})`));
+
+					const SOURCE_LABELS: Record<string, string> = {
+						website: "Sitio Web",
+						referral: "Referido",
+						cold_call: "Llamada en Frío",
+						email: "Email",
+						social_media: "Redes Sociales",
+						event: "Evento",
+						other: "Otro",
+						facebook: "Facebook",
+						instagram: "Instagram",
+						google: "Google",
+						Whatsapp: "WhatsApp",
+					};
+					byMedio = medioRows.map((r) => ({
+						name: SOURCE_LABELS[r.source || ""] || r.source || "Sin fuente",
 						monto: Number.parseFloat(r.monto) || 0,
 					}));
 				}
@@ -6015,6 +6116,6 @@ export const crmRouter = {
 				(a, b) => b.abiertas + b.cerradas - (a.abiertas + a.cerradas),
 			);
 
-			return { pipeline, ranking, activity };
+			return { pipeline, ranking, activity, byTipoCredito, byMarca, byMedio };
 		}),
 };

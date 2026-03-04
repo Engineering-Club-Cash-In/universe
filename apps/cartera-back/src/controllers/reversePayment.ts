@@ -857,7 +857,7 @@ interface AnularFacturaCofidiResult {
   mensaje?: string;
 }
 
-async function anularFacturaEnCofidi(
+export async function anularFacturaEnCofidi(
   params: AnularFacturaCofidiParams,
 ): Promise<AnularFacturaCofidiResult> {
   try {

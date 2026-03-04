@@ -17,7 +17,9 @@ import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment } from "../co
 import { eq } from "drizzle-orm";
 import { db } from "../database";
 import { creditos, pagos_credito } from "../database/db";
+import { revalidatePayment } from "../controllers/revalidatePayment";
 import { reversePayment } from "../controllers/reversePayment";
+import { revertPaymentToPending } from "../controllers/revertPaymentToPending";
 import { ajustarCuotasConSIFCO, marcarCuotasPagadasHastaNumero, procesarPagosSIFCODesdeJSON } from "../controllers/migratePayments";
 import { updateInstallments, updateAllInstallments } from "../controllers/updateCredit";
 
@@ -38,6 +40,8 @@ export const paymentRouter = new Elysia()
   // Endpoint para registrar pago (ya lo tienes)
   .post("/newPayment", insertPayment)
   .post("/reversePayment", reversePayment)
+  .post("/revertPaymentToPending", revertPaymentToPending)
+  .post("/revalidatePayment", revalidatePayment)
 
   // Nuevo endpoint para buscar pagos por SIFCO y/o fecha
   .get("/paymentByCredit", async ({ query, set }) => {
@@ -1181,14 +1185,15 @@ export const paymentRouter = new Elysia()
   "/update-pagos-espejo",
   async ({ body, set }) => {
     try {
-      const { numero_credito_sifco, nombre_inversionista, abono_capital, abono_interes, abono_iva } = body;
+      const { numero_credito_sifco, nombre_inversionista, abono_capital, abono_interes, abono_iva, nombre_cliente } = body;
 
       const result = await updatePagosEspejoPorCredito(
         numero_credito_sifco,
         nombre_inversionista,
         abono_capital,
         abono_interes,
-        abono_iva
+        abono_iva,
+        nombre_cliente
       );
 
       set.status = 200;
@@ -1209,6 +1214,7 @@ export const paymentRouter = new Elysia()
       abono_capital: t.Optional(t.Number()),
       abono_interes: t.Optional(t.Number()),
       abono_iva: t.Optional(t.Number()),
+      nombre_cliente: t.Optional(t.String()),
     }),
     detail: {
       tags: ["Pagos/Inversionistas"],

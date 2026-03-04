@@ -583,8 +583,7 @@ export const crmRouter = {
 
 						if (!firstStage) {
 							throw new ORPCError("INTERNAL_SERVER_ERROR", {
-								message:
-									"No se encontró el primer stage de ventas",
+								message: "No se encontró el primer stage de ventas",
 							});
 						}
 
@@ -3113,8 +3112,7 @@ export const crmRouter = {
 					candidateIds.length > 0
 						? await db
 								.select({
-									opportunityId:
-										opportunityStageHistory.opportunityId,
+									opportunityId: opportunityStageHistory.opportunityId,
 								})
 								.from(opportunityStageHistory)
 								.where(
@@ -3123,14 +3121,8 @@ export const crmRouter = {
 											opportunityStageHistory.opportunityId,
 											candidateIds,
 										),
-										inArray(
-											opportunityStageHistory.toStageId,
-											placedStageIds,
-										),
-										lt(
-											opportunityStageHistory.changedAt,
-											startOfMonth,
-										),
+										inArray(opportunityStageHistory.toStageId, placedStageIds),
+										lt(opportunityStageHistory.changedAt, startOfMonth),
 									),
 								)
 						: [];
@@ -5948,9 +5940,36 @@ export const crmRouter = {
 						),
 					);
 
-				const placedOppIds = [
+				const candidateIds = [
 					...new Set(placedThisMonth.map((o) => o.opportunityId)),
 				];
+
+				// Exclude opportunities that already reached placed before this month
+				const alreadyPlacedBefore =
+					candidateIds.length > 0
+						? await db
+								.select({
+									opportunityId: opportunityStageHistory.opportunityId,
+								})
+								.from(opportunityStageHistory)
+								.where(
+									and(
+										inArray(
+											opportunityStageHistory.opportunityId,
+											candidateIds,
+										),
+										inArray(opportunityStageHistory.toStageId, placedStageIds),
+										lt(opportunityStageHistory.changedAt, startOfMonth),
+									),
+								)
+						: [];
+
+				const alreadyPlacedIds = new Set(
+					alreadyPlacedBefore.map((o) => o.opportunityId),
+				);
+				const placedOppIds = candidateIds.filter(
+					(id) => !alreadyPlacedIds.has(id),
+				);
 
 				if (placedOppIds.length > 0) {
 					const rankingConditions = [
@@ -6015,20 +6034,19 @@ export const crmRouter = {
 						isNotNull(opportunities.vehicleId),
 					];
 					if (userFilter) {
-						marcaConditions.push(
-							eq(opportunities.assignedTo, userFilter),
-						);
+						marcaConditions.push(eq(opportunities.assignedTo, userFilter));
 					}
+					const marcaNorm = sql<string>`upper(trim(${vehicles.make}))`;
 					const marcaRows = await db
 						.select({
-							make: vehicles.make,
+							make: marcaNorm,
 							monto: sql<string>`coalesce(sum(${opportunities.value}), 0)`,
 							cantidad: count(),
 						})
 						.from(opportunities)
 						.innerJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
 						.where(and(...marcaConditions))
-						.groupBy(vehicles.make)
+						.groupBy(marcaNorm)
 						.orderBy(desc(sql`sum(${opportunities.value})`));
 
 					byMarca = marcaRows.map((r) => ({
@@ -6044,9 +6062,7 @@ export const crmRouter = {
 						not(eq(opportunities.status, "migrate")),
 					];
 					if (userFilter) {
-						medioConditions.push(
-							eq(opportunities.assignedTo, userFilter),
-						);
+						medioConditions.push(eq(opportunities.assignedTo, userFilter));
 					}
 					const medioRows = await db
 						.select({

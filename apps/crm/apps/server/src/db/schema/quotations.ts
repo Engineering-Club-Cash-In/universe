@@ -171,7 +171,7 @@ export const quotations = pgTable("quotations", {
 	rcdpCost: decimal("rcdp_cost", {
 		precision: 14,
 		scale: 2,
-	}).default("0"), // RCCDP 1er Trimestre (microbuses)
+	}).default("0"), // RCDP 1er Trimestre (microbuses)
 	vehicleTransferCost: decimal("vehicle_transfer_cost", {
 		precision: 14,
 		scale: 2,

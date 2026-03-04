@@ -79,11 +79,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Inspection360View } from "@/components/vehicles/inspection-360-view";
 import { VehicleDocumentUpload } from "@/components/vehicles/VehicleDocumentUpload";
+import { ROLES } from "@/lib/roles";
 import {
 	renderInspectionStatusBadge,
 	renderNewVehicleBadges,
 } from "@/lib/vehicle-utils";
-import { ROLES } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
 // Helper para renderizar el badge del estado del vehículo
@@ -180,9 +180,7 @@ function VehiclesDashboard() {
 	const { data: statistics } = useQuery(
 		orpc.getVehicleStatistics.queryOptions(),
 	);
-	const { data: userProfile } = useQuery(
-		orpc.getUserProfile.queryOptions(),
-	);
+	const { data: userProfile } = useQuery(orpc.getUserProfile.queryOptions());
 
 	// Get vehicles data from paginated response
 	const vehiclesList = vehicles?.data || [];
@@ -2438,72 +2436,73 @@ function VehiclesDashboard() {
 											<span className="font-medium">Vendido</span>
 										</div>
 										<p className="text-muted-foreground text-xs">
-											Solo un administrador o supervisor de ventas puede cambiar el estado de un vehículo vendido.
+											Solo un administrador o supervisor de ventas puede cambiar
+											el estado de un vehículo vendido.
 										</p>
 									</div>
 								) : (
-								<Select
-									value={editVehicleForm.status}
-									onValueChange={(
-										value:
-											| "pending"
-											| "available"
-											| "sold"
-											| "maintenance"
-											| "auction",
-									) =>
-										setEditVehicleForm({
-											...editVehicleForm,
-											status: value,
-										})
-									}
-								>
-									<SelectTrigger>
-										<SelectValue placeholder="Seleccionar estado" />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="pending">
-											<div className="flex flex-col">
-												<span className="font-medium">Pendiente</span>
-												<span className="text-muted-foreground text-xs">
-													En espera o Próximo a la venta
-												</span>
-											</div>
-										</SelectItem>
-										<SelectItem value="available">
-											<div className="flex flex-col">
-												<span className="font-medium">Disponible</span>
-												<span className="text-muted-foreground text-xs">
-													Listo para venta o financiamiento
-												</span>
-											</div>
-										</SelectItem>
-										<SelectItem value="sold">
-											<div className="flex flex-col">
-												<span className="font-medium">Vendido</span>
-												<span className="text-muted-foreground text-xs">
-													Vehículo ya fue vendido/financiado
-												</span>
-											</div>
-										</SelectItem>
-										<SelectItem value="maintenance">
-											<div className="flex flex-col">
-												<span className="font-medium">En Mantenimiento</span>
-												<span className="text-muted-foreground text-xs">
-													En reparación o servicio técnico
-												</span>
-											</div>
-										</SelectItem>
-										<SelectItem value="auction">
-											<div className="flex flex-col">
-												<span className="font-medium">En Remate</span>
-												<span className="text-muted-foreground text-xs">
-													Disponible para subasta/remate
-												</span>
-											</div>
-										</SelectItem>
-									</SelectContent>
-								</Select>
+									<Select
+										value={editVehicleForm.status}
+										onValueChange={(
+											value:
+												| "pending"
+												| "available"
+												| "sold"
+												| "maintenance"
+												| "auction",
+										) =>
+											setEditVehicleForm({
+												...editVehicleForm,
+												status: value,
+											})
+										}
+									>
+										<SelectTrigger>
+											<SelectValue placeholder="Seleccionar estado" />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="pending">
+												<div className="flex flex-col">
+													<span className="font-medium">Pendiente</span>
+													<span className="text-muted-foreground text-xs">
+														En espera o Próximo a la venta
+													</span>
+												</div>
+											</SelectItem>
+											<SelectItem value="available">
+												<div className="flex flex-col">
+													<span className="font-medium">Disponible</span>
+													<span className="text-muted-foreground text-xs">
+														Listo para venta o financiamiento
+													</span>
+												</div>
+											</SelectItem>
+											<SelectItem value="sold">
+												<div className="flex flex-col">
+													<span className="font-medium">Vendido</span>
+													<span className="text-muted-foreground text-xs">
+														Vehículo ya fue vendido/financiado
+													</span>
+												</div>
+											</SelectItem>
+											<SelectItem value="maintenance">
+												<div className="flex flex-col">
+													<span className="font-medium">En Mantenimiento</span>
+													<span className="text-muted-foreground text-xs">
+														En reparación o servicio técnico
+													</span>
+												</div>
+											</SelectItem>
+											<SelectItem value="auction">
+												<div className="flex flex-col">
+													<span className="font-medium">En Remate</span>
+													<span className="text-muted-foreground text-xs">
+														Disponible para subasta/remate
+													</span>
+												</div>
+											</SelectItem>
+										</SelectContent>
+									</Select>
 								)}
 							</div>
 						</div>

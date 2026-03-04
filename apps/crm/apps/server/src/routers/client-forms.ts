@@ -11,6 +11,66 @@ import { leads, opportunities } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
 import { crmProcedure, publicProcedure } from "../lib/orpc";
 
+// Fields that are decimal/integer in the DB and must not receive empty strings
+const DECIMAL_FIELDS = new Set([
+	"valorEstimado",
+	"montoSolicitado",
+	"sueldo",
+	"egresos",
+	"efectivo",
+	"cuentasCobrarAmigos",
+	"cuentasCobrarOtros",
+	"documentosCobrar",
+	"bienesInmueblesValor",
+	"vehiculosValor",
+	"maquinaria",
+	"muebles",
+	"menaje",
+	"cuentasPagarAmigos",
+	"cuentasPagarOtros",
+	"letrasPagar",
+	"sueldos",
+	"bonificaciones",
+	"arrendamientos",
+	"gastosPersonales",
+	"alquileres",
+	"amortizacionVivienda",
+	"deudasPersonales",
+]);
+
+const INTEGER_FIELDS = new Set([
+	"edad",
+	"dependientes",
+	"bienesInmueblesCantidad",
+	"vehiculosCantidad",
+]);
+
+function sanitizeFormData(
+	data: Record<string, unknown>,
+): Record<string, unknown> {
+	const sanitized: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(data)) {
+		if (DECIMAL_FIELDS.has(key)) {
+			if (value === "" || value === null || value === undefined) {
+				sanitized[key] = null;
+			} else {
+				const num = Number(value);
+				sanitized[key] = Number.isNaN(num) ? null : String(num);
+			}
+		} else if (INTEGER_FIELDS.has(key)) {
+			if (value === "" || value === null || value === undefined) {
+				sanitized[key] = null;
+			} else {
+				const num = Number(value);
+				sanitized[key] = Number.isNaN(num) ? null : Math.trunc(num);
+			}
+		} else {
+			sanitized[key] = value;
+		}
+	}
+	return sanitized;
+}
+
 export const clientFormsRouter = {
 	// Protected: Generate a token for an opportunity
 	generateFormToken: crmProcedure
@@ -157,7 +217,7 @@ export const clientFormsRouter = {
 			// Upsert credit application
 			const values = {
 				opportunityId: tokenRow.opportunityId,
-				...input.data,
+				...sanitizeFormData(input.data),
 				updatedAt: new Date(),
 			};
 
@@ -215,7 +275,7 @@ export const clientFormsRouter = {
 			// Upsert financial statement
 			const values = {
 				opportunityId: tokenRow.opportunityId,
-				...input.data,
+				...sanitizeFormData(input.data),
 				updatedAt: new Date(),
 			};
 

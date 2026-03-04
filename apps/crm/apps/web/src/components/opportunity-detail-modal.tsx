@@ -190,8 +190,7 @@ export function OpportunityDetailModal({
 	const canViewContracts =
 		userRole && PERMISSIONS.canViewOpportunityContracts(userRole);
 	const canAccessCRM = userRole && PERMISSIONS.canAccessCRM(userRole);
-	const isAccounting =
-		userRole && PERMISSIONS.canAccessAccounting(userRole);
+	const isAccounting = userRole && PERMISSIONS.canAccessAccounting(userRole);
 	const isWon = opportunity?.status === "won";
 
 	return (
@@ -434,7 +433,6 @@ export function OpportunityDetailModal({
 									</div>
 								</div>
 							)}
-
 						</div>
 
 						{/* Contracts Section */}
@@ -746,12 +744,12 @@ export function OpportunityDetailModal({
 								quotation={
 									opportunityQuotationsQuery.data?.[0]
 										? {
-												amountToFinance:
-													(opportunityQuotationsQuery.data[0] as any)
-														.amountToFinance,
-												totalFinanced:
-													(opportunityQuotationsQuery.data[0] as any)
-														.totalFinanced,
+												amountToFinance: (
+													opportunityQuotationsQuery.data[0] as any
+												).amountToFinance,
+												totalFinanced: (
+													opportunityQuotationsQuery.data[0] as any
+												).totalFinanced,
 											}
 										: null
 								}

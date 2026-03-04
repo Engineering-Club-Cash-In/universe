@@ -15,14 +15,12 @@ const FOOTER_SECTIONS = [
   {
     title: "Autos",
     links: [
-      { label: "Encuentra tu auto", href: "/credit" }, // TODO: devolver a "/marketplace" cuando esté habilitado
-      { label: "Obtén tu financiamiento", href: "/credit" },
-      { label: "Compramos tu auto", href: "/sell", disabled: true },
+      { label: "Obtén tu financiamiento", href: "/credit", disabled: false },
     ],
   },
   {
     title: "Investors",
-    links: [{ label: "Quiero invertir", href: "/invest" }],
+    links: [{ label: "Quiero invertir", href: "/invest", disabled: false }],
   },
 ];
 

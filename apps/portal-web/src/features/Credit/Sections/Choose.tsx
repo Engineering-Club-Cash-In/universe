@@ -1,13 +1,15 @@
 import { useState } from "react";
-import { IconCheckList } from "@/components";
+import { Button, IconCheckList } from "@/components";
 import { useModalOptionsCall, useIsMobile } from "@/hooks";
 import { ModalChatBot } from "@/components";
 import { motion } from "framer-motion";
+import { useNavigate } from "@tanstack/react-router";
 
 export const Choose = () => {
   const [type, setType] = useState<"buy" | "sell">("buy");
   const { isModalOpen, setIsModalOpen, optionsCredit } = useModalOptionsCall();
   const isMobile = useIsMobile();
+   const navigate = useNavigate();
 
   const features = [
     {
@@ -37,8 +39,7 @@ export const Choose = () => {
         "Pagos flexibles",
       ],
       onClickButton: () => {
-        setType("sell");
-        setIsModalOpen(true);
+        navigate({ to: "/leads", search: { type: "sell" } })
       },
       textButton: "Obtener Préstamo",
     },
@@ -64,8 +65,8 @@ export const Choose = () => {
       )}
       {/* Título y Subtítulo */}
       <div className="text-center mb-10 lg:mb-16 mt-10 lg:mt-0">
-        <h2 className="text-xl lg:text-header-2 font-bold mb-4">{title}</h2>
-        <p className="text-gray lg:text-xl max-w-3xl mx-auto">{subtitle}</p>
+        <h2 className="text-xl lg:text-header-3 font-bold mb-4">{title}</h2>
+        <p className="text-gray lg:text-lg max-w-3xl mx-auto">{subtitle}</p>
       </div>
 
       {/* Container con gradiente de fondo */}
@@ -103,7 +104,7 @@ export const Choose = () => {
               viewport={{ once: true }}
             >
               {/* Contenido superior */}
-              <div className="flex flex-col items-center text-center">
+              <div className="flex flex-col items-start">
                 {/* Título y descripción */}
                 <h3 className="text-2xl font-bold mb-4">{feature.title}</h3>
                 <p className="text-gray mb-6">{feature.description}</p>
@@ -120,31 +121,15 @@ export const Choose = () => {
                   ))}
                 </ul>
               </div>
-
-              {/* Botón con motion */}
-              <motion.button
-                className="flex items-center text-sm justify-center self-stretch text-primary font-semibold"
-                style={{
-                  height: "59.2px",
-                  borderRadius: "8px",
-                  border: "1px solid rgba(154, 159, 245, 0.50)",
-                  background: "rgba(0, 0, 0, 0.00)",
-                }}
-                whileHover={{
-                  scale: 1.02,
-                  border: "1px solid rgba(154, 159, 245, 0.80)",
-                  boxShadow: "0 0 20px rgba(154, 159, 245, 0.3)",
-                }}
-                whileTap={{ scale: 0.98 }}
-                transition={{
-                  type: "spring",
-                  stiffness: 400,
-                  damping: 17,
-                }}
-                onClick={feature.onClickButton}
-              >
-                {feature.textButton}
-              </motion.button>
+              <div className="flex justify-center w-full">
+                {/* Botón con motion */}
+                <Button
+                  size="md"
+                  onClick={feature.onClickButton}
+                >
+                  {feature.textButton}
+                </Button>
+              </div>
             </motion.div>
           ))}
         </div>

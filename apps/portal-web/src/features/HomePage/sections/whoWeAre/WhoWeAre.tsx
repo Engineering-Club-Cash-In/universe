@@ -172,7 +172,7 @@ export const WhoWeAre = () => {
             >
               {" "}de forma simple y confiable.
             </span>
-            <p className="text-white/80 text-base mt-4">
+            <p className="text-white/80 text-lg mt-4">
               Tecnología, asesoría humana y procesos claros, trabajando juntos.
             </p>
           </p>

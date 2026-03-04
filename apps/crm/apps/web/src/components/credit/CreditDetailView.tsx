@@ -150,6 +150,7 @@ interface CreditDetailViewProps {
 		extraMembershipCost?: string | null;
 		extraAdminCost?: string | null;
 		interestCost?: string | null;
+		rcdpCost?: string | null;
 		vehicleTransferCost?: string | null;
 		isInterno?: boolean;
 		amountToFinance: string;
@@ -656,6 +657,7 @@ export function CreditDetailView({
 	const membresia = Number.parseFloat(quotation?.extraMembershipCost || "0");
 	const gastosAdminBase = Number.parseFloat(quotation?.extraAdminCost || "600");
 	const interesAnticipado = Number.parseFloat(quotation?.interestCost || "0");
+	const rcdpTrimestre = Number.parseFloat(quotation?.rcdpCost || "0");
 
 	// ========================================
 	// Sección "Otros Descuentos"
@@ -700,7 +702,8 @@ export function CreditDetailView({
 		seguro +
 		membresia +
 		gastosAdminBase +
-		interesAnticipado;
+		interesAnticipado +
+		rcdpTrimestre;
 
 	// Subtotal: Otros Descuentos
 	const subtotalOtrosDescuentos =
@@ -1667,6 +1670,25 @@ export function CreditDetailView({
 														: "Q -"}
 												</TableCell>
 											</TableRow>
+											<TableRow>
+												<TableCell>RCDP 1er Trimestre</TableCell>
+												<TableCell className="text-center">
+													<Badge
+														variant={
+															rcdpTrimestre > 0 ? "default" : "outline"
+														}
+														className="text-xs"
+													>
+														{rcdpTrimestre > 0 ? "SI" : "NO"}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">-</TableCell>
+												<TableCell className="text-right">
+													{rcdpTrimestre > 0
+														? formatCurrency(rcdpTrimestre)
+														: "Q -"}
+												</TableCell>
+											</TableRow>
 										</TableBody>
 									</Table>
 									<div className="mt-3 flex justify-end">
@@ -2202,6 +2224,17 @@ export function CreditDetailView({
 											<TableCell />
 										</TableRow>
 										<TableRow>
+											<TableCell className="py-2">
+												RCDP 1er Trimestre
+											</TableCell>
+											<TableCell className="py-2 text-right">
+												{rcdpTrimestre > 0
+													? formatCurrency(rcdpTrimestre)
+													: "Q -"}
+											</TableCell>
+											<TableCell />
+										</TableRow>
+										<TableRow>
 											<TableCell className="py-2">Gastos legales</TableCell>
 											<TableCell className="py-2 text-right">
 												{subtotalGastosAbogado > 0
@@ -2211,6 +2244,7 @@ export function CreditDetailView({
 											<TableCell className="py-2 text-right font-semibold">
 												{formatCurrency(
 													interesAnticipado +
+														rcdpTrimestre +
 														royalty +
 														gastosCombinados +
 														seguro +
@@ -2230,6 +2264,7 @@ export function CreditDetailView({
 									{formatCurrency(
 										montoTotalFinanciar -
 											(interesAnticipado +
+												rcdpTrimestre +
 												royalty +
 												gastosCombinados +
 												seguro +

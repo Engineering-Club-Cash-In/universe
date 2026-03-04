@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, forwardRef, useImperativeHandle } from "react";
 import { useInspection } from "../contexts/InspectionContext";
+import { validateVehiclePlate } from "../services/vehicles";
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -124,14 +125,27 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
     triggerValidation: async () => {
       const result = await form.trigger();
       if (!result) {
+        toast.error("Por favor complete los campos marcados en rojo");
         // Scroll al primer campo con error
         const firstError = Object.keys(form.formState.errors)[0];
         if (firstError) {
           const element = document.querySelector(`[name="${firstError}"]`);
           element?.scrollIntoView({ behavior: "smooth", block: "center" });
         }
+        return false;
       }
-      return result;
+
+      // Validar también la placa contra duplicados antes de avanzar
+      const values = form.getValues();
+      const validationResult = await validateVehiclePlate(values.licensePlate, values.vinNumber);
+      if (!validationResult.success || !validationResult.data?.valid) {
+        toast.error(validationResult.data?.message || "La placa ya está en uso con otro chasis.");
+        return false;
+      }
+
+      // Si pasa la validación, guardamos en contexto de una vez
+      setFormData(values);
+      return true;
     }
   }));
 
@@ -144,6 +158,13 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     console.log(values);
+
+    // Validate license plate
+    const validationResult = await validateVehiclePlate(values.licensePlate, values.vinNumber);
+    if (!validationResult.success || !validationResult.data?.valid) {
+      toast.error(validationResult.data?.message || "La placa ya está en uso con otro chasis.");
+      return;
+    }
 
     // Save form data to context
     setFormData(values);

@@ -134,6 +134,7 @@ export const appRouter = {
 	getVehicleDocuments: vehiclesRouter.getVehicleDocuments,
 	uploadVehicleDocument: vehiclesRouter.uploadVehicleDocument,
 	deleteVehicleDocument: vehiclesRouter.deleteVehicleDocument,
+	validateLicensePlate: vehiclesRouter.validateLicensePlate,
 
 	// Cobros routes
 	getCobrosDashboardStats: cobrosRouter.getDashboardStats,

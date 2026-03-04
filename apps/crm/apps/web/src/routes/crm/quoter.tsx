@@ -27,12 +27,6 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Combobox } from "@/components/ui/combobox";
 import {
 	Dialog,
@@ -41,6 +35,12 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -2044,11 +2044,7 @@ function QuoterPage() {
 									</Button>
 									<DropdownMenu>
 										<DropdownMenuTrigger asChild>
-											<Button
-												type="button"
-												variant="outline"
-												className="gap-2"
-											>
+											<Button type="button" variant="outline" className="gap-2">
 												<FileText className="h-4 w-4" />
 												Generar PDF
 												<ChevronDown className="h-3 w-3" />
@@ -2058,13 +2054,11 @@ function QuoterPage() {
 											<DropdownMenuItem
 												onClick={() => handleGeneratePdf(false)}
 											>
-												<FileText className="h-4 w-4 mr-2" />
+												<FileText className="mr-2 h-4 w-4" />
 												PDF Interno
 											</DropdownMenuItem>
-											<DropdownMenuItem
-												onClick={() => handleGeneratePdf(true)}
-											>
-												<UserCheck className="h-4 w-4 mr-2" />
+											<DropdownMenuItem onClick={() => handleGeneratePdf(true)}>
+												<UserCheck className="mr-2 h-4 w-4" />
 												PDF Cliente
 											</DropdownMenuItem>
 										</DropdownMenuContent>
@@ -2334,26 +2328,19 @@ function QuotationDetailDialog({
 						</div>
 						<DropdownMenu>
 							<DropdownMenuTrigger asChild>
-								<Button
-									variant="outline"
-									className="gap-2"
-								>
+								<Button variant="outline" className="gap-2">
 									<FileText className="h-4 w-4" />
 									Generar PDF
 									<ChevronDown className="h-3 w-3" />
 								</Button>
 							</DropdownMenuTrigger>
 							<DropdownMenuContent>
-								<DropdownMenuItem
-									onClick={() => handleGeneratePdf(false)}
-								>
-									<FileText className="h-4 w-4 mr-2" />
+								<DropdownMenuItem onClick={() => handleGeneratePdf(false)}>
+									<FileText className="mr-2 h-4 w-4" />
 									PDF Interno
 								</DropdownMenuItem>
-								<DropdownMenuItem
-									onClick={() => handleGeneratePdf(true)}
-								>
-									<UserCheck className="h-4 w-4 mr-2" />
+								<DropdownMenuItem onClick={() => handleGeneratePdf(true)}>
+									<UserCheck className="mr-2 h-4 w-4" />
 									PDF Cliente
 								</DropdownMenuItem>
 							</DropdownMenuContent>

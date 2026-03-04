@@ -1674,9 +1674,7 @@ export function CreditDetailView({
 												<TableCell>RCDP 1er Trimestre</TableCell>
 												<TableCell className="text-center">
 													<Badge
-														variant={
-															rcdpTrimestre > 0 ? "default" : "outline"
-														}
+														variant={rcdpTrimestre > 0 ? "default" : "outline"}
 														className="text-xs"
 													>
 														{rcdpTrimestre > 0 ? "SI" : "NO"}
@@ -2224,9 +2222,7 @@ export function CreditDetailView({
 											<TableCell />
 										</TableRow>
 										<TableRow>
-											<TableCell className="py-2">
-												RCDP 1er Trimestre
-											</TableCell>
+											<TableCell className="py-2">RCDP 1er Trimestre</TableCell>
 											<TableCell className="py-2 text-right">
 												{rcdpTrimestre > 0
 													? formatCurrency(rcdpTrimestre)
@@ -2570,7 +2566,7 @@ export function CreditDetailView({
 										{checks.map((check) => (
 											<div
 												key={check.id}
-												className="rounded-lg border bg-card p-4 space-y-3"
+												className="space-y-3 rounded-lg border bg-card p-4"
 											>
 												<div className="flex items-start justify-between">
 													<div>
@@ -2581,7 +2577,7 @@ export function CreditDetailView({
 																{ minimumFractionDigits: 2 },
 															)}
 														</p>
-														<p className="text-sm text-muted-foreground">
+														<p className="text-muted-foreground text-sm">
 															{formatDate(check.checkDate)}
 														</p>
 													</div>
@@ -2604,35 +2600,51 @@ export function CreditDetailView({
 												</div>
 												<div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
 													<div>
-														<span className="text-muted-foreground">Emisor: </span>
+														<span className="text-muted-foreground">
+															Emisor:{" "}
+														</span>
 														<span>{check.issuer}</span>
 													</div>
 													<div>
-														<span className="text-muted-foreground">Banco: </span>
+														<span className="text-muted-foreground">
+															Banco:{" "}
+														</span>
 														<span>{check.issuerBank || "-"}</span>
 													</div>
 													<div>
-														<span className="text-muted-foreground">Beneficiario: </span>
+														<span className="text-muted-foreground">
+															Beneficiario:{" "}
+														</span>
 														<span>{check.beneficiary}</span>
 													</div>
 													<div>
-														<span className="text-muted-foreground">Banco Benef.: </span>
+														<span className="text-muted-foreground">
+															Banco Benef.:{" "}
+														</span>
 														<span>{check.beneficiaryBank || "-"}</span>
 													</div>
 													<div>
-														<span className="text-muted-foreground">No. Cuenta: </span>
+														<span className="text-muted-foreground">
+															No. Cuenta:{" "}
+														</span>
 														<span>{check.accountNumber || "-"}</span>
 													</div>
 													<div>
-														<span className="text-muted-foreground">Tipo: </span>
+														<span className="text-muted-foreground">
+															Tipo:{" "}
+														</span>
 														<span>{check.transferType}</span>
 													</div>
 													<div>
-														<span className="text-muted-foreground">Tipo Cuenta: </span>
+														<span className="text-muted-foreground">
+															Tipo Cuenta:{" "}
+														</span>
 														<span>{check.accountType || "-"}</span>
 													</div>
 													<div>
-														<span className="text-muted-foreground">Concepto: </span>
+														<span className="text-muted-foreground">
+															Concepto:{" "}
+														</span>
 														<span>{check.concept}</span>
 													</div>
 												</div>
@@ -2656,8 +2668,9 @@ export function CreditDetailView({
 										<div className="rounded-lg border border-yellow-500 bg-yellow-50 p-4 dark:bg-yellow-950/20">
 											<p className="font-medium text-yellow-800 dark:text-yellow-200">
 												Advertencia: El total de cheques (
-												{formatCurrency(totalCheques)}) no coincide con el
-												monto total a financiar ({formatCurrency(montoTotalFinanciar)})
+												{formatCurrency(totalCheques)}) no coincide con el monto
+												total a financiar ({formatCurrency(montoTotalFinanciar)}
+												)
 											</p>
 											<p className="text-sm text-yellow-700 dark:text-yellow-300">
 												Diferencia:{" "}

@@ -83,7 +83,7 @@ export const BuyCar = () => {
         <p className="text-gray lg:text-xl mb-8">
           Te ayudamos a hacer realidad tu sueño de tener un vehículo nuevo.
           Realizamos un análisis completo de tu perfil y del vehículo que
-          deseas. Si cumples con nuestros requisitos, ¡el auto es tuyo!
+          deseas. Si cumples con los requisitos, ¡el auto es tuyo!
         </p>
 
         {/* Items */}

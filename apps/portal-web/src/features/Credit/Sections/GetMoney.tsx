@@ -55,7 +55,7 @@ export const GetMoney = () => {
       {/* Lado izquierdo - Contenido */}
       <div className="flex flex-col justify-center">
         <h2 className="text-xl lg:text-header-2 font-bold mb-4">
-          Obtén dinero sin dejar tu auto
+          Obtén liquidez hoy y sigue manejando tu auto
         </h2>
 
         {/* Lado derecho - Imagen */}
@@ -88,10 +88,7 @@ export const GetMoney = () => {
         </div>
 
         <p className="  text-gray lg:text-xl mb-12 mt-6 lg:mt-0">
-          Tu auto tiene valor y nosotros te lo reconocemos. Obtén un préstamo
-          equivalente al valor de tu vehículo o un poco menos, mientras sigues
-          disfrutando de él. Tú conservas las llaves, nosotros te damos el
-          efectivo.
+          Obtén un préstamo por tu vehículo mientras sigues disfrutando de él
         </p>
 
         {/* Grid de items - 2 columnas responsive */}

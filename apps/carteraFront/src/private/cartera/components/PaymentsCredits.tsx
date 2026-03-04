@@ -183,7 +183,7 @@ export function PaymentsCredits() {
   );
   const falsePayment = useFalsePayment();
   const { user } = useAuth(); 
-  const { liquidandoId, handleLiquidar, handleReverse, reversePago } =
+  const { liquidandoId, handleLiquidar, handleReverse, reversePago, handleRevertToPending, revertPaymentToPending, handleRevalidatePayment, revalidatePayment } =
     usePagoForm();
   const [mesFiltro, setMesFiltro] = useState<string>("");
   const [anioFiltro, setAnioFiltro] = useState<string>("");
@@ -434,6 +434,52 @@ const handleDownloadExcel = async () => {
                       </>
                     ) : (
                       "Revertir Pago"
+                    )}
+                  </Button>
+                  
+                  {/* Botón Revertir a Pendiente */}
+                  <Button
+                    className="bg-orange-500 hover:bg-orange-600 text-white px-3 py-1 rounded font-bold shadow"
+                    onClick={() => {
+                      handleRevertToPending(item.pago.pago_id, item.pago.credito_id);
+                      refetch();
+                    }}
+                    disabled={
+                      item.pago.pagado === false ||
+                      item.pago.paymentFalse === true ||
+                      revertPaymentToPending.isPending
+                    }
+                  >
+                    {revertPaymentToPending.isPending ? (
+                      <>
+                        <Loader2 className="animate-spin w-4 h-4 mr-1" />
+                        Revirtiendo a Pdte...
+                      </>
+                    ) : (
+                      "Revertir a Pendiente"
+                    )}
+                  </Button>
+
+                  {/* Botón Revalidar Pago */}
+                  <Button
+                    className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded font-bold shadow"
+                    onClick={() => {
+                      handleRevalidatePayment(item.pago.pago_id, item.pago.credito_id);
+                      refetch();
+                    }}
+                    disabled={
+                      item.pago.pagado === true ||
+                      item.pago.paymentFalse === true ||
+                      revalidatePayment.isPending
+                    }
+                  >
+                    {revalidatePayment.isPending ? (
+                      <>
+                        <Loader2 className="animate-spin w-4 h-4 mr-1" />
+                        Revalidando...
+                      </>
+                    ) : (
+                      "Revalidar Pago"
                     )}
                   </Button>
 

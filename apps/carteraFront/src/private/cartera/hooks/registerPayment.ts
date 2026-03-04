@@ -7,6 +7,8 @@ import {
   getAbonosCuotaService,
   liquidatePagosInversionistasService,
   reversePagosInversionistasService,
+  revertPaymentToPendingService,
+  revalidatePaymentService,
   uploadFileService,
   type AbonosCuotaResponse,
   type CancelacionCredito,
@@ -574,6 +576,31 @@ const handleAbonoOtros = () => {
       },
     });
   }
+
+  function useRevertPaymentToPending() {
+    return useMutation({
+      mutationFn: revertPaymentToPendingService,
+      onSuccess: () => {
+        toast.success("Pago reversado a pendiente correctamente");
+      },
+      onError: (err: any) => {
+        toast.error("Error al reversar pago a pendiente: " + (err?.response?.data?.message || "Error desconocido"));
+      },
+    });
+  }
+
+  function useRevalidatePayment() {
+    return useMutation({
+      mutationFn: revalidatePaymentService,
+      onSuccess: () => {
+        toast.success("Pago revalidado correctamente");
+      },
+      onError: (err: any) => {
+        toast.error("Error al revalidar pago: " + (err?.response?.data?.message || "Error desconocido"));
+      },
+    });
+  }
+
   const liquidatePago = useLiquidatePagosInversionistas();
   const [liquidandoId, setLiquidandoId] = useState<number | null>(null);
   function handleLiquidar(pago_id: number, credito_id: number, cuota?: number) {
@@ -595,11 +622,24 @@ const handleAbonoOtros = () => {
     }
   }
   const reversePago = useReversePagosInversionistas();
+  const revertPaymentToPending = useRevertPaymentToPending();
+  const revalidatePayment = useRevalidatePayment();
 
   // Handler:
   function handleReverse(pago_id: number, credito_id: number, reverseAccounting: boolean) {
     reversePago.mutate({ pago_id, credito_id, reverseAccounting }, {});
   }
+
+  // Handler:
+  function handleRevertToPending(pago_id: number, credito_id: number) {
+    revertPaymentToPending.mutate({ pago_id, credito_id }, {});
+  }
+
+  // Handler:
+  function handleRevalidatePayment(pago_id: number, credito_id: number) {
+    revalidatePayment.mutate({ pago_id, credito_id }, {});
+  }
+
 async function handleResetCredito() {
  
   console.log(cuotaSeleccionada, " cuotaSeleccionada");
@@ -679,7 +719,11 @@ async function handleResetCredito() {
     handleLiquidar,
     liquidandoId,
     handleReverse,
+    handleRevertToPending,
+    handleRevalidatePayment,
     reversePago,
+    revertPaymentToPending,
+    revalidatePayment,
     setCuotaSeleccionada,
     setFileToUpload,
     fileToUpload,

@@ -241,7 +241,7 @@ const EXTRA_COST_FIELDS: ExtraCostFieldConfig[] = [
 	},
 	{
 		name: "rcdp",
-		label: "RCCDP 1er Trimestre",
+		label: "RCDP 1er Trimestre",
 		type: "fixed",
 		valueField: "rcdpCost",
 		creditType: "all",

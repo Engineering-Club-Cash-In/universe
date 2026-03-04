@@ -1671,7 +1671,7 @@ export function CreditDetailView({
 												</TableCell>
 											</TableRow>
 											<TableRow>
-												<TableCell>RCCDP 1er Trimestre</TableCell>
+												<TableCell>RCDP 1er Trimestre</TableCell>
 												<TableCell className="text-center">
 													<Badge
 														variant={
@@ -2225,7 +2225,7 @@ export function CreditDetailView({
 										</TableRow>
 										<TableRow>
 											<TableCell className="py-2">
-												RCCDP 1er Trimestre
+												RCDP 1er Trimestre
 											</TableCell>
 											<TableCell className="py-2 text-right">
 												{rcdpTrimestre > 0

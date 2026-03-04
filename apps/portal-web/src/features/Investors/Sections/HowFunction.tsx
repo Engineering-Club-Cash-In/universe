@@ -11,6 +11,7 @@ export const HowFunction = () => {
   }
 
   const isMobile = useIsMobile();
+  const iconSize = isMobile ? 24 : 32;
 
   const items: Item[] = [
     {
@@ -18,25 +19,21 @@ export const HowFunction = () => {
       title: "Crea tu perfil inversor",
       description:
         "Inicia tu camino a través de nuestro WhatsApp o un agente. Te ayudaremos a registrarte y resolveremos todas tus dudas, paso a paso.",
-      icon: (
-        <IconAddUser width={isMobile ? 24 : 32} height={isMobile ? 24 : 32} />
-      ),
+      icon: <IconAddUser width={iconSize} height={iconSize} />,
     },
     {
       step: "Paso 2",
       title: "Elige tu estrategia",
       description:
         "Selecciona el modelo que mejor se adapte a ti y define el monto que deseas invertir. El proceso es transparente y seguro desde el primer momento.",
-      icon: (
-        <IconWallet width={isMobile ? 24 : 32} height={isMobile ? 24 : 32} />
-      ),
+      icon: <IconWallet width={iconSize} height={iconSize} />,
     },
     {
       step: "Paso 3",
       title: "Invierte con seguridad",
       description:
         "Realiza tu primera inversión y monitorea tu rendimiento en tiempo real.",
-      icon: <IconQ width={isMobile ? 24 : 32} height={isMobile ? 24 : 32} />,
+      icon: <IconQ width={iconSize} height={iconSize} />,
     },
   ];
 
@@ -57,11 +54,11 @@ export const HowFunction = () => {
         <div className="flex flex-col gap-8">
           {items.map((item, index) => (
             <div key={index} className="flex gap-6 items-center">
-              <div className="rounded-full flex justify-center items-center bg-secondary/90 w-16 h-14">
+              <div className="border border-secondary text-secondary rounded-2xl flex justify-center items-center w-16 h-14">
                 {item.icon}
               </div>
               <div className="flex flex-col w-full">
-                <span className="text-secondary font-semibold text-[12px]">
+                <span className=" font-semibold text-[12px]">
                   {item.step}
                 </span>
                 <h3 className="lg:text-lg font-bold">{item.title}</h3>

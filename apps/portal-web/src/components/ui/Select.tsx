@@ -96,6 +96,7 @@ export const Select = ({
   return (
     <div ref={selectRef} style={{ position: "relative", width: "100%" }}>
       <button
+        type="button"
         onClick={() => setIsOpen(!isOpen)}
         style={{
           width: "100%",

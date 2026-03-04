@@ -26,32 +26,32 @@ const slides: CarouselSlide[] = [
     id: 1,
     imageUrl: url + "/videoPersonaManejando.mp4",
     title: "Tú eliges el auto, nosotros lo financiamos",
-    buttonText: "Solicitar",
+    buttonText: "Solicitar crédito",
     buttonLink: "/credit",
   },
-  {
+  /*{
     id: 2,
     imageUrl: url + "/familia-joven-disfrutando-de-su-viaje.jpg",
     title: "Tenemos el auto ideal para darte momentos inolvidables",
     buttonText: "Ver marketplace",
     buttonLink: "/marketplace",
     disabled: true,
-  },
+  },*/
   {
     id: 3,
     imageUrl: url + "/investor-meeting.jpg",
     title: "Hagamos una inversión segura",
-    buttonText: "Invierte",
+    buttonText: "Calcula tu inversión",
     buttonLink: "/invest",
   },
-  {
+  /*{
     id: 4,
     imageUrl: url + "/showroom-new.jpg",
     title: "¿Quieres vender tu auto? Nosotros nos encargamos",
     buttonText: "Vende tu auto",
     buttonLink: "/sell",
     disabled: true,
-  },
+  },*/
 ];
 
 export const CarrouselStart: React.FC = () => {
@@ -145,9 +145,9 @@ export const CarrouselStart: React.FC = () => {
                 delay: index === currentIndex ? 0.2 : 0,
                 duration: 0.6,
               }}
-              className="max-w-3xl"
+              className="max-w-2xl"
             >
-              <h1 className="text-2xl  lg:text-[55px] text-white mb-4">
+              <h1 className="text-2xl  lg:text-[55px] font-semibold text-white mb-4">
                 {slide.title}
               </h1>
 
@@ -159,7 +159,7 @@ export const CarrouselStart: React.FC = () => {
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                 >
-                  <Button size={isMobile ? "sm" : "lg"}>
+                  <Button size={isMobile ? "sm" : "md"}>
                     {slide.buttonText}
                   </Button>
                 </motion.a>

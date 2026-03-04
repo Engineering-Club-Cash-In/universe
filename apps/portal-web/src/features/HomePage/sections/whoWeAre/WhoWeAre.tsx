@@ -79,8 +79,8 @@ const FeatureCard = ({
       </div>
     ) : (
       <>
-        <div className={`flex items-center gap-2 ${isMobile ? "" : "min-h-[52px] items-start"}`}>
-          <span className={`w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0 ${isMobile ? "" : "mt-[7px]"}`} />
+        <div className={`flex gap-2 ${isMobile ? "items-center" : "items-start min-h-[52px]"}`}>
+          <span className={`w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0 ${isMobile ? "" : "mt-[9px]"}`} />
           <motion.span
             animate={{ color: isActive ? "#3A86FF" : "#FFFFFF" }}
             transition={{ duration: 0.15 }}

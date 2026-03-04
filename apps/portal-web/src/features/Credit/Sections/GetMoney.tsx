@@ -5,15 +5,15 @@ import {
   IconClock,
   Button,
 } from "@/components";
-import { useModalOptionsCall, useIsMobile } from "@/hooks";
-import { ModalChatBot } from "@/components";
+import { useIsMobile } from "@/hooks";
+import { useNavigate } from "@tanstack/react-router";
 
 const imageUrl = import.meta.env.VITE_IMAGE_URL;
 
 export const GetMoney = () => {
   const imageSrc = `${imageUrl}/credit_car2.jpg`;
-  const { isModalOpen, setIsModalOpen, optionsCredit } = useModalOptionsCall();
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
 
   const items = [
     {
@@ -88,7 +88,7 @@ export const GetMoney = () => {
         </div>
 
         <p className="  text-gray lg:text-xl mb-12 mt-6 lg:mt-0">
-          Obtén un préstamo por tu vehículo mientras sigues disfrutando de él.
+          Obtén un préstamo por tu vehículo mientras sigues disfrutando de él
         </p>
 
         {/* Grid de items - 2 columnas responsive */}
@@ -114,7 +114,7 @@ export const GetMoney = () => {
         <div>
           <Button
             size={isMobile ? "sm" : "lg"}
-            onClick={() => setIsModalOpen(true)}
+            onClick={() => navigate({ to: "/leads", search: { type: "sell" } })}
           >
             Solicitar préstamo
           </Button>
@@ -137,11 +137,6 @@ export const GetMoney = () => {
           </div>
         </div>
       </div>
-      <ModalChatBot
-        open={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        options={optionsCredit.sell}
-      />
     </section>
   );
 };

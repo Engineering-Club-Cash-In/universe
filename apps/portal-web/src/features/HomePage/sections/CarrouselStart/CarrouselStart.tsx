@@ -39,14 +39,14 @@ const slides: CarouselSlide[] = [
   },
   {
     id: 3,
-    imageUrl: url + "/IMG_6704.JPG.jpeg",
+    imageUrl: url + "/investor-meeting.jpg",
     title: "Hagamos una inversión segura",
     buttonText: "Invierte",
     buttonLink: "/invest",
   },
   {
     id: 4,
-    imageUrl: url + "/IMG_6693.JPG.jpeg",
+    imageUrl: url + "/showroom-new.jpg",
     title: "¿Quieres vender tu auto? Nosotros nos encargamos",
     buttonText: "Vende tu auto",
     buttonLink: "/sell",

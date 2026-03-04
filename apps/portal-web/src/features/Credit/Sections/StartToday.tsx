@@ -53,8 +53,8 @@ export const StartToday = () => {
           }}
           onClick={() => setIsModalOpen(true)}
         >
-          <span className="mr-2 inline-flex items-center" style={{ width: 21, height: 21 }}><Whatsapp /></span>
-          Contactanos por WhatsApp
+          <IconMessage className="mr-2" />
+          Contáctanos por WhatsApp
         </motion.button>
       </div>
       <div className="grid lg:grid-cols-3 gap-6 lg:gap-40 mb-20 lg:mb-0 lg:mt-6">

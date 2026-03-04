@@ -8,6 +8,7 @@ import {
 } from "./icons";
 import { Link } from "@components/ui";
 import { useIsMobile } from "@/hooks";
+import { IconCCI } from "@/components/IconCCI";
 
 // Navigation sections configuration
 const FOOTER_SECTIONS = [
@@ -16,7 +17,7 @@ const FOOTER_SECTIONS = [
     links: [
       { label: "Encuentra tu auto", href: "/credit" }, // TODO: devolver a "/marketplace" cuando esté habilitado
       { label: "Obtén tu financiamiento", href: "/credit" },
-      { label: "Compramos tu auto", href: "/sell" },
+      { label: "Compramos tu auto", href: "/sell", disabled: true },
     ],
   },
   {
@@ -42,19 +43,19 @@ export const SOCIAL_CONTACTS = [
   {
     icon: Facebook,
     label: "ClubCashIn",
-    href: "https://facebook.com/ClubCashIn",
+    href: "https://facebook.com/clubcashin",
   },
   {
     icon: Linkedin,
-    label: "Club Cash In",
-    href: "https://linkedin.com/company/club-cash-in",
+    label: "Clubcashin.com",
+    href: "https://linkedin.com/company/clubcashin",
   },
   {
     icon: Location,
     lead: false,
-    label: "Km 16.5, Centro Comercial Muxbal, Guatemala",
-    className: "max-w-[280px] text-center",
-    href: "https://www.google.com/maps/search/Centro+Comercial+Muxbal+Guatemala",
+    label: "Km 6.8 Antigua carretera a Muxbal, Complejo Pradera, Ofibodegas, Bodega 2",
+    className: "max-w-[320px] text-center",
+    href: "https://www.google.com/maps/search/Km+6.8+Antigua+carretera+a+Muxbal+Complejo+Pradera+Ofibodegas",
   },
 ];
 
@@ -92,7 +93,12 @@ export const Footer: React.FC<FooterProps> = ({ notShowRedirects = false }) => {
       <div className="flex justify-end flex-col gap-6 h-full p-8 lg:px-40 lg:py-20 z-10 relative">
         {/* Logo section */}
         <div className="flex flex-col lg:flex-row gap-6 lg:gap-10 lg:items-center">
-          <Link href="/"><h1 className="text-3xl lg:text-header-3">Cashin</h1></Link>
+          <Link href="/" className="flex items-center gap-2">
+            <div className="w-8 h-8">
+              <IconCCI />
+            </div>
+            <h1 className="text-3xl lg:text-header-3">CashIn</h1>
+          </Link>
         </div>
 
         <div className="border-t border-white border-2"></div>
@@ -105,15 +111,24 @@ export const Footer: React.FC<FooterProps> = ({ notShowRedirects = false }) => {
               {FOOTER_SECTIONS.map((section) => (
                 <div key={section.title} className="flex flex-col gap-6">
                   <div className="text-[20px] font-bold">{section.title}</div>
-                  {section.links.map((link) => (
-                    <Link
-                      key={link.label}
-                      href={link.href}
-                      className="transition-colors hover:text-gray-300"
-                    >
-                      {link.label}
-                    </Link>
-                  ))}
+                  {section.links.map((link) =>
+                    link.disabled ? (
+                      <span
+                        key={link.label}
+                        className="text-gray-600 cursor-not-allowed"
+                      >
+                        {link.label}
+                      </span>
+                    ) : (
+                      <Link
+                        key={link.label}
+                        href={link.href}
+                        className="transition-colors hover:text-gray-300"
+                      >
+                        {link.label}
+                      </Link>
+                    )
+                  )}
                 </div>
               ))}
             </div>

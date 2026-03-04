@@ -10,7 +10,7 @@ export const InfoLead = () => {
   const items = [
     {
       icon: <IconCheckDoc width={isMobile ? 20 : 34} />,
-      title: "Tu aplicas",
+      title: "Tú aplicas",
       description: "Completa tu solicitud en minutos",
     },
     {

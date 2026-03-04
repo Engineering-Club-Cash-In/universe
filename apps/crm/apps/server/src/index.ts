@@ -34,7 +34,7 @@ import {
 } from "./jobs/cobros-notifications";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
-import { appRouter } from "./routers/index";
+import { appRouter, disbursementRouter } from "./routers/index";
 import { investmentsRouter } from "./routers/investments";
 import externalContractsRouter from "./routes/external-contracts";
 
@@ -82,7 +82,11 @@ app.on(["POST", "GET"], "/api/auth/**", (c) => auth.handler(c.req.raw));
 // External contracts endpoint (requires service account authentication)
 app.route("/api/contracts/external", externalContractsRouter);
 
-const handler = new RPCHandler({ ...appRouter, ...investmentsRouter } as typeof appRouter & typeof investmentsRouter);
+const handler = new RPCHandler({
+	...appRouter,
+	...investmentsRouter,
+	...disbursementRouter,
+} as typeof appRouter & typeof investmentsRouter & typeof disbursementRouter);
 app.use("/rpc/*", async (c, next) => {
 	const context = await createContext({ context: c });
 	const { matched, response } = await handler.handle(c.req.raw, {

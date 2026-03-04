@@ -22,6 +22,7 @@ import {
 	History,
 	Kanban,
 	List,
+	Loader2,
 	Mail,
 	Phone,
 	Plus,
@@ -29,7 +30,6 @@ import {
 	Search,
 	Target,
 	Trash2,
-	Loader2,
 	TrendingUp,
 	Trophy,
 	Upload,
@@ -1339,7 +1339,10 @@ function RouteComponent() {
 	// Stats filtradas por mes desde el backend
 	const stats = placedStatsQuery.data;
 	const totalOpportunities =
-		stats?.totalOpportunities ?? stats?.teamOpportunities ?? stats?.myOpportunities ?? 0;
+		stats?.totalOpportunities ??
+		stats?.teamOpportunities ??
+		stats?.myOpportunities ??
+		0;
 	const totalValue = stats?.totalValue ?? 0;
 	const placedCount = stats?.placedCount ?? 0;
 	const placedAmount = stats?.placedAmount ?? 0;
@@ -1589,7 +1592,7 @@ function RouteComponent() {
 							<SelectItem value="other">Otro</SelectItem>
 						</SelectContent>
 					</Select>
-						<Button
+					<Button
 						variant={showLostOpportunities ? "default" : "outline"}
 						size="sm"
 						onClick={() => setShowLostOpportunities(!showLostOpportunities)}
@@ -1623,24 +1626,199 @@ function RouteComponent() {
 				}}
 			>
 				<DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
-						<DialogHeader>
-							<DialogTitle>Crear Nueva Oportunidad</DialogTitle>
-						</DialogHeader>
-						<form
-							onSubmit={(e) => {
-								e.preventDefault();
-								e.stopPropagation();
-								void createOpportunityForm.handleSubmit();
-							}}
-							className="space-y-4"
-						>
+					<DialogHeader>
+						<DialogTitle>Crear Nueva Oportunidad</DialogTitle>
+					</DialogHeader>
+					<form
+						onSubmit={(e) => {
+							e.preventDefault();
+							e.stopPropagation();
+							void createOpportunityForm.handleSubmit();
+						}}
+						className="space-y-4"
+					>
+						<div>
+							<createOpportunityForm.Field
+								name="title"
+								validators={{
+									onChange: ({ value }) => {
+										if (!value || value.trim() === "") {
+											return "El título es requerido";
+										}
+										return undefined;
+									},
+								}}
+							>
+								{(field) => (
+									<div className="space-y-2">
+										<Label htmlFor={field.name}>
+											Título de la Oportunidad{" "}
+											<span className="text-red-500">*</span>
+										</Label>
+										<Input
+											id={field.name}
+											name={field.name}
+											value={field.state.value}
+											onBlur={field.handleBlur}
+											onChange={(e) => field.handleChange(e.target.value)}
+											placeholder="Ingresa el título de la oportunidad..."
+											className={
+												field.state.meta.errors.length > 0
+													? "border-red-500"
+													: ""
+											}
+										/>
+										{field.state.meta.errors.map((error) => (
+											<p key={String(error)} className="text-red-500 text-sm">
+												{String(error)}
+											</p>
+										))}
+									</div>
+								)}
+							</createOpportunityForm.Field>
+						</div>
+
+						<div className="grid grid-cols-2 gap-4">
+							<div>
+								<createOpportunityForm.Field name="creditType">
+									{(field) => (
+										<div className="space-y-2">
+											<Label htmlFor={field.name}>
+												Tipo de Crédito <span className="text-red-500">*</span>
+											</Label>
+											<Select
+												value={field.state.value}
+												onValueChange={(value) =>
+													field.handleChange(
+														value as "autocompra" | "sobre_vehiculo",
+													)
+												}
+											>
+												<SelectTrigger className="w-full">
+													<SelectValue placeholder="Seleccionar tipo" />
+												</SelectTrigger>
+												<SelectContent align="start">
+													<SelectItem value="autocompra">Autocompra</SelectItem>
+													<SelectItem value="sobre_vehiculo">
+														Sobre Vehículo
+													</SelectItem>
+												</SelectContent>
+											</Select>
+										</div>
+									)}
+								</createOpportunityForm.Field>
+							</div>
+							<div>
+								<createOpportunityForm.Field name="loanPurpose">
+									{(field) => (
+										<div className="space-y-2">
+											<Label htmlFor={field.name}>Propósito del Préstamo</Label>
+											<Select
+												value={field.state.value}
+												onValueChange={(value) =>
+													field.handleChange(value as "personal" | "business")
+												}
+											>
+												<SelectTrigger className="w-full">
+													<SelectValue placeholder="Seleccionar propósito" />
+												</SelectTrigger>
+												<SelectContent align="start">
+													<SelectItem value="personal">Personal</SelectItem>
+													<SelectItem value="business">Negocio</SelectItem>
+												</SelectContent>
+											</Select>
+										</div>
+									)}
+								</createOpportunityForm.Field>
+							</div>
+						</div>
+
+						<div className="grid grid-cols-2 gap-4">
+							<div className="col-span-2">
+								<createOpportunityForm.Field name="leadId">
+									{(field) => (
+										<div className="space-y-2">
+											<Label htmlFor={field.name}>Lead</Label>
+											<Combobox
+												options={[
+													{ value: "none", label: "Sin lead" },
+													...(leadsQuery.data?.data?.map((lead) => ({
+														value: lead.id,
+														label: `${lead.firstName} ${lead.lastName}`,
+													})) || []),
+												]}
+												value={field.state.value ?? null}
+												onChange={(value) => field.handleChange(value)}
+												onSearchChange={setLeadsSearch}
+												isLoading={leadsQuery.isFetching}
+												placeholder="Buscar lead..."
+												width="full"
+											/>
+										</div>
+									)}
+								</createOpportunityForm.Field>
+							</div>
+						</div>
+
+						<div className="grid grid-cols-2 gap-4">
+							<div>
+								<createOpportunityForm.Field name="vehicleId">
+									{(field) => (
+										<div className="space-y-2">
+											<Label htmlFor={field.name}>Vehículo (Opcional)</Label>
+											<Combobox
+												options={[
+													{ value: "none", label: "Sin vehículo" },
+													...(vehiclesQuery.data?.data
+														?.filter((vehicle: any) =>
+															isVehicleAvailable(vehicle.status),
+														)
+														?.map((vehicle: any) => ({
+															value: vehicle.id,
+															label: `${vehicle.year} ${vehicle.make} ${vehicle.model}${vehicle.licensePlate ? ` - ${vehicle.licensePlate}` : ""}${vehicle.isNew ? " (Nuevo)" : ""}`,
+														})) || []),
+												]}
+												value={field.state.value ?? "none"}
+												onChange={(value) =>
+													field.handleChange(value === "none" ? "" : value)
+												}
+												onSearchChange={setVehiclesSearch}
+												isLoading={vehiclesQuery.isFetching}
+												placeholder="Buscar vehículo..."
+												width="full"
+											/>
+										</div>
+									)}
+								</createOpportunityForm.Field>
+							</div>
+							<div>
+								<createOpportunityForm.Field name="value">
+									{(field) => (
+										<div className="space-y-2">
+											<Label htmlFor={field.name}>Valor del Crédito</Label>
+											<Input
+												id={field.name}
+												name={field.name}
+												type="number"
+												value={field.state.value}
+												onBlur={field.handleBlur}
+												onChange={(e) => field.handleChange(e.target.value)}
+												placeholder="0.00"
+											/>
+										</div>
+									)}
+								</createOpportunityForm.Field>
+							</div>
+						</div>
+
+						<div className="grid grid-cols-2 gap-4">
 							<div>
 								<createOpportunityForm.Field
-									name="title"
+									name="stageId"
 									validators={{
-										onChange: ({ value }) => {
-											if (!value || value.trim() === "") {
-												return "El título es requerido";
+										onSubmit: ({ value }) => {
+											if (!value || value === "") {
+												return "La etapa es requerida";
 											}
 											return undefined;
 										},
@@ -1649,22 +1827,37 @@ function RouteComponent() {
 									{(field) => (
 										<div className="space-y-2">
 											<Label htmlFor={field.name}>
-												Título de la Oportunidad{" "}
-												<span className="text-red-500">*</span>
+												Etapa Inicial <span className="text-red-500">*</span>
 											</Label>
-											<Input
-												id={field.name}
-												name={field.name}
-												value={field.state.value}
-												onBlur={field.handleBlur}
-												onChange={(e) => field.handleChange(e.target.value)}
-												placeholder="Ingresa el título de la oportunidad..."
-												className={
-													field.state.meta.errors.length > 0
-														? "border-red-500"
-														: ""
-												}
-											/>
+											<Select
+												value={field.state.value || undefined}
+												onValueChange={(value) => field.handleChange(value)}
+											>
+												<SelectTrigger
+													className={
+														field.state.meta.errors.length > 0
+															? "w-full border-red-500"
+															: "w-full"
+													}
+												>
+													<SelectValue placeholder="Seleccionar etapa" />
+												</SelectTrigger>
+												<SelectContent align="start">
+													{salesStagesQuery.data
+														?.filter(
+															(stage) =>
+																stage.id &&
+																stage.id !== "" &&
+																stage.closurePercentage >= 1 &&
+																stage.closurePercentage <= 20,
+														)
+														.map((stage) => (
+															<SelectItem key={stage.id} value={stage.id}>
+																{stage.name} ({stage.closurePercentage}%)
+															</SelectItem>
+														))}
+												</SelectContent>
+											</Select>
 											{field.state.meta.errors.map((error) => (
 												<p key={String(error)} className="text-red-500 text-sm">
 													{String(error)}
@@ -1674,417 +1867,227 @@ function RouteComponent() {
 									)}
 								</createOpportunityForm.Field>
 							</div>
-
-							<div className="grid grid-cols-2 gap-4">
-								<div>
-									<createOpportunityForm.Field name="creditType">
-										{(field) => (
-											<div className="space-y-2">
-												<Label htmlFor={field.name}>
-													Tipo de Crédito{" "}
-													<span className="text-red-500">*</span>
-												</Label>
-												<Select
-													value={field.state.value}
-													onValueChange={(value) =>
-														field.handleChange(
-															value as "autocompra" | "sobre_vehiculo",
-														)
-													}
-												>
-													<SelectTrigger className="w-full">
-														<SelectValue placeholder="Seleccionar tipo" />
-													</SelectTrigger>
-													<SelectContent align="start">
-														<SelectItem value="autocompra">
-															Autocompra
-														</SelectItem>
-														<SelectItem value="sobre_vehiculo">
-															Sobre Vehículo
-														</SelectItem>
-													</SelectContent>
-												</Select>
-											</div>
-										)}
-									</createOpportunityForm.Field>
-								</div>
-								<div>
-									<createOpportunityForm.Field name="loanPurpose">
-										{(field) => (
-											<div className="space-y-2">
-												<Label htmlFor={field.name}>
-													Propósito del Préstamo
-												</Label>
-												<Select
-													value={field.state.value}
-													onValueChange={(value) =>
-														field.handleChange(value as "personal" | "business")
-													}
-												>
-													<SelectTrigger className="w-full">
-														<SelectValue placeholder="Seleccionar propósito" />
-													</SelectTrigger>
-													<SelectContent align="start">
-														<SelectItem value="personal">Personal</SelectItem>
-														<SelectItem value="business">Negocio</SelectItem>
-													</SelectContent>
-												</Select>
-											</div>
-										)}
-									</createOpportunityForm.Field>
-								</div>
-							</div>
-
-							<div className="grid grid-cols-2 gap-4">
-								<div className="col-span-2">
-									<createOpportunityForm.Field name="leadId">
-										{(field) => (
-											<div className="space-y-2">
-												<Label htmlFor={field.name}>Lead</Label>
-												<Combobox
-													options={[
-														{ value: "none", label: "Sin lead" },
-														...(leadsQuery.data?.data?.map((lead) => ({
-															value: lead.id,
-															label: `${lead.firstName} ${lead.lastName}`,
-														})) || []),
-													]}
-													value={field.state.value ?? null}
-													onChange={(value) => field.handleChange(value)}
-													onSearchChange={setLeadsSearch}
-													isLoading={leadsQuery.isFetching}
-													placeholder="Buscar lead..."
-													width="full"
-												/>
-											</div>
-										)}
-									</createOpportunityForm.Field>
-								</div>
-							</div>
-
-							<div className="grid grid-cols-2 gap-4">
-								<div>
-									<createOpportunityForm.Field name="vehicleId">
-										{(field) => (
-											<div className="space-y-2">
-												<Label htmlFor={field.name}>Vehículo (Opcional)</Label>
-												<Combobox
-													options={[
-														{ value: "none", label: "Sin vehículo" },
-														...(vehiclesQuery.data?.data
-															?.filter((vehicle: any) =>
-																isVehicleAvailable(vehicle.status),
-															)
-															?.map((vehicle: any) => ({
-																value: vehicle.id,
-																label: `${vehicle.year} ${vehicle.make} ${vehicle.model}${vehicle.licensePlate ? ` - ${vehicle.licensePlate}` : ""}${vehicle.isNew ? " (Nuevo)" : ""}`,
-															})) || []),
-													]}
-													value={field.state.value ?? "none"}
-													onChange={(value) =>
-														field.handleChange(value === "none" ? "" : value)
-													}
-													onSearchChange={setVehiclesSearch}
-													isLoading={vehiclesQuery.isFetching}
-													placeholder="Buscar vehículo..."
-													width="full"
-												/>
-											</div>
-										)}
-									</createOpportunityForm.Field>
-								</div>
-								<div>
-									<createOpportunityForm.Field name="value">
-										{(field) => (
-											<div className="space-y-2">
-												<Label htmlFor={field.name}>Valor del Crédito</Label>
-												<Input
-													id={field.name}
-													name={field.name}
-													type="number"
-													value={field.state.value}
-													onBlur={field.handleBlur}
-													onChange={(e) => field.handleChange(e.target.value)}
-													placeholder="0.00"
-												/>
-											</div>
-										)}
-									</createOpportunityForm.Field>
-								</div>
-							</div>
-
-							<div className="grid grid-cols-2 gap-4">
-								<div>
-									<createOpportunityForm.Field
-										name="stageId"
-										validators={{
-											onSubmit: ({ value }) => {
-												if (!value || value === "") {
-													return "La etapa es requerida";
-												}
-												return undefined;
-											},
-										}}
-									>
-										{(field) => (
-											<div className="space-y-2">
-												<Label htmlFor={field.name}>
-													Etapa Inicial <span className="text-red-500">*</span>
-												</Label>
-												<Select
-													value={field.state.value || undefined}
-													onValueChange={(value) => field.handleChange(value)}
-												>
-													<SelectTrigger
-														className={
-															field.state.meta.errors.length > 0
-																? "w-full border-red-500"
-																: "w-full"
-														}
-													>
-														<SelectValue placeholder="Seleccionar etapa" />
-													</SelectTrigger>
-													<SelectContent align="start">
-														{salesStagesQuery.data
-															?.filter(
-																(stage) =>
-																	stage.id &&
-																	stage.id !== "" &&
-																	stage.closurePercentage >= 1 &&
-																	stage.closurePercentage <= 20,
-															)
-															.map((stage) => (
-																<SelectItem key={stage.id} value={stage.id}>
-																	{stage.name} ({stage.closurePercentage}%)
-																</SelectItem>
-															))}
-													</SelectContent>
-												</Select>
-												{field.state.meta.errors.map((error) => (
-													<p
-														key={String(error)}
-														className="text-red-500 text-sm"
-													>
-														{String(error)}
-													</p>
-												))}
-											</div>
-										)}
-									</createOpportunityForm.Field>
-								</div>
-								<div>
-									<createOpportunityForm.Field name="expectedCloseDate">
-										{(field) => (
-											<div className="space-y-2">
-												<Label htmlFor={field.name}>
-													Fecha de Cierre Esperada
-												</Label>
-												<DatePicker
-													date={
-														field.state.value
-															? new Date(field.state.value)
-															: undefined
-													}
-													onDateChange={(date) => {
-														field.handleChange(
-															date ? date.toISOString().split("T")[0] : "",
-														);
-														field.handleBlur();
-													}}
-													placeholder="Seleccionar fecha de cierre"
-												/>
-											</div>
-										)}
-									</createOpportunityForm.Field>
-								</div>
-							</div>
-
 							<div>
-								<createOpportunityForm.Field name="vendorId">
+								<createOpportunityForm.Field name="expectedCloseDate">
 									{(field) => (
 										<div className="space-y-2">
 											<Label htmlFor={field.name}>
-												Vendedor del Vehículo (opcional)
+												Fecha de Cierre Esperada
 											</Label>
-											<Combobox
-												options={[
-													{ value: "none", label: "Sin vendedor asignado" },
-													...(vendorsQuery.data?.map((vendor: any) => ({
-														value: vendor.id,
-														label: `${vendor.name}${vendor.vendorType === "empresa" ? ` (${vendor.companyName})` : ""} - ${vendor.dpi}`,
-													})) || []),
-												]}
-												value={field.state.value ?? null}
-												onChange={(value) => field.handleChange(value)}
-												placeholder="Seleccionar vendedor"
-												width="full"
+											<DatePicker
+												date={
+													field.state.value
+														? new Date(field.state.value)
+														: undefined
+												}
+												onDateChange={(date) => {
+													field.handleChange(
+														date ? date.toISOString().split("T")[0] : "",
+													);
+													field.handleBlur();
+												}}
+												placeholder="Seleccionar fecha de cierre"
 											/>
 										</div>
 									)}
 								</createOpportunityForm.Field>
 							</div>
+						</div>
 
-							<div>
-								<createOpportunityForm.Field name="notes">
-									{(field) => (
-										<div className="space-y-2">
-											<Label htmlFor={field.name}>Notas</Label>
-											<Textarea
-												id={field.name}
-												name={field.name}
-												value={field.state.value}
-												onBlur={field.handleBlur}
-												onChange={(e) => field.handleChange(e.target.value)}
-												placeholder="Notas adicionales sobre esta oportunidad..."
-												rows={3}
-											/>
-										</div>
-									)}
-								</createOpportunityForm.Field>
-							</div>
-
-							<createOpportunityForm.Subscribe>
-								{(state) => (
-									<Button
-										type="submit"
-										className="w-full"
-										disabled={
-											!state.canSubmit ||
-											state.isSubmitting ||
-											createOpportunityMutation.isPending
-										}
-									>
-										{state.isSubmitting || createOpportunityMutation.isPending
-											? "Creando..."
-											: "Crear Oportunidad"}
-									</Button>
+						<div>
+							<createOpportunityForm.Field name="vendorId">
+								{(field) => (
+									<div className="space-y-2">
+										<Label htmlFor={field.name}>
+											Vendedor del Vehículo (opcional)
+										</Label>
+										<Combobox
+											options={[
+												{ value: "none", label: "Sin vendedor asignado" },
+												...(vendorsQuery.data?.map((vendor: any) => ({
+													value: vendor.id,
+													label: `${vendor.name}${vendor.vendorType === "empresa" ? ` (${vendor.companyName})` : ""} - ${vendor.dpi}`,
+												})) || []),
+											]}
+											value={field.state.value ?? null}
+											onChange={(value) => field.handleChange(value)}
+											placeholder="Seleccionar vendedor"
+											width="full"
+										/>
+									</div>
 								)}
-							</createOpportunityForm.Subscribe>
-						</form>
-					</DialogContent>
-				</Dialog>
+							</createOpportunityForm.Field>
+						</div>
 
-				{/* Opportunity Details Modal */}
-				<Dialog
-					open={isDetailsDialogOpen}
-					onOpenChange={setIsDetailsDialogOpen}
-				>
-					<DialogContent className="max-h-[90vh] w-[90vw] min-w-[800px] max-w-5xl overflow-y-auto">
-						<DialogHeader>
-							<DialogTitle>Detalles de la Oportunidad</DialogTitle>
-						</DialogHeader>
-						{selectedOpportunity && (
-							<Tabs
-								defaultValue="details"
-								className="w-full"
-								onValueChange={(value) => {
-									if (value === "credit") {
-										// Populate edit form when switching to credit tab, but don't open edit modal
-										handleEditOpportunity(false);
+						<div>
+							<createOpportunityForm.Field name="notes">
+								{(field) => (
+									<div className="space-y-2">
+										<Label htmlFor={field.name}>Notas</Label>
+										<Textarea
+											id={field.name}
+											name={field.name}
+											value={field.state.value}
+											onBlur={field.handleBlur}
+											onChange={(e) => field.handleChange(e.target.value)}
+											placeholder="Notas adicionales sobre esta oportunidad..."
+											rows={3}
+										/>
+									</div>
+								)}
+							</createOpportunityForm.Field>
+						</div>
+
+						<createOpportunityForm.Subscribe>
+							{(state) => (
+								<Button
+									type="submit"
+									className="w-full"
+									disabled={
+										!state.canSubmit ||
+										state.isSubmitting ||
+										createOpportunityMutation.isPending
 									}
-								}}
-							>
-								<TabsList className="grid w-full grid-cols-6">
-									<TabsTrigger value="details">Detalles</TabsTrigger>
-									<TabsTrigger value="documents">Documentos</TabsTrigger>
-									<TabsTrigger value="coDebtors">Co-firmantes</TabsTrigger>
-									<TabsTrigger value="credit">Credito</TabsTrigger>
-									<TabsTrigger value="forms">Formularios</TabsTrigger>
-									<TabsTrigger value="history">Historial</TabsTrigger>
-								</TabsList>
-								<TabsContent value="details" className="mt-6 space-y-6">
-									{/* Header with title and status */}
-									<div className="flex items-start justify-between">
-										<div>
-											<h3 className="font-semibold text-lg">
-												{selectedOpportunity.title}
-											</h3>
-											<div className="mt-1 flex items-center gap-2">
-												{selectedOpportunity.status === "won" ? (
-													<Badge
-														className={`${getStatusBadgeColor(selectedOpportunity.status)}`}
-														variant="outline"
-													>
-														{getStatusLabel(selectedOpportunity.status)}
-													</Badge>
-												) : (
-													<Select
-														value={selectedOpportunity.status}
-														onValueChange={(value) => {
-															updateOpportunityMutation.mutate({
-																id: selectedOpportunity.id,
-																status: value as "open" | "lost" | "on_hold",
-															});
-														}}
-													>
-														<SelectTrigger className="h-7 w-[130px]">
-															<SelectValue />
-														</SelectTrigger>
-														<SelectContent>
-															<SelectItem value="open">
-																<span className="flex items-center gap-2">
-																	<span className="h-2 w-2 rounded-full bg-blue-500" />
-																	Abierta
-																</span>
-															</SelectItem>
-															<SelectItem value="on_hold">
-																<span className="flex items-center gap-2">
-																	<span className="h-2 w-2 rounded-full bg-yellow-500" />
-																	En espera
-																</span>
-															</SelectItem>
-															<SelectItem value="lost">
-																<span className="flex items-center gap-2">
-																	<span className="h-2 w-2 rounded-full bg-red-500" />
-																	Perdida
-																</span>
-															</SelectItem>
-														</SelectContent>
-													</Select>
-												)}
-												{selectedOpportunity.stage && (
-													<Badge
-														style={{
-															backgroundColor: selectedOpportunity.stage.color,
-															color: "white",
-														}}
-													>
-														{selectedOpportunity.stage.name}
-													</Badge>
-												)}
-											</div>
-										</div>
-										<div className="text-right">
-											<div className="font-bold text-2xl text-green-600">
-												Q
-												{Number.parseFloat(
-													selectedOpportunity.value || "0",
-												).toLocaleString()}
-											</div>
-											<div className="text-muted-foreground text-sm">
-												{selectedOpportunity.probability ||
-													selectedOpportunity.stage?.closurePercentage ||
-													0}
-												% probabilidad
-											</div>
+								>
+									{state.isSubmitting || createOpportunityMutation.isPending
+										? "Creando..."
+										: "Crear Oportunidad"}
+								</Button>
+							)}
+						</createOpportunityForm.Subscribe>
+					</form>
+				</DialogContent>
+			</Dialog>
+
+			{/* Opportunity Details Modal */}
+			<Dialog open={isDetailsDialogOpen} onOpenChange={setIsDetailsDialogOpen}>
+				<DialogContent className="max-h-[90vh] w-[90vw] min-w-[800px] max-w-5xl overflow-y-auto">
+					<DialogHeader>
+						<DialogTitle>Detalles de la Oportunidad</DialogTitle>
+					</DialogHeader>
+					{selectedOpportunity && (
+						<Tabs
+							defaultValue="details"
+							className="w-full"
+							onValueChange={(value) => {
+								if (value === "credit") {
+									// Populate edit form when switching to credit tab, but don't open edit modal
+									handleEditOpportunity(false);
+								}
+							}}
+						>
+							<TabsList className="grid w-full grid-cols-6">
+								<TabsTrigger value="details">Detalles</TabsTrigger>
+								<TabsTrigger value="documents">Documentos</TabsTrigger>
+								<TabsTrigger value="coDebtors">Co-firmantes</TabsTrigger>
+								<TabsTrigger value="credit">Credito</TabsTrigger>
+								<TabsTrigger value="forms">Formularios</TabsTrigger>
+								<TabsTrigger value="history">Historial</TabsTrigger>
+							</TabsList>
+							<TabsContent value="details" className="mt-6 space-y-6">
+								{/* Header with title and status */}
+								<div className="flex items-start justify-between">
+									<div>
+										<h3 className="font-semibold text-lg">
+											{selectedOpportunity.title}
+										</h3>
+										<div className="mt-1 flex items-center gap-2">
+											{selectedOpportunity.status === "won" ? (
+												<Badge
+													className={`${getStatusBadgeColor(selectedOpportunity.status)}`}
+													variant="outline"
+												>
+													{getStatusLabel(selectedOpportunity.status)}
+												</Badge>
+											) : (
+												<Select
+													value={selectedOpportunity.status}
+													onValueChange={(value) => {
+														updateOpportunityMutation.mutate({
+															id: selectedOpportunity.id,
+															status: value as "open" | "lost" | "on_hold",
+														});
+													}}
+												>
+													<SelectTrigger className="h-7 w-[130px]">
+														<SelectValue />
+													</SelectTrigger>
+													<SelectContent>
+														<SelectItem value="open">
+															<span className="flex items-center gap-2">
+																<span className="h-2 w-2 rounded-full bg-blue-500" />
+																Abierta
+															</span>
+														</SelectItem>
+														<SelectItem value="on_hold">
+															<span className="flex items-center gap-2">
+																<span className="h-2 w-2 rounded-full bg-yellow-500" />
+																En espera
+															</span>
+														</SelectItem>
+														<SelectItem value="lost">
+															<span className="flex items-center gap-2">
+																<span className="h-2 w-2 rounded-full bg-red-500" />
+																Perdida
+															</span>
+														</SelectItem>
+													</SelectContent>
+												</Select>
+											)}
+											{selectedOpportunity.stage && (
+												<Badge
+													style={{
+														backgroundColor: selectedOpportunity.stage.color,
+														color: "white",
+													}}
+												>
+													{selectedOpportunity.stage.name}
+												</Badge>
+											)}
 										</div>
 									</div>
+									<div className="text-right">
+										<div className="font-bold text-2xl text-green-600">
+											Q
+											{Number.parseFloat(
+												selectedOpportunity.value || "0",
+											).toLocaleString()}
+										</div>
+										<div className="text-muted-foreground text-sm">
+											{selectedOpportunity.probability ||
+												selectedOpportunity.stage?.closurePercentage ||
+												0}
+											% probabilidad
+										</div>
+									</div>
+								</div>
 
-									{/* Details Grid */}
-									<div className="grid grid-cols-2 gap-6">
-										{/* Lead Information */}
-										{selectedOpportunity.lead && (
-											<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-												<Label className="font-semibold text-muted-foreground text-sm">
-													Lead
-												</Label>
-												<div className="flex items-center gap-3">
-													<Users className="h-5 w-5 text-muted-foreground" />
-													<span
-														className="cursor-pointer font-medium text-primary hover:underline"
-														role="button"
-														tabIndex={0}
-														onClick={() => {
+								{/* Details Grid */}
+								<div className="grid grid-cols-2 gap-6">
+									{/* Lead Information */}
+									{selectedOpportunity.lead && (
+										<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+											<Label className="font-semibold text-muted-foreground text-sm">
+												Lead
+											</Label>
+											<div className="flex items-center gap-3">
+												<Users className="h-5 w-5 text-muted-foreground" />
+												<span
+													className="cursor-pointer font-medium text-primary hover:underline"
+													role="button"
+													tabIndex={0}
+													onClick={() => {
+														setIsDetailsDialogOpen(false);
+														navigate({
+															to: "/crm/leads",
+															search: {
+																leadId: selectedOpportunity.lead?.id,
+															},
+														});
+													}}
+													onKeyDown={(e) => {
+														if (e.key === "Enter" || e.key === " ") {
+															e.preventDefault();
 															setIsDetailsDialogOpen(false);
 															navigate({
 																to: "/crm/leads",
@@ -2092,118 +2095,118 @@ function RouteComponent() {
 																	leadId: selectedOpportunity.lead?.id,
 																},
 															});
+														}
+													}}
+												>
+													{selectedOpportunity.lead.firstName}{" "}
+													{selectedOpportunity.lead.lastName}
+												</span>
+											</div>
+											{selectedOpportunity.lead.email && (
+												<div className="flex items-center gap-3 text-muted-foreground text-sm">
+													<Mail className="h-5 w-5" />
+													<span>{selectedOpportunity.lead.email}</span>
+												</div>
+											)}
+											{selectedOpportunity.lead.phone && (
+												<div className="flex items-center gap-3 text-muted-foreground text-sm">
+													<Phone className="h-5 w-5" />
+													<span>{selectedOpportunity.lead.phone}</span>
+												</div>
+											)}
+										</div>
+									)}
+
+									{/* Company Information */}
+									{selectedOpportunity.company && (
+										<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+											<Label className="font-semibold text-muted-foreground text-sm">
+												Empresa
+											</Label>
+											<div className="flex items-center gap-3">
+												<Building className="h-5 w-5 text-muted-foreground" />
+												<span className="font-medium">
+													{selectedOpportunity.company.name}
+												</span>
+											</div>
+										</div>
+									)}
+
+									{/* Expected Close Date */}
+									{selectedOpportunity.expectedCloseDate && (
+										<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+											<Label className="font-semibold text-muted-foreground text-sm">
+												Fecha de Cierre Esperada
+											</Label>
+											<div className="flex items-center gap-3">
+												<Calendar className="h-5 w-5 text-muted-foreground" />
+												<span className="font-medium">
+													{formatGuatemalaDate(
+														selectedOpportunity.expectedCloseDate,
+													)}
+												</span>
+											</div>
+										</div>
+									)}
+
+									{/* Assigned To */}
+									{selectedOpportunity.assignedUser && (
+										<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+											<Label className="font-semibold text-muted-foreground text-sm">
+												Asignado a
+											</Label>
+											<div className="flex items-center gap-3">
+												<Users className="h-5 w-5 text-muted-foreground" />
+												<span className="font-medium">
+													{selectedOpportunity.assignedUser.name ||
+														"Usuario sin nombre"}
+												</span>
+											</div>
+										</div>
+									)}
+
+									{/* Loan Purpose */}
+									{selectedOpportunity.loanPurpose && (
+										<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+											<Label className="font-semibold text-muted-foreground text-sm">
+												Propósito del Préstamo
+											</Label>
+											<div className="flex items-center gap-3">
+												<Banknote className="h-5 w-5 text-muted-foreground" />
+												<span className="font-medium">
+													{getLoanPurposeLabel(selectedOpportunity.loanPurpose)}
+												</span>
+											</div>
+										</div>
+									)}
+
+									{/* Vehicle Info */}
+									{selectedOpportunity.vehicle && (
+										<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+											<Label className="font-semibold text-muted-foreground text-sm">
+												Vehículo
+											</Label>
+											<div className="flex items-center gap-3">
+												<Car className="h-5 w-5 text-muted-foreground" />
+												<div className="flex flex-col gap-1">
+													<span
+														className="cursor-pointer font-medium text-primary hover:underline"
+														role="button"
+														tabIndex={0}
+														onClick={() => {
+															setIsDetailsDialogOpen(false);
+															navigate({
+																to: "/vehicles",
+																search: {
+																	vehicleId: selectedOpportunity.vehicle?.id,
+																	inspectionId: undefined,
+																	tab: undefined,
+																},
+															});
 														}}
 														onKeyDown={(e) => {
 															if (e.key === "Enter" || e.key === " ") {
 																e.preventDefault();
-																setIsDetailsDialogOpen(false);
-																navigate({
-																	to: "/crm/leads",
-																	search: {
-																		leadId: selectedOpportunity.lead?.id,
-																	},
-																});
-															}
-														}}
-													>
-														{selectedOpportunity.lead.firstName}{" "}
-														{selectedOpportunity.lead.lastName}
-													</span>
-												</div>
-												{selectedOpportunity.lead.email && (
-													<div className="flex items-center gap-3 text-muted-foreground text-sm">
-														<Mail className="h-5 w-5" />
-														<span>{selectedOpportunity.lead.email}</span>
-													</div>
-												)}
-												{selectedOpportunity.lead.phone && (
-													<div className="flex items-center gap-3 text-muted-foreground text-sm">
-														<Phone className="h-5 w-5" />
-														<span>{selectedOpportunity.lead.phone}</span>
-													</div>
-												)}
-											</div>
-										)}
-
-										{/* Company Information */}
-										{selectedOpportunity.company && (
-											<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-												<Label className="font-semibold text-muted-foreground text-sm">
-													Empresa
-												</Label>
-												<div className="flex items-center gap-3">
-													<Building className="h-5 w-5 text-muted-foreground" />
-													<span className="font-medium">
-														{selectedOpportunity.company.name}
-													</span>
-												</div>
-											</div>
-										)}
-
-										{/* Expected Close Date */}
-										{selectedOpportunity.expectedCloseDate && (
-											<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-												<Label className="font-semibold text-muted-foreground text-sm">
-													Fecha de Cierre Esperada
-												</Label>
-												<div className="flex items-center gap-3">
-													<Calendar className="h-5 w-5 text-muted-foreground" />
-													<span className="font-medium">
-														{formatGuatemalaDate(
-															selectedOpportunity.expectedCloseDate,
-														)}
-													</span>
-												</div>
-											</div>
-										)}
-
-										{/* Assigned To */}
-										{selectedOpportunity.assignedUser && (
-											<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-												<Label className="font-semibold text-muted-foreground text-sm">
-													Asignado a
-												</Label>
-												<div className="flex items-center gap-3">
-													<Users className="h-5 w-5 text-muted-foreground" />
-													<span className="font-medium">
-														{selectedOpportunity.assignedUser.name ||
-															"Usuario sin nombre"}
-													</span>
-												</div>
-											</div>
-										)}
-
-										{/* Loan Purpose */}
-										{selectedOpportunity.loanPurpose && (
-											<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-												<Label className="font-semibold text-muted-foreground text-sm">
-													Propósito del Préstamo
-												</Label>
-												<div className="flex items-center gap-3">
-													<Banknote className="h-5 w-5 text-muted-foreground" />
-													<span className="font-medium">
-														{getLoanPurposeLabel(
-															selectedOpportunity.loanPurpose,
-														)}
-													</span>
-												</div>
-											</div>
-										)}
-
-										{/* Vehicle Info */}
-										{selectedOpportunity.vehicle && (
-											<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-												<Label className="font-semibold text-muted-foreground text-sm">
-													Vehículo
-												</Label>
-												<div className="flex items-center gap-3">
-													<Car className="h-5 w-5 text-muted-foreground" />
-													<div className="flex flex-col gap-1">
-														<span
-															className="cursor-pointer font-medium text-primary hover:underline"
-															role="button"
-															tabIndex={0}
-															onClick={() => {
 																setIsDetailsDialogOpen(false);
 																navigate({
 																	to: "/vehicles",
@@ -2213,983 +2216,945 @@ function RouteComponent() {
 																		tab: undefined,
 																	},
 																});
-															}}
-															onKeyDown={(e) => {
-																if (e.key === "Enter" || e.key === " ") {
-																	e.preventDefault();
-																	setIsDetailsDialogOpen(false);
-																	navigate({
-																		to: "/vehicles",
-																		search: {
-																			vehicleId:
-																				selectedOpportunity.vehicle?.id,
-																			inspectionId: undefined,
-																			tab: undefined,
-																		},
-																	});
-																}
-															}}
-														>
-															{selectedOpportunity.vehicle.year}{" "}
-															{selectedOpportunity.vehicle.make}{" "}
-															{selectedOpportunity.vehicle.model}
-														</span>
-														<span className="text-muted-foreground text-sm">
-															{selectedOpportunity.vehicle.licensePlate ||
-																"Sin placa"}
-															{selectedOpportunity.vehicle.color &&
-																` • ${selectedOpportunity.vehicle.color}`}
-														</span>
-													</div>
-												</div>
-												{selectedOpportunity.vehicle.isNew && (
-													<div className="mt-2">
-														{renderNewVehicleBadges(
-															selectedOpportunity.vehicle,
-														)}
-													</div>
-												)}
-												{selectedOpportunity.vehicle.isNew &&
-													getMissingFieldsForNewVehicle(
-														selectedOpportunity.vehicle,
-													).length > 0 && (
-														<div className="mt-2 text-amber-600 text-sm">
-															<span className="font-medium">
-																Campos pendientes para cierre (100%):{" "}
-															</span>
-															{getMissingFieldsForNewVehicle(
-																selectedOpportunity.vehicle,
-															).join(", ")}
-														</div>
-													)}
-											</div>
-										)}
-									</div>
-
-									{/* Consolidated Credit Analysis Summary */}
-									<ConsolidatedCreditSummary
-										opportunityId={selectedOpportunity.id}
-									/>
-
-									{/* Contracts Section */}
-									{userProfile.data?.role &&
-										PERMISSIONS.canViewOpportunityContracts(
-											userProfile.data.role,
-										) && (
-											<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-												<div className="flex items-center gap-2">
-													<FileSignature className="h-5 w-5 text-muted-foreground" />
-													<Label className="font-semibold text-muted-foreground text-sm">
-														Contratos Legales
-													</Label>
-												</div>
-												{opportunityContractsQuery.isLoading ? (
-													<p className="text-muted-foreground text-sm">
-														Cargando contratos...
-													</p>
-												) : opportunityContractsQuery.data &&
-													opportunityContractsQuery.data.length > 0 ? (
-													<div className="space-y-2">
-														{opportunityContractsQuery.data.map(
-															({ contract }) => (
-																<div
-																	key={contract.id}
-																	className="flex items-center justify-between rounded-md border bg-background p-3"
-																>
-																	<div className="flex flex-col gap-1">
-																		<span className="font-medium text-sm">
-																			{contract.contractName}
-																		</span>
-																		<span className="text-muted-foreground text-xs">
-																			{getContractTypeLabel(
-																				contract.contractType,
-																			)}{" "}
-																			•{" "}
-																			{contract.status === "pending"
-																				? "Pendiente"
-																				: contract.status === "signed"
-																					? "Firmado"
-																					: "Cancelado"}
-																		</span>
-																	</div>
-																	<div className="flex gap-2">
-																		{contract.pdfLink && (
-																			<Button
-																				variant="outline"
-																				size="sm"
-																				asChild
-																			>
-																				<a
-																					href={contract.pdfLink}
-																					target="_blank"
-																					rel="noopener noreferrer"
-																					className="flex items-center gap-1"
-																				>
-																					<FileText className="h-3 w-3" />
-																					PDF
-																				</a>
-																			</Button>
-																		)}
-																		{contract.clientSigningLink && (
-																			<Button
-																				variant="outline"
-																				size="sm"
-																				asChild
-																			>
-																				<a
-																					href={contract.clientSigningLink}
-																					target="_blank"
-																					rel="noopener noreferrer"
-																					className="flex items-center gap-1"
-																				>
-																					<ExternalLink className="h-3 w-3" />
-																					Cliente
-																				</a>
-																			</Button>
-																		)}
-																		{contract.representativeSigningLink && (
-																			<Button
-																				variant="outline"
-																				size="sm"
-																				asChild
-																			>
-																				<a
-																					href={
-																						contract.representativeSigningLink
-																					}
-																					target="_blank"
-																					rel="noopener noreferrer"
-																					className="flex items-center gap-1"
-																				>
-																					<ExternalLink className="h-3 w-3" />
-																					Rep. Legal
-																				</a>
-																			</Button>
-																		)}
-																	</div>
-																</div>
-															),
-														)}
-													</div>
-												) : (
-													<p className="text-muted-foreground text-sm">
-														No hay contratos asociados a esta oportunidad
-													</p>
-												)}
-											</div>
-										)}
-
-									{/* Quotations Section */}
-									{userProfile.data?.role &&
-										PERMISSIONS.canAccessCRM(userProfile.data.role) && (
-											<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-												<div className="flex items-center gap-2">
-													<Calculator className="h-5 w-5 text-muted-foreground" />
-													<Label className="font-semibold text-muted-foreground text-sm">
-														Cotizaciones
-													</Label>
-												</div>
-												{opportunityQuotationsQuery.isLoading ? (
-													<p className="text-muted-foreground text-sm">
-														Cargando cotizaciones...
-													</p>
-												) : opportunityQuotationsQuery.data &&
-													opportunityQuotationsQuery.data.length > 0 ? (
-													<div className="space-y-2">
-														{opportunityQuotationsQuery.data.map(
-															(quotation: any) => (
-																<div
-																	key={quotation.id}
-																	className="flex items-center justify-between rounded-md border bg-background p-3"
-																>
-																	<div className="flex flex-col gap-1">
-																		<span className="font-medium text-sm">
-																			{quotation.vehicleBrand}{" "}
-																			{quotation.vehicleLine}{" "}
-																			{quotation.vehicleModel}
-																		</span>
-																		<span className="text-muted-foreground text-xs">
-																			Q
-																			{Number(
-																				quotation.vehicleValue,
-																			).toLocaleString()}{" "}
-																			• {quotation.termMonths} meses •{" "}
-																			{quotation.status === "draft"
-																				? "Borrador"
-																				: quotation.status === "sent"
-																					? "Enviada"
-																					: quotation.status === "accepted"
-																						? "Aceptada"
-																						: "Rechazada"}
-																		</span>
-																	</div>
-																	<div className="text-right">
-																		<p className="font-bold text-green-600">
-																			Q
-																			{Number(
-																				quotation.monthlyPayment,
-																			).toLocaleString()}
-																		</p>
-																		<p className="text-muted-foreground text-xs">
-																			cuota mensual
-																		</p>
-																	</div>
-																</div>
-															),
-														)}
-													</div>
-												) : (
-													<p className="text-muted-foreground text-sm">
-														No hay cotizaciones asociadas a esta oportunidad
-													</p>
-												)}
-											</div>
-										)}
-
-									{/* Opportunity ID */}
-									<div className="rounded-lg border bg-muted/20 px-4 py-3">
-										<div className="flex items-center justify-between">
-											<span className="text-muted-foreground text-xs">
-												ID de Oportunidad
-											</span>
-											<code className="rounded bg-muted px-2 py-1 font-mono text-xs">
-												{selectedOpportunity.id.slice(0, 8)}
-											</code>
-										</div>
-									</div>
-
-									{/* Actions */}
-									<div className="flex gap-3 border-t pt-6">
-										<Button
-											variant="outline"
-											size="default"
-											className="flex-1"
-											onClick={() => {
-												handleEditOpportunity(true);
-											}}
-										>
-											Editar
-										</Button>
-										<Button
-											variant="outline"
-											size="default"
-											className="flex-1"
-											onClick={handleChangeStage}
-										>
-											Cambiar Etapa
-										</Button>
-									</div>
-								</TabsContent>
-
-								<TabsContent value="forms" className="mt-6 space-y-4">
-									{selectedOpportunity && (
-										<ClientFormsSection opportunityId={selectedOpportunity.id} />
-									)}
-								</TabsContent>
-
-								<TabsContent value="history" className="mt-6 space-y-4">
-									<div className="space-y-4">
-										<div className="mb-4 flex items-center gap-2">
-											<History className="h-5 w-5 text-muted-foreground" />
-											<h3 className="font-semibold text-lg">
-												Historial de Cambios
-											</h3>
-										</div>
-
-										{isLoadingHistory ? (
-											<div className="flex items-center justify-center py-8">
-												<p className="text-muted-foreground">
-													Cargando historial...
-												</p>
-											</div>
-										) : opportunityHistory.length === 0 ? (
-											<div className="rounded-lg border bg-muted/30 p-4 text-center">
-												<p className="text-muted-foreground">
-													No hay cambios registrados
-												</p>
-											</div>
-										) : (
-											<div className="space-y-3">
-												{opportunityHistory.map((change) => (
-													<div
-														key={change.id}
-														className="rounded-lg border bg-card p-4"
+															}
+														}}
 													>
-														<div className="flex items-start justify-between">
-															<div className="flex-1 space-y-2">
-																<div className="flex items-center gap-2">
-																	{change.isOverride && (
-																		<Badge
-																			variant="outline"
-																			className="border-orange-300 bg-orange-100 text-orange-700"
-																		>
-																			Override
-																		</Badge>
-																	)}
-																	<span className="font-medium">
-																		{change.fromStage?.name || "Inicio"} →{" "}
-																		{change.toStage?.name}
+														{selectedOpportunity.vehicle.year}{" "}
+														{selectedOpportunity.vehicle.make}{" "}
+														{selectedOpportunity.vehicle.model}
+													</span>
+													<span className="text-muted-foreground text-sm">
+														{selectedOpportunity.vehicle.licensePlate ||
+															"Sin placa"}
+														{selectedOpportunity.vehicle.color &&
+															` • ${selectedOpportunity.vehicle.color}`}
+													</span>
+												</div>
+											</div>
+											{selectedOpportunity.vehicle.isNew && (
+												<div className="mt-2">
+													{renderNewVehicleBadges(selectedOpportunity.vehicle)}
+												</div>
+											)}
+											{selectedOpportunity.vehicle.isNew &&
+												getMissingFieldsForNewVehicle(
+													selectedOpportunity.vehicle,
+												).length > 0 && (
+													<div className="mt-2 text-amber-600 text-sm">
+														<span className="font-medium">
+															Campos pendientes para cierre (100%):{" "}
+														</span>
+														{getMissingFieldsForNewVehicle(
+															selectedOpportunity.vehicle,
+														).join(", ")}
+													</div>
+												)}
+										</div>
+									)}
+								</div>
+
+								{/* Consolidated Credit Analysis Summary */}
+								<ConsolidatedCreditSummary
+									opportunityId={selectedOpportunity.id}
+								/>
+
+								{/* Contracts Section */}
+								{userProfile.data?.role &&
+									PERMISSIONS.canViewOpportunityContracts(
+										userProfile.data.role,
+									) && (
+										<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+											<div className="flex items-center gap-2">
+												<FileSignature className="h-5 w-5 text-muted-foreground" />
+												<Label className="font-semibold text-muted-foreground text-sm">
+													Contratos Legales
+												</Label>
+											</div>
+											{opportunityContractsQuery.isLoading ? (
+												<p className="text-muted-foreground text-sm">
+													Cargando contratos...
+												</p>
+											) : opportunityContractsQuery.data &&
+												opportunityContractsQuery.data.length > 0 ? (
+												<div className="space-y-2">
+													{opportunityContractsQuery.data.map(
+														({ contract }) => (
+															<div
+																key={contract.id}
+																className="flex items-center justify-between rounded-md border bg-background p-3"
+															>
+																<div className="flex flex-col gap-1">
+																	<span className="font-medium text-sm">
+																		{contract.contractName}
+																	</span>
+																	<span className="text-muted-foreground text-xs">
+																		{getContractTypeLabel(
+																			contract.contractType,
+																		)}{" "}
+																		•{" "}
+																		{contract.status === "pending"
+																			? "Pendiente"
+																			: contract.status === "signed"
+																				? "Firmado"
+																				: "Cancelado"}
 																	</span>
 																</div>
-																{change.reason && (
-																	<p className="text-muted-foreground text-sm">
-																		{change.reason}
-																	</p>
-																)}
-																<div className="flex items-center gap-4 text-muted-foreground text-xs">
-																	<div className="flex items-center gap-1">
-																		<Clock className="h-3 w-3" />
-																		{new Date(
-																			change.changedAt,
-																		).toLocaleString()}
-																	</div>
-																	<div className="flex items-center gap-1">
-																		<Users className="h-3 w-3" />
-																		{change.changedBy?.name ||
-																			"Usuario desconocido"}
-																		{change.changedBy?.role && (
-																			<Badge
-																				variant="outline"
-																				className="ml-1 text-xs"
+																<div className="flex gap-2">
+																	{contract.pdfLink && (
+																		<Button variant="outline" size="sm" asChild>
+																			<a
+																				href={contract.pdfLink}
+																				target="_blank"
+																				rel="noopener noreferrer"
+																				className="flex items-center gap-1"
 																			>
-																				{getRoleLabel(change.changedBy.role)}
-																			</Badge>
-																		)}
-																	</div>
+																				<FileText className="h-3 w-3" />
+																				PDF
+																			</a>
+																		</Button>
+																	)}
+																	{contract.clientSigningLink && (
+																		<Button variant="outline" size="sm" asChild>
+																			<a
+																				href={contract.clientSigningLink}
+																				target="_blank"
+																				rel="noopener noreferrer"
+																				className="flex items-center gap-1"
+																			>
+																				<ExternalLink className="h-3 w-3" />
+																				Cliente
+																			</a>
+																		</Button>
+																	)}
+																	{contract.representativeSigningLink && (
+																		<Button variant="outline" size="sm" asChild>
+																			<a
+																				href={
+																					contract.representativeSigningLink
+																				}
+																				target="_blank"
+																				rel="noopener noreferrer"
+																				className="flex items-center gap-1"
+																			>
+																				<ExternalLink className="h-3 w-3" />
+																				Rep. Legal
+																			</a>
+																		</Button>
+																	)}
+																</div>
+															</div>
+														),
+													)}
+												</div>
+											) : (
+												<p className="text-muted-foreground text-sm">
+													No hay contratos asociados a esta oportunidad
+												</p>
+											)}
+										</div>
+									)}
+
+								{/* Quotations Section */}
+								{userProfile.data?.role &&
+									PERMISSIONS.canAccessCRM(userProfile.data.role) && (
+										<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+											<div className="flex items-center gap-2">
+												<Calculator className="h-5 w-5 text-muted-foreground" />
+												<Label className="font-semibold text-muted-foreground text-sm">
+													Cotizaciones
+												</Label>
+											</div>
+											{opportunityQuotationsQuery.isLoading ? (
+												<p className="text-muted-foreground text-sm">
+													Cargando cotizaciones...
+												</p>
+											) : opportunityQuotationsQuery.data &&
+												opportunityQuotationsQuery.data.length > 0 ? (
+												<div className="space-y-2">
+													{opportunityQuotationsQuery.data.map(
+														(quotation: any) => (
+															<div
+																key={quotation.id}
+																className="flex items-center justify-between rounded-md border bg-background p-3"
+															>
+																<div className="flex flex-col gap-1">
+																	<span className="font-medium text-sm">
+																		{quotation.vehicleBrand}{" "}
+																		{quotation.vehicleLine}{" "}
+																		{quotation.vehicleModel}
+																	</span>
+																	<span className="text-muted-foreground text-xs">
+																		Q
+																		{Number(
+																			quotation.vehicleValue,
+																		).toLocaleString()}{" "}
+																		• {quotation.termMonths} meses •{" "}
+																		{quotation.status === "draft"
+																			? "Borrador"
+																			: quotation.status === "sent"
+																				? "Enviada"
+																				: quotation.status === "accepted"
+																					? "Aceptada"
+																					: "Rechazada"}
+																	</span>
+																</div>
+																<div className="text-right">
+																	<p className="font-bold text-green-600">
+																		Q
+																		{Number(
+																			quotation.monthlyPayment,
+																		).toLocaleString()}
+																	</p>
+																	<p className="text-muted-foreground text-xs">
+																		cuota mensual
+																	</p>
+																</div>
+															</div>
+														),
+													)}
+												</div>
+											) : (
+												<p className="text-muted-foreground text-sm">
+													No hay cotizaciones asociadas a esta oportunidad
+												</p>
+											)}
+										</div>
+									)}
+
+								{/* Opportunity ID */}
+								<div className="rounded-lg border bg-muted/20 px-4 py-3">
+									<div className="flex items-center justify-between">
+										<span className="text-muted-foreground text-xs">
+											ID de Oportunidad
+										</span>
+										<code className="rounded bg-muted px-2 py-1 font-mono text-xs">
+											{selectedOpportunity.id.slice(0, 8)}
+										</code>
+									</div>
+								</div>
+
+								{/* Actions */}
+								<div className="flex gap-3 border-t pt-6">
+									<Button
+										variant="outline"
+										size="default"
+										className="flex-1"
+										onClick={() => {
+											handleEditOpportunity(true);
+										}}
+									>
+										Editar
+									</Button>
+									<Button
+										variant="outline"
+										size="default"
+										className="flex-1"
+										onClick={handleChangeStage}
+									>
+										Cambiar Etapa
+									</Button>
+								</div>
+							</TabsContent>
+
+							<TabsContent value="forms" className="mt-6 space-y-4">
+								{selectedOpportunity && (
+									<ClientFormsSection opportunityId={selectedOpportunity.id} />
+								)}
+							</TabsContent>
+
+							<TabsContent value="history" className="mt-6 space-y-4">
+								<div className="space-y-4">
+									<div className="mb-4 flex items-center gap-2">
+										<History className="h-5 w-5 text-muted-foreground" />
+										<h3 className="font-semibold text-lg">
+											Historial de Cambios
+										</h3>
+									</div>
+
+									{isLoadingHistory ? (
+										<div className="flex items-center justify-center py-8">
+											<p className="text-muted-foreground">
+												Cargando historial...
+											</p>
+										</div>
+									) : opportunityHistory.length === 0 ? (
+										<div className="rounded-lg border bg-muted/30 p-4 text-center">
+											<p className="text-muted-foreground">
+												No hay cambios registrados
+											</p>
+										</div>
+									) : (
+										<div className="space-y-3">
+											{opportunityHistory.map((change) => (
+												<div
+													key={change.id}
+													className="rounded-lg border bg-card p-4"
+												>
+													<div className="flex items-start justify-between">
+														<div className="flex-1 space-y-2">
+															<div className="flex items-center gap-2">
+																{change.isOverride && (
+																	<Badge
+																		variant="outline"
+																		className="border-orange-300 bg-orange-100 text-orange-700"
+																	>
+																		Override
+																	</Badge>
+																)}
+																<span className="font-medium">
+																	{change.fromStage?.name || "Inicio"} →{" "}
+																	{change.toStage?.name}
+																</span>
+															</div>
+															{change.reason && (
+																<p className="text-muted-foreground text-sm">
+																	{change.reason}
+																</p>
+															)}
+															<div className="flex items-center gap-4 text-muted-foreground text-xs">
+																<div className="flex items-center gap-1">
+																	<Clock className="h-3 w-3" />
+																	{new Date(change.changedAt).toLocaleString()}
+																</div>
+																<div className="flex items-center gap-1">
+																	<Users className="h-3 w-3" />
+																	{change.changedBy?.name ||
+																		"Usuario desconocido"}
+																	{change.changedBy?.role && (
+																		<Badge
+																			variant="outline"
+																			className="ml-1 text-xs"
+																		>
+																			{getRoleLabel(change.changedBy.role)}
+																		</Badge>
+																	)}
 																</div>
 															</div>
 														</div>
 													</div>
-												))}
-											</div>
-										)}
-									</div>
-								</TabsContent>
-
-								<TabsContent value="documents" className="mt-6 space-y-4">
-									<DocumentsManager opportunityId={selectedOpportunity.id} />
-								</TabsContent>
-
-								<TabsContent value="coDebtors" className="mt-6 space-y-4">
-									<CoDebtorsView
-										opportunityId={selectedOpportunity.id}
-										opportunity={selectedOpportunity}
-									/>
-								</TabsContent>
-
-								<TabsContent value="credit" className="mt-6 space-y-4">
-									{/* Detalle de Crédito - Mostrar cuando >= 40% */}
-									{(() => {
-										const currentStageData = salesStagesQuery.data?.find(
-											(s) => s.id === selectedOpportunity.stage?.id,
-										);
-										const showCreditDetail =
-											currentStageData &&
-											currentStageData.closurePercentage >= 40;
-
-										if (!showCreditDetail) {
-											return (
-												<div className="rounded-lg border border-dashed p-8 text-center">
-													<FileSpreadsheet className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
-													<p className="text-muted-foreground">
-														El detalle de crédito estará disponible cuando la
-														oportunidad alcance el 40% de avance.
-													</p>
-													<p className="mt-2 text-muted-foreground text-sm">
-														Etapa actual:{" "}
-														{currentStageData?.name || "Sin etapa"} (
-														{currentStageData?.closurePercentage || 0}%)
-													</p>
 												</div>
-											);
-										}
+											))}
+										</div>
+									)}
+								</div>
+							</TabsContent>
 
-										// Obtener la cotización más reciente
-										const latestQuotation =
-											opportunityQuotationsQuery.data?.[0] || null;
+							<TabsContent value="documents" className="mt-6 space-y-4">
+								<DocumentsManager opportunityId={selectedOpportunity.id} />
+							</TabsContent>
 
-										// Si no hay cotización, mostrar mensaje para crear una
-										if (!latestQuotation) {
-											return (
-												<div className="rounded-lg border border-orange-300 border-dashed bg-orange-50 p-8 text-center dark:border-orange-800 dark:bg-orange-950/20">
-													<Calculator className="mx-auto mb-4 h-12 w-12 text-orange-500" />
-													<h3 className="mb-2 font-semibold text-lg">
-														Se requiere una cotización
-													</h3>
-													<p className="mb-4 text-muted-foreground">
-														Para ver el detalle del crédito, primero debes crear
-														una cotización para esta oportunidad.
-													</p>
-													<Button
-														onClick={() => {
-															setIsDetailsDialogOpen(false);
-															navigate({
-																to: "/crm/quoter",
-																search: {
-																	opportunityId: selectedOpportunity.id,
-																},
-															});
-														}}
-													>
-														<Calculator className="mr-2 h-4 w-4" />
-														Crear Cotización
-													</Button>
-												</div>
-											);
-										}
+							<TabsContent value="coDebtors" className="mt-6 space-y-4">
+								<CoDebtorsView
+									opportunityId={selectedOpportunity.id}
+									opportunity={selectedOpportunity}
+								/>
+							</TabsContent>
 
+							<TabsContent value="credit" className="mt-6 space-y-4">
+								{/* Detalle de Crédito - Mostrar cuando >= 40% */}
+								{(() => {
+									const currentStageData = salesStagesQuery.data?.find(
+										(s) => s.id === selectedOpportunity.stage?.id,
+									);
+									const showCreditDetail =
+										currentStageData &&
+										currentStageData.closurePercentage >= 40;
+
+									if (!showCreditDetail) {
 										return (
-											<CreditDetailView
-												opportunityId={selectedOpportunity.id}
-												userRole={userProfile.data?.role}
-												opportunity={selectedOpportunity}
-												quotation={latestQuotation}
-											/>
+											<div className="rounded-lg border border-dashed p-8 text-center">
+												<FileSpreadsheet className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
+												<p className="text-muted-foreground">
+													El detalle de crédito estará disponible cuando la
+													oportunidad alcance el 40% de avance.
+												</p>
+												<p className="mt-2 text-muted-foreground text-sm">
+													Etapa actual: {currentStageData?.name || "Sin etapa"}{" "}
+													({currentStageData?.closurePercentage || 0}%)
+												</p>
+											</div>
 										);
-									})()}
-								</TabsContent>
-							</Tabs>
-						)}
-					</DialogContent>
-				</Dialog>
+									}
 
-				{/* Edit Opportunity Dialog */}
-				<Dialog
-					open={isEditDialogOpen}
-					onOpenChange={(open) => {
-						setIsEditDialogOpen(open);
-						if (!open) {
-							setLeadsSearch("");
-							setDebouncedLeadsSearch("");
-						}
-					}}
-				>
-					<DialogContent className="scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent dark:scrollbar-thumb-gray-700 max-h-[90vh] min-w-[56rem] max-w-5xl overflow-y-auto">
-						<DialogHeader>
-							<DialogTitle>Editar Oportunidad</DialogTitle>
-						</DialogHeader>
-						<form
-							onSubmit={(e) => {
-								e.preventDefault();
-								e.stopPropagation();
-								void editOpportunityForm.handleSubmit();
-							}}
-							className="space-y-6"
-						>
-							<div>
-								<editOpportunityForm.Field
-									name="title"
-									validators={{
-										onChange: ({ value }) => {
-											if (!value || value.trim() === "") {
-												return "El título es requerido";
+									// Obtener la cotización más reciente
+									const latestQuotation =
+										opportunityQuotationsQuery.data?.[0] || null;
+
+									// Si no hay cotización, mostrar mensaje para crear una
+									if (!latestQuotation) {
+										return (
+											<div className="rounded-lg border border-orange-300 border-dashed bg-orange-50 p-8 text-center dark:border-orange-800 dark:bg-orange-950/20">
+												<Calculator className="mx-auto mb-4 h-12 w-12 text-orange-500" />
+												<h3 className="mb-2 font-semibold text-lg">
+													Se requiere una cotización
+												</h3>
+												<p className="mb-4 text-muted-foreground">
+													Para ver el detalle del crédito, primero debes crear
+													una cotización para esta oportunidad.
+												</p>
+												<Button
+													onClick={() => {
+														setIsDetailsDialogOpen(false);
+														navigate({
+															to: "/crm/quoter",
+															search: {
+																opportunityId: selectedOpportunity.id,
+															},
+														});
+													}}
+												>
+													<Calculator className="mr-2 h-4 w-4" />
+													Crear Cotización
+												</Button>
+											</div>
+										);
+									}
+
+									return (
+										<CreditDetailView
+											opportunityId={selectedOpportunity.id}
+											userRole={userProfile.data?.role}
+											opportunity={selectedOpportunity}
+											quotation={latestQuotation}
+										/>
+									);
+								})()}
+							</TabsContent>
+						</Tabs>
+					)}
+				</DialogContent>
+			</Dialog>
+
+			{/* Edit Opportunity Dialog */}
+			<Dialog
+				open={isEditDialogOpen}
+				onOpenChange={(open) => {
+					setIsEditDialogOpen(open);
+					if (!open) {
+						setLeadsSearch("");
+						setDebouncedLeadsSearch("");
+					}
+				}}
+			>
+				<DialogContent className="scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent dark:scrollbar-thumb-gray-700 max-h-[90vh] min-w-[56rem] max-w-5xl overflow-y-auto">
+					<DialogHeader>
+						<DialogTitle>Editar Oportunidad</DialogTitle>
+					</DialogHeader>
+					<form
+						onSubmit={(e) => {
+							e.preventDefault();
+							e.stopPropagation();
+							void editOpportunityForm.handleSubmit();
+						}}
+						className="space-y-6"
+					>
+						<div>
+							<editOpportunityForm.Field
+								name="title"
+								validators={{
+									onChange: ({ value }) => {
+										if (!value || value.trim() === "") {
+											return "El título es requerido";
+										}
+										return undefined;
+									},
+								}}
+							>
+								{(field) => (
+									<div className="space-y-2">
+										<Label htmlFor={field.name}>
+											Título de la Oportunidad{" "}
+											<span className="text-red-500">*</span>
+										</Label>
+										<Input
+											id={field.name}
+											name={field.name}
+											value={field.state.value}
+											onBlur={field.handleBlur}
+											onChange={(e) => field.handleChange(e.target.value)}
+											placeholder="Ingresa el título de la oportunidad..."
+											className={
+												field.state.meta.errors.length > 0
+													? "border-red-500"
+													: ""
 											}
-											return undefined;
-										},
+										/>
+										{field.state.meta.errors.map((error) => (
+											<p key={String(error)} className="text-red-500 text-sm">
+												{String(error)}
+											</p>
+										))}
+									</div>
+								)}
+							</editOpportunityForm.Field>
+						</div>
+
+						<div className="grid grid-cols-2 gap-4">
+							<div>
+								<editOpportunityForm.Field name="leadId">
+									{(field) => {
+										const queryLeads =
+											leadsQuery.data?.data?.map((lead) => ({
+												value: lead.id,
+												label: `${lead.firstName} ${lead.lastName}`,
+											})) || [];
+										const currentLead = selectedOpportunity?.lead;
+										const hasCurrentInResults =
+											currentLead &&
+											queryLeads.some((o) => o.value === currentLead.id);
+										const leadOptions =
+											currentLead && !hasCurrentInResults
+												? [
+														{
+															value: currentLead.id,
+															label: `${currentLead.firstName} ${currentLead.lastName}`,
+														},
+														...queryLeads,
+													]
+												: queryLeads;
+										return (
+											<div className="space-y-2">
+												<Label htmlFor={field.name}>Lead</Label>
+												<Combobox
+													options={[
+														{ value: "none", label: "Sin lead" },
+														...leadOptions,
+													]}
+													value={field.state.value ?? null}
+													onChange={(value) => field.handleChange(value)}
+													onSearchChange={setLeadsSearch}
+													isLoading={leadsQuery.isFetching}
+													placeholder="Buscar lead..."
+													width="full"
+												/>
+											</div>
+										);
 									}}
-								>
+								</editOpportunityForm.Field>
+							</div>
+							<div>
+								<editOpportunityForm.Field name="value">
 									{(field) => (
 										<div className="space-y-2">
-											<Label htmlFor={field.name}>
-												Título de la Oportunidad{" "}
-												<span className="text-red-500">*</span>
-											</Label>
+											<Label htmlFor={field.name}>Valor del Crédito</Label>
 											<Input
 												id={field.name}
 												name={field.name}
+												type="number"
 												value={field.state.value}
 												onBlur={field.handleBlur}
 												onChange={(e) => field.handleChange(e.target.value)}
-												placeholder="Ingresa el título de la oportunidad..."
-												className={
-													field.state.meta.errors.length > 0
-														? "border-red-500"
-														: ""
-												}
+												placeholder="0.00"
 											/>
-											{field.state.meta.errors.map((error) => (
-												<p key={String(error)} className="text-red-500 text-sm">
-													{String(error)}
-												</p>
-											))}
+										</div>
+									)}
+								</editOpportunityForm.Field>
+							</div>
+						</div>
+
+						<div className="grid grid-cols-2 gap-4">
+							<div>
+								<editOpportunityForm.Field name="creditType">
+									{(field) => (
+										<div className="space-y-2">
+											<Label htmlFor={field.name}>Tipo de Crédito</Label>
+											<Select
+												value={field.state.value}
+												onValueChange={(value) =>
+													field.handleChange(
+														value as "autocompra" | "sobre_vehiculo",
+													)
+												}
+											>
+												<SelectTrigger className="w-full">
+													<SelectValue placeholder="Seleccionar tipo" />
+												</SelectTrigger>
+												<SelectContent align="start">
+													<SelectItem value="autocompra">Autocompra</SelectItem>
+													<SelectItem value="sobre_vehiculo">
+														Sobre Vehículo
+													</SelectItem>
+												</SelectContent>
+											</Select>
+										</div>
+									)}
+								</editOpportunityForm.Field>
+							</div>
+							<div>
+								<editOpportunityForm.Field name="loanPurpose">
+									{(field) => (
+										<div className="space-y-2">
+											<Label htmlFor={field.name}>Propósito del Préstamo</Label>
+											<Select
+												value={field.state.value}
+												onValueChange={(value) =>
+													field.handleChange(value as "personal" | "business")
+												}
+											>
+												<SelectTrigger className="w-full">
+													<SelectValue placeholder="Seleccionar propósito" />
+												</SelectTrigger>
+												<SelectContent align="start">
+													<SelectItem value="personal">Personal</SelectItem>
+													<SelectItem value="business">Negocio</SelectItem>
+												</SelectContent>
+											</Select>
+										</div>
+									)}
+								</editOpportunityForm.Field>
+							</div>
+						</div>
+
+						<div className="grid grid-cols-2 gap-4">
+							<div>
+								<editOpportunityForm.Field name="vehicleId">
+									{(field) => (
+										<div className="space-y-2">
+											<Label htmlFor={field.name}>Vehículo</Label>
+											<Combobox
+												options={[
+													{ value: "none", label: "Sin vehículo" },
+													...(vehiclesQuery.data?.data
+														?.filter((vehicle: any) =>
+															isVehicleAvailable(
+																vehicle.status,
+																selectedOpportunity?.vehicleId,
+																vehicle.id,
+															),
+														)
+														?.map((vehicle: any) => ({
+															value: vehicle.id,
+															label: `${vehicle.year} ${vehicle.make} ${vehicle.model}${vehicle.licensePlate ? ` - ${vehicle.licensePlate}` : ""}${vehicle.isNew ? " (Nuevo)" : ""}`,
+														})) || []),
+												]}
+												value={field.state.value || "none"}
+												onChange={(value) =>
+													field.handleChange(value === "none" ? "" : value)
+												}
+												onSearchChange={setVehiclesSearch}
+												isLoading={vehiclesQuery.isFetching}
+												placeholder="Buscar vehículo..."
+												width="full"
+											/>
 										</div>
 									)}
 								</editOpportunityForm.Field>
 							</div>
 
-							<div className="grid grid-cols-2 gap-4">
-								<div>
-									<editOpportunityForm.Field name="leadId">
-										{(field) => {
-											const queryLeads =
-												leadsQuery.data?.data?.map((lead) => ({
-													value: lead.id,
-													label: `${lead.firstName} ${lead.lastName}`,
-												})) || [];
-											const currentLead = selectedOpportunity?.lead;
-											const hasCurrentInResults =
-												currentLead &&
-												queryLeads.some((o) => o.value === currentLead.id);
-											const leadOptions =
-												currentLead && !hasCurrentInResults
-													? [
-															{
-																value: currentLead.id,
-																label: `${currentLead.firstName} ${currentLead.lastName}`,
-															},
-															...queryLeads,
-														]
-													: queryLeads;
-											return (
-												<div className="space-y-2">
-													<Label htmlFor={field.name}>Lead</Label>
-													<Combobox
-														options={[
-															{ value: "none", label: "Sin lead" },
-															...leadOptions,
-														]}
-														value={field.state.value ?? null}
-														onChange={(value) => field.handleChange(value)}
-														onSearchChange={setLeadsSearch}
-														isLoading={leadsQuery.isFetching}
-														placeholder="Buscar lead..."
-														width="full"
-													/>
-												</div>
-											);
-										}}
-									</editOpportunityForm.Field>
-								</div>
-								<div>
-									<editOpportunityForm.Field name="value">
-										{(field) => (
-											<div className="space-y-2">
-												<Label htmlFor={field.name}>Valor del Crédito</Label>
-												<Input
-													id={field.name}
-													name={field.name}
-													type="number"
-													value={field.state.value}
-													onBlur={field.handleBlur}
-													onChange={(e) => field.handleChange(e.target.value)}
-													placeholder="0.00"
-												/>
-											</div>
-										)}
-									</editOpportunityForm.Field>
-								</div>
-							</div>
-
-							<div className="grid grid-cols-2 gap-4">
-								<div>
-									<editOpportunityForm.Field name="creditType">
-										{(field) => (
-											<div className="space-y-2">
-												<Label htmlFor={field.name}>Tipo de Crédito</Label>
-												<Select
-													value={field.state.value}
-													onValueChange={(value) =>
-														field.handleChange(
-															value as "autocompra" | "sobre_vehiculo",
-														)
-													}
-												>
-													<SelectTrigger className="w-full">
-														<SelectValue placeholder="Seleccionar tipo" />
-													</SelectTrigger>
-													<SelectContent align="start">
-														<SelectItem value="autocompra">
-															Autocompra
+							<div>
+								<editOpportunityForm.Field name="stageId">
+									{(field) => (
+										<div className="space-y-2">
+											<Label htmlFor={field.name}>Etapa</Label>
+											<Select
+												value={field.state.value}
+												onValueChange={(value) => field.handleChange(value)}
+											>
+												<SelectTrigger className="w-full">
+													<SelectValue placeholder="Seleccionar etapa" />
+												</SelectTrigger>
+												<SelectContent>
+													{salesStagesQuery.data?.map((stage) => (
+														<SelectItem key={stage.id} value={stage.id}>
+															{stage.name} ({stage.closurePercentage}%)
 														</SelectItem>
-														<SelectItem value="sobre_vehiculo">
-															Sobre Vehículo
-														</SelectItem>
-													</SelectContent>
-												</Select>
-											</div>
-										)}
-									</editOpportunityForm.Field>
-								</div>
-								<div>
-									<editOpportunityForm.Field name="loanPurpose">
-										{(field) => (
-											<div className="space-y-2">
-												<Label htmlFor={field.name}>
-													Propósito del Préstamo
-												</Label>
-												<Select
-													value={field.state.value}
-													onValueChange={(value) =>
-														field.handleChange(value as "personal" | "business")
-													}
-												>
-													<SelectTrigger className="w-full">
-														<SelectValue placeholder="Seleccionar propósito" />
-													</SelectTrigger>
-													<SelectContent align="start">
-														<SelectItem value="personal">Personal</SelectItem>
-														<SelectItem value="business">Negocio</SelectItem>
-													</SelectContent>
-												</Select>
-											</div>
-										)}
-									</editOpportunityForm.Field>
-								</div>
-							</div>
-
-							<div className="grid grid-cols-2 gap-4">
-								<div>
-									<editOpportunityForm.Field name="vehicleId">
-										{(field) => (
-											<div className="space-y-2">
-												<Label htmlFor={field.name}>Vehículo</Label>
-												<Combobox
-													options={[
-														{ value: "none", label: "Sin vehículo" },
-														...(vehiclesQuery.data?.data
-															?.filter((vehicle: any) =>
-																isVehicleAvailable(
-																	vehicle.status,
-																	selectedOpportunity?.vehicleId,
-																	vehicle.id,
-																),
-															)
-															?.map((vehicle: any) => ({
-																value: vehicle.id,
-																label: `${vehicle.year} ${vehicle.make} ${vehicle.model}${vehicle.licensePlate ? ` - ${vehicle.licensePlate}` : ""}${vehicle.isNew ? " (Nuevo)" : ""}`,
-															})) || []),
-													]}
-													value={field.state.value || "none"}
-													onChange={(value) =>
-														field.handleChange(value === "none" ? "" : value)
-													}
-													onSearchChange={setVehiclesSearch}
-													isLoading={vehiclesQuery.isFetching}
-													placeholder="Buscar vehículo..."
-													width="full"
-												/>
-											</div>
-										)}
-									</editOpportunityForm.Field>
-								</div>
-
-								<div>
-									<editOpportunityForm.Field name="stageId">
-										{(field) => (
-											<div className="space-y-2">
-												<Label htmlFor={field.name}>Etapa</Label>
-												<Select
-													value={field.state.value}
-													onValueChange={(value) => field.handleChange(value)}
-												>
-													<SelectTrigger className="w-full">
-														<SelectValue placeholder="Seleccionar etapa" />
-													</SelectTrigger>
-													<SelectContent>
-														{salesStagesQuery.data?.map((stage) => (
-															<SelectItem key={stage.id} value={stage.id}>
-																{stage.name} ({stage.closurePercentage}%)
-															</SelectItem>
-														))}
-													</SelectContent>
-												</Select>
-											</div>
-										)}
-									</editOpportunityForm.Field>
-								</div>
-							</div>
-							<div className="grid grid-cols-2 gap-4">
-								<div>
-									<editOpportunityForm.Field name="probability">
-										{(field) => (
-											<div className="space-y-2">
-												<Label htmlFor={field.name}>Probabilidad (%)</Label>
-												<Input
-													id={field.name}
-													name={field.name}
-													type="number"
-													min="0"
-													max="100"
-													value={field.state.value ?? ""}
-													onBlur={field.handleBlur}
-													onChange={(e) => {
-														const value = e.target.value;
-														console.log("Input value:", value);
-														if (value === "") {
-															field.handleChange(undefined);
-														} else {
-															let numericValue = Number(value);
-															if (numericValue < 0) numericValue = 0;
-															if (numericValue > 100) numericValue = 100;
-															field.handleChange(numericValue);
-														}
-													}}
-													placeholder="0"
-												/>
-											</div>
-										)}
-									</editOpportunityForm.Field>
-								</div>
-								<div>
-									<editOpportunityForm.Field name="expectedCloseDate">
-										{(field) => (
-											<div className="space-y-2">
-												<Label htmlFor={field.name}>Fecha de Cierre</Label>
-												<DatePicker
-													date={
-														field.state.value
-															? new Date(field.state.value)
-															: undefined
-													}
-													onDateChange={(date) => {
-														field.handleChange(
-															date ? date.toISOString().split("T")[0] : "",
-														);
-														field.handleBlur();
-													}}
-													placeholder="Seleccionar fecha de cierre"
-													className="w-full"
-												/>
-											</div>
-										)}
-									</editOpportunityForm.Field>
-								</div>
-							</div>
-
-							<editOpportunityForm.Subscribe>
-								{(state) => (
-									<div className="flex gap-3">
-										<Button
-											type="button"
-											variant="outline"
-											className="flex-1"
-											onClick={() => setIsEditDialogOpen(false)}
-										>
-											Cancelar
-										</Button>
-										<Button
-											type="submit"
-											className="flex-1"
-											disabled={
-												!state.canSubmit ||
-												state.isSubmitting ||
-												updateOpportunityMutation.isPending
-											}
-										>
-											{state.isSubmitting || updateOpportunityMutation.isPending
-												? "Actualizando..."
-												: "Actualizar Oportunidad"}
-										</Button>
-									</div>
-								)}
-							</editOpportunityForm.Subscribe>
-						</form>
-
-						{/* Notes Timeline */}
-						{selectedOpportunity && (
-							<div className="mt-6 border-t pt-6">
-								<NotesTimeline
-									entityType="opportunity"
-									entityId={selectedOpportunity.id}
-									title="Timeline de Notas"
-								/>
-							</div>
-						)}
-					</DialogContent>
-				</Dialog>
-
-				{/* Change Stage Dialog */}
-				<Dialog
-					open={isChangeStageDialogOpen}
-					onOpenChange={setIsChangeStageDialogOpen}
-				>
-					<DialogContent className="max-w-md">
-						<DialogHeader>
-							<DialogTitle>Cambiar Etapa</DialogTitle>
-						</DialogHeader>
-						{selectedOpportunity && (
-							<div className="space-y-6">
-								<div className="space-y-2">
-									<Label>Oportunidad</Label>
-									<p className="text-muted-foreground text-sm">
-										{selectedOpportunity.title}
-									</p>
-								</div>
-								<div className="space-y-3">
-									<Label>Etapa Actual</Label>
-									{selectedOpportunity.stage && (
-										<Badge
-											style={{
-												backgroundColor: selectedOpportunity.stage.color,
-												color: "white",
-											}}
-											className="block w-fit"
-										>
-											{selectedOpportunity.stage.name}
-										</Badge>
+													))}
+												</SelectContent>
+											</Select>
+										</div>
 									)}
-								</div>
-								<div className="space-y-3">
-									<Label>Nueva Etapa</Label>
-									<Select
-										value={selectedStage}
-										onValueChange={setSelectedStage}
-									>
-										<SelectTrigger className="w-full">
-											<SelectValue placeholder="Seleccionar nueva etapa" />
-										</SelectTrigger>
-										<SelectContent>
-											{salesStagesQuery.data?.map((stage) => (
-												<SelectItem key={stage.id} value={stage.id}>
-													{stage.name} ({stage.closurePercentage}%)
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="stageChangeReason">
-										Razón del cambio (opcional)
-									</Label>
-									<Textarea
-										id="stageChangeReason"
-										value={stageChangeReason}
-										onChange={(e) => setStageChangeReason(e.target.value)}
-										placeholder="Describe por qué se está cambiando la etapa..."
-										rows={3}
-									/>
-								</div>
-								<div className="flex gap-3 pt-4">
+								</editOpportunityForm.Field>
+							</div>
+						</div>
+						<div className="grid grid-cols-2 gap-4">
+							<div>
+								<editOpportunityForm.Field name="probability">
+									{(field) => (
+										<div className="space-y-2">
+											<Label htmlFor={field.name}>Probabilidad (%)</Label>
+											<Input
+												id={field.name}
+												name={field.name}
+												type="number"
+												min="0"
+												max="100"
+												value={field.state.value ?? ""}
+												onBlur={field.handleBlur}
+												onChange={(e) => {
+													const value = e.target.value;
+													console.log("Input value:", value);
+													if (value === "") {
+														field.handleChange(undefined);
+													} else {
+														let numericValue = Number(value);
+														if (numericValue < 0) numericValue = 0;
+														if (numericValue > 100) numericValue = 100;
+														field.handleChange(numericValue);
+													}
+												}}
+												placeholder="0"
+											/>
+										</div>
+									)}
+								</editOpportunityForm.Field>
+							</div>
+							<div>
+								<editOpportunityForm.Field name="expectedCloseDate">
+									{(field) => (
+										<div className="space-y-2">
+											<Label htmlFor={field.name}>Fecha de Cierre</Label>
+											<DatePicker
+												date={
+													field.state.value
+														? new Date(field.state.value)
+														: undefined
+												}
+												onDateChange={(date) => {
+													field.handleChange(
+														date ? date.toISOString().split("T")[0] : "",
+													);
+													field.handleBlur();
+												}}
+												placeholder="Seleccionar fecha de cierre"
+												className="w-full"
+											/>
+										</div>
+									)}
+								</editOpportunityForm.Field>
+							</div>
+						</div>
+
+						<editOpportunityForm.Subscribe>
+							{(state) => (
+								<div className="flex gap-3">
 									<Button
 										type="button"
 										variant="outline"
 										className="flex-1"
-										onClick={() => {
-											setIsChangeStageDialogOpen(false);
-											setStageChangeReason("");
-										}}
+										onClick={() => setIsEditDialogOpen(false)}
 									>
 										Cancelar
 									</Button>
 									<Button
+										type="submit"
 										className="flex-1"
-										onClick={() => {
-											if (selectedStage && selectedOpportunity) {
-												const targetStage = salesStagesQuery.data?.find(
-													(stage) => stage.id === selectedStage,
-												);
-												const currentStage = selectedOpportunity.stage;
-
-												// Validate: cannot skip from <=20% to >30% (must go through analysis)
-												if (
-													targetStage &&
-													currentStage &&
-													currentStage.closurePercentage <= 20 &&
-													targetStage.closurePercentage > 30
-												) {
-													toast.error(
-														"Las oportunidades en etapas tempranas deben pasar primero por Recepción de documentación (30%) antes de avanzar. No puedes saltarte el proceso de análisis.",
-													);
-													return;
-												}
-
-												// Validate: cannot manually move from 30% to 40% (only analysis approval can do this)
-												if (
-													targetStage &&
-													currentStage &&
-													currentStage.closurePercentage === 30 &&
-													targetStage.closurePercentage >= 40
-												) {
-													toast.error(
-														"No puedes mover manualmente una oportunidad de Recepción de documentación (30%) a etapas superiores. El equipo de análisis debe aprobar los documentos para que la oportunidad avance automáticamente al 40%.",
-													);
-													return;
-												}
-												// Intercept 85% → 90%+: open confirm contracts signed modal
-												if (
-													targetStage &&
-													currentStage &&
-													currentStage.closurePercentage === 85 &&
-													targetStage.closurePercentage >= 90
-												) {
-													setOpportunityToConfirmSigned({
-														id: selectedOpportunity.id,
-														title: selectedOpportunity.title,
-													});
-													setConfirmSignedModalOpen(true);
-													setIsChangeStageDialogOpen(false);
-													return;
-												}
-
-												// Validate: moving from <=20% to >=30% requires a vehicle
-												if (
-													targetStage &&
-													currentStage &&
-													currentStage.closurePercentage <= 20 &&
-													targetStage.closurePercentage >= 30 &&
-													!selectedOpportunity.vehicleId
-												) {
-													toast.error(
-														"Para avanzar a esta etapa, la oportunidad debe tener un vehículo asignado. Por favor edita la oportunidad y asigna un vehículo.",
-													);
-													return;
-												}
-
-												// Validate: moving to 100% requires credit terms
-												if (
-													targetStage &&
-													targetStage.closurePercentage === 100
-												) {
-													const missingFields: string[] = [];
-
-													if (!selectedOpportunity.vehicleId)
-														missingFields.push("vehículo");
-													if (!selectedOpportunity.lead)
-														missingFields.push("lead/contacto");
-													if (!selectedOpportunity.value)
-														missingFields.push("valor del crédito");
-													if (!selectedOpportunity.numeroCuotas)
-														missingFields.push("número de cuotas");
-													if (!selectedOpportunity.tasaInteres)
-														missingFields.push("tasa de interés");
-													if (!selectedOpportunity.cuotaMensual)
-														missingFields.push("cuota mensual");
-													if (!selectedOpportunity.fechaInicio)
-														missingFields.push("fecha de inicio del contrato");
-													if (!selectedOpportunity.diaPagoMensual)
-														missingFields.push("día de pago mensual");
-
-													if (missingFields.length > 0) {
-														toast.error(
-															`No se puede cerrar la oportunidad al 100%. Faltan los siguientes datos: ${missingFields.join(", ")}. Por favor edita la oportunidad y completa todos los términos de crédito.`,
-															{ duration: 8000 },
-														);
-														return;
-													}
-												}
-
-												updateOpportunityMutation.mutate({
-													id: selectedOpportunity.id,
-													stageId: selectedStage,
-													stageChangeReason: stageChangeReason || undefined,
-												});
-												setIsChangeStageDialogOpen(false);
-												setStageChangeReason("");
-											}
-										}}
 										disabled={
-											!selectedStage || updateOpportunityMutation.isPending
+											!state.canSubmit ||
+											state.isSubmitting ||
+											updateOpportunityMutation.isPending
 										}
 									>
-										{updateOpportunityMutation.isPending
+										{state.isSubmitting || updateOpportunityMutation.isPending
 											? "Actualizando..."
-											: "Cambiar Etapa"}
+											: "Actualizar Oportunidad"}
 									</Button>
 								</div>
+							)}
+						</editOpportunityForm.Subscribe>
+					</form>
+
+					{/* Notes Timeline */}
+					{selectedOpportunity && (
+						<div className="mt-6 border-t pt-6">
+							<NotesTimeline
+								entityType="opportunity"
+								entityId={selectedOpportunity.id}
+								title="Timeline de Notas"
+							/>
+						</div>
+					)}
+				</DialogContent>
+			</Dialog>
+
+			{/* Change Stage Dialog */}
+			<Dialog
+				open={isChangeStageDialogOpen}
+				onOpenChange={setIsChangeStageDialogOpen}
+			>
+				<DialogContent className="max-w-md">
+					<DialogHeader>
+						<DialogTitle>Cambiar Etapa</DialogTitle>
+					</DialogHeader>
+					{selectedOpportunity && (
+						<div className="space-y-6">
+							<div className="space-y-2">
+								<Label>Oportunidad</Label>
+								<p className="text-muted-foreground text-sm">
+									{selectedOpportunity.title}
+								</p>
 							</div>
-						)}
-					</DialogContent>
-				</Dialog>
+							<div className="space-y-3">
+								<Label>Etapa Actual</Label>
+								{selectedOpportunity.stage && (
+									<Badge
+										style={{
+											backgroundColor: selectedOpportunity.stage.color,
+											color: "white",
+										}}
+										className="block w-fit"
+									>
+										{selectedOpportunity.stage.name}
+									</Badge>
+								)}
+							</div>
+							<div className="space-y-3">
+								<Label>Nueva Etapa</Label>
+								<Select value={selectedStage} onValueChange={setSelectedStage}>
+									<SelectTrigger className="w-full">
+										<SelectValue placeholder="Seleccionar nueva etapa" />
+									</SelectTrigger>
+									<SelectContent>
+										{salesStagesQuery.data?.map((stage) => (
+											<SelectItem key={stage.id} value={stage.id}>
+												{stage.name} ({stage.closurePercentage}%)
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							</div>
+							<div className="space-y-2">
+								<Label htmlFor="stageChangeReason">
+									Razón del cambio (opcional)
+								</Label>
+								<Textarea
+									id="stageChangeReason"
+									value={stageChangeReason}
+									onChange={(e) => setStageChangeReason(e.target.value)}
+									placeholder="Describe por qué se está cambiando la etapa..."
+									rows={3}
+								/>
+							</div>
+							<div className="flex gap-3 pt-4">
+								<Button
+									type="button"
+									variant="outline"
+									className="flex-1"
+									onClick={() => {
+										setIsChangeStageDialogOpen(false);
+										setStageChangeReason("");
+									}}
+								>
+									Cancelar
+								</Button>
+								<Button
+									className="flex-1"
+									onClick={() => {
+										if (selectedStage && selectedOpportunity) {
+											const targetStage = salesStagesQuery.data?.find(
+												(stage) => stage.id === selectedStage,
+											);
+											const currentStage = selectedOpportunity.stage;
+
+											// Validate: cannot skip from <=20% to >30% (must go through analysis)
+											if (
+												targetStage &&
+												currentStage &&
+												currentStage.closurePercentage <= 20 &&
+												targetStage.closurePercentage > 30
+											) {
+												toast.error(
+													"Las oportunidades en etapas tempranas deben pasar primero por Recepción de documentación (30%) antes de avanzar. No puedes saltarte el proceso de análisis.",
+												);
+												return;
+											}
+
+											// Validate: cannot manually move from 30% to 40% (only analysis approval can do this)
+											if (
+												targetStage &&
+												currentStage &&
+												currentStage.closurePercentage === 30 &&
+												targetStage.closurePercentage >= 40
+											) {
+												toast.error(
+													"No puedes mover manualmente una oportunidad de Recepción de documentación (30%) a etapas superiores. El equipo de análisis debe aprobar los documentos para que la oportunidad avance automáticamente al 40%.",
+												);
+												return;
+											}
+											// Intercept 85% → 90%+: open confirm contracts signed modal
+											if (
+												targetStage &&
+												currentStage &&
+												currentStage.closurePercentage === 85 &&
+												targetStage.closurePercentage >= 90
+											) {
+												setOpportunityToConfirmSigned({
+													id: selectedOpportunity.id,
+													title: selectedOpportunity.title,
+												});
+												setConfirmSignedModalOpen(true);
+												setIsChangeStageDialogOpen(false);
+												return;
+											}
+
+											// Validate: moving from <=20% to >=30% requires a vehicle
+											if (
+												targetStage &&
+												currentStage &&
+												currentStage.closurePercentage <= 20 &&
+												targetStage.closurePercentage >= 30 &&
+												!selectedOpportunity.vehicleId
+											) {
+												toast.error(
+													"Para avanzar a esta etapa, la oportunidad debe tener un vehículo asignado. Por favor edita la oportunidad y asigna un vehículo.",
+												);
+												return;
+											}
+
+											// Validate: moving to 100% requires credit terms
+											if (
+												targetStage &&
+												targetStage.closurePercentage === 100
+											) {
+												const missingFields: string[] = [];
+
+												if (!selectedOpportunity.vehicleId)
+													missingFields.push("vehículo");
+												if (!selectedOpportunity.lead)
+													missingFields.push("lead/contacto");
+												if (!selectedOpportunity.value)
+													missingFields.push("valor del crédito");
+												if (!selectedOpportunity.numeroCuotas)
+													missingFields.push("número de cuotas");
+												if (!selectedOpportunity.tasaInteres)
+													missingFields.push("tasa de interés");
+												if (!selectedOpportunity.cuotaMensual)
+													missingFields.push("cuota mensual");
+												if (!selectedOpportunity.fechaInicio)
+													missingFields.push("fecha de inicio del contrato");
+												if (!selectedOpportunity.diaPagoMensual)
+													missingFields.push("día de pago mensual");
+
+												if (missingFields.length > 0) {
+													toast.error(
+														`No se puede cerrar la oportunidad al 100%. Faltan los siguientes datos: ${missingFields.join(", ")}. Por favor edita la oportunidad y completa todos los términos de crédito.`,
+														{ duration: 8000 },
+													);
+													return;
+												}
+											}
+
+											updateOpportunityMutation.mutate({
+												id: selectedOpportunity.id,
+												stageId: selectedStage,
+												stageChangeReason: stageChangeReason || undefined,
+											});
+											setIsChangeStageDialogOpen(false);
+											setStageChangeReason("");
+										}
+									}}
+									disabled={
+										!selectedStage || updateOpportunityMutation.isPending
+									}
+								>
+									{updateOpportunityMutation.isPending
+										? "Actualizando..."
+										: "Cambiar Etapa"}
+								</Button>
+							</div>
+						</div>
+					)}
+				</DialogContent>
+			</Dialog>
 
 			{/* Conditional View: Kanban or Table */}
 			{viewMode === "kanban" ? (

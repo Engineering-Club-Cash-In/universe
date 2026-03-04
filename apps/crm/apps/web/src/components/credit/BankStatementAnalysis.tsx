@@ -76,7 +76,9 @@ export function BankStatementAnalysis({
 				leadId ? { leadId } : { coDebtorId: coDebtorId! },
 			),
 		onSuccess: () => {
-			toast.success("Análisis reseteado. Puede volver a subir estados de cuenta.");
+			toast.success(
+				"Análisis reseteado. Puede volver a subir estados de cuenta.",
+			);
 			queryClient.invalidateQueries({ queryKey });
 			onAnalysisComplete?.();
 		},

@@ -175,7 +175,6 @@ export const PERMISSIONS = {
 		role === ROLES.SALES_SUPERVISOR ||
 		role === ROLES.ANALYST ||
 		role === ROLES.ACCOUNTING,
-		
 
 	canCreateLegalContracts: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.JURIDICO,

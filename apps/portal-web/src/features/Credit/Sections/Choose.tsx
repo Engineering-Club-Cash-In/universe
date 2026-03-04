@@ -103,7 +103,7 @@ export const Choose = () => {
               viewport={{ once: true }}
             >
               {/* Contenido superior */}
-              <div>
+              <div className="flex flex-col items-center text-center">
                 {/* Título y descripción */}
                 <h3 className="text-2xl font-bold mb-4">{feature.title}</h3>
                 <p className="text-gray mb-6">{feature.description}</p>
@@ -115,7 +115,7 @@ export const Choose = () => {
                       <div className="mt-1 shrink-0 text-primary">
                         <IconCheckList />
                       </div>
-                      <span className="text-gray">{item}</span>
+                      <span className="text-gray text-left">{item}</span>
                     </li>
                   ))}
                 </ul>

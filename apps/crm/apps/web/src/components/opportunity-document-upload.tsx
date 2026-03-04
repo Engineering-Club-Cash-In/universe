@@ -230,9 +230,7 @@ export function OpportunityDocumentUpload({
 					}
 				}
 				if (failed > 0) {
-					toast.error(
-						`${failed} de 3 estados de cuenta fallaron al subir`,
-					);
+					toast.error(`${failed} de 3 estados de cuenta fallaron al subir`);
 				}
 				setIncludeAll3Months(false);
 			})();

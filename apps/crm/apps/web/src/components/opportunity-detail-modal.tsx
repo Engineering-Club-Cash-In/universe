@@ -210,15 +210,7 @@ export function OpportunityDetailModal({
 					}}
 				>
 					<TabsList
-						className={`grid w-full ${
-							isWon
-								? readOnly
-									? "grid-cols-6"
-									: "grid-cols-7"
-								: readOnly
-									? "grid-cols-5"
-									: "grid-cols-6"
-						}`}
+						className={`grid w-full ${isWon ? (readOnly ? "grid-cols-6" : "grid-cols-7") : readOnly ? "grid-cols-5" : "grid-cols-6"}`}
 					>
 						<TabsTrigger value="details">Detalles</TabsTrigger>
 						<TabsTrigger value="documents">Documentos</TabsTrigger>

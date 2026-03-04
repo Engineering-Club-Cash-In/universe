@@ -33,7 +33,7 @@ export const HowSellOrBuy = () => {
       icon: (
         <IconSettings width={isMobile ? 24 : 48} height={isMobile ? 24 : 48} />
       ),
-      title: "Configura tu compra",
+      title: "Te acompañamos en toda tu gestión",
       description:
         "Puedes realizar todo tu proceso en línea o contactar a un asesor para que te acompañe en toda tu gestión.",
     },
@@ -49,7 +49,7 @@ export const HowSellOrBuy = () => {
       icon: <IconCar width={isMobile ? 24 : 48} height={isMobile ? 24 : 48} />,
       title: "Cuéntanos sobre tu auto",
       description:
-        "A través de un proceso simple comparte toda la información importante sobre tu auto.",
+        "A través de un proceso simple comparte toda la información importante sobre tu auto",
     },
     {
       icon: (

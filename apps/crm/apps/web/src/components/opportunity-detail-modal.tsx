@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -23,6 +23,7 @@ import { useState } from "react";
 import { ClientFormsSection } from "@/components/client-forms/ClientFormsSection";
 import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
+import { DisbursementView } from "@/components/disbursement/DisbursementView";
 import { OpportunityDocumentUpload } from "@/components/opportunity-document-upload";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -110,6 +111,7 @@ type OpportunityDetailModalProps = {
 	onNavigateToLead?: (leadId: string) => void;
 	onNavigateToVehicle?: (vehicleId: string) => void;
 	onNavigateToQuoter?: (opportunityId: string) => void;
+	initialTab?: string;
 };
 
 export function OpportunityDetailModal({
@@ -123,6 +125,7 @@ export function OpportunityDetailModal({
 	onNavigateToLead,
 	onNavigateToVehicle,
 	onNavigateToQuoter,
+	initialTab,
 }: OpportunityDetailModalProps) {
 	const [opportunityHistory, setOpportunityHistory] = useState<any[]>([]);
 	const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -136,7 +139,7 @@ export function OpportunityDetailModal({
 			open &&
 			!!opportunity?.id &&
 			!!userRole &&
-			PERMISSIONS.canViewOpportunityContracts(userRole),
+			PERMISSIONS.canAccessClients(userRole),
 		queryKey: ["listLegalContractsByOpportunity", opportunity?.id, userRole],
 	});
 
@@ -149,7 +152,7 @@ export function OpportunityDetailModal({
 			open &&
 			!!opportunity?.id &&
 			!!userRole &&
-			PERMISSIONS.canAccessCRM(userRole),
+			PERMISSIONS.canAccessClients(userRole),
 		queryKey: ["listQuotationsByOpportunity", opportunity?.id, userRole],
 	});
 
@@ -187,6 +190,9 @@ export function OpportunityDetailModal({
 	const canViewContracts =
 		userRole && PERMISSIONS.canViewOpportunityContracts(userRole);
 	const canAccessCRM = userRole && PERMISSIONS.canAccessCRM(userRole);
+	const isAccounting =
+		userRole && PERMISSIONS.canAccessAccounting(userRole);
+	const isWon = opportunity?.status === "won";
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
@@ -195,7 +201,7 @@ export function OpportunityDetailModal({
 					<DialogTitle>Detalles de la Oportunidad</DialogTitle>
 				</DialogHeader>
 				<Tabs
-					defaultValue="details"
+					defaultValue={initialTab || "details"}
 					className="w-full"
 					onValueChange={(value) => {
 						if (value === "history") {
@@ -204,12 +210,23 @@ export function OpportunityDetailModal({
 					}}
 				>
 					<TabsList
-						className={`grid w-full ${readOnly ? "grid-cols-5" : "grid-cols-6"}`}
+						className={`grid w-full ${
+							isWon
+								? readOnly
+									? "grid-cols-6"
+									: "grid-cols-7"
+								: readOnly
+									? "grid-cols-5"
+									: "grid-cols-6"
+						}`}
 					>
 						<TabsTrigger value="details">Detalles</TabsTrigger>
 						<TabsTrigger value="documents">Documentos</TabsTrigger>
 						<TabsTrigger value="coDebtors">Co-firmantes</TabsTrigger>
 						<TabsTrigger value="credit">Crédito</TabsTrigger>
+						{isWon && (
+							<TabsTrigger value="disbursement">Desembolso</TabsTrigger>
+						)}
 						<TabsTrigger value="forms">Formularios</TabsTrigger>
 						{!readOnly && <TabsTrigger value="history">Historial</TabsTrigger>}
 					</TabsList>
@@ -425,6 +442,7 @@ export function OpportunityDetailModal({
 									</div>
 								</div>
 							)}
+
 						</div>
 
 						{/* Contracts Section */}
@@ -725,6 +743,29 @@ export function OpportunityDetailModal({
 							);
 						})()}
 					</TabsContent>
+
+					{isWon && (
+						<TabsContent value="disbursement" className="mt-6 space-y-6">
+							<DisbursementView
+								opportunityId={opportunity.id}
+								opportunityTitle={opportunity.title}
+								assignedUserId={opportunity.assignedUser?.id}
+								userRole={userRole}
+								quotation={
+									opportunityQuotationsQuery.data?.[0]
+										? {
+												amountToFinance:
+													(opportunityQuotationsQuery.data[0] as any)
+														.amountToFinance,
+												totalFinanced:
+													(opportunityQuotationsQuery.data[0] as any)
+														.totalFinanced,
+											}
+										: null
+								}
+							/>
+						</TabsContent>
+					)}
 
 					<TabsContent value="forms" className="mt-6 space-y-4">
 						{opportunity && (

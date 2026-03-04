@@ -116,6 +116,13 @@ const REDIRECT_CONFIG: Record<
 		label: "Ver cliente",
 		getRoute: (id) => ({ to: "/crm/clients", search: { opportunityId: id } }),
 	},
+	client_details_disbursement: {
+		label: "Ver desembolso",
+		getRoute: (id) => ({
+			to: "/crm/clients",
+			search: { opportunityId: id, initialTab: "disbursement" },
+		}),
+	},
 	contract_details: {
 		label: "Generar contratos",
 		getRoute: (id) => ({

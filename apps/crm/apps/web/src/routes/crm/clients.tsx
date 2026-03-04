@@ -75,6 +75,7 @@ export const Route = createFileRoute("/crm/clients")({
 	component: RouteComponent,
 	validateSearch: z.object({
 		opportunityId: z.string().optional(),
+		initialTab: z.string().optional(),
 		idLead: z.string().optional(),
 		edit: z.boolean().optional(),
 	}).parse,
@@ -1445,6 +1446,7 @@ function RouteComponent() {
 				opportunity={selectedOpportunityForModal}
 				userRole={userProfile.data?.role}
 				readOnly
+				initialTab={search.initialTab}
 				onNavigateToLead={(id: string) => {
 					//borrar los search params de oportunidad y agregar el id del lead a la pagina actual de clients
 					navigate({

@@ -239,6 +239,15 @@ const EXTRA_COST_FIELDS: ExtraCostFieldConfig[] = [
 		section: "comision",
 		computed: true,
 	},
+	{
+		name: "rcdp",
+		label: "RCCDP 1er Trimestre",
+		type: "fixed",
+		valueField: "rcdpCost",
+		creditType: "all",
+		section: "comision",
+		computed: true,
+	},
 	// Sección: Otros Descuentos
 	{
 		name: "appointment",
@@ -895,6 +904,7 @@ function QuoterPage() {
 				extraMembershipCost: Number(value.extraMembershipCost),
 				extraAdminCost: Number(value.extraAdminCost),
 				interestCost: Number(value.interestCost),
+				rcdpCost: Number(value.rcdpCost),
 				vehicleTransferCost: Number(value.vehicleTransferCost),
 				isInterno,
 			});
@@ -1003,6 +1013,7 @@ function QuoterPage() {
 
 		quoterForm.setFieldValue("royalty", result.calculatedRoyalty);
 		quoterForm.setFieldValue("interestCost", result.calculatedInterest);
+		quoterForm.setFieldValue("rcdpCost", result.rcdpCost);
 		quoterForm.setFieldValue("adminCost", result.adminCost);
 
 		// Nota: extraInsuranceCost y extraMembershipCost se calculan en updateInsuranceCost()
@@ -1228,6 +1239,7 @@ function QuoterPage() {
 					Number(q.extraAdminCost) || 600,
 				);
 				quoterForm.setFieldValue("interestCost", Number(q.interestCost) || 0);
+				quoterForm.setFieldValue("rcdpCost", Number(q.rcdpCost) || 0);
 				quoterForm.setFieldValue(
 					"vehicleTransferCost",
 					Number(q.vehicleTransferCost) || 0,

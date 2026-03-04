@@ -28,7 +28,10 @@ function sumArray(arr: unknown): number {
 // biome-ignore lint: PDF generation uses any for flexible data
 type FormData = Record<string, any>;
 
-export function generateCreditApplicationPdf(data: FormData) {
+export function generateCreditApplicationPdf(
+	data: FormData,
+	signatureOverride?: string,
+) {
 	const doc = new jsPDF();
 	const pageWidth = doc.internal.pageSize.getWidth();
 	let y = 15;
@@ -321,13 +324,14 @@ export function generateCreditApplicationPdf(data: FormData) {
 	y = (doc as any).lastAutoTable.finalY + 15;
 
 	// Signature
+	const firmaImg = data.firmaImagen || signatureOverride;
 	if (y > 230) {
 		doc.addPage();
 		y = 15;
 	}
-	if (data.firmaImagen) {
+	if (firmaImg) {
 		try {
-			doc.addImage(data.firmaImagen, "PNG", 14, y, 60, 30);
+			doc.addImage(firmaImg, "PNG", 14, y, 60, 30);
 			y += 32;
 		} catch {
 			// If image fails, just skip
@@ -345,6 +349,96 @@ export function generateCreditApplicationPdf(data: FormData) {
 			y,
 		);
 	}
+
+	// Cláusula de Consentimiento
+	doc.addPage();
+	y = 20;
+	doc.setFontSize(13);
+	doc.setFont("helvetica", "bold");
+	doc.text(
+		"CLAUSULA DE CONSENTIMIENTO DEL CIUDADANO",
+		pageWidth / 2,
+		y,
+		{ align: "center" },
+	);
+	y += 10;
+
+	doc.setFontSize(8);
+	doc.setFont("helvetica", "normal");
+	const consentMargin = 14;
+	const consentWidth = pageWidth - consentMargin * 2;
+
+	const consentParagraphs = [
+		"1. Autorizo expresamente a CREACIÓN E IMAGEN, SOCIEDAD ANÓNIMA para que solicite, recopile, almacene, intercambie y utilice toda la información relacionada con mi historial crediticio, referencias personales, laborales, comerciales, financieras y patrimoniales, ante cualquier entidad pública o privada, burós de crédito, centrales de riesgo, u otras fuentes de información, con el propósito de evaluar mi solicitud de crédito y durante la vigencia del mismo.",
+		"2. Autorizo a CREACIÓN E IMAGEN, SOCIEDAD ANÓNIMA para que comparta mi información crediticia y financiera con terceros que tengan un interés legítimo, incluyendo pero no limitado a: entidades financieras, aseguradoras, empresas de cobro, y cualquier otra entidad que participe en la evaluación, otorgamiento, administración o recuperación del crédito solicitado.",
+		"3. Declaro que toda la información proporcionada en esta solicitud es verídica y completa. Reconozco que cualquier falsedad u omisión en la información proporcionada puede ser causa de rechazo de mi solicitud o de rescisión del contrato de crédito, sin perjuicio de las acciones legales que pudieran corresponder.",
+		"4. Me comprometo a notificar a CREACIÓN E IMAGEN, SOCIEDAD ANÓNIMA de cualquier cambio en mi información personal, laboral, financiera o patrimonial que pueda afectar las condiciones bajo las cuales se otorgó el crédito.",
+	];
+
+	for (const paragraph of consentParagraphs) {
+		const lines = doc.splitTextToSize(paragraph, consentWidth);
+		if (y + lines.length * 4 > 270) {
+			doc.addPage();
+			y = 20;
+		}
+		doc.text(lines, consentMargin, y);
+		y += lines.length * 4 + 4;
+	}
+
+	y += 4;
+	const closingText =
+		"Al firmar este documento, confirmo que he leído, entendido y aceptado todos los términos anteriores de forma libre y voluntaria.";
+	const closingLines = doc.splitTextToSize(closingText, consentWidth);
+	doc.text(closingLines, consentMargin, y);
+	y += closingLines.length * 4 + 10;
+
+	// Consent fields
+	const nombreCompleto = [
+		val(data.primerNombre),
+		val(data.segundoNombre),
+		val(data.primerApellido),
+		val(data.segundoApellido),
+		val(data.apellidoCasada) ? `de ${val(data.apellidoCasada)}` : "",
+	]
+		.filter(Boolean)
+		.join(" ");
+
+	doc.setFont("helvetica", "bold");
+	doc.text("Nombre Completo:", consentMargin, y);
+	doc.setFont("helvetica", "normal");
+	doc.text(nombreCompleto, consentMargin + 35, y);
+	y += 6;
+
+	doc.setFont("helvetica", "bold");
+	doc.text("DPI:", consentMargin, y);
+	doc.setFont("helvetica", "normal");
+	doc.text(val(data.dpi), consentMargin + 35, y);
+	y += 6;
+
+	doc.setFont("helvetica", "bold");
+	doc.text("NIT:", consentMargin, y);
+	doc.setFont("helvetica", "normal");
+	doc.text(val(data.nit), consentMargin + 35, y);
+	y += 6;
+
+	doc.setFont("helvetica", "bold");
+	doc.text("Fecha:", consentMargin, y);
+	doc.setFont("helvetica", "normal");
+	doc.text(val(data.fechaFirma) || new Date().toLocaleDateString("es-GT"), consentMargin + 35, y);
+	y += 10;
+
+	// Consent signature
+	if (firmaImg) {
+		try {
+			doc.addImage(firmaImg, "PNG", consentMargin, y, 60, 30);
+			y += 32;
+		} catch {
+			// Skip if image fails
+		}
+	}
+	doc.text("_______________________________", consentMargin, y);
+	y += 4;
+	doc.text("Firma del Solicitante", consentMargin, y);
 
 	// Footer
 	const pageCount = doc.getNumberOfPages();

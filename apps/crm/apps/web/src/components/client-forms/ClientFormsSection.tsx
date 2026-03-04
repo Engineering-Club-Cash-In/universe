@@ -188,6 +188,8 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 						onClick={() =>
 							generateCreditApplicationPdf(
 								formData.creditApplication as Record<string, unknown>,
+								(formData.financialStatement as Record<string, unknown>)
+									?.firmaImagen as string | undefined,
 							)
 						}
 					>

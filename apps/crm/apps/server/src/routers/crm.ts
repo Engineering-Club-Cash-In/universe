@@ -583,8 +583,7 @@ export const crmRouter = {
 
 						if (!firstStage) {
 							throw new ORPCError("INTERNAL_SERVER_ERROR", {
-								message:
-									"No se encontró el primer stage de ventas",
+								message: "No se encontró el primer stage de ventas",
 							});
 						}
 
@@ -3113,8 +3112,7 @@ export const crmRouter = {
 					candidateIds.length > 0
 						? await db
 								.select({
-									opportunityId:
-										opportunityStageHistory.opportunityId,
+									opportunityId: opportunityStageHistory.opportunityId,
 								})
 								.from(opportunityStageHistory)
 								.where(
@@ -3123,14 +3121,8 @@ export const crmRouter = {
 											opportunityStageHistory.opportunityId,
 											candidateIds,
 										),
-										inArray(
-											opportunityStageHistory.toStageId,
-											placedStageIds,
-										),
-										lt(
-											opportunityStageHistory.changedAt,
-											startOfMonth,
-										),
+										inArray(opportunityStageHistory.toStageId, placedStageIds),
+										lt(opportunityStageHistory.changedAt, startOfMonth),
 									),
 								)
 						: [];
@@ -5932,6 +5924,9 @@ export const crmRouter = {
 			const placedStageIds = placedStages.map((s) => s.id);
 
 			let ranking: { name: string; monto: number }[] = [];
+			let byTipoCredito: { name: string; monto: number }[] = [];
+			let byMarca: { name: string; monto: number; cantidad: number }[] = [];
+			let byMedio: { name: string; monto: number }[] = [];
 			if (placedStageIds.length > 0) {
 				// Find opportunities that moved to a placed stage within this month
 				const placedThisMonth = await db
@@ -5945,9 +5940,36 @@ export const crmRouter = {
 						),
 					);
 
-				const placedOppIds = [
+				const candidateIds = [
 					...new Set(placedThisMonth.map((o) => o.opportunityId)),
 				];
+
+				// Exclude opportunities that already reached placed before this month
+				const alreadyPlacedBefore =
+					candidateIds.length > 0
+						? await db
+								.select({
+									opportunityId: opportunityStageHistory.opportunityId,
+								})
+								.from(opportunityStageHistory)
+								.where(
+									and(
+										inArray(
+											opportunityStageHistory.opportunityId,
+											candidateIds,
+										),
+										inArray(opportunityStageHistory.toStageId, placedStageIds),
+										lt(opportunityStageHistory.changedAt, startOfMonth),
+									),
+								)
+						: [];
+
+				const alreadyPlacedIds = new Set(
+					alreadyPlacedBefore.map((o) => o.opportunityId),
+				);
+				const placedOppIds = candidateIds.filter(
+					(id) => !alreadyPlacedIds.has(id),
+				);
 
 				if (placedOppIds.length > 0) {
 					const rankingConditions = [
@@ -5972,6 +5994,101 @@ export const crmRouter = {
 
 					ranking = rankingRows.map((r) => ({
 						name: r.userName || "Sin asignar",
+						monto: Number.parseFloat(r.monto) || 0,
+					}));
+
+					// 4) Monto colocado por tipo de crédito
+					const tipoCreditoConditions = [
+						inArray(opportunities.id, placedOppIds),
+						inArray(opportunities.stageId, placedStageIds),
+						not(eq(opportunities.status, "migrate")),
+					];
+					if (userFilter) {
+						tipoCreditoConditions.push(
+							eq(opportunities.assignedTo, userFilter),
+						);
+					}
+					const tipoCreditoRows = await db
+						.select({
+							creditType: opportunities.creditType,
+							monto: sql<string>`coalesce(sum(${opportunities.value}), 0)`,
+						})
+						.from(opportunities)
+						.where(and(...tipoCreditoConditions))
+						.groupBy(opportunities.creditType);
+
+					const CREDIT_TYPE_LABELS: Record<string, string> = {
+						autocompra: "Autocompra",
+						sobre_vehiculo: "Sobre Vehículo",
+					};
+					byTipoCredito = tipoCreditoRows.map((r) => ({
+						name: CREDIT_TYPE_LABELS[r.creditType] || r.creditType,
+						monto: Number.parseFloat(r.monto) || 0,
+					}));
+
+					// 5) Monto colocado y cantidad por marca de vehículo
+					const marcaConditions = [
+						inArray(opportunities.id, placedOppIds),
+						inArray(opportunities.stageId, placedStageIds),
+						not(eq(opportunities.status, "migrate")),
+						isNotNull(opportunities.vehicleId),
+					];
+					if (userFilter) {
+						marcaConditions.push(eq(opportunities.assignedTo, userFilter));
+					}
+					const marcaNorm = sql<string>`upper(trim(${vehicles.make}))`;
+					const marcaRows = await db
+						.select({
+							make: marcaNorm,
+							monto: sql<string>`coalesce(sum(${opportunities.value}), 0)`,
+							cantidad: count(),
+						})
+						.from(opportunities)
+						.innerJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+						.where(and(...marcaConditions))
+						.groupBy(marcaNorm)
+						.orderBy(desc(sql`sum(${opportunities.value})`));
+
+					byMarca = marcaRows.map((r) => ({
+						name: r.make || "Sin marca",
+						monto: Number.parseFloat(r.monto) || 0,
+						cantidad: r.cantidad,
+					}));
+
+					// 6) Monto colocado por medio/fuente
+					const medioConditions = [
+						inArray(opportunities.id, placedOppIds),
+						inArray(opportunities.stageId, placedStageIds),
+						not(eq(opportunities.status, "migrate")),
+					];
+					if (userFilter) {
+						medioConditions.push(eq(opportunities.assignedTo, userFilter));
+					}
+					const medioRows = await db
+						.select({
+							source: opportunities.source,
+							monto: sql<string>`coalesce(sum(${opportunities.value}), 0)`,
+						})
+						.from(opportunities)
+						.where(and(...medioConditions))
+						.groupBy(opportunities.source)
+						.orderBy(desc(sql`sum(${opportunities.value})`));
+
+					const SOURCE_LABELS: Record<string, string> = {
+						website: "Sitio Web",
+						referral: "Referido",
+						cold_call: "Llamada en Frío",
+						email: "Email",
+						social_media: "Redes Sociales",
+						event: "Evento",
+						other: "Otro",
+						facebook: "Facebook",
+						instagram: "Instagram",
+						google: "Google",
+						Whatsapp: "WhatsApp",
+					};
+					byMedio = medioRows.map((r) => ({
+						name: SOURCE_LABELS[r.source || ""] || r.source || "Sin fuente",
 						monto: Number.parseFloat(r.monto) || 0,
 					}));
 				}
@@ -6015,6 +6132,6 @@ export const crmRouter = {
 				(a, b) => b.abiertas + b.cerradas - (a.abiertas + a.cerradas),
 			);
 
-			return { pipeline, ranking, activity };
+			return { pipeline, ranking, activity, byTipoCredito, byMarca, byMedio };
 		}),
 };

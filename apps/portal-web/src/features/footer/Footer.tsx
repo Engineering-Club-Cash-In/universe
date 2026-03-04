@@ -8,6 +8,7 @@ import {
 } from "./icons";
 import { Link } from "@components/ui";
 import { useIsMobile } from "@/hooks";
+import { IconCCI } from "@/components/IconCCI";
 
 // Navigation sections configuration
 const FOOTER_SECTIONS = [
@@ -36,8 +37,8 @@ export const SOCIAL_CONTACTS = [
   {
     icon: Whatsapp,
     lead: false,
-    label: "+502 2234-1368",
-    href: "https://wa.me/50222341368",
+    label: "+502 3484-9518",
+    href: "https://wa.me/50234849518",
   },
   {
     icon: Facebook,
@@ -92,7 +93,12 @@ export const Footer: React.FC<FooterProps> = ({ notShowRedirects = false }) => {
       <div className="flex justify-end flex-col gap-6 h-full p-8 lg:px-40 lg:py-20 z-10 relative">
         {/* Logo section */}
         <div className="flex flex-col lg:flex-row gap-6 lg:gap-10 lg:items-center">
-          <Link href="/"><h1 className="text-3xl lg:text-header-3">Cashin</h1></Link>
+          <Link href="/" className="flex items-center gap-2">
+            <div className="w-8 h-8">
+              <IconCCI />
+            </div>
+            <h1 className="text-3xl lg:text-header-3">CashIn</h1>
+          </Link>
         </div>
 
         <div className="border-t border-white border-2"></div>

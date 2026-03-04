@@ -3,6 +3,7 @@
 import React, { useState, Fragment } from "react";
 
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import {
   ChevronLeft,
   ChevronRight,
@@ -13,7 +14,6 @@ import {
   FileText,
   Check,
   FileSpreadsheet,
-  Badge,
   Download,
   Loader2,
   MoreVertical,
@@ -25,7 +25,6 @@ import {
   User,
   CalendarRange,
   ListFilter,
-  Search,
   ChevronsUpDown,
   Hash,
   Handshake,
@@ -131,7 +130,7 @@ export function PaymentsTable() {
   const [pagoIdParaVerFacturas, setPagoIdParaVerFacturas] = useState<
     number | null
   >(null);
-  const { handleReverse, reversePago } = usePagoForm();
+  const { handleReverse, reversePago, handleRevertToPending, revertPaymentToPending, handleRevalidatePayment, revalidatePayment } = usePagoForm();
   const [isCollapsed, setIsCollapsed] = useState(true);
   const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
   const [isDownloadingAdvisor, setIsDownloadingAdvisor] = useState(false);
@@ -277,7 +276,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
         label: string;
         color: string;
         bgColor: string;
-        icon: JSX.Element;
+        icon: React.JSX.Element;
       }
     > = {
       no_requiere: {
@@ -1141,6 +1140,50 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                         </>
                       )}
                     </button>
+
+                    {/* Revertir a Pendiente */}
+                    <button
+                      className="bg-orange-500 hover:bg-orange-600 text-white px-3 py-1 rounded font-bold shadow flex items-center gap-1"
+                      onClick={() => {
+                        handleRevertToPending(pago.pagoId, pago.credito?.creditoId || 0);
+                        refetch();
+                      }}
+                      disabled={revertPaymentToPending.isPending || user?.role !== "ADMIN" || pago.validationStatus !== "validated"}
+                    >
+                      {revertPaymentToPending.isPending ? (
+                        <>
+                          <Loader2 className="animate-spin w-4 h-4" />
+                          Revirtiendo a Pdte...
+                        </>
+                      ) : (
+                        <>
+                          <Undo2 className="w-4 h-4" />
+                          A Pendiente
+                        </>
+                      )}
+                    </button>
+
+                    {/* Revalidar Pago */}
+                    <button
+                      className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded font-bold shadow flex items-center gap-1"
+                      onClick={() => {
+                        handleRevalidatePayment(pago.pagoId, pago.credito?.creditoId || 0);
+                        refetch();
+                      }}
+                      disabled={revalidatePayment.isPending || user?.role !== "ADMIN" || pago.validationStatus === "validated"}
+                    >
+                      {revalidatePayment.isPending ? (
+                        <>
+                          <Loader2 className="animate-spin w-4 h-4" />
+                          Revalidando...
+                        </>
+                      ) : (
+                        <>
+                          <Check className="w-4 h-4" />
+                          Revalidar
+                        </>
+                      )}
+                    </button>
                   </div>
 
                   {/* 🔽 COLAPSABLE COMPLETO */}
@@ -1371,7 +1414,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                               Categoría
                             </div>
                             <div className="font-bold text-blue-700">
-                              {pago.usuario?.categoria || "--"}
+                              {pago.usuario?.Categoria || "--"}
                             </div>
                           </div>
                         </div>
@@ -1629,6 +1672,66 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                                 {reversePago.isPending
                                   ? "Revirtiendo..."
                                   : "Revertir Pago"}
+                              </span>
+                            </DropdownMenuItem>
+
+                            <DropdownMenuSeparator className="bg-gray-200 my-1" />
+
+                            {/* Revertir a Pendiente */}
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (user?.role === "ADMIN") {
+                                  handleRevertToPending(pago.pagoId, pago.credito?.creditoId || 0);
+                                  refetch();
+                                }
+                              }}
+                              disabled={
+                                revertPaymentToPending.isPending || user?.role !== "ADMIN" || pago.validationStatus !== "validated"
+                              }
+                              className={`cursor-pointer py-2.5 px-3 flex items-center rounded-lg transition ${
+                                user?.role !== "ADMIN" || pago.validationStatus !== "validated"
+                                  ? "opacity-50 text-gray-400 bg-gray-50"
+                                  : "text-orange-700 hover:text-orange-900 hover:bg-orange-50"
+                              }`}
+                            >
+                              <Undo2
+                                className={`w-4 h-4 mr-2 flex-shrink-0 ${user?.role !== "ADMIN" || pago.validationStatus !== "validated" ? "text-gray-400" : "text-orange-600"}`}
+                              />
+                              <span className="font-semibold">
+                                {revertPaymentToPending.isPending
+                                  ? "Revirtiendo a Pdte..."
+                                  : "Revertir a Pendiente"}
+                              </span>
+                            </DropdownMenuItem>
+                            
+                            <DropdownMenuSeparator className="bg-gray-200 my-1" />
+
+                            {/* Revalidar Pago */}
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (user?.role === "ADMIN") {
+                                  handleRevalidatePayment(pago.pagoId, pago.credito?.creditoId || 0);
+                                  refetch();
+                                }
+                              }}
+                              disabled={
+                                revalidatePayment.isPending || user?.role !== "ADMIN" || pago.validationStatus === "validated"
+                              }
+                              className={`cursor-pointer py-2.5 px-3 flex items-center rounded-lg transition ${
+                                user?.role !== "ADMIN" || pago.validationStatus === "validated"
+                                  ? "opacity-50 text-gray-400 bg-gray-50"
+                                  : "text-purple-700 hover:text-purple-900 hover:bg-purple-50"
+                              }`}
+                            >
+                              <Check
+                                className={`w-4 h-4 mr-2 flex-shrink-0 ${user?.role !== "ADMIN" || pago.validationStatus === "validated" ? "text-gray-400" : "text-purple-600"}`}
+                              />
+                              <span className="font-semibold">
+                                {revalidatePayment.isPending
+                                  ? "Revalidando..."
+                                  : "Revalidar Pago"}
                               </span>
                             </DropdownMenuItem>
                           </DropdownMenuContent>

@@ -328,8 +328,9 @@ export async function createPublicLead(c: Context) {
 			.returning();
 
 		// RENAP solo si tiene DPI y teléfono
-		const renapInfo =
-			hasDpi ? await getOnlyRenapInfoController(body.dpi) : null;
+		const renapInfo = hasDpi
+			? await getOnlyRenapInfoController(body.dpi)
+			: null;
 
 		const opportunity = await createOpportunityForLead(
 			newLead.id,

@@ -35,7 +35,7 @@ export const HowSellOrBuy = () => {
       ),
       title: "Configura tu compra",
       description:
-        "Puedes realizar todo tu proceso en línea o contactar a un asesor para que te acompañe en todo el proceso.",
+        "Puedes realizar todo tu proceso en línea o contactar a un asesor para que te acompañe en toda tu gestión.",
     },
     {
       icon: <IconCar width={isMobile ? 24 : 48} height={isMobile ? 24 : 48} />,
@@ -49,7 +49,7 @@ export const HowSellOrBuy = () => {
       icon: <IconCar width={isMobile ? 24 : 48} height={isMobile ? 24 : 48} />,
       title: "Cuéntanos sobre tu auto",
       description:
-        "Realiza unos pocos pasos y déjanos saber toda la información importante sobre tu auto.",
+        "A través de un proceso simple comparte toda la información importante sobre tu auto.",
     },
     {
       icon: (
@@ -63,7 +63,7 @@ export const HowSellOrBuy = () => {
       icon: (
         <IconDollar width={isMobile ? 24 : 48} height={isMobile ? 24 : 48} />
       ),
-      title: "Cerramos la venta y realizamos el pago",
+      title: "Confirmación de venta",
       description:
         "Una vez todo esté listo, cerramos la venta y realizamos el pago de manera segura.",
     },

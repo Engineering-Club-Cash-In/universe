@@ -47,7 +47,7 @@ export const LeadInvestor = ({ initialAmount, initialTerm, initialType }: LeadIn
               </div>
             )}
             <h2 className="text-2xl font-bold lg:text-header-body xl:text-header-3 text-white text-center px-6 lg:px-30">
-              Pequeñas decisiones, grandes momentos.
+              Oportunidades reales. Crecimiento real.
             </h2>
           </div>
         </div>

@@ -4768,7 +4768,7 @@ export const crmRouter = {
 				assignedToRole: "accounting",
 				relatedEntityType: "opportunity_client",
 				relatedEntityId: input.opportunityId,
-				redirectPage: "client_details",
+				redirectPage: "client_details_disbursement",
 			});
 
 			return {

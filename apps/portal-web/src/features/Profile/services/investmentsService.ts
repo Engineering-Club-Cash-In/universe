@@ -169,6 +169,35 @@ export const getInvestmentsStats = async (dpi: string = "", email: string = ""):
 };
 
 // ============================================
+// HISTORIAL DE REPORTE DE LIQUIDACIONES
+// ============================================
+
+export interface HistorialReporte {
+  reporte_url: string;
+  fecha_generacion: string;
+}
+
+export interface HistorialReporteResponse {
+  success: boolean;
+  data: HistorialReporte;
+}
+
+/**
+ * Obtener el link del historial de reporte de liquidaciones por email
+ */
+export const getHistorialReporte = async (email: string): Promise<HistorialReporte> => {
+  try {
+    const response = await apiAuth.get<HistorialReporteResponse>(
+      `/api/cartera/liquidaciones/reporte?email=${encodeURIComponent(email)}`
+    );
+    return response.data.data;
+  } catch (error) {
+    console.error("Error al obtener historial de reporte:", error);
+    throw error;
+  }
+};
+
+// ============================================
 // INTERFACES PARA ASESORES
 // ============================================
 

@@ -83,7 +83,7 @@ export const transformToChartData = (
       data: data.dataSP.map((d) => ({ x: d.yearsX, y: d.value })),
     },
     {
-      id: "Cashin (14.11%)",
+      id: "CashIn (14.11%)",
       color: "#10B981",
       data: data.dataCashin.map((d) => ({ x: d.yearsX, y: d.value })),
     },

@@ -1,6 +1,6 @@
 import { openai } from "@ai-sdk/openai";
 import { ORPCError } from "@orpc/server";
-import { generateObject } from "ai";
+import { generateObject, generateText } from "ai";
 import { and, desc, eq, ilike, inArray, not, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
@@ -1341,13 +1341,40 @@ REGLAS IMPORTANTES:
 					input.photos,
 				);
 
-				const { object } = await generateObject({
+				// Step 1: Web search for current market prices
+				console.log("Searching web for current market prices...");
+				const { text: marketResearch, sources, usage: searchUsage } = await generateText({
+					model: openai("gpt-5-mini"),
+					prompt: `Busca precios actuales de mercado para: ${context.make} ${context.model} ${context.year} usado en Guatemala.
+Incluye precios de venta en portales como OLX, Encuentra24, Facebook Marketplace Guatemala, y cualquier referencia relevante.
+Responde con un resumen conciso de los precios encontrados en Quetzales (GTQ).`,
+					tools: {
+						web_search: openai.tools.webSearch({
+							searchContextSize: "medium",
+							userLocation: {
+								type: "approximate",
+								city: "Guatemala City",
+								country: "GT",
+							},
+						}),
+					},
+				});
+				console.log("Market research results:", marketResearch);
+				console.log("Sources:", sources);
+
+				// Step 2: Generate structured valuation with market data
+				const { object, usage: valuationUsage } = await generateObject({
 					model: openai("gpt-5-mini"),
 					schema: vehicleValuationSchema,
 					messages: [
 						{
 							role: "system",
 							content: `Eres un experto valuador de vehículos en Guatemala con más de 20 años de experiencia en el mercado automotriz guatemalteco.
+
+DATOS DE MERCADO ACTUALES (obtenidos de búsqueda web en tiempo real):
+${marketResearch}
+
+${sources?.length ? `Fuentes consultadas:\n${sources.map((s) => `- ${"url" in s ? s.url : s.id}`).join("\n")}` : ""}
 
 Tu tarea es realizar una valoración precisa de vehículos basada en:
 
@@ -1450,10 +1477,31 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 
 				console.log("AI valuation result:", object);
 
+				// Token usage tracking
+				const totalInputTokens = (searchUsage.inputTokens ?? 0) + (valuationUsage.inputTokens ?? 0);
+				const totalOutputTokens = (searchUsage.outputTokens ?? 0) + (valuationUsage.outputTokens ?? 0);
+				const totalTokens = totalInputTokens + totalOutputTokens;
+
+				// gpt-5-mini pricing: $0.25/1M input, $2.00/1M output
+				const estimatedCostUSD = (totalInputTokens * 0.25 / 1_000_000) + (totalOutputTokens * 2.00 / 1_000_000);
+
+				console.log("=== AI VALUATION TOKEN USAGE ===");
+				console.log(`Web Search - Input: ${searchUsage.inputTokens}, Output: ${searchUsage.outputTokens}, Total: ${searchUsage.totalTokens}`);
+				console.log(`Valuation  - Input: ${valuationUsage.inputTokens}, Output: ${valuationUsage.outputTokens}, Total: ${valuationUsage.totalTokens}`);
+				console.log(`Combined   - Input: ${totalInputTokens}, Output: ${totalOutputTokens}, Total: ${totalTokens}`);
+				console.log(`Estimated Cost: $${estimatedCostUSD.toFixed(6)} USD`);
+				console.log("================================");
+
 				return {
 					success: true,
 					valuation: object,
 					message: "Valoración por IA generada exitosamente",
+					usage: {
+						webSearch: { inputTokens: searchUsage.inputTokens, outputTokens: searchUsage.outputTokens, totalTokens: searchUsage.totalTokens },
+						valuation: { inputTokens: valuationUsage.inputTokens, outputTokens: valuationUsage.outputTokens, totalTokens: valuationUsage.totalTokens },
+						total: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens, totalTokens },
+						estimatedCostUSD: Number(estimatedCostUSD.toFixed(6)),
+					},
 				};
 			} catch (error) {
 				console.error("AI valuation error:", error);

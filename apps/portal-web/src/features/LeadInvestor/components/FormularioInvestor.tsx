@@ -40,7 +40,7 @@ const AMOUNT_OPTIONS = [
 
 const TYPE_LABELS: Record<string, string> = {
   tradicional: "tradicional",
-  "interes-simple": "interés simple",
+  vencimiento: "reinversión de capital",
   compuesto: "compuesto",
 };
 
@@ -85,9 +85,7 @@ export const FormularioInvestor = ({ initialAmount, initialTerm, initialType }: 
         Solicita asesoría personalizada
       </h1>
       <p className="text-base text-[#7A7A8A] mb-4">
-        Déjanos tus datos y un asesor de inversiones se comunicará
-        <br />
-        contigo para brindarte información detallada.
+        Déjanos tus datos y un asesor de inversiones se comunicará contigo para brindarte información detallada.
       </p>
 
       {/* Selector de tipo de perfil */}

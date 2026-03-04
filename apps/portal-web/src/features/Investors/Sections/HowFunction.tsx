@@ -16,7 +16,7 @@ export const HowFunction = () => {
   const items: Item[] = [
     {
       step: "Paso 1",
-      title: "Crea tu perfil inversor",
+      title: "Crea tu perfil o contáctanos",
       description:
         "Inicia tu camino a través de nuestro WhatsApp o un agente. Te ayudaremos a registrarte y resolveremos todas tus dudas, paso a paso.",
       icon: <IconAddUser width={iconSize} height={iconSize} />,
@@ -30,9 +30,9 @@ export const HowFunction = () => {
     },
     {
       step: "Paso 3",
-      title: "Invierte con seguridad",
+      title: "Activa tu inversión y haz crecer tu capital",
       description:
-        "Realiza tu primera inversión y monitorea tu rendimiento en tiempo real.",
+        "Monitorea tu desempeño, recibe informes periódicos y toma decisiones informadas para maximizar tus resultados.",
       icon: <IconQ width={iconSize} height={iconSize} />,
     },
   ];

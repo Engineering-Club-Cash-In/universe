@@ -54,7 +54,7 @@ export const Now = () => {
               viewport={{ once: true }}
               transition={{ duration: 0.5, delay: 0.2 }}
             >
-              Únete a miles de inversionistas que ya están construyendo su
+              Únete a cientos de inversionistas que ya están construyendo su
               patrimonio
               <br></br>
               con nosotros. Seguridad, rendimientos y el respaldo de expertos.
@@ -62,7 +62,16 @@ export const Now = () => {
 
             {/* Botón Invierte Ahora con motion */}
             <Button
-              onClick={() => navigate({ to: "/leadInvestor", search: { amount: undefined, term: undefined, type: undefined } })}
+              onClick={() =>
+                navigate({
+                  to: "/leadInvestor",
+                  search: {
+                    amount: undefined,
+                    term: undefined,
+                    type: undefined,
+                  },
+                })
+              }
               size={isMobile ? "md" : "lg"}
             >
               Invierte Ahora
@@ -90,7 +99,7 @@ export const Now = () => {
             >
               <div className="flex gap-1 items-center">
                 <div className="w-2 h-2 rounded-full bg-secondary" />
-                <span>Registro en 10 minutos</span>
+                <span>Asesoría personalizada</span>
               </div>
               <div className="flex gap-1 items-center">
                 <div className="w-2 h-2 rounded-full lg:ml-12 bg-secondary" />

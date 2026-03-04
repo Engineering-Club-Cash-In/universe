@@ -232,7 +232,7 @@ if (facturasExistentes.length > 0) {
 
       const receptor = {
         idReceptor: pagoData.nit
-          ? pagoData.nit.split('/')[0].trim().replace(/[kK]/g, '').replace(/-$/, '') // 🔥 Tomar primer NIT, quitar K y guión final
+          ? pagoData.nit.split('/')[0].trim().replace(/-/g, '') // 🔥 Tomar primer NIT, quitar guiones
           : "CF",
         nombreReceptor: pagoData.nombre
           ? pagoData.nombre.split('/')[0].trim() // 🔥 Tomar solo el primer nombre
@@ -1987,7 +1987,7 @@ if (facturasExistentes.length > 0) {
     "/facturar-generico",
     async ({ body, set, request }) => {
       try {
-        const { nit, items: itemsInput, created_by: bodyCreatedBy, emisor } = body;
+        const { nit, items: itemsInput, created_by: bodyCreatedBy, emisor, credito_nuevo} = body;
 
         // Si no viene created_by en el body, extraerlo del token
         let created_by = bodyCreatedBy;
@@ -2137,6 +2137,7 @@ if (facturasExistentes.length > 0) {
           created_by,
           customConfig: emisorKey !== "CUBE" ? emisorConfig.config : undefined,
           customSatConfig: emisorKey !== "CUBE" ? emisorConfig.satConfig : undefined,
+          usarFechaActual: credito_nuevo,
         });
 
         console.log("🎉 ========== FACTURA GENÉRICA GENERADA ==========");
@@ -2192,6 +2193,7 @@ if (facturasExistentes.length > 0) {
           t.Literal("GRUPO_BATRO"),
           t.Literal("AUTOCASH"),
         ]),
+        credito_nuevo: t.Optional(t.Boolean({ default: false })),
       }),
     }
   )
@@ -2322,6 +2324,7 @@ async function certificarFacturaHelper({
   created_by,
   customConfig,
   customSatConfig,
+  usarFechaActual = false,
 }: {
   pago_id?: number | null;
   receptor: any;
@@ -2337,6 +2340,7 @@ async function certificarFacturaHelper({
     nit?: string;
     entity?: string;
   };
+  usarFechaActual?: boolean;
 }) {
   try {
     console.log(`\n📄 ========== CERTIFICANDO FACTURA ==========`);
@@ -2351,7 +2355,13 @@ async function certificarFacturaHelper({
     const idInterno = generarIdInternoRandom();
 const fechaGuatemala = new Date();
 fechaGuatemala.setUTCHours(fechaGuatemala.getUTCHours() - 6);
-const fechaHoraEmision = fechaGuatemala.toISOString().substring(0, 19);
+
+// Si estamos en los primeros 5 días del mes, usar último día del mes anterior (a menos que usarFechaActual sea true)
+let fechaEmision = fechaGuatemala;
+if (!usarFechaActual && fechaGuatemala.getUTCDate() <= 5) {
+  fechaEmision = new Date(Date.UTC(fechaGuatemala.getUTCFullYear(), fechaGuatemala.getUTCMonth(), 0, 23, 59, 59));
+}
+const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
 
 
     // ============================================
@@ -2421,6 +2431,13 @@ const fechaHoraEmision = fechaGuatemala.toISOString().substring(0, 19);
         throw new Error(
           `Las credenciales de certificación no son válidas. ` +
             `Verifique con COFIDI que el usuario '${SAT_CONFIG.user}' tenga permisos activos.`
+        );
+      }
+
+      if (errorMessage.includes("NIT del Receptor es inválido") || errorMessage.includes("1014")) {
+        throw new Error(
+          `NIT del receptor inválido. NIT enviado: "${receptor.idReceptor}" para "${receptor.nombreReceptor}". ` +
+            `Respuesta COFIDI: ${errorMessage}`
         );
       }
 

@@ -274,13 +274,14 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 	const liquidateMutation = useMutation({
 		...orpc.liquidateInversionista.mutationOptions(),
 		onSuccess: (res) => {
-			if (res.success) {
-				toast.success("Liquidación completada correctamente");
+			// Si la petición no lanza error (200 OK), asumimos éxito a menos que traiga un flag explícito de error
+			if (res && res.error) {
+				toast.error(res.error || res.message || "Error al liquidar");
+			} else {
+				toast.success(res?.message || "Liquidación completada correctamente");
 				queryClient.invalidateQueries({
 					queryKey: orpc.getResumenGlobalInversionistas.queryOptions().queryKey,
 				});
-			} else {
-				toast.error(res.message || "Error al liquidar");
 			}
 		},
 		onError: (err) => {

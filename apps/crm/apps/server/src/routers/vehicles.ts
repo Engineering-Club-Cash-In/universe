@@ -772,6 +772,39 @@ export const vehiclesRouter = {
 			return inspection || null;
 		}),
 
+	// Validate if license plate is already used by a different VIN
+	validateLicensePlate: publicProcedure
+		.input(
+			z.object({
+				licensePlate: z.string(),
+				vinNumber: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			if (!input.licensePlate) return { valid: true };
+
+			const existingWithPlate = await db
+				.select({ vinNumber: vehicles.vinNumber })
+				.from(vehicles)
+				.where(eq(vehicles.licensePlate, input.licensePlate))
+				.limit(1);
+
+			// If plate exists but it belongs to another VIN
+			if (
+				existingWithPlate.length > 0 &&
+				existingWithPlate[0].vinNumber &&
+				input.vinNumber &&
+				existingWithPlate[0].vinNumber !== input.vinNumber
+			) {
+				return {
+					valid: false,
+					message: `La placa "${input.licensePlate}" ya está registrada con el chasis/VIN "${existingWithPlate[0].vinNumber}".`,
+				};
+			}
+
+			return { valid: true, message: "" };
+		}),
+
 	// Get statistics
 	getStatistics: publicProcedure.handler(async () => {
 		const allVehicles = await db.select().from(vehicles);

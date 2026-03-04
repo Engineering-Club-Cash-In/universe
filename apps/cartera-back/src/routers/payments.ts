@@ -17,7 +17,9 @@ import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment } from "../co
 import { eq } from "drizzle-orm";
 import { db } from "../database";
 import { creditos, pagos_credito } from "../database/db";
+import { revalidatePayment } from "../controllers/revalidatePayment";
 import { reversePayment } from "../controllers/reversePayment";
+import { revertPaymentToPending } from "../controllers/revertPaymentToPending";
 import { ajustarCuotasConSIFCO, marcarCuotasPagadasHastaNumero, procesarPagosSIFCODesdeJSON } from "../controllers/migratePayments";
 import { updateInstallments, updateAllInstallments } from "../controllers/updateCredit";
 
@@ -38,6 +40,8 @@ export const paymentRouter = new Elysia()
   // Endpoint para registrar pago (ya lo tienes)
   .post("/newPayment", insertPayment)
   .post("/reversePayment", reversePayment)
+  .post("/revertPaymentToPending", revertPaymentToPending)
+  .post("/revalidatePayment", revalidatePayment)
 
   // Nuevo endpoint para buscar pagos por SIFCO y/o fecha
   .get("/paymentByCredit", async ({ query, set }) => {

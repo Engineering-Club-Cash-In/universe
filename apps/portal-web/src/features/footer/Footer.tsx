@@ -116,6 +116,8 @@ export const Footer: React.FC<FooterProps> = ({ notShowRedirects = false }) => {
                       <span
                         key={link.label}
                         className="text-gray-600 cursor-not-allowed"
+                        aria-disabled="true"
+                        role="link"
                       >
                         {link.label}
                       </span>

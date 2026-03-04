@@ -1,4 +1,5 @@
-import { BoottomSheets, IconMessage, ModalChatBot } from "@/components";
+import { BoottomSheets, ModalChatBot } from "@/components";
+import { Whatsapp } from "@/features/footer/icons";
 import { motion } from "framer-motion";
 import { useModalOptionsCall } from "@/hooks";
 
@@ -22,7 +23,7 @@ export const StartToday = () => {
   return (
     <section className="start-today lg:my-10 flex flex-col  gap-8 justify-center items-center px-8 text-center lg:text-start">
       <div>
-        <BoottomSheets>¡Estamos Listos para Ayudarte!</BoottomSheets>
+        <BoottomSheets>¡Estamos listos para ayudarte!</BoottomSheets>
       </div>
       <h2 className="text-2xl lg:text-header-2  font-bold">Comienza tu trámite hoy</h2>
       <p className="text-gray lg:text-xl lg:w-1/2  xl:w-2/5 text-center">
@@ -52,8 +53,8 @@ export const StartToday = () => {
           }}
           onClick={() => setIsModalOpen(true)}
         >
-          <IconMessage className="mr-2" />
-          Háblanos en nuestro chat de WhatsApp
+          <span className="mr-2 inline-flex items-center" style={{ width: 21, height: 21 }}><Whatsapp /></span>
+          Contactanos por WhatsApp
         </motion.button>
       </div>
       <div className="grid lg:grid-cols-3 gap-6 lg:gap-40 mb-20 lg:mb-0 lg:mt-6">

@@ -51,11 +51,19 @@ function sanitizeFormData(
 	const sanitized: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(data)) {
 		if (DECIMAL_FIELDS.has(key)) {
-			sanitized[key] =
-				value === "" || value === null || value === undefined ? null : value;
+			if (value === "" || value === null || value === undefined) {
+				sanitized[key] = null;
+			} else {
+				const num = Number(value);
+				sanitized[key] = Number.isNaN(num) ? null : String(num);
+			}
 		} else if (INTEGER_FIELDS.has(key)) {
-			sanitized[key] =
-				value === "" || value === null || value === undefined ? null : value;
+			if (value === "" || value === null || value === undefined) {
+				sanitized[key] = null;
+			} else {
+				const num = Number(value);
+				sanitized[key] = Number.isNaN(num) ? null : Math.trunc(num);
+			}
 		} else {
 			sanitized[key] = value;
 		}

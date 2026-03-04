@@ -83,6 +83,7 @@ import {
 	renderInspectionStatusBadge,
 	renderNewVehicleBadges,
 } from "@/lib/vehicle-utils";
+import { ROLES } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
 // Helper para renderizar el badge del estado del vehículo
@@ -178,6 +179,9 @@ function VehiclesDashboard() {
 	});
 	const { data: statistics } = useQuery(
 		orpc.getVehicleStatistics.queryOptions(),
+	);
+	const { data: userProfile } = useQuery(
+		orpc.getUserProfile.queryOptions(),
 	);
 
 	// Get vehicles data from paginated response
@@ -2425,6 +2429,19 @@ function VehiclesDashboard() {
 							<h4 className="font-medium text-sm">Estado del Vehículo</h4>
 							<div className="space-y-2">
 								<Label htmlFor="edit-status">Estado *</Label>
+								{editVehicleForm.status === "sold" &&
+								userProfile?.role &&
+								userProfile.role !== ROLES.ADMIN &&
+								userProfile.role !== ROLES.SALES_SUPERVISOR ? (
+									<div className="space-y-1">
+										<div className="flex h-10 w-full items-center rounded-md border bg-muted px-3 py-2 text-sm opacity-60">
+											<span className="font-medium">Vendido</span>
+										</div>
+										<p className="text-muted-foreground text-xs">
+											Solo un administrador o supervisor de ventas puede cambiar el estado de un vehículo vendido.
+										</p>
+									</div>
+								) : (
 								<Select
 									value={editVehicleForm.status}
 									onValueChange={(
@@ -2487,6 +2504,7 @@ function VehiclesDashboard() {
 										</SelectItem>
 									</SelectContent>
 								</Select>
+								)}
 							</div>
 						</div>
 

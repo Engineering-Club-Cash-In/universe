@@ -40,7 +40,7 @@ export const Calculator: React.FC = () => {
   // Tipos de inversión
   const investmentTypeOptions = [
     { value: "tradicional", label: "Tradicional" },
-    { value: "vencimiento", label: "Al Vencimiento" },
+    { value: "vencimiento", label: "Reinversión de Capital" },
     { value: "compuesto", label: "Interés Compuesto" },
   ];
 
@@ -76,8 +76,8 @@ export const Calculator: React.FC = () => {
 
     return {
       principal: capital,
-      profit: result.totalInterests || 0,
-      totalReturn: result.totalToReceive,
+      profit: result.grossProfit || 0,
+      totalReturn: capital + (result.grossProfit || 0),
       months: termMonths,
     };
   };
@@ -152,15 +152,15 @@ export const Calculator: React.FC = () => {
               <>
                 <span className="text-secondary font-semibold">Inversión Tradicional: </span>
                 <span className="font-normal">
-                  Recibes intereses periódicos y el capital al final del plazo. El rendimiento es estable y predecible.
+                  Recibes tu capital e intereses de forma mensual.
                 </span>
               </>
             )}
             {investmentType === "vencimiento" && (
               <>
-                <span className="text-secondary font-semibold">Al Vencimiento: </span>
+                <span className="text-secondary font-semibold">Reinversión de Capital: </span>
                 <span className="font-normal">
-                  Tu capital e intereses se entregan al finalizar el plazo. Ideal si no necesitas liquidez inmediata.
+                  Cada mes recibes tus intereses y el capital se reinvierte automáticamente para el siguiente período.
                 </span>
               </>
             )}

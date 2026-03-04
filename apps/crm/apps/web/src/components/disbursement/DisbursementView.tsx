@@ -18,6 +18,16 @@ import { Button } from "@/components/ui/button";
 import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
+const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+
+type DisbursementDoc = Awaited<
+	ReturnType<typeof client.getDisbursementForOpportunity>
+>["documents"][number];
+
+type CreditCheck = Awaited<
+	ReturnType<typeof client.getChecksByOpportunity>
+>[number];
+
 interface DisbursementViewProps {
 	opportunityId: string;
 	opportunityTitle: string;
@@ -57,14 +67,14 @@ export function DisbursementView({
 			input: { opportunityId },
 		}),
 		queryKey: ["getDisbursementForOpportunity", opportunityId],
-	}) as any;
+	});
 
 	// Query for checks associated with the opportunity
 	const checksQuery = useQuery({
 		queryKey: ["getChecksByOpportunity", opportunityId],
 		queryFn: () =>
 			client.getChecksByOpportunity({ opportunityId }),
-	}) as any;
+	});
 
 	const uploadDisbursementMutation = useMutation({
 		mutationFn: async (file: File) => {
@@ -140,7 +150,15 @@ export function DisbursementView({
 			setUploadingDisbursement(true);
 			try {
 				for (const file of Array.from(files)) {
-					await uploadDisbursementMutation.mutateAsync(file);
+					if (file.size > MAX_FILE_SIZE) {
+						toast.error(`${file.name} excede el límite de 20MB`);
+						continue;
+					}
+					try {
+						await uploadDisbursementMutation.mutateAsync(file);
+					} catch {
+						toast.error(`Error subiendo ${file.name}`);
+					}
 				}
 			} finally {
 				setUploadingDisbursement(false);
@@ -195,7 +213,7 @@ export function DisbursementView({
 					</p>
 				) : hasDocuments ? (
 					<div className="space-y-2">
-						{disbursementQuery.data!.documents.map((doc: any) => (
+						{disbursementQuery.data!.documents.map((doc: DisbursementDoc) => (
 							<div
 								key={doc.id}
 								className="flex items-center justify-between rounded-md border bg-background px-4 py-3"
@@ -336,9 +354,9 @@ export function DisbursementView({
 						Cargando cheques...
 					</p>
 				) : checksQuery.data &&
-					(checksQuery.data as any[]).length > 0 ? (
+					checksQuery.data.length > 0 ? (
 					<div className="space-y-3">
-						{(checksQuery.data as any[]).map((check) => (
+						{checksQuery.data.map((check: CreditCheck) => (
 							<div
 								key={check.id}
 								className="rounded-lg border bg-background p-5"

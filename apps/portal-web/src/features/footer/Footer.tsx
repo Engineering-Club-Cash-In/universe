@@ -47,15 +47,15 @@ export const SOCIAL_CONTACTS = [
   },
   {
     icon: Linkedin,
-    label: "clubcashin-com",
-    href: "https://linkedin.com/company/clubcashin-com",
+    label: "Clubcashin.com",
+    href: "https://linkedin.com/company/clubcashin",
   },
   {
     icon: Location,
     lead: false,
-    label: '3a avenida "A" 13-78, Colonia Lomas de Pamplona zona 13',
-    className: "max-w-[280px] text-center",
-    href: "https://www.google.com/maps/place/Club+Cash+In/@14.5992026,-90.5374228,873m/data=!3m2!1e3!4b1!4m6!3m5!1s0x8589a1a13ede014d:0xcc9c190a50d9f749!8m2!3d14.5992026!4d-90.5348479!16s%2Fg%2F11k0wwn0rc!5m1!1e1?entry=ttu&g_ep=EgoyMDI1MTExNi4wIKXMDSoASAFQAw%3D%3D",
+    label: "Km 6.8 Antigua carretera a Muxbal, Complejo Pradera, Ofibodegas, Bodega 2",
+    className: "max-w-[320px] text-center",
+    href: "https://www.google.com/maps/search/Km+6.8+Antigua+carretera+a+Muxbal+Complejo+Pradera+Ofibodegas",
   },
 ];
 

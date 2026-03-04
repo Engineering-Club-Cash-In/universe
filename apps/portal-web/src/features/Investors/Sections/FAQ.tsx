@@ -70,7 +70,7 @@ export const FAQ = () => {
       question: "¿Por qué es mi mejor opción?",
       answer: `
         <ol>
-            <li>Buenos rendimientos: es muy rentable, puedes obtener retornos de hasta 14.11% anual.</li>
+            <li>Rendimientos competitivos: Puedes obtener retornos de hasta 14.11% anual.</li>
             <li>Accesible: hay inversiones para todos.</li>
             <li>Transparente: sabes exactamente el destino, plazo, retorno y riesgo de tu inversión.</li>
             <li>Sencillo: todo es online, tú inviertes y clubcashin.com se encarga del resto.</li>

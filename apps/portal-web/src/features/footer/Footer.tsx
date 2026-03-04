@@ -41,7 +41,7 @@ export const SOCIAL_CONTACTS = [
   },
   {
     icon: Facebook,
-    label: "Clubcashin",
+    label: "ClubCashIn",
     href: "https://facebook.com/clubcashin",
   },
   {

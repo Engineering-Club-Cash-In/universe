@@ -17,7 +17,7 @@ const FOOTER_SECTIONS = [
     links: [
       { label: "Encuentra tu auto", href: "/credit" }, // TODO: devolver a "/marketplace" cuando esté habilitado
       { label: "Obtén tu financiamiento", href: "/credit" },
-      { label: "Compramos tu auto", href: "/sell" },
+      { label: "Compramos tu auto", href: "/sell", disabled: true },
     ],
   },
   {
@@ -111,15 +111,24 @@ export const Footer: React.FC<FooterProps> = ({ notShowRedirects = false }) => {
               {FOOTER_SECTIONS.map((section) => (
                 <div key={section.title} className="flex flex-col gap-6">
                   <div className="text-[20px] font-bold">{section.title}</div>
-                  {section.links.map((link) => (
-                    <Link
-                      key={link.label}
-                      href={link.href}
-                      className="transition-colors hover:text-gray-300"
-                    >
-                      {link.label}
-                    </Link>
-                  ))}
+                  {section.links.map((link) =>
+                    link.disabled ? (
+                      <span
+                        key={link.label}
+                        className="text-gray-600 cursor-not-allowed"
+                      >
+                        {link.label}
+                      </span>
+                    ) : (
+                      <Link
+                        key={link.label}
+                        href={link.href}
+                        className="transition-colors hover:text-gray-300"
+                      >
+                        {link.label}
+                      </Link>
+                    )
+                  )}
                 </div>
               ))}
             </div>

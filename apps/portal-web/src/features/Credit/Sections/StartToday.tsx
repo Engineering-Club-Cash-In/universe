@@ -1,4 +1,5 @@
-import { BoottomSheets, IconMessage, ModalChatBot } from "@/components";
+import { BoottomSheets, ModalChatBot } from "@/components";
+import { Whatsapp } from "@/features/footer/icons";
 import { motion } from "framer-motion";
 import { useModalOptionsCall } from "@/hooks";
 

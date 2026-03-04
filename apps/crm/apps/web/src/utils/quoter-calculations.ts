@@ -37,6 +37,7 @@ export interface QuotationResult {
 	amountToFinance: number;
 	calculatedRoyalty: number;
 	calculatedInterest: number;
+	rcdpCost: number;
 	adminCost: number;
 	totalFinanced: number;
 	monthlyPayment: number;
@@ -127,12 +128,11 @@ export function calculateQuotation(input: QuotationInput): QuotationResult {
 		// Royalty = % de B22 redondeado hacia arriba
 		calculatedRoyalty = Math.ceil(b22 * (royaltyPercentage / 100));
 
-		// Interés = ROUNDUP(B22 * tasa autocompra) + RCDP (para microbuses)
-		calculatedInterest =
-			Math.ceil(b22 * AUTOCOMPRA_INTEREST_RATE) + input.rcdpCost;
+		// Interés = ROUNDUP(B22 * tasa autocompra) — sin RCDP
+		calculatedInterest = Math.ceil(b22 * AUTOCOMPRA_INTEREST_RATE);
 
-		// Gastos Admin = Garantía + Royalty + Leasing + Admin fijo + Intereses + GPS + Seguro
-		const extraCost = calculatedInterest + gps + seguro;
+		// Gastos Admin = Garantía + Royalty + Leasing + Admin fijo + Intereses + RCDP + GPS + Seguro
+		const extraCost = calculatedInterest + input.rcdpCost + gps + seguro;
 		adminCost = garantia + calculatedRoyalty + leasing + adminFijo + extraCost;
 
 		// Total financiado = monto a financiar + costos financiados
@@ -155,6 +155,7 @@ export function calculateQuotation(input: QuotationInput): QuotationResult {
 		amountToFinance,
 		calculatedRoyalty,
 		calculatedInterest,
+		rcdpCost: input.rcdpCost,
 		adminCost: Math.round(adminCost * 100) / 100,
 		totalFinanced,
 		monthlyPayment,

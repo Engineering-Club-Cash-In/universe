@@ -38,11 +38,28 @@ const AMOUNT_OPTIONS = [
   { value: "1000000", label: "Q1,000,000" },
 ];
 
-interface FormularioInvestorProps {
-  initialAmount?: string;
+const TYPE_LABELS: Record<string, string> = {
+  tradicional: "tradicional",
+  "interes-simple": "interés simple",
+  compuesto: "compuesto",
+};
+
+function buildDefaultMessage(amount?: string, term?: string, type?: string): string {
+  const parts: string[] = [];
+  if (amount) parts.push(`un monto de Q${Number(amount).toLocaleString()}`);
+  if (term) parts.push(`un plazo de ${term} meses`);
+  if (type) parts.push(`tipo ${TYPE_LABELS[type] || type}`);
+  if (parts.length === 0) return "";
+  return `Estoy interesado en invertir con ${parts.join(", ")}.`;
 }
 
-export const FormularioInvestor = ({ initialAmount }: FormularioInvestorProps) => {
+interface FormularioInvestorProps {
+  initialAmount?: string;
+  initialTerm?: string;
+  initialType?: string;
+}
+
+export const FormularioInvestor = ({ initialAmount, initialTerm, initialType }: FormularioInvestorProps) => {
   const {
     values,
     errors,
@@ -54,7 +71,7 @@ export const FormularioInvestor = ({ initialAmount }: FormularioInvestorProps) =
     handleSubmit,
     isSubmitting,
     serverError,
-  } = useFormInvestor(initialAmount);
+  } = useFormInvestor(initialAmount, buildDefaultMessage(initialAmount, initialTerm, initialType));
   const isMobile = useIsMobile();
 
   const handleProfileSelect = (type: ProfileType) => {

@@ -75,7 +75,7 @@ const validationSchema = Yup.object({
 
 const VALID_AMOUNTS = ["25000", "50000", "100000", "250000", "500000", "1000000"];
 
-const buildInitialValues = (amount?: string): FormInvestorValues => ({
+const buildInitialValues = (amount?: string, defaultMessage?: string): FormInvestorValues => ({
   profileType: "individual",
   nombreCompleto: "",
   nombreSociedad: "",
@@ -85,10 +85,10 @@ const buildInitialValues = (amount?: string): FormInvestorValues => ({
   telefono: "",
   experiencia: "",
   proposedAmount: amount && VALID_AMOUNTS.includes(amount) ? amount : "",
-  mensaje: "",
+  mensaje: defaultMessage || "",
 });
 
-export const useFormInvestor = (initialAmount?: string) => {
+export const useFormInvestor = (initialAmount?: string, defaultMessage?: string) => {
   const setSubmitted = useLeadInvestor((state) => state.setSubmitted);
   const [serverError, setServerError] = useState<string>("");
 
@@ -108,7 +108,7 @@ export const useFormInvestor = (initialAmount?: string) => {
   });
 
   const formik = useFormik<FormInvestorValues>({
-    initialValues: buildInitialValues(initialAmount),
+    initialValues: buildInitialValues(initialAmount, defaultMessage),
     validationSchema,
     onSubmit: async (values) => {
       mutation.mutate(values);

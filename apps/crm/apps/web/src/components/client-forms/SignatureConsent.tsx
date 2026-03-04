@@ -9,6 +9,7 @@ interface SignatureConsentProps {
 	dpi: string;
 	nit?: string;
 	isSubmitting?: boolean;
+	onBack?: () => void;
 }
 
 export function SignatureConsent({
@@ -17,6 +18,7 @@ export function SignatureConsent({
 	dpi,
 	nit,
 	isSubmitting,
+	onBack,
 }: SignatureConsentProps) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const signaturePadRef = useRef<SignaturePad | null>(null);
@@ -149,7 +151,14 @@ export function SignatureConsent({
 				</CardContent>
 			</Card>
 
-			<div className="flex justify-end">
+			<div className="flex justify-between">
+				{onBack ? (
+					<Button type="button" variant="outline" size="lg" onClick={onBack}>
+						Volver
+					</Button>
+				) : (
+					<div />
+				)}
 				<Button
 					type="button"
 					size="lg"

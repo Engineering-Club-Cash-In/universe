@@ -86,6 +86,9 @@ function FormularioPage() {
 		setStep("signature");
 	};
 
+	const handleBackToCredit = () => setStep("credit");
+	const handleBackToFinancial = () => setStep("financial");
+
 	const handleSignatureComplete = async (signatureDataUrl: string) => {
 		if (!financialDataRef.current) return;
 		setIsSubmitting(true);
@@ -110,22 +113,24 @@ function FormularioPage() {
 	};
 
 	// Build pre-fill defaults from lead data
-	const creditDefaults = validatedData?.lead
-		? {
-				primerNombre: (validatedData.lead.firstName as string) || "",
-				segundoNombre: (validatedData.lead.middleName as string) || "",
-				primerApellido: (validatedData.lead.lastName as string) || "",
-				segundoApellido: (validatedData.lead.secondLastName as string) || "",
-				dpi: (validatedData.lead.dpi as string) || "",
-				nit: (validatedData.lead.nit as string) || "",
-				email: (validatedData.lead.email as string) || "",
-				telMovil: (validatedData.lead.phone as string) || "",
-				direccionResidencia: (validatedData.lead.direccion as string) || "",
-				vehiculoMarca: (validatedData.vehicle?.make as string) || "",
-				vehiculoLinea: (validatedData.vehicle?.model as string) || "",
-				vehiculoModelo: (validatedData.vehicle?.year as string) || "",
-			}
-		: undefined;
+	const creditDefaults = creditDataRef.current
+		? creditDataRef.current
+		: validatedData?.lead
+			? {
+					primerNombre: (validatedData.lead.firstName as string) || "",
+					segundoNombre: (validatedData.lead.middleName as string) || "",
+					primerApellido: (validatedData.lead.lastName as string) || "",
+					segundoApellido: (validatedData.lead.secondLastName as string) || "",
+					dpi: (validatedData.lead.dpi as string) || "",
+					nit: (validatedData.lead.nit as string) || "",
+					email: (validatedData.lead.email as string) || "",
+					telMovil: (validatedData.lead.phone as string) || "",
+					direccionResidencia: (validatedData.lead.direccion as string) || "",
+					vehiculoMarca: (validatedData.vehicle?.make as string) || "",
+					vehiculoLinea: (validatedData.vehicle?.model as string) || "",
+					vehiculoModelo: (validatedData.vehicle?.year as string) || "",
+				}
+			: undefined;
 
 	const financialDefaults = creditDataRef.current
 		? {
@@ -255,6 +260,7 @@ function FormularioPage() {
 						defaultValues={financialDefaults}
 						onSubmit={handleFinancialSubmit}
 						isSubmitting={isSubmitting}
+						onBack={handleBackToCredit}
 					/>
 				)}
 				{step === "signature" && (
@@ -264,6 +270,7 @@ function FormularioPage() {
 						dpi={creditDataRef.current?.dpi || ""}
 						nit={creditDataRef.current?.nit}
 						isSubmitting={isSubmitting}
+						onBack={handleBackToFinancial}
 					/>
 				)}
 			</div>

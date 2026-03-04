@@ -1482,8 +1482,11 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 				const totalOutputTokens = (searchUsage.outputTokens ?? 0) + (valuationUsage.outputTokens ?? 0);
 				const totalTokens = totalInputTokens + totalOutputTokens;
 
-				// gpt-5-mini pricing: $0.25/1M input, $2.00/1M output
-				const estimatedCostUSD = (totalInputTokens * 0.25 / 1_000_000) + (totalOutputTokens * 2.00 / 1_000_000);
+				// gpt-5-mini pricing per 1M tokens
+				const GPT5_MINI_INPUT_COST_PER_M = 0.25;
+				const GPT5_MINI_OUTPUT_COST_PER_M = 2.00;
+				const TOKENS_PER_M = 1_000_000;
+				const estimatedCostUSD = (totalInputTokens * GPT5_MINI_INPUT_COST_PER_M / TOKENS_PER_M) + (totalOutputTokens * GPT5_MINI_OUTPUT_COST_PER_M / TOKENS_PER_M);
 
 				console.log("=== AI VALUATION TOKEN USAGE ===");
 				console.log(`Web Search - Input: ${searchUsage.inputTokens}, Output: ${searchUsage.outputTokens}, Total: ${searchUsage.totalTokens}`);

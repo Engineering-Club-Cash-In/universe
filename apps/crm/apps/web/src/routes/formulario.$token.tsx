@@ -86,6 +86,9 @@ function FormularioPage() {
 		setStep("signature");
 	};
 
+	const handleBackToCredit = () => setStep("credit");
+	const handleBackToFinancial = () => setStep("financial");
+
 	const handleSignatureComplete = async (signatureDataUrl: string) => {
 		if (!financialDataRef.current) return;
 		setIsSubmitting(true);
@@ -255,6 +258,7 @@ function FormularioPage() {
 						defaultValues={financialDefaults}
 						onSubmit={handleFinancialSubmit}
 						isSubmitting={isSubmitting}
+						onBack={handleBackToCredit}
 					/>
 				)}
 				{step === "signature" && (
@@ -264,6 +268,7 @@ function FormularioPage() {
 						dpi={creditDataRef.current?.dpi || ""}
 						nit={creditDataRef.current?.nit}
 						isSubmitting={isSubmitting}
+						onBack={handleBackToFinancial}
 					/>
 				)}
 			</div>

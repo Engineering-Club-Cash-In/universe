@@ -19,6 +19,7 @@ interface FinancialStatementFormProps {
 	defaultValues?: Partial<FinancialStatementFormData>;
 	onSubmit: (data: FinancialStatementFormData) => void;
 	isSubmitting?: boolean;
+	onBack?: () => void;
 }
 
 function parseNum(val: string | undefined): number {
@@ -43,6 +44,7 @@ export function FinancialStatementForm({
 	defaultValues,
 	onSubmit,
 	isSubmitting,
+	onBack,
 }: FinancialStatementFormProps) {
 	const {
 		register,
@@ -713,7 +715,14 @@ export function FinancialStatementForm({
 				</CardContent>
 			</Card>
 
-			<div className="flex justify-end">
+			<div className="flex justify-between">
+				{onBack ? (
+					<Button type="button" variant="outline" size="lg" onClick={onBack}>
+						Volver
+					</Button>
+				) : (
+					<div />
+				)}
 				<Button type="submit" size="lg" disabled={isSubmitting}>
 					{isSubmitting ? "Guardando..." : "Continuar a Firma"}
 				</Button>

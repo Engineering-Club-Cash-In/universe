@@ -17,6 +17,7 @@ import {
   getAsesorById,
   type CreateInvestorPayload,
 } from "../services/cartera";
+import { getSignedUrlFromBucket } from "../lib/storage";
 
 const carteraRoutes = new Hono();
 
@@ -238,6 +239,51 @@ carteraRoutes.get("/advisor", async (c) => {
     }
     throw new HTTPException(500, {
       message: error instanceof Error ? error.message : "Error al obtener asesor",
+    });
+  }
+});
+
+// ============================================
+// REPORTE DE LIQUIDACIONES (R2)
+// ============================================
+
+/**
+ * GET /api/cartera/liquidaciones/reporte?email=correo@ejemplo.com
+ * Genera URL temporal del reporte xlsx almacenado en R2
+ */
+carteraRoutes.get("/liquidaciones/reporte", async (c) => {
+  try {
+    const email = c.req.query("email");
+    if (!email) {
+      throw new HTTPException(400, { message: "El parámetro 'email' es requerido" });
+    }
+
+    const bucket = process.env.R2_BUCKET_NAME || "reports";
+    const key = `settlement-history/${email}.xlsx`;
+
+    const result = await getSignedUrlFromBucket(key, bucket);
+
+    if (!result) {
+      return c.json(
+        { success: false, error: "Reporte no encontrado para este correo" },
+        404,
+      );
+    }
+
+    return c.json({
+      success: true,
+      data: {
+        reporte_url: result.url,
+        fecha_generacion: result.lastModified?.toISOString() || new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    if (error instanceof HTTPException) {
+      throw error;
+    }
+    console.error("[ReporteLiquidaciones] Error:", error);
+    throw new HTTPException(500, {
+      message: "Error al obtener el reporte",
     });
   }
 });

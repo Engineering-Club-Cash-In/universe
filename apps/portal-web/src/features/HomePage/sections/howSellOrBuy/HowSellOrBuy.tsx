@@ -35,7 +35,7 @@ export const HowSellOrBuy = () => {
       ),
       title: "Te acompañamos en toda tu gestión",
       description:
-        "Puedes realizar todo tu proceso en línea o contactar a un asesor para que te acompañe en todo el proceso.",
+        "Puedes realizar todo tu proceso en línea o contactar a un asesor para que te acompañe en toda tu gestión.",
     },
     {
       icon: <IconCar width={isMobile ? 24 : 48} height={isMobile ? 24 : 48} />,

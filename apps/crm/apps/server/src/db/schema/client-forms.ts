@@ -19,6 +19,7 @@ export const clientFormTokens = pgTable("client_form_tokens", {
 	token: uuid("token").notNull().unique().defaultRandom(),
 	expiresAt: timestamp("expires_at").notNull(),
 	used: boolean("used").notNull().default(false),
+	creditSubmittedAt: timestamp("credit_submitted_at"),
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

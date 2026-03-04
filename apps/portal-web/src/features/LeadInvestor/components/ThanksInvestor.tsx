@@ -5,7 +5,7 @@ import { Link } from "@tanstack/react-router";
 
 export const ThanksInvestor = () => {
   useEffect(() => {
-    window.scrollTo(0, 0);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
   return (

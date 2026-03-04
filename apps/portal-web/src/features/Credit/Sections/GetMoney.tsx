@@ -75,7 +75,7 @@ export const GetMoney = () => {
             )}
             <img
               src={imageSrc}
-              alt="Auto"
+              alt="Vehículo disponible para préstamo con garantía"
               className="w-full h-full object-cover rounded-2xl relative"
             />
             {/* Badge en esquina superior derecha */}
@@ -126,7 +126,7 @@ export const GetMoney = () => {
         <div className="relative  lg:w-[40vw]">
           <img
             src={imageSrc}
-            alt="Auto"
+            alt="Vehículo disponible para préstamo con garantía"
             className="w-full h-full object-cover rounded-2xl"
           />
           {/* Badge en esquina superior derecha */}

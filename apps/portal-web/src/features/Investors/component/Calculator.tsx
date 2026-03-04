@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { IconCalculator, Select, IconArrow } from "@/components";
 import { motion } from "framer-motion";
+import { useNavigate } from "@tanstack/react-router";
 import {
   calculateCompoundInvestment,
   calculateTraditionalInvestment,
@@ -12,6 +13,7 @@ const INTEREST_RATE = 1.5; // 1.5% mensual
 const INVESTOR_PERCENTAGE = 70; // 70% para el inversionista
 
 export const Calculator: React.FC = () => {
+  const navigate = useNavigate();
   const [amount, setAmount] = useState("");
   const [term, setTerm] = useState("");
   const [investmentType, setInvestmentType] = useState("tradicional");
@@ -84,9 +86,8 @@ export const Calculator: React.FC = () => {
 
   return (
     <div
-      className="p-6 lg:p-8 xl:p-16 rounded-3xl"
+      className="p-6 lg:p-8 xl:p-16 rounded-3xl border border-[#D0D0D0]"
       style={{
-        border: "0.86px solid rgba(212, 175, 55, 0.20)",
         background: "linear-gradient(180deg, #0A0A0A 0%, #000 100%)",
       }}
     >
@@ -147,19 +148,36 @@ export const Calculator: React.FC = () => {
           </div>
 
           <p className="text-sm lg:text-base">
-            <span className="text-secondary font-semibold">
-              Inversión Tradicional:{" "}
-            </span>
-            <span className="font-normal">
-              Recibes intereses periódicos y el capital al final del plazo. El
-              rendimiento es estable y predecible.
-            </span>
+            {investmentType === "tradicional" && (
+              <>
+                <span className="text-secondary font-semibold">Inversión Tradicional: </span>
+                <span className="font-normal">
+                  Recibes intereses periódicos y el capital al final del plazo. El rendimiento es estable y predecible.
+                </span>
+              </>
+            )}
+            {investmentType === "vencimiento" && (
+              <>
+                <span className="text-secondary font-semibold">Al Vencimiento: </span>
+                <span className="font-normal">
+                  Tu capital e intereses se entregan al finalizar el plazo. Ideal si no necesitas liquidez inmediata.
+                </span>
+              </>
+            )}
+            {investmentType === "compuesto" && (
+              <>
+                <span className="text-secondary font-semibold">Interés Compuesto: </span>
+                <span className="font-normal">
+                  Tus intereses se reinvierten automáticamente, generando rendimientos sobre rendimientos.
+                </span>
+              </>
+            )}
           </p>
         </div>
 
         {/* Segundo Grid - Visualización */}
         <div
-          className="flex flex-col gap-4 justify-center p-4 lg:p-8"
+          className="flex flex-col gap-4 justify-center p-4 lg:p-8 mt-6 lg:mt-0"
           style={{
             borderRadius: "13.765px",
             border: "1.721px solid rgba(78, 87, 234, 0.30)",
@@ -192,7 +210,7 @@ export const Calculator: React.FC = () => {
                 <p className=" text-xs lg:text-sm  text-gray-400 mb-1">
                   Ganancia Estimada
                 </p>
-                <p className="lg:text-2xl font-bold text-secondary">
+                <p className="lg:text-2xl font-bold text-primary">
                   + Q{" "}
                   {results.profit.toLocaleString("es-GT", {
                     minimumFractionDigits: 2,
@@ -215,12 +233,12 @@ export const Calculator: React.FC = () => {
               </div>
 
               <motion.button
-                className="mt-4 w-full py-3 px-6 rounded-lg  text-sm border border-secondary text-secondary bg-transparent"
+                className="mt-4 w-full py-3 px-6 rounded-lg  text-sm border border-primary text-primary bg-transparent"
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 transition={{ duration: 0.2 }}
                 onClick={() => {
-                     globalThis.location.href = "/leadInvestor?amount=" + amount + "&term=" + term + "&type=" + investmentType;
+                     navigate({ to: "/leadInvestor", search: { amount, term, type: investmentType } });
                 }}
               >
                 Contáctanos para Invertir

@@ -302,10 +302,8 @@ export const appRouter = {
 export const disbursementRouter = {
 	getDisbursementForOpportunity:
 		notificationsRouter.getDisbursementForOpportunity,
-	deleteNotificationDocument:
-		notificationsRouter.deleteNotificationDocument,
-	notifyDisbursementCompleted:
-		notificationsRouter.notifyDisbursementCompleted,
+	deleteNotificationDocument: notificationsRouter.deleteNotificationDocument,
+	notifyDisbursementCompleted: notificationsRouter.notifyDisbursementCompleted,
 };
 
 export type AppRouter = typeof appRouter;

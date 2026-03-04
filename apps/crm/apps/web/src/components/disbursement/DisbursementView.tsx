@@ -53,12 +53,8 @@ export function DisbursementView({
 	const isAccounting =
 		userRole != null && PERMISSIONS.canAccessAccounting(userRole);
 
-	const amountToFinance = quotation
-		? Number(quotation.amountToFinance)
-		: 0;
-	const totalFinanced = quotation
-		? Number(quotation.totalFinanced)
-		: 0;
+	const amountToFinance = quotation ? Number(quotation.amountToFinance) : 0;
+	const totalFinanced = quotation ? Number(quotation.totalFinanced) : 0;
 	const gastos = totalFinanced - amountToFinance;
 
 	// Query for disbursement info (accounting documents)
@@ -72,15 +68,13 @@ export function DisbursementView({
 	// Query for checks associated with the opportunity
 	const checksQuery = useQuery({
 		queryKey: ["getChecksByOpportunity", opportunityId],
-		queryFn: () =>
-			client.getChecksByOpportunity({ opportunityId }),
+		queryFn: () => client.getChecksByOpportunity({ opportunityId }),
 	});
 
 	const uploadDisbursementMutation = useMutation({
 		mutationFn: async (file: File) => {
 			const notificationId = disbursementQuery.data?.notificationId;
-			if (!notificationId)
-				throw new Error("No hay notificación de desembolso");
+			if (!notificationId) throw new Error("No hay notificación de desembolso");
 
 			const data = await new Promise<string>((resolve, reject) => {
 				const reader = new FileReader();
@@ -171,8 +165,7 @@ export function DisbursementView({
 	);
 
 	const hasDocuments =
-		disbursementQuery.data &&
-		disbursementQuery.data.documents.length > 0;
+		disbursementQuery.data && disbursementQuery.data.documents.length > 0;
 
 	return (
 		<div className="space-y-6">
@@ -188,9 +181,7 @@ export function DisbursementView({
 						</p>
 					</div>
 					<div className="rounded-lg border bg-muted/30 p-4">
-						<span className="text-muted-foreground text-xs">
-							Gastos
-						</span>
+						<span className="text-muted-foreground text-xs">Gastos</span>
 						<p className="font-bold text-2xl text-orange-600">
 							Q{gastos.toLocaleString()}
 						</p>
@@ -202,9 +193,7 @@ export function DisbursementView({
 			<div className="space-y-3">
 				<div className="flex items-center gap-2">
 					<FileText className="h-5 w-5 text-muted-foreground" />
-					<h3 className="font-semibold text-lg">
-						Boletas de desembolso
-					</h3>
+					<h3 className="font-semibold text-lg">Boletas de desembolso</h3>
 				</div>
 
 				{disbursementQuery.isLoading ? (
@@ -230,16 +219,8 @@ export function DisbursementView({
 									</div>
 								</div>
 								<div className="flex shrink-0 items-center gap-1">
-									<a
-										href={doc.url}
-										target="_blank"
-										rel="noopener noreferrer"
-									>
-										<Button
-											size="sm"
-											variant="outline"
-											className="h-8"
-										>
+									<a href={doc.url} target="_blank" rel="noopener noreferrer">
+										<Button size="sm" variant="outline" className="h-8">
 											<Download className="mr-1 h-3 w-3" />
 											Descargar
 										</Button>
@@ -249,13 +230,9 @@ export function DisbursementView({
 											size="sm"
 											variant="ghost"
 											className="h-8 text-destructive hover:text-destructive"
-											disabled={
-												deleteDisbursementDocMutation.isPending
-											}
+											disabled={deleteDisbursementDocMutation.isPending}
 											onClick={() =>
-												deleteDisbursementDocMutation.mutate(
-													doc.id,
-												)
+												deleteDisbursementDocMutation.mutate(doc.id)
 											}
 										>
 											<Trash2 className="h-4 w-4" />
@@ -275,44 +252,41 @@ export function DisbursementView({
 				)}
 
 				{/* Upload area - only for accounting */}
-				{isAccounting &&
-					disbursementQuery.data?.notificationId && (
-						<div
-							className="flex cursor-pointer items-center justify-center gap-2 rounded-md border-2 border-muted-foreground/25 border-dashed px-4 py-2.5 transition-colors hover:border-muted-foreground/50"
-							role="button"
-							tabIndex={0}
-							onClick={() => fileInputRef.current?.click()}
-							onKeyDown={(e) => {
-								if (e.key === "Enter" || e.key === " ") {
-									e.preventDefault();
-									fileInputRef.current?.click();
-								}
-							}}
-						>
-							{uploadingDisbursement ? (
-								<Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-							) : (
-								<Upload className="h-4 w-4 text-muted-foreground/50" />
-							)}
-							<span className="text-muted-foreground text-sm">
-								{uploadingDisbursement
-									? "Subiendo..."
-									: "Subir boletas"}
-							</span>
-							<span className="text-[11px] text-muted-foreground/60">
-								(PDF, imágenes, Word, Excel)
-							</span>
-							<input
-								ref={fileInputRef}
-								type="file"
-								multiple
-								accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
-								className="hidden"
-								onChange={handleDisbursementFileSelect}
-								disabled={uploadingDisbursement}
-							/>
-						</div>
-					)}
+				{isAccounting && disbursementQuery.data?.notificationId && (
+					<div
+						className="flex cursor-pointer items-center justify-center gap-2 rounded-md border-2 border-muted-foreground/25 border-dashed px-4 py-2.5 transition-colors hover:border-muted-foreground/50"
+						role="button"
+						tabIndex={0}
+						onClick={() => fileInputRef.current?.click()}
+						onKeyDown={(e) => {
+							if (e.key === "Enter" || e.key === " ") {
+								e.preventDefault();
+								fileInputRef.current?.click();
+							}
+						}}
+					>
+						{uploadingDisbursement ? (
+							<Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+						) : (
+							<Upload className="h-4 w-4 text-muted-foreground/50" />
+						)}
+						<span className="text-muted-foreground text-sm">
+							{uploadingDisbursement ? "Subiendo..." : "Subir boletas"}
+						</span>
+						<span className="text-[11px] text-muted-foreground/60">
+							(PDF, imágenes, Word, Excel)
+						</span>
+						<input
+							ref={fileInputRef}
+							type="file"
+							multiple
+							accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
+							className="hidden"
+							onChange={handleDisbursementFileSelect}
+							disabled={uploadingDisbursement}
+						/>
+					</div>
+				)}
 
 				{/* Notify sales button */}
 				{isAccounting && hasDocuments && (
@@ -334,8 +308,7 @@ export function DisbursementView({
 				{!disbursementQuery.data?.notificationId &&
 					!disbursementQuery.isLoading && (
 						<p className="text-muted-foreground text-sm">
-							No hay notificación de desembolso para esta
-							oportunidad.
+							No hay notificación de desembolso para esta oportunidad.
 						</p>
 					)}
 			</div>
@@ -344,17 +317,12 @@ export function DisbursementView({
 			<div className="space-y-3">
 				<div className="flex items-center gap-2">
 					<Banknote className="h-5 w-5 text-muted-foreground" />
-					<h3 className="font-semibold text-lg">
-						Cheques / Transferencias
-					</h3>
+					<h3 className="font-semibold text-lg">Cheques / Transferencias</h3>
 				</div>
 
 				{checksQuery.isLoading ? (
-					<p className="text-muted-foreground text-sm">
-						Cargando cheques...
-					</p>
-				) : checksQuery.data &&
-					checksQuery.data.length > 0 ? (
+					<p className="text-muted-foreground text-sm">Cargando cheques...</p>
+				) : checksQuery.data && checksQuery.data.length > 0 ? (
 					<div className="space-y-3">
 						{checksQuery.data.map((check: CreditCheck) => (
 							<div
@@ -364,10 +332,7 @@ export function DisbursementView({
 								<div className="flex items-start justify-between gap-4">
 									<div className="space-y-2">
 										<div className="flex items-center gap-3">
-											<Badge
-												variant="outline"
-												className="text-sm"
-											>
+											<Badge variant="outline" className="text-sm">
 												{check.transferType}
 											</Badge>
 											<span className="font-semibold text-base">
@@ -421,24 +386,17 @@ export function DisbursementView({
 													Fecha
 												</span>
 												<p className="font-medium text-sm">
-													{format(
-														new Date(check.checkDate),
-														"dd/MM/yyyy",
-														{ locale: es },
-													)}
+													{format(new Date(check.checkDate), "dd/MM/yyyy", {
+														locale: es,
+													})}
 												</p>
 											</div>
 										</div>
 									</div>
 									<div className="shrink-0 text-right">
-										<span className="text-muted-foreground text-xs">
-											Monto
-										</span>
+										<span className="text-muted-foreground text-xs">Monto</span>
 										<p className="font-bold text-green-600 text-xl">
-											{check.currency}{" "}
-											{Number(
-												check.amount,
-											).toLocaleString()}
+											{check.currency} {Number(check.amount).toLocaleString()}
 										</p>
 									</div>
 								</div>

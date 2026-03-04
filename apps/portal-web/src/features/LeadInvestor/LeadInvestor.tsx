@@ -7,9 +7,11 @@ const urlImage = import.meta.env.VITE_IMAGE_URL;
 
 interface LeadInvestorProps {
   initialAmount?: string;
+  initialTerm?: string;
+  initialType?: string;
 }
 
-export const LeadInvestor = ({ initialAmount }: LeadInvestorProps) => {
+export const LeadInvestor = ({ initialAmount, initialTerm, initialType }: LeadInvestorProps) => {
   const imageUrl = urlImage + "/Frame 1321315308.png";
   const isMobile = useIsMobile();
   const isSubmitted = useLeadInvestor((state) => state.isSubmitted);
@@ -50,7 +52,7 @@ export const LeadInvestor = ({ initialAmount }: LeadInvestorProps) => {
           </div>
         </div>
         <div className="py-12 lg:py-0 lg:-mt-6 px-10 lg:px-30 xl:px-40">
-          <FormularioInvestor initialAmount={initialAmount} />
+          <FormularioInvestor initialAmount={initialAmount} initialTerm={initialTerm} initialType={initialType} />
         </div>
       </div>
     </div>

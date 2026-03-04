@@ -626,8 +626,7 @@ export const notificationsRouter = {
 
 			if (!opportunity.assignedTo) {
 				throw new ORPCError("BAD_REQUEST", {
-					message:
-						"La oportunidad no tiene un asesor de ventas asignado",
+					message: "La oportunidad no tiene un asesor de ventas asignado",
 				});
 			}
 

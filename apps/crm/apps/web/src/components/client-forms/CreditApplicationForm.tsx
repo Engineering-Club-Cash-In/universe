@@ -256,7 +256,7 @@ export function CreditApplicationForm({
 				</CardHeader>
 				<CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
 					<div className="space-y-2">
-						<Label>Profesión</Label>
+						<Label>Profesión (último grado académico)</Label>
 						<Input {...register("profesion")} />
 					</div>
 					<div className="space-y-2">
@@ -383,7 +383,7 @@ export function CreditApplicationForm({
 			{/* Referencias Crediticias */}
 			<Card>
 				<CardHeader>
-					<CardTitle>Referencias Crediticias</CardTitle>
+					<CardTitle>Referencias Familiares</CardTitle>
 				</CardHeader>
 				<CardContent className="space-y-4">
 					{[0, 1, 2].map((i) => (

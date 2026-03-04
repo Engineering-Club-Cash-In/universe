@@ -728,19 +728,30 @@ function RouteComponent() {
 								</CardDescription>
 							</CardHeader>
 							<CardContent>
-								<ResponsiveContainer width="100%" height={300}>
+								<ResponsiveContainer width="100%" height={400}>
 									<BarChart data={chartData.data.pipeline}>
 										<CartesianGrid strokeDasharray="3 3" />
 										<XAxis
 											dataKey="name"
-											angle={-45}
-											textAnchor="end"
-											height={100}
-											fontSize={11}
 											interval={0}
-											tickFormatter={(name: string) =>
-												name.length > 20 ? `${name.slice(0, 18)}…` : name
-											}
+											height={120}
+											tick={({ x, y, payload }) => (
+												<g transform={`translate(${x},${y})`}>
+													<text
+														x={0}
+														y={0}
+														dy={16}
+														textAnchor="end"
+														fill="#666"
+														fontSize={11}
+														transform="rotate(-45)"
+													>
+														{payload.value.length > 20
+															? `${payload.value.slice(0, 18)}…`
+															: payload.value}
+													</text>
+												</g>
+											)}
 										/>
 										<YAxis
 											tickFormatter={(v: number) =>
@@ -839,9 +850,7 @@ function RouteComponent() {
 					chartData.data.byMarca.length > 0 ||
 					chartData.data.byMedio.length > 0) && (
 					<div className="space-y-4">
-						<h2 className="font-semibold text-2xl">
-							Análisis de Colocación
-						</h2>
+						<h2 className="font-semibold text-2xl">Análisis de Colocación</h2>
 						<div className="grid gap-4 md:grid-cols-2">
 							{/* Pie: Monto por Tipo de Crédito */}
 							{chartData.data.byTipoCredito.length > 0 && (
@@ -891,16 +900,28 @@ function RouteComponent() {
 										</CardDescription>
 									</CardHeader>
 									<CardContent>
-										<ResponsiveContainer width="100%" height={300}>
+										<ResponsiveContainer width="100%" height={400}>
 											<BarChart data={chartData.data.byMedio}>
 												<CartesianGrid strokeDasharray="3 3" />
 												<XAxis
 													dataKey="name"
-													angle={-45}
-													textAnchor="end"
-													height={100}
-													fontSize={11}
 													interval={0}
+													height={120}
+													tick={({ x, y, payload }) => (
+														<g transform={`translate(${x},${y})`}>
+															<text
+																x={0}
+																y={0}
+																dy={16}
+																textAnchor="end"
+																fill="#666"
+																fontSize={11}
+																transform="rotate(-45)"
+															>
+																{payload.value}
+															</text>
+														</g>
+													)}
 												/>
 												<YAxis
 													tickFormatter={(v: number) =>
@@ -923,24 +944,34 @@ function RouteComponent() {
 							{chartData.data.byMarca.length > 0 && (
 								<Card className="md:col-span-2">
 									<CardHeader>
-										<CardTitle>
-											Colocación por Marca de Vehículo
-										</CardTitle>
+										<CardTitle>Colocación por Marca de Vehículo</CardTitle>
 										<CardDescription>
 											Monto colocado y cantidad de créditos por marca
 										</CardDescription>
 									</CardHeader>
 									<CardContent>
-										<ResponsiveContainer width="100%" height={350}>
+										<ResponsiveContainer width="100%" height={400}>
 											<LineChart data={chartData.data.byMarca}>
 												<CartesianGrid strokeDasharray="3 3" />
 												<XAxis
 													dataKey="name"
-													angle={-45}
-													textAnchor="end"
-													height={80}
-													fontSize={11}
 													interval={0}
+													height={120}
+													tick={({ x, y, payload }) => (
+														<g transform={`translate(${x},${y})`}>
+															<text
+																x={0}
+																y={0}
+																dy={16}
+																textAnchor="end"
+																fill="#666"
+																fontSize={11}
+																transform="rotate(-45)"
+															>
+																{payload.value}
+															</text>
+														</g>
+													)}
 												/>
 												<YAxis
 													yAxisId="left"

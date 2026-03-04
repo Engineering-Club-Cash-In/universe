@@ -5,22 +5,22 @@ export const InfoLead = () => {
   const isMobile = useIsMobile();
   const title = "Compra el auto que siempre quisiste";
   const description =
-    "Te ayudamos a hacer realidad tu sueño de tener un vehículo nuevo. Realizamos un análisis completo de tu perfil y del vehículo que deseas. Si cumples con nuestros requisitos, ¡el auto es tuyo!";
+    "Te ayudamos a hacer realidad tu sueño de tener un vehículo nuevo. Realizamos un análisis completo de tu perfil y del vehículo que deseas. Si cumples con los requisitos, ¡el auto es tuyo!";
 
   const items = [
     {
       icon: <IconCheckDoc width={isMobile ? 20 : 34} />,
-      title: "Aplica",
+      title: "Tu aplicas",
       description: "Completa tu solicitud en minutos",
     },
     {
       icon: <IconSearch width={isMobile ? 20 : 34} />,
-      title: "Evaluamos",
+      title: "Nosotros evaluamos",
       description: "Analizamos tu perfil y el vehículo que deseas",
     },
     {
       icon: <IconKey width={isMobile ? 20 : 34} />,
-      title: "Estrenas tu auto",
+      title: "Y estrenas tu auto",
       description: "Recibe tu préstamo y disfruta",
     },
   ];

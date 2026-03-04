@@ -29,6 +29,7 @@ import {
 	Search,
 	Target,
 	Trash2,
+	Loader2,
 	TrendingUp,
 	Trophy,
 	Upload,
@@ -39,6 +40,7 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import invariant from "tiny-invariant";
 import { z } from "zod";
+import { ClientFormsSection } from "@/components/client-forms/ClientFormsSection";
 import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
 import { ConsolidatedCreditSummary } from "@/components/credit/ConsolidatedCreditSummary";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
@@ -698,6 +700,15 @@ function RouteComponent() {
 			sourceFilter,
 		],
 	});
+	// Stats filtradas por mes (usa el backend que filtra por opportunityStageHistory.changedAt)
+	const placedStatsQuery = useQuery({
+		...orpc.getDashboardStats.queryOptions({ input: { month, year } }),
+		enabled:
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
+			!!session?.user?.id,
+	});
+
 	const salesStagesQuery = useQuery({
 		...orpc.getSalesStages.queryOptions(),
 		enabled:
@@ -1325,37 +1336,17 @@ function RouteComponent() {
 		}
 	};
 
-	// Calculate comprehensive opportunities metrics
-	const totalOpportunities = filteredData?.length || 0;
-	const totalValue =
-		filteredData?.reduce(
-			(sum, opp) => sum + (Number.parseFloat(opp.value || "0") || 0),
-			0,
-		) || 0;
-	const wonOpportunities =
-		filteredData?.filter((opp) => opp.status === "won").length || 0;
-	const lostOpportunities =
-		filteredData?.filter((opp) => opp.status === "lost").length || 0;
-	const _openOpportunities =
-		filteredData?.filter((opp) => opp.status === "open").length || 0;
-
-	// Calculate win rate from closed deals only
-	const closedOpportunities = wonOpportunities + lostOpportunities;
+	// Stats filtradas por mes desde el backend
+	const stats = placedStatsQuery.data;
+	const totalOpportunities =
+		stats?.totalOpportunities ?? stats?.teamOpportunities ?? stats?.myOpportunities ?? 0;
+	const totalValue = stats?.totalValue ?? 0;
+	const placedCount = stats?.placedCount ?? 0;
+	const placedAmount = stats?.placedAmount ?? 0;
 	const winRate =
-		closedOpportunities > 0
-			? Math.round((wonOpportunities / closedOpportunities) * 100)
+		totalOpportunities > 0
+			? Math.round((placedCount / totalOpportunities) * 100)
 			: 0;
-
-	const PLACED_STAGE_THRESHOLD = 90;
-	const placedOpportunities =
-		filteredData?.filter(
-			(opp) => (opp.stage?.closurePercentage || 0) >= PLACED_STAGE_THRESHOLD,
-		) || [];
-	const placedCount = placedOpportunities.length;
-	const placedAmount = placedOpportunities.reduce(
-		(sum, opp) => sum + (Number.parseFloat(opp.value || "0") || 0),
-		0,
-	);
 
 	return (
 		<div className="container mx-auto space-y-6 p-6">
@@ -1366,19 +1357,17 @@ function RouteComponent() {
 						Rastrea las oportunidades a través de tu proceso de ventas
 					</p>
 				</div>
-				{!isSales && (
-					<div className="flex items-center gap-2">
-						<Button variant="outline" size="icon" onClick={goToPreviousMonth}>
-							<ChevronLeft className="h-4 w-4" />
-						</Button>
-						<span className="min-w-[140px] text-center font-medium">
-							{MONTH_NAMES[month - 1]} {year}
-						</span>
-						<Button variant="outline" size="icon" onClick={goToNextMonth}>
-							<ChevronRight className="h-4 w-4" />
-						</Button>
-					</div>
-				)}
+				<div className="flex items-center gap-2">
+					<Button variant="outline" size="icon" onClick={goToPreviousMonth}>
+						<ChevronLeft className="h-4 w-4" />
+					</Button>
+					<span className="min-w-[140px] text-center font-medium">
+						{MONTH_NAMES[month - 1]} {year}
+					</span>
+					<Button variant="outline" size="icon" onClick={goToNextMonth}>
+						<ChevronRight className="h-4 w-4" />
+					</Button>
+				</div>
 			</div>
 
 			{/* Stats Cards */}
@@ -1391,10 +1380,16 @@ function RouteComponent() {
 						<Target className="h-4 w-4 text-muted-foreground" />
 					</CardHeader>
 					<CardContent>
-						<div className="font-bold text-2xl">{totalOpportunities}</div>
-						<p className="text-muted-foreground text-xs">
-							Q{totalValue.toLocaleString()} en pipeline
-						</p>
+						{placedStatsQuery.isLoading ? (
+							<Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+						) : (
+							<>
+								<div className="font-bold text-2xl">{totalOpportunities}</div>
+								<p className="text-muted-foreground text-xs">
+									Q{totalValue.toLocaleString()} en pipeline
+								</p>
+							</>
+						)}
 					</CardContent>
 				</Card>
 				<Card>
@@ -1403,10 +1398,16 @@ function RouteComponent() {
 						<TrendingUp className="h-4 w-4 text-green-500" />
 					</CardHeader>
 					<CardContent>
-						<div className="font-bold text-2xl">{winRate}%</div>
-						<p className="text-muted-foreground text-xs">
-							{wonOpportunities}/{closedOpportunities} cerrados
-						</p>
+						{placedStatsQuery.isLoading ? (
+							<Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+						) : (
+							<>
+								<div className="font-bold text-2xl">{winRate}%</div>
+								<p className="text-muted-foreground text-xs">
+									{placedCount}/{totalOpportunities} del total
+								</p>
+							</>
+						)}
 					</CardContent>
 				</Card>
 				<Card className="border-green-200 bg-green-50/50">
@@ -1417,9 +1418,13 @@ function RouteComponent() {
 						<Trophy className="h-4 w-4 text-green-600" />
 					</CardHeader>
 					<CardContent>
-						<div className="font-bold text-2xl text-green-700">
-							{placedCount}
-						</div>
+						{placedStatsQuery.isLoading ? (
+							<Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+						) : (
+							<div className="font-bold text-2xl text-green-700">
+								{placedCount}
+							</div>
+						)}
 					</CardContent>
 				</Card>
 				<Card className="border-green-200 bg-green-50/50">
@@ -1430,9 +1435,13 @@ function RouteComponent() {
 						<Banknote className="h-4 w-4 text-green-600" />
 					</CardHeader>
 					<CardContent>
-						<div className="font-bold text-2xl text-green-700">
-							Q{placedAmount.toLocaleString()}
-						</div>
+						{placedStatsQuery.isLoading ? (
+							<Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+						) : (
+							<div className="font-bold text-2xl text-green-700">
+								Q{placedAmount.toLocaleString()}
+							</div>
+						)}
 					</CardContent>
 				</Card>
 			</div>
@@ -1975,11 +1984,12 @@ function RouteComponent() {
 									}
 								}}
 							>
-								<TabsList className="grid w-full grid-cols-5">
+								<TabsList className="grid w-full grid-cols-6">
 									<TabsTrigger value="details">Detalles</TabsTrigger>
 									<TabsTrigger value="documents">Documentos</TabsTrigger>
 									<TabsTrigger value="coDebtors">Co-firmantes</TabsTrigger>
 									<TabsTrigger value="credit">Credito</TabsTrigger>
+									<TabsTrigger value="forms">Formularios</TabsTrigger>
 									<TabsTrigger value="history">Historial</TabsTrigger>
 								</TabsList>
 								<TabsContent value="details" className="mt-6 space-y-6">
@@ -2469,6 +2479,12 @@ function RouteComponent() {
 											Cambiar Etapa
 										</Button>
 									</div>
+								</TabsContent>
+
+								<TabsContent value="forms" className="mt-6 space-y-4">
+									{selectedOpportunity && (
+										<ClientFormsSection opportunityId={selectedOpportunity.id} />
+									)}
 								</TabsContent>
 
 								<TabsContent value="history" className="mt-6 space-y-4">

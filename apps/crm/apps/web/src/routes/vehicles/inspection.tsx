@@ -205,7 +205,11 @@ function VehicleInspectionForm() {
 			setTimeout(() => {
 				navigate({
 					to: "/vehicles",
-					search: { vehicleId: undefined, inspectionId: undefined, tab: undefined },
+					search: {
+						vehicleId: undefined,
+						inspectionId: undefined,
+						tab: undefined,
+					},
 				});
 			}, 2000);
 		} catch (error) {

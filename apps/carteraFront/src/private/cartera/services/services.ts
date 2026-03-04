@@ -516,6 +516,7 @@ export interface PagoData {
     total_restante: string;
     llamada: string | null;
     fecha_pago: string;
+    fecha_aplicado: string;
     fecha_filtro: string;
     renuevo_o_nuevo: string | null;
     membresias: number;
@@ -684,6 +685,24 @@ export async function reversePagosInversionistasService({ pago_id, credito_id,re
     pago_id,
     credito_id,
     reverseAccounting,
+  });
+  return res.data;
+}
+
+// Revertir pago a pendiente
+export async function revertPaymentToPendingService({ pago_id, credito_id }: { pago_id: number; credito_id: number }) {
+  const res = await api.post(`${API_URL}/revertPaymentToPending`, {
+    pago_id,
+    credito_id,
+  });
+  return res.data;
+}
+
+// Revalidar pago
+export async function revalidatePaymentService({ pago_id, credito_id }: { pago_id: number; credito_id: number }) {
+  const res = await api.post(`${API_URL}/revalidatePayment`, {
+    pago_id,
+    credito_id,
   });
   return res.data;
 }

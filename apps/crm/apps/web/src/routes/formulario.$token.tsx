@@ -18,13 +18,7 @@ type FormStep =
 	| "success"
 	| "error";
 
-interface ValidatedData {
-	opportunityId: string;
-	lead: Record<string, unknown> | null;
-	vehicle: Record<string, unknown> | null;
-	creditApplicationExists: boolean;
-	financialStatementExists: boolean;
-}
+type ValidatedData = Awaited<ReturnType<typeof client.validateFormToken>>;
 
 export const Route = createFileRoute("/formulario/$token")({
 	component: FormularioPage,
@@ -55,6 +49,7 @@ function FormularioPage() {
 					setStep("credit");
 				}
 			} catch (error) {
+				console.error("[FormularioPage] Error validando token:", token, error);
 				const msg =
 					error instanceof Error ? error.message : "Error al validar el enlace";
 				setErrorMessage(msg);
@@ -74,7 +69,11 @@ function FormularioPage() {
 			creditDataRef.current = data;
 			toast.success("Solicitud de crédito guardada");
 			setStep("financial");
-		} catch {
+		} catch (error) {
+			console.error(
+				"[FormularioPage] Error al enviar solicitud de crédito:",
+				error,
+			);
 			toast.error("Error al guardar la solicitud");
 		} finally {
 			setIsSubmitting(false);
@@ -105,7 +104,11 @@ function FormularioPage() {
 			});
 			toast.success("Formularios completados exitosamente");
 			setStep("success");
-		} catch {
+		} catch (error) {
+			console.error(
+				"[FormularioPage] Error al enviar estado patrimonial:",
+				error,
+			);
 			toast.error("Error al enviar el formulario");
 		} finally {
 			setIsSubmitting(false);
@@ -128,24 +131,27 @@ function FormularioPage() {
 					direccionResidencia: (validatedData.lead.direccion as string) || "",
 					vehiculoMarca: (validatedData.vehicle?.make as string) || "",
 					vehiculoLinea: (validatedData.vehicle?.model as string) || "",
-					vehiculoModelo: (validatedData.vehicle?.year as string) || "",
+					vehiculoModelo: String(validatedData.vehicle?.year ?? ""),
 				}
 			: undefined;
 
-	const financialDefaults = creditDataRef.current
+	// Source for financial pre-fill: in-session data or existing credit from DB
+	const creditSource = creditDataRef.current ?? validatedData?.existingCreditApplication;
+
+	const financialDefaults = creditSource
 		? {
-				primerNombre: creditDataRef.current.primerNombre,
-				segundoNombre: creditDataRef.current.segundoNombre,
-				primerApellido: creditDataRef.current.primerApellido,
-				segundoApellido: creditDataRef.current.segundoApellido,
-				apellidoCasada: creditDataRef.current.apellidoCasada,
-				dpi: creditDataRef.current.dpi,
-				nit: creditDataRef.current.nit,
+				primerNombre: creditSource.primerNombre || "",
+				segundoNombre: creditSource.segundoNombre || "",
+				primerApellido: creditSource.primerApellido || "",
+				segundoApellido: creditSource.segundoApellido || "",
+				apellidoCasada: creditSource.apellidoCasada || "",
+				dpi: creditSource.dpi || "",
+				nit: creditSource.nit || "",
 			}
 		: undefined;
 
-	const signatureFullName = creditDataRef.current
-		? `${creditDataRef.current.primerNombre} ${creditDataRef.current.segundoNombre || ""} ${creditDataRef.current.primerApellido} ${creditDataRef.current.segundoApellido || ""}`.trim()
+	const signatureFullName = creditSource
+		? `${creditSource.primerNombre || ""} ${creditSource.segundoNombre || ""} ${creditSource.primerApellido || ""} ${creditSource.segundoApellido || ""}`.trim()
 		: "";
 
 	if (step === "loading") {
@@ -267,8 +273,8 @@ function FormularioPage() {
 					<SignatureConsent
 						onComplete={handleSignatureComplete}
 						fullName={signatureFullName}
-						dpi={creditDataRef.current?.dpi || ""}
-						nit={creditDataRef.current?.nit}
+						dpi={creditSource?.dpi || ""}
+						nit={creditSource?.nit || undefined}
 						isSubmitting={isSubmitting}
 						onBack={handleBackToFinancial}
 					/>

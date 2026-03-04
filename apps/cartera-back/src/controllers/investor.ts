@@ -3622,18 +3622,24 @@ export async function getLiquidaciones({
         )
         .orderBy(pagos_credito_inversionistas_espejo.fecha_pago);
 
-      // 💰 Calcular ISR por pago
+      // 💰 Calcular ISR y cuota por pago
       const pagosConISR = pagos.map((pago) => {
+        const abono_capital = new Big(pago.abono_capital ?? 0);
         const abono_interes = new Big(pago.abono_interes ?? 0);
+        const abono_iva = new Big(pago.abono_iva ?? 0);
         const isr = liq.emite_factura ? new Big(0) : abono_interes.times(0.07);
+
+        const cuota = abono_capital
+          .plus(abono_interes)
+          .plus(liq.emite_factura ? abono_iva : isr.neg());
 
         return {
           ...pago,
-          abono_capital: Number(pago.abono_capital),
-          abono_interes: Number(pago.abono_interes),
-          abono_iva: Number(pago.abono_iva),
-          isr: Number(isr.toString()),
-          cuota: Number(pago.cuota),
+          abono_capital: Number(abono_capital),
+          abono_interes: Number(abono_interes),
+          abono_iva: Number(abono_iva),
+          isr: Number(isr),
+          cuota: Number(cuota),
         };
       });
 
@@ -3725,7 +3731,7 @@ export async function getInvestorPerformance(dpi: string) {
     // Buscar cuotas LIQUIDADAS de este crédito para este inversionista
     const pagosLiquidados = await db
       .select({
-        cuota: pagos_credito_inversionistas_espejo.cuota,
+        cuota: pagos_credito_inversionistas_espejo.abono_interes,
       })
       .from(pagos_credito_inversionistas_espejo)
       .where(

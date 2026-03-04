@@ -679,12 +679,10 @@ function RouteComponent() {
 	};
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
-	const isSales = userProfile.data?.role === "sales";
 	const opportunitiesQuery = useQuery({
 		...orpc.getOpportunities.queryOptions({
 			input: {
 				excludeStatuses: ["migrate"],
-				...(!isSales ? { createdMonth: month, createdYear: year } : {}),
 				...(sourceFilter !== "all" ? { source: sourceFilter as any } : {}),
 			},
 		}),
@@ -696,7 +694,6 @@ function RouteComponent() {
 			"getOpportunities",
 			session?.user?.id,
 			userProfile.data?.role,
-			...(isSales ? [] : [month, year]),
 			sourceFilter,
 		],
 	});

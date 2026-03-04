@@ -2143,10 +2143,11 @@ export async function updatePagosEspejoPorCredito(
   nombre_inversionista: string,
   abono_capital?: number,
   abono_interes?: number,
-  abono_iva?: number
+  abono_iva?: number,
+  nombre_cliente?: string
 ) {
   // 1. Buscar el crédito por numero_credito_sifco
-  const [credito] = await db
+  let [credito] = await db
     .select({
       credito_id: creditos.credito_id,
       numero_credito_sifco: creditos.numero_credito_sifco,
@@ -2155,8 +2156,46 @@ export async function updatePagosEspejoPorCredito(
     .where(eq(creditos.numero_credito_sifco, numero_credito_sifco.trim()))
     .limit(1);
 
+  // Fallback: buscar por nombre de cliente (fuzzy)
+  if (!credito && nombre_cliente) {
+    const clienteNorm = removeAccents(nombre_cliente.trim().toLowerCase());
+    const palabras = clienteNorm.split(/\s+/).filter(p => p.length > 2);
+
+    if (palabras.length > 0) {
+      const candidatos = await db
+        .select({
+          credito_id: creditos.credito_id,
+          numero_credito_sifco: creditos.numero_credito_sifco,
+          nombre_cliente: usuarios.nombre,
+        })
+        .from(creditos)
+        .leftJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+        .where(
+          sql`translate(lower(${usuarios.nombre}), 'áéíóúàèìòùäëïöüâêîôûñ', 'aeiouaeiouaeiouaeioun') ILIKE ${"%" + palabras.join("%") + "%"}`
+        )
+        .limit(5);
+
+      if (candidatos.length === 1) {
+        credito = candidatos[0];
+      } else if (candidatos.length > 1) {
+        // Elegir el que más palabras coincida
+        let mejor = candidatos[0];
+        let mejorScore = 0;
+        for (const c of candidatos) {
+          const nombreNorm = removeAccents((c.nombre_cliente ?? "").toLowerCase());
+          const score = palabras.filter(p => nombreNorm.includes(p)).length;
+          if (score > mejorScore) {
+            mejorScore = score;
+            mejor = c;
+          }
+        }
+        credito = mejor;
+      }
+    }
+  }
+
   if (!credito) {
-    throw new Error(`No se encontró crédito con numero_credito_sifco: "${numero_credito_sifco}"`);
+    throw new Error(`No se encontró crédito con numero_credito_sifco: "${numero_credito_sifco}"${nombre_cliente ? ` ni por cliente: "${nombre_cliente}"` : ""}`);
   }
 
   // 2. Buscar inversionista por nombre (sin tildes, sin mayúsculas)
@@ -2192,7 +2231,7 @@ export async function updatePagosEspejoPorCredito(
     throw new Error("Debe enviar al menos un campo a actualizar (abono_capital, abono_interes, abono_iva)");
   }
 
-  // 4. Actualizar los registros NO_LIQUIDADO de ese crédito e inversionista en la tabla espejo
+  // 4. Intentar actualizar registros existentes
   const result = await db
     .update(pagos_credito_inversionistas_espejo)
     .set(setData)
@@ -2204,15 +2243,18 @@ export async function updatePagosEspejoPorCredito(
       )
     );
 
+  const updatedCount = result.rowCount ?? 0;
+
   return {
     success: true,
-    message: `Pagos espejo actualizados para SIFCO: ${credito.numero_credito_sifco}, inversionista "${inversionista.nombre}"`,
+    message: updatedCount > 0
+      ? `Pagos espejo actualizados para SIFCO: ${credito.numero_credito_sifco}, inversionista "${inversionista.nombre}"`
+      : `Sin registros espejo NO_LIQUIDADO para SIFCO: ${credito.numero_credito_sifco}, inversionista "${inversionista.nombre}" - saltado`,
     credito_id: credito.credito_id,
     numero_credito_sifco: credito.numero_credito_sifco,
     inversionista_id: inversionista.inversionista_id,
     nombre_inversionista: inversionista.nombre,
-    numero_credito_sifco: credito.numero_credito_sifco,
-    registrosActualizados: result.rowCount ?? 0,
+    registrosActualizados: updatedCount,
   };
 }
 

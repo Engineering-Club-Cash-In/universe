@@ -109,7 +109,7 @@ export const BuyCar = () => {
         {/* Botón */}
         <div className="mt-12 lg:mt-6">
           <Button
-            size={isMobile ? "sm" : "lg"}
+            size={isMobile ? "sm" : "md"}
             onClick={() => setIsModalOpen(true)}
           >
             Solicita tu crédito

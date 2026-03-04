@@ -51,7 +51,7 @@ export const WhyInvest = () => {
       <div
         className="w-screen h-[10px] md:hidden mb-8"
         style={{
-          background: "linear-gradient(90deg, #171717 0%, #D1E400 50%, #171717 100%)",
+          background: "linear-gradient(90deg, #171717 0%, #27A6ED 50%, #171717 100%)",
         }}
       />
 
@@ -73,7 +73,7 @@ export const WhyInvest = () => {
           className="absolute left-0 right-0 top-1/2 -translate-y-1/2 w-full hidden md:block"
           style={{
             background:
-              "linear-gradient(90deg, #171717 0%, #D1E400 50%, #171717 100%)",
+              "linear-gradient(90deg, #171717 0%, #27A6ED 50%, #171717 100%)",
             height: "80px",
           }}
         />
@@ -90,7 +90,7 @@ export const WhyInvest = () => {
               }}
             >
               <div className="w-full">
-                <div className="p-4 text-primary rounded-xl border border-primary w-max">
+                <div className="p-4 text-secondary rounded-xl border border-secondary w-max">
                   {item.icon}
                 </div>
               </div>
@@ -105,7 +105,7 @@ export const WhyInvest = () => {
       <div
         className="w-screen h-[10px] md:hidden mt-8"
         style={{
-          background: "linear-gradient(90deg, #171717 0%, #D1E400 50%, #171717 100%)",
+          background: "linear-gradient(90deg, #171717 0%, #27A6ED 50%, #171717 100%)",
         }}
       />
     </div>

@@ -39,7 +39,7 @@ export const GetMoney = () => {
   ];
 
   return (
-    <section className="text-center lg:text-start flex flex-col px-8 gap-10 lg:flex-row lg:gap-16 xl:gap-40 lg:mt-56 lg:mb-20 lg:px-20 items-center">
+    <section className="text-center lg:text-start flex flex-col px-8 gap-10 lg:flex-row lg:gap-16 xl:gap-30 lg:mt-56 lg:mb-20 lg:px-20 items-center">
       {isMobile && (
         <div
           className="w-full"
@@ -96,10 +96,10 @@ export const GetMoney = () => {
           {items.map((item, index) => (
             <div
               key={index}
-              className="flex flex-col items-center p-6 rounded-xl border border-secondary/20 bg-secondary/5"
+              className="flex flex-col  w-full p-6 rounded-xl border border-secondary/20 bg-secondary/5"
             >
               {/* Icono */}
-              <div className="mb-4 w-8 text-secondary">{item.icon}</div>
+              <div className="mb-4  flex w-full justify-center text-secondary">{item.icon}</div>
 
               {/* Título */}
               <h3 className="text-sm lg:text-base mb-2 font-bold">{item.title}</h3>
@@ -113,7 +113,7 @@ export const GetMoney = () => {
         {/* Botón */}
         <div>
           <Button
-            size={isMobile ? "sm" : "lg"}
+            size={isMobile ? "sm" : "md"}
             onClick={() => navigate({ to: "/leads", search: { type: "sell" } })}
           >
             Solicitar préstamo

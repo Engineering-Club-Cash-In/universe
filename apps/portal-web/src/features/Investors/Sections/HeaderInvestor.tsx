@@ -1,5 +1,5 @@
 import { InvestorsLogo } from "@/features/footer/icons";
-import { IconArrow, IconInfo } from "@/components";
+import { IconArrow } from "@/components";
 import { motion } from "framer-motion";
 import { useIsMobile } from "@/hooks";
 import { useNavigate } from "@tanstack/react-router";
@@ -25,12 +25,12 @@ export const HeaderInvestor = () => {
             inversiones inteligentes
           </p>
           <div className="lg:hidden w-full">
-          <img
-            src={imgUrl}
-            alt="Inversiones"
-            className="w-full h-full object-cover rounded-xl"
-          />
-        </div>
+            <img
+              src={imgUrl}
+              alt="Inversiones"
+              className="w-full h-full object-cover rounded-xl"
+            />
+          </div>
           <p className="text-sm text-gray lg:text-2xl leading-8 lg:leading-6 text-center lg:text-start">
             Accede a oportunidades exclusivas de inversión con rendimientos
             superiores al mercado. Seguridad, transparencia y asesoría
@@ -38,40 +38,24 @@ export const HeaderInvestor = () => {
           </p>
 
           {/* Botones */}
-          <div className="flex gap-6 mt-4  w-full xl:w-3/4">
+          <div className="flex gap-6 mt-4 w-full xl:w-1/3">
             <motion.button
-              className="flex items-center p-4 justify-center gap-4 w-full text-primary  rounded-xl border border-primary/50 hover:bg-primary/10 transition-colors"
+              className="flex items-center p-4 justify-center gap-4 w-full text-secondary  rounded-xl border border-secondary/50 hover:bg-secondary/10 transition-colors"
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               transition={{ type: "spring", stiffness: 400, damping: 17 }}
-              onClick={() => navigate({ to: "/leadInvestor", search: { amount: undefined } })}
+              onClick={() =>
+                navigate({ to: "/leadInvestor", search: { amount: undefined, term: undefined, type: undefined } })
+              }
             >
               <div>
-                <IconArrow width={isMobile ? 16 : 24} height={isMobile ? 16 : 24} />
+                <IconArrow
+                  width={isMobile ? 16 : 24}
+                  height={isMobile ? 16 : 24}
+                />
               </div>
               <span className="text-xs lg:text-lg font-semibold">
                 Quiero invertir ahora
-              </span>
-            </motion.button>
-
-            <motion.button
-              className="flex items-center p-4 justify-center text-primary gap-4 w-full  rounded-xl border border-primary/50 hover:bg-primary/10 transition-colors"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              transition={{ type: "spring", stiffness: 400, damping: 17 }}
-              onClick={() => {
-                //navegar a la seccion con id:"how-it-works"
-                const element = document.getElementById("how-it-works");
-                if (element) {
-                  element.scrollIntoView({ behavior: "smooth" });
-                }
-              }}
-            >
-              <div>
-                <IconInfo width={isMobile ? 16 : 24} height={isMobile ? 16 : 24} />
-              </div>
-              <span className="text-xs lg:text-lg font-semibold">
-                Conoce cómo funciona
               </span>
             </motion.button>
           </div>

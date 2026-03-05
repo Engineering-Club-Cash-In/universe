@@ -42,6 +42,9 @@ export function DatePickerMUI({
             fullWidth: true,
             size: "medium",
           },
+          popper: {
+            disablePortal: true,
+          },
         }}
       />
     </LocalizationProvider>

@@ -605,10 +605,11 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 
 					// Construir el payload exacto que se envía al endpoint
 					const requestBody = {
-						nit: nit || "CF", // CF = Consumidor Final si no hay NIT
+						nit: nit,
 						items: invoice.items,
 						emisor: "CUBE",
 						created_by: FACTURACION_CREATED_BY,
+						credito_nuevo: true, // Indicamos que es un crédito nuevo para que cartera-back lo maneje como tal
 					};
 
 					// Llamar al endpoint de facturación genérica

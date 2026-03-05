@@ -448,7 +448,7 @@ function RouteComponent() {
 				}).queryKey,
 			});
 			queryClient.invalidateQueries({
-				queryKey: orpc.getInvestmentOpportunities.queryOptions().queryKey,
+				queryKey: orpc.getInvestmentOpportunities.queryOptions({ input: {} }).queryKey,
 			});
 			queryClient.invalidateQueries({
 				queryKey: orpc.getInvestmentDashboardStats.queryOptions().queryKey,

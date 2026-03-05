@@ -407,6 +407,16 @@ export function InvestmentAssignmentSection({
 			);
 			return;
 		}
+		const totalPart = editedExistingInvestors.reduce(
+			(sum, inv) => sum + (inv.porcentaje_participacion || 0),
+			0,
+		);
+		if (Math.abs(totalPart - 100) >= 0.01) {
+			toast.error(
+				`La suma de porcentajes de participación debe ser 100% (actual: ${totalPart}%)`,
+			);
+			return;
+		}
 		updateInvestorsMutation.mutate({
 			opportunityId: selectedOpportunityId,
 			inversionistas: JSON.stringify(editedExistingInvestors),
@@ -463,6 +473,17 @@ export function InvestmentAssignmentSection({
 	// Validar que los montos sean exactamente iguales (siempre, con existentes + nuevos)
 	const montosCoinciden = Math.abs(totalMontoGeneral - creditAmount) < 0.01;
 	const hasValidNit = editNit.trim().length > 0;
+	// Validate total participation equals 100%
+	const totalParticipacion =
+		selectedInversionistas.reduce(
+			(sum, inv) => sum + (inv.porcentaje_participacion || 0),
+			0,
+		) +
+		(selectedOpportunity?.existingInvestors?.reduce(
+			(sum, inv) => sum + (inv.porcentaje_participacion || 0),
+			0,
+		) || 0);
+	const participacionCoincide = Math.abs(totalParticipacion - 100) < 0.01;
 	const canAssign =
 		selectedOpportunity &&
 		(hasExistingInvestors || hasNewInvestors) &&
@@ -470,6 +491,7 @@ export function InvestmentAssignmentSection({
 		selectedOpportunity.vehicle?.hasRequiredData &&
 		selectedOpportunity.hasCreditData &&
 		montosCoinciden &&
+		participacionCoincide &&
 		hasValidNit;
 
 	// Get disabled reason for tooltip
@@ -512,6 +534,12 @@ export function InvestmentAssignmentSection({
 		if (Math.abs(totalMontoGeneral - creditAmount) >= 0.01) {
 			reasons.push(
 				`La suma de aportes (${formatCurrency(totalMontoGeneral)}) debe ser exactamente igual al capital del crédito (${formatCurrency(creditAmount)})`,
+			);
+		}
+
+		if (Math.abs(totalParticipacion - 100) >= 0.01) {
+			reasons.push(
+				`La suma de porcentajes de participación debe ser exactamente 100% (actual: ${totalParticipacion}%)`,
 			);
 		}
 

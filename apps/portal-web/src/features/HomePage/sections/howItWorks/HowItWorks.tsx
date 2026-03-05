@@ -129,10 +129,12 @@ export const HowItWorks: React.FC = () => {
                   >
                     <button
                       className="absolute top-4 right-4 text-white/70 hover:text-white text-xl z-10"
-                      onPointerDown={(e) => {
+                      onClick={(e) => {
                         e.stopPropagation();
                         setActiveIndex(null);
                       }}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onTouchStart={(e) => e.stopPropagation()}
                     >
                       ✕
                     </button>

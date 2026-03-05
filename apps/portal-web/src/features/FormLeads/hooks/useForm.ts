@@ -2,7 +2,7 @@ import { useFormik } from "formik";
 import * as Yup from "yup";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
-import { useLead } from "../store/useLead";
+import { useNavigate } from "@tanstack/react-router";
 import { sendLead } from "../service/serviceLead";
 
 export type CreditType = "autocompra" | "sobre_vehiculo";
@@ -57,15 +57,15 @@ const initialValues: FormLeadsValues = {
 };
 
 export const useFormLeads = () => {
-  const setSubmitted = useLead((state) => state.setSubmitted);
+  const navigate = useNavigate();
   const [serverError, setServerError] = useState<string>("");
 
   const mutation = useMutation({
     mutationFn: sendLead,
-    onSuccess: (data, variables) => {
+    onSuccess: (data) => {
       console.log("Lead enviado exitosamente:", data);
       setServerError("");
-      setSubmitted(variables);
+      navigate({ to: "/thanks", search: { type: "lead" } });
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (error: any) => {

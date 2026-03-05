@@ -3422,7 +3422,7 @@ export const crmRouter = {
 					name: z.string(),
 					type: z.string(),
 					size: z.number(),
-					data: z.string(), // Base64
+					key: z.string(), // R2 key from presigned upload
 				}),
 			}),
 		)
@@ -3467,10 +3467,6 @@ export const crmRouter = {
 				name: input.file.name,
 			} as File);
 
-			// Crear un File/Blob desde los datos
-			const fileBuffer = Buffer.from(input.file.data, "base64");
-			const fileBlob = new Blob([fileBuffer], { type: resolvedMimeType });
-
 			// Validar archivo
 			const validation = validateFile({
 				type: resolvedMimeType,
@@ -3482,15 +3478,11 @@ export const crmRouter = {
 				throw new ORPCError("BAD_REQUEST", { message: validation.error });
 			}
 
-			// Generar nombre único
-			const uniqueFilename = generateUniqueFilename(input.file.name);
+			// El archivo ya fue subido a R2 por el frontend via presigned URL
+			const key = input.file.key;
 
-			// Subir a R2
-			const { key } = await uploadFileToR2(
-				fileBlob,
-				uniqueFilename,
-				input.opportunityId,
-			);
+			// Extraer el nombre unico del key (ultima parte del path)
+			const uniqueFilename = key.split("/").pop()!;
 
 			// Guardar en base de datos
 			const [newDocument] = await db

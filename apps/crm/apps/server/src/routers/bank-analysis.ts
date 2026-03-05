@@ -11,29 +11,11 @@ import {
 } from "../lib/bank-analysis-schema";
 import { calculateCreditCapacity } from "../lib/financial-math";
 import { crmProcedure } from "../lib/orpc";
+import { getFileBuffer } from "../lib/storage";
 
 const MAX_AI_ATTEMPTS = 2;
 const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15MB por archivo
 const AI_TIMEOUT_MS = 120_000; // 2 minutos timeout para la IA
-
-// Validar que el archivo es un PDF verificando los magic bytes
-function isValidPdf(base64Data: string): boolean {
-	try {
-		const buffer = Buffer.from(base64Data, "base64");
-		// PDF magic bytes: %PDF (0x25 0x50 0x44 0x46)
-		return buffer.length >= 4 && buffer.subarray(0, 4).toString() === "%PDF";
-	} catch {
-		return false;
-	}
-}
-
-// Obtener tamaño del archivo en bytes desde base64
-function getBase64SizeInBytes(base64Data: string): number {
-	// Base64 encoding: cada 4 caracteres = 3 bytes
-	// Ajustar por padding (=)
-	const padding = (base64Data.match(/=/g) || []).length;
-	return Math.floor((base64Data.length * 3) / 4) - padding;
-}
 
 export const bankAnalysisRouter = {
 	analyzeBankStatements: crmProcedure
@@ -46,7 +28,7 @@ export const bankAnalysisRouter = {
 						.array(
 							z.object({
 								name: z.string(),
-								data: z.string(), // base64
+								key: z.string(), // R2 key from presigned upload
 								mimeType: z.string().default("application/pdf"),
 							}),
 						)
@@ -100,21 +82,27 @@ export const bankAnalysisRouter = {
 				}
 			}
 
-			// 2. Validar archivos: tamaño máximo y formato PDF
+			// 2. Validar archivos: descargar de R2 y verificar formato PDF
+			const downloadedFiles: { name: string; buffer: Buffer }[] = [];
 			for (const file of input.files) {
-				const fileSize = getBase64SizeInBytes(file.data);
-				if (fileSize > MAX_FILE_SIZE_BYTES) {
+				const buffer = await getFileBuffer(file.key);
+
+				if (buffer.length > MAX_FILE_SIZE_BYTES) {
 					const maxSizeMB = MAX_FILE_SIZE_BYTES / (1024 * 1024);
-					const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(1);
+					const fileSizeMB = (buffer.length / (1024 * 1024)).toFixed(1);
 					throw new ORPCError("BAD_REQUEST", {
 						message: `El archivo "${file.name}" (${fileSizeMB}MB) excede el tamaño máximo permitido de ${maxSizeMB}MB.`,
 					});
 				}
-				if (!isValidPdf(file.data)) {
+
+				// Validate PDF magic bytes directly from buffer
+				if (buffer.length < 4 || buffer.subarray(0, 4).toString() !== "%PDF") {
 					throw new ORPCError("BAD_REQUEST", {
 						message: `El archivo "${file.name}" no es un PDF válido.`,
 					});
 				}
+
+				downloadedFiles.push({ name: file.name, buffer });
 			}
 
 			// 3. Incremento atómico del contador para evitar race conditions
@@ -212,10 +200,10 @@ export const bankAnalysisRouter = {
 				}
 			}
 
-			// 4. Construir content parts con los PDFs
-			const fileParts = input.files.map((file) => ({
+			// 4. Construir content parts con los PDFs descargados de R2
+			const fileParts = downloadedFiles.map((file) => ({
 				type: "file" as const,
-				data: Buffer.from(file.data, "base64"),
+				data: file.buffer,
 				mediaType: "application/pdf" as const,
 				filename: file.name,
 			}));

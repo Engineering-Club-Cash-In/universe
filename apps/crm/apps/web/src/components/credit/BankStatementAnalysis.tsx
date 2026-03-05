@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import { client, orpc } from "@/utils/orpc";
 
 const MAX_AI_ATTEMPTS = 2;
@@ -89,25 +90,19 @@ export function BankStatementAnalysis({
 
 	const analyzeMutation = useMutation({
 		mutationFn: async () => {
+			// Upload all files to R2 first
 			const filePayloads = await Promise.all(
-				files.map(
-					(file) =>
-						new Promise<{ name: string; data: string; mimeType: string }>(
-							(resolve, reject) => {
-								const reader = new FileReader();
-								reader.onload = () => {
-									const base64 = (reader.result as string).split(",")[1];
-									resolve({
-										name: file.name,
-										data: base64,
-										mimeType: file.type || "application/pdf",
-									});
-								};
-								reader.onerror = reject;
-								reader.readAsDataURL(file);
-							},
-						),
-				),
+				files.map(async (file) => {
+					const folder = leadId
+						? `bank-statements/${leadId}`
+						: `bank-statements/${coDebtorId}`;
+					const { key } = await uploadFileToR2WithRetry(file, folder);
+					return {
+						name: file.name,
+						key,
+						mimeType: file.type || "application/pdf",
+					};
+				}),
 			);
 
 			return client.analyzeBankStatements({

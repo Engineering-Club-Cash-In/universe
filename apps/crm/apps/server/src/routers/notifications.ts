@@ -12,10 +12,8 @@ import {
 import { adminProcedure, protectedProcedure } from "../lib/orpc";
 import {
 	deleteFileFromR2,
-	generateUniqueFilename,
 	getFileUrl,
 	resolveMimeType,
-	uploadFileToR2,
 	validateFile,
 } from "../lib/storage";
 
@@ -474,7 +472,7 @@ export const notificationsRouter = {
 					name: z.string(),
 					type: z.string(),
 					size: z.number(),
-					data: z.string(), // Base64
+					key: z.string(), // R2 key from presigned upload
 				}),
 			}),
 		)
@@ -522,16 +520,9 @@ export const notificationsRouter = {
 				});
 			}
 
-			// Subir a R2
-			const fileBuffer = Buffer.from(input.file.data, "base64");
-			const fileBlob = new Blob([fileBuffer], { type: resolvedMimeType });
-			const uniqueFilename = generateUniqueFilename(input.file.name);
-
-			const { key } = await uploadFileToR2(
-				fileBlob,
-				uniqueFilename,
-				`notifications/${input.notificationId}`,
-			);
+			// File already uploaded to R2 via presigned URL
+			const key = input.file.key;
+			const uniqueFilename = key.split("/").pop()!;
 
 			// Guardar registro en la base de datos
 			const [document] = await db

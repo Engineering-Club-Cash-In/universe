@@ -1,6 +1,7 @@
 import {
 	DeleteObjectCommand,
 	GetObjectCommand,
+	HeadObjectCommand,
 	PutObjectCommand,
 	S3Client,
 } from "@aws-sdk/client-s3";
@@ -98,6 +99,29 @@ async function getCachedSignedUrl(
 	return url;
 }
 
+// =============================================================================
+// PRESIGNED UPLOAD URLs
+// =============================================================================
+
+const PRESIGNED_UPLOAD_EXPIRY = 600; // 10 minutes
+
+/**
+ * Generate a presigned PUT URL so the client can upload directly to R2.
+ */
+export async function generatePresignedUploadUrl(
+	key: string,
+	contentType: string,
+	expiresIn = PRESIGNED_UPLOAD_EXPIRY,
+): Promise<string> {
+	const command = new PutObjectCommand({
+		Bucket: R2_BUCKET_NAME,
+		Key: key,
+		ContentType: contentType,
+	});
+
+	return getSignedUrl(r2Client, command, { expiresIn });
+}
+
 // Generar un nombre único para el archivo
 export function generateUniqueFilename(originalName: string): string {
 	const timestamp = Date.now();
@@ -108,6 +132,31 @@ export function generateUniqueFilename(originalName: string): string {
 	const sanitizedBaseName = baseName.replace(/[^a-zA-Z0-9-_]/g, "_");
 
 	return `${timestamp}-${randomString}-${sanitizedBaseName}.${extension}`;
+}
+
+// Verificar que un archivo existe en R2
+export async function fileExistsInR2(key: string): Promise<boolean> {
+	try {
+		const command = new HeadObjectCommand({
+			Bucket: R2_BUCKET_NAME,
+			Key: key,
+		});
+		await r2Client.send(command);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+// Descargar archivo de R2 como Buffer (para enviar a AI)
+export async function getFileBuffer(key: string): Promise<Buffer> {
+	const command = new GetObjectCommand({
+		Bucket: R2_BUCKET_NAME,
+		Key: key,
+	});
+	const response = await r2Client.send(command);
+	const arrayBuffer = await response.Body!.transformToByteArray();
+	return Buffer.from(arrayBuffer);
 }
 
 // Subir archivo a R2 (para oportunidades)

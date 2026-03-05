@@ -18,10 +18,8 @@ import {
 } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
-	generateUniqueFilename,
 	getFileUrl,
 	getFileUrlWithBucketInKey,
-	uploadFileToR2,
 	validateFile,
 } from "../lib/storage";
 import { closeOpportunity } from "../services/close-opportunity";
@@ -52,7 +50,7 @@ export const legalContractsRouter = {
 						name: z.string(),
 						type: z.string(),
 						size: z.number(),
-						data: z.string(), // Base64
+						key: z.string(), // R2 key from presigned upload
 					})
 					.optional(),
 			}),
@@ -96,7 +94,7 @@ export const legalContractsRouter = {
 				}
 			}
 
-			// Subir PDF si se proporciona
+			// Guardar key del PDF si se proporciono (ya subido a R2 via presigned URL)
 			let pdfLink: string | undefined;
 			if (input.pdfFile) {
 				const validation = validateFile({
@@ -106,22 +104,11 @@ export const legalContractsRouter = {
 
 				if (!validation.valid) {
 					throw new ORPCError("BAD_REQUEST", {
-						message: validation.error || "Archivo inválido",
+						message: validation.error || "Archivo invalido",
 					});
 				}
 
-				const fileBuffer = Buffer.from(input.pdfFile.data, "base64");
-				const fileBlob = new Blob([fileBuffer], { type: input.pdfFile.type });
-				const uniqueFilename = generateUniqueFilename(input.pdfFile.name);
-
-				const { key } = await uploadFileToR2(
-					fileBlob,
-					uniqueFilename,
-					`legal-contracts/${input.opportunityId || input.leadId}`,
-				);
-
-				// Guardar solo la key, no la URL firmada temporal
-				pdfLink = key;
+				pdfLink = input.pdfFile.key;
 			}
 
 			// Crear el contrato (sin incluir pdfFile en los valores)
@@ -154,7 +141,7 @@ export const legalContractsRouter = {
 						name: z.string(),
 						type: z.string(),
 						size: z.number(),
-						data: z.string(), // Base64
+						key: z.string(), // R2 key from presigned upload
 					})
 					.optional(),
 			}),
@@ -180,7 +167,7 @@ export const legalContractsRouter = {
 				});
 			}
 
-			// Subir PDF si se proporciona
+			// Guardar key del PDF si se proporciono (ya subido a R2 via presigned URL)
 			let pdfLink: string | undefined;
 			if (input.pdfFile) {
 				const validation = validateFile({
@@ -190,22 +177,11 @@ export const legalContractsRouter = {
 
 				if (!validation.valid) {
 					throw new ORPCError("BAD_REQUEST", {
-						message: validation.error || "Archivo inválido",
+						message: validation.error || "Archivo invalido",
 					});
 				}
 
-				const fileBuffer = Buffer.from(input.pdfFile.data, "base64");
-				const fileBlob = new Blob([fileBuffer], { type: input.pdfFile.type });
-				const uniqueFilename = generateUniqueFilename(input.pdfFile.name);
-
-				const { key } = await uploadFileToR2(
-					fileBlob,
-					uniqueFilename,
-					`legal-contracts/${existingContract.opportunityId || existingContract.leadId}`,
-				);
-
-				// Guardar solo la key, no la URL firmada temporal
-				pdfLink = key;
+				pdfLink = input.pdfFile.key;
 			}
 
 			// Actualizar el contrato

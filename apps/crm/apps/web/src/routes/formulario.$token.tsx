@@ -136,7 +136,8 @@ function FormularioPage() {
 			: undefined;
 
 	// Source for financial pre-fill: in-session data or existing credit from DB
-	const creditSource = creditDataRef.current ?? validatedData?.existingCreditApplication;
+	const creditSource =
+		creditDataRef.current ?? validatedData?.existingCreditApplication;
 
 	const financialDefaults = creditSource
 		? {

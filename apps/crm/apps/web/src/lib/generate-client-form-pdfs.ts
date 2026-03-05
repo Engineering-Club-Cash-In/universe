@@ -355,12 +355,9 @@ export function generateCreditApplicationPdf(
 	y = 20;
 	doc.setFontSize(13);
 	doc.setFont("helvetica", "bold");
-	doc.text(
-		"CLAUSULA DE CONSENTIMIENTO DEL CIUDADANO",
-		pageWidth / 2,
-		y,
-		{ align: "center" },
-	);
+	doc.text("CLAUSULA DE CONSENTIMIENTO DEL CIUDADANO", pageWidth / 2, y, {
+		align: "center",
+	});
 	y += 10;
 
 	doc.setFontSize(8);
@@ -424,7 +421,11 @@ export function generateCreditApplicationPdf(
 	doc.setFont("helvetica", "bold");
 	doc.text("Fecha:", consentMargin, y);
 	doc.setFont("helvetica", "normal");
-	doc.text(val(data.fechaFirma) || new Date().toLocaleDateString("es-GT"), consentMargin + 35, y);
+	doc.text(
+		val(data.fechaFirma) || new Date().toLocaleDateString("es-GT"),
+		consentMargin + 35,
+		y,
+	);
 	y += 10;
 
 	// Consent signature

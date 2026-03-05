@@ -1352,7 +1352,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         ce.numero_cuenta AS "cuentaEmpresaNumero",
 
         -- 📅 Fecha boleta en zona Guatemala
-        TO_CHAR(p.fecha_boleta::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD') AS "fechaBoleta",
+        TO_CHAR(p.fecha_boleta, 'YYYY-MM-DD') AS "fechaBoleta",
 
         -- 📅 Fecha en que se aplicó el pago (zona Guatemala)
         TO_CHAR(p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD HH24:MI:SS') AS "fechaAplicado",

@@ -179,6 +179,7 @@ export function InvestorsList({
                   type="number"
                   name={`${fieldName}.${index}.monto_aportado`}
                   value={inv.monto_aportado}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) => handleMontoAportadoChange(index, Number(e.target.value))}
                 />
               </div>
@@ -189,6 +190,7 @@ export function InvestorsList({
                   type="number"
                   name={`${fieldName}.${index}.porcentaje_cash_in`}
                   value={inv.porcentaje_cash_in}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) => {
                     const val = Number(e.target.value);
                     formik.setFieldValue(
@@ -209,6 +211,7 @@ export function InvestorsList({
                   type="number"
                   name={`${fieldName}.${index}.porcentaje_inversion`}
                   value={inv.porcentaje_inversion}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) => {
                     const val = Number(e.target.value);
                     formik.setFieldValue(
@@ -315,6 +318,7 @@ export function InvestorsList({
                         type="number"
                         name={`investorsMirror.${index}.monto_aportado`}
                         value={invMirror.monto_aportado}
+                        onFocus={(e) => e.target.select()}
                         onChange={formik.handleChange}
                         />
                     </div>
@@ -325,6 +329,7 @@ export function InvestorsList({
                         type="number"
                         name={`investorsMirror.${index}.porcentaje_cash_in`}
                         value={invMirror.porcentaje_cash_in}
+                        onFocus={(e) => e.target.select()}
                         onChange={(e) => {
                             const val = Number(e.target.value);
                             formik.setFieldValue(`investorsMirror.${index}.porcentaje_cash_in`, val);
@@ -339,6 +344,7 @@ export function InvestorsList({
                         type="number"
                         name={`investorsMirror.${index}.porcentaje_inversion`}
                         value={invMirror.porcentaje_inversion}
+                        onFocus={(e) => e.target.select()}
                         onChange={(e) => {
                             const val = Number(e.target.value);
                             formik.setFieldValue(`investorsMirror.${index}.porcentaje_inversion`, val);

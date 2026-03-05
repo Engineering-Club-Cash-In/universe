@@ -1,7 +1,6 @@
 import { Button } from "@/components";
-import { Formulario, InfoLead, Thanks } from "./components";
+import { Formulario, InfoLead } from "./components";
 import { useIsMobile } from "@/hooks";
-import { useLead } from "./store/useLead";
 import { Link } from "@/components/ui";
 import { IconCCI } from "@/components/IconCCI";
 
@@ -19,7 +18,6 @@ export const IconCashIn = () => (
 export const FormLeads = () => {
   const imageUrl = urlImage + "/landingForm.png";
   const isMobile = useIsMobile();
-  const isSubmitted = useLead((state) => state.isSubmitted);
 
   const handleRedirectInfo = () => {
     const infoSection = document.getElementById("info-lead");
@@ -27,11 +25,6 @@ export const FormLeads = () => {
       infoSection.scrollIntoView({ behavior: "smooth" });
     }
   };
-
-  // Si ya se envió el formulario, mostrar pantalla de agradecimiento
-  if (isSubmitted) {
-    return <Thanks />;
-  }
 
   return (
     <div className="flex flex-col gap-2 pt-4 lg:pt-6 mb-20">

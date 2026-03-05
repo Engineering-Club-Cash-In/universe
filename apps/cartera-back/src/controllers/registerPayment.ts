@@ -1067,7 +1067,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           numeroAutorizacion: numeroAutorizacion,
           banco_id: banco_id,
           registerBy: registerBy,
-          fecha_boleta: convertirAHoraGuatemala(fecha_boleta)?.toISOString(),
+          fecha_boleta: fecha_boleta,
           monto_aplicado: totalPagado.toString(),
         };
 
@@ -1241,7 +1241,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
                   numeroAutorizacion: pagoData.numeroAutorizacion || null,
                   registerBy: pagoData.registerBy,
                   pagoConvenio: montoConvenio.toString() || "0",
-                  fecha_boleta:convertirAHoraGuatemala(pagoData.fecha_boleta)?.toISOString(),
+                  fecha_boleta:pagoData.fecha_boleta,
                   monto_aplicado: pagoData.monto_aplicado,
                 })
                 .returning();
@@ -1432,7 +1432,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         paymentFalse: false,
         registerBy: registerBy,
         pagoConvenio: montoConvenio.toString() || "0",
-        fecha_boleta: convertirAHoraGuatemala(fecha_boleta)?.toISOString(),
+        fecha_boleta: fecha_boleta,
         monto_aplicado: abonoCapital.toString(),
       };
 
@@ -1708,7 +1708,7 @@ export async function insertarPago({
       reserva: "0",
       observaciones: "",
       validationStatus: "pending",
-      fecha_boleta: convertirAHoraGuatemala(fecha_boleta)?.toISOString(),
+      fecha_boleta: fecha_boleta,
       banco_id: banco_id ?? undefined,
       numeroAutorizacion: numeroAutorizacion ?? "",
       registerBy: registerBy,

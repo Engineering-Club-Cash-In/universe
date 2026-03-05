@@ -245,7 +245,7 @@ export const ModalConfirmChange = ({
             onClick={handleConfirmChange}
             isLoading={isSaving}
             size="sm"
-            className={!tempValue?.trim() ? "opacity-50 cursor-not-allowed" : ""}
+            className={!String(tempValue ?? "").trim() ? "opacity-50 cursor-not-allowed" : ""}
           >
             {isSaving ? "Guardando..." : "Confirmar"}
           </Button>

@@ -106,6 +106,7 @@ export const appRouter = {
 	generateFormToken: clientFormsRouter.generateFormToken,
 	validateFormToken: clientFormsRouter.validateFormToken,
 	submitCreditApplication: clientFormsRouter.submitCreditApplication,
+	signCreditApplication: clientFormsRouter.signCreditApplication,
 	submitFinancialStatement: clientFormsRouter.submitFinancialStatement,
 	getClientFormData: clientFormsRouter.getClientFormData,
 	getFormTokenByOpportunity: clientFormsRouter.getFormTokenByOpportunity,

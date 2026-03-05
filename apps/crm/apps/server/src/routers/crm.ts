@@ -8,6 +8,7 @@ import {
 	ilike,
 	inArray,
 	isNotNull,
+	isNull,
 	lt,
 	lte,
 	not,
@@ -1109,7 +1110,7 @@ export const crmRouter = {
 				conditions.push(eq(opportunities.id, input.opportunityId));
 			}
 
-			// Search filter (by title, company name, or lead name)
+			// Search filter (by title, company name, lead name, phone, or opportunity ID)
 			if (searchTerm) {
 				conditions.push(
 					or(
@@ -1118,6 +1119,8 @@ export const crmRouter = {
 						ilike(leads.firstName, `%${searchTerm}%`),
 						ilike(leads.lastName, `%${searchTerm}%`),
 						ilike(opportunities.numeroSifco, `%${searchTerm}%`),
+						ilike(leads.phone, `%${searchTerm}%`),
+						sql`${opportunities.id}::text ILIKE ${`%${searchTerm}%`}`,
 					),
 				);
 			}
@@ -1134,7 +1137,7 @@ export const crmRouter = {
 				conditions.push(eq(opportunities.source, input.source));
 			}
 
-			// Filtro por mes/año: createdAt para oportunidades < 90%, actual_close_date para >= 90%
+			// Filtro por mes/año: oportunidades abiertas siempre visibles, cerradas filtradas por actual_close_date
 			if (input?.createdMonth && input?.createdYear) {
 				const startOfMonth = new Date(
 					input.createdYear,
@@ -1143,34 +1146,28 @@ export const crmRouter = {
 				);
 				const endOfMonth = new Date(input.createdYear, input.createdMonth, 1);
 
-				const PLACED_STAGE_THRESHOLD = 90;
-				const placedStages = await db
-					.select({ id: salesStages.id })
-					.from(salesStages)
-					.where(gte(salesStages.closurePercentage, PLACED_STAGE_THRESHOLD));
-				const placedStageIds = placedStages.map((s) => s.id);
-
-				if (placedStageIds.length > 0) {
-					conditions.push(
-						or(
-							// < 90%: filtrar por fecha de creación
-							and(
-								not(inArray(opportunities.stageId, placedStageIds)),
-								gte(opportunities.createdAt, startOfMonth),
-								lt(opportunities.createdAt, endOfMonth),
-							),
-							// >= 90%: filtrar por fecha de cierre
-							and(
-								inArray(opportunities.stageId, placedStageIds),
-								gte(opportunities.actualCloseDate, startOfMonth),
-								lt(opportunities.actualCloseDate, endOfMonth),
+				conditions.push(
+					or(
+						// Oportunidades abiertas/on_hold: siempre visibles
+						inArray(opportunities.status, ["open", "on_hold"]),
+						// Oportunidades cerradas (won/lost): filtrar por fecha de cierre
+						and(
+							inArray(opportunities.status, ["won", "lost"]),
+							or(
+								and(
+									gte(opportunities.actualCloseDate, startOfMonth),
+									lt(opportunities.actualCloseDate, endOfMonth),
+								),
+								// Fallback: si no tiene fecha de cierre, usar fecha de creación
+								and(
+									isNull(opportunities.actualCloseDate),
+									gte(opportunities.createdAt, startOfMonth),
+									lt(opportunities.createdAt, endOfMonth),
+								),
 							),
 						),
-					);
-				} else {
-					conditions.push(gte(opportunities.createdAt, startOfMonth));
-					conditions.push(lt(opportunities.createdAt, endOfMonth));
-				}
+					),
+				);
 			}
 
 			// Role-based filter: admin and sales_supervisor can see all, others only their own

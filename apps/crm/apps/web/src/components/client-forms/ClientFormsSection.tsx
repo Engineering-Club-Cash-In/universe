@@ -180,34 +180,38 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 			</div>
 
 			{/* PDF Downloads */}
-			{isComplete && formData && (
+			{(hasCreditApp || hasFinancialStmt) && formData && (
 				<div className="flex gap-3">
-					<Button
-						variant="outline"
-						size="sm"
-						onClick={() =>
-							generateCreditApplicationPdf(
-								formData.creditApplication as Record<string, unknown>,
-								(formData.financialStatement as Record<string, unknown>)
-									?.firmaImagen as string | undefined,
-							)
-						}
-					>
-						<Download className="mr-2 h-4 w-4" />
-						Descargar Solicitud PDF
-					</Button>
-					<Button
-						variant="outline"
-						size="sm"
-						onClick={() =>
-							generateFinancialStatementPdf(
-								formData.financialStatement as Record<string, unknown>,
-							)
-						}
-					>
-						<Download className="mr-2 h-4 w-4" />
-						Descargar Estado Patrimonial PDF
-					</Button>
+					{hasCreditApp && (
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() =>
+								generateCreditApplicationPdf(
+									formData.creditApplication as Record<string, unknown>,
+									(formData.financialStatement as Record<string, unknown>)
+										?.firmaImagen as string | undefined,
+								)
+							}
+						>
+							<Download className="mr-2 h-4 w-4" />
+							Descargar Solicitud PDF
+						</Button>
+					)}
+					{hasFinancialStmt && (
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() =>
+								generateFinancialStatementPdf(
+									formData.financialStatement as Record<string, unknown>,
+								)
+							}
+						>
+							<Download className="mr-2 h-4 w-4" />
+							Descargar Estado Patrimonial PDF
+						</Button>
+					)}
 				</div>
 			)}
 		</div>

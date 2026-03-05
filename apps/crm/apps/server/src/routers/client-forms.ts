@@ -78,9 +78,7 @@ const creditApplicationServerSchema = z.object({
 	conyugeDireccion: z.string().optional(),
 	conyugeTelOficina: z.string().optional(),
 	conyugeTelMovil: z.string().optional(),
-	referenciasCrediticias: z
-		.array(referenciaCrediticiaServerSchema)
-		.optional(),
+	referenciasCrediticias: z.array(referenciaCrediticiaServerSchema).optional(),
 	cuentasBancarias: z.array(cuentaBancariaServerSchema).optional(),
 	referenciasPersonales: z.array(referenciaPersonalServerSchema).optional(),
 	esPep: z.boolean().optional(),
@@ -251,9 +249,7 @@ function sanitizeFormData(
 				sanitized[key] = Number.isNaN(num) ? null : Math.trunc(num);
 			}
 		} else if (JSONB_ARRAY_FIELDS.has(key) && Array.isArray(value)) {
-			sanitized[key] = sanitizeJsonbArray(
-				value as Record<string, unknown>[],
-			);
+			sanitized[key] = sanitizeJsonbArray(value as Record<string, unknown>[]);
 		} else {
 			sanitized[key] = value;
 		}

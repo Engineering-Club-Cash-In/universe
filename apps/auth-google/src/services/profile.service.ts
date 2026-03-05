@@ -119,6 +119,18 @@ export class ProfileService {
   }
 
   /**
+   * Verifica si un DPI ya existe en la tabla de usuarios
+   */
+  static async checkDpiExists(dpi: string): Promise<boolean> {
+    const result = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.dpi, dpi));
+
+    return result.length > 0;
+  }
+
+  /**
    * Verifica si el perfil está completo (tiene DPI, teléfono y dirección)
    */
   private static isProfileComplete(

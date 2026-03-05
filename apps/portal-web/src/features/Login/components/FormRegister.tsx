@@ -9,23 +9,14 @@ export const FormRegister = () => {
   const {
     formik,
     handleGoogleRegister,
+    handleNextStep,
     isLoading,
     isGoogleLoading,
+    isCheckingDpi,
     currentStep,
-    nextStep,
   } = useRegister();
   const isMobile = useIsMobile();
   const [isTermsOpen, setIsTermsOpen] = useState(false);
-
-  const handleStep1Next = () => {
-    // Validar tipo de usuario y DPI antes de continuar
-    formik.setFieldTouched("userType", true);
-    formik.setFieldTouched("dpi", true);
-
-    if (formik.values.userType && formik.values.dpi && !formik.errors.dpi) {
-      nextStep();
-    }
-  };
 
   return (
     <div className="w-full flex justify-center mb-20 mt-16 items-center">
@@ -126,11 +117,12 @@ export const FormRegister = () => {
             />
 
             <Button
-              onClick={handleStep1Next}
+              onClick={handleNextStep}
               size={isMobile ? "sm" : "md"}
               type="button"
+              isLoading={isCheckingDpi}
             >
-              Continuar
+              {isCheckingDpi ? "Verificando DPI..." : "Continuar"}
             </Button>
 
             <div className="flex justify-center items-center gap-1 flex-col text-sm lg:text-base">

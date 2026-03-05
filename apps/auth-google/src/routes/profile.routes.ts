@@ -5,6 +5,41 @@ import { HTTPException } from "hono/http-exception";
 const profileRoutes = new Hono();
 
 /**
+ * GET /api/profile/check-dpi/:dpi
+ * Verifica si un DPI ya está registrado
+ */
+profileRoutes.get("/check-dpi/:dpi", async (c) => {
+  try {
+    const dpi = c.req.param("dpi");
+
+    if (!dpi) {
+      throw new HTTPException(400, { message: "DPI es requerido" });
+    }
+
+    if (!/^\d{13}$/.test(dpi)) {
+      throw new HTTPException(400, {
+        message: "El DPI debe tener exactamente 13 dígitos",
+      });
+    }
+
+    const exists = await ProfileService.checkDpiExists(dpi);
+
+    return c.json({
+      success: true,
+      data: { exists },
+    });
+  } catch (error) {
+    if (error instanceof HTTPException) {
+      throw error;
+    }
+
+    throw new HTTPException(500, {
+      message: "Error al verificar el DPI",
+    });
+  }
+});
+
+/**
  * GET /api/profile/:userId
  * Obtiene el perfil de un usuario
  */

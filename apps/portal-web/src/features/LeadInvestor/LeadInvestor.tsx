@@ -1,6 +1,5 @@
 import { useIsMobile } from "@/hooks";
-import { useLeadInvestor } from "./store/useLeadInvestor";
-import { FormularioInvestor, ThanksInvestor } from "./components";
+import { FormularioInvestor } from "./components";
 import { IconCashIn } from "@/features/FormLeads/FormLeads";
 
 const urlImage = import.meta.env.VITE_IMAGE_URL;
@@ -14,11 +13,6 @@ interface LeadInvestorProps {
 export const LeadInvestor = ({ initialAmount, initialTerm, initialType }: LeadInvestorProps) => {
   const imageUrl = urlImage + "/Frame 1321315308.png";
   const isMobile = useIsMobile();
-  const isSubmitted = useLeadInvestor((state) => state.isSubmitted);
-
-  if (isSubmitted) {
-    return <ThanksInvestor />;
-  }
 
   return (
     <div className="flex flex-col  pt-4 lg:pt-6 mb-20">

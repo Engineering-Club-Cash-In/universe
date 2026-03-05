@@ -73,7 +73,7 @@ export const InfoPerson = () => {
       if (isInvestor) {
         // Datos de inversionista
         setDpi(profileData.dpi?.toString() || "");
-        setBanco(profileData.banco_id || "");
+        setBanco(profileData.banco_id?.toString() || "");
         setTipoCuenta(profileData.tipo_cuenta || "");
         setNumeroCuenta(profileData.numero_cuenta || "");
       } else {
@@ -289,7 +289,7 @@ export const InfoPerson = () => {
                   //@ts-ignore
                   options={
                     bancos?.map((b) => ({
-                      value: b.banco_id,
+                      value: b.banco_id.toString(),
                       label: b.nombre,
                     })) || []
                   }

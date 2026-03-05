@@ -200,9 +200,15 @@ export const NavBar = () => {
             ))}
           </div>
 
-          <Link href="/login" className="shrink-0">
-            <Button size="sm">Iniciar sesión</Button>
-          </Link>
+          {isAuthenticated ? (
+            <Link href="/profile" className="shrink-0">
+              <Button size="sm">Mi Perfil</Button>
+            </Link>
+          ) : (
+            <Link href="/login" className="shrink-0">
+              <Button size="sm">Iniciar sesión</Button>
+            </Link>
+          )}
         </div>
 
         {/* Mobile: Icono de menú hamburguesa */}

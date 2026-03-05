@@ -20,6 +20,7 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import { client } from "@/utils/orpc";
 
 interface VehicleDocumentUploadProps {
@@ -67,16 +68,10 @@ export function VehicleDocumentUpload({
 			documentType: string;
 			description?: string;
 		}) => {
-			const base64 = await new Promise<string>((resolve, reject) => {
-				const reader = new FileReader();
-				reader.onloadend = () => {
-					const result = reader.result as string;
-					const base64Data = result.split(",")[1];
-					resolve(base64Data);
-				};
-				reader.onerror = reject;
-				reader.readAsDataURL(data.file);
-			});
+			const { key } = await uploadFileToR2WithRetry(
+				data.file,
+				`vehicles/${vehicleId}`,
+			);
 
 			return await client.uploadVehicleDocument({
 				vehicleId,
@@ -86,7 +81,7 @@ export function VehicleDocumentUpload({
 					name: data.file.name,
 					type: data.file.type,
 					size: data.file.size,
-					data: base64,
+					key,
 				},
 			});
 		},

@@ -1605,7 +1605,7 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 					name: z.string(),
 					type: z.string(),
 					size: z.number(),
-					data: z.string(), // Base64
+					key: z.string(), // R2 key from presigned upload
 				}),
 			}),
 		)
@@ -1638,10 +1638,6 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 				name: input.file.name,
 			} as File);
 
-			// Create File/Blob from data
-			const fileBuffer = Buffer.from(input.file.data, "base64");
-			const fileBlob = new Blob([fileBuffer], { type: resolvedMimeType });
-
 			// Validate file
 			const validation = validateFile({
 				type: resolvedMimeType,
@@ -1653,15 +1649,9 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 				throw new ORPCError("BAD_REQUEST", { message: validation.error });
 			}
 
-			// Generate unique filename
-			const uniqueFilename = generateUniqueFilename(input.file.name);
-
-			// Upload to R2
-			const { key } = await uploadFileToR2(
-				fileBlob,
-				uniqueFilename,
-				input.vehicleId,
-			);
+			// File already uploaded to R2 via presigned URL
+			const key = input.file.key;
+			const uniqueFilename = key.split("/").pop()!;
 			// Save to database
 			const [newDocument] = await db
 				.insert(vehicleDocuments)

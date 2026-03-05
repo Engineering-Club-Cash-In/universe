@@ -5,6 +5,7 @@ import type { RegisterCredentials } from "@/lib/auth";
 import { authClient } from "@/lib/auth";
 import { useNavigate } from "@tanstack/react-router";
 import { registerExternalUser } from "@/features/Profile/services/unifiedService";
+import { apiAuth } from "@/lib/api/apiAuth";
 
 // Esquema de validación con Yup
 const validationSchema = Yup.object({
@@ -36,9 +37,19 @@ const validationSchema = Yup.object({
     .required("Debes seleccionar qué deseas hacer"),
 });
 
+const checkDpiExists = async (dpi: string): Promise<boolean> => {
+  try {
+    const response = await apiAuth.get(`/api/profile/check-dpi/${dpi}`);
+    return response.data?.data?.exists ?? false;
+  } catch {
+    return false;
+  }
+};
+
 export const useRegister = () => {
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isCheckingDpi, setIsCheckingDpi] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
   const navigate = useNavigate();
 
@@ -93,32 +104,38 @@ export const useRegister = () => {
     },
   });
 
-  const handleGoogleRegister = async () => {
-    // Validar que se haya seleccionado el tipo de usuario
+  const validateDpi = async (): Promise<boolean> => {
+    formik.setFieldTouched("userType", true);
+    formik.setFieldTouched("dpi", true);
+
     if (!formik.values.userType) {
-      formik.setFieldTouched("userType", true);
-      formik.setFieldError(
-        "userType",
-        "Debes seleccionar qué deseas hacer antes de continuar"
-      );
-      return;
+      return false;
     }
 
-    // Validar que se haya ingresado el DPI
-    if (!formik.values.dpi || formik.values.dpi.length !== 13) {
-      formik.setFieldTouched("dpi", true);
-      formik.setFieldError(
-        "dpi",
-        "Debes ingresar tu DPI antes de continuar con Google"
-      );
-      return;
+    if (!formik.values.dpi || !/^[0-9]{13}$/.test(formik.values.dpi)) {
+      return false;
     }
+
+    setIsCheckingDpi(true);
+    try {
+      const exists = await checkDpiExists(formik.values.dpi);
+      if (exists) {
+        formik.setFieldError("dpi", "Este DPI ya está registrado");
+        return false;
+      }
+      return true;
+    } finally {
+      setIsCheckingDpi(false);
+    }
+  };
+
+  const handleGoogleRegister = async () => {
+    const isValid = await validateDpi();
+    if (!isValid) return;
 
     try {
       setIsGoogleLoading(true);
 
-      // Iniciar el flujo de OAuth con Google
-      // Pasar userType, DPI y phone en la URL para procesarlos en useProfile
       await authClient.signIn.social({
         provider: "google",
         callbackURL: `${import.meta.env.VITE_FRONTEND_URL}/profile?userType=${formik.values.userType}&dpi=${formik.values.dpi}`,
@@ -126,6 +143,13 @@ export const useRegister = () => {
     } catch (error) {
       console.error("Error during Google register:", error);
       setIsGoogleLoading(false);
+    }
+  };
+
+  const handleNextStep = async () => {
+    const isValid = await validateDpi();
+    if (isValid) {
+      setCurrentStep((prev) => Math.min(prev + 1, 2));
     }
   };
 
@@ -144,8 +168,10 @@ export const useRegister = () => {
   return {
     formik,
     handleGoogleRegister,
+    handleNextStep,
     isLoading,
     isGoogleLoading,
+    isCheckingDpi,
     currentStep,
     nextStep,
     prevStep,

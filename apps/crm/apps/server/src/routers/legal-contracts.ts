@@ -955,13 +955,11 @@ export const legalContractsRouter = {
 						),
 					);
 
-				// Mover oportunidad a 90% y marcar como ganada
+				// Mover oportunidad a 90% (no marcar como won aún, closeOpportunity lo hace)
 				await tx
 					.update(opportunities)
 					.set({
 						stageId: targetStage.id,
-						status: "won",
-						actualCloseDate: new Date(),
 						updatedAt: new Date(),
 					})
 					.where(eq(opportunities.id, input.opportunityId));
@@ -983,6 +981,15 @@ export const legalContractsRouter = {
 			});
 
 			if (!closeResult.success) {
+				// Revertir etapa a 85% ya que closeOpportunity falló
+				await db
+					.update(opportunities)
+					.set({
+						stageId: opportunity.stageId,
+						updatedAt: new Date(),
+					})
+					.where(eq(opportunities.id, input.opportunityId));
+
 				throw new ORPCError("BAD_REQUEST", {
 					message: closeResult.error || "Error al cerrar la oportunidad",
 				});

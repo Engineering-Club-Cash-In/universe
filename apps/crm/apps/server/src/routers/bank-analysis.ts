@@ -33,7 +33,7 @@ export const bankAnalysisRouter = {
 							}),
 						)
 						.min(1)
-						.max(3),
+						.max(9),
 					annualRate: z.number().default(0.18),
 					termMonths: z.number().int().min(12).max(120).default(60),
 					maxDebtRatio: z.number().min(0).max(1).default(0.2),

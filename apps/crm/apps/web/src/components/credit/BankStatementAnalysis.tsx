@@ -137,9 +137,9 @@ export function BankStatementAnalysis({
 		}
 
 		const totalFiles = files.length + pdfFiles.length;
-		if (totalFiles > 3) {
-			toast.warning("Máximo 3 archivos permitidos");
-			const allowed = pdfFiles.slice(0, 3 - files.length);
+		if (totalFiles > 9) {
+			toast.warning("Máximo 9 archivos permitidos");
+			const allowed = pdfFiles.slice(0, 9 - files.length);
 			setFiles((prev) => [...prev, ...allowed]);
 		} else {
 			setFiles((prev) => [...prev, ...pdfFiles]);
@@ -161,8 +161,8 @@ export function BankStatementAnalysis({
 					Análisis de Estados de Cuenta
 				</CardTitle>
 				<CardDescription className="text-xs">
-					Suba 1 a 3 estados de cuenta bancarios en PDF para análisis automático
-					con IA
+					Suba de 1 a 9 estados de cuenta bancarios en PDF para análisis
+					automático con IA (hasta 3 bancos diferentes)
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="space-y-3">
@@ -175,7 +175,7 @@ export function BankStatementAnalysis({
 						multiple
 						className="hidden"
 						onChange={handleFileChange}
-						disabled={files.length >= 3 || analyzeMutation.isPending}
+						disabled={files.length >= 9 || analyzeMutation.isPending}
 					/>
 					<Button
 						type="button"
@@ -183,10 +183,10 @@ export function BankStatementAnalysis({
 						size="sm"
 						className="w-full"
 						onClick={() => fileInputRef.current?.click()}
-						disabled={files.length >= 3 || analyzeMutation.isPending}
+						disabled={files.length >= 9 || analyzeMutation.isPending}
 					>
 						<Upload className="mr-2 h-4 w-4" />
-						Seleccionar PDFs ({files.length}/3)
+						Seleccionar PDFs ({files.length}/9)
 					</Button>
 				</div>
 

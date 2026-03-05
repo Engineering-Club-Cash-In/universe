@@ -14,6 +14,7 @@ interface SelectProps {
   placeholder?: string;
   color?: string;
   variant?: "dark" | "light" | "secondary";
+  disabled?: boolean;
 }
 
 export const Select = ({
@@ -23,6 +24,7 @@ export const Select = ({
   placeholder = "Seleccionar...",
   color = "secondary",
   variant = "dark",
+  disabled,
 }: SelectProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const selectRef = useRef<HTMLDivElement>(null);
@@ -97,7 +99,7 @@ export const Select = ({
     <div ref={selectRef} style={{ position: "relative", width: "100%" }}>
       <button
         type="button"
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => !disabled && setIsOpen(!isOpen)}
         style={{
           width: "100%",
           height: isSecondary ? "auto" : isLight ? "58px" : "50px",
@@ -106,7 +108,8 @@ export const Select = ({
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          cursor: "pointer",
+          cursor: disabled ? "not-allowed" : "pointer",
+          opacity: disabled ? 0.6 : 1,
           fontSize: isMobile ? "14px" : "16px",
           fontFamily: "inherit",
           transition: "border-color 0.2s",

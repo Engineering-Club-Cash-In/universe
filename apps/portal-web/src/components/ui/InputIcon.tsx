@@ -4,9 +4,11 @@ interface InputIconProps {
   icon: React.ReactNode;
   placeholder?: string;
   value: string;
-  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   type?: string;
   name?: string;
+  disabled?: boolean;
+  maxLength?: number;
 }
 
 export const InputIcon: React.FC<InputIconProps> = ({
@@ -16,6 +18,8 @@ export const InputIcon: React.FC<InputIconProps> = ({
   onChange,
   type = 'text',
   name,
+  disabled,
+  maxLength,
 }) => {
   return (
     <div
@@ -36,7 +40,9 @@ export const InputIcon: React.FC<InputIconProps> = ({
         placeholder={placeholder}
         value={value}
         onChange={onChange}
-        className="flex-1 bg-transparent border-0 outline-none"
+        disabled={disabled}
+        maxLength={maxLength}
+        className="flex-1 bg-transparent border-0 outline-none disabled:cursor-not-allowed disabled:opacity-60"
         style={{
           background: 'transparent',
           border: 'none',

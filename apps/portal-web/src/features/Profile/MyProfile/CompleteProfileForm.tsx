@@ -148,6 +148,7 @@ export const CompleteProfileForm = ({
             }}
             type="text"
             name="dpi"
+            maxLength={13}
           />
         </div>
 

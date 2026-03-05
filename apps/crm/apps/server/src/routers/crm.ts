@@ -1109,7 +1109,7 @@ export const crmRouter = {
 				conditions.push(eq(opportunities.id, input.opportunityId));
 			}
 
-			// Search filter (by title, company name, or lead name)
+			// Search filter (by title, company name, lead name, phone, or opportunity ID)
 			if (searchTerm) {
 				conditions.push(
 					or(
@@ -1118,6 +1118,8 @@ export const crmRouter = {
 						ilike(leads.firstName, `%${searchTerm}%`),
 						ilike(leads.lastName, `%${searchTerm}%`),
 						ilike(opportunities.numeroSifco, `%${searchTerm}%`),
+						ilike(leads.phone, `%${searchTerm}%`),
+						ilike(opportunities.id, `%${searchTerm}%`),
 					),
 				);
 			}

@@ -89,6 +89,7 @@ function FormularioPage() {
 	};
 
 	const handleBackToCredit = () => setStep("credit");
+	const handleBackToCreditSignature = () => setStep("credit-signature");
 	const handleBackToFinancial = () => setStep("financial");
 
 	const handleCreditSignatureComplete = async (signatureDataUrl: string) => {
@@ -312,7 +313,7 @@ function FormularioPage() {
 						defaultValues={financialDefaults}
 						onSubmit={handleFinancialSubmit}
 						isSubmitting={isSubmitting}
-						onBack={handleBackToCredit}
+						onBack={handleBackToCreditSignature}
 					/>
 				)}
 				{step === "financial-signature" && (

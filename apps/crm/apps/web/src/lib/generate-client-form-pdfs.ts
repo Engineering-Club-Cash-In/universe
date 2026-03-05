@@ -28,10 +28,7 @@ function sumArray(arr: unknown): number {
 // biome-ignore lint: PDF generation uses any for flexible data
 type FormData = Record<string, any>;
 
-export function generateCreditApplicationPdf(
-	data: FormData,
-	signatureOverride?: string,
-) {
+export function generateCreditApplicationPdf(data: FormData) {
 	const doc = new jsPDF();
 	const pageWidth = doc.internal.pageSize.getWidth();
 	let y = 15;
@@ -324,7 +321,7 @@ export function generateCreditApplicationPdf(
 	y = (doc as any).lastAutoTable.finalY + 15;
 
 	// Signature
-	const firmaImg = data.firmaImagen || signatureOverride;
+	const firmaImg = data.firmaImagen;
 	if (y > 230) {
 		doc.addPage();
 		y = 15;

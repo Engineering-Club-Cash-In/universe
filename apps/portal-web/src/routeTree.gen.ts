@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as ThanksRouteImport } from './routes/thanks'
 import { Route as TermsChar38conditionsRouteImport } from './routes/terms&conditions'
 import { Route as StylesRouteImport } from './routes/styles'
 import { Route as SellRouteImport } from './routes/sell'
@@ -30,6 +31,11 @@ import { Route as MarketplaceIndexRouteImport } from './routes/marketplace/index
 import { Route as MarketplaceSearchIndexRouteImport } from './routes/marketplace/search/index'
 import { Route as MarketplaceSearchIdRouteImport } from './routes/marketplace/search/$id'
 
+const ThanksRoute = ThanksRouteImport.update({
+  id: '/thanks',
+  path: '/thanks',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TermsChar38conditionsRoute = TermsChar38conditionsRouteImport.update({
   id: '/terms&conditions',
   path: '/terms&conditions',
@@ -149,6 +155,7 @@ export interface FileRoutesByFullPath {
   '/sell': typeof SellRoute
   '/styles': typeof StylesRoute
   '/terms&conditions': typeof TermsChar38conditionsRoute
+  '/thanks': typeof ThanksRoute
   '/marketplace/': typeof MarketplaceIndexRoute
   '/marketplace/search/$id': typeof MarketplaceSearchIdRoute
   '/marketplace/search/': typeof MarketplaceSearchIndexRoute
@@ -171,6 +178,7 @@ export interface FileRoutesByTo {
   '/sell': typeof SellRoute
   '/styles': typeof StylesRoute
   '/terms&conditions': typeof TermsChar38conditionsRoute
+  '/thanks': typeof ThanksRoute
   '/marketplace': typeof MarketplaceIndexRoute
   '/marketplace/search/$id': typeof MarketplaceSearchIdRoute
   '/marketplace/search': typeof MarketplaceSearchIndexRoute
@@ -194,6 +202,7 @@ export interface FileRoutesById {
   '/sell': typeof SellRoute
   '/styles': typeof StylesRoute
   '/terms&conditions': typeof TermsChar38conditionsRoute
+  '/thanks': typeof ThanksRoute
   '/marketplace/': typeof MarketplaceIndexRoute
   '/marketplace/search/$id': typeof MarketplaceSearchIdRoute
   '/marketplace/search/': typeof MarketplaceSearchIndexRoute
@@ -218,6 +227,7 @@ export interface FileRouteTypes {
     | '/sell'
     | '/styles'
     | '/terms&conditions'
+    | '/thanks'
     | '/marketplace/'
     | '/marketplace/search/$id'
     | '/marketplace/search/'
@@ -240,6 +250,7 @@ export interface FileRouteTypes {
     | '/sell'
     | '/styles'
     | '/terms&conditions'
+    | '/thanks'
     | '/marketplace'
     | '/marketplace/search/$id'
     | '/marketplace/search'
@@ -262,6 +273,7 @@ export interface FileRouteTypes {
     | '/sell'
     | '/styles'
     | '/terms&conditions'
+    | '/thanks'
     | '/marketplace/'
     | '/marketplace/search/$id'
     | '/marketplace/search/'
@@ -285,6 +297,7 @@ export interface RootRouteChildren {
   SellRoute: typeof SellRoute
   StylesRoute: typeof StylesRoute
   TermsChar38conditionsRoute: typeof TermsChar38conditionsRoute
+  ThanksRoute: typeof ThanksRoute
   MarketplaceIndexRoute: typeof MarketplaceIndexRoute
   MarketplaceSearchIdRoute: typeof MarketplaceSearchIdRoute
   MarketplaceSearchIndexRoute: typeof MarketplaceSearchIndexRoute
@@ -292,6 +305,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/thanks': {
+      id: '/thanks'
+      path: '/thanks'
+      fullPath: '/thanks'
+      preLoaderRoute: typeof ThanksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/terms&conditions': {
       id: '/terms&conditions'
       path: '/terms&conditions'
@@ -453,6 +473,7 @@ const rootRouteChildren: RootRouteChildren = {
   SellRoute: SellRoute,
   StylesRoute: StylesRoute,
   TermsChar38conditionsRoute: TermsChar38conditionsRoute,
+  ThanksRoute: ThanksRoute,
   MarketplaceIndexRoute: MarketplaceIndexRoute,
   MarketplaceSearchIdRoute: MarketplaceSearchIdRoute,
   MarketplaceSearchIndexRoute: MarketplaceSearchIndexRoute,

@@ -289,7 +289,7 @@ export const InfoPerson = () => {
                   //@ts-ignore
                   options={
                     bancos?.map((b) => ({
-                      value: b.banco_id,
+                      value: b.banco_id.toString(),
                       label: b.nombre,
                     })) || []
                   }

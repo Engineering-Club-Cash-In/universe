@@ -183,7 +183,7 @@ export function PaymentsCredits() {
   );
   const falsePayment = useFalsePayment();
   const { user } = useAuth(); 
-  const { liquidandoId, handleLiquidar, handleReverse, reversePago, handleRevertToPending, revertPaymentToPending, handleRevalidatePayment, revalidatePayment } =
+  const { liquidandoId, handleLiquidar, handleReverse, reversePago, handleRevertToPending, revertPaymentToPending, handleRevalidatePayment, revalidatePayment, handleProcessInvestors, processInvestors } =
     usePagoForm();
   const [mesFiltro, setMesFiltro] = useState<string>("");
   const [anioFiltro, setAnioFiltro] = useState<string>("");
@@ -437,7 +437,7 @@ const handleDownloadExcel = async () => {
                     )}
                   </Button>
                   
-                  {/* Botón Revertir a Pendiente */}
+                  {/* Botón Revertir Pago / Inversiones */}
                   <Button
                     className="bg-orange-500 hover:bg-orange-600 text-white px-3 py-1 rounded font-bold shadow"
                     onClick={() => {
@@ -445,7 +445,6 @@ const handleDownloadExcel = async () => {
                       refetch();
                     }}
                     disabled={
-                      item.pago.pagado === false ||
                       item.pago.paymentFalse === true ||
                       revertPaymentToPending.isPending
                     }
@@ -453,10 +452,31 @@ const handleDownloadExcel = async () => {
                     {revertPaymentToPending.isPending ? (
                       <>
                         <Loader2 className="animate-spin w-4 h-4 mr-1" />
-                        Revirtiendo a Pdte...
+                        Revirtiendo...
                       </>
                     ) : (
-                      "Revertir a Pendiente"
+                      "Revertir Especial"
+                    )}
+                  </Button>
+
+                  {/* Botón Procesar Inversionistas */}
+                  <Button
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded font-bold shadow"
+                    onClick={() => {
+                      handleProcessInvestors(item.pago.pago_id, item.pago.credito_id);
+                      refetch();
+                    }}
+                    disabled={
+                      processInvestors.isPending
+                    }
+                  >
+                    {processInvestors.isPending ? (
+                      <>
+                        <Loader2 className="animate-spin w-4 h-4 mr-1" />
+                        Procesando...
+                      </>
+                    ) : (
+                      "Proc. Inversionistas"
                     )}
                   </Button>
 

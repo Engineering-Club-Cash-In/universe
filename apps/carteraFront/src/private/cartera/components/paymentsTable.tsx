@@ -130,7 +130,7 @@ export function PaymentsTable() {
   const [pagoIdParaVerFacturas, setPagoIdParaVerFacturas] = useState<
     number | null
   >(null);
-  const { handleReverse, reversePago, handleRevertToPending, revertPaymentToPending, handleRevalidatePayment, revalidatePayment } = usePagoForm();
+  const { handleReverse, reversePago, handleRevertToPending, revertPaymentToPending, handleRevalidatePayment, revalidatePayment, handleProcessInvestors, processInvestors } = usePagoForm();
   const [isCollapsed, setIsCollapsed] = useState(true);
   const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
   const [isDownloadingAdvisor, setIsDownloadingAdvisor] = useState(false);
@@ -1146,19 +1146,39 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                       className="bg-orange-500 hover:bg-orange-600 text-white px-3 py-1 rounded font-bold shadow flex items-center gap-1"
                       onClick={() => {
                         handleRevertToPending(pago.pagoId, pago.credito?.creditoId || 0);
-                        refetch();
                       }}
-                      disabled={revertPaymentToPending.isPending || user?.role !== "ADMIN" || pago.validationStatus !== "validated"}
+                      disabled={revertPaymentToPending.isPending || user?.role !== "ADMIN"}
                     >
                       {revertPaymentToPending.isPending ? (
                         <>
                           <Loader2 className="animate-spin w-4 h-4" />
-                          Revirtiendo a Pdte...
+                          Revirtiendo...
                         </>
                       ) : (
                         <>
                           <Undo2 className="w-4 h-4" />
-                          A Pendiente
+                          Revertir Especial
+                        </>
+                      )}
+                    </button>
+
+                    {/* Procesar Inversionistas */}
+                    <button
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded font-bold shadow flex items-center gap-1"
+                      onClick={() => {
+                        handleProcessInvestors(pago.pagoId, pago.credito?.creditoId || 0);
+                      }}
+                      disabled={processInvestors.isPending || user?.role !== "ADMIN"}
+                    >
+                      {processInvestors.isPending ? (
+                        <>
+                          <Loader2 className="animate-spin w-4 h-4" />
+                          Procesando...
+                        </>
+                      ) : (
+                        <>
+                          <Users2 className="w-4 h-4" />
+                          Proc. Inversionistas
                         </>
                       )}
                     </button>
@@ -1168,7 +1188,6 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                       className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded font-bold shadow flex items-center gap-1"
                       onClick={() => {
                         handleRevalidatePayment(pago.pagoId, pago.credito?.creditoId || 0);
-                        refetch();
                       }}
                       disabled={revalidatePayment.isPending || user?.role !== "ADMIN" || pago.validationStatus === "validated"}
                     >
@@ -1677,31 +1696,59 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
 
                             <DropdownMenuSeparator className="bg-gray-200 my-1" />
 
-                            {/* Revertir a Pendiente */}
+                            {/* Revertir a Pendiente / Inversiones */}
                             <DropdownMenuItem
                               onClick={(e) => {
                                 e.stopPropagation();
                                 if (user?.role === "ADMIN") {
                                   handleRevertToPending(pago.pagoId, pago.credito?.creditoId || 0);
-                                  refetch();
                                 }
                               }}
                               disabled={
-                                revertPaymentToPending.isPending || user?.role !== "ADMIN" || pago.validationStatus !== "validated"
+                                revertPaymentToPending.isPending || user?.role !== "ADMIN"
                               }
                               className={`cursor-pointer py-2.5 px-3 flex items-center rounded-lg transition ${
-                                user?.role !== "ADMIN" || pago.validationStatus !== "validated"
+                                user?.role !== "ADMIN"
                                   ? "opacity-50 text-gray-400 bg-gray-50"
                                   : "text-orange-700 hover:text-orange-900 hover:bg-orange-50"
                               }`}
                             >
                               <Undo2
-                                className={`w-4 h-4 mr-2 flex-shrink-0 ${user?.role !== "ADMIN" || pago.validationStatus !== "validated" ? "text-gray-400" : "text-orange-600"}`}
+                                className={`w-4 h-4 mr-2 flex-shrink-0 ${user?.role !== "ADMIN" ? "text-gray-400" : "text-orange-600"}`}
                               />
                               <span className="font-semibold">
                                 {revertPaymentToPending.isPending
-                                  ? "Revirtiendo a Pdte..."
-                                  : "Revertir a Pendiente"}
+                                  ? "Revirtiendo Especial..."
+                                  : "Revertir Especial"}
+                              </span>
+                            </DropdownMenuItem>
+
+                            <DropdownMenuSeparator className="bg-gray-200 my-1" />
+
+                            {/* Procesar Inversionistas */}
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (user?.role === "ADMIN") {
+                                  handleProcessInvestors(pago.pagoId, pago.credito?.creditoId || 0);
+                                }
+                              }}
+                              disabled={
+                                processInvestors.isPending || user?.role !== "ADMIN"
+                              }
+                              className={`cursor-pointer py-2.5 px-3 flex items-center rounded-lg transition ${
+                                user?.role !== "ADMIN"
+                                  ? "opacity-50 text-gray-400 bg-gray-50"
+                                  : "text-indigo-700 hover:text-indigo-900 hover:bg-indigo-50"
+                              }`}
+                            >
+                              <Users2
+                                className={`w-4 h-4 mr-2 flex-shrink-0 ${user?.role !== "ADMIN" ? "text-gray-400" : "text-indigo-600"}`}
+                              />
+                              <span className="font-semibold">
+                                {processInvestors.isPending
+                                  ? "Procesando..."
+                                  : "Procesar Inversionistas"}
                               </span>
                             </DropdownMenuItem>
                             
@@ -1713,7 +1760,6 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                                 e.stopPropagation();
                                 if (user?.role === "ADMIN") {
                                   handleRevalidatePayment(pago.pagoId, pago.credito?.creditoId || 0);
-                                  refetch();
                                 }
                               }}
                               disabled={

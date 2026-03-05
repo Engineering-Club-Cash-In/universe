@@ -9,6 +9,7 @@ import {
   reversePagosInversionistasService,
   revertPaymentToPendingService,
   revalidatePaymentService,
+  processInvestorsService,
   uploadFileService,
   type AbonosCuotaResponse,
   type CancelacionCredito,
@@ -16,7 +17,7 @@ import {
   type Usuario,
 } from "../services/services";
 import { useEffect, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useResetCredit } from "./resetCredit";
 import { useAuth } from "@/Provider/authProvider";
 import { toast } from "sonner";
@@ -55,7 +56,7 @@ function zodToFormikValidate(schema: z.ZodSchema<any>) {
 }
 
 export function usePagoForm() {
-  
+  const queryClient = useQueryClient();
 const { mutate: resetCredit } = useResetCredit();
 const [resetBuscador, setResetBuscador] = useState(false);
   const [modalMode, setModalMode] = useState<"excedente" | "pagada">(
@@ -582,6 +583,7 @@ const handleAbonoOtros = () => {
       mutationFn: revertPaymentToPendingService,
       onSuccess: () => {
         toast.success("Pago reversado a pendiente correctamente");
+        queryClient.invalidateQueries({ queryKey: ["pagos-inversionistas"] });
       },
       onError: (err: any) => {
         toast.error("Error al reversar pago a pendiente: " + (err?.response?.data?.message || "Error desconocido"));
@@ -594,9 +596,23 @@ const handleAbonoOtros = () => {
       mutationFn: revalidatePaymentService,
       onSuccess: () => {
         toast.success("Pago revalidado correctamente");
+        queryClient.invalidateQueries({ queryKey: ["pagos-inversionistas"] });
       },
       onError: (err: any) => {
         toast.error("Error al revalidar pago: " + (err?.response?.data?.message || "Error desconocido"));
+      },
+    });
+  }
+
+  function useProcessInvestors() {
+    return useMutation({
+      mutationFn: processInvestorsService,
+      onSuccess: () => {
+        toast.success("Inversionistas procesados correctamente");
+        queryClient.invalidateQueries({ queryKey: ["pagos-inversionistas"] });
+      },
+      onError: (err: any) => {
+        toast.error("Error al procesar inversionistas: " + (err?.response?.data?.message || "Error desconocido"));
       },
     });
   }
@@ -624,6 +640,7 @@ const handleAbonoOtros = () => {
   const reversePago = useReversePagosInversionistas();
   const revertPaymentToPending = useRevertPaymentToPending();
   const revalidatePayment = useRevalidatePayment();
+  const processInvestors = useProcessInvestors();
 
   // Handler:
   function handleReverse(pago_id: number, credito_id: number, reverseAccounting: boolean) {
@@ -638,6 +655,11 @@ const handleAbonoOtros = () => {
   // Handler:
   function handleRevalidatePayment(pago_id: number, credito_id: number) {
     revalidatePayment.mutate({ pago_id, credito_id }, {});
+  }
+
+  // Handler:
+  function handleProcessInvestors(pago_id: number, credito_id: number) {
+    processInvestors.mutate({ pago_id, credito_id }, {});
   }
 
 async function handleResetCredito() {
@@ -724,6 +746,8 @@ async function handleResetCredito() {
     reversePago,
     revertPaymentToPending,
     revalidatePayment,
+    processInvestors,
+    handleProcessInvestors,
     setCuotaSeleccionada,
     setFileToUpload,
     fileToUpload,

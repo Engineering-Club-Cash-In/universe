@@ -78,6 +78,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
+import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import {
 	formatDate,
 	formatGuatemalaDate,
@@ -3295,29 +3296,22 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 	const uploadSingleDocument = async (docType: string) => {
 		if (!selectedFile) return;
 
-		const formData = new FormData();
-		formData.append("file", selectedFile);
-		formData.append("opportunityId", opportunityId);
-		formData.append("documentType", docType);
-		if (description) {
-			formData.append("description", description);
-		}
-
-		const response = await fetch(
-			`${import.meta.env.VITE_SERVER_URL}/api/upload-opportunity-document`,
-			{
-				method: "POST",
-				body: formData,
-				credentials: "include",
-			},
+		const { key } = await uploadFileToR2WithRetry(
+			selectedFile,
+			`opportunities/${opportunityId}`,
 		);
 
-		if (!response.ok) {
-			const error = await response.json();
-			throw new Error(error.message || "Error al subir el archivo");
-		}
-
-		return response.json();
+		return await client.uploadOpportunityDocument({
+			opportunityId,
+			documentType: docType as any,
+			description: description || undefined,
+			file: {
+				name: selectedFile.name,
+				type: selectedFile.type,
+				size: selectedFile.size,
+				key,
+			},
+		});
 	};
 
 	// Upload mutation

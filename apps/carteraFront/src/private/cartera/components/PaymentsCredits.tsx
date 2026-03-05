@@ -442,7 +442,6 @@ const handleDownloadExcel = async () => {
                     className="bg-orange-500 hover:bg-orange-600 text-white px-3 py-1 rounded font-bold shadow"
                     onClick={() => {
                       handleRevertToPending(item.pago.pago_id, item.pago.credito_id);
-                      refetch();
                     }}
                     disabled={
                       item.pago.paymentFalse === true ||
@@ -464,7 +463,6 @@ const handleDownloadExcel = async () => {
                     className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded font-bold shadow"
                     onClick={() => {
                       handleProcessInvestors(item.pago.pago_id, item.pago.credito_id);
-                      refetch();
                     }}
                     disabled={
                       processInvestors.isPending
@@ -485,7 +483,6 @@ const handleDownloadExcel = async () => {
                     className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded font-bold shadow"
                     onClick={() => {
                       handleRevalidatePayment(item.pago.pago_id, item.pago.credito_id);
-                      refetch();
                     }}
                     disabled={
                       item.pago.pagado === true ||

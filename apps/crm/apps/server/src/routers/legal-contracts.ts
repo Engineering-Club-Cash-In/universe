@@ -920,7 +920,20 @@ export const legalContractsRouter = {
 				});
 			}
 
-			// En transacción: re-verificar etapa + marcar contratos + mover a 90%
+			// Primero: cerrar la oportunidad (crear crédito en cartera-back, cliente, contrato)
+			// Si falla, la oportunidad se queda en 85% y no se mueve a 90%
+			const closeResult = await closeOpportunity({
+				opportunityId: input.opportunityId,
+				userId: context.userId,
+			});
+
+			if (!closeResult.success) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: closeResult.error || "Error al cerrar la oportunidad",
+				});
+			}
+
+			// Solo si cartera-back respondió OK: marcar contratos + mover a 90%
 			await db.transaction(async (tx) => {
 				// Re-verificar que la oportunidad sigue en 85% (previene race condition)
 				const [currentOpp] = await tx
@@ -955,7 +968,7 @@ export const legalContractsRouter = {
 						),
 					);
 
-				// Mover oportunidad a 90% (no marcar como won aún, closeOpportunity lo hace)
+				// Mover oportunidad a 90%
 				await tx
 					.update(opportunities)
 					.set({
@@ -973,27 +986,6 @@ export const legalContractsRouter = {
 					reason: "Contratos firmados confirmados - Avanza a formalización",
 				});
 			});
-
-			// Cerrar la oportunidad (crear crédito, cliente, contrato en cartera)
-			const closeResult = await closeOpportunity({
-				opportunityId: input.opportunityId,
-				userId: context.userId,
-			});
-
-			if (!closeResult.success) {
-				// Revertir etapa a 85% ya que closeOpportunity falló
-				await db
-					.update(opportunities)
-					.set({
-						stageId: opportunity.stageId,
-						updatedAt: new Date(),
-					})
-					.where(eq(opportunities.id, input.opportunityId));
-
-				throw new ORPCError("BAD_REQUEST", {
-					message: closeResult.error || "Error al cerrar la oportunidad",
-				});
-			}
 
 			// Notificar a análisis que está lista para desembolso
 			await createNotification({

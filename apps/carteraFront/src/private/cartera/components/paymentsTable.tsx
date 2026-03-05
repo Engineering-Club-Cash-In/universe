@@ -1146,7 +1146,6 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                       className="bg-orange-500 hover:bg-orange-600 text-white px-3 py-1 rounded font-bold shadow flex items-center gap-1"
                       onClick={() => {
                         handleRevertToPending(pago.pagoId, pago.credito?.creditoId || 0);
-                        refetch();
                       }}
                       disabled={revertPaymentToPending.isPending || user?.role !== "ADMIN"}
                     >
@@ -1168,7 +1167,6 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                       className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded font-bold shadow flex items-center gap-1"
                       onClick={() => {
                         handleProcessInvestors(pago.pagoId, pago.credito?.creditoId || 0);
-                        refetch();
                       }}
                       disabled={processInvestors.isPending || user?.role !== "ADMIN"}
                     >
@@ -1190,7 +1188,6 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                       className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded font-bold shadow flex items-center gap-1"
                       onClick={() => {
                         handleRevalidatePayment(pago.pagoId, pago.credito?.creditoId || 0);
-                        refetch();
                       }}
                       disabled={revalidatePayment.isPending || user?.role !== "ADMIN" || pago.validationStatus === "validated"}
                     >
@@ -1705,7 +1702,6 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                                 e.stopPropagation();
                                 if (user?.role === "ADMIN") {
                                   handleRevertToPending(pago.pagoId, pago.credito?.creditoId || 0);
-                                  refetch();
                                 }
                               }}
                               disabled={
@@ -1735,7 +1731,6 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                                 e.stopPropagation();
                                 if (user?.role === "ADMIN") {
                                   handleProcessInvestors(pago.pagoId, pago.credito?.creditoId || 0);
-                                  refetch();
                                 }
                               }}
                               disabled={
@@ -1765,7 +1760,6 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                                 e.stopPropagation();
                                 if (user?.role === "ADMIN") {
                                   handleRevalidatePayment(pago.pagoId, pago.credito?.creditoId || 0);
-                                  refetch();
                                 }
                               }}
                               disabled={

@@ -844,17 +844,19 @@ app.get("/upload-csv", async (c) => {
 // Endpoint REST directo para migración masiva de créditos (más fácil de usar desde Postman)
 // SIEMPRE usa transacción - si algo falla, se hace rollback de todo
 // Reprocesar oportunidades ganadas sin numero SIFCO
-app.post("/api/reprocess-won-opportunities", async (c) => {
-	try {
-		const { reprocessWonOpportunities } = await import(
-			"./controllers/reprocess-opportunities"
-		);
-		return await reprocessWonOpportunities(c);
-	} catch (err: any) {
-		console.error("[ReprocessWon] Error:", err);
-		return c.json({ error: err.message }, 500);
-	}
-});
+// DESCONECTADO: ya se procesaron las 7 oportunidades pendientes (2026-03-05)
+// Para reconectar, descomentar el bloque de abajo
+// app.post("/api/reprocess-won-opportunities", async (c) => {
+// 	try {
+// 		const { reprocessWonOpportunities } = await import(
+// 			"./controllers/reprocess-opportunities"
+// 		);
+// 		return await reprocessWonOpportunities(c);
+// 	} catch (err: any) {
+// 		console.error("[ReprocessWon] Error:", err);
+// 		return c.json({ error: err.message }, 500);
+// 	}
+// });
 
 app.post("/api/migrate/creditos", async (c) => {
 	try {

@@ -29,6 +29,8 @@ export const InputIcon: React.FC<InputIconProps> = ({
         background: '#F9FAFB',
         height: '58px',
         padding: '16px',
+        opacity: disabled ? 0.6 : 1,
+        cursor: disabled ? 'not-allowed' : undefined,
       }}
     >
       <div className="flex items-center mr-3">

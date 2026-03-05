@@ -683,6 +683,8 @@ function RouteComponent() {
 		...orpc.getOpportunities.queryOptions({
 			input: {
 				excludeStatuses: ["migrate"],
+				createdMonth: month,
+				createdYear: year,
 				...(sourceFilter !== "all" ? { source: sourceFilter as any } : {}),
 			},
 		}),
@@ -694,6 +696,8 @@ function RouteComponent() {
 			"getOpportunities",
 			session?.user?.id,
 			userProfile.data?.role,
+			month,
+			year,
 			sourceFilter,
 		],
 	});

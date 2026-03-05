@@ -2,7 +2,7 @@ import { useFormik } from "formik";
 import * as Yup from "yup";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
-import { useLeadInvestor } from "../store/useLeadInvestor";
+import { useNavigate } from "@tanstack/react-router";
 import { sendLeadInvestor } from "../service/serviceLeadInvestor";
 
 export type ProfileType = "individual" | "juridica";
@@ -89,15 +89,15 @@ const buildInitialValues = (amount?: string, defaultMessage?: string): FormInves
 });
 
 export const useFormInvestor = (initialAmount?: string, defaultMessage?: string) => {
-  const setSubmitted = useLeadInvestor((state) => state.setSubmitted);
+  const navigate = useNavigate();
   const [serverError, setServerError] = useState<string>("");
 
   const mutation = useMutation({
     mutationFn: sendLeadInvestor,
-    onSuccess: (data, variables) => {
+    onSuccess: (data) => {
       console.log("Lead investor enviado exitosamente:", data);
       setServerError("");
-      setSubmitted(variables);
+      navigate({ to: "/thanks", search: { type: "investor" } });
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (error: any) => {

@@ -370,6 +370,7 @@ export const clientFormsRouter = {
 				lead,
 				vehicle,
 				creditApplicationExists: !!existingCredit,
+				creditHasSignature: !!existingCredit?.firmaImagen,
 				financialStatementExists: !!existingFinancial,
 				// Only return fields needed for pre-fill, not the full row
 				existingCreditApplication: existingCredit
@@ -441,6 +442,56 @@ export const clientFormsRouter = {
 				);
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
 					message: "Error al guardar la solicitud de crédito",
+				});
+			}
+
+			return { success: true };
+		}),
+
+	// Public: Sign credit application (add signature after submission)
+	signCreditApplication: publicProcedure
+		.input(
+			z.object({
+				token: z.string().uuid(),
+				firmaImagen: z.string(),
+				fechaFirma: z.string(),
+				horaFirma: z.string(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const tokenRow = await getValidToken(input.token);
+
+			try {
+				const [existing] = await db
+					.select()
+					.from(creditApplications)
+					.where(eq(creditApplications.opportunityId, tokenRow.opportunityId))
+					.limit(1);
+
+				if (!existing) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "No se encontró la solicitud de crédito para firmar",
+					});
+				}
+
+				await db
+					.update(creditApplications)
+					.set({
+						firmaImagen: input.firmaImagen,
+						fechaFirma: input.fechaFirma,
+						horaFirma: input.horaFirma,
+						updatedAt: new Date(),
+					})
+					.where(eq(creditApplications.id, existing.id));
+			} catch (error) {
+				if (error instanceof ORPCError) throw error;
+				console.error(
+					"[signCreditApplication] DB error for opportunity:",
+					tokenRow.opportunityId,
+					error,
+				);
+				throw new ORPCError("INTERNAL_SERVER_ERROR", {
+					message: "Error al firmar la solicitud de crédito",
 				});
 			}
 

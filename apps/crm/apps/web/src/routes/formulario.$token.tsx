@@ -13,8 +13,9 @@ import { client } from "@/utils/orpc";
 type FormStep =
 	| "loading"
 	| "credit"
+	| "credit-signature"
 	| "financial"
-	| "signature"
+	| "financial-signature"
 	| "success"
 	| "error";
 
@@ -43,6 +44,8 @@ function FormularioPage() {
 				setValidatedData(result);
 				if (result.creditApplicationExists && result.financialStatementExists) {
 					setStep("success");
+				} else if (result.creditApplicationExists && !result.creditHasSignature) {
+					setStep("credit-signature");
 				} else if (result.creditApplicationExists) {
 					setStep("financial");
 				} else {
@@ -68,7 +71,7 @@ function FormularioPage() {
 			});
 			creditDataRef.current = data;
 			toast.success("Solicitud de crédito guardada");
-			setStep("financial");
+			setStep("credit-signature");
 		} catch (error) {
 			console.error(
 				"[FormularioPage] Error al enviar solicitud de crédito:",
@@ -82,13 +85,34 @@ function FormularioPage() {
 
 	const handleFinancialSubmit = async (data: FinancialStatementFormData) => {
 		financialDataRef.current = data;
-		setStep("signature");
+		setStep("financial-signature");
 	};
 
 	const handleBackToCredit = () => setStep("credit");
+	const handleBackToCreditSignature = () => setStep("credit-signature");
 	const handleBackToFinancial = () => setStep("financial");
 
-	const handleSignatureComplete = async (signatureDataUrl: string) => {
+	const handleCreditSignatureComplete = async (signatureDataUrl: string) => {
+		setIsSubmitting(true);
+		try {
+			const now = new Date();
+			await client.signCreditApplication({
+				token,
+				firmaImagen: signatureDataUrl,
+				fechaFirma: now.toISOString().split("T")[0],
+				horaFirma: now.toTimeString().split(" ")[0],
+			});
+			toast.success("Solicitud firmada exitosamente");
+			setStep("financial");
+		} catch (error) {
+			console.error("[FormularioPage] Error al firmar solicitud:", error);
+			toast.error("Error al firmar la solicitud");
+		} finally {
+			setIsSubmitting(false);
+		}
+	};
+
+	const handleFinancialSignatureComplete = async (signatureDataUrl: string) => {
 		if (!financialDataRef.current) return;
 		setIsSubmitting(true);
 		try {
@@ -221,15 +245,27 @@ function FormularioPage() {
 		);
 	}
 
-	const stepNumber = step === "credit" ? 1 : step === "financial" ? 2 : 3;
+	const stepNumber =
+		step === "credit" ? 1
+			: step === "credit-signature" ? 2
+				: step === "financial" ? 3
+					: 4;
 	const stepLabel =
 		step === "credit"
 			? "Paso 1: Solicitud de Crédito"
-			: step === "financial"
-				? "Paso 2: Estado Patrimonial"
-				: "Paso 3: Firma y Consentimiento";
+			: step === "credit-signature"
+				? "Paso 2: Firma de Solicitud"
+				: step === "financial"
+					? "Paso 3: Estado Patrimonial"
+					: "Paso 4: Firma Estado Patrimonial";
 	const progressWidth =
-		step === "credit" ? "33%" : step === "financial" ? "66%" : "100%";
+		step === "credit"
+			? "25%"
+			: step === "credit-signature"
+				? "50%"
+				: step === "financial"
+					? "75%"
+					: "100%";
 
 	return (
 		<div className="min-h-screen bg-background">
@@ -240,7 +276,7 @@ function FormularioPage() {
 						<div className="flex-1">
 							<div className="flex items-center justify-between text-sm">
 								<span className="font-medium">{stepLabel}</span>
-								<span className="text-muted-foreground">{stepNumber}/3</span>
+								<span className="text-muted-foreground">{stepNumber}/4</span>
 							</div>
 							<div className="mt-1 h-2 w-full rounded-full bg-muted">
 								<div
@@ -262,17 +298,27 @@ function FormularioPage() {
 						isSubmitting={isSubmitting}
 					/>
 				)}
+				{step === "credit-signature" && (
+					<SignatureConsent
+						onComplete={handleCreditSignatureComplete}
+						fullName={signatureFullName}
+						dpi={creditSource?.dpi || ""}
+						nit={creditSource?.nit || undefined}
+						isSubmitting={isSubmitting}
+						onBack={handleBackToCredit}
+					/>
+				)}
 				{step === "financial" && (
 					<FinancialStatementForm
 						defaultValues={financialDefaults}
 						onSubmit={handleFinancialSubmit}
 						isSubmitting={isSubmitting}
-						onBack={handleBackToCredit}
+						onBack={handleBackToCreditSignature}
 					/>
 				)}
-				{step === "signature" && (
+				{step === "financial-signature" && (
 					<SignatureConsent
-						onComplete={handleSignatureComplete}
+						onComplete={handleFinancialSignatureComplete}
 						fullName={signatureFullName}
 						dpi={creditSource?.dpi || ""}
 						nit={creditSource?.nit || undefined}

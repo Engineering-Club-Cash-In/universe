@@ -8,6 +8,7 @@ import {
 	ilike,
 	inArray,
 	isNotNull,
+	isNull,
 	lt,
 	lte,
 	not,
@@ -1119,7 +1120,7 @@ export const crmRouter = {
 						ilike(leads.lastName, `%${searchTerm}%`),
 						ilike(opportunities.numeroSifco, `%${searchTerm}%`),
 						ilike(leads.phone, `%${searchTerm}%`),
-						ilike(opportunities.id, `%${searchTerm}%`),
+						sql`${opportunities.id}::text ILIKE ${`%${searchTerm}%`}`,
 					),
 				);
 			}
@@ -1152,8 +1153,18 @@ export const crmRouter = {
 						// Oportunidades cerradas (won/lost): filtrar por fecha de cierre
 						and(
 							inArray(opportunities.status, ["won", "lost"]),
-							gte(opportunities.actualCloseDate, startOfMonth),
-							lt(opportunities.actualCloseDate, endOfMonth),
+							or(
+								and(
+									gte(opportunities.actualCloseDate, startOfMonth),
+									lt(opportunities.actualCloseDate, endOfMonth),
+								),
+								// Fallback: si no tiene fecha de cierre, usar fecha de creación
+								and(
+									isNull(opportunities.actualCloseDate),
+									gte(opportunities.createdAt, startOfMonth),
+									lt(opportunities.createdAt, endOfMonth),
+								),
+							),
 						),
 					),
 				);

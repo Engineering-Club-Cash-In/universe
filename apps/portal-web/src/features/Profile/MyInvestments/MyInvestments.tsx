@@ -410,7 +410,7 @@ export const MyInvestments = () => {
                                 Reinversión
                               </h4>
                               <div className="grid grid-cols-2 gap-4">
-                                <div>
+                                {/*<div>
                                   <span className="text-xs text-white/40 block mb-1">Capital</span>
                                   <span className="text-base text-white/90 tabular-nums">
                                     {formatCurrency(liquidacion.reinversion.reinversion_capital)}
@@ -421,7 +421,7 @@ export const MyInvestments = () => {
                                   <span className="text-base text-green-400 tabular-nums">
                                     {formatCurrency(liquidacion.reinversion.reinversion_interes)}
                                   </span>
-                                </div>
+                                </div>*/}
                                 <div className="col-span-2">
                                   <span className="text-xs text-white/40 block mb-1">Total Reinvertido</span>
                                   <span className="text-lg lg:text-xl font-semibold text-white tabular-nums">
@@ -468,7 +468,7 @@ export const MyInvestments = () => {
                             : `Ver ${liquidacion.pagos.length} pagos`}
                         </button>
 
-                        {liquidacion.reporte_liquidacion && (
+                        {/*liquidacion.reporte_liquidacion && (
                           <a
                             href={liquidacion.reporte_liquidacion}
                             target="_blank"
@@ -478,7 +478,7 @@ export const MyInvestments = () => {
                             Ver reporte de liquidación
                             <span aria-hidden="true">&rarr;</span>
                           </a>
-                        )}
+                        )*/}
                       </div>
                     </div>
 

@@ -18,6 +18,7 @@ import {
   aplicarPagosEspejo,
   deletePagosEspejoNoLiquidados,
   updateSaldoReinversion,
+  updateLiquidacionReporteUrl,
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
 import { generarYSubirPDFInversionista } from "../utils/functions/generalFunctions";
@@ -392,7 +393,14 @@ export const inversionistasRouter = new Elysia()
         logoUrl
       );
 
-      return { success: true, url, filename };
+      const liquidacionActualizada = await updateLiquidacionReporteUrl(Number(id), url);
+
+      return {
+        success: true,
+        url,
+        filename,
+        liquidacion: liquidacionActualizada || null,
+      };
     } catch (error) {
       console.error("[investor/pdf-liquidados] Error:", error);
       set.status = 500;

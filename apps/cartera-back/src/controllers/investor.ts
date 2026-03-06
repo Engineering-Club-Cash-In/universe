@@ -1740,6 +1740,35 @@ export async function getInvestorTotalsGlobales(
   };
 }
 
+export async function updateLiquidacionReporteUrl(inversionistaId: number, url: string) {
+  const [liquidacion] = await db
+    .select({
+      liquidacion_id: liquidaciones.liquidacion_id,
+      fecha_liquidacion: liquidaciones.fecha_liquidacion,
+      reporte_liquidacion_url: liquidaciones.reporte_liquidacion_url,
+    })
+    .from(liquidaciones)
+    .where(eq(liquidaciones.inversionista_id, inversionistaId))
+    .orderBy(desc(liquidaciones.fecha_liquidacion))
+    .limit(1);
+
+  if (liquidacion) {
+    await db
+      .update(liquidaciones)
+      .set({ reporte_liquidacion_url: url })
+      .where(eq(liquidaciones.liquidacion_id, liquidacion.liquidacion_id));
+
+    return {
+      liquidacion_id: liquidacion.liquidacion_id,
+      fecha_liquidacion: liquidacion.fecha_liquidacion,
+      url_anterior: liquidacion.reporte_liquidacion_url,
+      url_nueva: url,
+    };
+  }
+
+  return null;
+}
+
 // ============================================
 // upsertPagosEspejo
 // ============================================
@@ -2783,7 +2812,10 @@ export function generarHTMLReporte(
           <tr class="total">
             <td>Total</td>
             <td></td>
-            <td></td>
+            <td>${
+              (Number(subtotal.total_monto_aportado || 0) + Number(subtotal.total_abono_capital || 0))
+                .toLocaleString("es-GT", { style: "currency", currency: "GTQ" })
+            }</td>
             <td></td>
             <td></td>
             <td></td>

@@ -1,16 +1,20 @@
 import Big from "big.js";
 import z from "zod";
 import { db } from "../database";
-import { 
-  creditos, 
-  creditos_rubros_otros, 
+import {
+  creditos,
+  creditos_rubros_otros,
   creditos_inversionistas,
-  creditos_inversionistas_espejo, 
-  cuotas_credito, 
-  pagos_credito 
+  creditos_inversionistas_espejo,
+  cuotas_credito,
+  pagos_credito,
+  platform_users,
+  inversionistas,
 } from "../database/db";
 import { findOrCreateAdvisorByName, getAsesorConMenorCarga } from "./advisor";
 import { findOrCreateUserByName } from "./users";
+import { sendNewCreditNotification } from "@cci/email";
+import { eq, and } from "drizzle-orm";
 
 // ========================================
 // TIPOS E INTERFACES
@@ -818,6 +822,38 @@ export const insertCredit = async ({ body, set }: { body: unknown; set: SetConte
       cuotasInsertadas,
       fechas
     );
+
+    // 7. Notificar a todos los admins por email
+    try {
+      const adminUsers = await db
+        .select({ email: platform_users.email })
+        .from(platform_users)
+        .where(and(eq(platform_users.role, "ADMIN"), eq(platform_users.is_active, true)));
+
+      const adminEmails = adminUsers.map((u) => u.email);
+
+      const investorNames: string[] = [];
+      for (const inv of creditData.inversionistas) {
+        const [investor] = await db
+          .select({ nombre: inversionistas.nombre })
+          .from(inversionistas)
+          .where(eq(inversionistas.inversionista_id, inv.inversionista_id));
+        if (investor) investorNames.push(`${investor.nombre} (Q.${inv.monto_aportado.toFixed(2)})`);
+      }
+
+      await sendNewCreditNotification({
+        to: adminEmails,
+        clientName: creditData.usuario,
+        creditNumber: creditData.numero_credito_sifco,
+        capital: creditData.capital.toFixed(2),
+        plazo: creditData.plazo,
+        cuota: creditData.cuota.toFixed(2),
+        interestRate: creditData.porcentaje_interes.toString(),
+        investors: investorNames,
+      });
+    } catch (emailErr) {
+      console.error("Error sending new credit notification email:", emailErr);
+    }
 
     set.status = 201;
     return newCredit;

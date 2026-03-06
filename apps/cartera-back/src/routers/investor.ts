@@ -345,7 +345,7 @@ export const inversionistasRouter = new Elysia()
       filename,
     };
   })
-  .post("/investor/pdf-liquidados", async ({ body, set }) => {
+  .post("/investor/reporte-liquidados", async ({ body, set }) => {
     const { id } = body as { id?: number };
 
     if (!id || isNaN(Number(id))) {

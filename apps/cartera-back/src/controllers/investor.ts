@@ -2632,6 +2632,7 @@ export function generarHTMLReporte(
       width: 210px;
       height: auto;
       margin-right: 32px;
+      margin-top: -50px;
     }
     .header-totals-row {
       flex: 1;

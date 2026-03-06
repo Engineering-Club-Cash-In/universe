@@ -403,12 +403,12 @@ function RouteComponent() {
 	const queryClient = useQueryClient();
 
 	const opportunitiesQuery = useQuery({
-		...orpc.getInvestmentOpportunities.queryOptions(),
+		...orpc.getInvestmentOpportunities.queryOptions({ input: {} }),
 		enabled: !!session,
 	});
 
 	const statsQuery = useQuery({
-		...orpc.getInvestmentDashboardStats.queryOptions(),
+		...orpc.getInvestmentDashboardStats.queryOptions({ input: {} }),
 		enabled: !!session,
 	});
 
@@ -418,10 +418,10 @@ function RouteComponent() {
 		onSuccess: () => {
 			toast.success("Etapa actualizada correctamente");
 			queryClient.invalidateQueries({
-				queryKey: orpc.getInvestmentOpportunities.queryOptions().queryKey,
+				queryKey: orpc.getInvestmentOpportunities.queryOptions({ input: {} }).queryKey,
 			});
 			queryClient.invalidateQueries({
-				queryKey: orpc.getInvestmentDashboardStats.queryOptions().queryKey,
+				queryKey: orpc.getInvestmentDashboardStats.queryOptions({ input: {} }).queryKey,
 			});
 		},
 		onError: (error) => {
@@ -473,10 +473,10 @@ function RouteComponent() {
 
 	function handleRefresh() {
 		queryClient.invalidateQueries({
-			queryKey: orpc.getInvestmentOpportunities.queryOptions().queryKey,
+			queryKey: orpc.getInvestmentOpportunities.queryOptions({ input: {} }).queryKey,
 		});
 		queryClient.invalidateQueries({
-			queryKey: orpc.getInvestmentDashboardStats.queryOptions().queryKey,
+			queryKey: orpc.getInvestmentDashboardStats.queryOptions({ input: {} }).queryKey,
 		});
 	}
 

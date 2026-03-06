@@ -1287,6 +1287,12 @@ function RouteComponent() {
 									.includes(debouncedBoardSearch.trim().toLowerCase()) ||
 								(opp.title ?? "")
 									.toLowerCase()
+									.includes(debouncedBoardSearch.trim().toLowerCase()) ||
+								(opp.lead?.phone ?? "")
+									.toLowerCase()
+									.includes(debouncedBoardSearch.trim().toLowerCase()) ||
+								opp.id
+									.toLowerCase()
 									.includes(debouncedBoardSearch.trim().toLowerCase())),
 					) || [];
 
@@ -3193,6 +3199,12 @@ function RouteComponent() {
 										.toLowerCase()
 										.includes(debouncedBoardSearch.trim().toLowerCase()) ||
 									(opp.title ?? "")
+										.toLowerCase()
+										.includes(debouncedBoardSearch.trim().toLowerCase()) ||
+									(opp.lead?.phone ?? "")
+										.toLowerCase()
+										.includes(debouncedBoardSearch.trim().toLowerCase()) ||
+									opp.id
 										.toLowerCase()
 										.includes(debouncedBoardSearch.trim().toLowerCase())),
 						) ?? []

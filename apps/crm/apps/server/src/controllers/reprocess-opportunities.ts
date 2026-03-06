@@ -8,6 +8,8 @@ import { closeOpportunity } from "../services/close-opportunity";
 const INTERVAL_MS = 6000;
 
 export async function reprocessWonOpportunities(c: Context) {
+	const opportunityId = c.req.query("opportunityId");
+
 	// Buscar un usuario admin
 	const [adminUser] = await db
 		.select({ id: user.id })
@@ -27,12 +29,15 @@ export async function reprocessWonOpportunities(c: Context) {
 			and(
 				eq(opportunities.status, "won"),
 				isNull(opportunities.numeroSifco),
+				...(opportunityId ? [eq(opportunities.id, opportunityId)] : []),
 			),
 		);
 
 	if (wonOpps.length === 0) {
 		return c.json({
-			message: "No hay oportunidades ganadas sin número SIFCO",
+			message: opportunityId
+				? `Oportunidad ${opportunityId} no encontrada o ya tiene número SIFCO`
+				: "No hay oportunidades ganadas sin número SIFCO",
 			processed: 0,
 			results: [],
 		});
@@ -46,7 +51,8 @@ export async function reprocessWonOpportunities(c: Context) {
 		error?: string;
 	}> = [];
 
-	for (const opp of wonOpps) {
+	for (let i = 0; i < wonOpps.length; i++) {
+		const opp = wonOpps[i];
 		try {
 			const result = await closeOpportunity({
 				opportunityId: opp.id,
@@ -70,7 +76,7 @@ export async function reprocessWonOpportunities(c: Context) {
 		}
 
 		// Intervalo para no saturar cartera-back
-		if (wonOpps.indexOf(opp) < wonOpps.length - 1) {
+		if (i < wonOpps.length - 1) {
 			await new Promise((resolve) => setTimeout(resolve, INTERVAL_MS));
 		}
 	}

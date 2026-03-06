@@ -315,6 +315,7 @@ export default function VehiclePictures({
   });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   // Sincronizar fotos al contexto cuando cambian (para preservar al navegar)
   useEffect(() => {
@@ -449,6 +450,8 @@ export default function VehiclePictures({
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    // Reset input so the same file can be re-selected (e.g. retaking a photo)
+    event.target.value = '';
 
     const reader = new FileReader();
     reader.onload = () => {
@@ -1033,14 +1036,35 @@ export default function VehiclePictures({
                       </div>
                     </div>
                   ) : (
-                    <div
-                      className="flex flex-col items-center justify-center w-full max-w-md aspect-4/3 bg-muted rounded-lg border-2 border-dashed border-muted-foreground/25 cursor-pointer hover:bg-muted/80 transition-colors"
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      <Camera className="h-10 w-10 text-muted-foreground mb-2" />
-                      <p className="text-sm text-muted-foreground">
-                        Clic para tomar o seleccionar una foto
-                      </p>
+                    <div className="flex flex-col items-center justify-center w-full max-w-md aspect-4/3 bg-muted rounded-lg border-2 border-dashed border-muted-foreground/25">
+                      <div className="flex gap-3">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => cameraInputRef.current?.click()}
+                          className="h-auto flex-col gap-1 px-6 py-4"
+                        >
+                          <Camera className="h-8 w-8 text-muted-foreground" />
+                          <span className="text-xs text-muted-foreground">Tomar Foto</span>
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="h-auto flex-col gap-1 px-6 py-4"
+                        >
+                          <Upload className="h-8 w-8 text-muted-foreground" />
+                          <span className="text-xs text-muted-foreground">Subir Archivo</span>
+                        </Button>
+                      </div>
+                      <input
+                        ref={cameraInputRef}
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        className="hidden"
+                        onChange={handleFileUpload}
+                      />
                       <input
                         ref={fileInputRef}
                         type="file"
@@ -1143,8 +1167,8 @@ export default function VehiclePictures({
                     if (currentPhotoData) {
                       goToNextPhoto();
                     } else {
-                      // Abre el selector de archivo por defecto
-                      fileInputRef.current?.click();
+                      // Abre la cámara por defecto
+                      cameraInputRef.current?.click();
                     }
                   }}
                   disabled={isLastPhoto && currentPhotoData === null}

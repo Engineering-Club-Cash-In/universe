@@ -111,7 +111,7 @@ function RouteComponent() {
 	// Obtener oportunidades listas para contratos (80%+)
 	const { data: opportunitiesForContracts, isLoading: isLoadingOpportunities } =
 		useQuery({
-			...orpc.getOpportunitiesForContracts.queryOptions(),
+			...orpc.getOpportunitiesForContracts.queryOptions({ input: {} }),
 			enabled: canViewLegal,
 		});
 

@@ -91,7 +91,7 @@ function RouteComponent() {
 		queryKey: ["getCompanies", session?.user?.id, userProfile.data?.role],
 	});
 	const leadsQuery = useQuery({
-		...orpc.getLeads.queryOptions({ limit: 100 }),
+		...orpc.getLeads.queryOptions({ input: { limit: 100 } }),
 		enabled:
 			!!userProfile.data?.role &&
 			PERMISSIONS.canCreateCompanies(userProfile.data.role) &&
@@ -104,7 +104,7 @@ function RouteComponent() {
 		],
 	});
 	const opportunitiesQuery = useQuery({
-		...orpc.getOpportunities.queryOptions(),
+		...orpc.getOpportunities.queryOptions({ input: {} }),
 		enabled:
 			!!userProfile.data?.role &&
 			PERMISSIONS.canCreateCompanies(userProfile.data.role) &&

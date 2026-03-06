@@ -2659,10 +2659,7 @@ export const crmRouter = {
 				.selectDistinct({ leadId: opportunities.leadId })
 				.from(opportunities)
 				.where(
-					and(
-						isNotNull(opportunities.leadId),
-						eq(opportunities.status, "won"),
-					),
+					and(isNotNull(opportunities.leadId), eq(opportunities.status, "won")),
 				);
 
 			const clientLeadIds = leadsWithClosedOpportunities
@@ -5277,6 +5274,17 @@ export const crmRouter = {
 				});
 			}
 
+			// Validate total participation equals 100%
+			const totalParticipacion = allInvestors.reduce(
+				(sum, inv) => sum + (inv.porcentaje_participacion || 0),
+				0,
+			);
+			if (Math.abs(totalParticipacion - 100) > 0.01) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `La suma de porcentajes de participación debe ser exactamente 100% (actual: ${totalParticipacion}%)`,
+				});
+			}
+
 			// Validate minimum data for contracts
 			const validationErrors: string[] = [];
 
@@ -5500,6 +5508,17 @@ export const crmRouter = {
 						message: "El porcentaje de cash-in debe estar entre 0 y 100",
 					});
 				}
+			}
+
+			// Validate total participation equals 100%
+			const totalParticipacion = parsedInvestors.reduce(
+				(sum, inv) => sum + (inv.porcentaje_participacion || 0),
+				0,
+			);
+			if (Math.abs(totalParticipacion - 100) > 0.01) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `La suma de porcentajes de participación debe ser exactamente 100% (actual: ${totalParticipacion}%)`,
+				});
 			}
 
 			// Update

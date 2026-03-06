@@ -20,6 +20,19 @@ export const revertPaymentToPendingSchema = z.object({
 });
 
 // ============================================================================
+// HELPER: REVERTIR INVERSIONES
+// ============================================================================
+async function reverseAndCleanInvestors(tx: any, credito_id: number, pago_id: number) {
+  console.log("\n💼 ========== REVERSANDO INVERSIONES ==========");
+  await processAndReplaceCreditInvestorsReverse(credito_id, pago_id);
+  
+  await tx
+    .delete(pagos_credito_inversionistas)
+    .where(eq(pagos_credito_inversionistas.pago_id, pago_id));
+  console.log("✅ Inversiones reversadas y eliminadas de BD");
+}
+
+// ============================================================================
 // FUNCIÓN PRINCIPAL: PASAR PAGO A PENDIENTE
 // ============================================================================
 export const revertPaymentToPending = async ({ body, set }: any) => {
@@ -82,6 +95,20 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
 
       console.log("✅ Crédito encontrado y activo");
 
+      if (!pagoValidado) {
+        console.log("ℹ️ El pago ya está en estado PENDIENTE. Solo se reversarán las inversiones.");
+        
+        await reverseAndCleanInvestors(tx, credito_id, pago_id);
+
+        return {
+          pago_id,
+          credito_id,
+          numero_credito_sifco: creditData.numero_credito_sifco,
+          cuota: creditData.cuota,
+          message: "Inversiones reversadas exitosamente (el pago ya estaba pendiente)"
+        };
+      }
+
       // 4️⃣ RECALCULAR VALORES DEL CRÉDITO
       let nuevoCapital = new Big(creditData.capital ?? 0);
       let cuota_interes = new Big(creditData.cuota_interes ?? 0);
@@ -129,13 +156,7 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
       }
 
       // 5️⃣ REVERTIR Y ELIMINAR INVERSIONES
-      console.log("\n💼 ========== REVERSANDO INVERSIONES ==========");
-      await processAndReplaceCreditInvestorsReverse(credito_id, pago_id);
-      
-      await tx
-        .delete(pagos_credito_inversionistas)
-        .where(eq(pagos_credito_inversionistas.pago_id, pago_id));
-      console.log("✅ Inversiones reversadas y eliminadas de BD");
+      await reverseAndCleanInvestors(tx, credito_id, pago_id);
 
       // 6️⃣ ANULAR FACTURAS ELECTRÓNICAS
       console.log("\n🧾 ========== ANULANDO FACTURAS ELECTRÓNICAS ==========");
@@ -156,17 +177,17 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
         for (const factura of facturasDelPago) {
           console.log(`\n🧾 Procesando factura ${factura.serie}-${factura.numero} (${factura.uuid})`);
 
-          const resultadoCofidi = await anularFacturaEnCofidi({
-            uuid: factura.uuid,
-            motivo: `Reversión automática del pago ID: ${pago_id}`,
-            factura: {
-              receptor_nit: factura.receptor_nit,
-              fecha_certificacion: factura.fecha_certificacion,
-              fecha_emision: factura.fecha_emision,
-            },
-          });
+          // const resultadoCofidi = await anularFacturaEnCofidi({
+          //   uuid: factura.uuid,
+          //   motivo: `Reversión automática del pago ID: ${pago_id}`,
+          //   factura: {
+          //     receptor_nit: factura.receptor_nit,
+          //     fecha_certificacion: factura.fecha_certificacion,
+          //     fecha_emision: factura.fecha_emision,
+          //   },
+          // });
 
-          if (resultadoCofidi.success && resultadoCofidi.anulado) {
+          // if (resultadoCofidi.success && resultadoCofidi.anulado) {
             try {
               await tx
                 .update(facturas_electronicas)
@@ -174,7 +195,7 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
                   status: "ANULADA",
                   fecha_anulacion: new Date(),
                   motivo_anulacion: `Reversión automática del pago ID: ${pago_id}`,
-                  anulada_por: creditData.usuario_id || null,
+                  anulada_por: null,
                 })
                 .where(eq(facturas_electronicas.factura_id, factura.factura_id));
 
@@ -195,15 +216,15 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
                 mensaje: "Anulada en COFIDI pero error al actualizar BD",
               });
             }
-          } else {
-            console.error(`❌ Error al anular en COFIDI:`, resultadoCofidi.mensaje);
-            facturasConError.push({
-              factura_id: factura.factura_id,
-              uuid: factura.uuid,
-              error: resultadoCofidi.error,
-              mensaje: resultadoCofidi.mensaje,
-            });
-          }
+          // } else {
+          //   console.error(`❌ Error al anular en COFIDI:`, resultadoCofidi.mensaje);
+          //   facturasConError.push({
+          //     factura_id: factura.factura_id,
+          //     uuid: factura.uuid,
+          //     error: resultadoCofidi.error,
+          //     mensaje: resultadoCofidi.mensaje,
+          //   });
+          // }
         }
         console.log(`\n📊 Resumen anulación facturas: ✅ Anuladas: ${facturasAnuladas.length} | ❌ Con error: ${facturasConError.length}`);
       }

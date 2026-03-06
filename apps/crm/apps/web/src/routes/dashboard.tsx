@@ -117,7 +117,7 @@ function RouteComponent() {
 
 	// Cobros Dashboard Stats
 	const cobrosStats = useQuery({
-		...orpc.getCobrosDashboardStats.queryOptions({}),
+		...orpc.getCobrosDashboardStats.queryOptions({ input: {} }),
 		enabled:
 			!!userProfile.data?.role &&
 			PERMISSIONS.canAccessCobros(userProfile.data.role),
@@ -126,7 +126,7 @@ function RouteComponent() {
 
 	// Juridico Dashboard Stats - Oportunidades pendientes de contrato
 	const juridicoStats = useQuery({
-		...orpc.getOpportunitiesForContracts.queryOptions({}),
+		...orpc.getOpportunitiesForContracts.queryOptions({ input: {} }),
 		enabled:
 			!!userProfile.data?.role &&
 			PERMISSIONS.canAccessJuridico(userProfile.data.role),
@@ -135,7 +135,7 @@ function RouteComponent() {
 
 	// Analyst Dashboard Stats - Oportunidades para análisis
 	const analysisStats = useQuery({
-		...orpc.getOpportunitiesForAnalysis.queryOptions(),
+		...orpc.getOpportunitiesForAnalysis.queryOptions({ input: {} }),
 		enabled:
 			!!userProfile.data?.role &&
 			PERMISSIONS.canAccessAnalysis(userProfile.data.role),

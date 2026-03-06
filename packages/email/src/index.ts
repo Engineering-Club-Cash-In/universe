@@ -1,6 +1,7 @@
 import { Resend } from "resend";
 import LiquidationEmail from "./templates/LiquidationTemplate";
 import PasswordResetEmail from "./templates/PasswordResetTemplate";
+import NewCreditEmail from "./templates/NewCreditTemplate";
 import * as React from "react";
 
 import { z } from "zod";
@@ -99,6 +100,68 @@ export const sendPasswordResetEmail = async (to: string, resetUrl: string) => {
     return { success: true, data };
   } catch (err) {
     console.error("[sendPasswordResetEmail] Unexpected Error:", err);
+    return { success: false, error: err };
+  }
+};
+
+export interface SendNewCreditNotificationParams {
+  to: string[];
+  clientName: string;
+  creditNumber: string;
+  capital: string;
+  plazo: number;
+  cuota: string;
+  interestRate: string;
+  investors: string[];
+  currencySymbol?: string;
+}
+
+export const sendNewCreditNotification = async ({
+  to,
+  clientName,
+  creditNumber,
+  capital,
+  plazo,
+  cuota,
+  interestRate,
+  investors,
+  currencySymbol,
+}: SendNewCreditNotificationParams) => {
+  try {
+    const validEmails = to.filter((email) => {
+      try { emailSchema.parse(email); return true; } catch { return false; }
+    });
+
+    if (validEmails.length === 0) {
+      console.warn("[sendNewCreditNotification] No valid admin emails found");
+      return { success: false, error: "No valid emails" };
+    }
+
+    const { data, error } = await resend.emails.send({
+      from: `Club Cash In <no-reply@${domain}>`,
+      to: validEmails,
+      subject: `Nuevo Crédito Creado - ${creditNumber} | ${clientName}`,
+      react: React.createElement(NewCreditEmail, {
+        clientName,
+        creditNumber,
+        capital,
+        plazo,
+        cuota,
+        interestRate,
+        investors,
+        currencySymbol,
+      }),
+    });
+
+    if (error) {
+      console.error("[sendNewCreditNotification] Resend API Error:", error);
+      return { success: false, error };
+    }
+
+    console.log(`[sendNewCreditNotification] Email sent to ${validEmails.length} admins. ID: ${data?.id}`);
+    return { success: true, data };
+  } catch (err) {
+    console.error("[sendNewCreditNotification] Unexpected Error:", err);
     return { success: false, error: err };
   }
 };

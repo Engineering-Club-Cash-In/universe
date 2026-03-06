@@ -332,21 +332,33 @@ const VehiclePhoto = ({ photo, index }: { photo: any; index: number }) => {
     );
   }
 
+  const comment = photo.valuatorComment || photo.description;
+
   return (
     <div
       key={photo.id || index}
-      className="relative aspect-square bg-muted rounded-md overflow-hidden border"
+      className="relative aspect-square bg-muted rounded-md overflow-hidden border group"
     >
       <img
         src={photo.url}
         alt={photo.title || `Foto ${index + 1}`}
-        className="w-full h-full object-cover"
+        className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
         onError={() => setHasError(true)}
       />
-      <div className="absolute bottom-0 left-0 right-0 bg-black/60 p-1">
-        <p className="text-xs text-white truncate text-center">
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent p-2 pt-6 flex flex-col justify-end">
+        <p className="text-[11px] font-semibold text-white truncate text-center">
           {photo.title || `${photo.category} - ${photo.photoType}`}
         </p>
+        {comment && (
+          <p className="text-[10px] text-slate-300 line-clamp-3 mt-1 text-center leading-snug break-words">
+            {comment}
+          </p>
+        )}
+        {photo.noCommentsChecked && !comment && (
+          <p className="text-[10px] text-slate-400/80 italic mt-0.5 text-center px-1">
+            Sin comentarios
+          </p>
+        )}
       </div>
     </div>
   );

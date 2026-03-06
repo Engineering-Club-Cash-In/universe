@@ -468,7 +468,7 @@ export const MyInvestments = () => {
                             : `Ver ${liquidacion.pagos.length} pagos`}
                         </button>
 
-                        {/*liquidacion.reporte_liquidacion && (
+                        {liquidacion.reporte_liquidacion && (
                           <a
                             href={liquidacion.reporte_liquidacion}
                             target="_blank"
@@ -478,7 +478,7 @@ export const MyInvestments = () => {
                             Ver reporte de liquidación
                             <span aria-hidden="true">&rarr;</span>
                           </a>
-                        )*/}
+                        )}
                       </div>
                     </div>
 

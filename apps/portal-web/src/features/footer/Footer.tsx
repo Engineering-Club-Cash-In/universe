@@ -102,7 +102,7 @@ export const Footer: React.FC<FooterProps> = ({ notShowRedirects = false }) => {
         <div className="border-t border-white border-2"></div>
 
         {/* Main content grid */}
-        <div className="grid grid-cols-1  lg:grid-cols-5 gap-6 lg:gap-0 w-full ">
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 w-full">
           {/* Navigation links */}
           {!notShowRedirects && (
             <div className="order-2 lg:order-1  w-full col-span-3 lg:col-span-2 flex flex-col lg:flex-row gap-10 lg:gap-14">

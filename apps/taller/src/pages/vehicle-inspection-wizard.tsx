@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -8,11 +8,13 @@ import {
   CheckCircle,
   DollarSign,
   Activity,
-  Trash2
+  Trash2,
+  AlertTriangle
 } from "lucide-react";
 import { useInspection } from "../contexts/InspectionContext";
 import { prepareInspectionData, createFullInspection } from "../services/vehicles";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import VehicleInspectionForm, { type VehicleInspectionFormRef } from "./vehicle-inspection";
@@ -66,6 +68,10 @@ export default function VehicleInspectionWizard() {
   const [photosCompleted, setPhotosCompleted] = useState(false);
   const [valuationCompleted, setValuationCompleted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Detectar si hay un borrador pendiente al montar
+  const hasDraft = Object.keys(formData).length > 0 || items360.length > 0 || checklistItems.length > 0 || photos.length > 0;
+  const [showDraftDialog, setShowDraftDialog] = useState(hasDraft);
 
   const progress = ((currentStep + 1) / STEPS.length) * 100;
 
@@ -172,6 +178,43 @@ export default function VehicleInspectionWizard() {
     <div className="min-h-screen bg-gray-50">
       <Toaster />
 
+      {/* Diálogo de borrador pendiente */}
+      <Dialog open={showDraftDialog} onOpenChange={(open) => { if (!open) setShowDraftDialog(false); }}>
+        <DialogContent className="max-w-sm" onInteractOutside={(e) => e.preventDefault()}>
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-6 w-6 text-amber-500 flex-shrink-0" />
+              <DialogTitle>Inspección pendiente</DialogTitle>
+            </div>
+            <DialogDescription>
+              Tiene una inspección sin terminar
+              {formData?.licensePlate && (
+                <> del vehículo <strong>{formData.licensePlate}</strong></>
+              )}
+              . ¿Desea continuar donde se quedó o empezar una nueva?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-row gap-3">
+            <Button
+              variant="outline"
+              className="flex-1"
+              onClick={() => {
+                resetInspection();
+                setShowDraftDialog(false);
+              }}
+            >
+              Nueva
+            </Button>
+            <Button
+              className="flex-1"
+              onClick={() => setShowDraftDialog(false)}
+            >
+              Continuar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Header */}
       <div className="bg-white border-b">
         <div className="container mx-auto px-2 sm:px-4 py-1 flex items-center justify-between">
@@ -181,22 +224,32 @@ export default function VehicleInspectionWizard() {
               Complete todos los pasos para registrar la inspección
             </p>
           </div>
-          {isDevMode && (
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => {
-                if (window.confirm('¿Está seguro de querer limpiar toda la inspección y empezar de 0?')) {
-                  resetInspection();
-                  window.location.reload();
-                }
-              }}
-              className="hidden sm:flex"
-            >
-              <Trash2 className="w-4 h-4 mr-2" />
-              Reset (Dev)
-            </Button>
-          )}
+          {/* Icon-only on mobile, full button on desktop */}
+          <Button
+            variant="destructive"
+            size="icon"
+            onClick={() => {
+              if (window.confirm('¿Está seguro de querer limpiar toda la inspección y empezar de 0?')) {
+                resetInspection();
+              }
+            }}
+            className="sm:hidden h-8 w-8"
+          >
+            <Trash2 className="w-4 h-4" />
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => {
+              if (window.confirm('¿Está seguro de querer limpiar toda la inspección y empezar de 0?')) {
+                resetInspection();
+              }
+            }}
+            className="hidden sm:flex"
+          >
+            <Trash2 className="w-4 h-4 mr-2" />
+            Reiniciar
+          </Button>
         </div>
       </div>
 

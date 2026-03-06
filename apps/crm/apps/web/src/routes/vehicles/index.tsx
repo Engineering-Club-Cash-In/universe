@@ -28,6 +28,7 @@ import {
 	Sparkles,
 	Wrench,
 	XCircle,
+	MessageCircle,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -314,6 +315,14 @@ function VehiclesDashboard() {
 	const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
 	const [evidenceItemName, setEvidenceItemName] = useState("");
 	const [photoCategoryFilter, setPhotoCategoryFilter] = useState("all");
+	const [selectedPhoto, setSelectedPhoto] = useState<{
+		id: string;
+		url: string;
+		title: string;
+		category: string;
+		valuatorComment?: string | null;
+		noCommentsChecked?: boolean;
+	} | null>(null);
 
 	const createNewVehicleMutation = useMutation({
 		mutationFn: (data: typeof newVehicleForm) =>
@@ -1732,7 +1741,8 @@ function VehiclesDashboard() {
 														{filteredPhotos.map((photo: any, index: number) => (
 															<Card
 																key={photo.id || index}
-																className="overflow-hidden"
+																className="overflow-hidden cursor-pointer"
+																onClick={() => setSelectedPhoto(photo)}
 															>
 																<CardContent className="p-0">
 																	<div className="relative aspect-square">
@@ -1741,6 +1751,11 @@ function VehiclesDashboard() {
 																			alt={photo.title || `Foto ${index + 1}`}
 																			className="h-full w-full object-cover transition-transform hover:scale-105"
 																		/>
+																		{photo.valuatorComment && !photo.noCommentsChecked && (
+																			<div className="absolute top-1.5 right-1.5 rounded-full bg-amber-500 p-1">
+																				<MessageCircle className="h-3 w-3 text-white" />
+																			</div>
+																		)}
 																	</div>
 																	<div className="p-2">
 																		<p className="line-clamp-1 font-medium text-xs">
@@ -1781,7 +1796,8 @@ function VehiclesDashboard() {
 																		(photo: any, index: number) => (
 																			<Card
 																				key={photo.id || index}
-																				className="overflow-hidden"
+																				className="overflow-hidden cursor-pointer"
+																				onClick={() => setSelectedPhoto(photo)}
 																			>
 																				<CardContent className="p-0">
 																					<div className="relative aspect-square">
@@ -1795,6 +1811,11 @@ function VehiclesDashboard() {
 																							}
 																							className="h-full w-full object-cover transition-transform hover:scale-105"
 																						/>
+																						{photo.valuatorComment && !photo.noCommentsChecked && (
+																							<div className="absolute top-1.5 right-1.5 rounded-full bg-amber-500 p-1">
+																								<MessageCircle className="h-3 w-3 text-white" />
+																							</div>
+																						)}
 																					</div>
 																					<div className="p-2">
 																						<p className="line-clamp-1 font-medium text-xs">
@@ -1823,6 +1844,35 @@ function VehiclesDashboard() {
 										</CardContent>
 									</Card>
 								)}
+								{/* Photo detail dialog */}
+								<Dialog open={!!selectedPhoto} onOpenChange={(open) => !open && setSelectedPhoto(null)}>
+									<DialogContent className="max-w-lg p-0 gap-0 overflow-hidden">
+										{selectedPhoto && (
+											<>
+												<img
+													src={selectedPhoto.url}
+													alt={selectedPhoto.title}
+													className="w-full max-h-[60vh] object-contain bg-black"
+												/>
+												<div className="p-4 space-y-2">
+													<DialogHeader>
+														<DialogTitle className="text-sm">
+															{selectedPhoto.title}
+														</DialogTitle>
+													</DialogHeader>
+													{selectedPhoto.valuatorComment && !selectedPhoto.noCommentsChecked && (
+														<div className="flex gap-2 items-start rounded-md bg-amber-50 border border-amber-200 p-3">
+															<MessageCircle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+															<p className="text-sm text-amber-900">
+																{selectedPhoto.valuatorComment}
+															</p>
+														</div>
+													)}
+												</div>
+											</>
+										)}
+									</DialogContent>
+								</Dialog>
 							</TabsContent>
 
 							<TabsContent value="documents" className="mt-4 space-y-4">

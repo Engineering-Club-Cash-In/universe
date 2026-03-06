@@ -52,7 +52,7 @@ export const SOCIAL_CONTACTS = [
     icon: Location,
     lead: false,
     label: "Km 6.8 Antigua carretera a Muxbal, Complejo Pradera, Ofibodegas, Bodega 2",
-    className: "max-w-[320px] text-center",
+    className: "max-w-[420px] text-center",
     href: "https://www.google.com/maps/search/Km+6.8+Antigua+carretera+a+Muxbal+Complejo+Pradera+Ofibodegas",
   },
 ];
@@ -102,10 +102,10 @@ export const Footer: React.FC<FooterProps> = ({ notShowRedirects = false }) => {
         <div className="border-t border-white border-2"></div>
 
         {/* Main content grid */}
-        <div className="grid grid-cols-1  lg:grid-cols-5 gap-6 lg:gap-0 w-full ">
+        <div className="grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-5 gap-6 w-full">
           {/* Navigation links */}
           {!notShowRedirects && (
-            <div className="order-2 lg:order-1  w-full col-span-3 lg:col-span-2 flex flex-col lg:flex-row gap-10 lg:gap-14">
+            <div className="order-2 lg:order-1  w-full col-span-3 lg:col-span-1 xl:col-span-2 flex flex-col xl:flex-row gap-10 xl:gap-14">
               {FOOTER_SECTIONS.map((section) => (
                 <div key={section.title} className="flex flex-col gap-6">
                   <div className="text-[20px] font-bold">{section.title}</div>
@@ -136,7 +136,7 @@ export const Footer: React.FC<FooterProps> = ({ notShowRedirects = false }) => {
 
           {/* Social media and contact */}
           <div
-            className={`order-1 lg:order-2 w-full col-span-2 lg:col-span-3 flex ${notShowRedirects ? "" : "lg:justify-end lg:pr-14"} gap-4 lg:gap-8 `}
+            className={`order-1 lg:order-2 w-full col-span-2 lg:col-span-2 xl:col-span-3 flex ${notShowRedirects ? "" : "lg:justify-end xl:pr-14"} gap-4 lg:gap-8 `}
           >
             {SOCIAL_CONTACTS.filter(contact => notShowRedirects ? contact.lead !== false : true).map((contact) => {
               const IconComponent = contact.icon;

@@ -13,7 +13,7 @@ import { promises as fs } from "fs";
 import { mapPagosPorCreditos, mapPagosDesdeJson } from "../migration/migration";
 import { authMiddleware } from "./midleware";
 import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagosToExcel } from "../controllers/reports";
-import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment } from "../controllers/registerPayment";
+import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment, aplicarMontoAPago } from "../controllers/registerPayment";
 import { eq } from "drizzle-orm";
 import { db } from "../database";
 import { creditos, pagos_credito } from "../database/db";
@@ -213,9 +213,16 @@ export const paymentRouter = new Elysia()
             dia,
             mes,
             anio,
+            fechaInicio,
+            fechaFin,
             inversionistaId,
             usuarioNombre,
             validationStatus,
+            categoriaCredito,
+            tipoCredito,
+            formatoCredito,
+            soloAplicados,
+            fechaAplicado,
           });
           set.status = 200;
           return {
@@ -233,8 +240,16 @@ export const paymentRouter = new Elysia()
             dia,
             mes,
             anio,
+            fechaInicio,
+            fechaFin,
             inversionistaId,
-            usuarioNombre,validationStatus
+            usuarioNombre,
+            validationStatus,
+            categoriaCredito,
+            tipoCredito,
+            formatoCredito,
+            soloAplicados,
+            fechaAplicado,
           });
           set.status = 200;
           return {
@@ -1252,6 +1267,36 @@ export const paymentRouter = new Elysia()
     detail: {
       tags: ["Pagos"],
       summary: "Obtener abonos de una cuota por número de crédito SIFCO",
+    },
+  }
+)
+.post(
+  "/aplicar-monto-pago",
+  async ({ body, set }) => {
+    try {
+      const { pago_id, monto, fecha_pago, validationStatus } = body;
+      const result = await aplicarMontoAPago(pago_id, monto, fecha_pago, validationStatus);
+      set.status = result.success ? 200 : 400;
+      return result;
+    } catch (error: any) {
+      console.error("Error en /aplicar-monto-pago:", error);
+      set.status = 500;
+      return {
+        success: false,
+        message: error.message || "Error al aplicar monto al pago",
+      };
+    }
+  },
+  {
+    body: t.Object({
+      pago_id: t.Number(),
+      monto: t.Number(),
+      fecha_pago: t.Optional(t.String()),
+      validationStatus: t.Optional(t.String()),
+    }),
+    detail: {
+      tags: ["Pagos"],
+      summary: "Aplicar un monto adicional a los restantes de un pago existente",
     },
   }
 )

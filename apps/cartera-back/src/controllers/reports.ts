@@ -312,9 +312,16 @@ export async function exportPagosConInversionistasExcel(
     dia?: number;
     mes?: number;
     anio?: number;
+    fechaInicio?: string;
+    fechaFin?: string;
     inversionistaId?: number;
     usuarioNombre?: string;
     validationStatus?: string;
+    categoriaCredito?: string;
+    tipoCredito?: string;
+    formatoCredito?: string;
+    soloAplicados?: boolean;
+    fechaAplicado?: string;
   }
 ) {
   // 1️⃣ Obtener los datos completos de tu servicio
@@ -600,9 +607,16 @@ export async function exportPagosAdvisorExcel(
     dia?: number;
     mes?: number;
     anio?: number;
+    fechaInicio?: string;
+    fechaFin?: string;
     inversionistaId?: number;
     usuarioNombre?: string;
     validationStatus?: string;
+    categoriaCredito?: string;
+    tipoCredito?: string;
+    formatoCredito?: string;
+    soloAplicados?: boolean;
+    fechaAplicado?: string;
   }
 ) {
   const result = await getPagosConInversionistas({

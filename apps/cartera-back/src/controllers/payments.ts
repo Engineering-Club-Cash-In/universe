@@ -705,7 +705,7 @@ export async function insertPagosCreditoInversionistasV2(
       : new Big(inv.porcentaje_participacion_inversionista ?? 0).div(100);
 
     // Distribuir abonos: primero por participación, luego por porcentaje general
-    const abonoCapitalInv = pagoAbonoCapital.times(porcentajeParticipacion).times(porcentajeGeneral);
+    const abonoCapitalInv = pagoAbonoCapital.times(porcentajeGeneral);
     const abonoInteresInv = pagoAbonoInteres.times(porcentajeParticipacion).times(porcentajeGeneral);
     const abonoIvaInv = pagoAbonoIva.times(porcentajeParticipacion).times(porcentajeGeneral);
 
@@ -1302,7 +1302,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     if (soloAplicados === false) whereClauses.push(`p.fecha_aplicado IS NULL`);
     if (fechaAplicado) {
       whereClauses.push(
-        `(p.fecha_aplicado AT TIME ZONE 'America/Guatemala')::date = '${fechaAplicado}'::date`
+        `(p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date = '${fechaAplicado}'::date`
       );
     }
 

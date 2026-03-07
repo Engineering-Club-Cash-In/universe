@@ -230,10 +230,13 @@ if (facturasExistentes.length > 0) {
         return pais;
       };
 
+      // 🔥 Extraer todos los NITs disponibles (separados por /)
+      const nitsDisponibles = pagoData.nit
+        ? pagoData.nit.split('/').map((n: string) => n.trim().replace(/-/g, '')).filter((n: string) => n.length > 0)
+        : [];
+
       const receptor = {
-        idReceptor: pagoData.nit
-          ? pagoData.nit.split('/')[0].trim().replace(/-/g, '') // 🔥 Tomar primer NIT, quitar guiones
-          : "CF",
+        idReceptor: nitsDisponibles.length > 0 ? nitsDisponibles[0] : "CF",
         nombreReceptor: pagoData.nombre
           ? pagoData.nombre.split('/')[0].trim() // 🔥 Tomar solo el primer nombre
           : pagoData.nombre,
@@ -361,6 +364,7 @@ if (facturasExistentes.length > 0) {
             items: itemsMora,
             complementos: complementosMora,
             created_by,
+            nitsFallback: nitsDisponibles.slice(1),
           });
 
           facturasGeneradas.push({
@@ -518,6 +522,7 @@ if (facturasExistentes.length > 0) {
             items: itemsOtrosServicios,
             complementos: complementosOtrosServicios,
             created_by,
+            nitsFallback: nitsDisponibles.slice(1),
           });
 
           facturasGeneradas.push({
@@ -601,6 +606,7 @@ if (facturasExistentes.length > 0) {
             items: itemsOtros,
             complementos: complementosOtros,
             created_by,
+            nitsFallback: nitsDisponibles.slice(1),
           });
 
           facturasGeneradas.push({
@@ -742,6 +748,7 @@ if (facturasExistentes.length > 0) {
               created_by,
               customConfig: inversionistaConfig?.config,
               customSatConfig: inversionistaConfig?.satConfig,
+              nitsFallback: nitsDisponibles.slice(1),
             });
 
             facturasGeneradas.push({
@@ -828,6 +835,7 @@ if (facturasExistentes.length > 0) {
               items: itemsCube,
               complementos: complementosCube,
               created_by,
+              nitsFallback: nitsDisponibles.slice(1),
             });
 
             facturasGeneradas.push({
@@ -2325,6 +2333,7 @@ async function certificarFacturaHelper({
   customConfig,
   customSatConfig,
   usarFechaActual = false,
+  nitsFallback = [],
 }: {
   pago_id?: number | null;
   receptor: any;
@@ -2341,6 +2350,7 @@ async function certificarFacturaHelper({
     entity?: string;
   };
   usarFechaActual?: boolean;
+  nitsFallback?: string[];
 }) {
   try {
     console.log(`\n📄 ========== CERTIFICANDO FACTURA ==========`);
@@ -2435,6 +2445,40 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
       }
 
       if (errorMessage.includes("NIT del Receptor es inválido") || errorMessage.includes("1014")) {
+        // 🔥 Si hay NITs alternativos, intentar con el siguiente
+        if (nitsFallback.length > 0) {
+          const siguienteNit = nitsFallback[0];
+          const restantesFallback = nitsFallback.slice(1);
+          console.log(`   🔄 NIT "${receptor.idReceptor}" inválido, reintentando con: "${siguienteNit}"`);
+          return certificarFacturaHelper({
+            pago_id,
+            receptor: { ...receptor, idReceptor: siguienteNit },
+            items,
+            complementos,
+            created_by,
+            customConfig,
+            customSatConfig,
+            usarFechaActual,
+            nitsFallback: restantesFallback,
+          });
+        }
+
+        // 🔥 Si no hay más NITs, intentar con "CF" como último recurso
+        if (receptor.idReceptor !== "CF") {
+          console.log(`   🔄 NIT "${receptor.idReceptor}" inválido, reintentando con "CF"`);
+          return certificarFacturaHelper({
+            pago_id,
+            receptor: { ...receptor, idReceptor: "CF" },
+            items,
+            complementos,
+            created_by,
+            customConfig,
+            customSatConfig,
+            usarFechaActual,
+            nitsFallback: [],
+          });
+        }
+
         throw new Error(
           `NIT del receptor inválido. NIT enviado: "${receptor.idReceptor}" para "${receptor.nombreReceptor}". ` +
             `Respuesta COFIDI: ${errorMessage}`

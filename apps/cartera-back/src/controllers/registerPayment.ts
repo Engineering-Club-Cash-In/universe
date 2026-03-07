@@ -16,8 +16,7 @@ import {
 import { eq, and, lte, asc, desc, sql, gt, gte, or, ne, inArray } from "drizzle-orm";
 import { updateMora } from "./latefee";
 import { insertPagosCreditoInversionistas, insertPagosCreditoInversionistasV2 } from "./payments";
-import { processAndReplaceCreditInvestors } from "./investor";
-import { formatInTimeZone } from "date-fns-tz/dist/cjs/formatInTimeZone";
+import { processAndReplaceCreditInvestors } from "./investor"; 
 import { processConvenioPayment } from "./paymentAgreement";
 import { convertirAHoraGuatemala } from "../utils/functions/generalFunctions";
 
@@ -2434,6 +2433,207 @@ export async function actualizarCuentaPago(
       message: "❌ Error al actualizar la cuenta del pago",
       error: error.message,
       data: null,
+    };
+  }
+}
+
+/**
+ * Aplica un monto adicional a los restantes de un pago existente.
+ * Recibe pago_id y monto, distribuye en orden: interés → IVA → seguro → GPS → membresías → capital.
+ * Actualiza solo ese pago y llama a inversionistas.
+ */
+export async function aplicarMontoAPago(pago_id: number, monto: number, fecha_pago?: string, validationStatus?: string) {
+  try {
+    // 1. Obtener el pago
+    const [pago] = await db
+      .select()
+      .from(pagos_credito)
+      .where(eq(pagos_credito.pago_id, pago_id))
+      .limit(1);
+
+    if (!pago) {
+      return { success: false, message: `Pago ${pago_id} no encontrado` };
+    }
+
+    // 2. Obtener restantes del pago
+    const interes_restante = new Big(pago.interes_restante ?? 0);
+    const iva_restante = new Big(pago.iva_12_restante ?? 0);
+    const seguro_restante = new Big(pago.seguro_restante ?? 0);
+    const gps_restante = new Big(pago.gps_restante ?? 0);
+    const membresias_restante = new Big(pago.membresias ?? 0);
+    const capital_restante = new Big(pago.capital_restante ?? 0);
+
+    let disponible = new Big(monto);
+
+    // 3. Distribuir en orden de prioridad
+    // 3.1 Interés
+    let abono_interes = new Big(0);
+    if (disponible.gt(0) && interes_restante.gt(0)) {
+      abono_interes = disponible.lt(interes_restante) ? disponible : interes_restante;
+      disponible = disponible.minus(abono_interes);
+    }
+
+    // 3.2 IVA
+    let abono_iva = new Big(0);
+    if (disponible.gt(0) && iva_restante.gt(0)) {
+      abono_iva = disponible.lt(iva_restante) ? disponible : iva_restante;
+      disponible = disponible.minus(abono_iva);
+    }
+
+    // 3.3 Seguro
+    let abono_seguro = new Big(0);
+    if (disponible.gt(0) && seguro_restante.gt(0)) {
+      abono_seguro = disponible.lt(seguro_restante) ? disponible : seguro_restante;
+      disponible = disponible.minus(abono_seguro);
+    }
+
+    // 3.4 GPS
+    let abono_gps = new Big(0);
+    if (disponible.gt(0) && gps_restante.gt(0)) {
+      abono_gps = disponible.lt(gps_restante) ? disponible : gps_restante;
+      disponible = disponible.minus(abono_gps);
+    }
+
+    // 3.5 Membresías
+    let abono_membresias = new Big(0);
+    if (disponible.gt(0) && membresias_restante.gt(0)) {
+      abono_membresias = disponible.lt(membresias_restante) ? disponible : membresias_restante;
+      disponible = disponible.minus(abono_membresias);
+    }
+
+    // 3.6 Capital
+    let abono_capital = new Big(0);
+    if (disponible.gt(0) && capital_restante.gt(0)) {
+      abono_capital = disponible.lt(capital_restante) ? disponible : capital_restante;
+      disponible = disponible.minus(abono_capital);
+    }
+
+    // 4. Calcular nuevos restantes
+    const nuevo_interes_restante = interes_restante.minus(abono_interes);
+    const nuevo_iva_restante = iva_restante.minus(abono_iva);
+    const nuevo_seguro_restante = seguro_restante.minus(abono_seguro);
+    const nuevo_gps_restante = gps_restante.minus(abono_gps);
+    const nuevo_membresias_restante = membresias_restante.minus(abono_membresias);
+    const nuevo_capital_restante = capital_restante.minus(abono_capital);
+
+    const cuota_pagada =
+      nuevo_interes_restante.eq(0) &&
+      nuevo_iva_restante.eq(0) &&
+      nuevo_seguro_restante.eq(0) &&
+      nuevo_gps_restante.eq(0) &&
+      nuevo_membresias_restante.eq(0) &&
+      nuevo_capital_restante.eq(0);
+
+    // Resetear abonos: solo quedan los de este monto
+    const nuevo_abono_interes = abono_interes;
+    const nuevo_abono_iva = abono_iva;
+    const nuevo_abono_seguro = abono_seguro;
+    const nuevo_abono_gps = abono_gps;
+    const nuevo_abono_membresias = abono_membresias;
+    const nuevo_abono_capital = abono_capital;
+
+    const totalPagado = abono_capital
+      .plus(abono_interes)
+      .plus(abono_iva)
+      .plus(abono_seguro)
+      .plus(abono_gps)
+      .plus(abono_membresias);
+
+    const nuevo_monto_aplicado = totalPagado;
+    const nuevo_monto_boleta = new Big(monto);
+
+    // Fecha de pago: si viene, usarla; sino, fecha actual en hora Guatemala
+    let fechaPago: Date;
+    if (fecha_pago) {
+      fechaPago = new Date(fecha_pago);
+    } else {
+      const guatemalaTimeString = new Date().toLocaleString("en-US", {
+        timeZone: "America/Guatemala",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+      const [datePart, timePart] = guatemalaTimeString.split(", ");
+      const [month, day, year] = datePart.split("/");
+      fechaPago = new Date(`${year}-${month}-${day}T${timePart}`);
+    }
+
+    // 5. Actualizar el pago
+    const [pagoActualizado] = await db
+      .update(pagos_credito)
+      .set({
+        abono_interes: nuevo_abono_interes.toString(),
+        abono_iva_12: nuevo_abono_iva.toString(),
+        abono_seguro: nuevo_abono_seguro.toString(),
+        abono_gps: nuevo_abono_gps.toString(),
+        abono_capital: nuevo_abono_capital.toString(),
+        membresias_pago: nuevo_abono_membresias.toString(),
+        membresias: nuevo_membresias_restante.toString(),
+        capital_restante: nuevo_capital_restante.toString(),
+        interes_restante: nuevo_interes_restante.toString(),
+        iva_12_restante: nuevo_iva_restante.toString(),
+        seguro_restante: nuevo_seguro_restante.toString(),
+        gps_restante: nuevo_gps_restante.toString(),
+        monto_boleta: nuevo_monto_boleta.toString(),
+        monto_aplicado: nuevo_monto_aplicado.toString(),
+        pagado: cuota_pagada,
+        fecha_pago: fechaPago,
+        ...(validationStatus ? { validationStatus: validationStatus as any } : {}),
+      })
+      .where(eq(pagos_credito.pago_id, pago_id))
+      .returning();
+
+    // 6. Si quedó pagada, marcar la cuota también
+    if (cuota_pagada && pago.cuota_id) {
+      await db
+        .update(cuotas_credito)
+        .set({ pagado: true })
+        .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
+    }
+
+    // 7. Distribuir entre inversionistas
+    if (pago.credito_id) {
+      await insertPagosCreditoInversionistasV2(pago_id, pago.credito_id);
+    }
+
+    return {
+      success: true,
+      message: cuota_pagada
+        ? "Pago completado y aplicado"
+        : "Monto aplicado a restantes (pago aún parcial)",
+      data: {
+        pago_id,
+        monto_aplicado: monto,
+        sobrante: disponible.toString(),
+        pagado: cuota_pagada,
+        abonos: {
+          interes: abono_interes.toString(),
+          iva: abono_iva.toString(),
+          seguro: abono_seguro.toString(),
+          gps: abono_gps.toString(),
+          membresias: abono_membresias.toString(),
+          capital: abono_capital.toString(),
+        },
+        nuevos_restantes: {
+          interes: nuevo_interes_restante.toString(),
+          iva: nuevo_iva_restante.toString(),
+          seguro: nuevo_seguro_restante.toString(),
+          gps: nuevo_gps_restante.toString(),
+          membresias: nuevo_membresias_restante.toString(),
+          capital: nuevo_capital_restante.toString(),
+        },
+      },
+    };
+  } catch (error: any) {
+    console.error("❌ Error en aplicarMontoAPago:", error);
+    return {
+      success: false,
+      message: "Error al aplicar monto al pago",
+      error: error.message,
     };
   }
 }

@@ -135,7 +135,10 @@ export function OpportunityDocumentUpload({
 		mutationFn: async (data: { file: File; documentType: string }) => {
 			const { key } = await uploadFileToR2WithRetry(
 				data.file,
-				`opportunities/${opportunityId}`,
+				{
+					resourceType: "opportunity_document",
+					resourceId: opportunityId,
+				},
 			);
 
 			return await client.uploadOpportunityDocument({

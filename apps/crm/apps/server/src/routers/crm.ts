@@ -57,12 +57,10 @@ import {
 import { analystProcedure, crmProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
+	buildUploadPrefix,
 	deleteFileFromR2,
-	generateUniqueFilename,
 	getFileUrl,
-	resolveMimeType,
-	uploadFileToR2,
-	validateFile,
+	verifyUploadedDocumentInR2,
 } from "../lib/storage";
 import {
 	formatMissingFields,
@@ -3461,28 +3459,17 @@ export const crmRouter = {
 				});
 			}
 
-			// Resolver MIME type (fallback por extensión para archivos con extensión en mayúsculas)
-			const resolvedMimeType = resolveMimeType({
-				type: input.file.type,
-				name: input.file.name,
-			} as File);
+			const uploadedFile = await verifyUploadedDocumentInR2({
+				key: input.file.key,
+				expectedPrefix: buildUploadPrefix(
+					"opportunity_document",
+					input.opportunityId,
+				),
+				filename: input.file.name,
+				mimeType: input.file.type,
+			});
 
-			// Validar archivo
-			const validation = validateFile({
-				type: resolvedMimeType,
-				size: input.file.size,
-				name: input.file.name,
-			} as File);
-
-			if (!validation.valid) {
-				throw new ORPCError("BAD_REQUEST", { message: validation.error });
-			}
-
-			// El archivo ya fue subido a R2 por el frontend via presigned URL
-			const key = input.file.key;
-
-			// Extraer el nombre unico del key (ultima parte del path)
-			const uniqueFilename = key.split("/").pop()!;
+			const uniqueFilename = uploadedFile.key.split("/").pop()!;
 
 			// Guardar en base de datos
 			const [newDocument] = await db
@@ -3491,12 +3478,12 @@ export const crmRouter = {
 					opportunityId: input.opportunityId,
 					filename: uniqueFilename,
 					originalName: input.file.name,
-					mimeType: resolvedMimeType,
-					size: input.file.size,
+					mimeType: uploadedFile.mimeType,
+					size: uploadedFile.size,
 					documentType: input.documentType,
 					description: input.description,
 					uploadedBy: context.userId,
-					filePath: key,
+					filePath: uploadedFile.key,
 				})
 				.returning();
 
@@ -3513,12 +3500,12 @@ export const crmRouter = {
 						vehicleId: opportunity[0].vehicleId,
 						filename: uniqueFilename,
 						originalName: input.file.name,
-						mimeType: resolvedMimeType,
-						size: input.file.size,
+						mimeType: uploadedFile.mimeType,
+						size: uploadedFile.size,
 						documentType: input.documentType,
 						description: input.description,
 						uploadedBy: context.userId,
-						filePath: key,
+						filePath: uploadedFile.key,
 					})
 					.returning();
 

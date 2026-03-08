@@ -1,9 +1,12 @@
+import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { crmProcedure } from "../lib/orpc";
 import {
-	ALLOWED_DOCUMENT_TYPES,
+	UPLOAD_RESOURCE_TYPES,
+	buildUploadPrefix,
 	generatePresignedUploadUrl,
 	generateUniqueFilename,
+	validateResolvedMimeType,
 } from "../lib/storage";
 
 export const uploadRouter = {
@@ -11,19 +14,28 @@ export const uploadRouter = {
 		.input(
 			z.object({
 				filename: z.string().min(1),
-				mimeType: z
-					.string()
-					.refine((type) => ALLOWED_DOCUMENT_TYPES.includes(type), {
-						message: "Tipo de archivo no permitido",
-					}),
-				folder: z.string().min(1),
+				mimeType: z.string().optional(),
+				resourceType: z.enum(UPLOAD_RESOURCE_TYPES),
+				resourceId: z.string().uuid(),
 			}),
 		)
 		.handler(async ({ input }) => {
-			const uniqueFilename = generateUniqueFilename(input.filename);
-			const key = `${input.folder}/${uniqueFilename}`;
-			const url = await generatePresignedUploadUrl(key, input.mimeType);
+			const resolvedMime = validateResolvedMimeType({
+				name: input.filename,
+				type: input.mimeType,
+			});
 
-			return { url, key };
+			if (!resolvedMime.valid || !resolvedMime.mimeType) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: resolvedMime.error || "Tipo de archivo no permitido",
+				});
+			}
+
+			const prefix = buildUploadPrefix(input.resourceType, input.resourceId);
+			const uniqueFilename = generateUniqueFilename(input.filename);
+			const key = `${prefix}/${uniqueFilename}`;
+			const url = await generatePresignedUploadUrl(key, resolvedMime.mimeType);
+
+			return { url, key, resolvedMimeType: resolvedMime.mimeType };
 		}),
 };

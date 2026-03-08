@@ -4,6 +4,18 @@ interface UploadOptions {
 	onProgress?: (percent: number) => void;
 }
 
+type UploadResourceType =
+	| "opportunity_document"
+	| "vehicle_document"
+	| "notification_document"
+	| "legal_contract_pdf"
+	| "bank_statement";
+
+interface UploadTarget {
+	resourceType: UploadResourceType;
+	resourceId: string;
+}
+
 /**
  * Sube un archivo directamente a R2 usando presigned URLs.
  * 1. Pide presigned URL al backend
@@ -12,18 +24,19 @@ interface UploadOptions {
  */
 export async function uploadFileToR2(
 	file: File,
-	folder: string,
+	target: UploadTarget,
 	options?: UploadOptions,
 ): Promise<{ key: string }> {
 	// 1. Obtener presigned URL
-	const { url, key } = await client.getUploadPresignedUrl({
+	const { url, key, resolvedMimeType } = await client.getUploadPresignedUrl({
 		filename: file.name,
 		mimeType: file.type,
-		folder,
+		resourceType: target.resourceType,
+		resourceId: target.resourceId,
 	});
 
 	// 2. Subir directo a R2
-	await putFileToR2(url, file, options);
+	await putFileToR2(url, file, resolvedMimeType, options);
 
 	return { key };
 }
@@ -31,6 +44,7 @@ export async function uploadFileToR2(
 function putFileToR2(
 	url: string,
 	file: File,
+	contentType: string,
 	options?: UploadOptions,
 ): Promise<void> {
 	return new Promise((resolve, reject) => {
@@ -59,7 +73,7 @@ function putFileToR2(
 		});
 
 		xhr.open("PUT", url);
-		xhr.setRequestHeader("Content-Type", file.type);
+		xhr.setRequestHeader("Content-Type", contentType);
 		xhr.send(file);
 	});
 }
@@ -78,17 +92,17 @@ class PresignedUrlExpiredError extends Error {
  */
 export async function uploadFileToR2WithRetry(
 	file: File,
-	folder: string,
+	target: UploadTarget,
 	options?: UploadOptions,
 ): Promise<{ key: string }> {
 	try {
-		return await uploadFileToR2(file, folder, options);
+		return await uploadFileToR2(file, target, options);
 	} catch (error) {
 		if (error instanceof PresignedUrlExpiredError) {
 			// Presigned URL expirada, pedir nueva y reintentar
-			return await uploadFileToR2(file, folder, options);
+			return await uploadFileToR2(file, target, options);
 		}
 		// Otro error, reintentar 1 vez
-		return await uploadFileToR2(file, folder, options);
+		return await uploadFileToR2(file, target, options);
 	}
 }

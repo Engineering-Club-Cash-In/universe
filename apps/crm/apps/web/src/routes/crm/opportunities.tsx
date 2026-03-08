@@ -3298,7 +3298,10 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 
 		const { key } = await uploadFileToR2WithRetry(
 			selectedFile,
-			`opportunities/${opportunityId}`,
+			{
+				resourceType: "opportunity_document",
+				resourceId: opportunityId,
+			},
 		);
 
 		return await client.uploadOpportunityDocument({

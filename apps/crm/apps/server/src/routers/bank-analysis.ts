@@ -11,7 +11,11 @@ import {
 } from "../lib/bank-analysis-schema";
 import { calculateCreditCapacity } from "../lib/financial-math";
 import { crmProcedure } from "../lib/orpc";
-import { getFileBuffer } from "../lib/storage";
+import {
+	buildUploadPrefix,
+	getFileBuffer,
+	verifyUploadedDocumentInR2,
+} from "../lib/storage";
 
 const MAX_AI_ATTEMPTS = 2;
 const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15MB por archivo
@@ -43,8 +47,10 @@ export const bankAnalysisRouter = {
 					message: "Debe proporcionar leadId o coDebtorId",
 				}),
 		)
-		.handler(async ({ input, context }) => {
-			const isForLead = !!input.leadId;
+			.handler(async ({ input, context }) => {
+				const isForLead = !!input.leadId;
+				const resourceId = input.leadId || input.coDebtorId!;
+				const expectedPrefix = buildUploadPrefix("bank_statement", resourceId);
 
 			// 1. Verificar que el lead/co-deudor existe y el usuario tiene acceso
 			if (isForLead) {
@@ -85,15 +91,14 @@ export const bankAnalysisRouter = {
 			// 2. Validar archivos: descargar de R2 y verificar formato PDF
 			const downloadedFiles: { name: string; buffer: Buffer }[] = [];
 			for (const file of input.files) {
-				const buffer = await getFileBuffer(file.key);
-
-				if (buffer.length > MAX_FILE_SIZE_BYTES) {
-					const maxSizeMB = MAX_FILE_SIZE_BYTES / (1024 * 1024);
-					const fileSizeMB = (buffer.length / (1024 * 1024)).toFixed(1);
-					throw new ORPCError("BAD_REQUEST", {
-						message: `El archivo "${file.name}" (${fileSizeMB}MB) excede el tamaño máximo permitido de ${maxSizeMB}MB.`,
-					});
-				}
+				const uploadedFile = await verifyUploadedDocumentInR2({
+					key: file.key,
+					expectedPrefix,
+					filename: file.name,
+					mimeType: file.mimeType,
+					maxSizeBytes: MAX_FILE_SIZE_BYTES,
+				});
+				const buffer = await getFileBuffer(uploadedFile.key);
 
 				// Validate PDF magic bytes directly from buffer
 				if (buffer.length < 4 || buffer.subarray(0, 4).toString() !== "%PDF") {

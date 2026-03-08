@@ -260,7 +260,10 @@ export function CreateContractModal({
 				toast.error("El archivo debe ser menor a 10MB");
 				return;
 			}
-			if (file.type !== "application/pdf") {
+			if (
+				file.type !== "application/pdf" &&
+				!file.name.toLowerCase().endsWith(".pdf")
+			) {
 				toast.error("Solo se permiten archivos PDF");
 				return;
 			}
@@ -290,8 +293,10 @@ export function CreateContractModal({
 			| { name: string; type: string; size: number; key: string }
 			| undefined;
 		if (selectedPdfFile) {
-			const folder = `legal-contracts/${formData.opportunityId || leadId}`;
-			const { key } = await uploadFileToR2WithRetry(selectedPdfFile, folder);
+			const { key } = await uploadFileToR2WithRetry(selectedPdfFile, {
+				resourceType: "legal_contract_pdf",
+				resourceId: formData.opportunityId || leadId,
+			});
 			pdfFileData = {
 				name: selectedPdfFile.name,
 				type: selectedPdfFile.type,

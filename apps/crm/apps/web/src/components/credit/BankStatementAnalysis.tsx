@@ -25,6 +25,12 @@ import { client, orpc } from "@/utils/orpc";
 
 const MAX_AI_ATTEMPTS = 2;
 
+function isPdfFile(file: File) {
+	return (
+		file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
+	);
+}
+
 interface BankStatementAnalysisProps {
 	leadId?: string;
 	coDebtorId?: string;
@@ -93,10 +99,10 @@ export function BankStatementAnalysis({
 			// Upload all files to R2 first
 			const filePayloads = await Promise.all(
 				files.map(async (file) => {
-					const folder = leadId
-						? `bank-statements/${leadId}`
-						: `bank-statements/${coDebtorId}`;
-					const { key } = await uploadFileToR2WithRetry(file, folder);
+					const { key } = await uploadFileToR2WithRetry(file, {
+						resourceType: "bank_statement",
+						resourceId: leadId || coDebtorId!,
+					});
 					return {
 						name: file.name,
 						key,
@@ -130,7 +136,7 @@ export function BankStatementAnalysis({
 
 	const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
 		const selectedFiles = Array.from(e.target.files || []);
-		const pdfFiles = selectedFiles.filter((f) => f.type === "application/pdf");
+		const pdfFiles = selectedFiles.filter(isPdfFile);
 
 		if (pdfFiles.length !== selectedFiles.length) {
 			toast.warning("Solo se permiten archivos PDF");

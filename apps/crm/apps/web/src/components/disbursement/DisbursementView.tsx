@@ -80,7 +80,10 @@ export function DisbursementView({
 
 			const { key } = await uploadFileToR2WithRetry(
 				file,
-				`notifications/${notificationId}`,
+				{
+					resourceType: "notification_document",
+					resourceId: notificationId,
+				},
 			);
 
 			return await client.addDocumentToNotification({

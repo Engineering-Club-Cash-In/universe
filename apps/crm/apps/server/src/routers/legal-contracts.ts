@@ -18,9 +18,10 @@ import {
 } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
+	buildUploadPrefix,
 	getFileUrl,
 	getFileUrlWithBucketInKey,
-	validateFile,
+	verifyUploadedDocumentInR2,
 } from "../lib/storage";
 import { closeOpportunity } from "../services/close-opportunity";
 import { createNotification } from "./notifications";
@@ -97,18 +98,17 @@ export const legalContractsRouter = {
 			// Guardar key del PDF si se proporciono (ya subido a R2 via presigned URL)
 			let pdfLink: string | undefined;
 			if (input.pdfFile) {
-				const validation = validateFile({
-					type: input.pdfFile.type,
-					size: input.pdfFile.size,
-				} as File);
+				const uploadedFile = await verifyUploadedDocumentInR2({
+					key: input.pdfFile.key,
+					expectedPrefix: buildUploadPrefix(
+						"legal_contract_pdf",
+						input.opportunityId || input.leadId,
+					),
+					filename: input.pdfFile.name,
+					mimeType: input.pdfFile.type,
+				});
 
-				if (!validation.valid) {
-					throw new ORPCError("BAD_REQUEST", {
-						message: validation.error || "Archivo invalido",
-					});
-				}
-
-				pdfLink = input.pdfFile.key;
+				pdfLink = uploadedFile.key;
 			}
 
 			// Crear el contrato (sin incluir pdfFile en los valores)
@@ -170,18 +170,17 @@ export const legalContractsRouter = {
 			// Guardar key del PDF si se proporciono (ya subido a R2 via presigned URL)
 			let pdfLink: string | undefined;
 			if (input.pdfFile) {
-				const validation = validateFile({
-					type: input.pdfFile.type,
-					size: input.pdfFile.size,
-				} as File);
+				const uploadedFile = await verifyUploadedDocumentInR2({
+					key: input.pdfFile.key,
+					expectedPrefix: buildUploadPrefix(
+						"legal_contract_pdf",
+						existingContract.opportunityId || existingContract.leadId,
+					),
+					filename: input.pdfFile.name,
+					mimeType: input.pdfFile.type,
+				});
 
-				if (!validation.valid) {
-					throw new ORPCError("BAD_REQUEST", {
-						message: validation.error || "Archivo invalido",
-					});
-				}
-
-				pdfLink = input.pdfFile.key;
+				pdfLink = uploadedFile.key;
 			}
 
 			// Actualizar el contrato

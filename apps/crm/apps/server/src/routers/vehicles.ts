@@ -35,12 +35,10 @@ import {
 	tallerOrCrmProcedure,
 } from "../lib/orpc";
 import {
+	buildUploadPrefix,
 	deleteFileFromR2,
-	generateUniqueFilename,
 	getFileUrl,
-	resolveMimeType,
-	uploadFileToR2,
-	validateFile,
+	verifyUploadedDocumentInR2,
 } from "../lib/storage";
 import {
 	prepareValuationContext,
@@ -1632,26 +1630,13 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 				});
 			}
 
-			// Resolver MIME type (fallback por extensión)
-			const resolvedMimeType = resolveMimeType({
-				type: input.file.type,
-				name: input.file.name,
-			} as File);
-
-			// Validate file
-			const validation = validateFile({
-				type: resolvedMimeType,
-				size: input.file.size,
-				name: input.file.name,
-			} as File);
-
-			if (!validation.valid) {
-				throw new ORPCError("BAD_REQUEST", { message: validation.error });
-			}
-
-			// File already uploaded to R2 via presigned URL
-			const key = input.file.key;
-			const uniqueFilename = key.split("/").pop()!;
+			const uploadedFile = await verifyUploadedDocumentInR2({
+				key: input.file.key,
+				expectedPrefix: buildUploadPrefix("vehicle_document", input.vehicleId),
+				filename: input.file.name,
+				mimeType: input.file.type,
+			});
+			const uniqueFilename = uploadedFile.key.split("/").pop()!;
 			// Save to database
 			const [newDocument] = await db
 				.insert(vehicleDocuments)
@@ -1659,12 +1644,12 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 					vehicleId: input.vehicleId,
 					filename: uniqueFilename,
 					originalName: input.file.name,
-					mimeType: resolvedMimeType,
-					size: input.file.size,
+					mimeType: uploadedFile.mimeType,
+					size: uploadedFile.size,
 					documentType: input.documentType,
 					description: input.description || undefined,
 					uploadedBy: context.userId,
-					filePath: key,
+					filePath: uploadedFile.key,
 				})
 				.returning();
 

@@ -9,12 +9,15 @@ import { vehicles } from "../db/schema/vehicles";
 import { protectedProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
+	MAX_FILE_SIZE,
 	UPLOAD_RESOURCE_TYPES,
 	buildUploadPrefix,
 	generatePresignedUploadUrl,
 	generateUniqueFilename,
 	validateResolvedMimeType,
 } from "../lib/storage";
+
+const MAX_BANK_STATEMENT_SIZE = 15 * 1024 * 1024;
 
 async function getCurrentUser(userId: string) {
 	const [currentUser] = await db
@@ -214,6 +217,7 @@ export const uploadRouter = {
 			z.object({
 				filename: z.string().min(1),
 				mimeType: z.string().optional(),
+				size: z.number().int().positive(),
 				resourceType: z.enum(UPLOAD_RESOURCE_TYPES),
 				resourceId: z.string().uuid(),
 			}),
@@ -236,6 +240,26 @@ export const uploadRouter = {
 			if (!resolvedMime.valid || !resolvedMime.mimeType) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: resolvedMime.error || "Tipo de archivo no permitido",
+				});
+			}
+
+			const maxSizeBytes =
+				input.resourceType === "bank_statement"
+					? MAX_BANK_STATEMENT_SIZE
+					: MAX_FILE_SIZE;
+
+			if (input.size > maxSizeBytes) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `El archivo es demasiado grande. El tamaño máximo permitido es ${Math.round(maxSizeBytes / (1024 * 1024))}MB.`,
+				});
+			}
+
+			if (
+				input.resourceType === "bank_statement" &&
+				resolvedMime.mimeType !== "application/pdf"
+			) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Los estados de cuenta deben subirse en formato PDF.",
 				});
 			}
 

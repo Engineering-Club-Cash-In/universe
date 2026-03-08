@@ -31,6 +31,7 @@ export async function uploadFileToR2(
 	const { url, key, resolvedMimeType } = await client.getUploadPresignedUrl({
 		filename: file.name,
 		mimeType: file.type,
+		size: file.size,
 		resourceType: target.resourceType,
 		resourceId: target.resourceId,
 	});

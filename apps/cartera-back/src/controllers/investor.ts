@@ -97,18 +97,23 @@ async function consultarPagosInversionista(
   creditoId: number,
   incluirLiquidados: boolean,
   numeroCuota: number | undefined,
-  config: TablaConfig
+  config: TablaConfig,
+  soloLiquidados = false
 ) {
   // 🔥 Type assertion segura: sabemos que ambas tablas tienen la misma estructura
   const tabla = config.pagosCreditoInversionistas as typeof pagos_credito_inversionistas;
-  
+
   // 🔥 TIPADO: SQL[] es el tipo correcto para condiciones en Drizzle
   const pagosConditions: SQL[] = [
     eq(tabla.inversionista_id, inversionistaId),
     eq(tabla.credito_id, creditoId),
   ];
 
-  if (!incluirLiquidados) {
+  if (soloLiquidados) {
+    pagosConditions.push(
+      eq(tabla.estado_liquidacion, "LIQUIDADO")
+    );
+  } else if (!incluirLiquidados) {
     pagosConditions.push(
       eq(tabla.estado_liquidacion, "NO_LIQUIDADO")
     );
@@ -163,14 +168,15 @@ async function consultarPagosAmbos(
   inversionistaId: number,
   creditoId: number,
   incluirLiquidados: boolean,
-  numeroCuota: number | undefined
+  numeroCuota: number | undefined,
+  soloLiquidados = false
 ) {
   const configOriginal = getTablaConfig("original");
   const configEspejo = getTablaConfig("espejo");
 
   const [pagosOriginales, pagosEspejos] = await Promise.all([
-    consultarPagosInversionista(inversionistaId, creditoId, incluirLiquidados, numeroCuota, configOriginal),
-    consultarPagosInversionista(inversionistaId, creditoId, incluirLiquidados, numeroCuota, configEspejo),
+    consultarPagosInversionista(inversionistaId, creditoId, incluirLiquidados, numeroCuota, configOriginal, soloLiquidados),
+    consultarPagosInversionista(inversionistaId, creditoId, incluirLiquidados, numeroCuota, configEspejo, soloLiquidados),
   ]);
 
   return [...pagosOriginales, ...pagosEspejos];
@@ -182,7 +188,8 @@ async function consultarPagosBulk(
   creditosIds: number[],
   incluirLiquidados: boolean,
   numeroCuota: number | undefined,
-  config: TablaConfig
+  config: TablaConfig,
+  soloLiquidados = false
 ) {
   const tabla = config.pagosCreditoInversionistas as typeof pagos_credito_inversionistas;
 
@@ -191,7 +198,9 @@ async function consultarPagosBulk(
     inArray(tabla.credito_id, creditosIds),
   ];
 
-  if (!incluirLiquidados) {
+  if (soloLiquidados) {
+    pagosConditions.push(eq(tabla.estado_liquidacion, "LIQUIDADO"));
+  } else if (!incluirLiquidados) {
     pagosConditions.push(eq(tabla.estado_liquidacion, "NO_LIQUIDADO"));
   }
 
@@ -217,11 +226,12 @@ async function consultarPagosBulkAmbos(
   inversionistaId: number,
   creditosIds: number[],
   incluirLiquidados: boolean,
-  numeroCuota: number | undefined
+  numeroCuota: number | undefined,
+  soloLiquidados = false
 ) {
   const [pagosOriginales, pagosEspejos] = await Promise.all([
-    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("original")),
-    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("espejo")),
+    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("original"), soloLiquidados),
+    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("espejo"), soloLiquidados),
   ]);
   return [...pagosOriginales, ...pagosEspejos];
 }
@@ -1003,7 +1013,8 @@ export async function resumeInvestor(
   dpi?: string,
   incluirLiquidados = false,
   numeroCuota?: number,
-  tipo: TipoConsulta = "originales" // 🆕 NUEVO: Permite consultar originales, espejos o ambas
+  tipo: TipoConsulta = "originales",
+  soloLiquidados = false
 ) {
   console.log(
     "resumeInvestor for",
@@ -1183,7 +1194,8 @@ export async function resumeInvestor(
               inv.inversionista_id,
               c.credito_id,
               incluirLiquidados,
-              numeroCuota
+              numeroCuota,
+              soloLiquidados
             );
           } else {
             const config = getTablaConfig(tipo === "espejos" ? "espejo" : "original");
@@ -1192,7 +1204,8 @@ export async function resumeInvestor(
               c.credito_id,
               incluirLiquidados,
               numeroCuota,
-              config
+              config,
+              soloLiquidados
             );
           }
 
@@ -1403,7 +1416,7 @@ const mes = fechaParaMes
           total_isr: formatValue(subtotal.total_isr.toString()),
           total_cuota: formatValue(subtotal.total_cuota.toString()),
           total_monto_aportado: formatValue(subtotal.total_monto_aportado.toString()),
-          totalAbonoGeneralInteres: formatValue(subtotal.totalAbonoGeneralInteres.toString()),
+          total_abono_general_interes: formatValue(subtotal.totalAbonoGeneralInteres.toString()),
           total_capital_creditos: formatValue(subtotal.total_capital_creditos.toString()),
           total_capital_actual: formatValue(subtotal.total_capital_actual.toString()),
         },
@@ -1429,7 +1442,8 @@ export async function getInvestorTotalsGlobales(
   dpi?: string,
   tipo: TipoConsulta = "originales",
   incluirLiquidados = false,
-  numeroCuota?: number
+  numeroCuota?: number,
+  soloLiquidados = false
 ) {
   console.log(
     "getInvestorTotalsGlobales for",
@@ -1556,7 +1570,8 @@ export async function getInvestorTotalsGlobales(
       inv.inversionista_id,
       creditosIds,
       incluirLiquidados,
-      numeroCuota
+      numeroCuota,
+      soloLiquidados
     );
   } else {
     const config = getTablaConfig(tipo === "espejos" ? "espejo" : "original");
@@ -1565,7 +1580,8 @@ export async function getInvestorTotalsGlobales(
       creditosIds,
       incluirLiquidados,
       numeroCuota,
-      config
+      config,
+      soloLiquidados
     );
   }
 
@@ -1599,6 +1615,9 @@ export async function getInvestorTotalsGlobales(
     if (!credito) continue;
 
     const pagos = pagosPorCredito.get(c.credito_id) ?? [];
+
+    // Saltar créditos sin pagos cuando se filtra por estado
+    if (pagos.length === 0) continue;
 
     // Sumar totales
     const capital_credito = new Big(credito?.capital ?? 0);
@@ -1711,7 +1730,7 @@ export async function getInvestorTotalsGlobales(
       total_cuota_sin_reinversion: formatValue(subtotal.total_cuota.plus(subtotal.total_reinversion).toString()),
       total_cuota_con_reinversion: formatValue(subtotal.total_cuota.toString()),
       total_monto_aportado: formatValue(subtotal.total_monto_aportado.toString()),
-      totalAbonoGeneralInteres: formatValue(subtotal.totalAbonoGeneralInteres.toString()),
+      total_abono_general_interes: formatValue(subtotal.totalAbonoGeneralInteres.toString()),
       total_capital_creditos: formatValue(subtotal.total_capital_creditos.toString()),
       total_capital_actual: formatValue(subtotal.total_capital_actual.toString()),
       total_reinversion_capital: formatValue(subtotal.total_reinversion_capital.toString()),
@@ -2698,17 +2717,17 @@ export function generarHTMLReporte(
             <th>Meses en crédito</th>
             <th>Nombre</th>
             <th>Capital</th>
-            <th>%</th>
+            <th>% Interés</th>
             <th>% Inversionista</th>
-            <th>TASA DE INTERÉS INVERSOR</th>
-            <th>Cuota Inversionista</th>
-            <th>IVA Inversionista</th>
+            <th>Tasa interés inversor</th>
+            <th>Interés Inversor</th>
+            <th>IVA</th>
             <th>ISR</th>
             <th>Abono capital</th>
-            <th>% INVERSOR</th>
+            <th>% Inversionista Neto</th>
             <th>Capital restante</th>
-            <th>CUOTA DE MES</th>
-             <th>Plazo</th>
+            <th>Cuota de mes</th>
+            <th>Plazo</th>
             <th>NIT</th>
           </tr>
         </thead>
@@ -2730,7 +2749,7 @@ export function generarHTMLReporte(
                 </td>
                                   <td>${c.porcentaje_interes ?? ""} %</td>
                                   <td>${pago.porcentaje_inversor ?? ""} %</td>
-                  <td>${pago.tasaInteresInvesor} %</td>
+                  <td>${Big(pago.tasaInteresInvesor || 0).div(100).toFixed(2)} %</td>
                   <td>Q${Number(pago.abono_interes ?? 0).toLocaleString(
                     "es-GT",
                     { minimumFractionDigits: 2 }
@@ -2764,59 +2783,35 @@ export function generarHTMLReporte(
           <tr class="total">
             <td>Total</td>
             <td></td>
-            <td> </td>
             <td></td>
             <td></td>
-            <td> </td>
-          <td>${
-            subtotal.total_abono_interes
-              ? subtotal.total_abono_interes.toLocaleString("es-GT", {
-                  style: "currency",
-                  currency: "GTQ",
-                })
-              : ""
-          }</td>
-<td>${
-    subtotal.total_abono_iva
-      ? subtotal.total_abono_iva.toLocaleString("es-GT", {
-          style: "currency",
-          currency: "GTQ",
-        })
-      : ""
-  }</td>
-<td>${
-    subtotal.total_isr
-      ? subtotal.total_isr.toLocaleString("es-GT", {
-          style: "currency",
-          currency: "GTQ",
-        })
-      : ""
-  }</td>
-<td>${
-    subtotal.total_abono_capital
-      ? subtotal.total_abono_capital.toLocaleString("es-GT", {
-          style: "currency",
-          currency: "GTQ",
-        })
-      : ""
-  }</td>
-<td>${
-    subtotal.total_abono_general_interes
-      ? subtotal.total_abono_general_interes.toLocaleString("es-GT", {
-          style: "currency",
-          currency: "GTQ",
-        })
-      : ""
-  }</td>
-<td>${
-    subtotal.total_monto_aportado
-      ? subtotal.total_monto_aportado.toLocaleString("es-GT", {
-          style: "currency",
-          currency: "GTQ",
-        })
-      : ""
-  }</td>
-
+            <td></td>
+            <td></td>
+            <td>${
+              ""
+            }</td>
+            <td>${
+              ""
+            }</td>
+            <td>${
+               ""
+            }</td>
+            <td>${
+              subtotal.total_abono_capital
+                ? Number(subtotal.total_abono_capital).toLocaleString("es-GT", { style: "currency", currency: "GTQ" })
+                : ""
+            }</td>
+            <td>${
+              subtotal.total_abono_general_interes
+                ? Number(subtotal.total_abono_general_interes).toLocaleString("es-GT", { style: "currency", currency: "GTQ" })
+                : ""
+            }</td>
+            <td>${
+              subtotal.total_monto_aportado
+                ? Number(subtotal.total_monto_aportado).toLocaleString("es-GT", { style: "currency", currency: "GTQ" })
+                : ""
+            }</td>
+            <td></td>
             <td></td>
             <td></td>
           </tr>

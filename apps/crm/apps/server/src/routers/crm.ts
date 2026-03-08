@@ -2652,33 +2652,12 @@ export const crmRouter = {
 		.handler(async ({ input, context }) => {
 			const { limit, offset, search } = input;
 
-			// First, get all stages with 100% closure
-			const closedStages = await db
-				.select({ id: salesStages.id })
-				.from(salesStages)
-				.where(gte(salesStages.closurePercentage, 100));
-
-			const closedStageIds = closedStages.map((s) => s.id);
-
-			// Build subquery to find leads with at least one closed opportunity
-			// A closed opportunity is one with numeroSifco OR in a 100% stage
+			// Build subquery to find leads with at least one won opportunity
 			const leadsWithClosedOpportunities = await db
 				.selectDistinct({ leadId: opportunities.leadId })
 				.from(opportunities)
-				.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
 				.where(
-					and(
-						isNotNull(opportunities.leadId),
-						or(
-							isNotNull(opportunities.numeroSifco),
-							closedStageIds.length > 0
-								? sql`${opportunities.stageId} IN (${sql.join(
-										closedStageIds.map((id) => sql`${id}`),
-										sql`, `,
-									)})`
-								: sql`false`,
-						),
-					),
+					and(isNotNull(opportunities.leadId), eq(opportunities.status, "won")),
 				);
 
 			const clientLeadIds = leadsWithClosedOpportunities
@@ -5274,6 +5253,17 @@ export const crmRouter = {
 				});
 			}
 
+			// Validate total participation equals 100%
+			const totalParticipacion = allInvestors.reduce(
+				(sum, inv) => sum + (inv.porcentaje_participacion || 0),
+				0,
+			);
+			if (Math.abs(totalParticipacion - 100) > 0.01) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `La suma de porcentajes de participación debe ser exactamente 100% (actual: ${totalParticipacion}%)`,
+				});
+			}
+
 			// Validate minimum data for contracts
 			const validationErrors: string[] = [];
 
@@ -5497,6 +5487,17 @@ export const crmRouter = {
 						message: "El porcentaje de cash-in debe estar entre 0 y 100",
 					});
 				}
+			}
+
+			// Validate total participation equals 100%
+			const totalParticipacion = parsedInvestors.reduce(
+				(sum, inv) => sum + (inv.porcentaje_participacion || 0),
+				0,
+			);
+			if (Math.abs(totalParticipacion - 100) > 0.01) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `La suma de porcentajes de participación debe ser exactamente 100% (actual: ${totalParticipacion}%)`,
+				});
 			}
 
 			// Update

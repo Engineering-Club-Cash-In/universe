@@ -967,7 +967,7 @@ export const legalContractsRouter = {
 						),
 					);
 
-				// Mover oportunidad a 90%
+				// Mover oportunidad a 90% (closeOpportunity ya seteó status "won")
 				await tx
 					.update(opportunities)
 					.set({

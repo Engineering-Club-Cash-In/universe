@@ -44,7 +44,10 @@ function FormularioPage() {
 				setValidatedData(result);
 				if (result.creditApplicationExists && result.financialStatementExists) {
 					setStep("success");
-				} else if (result.creditApplicationExists && !result.creditHasSignature) {
+				} else if (
+					result.creditApplicationExists &&
+					!result.creditHasSignature
+				) {
 					setStep("credit-signature");
 				} else if (result.creditApplicationExists) {
 					setStep("financial");
@@ -246,9 +249,12 @@ function FormularioPage() {
 	}
 
 	const stepNumber =
-		step === "credit" ? 1
-			: step === "credit-signature" ? 2
-				: step === "financial" ? 3
+		step === "credit"
+			? 1
+			: step === "credit-signature"
+				? 2
+				: step === "financial"
+					? 3
 					: 4;
 	const stepLabel =
 		step === "credit"

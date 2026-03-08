@@ -1,11 +1,5 @@
 import { sql } from "drizzle-orm";
-import {
-	decimal,
-	integer,
-	pgView,
-	text,
-	timestamp,
-} from "drizzle-orm/pg-core";
+import { decimal, integer, pgView, text, timestamp } from "drizzle-orm/pg-core";
 
 export const vistaReporteColocacion = pgView("vista_reporte_colocacion", {
 	anio: integer("anio"),

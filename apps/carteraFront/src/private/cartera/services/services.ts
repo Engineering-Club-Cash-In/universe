@@ -706,6 +706,15 @@ export async function revalidatePaymentService({ pago_id, credito_id }: { pago_i
   });
   return res.data;
 }
+
+// Procesar inversionistas manualmente
+export async function processInvestorsService({ pago_id, credito_id }: { pago_id: number; credito_id: number }) {
+  const res = await api.post(`${API_URL}/processInvestors`, {
+    pago_id,
+    credito_id,
+  });
+  return res.data;
+}
 export interface PagoCredito {
   id: number;
   mes: string;

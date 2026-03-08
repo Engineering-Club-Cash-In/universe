@@ -83,18 +83,18 @@ export const WhyInvest = () => {
           {items.map((item, index) => (
             <div
               key={index}
-              className="flex flex-col p-6 gap-4 lg:gap-6 border border-white/20"
+              className="flex flex-col p-4 lg:p-6 gap-4 lg:gap-6 border border-white/20 overflow-hidden"
               style={{
                 borderRadius: "24px",
                 background: "linear-gradient(180deg, #0A0A0A 0%, #000 100%)",
               }}
             >
-              <div className="w-full">
+              <div className="w-full flex justify-center">
                 <div className="p-4 text-secondary rounded-xl border border-secondary w-max">
                   {item.icon}
                 </div>
               </div>
-              <h3 className="lg:text-xl font-semibold">{item.title}</h3>
+              <h3 className="text-sm lg:text-xl font-semibold">{item.title}</h3>
               <p className="text-sm lg:text-base text-gray leading-6">{item.description}</p>
             </div>
           ))}

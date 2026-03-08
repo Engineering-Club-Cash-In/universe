@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { IconCalculator, Select, IconArrow } from "@/components";
+import { IconCalculator, Select, Input, IconArrow } from "@/components";
 import { motion } from "framer-motion";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -18,22 +18,9 @@ export const Calculator: React.FC = () => {
   const [term, setTerm] = useState("");
   const [investmentType, setInvestmentType] = useState("tradicional");
 
-  // Generar opciones de monto (Q25,000 a Q1,000,000)
-  const amountOptions = [
-    { value: "25000", label: "Q25,000" },
-    { value: "50000", label: "Q50,000" },
-    { value: "100000", label: "Q100,000" },
-    { value: "250000", label: "Q250,000" },
-    { value: "500000", label: "Q500,000" },
-    { value: "1000000", label: "Q1,000,000" },
-  ];
-
-  // Generar opciones de plazo (12m a 60m)
+  // Opciones de plazo
   const termOptions = [
-    { value: "12", label: "12 meses" },
-    { value: "24", label: "24 meses" },
     { value: "36", label: "36 meses" },
-    { value: "48", label: "48 meses" },
     { value: "60", label: "60 meses" },
   ];
 
@@ -106,11 +93,13 @@ export const Calculator: React.FC = () => {
             <label className="block text-white mb-2 text-sm">
               Monto a Invertir
             </label>
-            <Select
-              options={amountOptions}
+            <Input
+              variant="primary"
+              name="amount"
               value={amount}
               onChange={setAmount}
-              placeholder="Selecciona el monto"
+              placeholder="Ej: 100000"
+              type="number"
             />
           </div>
 

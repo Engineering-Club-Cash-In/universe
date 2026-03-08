@@ -278,6 +278,7 @@ export function ModalEditCredit({
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent
+        onInteractOutside={(e) => e.preventDefault()}
         className="max-w-3xl w-full bg-white text-gray-800 shadow-2xl border border-blue-100 p-0"
         style={{
           maxHeight: "94vh",
@@ -397,6 +398,7 @@ export function ModalEditCredit({
                         }
                         name={name}
                         value={formik.values[name] ?? ""}
+                        onFocus={(e) => e.target.select()}
                         onChange={formik.handleChange}
                         className="bg-blue-50 border-blue-200 text-gray-800"
                         min={
@@ -432,6 +434,7 @@ export function ModalEditCredit({
                       type={name === "saldo_a_favor" ? "number" : "text"}
                       name={name}
                       value={formik.values[name] ?? ""}
+                      onFocus={(e) => e.target.select()}
                       onChange={formik.handleChange}
                       className="bg-blue-50 border-blue-200 text-gray-800"
                       min={name === "saldo_a_favor" ? 0 : undefined}

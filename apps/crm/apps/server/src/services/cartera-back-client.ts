@@ -706,6 +706,15 @@ export class CarteraBackClient {
 		return response;
 	}
 
+	async getResumenGlobalExcel(): Promise<{ success: boolean; url: string }> {
+		const response = await this.request<{ success: boolean; url: string }>(
+			"/resumen-global?excel=true",
+			{ method: "GET" },
+			false,
+		);
+		return response;
+	}
+
 	async uploadFile(
 		file: File | Blob,
 		filename: string,

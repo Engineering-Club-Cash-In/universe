@@ -465,11 +465,11 @@
 
       abono_capital: numeric("abono_capital", {
         precision: 18,
-        scale: 2,
+        scale: 10,
       }).notNull(),
       abono_interes: numeric("abono_interes", {
         precision: 18,
-        scale: 2,
+        scale: 10,
       }).notNull(),
       abono_iva_12: numeric("abono_iva_12", {
         precision: 18,

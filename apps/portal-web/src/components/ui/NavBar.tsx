@@ -14,6 +14,7 @@ import {
 import { useIsMobile } from "@/hooks";
 import { useAuth } from "@/lib/useAuth";
 import { authClient } from "@/lib/auth";
+import { useQueryClient } from "@tanstack/react-query";
 import { IconCCI } from "../IconCCI";
 import { Button } from "./Button";
 
@@ -22,6 +23,7 @@ export const NavBar = () => {
 
   const matchRoute = useMatchRoute();
   const { isAuthenticated, user } = useAuth();
+  const queryClient = useQueryClient();
 
   const defaultNavItems = [
     { label: "Solicita tu crédito", href: "/credit" },
@@ -77,10 +79,12 @@ export const NavBar = () => {
   const handleLogout = async () => {
     try {
       await authClient.signOut();
-      setIsMobileMenuOpen(false);
-      globalThis.location.href = "/login";
     } catch (error) {
       console.error("Error during logout:", error);
+    } finally {
+      queryClient.setQueryData(["auth", "session"], null);
+      queryClient.removeQueries({ queryKey: ["auth", "session"] });
+      setIsMobileMenuOpen(false);
       globalThis.location.href = "/login";
     }
   };

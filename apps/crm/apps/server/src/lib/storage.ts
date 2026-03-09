@@ -1,9 +1,12 @@
 import {
 	DeleteObjectCommand,
 	GetObjectCommand,
+	HeadObjectCommand,
+	type HeadObjectCommandOutput,
 	PutObjectCommand,
 	S3Client,
 } from "@aws-sdk/client-s3";
+import { ORPCError } from "@orpc/server";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 // Configuración de Cloudflare R2
@@ -98,6 +101,57 @@ async function getCachedSignedUrl(
 	return url;
 }
 
+// =============================================================================
+// PRESIGNED UPLOAD URLs
+// =============================================================================
+
+const PRESIGNED_UPLOAD_EXPIRY = 600; // 10 minutes
+
+export const UPLOAD_RESOURCE_TYPES = [
+	"opportunity_document",
+	"vehicle_document",
+	"notification_document",
+	"legal_contract_pdf",
+	"bank_statement",
+] as const;
+
+export type UploadResourceType = (typeof UPLOAD_RESOURCE_TYPES)[number];
+
+/**
+ * Generate a presigned PUT URL so the client can upload directly to R2.
+ */
+export async function generatePresignedUploadUrl(
+	key: string,
+	contentType: string,
+	expiresIn = PRESIGNED_UPLOAD_EXPIRY,
+): Promise<string> {
+	const command = new PutObjectCommand({
+		Bucket: R2_BUCKET_NAME,
+		Key: key,
+		ContentType: contentType,
+	});
+
+	return getSignedUrl(r2Client, command, { expiresIn });
+}
+
+export function buildUploadPrefix(
+	resourceType: UploadResourceType,
+	resourceId: string,
+): string {
+	switch (resourceType) {
+		case "opportunity_document":
+			return `opportunities/${resourceId}`;
+		case "vehicle_document":
+			return `vehicles/${resourceId}`;
+		case "notification_document":
+			return `notifications/${resourceId}`;
+		case "legal_contract_pdf":
+			return `legal-contracts/${resourceId}`;
+		case "bank_statement":
+			return `bank-statements/${resourceId}`;
+	}
+}
+
 // Generar un nombre único para el archivo
 export function generateUniqueFilename(originalName: string): string {
 	const timestamp = Date.now();
@@ -108,6 +162,120 @@ export function generateUniqueFilename(originalName: string): string {
 	const sanitizedBaseName = baseName.replace(/[^a-zA-Z0-9-_]/g, "_");
 
 	return `${timestamp}-${randomString}-${sanitizedBaseName}.${extension}`;
+}
+
+export interface UploadFileLike {
+	name: string;
+	type?: string;
+	size?: number;
+}
+
+export interface R2ObjectMetadata {
+	size: number;
+	contentType?: string;
+}
+
+export async function getR2ObjectMetadata(key: string): Promise<R2ObjectMetadata> {
+	try {
+		const command = new HeadObjectCommand({
+			Bucket: R2_BUCKET_NAME,
+			Key: key,
+		});
+		const response: HeadObjectCommandOutput = await r2Client.send(command);
+		return {
+			size: response.ContentLength ?? 0,
+			contentType: response.ContentType,
+		};
+	} catch {
+		throw new ORPCError("BAD_REQUEST", {
+			message: "El archivo no existe en almacenamiento.",
+		});
+	}
+}
+
+export function assertUploadKeyMatchesPrefix(
+	key: string,
+	expectedPrefix: string,
+): void {
+	if (!key.startsWith(`${expectedPrefix}/`)) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: "El archivo no pertenece al recurso esperado.",
+		});
+	}
+}
+
+export function resolveMimeType(file: UploadFileLike): string {
+	if (file.type && ALLOWED_DOCUMENT_TYPES.includes(file.type)) {
+		return file.type;
+	}
+	const extension = file.name.split(".").pop()?.toLowerCase();
+	if (extension && EXTENSION_TO_MIME[extension]) {
+		return EXTENSION_TO_MIME[extension];
+	}
+	return file.type || "";
+}
+
+export function validateResolvedMimeType(
+	file: UploadFileLike,
+): { valid: boolean; mimeType?: string; error?: string } {
+	const mimeType = resolveMimeType(file);
+
+	if (!ALLOWED_DOCUMENT_TYPES.includes(mimeType)) {
+		return {
+			valid: false,
+			error:
+				"Tipo de archivo no permitido. Solo se permiten PDF, imágenes (JPEG, PNG, WebP, AVIF), documentos Word y Excel.",
+		};
+	}
+
+	return { valid: true, mimeType };
+}
+
+export async function verifyUploadedDocumentInR2(params: {
+	key: string;
+	expectedPrefix: string;
+	filename: string;
+	mimeType?: string;
+	maxSizeBytes?: number;
+}): Promise<{ key: string; filename: string; size: number; mimeType: string }> {
+	assertUploadKeyMatchesPrefix(params.key, params.expectedPrefix);
+
+	const metadata = await getR2ObjectMetadata(params.key);
+	const resolved = validateResolvedMimeType({
+		name: params.filename,
+		type: metadata.contentType || params.mimeType,
+	});
+
+	if (!resolved.valid || !resolved.mimeType) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: resolved.error || "Tipo de archivo no permitido.",
+		});
+	}
+
+	const maxSizeBytes = params.maxSizeBytes ?? MAX_FILE_SIZE;
+	if (metadata.size > maxSizeBytes) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: `El archivo es demasiado grande. El tamaño máximo permitido es ${Math.round(maxSizeBytes / (1024 * 1024))}MB.`,
+		});
+	}
+
+	return {
+		key: params.key,
+		filename: params.filename,
+		size: metadata.size,
+		mimeType: resolved.mimeType,
+	};
+}
+
+// Descargar archivo de R2 como Buffer (para enviar a AI)
+export async function getFileBuffer(key: string): Promise<Buffer> {
+	const command = new GetObjectCommand({
+		Bucket: R2_BUCKET_NAME,
+		Key: key,
+	});
+	const response = await r2Client.send(command);
+	const arrayBuffer = await response.Body!.transformToByteArray();
+	return Buffer.from(arrayBuffer);
 }
 
 // Subir archivo a R2 (para oportunidades)
@@ -301,26 +469,14 @@ const EXTENSION_TO_MIME: Record<string, string> = {
 };
 
 // Resolver MIME type desde extensión como fallback
-export function resolveMimeType(file: File): string {
-	if (file.type && ALLOWED_DOCUMENT_TYPES.includes(file.type)) {
-		return file.type;
-	}
-	const extension = file.name.split(".").pop()?.toLowerCase();
-	if (extension && EXTENSION_TO_MIME[extension]) {
-		return EXTENSION_TO_MIME[extension];
-	}
-	return file.type || "";
-}
-
 // Validar archivo
 export function validateFile(file: File): { valid: boolean; error?: string } {
-	const mimeType = resolveMimeType(file);
+	const resolved = validateResolvedMimeType(file);
 
-	if (!ALLOWED_DOCUMENT_TYPES.includes(mimeType)) {
+	if (!resolved.valid) {
 		return {
 			valid: false,
-			error:
-				"Tipo de archivo no permitido. Solo se permiten PDF, imágenes (JPEG, PNG, WebP, AVIF), documentos Word y Excel.",
+			error: resolved.error,
 		};
 	}
 

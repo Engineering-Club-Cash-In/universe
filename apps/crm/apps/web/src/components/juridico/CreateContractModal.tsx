@@ -20,6 +20,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import { client, orpc } from "@/utils/orpc";
 
 const CONTRACT_TYPES = [
@@ -177,7 +178,7 @@ export function CreateContractModal({
 				name: string;
 				type: string;
 				size: number;
-				data: string;
+				key: string;
 			};
 		}) => {
 			if (values.id) {
@@ -259,7 +260,10 @@ export function CreateContractModal({
 				toast.error("El archivo debe ser menor a 10MB");
 				return;
 			}
-			if (file.type !== "application/pdf") {
+			if (
+				file.type !== "application/pdf" &&
+				!file.name.toLowerCase().endsWith(".pdf")
+			) {
 				toast.error("Solo se permiten archivos PDF");
 				return;
 			}
@@ -286,25 +290,18 @@ export function CreateContractModal({
 
 		// Preparar archivo PDF si existe
 		let pdfFileData:
-			| { name: string; type: string; size: number; data: string }
+			| { name: string; type: string; size: number; key: string }
 			| undefined;
 		if (selectedPdfFile) {
-			const base64 = await new Promise<string>((resolve, reject) => {
-				const reader = new FileReader();
-				reader.onloadend = () => {
-					const result = reader.result as string;
-					const base64Data = result.split(",")[1];
-					resolve(base64Data);
-				};
-				reader.onerror = reject;
-				reader.readAsDataURL(selectedPdfFile);
+			const { key } = await uploadFileToR2WithRetry(selectedPdfFile, {
+				resourceType: "legal_contract_pdf",
+				resourceId: formData.opportunityId || leadId,
 			});
-
 			pdfFileData = {
 				name: selectedPdfFile.name,
 				type: selectedPdfFile.type,
 				size: selectedPdfFile.size,
-				data: base64,
+				key,
 			};
 		}
 

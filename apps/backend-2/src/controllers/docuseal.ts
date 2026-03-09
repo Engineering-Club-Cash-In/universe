@@ -254,9 +254,13 @@ export async function getDocumentsByDpiController(
     };
   } catch (error: any) {
     console.error("[ERROR] getDocumentsByDpiController:", error);
+
+    const isRenapError = error.message?.includes("RENAP");
     return {
       success: false,
-      message: "Internal server error while fetching documents by DPI",
+      message: isRenapError
+        ? `No se pudo validar el DPI en RENAP. Verifique que el número de DPI sea correcto.`
+        : "Error interno al obtener documentos por DPI",
       error: error.message,
     };
   }

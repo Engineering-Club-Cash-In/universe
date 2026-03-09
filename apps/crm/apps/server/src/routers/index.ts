@@ -21,6 +21,7 @@ import { quotationsRouter } from "./quotations";
 import { reportesCarteraRouter } from "./reportes-cartera";
 import * as reportsRouter from "./reports";
 import { vehiclesRouter } from "./vehicles";
+import { uploadRouter } from "./upload";
 import { vendorsRouter } from "./vendors";
 export const appRouter = {
 	healthCheck: publicProcedure.handler(() => {
@@ -305,6 +306,9 @@ export const disbursementRouter = {
 		notificationsRouter.getDisbursementForOpportunity,
 	deleteNotificationDocument: notificationsRouter.deleteNotificationDocument,
 	notifyDisbursementCompleted: notificationsRouter.notifyDisbursementCompleted,
+
+	// Upload (presigned URLs) — placed here to avoid TS7056 in appRouter
+	getUploadPresignedUrl: uploadRouter.getUploadPresignedUrl,
 };
 
 export type AppRouter = typeof appRouter;

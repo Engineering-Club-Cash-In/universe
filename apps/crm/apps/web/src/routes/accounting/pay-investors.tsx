@@ -5,6 +5,7 @@ import {
 	ChevronLeft,
 	ChevronRight,
 	CreditCard,
+	Download,
 	Eye,
 	FileCheck,
 	Loader2,
@@ -429,6 +430,32 @@ function PagarInversionistas() {
 
 	const [search, setSearch] = useState("");
 	const [page, setPage] = useState(1);
+	const [downloadingExcel, setDownloadingExcel] = useState(false);
+
+	const handleDownloadExcel = async () => {
+		setDownloadingExcel(true);
+		try {
+			const serverUrl = import.meta.env.VITE_SERVER_URL;
+			const res = await fetch(
+				`${serverUrl}/api/accounting/resumen-global-excel`,
+				{ credentials: "include" },
+			);
+			if (!res.ok) {
+				const err = await res.json();
+				throw new Error(err.error || "Error al descargar");
+			}
+			const data = await res.json();
+			if (!data.success || !data.url) {
+				throw new Error("No se pudo generar el Excel");
+			}
+			window.open(data.url, "_blank");
+			toast.success("Excel descargado correctamente");
+		} catch (err: any) {
+			toast.error(err.message || "Error al descargar Excel");
+		} finally {
+			setDownloadingExcel(false);
+		}
+	};
 
 	const { data, isLoading, error } = useQuery({
 		...orpc.getResumenGlobalInversionistas.queryOptions(),
@@ -507,13 +534,29 @@ function PagarInversionistas() {
 	return (
 		<div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6">
 			{/* Header */}
-			<div>
-				<h1 className="font-bold text-2xl tracking-tight">
-					Pagar Inversionistas
-				</h1>
-				<p className="text-muted-foreground text-sm">
-					Resumen global de pagos pendientes
-				</p>
+			<div className="flex items-center justify-between">
+				<div>
+					<h1 className="font-bold text-2xl tracking-tight">
+						Pagar Inversionistas
+					</h1>
+					<p className="text-muted-foreground text-sm">
+						Resumen global de pagos pendientes
+					</p>
+				</div>
+				<Button
+					variant="outline"
+					size="sm"
+					className="gap-2"
+					disabled={downloadingExcel}
+					onClick={handleDownloadExcel}
+				>
+					{downloadingExcel ? (
+						<Loader2 className="h-4 w-4 animate-spin" />
+					) : (
+						<Download className="h-4 w-4" />
+					)}
+					Exportar Excel
+				</Button>
 			</div>
 
 			{/* Stats */}

@@ -68,6 +68,8 @@ export interface InversionistaReporte {
   banco: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;
+  moneda: string;
+  currencySymbol: string;
   creditos: CreditoData[];
   subtotal: Subtotal;
 }

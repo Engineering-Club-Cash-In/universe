@@ -6,7 +6,11 @@ import {
   Loading,
   ModalChatBot,
 } from "@/components";
-import { getInvestmentsStats, getLiquidaciones, getHistorialReporte } from "../services";
+import {
+  getInvestmentsStats,
+  getLiquidaciones,
+  getHistorialReporte,
+} from "../services";
 import { useQuery } from "@tanstack/react-query";
 import { useModalOptionsCall } from "@/hooks";
 import { ContainerMenu } from "../components/ContainerMenu";
@@ -15,9 +19,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/lib";
 
 export const MyInvestments = () => {
-  const {user} = useAuth();
+  const { user } = useAuth();
   const [expandedLiquidacion, setExpandedLiquidacion] = useState<number | null>(
-    null
+    null,
   );
   const [currentPage, setCurrentPage] = useState(1);
   const perPage = 10;
@@ -42,7 +46,12 @@ export const MyInvestments = () => {
   } = useQuery({
     queryKey: ["liquidaciones", user?.id, currentPage, perPage],
     queryFn: () =>
-      getLiquidaciones(user?.dpi || "", user?.email || "", currentPage, perPage),
+      getLiquidaciones(
+        user?.dpi || "",
+        user?.email || "",
+        currentPage,
+        perPage,
+      ),
     enabled: !!user?.id,
   });
 
@@ -262,7 +271,6 @@ export const MyInvestments = () => {
 
           {/* Lista de Liquidaciones */}
           <div>
-
             {fetchingLiquidaciones ? (
               <div className="py-12">
                 <Loading />
@@ -302,7 +310,7 @@ export const MyInvestments = () => {
                         {/* Cuota - dato principal */}
                         <div className="md:text-right">
                           <span className="text-sm text-white/50 block mb-1">
-                            Total Cuota
+                            Total Pago
                           </span>
                           <span className="text-2xl lg:text-3xl font-bold text-primary tabular-nums">
                             {formatCurrency(liquidacion.totales.total_cuota)}
@@ -314,7 +322,7 @@ export const MyInvestments = () => {
                       <div className="grid grid-cols-2 md:grid-cols-5 gap-x-6 gap-y-4 mb-6">
                         <div>
                           <span className="text-sm text-white/50 block mb-1">
-                            Capital
+                            Amortización Capital
                           </span>
                           <span className="text-base lg:text-lg text-white/90 tabular-nums">
                             {formatCurrency(liquidacion.totales.total_capital)}
@@ -367,25 +375,37 @@ export const MyInvestments = () => {
                               </h4>
                               <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                  <span className="text-xs text-white/40 block mb-1">Monto</span>
+                                  <span className="text-xs text-white/40 block mb-1">
+                                    Monto
+                                  </span>
                                   <span className="text-base text-white/90 tabular-nums">
-                                    {formatCurrency(Math.abs(liquidacion.boleta.monto_boleta))}
+                                    {formatCurrency(
+                                      Math.abs(liquidacion.boleta.monto_boleta),
+                                    )}
                                   </span>
                                 </div>
                                 <div>
-                                  <span className="text-xs text-white/40 block mb-1">Estado</span>
-                                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                                    liquidacion.boleta.estado === "PROCESADO"
-                                      ? "text-green-400 bg-green-500/10"
-                                      : "text-yellow-400 bg-yellow-500/10"
-                                  }`}>
+                                  <span className="text-xs text-white/40 block mb-1">
+                                    Estado
+                                  </span>
+                                  <span
+                                    className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                                      liquidacion.boleta.estado === "PROCESADO"
+                                        ? "text-green-400 bg-green-500/10"
+                                        : "text-yellow-400 bg-yellow-500/10"
+                                    }`}
+                                  >
                                     {liquidacion.boleta.estado}
                                   </span>
                                 </div>
                                 <div>
-                                  <span className="text-xs text-white/40 block mb-1">Fecha de subida</span>
+                                  <span className="text-xs text-white/40 block mb-1">
+                                    Fecha de subida
+                                  </span>
                                   <span className="text-sm text-white/70">
-                                    {formatShortDate(liquidacion.boleta.fecha_subida)}
+                                    {formatShortDate(
+                                      liquidacion.boleta.fecha_subida,
+                                    )}
                                   </span>
                                 </div>
                               </div>
@@ -423,9 +443,13 @@ export const MyInvestments = () => {
                                   </span>
                                 </div>*/}
                                 <div className="col-span-2">
-                                  <span className="text-xs text-white/40 block mb-1">Total Reinvertido</span>
+                                  <span className="text-xs text-white/40 block mb-1">
+                                    Total Reinvertido
+                                  </span>
                                   <span className="text-lg lg:text-xl font-semibold text-white tabular-nums">
-                                    {formatCurrency(liquidacion.reinversion.reinversion_total)}
+                                    {formatCurrency(
+                                      liquidacion.reinversion.reinversion_total,
+                                    )}
                                   </span>
                                 </div>
                               </div>
@@ -498,107 +522,145 @@ export const MyInvestments = () => {
                             </h4>
                             <div className="space-y-3">
                               {liquidacion.pagos
-                                .slice((pagosPage - 1) * pagosPerPage, pagosPage * pagosPerPage)
+                                .slice(
+                                  (pagosPage - 1) * pagosPerPage,
+                                  pagosPage * pagosPerPage,
+                                )
                                 .map((pago) => (
-                                <div
-                                  key={pago.pago_id}
-                                  className="bg-white/5 rounded-xl p-5 border border-white/10"
-                                >
-                                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
-                                    <div className="min-w-0">
-                                      <p className="text-base lg:text-lg font-semibold text-white truncate">
-                                        {pago.nombre_cliente}
-                                      </p>
-                                      <p className="text-sm text-white/50">
-                                        Crédito: {pago.numero_credito_sifco} &middot; {formatShortDate(pago.fecha_pago)}
-                                      </p>
+                                  <div
+                                    key={pago.pago_id}
+                                    className="bg-white/5 rounded-xl p-5 border border-white/10"
+                                  >
+                                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+                                      <div className="min-w-0">
+                                        <p className="text-base lg:text-lg font-semibold text-white truncate">
+                                          {pago.nombre_cliente}
+                                        </p>
+                                        <p className="text-sm text-white/50">
+                                          Crédito: {pago.numero_credito_sifco}{" "}
+                                          &middot;{" "}
+                                          {formatShortDate(pago.fecha_pago)}
+                                        </p>
+                                      </div>
+                                      <div className="flex items-center gap-2 shrink-0">
+                                        <span className="text-sm text-white/50">
+                                          Pago:
+                                        </span>
+                                        <span className="text-xl lg:text-2xl text-primary font-bold tabular-nums">
+                                          {formatCurrency(pago.cuota)}
+                                        </span>
+                                      </div>
                                     </div>
-                                    <div className="flex items-center gap-2 shrink-0">
-                                      <span className="text-sm text-white/50">Cuota:</span>
-                                      <span className="text-xl lg:text-2xl text-primary font-bold tabular-nums">
-                                        {formatCurrency(pago.cuota)}
-                                      </span>
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                      <div>
+                                        <span className="text-xs text-white/40 block mb-1">
+                                          Tasa Interés + IVA
+                                        </span>
+                                        <span className="text-base text-white/80 tabular-nums">
+                                          {pago.tasa_interes ?? "0"}%
+                                        </span>
+                                      </div>
+                                      <div>
+                                        <span className="text-xs text-white/40 block mb-1">
+                                          Participación
+                                        </span>
+                                        <span className="text-base text-white/80 tabular-nums">
+                                          {pago.porcentaje_participacion ?? "0"}
+                                          %
+                                        </span>
+                                      </div>
+                                      <div>
+                                        <span className="text-xs text-white/40 block mb-1">
+                                          % Tasa Interés Inversionista + IVA
+                                        </span>
+                                        <span className="text-base text-white/80 tabular-nums">
+                                          {pago.porcentaje_tasa_interes ?? "0"}%
+                                        </span>
+                                      </div>
+
+                                      <div>
+                                        <span className="text-xs text-white/40 block mb-1">
+                                          Amortización Capital
+                                        </span>
+                                        <span className="text-base text-white/80 tabular-nums">
+                                          {formatCurrency(pago.abono_capital)}
+                                        </span>
+                                      </div>
+                                      <div>
+                                        <span className="text-xs text-white/40 block mb-1">
+                                          Interés
+                                        </span>
+                                        <span className="text-base text-green-400 tabular-nums">
+                                          {formatCurrency(pago.abono_interes)}
+                                        </span>
+                                      </div>
+                                      <div>
+                                        <span className="text-xs text-white/40 block mb-1">
+                                          IVA
+                                        </span>
+                                        <span className="text-base text-white/70 tabular-nums">
+                                          {formatCurrency(pago.abono_iva)}
+                                        </span>
+                                      </div>
                                     </div>
                                   </div>
-                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                    <div>
-                                      <span className="text-xs text-white/40 block mb-1">
-                                        Capital
-                                      </span>
-                                      <span className="text-base text-white/80 tabular-nums">
-                                        {formatCurrency(pago.abono_capital)}
-                                      </span>
-                                    </div>
-                                    <div>
-                                      <span className="text-xs text-white/40 block mb-1">
-                                        Interés
-                                      </span>
-                                      <span className="text-base text-green-400 tabular-nums">
-                                        {formatCurrency(pago.abono_interes)}
-                                      </span>
-                                    </div>
-                                    <div>
-                                      <span className="text-xs text-white/40 block mb-1">
-                                        IVA
-                                      </span>
-                                      <span className="text-base text-white/70 tabular-nums">
-                                        {formatCurrency(pago.abono_iva)}
-                                      </span>
-                                    </div>
-                                    <div>
-                                      <span className="text-xs text-white/40 block mb-1">
-                                        Participación
-                                      </span>
-                                      <span className="text-base text-white/80 tabular-nums">
-                                        {pago.porcentaje_participacion
-                                          ? pago?.porcentaje_participacion
-                                          : "0"}
-                                        %
-                                      </span>
-                                    </div>
-                                  </div>
-                                </div>
-                              ))}
+                                ))}
                             </div>
 
                             {/* Paginación de pagos (client-side, 25 por página) */}
-                            {liquidacion.pagos.length > pagosPerPage && (() => {
-                              const pagosTotalPages = Math.ceil(liquidacion.pagos.length / pagosPerPage);
-                              return (
-                                <div className="flex items-center justify-between mt-5 pt-4 border-t border-white/10">
-                                  <p className="text-sm text-white/50">
-                                    Mostrando {Math.min(pagosPage * pagosPerPage, liquidacion.pagos.length)} de {liquidacion.pagos.length} pagos
-                                  </p>
-                                  <div className="flex items-center gap-3">
-                                    <button
-                                      onClick={() => setPagosPage((p) => Math.max(1, p - 1))}
-                                      disabled={pagosPage === 1}
-                                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-[background-color,color] focus-visible:ring-2 focus-visible:ring-primary ${
-                                        pagosPage === 1
-                                          ? "bg-white/5 text-white/30 cursor-not-allowed"
-                                          : "bg-white/10 text-white hover:bg-white/20"
-                                      }`}
-                                    >
-                                      Anterior
-                                    </button>
-                                    <span className="text-sm text-white/60 tabular-nums">
-                                      {pagosPage} / {pagosTotalPages}
-                                    </span>
-                                    <button
-                                      onClick={() => setPagosPage((p) => Math.min(pagosTotalPages, p + 1))}
-                                      disabled={pagosPage === pagosTotalPages}
-                                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-[background-color,color] focus-visible:ring-2 focus-visible:ring-primary ${
-                                        pagosPage === pagosTotalPages
-                                          ? "bg-white/5 text-white/30 cursor-not-allowed"
-                                          : "bg-white/10 text-white hover:bg-white/20"
-                                      }`}
-                                    >
-                                      Siguiente
-                                    </button>
+                            {liquidacion.pagos.length > pagosPerPage &&
+                              (() => {
+                                const pagosTotalPages = Math.ceil(
+                                  liquidacion.pagos.length / pagosPerPage,
+                                );
+                                return (
+                                  <div className="flex items-center justify-between mt-5 pt-4 border-t border-white/10">
+                                    <p className="text-sm text-white/50">
+                                      Mostrando{" "}
+                                      {Math.min(
+                                        pagosPage * pagosPerPage,
+                                        liquidacion.pagos.length,
+                                      )}{" "}
+                                      de {liquidacion.pagos.length} pagos
+                                    </p>
+                                    <div className="flex items-center gap-3">
+                                      <button
+                                        onClick={() =>
+                                          setPagosPage((p) =>
+                                            Math.max(1, p - 1),
+                                          )
+                                        }
+                                        disabled={pagosPage === 1}
+                                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-[background-color,color] focus-visible:ring-2 focus-visible:ring-primary ${
+                                          pagosPage === 1
+                                            ? "bg-white/5 text-white/30 cursor-not-allowed"
+                                            : "bg-white/10 text-white hover:bg-white/20"
+                                        }`}
+                                      >
+                                        Anterior
+                                      </button>
+                                      <span className="text-sm text-white/60 tabular-nums">
+                                        {pagosPage} / {pagosTotalPages}
+                                      </span>
+                                      <button
+                                        onClick={() =>
+                                          setPagosPage((p) =>
+                                            Math.min(pagosTotalPages, p + 1),
+                                          )
+                                        }
+                                        disabled={pagosPage === pagosTotalPages}
+                                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-[background-color,color] focus-visible:ring-2 focus-visible:ring-primary ${
+                                          pagosPage === pagosTotalPages
+                                            ? "bg-white/5 text-white/30 cursor-not-allowed"
+                                            : "bg-white/10 text-white hover:bg-white/20"
+                                        }`}
+                                      >
+                                        Siguiente
+                                      </button>
+                                    </div>
                                   </div>
-                                </div>
-                              );
-                            })()}
+                                );
+                              })()}
                           </div>
                         </motion.div>
                       )}

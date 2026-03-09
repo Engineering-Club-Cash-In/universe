@@ -2547,29 +2547,31 @@ export function generarHTMLReporte(
   } = inversionista;
   const fechaHoy = dayjs().format("DD [de] MMMM YYYY");
 
+  // Moneda dinámica
+  const esDolares = inversionista.moneda === "dolares";
+  const sym = esDolares ? "$" : "Q";
+  const currCode = esDolares ? "USD" : "GTQ";
+  const locale = esDolares ? "en-US" : "es-GT";
+
+  const fmt = (val: number | string | null | undefined) => {
+    const n = Number(val || 0);
+    return `${sym}${n.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+
   // Totales formateados
-  const capitalActivo = creditosData
-    .reduce((s, c) => s + parseFloat(c.monto_aportado || "0"), 0)
-    .toLocaleString("es-GT", { style: "currency", currency: "GTQ" });
+  const capitalActivo = fmt(
+    creditosData.reduce((s, c) => s + parseFloat(c.monto_aportado || "0"), 0)
+  );
   const abonoCapital = subtotal.total_abono_capital
-    ? subtotal.total_abono_capital.toLocaleString("es-GT", {
-        style: "currency",
-        currency: "GTQ",
-      })
+    ? fmt(subtotal.total_abono_capital)
     : "";
 
   const abonoInteres = subtotal.total_abono_interes
-    ? subtotal.total_abono_interes.toLocaleString("es-GT", {
-        style: "currency",
-        currency: "GTQ",
-      })
+    ? fmt(subtotal.total_abono_interes)
     : "";
 
   const granTotal = subtotal.total_cuota_con_reinversion
-    ? subtotal.total_cuota_con_reinversion.toLocaleString("es-GT", {
-        style: "currency",
-        currency: "GTQ",
-      })
+    ? fmt(subtotal.total_cuota_con_reinversion)
     : "";
 
   return `
@@ -2772,33 +2774,18 @@ export function generarHTMLReporte(
                                   <td>${pago.cuota ?? c.meses_en_credito ?? ""}</td>
                                   <td>${c.nombre_usuario ?? ""}</td>
                           <td>
-                  Q${Big(c.monto_aportado || 0)
-                    .add(Big(pago.abono_capital || 0))
-                    .toFixed(2)
-                    .replace(/\B(?=(\d{3})+(?!\d))/g, ",")}
+                  ${fmt(Big(c.monto_aportado || 0).add(Big(pago.abono_capital || 0)).toFixed(2))}
                 </td>
                                   <td>${c.porcentaje_interes ?? ""} %</td>
                                   <td>${pago.porcentaje_inversor ?? ""} %</td>
                   <td>${Big(pago.tasaInteresInvesor || 0).div(100).toFixed(2)} %</td>
-                  <td>Q${Number(pago.abono_interes ?? 0).toLocaleString(
-                    "es-GT",
-                    { minimumFractionDigits: 2 }
-                  )}</td>
-                  <td>Q${Number(pago.abono_iva ?? 0).toLocaleString("es-GT", {
-                    minimumFractionDigits: 2,
-                  })}</td>
-                  <td>Q${Number(pago.isr ?? 0).toLocaleString("es-GT", {
-                    minimumFractionDigits: 2,
-                  })}</td>
-                  <td>Q${Number(pago.abono_capital ?? 0).toLocaleString(
-                    "es-GT",
-                    { minimumFractionDigits: 2 }
-                  )}</td>
-                  <td>Q${Number(pago.abonoGeneralInteres ?? 0).toLocaleString(
-                    "es-GT"
-                  )}</td>
+                  <td>${fmt(pago.abono_interes)}</td>
+                  <td>${fmt(pago.abono_iva)}</td>
+                  <td>${fmt(pago.isr)}</td>
+                  <td>${fmt(pago.abono_capital)}</td>
+                  <td>${fmt(pago.abonoGeneralInteres)}</td>
                               <td>
-                  Q${Big(c.monto_aportado || 0)}
+                  ${fmt(c.monto_aportado)}
                 </td>
         <td>${pago.mes || "-"}${pago.cuota ? ` (Cuota #${pago.cuota})` : ""}</td>
                   <td>${c.plazo ?? ""}</td>
@@ -2813,37 +2800,16 @@ export function generarHTMLReporte(
           <tr class="total">
             <td>Total</td>
             <td></td>
-            <td>${
-              (Number(subtotal.total_monto_aportado || 0) + Number(subtotal.total_abono_capital || 0))
-                .toLocaleString("es-GT", { style: "currency", currency: "GTQ" })
-            }</td>
+            <td>${fmt(Number(subtotal.total_monto_aportado || 0) + Number(subtotal.total_abono_capital || 0))}</td>
             <td></td>
             <td></td>
             <td></td>
-            <td>${
-              ""
-            }</td>
-            <td>${
-              ""
-            }</td>
-            <td>${
-               ""
-            }</td>
-            <td>${
-              subtotal.total_abono_capital
-                ? Number(subtotal.total_abono_capital).toLocaleString("es-GT", { style: "currency", currency: "GTQ" })
-                : ""
-            }</td>
-            <td>${
-              subtotal.total_abono_general_interes
-                ? Number(subtotal.total_abono_general_interes).toLocaleString("es-GT", { style: "currency", currency: "GTQ" })
-                : ""
-            }</td>
-            <td>${
-              subtotal.total_monto_aportado
-                ? Number(subtotal.total_monto_aportado).toLocaleString("es-GT", { style: "currency", currency: "GTQ" })
-                : ""
-            }</td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td>${subtotal.total_abono_capital ? fmt(subtotal.total_abono_capital) : ""}</td>
+            <td>${subtotal.total_abono_general_interes ? fmt(subtotal.total_abono_general_interes) : ""}</td>
+            <td>${subtotal.total_monto_aportado ? fmt(subtotal.total_monto_aportado) : ""}</td>
             <td></td>
             <td></td>
             <td></td>
@@ -2854,19 +2820,19 @@ export function generarHTMLReporte(
     <div style="display:flex;gap:80px;margin:28px 50px 0 50px;">
       <div style="text-align:center;min-width:220px;">
         <div style="font-size:2.2rem;font-weight:bold;color:#1d293b;">
-          ${Number(subtotal.total_reinversion_capital ?? 0).toLocaleString("es-GT", { style: "currency", currency: "GTQ" })}
+          ${fmt(subtotal.total_reinversion_capital)}
         </div>
         <div style="color:#8c98b5;font-size:1.15rem;margin-top:4px;">Reinversión Capital</div>
       </div>
       <div style="text-align:center;min-width:220px;">
         <div style="font-size:2.2rem;font-weight:bold;color:#1d293b;">
-          ${Number(subtotal.total_reinversion_interes ?? 0).toLocaleString("es-GT", { style: "currency", currency: "GTQ" })}
+          ${fmt(subtotal.total_reinversion_interes)}
         </div>
         <div style="color:#8c98b5;font-size:1.15rem;margin-top:4px;">Reinversión Interés</div>
       </div>
       <div style="text-align:center;min-width:220px;">
         <div style="font-size:2.2rem;font-weight:bold;color:#215da8;">
-          ${Number(subtotal.total_reinversion ?? 0).toLocaleString("es-GT", { style: "currency", currency: "GTQ" })}
+          ${fmt(subtotal.total_reinversion)}
         </div>
         <div style="color:#8c98b5;font-size:1.15rem;margin-top:4px;">Total Reinversión</div>
       </div>
@@ -3638,6 +3604,7 @@ export async function getLiquidaciones({
           numero_credito_sifco: creditos.numero_credito_sifco,
           nombre_cliente: usuarios.nombre,
           nit_cliente: usuarios.nit,
+          porcentaje_interes_credito: creditos.porcentaje_interes,
         })
         .from(pagos_credito_inversionistas_espejo)
         .leftJoin(
@@ -3663,6 +3630,8 @@ export async function getLiquidaciones({
 
         return {
           ...pago,
+          porcentaje_tasa_interes: Number(new Big(pago.porcentaje_interes_credito ?? 1.5).times(new Big(pago.porcentaje_participacion ?? 80)).div(100)),
+          tasa_interes: Number(new Big(pago.porcentaje_interes_credito ?? 1.5)),
           abono_capital: Number(abono_capital),
           abono_interes: Number(abono_interes),
           abono_iva: Number(abono_iva),

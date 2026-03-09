@@ -705,7 +705,7 @@ export async function insertPagosCreditoInversionistasV2(
       : new Big(inv.porcentaje_participacion_inversionista ?? 0).div(100);
 
     // Distribuir abonos: primero por participación, luego por porcentaje general
-    const abonoCapitalInv = pagoAbonoCapital.times(porcentajeParticipacion).times(porcentajeGeneral);
+    const abonoCapitalInv = pagoAbonoCapital.times(porcentajeGeneral);
     const abonoInteresInv = pagoAbonoInteres.times(porcentajeParticipacion).times(porcentajeGeneral);
     const abonoIvaInv = pagoAbonoIva.times(porcentajeParticipacion).times(porcentajeGeneral);
 
@@ -1302,7 +1302,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     if (soloAplicados === false) whereClauses.push(`p.fecha_aplicado IS NULL`);
     if (fechaAplicado) {
       whereClauses.push(
-        `(p.fecha_aplicado AT TIME ZONE 'America/Guatemala')::date = '${fechaAplicado}'::date`
+        `(p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date = '${fechaAplicado}'::date`
       );
     }
 
@@ -1352,7 +1352,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         ce.numero_cuenta AS "cuentaEmpresaNumero",
 
         -- 📅 Fecha boleta en zona Guatemala
-        TO_CHAR(p.fecha_boleta::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD') AS "fechaBoleta",
+        TO_CHAR(p.fecha_boleta AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD') AS "fechaBoleta",
 
         -- 📅 Fecha en que se aplicó el pago (zona Guatemala)
         TO_CHAR(p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD HH24:MI:SS') AS "fechaAplicado",

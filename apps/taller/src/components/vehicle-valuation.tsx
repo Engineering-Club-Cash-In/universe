@@ -92,12 +92,18 @@ export default function VehicleValuation({
   isWizardMode = false,
   isSubmitting = false
 }: VehicleValuationProps) {
-  const { checklistItems, photos } = useInspection();
+  const { checklistItems, photos, setFormData } = useInspection();
   const [aiValuation, setAiValuation] = useState<AIValuationResult | null>(null);
   const [loadingAI, setLoadingAI] = useState(false);
   const [aiAttemptCount, setAiAttemptCount] = useState(0);
   const [aiFailed, setAiFailed] = useState(false);
   const [scannerFile, setScannerFile] = useState<File | null>(null);
+  const [uploadingScanner, setUploadingScanner] = useState(false);
+  const [scannerUploadUrl, setScannerUploadUrl] = useState<string | null>(null);
+  const [tempUploadId] = useState(() => {
+    const stableId = vehicleData?.vinNumber || vehicleData?.licensePlate || Date.now().toString();
+    return `scanner-${String(stableId).replace(/[^a-zA-Z0-9-_]/g, "_")}`;
+  });
 
 
 
@@ -129,11 +135,42 @@ export default function VehicleValuation({
       const file = e.target.files[0];
       if (file.type === "application/pdf") {
         setScannerFile(file);
+        setScannerUploadUrl(null);
         form.setValue("scannerResult", file);
       } else {
         alert("Por favor suba un archivo PDF");
       }
     }
+  };
+
+  const uploadScannerToServer = async (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("vehicleId", tempUploadId);
+    formData.append("category", "scanner");
+    formData.append("photoType", "scanner-report");
+    formData.append("title", "Reporte de scanner");
+    formData.append("description", "Reporte PDF del scanner");
+
+    const response = await fetch(`${import.meta.env.VITE_SERVER_URL || 'http://localhost:3000'}/api/upload-vehicle-photo`, {
+      method: "POST",
+      credentials: "include",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      let errorMessage = `Upload failed: ${response.statusText}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        // Keep generic error if response is not JSON
+      }
+      throw new Error(errorMessage);
+    }
+
+    const result = await response.json();
+    return result.data.url as string;
   };
 
   // AI valuation logic
@@ -206,8 +243,39 @@ export default function VehicleValuation({
     }
   };
 
-  const onSubmit = (values: ValuationFormValues) => {
-    onComplete(values, aiValuation || undefined);
+  const onSubmit = async (values: ValuationFormValues) => {
+    let scannerResultUrl: string | undefined;
+
+    if (values.scannerUsed === "Sí") {
+      const scannerDocument = values.scannerResult as File | undefined;
+
+      if (scannerDocument) {
+        try {
+          setUploadingScanner(true);
+          scannerResultUrl = scannerUploadUrl || await uploadScannerToServer(scannerDocument);
+          setScannerUploadUrl(scannerResultUrl);
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : "Error subiendo el PDF del scanner");
+          return;
+        } finally {
+          setUploadingScanner(false);
+        }
+      } else {
+        scannerResultUrl = scannerUploadUrl || undefined;
+      }
+    }
+
+    const submissionData = {
+      ...values,
+      scannerResultUrl,
+    };
+
+    setFormData((prev: any) => ({
+      ...prev,
+      ...submissionData,
+    }));
+
+    onComplete(submissionData, aiValuation || undefined);
   };
 
   return (
@@ -736,11 +804,11 @@ export default function VehicleValuation({
           </Card>
 
           {isWizardMode && (
-            <Button type="submit" className="w-full" disabled={isSubmitting}>
-              {isSubmitting ? (
+            <Button type="submit" className="w-full" disabled={isSubmitting || uploadingScanner}>
+              {(isSubmitting || uploadingScanner) ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Enviando inspección...
+                  {uploadingScanner ? "Subiendo scanner..." : "Enviando inspección..."}
                 </>
               ) : (
                 "Finalizar Inspección"

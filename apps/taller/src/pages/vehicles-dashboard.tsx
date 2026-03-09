@@ -332,7 +332,7 @@ const VehiclePhoto = ({ photo, index }: { photo: any; index: number }) => {
     );
   }
 
-  const comment = photo.valuatorComment || photo.description;
+  const comment = photo.valuatorComment?.trim();
 
   return (
     <div

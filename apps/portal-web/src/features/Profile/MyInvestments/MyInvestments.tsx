@@ -551,7 +551,7 @@ export const MyInvestments = () => {
                                         </span>
                                       </div>
                                     </div>
-                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
                                       <div>
                                         <span className="text-xs text-white/40 block mb-1">
                                           Tasa Interés + IVA

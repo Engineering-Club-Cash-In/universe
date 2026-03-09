@@ -705,6 +705,28 @@ app.post("/info/check-liveness", async (c) => {
 });
 // 🔥 ENDPOINT - Validar OTP con control de intentos
 
+// Obtener URL del Excel del resumen global de inversionistas
+app.get("/api/accounting/resumen-global-excel", async (c) => {
+	try {
+		const context = await createContext({ context: c });
+		if (!context.session?.user?.id) {
+			return c.json({ error: "No autorizado" }, 401);
+		}
+
+		const { carteraBackClient } = await import(
+			"./services/cartera-back-client"
+		);
+		const result = await carteraBackClient.getResumenGlobalExcel();
+		return c.json(result);
+	} catch (err: any) {
+		console.error("[ResumenGlobalExcel] Error:", err);
+		return c.json(
+			{ error: err.message || "Error al descargar Excel" },
+			500,
+		);
+	}
+});
+
 // Upload boleta de inversionista a cartera-back
 app.post("/api/accounting/upload-boleta", async (c) => {
 	try {

@@ -19,6 +19,8 @@ export interface LiquidacionPago {
   abono_interes: number;
   abono_iva: number;
   isr: number;
+  tasa_interes: number;
+  porcentaje_tasa_interes: number;
   porcentaje_participacion: number;
   fecha_pago: string;
   cuota: number;

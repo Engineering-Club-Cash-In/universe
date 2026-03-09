@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Sparkles, Loader2, TrendingUp } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -86,6 +86,25 @@ interface AIValuationResult {
   commercialClassificationReasoning?: string;
 }
 
+const MAX_AI_ATTEMPTS = 2;
+
+function isRetryableAIError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    error.name === "TimeoutError" ||
+    message.includes("timeout") ||
+    message.includes("timed out") ||
+    message.includes("network") ||
+    message.includes("fetch") ||
+    message.includes("conexi") ||
+    message.includes("abort")
+  );
+}
+
 export default function VehicleValuation({
   vehicleData,
   onComplete,
@@ -97,6 +116,7 @@ export default function VehicleValuation({
   const [loadingAI, setLoadingAI] = useState(false);
   const [aiAttemptCount, setAiAttemptCount] = useState(0);
   const [aiFailed, setAiFailed] = useState(false);
+  const [aiLoadingMessage, setAiLoadingMessage] = useState("Analizando vehículo...");
   const [scannerFile, setScannerFile] = useState<File | null>(null);
   const [uploadingScanner, setUploadingScanner] = useState(false);
   const [scannerUploadUrl, setScannerUploadUrl] = useState<string | null>(null);
@@ -173,10 +193,38 @@ export default function VehicleValuation({
     return result.data.url as string;
   };
 
+  useEffect(() => {
+    if (!loadingAI) {
+      setAiLoadingMessage("Analizando vehículo...");
+      return;
+    }
+
+    setAiLoadingMessage("Analizando vehículo...");
+
+    const timers = [
+      setTimeout(() => {
+        setAiLoadingMessage("Buscando referencias en internet...");
+      }, 8000),
+      setTimeout(() => {
+        setAiLoadingMessage("Comparando mercado y condición del vehículo...");
+      }, 18000),
+      setTimeout(() => {
+        setAiLoadingMessage("La valoración sigue procesándose. Puede tardar un poco más.");
+      }, 30000),
+    ];
+
+    return () => {
+      timers.forEach(clearTimeout);
+    };
+  }, [loadingAI]);
+
   // AI valuation logic
   const getAIValuation = async () => {
+    if (loadingAI || aiAttemptCount >= MAX_AI_ATTEMPTS) {
+      return;
+    }
+
     setLoadingAI(true);
-    setAiAttemptCount(prev => prev + 1);
     setAiFailed(false);
 
     const values = form.getValues();
@@ -236,7 +284,12 @@ export default function VehicleValuation({
       toast.success("Valoración por IA completada");
     } catch (error) {
       setAiFailed(true);
-      toast.error("Error al obtener valoración por IA. Complete manualmente.");
+      if (isRetryableAIError(error)) {
+        toast.error("La valoración tardó demasiado o falló la conexión. Puede reintentar sin consumir intento.");
+      } else {
+        setAiAttemptCount(prev => Math.min(prev + 1, MAX_AI_ATTEMPTS));
+        toast.error("Error al obtener valoración por IA. Complete manualmente.");
+      }
       console.error(error);
     } finally {
       setLoadingAI(false);
@@ -513,13 +566,13 @@ export default function VehicleValuation({
               <Button
                 type="button"
                 onClick={getAIValuation}
-                disabled={loadingAI || aiAttemptCount >= 2}
+                disabled={loadingAI || aiAttemptCount >= MAX_AI_ATTEMPTS}
                 className="w-full"
               >
                 {loadingAI ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Analizando vehículo...
+                    {aiLoadingMessage}
                   </>
                 ) : (
                   <>
@@ -528,7 +581,12 @@ export default function VehicleValuation({
                   </>
                 )}
               </Button>
-              {aiAttemptCount >= 2 && aiFailed && (
+              {loadingAI && (
+                <p className="text-xs text-muted-foreground text-center mt-2">
+                  La valoración con búsqueda en internet puede tardar varios segundos. No cierre esta pantalla mientras termina.
+                </p>
+              )}
+              {aiAttemptCount >= MAX_AI_ATTEMPTS && aiFailed && (
                 <p className="text-xs text-muted-foreground text-center mt-2">
                   Se alcanzó el límite de intentos. Complete la valoración manualmente.
                 </p>

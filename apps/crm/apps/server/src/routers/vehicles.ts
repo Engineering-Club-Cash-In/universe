@@ -954,6 +954,8 @@ export const vehiclesRouter = {
 							title: z.string(),
 							description: z.string().optional(),
 							url: z.string(),
+							valuatorComment: z.string().optional(),
+							noCommentsChecked: z.boolean().optional(),
 						}),
 					)
 					.optional(),

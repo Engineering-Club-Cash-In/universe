@@ -13,6 +13,7 @@ import { calculateCreditCapacity } from "../lib/financial-math";
 import { crmProcedure } from "../lib/orpc";
 import {
 	buildUploadPrefix,
+	deleteFileFromR2,
 	getFileBuffer,
 	verifyUploadedDocumentInR2,
 } from "../lib/storage";
@@ -47,10 +48,10 @@ export const bankAnalysisRouter = {
 					message: "Debe proporcionar leadId o coDebtorId",
 				}),
 		)
-			.handler(async ({ input, context }) => {
-				const isForLead = !!input.leadId;
-				const resourceId = input.leadId || input.coDebtorId!;
-				const expectedPrefix = buildUploadPrefix("bank_statement", resourceId);
+		.handler(async ({ input, context }) => {
+			const isForLead = !!input.leadId;
+			const resourceId = input.leadId || input.coDebtorId!;
+			const expectedPrefix = buildUploadPrefix("bank_statement", resourceId);
 
 			// 1. Verificar que el lead/co-deudor existe y el usuario tiene acceso
 			if (isForLead) {
@@ -88,217 +89,240 @@ export const bankAnalysisRouter = {
 				}
 			}
 
-			// 2. Validar archivos: descargar de R2 y verificar formato PDF
-			const downloadedFiles: { name: string; buffer: Buffer }[] = [];
-			for (const file of input.files) {
-				const uploadedFile = await verifyUploadedDocumentInR2({
-					key: file.key,
-					expectedPrefix,
-					filename: file.name,
-					mimeType: file.mimeType,
-					maxSizeBytes: MAX_FILE_SIZE_BYTES,
-				});
-				const buffer = await getFileBuffer(uploadedFile.key);
-
-				// Validate PDF magic bytes directly from buffer
-				if (buffer.length < 4 || buffer.subarray(0, 4).toString() !== "%PDF") {
-					throw new ORPCError("BAD_REQUEST", {
-						message: `El archivo "${file.name}" no es un PDF válido.`,
-					});
-				}
-
-				downloadedFiles.push({ name: file.name, buffer });
-			}
-
-			// 3. Incremento atómico del contador para evitar race conditions
-			const whereCondition = isForLead
-				? eq(creditAnalysis.leadId, input.leadId!)
-				: eq(creditAnalysis.coDebtorId, input.coDebtorId!);
-
-			const updateResult = await db
-				.update(creditAnalysis)
-				.set({
-					attemptCount: sql`${creditAnalysis.attemptCount} + 1`,
-					updatedAt: new Date(),
-				})
-				.where(
-					and(
-						whereCondition,
-						lt(creditAnalysis.attemptCount, MAX_AI_ATTEMPTS),
-						isNull(creditAnalysis.analyzedAt),
-					),
-				)
-				.returning({
-					id: creditAnalysis.id,
-					attemptCount: creditAnalysis.attemptCount,
-				});
-
-			let currentAttemptCount: number;
-
-			if (updateResult.length > 0) {
-				// Registro existente actualizado exitosamente
-				currentAttemptCount = updateResult[0].attemptCount;
-			} else {
-				// No se actualizó: o no existe, o ya tiene análisis, o alcanzó el límite
-				const existing = await db
-					.select()
-					.from(creditAnalysis)
-					.where(whereCondition)
-					.limit(1);
-
-				if (existing.length === 0) {
-					// No existe, crear nuevo registro
-					const insertValues = isForLead
-						? {
-								leadId: input.leadId!,
-								attemptCount: 1,
-								createdBy: context.userId,
-							}
-						: {
-								coDebtorId: input.coDebtorId!,
-								attemptCount: 1,
-								createdBy: context.userId,
-							};
-
-					const insertResult = await db
-						.insert(creditAnalysis)
-						.values(insertValues)
-						.onConflictDoNothing() // En caso de race condition en insert
-						.returning({ attemptCount: creditAnalysis.attemptCount });
-
-					if (insertResult.length === 0) {
-						// Hubo conflict, reintentar el update
-						const retryUpdate = await db
-							.update(creditAnalysis)
-							.set({
-								attemptCount: sql`${creditAnalysis.attemptCount} + 1`,
-								updatedAt: new Date(),
-							})
-							.where(
-								and(
-									whereCondition,
-									lt(creditAnalysis.attemptCount, MAX_AI_ATTEMPTS),
-									isNull(creditAnalysis.analyzedAt),
-								),
-							)
-							.returning({ attemptCount: creditAnalysis.attemptCount });
-
-						if (retryUpdate.length === 0) {
-							throw new ORPCError("PRECONDITION_FAILED", {
-								message: `Se alcanzó el límite de ${MAX_AI_ATTEMPTS} intentos o ya existe un análisis exitoso.`,
-							});
-						}
-						currentAttemptCount = retryUpdate[0].attemptCount;
-					} else {
-						currentAttemptCount = insertResult[0].attemptCount;
-					}
-				} else {
-					// Existe pero no se pudo actualizar
-					if (existing[0].analyzedAt !== null) {
-						throw new ORPCError("PRECONDITION_FAILED", {
-							message: `Ya existe un análisis exitoso para este ${isForLead ? "lead" : "co-deudor"}. No se permiten más intentos.`,
-						});
-					}
-					throw new ORPCError("PRECONDITION_FAILED", {
-						message: `Se alcanzó el límite de ${MAX_AI_ATTEMPTS} intentos de análisis. Contacte al administrador.`,
-					});
-				}
-			}
-
-			// 4. Construir content parts con los PDFs descargados de R2
-			const fileParts = downloadedFiles.map((file) => ({
-				type: "file" as const,
-				data: file.buffer,
-				mediaType: "application/pdf" as const,
-				filename: file.name,
-			}));
-
-			// 5. Llamar a Gemini con generateObject (aquí es donde cuesta dinero)
-			let analysis: Awaited<
-				ReturnType<typeof generateObject<typeof bankStatementAnalysisSchema>>
-			>["object"];
+			const uploadedKeys: string[] = [];
 
 			try {
-				const result = await generateObject({
-					model: google("gemini-3-flash-preview"),
-					schema: bankStatementAnalysisSchema,
-					abortSignal: AbortSignal.timeout(AI_TIMEOUT_MS),
-					messages: [
-						{
-							role: "system",
-							content: BANK_ANALYSIS_PROMPT,
-						},
-						{
-							role: "user",
-							content: [
-								{
-									type: "text",
-									text: "Analiza los siguientes estados de cuenta bancarios:",
-								},
-								...fileParts,
-							],
-						},
-					],
-				});
-				analysis = result.object;
-			} catch (error) {
-				// El intento ya se contó, informar al usuario del error
-				const isTimeout =
-					error instanceof Error && error.name === "TimeoutError";
-				console.error("Error en análisis de IA:", {
-					leadId: input.leadId,
-					attemptCount: currentAttemptCount,
-					isTimeout,
-					error: error instanceof Error ? error.message : String(error),
+				// 2. Validar archivos: descargar de R2 y verificar formato PDF
+				const downloadedFiles: { name: string; buffer: Buffer }[] = [];
+				for (const file of input.files) {
+					const uploadedFile = await verifyUploadedDocumentInR2({
+						key: file.key,
+						expectedPrefix,
+						filename: file.name,
+						mimeType: file.mimeType,
+						maxSizeBytes: MAX_FILE_SIZE_BYTES,
+					});
+					uploadedKeys.push(uploadedFile.key);
+					const buffer = await getFileBuffer(uploadedFile.key);
+
+					// Validate PDF magic bytes directly from buffer
+					if (
+						buffer.length < 4 ||
+						buffer.subarray(0, 4).toString() !== "%PDF"
+					) {
+						throw new ORPCError("BAD_REQUEST", {
+							message: `El archivo "${file.name}" no es un PDF válido.`,
+						});
+					}
+
+					downloadedFiles.push({ name: file.name, buffer });
+				}
+
+				// 3. Incremento atómico del contador para evitar race conditions
+				const whereCondition = isForLead
+					? eq(creditAnalysis.leadId, input.leadId!)
+					: eq(creditAnalysis.coDebtorId, input.coDebtorId!);
+
+				const updateResult = await db
+					.update(creditAnalysis)
+					.set({
+						attemptCount: sql`${creditAnalysis.attemptCount} + 1`,
+						updatedAt: new Date(),
+					})
+					.where(
+						and(
+							whereCondition,
+							lt(creditAnalysis.attemptCount, MAX_AI_ATTEMPTS),
+							isNull(creditAnalysis.analyzedAt),
+						),
+					)
+					.returning({
+						id: creditAnalysis.id,
+						attemptCount: creditAnalysis.attemptCount,
+					});
+
+				let currentAttemptCount: number;
+
+				if (updateResult.length > 0) {
+					// Registro existente actualizado exitosamente
+					currentAttemptCount = updateResult[0].attemptCount;
+				} else {
+					// No se actualizó: o no existe, o ya tiene análisis, o alcanzó el límite
+					const existing = await db
+						.select()
+						.from(creditAnalysis)
+						.where(whereCondition)
+						.limit(1);
+
+					if (existing.length === 0) {
+						// No existe, crear nuevo registro
+						const insertValues = isForLead
+							? {
+									leadId: input.leadId!,
+									attemptCount: 1,
+									createdBy: context.userId,
+								}
+							: {
+									coDebtorId: input.coDebtorId!,
+									attemptCount: 1,
+									createdBy: context.userId,
+								};
+
+						const insertResult = await db
+							.insert(creditAnalysis)
+							.values(insertValues)
+							.onConflictDoNothing() // En caso de race condition en insert
+							.returning({ attemptCount: creditAnalysis.attemptCount });
+
+						if (insertResult.length === 0) {
+							// Hubo conflict, reintentar el update
+							const retryUpdate = await db
+								.update(creditAnalysis)
+								.set({
+									attemptCount: sql`${creditAnalysis.attemptCount} + 1`,
+									updatedAt: new Date(),
+								})
+								.where(
+									and(
+										whereCondition,
+										lt(creditAnalysis.attemptCount, MAX_AI_ATTEMPTS),
+										isNull(creditAnalysis.analyzedAt),
+									),
+								)
+								.returning({ attemptCount: creditAnalysis.attemptCount });
+
+							if (retryUpdate.length === 0) {
+								throw new ORPCError("PRECONDITION_FAILED", {
+									message: `Se alcanzó el límite de ${MAX_AI_ATTEMPTS} intentos o ya existe un análisis exitoso.`,
+								});
+							}
+							currentAttemptCount = retryUpdate[0].attemptCount;
+						} else {
+							currentAttemptCount = insertResult[0].attemptCount;
+						}
+					} else {
+						// Existe pero no se pudo actualizar
+						if (existing[0].analyzedAt !== null) {
+							throw new ORPCError("PRECONDITION_FAILED", {
+								message: `Ya existe un análisis exitoso para este ${isForLead ? "lead" : "co-deudor"}. No se permiten más intentos.`,
+							});
+						}
+						throw new ORPCError("PRECONDITION_FAILED", {
+							message: `Se alcanzó el límite de ${MAX_AI_ATTEMPTS} intentos de análisis. Contacte al administrador.`,
+						});
+					}
+				}
+
+				// 4. Construir content parts con los PDFs descargados de R2
+				const fileParts = downloadedFiles.map((file) => ({
+					type: "file" as const,
+					data: file.buffer,
+					mediaType: "application/pdf" as const,
+					filename: file.name,
+				}));
+
+				// 5. Llamar a Gemini con generateObject (aquí es donde cuesta dinero)
+				let analysis: Awaited<
+					ReturnType<typeof generateObject<typeof bankStatementAnalysisSchema>>
+				>["object"];
+
+				try {
+					const result = await generateObject({
+						model: google("gemini-3-flash-preview"),
+						schema: bankStatementAnalysisSchema,
+						abortSignal: AbortSignal.timeout(AI_TIMEOUT_MS),
+						messages: [
+							{
+								role: "system",
+								content: BANK_ANALYSIS_PROMPT,
+							},
+							{
+								role: "user",
+								content: [
+									{
+										type: "text",
+										text: "Analiza los siguientes estados de cuenta bancarios:",
+									},
+									...fileParts,
+								],
+							},
+						],
+					});
+					analysis = result.object;
+				} catch (error) {
+					// El intento ya se contó, informar al usuario del error
+					const isTimeout =
+						error instanceof Error && error.name === "TimeoutError";
+					console.error("Error en análisis de IA:", {
+						leadId: input.leadId,
+						attemptCount: currentAttemptCount,
+						isTimeout,
+						error: error instanceof Error ? error.message : String(error),
+					});
+
+					const remainingAttempts = MAX_AI_ATTEMPTS - currentAttemptCount;
+					const timeoutMsg = isTimeout
+						? "El análisis tardó demasiado tiempo. "
+						: "";
+					throw new ORPCError("INTERNAL_SERVER_ERROR", {
+						message: `${timeoutMsg}Error al analizar los documentos (intento ${currentAttemptCount}/${MAX_AI_ATTEMPTS}). ${
+							remainingAttempts > 0
+								? `Puede intentar ${remainingAttempts} vez más.`
+								: "Se agotaron los intentos disponibles. Contacte al administrador."
+						}`,
+					});
+				}
+
+				// 6. Calcular capacidad crediticia
+				const creditCapacity = calculateCreditCapacity(analysis, {
+					annualRate: input.annualRate,
+					termMonths: input.termMonths,
+					maxDebtRatio: input.maxDebtRatio,
+					maxVariableDebtRatio: input.maxVariableDebtRatio,
 				});
 
-				const remainingAttempts = MAX_AI_ATTEMPTS - currentAttemptCount;
-				const timeoutMsg = isTimeout
-					? "El análisis tardó demasiado tiempo. "
-					: "";
-				throw new ORPCError("INTERNAL_SERVER_ERROR", {
-					message: `${timeoutMsg}Error al analizar los documentos (intento ${currentAttemptCount}/${MAX_AI_ATTEMPTS}). ${
-						remainingAttempts > 0
-							? `Puede intentar ${remainingAttempts} vez más.`
-							: "Se agotaron los intentos disponibles. Contacte al administrador."
-					}`,
-				});
+				// 7. Actualizar con los resultados del análisis exitoso
+				await db
+					.update(creditAnalysis)
+					.set({
+						fullAnalysis: JSON.stringify(analysis),
+						monthlyFixedIncome:
+							analysis.promedio_mensual.promedio_ingresos_fijos.toString(),
+						monthlyVariableIncome:
+							analysis.promedio_mensual.promedio_ingresos_variables.toString(),
+						monthlyFixedExpenses:
+							analysis.promedio_mensual.promedio_gastos_fijos.toString(),
+						monthlyVariableExpenses:
+							analysis.promedio_mensual.promedio_gastos_variables.toString(),
+						economicAvailability:
+							analysis.promedio_mensual.disponibilidad_economica.toString(),
+						maxPayment: creditCapacity.maxPayment.toString(),
+						maxCreditAmount: creditCapacity.maxCreditAmount.toString(),
+						analyzedAt: new Date(),
+						updatedAt: new Date(),
+					})
+					.where(whereCondition);
+
+				// 8. Retornar resultados
+				return {
+					analysis,
+					creditCapacity,
+				};
+			} finally {
+				const cleanupResults = await Promise.allSettled(
+					uploadedKeys.map((key) => deleteFileFromR2(key)),
+				);
+				const failedDeletes = cleanupResults.filter(
+					(result) => result.status === "rejected",
+				);
+
+				if (failedDeletes.length > 0) {
+					console.error("Failed to cleanup bank statement uploads from R2", {
+						resourceId,
+						keys: uploadedKeys,
+						failedDeletes: failedDeletes.length,
+					});
+				}
 			}
-
-			// 6. Calcular capacidad crediticia
-			const creditCapacity = calculateCreditCapacity(analysis, {
-				annualRate: input.annualRate,
-				termMonths: input.termMonths,
-				maxDebtRatio: input.maxDebtRatio,
-				maxVariableDebtRatio: input.maxVariableDebtRatio,
-			});
-
-			// 7. Actualizar con los resultados del análisis exitoso
-			await db
-				.update(creditAnalysis)
-				.set({
-					fullAnalysis: JSON.stringify(analysis),
-					monthlyFixedIncome:
-						analysis.promedio_mensual.promedio_ingresos_fijos.toString(),
-					monthlyVariableIncome:
-						analysis.promedio_mensual.promedio_ingresos_variables.toString(),
-					monthlyFixedExpenses:
-						analysis.promedio_mensual.promedio_gastos_fijos.toString(),
-					monthlyVariableExpenses:
-						analysis.promedio_mensual.promedio_gastos_variables.toString(),
-					economicAvailability:
-						analysis.promedio_mensual.disponibilidad_economica.toString(),
-					maxPayment: creditCapacity.maxPayment.toString(),
-					maxCreditAmount: creditCapacity.maxCreditAmount.toString(),
-					analyzedAt: new Date(),
-					updatedAt: new Date(),
-				})
-				.where(whereCondition);
-
-			// 8. Retornar resultados
-			return {
-				analysis,
-				creditCapacity,
-			};
 		}),
 };

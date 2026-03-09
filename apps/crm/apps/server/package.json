@@ -6,6 +6,7 @@
 		"build": "tsc && tsc-alias",
 		"check-types": "tsc --noEmit",
 		"compile": "bun build --compile --minify --sourcemap --bytecode ./src/index.ts --outfile server",
+		"cleanup:r2-orphans": "bun run src/scripts/cleanup-r2-orphans.ts",
 		"dev": "bun run --hot src/index.ts",
 		"start": "bun run dist/src/index.js",
 		"db:push": "drizzle-kit push",

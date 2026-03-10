@@ -3204,7 +3204,10 @@ export async function resumenGlobalInversionistas(
       inversionistas.numero_cuenta
     )
     // Solo mostrar inversionistas que tengan al menos 1 pago espejo NO_LIQUIDADO
-    .having(sql`COUNT(${pe.id}) > 0`
+     .having(
+      excel
+        ? undefined
+        : sql`COUNT(${pe.id}) > 0`
     );
 
   console.log("resumen-global result IDs:", result.map(r => r.inversionista_id));

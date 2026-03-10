@@ -2903,6 +2903,6 @@ export interface MarcarCuotasBody {
 }
 
 export async function marcarCuotasService(body: MarcarCuotasBody) {
-  const { data } = await api.post("/pagos/marcar-cuotas", body);
+  const { data } = await api.post("/marcar-cuotas", body);
   return data;
 }

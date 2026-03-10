@@ -705,7 +705,7 @@ export async function insertPagosCreditoInversionistasV2(
       : new Big(inv.porcentaje_participacion_inversionista ?? 0).div(100);
 
     // Distribuir abonos: primero por participación, luego por porcentaje general
-    const abonoCapitalInv = pagoAbonoCapital.times(porcentajeParticipacion).times(porcentajeGeneral);
+    const abonoCapitalInv = pagoAbonoCapital.times(porcentajeGeneral);
     const abonoInteresInv = pagoAbonoInteres.times(porcentajeParticipacion).times(porcentajeGeneral);
     const abonoIvaInv = pagoAbonoIva.times(porcentajeParticipacion).times(porcentajeGeneral);
 
@@ -1302,7 +1302,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     if (soloAplicados === false) whereClauses.push(`p.fecha_aplicado IS NULL`);
     if (fechaAplicado) {
       whereClauses.push(
-        `(p.fecha_aplicado AT TIME ZONE 'America/Guatemala')::date = '${fechaAplicado}'::date`
+        `(p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date = '${fechaAplicado}'::date`
       );
     }
 
@@ -1352,7 +1352,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         ce.numero_cuenta AS "cuentaEmpresaNumero",
 
         -- 📅 Fecha boleta en zona Guatemala
-        TO_CHAR(p.fecha_boleta::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD') AS "fechaBoleta",
+        TO_CHAR(p.fecha_boleta AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD') AS "fechaBoleta",
 
         -- 📅 Fecha en que se aplicó el pago (zona Guatemala)
         TO_CHAR(p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD HH24:MI:SS') AS "fechaAplicado",
@@ -1581,6 +1581,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       SELECT
         i.inversionista_id AS "inversionistaId",
         i.nombre AS "nombreInversionista",
+        i.emite_factura AS "emiteFactura",
         COALESCE(SUM(pci.abono_capital::numeric), 0) AS "totalAbonoCapital",
         COALESCE(SUM(pci.abono_interes::numeric), 0) AS "totalAbonoInteres",
         COALESCE(SUM(pci.abono_iva_12::numeric), 0) AS "totalAbonoIva",
@@ -1596,7 +1597,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         AND ci.inversionista_id = pci.inversionista_id
       ${sql.raw(whereSQL)}
       ${sql.raw(inversionistaId ? `AND pci.inversionista_id = '${inversionistaId}'` : '')}
-      GROUP BY i.inversionista_id, i.nombre
+      GROUP BY i.inversionista_id, i.nombre, i.emite_factura
       ORDER BY i.nombre
     `;
 
@@ -1604,6 +1605,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     const totalesInversionistas = totalesInvResult.rows.map((r: any) => ({
       inversionistaId: r.inversionistaId,
       nombreInversionista: r.nombreInversionista,
+      emiteFactura: r.emiteFactura ?? false,
       totalAbonoCapital: new Big(r.totalAbonoCapital).round(2).toNumber(),
       totalAbonoInteres: new Big(r.totalAbonoInteres).round(2).toNumber(),
       totalAbonoIva: new Big(r.totalAbonoIva).round(2).toNumber(),

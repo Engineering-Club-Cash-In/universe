@@ -312,9 +312,16 @@ export async function exportPagosConInversionistasExcel(
     dia?: number;
     mes?: number;
     anio?: number;
+    fechaInicio?: string;
+    fechaFin?: string;
     inversionistaId?: number;
     usuarioNombre?: string;
     validationStatus?: string;
+    categoriaCredito?: string;
+    tipoCredito?: string;
+    formatoCredito?: string;
+    soloAplicados?: boolean;
+    fechaAplicado?: string;
   }
 ) {
   // 1️⃣ Obtener los datos completos de tu servicio
@@ -359,6 +366,7 @@ export async function exportPagosConInversionistasExcel(
     { header: "Otros", key: "otrosPago", width: 12 },
     { header: "Total Pago", key: "totalPago", width: 15 },
     { header: "Inversionistas", key: "inversionista", width: 28 },
+    { header: "Emite Factura", key: "emiteFactura", width: 15 },
     { header: "Fondos Otorgados", key: "fondosOtorgados", width: 18 },
     { header: "Capital Inversionista", key: "capitalInv", width: 18 },
     { header: "Interes Inversionista", key: "interesInv", width: 18 },
@@ -454,7 +462,7 @@ export async function exportPagosConInversionistasExcel(
       const r = sheet.addRow({
         noPrestamo, nombreDeudor, montoOtorgado, numCuota,
         capital: capitalPago, intereses: interesesPago, mora: moraPago, otrosPago: Number(item.otros || 0), totalPago,
-        inversionista: "", fondosOtorgados: 0,
+        inversionista: "", emiteFactura: "", fondosOtorgados: 0,
         capitalInv: 0, interesInv: 0, ivaInv: 0, subtotalInv: 0, isrInv: 0, cuotaPago: 0,
         seguro: Number(item.abono_seguro || 0), membresias: Number(item.membresias || 0),
         gps: Number(item.abono_gps || 0), otros: Number(item.otros || 0),
@@ -477,6 +485,7 @@ export async function exportPagosConInversionistasExcel(
           noPrestamo, nombreDeudor, montoOtorgado, numCuota,
           capital: capitalPago, intereses: interesesPago, mora: moraPago, otrosPago: Number(item.otros || 0), totalPago,
           inversionista: inv.nombreInversionista,
+          emiteFactura: inv.emiteFactura ? "Sí" : "No",
           fondosOtorgados: Number(inv.montoAportado || 0),
           capitalInv: capitalI, interesInv: interesI, ivaInv: ivaI,
           subtotalInv: subtotalI, isrInv: isrI, cuotaPago: cuotaP,
@@ -600,9 +609,16 @@ export async function exportPagosAdvisorExcel(
     dia?: number;
     mes?: number;
     anio?: number;
+    fechaInicio?: string;
+    fechaFin?: string;
     inversionistaId?: number;
     usuarioNombre?: string;
     validationStatus?: string;
+    categoriaCredito?: string;
+    tipoCredito?: string;
+    formatoCredito?: string;
+    soloAplicados?: boolean;
+    fechaAplicado?: string;
   }
 ) {
   const result = await getPagosConInversionistas({

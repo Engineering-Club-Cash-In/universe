@@ -1,23 +1,23 @@
 export const SAT_CONFIG = {
-  requestor: "8A454E3F-CEA1-41D8-A13A-A748A4891BBE",
-  user: "8A454E3F-CEA1-41D8-A13A-A748A4891BBE",
-  userName: "TEST",
+  requestor: "F547950A-1B0E-49D7-BFB5-42E313FF6740",
+  user: "F547950A-1B0E-49D7-BFB5-42E313FF6740",
+  userName: "ADMINISTRADOR",
   endpointUrl:
     "https://portaltest.cofidiguatemala.com:8443/webservicefront/factwsfront.asmx",
-  entity: "800000001026",
+  entity: "98766430",
 };
 
 export const COFIDI_CONFIG = {
-  requestor: "8A454E3F-CEA1-41D8-A13A-A748A4891BBE",
-  entity: "800000001026",
+  requestor: "F547950A-1B0E-49D7-BFB5-42E313FF6740",
+  entity: "98766430",
   endpointUrl:
     "https://portaltest.cofidiguatemala.com:8443/nitfel/consultanit.asmx",
 };
 
 export const CLUB_CASHIN_CONFIG = {
   emisor: {
-    nit: "800000001026", // 👈 ✅ CAMBIAR A NIT DE PRUEBA
-    nombreEmisor: "CUBE INVESTMENTS, S.A.",
+    nit: "98766430",
+    nombreEmisor: "CUBE INVESTMENTS, SOCIEDAD ANONIMA",
     codigoEstablecimiento: "1",
     nombreComercial: "CASH-IN",
     afiliacionIVA: "GEN",
@@ -35,7 +35,7 @@ export const CLUB_CASHIN_CONFIG = {
   frases: [
     {
       tipoFrase: 1 as const,
-      codigoEscenario: "1", // 👈 ✅ CAMBIAR A ESCENARIO 2
+      codigoEscenario: "2",
     },
   ],
 };

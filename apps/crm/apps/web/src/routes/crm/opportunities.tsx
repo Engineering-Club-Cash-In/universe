@@ -78,6 +78,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
+import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import {
 	formatDate,
 	formatGuatemalaDate,
@@ -211,22 +212,32 @@ function DraggableOpportunityCard({
 						Reenviado a Análisis
 					</Badge>
 				)}
-				{opportunity.expectedCloseDate && (
-					<div className="flex items-center gap-1 text-muted-foreground text-xs">
-						<Calendar className="h-3 w-3" />
-						{formatDate(opportunity.expectedCloseDate)}
+				<div className="space-y-1 border-t pt-1">
+					<div className="flex items-center justify-between">
+						<span className="text-muted-foreground text-xs">Probabilidad</span>
+						<span className="text-muted-foreground text-xs">
+							{opportunity.probability ||
+								opportunity.stage?.closurePercentage ||
+								0}
+							%
+						</span>
 					</div>
-				)}
-				<div className="flex items-center justify-between pt-1">
-					<span className="text-muted-foreground text-xs">
-						{opportunity.probability ||
-							opportunity.stage?.closurePercentage ||
-							0}
-						% probabilidad
-					</span>
-					<span className="text-muted-foreground text-xs">
-						{formatGuatemalaDate(opportunity.createdAt)}
-					</span>
+					<div className="flex items-center justify-between">
+						<span className="text-muted-foreground text-xs">Creada</span>
+						<span className="text-muted-foreground text-xs">
+							{formatGuatemalaDate(opportunity.createdAt)}
+						</span>
+					</div>
+					{opportunity.closedAt && (
+						<div className="flex items-center justify-between">
+							<span className="text-muted-foreground text-xs">
+								Cierre real
+							</span>
+							<span className="text-muted-foreground text-xs">
+								{formatGuatemalaDate(opportunity.closedAt)}
+							</span>
+						</div>
+					)}
 				</div>
 				<div className="border-t pt-1">
 					<span className="font-mono text-[10px] text-muted-foreground/60">
@@ -3295,29 +3306,25 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 	const uploadSingleDocument = async (docType: string) => {
 		if (!selectedFile) return;
 
-		const formData = new FormData();
-		formData.append("file", selectedFile);
-		formData.append("opportunityId", opportunityId);
-		formData.append("documentType", docType);
-		if (description) {
-			formData.append("description", description);
-		}
-
-		const response = await fetch(
-			`${import.meta.env.VITE_SERVER_URL}/api/upload-opportunity-document`,
+		const { key } = await uploadFileToR2WithRetry(
+			selectedFile,
 			{
-				method: "POST",
-				body: formData,
-				credentials: "include",
+				resourceType: "opportunity_document",
+				resourceId: opportunityId,
 			},
 		);
 
-		if (!response.ok) {
-			const error = await response.json();
-			throw new Error(error.message || "Error al subir el archivo");
-		}
-
-		return response.json();
+		return await client.uploadOpportunityDocument({
+			opportunityId,
+			documentType: docType as any,
+			description: description || undefined,
+			file: {
+				name: selectedFile.name,
+				type: selectedFile.type,
+				size: selectedFile.size,
+				key,
+			},
+		});
 	};
 
 	// Upload mutation

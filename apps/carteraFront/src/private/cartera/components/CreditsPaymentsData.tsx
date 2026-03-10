@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { useCreditosPaginadosWithFilters } from "../hooks/credits";
 import { Button } from "@/components/ui/button";
-import { Eye, Pencil, XCircle, FileCheck } from "lucide-react";
+import { Eye, Pencil, XCircle, FileCheck, CheckCircle2 } from "lucide-react";
 
 import {
   Table,
@@ -35,6 +35,7 @@ import { openReportInNewTab, useActivateCredit, useToggleCancelacionActivo } fro
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useAuth } from "@/Provider/authProvider";
 import { ModalCreateMora } from "./createMoraModal";
+import { ModalMarcarCuotas } from "./ModalMarcarCuotas";
 import { useReport } from "../hooks/reports";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { usePaymentAgreements,useTogglePaymentAgreementStatus } from "../hooks/paymentagreement";
@@ -227,6 +228,8 @@ export function ListaCreditosPagos() {
   const [selectedCreditMora, setSelectedCreditMora] = useState<any | null>(
     null
   );
+  const [openMarcarCuotasModal, setOpenMarcarCuotasModal] = useState(false);
+  const [selectedCreditMarcarCuotas, setSelectedCreditMarcarCuotas] = useState<string>("");
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedCreditId, setSelectedCreditId] = useState<number | null>(null);
   const activateCreditMutation = useActivateCredit();
@@ -607,6 +610,8 @@ export function ListaCreditosPagos() {
           handleOpenEdit={handleOpenEdit}
           setSelectedCreditMora={setSelectedCreditMora}
           setOpenMoraModal={setOpenMoraModal}
+          setSelectedCreditMarcarCuotas={setSelectedCreditMarcarCuotas}
+          setOpenMarcarCuotasModal={setOpenMarcarCuotasModal}
           setSelectedCreditForReport={setSelectedCreditForReport}
           setReportModalOpen={setReportModalOpen}
           handleActivarConvenio={handleActivarConvenio}
@@ -628,6 +633,8 @@ export function ListaCreditosPagos() {
           handleOpenEdit={handleOpenEdit}
           setSelectedCreditMora={setSelectedCreditMora}
           setOpenMoraModal={setOpenMoraModal}
+          setSelectedCreditMarcarCuotas={setSelectedCreditMarcarCuotas}
+          setOpenMarcarCuotasModal={setOpenMarcarCuotasModal}
           setSelectedCreditForReport={setSelectedCreditForReport}
           setReportModalOpen={setReportModalOpen}
           handleActivarConvenio={handleActivarConvenio}
@@ -715,6 +722,23 @@ export function ListaCreditosPagos() {
     }, 50); // 👈 Otro delay pequeño acá
   }}
 />
+
+      {/* Modal de Marcar Cuotas */}
+      <ModalMarcarCuotas
+        open={openMarcarCuotasModal}
+        onClose={() => {
+          setOpenMarcarCuotasModal(false);
+          setSelectedCreditMarcarCuotas("");
+        }}
+        numeroCreditoSifco={selectedCreditMarcarCuotas}
+        onSuccess={() => {
+          setTimeout(() => {
+            queryClient.invalidateQueries({
+              queryKey: ["creditos-paginados", mes, anio, page, perPage],
+            });
+          }, 50);
+        }}
+      />
 
       {/* Modal de Reportes */}
       {reportModalOpen && selectedCreditForReport && (
@@ -1055,6 +1079,8 @@ function MobileView({
   handleOpenEdit,
   setSelectedCreditMora,
   setOpenMoraModal,
+  setSelectedCreditMarcarCuotas,
+  setOpenMarcarCuotasModal,
   setSelectedCreditForReport,
   setReportModalOpen,
   handleActivarConvenio,
@@ -1205,7 +1231,17 @@ function MobileView({
                 >
                   ➕ Mora
                 </Button>
-                 
+                <Button
+                  variant="outline"
+                  className="text-emerald-700 border-emerald-300 hover:bg-emerald-50"
+                  onClick={() => {
+                    setSelectedCreditMarcarCuotas(item.creditos.numero_credito_sifco);
+                    setOpenMarcarCuotasModal(true);
+                  }}
+                >
+                  <CheckCircle2 className="w-4 h-4 mr-1" /> Marcar Cuotas
+                </Button>
+
               </>
             )}
             {canViewReports(item.creditos.statusCredit) &&
@@ -1274,6 +1310,8 @@ function DesktopView({
   handleOpenEdit,
   setSelectedCreditMora,
   setOpenMoraModal,
+  setSelectedCreditMarcarCuotas,
+  setOpenMarcarCuotasModal,
   setSelectedCreditForReport,
   setReportModalOpen,
   handleActivarConvenio,
@@ -1442,7 +1480,19 @@ function DesktopView({
                               ➕ Mora
                             </Button>
                           )}
- 
+                          {user?.role === "ADMIN" && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex items-center gap-1 text-emerald-700 border-emerald-300 hover:bg-emerald-50"
+                              onClick={() => {
+                                setSelectedCreditMarcarCuotas(item.creditos.numero_credito_sifco);
+                                setOpenMarcarCuotasModal(true);
+                              }}
+                            >
+                              <CheckCircle2 className="w-4 h-4" /> Marcar Cuotas
+                            </Button>
+                          )}
 
                         {canViewReports(item.creditos.statusCredit) &&
                           user?.role === "ADMIN" && (

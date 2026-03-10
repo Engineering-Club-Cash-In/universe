@@ -57,12 +57,10 @@ import {
 import { analystProcedure, crmProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
+	buildUploadPrefix,
 	deleteFileFromR2,
-	generateUniqueFilename,
 	getFileUrl,
-	resolveMimeType,
-	uploadFileToR2,
-	validateFile,
+	verifyUploadedDocumentInR2,
 } from "../lib/storage";
 import {
 	formatMissingFields,
@@ -1006,6 +1004,19 @@ export const crmRouter = {
 		.handler(async ({ input, context }) => {
 			const leadIdFilter = input?.leadId;
 			const searchTerm = input?.search;
+			const firstClosedStageDates = db
+				.select({
+					opportunityId: opportunityStageHistory.opportunityId,
+					firstClosedStageAt:
+						sql<Date>`min(${opportunityStageHistory.changedAt})`.as(
+							"first_closed_stage_at",
+						),
+				})
+				.from(opportunityStageHistory)
+				.innerJoin(salesStages, eq(opportunityStageHistory.toStageId, salesStages.id))
+				.where(gte(salesStages.closurePercentage, 90))
+				.groupBy(opportunityStageHistory.opportunityId)
+				.as("first_closed_stage_dates");
 
 			const selectFields = {
 				id: opportunities.id,
@@ -1019,6 +1030,10 @@ export const crmRouter = {
 				assignedTo: opportunities.assignedTo,
 				notes: opportunities.notes,
 				createdAt: opportunities.createdAt,
+				closedAt:
+					sql<Date | null>`coalesce(${opportunities.actualCloseDate}, ${firstClosedStageDates.firstClosedStageAt})`.as(
+						"closed_at",
+					),
 				updatedAt: opportunities.updatedAt,
 				numeroSifco: opportunities.numeroSifco,
 				// Analysis status for tracking rejection/resubmission
@@ -1092,6 +1107,10 @@ export const crmRouter = {
 			const baseQuery = db
 				.select(selectFields)
 				.from(opportunities)
+				.leftJoin(
+					firstClosedStageDates,
+					eq(opportunities.id, firstClosedStageDates.opportunityId),
+				)
 				.leftJoin(companies, eq(opportunities.companyId, companies.id))
 				.leftJoin(leads, eq(opportunities.leadId, leads.id))
 				.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
@@ -3401,7 +3420,7 @@ export const crmRouter = {
 					name: z.string(),
 					type: z.string(),
 					size: z.number(),
-					data: z.string(), // Base64
+					key: z.string(), // R2 key from presigned upload
 				}),
 			}),
 		)
@@ -3440,36 +3459,17 @@ export const crmRouter = {
 				});
 			}
 
-			// Resolver MIME type (fallback por extensión para archivos con extensión en mayúsculas)
-			const resolvedMimeType = resolveMimeType({
-				type: input.file.type,
-				name: input.file.name,
-			} as File);
+			const uploadedFile = await verifyUploadedDocumentInR2({
+				key: input.file.key,
+				expectedPrefix: buildUploadPrefix(
+					"opportunity_document",
+					input.opportunityId,
+				),
+				filename: input.file.name,
+				mimeType: input.file.type,
+			});
 
-			// Crear un File/Blob desde los datos
-			const fileBuffer = Buffer.from(input.file.data, "base64");
-			const fileBlob = new Blob([fileBuffer], { type: resolvedMimeType });
-
-			// Validar archivo
-			const validation = validateFile({
-				type: resolvedMimeType,
-				size: input.file.size,
-				name: input.file.name,
-			} as File);
-
-			if (!validation.valid) {
-				throw new ORPCError("BAD_REQUEST", { message: validation.error });
-			}
-
-			// Generar nombre único
-			const uniqueFilename = generateUniqueFilename(input.file.name);
-
-			// Subir a R2
-			const { key } = await uploadFileToR2(
-				fileBlob,
-				uniqueFilename,
-				input.opportunityId,
-			);
+			const uniqueFilename = uploadedFile.key.split("/").pop()!;
 
 			// Guardar en base de datos
 			const [newDocument] = await db
@@ -3478,12 +3478,12 @@ export const crmRouter = {
 					opportunityId: input.opportunityId,
 					filename: uniqueFilename,
 					originalName: input.file.name,
-					mimeType: resolvedMimeType,
-					size: input.file.size,
+					mimeType: uploadedFile.mimeType,
+					size: uploadedFile.size,
 					documentType: input.documentType,
 					description: input.description,
 					uploadedBy: context.userId,
-					filePath: key,
+					filePath: uploadedFile.key,
 				})
 				.returning();
 
@@ -3500,12 +3500,12 @@ export const crmRouter = {
 						vehicleId: opportunity[0].vehicleId,
 						filename: uniqueFilename,
 						originalName: input.file.name,
-						mimeType: resolvedMimeType,
-						size: input.file.size,
+						mimeType: uploadedFile.mimeType,
+						size: uploadedFile.size,
 						documentType: input.documentType,
 						description: input.description,
 						uploadedBy: context.userId,
-						filePath: key,
+						filePath: uploadedFile.key,
 					})
 					.returning();
 

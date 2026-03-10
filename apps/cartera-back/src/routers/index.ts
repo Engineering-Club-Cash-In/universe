@@ -15,6 +15,7 @@ import { dteController } from "./cofidi";
 import { recalculateFromJsonRouter } from "./recalculateFromJson";
 import { mirrorInvestorRouter } from "./mirrorInvestor";
 import { notificationsRouter } from "./notifications";
+import { reconcileEspejoRouter } from "./reconcileEspejo";
 export {
-    defaultRouter,inversionistasRouter,advisorRouter,usersRouter,creditRouter,paymentRouter,uploadRouter,sifcoRouter,authRouter,morasRouter,bancosRouter,cuentasRoutes,paymentAgreementsRouter,dteController,recalculateFromJsonRouter,mirrorInvestorRouter,notificationsRouter
+    defaultRouter,inversionistasRouter,advisorRouter,usersRouter,creditRouter,paymentRouter,uploadRouter,sifcoRouter,authRouter,morasRouter,bancosRouter,cuentasRoutes,paymentAgreementsRouter,dteController,recalculateFromJsonRouter,mirrorInvestorRouter,notificationsRouter,reconcileEspejoRouter
 }   

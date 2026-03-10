@@ -35,12 +35,10 @@ import {
 	tallerOrCrmProcedure,
 } from "../lib/orpc";
 import {
+	buildUploadPrefix,
 	deleteFileFromR2,
-	generateUniqueFilename,
 	getFileUrl,
-	resolveMimeType,
-	uploadFileToR2,
-	validateFile,
+	verifyUploadedDocumentInR2,
 } from "../lib/storage";
 import {
 	prepareValuationContext,
@@ -956,6 +954,8 @@ export const vehiclesRouter = {
 							title: z.string(),
 							description: z.string().optional(),
 							url: z.string(),
+							valuatorComment: z.string().optional(),
+							noCommentsChecked: z.boolean().optional(),
 						}),
 					)
 					.optional(),
@@ -1605,7 +1605,7 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 					name: z.string(),
 					type: z.string(),
 					size: z.number(),
-					data: z.string(), // Base64
+					key: z.string(), // R2 key from presigned upload
 				}),
 			}),
 		)
@@ -1632,36 +1632,13 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 				});
 			}
 
-			// Resolver MIME type (fallback por extensión)
-			const resolvedMimeType = resolveMimeType({
-				type: input.file.type,
-				name: input.file.name,
-			} as File);
-
-			// Create File/Blob from data
-			const fileBuffer = Buffer.from(input.file.data, "base64");
-			const fileBlob = new Blob([fileBuffer], { type: resolvedMimeType });
-
-			// Validate file
-			const validation = validateFile({
-				type: resolvedMimeType,
-				size: input.file.size,
-				name: input.file.name,
-			} as File);
-
-			if (!validation.valid) {
-				throw new ORPCError("BAD_REQUEST", { message: validation.error });
-			}
-
-			// Generate unique filename
-			const uniqueFilename = generateUniqueFilename(input.file.name);
-
-			// Upload to R2
-			const { key } = await uploadFileToR2(
-				fileBlob,
-				uniqueFilename,
-				input.vehicleId,
-			);
+			const uploadedFile = await verifyUploadedDocumentInR2({
+				key: input.file.key,
+				expectedPrefix: buildUploadPrefix("vehicle_document", input.vehicleId),
+				filename: input.file.name,
+				mimeType: input.file.type,
+			});
+			const uniqueFilename = uploadedFile.key.split("/").pop()!;
 			// Save to database
 			const [newDocument] = await db
 				.insert(vehicleDocuments)
@@ -1669,12 +1646,12 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 					vehicleId: input.vehicleId,
 					filename: uniqueFilename,
 					originalName: input.file.name,
-					mimeType: resolvedMimeType,
-					size: input.file.size,
+					mimeType: uploadedFile.mimeType,
+					size: uploadedFile.size,
 					documentType: input.documentType,
 					description: input.description || undefined,
 					uploadedBy: context.userId,
-					filePath: key,
+					filePath: uploadedFile.key,
 				})
 				.returning();
 

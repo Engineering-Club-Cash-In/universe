@@ -1,10 +1,10 @@
-import { InvestorsLogo } from "@/features/footer/icons";
 import { IconArrow } from "@/components";
 import { motion } from "framer-motion";
 import { useIsMobile } from "@/hooks";
 import { useNavigate } from "@tanstack/react-router";
 
 const imgUrl = import.meta.env.VITE_IMAGE_URL + "/investors.jpg";
+const investorLogoSrc = "/investor-white.png";
 
 export const HeaderInvestor = () => {
   const navigate = useNavigate();
@@ -15,9 +15,10 @@ export const HeaderInvestor = () => {
       <div className="flex gap-20">
         <div className="flex flex-col items-center lg:items-start gap-6 lg:gap-12 w-full lg:w-3/5">
           <div>
-            <InvestorsLogo
-              width={isMobile ? "200px" : "320px"}
-              height={isMobile ? "80px" : "128px"}
+            <img
+              src={investorLogoSrc}
+              alt="CashIn Inversiones"
+              className={isMobile ? "w-[180px] h-auto" : "w-[320px] h-auto"}
             />
           </div>
           <p className="text-xl text-center lg:text-start lg:text-header-3 lg:pr-30">

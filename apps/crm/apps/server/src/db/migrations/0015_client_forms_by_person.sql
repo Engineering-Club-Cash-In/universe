@@ -16,7 +16,8 @@ SET
 	"person_id" = o."lead_id"
 FROM "opportunities" o
 WHERE cft."opportunity_id" = o."id"
-	AND cft."person_type" IS NULL;
+	AND cft."person_type" IS NULL
+	AND o."lead_id" IS NOT NULL;
 
 UPDATE "credit_applications" ca
 SET
@@ -24,7 +25,8 @@ SET
 	"person_id" = o."lead_id"
 FROM "opportunities" o
 WHERE ca."opportunity_id" = o."id"
-	AND ca."person_type" IS NULL;
+	AND ca."person_type" IS NULL
+	AND o."lead_id" IS NOT NULL;
 
 UPDATE "financial_statements" fs
 SET
@@ -32,7 +34,8 @@ SET
 	"person_id" = o."lead_id"
 FROM "opportunities" o
 WHERE fs."opportunity_id" = o."id"
-	AND fs."person_type" IS NULL;
+	AND fs."person_type" IS NULL
+	AND o."lead_id" IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS "client_form_tokens_opportunity_person_idx"
 	ON "client_form_tokens" ("opportunity_id", "person_type", "person_id");

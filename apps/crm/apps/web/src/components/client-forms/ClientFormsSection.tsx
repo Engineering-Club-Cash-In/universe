@@ -22,6 +22,11 @@ interface ClientFormsSectionProps {
 	opportunityId: string;
 }
 
+type ClientFormData = Awaited<ReturnType<typeof client.getClientFormData>>;
+type ClientFormParticipant = ClientFormData["participants"][number] & {
+	canGenerateLink?: boolean;
+};
+
 export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 	const queryClient = useQueryClient();
 	const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -64,7 +69,7 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 		);
 	}
 
-	const participants = data?.participants ?? [];
+		const participants: ClientFormParticipant[] = data?.participants ?? [];
 	const completedCount = participants.filter(
 		(participant) =>
 			participant.creditApplicationExists &&
@@ -125,7 +130,7 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 									Enlace del Formulario
 								</div>
 
-								{!participant.latestToken ? (
+								{!participant.latestToken && participant.canGenerateLink ? (
 									<Button
 										onClick={() =>
 											generateMutation.mutate({
@@ -144,6 +149,10 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 											"Generar Enlace"
 										)}
 									</Button>
+								) : !participant.latestToken ? (
+									<div className="text-muted-foreground text-sm">
+										Registro historico sin enlace activo
+									</div>
 								) : (
 									<div className="space-y-2">
 										<div className="flex gap-2">
@@ -173,7 +182,9 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 														personId: participant.personId,
 													})
 												}
-												disabled={isGenerating}
+												disabled={
+													isGenerating || !participant.canGenerateLink
+												}
 											>
 												{isGenerating ? "Regenerando..." : "Nuevo enlace"}
 											</Button>

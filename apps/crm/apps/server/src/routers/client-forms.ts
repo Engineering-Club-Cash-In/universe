@@ -396,17 +396,31 @@ async function getValidToken(token: string) {
 	return tokenRow;
 }
 
-function requireTokenParticipant(tokenRow: TokenRow) {
-	if (!tokenRow.personType || !tokenRow.personId) {
-		throw new ORPCError("BAD_REQUEST", {
-			message:
-				"Este enlace todavía no está asociado a una persona. Regenera el enlace.",
-		});
+async function resolveTokenParticipant(tokenRow: TokenRow): Promise<{
+	personType: FormPersonType;
+	personId: string;
+} | null> {
+	if (tokenRow.personType && tokenRow.personId) {
+		return {
+			personType: tokenRow.personType as FormPersonType,
+			personId: tokenRow.personId,
+		};
 	}
 
+	const opp = await getOpportunityOrThrow(tokenRow.opportunityId);
+	if (!opp.leadId) return null;
+
+	await db
+		.update(clientFormTokens)
+		.set({
+			personType: "lead",
+			personId: opp.leadId,
+		})
+		.where(eq(clientFormTokens.id, tokenRow.id));
+
 	return {
-		personType: tokenRow.personType as FormPersonType,
-		personId: tokenRow.personId,
+		personType: "lead",
+		personId: opp.leadId,
 	};
 }
 
@@ -431,6 +445,15 @@ async function getVehicleForOpportunity(opportunityId: string) {
 function serializeRow(row: unknown): FormRow {
 	if (!row) return null;
 	return JSON.parse(JSON.stringify(row)) as Record<string, unknown>;
+}
+
+function getParticipantNameFromForm(row: Record<string, unknown> | null): string {
+	if (!row) return "";
+	const fullName = [row.primerNombre, row.segundoNombre, row.primerApellido, row.segundoApellido]
+		.map((value) => (typeof value === "string" ? value.trim() : ""))
+		.filter(Boolean)
+		.join(" ");
+	return fullName;
 }
 
 export const clientFormsRouter = {
@@ -472,24 +495,20 @@ export const clientFormsRouter = {
 		.input(z.object({ token: z.string().uuid() }))
 		.handler(async ({ input }) => {
 			const tokenRow = await getValidToken(input.token);
-			const participantRef = requireTokenParticipant(tokenRow);
-			const { participant, participantType, displayName } =
-				await resolveParticipant(
-					tokenRow.opportunityId,
-					participantRef.personType,
-					participantRef.personId,
-				);
+			const participantRef = await resolveTokenParticipant(tokenRow);
 			const vehicle = await getVehicleForOpportunity(tokenRow.opportunityId);
 
 			const [existingCredit] = await db
 				.select()
 				.from(creditApplications)
 				.where(
-					personWhereClause(
-						tokenRow.opportunityId,
-						participantRef.personType,
-						participantRef.personId,
-					),
+					participantRef
+						? personWhereClause(
+								tokenRow.opportunityId,
+								participantRef.personType,
+								participantRef.personId,
+							)
+						: eq(creditApplications.opportunityId, tokenRow.opportunityId),
 				)
 				.limit(1);
 
@@ -497,13 +516,64 @@ export const clientFormsRouter = {
 				.select()
 				.from(financialStatements)
 				.where(
-					financialPersonWhereClause(
-						tokenRow.opportunityId,
-						participantRef.personType,
-						participantRef.personId,
-					),
+					participantRef
+						? financialPersonWhereClause(
+								tokenRow.opportunityId,
+								participantRef.personType,
+								participantRef.personId,
+							)
+						: eq(financialStatements.opportunityId, tokenRow.opportunityId),
 				)
 				.limit(1);
+
+			if (!participantRef) {
+				const displayName =
+					getParticipantNameFromForm(
+						serializeRow(existingCredit ?? existingFinancial),
+					) || "Titular";
+
+				return {
+					opportunityId: tokenRow.opportunityId,
+					personType: "lead" as const,
+					personId: null,
+					personDisplayName: displayName,
+					person: {
+						firstName: (existingCredit?.primerNombre as string | null) ?? "",
+						middleName: (existingCredit?.segundoNombre as string | null) ?? "",
+						lastName: (existingCredit?.primerApellido as string | null) ?? "",
+						secondLastName:
+							(existingCredit?.segundoApellido as string | null) ?? "",
+						dpi: (existingCredit?.dpi as string | null) ?? "",
+						nit: (existingCredit?.nit as string | null) ?? "",
+						email: (existingCredit?.email as string | null) ?? "",
+						phone: (existingCredit?.telMovil as string | null) ?? "",
+						direccion:
+							(existingCredit?.direccionResidencia as string | null) ?? "",
+					},
+					vehicle,
+					creditApplicationExists: !!existingCredit,
+					creditHasSignature: !!existingCredit?.firmaImagen,
+					financialStatementExists: !!existingFinancial,
+					existingCreditApplication: existingCredit
+						? {
+								primerNombre: existingCredit.primerNombre,
+								segundoNombre: existingCredit.segundoNombre,
+								primerApellido: existingCredit.primerApellido,
+								segundoApellido: existingCredit.segundoApellido,
+								apellidoCasada: existingCredit.apellidoCasada,
+								dpi: existingCredit.dpi,
+								nit: existingCredit.nit,
+							}
+						: null,
+				};
+			}
+
+			const { participant, participantType, displayName } =
+				await resolveParticipant(
+					tokenRow.opportunityId,
+					participantRef.personType,
+					participantRef.personId,
+				);
 
 			return {
 				opportunityId: tokenRow.opportunityId,
@@ -556,7 +626,7 @@ export const clientFormsRouter = {
 		)
 		.handler(async ({ input }) => {
 			const tokenRow = await getValidToken(input.token);
-			const participantRef = requireTokenParticipant(tokenRow);
+			const participantRef = await resolveTokenParticipant(tokenRow);
 
 			const parsed = creditApplicationServerSchema.safeParse(input.data);
 			if (!parsed.success) {
@@ -567,8 +637,12 @@ export const clientFormsRouter = {
 
 			const values = {
 				opportunityId: tokenRow.opportunityId,
-				personType: participantRef.personType,
-				personId: participantRef.personId,
+				...(participantRef
+					? {
+							personType: participantRef.personType,
+							personId: participantRef.personId,
+						}
+					: {}),
 				...sanitizeFormData(parsed.data as Record<string, unknown>),
 				updatedAt: new Date(),
 			};
@@ -578,11 +652,13 @@ export const clientFormsRouter = {
 					.select()
 					.from(creditApplications)
 					.where(
-						personWhereClause(
-							tokenRow.opportunityId,
-							participantRef.personType,
-							participantRef.personId,
-						),
+						participantRef
+							? personWhereClause(
+									tokenRow.opportunityId,
+									participantRef.personType,
+									participantRef.personId,
+								)
+							: eq(creditApplications.opportunityId, tokenRow.opportunityId),
 					)
 					.limit(1);
 
@@ -624,18 +700,20 @@ export const clientFormsRouter = {
 		)
 		.handler(async ({ input }) => {
 			const tokenRow = await getValidToken(input.token);
-			const participantRef = requireTokenParticipant(tokenRow);
+			const participantRef = await resolveTokenParticipant(tokenRow);
 
 			try {
 				const [existing] = await db
 					.select()
 					.from(creditApplications)
 					.where(
-						personWhereClause(
-							tokenRow.opportunityId,
-							participantRef.personType,
-							participantRef.personId,
-						),
+						participantRef
+							? personWhereClause(
+									tokenRow.opportunityId,
+									participantRef.personType,
+									participantRef.personId,
+								)
+							: eq(creditApplications.opportunityId, tokenRow.opportunityId),
 					)
 					.limit(1);
 
@@ -678,7 +756,7 @@ export const clientFormsRouter = {
 		)
 		.handler(async ({ input }) => {
 			const tokenRow = await getValidToken(input.token);
-			const participantRef = requireTokenParticipant(tokenRow);
+			const participantRef = await resolveTokenParticipant(tokenRow);
 
 			const parsed = financialStatementServerSchema.safeParse(input.data);
 			if (!parsed.success) {
@@ -689,8 +767,12 @@ export const clientFormsRouter = {
 
 			const values = {
 				opportunityId: tokenRow.opportunityId,
-				personType: participantRef.personType,
-				personId: participantRef.personId,
+				...(participantRef
+					? {
+							personType: participantRef.personType,
+							personId: participantRef.personId,
+						}
+					: {}),
 				...sanitizeFormData(parsed.data as Record<string, unknown>),
 				updatedAt: new Date(),
 			};
@@ -700,11 +782,13 @@ export const clientFormsRouter = {
 					.select()
 					.from(financialStatements)
 					.where(
-						financialPersonWhereClause(
-							tokenRow.opportunityId,
-							participantRef.personType,
-							participantRef.personId,
-						),
+						participantRef
+							? financialPersonWhereClause(
+									tokenRow.opportunityId,
+									participantRef.personType,
+									participantRef.personId,
+								)
+							: eq(financialStatements.opportunityId, tokenRow.opportunityId),
 					)
 					.limit(1);
 
@@ -773,71 +857,158 @@ export const clientFormsRouter = {
 
 			const latestTokens = new Map<string, TokenRow>();
 			for (const tokenRow of tokenRows) {
-				const key = `${tokenRow.personType}:${tokenRow.personId}`;
+				const key =
+					tokenRow.personType && tokenRow.personId
+						? `${tokenRow.personType}:${tokenRow.personId}`
+						: `legacy:${tokenRow.opportunityId}`;
 				if (!latestTokens.has(key)) {
 					latestTokens.set(key, tokenRow);
 				}
 			}
 
 			const creditByPerson = new Map(
-				creditRows.map((row) => [`${row.personType}:${row.personId}`, row]),
+				creditRows.map((row) => [
+					row.personType && row.personId
+						? `${row.personType}:${row.personId}`
+						: `legacy:${row.opportunityId}`,
+					row,
+				]),
 			);
 			const financialByPerson = new Map(
-				financialRows.map((row) => [`${row.personType}:${row.personId}`, row]),
+				financialRows.map((row) => [
+					row.personType && row.personId
+						? `${row.personType}:${row.personId}`
+						: `legacy:${row.opportunityId}`,
+					row,
+				]),
 			);
+			const participantMap = new Map<
+				string,
+				{
+					personType: "lead" | "coDebtor";
+					personId: string;
+					displayName: string;
+					roleLabel: string;
+					email: string | null;
+					phone: string | null;
+					canGenerateLink: boolean;
+				}
+			>();
 
-			const participants = [
-				...(lead
-					? [
-							{
-								personType: "lead" as const,
-								personId: lead.id,
-								displayName: [
-									lead.firstName,
-									lead.middleName,
-									lead.lastName,
-									lead.secondLastName,
-								]
-									.filter(Boolean)
-									.join(" "),
-								roleLabel: "Titular",
-								email: lead.email,
-								phone: lead.phone,
-							},
-						]
-					: []),
-				...coDebtorsList.map((coDebtor, index) => ({
-					personType: "coDebtor" as const,
+			if (lead) {
+				participantMap.set(`lead:${lead.id}`, {
+					personType: "lead",
+					personId: lead.id,
+					displayName: [
+						lead.firstName,
+						lead.middleName,
+						lead.lastName,
+						lead.secondLastName,
+					]
+						.filter(Boolean)
+						.join(" "),
+					roleLabel: "Titular",
+					email: lead.email,
+					phone: lead.phone,
+					canGenerateLink: true,
+				});
+			}
+
+			for (const [index, coDebtor] of coDebtorsList.entries()) {
+				participantMap.set(`coDebtor:${coDebtor.id}`, {
+					personType: "coDebtor",
 					personId: coDebtor.id,
 					displayName: coDebtor.fullName,
 					roleLabel: `Co-firmante ${index + 1}`,
 					email: coDebtor.email,
 					phone: coDebtor.phone,
-				})),
-			].map((participant) => {
-				const key = `${participant.personType}:${participant.personId}`;
-				const latestToken = latestTokens.get(key) ?? null;
-				const creditApp = creditByPerson.get(key) ?? null;
-				const financialStmt = financialByPerson.get(key) ?? null;
+					canGenerateLink: true,
+				});
+			}
 
-				return {
-					...participant,
-					latestToken: latestToken
-						? {
-								token: latestToken.token,
-								url: `${process.env.FRONT_URL}/formulario/${latestToken.token}`,
-								expiresAt: latestToken.expiresAt,
-								used: latestToken.used,
-								createdAt: latestToken.createdAt,
-							}
-						: null,
-					creditApplication: serializeRow(creditApp),
-					financialStatement: serializeRow(financialStmt),
-					creditApplicationExists: !!creditApp,
-					creditHasSignature: !!creditApp?.firmaImagen,
-					financialStatementExists: !!financialStmt,
-				};
-			});
+			for (const tokenRow of tokenRows) {
+				if (!tokenRow.personType || !tokenRow.personId) continue;
+				const key = `${tokenRow.personType}:${tokenRow.personId}`;
+				if (participantMap.has(key)) continue;
+				const creditApp = serializeRow(creditByPerson.get(key) ?? null);
+				const financialStmt = serializeRow(financialByPerson.get(key) ?? null);
+				participantMap.set(key, {
+					personType: tokenRow.personType as "lead" | "coDebtor",
+					personId: tokenRow.personId,
+					displayName:
+						getParticipantNameFromForm(creditApp) ||
+						getParticipantNameFromForm(financialStmt) ||
+						(tokenRow.personType === "lead"
+							? "Titular historico"
+							: "Co-firmante historico"),
+					roleLabel:
+						tokenRow.personType === "lead"
+							? "Titular historico"
+							: "Co-firmante historico",
+					email:
+						(typeof creditApp?.email === "string" ? creditApp.email : null) ?? null,
+					phone:
+						(typeof creditApp?.telMovil === "string"
+							? creditApp.telMovil
+							: null) ?? null,
+					canGenerateLink: false,
+				});
+			}
+
+			if (
+				latestTokens.has(`legacy:${input.opportunityId}`) ||
+				creditByPerson.has(`legacy:${input.opportunityId}`) ||
+				financialByPerson.has(`legacy:${input.opportunityId}`)
+			) {
+				const creditApp = serializeRow(
+					creditByPerson.get(`legacy:${input.opportunityId}`) ?? null,
+				);
+				const financialStmt = serializeRow(
+					financialByPerson.get(`legacy:${input.opportunityId}`) ?? null,
+				);
+				participantMap.set(`legacy:${input.opportunityId}`, {
+					personType: "lead",
+					personId: `legacy:${input.opportunityId}`,
+					displayName:
+						getParticipantNameFromForm(creditApp) ||
+						getParticipantNameFromForm(financialStmt) ||
+						"Titular legacy",
+					roleLabel: "Titular legacy",
+					email:
+						(typeof creditApp?.email === "string" ? creditApp.email : null) ?? null,
+					phone:
+						(typeof creditApp?.telMovil === "string"
+							? creditApp.telMovil
+							: null) ?? null,
+					canGenerateLink: false,
+				});
+			}
+
+			const participants = Array.from(participantMap.entries()).map(
+				([key, participant]) => {
+					const latestToken = latestTokens.get(key) ?? null;
+					const creditApp = creditByPerson.get(key) ?? null;
+					const financialStmt = financialByPerson.get(key) ?? null;
+
+					return {
+						...participant,
+						latestToken: latestToken
+							? {
+									token: latestToken.token,
+									url: `${process.env.FRONT_URL}/formulario/${latestToken.token}`,
+									expiresAt: latestToken.expiresAt,
+									used: latestToken.used,
+									createdAt: latestToken.createdAt,
+								}
+							: null,
+						creditApplication: serializeRow(creditApp),
+						financialStatement: serializeRow(financialStmt),
+						creditApplicationExists: !!creditApp,
+						creditHasSignature: !!creditApp?.firmaImagen,
+						financialStatementExists: !!financialStmt,
+					};
+				},
+			);
 
 			return {
 				opportunityId: input.opportunityId,

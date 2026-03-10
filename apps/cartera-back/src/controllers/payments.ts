@@ -1411,8 +1411,8 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
               'emiteFactura', i.emite_factura,
               'abonoCapital', pci.abono_capital,
               'abonoInteres', pci.abono_interes,
-              'abonoIva', pci.abono_iva_12,
-              'isr', ROUND(COALESCE(pci.abono_interes, 0) * 0.05, 2),
+              'abonoIva', CASE WHEN i.emite_factura = true THEN pci.abono_iva_12 ELSE 0 END,
+              'isr', CASE WHEN i.emite_factura = true THEN 0 ELSE ROUND(COALESCE(pci.abono_interes, 0) * 0.05, 2) END,
               'cuotaPago', pci.cuota,
               'montoAportado', ci.monto_aportado,
               'porcentajeParticipacion', ci.porcentaje_participacion_inversionista

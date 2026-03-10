@@ -1004,6 +1004,19 @@ export const crmRouter = {
 		.handler(async ({ input, context }) => {
 			const leadIdFilter = input?.leadId;
 			const searchTerm = input?.search;
+			const firstClosedStageDates = db
+				.select({
+					opportunityId: opportunityStageHistory.opportunityId,
+					firstClosedStageAt:
+						sql<Date>`min(${opportunityStageHistory.changedAt})`.as(
+							"first_closed_stage_at",
+						),
+				})
+				.from(opportunityStageHistory)
+				.innerJoin(salesStages, eq(opportunityStageHistory.toStageId, salesStages.id))
+				.where(gte(salesStages.closurePercentage, 90))
+				.groupBy(opportunityStageHistory.opportunityId)
+				.as("first_closed_stage_dates");
 
 			const selectFields = {
 				id: opportunities.id,
@@ -1017,6 +1030,10 @@ export const crmRouter = {
 				assignedTo: opportunities.assignedTo,
 				notes: opportunities.notes,
 				createdAt: opportunities.createdAt,
+				closedAt:
+					sql<Date | null>`coalesce(${opportunities.actualCloseDate}, ${firstClosedStageDates.firstClosedStageAt})`.as(
+						"closed_at",
+					),
 				updatedAt: opportunities.updatedAt,
 				numeroSifco: opportunities.numeroSifco,
 				// Analysis status for tracking rejection/resubmission
@@ -1090,6 +1107,10 @@ export const crmRouter = {
 			const baseQuery = db
 				.select(selectFields)
 				.from(opportunities)
+				.leftJoin(
+					firstClosedStageDates,
+					eq(opportunities.id, firstClosedStageDates.opportunityId),
+				)
 				.leftJoin(companies, eq(opportunities.companyId, companies.id))
 				.leftJoin(leads, eq(opportunities.leadId, leads.id))
 				.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))

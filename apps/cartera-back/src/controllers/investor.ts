@@ -3114,7 +3114,7 @@ export async function resumenGlobalInversionistas(
       total_isr: sql<number>`COALESCE(SUM(
         CASE 
           WHEN ${inversionistas.emite_factura} THEN 0 
-          ELSE ${pe.abono_interes} * 0.07
+          ELSE ROUND(${pe.abono_interes} * 0.07, 2)
         END
       ), 0)`,
 
@@ -3126,7 +3126,7 @@ export async function resumenGlobalInversionistas(
         + CASE
             WHEN ${inversionistas.emite_factura}
               THEN ${pe.abono_iva_12}
-            ELSE -(${pe.abono_interes} * 0.07)
+            ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
           END
       ), 0)`,
 
@@ -3144,7 +3144,7 @@ export async function resumenGlobalInversionistas(
             + CASE
                 WHEN ${inversionistas.emite_factura}
                   THEN ${pe.abono_iva_12}
-                ELSE -(${pe.abono_interes} * 0.07)
+                ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
               END
           ), 0)
         )
@@ -3159,7 +3159,7 @@ export async function resumenGlobalInversionistas(
           + CASE
               WHEN ${inversionistas.emite_factura}
                 THEN ${pe.abono_iva_12}
-              ELSE -(${pe.abono_interes} * 0.07)
+              ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
             END
         ), 0)
         - CASE ${inversionistas.tipo_reinversion}
@@ -3175,7 +3175,7 @@ export async function resumenGlobalInversionistas(
                 + CASE
                     WHEN ${inversionistas.emite_factura}
                       THEN ${pe.abono_iva_12}
-                    ELSE -(${pe.abono_interes} * 0.07)
+                    ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
                   END
               ), 0)
             )

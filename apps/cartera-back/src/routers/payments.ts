@@ -22,7 +22,7 @@ import { reversePayment } from "../controllers/reversePayment";
 import { revertPaymentToPending } from "../controllers/revertPaymentToPending";
 import { processInvestors } from "../controllers/processInvestors";
 import { ajustarCuotasConSIFCO, marcarCuotasPagadasHastaNumero, procesarPagosSIFCODesdeJSON } from "../controllers/migratePayments";
-import { updateInstallments, updateAllInstallments, recalcularCuotasInversionistas } from "../controllers/updateCredit";
+import { updateInstallments, updateAllInstallments } from "../controllers/updateCredit";
 
 export const liquidatePaymentsSchema = z.object({
   pago_id: z.number().int().positive(),
@@ -1190,7 +1190,7 @@ export const paymentRouter = new Elysia()
     body: t.Object({
       numero_credito_sifco: t.String(),
       hasta_cuota: t.Number(),
-      fecha_primer_pago: t.String(),
+      fecha_primer_pago: t.Optional(t.String()),
     }),
     detail: {
       tags: ["Créditos"],
@@ -1297,32 +1297,6 @@ export const paymentRouter = new Elysia()
     detail: {
       tags: ["Pagos"],
       summary: "Aplicar un monto adicional a los restantes de un pago existente",
-    },
-  }
-)
-.post(
-  "/recalcular-cuotas-inversionistas",
-  async ({ set }) => {
-    try {
-      const result = await recalcularCuotasInversionistas();
-      set.status = 200;
-      return {
-        success: true,
-        message: "Cuotas de inversionistas recalculadas",
-        ...result,
-      };
-    } catch (error: any) {
-      set.status = 500;
-      return {
-        success: false,
-        message: error.message || "Error al recalcular cuotas",
-      };
-    }
-  },
-  {
-    detail: {
-      tags: ["Créditos"],
-      summary: "Recalcula cuota_inversionista en padre y espejo para todos los créditos activos",
     },
   }
 )

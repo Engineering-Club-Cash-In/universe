@@ -530,7 +530,10 @@ const updateInvestors = async (
   console.log(current.capital, "current values ");
 
   // 🔥 OBTENER CAPITAL Y CUOTA TOTAL DEL CRÉDITO (usar valores nuevos si existen)
-  const capitalTotal = new Big(updateFields.capital ?? current?.capital);
+  const capitalTotal = inversionistas.reduce(
+    (acc: Big, inv) => acc.plus(inv.monto_aportado),
+    new Big(0),
+  );
   const cuotaTotal = new Big(updateFields.cuota ?? current?.cuota);
 
   console.log(`💰 Capital Total: Q${capitalTotal.toFixed(2)}`);

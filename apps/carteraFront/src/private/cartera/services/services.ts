@@ -2895,3 +2895,14 @@ export async function getAbonosCuotaService(
   );
   return data;
 }
+
+// Marcar cuotas pagadas hasta un número de cuota
+export interface MarcarCuotasBody {
+  numero_credito_sifco: string;
+  hasta_cuota: number;
+}
+
+export async function marcarCuotasService(body: MarcarCuotasBody) {
+  const { data } = await api.post("/pagos/marcar-cuotas", body);
+  return data;
+}

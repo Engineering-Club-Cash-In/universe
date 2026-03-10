@@ -1411,8 +1411,8 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
               'emiteFactura', i.emite_factura,
               'abonoCapital', pci.abono_capital,
               'abonoInteres', pci.abono_interes,
-              'abonoIva', CASE WHEN i.emite_factura = true THEN pci.abono_iva_12 ELSE 0 END,
-              'isr', CASE WHEN i.emite_factura = true THEN 0 ELSE ROUND(COALESCE(pci.abono_interes, 0) * 0.05, 2) END,
+              'abonoIva', pci.abono_iva_12,
+              'isr', ROUND(COALESCE(pci.abono_interes, 0) * 0.05, 2),
               'cuotaPago', pci.cuota,
               'montoAportado', ci.monto_aportado,
               'porcentajeParticipacion', ci.porcentaje_participacion_inversionista
@@ -1581,6 +1581,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       SELECT
         i.inversionista_id AS "inversionistaId",
         i.nombre AS "nombreInversionista",
+        i.emite_factura AS "emiteFactura",
         COALESCE(SUM(pci.abono_capital::numeric), 0) AS "totalAbonoCapital",
         COALESCE(SUM(pci.abono_interes::numeric), 0) AS "totalAbonoInteres",
         COALESCE(SUM(pci.abono_iva_12::numeric), 0) AS "totalAbonoIva",
@@ -1596,7 +1597,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         AND ci.inversionista_id = pci.inversionista_id
       ${sql.raw(whereSQL)}
       ${sql.raw(inversionistaId ? `AND pci.inversionista_id = '${inversionistaId}'` : '')}
-      GROUP BY i.inversionista_id, i.nombre
+      GROUP BY i.inversionista_id, i.nombre, i.emite_factura
       ORDER BY i.nombre
     `;
 
@@ -1604,6 +1605,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     const totalesInversionistas = totalesInvResult.rows.map((r: any) => ({
       inversionistaId: r.inversionistaId,
       nombreInversionista: r.nombreInversionista,
+      emiteFactura: r.emiteFactura ?? false,
       totalAbonoCapital: new Big(r.totalAbonoCapital).round(2).toNumber(),
       totalAbonoInteres: new Big(r.totalAbonoInteres).round(2).toNumber(),
       totalAbonoIva: new Big(r.totalAbonoIva).round(2).toNumber(),

@@ -16,6 +16,8 @@ export const clientFormTokens = pgTable("client_form_tokens", {
 	opportunityId: uuid("opportunity_id")
 		.notNull()
 		.references(() => opportunities.id, { onDelete: "cascade" }),
+	personType: text("person_type"), // 'lead' | 'coDebtor'
+	personId: uuid("person_id"), // lead.id or co_debtors.id
 	token: uuid("token").notNull().unique().defaultRandom(),
 	expiresAt: timestamp("expires_at").notNull(),
 	used: boolean("used").notNull().default(false),
@@ -30,6 +32,8 @@ export const creditApplications = pgTable("credit_applications", {
 		.notNull()
 		.unique()
 		.references(() => opportunities.id, { onDelete: "cascade" }),
+	personType: text("person_type"), // 'lead' | 'coDebtor'
+	personId: uuid("person_id"), // lead.id or co_debtors.id
 
 	// Datos personales
 	primerApellido: text("primer_apellido"),
@@ -113,6 +117,8 @@ export const financialStatements = pgTable("financial_statements", {
 		.notNull()
 		.unique()
 		.references(() => opportunities.id, { onDelete: "cascade" }),
+	personType: text("person_type"), // 'lead' | 'coDebtor'
+	personId: uuid("person_id"), // lead.id or co_debtors.id
 
 	// Datos personales
 	primerNombre: text("primer_nombre"),

@@ -142,20 +142,38 @@ function FormularioPage() {
 		}
 	};
 
-	// Build pre-fill defaults from lead data
+	// Build pre-fill defaults from the participant tied to the token.
 	const creditDefaults = creditDataRef.current
 		? creditDataRef.current
-		: validatedData?.lead
+		: validatedData?.person
 			? {
-					primerNombre: (validatedData.lead.firstName as string) || "",
-					segundoNombre: (validatedData.lead.middleName as string) || "",
-					primerApellido: (validatedData.lead.lastName as string) || "",
-					segundoApellido: (validatedData.lead.secondLastName as string) || "",
-					dpi: (validatedData.lead.dpi as string) || "",
-					nit: (validatedData.lead.nit as string) || "",
-					email: (validatedData.lead.email as string) || "",
-					telMovil: (validatedData.lead.phone as string) || "",
-					direccionResidencia: (validatedData.lead.direccion as string) || "",
+					primerNombre:
+						(validatedData.personType === "lead"
+							? (validatedData.person.firstName as string)
+							: (validatedData.person.fullName as string)?.split(" ")[0]) || "",
+					segundoNombre:
+						validatedData.personType === "lead"
+							? (validatedData.person.middleName as string) || ""
+							: "",
+					primerApellido:
+						validatedData.personType === "lead"
+							? (validatedData.person.lastName as string) || ""
+							: "",
+					segundoApellido:
+						validatedData.personType === "lead"
+							? (validatedData.person.secondLastName as string) || ""
+							: "",
+					dpi: (validatedData.person.dpi as string) || "",
+					nit:
+						validatedData.personType === "lead"
+							? (validatedData.person.nit as string) || ""
+							: "",
+					email: (validatedData.person.email as string) || "",
+					telMovil: (validatedData.person.phone as string) || "",
+					direccionResidencia:
+						validatedData.personType === "lead"
+							? (validatedData.person.direccion as string) || ""
+							: "",
 					vehiculoMarca: (validatedData.vehicle?.make as string) || "",
 					vehiculoLinea: (validatedData.vehicle?.model as string) || "",
 					vehiculoModelo: String(validatedData.vehicle?.year ?? ""),
@@ -290,6 +308,11 @@ function FormularioPage() {
 									style={{ width: progressWidth }}
 								/>
 							</div>
+							{validatedData?.personDisplayName && (
+								<p className="mt-2 text-muted-foreground text-xs">
+									Formulario para: {validatedData.personDisplayName}
+								</p>
+							)}
 						</div>
 					</div>
 				</div>

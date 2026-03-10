@@ -1,5 +1,6 @@
 export * from "./auctionVehicles";
 export * from "./auth";
+export * from "./buro";
 export * from "./cartera-back";
 export * from "./checks";
 export * from "./client-forms";
@@ -13,6 +14,7 @@ export * from "./locations";
 export * from "./miniagent-credentials";
 export * from "./notes";
 export * from "./notifications";
+export * from "./otp";
 export * from "./quotations";
 export * from "./renap";
 export * from "./vehicles";

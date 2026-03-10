@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PERMISSIONS } from "@/lib/roles";
+import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import { client, orpc } from "@/utils/orpc";
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
@@ -74,17 +75,16 @@ export function DisbursementView({
 	const uploadDisbursementMutation = useMutation({
 		mutationFn: async (file: File) => {
 			const notificationId = disbursementQuery.data?.notificationId;
-			if (!notificationId) throw new Error("No hay notificación de desembolso");
+			if (!notificationId)
+				throw new Error("No hay notificacion de desembolso");
 
-			const data = await new Promise<string>((resolve, reject) => {
-				const reader = new FileReader();
-				reader.onload = () => {
-					const base64 = (reader.result as string).split(",")[1];
-					resolve(base64);
-				};
-				reader.onerror = reject;
-				reader.readAsDataURL(file);
-			});
+			const { key } = await uploadFileToR2WithRetry(
+				file,
+				{
+					resourceType: "notification_document",
+					resourceId: notificationId,
+				},
+			);
 
 			return await client.addDocumentToNotification({
 				notificationId,
@@ -92,7 +92,7 @@ export function DisbursementView({
 					name: file.name,
 					type: file.type,
 					size: file.size,
-					data,
+					key,
 				},
 			});
 		},

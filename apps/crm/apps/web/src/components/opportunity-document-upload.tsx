@@ -16,6 +16,7 @@ import { Combobox } from "@/components/ui/combobox";
 import { Label } from "@/components/ui/label";
 import { getDocumentTypeLabel } from "@/lib/crm-formatters";
 import { VEHICLE_DOCUMENT_TYPES } from "@/lib/document-constants";
+import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import { client } from "@/utils/orpc";
 
 interface OpportunityDocumentUploadProps {
@@ -132,16 +133,13 @@ export function OpportunityDocumentUpload({
 
 	const uploadMutation = useMutation({
 		mutationFn: async (data: { file: File; documentType: string }) => {
-			const base64 = await new Promise<string>((resolve, reject) => {
-				const reader = new FileReader();
-				reader.onloadend = () => {
-					const result = reader.result as string;
-					const base64Data = result.split(",")[1];
-					resolve(base64Data);
-				};
-				reader.onerror = reject;
-				reader.readAsDataURL(data.file);
-			});
+			const { key } = await uploadFileToR2WithRetry(
+				data.file,
+				{
+					resourceType: "opportunity_document",
+					resourceId: opportunityId,
+				},
+			);
 
 			return await client.uploadOpportunityDocument({
 				opportunityId,
@@ -150,7 +148,7 @@ export function OpportunityDocumentUpload({
 					name: data.file.name,
 					type: data.file.type,
 					size: data.file.size,
-					data: base64,
+					key,
 				},
 			});
 		},

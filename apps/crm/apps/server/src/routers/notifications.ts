@@ -11,12 +11,10 @@ import {
 } from "../db/schema/notifications";
 import { adminProcedure, protectedProcedure } from "../lib/orpc";
 import {
+	buildUploadPrefix,
 	deleteFileFromR2,
-	generateUniqueFilename,
 	getFileUrl,
-	resolveMimeType,
-	uploadFileToR2,
-	validateFile,
+	verifyUploadedDocumentInR2,
 } from "../lib/storage";
 
 // Campos de selección con join al creador
@@ -474,7 +472,7 @@ export const notificationsRouter = {
 					name: z.string(),
 					type: z.string(),
 					size: z.number(),
-					data: z.string(), // Base64
+					key: z.string(), // R2 key from presigned upload
 				}),
 			}),
 		)
@@ -503,35 +501,16 @@ export const notificationsRouter = {
 				});
 			}
 
-			// Resolver MIME type (fallback por extensión)
-			const resolvedMimeType = resolveMimeType({
-				type: input.file.type,
-				name: input.file.name,
-			} as File);
-
-			// Validar archivo
-			const validation = validateFile({
-				type: resolvedMimeType,
-				size: input.file.size,
-				name: input.file.name,
-			} as File);
-
-			if (!validation.valid) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: validation.error || "Archivo inválido",
-				});
-			}
-
-			// Subir a R2
-			const fileBuffer = Buffer.from(input.file.data, "base64");
-			const fileBlob = new Blob([fileBuffer], { type: resolvedMimeType });
-			const uniqueFilename = generateUniqueFilename(input.file.name);
-
-			const { key } = await uploadFileToR2(
-				fileBlob,
-				uniqueFilename,
-				`notifications/${input.notificationId}`,
-			);
+			const uploadedFile = await verifyUploadedDocumentInR2({
+				key: input.file.key,
+				expectedPrefix: buildUploadPrefix(
+					"notification_document",
+					input.notificationId,
+				),
+				filename: input.file.name,
+				mimeType: input.file.type,
+			});
+			const uniqueFilename = uploadedFile.key.split("/").pop()!;
 
 			// Guardar registro en la base de datos
 			const [document] = await db
@@ -540,9 +519,9 @@ export const notificationsRouter = {
 					notificationId: input.notificationId,
 					filename: uniqueFilename,
 					originalName: input.file.name,
-					mimeType: resolvedMimeType,
-					size: input.file.size,
-					filePath: key,
+					mimeType: uploadedFile.mimeType,
+					size: uploadedFile.size,
+					filePath: uploadedFile.key,
 					uploadedBy: userId,
 				})
 				.returning();

@@ -10,6 +10,7 @@ import {
 	Users,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -1248,8 +1249,11 @@ export function DynamicContractWizard({
 					updateDateFields(fechaStr, diaPagoDefault);
 				}
 			}
-		} catch (error) {
+		} catch (error: any) {
 			console.error("Error fetching documents data:", error);
+			const message =
+				error?.message || "Error al obtener datos de documentos";
+			toast.error(message);
 		} finally {
 			setIsLoadingFields(false);
 		}

@@ -592,17 +592,17 @@ export const inversionistasRouter = new Elysia()
     "/inversionistas/rendimiento",
     async ({ query, set }) => {
       try {
-        const { dpi } = query;
+        const { dpi, email } = query;
 
-        if (!dpi) {
+        if (!dpi && !email) {
           set.status = 400;
           return {
             success: false,
-            message: "El parámetro 'dpi' es obligatorio",
+            message: "Se requiere al menos 'dpi' o 'email'",
           };
         }
 
-        const result = await getInvestorPerformance(dpi);
+        const result = await getInvestorPerformance(dpi, email);
 
         set.status = 200;
         return {
@@ -621,10 +621,11 @@ export const inversionistasRouter = new Elysia()
     },
     {
       query: t.Object({
-        dpi: t.String(),
+        dpi: t.Optional(t.String()),
+        email: t.Optional(t.String()),
       }),
       detail: {
-        summary: "Obtener rendimiento de inversionista por DPI",
+        summary: "Obtener rendimiento de inversionista por DPI o email",
         tags: ["Inversionistas"],
       },
     }

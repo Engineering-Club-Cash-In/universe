@@ -98,7 +98,8 @@ async function consultarPagosInversionista(
   incluirLiquidados: boolean,
   numeroCuota: number | undefined,
   config: TablaConfig,
-  soloLiquidados = false
+  soloLiquidados = false,
+  liquidacionId?: number
 ) {
   // 🔥 Type assertion segura: sabemos que ambas tablas tienen la misma estructura
   const tabla = config.pagosCreditoInversionistas as typeof pagos_credito_inversionistas;
@@ -109,7 +110,10 @@ async function consultarPagosInversionista(
     eq(tabla.credito_id, creditoId),
   ];
 
-  if (soloLiquidados) {
+  if (liquidacionId) {
+    pagosConditions.push(eq(tabla.liquidacion_id, liquidacionId));
+    pagosConditions.push(eq(tabla.estado_liquidacion, "LIQUIDADO"));
+  } else if (soloLiquidados) {
     pagosConditions.push(
       eq(tabla.estado_liquidacion, "LIQUIDADO")
     );
@@ -169,14 +173,15 @@ async function consultarPagosAmbos(
   creditoId: number,
   incluirLiquidados: boolean,
   numeroCuota: number | undefined,
-  soloLiquidados = false
+  soloLiquidados = false,
+  liquidacionId?: number
 ) {
   const configOriginal = getTablaConfig("original");
   const configEspejo = getTablaConfig("espejo");
 
   const [pagosOriginales, pagosEspejos] = await Promise.all([
-    consultarPagosInversionista(inversionistaId, creditoId, incluirLiquidados, numeroCuota, configOriginal, soloLiquidados),
-    consultarPagosInversionista(inversionistaId, creditoId, incluirLiquidados, numeroCuota, configEspejo, soloLiquidados),
+    consultarPagosInversionista(inversionistaId, creditoId, incluirLiquidados, numeroCuota, configOriginal, soloLiquidados, liquidacionId),
+    consultarPagosInversionista(inversionistaId, creditoId, incluirLiquidados, numeroCuota, configEspejo, soloLiquidados, liquidacionId),
   ]);
 
   return [...pagosOriginales, ...pagosEspejos];
@@ -189,7 +194,8 @@ async function consultarPagosBulk(
   incluirLiquidados: boolean,
   numeroCuota: number | undefined,
   config: TablaConfig,
-  soloLiquidados = false
+  soloLiquidados = false,
+  liquidacionId?: number
 ) {
   const tabla = config.pagosCreditoInversionistas as typeof pagos_credito_inversionistas;
 
@@ -198,7 +204,10 @@ async function consultarPagosBulk(
     inArray(tabla.credito_id, creditosIds),
   ];
 
-  if (soloLiquidados) {
+  if (liquidacionId) {
+    pagosConditions.push(eq(tabla.liquidacion_id, liquidacionId));
+    pagosConditions.push(eq(tabla.estado_liquidacion, "LIQUIDADO"));
+  } else if (soloLiquidados) {
     pagosConditions.push(eq(tabla.estado_liquidacion, "LIQUIDADO"));
   } else if (!incluirLiquidados) {
     pagosConditions.push(eq(tabla.estado_liquidacion, "NO_LIQUIDADO"));
@@ -227,11 +236,12 @@ async function consultarPagosBulkAmbos(
   creditosIds: number[],
   incluirLiquidados: boolean,
   numeroCuota: number | undefined,
-  soloLiquidados = false
+  soloLiquidados = false,
+  liquidacionId?: number
 ) {
   const [pagosOriginales, pagosEspejos] = await Promise.all([
-    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("original"), soloLiquidados),
-    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("espejo"), soloLiquidados),
+    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("original"), soloLiquidados, liquidacionId),
+    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("espejo"), soloLiquidados, liquidacionId),
   ]);
   return [...pagosOriginales, ...pagosEspejos];
 }
@@ -1014,7 +1024,8 @@ export async function resumeInvestor(
   incluirLiquidados = false,
   numeroCuota?: number,
   tipo: TipoConsulta = "originales",
-  soloLiquidados = false
+  soloLiquidados = false,
+  liquidacionId?: number
 ) {
   console.log(
     "resumeInvestor for",
@@ -1195,7 +1206,8 @@ export async function resumeInvestor(
               c.credito_id,
               incluirLiquidados,
               numeroCuota,
-              soloLiquidados
+              soloLiquidados,
+              liquidacionId
             );
           } else {
             const config = getTablaConfig(tipo === "espejos" ? "espejo" : "original");
@@ -1205,7 +1217,8 @@ export async function resumeInvestor(
               incluirLiquidados,
               numeroCuota,
               config,
-              soloLiquidados
+              soloLiquidados,
+              liquidacionId
             );
           }
 
@@ -1443,7 +1456,8 @@ export async function getInvestorTotalsGlobales(
   tipo: TipoConsulta = "originales",
   incluirLiquidados = false,
   numeroCuota?: number,
-  soloLiquidados = false
+  soloLiquidados = false,
+  liquidacionId?: number
 ) {
   console.log(
     "getInvestorTotalsGlobales for",
@@ -1571,7 +1585,8 @@ export async function getInvestorTotalsGlobales(
       creditosIds,
       incluirLiquidados,
       numeroCuota,
-      soloLiquidados
+      soloLiquidados,
+      liquidacionId
     );
   } else {
     const config = getTablaConfig(tipo === "espejos" ? "espejo" : "original");
@@ -1581,7 +1596,8 @@ export async function getInvestorTotalsGlobales(
       incluirLiquidados,
       numeroCuota,
       config,
-      soloLiquidados
+      soloLiquidados,
+      liquidacionId
     );
   }
 
@@ -2169,7 +2185,11 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
     try {
       console.log(`\n💰 Procesando inversionista ${inv_id}...`);
 
-      // 🔍 PASO 2.1: Buscar boleta PENDIENTE del inversionista
+      // ========================================
+      // FASE 1: VALIDACIONES PRE-TRANSACCION
+      // ========================================
+
+      // Buscar boleta PENDIENTE del inversionista
       console.log(`  🔍 Buscando boleta PENDIENTE...`);
       const [boletaPendiente] = await db
         .select()
@@ -2180,88 +2200,54 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
             eq(boletasPagoInversionista.estado, "PENDIENTE")
           )
         )
-        .orderBy(desc(boletasPagoInversionista.fecha_subida)) // La más reciente
+        .orderBy(desc(boletasPagoInversionista.fecha_subida))
         .limit(1);
 
       if (boletaPendiente) {
         console.log(`  ✅ Boleta encontrada: ID ${boletaPendiente.boleta_id}`);
-        console.log(`     URL: ${boletaPendiente.boleta_url}`);
-        console.log(`     Monto: Q${boletaPendiente.monto_boleta ?? "N/A"}`);
-        console.log(`     Fecha subida: ${boletaPendiente.fecha_subida}`);
       } else {
         console.log(`  ⚠️ Sin boleta PENDIENTE, se liquida sin boleta`);
       }
 
-      // 🆕 Obtener datos del inversionista desde las tablas espejo
-      const resumen = await resumeInvestor(
-        inv_id,
-        1,
-        999999,
-        undefined,
-        undefined,
-        undefined,
-        false,
-        undefined,
-        "espejos"
-      );
+      // Verificar que hay pagos NO_LIQUIDADO para este inversionista
+      const pagosNoLiquidados = await db
+        .select({
+          id: pagos_credito_inversionistas_espejo.id,
+          pago_id: pagos_credito_inversionistas_espejo.pago_id,
+          credito_id: pagos_credito_inversionistas_espejo.credito_id,
+          abono_capital: pagos_credito_inversionistas_espejo.abono_capital,
+        })
+        .from(pagos_credito_inversionistas_espejo)
+        .where(
+          and(
+            eq(pagos_credito_inversionistas_espejo.inversionista_id, inv_id),
+            eq(pagos_credito_inversionistas_espejo.estado_liquidacion, "NO_LIQUIDADO")
+          )
+        );
 
-      if (!resumen.inversionistas || resumen.inversionistas.length === 0) {
-        console.log(`  ⚠️ Inversionista ${inv_id} sin pagos pendientes`);
-        errores.push({
-          inversionista_id: inv_id,
-          razon: "Sin pagos pendientes",
-        });
-        inversionistasSaltados++;
-        continue;
-      }
-
-      const inversionista = resumen.inversionistas[0];
-
-      if (
-        !inversionista.creditos.some((c) => c.pagos.length > 0)
-      ) {
+      if (pagosNoLiquidados.length === 0) {
         console.log(`  ⚠️ Inversionista ${inv_id} sin pagos para liquidar`);
-        errores.push({
-          inversionista_id: inv_id,
-          razon: "Sin pagos para liquidar",
-        });
+        errores.push({ inversionista_id: inv_id, razon: "Sin pagos para liquidar" });
         inversionistasSaltados++;
         continue;
       }
 
-      // Totales desde getInvestorTotalsGlobales (espejos, no liquidados)
-      const totalesResult = await getInvestorTotalsGlobales(
-        inv_id,
-        undefined,
-        "espejos",
-        false
-      );
+      // Totales pre-liquidación (espejos, no liquidados)
+      const totalesResult = await getInvestorTotalsGlobales(inv_id, undefined, "espejos", false);
       const totales = totalesResult.totales;
-      inversionista.subtotal = totales as any;
-
-      const cantidadPagos = inversionista.creditos.reduce(
-        (sum, cred) => sum + (cred.pagos?.length ?? 0),
-        0
-      );
-
-      if (Number(totales.total_cuota_con_reinversion) === 0 && cantidadPagos === 0) {
-        console.log(`  ⚠️ Inversionista ${inv_id} sin pagos para liquidar`);
-        errores.push({
-          inversionista_id: inv_id,
-          razon: "Sin pagos para liquidar",
-        });
-        inversionistasSaltados++;
-        continue;
-      }
+      const cantidadPagos = pagosNoLiquidados.length;
 
       console.log(`  📊 Total pagos a liquidar: ${cantidadPagos}`);
 
-      // Reinversión desde los totales globales
       const reinvCapital = totales.total_reinversion_capital ?? 0;
       const reinvInteres = totales.total_reinversion_interes ?? 0;
       const reinvTotal = totales.total_reinversion ?? 0;
 
-      // 🆕 PASO 3: Crear registro de liquidación (con o sin boleta)
+      // ========================================
+      // FASE 2: TRANSACCION (datos financieros)
+      // ========================================
+
+      // Crear registro de liquidación
       const [liquidacion] = await db
         .insert(liquidaciones)
         .values({
@@ -2280,96 +2266,59 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
         })
         .returning();
 
-      console.log(
-        `  ✅ Liquidación creada: liquidacion_id=${liquidacion.liquidacion_id}`
-      );
+      console.log(`  ✅ Liquidación creada: liquidacion_id=${liquidacion.liquidacion_id}`);
 
-      // 🔥 PASO 3.1: Marcar boleta como PROCESADO (solo si existe)
+      // Marcar boleta como PROCESADO (solo si existe)
       if (boletaPendiente) {
         await db
           .update(boletasPagoInversionista)
-          .set({
-            estado: "PROCESADO",
-            fecha_procesado: new Date(),
-          })
+          .set({ estado: "PROCESADO", fecha_procesado: new Date() })
           .where(eq(boletasPagoInversionista.boleta_id, boletaPendiente.boleta_id));
-
         console.log(`  ✅ Boleta ${boletaPendiente.boleta_id} marcada como PROCESADO`);
       }
 
-      // Reiniciar reinversiones y actualizar saldo_reinversion del inversionista
+      // Reinversiones
       const montoReinvertido = new Big(reinvTotal);
       if (montoReinvertido.gt(0)) {
-        // Sumar lo reinvertido al saldo disponible del inversionista
         await db.update(inversionistas)
           .set({
             saldo_reinversion: sql`${inversionistas.saldo_reinversion} + ${montoReinvertido.toFixed(2)}::numeric`,
           })
           .where(eq(inversionistas.inversionista_id, inv_id));
 
-        // Reiniciar acumulado
         await db.update(reinversiones)
-          .set({
-            monto_capital: "0",
-            monto_interes: "0",
-            monto_total: "0",
-          })
+          .set({ monto_capital: "0", monto_interes: "0", monto_total: "0" })
           .where(eq(reinversiones.inversionista_id, inv_id));
 
-        console.log(`  ✅ Saldo reinversión actualizado (+${montoReinvertido.toFixed(2)}) y reinversiones reiniciadas para inversionista ${inv_id}`);
+        console.log(`  ✅ Saldo reinversión actualizado (+${montoReinvertido.toFixed(2)})`);
       }
 
-      // 🆕 PASO 4: Obtener IDs de pagos y actualizar en base a ESPEJO
-      const pagosIds: number[] = [];
-      for (const credito of inversionista.creditos) {
-        if (credito.pagos && credito.pagos.length > 0) {
-          const pagosBD = await db
-            .select({
-              id: pagos_credito_inversionistas_espejo.id,
-              pago_id: pagos_credito_inversionistas_espejo.pago_id,
-              abono_capital: pagos_credito_inversionistas_espejo.abono_capital,
-            })
-            .from(pagos_credito_inversionistas_espejo)
-            .where(
-              and(
-                eq(pagos_credito_inversionistas_espejo.inversionista_id, inv_id),
-                eq(pagos_credito_inversionistas_espejo.credito_id, credito.credito_id),
-                eq(
-                  pagos_credito_inversionistas_espejo.estado_liquidacion,
-                  "NO_LIQUIDADO"
-                )
-              )
-            );
-          
-          const idsActuales = pagosBD.map((p) => p.id);
-          pagosIds.push(...idsActuales);
+      // Descontar capital por crédito y marcar pagos como LIQUIDADO
+      const creditosConPagos = new Map<number, typeof pagosNoLiquidados>();
+      for (const pago of pagosNoLiquidados) {
+        if (!creditosConPagos.has(pago.credito_id)) {
+          creditosConPagos.set(pago.credito_id, []);
+        }
+        creditosConPagos.get(pago.credito_id)!.push(pago);
+      }
 
-          if (idsActuales.length > 0) {
-            // Calcular capital total a descontar
-            const sumaCapital = pagosBD.reduce(
-              (sum, p) => sum + Number(p.abono_capital || 0),
-              0
-            );
+      const pagosIds = pagosNoLiquidados.map((p) => p.id);
 
-            if (sumaCapital > 0) {
-              const sumaSegura = new Big(sumaCapital) || 0;
-              
-              // Descontar capital de la tabla espejo SOLAMENTE
-              await processAndReplaceCreditInvestors(
-                credito.credito_id,
-                sumaSegura.toNumber(),
-                false,
-                inv_id,
-               true
-              );
-            }
-          }
+      for (const [creditoId, pagosCred] of creditosConPagos) {
+        const sumaCapital = pagosCred.reduce((sum, p) => sum + Number(p.abono_capital || 0), 0);
+        if (sumaCapital > 0) {
+          await processAndReplaceCreditInvestors(
+            creditoId,
+            new Big(sumaCapital).toNumber(),
+            false,
+            inv_id,
+            true
+          );
         }
       }
 
       let updateResult: any = { rowCount: 0 };
       if (pagosIds.length > 0) {
-        // NOTA: Por requerimiento del negocio, solo se liquida la tabla espejo, la original debe permanecer intacta en su estado.
         updateResult = await db
           .update(pagos_credito_inversionistas_espejo)
           .set({
@@ -2381,40 +2330,19 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
 
       console.log(`  ✅ ${updateResult.rowCount ?? 0} pagos espejo actualizados`);
 
-      // 🆕 PASO 4.1: Marcar cuotas como liquidado_inversionistas = false con fecha Guatemala
-      const allPagoIds: number[] = [];
-      for (const credito of inversionista.creditos) {
-        if (credito.pagos && credito.pagos.length > 0) {
-          const pagosBDCuota = await db
-            .select({ pago_id: pagos_credito_inversionistas_espejo.pago_id })
-            .from(pagos_credito_inversionistas_espejo)
-            .where(
-              and(
-                eq(pagos_credito_inversionistas_espejo.inversionista_id, inv_id),
-                eq(pagos_credito_inversionistas_espejo.credito_id, credito.credito_id),
-                eq(pagos_credito_inversionistas_espejo.liquidacion_id, liquidacion.liquidacion_id)
-              )
-            );
-          allPagoIds.push(...pagosBDCuota.map((p) => p.pago_id));
-        }
-      }
-
+      // Marcar cuotas como liquidado_inversionistas
+      const allPagoIds = [...new Set(pagosNoLiquidados.map((p) => p.pago_id))];
       if (allPagoIds.length > 0) {
-        const uniquePagoIds = [...new Set(allPagoIds)];
-
-        // Buscar cuota_ids de esos pagos
         const cuotasDeLosPagos = await db
           .select({ cuota_id: pagos_credito.cuota_id })
           .from(pagos_credito)
-          .where(inArray(pagos_credito.pago_id, uniquePagoIds));
+          .where(inArray(pagos_credito.pago_id, allPagoIds));
 
         const uniqueCuotaIds = [...new Set(cuotasDeLosPagos.map((c) => c.cuota_id))];
-
         if (uniqueCuotaIds.length > 0) {
           const fechaGuatemala = new Date(
             new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" })
           );
-
           await db
             .update(cuotas_credito)
             .set({
@@ -2422,67 +2350,87 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
               fecha_liquidacion_inversionistas: fechaGuatemala,
             })
             .where(inArray(cuotas_credito.cuota_id, uniqueCuotaIds));
-
-          console.log(`  ✅ ${uniqueCuotaIds.length} cuotas actualizadas (liquidado_inversionistas=false)`);
+          console.log(`  ✅ ${uniqueCuotaIds.length} cuotas actualizadas`);
         }
       }
 
-      // 🆕 PASO 5: Generar PDF y subir a R2
-      console.log(`  📄 Generando PDF...`);
+      // ========================================
+      // FASE 3: POST-TRANSACCION (PDF + email, best-effort)
+      // Los datos financieros ya están committed
+      // ========================================
+      try {
+        const resumen = await resumeInvestor(
+          inv_id,
+          1,
+          999999,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          undefined,
+          "espejos",
+          true,
+          liquidacion.liquidacion_id
+        );
 
-      const logoUrl = process.env.LOGO_URL || "";
-      const filename = `liquidacion_${liquidacion.liquidacion_id}_${Date.now()}.pdf`;
-      const { url, pdfBuffer } = await generarYSubirPDFInversionista(
-        inversionista as any,
-        filename,
-        logoUrl
-      );
+        const inversionista = resumen.inversionistas?.[0];
 
-      console.log(`  ✅ PDF generado y guardado: ${filename}`);
+        if (inversionista) {
+          inversionista.subtotal = totales as any;
 
-      // 🆕 PASO 6: Actualizar liquidación con URL del reporte
-      await db
-        .update(liquidaciones)
-        .set({ reporte_liquidacion_url: url })
-        .where(eq(liquidaciones.liquidacion_id, liquidacion.liquidacion_id));
+          console.log(`  📄 Generando PDF...`);
+          const logoUrl = process.env.LOGO_URL || "";
+          const filename = `liquidacion_${liquidacion.liquidacion_id}_${Date.now()}.pdf`;
+          const pdfResult = await generarYSubirPDFInversionista(
+            inversionista as any,
+            filename,
+            logoUrl
+          );
+          const url = pdfResult.url;
+          const pdfBuffer = Buffer.from(pdfResult.pdfBuffer);
 
-      console.log(
-        `  ✅ Reporte actualizado en liquidación ${liquidacion.liquidacion_id}`
-      );
+          console.log(`  ✅ PDF generado: ${filename}`);
 
-      // 📧 ENVIAR CORREO AL INVERSIONISTA
-      if (inversionista.email) {
-        try {
-          const totalCuota = inversionista.subtotal.total_cuota.toString();
-          
-          await sendLiquidationEmail({
-            to: inversionista.email,
-            investorName: inversionista.nombre_inversionista,
-            amount: totalCuota,
-            creditNumber: "Múltiples", // O podrías concatenar los IDs
-            date: dayjs().format("DD/MM/YYYY"),
-            currencySymbol: inversionista.moneda === "dolares" ? "$" : "Q.",
-            attachment: {
-              filename: `Liquidacion_${inversionista.nombre_inversionista.replace(/\s+/g, '_')}_${dayjs().format('YYYYMMDD')}.pdf`,
-              content: Buffer.from(pdfBuffer),
+          // Actualizar liquidación con URL del reporte
+          await db
+            .update(liquidaciones)
+            .set({ reporte_liquidacion_url: url })
+            .where(eq(liquidaciones.liquidacion_id, liquidacion.liquidacion_id));
+
+          // Enviar correo (best-effort)
+          if (inversionista.email && pdfBuffer) {
+            try {
+              await sendLiquidationEmail({
+                to: inversionista.email,
+                investorName: inversionista.nombre_inversionista,
+                amount: inversionista.subtotal.total_cuota.toString(),
+                creditNumber: "Múltiples",
+                date: dayjs().format("DD/MM/YYYY"),
+                currencySymbol: inversionista.moneda === "dolares" ? "$" : "Q.",
+                attachment: {
+                  filename: `Liquidacion_${inversionista.nombre_inversionista.replace(/\s+/g, '_')}_${dayjs().format('YYYYMMDD')}.pdf`,
+                  content: pdfBuffer,
+                }
+              });
+              console.log(`  📧 Correo enviado a ${inversionista.email}`);
+            } catch (emailError) {
+              console.error(`  ❌ Error al enviar correo a ${inversionista.email}:`, emailError);
             }
+          } else {
+            console.warn(`  ⚠️ Inversionista sin correo configurado`);
+          }
+
+          reportesGenerados.push({
+            inversionista_id: inv_id,
+            url,
+            boleta_id: boletaPendiente?.boleta_id ?? 0,
+            boleta_url: boletaPendiente?.boleta_url ?? "",
           });
-          console.log(`  📧 Correo enviado a ${inversionista.email}`);
-        } catch (emailError) {
-          console.error(`  ❌ Error al enviar correo a ${inversionista.email}:`, emailError);
-          // No lanzamos error para no detener la liquidación
         }
-      } else {
-        console.warn(`  ⚠️ El inversionista ${inversionista.nombre_inversionista} no tiene correo configurado.`);
+      } catch (pdfError) {
+        console.error(`  ❌ Error generando PDF (datos financieros ya guardados):`, pdfError);
       }
-      
-      reportesGenerados.push({
-        inversionista_id: inv_id,
-        url,
-        boleta_id: boletaPendiente?.boleta_id ?? 0,
-        boleta_url: boletaPendiente?.boleta_url ?? "",
-      });
-      
+
       totalPagosLiquidados += updateResult.rowCount ?? 0;
       totalLiquidaciones++;
     } catch (error) {
@@ -2492,7 +2440,6 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
         razon: error instanceof Error ? error.message : "Error desconocido",
       });
       inversionistasSaltados++;
-      // 🔥 NO hacemos throw, solo seguimos con el siguiente
     }
   }
 
@@ -3256,8 +3203,8 @@ export async function resumenGlobalInversionistas(
       inversionistas.tipo_cuenta,
       inversionistas.numero_cuenta
     )
-    // Solo mostrar inversionistas que tengan al menos 1 pago espejo NO_LIQUIDADO (cuando no es excel)
-    .having(
+    // Solo mostrar inversionistas que tengan al menos 1 pago espejo NO_LIQUIDADO
+     .having(
       excel
         ? undefined
         : sql`COUNT(${pe.id}) > 0`

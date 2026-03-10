@@ -1530,8 +1530,9 @@ export async function createBoleta(
           monto_boleta: montoBoleta,
           notas: data.notas || null,
           subido_por: data.subido_por ? Number(data.subido_por) : null,
-          estado: "PENDIENTE",
+          estado: "PROCESADO", // Se marca directo como PROCESADO porque se asume que la boleta ya fue validada al subirla (puede cambiarse a PENDIENTE si se quiere un proceso de validación manual)
           fecha_subida: fechaGuatemala,
+          fecha_procesado: fechaGuatemala,
         })
         .returning();
 
@@ -1557,15 +1558,6 @@ export async function createBoleta(
         .returning();
 
       console.log(`Liquidacion creada: ID ${liquidacion.liquidacion_id}`);
-
-      // 2c. Marcar boleta como PROCESADO
-      await tx
-        .update(boletasPagoInversionista)
-        .set({
-          estado: "PROCESADO",
-          fecha_procesado: new Date(),
-        })
-        .where(eq(boletasPagoInversionista.boleta_id, nuevaBoleta.boleta_id));
 
       // 2d. Actualizar saldo_reinversion y reiniciar reinversiones
       const montoReinvertido = new Big(reinvTotal);
@@ -1739,9 +1731,11 @@ export async function createBoleta(
         undefined,
         undefined,
         undefined,
-        false,
+        true,
         undefined,
-        "espejos"
+        "espejos",
+        true,
+        txResult.liquidacion.liquidacion_id
       );
 
       const investorData = resumen.inversionistas?.[0];

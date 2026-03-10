@@ -7,13 +7,11 @@ RUN npm install -g bun
 # Copy the entire CRM workspace (both web and server)
 COPY ../../ ./
 
-# Navigate to web directory
+# Install deps with copyfile backend to avoid symlink issues with Vite/Rollup
+RUN bun install --frozen-lockfile --backend=copyfile
+
+# Build web app
 WORKDIR /app/apps/web
-
-# Install dependencies
-RUN bun install --frozen-lockfile
-
-# Build the application
 RUN bun run build
 
 EXPOSE 3001

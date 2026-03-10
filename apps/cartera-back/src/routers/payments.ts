@@ -1190,7 +1190,7 @@ export const paymentRouter = new Elysia()
     body: t.Object({
       numero_credito_sifco: t.String(),
       hasta_cuota: t.Number(),
-      fecha_primer_pago: t.String(),
+      fecha_primer_pago: t.Optional(t.String()),
     }),
     detail: {
       tags: ["Créditos"],

@@ -6,6 +6,7 @@ import {
 	pgTable,
 	text,
 	timestamp,
+	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core";
 import { opportunities } from "./crm";
@@ -26,14 +27,15 @@ export const clientFormTokens = pgTable("client_form_tokens", {
 });
 
 // Credit Application form (Formulario Solicitud de Credito)
-export const creditApplications = pgTable("credit_applications", {
-	id: uuid("id").primaryKey().defaultRandom(),
-	opportunityId: uuid("opportunity_id")
-		.notNull()
-		.unique()
-		.references(() => opportunities.id, { onDelete: "cascade" }),
-	personType: text("person_type"), // 'lead' | 'coDebtor'
-	personId: uuid("person_id"), // lead.id or co_debtors.id
+export const creditApplications = pgTable(
+	"credit_applications",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		opportunityId: uuid("opportunity_id")
+			.notNull()
+			.references(() => opportunities.id, { onDelete: "cascade" }),
+		personType: text("person_type"), // 'lead' | 'coDebtor'
+		personId: uuid("person_id"), // lead.id or co_debtors.id
 
 	// Datos personales
 	primerApellido: text("primer_apellido"),
@@ -106,19 +108,26 @@ export const creditApplications = pgTable("credit_applications", {
 	fechaFirma: text("fecha_firma"),
 	horaFirma: text("hora_firma"),
 
-	createdAt: timestamp("created_at").notNull().defaultNow(),
-	updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+		updatedAt: timestamp("updated_at").notNull().defaultNow(),
+	},
+	(table) => ({
+		opportunityPersonUnique: uniqueIndex(
+			"credit_applications_opportunity_person_unique",
+		).on(table.opportunityId, table.personType, table.personId),
+	}),
+);
 
 // Financial Statement (Estado Patrimonial)
-export const financialStatements = pgTable("financial_statements", {
-	id: uuid("id").primaryKey().defaultRandom(),
-	opportunityId: uuid("opportunity_id")
-		.notNull()
-		.unique()
-		.references(() => opportunities.id, { onDelete: "cascade" }),
-	personType: text("person_type"), // 'lead' | 'coDebtor'
-	personId: uuid("person_id"), // lead.id or co_debtors.id
+export const financialStatements = pgTable(
+	"financial_statements",
+	{
+		id: uuid("id").primaryKey().defaultRandom(),
+		opportunityId: uuid("opportunity_id")
+			.notNull()
+			.references(() => opportunities.id, { onDelete: "cascade" }),
+		personType: text("person_type"), // 'lead' | 'coDebtor'
+		personId: uuid("person_id"), // lead.id or co_debtors.id
 
 	// Datos personales
 	primerNombre: text("primer_nombre"),
@@ -197,6 +206,12 @@ export const financialStatements = pgTable("financial_statements", {
 	firmaImagen: text("firma_imagen"),
 	fechaFirma: text("fecha_firma"),
 
-	createdAt: timestamp("created_at").notNull().defaultNow(),
-	updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+		createdAt: timestamp("created_at").notNull().defaultNow(),
+		updatedAt: timestamp("updated_at").notNull().defaultNow(),
+	},
+	(table) => ({
+		opportunityPersonUnique: uniqueIndex(
+			"financial_statements_opportunity_person_unique",
+		).on(table.opportunityId, table.personType, table.personId),
+	}),
+);

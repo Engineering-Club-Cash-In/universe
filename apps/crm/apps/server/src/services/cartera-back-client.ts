@@ -54,6 +54,13 @@ interface CarteraBackClientConfig {
 	cacheTtl: number;
 }
 
+export interface ResumenGlobalInversionistasFilters {
+	inversionistaId?: string | number;
+	estado?: "pending" | "uploaded" | "liquidated" | "all";
+	mes?: number;
+	anio?: number;
+}
+
 const DEFAULT_CONFIG: CarteraBackClientConfig = {
 	baseUrl: process.env.CARTERA_BACK_URL || "http://localhost:7000",
 	apiKey: process.env.CARTERA_BACK_API_KEY,
@@ -695,20 +702,51 @@ export class CarteraBackClient {
 	// RESUMEN GLOBAL INVERSIONISTAS
 	// ========================================================================
 
-	async getResumenGlobalInversionistas(): Promise<
+	async getResumenGlobalInversionistas(
+		filters: ResumenGlobalInversionistasFilters = {},
+	): Promise<
 		ResumenGlobalInversionista[]
 	> {
+		const queryParams = new URLSearchParams();
+
+		if (filters.inversionistaId !== undefined) {
+			queryParams.set("inversionistaId", String(filters.inversionistaId));
+		}
+		queryParams.set("estado", filters.estado ?? "pending");
+		if (filters.mes !== undefined) {
+			queryParams.set("mes", String(filters.mes));
+		}
+		if (filters.anio !== undefined) {
+			queryParams.set("anio", String(filters.anio));
+		}
+
 		const response = await this.request<ResumenGlobalInversionista[]>(
-			"/resumen-global-liquidaciones",
+			`/resumen-global-liquidaciones?${queryParams.toString()}`,
 			{ method: "GET" },
 			true,
 		);
 		return response;
 	}
 
-	async getResumenGlobalExcel(): Promise<{ success: boolean; url: string }> {
+	async getResumenGlobalExcel(
+		filters: ResumenGlobalInversionistasFilters = {},
+	): Promise<{ success: boolean; url: string }> {
+		const queryParams = new URLSearchParams();
+
+		if (filters.inversionistaId !== undefined) {
+			queryParams.set("inversionistaId", String(filters.inversionistaId));
+		}
+		queryParams.set("estado", filters.estado ?? "pending");
+		if (filters.mes !== undefined) {
+			queryParams.set("mes", String(filters.mes));
+		}
+		if (filters.anio !== undefined) {
+			queryParams.set("anio", String(filters.anio));
+		}
+		queryParams.set("excel", "true");
+
 		const response = await this.request<{ success: boolean; url: string }>(
-			"/resumen-global-liquidaciones?excel=true",
+			`/resumen-global-liquidaciones?${queryParams.toString()}`,
 			{ method: "GET" },
 			false,
 		);

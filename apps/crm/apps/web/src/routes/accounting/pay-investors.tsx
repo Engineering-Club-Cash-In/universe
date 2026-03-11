@@ -77,15 +77,29 @@ const formatQ = (value: string) => {
 	return `Q${num.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
+const dedupeInversionistas = (items: ResumenInversionista[]) => {
+	const byId = new Map<number, ResumenInversionista>();
+
+	for (const item of items) {
+		byId.set(item.inversionista_id, item);
+	}
+
+	return [...byId.values()];
+};
+
+const invalidateResumenGlobalInversionistas = () =>
+	queryClient.invalidateQueries({
+		predicate: (query) =>
+			JSON.stringify(query.queryKey).includes("getResumenGlobalInversionistas"),
+	});
+
 // ─── Upload boleta hook ───────────────────────────────────────────────────────
 
 function useUploadBoleta() {
 	const createBoletaMutation = useMutation({
 		...orpc.createBoleta.mutationOptions(),
 		onSuccess: () => {
-			queryClient.invalidateQueries({
-				queryKey: orpc.getResumenGlobalInversionistas.queryOptions().queryKey,
-			});
+			invalidateResumenGlobalInversionistas();
 		},
 	});
 
@@ -282,9 +296,7 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 				toast.error(res.error || res.message || "Error al liquidar");
 			} else {
 				toast.success(res?.message || "Liquidación completada correctamente");
-				queryClient.invalidateQueries({
-					queryKey: orpc.getResumenGlobalInversionistas.queryOptions().queryKey,
-				});
+				invalidateResumenGlobalInversionistas();
 			}
 		},
 		onError: (err) => {
@@ -435,13 +447,25 @@ function PagarInversionistas() {
 	const [downloadingExcel, setDownloadingExcel] = useState(false);
 	const [estadoBoletaFilter, setEstadoBoletaFilter] =
 		useState<EstadoBoletaFilter>("all");
+	const canAccessAccounting =
+		!!session && !!userRole && PERMISSIONS.canAccessAccounting(userRole);
 
 	const handleDownloadExcel = async () => {
+		if (estadoBoletaFilter === "all") {
+			toast.error(
+				"Para exportar, selecciona Pendientes o Subidas. 'Todas' combina ambos listados localmente.",
+			);
+			return;
+		}
+
 		setDownloadingExcel(true);
 		try {
 			const serverUrl = import.meta.env.VITE_SERVER_URL;
+			const queryParams = new URLSearchParams({
+				estado: estadoBoletaFilter,
+			});
 			const res = await fetch(
-				`${serverUrl}/api/accounting/resumen-global-excel`,
+				`${serverUrl}/api/accounting/resumen-global-excel?${queryParams.toString()}`,
 				{ credentials: "include" },
 			);
 			if (!res.ok) {
@@ -461,36 +485,40 @@ function PagarInversionistas() {
 		}
 	};
 
-	const { data, isLoading, error } = useQuery({
-		...orpc.getResumenGlobalInversionistas.queryOptions(),
-		enabled:
-			!!session && !!userRole && PERMISSIONS.canAccessAccounting(userRole),
+	const pendientesQuery = useQuery({
+		...orpc.getResumenGlobalInversionistas.queryOptions({
+			input: { estado: "pending" },
+		}),
+		enabled: canAccessAccounting,
 	});
 
-	const inversionistas = (data ?? []) as ResumenInversionista[];
-	const conBoleta = inversionistas.filter(
-		(inv) => inv.boleta_pendiente != null,
-	).length;
-	const sinBoleta = inversionistas.length - conBoleta;
+	const subidasQuery = useQuery({
+		...orpc.getResumenGlobalInversionistas.queryOptions({
+			input: { estado: "uploaded" },
+		}),
+		enabled: canAccessAccounting,
+	});
+
+	const pendientes = (pendientesQuery.data ?? []) as ResumenInversionista[];
+	const subidas = (subidasQuery.data ?? []) as ResumenInversionista[];
+	const inversionistas = useMemo(() => {
+		if (estadoBoletaFilter === "pending") return pendientes;
+		if (estadoBoletaFilter === "uploaded") return subidas;
+		return dedupeInversionistas([...pendientes, ...subidas]);
+	}, [estadoBoletaFilter, pendientes, subidas]);
+	const conBoleta = subidas.length;
+	const sinBoleta = pendientes.length;
 
 	const filtered = useMemo(() => {
 		const q = search.trim().toLowerCase();
+		if (!q) return inversionistas;
 
-		return inversionistas.filter((inv) => {
-			const matchesSearch =
-				!q ||
+		return inversionistas.filter(
+			(inv) =>
 				inv.nombre.toLowerCase().includes(q) ||
-				String(inv.inversionista_id).includes(q);
-
-			const hasUploadedBoleta = inv.boleta_pendiente != null;
-			const matchesFilter =
-				estadoBoletaFilter === "all" ||
-				(estadoBoletaFilter === "uploaded" && hasUploadedBoleta) ||
-				(estadoBoletaFilter === "pending" && !hasUploadedBoleta);
-
-			return matchesSearch && matchesFilter;
-		});
-	}, [inversionistas, search, estadoBoletaFilter]);
+				String(inv.inversionista_id).includes(q),
+		);
+	}, [inversionistas, search]);
 
 	const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
 	const safePage = Math.min(page, totalPages);
@@ -517,7 +545,7 @@ function PagarInversionistas() {
 		);
 	}
 
-	if (isLoading) {
+	if (pendientesQuery.isLoading || subidasQuery.isLoading) {
 		return (
 			<div className="flex min-h-screen items-center justify-center">
 				<Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -525,7 +553,7 @@ function PagarInversionistas() {
 		);
 	}
 
-	if (error) {
+	if (pendientesQuery.error || subidasQuery.error) {
 		return (
 			<div className="flex min-h-screen items-center justify-center">
 				<div className="text-center">

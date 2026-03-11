@@ -23,6 +23,12 @@ import { eq, and, sql, inArray, ilike, like, desc, count, SQL } from "drizzle-or
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import Big from "big.js";
 import { sendLiquidationEmail, sendSimpleEmail } from "@cci/email";
+import {
+  boletaEstaEnPeriodo,
+  resolveEstadoLiquidacionResumen,
+  type EstadoLiquidacionResumen,
+  type EstadoLiquidacionResumenFilter,
+} from "../utils/investorLiquidationSummary";
 
 // ============================================
 // 🆕 TIPOS Y CONFIGURACIÓN PARA CONSULTAS ORIGINALES/ESPEJO
@@ -3053,73 +3059,149 @@ interface InversionistaResumen {
   boleta_pendiente: BoletaPendiente | null;
 }
 
-export async function resumenGlobalInversionistas(
+type EstadoPagoResumen = "NO_LIQUIDADO" | "LIQUIDADO";
+
+interface InversionistaResumenConEstado extends InversionistaResumen {
+  estado_liquidacion_resumen: EstadoLiquidacionResumen;
+}
+
+interface InversionistaResumenRow {
+  inversionista_id: number;
+  nombre: string;
+  emite_factura: boolean;
+  reinversion:
+    | "sin_reinversion"
+    | "reinversion_capital"
+    | "reinversion_interes"
+    | "reinversion_total"
+    | "reinversion_variable";
+  banco_nombre: string | null;
+  tipo_cuenta: string | null;
+  numero_cuenta: string | null;
+  total_abono_capital: number;
+  total_abono_interes: number;
+  total_abono_iva: number;
+  total_isr: number;
+  total_a_recibir_sin_reinversion: number;
+  total_reinversion: number;
+  total_a_recibir_con_reinversion: number;
+}
+
+function mapBoletasPendientes(
+  boletasPendientes: Array<{
+    boleta_id: number;
+    inversionista_id: number;
+    boleta_url: string;
+    estado: string;
+    notas: string | null;
+    monto_boleta: string | null;
+    fecha_subida: Date;
+  }>
+) {
+  const boletaMap = new Map<number, BoletaPendiente>();
+
+  for (const b of boletasPendientes) {
+    if (!boletaMap.has(b.inversionista_id)) {
+      boletaMap.set(b.inversionista_id, {
+        boleta_id: b.boleta_id,
+        boleta_url: b.boleta_url,
+        estado: b.estado,
+        notas: b.notas,
+        monto_boleta: b.monto_boleta,
+        fecha_subida: b.fecha_subida,
+      });
+    }
+  }
+
+  return boletaMap;
+}
+
+async function getBoletasPendientesMap(
+  inversionistaIds: number[],
+  mes?: number,
+  anio?: number
+) {
+  const boletasPendientes = inversionistaIds.length > 0
+    ? await db
+        .select({
+          boleta_id: boletasPagoInversionista.boleta_id,
+          inversionista_id: boletasPagoInversionista.inversionista_id,
+          boleta_url: boletasPagoInversionista.boleta_url,
+          estado: boletasPagoInversionista.estado,
+          notas: boletasPagoInversionista.notas,
+          monto_boleta: boletasPagoInversionista.monto_boleta,
+          fecha_subida: boletasPagoInversionista.fecha_subida,
+        })
+        .from(boletasPagoInversionista)
+        .where(
+          and(
+            inArray(boletasPagoInversionista.inversionista_id, inversionistaIds),
+            eq(boletasPagoInversionista.estado, "PENDIENTE"),
+            ...(mes
+              ? [sql`EXTRACT(MONTH FROM ${boletasPagoInversionista.fecha_subida}) = ${mes}`]
+              : []),
+            ...(anio
+              ? [sql`EXTRACT(YEAR FROM ${boletasPagoInversionista.fecha_subida}) = ${anio}`]
+              : [])
+          )
+        )
+        .orderBy(desc(boletasPagoInversionista.fecha_subida))
+    : [];
+
+  const boletasFiltradas = boletasPendientes.filter((boleta) =>
+    boletaEstaEnPeriodo(boleta.fecha_subida, mes, anio)
+  );
+
+  return mapBoletasPendientes(boletasFiltradas);
+}
+
+async function consultarResumenGlobalPorEstadoPago(
+  estadoPago: EstadoPagoResumen,
   inversionistaId?: number,
   mes?: number,
   anio?: number,
   excel: boolean = false
-): Promise<
-  InversionistaResumen[] | { success: boolean; url: string; filename: string }
-> {
-  // 🔎 Condiciones sobre inversionistas (van en WHERE)
+): Promise<InversionistaResumenRow[]> {
   const condicionesWhere: any[] = [
-    eq(inversionistas.permite_distribucion, false) // Solo inversionistas que NO permiten distribución (es decir, que se les paga directamente)
+    eq(inversionistas.permite_distribucion, false),
   ];
 
   if (inversionistaId) {
-    condicionesWhere.push(
-      eq(inversionistas.inversionista_id, inversionistaId)
-    );
+    condicionesWhere.push(eq(inversionistas.inversionista_id, inversionistaId));
   }
 
-  // 🔎 Condiciones sobre pagos espejo (van en el ON del LEFT JOIN)
-  const pe = pagos_credito_inversionistas_espejo; // alias corto
-
+  const pe = pagos_credito_inversionistas_espejo;
   const condicionesJoinPagos: any[] = [
     eq(inversionistas.inversionista_id, pe.inversionista_id),
-    eq(pe.estado_liquidacion, "NO_LIQUIDADO"),
+    eq(pe.estado_liquidacion, estadoPago),
   ];
 
   if (mes) {
-    condicionesJoinPagos.push(
-      sql`EXTRACT(MONTH FROM ${pe.fecha_pago}) = ${mes}`
-    );
+    condicionesJoinPagos.push(sql`EXTRACT(MONTH FROM ${pe.fecha_pago}) = ${mes}`);
   }
 
   if (anio) {
-    condicionesJoinPagos.push(
-      sql`EXTRACT(YEAR FROM ${pe.fecha_pago}) = ${anio}`
-    );
+    condicionesJoinPagos.push(sql`EXTRACT(YEAR FROM ${pe.fecha_pago}) = ${anio}`);
   }
 
-  // 📊 Query agregada usando tablas ESPEJO (misma lógica que getInvestorMirrorSummary)
-
-  const result = await db
+  return db
     .select({
       inversionista_id: inversionistas.inversionista_id,
       nombre: inversionistas.nombre,
       emite_factura: inversionistas.emite_factura,
       reinversion: inversionistas.tipo_reinversion,
-      banco_id: inversionistas.banco_id,
       banco_nombre: bancos.nombre,
       tipo_cuenta: inversionistas.tipo_cuenta,
       numero_cuenta: inversionistas.numero_cuenta,
-
-      // Sumas directas de pagos espejo
       total_abono_capital: sql<number>`COALESCE(SUM(${pe.abono_capital}), 0)`,
       total_abono_interes: sql<number>`COALESCE(SUM(${pe.abono_interes}), 0)`,
       total_abono_iva: sql<number>`COALESCE(SUM(${pe.abono_iva_12}), 0)`,
-
-      // ISR: 7% sobre interés si NO emite factura
       total_isr: sql<number>`COALESCE(SUM(
-        CASE 
-          WHEN ${inversionistas.emite_factura} THEN 0 
+        CASE
+          WHEN ${inversionistas.emite_factura} THEN 0
           ELSE ROUND(${pe.abono_interes} * 0.07, 2)
         END
       ), 0)`,
-
-      // Total a recibir sin reinversión = abono_capital + interesTotal
-      // interesTotal = abono_interes + (emite_factura ? iva : -(interes*0.07))
       total_a_recibir_sin_reinversion: sql<number>`COALESCE(SUM(
         ${pe.abono_capital}
         + ${pe.abono_interes}
@@ -3129,8 +3211,6 @@ export async function resumenGlobalInversionistas(
             ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
           END
       ), 0)`,
-
-      // Reinversión por tipo — CASE fuera de SUM para que reinversion_variable sea tope global
       total_reinversion: sql<number>`CASE ${inversionistas.tipo_reinversion}
         WHEN 'sin_reinversion' THEN 0
         WHEN 'reinversion_capital' THEN COALESCE(SUM(${pe.abono_capital}), 0)
@@ -3150,8 +3230,6 @@ export async function resumenGlobalInversionistas(
         )
         ELSE 0
       END`,
-
-      // Total a recibir con reinversión = sin_reinversion - reinversion
       total_a_recibir_con_reinversion: sql<number>`
         COALESCE(SUM(
           ${pe.abono_capital}
@@ -3183,14 +3261,8 @@ export async function resumenGlobalInversionistas(
           END`,
     })
     .from(inversionistas)
-    .leftJoin(
-      bancos,
-      eq(inversionistas.banco_id, bancos.banco_id)
-    )
-    .leftJoin(
-      pe,
-      and(...condicionesJoinPagos)
-    )
+    .leftJoin(bancos, eq(inversionistas.banco_id, bancos.banco_id))
+    .leftJoin(pe, and(...condicionesJoinPagos))
     .where(and(...condicionesWhere))
     .groupBy(
       inversionistas.inversionista_id,
@@ -3198,175 +3270,18 @@ export async function resumenGlobalInversionistas(
       inversionistas.emite_factura,
       inversionistas.tipo_reinversion,
       inversionistas.monto_reinversion,
-      inversionistas.banco_id,
       bancos.nombre,
       inversionistas.tipo_cuenta,
       inversionistas.numero_cuenta
     )
-    // Solo mostrar inversionistas que tengan al menos 1 pago espejo NO_LIQUIDADO
-     .having(
-      excel
-        ? undefined
-        : sql`COUNT(${pe.id}) > 0`
-    );
+    .having(excel ? undefined : sql`COUNT(${pe.id}) > 0`);
+}
 
-  console.log("resumen-global result IDs:", result.map(r => r.inversionista_id));
-  console.log("resumen-global total:", result.length, "inversionistas");
-
-  // 📂 Si excel = true → generar archivo, subir a R2 y devolver URL
-  if (excel) {
-    const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet("Resumen Inversionistas");
-
-    // 🎨 Estilo del encabezado
-    const headerRow = sheet.addRow([
-      "ID",
-      "Nombre",
-      "Factura",
-      "Reinversión",
-      "Banco",
-      "Tipo Cuenta",
-      "Número Cuenta",
-      "Capital",
-      "Interés",
-      "IVA",
-      "ISR",
-      "Total sin Reinversión",
-      "Reinversión",
-      "Total con Reinversión",
-    ]);
-
-    // Estilizar encabezados
-    headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
-    headerRow.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "FF0070C0" },
-    };
-    headerRow.alignment = { horizontal: "center", vertical: "middle" };
-
-    // Filas de datos
-    result.forEach((inv) => {
-      const row = sheet.addRow([
-        inv.inversionista_id,
-        inv.nombre,
-        inv.emite_factura ? "Sí" : "No",
-        inv.reinversion || "sin_reinversion",
-        inv.banco_nombre ?? "", // 🔥 Ahora usamos banco_nombre
-        inv.tipo_cuenta ?? "",
-        inv.numero_cuenta ?? "",
-        Number(inv.total_abono_capital).toFixed(2),
-        Number(inv.total_abono_interes).toFixed(2),
-        Number(inv.total_abono_iva).toFixed(2),
-        Number(inv.total_isr).toFixed(2),
-        Number(inv.total_a_recibir_sin_reinversion).toFixed(2),
-        Number(inv.total_reinversion).toFixed(2),
-        Number(inv.total_a_recibir_con_reinversion).toFixed(2),
-      ]);
-
-      // 🆕 Resaltar ISR = 0 cuando emite factura
-      if (inv.emite_factura) {
-        const isrCell = row.getCell(11); // Columna ISR
-        isrCell.fill = {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: "FFE0E0E0" }, // Gris claro
-        };
-        isrCell.font = { color: { argb: "FF808080" } }; // Texto gris
-      }
-
-      // 🆕 Formato de moneda para columnas numéricas
-      for (let i = 8; i <= 14; i++) {
-        row.getCell(i).numFmt = "Q#,##0.00";
-      }
-    });
-
-    // Ajustar ancho automático
-    sheet.columns.forEach((col, index) => {
-      let maxLength = 10;
-      col.eachCell?.({ includeEmpty: true }, (cell) => {
-        const len = cell.value ? cell.value.toString().length : 0;
-        if (len > maxLength) maxLength = len;
-      });
-      col.width = maxLength + 2;
-    });
-
-    // Congelar primera fila (encabezados)
-    sheet.views = [{ state: "frozen", ySplit: 1 }];
-
-    const buffer = await workbook.xlsx.writeBuffer();
-
-    // 🚀 Subir directo a R2
-    const filename = `resumen_inversionistas_${Date.now()}.xlsx`;
-    const s3 = new S3Client({
-      endpoint: process.env.BUCKET_REPORTS_URL,
-      region: "auto",
-      credentials: {
-        accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
-        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
-      },
-    });
-
-    await s3.send(
-      new PutObjectCommand({
-        Bucket: process.env.BUCKET_REPORTS,
-        Key: filename,
-        Body: new Uint8Array(buffer),
-        ContentType:
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      })
-    );
-
-    const url = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
-
-    return {
-      success: true,
-      url,
-      filename,
-    };
-  }
-
-  // 🔎 Obtener boletas pendientes por inversionista (solo para consulta JSON)
-  const inversionistaIds = result.map((inv) => inv.inversionista_id);
-
-  const boletasPendientes = inversionistaIds.length > 0
-    ? await db
-        .select({
-          boleta_id: boletasPagoInversionista.boleta_id,
-          inversionista_id: boletasPagoInversionista.inversionista_id,
-          boleta_url: boletasPagoInversionista.boleta_url,
-          estado: boletasPagoInversionista.estado,
-          notas: boletasPagoInversionista.notas,
-          monto_boleta: boletasPagoInversionista.monto_boleta,
-          fecha_subida: boletasPagoInversionista.fecha_subida,
-        })
-        .from(boletasPagoInversionista)
-        .where(
-          and(
-            inArray(boletasPagoInversionista.inversionista_id, inversionistaIds),
-            eq(boletasPagoInversionista.estado, "PENDIENTE")
-          )
-        )
-        .orderBy(desc(boletasPagoInversionista.fecha_subida))
-    : [];
-
-  // Mapear boleta pendiente por inversionista (solo la más reciente)
-  const boletaMap = new Map<number, BoletaPendiente>();
-  for (const b of boletasPendientes) {
-    if (!boletaMap.has(b.inversionista_id)) {
-      boletaMap.set(b.inversionista_id, {
-        boleta_id: b.boleta_id,
-        boleta_url: b.boleta_url,
-        estado: b.estado,
-        notas: b.notas,
-        monto_boleta: b.monto_boleta,
-        fecha_subida: b.fecha_subida,
-      });
-    }
-  }
-
-  // Map result to match InversionistaResumen interface
-  return result.map((inv) => ({
+function mapResumenRow(
+  inv: InversionistaResumenRow,
+  boleta_pendiente: BoletaPendiente | null
+): InversionistaResumen {
+  return {
     inversionista_id: inv.inversionista_id,
     nombre: inv.nombre,
     emite_factura: inv.emite_factura,
@@ -3381,8 +3296,238 @@ export async function resumenGlobalInversionistas(
     total_a_recibir_sin_reinversion: inv.total_a_recibir_sin_reinversion,
     total_reinversion: inv.total_reinversion,
     total_a_recibir_con_reinversion: inv.total_a_recibir_con_reinversion,
-    boleta_pendiente: boletaMap.get(inv.inversionista_id) ?? null,
-  }));
+    boleta_pendiente,
+  };
+}
+
+async function generateResumenGlobalWorkbook(
+  rows: Array<InversionistaResumen | InversionistaResumenConEstado>,
+  includeEstado: boolean
+) {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Resumen Inversionistas");
+
+  const headers = [
+    "ID",
+    "Nombre",
+    ...(includeEstado ? ["Estado"] : []),
+    "Factura",
+    "Reinversión",
+    "Banco",
+    "Tipo Cuenta",
+    "Número Cuenta",
+    "Capital",
+    "Interés",
+    "IVA",
+    "ISR",
+    "Total sin Reinversión",
+    "Reinversión",
+    "Total con Reinversión",
+  ];
+
+  const headerRow = sheet.addRow(headers);
+  headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  headerRow.fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FF0070C0" },
+  };
+  headerRow.alignment = { horizontal: "center", vertical: "middle" };
+
+  rows.forEach((inv) => {
+    const row = sheet.addRow([
+      inv.inversionista_id,
+      inv.nombre,
+      ...("estado_liquidacion_resumen" in inv ? [inv.estado_liquidacion_resumen] : includeEstado ? [""] : []),
+      inv.emite_factura ? "Sí" : "No",
+      inv.reinversion || "sin_reinversion",
+      inv.banco ?? "",
+      inv.tipo_cuenta ?? "",
+      inv.numero_cuenta ?? "",
+      Number(inv.total_abono_capital).toFixed(2),
+      Number(inv.total_abono_interes).toFixed(2),
+      Number(inv.total_abono_iva).toFixed(2),
+      Number(inv.total_isr).toFixed(2),
+      Number(inv.total_a_recibir_sin_reinversion).toFixed(2),
+      Number(inv.total_reinversion).toFixed(2),
+      Number(inv.total_a_recibir_con_reinversion).toFixed(2),
+    ]);
+
+    const isrCellIndex = includeEstado ? 12 : 11;
+    const firstMoneyColumn = includeEstado ? 9 : 8;
+    const lastMoneyColumn = includeEstado ? 15 : 14;
+
+    if (inv.emite_factura) {
+      const isrCell = row.getCell(isrCellIndex);
+      isrCell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE0E0E0" },
+      };
+      isrCell.font = { color: { argb: "FF808080" } };
+    }
+
+    for (let i = firstMoneyColumn; i <= lastMoneyColumn; i++) {
+      row.getCell(i).numFmt = "Q#,##0.00";
+    }
+  });
+
+  sheet.columns.forEach((col) => {
+    let maxLength = 10;
+    col.eachCell?.({ includeEmpty: true }, (cell) => {
+      const len = cell.value ? cell.value.toString().length : 0;
+      if (len > maxLength) maxLength = len;
+    });
+    col.width = maxLength + 2;
+  });
+
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const filename = `resumen_inversionistas_${Date.now()}.xlsx`;
+  const s3 = new S3Client({
+    endpoint: process.env.BUCKET_REPORTS_URL,
+    region: "auto",
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
+    },
+  });
+
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: process.env.BUCKET_REPORTS,
+      Key: filename,
+      Body: new Uint8Array(buffer),
+      ContentType:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    })
+  );
+
+  return {
+    success: true,
+    url: `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`,
+    filename,
+  };
+}
+
+export async function resumenGlobalInversionistas(
+  inversionistaId?: number,
+  mes?: number,
+  anio?: number,
+  excel: boolean = false
+): Promise<
+  InversionistaResumen[] | { success: boolean; url: string; filename: string }
+> {
+  const result = await consultarResumenGlobalPorEstadoPago(
+    "NO_LIQUIDADO",
+    inversionistaId,
+    mes,
+    anio,
+    excel
+  );
+
+  console.log("resumen-global result IDs:", result.map(r => r.inversionista_id));
+  console.log("resumen-global total:", result.length, "inversionistas");
+
+  if (excel) {
+    const excelRows = result.map((inv) => mapResumenRow(inv, null));
+    return generateResumenGlobalWorkbook(excelRows, false);
+  }
+
+  const inversionistaIds = result.map((inv) => inv.inversionista_id);
+  const boletaMap = await getBoletasPendientesMap(inversionistaIds);
+
+  return result.map((inv) =>
+    mapResumenRow(inv, boletaMap.get(inv.inversionista_id) ?? null)
+  );
+}
+
+export async function resumenGlobalLiquidaciones(
+  inversionistaId?: number,
+  mes?: number,
+  anio?: number,
+  estado: EstadoLiquidacionResumenFilter = "all",
+  excel: boolean = false
+): Promise<
+  InversionistaResumenConEstado[] | { success: boolean; url: string; filename: string }
+> {
+  // Para este endpoint el período se recibe validado desde la ruta.
+  // Cuando estado=all, el mes/anio aplican a todo el corte consultado.
+  const [noLiquidados, liquidados] = await Promise.all([
+    consultarResumenGlobalPorEstadoPago("NO_LIQUIDADO", inversionistaId, mes, anio, false),
+    consultarResumenGlobalPorEstadoPago("LIQUIDADO", inversionistaId, mes, anio, false),
+  ]);
+
+  const inversionistaIds = Array.from(
+    new Set([
+      ...noLiquidados.map((inv) => inv.inversionista_id),
+      ...liquidados.map((inv) => inv.inversionista_id),
+    ])
+  );
+  const boletaMap = await getBoletasPendientesMap(inversionistaIds, mes, anio);
+
+  const noLiquidadosMap = new Map(
+    noLiquidados.map((inv) => [inv.inversionista_id, inv])
+  );
+
+  const result: InversionistaResumenConEstado[] = [];
+
+  for (const inv of noLiquidados) {
+    const hasBoletaPendiente = boletaMap.has(inv.inversionista_id);
+    const estadoResumen = resolveEstadoLiquidacionResumen({
+      requestedEstado: estado,
+      hasNoLiquidado: true,
+      hasLiquidado: liquidados.some(
+        (liq) => liq.inversionista_id === inv.inversionista_id
+      ),
+      hasBoletaPendiente,
+    });
+
+    if (!estadoResumen) {
+      continue;
+    }
+
+    result.push({
+      ...mapResumenRow(inv, boletaMap.get(inv.inversionista_id) ?? null),
+      estado_liquidacion_resumen: estadoResumen,
+    });
+  }
+
+  for (const inv of liquidados) {
+    if (noLiquidadosMap.has(inv.inversionista_id)) {
+      continue;
+    }
+
+    const estadoResumen = resolveEstadoLiquidacionResumen({
+      requestedEstado: estado,
+      hasNoLiquidado: false,
+      hasLiquidado: true,
+      hasBoletaPendiente: false,
+    });
+
+    if (!estadoResumen) {
+      continue;
+    }
+
+    result.push({
+      ...mapResumenRow(inv, null),
+      estado_liquidacion_resumen: estadoResumen,
+    });
+  }
+
+  console.log("resumen-global-liquidaciones estado:", estado);
+  console.log(
+    "resumen-global-liquidaciones total:",
+    result.length,
+    "inversionistas"
+  );
+
+  if (excel) {
+    return generateResumenGlobalWorkbook(result, true);
+  }
+
+  return result;
 }
 /**
  * Obtiene liquidaciones con sus pagos

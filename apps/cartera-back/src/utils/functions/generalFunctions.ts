@@ -611,6 +611,251 @@ export async function buildCancelationWorkbook(
   const arr = (await wb.xlsx.writeBuffer()) as ArrayBuffer;
   return Buffer.from(arr);
 }
+/** ───────── Excel inversionista ───────── */
+
+export async function buildInversionistaWorkbook(
+  inv: InversionistaReporte,
+  opts?: { logoUrl?: string }
+): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Club Cashin.com";
+  wb.created = new Date();
+
+  const ws = wb.addWorksheet("Reporte", {
+    properties: { defaultRowHeight: 18 },
+  });
+
+  // anchos de columna (15 cols)
+  [10, 22, 14, 12, 16, 20, 16, 12, 12, 14, 20, 16, 22, 10, 14].forEach(
+    (w, i) => (ws.getColumn(i + 1).width = w)
+  );
+
+  const CINV = {
+    navy:  "FF0F1B4C",
+    blue:  "FF0485C2",
+    text:  "FF0F172A",
+    slate: "FF334155",
+    white: "FFFFFFFF",
+    line:  "FFE0E7EF",
+    zebra: "FFF9FBFF",
+    total: "FFF0F9FF",
+    gray:  "FF8C98B5",
+  };
+
+  const esDolares = inv.moneda === "dolares";
+  const sym = esDolares ? "$" : "Q";
+  const numFmt = `"${sym}"#,##0.00`;
+  const pctFmt = `0.00"%"`;
+
+  function toN(v: any) { return Number(v || 0); }
+
+  // ── fila 1-2: logo + título
+  const logo = await fetchImageBase64(opts?.logoUrl);
+  if (logo) {
+    const imgId = wb.addImage({ base64: logo.data, extension: logo.ext });
+    ws.addImage(imgId, "A1:B2");
+  }
+
+  ws.mergeCells("C1:O1");
+  ws.getCell("C1").value = "REPORTE DE INVERSIONES";
+  ws.getCell("C1").font = { bold: true, size: 14, color: { argb: CINV.navy } };
+  ws.getCell("C1").alignment = { vertical: "middle" };
+
+  ws.mergeCells("C2:O2");
+  ws.getCell("C2").value = inv.nombre_inversionista;
+  ws.getCell("C2").font = { bold: true, size: 12, color: { argb: CINV.blue } };
+  ws.getCell("C2").alignment = { vertical: "middle" };
+
+  // ── fila 3: totales resumen (4 bloques)
+  const sub = inv.subtotal;
+  const capitalActivo = inv.creditos.reduce((s, c) => s + toN(c.monto_aportado), 0);
+  const resumen: [string, number][] = [
+    ["Capital activo",       capitalActivo],
+    ["Abono capital",        toN(sub.total_abono_capital)],
+    ["Interés recibido",     toN(sub.total_abono_general_interes)],
+    ["Gran total a recibir", toN(sub.total_cuota_con_reinversion)],
+  ];
+  const resumenCols = [1, 4, 8, 12];
+  for (let i = 0; i < resumen.length; i++) {
+    const col = resumenCols[i];
+    const labelCell = ws.getCell(3, col);
+    labelCell.value = resumen[i][0];
+    labelCell.font = { bold: true, color: { argb: CINV.slate }, size: 9 };
+    labelCell.alignment = { horizontal: "center" };
+    ws.mergeCells(3, col, 3, col + 2);
+
+    const valCell = ws.getCell(4, col);
+    valCell.value = resumen[i][1];
+    valCell.numFmt = numFmt;
+    valCell.font = { bold: true, size: 12, color: { argb: CINV.navy } };
+    valCell.alignment = { horizontal: "center" };
+    ws.mergeCells(4, col, 4, col + 2);
+  }
+
+  // ── fila 6: encabezados de tabla
+  const HEAD_ROW = 6;
+  const head = ws.getRow(HEAD_ROW);
+  head.values = [
+    "Meses en crédito", "Nombre", "Capital",
+    "% Interés", "% Inversionista", "Tasa interés inversor",
+    "Interés Inversor", "IVA", "ISR",
+    "Abono capital", "% Inv. Neto", "Capital restante",
+    "Cuota de mes", "Plazo", "NIT",
+  ];
+  for (let i = 1; i <= 15; i++) {
+    const c = head.getCell(i);
+    c.font = { bold: true, color: { argb: CINV.white } };
+    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINV.blue } };
+    c.alignment = { horizontal: "center", wrapText: true };
+    c.border = { bottom: { style: "thin", color: { argb: CINV.line } } };
+  }
+  head.height = 28;
+
+  // ── filas de datos
+  let row = HEAD_ROW;
+  let rowIdx = 0;
+  const firstDataRow = HEAD_ROW + 1;
+
+  for (const cr of inv.creditos) {
+    for (const pago of cr.pagos ?? []) {
+      row++;
+      rowIdx++;
+      const rr = ws.getRow(row);
+
+      const capital = toN(cr.monto_aportado) + toN(pago.abono_capital);
+      const tasaFmt = toN(pago.tasaInteresInvesor) / 100;
+      const cuotaMes = `${pago.mes || "-"}${pago.cuota ? ` (Cuota #${pago.cuota})` : ""}`;
+
+      rr.values = [
+        pago.cuota ?? cr.meses_en_credito ?? "",
+        cr.nombre_usuario ?? "",
+        capital,
+        String(cr.porcentaje_interes ?? "") + " %",
+        String(pago.porcentaje_inversor ?? "") + " %",
+        tasaFmt,
+        toN(pago.abono_interes),
+        toN(pago.abono_iva),
+        toN(pago.isr),
+        toN(pago.abono_capital),
+        toN(pago.abonoGeneralInteres),
+        toN(cr.monto_aportado),
+        cuotaMes,
+        cr.plazo ?? "",
+        cr.nit_usuario ?? "",
+      ];
+
+      rr.getCell(3).numFmt  = numFmt;
+      rr.getCell(6).numFmt  = pctFmt;
+      [7, 8, 9, 10, 11, 12].forEach(i => (rr.getCell(i).numFmt = numFmt));
+
+      rr.getCell(7).font  = { color: { argb: CINV.navy } };
+      rr.getCell(10).font = { color: { argb: CINV.navy } };
+
+      if (rowIdx % 2 === 0) {
+        for (let c = 1; c <= 15; c++) {
+          rr.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINV.zebra } };
+        }
+      }
+      rr.eachCell(cell => {
+        cell.border = { bottom: { style: "thin", color: { argb: CINV.line } } };
+      });
+    }
+  }
+
+  const lastDataRow = row;
+
+  // ── fila de totales con fórmulas SUM
+  row++;
+  const totalRow = ws.getRow(row);
+  const r1 = firstDataRow;
+  const r2 = lastDataRow;
+
+  totalRow.getCell(1).value = "Total";
+  // col 3: Capital = SUM(C:C) sobre filas de datos
+  totalRow.getCell(3).value  = { formula: `SUM(C${r1}:C${r2})` };
+  totalRow.getCell(3).numFmt = numFmt;
+  // col 7-12: fórmulas SUM para columnas numéricas
+  const sumCols: [number, string][] = [
+    [7,  "G"], [8,  "H"], [9,  "I"],
+    [10, "J"], [11, "K"], [12, "L"],
+  ];
+  for (const [ci, col] of sumCols) {
+    totalRow.getCell(ci).value  = { formula: `SUM(${col}${r1}:${col}${r2})` };
+    totalRow.getCell(ci).numFmt = numFmt;
+  }
+  for (let c = 1; c <= 15; c++) {
+    const cell = totalRow.getCell(c);
+    cell.font = { bold: true, color: { argb: CINV.navy } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINV.total } };
+    cell.border = {
+      top:    { style: "medium", color: { argb: CINV.blue } },
+      bottom: { style: "thin",   color: { argb: CINV.line } },
+    };
+  }
+
+  // ── sección reinversión (2 filas abajo de la tabla)
+  row += 2;
+  const reinv: [string, number][] = [
+    ["Reinversión Capital",  toN(sub.total_reinversion_capital)],
+    ["Reinversión Interés",  toN(sub.total_reinversion_interes)],
+    ["Total Reinversión",    toN(sub.total_reinversion)],
+  ];
+  let col = 1;
+  for (const [label, val] of reinv) {
+    ws.getCell(row, col).value = label;
+    ws.getCell(row, col).font = { color: { argb: CINV.gray }, size: 9 };
+    ws.mergeCells(row, col, row, col + 2);
+    col += 3;
+
+    ws.getCell(row + 1, col - 3).value = val;
+    ws.getCell(row + 1, col - 3).numFmt = numFmt;
+    ws.getCell(row + 1, col - 3).font = { bold: true, size: 11, color: { argb: CINV.blue } };
+    ws.mergeCells(row + 1, col - 3, row + 1, col - 1);
+  }
+
+  // ── pie
+  row += 3;
+  ws.mergeCells(`A${row}:O${row}`);
+  ws.getCell(`A${row}`).value = `Generado por Club Cashin.com · ${new Date().toLocaleDateString("es-GT")}`;
+  ws.getCell(`A${row}`).font = { color: { argb: CINV.gray }, size: 9 };
+
+  ws.views = [{ state: "frozen", ySplit: HEAD_ROW }];
+
+  const arr = (await wb.xlsx.writeBuffer()) as ArrayBuffer;
+  return Buffer.from(arr);
+}
+
+export async function generarYSubirExcelInversionista(
+  inversionista: InversionistaReporte,
+  filename: string,
+  logoUrl: string = ""
+): Promise<{ url: string; excelBuffer: Buffer }> {
+  const excelBuffer = await buildInversionistaWorkbook(inversionista, { logoUrl });
+
+  const s3 = new S3Client({
+    endpoint: process.env.BUCKET_REPORTS_URL,
+    region: "auto",
+    credentials: {
+      accessKeyId:     process.env.R2_ACCESS_KEY_ID     as string,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
+    },
+  });
+
+  await s3.send(
+    new PutObjectCommand({
+      Bucket:      process.env.BUCKET_REPORTS,
+      Key:         filename,
+      Body:        excelBuffer,
+      ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    })
+  );
+
+  return {
+    url: `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`,
+    excelBuffer,
+  };
+}
+
 /**
  * Convierte un string o número en Big, limpiando %, Q, comas y guiones
  * @param value valor original

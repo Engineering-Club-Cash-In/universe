@@ -23,7 +23,7 @@ import {
   revertirLiquidacion,
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
-import { generarYSubirPDFInversionista } from "../utils/functions/generalFunctions";
+import { generarYSubirPDFInversionista, generarYSubirExcelInversionista } from "../utils/functions/generalFunctions";
 import { authMiddleware } from "./midleware";
 import { obtenerCreditosConPagosPendientes, calcularYRegistrarPagosEspejo } from "../controllers/payments";
 import { createBoleta, getBoletaById, getAllBoletas, getBoletasPendientes, updateBoleta, marcarBoletaComoProcesada, marcarBoletaComoPendiente, deleteBoleta, getBoletasStats } from "../controllers/liquidateInvestor";
@@ -487,20 +487,18 @@ export const inversionistasRouter = new Elysia()
       inversionista.subtotal = totales.totales as any;
 
       const logoUrl = import.meta.env.LOGO_URL || "";
-      const filename = `reporte_liquidados_${id}_${Date.now()}.pdf`;
-      const { url } = await generarYSubirPDFInversionista(
+      const filenameExcel = `reporte_liquidados_${id}_${Date.now()}.xlsx`;
+
+      const { url: urlExcel } = await generarYSubirExcelInversionista(
         inversionista as any,
-        filename,
+        filenameExcel,
         logoUrl
       );
 
-      const liquidacionActualizada = await updateLiquidacionReporteUrl(Number(id), url);
-
       return {
         success: true,
-        url,
-        filename,
-        liquidacion: liquidacionActualizada || null,
+        url_excel: urlExcel,
+        filename_excel: filenameExcel,
       };
     } catch (error) {
       console.error("[investor/pdf-liquidados] Error:", error);

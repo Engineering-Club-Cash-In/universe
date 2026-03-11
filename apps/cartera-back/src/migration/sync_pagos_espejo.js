@@ -52,14 +52,24 @@ function leerExcel(archivo) {
   const ws = wb.Sheets[hoja];
   const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
-  // Buscar header dinámicamente
+  // Buscar header dinámicamente y detectar índices de columnas
   let headerRow = 3;
+  let colCliente = 1, colInteres = 6, colIva = 7, colIsr = 8, colCapital = 9;
   for (let i = 0; i < Math.min(10, data.length); i++) {
     const row = data[i];
     if (!row) continue;
     const rowStr = row.map(c => String(c || '').toLowerCase()).join(' ');
     if (rowStr.includes('capital') && rowStr.includes('cliente')) {
       headerRow = i;
+      // Detectar columnas por nombre del header
+      for (let j = 0; j < row.length; j++) {
+        const h = String(row[j] || '').toLowerCase().trim();
+        if (h === 'cliente') colCliente = j;
+        else if (h.includes('interés inversor') || h === 'interés inversor') colInteres = j;
+        else if (h === 'iva' || h === 'iva retenido') colIva = j;
+        else if (h === 'isr' || h === 'isr retenido') colIsr = j;
+        else if (h.includes('amortización capital') || h === 'amortización capital') colCapital = j;
+      }
       break;
     }
   }
@@ -68,13 +78,13 @@ function leerExcel(archivo) {
   let totals = { cap: 0, int: 0, iva: 0, isr: 0, count: 0 };
   for (let i = headerRow + 1; i < data.length; i++) {
     const row = data[i];
-    if (!row || !row[1]) continue;
-    const cliente = String(row[1]).trim();
+    if (!row || !row[colCliente]) continue;
+    const cliente = String(row[colCliente]).trim();
     if (cliente.toLowerCase().includes('total')) continue;
-    const cap = Number(row[9] || 0);
-    const int = Number(row[6] || 0);
-    const iva = Number(row[7] || 0);
-    const isr = Number(row[8] || 0);
+    const cap = Number(row[colCapital] || 0);
+    const int = Number(row[colInteres] || 0);
+    const iva = Number(row[colIva] || 0);
+    const isr = Number(row[colIsr] || 0);
     if (isNaN(cap) || (cap === 0 && int === 0 && iva === 0)) continue;
     const k = cliente.substring(0, 20).toLowerCase();
     excelMap[k] = { capital: cap.toFixed(10), interes: int.toFixed(10), iva: iva.toFixed(10), isr: isr.toFixed(10), cliente };

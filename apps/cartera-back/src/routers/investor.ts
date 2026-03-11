@@ -19,6 +19,7 @@ import {
   deletePagosEspejoNoLiquidados,
   updateSaldoReinversion,
   updateLiquidacionReporteUrl,
+  getLiquidacionesPorFecha,
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
 import { generarYSubirPDFInversionista } from "../utils/functions/generalFunctions";
@@ -346,8 +347,103 @@ export const inversionistasRouter = new Elysia()
       filename,
     };
   })
+  .post("/investor/reporte-liquidados-masivo", async ({ body, set }) => {
+    const { fecha_liquidacion } = body as { fecha_liquidacion?: string };
+
+    const fecha = fecha_liquidacion || new Date().toISOString().slice(0, 10);
+
+    try {
+      const liquidacionesDelDia = await getLiquidacionesPorFecha(fecha);
+
+      if (!liquidacionesDelDia.length) {
+        set.status = 404;
+        return { message: `No se encontraron liquidaciones para la fecha ${fecha}.` };
+      }
+
+      const resultados: any[] = [];
+      const errores: any[] = [];
+
+      for (const liq of liquidacionesDelDia) {
+        const { inversionista_id: id, liquidacion_id: liqId } = liq;
+        try {
+          const result = await resumeInvestor(
+            id,
+            1,
+            999999,
+            undefined,
+            undefined,
+            undefined,
+            false,
+            undefined,
+            "espejos",
+            true,
+            liqId
+          );
+
+          if (!result.inversionistas.length) {
+            errores.push({ id, liquidacion_id: liqId, error: "Sin pagos liquidados" });
+            continue;
+          }
+
+          const inversionista = result.inversionistas[0];
+
+          const totales = await getInvestorTotalsGlobales(
+            id,
+            undefined,
+            "espejos",
+            false,
+            undefined,
+            true,
+            liqId
+          );
+          inversionista.subtotal = totales.totales as any;
+
+          const logoUrl = import.meta.env.LOGO_URL || "";
+          const filename = `reporte_liquidados_${id}_${Date.now()}.pdf`;
+          const { url } = await generarYSubirPDFInversionista(
+            inversionista as any,
+            filename,
+            logoUrl
+          );
+
+          const liquidacionActualizada = await updateLiquidacionReporteUrl(id, url);
+
+          resultados.push({
+            inversionista_id: id,
+            liquidacion_id: liqId,
+            nombre: inversionista.nombre_inversionista,
+            url,
+            filename,
+            liquidacion: liquidacionActualizada || null,
+          });
+        } catch (err) {
+          errores.push({
+            id,
+            liquidacion_id: liqId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
+      return {
+        success: true,
+        fecha,
+        total_procesados: resultados.length,
+        total_errores: errores.length,
+        resultados,
+        errores,
+      };
+    } catch (error) {
+      console.error("[investor/reporte-liquidados-masivo] Error:", error);
+      set.status = 500;
+      return {
+        message: "Error al generar reportes masivos",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  })
   .post("/investor/reporte-liquidados", async ({ body, set }) => {
-    const { id } = body as { id?: number };
+    const { id, fecha_liquidacion } = body as { id?: number; fecha_liquidacion?: string };
 
     if (!id || isNaN(Number(id))) {
       set.status = 400;
@@ -365,7 +461,9 @@ export const inversionistasRouter = new Elysia()
         false,
         undefined,
         "espejos",
-        true // soloLiquidados
+        true, // soloLiquidados
+        undefined, // liquidacionId
+        fecha_liquidacion
       );
 
       if (!result.inversionistas.length) {
@@ -381,7 +479,9 @@ export const inversionistasRouter = new Elysia()
         "espejos",
         false,
         undefined,
-        true // soloLiquidados
+        true, // soloLiquidados
+        undefined, // liquidacionId
+        fecha_liquidacion
       );
       inversionista.subtotal = totales.totales as any;
 

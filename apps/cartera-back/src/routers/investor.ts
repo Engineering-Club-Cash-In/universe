@@ -20,9 +20,11 @@ import {
   deletePagosEspejoNoLiquidados,
   updateSaldoReinversion,
   updateLiquidacionReporteUrl,
+  getLiquidacionesPorFecha,
+  revertirLiquidacion,
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
-import { generarYSubirPDFInversionista } from "../utils/functions/generalFunctions";
+import { generarYSubirPDFInversionista, generarYSubirExcelInversionista } from "../utils/functions/generalFunctions";
 import { authMiddleware } from "./midleware";
 import { obtenerCreditosConPagosPendientes, calcularYRegistrarPagosEspejo } from "../controllers/payments";
 import { createBoleta, getBoletaById, getAllBoletas, getBoletasPendientes, updateBoleta, marcarBoletaComoProcesada, marcarBoletaComoPendiente, deleteBoleta, getBoletasStats } from "../controllers/liquidateInvestor";
@@ -348,6 +350,101 @@ export const inversionistasRouter = new Elysia()
       filename,
     };
   })
+  .post("/investor/reporte-liquidados-masivo", async ({ body, set }) => {
+    const { fecha_liquidacion } = body as { fecha_liquidacion?: string };
+
+    const fecha = fecha_liquidacion || new Date().toISOString().slice(0, 10);
+
+    try {
+      const liquidacionesDelDia = await getLiquidacionesPorFecha(fecha);
+
+      if (!liquidacionesDelDia.length) {
+        set.status = 404;
+        return { message: `No se encontraron liquidaciones para la fecha ${fecha}.` };
+      }
+
+      const resultados: any[] = [];
+      const errores: any[] = [];
+
+      for (const liq of liquidacionesDelDia) {
+        const { inversionista_id: id, liquidacion_id: liqId } = liq;
+        try {
+          const result = await resumeInvestor(
+            id,
+            1,
+            999999,
+            undefined,
+            undefined,
+            undefined,
+            false,
+            undefined,
+            "espejos",
+            true,
+            liqId
+          );
+
+          if (!result.inversionistas.length) {
+            errores.push({ id, liquidacion_id: liqId, error: "Sin pagos liquidados" });
+            continue;
+          }
+
+          const inversionista = result.inversionistas[0];
+
+          const totales = await getInvestorTotalsGlobales(
+            id,
+            undefined,
+            "espejos",
+            false,
+            undefined,
+            true,
+            liqId
+          );
+          inversionista.subtotal = totales.totales as any;
+
+          const logoUrl = import.meta.env.LOGO_URL || "";
+          const filename = `reporte_liquidados_${id}_${Date.now()}.xlsx`;
+          const { url } = await generarYSubirExcelInversionista(
+            inversionista as any,
+            filename,
+            logoUrl
+          );
+
+          const liquidacionActualizada = await updateLiquidacionReporteUrl(id, url);
+
+          resultados.push({
+            inversionista_id: id,
+            liquidacion_id: liqId,
+            nombre: inversionista.nombre_inversionista,
+            url,
+            filename,
+            liquidacion: liquidacionActualizada || null,
+          });
+        } catch (err) {
+          errores.push({
+            id,
+            liquidacion_id: liqId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
+      return {
+        success: true,
+        fecha,
+        total_procesados: resultados.length,
+        total_errores: errores.length,
+        resultados,
+        errores,
+      };
+    } catch (error) {
+      console.error("[investor/reporte-liquidados-masivo] Error:", error);
+      set.status = 500;
+      return {
+        message: "Error al generar reportes masivos",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  })
   .post("/investor/reporte-liquidados", async ({ body, set }) => {
     const { id, fecha_liquidacion } = body as { id?: number; fecha_liquidacion?: string };
 
@@ -384,7 +481,8 @@ export const inversionistasRouter = new Elysia()
         undefined,
         "espejos",
         true, // soloLiquidados
-        liquidacionId
+        undefined, // liquidacionId
+        fecha_liquidacion
       );
 
       if (!result.inversionistas.length) {
@@ -401,31 +499,58 @@ export const inversionistasRouter = new Elysia()
         false,
         undefined,
         true, // soloLiquidados
-        liquidacionId
+        undefined, // liquidacionId
+        fecha_liquidacion
       );
       inversionista.subtotal = totales.totales as any;
 
       const logoUrl = import.meta.env.LOGO_URL || "";
-      const filename = `reporte_liquidados_${id}_${Date.now()}.pdf`;
-      const { url } = await generarYSubirPDFInversionista(
-        inversionista as any,
-        filename,
-        logoUrl
-      );
+      const ts = Date.now();
+      const filenamePdf   = `reporte_liquidados_${id}_${ts}.pdf`;
+      const filenameExcel = `reporte_liquidados_${id}_${ts}.xlsx`;
 
-      const liquidacionActualizada = await updateLiquidacionReporteUrl(Number(id), url);
+      const [{ url }, { url: urlExcel }] = await Promise.all([
+        generarYSubirPDFInversionista(inversionista as any, filenamePdf, logoUrl),
+        generarYSubirExcelInversionista(inversionista as any, filenameExcel, logoUrl),
+      ]);
 
       return {
         success: true,
         url,
-        filename,
-        liquidacion: liquidacionActualizada || null,
+        url_excel: urlExcel,
+        filename: filenamePdf,
+        filename_excel: filenameExcel,
       };
     } catch (error) {
       console.error("[investor/pdf-liquidados] Error:", error);
       set.status = 500;
       return {
         message: "Error al generar el PDF",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  })
+  // ──────────────────────────────────────────────
+  // Revertir una liquidación completa por liquidacion_id
+  // Deshace: pagos espejo, monto_aportado, cuotas, boleta, reinversión y liquidación
+  // Todo dentro de una transacción
+  // ──────────────────────────────────────────────
+  .post("/investor/revertir-liquidacion", async ({ body, set }) => {
+    const { liquidacion_id } = body as { liquidacion_id?: number };
+
+    if (!liquidacion_id || isNaN(Number(liquidacion_id))) {
+      set.status = 400;
+      return { message: "El parámetro 'liquidacion_id' es obligatorio y debe ser numérico." };
+    }
+
+    try {
+      const result = await revertirLiquidacion(Number(liquidacion_id));
+      return result;
+    } catch (error) {
+      console.error("[investor/revertir-liquidacion] Error:", error);
+      set.status = 500;
+      return {
+        message: "Error al revertir la liquidación",
         error: error instanceof Error ? error.message : String(error),
       };
     }

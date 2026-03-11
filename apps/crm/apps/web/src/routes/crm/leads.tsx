@@ -76,6 +76,7 @@ import { authClient } from "@/lib/auth-client";
 import {
 	formatCurrency,
 	formatGuatemalaDate,
+	formatGuatemalaDateTime,
 	getMaritalStatusLabel,
 	getOccupationLabel,
 	getSourceLabel,
@@ -2093,7 +2094,7 @@ function RouteComponent() {
 												<span className="text-muted-foreground">-</span>
 											)}
 										</TableCell>
-										<TableCell>{formatGuatemalaDate(lead.createdAt)}</TableCell>
+										<TableCell>{formatGuatemalaDateTime(lead.createdAt)}</TableCell>
 										<TableCell className="text-right">
 											<DropdownMenu>
 												<DropdownMenuTrigger asChild>

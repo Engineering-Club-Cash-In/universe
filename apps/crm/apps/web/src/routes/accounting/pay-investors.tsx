@@ -65,6 +65,8 @@ interface ResumenInversionista {
 	boleta_pendiente?: BoletaPendiente | null;
 }
 
+type EstadoBoletaFilter = "all" | "pending" | "uploaded";
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const PAGE_SIZE = 20;
@@ -431,6 +433,8 @@ function PagarInversionistas() {
 	const [search, setSearch] = useState("");
 	const [page, setPage] = useState(1);
 	const [downloadingExcel, setDownloadingExcel] = useState(false);
+	const [estadoBoletaFilter, setEstadoBoletaFilter] =
+		useState<EstadoBoletaFilter>("all");
 
 	const handleDownloadExcel = async () => {
 		setDownloadingExcel(true);
@@ -464,16 +468,29 @@ function PagarInversionistas() {
 	});
 
 	const inversionistas = (data ?? []) as ResumenInversionista[];
+	const conBoleta = inversionistas.filter(
+		(inv) => inv.boleta_pendiente != null,
+	).length;
+	const sinBoleta = inversionistas.length - conBoleta;
 
 	const filtered = useMemo(() => {
-		if (!search.trim()) return inversionistas;
-		const q = search.toLowerCase();
-		return inversionistas.filter(
-			(inv) =>
+		const q = search.trim().toLowerCase();
+
+		return inversionistas.filter((inv) => {
+			const matchesSearch =
+				!q ||
 				inv.nombre.toLowerCase().includes(q) ||
-				String(inv.inversionista_id).includes(q),
-		);
-	}, [inversionistas, search]);
+				String(inv.inversionista_id).includes(q);
+
+			const hasUploadedBoleta = inv.boleta_pendiente != null;
+			const matchesFilter =
+				estadoBoletaFilter === "all" ||
+				(estadoBoletaFilter === "uploaded" && hasUploadedBoleta) ||
+				(estadoBoletaFilter === "pending" && !hasUploadedBoleta);
+
+			return matchesSearch && matchesFilter;
+		});
+	}, [inversionistas, search, estadoBoletaFilter]);
 
 	const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
 	const safePage = Math.min(page, totalPages);
@@ -526,11 +543,6 @@ function PagarInversionistas() {
 			acc + Number.parseFloat(inv.total_a_recibir_con_reinversion || "0"),
 		0,
 	);
-	const conBoleta = inversionistas.filter(
-		(inv) => inv.boleta_pendiente != null,
-	).length;
-	const sinBoleta = inversionistas.length - conBoleta;
-
 	return (
 		<div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6">
 			{/* Header */}
@@ -594,6 +606,38 @@ function PagarInversionistas() {
 						onChange={(e) => handleSearch(e.target.value)}
 						className="pl-9"
 					/>
+				</div>
+				<div className="flex flex-wrap gap-2">
+					<Button
+						variant={estadoBoletaFilter === "all" ? "default" : "outline"}
+						size="sm"
+						onClick={() => {
+							setEstadoBoletaFilter("all");
+							setPage(1);
+						}}
+					>
+						Todas ({inversionistas.length})
+					</Button>
+					<Button
+						variant={estadoBoletaFilter === "pending" ? "default" : "outline"}
+						size="sm"
+						onClick={() => {
+							setEstadoBoletaFilter("pending");
+							setPage(1);
+						}}
+					>
+						Pendientes ({sinBoleta})
+					</Button>
+					<Button
+						variant={estadoBoletaFilter === "uploaded" ? "default" : "outline"}
+						size="sm"
+						onClick={() => {
+							setEstadoBoletaFilter("uploaded");
+							setPage(1);
+						}}
+					>
+						Subidas ({conBoleta})
+					</Button>
 				</div>
 				<PaginationControls
 					page={safePage}

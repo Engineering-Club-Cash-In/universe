@@ -3058,6 +3058,7 @@ interface InversionistaResumen {
   total_a_recibir_con_reinversion: number;
   total_cuota: number;
   boleta_pendiente: BoletaPendiente | null;
+  boleta_liquidacion: BoletaPendiente | null;
 }
 
 type EstadoPagoResumen = "NO_LIQUIDADO" | "LIQUIDADO";
@@ -3164,6 +3165,65 @@ async function getBoletasMap(
   );
 
   return mapBoletasPendientes(boletasFiltradas);
+}
+
+async function getBoletasLiquidacionMap(
+  inversionistaIds: number[],
+  mes?: number,
+  anio?: number
+) {
+  if (inversionistaIds.length === 0) {
+    return new Map<number, BoletaPendiente>();
+  }
+
+  const liquidacionesConBoleta = await db
+    .select({
+      inversionista_id: liquidaciones.inversionista_id,
+      boleta_id: boletasPagoInversionista.boleta_id,
+      boleta_url: boletasPagoInversionista.boleta_url,
+      estado: boletasPagoInversionista.estado,
+      notas: boletasPagoInversionista.notas,
+      monto_boleta: boletasPagoInversionista.monto_boleta,
+      fecha_subida: boletasPagoInversionista.fecha_subida,
+      fecha_liquidacion: liquidaciones.fecha_liquidacion,
+    })
+    .from(liquidaciones)
+    .innerJoin(
+      boletasPagoInversionista,
+      eq(liquidaciones.boleta_id, boletasPagoInversionista.boleta_id)
+    )
+    .where(
+      and(
+        inArray(liquidaciones.inversionista_id, inversionistaIds),
+        ...(mes
+          ? [sql`EXTRACT(MONTH FROM ${liquidaciones.fecha_liquidacion}) = ${mes}`]
+          : []),
+        ...(anio
+          ? [sql`EXTRACT(YEAR FROM ${liquidaciones.fecha_liquidacion}) = ${anio}`]
+          : [])
+      )
+    )
+    .orderBy(
+      desc(liquidaciones.fecha_liquidacion),
+      desc(boletasPagoInversionista.fecha_subida)
+    );
+
+  const boletaMap = new Map<number, BoletaPendiente>();
+
+  for (const row of liquidacionesConBoleta) {
+    if (!boletaMap.has(row.inversionista_id)) {
+      boletaMap.set(row.inversionista_id, {
+        boleta_id: row.boleta_id,
+        boleta_url: row.boleta_url,
+        estado: row.estado,
+        notas: row.notas,
+        monto_boleta: row.monto_boleta,
+        fecha_subida: row.fecha_subida,
+      });
+    }
+  }
+
+  return boletaMap;
 }
 
 async function consultarResumenGlobalPorEstadoPago(
@@ -3349,7 +3409,8 @@ async function consultarResumenGlobalPorEstadoPago(
 
 function mapResumenRow(
   inv: InversionistaResumenRow,
-  boleta_pendiente: BoletaPendiente | null
+  boleta_pendiente: BoletaPendiente | null,
+  boleta_liquidacion: BoletaPendiente | null = null
 ): InversionistaResumen {
   return {
     inversionista_id: inv.inversionista_id,
@@ -3368,6 +3429,7 @@ function mapResumenRow(
     total_a_recibir_con_reinversion: inv.total_a_recibir_con_reinversion,
     total_cuota: inv.total_cuota,
     boleta_pendiente,
+    boleta_liquidacion,
   };
 }
 
@@ -3502,7 +3564,7 @@ export async function resumenGlobalInversionistas(
   console.log("resumen-global total:", result.length, "inversionistas");
 
   if (excel) {
-    const excelRows = result.map((inv) => mapResumenRow(inv, null));
+    const excelRows = result.map((inv) => mapResumenRow(inv, null, null));
     return generateResumenGlobalWorkbook(excelRows, false);
   }
 
@@ -3510,7 +3572,7 @@ export async function resumenGlobalInversionistas(
   const boletaMap = await getBoletasPendientesMap(inversionistaIds);
 
   return result.map((inv) =>
-    mapResumenRow(inv, boletaMap.get(inv.inversionista_id) ?? null)
+    mapResumenRow(inv, boletaMap.get(inv.inversionista_id) ?? null, null)
   );
 }
 
@@ -3536,9 +3598,10 @@ export async function resumenGlobalLiquidaciones(
       ...liquidados.map((inv) => inv.inversionista_id),
     ])
   );
-  const [boletaPendienteMap, boletaSubidaMap] = await Promise.all([
+  const [boletaPendienteMap, boletaSubidaMap, boletaLiquidacionMap] = await Promise.all([
     getBoletasPendientesMap(inversionistaIds, mes, anio),
     getBoletasMap(inversionistaIds, ["PENDIENTE", "PROCESADO"], mes, anio),
+    getBoletasLiquidacionMap(inversionistaIds, mes, anio),
   ]);
 
   const noLiquidadosMap = new Map(
@@ -3563,7 +3626,11 @@ export async function resumenGlobalLiquidaciones(
     }
 
     result.push({
-      ...mapResumenRow(inv, boletaPendienteMap.get(inv.inversionista_id) ?? null),
+      ...mapResumenRow(
+        inv,
+        boletaPendienteMap.get(inv.inversionista_id) ?? null,
+        boletaLiquidacionMap.get(inv.inversionista_id) ?? null
+      ),
       estado_liquidacion_resumen: estadoResumen,
     });
   }
@@ -3585,7 +3652,11 @@ export async function resumenGlobalLiquidaciones(
     }
 
     result.push({
-      ...mapResumenRow(inv, null),
+      ...mapResumenRow(
+        inv,
+        null,
+        boletaLiquidacionMap.get(inv.inversionista_id) ?? null
+      ),
       estado_liquidacion_resumen: estadoResumen,
     });
   }

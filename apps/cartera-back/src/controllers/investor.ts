@@ -3447,7 +3447,7 @@ export async function resumenGlobalLiquidaciones(
   inversionistaId?: number,
   mes?: number,
   anio?: number,
-  estado: EstadoLiquidacionResumenFilter = "all",
+  estado: EstadoLiquidacionResumenFilter = "pending",
   excel: boolean = false
 ): Promise<
   InversionistaResumenConEstado[] | { success: boolean; url: string; filename: string }

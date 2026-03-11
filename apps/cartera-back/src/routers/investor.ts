@@ -438,7 +438,7 @@ export const inversionistasRouter = new Elysia()
   .get(
     "/resumen-global-liquidaciones",
     async ({ query, set }) => {
-      const { inversionistaId, mes, anio, estado = "all", excel } = query;
+      const { inversionistaId, mes, anio, estado = "pending", excel } = query;
       const estadoFiltro = estado as "pending" | "uploaded" | "liquidated" | "all";
 
       if (requierePeriodoLiquidacion(estadoFiltro) && (!mes || !anio)) {
@@ -475,7 +475,7 @@ export const inversionistasRouter = new Elysia()
       detail: {
         summary: "Obtiene el resumen global de liquidaciones por inversionista",
         description:
-          "Devuelve inversionistas clasificados como pending, uploaded o liquidated usando pagos espejo. /resumen-global se mantiene sin cambios y sigue devolviendo solo NO_LIQUIDADO. Para estado=liquidated y estado=all, mes y anio son obligatorios y el período se aplica al resumen consultado.",
+          "Devuelve inversionistas clasificados como pending, uploaded o liquidated usando pagos espejo. /resumen-global se mantiene sin cambios y sigue devolviendo solo NO_LIQUIDADO. Si no se envía estado, se usa pending. Para estado=liquidated y estado=all, mes y anio son obligatorios y el período se aplica al resumen consultado.",
         tags: ["Inversionistas"],
       },
     }

@@ -611,7 +611,9 @@ function PagarInversionistas() {
 	const totalLiquidadas = inversionistas.filter(
 		(inv) => inv.estado_liquidacion_resumen === "liquidated",
 	).length;
-	const sinBoleta = inversionistas.length - conBoleta;
+	const pendientesDeLiquidar = inversionistas.filter(
+		(inv) => inv.estado_liquidacion_resumen !== "liquidated",
+	).length;
 
 	const filtered = useMemo(() => {
 		const q = search.trim().toLowerCase();
@@ -725,7 +727,7 @@ function PagarInversionistas() {
 				/>
 				<StatCard
 					label="Pendientes de liquidar"
-					value={String(sinBoleta)}
+					value={String(pendientesDeLiquidar)}
 					icon={<Upload className="h-4 w-4 text-orange-500" />}
 				/>
 			</div>

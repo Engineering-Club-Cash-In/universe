@@ -186,7 +186,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         pago_otros: pagos_credito.otros,
       })
       .from(cuotas_credito)
-      .innerJoin(
+      .leftJoin(
         pagos_credito,
         eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
       )
@@ -298,7 +298,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       .orderBy(cuotas_credito.fecha_vencimiento)
       .limit(1);
 
-    // 🔥 VALIDACIÓN: Si no hay cuota actual, retornar datos vacíos
+    // 🔥 VALIDACIÓN: Si no hay cuota actual, retornar datos sin cuota activa
     if (!cuotaActualDataResult || cuotaActualDataResult.length === 0) {
       return {
         flujo: "ACTIVO",
@@ -307,9 +307,9 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         cuotaActual: null,
         cuotaActualPagada: false,
         cuotaActualStatus: null,
-        cuotasPendientes: [],
-        cuotasAtrasadas: [],
-        cuotasPagadas: [],
+        cuotasPendientes,
+        cuotasAtrasadas,
+        cuotasPagadas,
         moraActual: 0,
         mora: null,
         convenioActivo: null,

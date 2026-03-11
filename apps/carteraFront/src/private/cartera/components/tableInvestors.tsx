@@ -356,15 +356,13 @@ export function TableInvestors() {
   useEffect(() => {
     if (!currentInv) return;
 
-    // Regla: Si hay créditos sin pagos (vacíos), forzamos modo Normal para permitir "Generar"
     const creditos = currentInv.creditos ?? [];
     
-    // Null-safety check (Recommendation 2 & 4)
-    const tieneCreditosSinPagos = creditos.some(
-      (c: any) => !c.pagos || c.pagos.length === 0
+    // Regla solicitada: Si AL MENOS UN crédito tiene pagos, y hay algún pago no liquidado, activar Modo Borrador.
+    const algunCreditoConPagos = creditos.some(
+      (c: any) => c.pagos && c.pagos.length > 0
     );
 
-    // Regla: Si todos tienen pagos, buscamos pendientes de liquidar
     const tienePagoNoLiquidado = creditos.some((c: any) =>
       (c.pagos ?? []).some(
         (p: any) =>
@@ -372,18 +370,15 @@ export function TableInvestors() {
       )
     );
 
-    if (!tieneCreditosSinPagos && tienePagoNoLiquidado) {
-      // Activar solo si es necesario
+    if (algunCreditoConPagos && tienePagoNoLiquidado) {
       if (!isDraft || draftInvestorId !== currentInv.inversionista_id) {
-        console.log("🛠️ Auto-Draft Optimizado: ON para", currentInv.nombre_inversionista);
+        console.log("🛠️ Auto-Draft: ON (Al menos un crédito con pagos) para", currentInv.nombre_inversionista);
         setIsDraft(true);
         setDraftInvestorId(currentInv.inversionista_id);
       }
     } else {
-      // 🔄 FIX: Modo Borrador "Pegajoso"
-      // Si el inversionista actual NO cumple las condiciones, apagar SIEMPRE.
       if (isDraft) {
-        console.log("🍃 Auto-Draft Optimizado: OFF (Condiciones no cumplidas)");
+        console.log("🍃 Auto-Draft: OFF (No hay créditos con pagos o no hay pendientes)");
         setIsDraft(false);
         setDraftInvestorId(null);
       }
@@ -1211,7 +1206,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                           </h5>
                         </div>
 
-                        <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mt-3">
+                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mt-3">
                           <div>
                             <div className="text-xs text-gray-500">
                               Cliente
@@ -1255,6 +1250,17 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                             </div>
                             <div className="font-semibold text-purple-700 text-sm">
                               {cred.porcentaje_interes}%
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-xs text-gray-500">
+                              IVA + ISR
+                            </div>
+                            <div className="font-semibold text-violet-700 text-sm">
+                              {inv.currencySymbol}
+                              {(Number(cred.total_abono_iva) + Number(cred.total_isr)).toLocaleString("es-GT", {
+                                minimumFractionDigits: 2,
+                              })}
                             </div>
                           </div>
                           <div>
@@ -1587,7 +1593,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
         {/* Descargar PDF */}
         <button
           className="px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2 shadow-sm"
-          disabled={Number(inv.subtotal?.total_cuota ?? 0) <= 0 || downloadPDF.isPending}
+          disabled={Number(inv.subtotal?.total_cuota_sin_reinversion ?? 0) <= 0 || downloadPDF.isPending}
           onClick={() =>
             downloadPDF.mutate({
               id: inv.inversionista_id,

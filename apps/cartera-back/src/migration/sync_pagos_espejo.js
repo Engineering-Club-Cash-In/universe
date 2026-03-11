@@ -46,6 +46,10 @@ require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
 const pool = new Pool({ connectionString: process.env.SUPABASE_DB_URL });
 const CARPETA = path.join(__dirname, 'Liquidaciones Marzo 2026');
 
+function normalizeKey(str) {
+  return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').substring(0, 20).toLowerCase();
+}
+
 function leerExcel(archivo) {
   const wb = XLSX.readFile(path.join(CARPETA, archivo));
   const hoja = wb.SheetNames.find(h => h.toLowerCase().includes('febrero 2026')) || wb.SheetNames[wb.SheetNames.length - 1];
@@ -74,6 +78,7 @@ function leerExcel(archivo) {
     }
   }
 
+  // excelMap: key -> array of entries (para manejar duplicados en Excel)
   const excelMap = {};
   let totals = { cap: 0, int: 0, iva: 0, isr: 0, count: 0 };
   for (let i = headerRow + 1; i < data.length; i++) {
@@ -86,8 +91,9 @@ function leerExcel(archivo) {
     const iva = Number(row[colIva] || 0);
     const isr = Number(row[colIsr] || 0);
     if (isNaN(cap) || (cap === 0 && int === 0 && iva === 0)) continue;
-    const k = cliente.substring(0, 20).toLowerCase();
-    excelMap[k] = { capital: cap.toFixed(10), interes: int.toFixed(10), iva: iva.toFixed(10), isr: isr.toFixed(10), cliente };
+    const k = normalizeKey(cliente);
+    if (!excelMap[k]) excelMap[k] = [];
+    excelMap[k].push({ capital: cap.toFixed(10), interes: int.toFixed(10), iva: iva.toFixed(10), isr: isr.toFixed(10), cliente });
     totals.cap += cap;
     totals.int += int;
     totals.iva += iva;
@@ -124,13 +130,29 @@ async function procesarInversionista(c, invId, archivo, nombre) {
   let ok = 0, updated = 0, noMatch = 0;
 
   for (const db of pagos.rows) {
-    const k = db.cliente.substring(0, 20).toLowerCase();
-    const ex = excel.excelMap[k];
-    if (!ex) {
-      console.log(`  NO MATCH | ${db.cliente}`);
+    const k = normalizeKey(db.cliente);
+    let entries = excel.excelMap[k];
+
+    // Fallback: si no hay match exacto, intentar con primeros 10 chars (maneja typos leves)
+    if (!entries) {
+      const kShort = db.cliente.normalize('NFD').replace(/[\u0300-\u036f]/g, '').substring(0, 10).toLowerCase();
+      const fallback = Object.entries(excel.excelMap).find(([ek, _]) => ek.startsWith(kShort));
+      if (fallback) entries = fallback[1];
+    }
+
+    if (!entries) {
+      console.log(`  NO MATCH -> 0 | ${db.cliente}`);
+      await c.query(
+        'UPDATE cartera.pagos_credito_inversionistas_espejo SET abono_capital = 0, abono_interes = 0, abono_iva_12 = 0 WHERE id = $1',
+        [db.id]
+      );
       noMatch++;
       continue;
     }
+
+    // Tomar el primer entry disponible (pop para que duplicados en DB tomen entradas distintas)
+    const ex = entries.shift();
+    if (entries.length === 0) delete excel.excelMap[k];
 
     const capOk = Math.abs(Number(db.abono_capital) - Number(ex.capital)) < 0.000001;
     const intOk = Math.abs(Number(db.abono_interes) - Number(ex.interes)) < 0.000001;

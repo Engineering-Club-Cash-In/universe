@@ -713,10 +713,26 @@ app.get("/api/accounting/resumen-global-excel", async (c) => {
 			return c.json({ error: "No autorizado" }, 401);
 		}
 
+		const estado = c.req.query("estado");
+		const mes = c.req.query("mes");
+		const anio = c.req.query("anio");
+		const inversionistaId = c.req.query("inversionistaId");
+
 		const { carteraBackClient } = await import(
 			"./services/cartera-back-client"
 		);
-		const result = await carteraBackClient.getResumenGlobalExcel();
+		const result = await carteraBackClient.getResumenGlobalExcel({
+			estado:
+				estado === "pending" ||
+				estado === "uploaded" ||
+				estado === "liquidated" ||
+				estado === "all"
+					? estado
+					: "pending",
+			mes: mes ? Number(mes) : undefined,
+			anio: anio ? Number(anio) : undefined,
+			inversionistaId: inversionistaId || undefined,
+		});
 		return c.json(result);
 	} catch (err: any) {
 		console.error("[ResumenGlobalExcel] Error:", err);

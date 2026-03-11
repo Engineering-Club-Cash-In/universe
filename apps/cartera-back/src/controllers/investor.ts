@@ -1263,7 +1263,7 @@ export async function resumeInvestor(
               const abono_capital = new Big(pago.abono_capital ?? 0);
               const abono_interes = new Big(pago.abono_interes ?? 0);
               const abono_iva = new Big(pago.abono_iva_12 ?? 0);
-              const isr = abono_interes.times(0.07).round(2);
+              const isr = abono_interes.times(0.07);
               const cuota = pago.cuota ?? 0;
               let cuota_inversor;
               let abonoGeneralInteres;
@@ -1338,7 +1338,7 @@ const mes = fechaParaMes
                 abono_capital: formatValue(abono_capital.toString()),
                 abono_interes: formatValue(abono_interes.toString()),
                 abono_iva: formatValue(abono_iva.toString()),
-                isr: inv.emite_factura ? 0 : formatValue(isr.toString()),
+                isr: inv.emite_factura ? 0 : formatValue(isr.round(2).toString()),
                 porcentaje_inversor: pago.porcentaje_participacion,
                 cuota_inversor: formatValue(cuota_inversor.toString()),
                 cuota: formatValue(cuota),
@@ -1395,9 +1395,19 @@ const mes = fechaParaMes
             pagos: pagos_detalle,
             total_abono_capital: formatValue(total_abono_capital.toString()),
             total_abono_interes: formatValue(total_abono_interes.toString()),
-            total_abono_iva: formatValue(total_abono_iva.toString()),
-            total_isr: formatValue(total_isr.toString()),
-            total_cuota: formatValue(total_cuota.toString()),
+            total_abono_iva: formatValue(
+              (inv.emite_factura
+                ? total_abono_iva
+                : total_abono_interes.round(2).times(0.12)
+              ).round(2).toString()
+            ),
+            total_isr: formatValue(
+              (inv.emite_factura
+                ? new Big(0)
+                : total_abono_interes.round(2).times(0.07)
+              ).round(2).toString()
+            ),
+            total_cuota: formatValue(total_cuota.round(2).toString()),
             meses_en_credito,
             origen: c.origen, // 🆕 NUEVO: Indica si viene de tabla original o espejo
           };
@@ -1432,9 +1442,19 @@ const mes = fechaParaMes
         subtotal: {
           total_abono_capital: formatValue(subtotal.total_abono_capital.toString()),
           total_abono_interes: formatValue(subtotal.total_abono_interes.toString()),
-          total_abono_iva: formatValue(subtotal.total_abono_iva.toString()),
-          total_isr: formatValue(subtotal.total_isr.toString()),
-          total_cuota: formatValue(subtotal.total_cuota.toString()),
+          total_abono_iva: formatValue(
+            (inv.emite_factura
+              ? subtotal.total_abono_iva
+              : subtotal.total_abono_interes.round(2).times(0.12)
+            ).round(2).toString()
+          ),
+          total_isr: formatValue(
+            (inv.emite_factura
+              ? new Big(0)
+              : subtotal.total_abono_interes.round(2).times(0.07)
+            ).round(2).toString()
+          ),
+          total_cuota: formatValue(subtotal.total_cuota.round(2).toString()),
           total_monto_aportado: formatValue(subtotal.total_monto_aportado.toString()),
           total_abono_general_interes: formatValue(subtotal.totalAbonoGeneralInteres.toString()),
           total_capital_creditos: formatValue(subtotal.total_capital_creditos.toString()),
@@ -1649,8 +1669,8 @@ export async function getInvestorTotalsGlobales(
     for (const pago of pagos) {
       const abono_capital = new Big(pago.abono_capital ?? 0);
       const abono_interes = new Big(pago.abono_interes ?? 0);
-      const abono_iva = new Big(pago.abono_iva_12 ?? 0);
-      const isr = abono_interes.times(0.07).round(2);
+      const abono_iva = new Big(pago.abono_iva_12 ?? 0).round(2);
+      const isr = abono_interes.times(0.07);
 
       let abonoGeneralInteres;
       if (inv.emite_factura) {
@@ -1746,19 +1766,24 @@ export async function getInvestorTotalsGlobales(
     moneda: inv.moneda,
     currencySymbol: inv.moneda === "dolares" ? "$" : "Q.",
     totales: {
-      total_abono_capital: formatValue(subtotal.total_abono_capital.toString()),
-      total_abono_interes: formatValue(subtotal.total_abono_interes.toString()),
-      total_abono_iva: formatValue(subtotal.total_abono_iva.toString()),
-      total_isr: formatValue(subtotal.total_isr.toString()),
-      total_cuota_sin_reinversion: formatValue(subtotal.total_cuota.plus(subtotal.total_reinversion).toString()),
-      total_cuota_con_reinversion: formatValue(subtotal.total_cuota.toString()),
-      total_monto_aportado: formatValue(subtotal.total_monto_aportado.toString()),
-      total_abono_general_interes: formatValue(subtotal.totalAbonoGeneralInteres.toString()),
-      total_capital_creditos: formatValue(subtotal.total_capital_creditos.toString()),
-      total_capital_actual: formatValue(subtotal.total_capital_actual.toString()),
-      total_reinversion_capital: formatValue(subtotal.total_reinversion_capital.toString()),
-      total_reinversion_interes: formatValue(subtotal.total_reinversion_interes.toString()),
-      total_reinversion: formatValue(subtotal.total_reinversion.toString()),
+      total_abono_capital: formatValue(subtotal.total_abono_capital.round(2).toString()),
+      total_abono_interes: formatValue(subtotal.total_abono_interes.round(2).toString()),
+      total_abono_iva: formatValue(
+        (inv.emite_factura
+          ? subtotal.total_abono_iva
+          : subtotal.total_abono_interes.round(2).times(0.12)
+        ).round(2).toString()
+      ),
+      total_isr: formatValue(subtotal.total_isr.round(2).toString()),
+      total_cuota_sin_reinversion: formatValue(subtotal.total_cuota.plus(subtotal.total_reinversion).round(2).toString()),
+      total_cuota_con_reinversion: formatValue(subtotal.total_cuota.round(2).toString()),
+      total_monto_aportado: formatValue(subtotal.total_monto_aportado.round(2).toString()),
+      total_abono_general_interes: formatValue(subtotal.totalAbonoGeneralInteres.round(2).toString()),
+      total_capital_creditos: formatValue(subtotal.total_capital_creditos.round(2).toString()),
+      total_capital_actual: formatValue(subtotal.total_capital_actual.round(2).toString()),
+      total_reinversion_capital: formatValue(subtotal.total_reinversion_capital.round(2).toString()),
+      total_reinversion_interes: formatValue(subtotal.total_reinversion_interes.round(2).toString()),
+      total_reinversion: formatValue(subtotal.total_reinversion.round(2).toString()),
     },
   };
 }

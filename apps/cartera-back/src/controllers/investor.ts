@@ -1,6 +1,7 @@
 // app.ts (o donde declares tus rutas Elysia)
 import { z } from "zod";
 import { formatToUSD } from "../utils/functions/currencyConverter";
+import { USD_EXCHANGE_RATE } from "../utils/functions/const";
 import { generarYSubirPDFInversionista, generarPDFBuffer } from "../utils/functions/generalFunctions";
 import { db } from "../database/index";
 import {
@@ -1824,9 +1825,22 @@ export async function upsertPagosEspejo(
   const ids = pagos.map((p) => p.id);
 
   const encontrados = await db
-    .select({ id: pagos_credito_inversionistas_espejo.id })
+    .select({
+      id: pagos_credito_inversionistas_espejo.id,
+      moneda: inversionistas.moneda,
+    })
     .from(pagos_credito_inversionistas_espejo)
+    .innerJoin(
+      inversionistas,
+      eq(
+        pagos_credito_inversionistas_espejo.inversionista_id,
+        inversionistas.inversionista_id
+      )
+    )
     .where(inArray(pagos_credito_inversionistas_espejo.id, ids));
+
+  // Crear un mapa de { id: moneda } para buscar fácilmente
+  const monedaPorId = new Map(encontrados.map((r) => [r.id, r.moneda]));
 
   const idsEncontrados = new Set(encontrados.map((r) => r.id));
   const idsNoEncontrados = ids.filter((id) => !idsEncontrados.has(id));
@@ -1840,18 +1854,32 @@ export async function upsertPagosEspejo(
   // ── PASO 2: UPDATE por id para cada pago ────────────────────────────────────
   await Promise.all(
     pagos.map((p) => {
-      // 🆕 Recalcular IVA basado en el interés (Siempre 12%)
-      const numericInteres = Number(p.abono_interes) || 0;
+      let finalAbonoCapital = p.abono_capital;
+      let finalAbonoInteres = p.abono_interes;
+      let finalCuota = p.cuota;
+
+      const moneda = monedaPorId.get(p.id);
+
+      // Si la moneda es dólares, convertimos los valores del request a Quetzales
+      if (moneda === "dolares") {
+        const tcambio = USD_EXCHANGE_RATE || 7.9;
+        finalAbonoCapital = (Number(p.abono_capital) * tcambio).toFixed(2);
+        finalAbonoInteres = (Number(p.abono_interes) * tcambio).toFixed(2);
+        finalCuota = (Number(p.cuota) * tcambio).toFixed(2);
+      }
+
+      // 🆕 Recalcular IVA basado en el interés convertido (Siempre 12%)
+      const numericInteres = Number(finalAbonoInteres) || 0;
       const calculadoIva = (numericInteres * 0.12).toFixed(2);
 
       return db
         .update(pagos_credito_inversionistas_espejo)
         .set({
-          abono_capital:            p.abono_capital,
-          abono_interes:            p.abono_interes,
+          abono_capital:            finalAbonoCapital,
+          abono_interes:            finalAbonoInteres,
           abono_iva_12:             calculadoIva,
           porcentaje_participacion: p.porcentaje_participacion,
-          cuota:                    p.cuota,
+          cuota:                    finalCuota,
           ...(p.estado_liquidacion && { estado_liquidacion: p.estado_liquidacion }),
         })
         .where(eq(pagos_credito_inversionistas_espejo.id, p.id));

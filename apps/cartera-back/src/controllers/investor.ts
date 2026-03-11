@@ -3407,6 +3407,63 @@ async function consultarResumenGlobalPorEstadoPago(
     .having(excel ? undefined : sql`COUNT(${pe.id}) > 0`);
 }
 
+async function consultarResumenGlobalDesdeLiquidaciones(
+  inversionistaId?: number,
+  mes?: number,
+  anio?: number
+): Promise<InversionistaResumenRow[]> {
+  const condicionesWhere: any[] = [
+    eq(inversionistas.permite_distribucion, false),
+  ];
+
+  if (inversionistaId) {
+    condicionesWhere.push(eq(inversionistas.inversionista_id, inversionistaId));
+  }
+
+  if (mes) {
+    condicionesWhere.push(sql`EXTRACT(MONTH FROM ${liquidaciones.fecha_liquidacion}) = ${mes}`);
+  }
+
+  if (anio) {
+    condicionesWhere.push(sql`EXTRACT(YEAR FROM ${liquidaciones.fecha_liquidacion}) = ${anio}`);
+  }
+
+  return db
+    .select({
+      inversionista_id: inversionistas.inversionista_id,
+      nombre: inversionistas.nombre,
+      emite_factura: inversionistas.emite_factura,
+      reinversion: inversionistas.tipo_reinversion,
+      banco_nombre: bancos.nombre,
+      tipo_cuenta: inversionistas.tipo_cuenta,
+      numero_cuenta: inversionistas.numero_cuenta,
+      total_abono_capital: sql<number>`COALESCE(SUM(${liquidaciones.total_capital}), 0)`,
+      total_abono_interes: sql<number>`COALESCE(SUM(${liquidaciones.total_interes}), 0)`,
+      total_abono_iva: sql<number>`COALESCE(SUM(${liquidaciones.total_iva}), 0)`,
+      total_isr: sql<number>`COALESCE(SUM(${liquidaciones.total_isr}), 0)`,
+      total_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.reinversion_total}), 0)`,
+      total_cuota: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0)`,
+      total_a_recibir_con_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0)`,
+      total_a_recibir_sin_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0) + COALESCE(SUM(${liquidaciones.reinversion_total}), 0)`,
+    })
+    .from(liquidaciones)
+    .innerJoin(
+      inversionistas,
+      eq(liquidaciones.inversionista_id, inversionistas.inversionista_id)
+    )
+    .leftJoin(bancos, eq(inversionistas.banco_id, bancos.banco_id))
+    .where(and(...condicionesWhere))
+    .groupBy(
+      inversionistas.inversionista_id,
+      inversionistas.nombre,
+      inversionistas.emite_factura,
+      inversionistas.tipo_reinversion,
+      bancos.nombre,
+      inversionistas.tipo_cuenta,
+      inversionistas.numero_cuenta
+    );
+}
+
 function mapResumenRow(
   inv: InversionistaResumenRow,
   boleta_pendiente: BoletaPendiente | null,
@@ -3589,7 +3646,7 @@ export async function resumenGlobalLiquidaciones(
   // Cuando estado=all, el mes/anio aplican a todo el corte consultado.
   const [noLiquidados, liquidados] = await Promise.all([
     consultarResumenGlobalPorEstadoPago("NO_LIQUIDADO", inversionistaId, mes, anio, false),
-    consultarResumenGlobalPorEstadoPago("LIQUIDADO", inversionistaId, mes, anio, false),
+    consultarResumenGlobalDesdeLiquidaciones(inversionistaId, mes, anio),
   ]);
 
   const inversionistaIds = Array.from(

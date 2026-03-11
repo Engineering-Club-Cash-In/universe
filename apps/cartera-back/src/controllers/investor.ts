@@ -99,7 +99,8 @@ async function consultarPagosInversionista(
   numeroCuota: number | undefined,
   config: TablaConfig,
   soloLiquidados = false,
-  liquidacionId?: number
+  liquidacionId?: number,
+  fechaLiquidacion?: string
 ) {
   // 🔥 Type assertion segura: sabemos que ambas tablas tienen la misma estructura
   const tabla = config.pagosCreditoInversionistas as typeof pagos_credito_inversionistas;
@@ -110,7 +111,16 @@ async function consultarPagosInversionista(
     eq(tabla.credito_id, creditoId),
   ];
 
-  if (liquidacionId) {
+  if (fechaLiquidacion) {
+    pagosConditions.push(eq(tabla.estado_liquidacion, "LIQUIDADO"));
+    pagosConditions.push(
+      sql`${tabla.liquidacion_id} IN (
+        SELECT ${liquidaciones.liquidacion_id} FROM ${liquidaciones}
+        WHERE ${liquidaciones.inversionista_id} = ${inversionistaId}
+          AND ${liquidaciones.fecha_liquidacion}::date = ${fechaLiquidacion}
+      )`
+    );
+  } else if (liquidacionId) {
     pagosConditions.push(eq(tabla.liquidacion_id, liquidacionId));
     pagosConditions.push(eq(tabla.estado_liquidacion, "LIQUIDADO"));
   } else if (soloLiquidados) {
@@ -174,14 +184,15 @@ async function consultarPagosAmbos(
   incluirLiquidados: boolean,
   numeroCuota: number | undefined,
   soloLiquidados = false,
-  liquidacionId?: number
+  liquidacionId?: number,
+  fechaLiquidacion?: string
 ) {
   const configOriginal = getTablaConfig("original");
   const configEspejo = getTablaConfig("espejo");
 
   const [pagosOriginales, pagosEspejos] = await Promise.all([
-    consultarPagosInversionista(inversionistaId, creditoId, incluirLiquidados, numeroCuota, configOriginal, soloLiquidados, liquidacionId),
-    consultarPagosInversionista(inversionistaId, creditoId, incluirLiquidados, numeroCuota, configEspejo, soloLiquidados, liquidacionId),
+    consultarPagosInversionista(inversionistaId, creditoId, incluirLiquidados, numeroCuota, configOriginal, soloLiquidados, liquidacionId, fechaLiquidacion),
+    consultarPagosInversionista(inversionistaId, creditoId, incluirLiquidados, numeroCuota, configEspejo, soloLiquidados, liquidacionId, fechaLiquidacion),
   ]);
 
   return [...pagosOriginales, ...pagosEspejos];
@@ -195,7 +206,8 @@ async function consultarPagosBulk(
   numeroCuota: number | undefined,
   config: TablaConfig,
   soloLiquidados = false,
-  liquidacionId?: number
+  liquidacionId?: number,
+  fechaLiquidacion?: string
 ) {
   const tabla = config.pagosCreditoInversionistas as typeof pagos_credito_inversionistas;
 
@@ -204,7 +216,16 @@ async function consultarPagosBulk(
     inArray(tabla.credito_id, creditosIds),
   ];
 
-  if (liquidacionId) {
+  if (fechaLiquidacion) {
+    pagosConditions.push(eq(tabla.estado_liquidacion, "LIQUIDADO"));
+    pagosConditions.push(
+      sql`${tabla.liquidacion_id} IN (
+        SELECT ${liquidaciones.liquidacion_id} FROM ${liquidaciones}
+        WHERE ${liquidaciones.inversionista_id} = ${inversionistaId}
+          AND ${liquidaciones.fecha_liquidacion}::date = ${fechaLiquidacion}
+      )`
+    );
+  } else if (liquidacionId) {
     pagosConditions.push(eq(tabla.liquidacion_id, liquidacionId));
     pagosConditions.push(eq(tabla.estado_liquidacion, "LIQUIDADO"));
   } else if (soloLiquidados) {
@@ -237,11 +258,12 @@ async function consultarPagosBulkAmbos(
   incluirLiquidados: boolean,
   numeroCuota: number | undefined,
   soloLiquidados = false,
-  liquidacionId?: number
+  liquidacionId?: number,
+  fechaLiquidacion?: string
 ) {
   const [pagosOriginales, pagosEspejos] = await Promise.all([
-    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("original"), soloLiquidados, liquidacionId),
-    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("espejo"), soloLiquidados, liquidacionId),
+    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("original"), soloLiquidados, liquidacionId, fechaLiquidacion),
+    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("espejo"), soloLiquidados, liquidacionId, fechaLiquidacion),
   ]);
   return [...pagosOriginales, ...pagosEspejos];
 }
@@ -1025,7 +1047,8 @@ export async function resumeInvestor(
   numeroCuota?: number,
   tipo: TipoConsulta = "originales",
   soloLiquidados = false,
-  liquidacionId?: number
+  liquidacionId?: number,
+  fechaLiquidacion?: string
 ) {
   console.log(
     "resumeInvestor for",
@@ -1207,7 +1230,8 @@ export async function resumeInvestor(
               incluirLiquidados,
               numeroCuota,
               soloLiquidados,
-              liquidacionId
+              liquidacionId,
+              fechaLiquidacion
             );
           } else {
             const config = getTablaConfig(tipo === "espejos" ? "espejo" : "original");
@@ -1218,7 +1242,8 @@ export async function resumeInvestor(
               numeroCuota,
               config,
               soloLiquidados,
-              liquidacionId
+              liquidacionId,
+              fechaLiquidacion
             );
           }
 
@@ -1457,7 +1482,8 @@ export async function getInvestorTotalsGlobales(
   incluirLiquidados = false,
   numeroCuota?: number,
   soloLiquidados = false,
-  liquidacionId?: number
+  liquidacionId?: number,
+  fechaLiquidacion?: string
 ) {
   console.log(
     "getInvestorTotalsGlobales for",
@@ -1586,7 +1612,8 @@ export async function getInvestorTotalsGlobales(
       incluirLiquidados,
       numeroCuota,
       soloLiquidados,
-      liquidacionId
+      liquidacionId,
+      fechaLiquidacion
     );
   } else {
     const config = getTablaConfig(tipo === "espejos" ? "espejo" : "original");
@@ -1597,7 +1624,8 @@ export async function getInvestorTotalsGlobales(
       numeroCuota,
       config,
       soloLiquidados,
-      liquidacionId
+      liquidacionId,
+      fechaLiquidacion
     );
   }
 
@@ -1783,6 +1811,19 @@ export async function updateLiquidacionReporteUrl(inversionistaId: number, url: 
   }
 
   return null;
+}
+
+/**
+ * Obtiene las liquidaciones (con inversionista_id y liquidacion_id) de una fecha dada.
+ */
+export async function getLiquidacionesPorFecha(fecha: string) {
+  return await db
+    .select({
+      liquidacion_id: liquidaciones.liquidacion_id,
+      inversionista_id: liquidaciones.inversionista_id,
+    })
+    .from(liquidaciones)
+    .where(sql`${liquidaciones.fecha_liquidacion}::date = ${fecha}`);
 }
 
 // ============================================

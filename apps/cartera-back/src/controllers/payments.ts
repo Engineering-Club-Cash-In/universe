@@ -2088,7 +2088,8 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number) {
             credito.creditoId,
             false,  // excludeCube
             false,  // cuotaPagada
-            false   // updateCredito ← omite el UPDATE a creditos_inversionistas_espejo
+            false,   // updateCredito ← omite el UPDATE a creditos_inversionistas_espejo
+            inversionistaId
           );
 
           console.log(

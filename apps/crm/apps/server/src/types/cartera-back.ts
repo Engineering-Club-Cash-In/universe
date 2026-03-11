@@ -676,6 +676,8 @@ export interface ResumenGlobalInversionista {
 	total_reinversion: string;
 	total_a_recibir_con_reinversion: string;
 	boleta_pendiente: BoletaPagoInversionista | null;
+	boleta_liquidacion?: BoletaPagoInversionista | null;
+	estado_liquidacion_resumen?: "pending" | "uploaded" | "liquidated";
 }
 
 // ============================================================================

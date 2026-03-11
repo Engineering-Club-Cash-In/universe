@@ -206,14 +206,15 @@ export function generateCreditApplicationPdf(data: FormData) {
 
 	y = (doc as any).lastAutoTable.finalY + 8;
 
-	// Section: Referencias Crediticias
+	// Section: Referencias Familiares
 	if (
 		Array.isArray(data.referenciasCrediticias) &&
 		data.referenciasCrediticias.length > 0
 	) {
 		doc.setFontSize(11);
 		doc.setFont("helvetica", "bold");
-		doc.text("REFERENCIAS CREDITICIAS", 14, y);
+		// `referenciasCrediticias` is the legacy storage key for family references.
+		doc.text("REFERENCIAS FAMILIARES", 14, y);
 		y += 2;
 
 		autoTable(doc, {

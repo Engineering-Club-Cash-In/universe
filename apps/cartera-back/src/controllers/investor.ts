@@ -1827,6 +1827,182 @@ export async function getLiquidacionesPorFecha(fecha: string) {
 }
 
 // ============================================
+// Revertir liquidación por liquidacion_id
+// ============================================
+
+/**
+ * Revierte completamente una liquidación dado su liquidacion_id.
+ * Deshace todos los efectos de liquidateByInvestorId en orden inverso,
+ * dentro de una transacción para garantizar atomicidad.
+ */
+export async function revertirLiquidacion(liquidacion_id: number) {
+  return await db.transaction(async (tx) => {
+    // ──────────────────────────────────────────────
+    // PASO 1: Obtener la liquidación y validar que existe
+    // ──────────────────────────────────────────────
+    const [liquidacion] = await tx
+      .select()
+      .from(liquidaciones)
+      .where(eq(liquidaciones.liquidacion_id, liquidacion_id));
+
+    if (!liquidacion) {
+      throw new Error(`No se encontró la liquidación con id: ${liquidacion_id}`);
+    }
+
+    const inv_id = liquidacion.inversionista_id;
+    console.log(`\n🔄 Revirtiendo liquidación ${liquidacion_id} del inversionista ${inv_id}`);
+
+    // ──────────────────────────────────────────────
+    // PASO 2: Obtener todos los pagos espejo asociados a esta liquidación
+    // ──────────────────────────────────────────────
+    const pagosLiquidados = await tx
+      .select()
+      .from(pagos_credito_inversionistas_espejo)
+      .where(eq(pagos_credito_inversionistas_espejo.liquidacion_id, liquidacion_id));
+
+    console.log(`  📊 Pagos asociados a esta liquidación: ${pagosLiquidados.length}`);
+
+    // ──────────────────────────────────────────────
+    // PASO 3: Restaurar monto_aportado en creditos_inversionistas_espejo
+    //   Agrupamos pagos por credito_id, sumamos abono_capital y llamamos
+    //   processAndReplaceCreditInvestors con addition=true para sumar de vuelta
+    // ──────────────────────────────────────────────
+    const pagosPorCredito = new Map<number, typeof pagosLiquidados>();
+    for (const pago of pagosLiquidados) {
+      if (!pagosPorCredito.has(pago.credito_id)) {
+        pagosPorCredito.set(pago.credito_id, []);
+      }
+      pagosPorCredito.get(pago.credito_id)!.push(pago);
+    }
+
+    for (const [creditoId, pagos] of pagosPorCredito) {
+      const totalAbonoCapital = pagos.reduce(
+        (acc, p) => acc.plus(new Big(p.abono_capital ?? 0)),
+        new Big(0)
+      );
+
+      if (totalAbonoCapital.gt(0)) {
+        // addition=true → suma de vuelta el capital al monto_aportado
+        await processAndReplaceCreditInvestors(
+          creditoId,
+          totalAbonoCapital.toNumber(),
+          true,       // addition: sumar de vuelta
+          inv_id,
+          true        // updateMirror: tabla espejo
+        );
+        console.log(`  ✅ Crédito ${creditoId}: monto_aportado restaurado (+${totalAbonoCapital.toFixed(2)})`);
+      }
+    }
+
+    // ──────────────────────────────────────────────
+    // PASO 4: Revertir pagos espejo a NO_LIQUIDADO
+    //   Quitamos la referencia a la liquidación y cambiamos el estado
+    // ──────────────────────────────────────────────
+    const pagosIds = pagosLiquidados.map((p) => p.id);
+    if (pagosIds.length > 0) {
+      await tx
+        .update(pagos_credito_inversionistas_espejo)
+        .set({
+          estado_liquidacion: "NO_LIQUIDADO",
+          liquidacion_id: null,
+        })
+        .where(inArray(pagos_credito_inversionistas_espejo.id, pagosIds));
+
+      console.log(`  ✅ ${pagosIds.length} pagos revertidos a NO_LIQUIDADO`);
+    }
+
+    // ──────────────────────────────────────────────
+    // PASO 5: Revertir cuotas del crédito
+    //   Marcamos liquidado_inversionistas = false y limpiamos fecha
+    // ──────────────────────────────────────────────
+    const allPagoIds = [...new Set(pagosLiquidados.map((p) => p.pago_id))];
+    if (allPagoIds.length > 0) {
+      const cuotasDeLosPagos = await tx
+        .select({ cuota_id: pagos_credito.cuota_id })
+        .from(pagos_credito)
+        .where(inArray(pagos_credito.pago_id, allPagoIds));
+
+      const uniqueCuotaIds = [
+        ...new Set(
+          cuotasDeLosPagos
+            .map((c) => c.cuota_id)
+            .filter((id): id is number => id !== null)
+        ),
+      ];
+
+      if (uniqueCuotaIds.length > 0) {
+        await tx
+          .update(cuotas_credito)
+          .set({
+            liquidado_inversionistas: false,
+            fecha_liquidacion_inversionistas: null,
+          })
+          .where(inArray(cuotas_credito.cuota_id, uniqueCuotaIds));
+
+        console.log(`  ✅ ${uniqueCuotaIds.length} cuotas revertidas`);
+      }
+    }
+
+    // ──────────────────────────────────────────────
+    // PASO 6: Eliminar boleta asociada (si existe)
+    // ──────────────────────────────────────────────
+    if (liquidacion.boleta_id) {
+      await tx
+        .delete(boletasPagoInversionista)
+        .where(eq(boletasPagoInversionista.boleta_id, liquidacion.boleta_id));
+
+      console.log(`  ✅ Boleta ${liquidacion.boleta_id} eliminada`);
+    }
+
+    // ──────────────────────────────────────────────
+    // PASO 7: Revertir reinversión
+    //   Restamos el monto reinvertido del saldo_reinversion del inversionista
+    //   y restauramos los montos en la tabla reinversiones
+    // ──────────────────────────────────────────────
+    const reinvTotal = new Big(liquidacion.reinversion_total ?? 0);
+    if (reinvTotal.gt(0)) {
+      // Restar del saldo_reinversion
+      await tx
+        .update(inversionistas)
+        .set({
+          saldo_reinversion: sql`${inversionistas.saldo_reinversion} - ${reinvTotal.toFixed(2)}::numeric`,
+        })
+        .where(eq(inversionistas.inversionista_id, inv_id));
+
+      // Restaurar montos en reinversiones
+      await tx
+        .update(reinversiones)
+        .set({
+          monto_capital: liquidacion.reinversion_capital ?? "0",
+          monto_interes: liquidacion.reinversion_interes ?? "0",
+          monto_total: liquidacion.reinversion_total ?? "0",
+        })
+        .where(eq(reinversiones.inversionista_id, inv_id));
+
+      console.log(`  ✅ Reinversión revertida (-${reinvTotal.toFixed(2)} del saldo)`);
+    }
+
+    // ──────────────────────────────────────────────
+    // PASO 8: Eliminar la liquidación
+    // ──────────────────────────────────────────────
+    await tx
+      .delete(liquidaciones)
+      .where(eq(liquidaciones.liquidacion_id, liquidacion_id));
+
+    console.log(`  ✅ Liquidación ${liquidacion_id} eliminada`);
+    console.log(`🔄 Reversión completada exitosamente\n`);
+
+    return {
+      success: true,
+      liquidacion_id,
+      inversionista_id: inv_id,
+      pagos_revertidos: pagosLiquidados.length,
+      creditos_afectados: pagosPorCredito.size,
+    };
+  });
+}
+
+// ============================================
 // upsertPagosEspejo
 // ============================================
 

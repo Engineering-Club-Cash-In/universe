@@ -20,6 +20,7 @@ import {
   updateSaldoReinversion,
   updateLiquidacionReporteUrl,
   getLiquidacionesPorFecha,
+  revertirLiquidacion,
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
 import { generarYSubirPDFInversionista } from "../utils/functions/generalFunctions";
@@ -506,6 +507,31 @@ export const inversionistasRouter = new Elysia()
       set.status = 500;
       return {
         message: "Error al generar el PDF",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  })
+  // ──────────────────────────────────────────────
+  // Revertir una liquidación completa por liquidacion_id
+  // Deshace: pagos espejo, monto_aportado, cuotas, boleta, reinversión y liquidación
+  // Todo dentro de una transacción
+  // ──────────────────────────────────────────────
+  .post("/investor/revertir-liquidacion", async ({ body, set }) => {
+    const { liquidacion_id } = body as { liquidacion_id?: number };
+
+    if (!liquidacion_id || isNaN(Number(liquidacion_id))) {
+      set.status = 400;
+      return { message: "El parámetro 'liquidacion_id' es obligatorio y debe ser numérico." };
+    }
+
+    try {
+      const result = await revertirLiquidacion(Number(liquidacion_id));
+      return result;
+    } catch (error) {
+      console.error("[investor/revertir-liquidacion] Error:", error);
+      set.status = 500;
+      return {
+        message: "Error al revertir la liquidación",
         error: error instanceof Error ? error.message : String(error),
       };
     }

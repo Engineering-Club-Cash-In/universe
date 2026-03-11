@@ -14,6 +14,16 @@ import {
 } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -75,7 +85,7 @@ interface ResumenInversionista {
 	estado_liquidacion_resumen?: "pending" | "uploaded" | "liquidated";
 }
 
-type EstadoBoletaFilter = "all" | "pending" | "uploaded" | "liquidated";
+type EstadoBoletaFilter = "all" | "pending" | "liquidated";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -301,6 +311,8 @@ function DetailItem({ label, value }: { label: string; value: string }) {
 
 function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 	const [dialogOpen, setDialogOpen] = useState(false);
+	const [confirmLiquidarSinBoletaOpen, setConfirmLiquidarSinBoletaOpen] =
+		useState(false);
 	const tieneBoleta = inv.boleta_pendiente != null;
 	const tieneBoletaLiquidacion = inv.boleta_liquidacion != null;
 	const estadoResumen =
@@ -461,11 +473,16 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 							size="sm"
 							className="h-8 flex-1 gap-1.5 bg-emerald-600 text-xs hover:bg-emerald-700"
 							disabled={liquidateMutation.isPending}
-							onClick={() =>
+							onClick={() => {
+								if (!tieneBoleta) {
+									setConfirmLiquidarSinBoletaOpen(true);
+									return;
+								}
+
 								liquidateMutation.mutate({
 									inversionista_id: inv.inversionista_id,
-								})
-							}
+								});
+							}}
 						>
 							{liquidateMutation.isPending ? (
 								<Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -483,6 +500,36 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 				open={dialogOpen}
 				onOpenChange={setDialogOpen}
 			/>
+
+			<AlertDialog
+				open={confirmLiquidarSinBoletaOpen}
+				onOpenChange={setConfirmLiquidarSinBoletaOpen}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>¿Liquidar sin boleta?</AlertDialogTitle>
+						<AlertDialogDescription>
+							{inv.nombre} se liquidará sin una boleta subida. Esta acción
+							continuará el proceso de liquidación de todas formas.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel disabled={liquidateMutation.isPending}>
+							Cancelar
+						</AlertDialogCancel>
+						<AlertDialogAction
+							disabled={liquidateMutation.isPending}
+							onClick={() =>
+								liquidateMutation.mutate({
+									inversionista_id: inv.inversionista_id,
+								})
+							}
+						>
+							{liquidateMutation.isPending ? "Liquidando..." : "Liquidar sin boleta"}
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</>
 	);
 }
@@ -561,6 +608,9 @@ function PagarInversionistas() {
 	const conBoleta = inversionistas.filter(
 		(inv) => inv.boleta_pendiente != null,
 	).length;
+	const totalLiquidadas = inversionistas.filter(
+		(inv) => inv.estado_liquidacion_resumen === "liquidated",
+	).length;
 	const sinBoleta = inversionistas.length - conBoleta;
 
 	const filtered = useMemo(() => {
@@ -620,11 +670,13 @@ function PagarInversionistas() {
 		);
 	}
 
-	const totalARecibir = inversionistas.reduce(
-		(acc, inv) =>
-			acc + Number.parseFloat(inv.total_a_recibir_con_reinversion || "0"),
-		0,
-	);
+	const totalPendienteLiquidar = inversionistas
+		.filter((inv) => inv.estado_liquidacion_resumen !== "liquidated")
+		.reduce(
+			(acc, inv) =>
+				acc + Number.parseFloat(inv.total_a_recibir_con_reinversion || "0"),
+			0,
+		);
 	return (
 		<div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6">
 			{/* Header */}
@@ -661,18 +713,18 @@ function PagarInversionistas() {
 					icon={<CreditCard className="h-4 w-4 text-muted-foreground" />}
 				/>
 				<StatCard
-					label="Total a pagar"
-					value={formatQ(String(totalARecibir))}
+					label="Total pendiente de liquidar"
+					value={formatQ(String(totalPendienteLiquidar))}
 					icon={<Banknote className="h-4 w-4 text-emerald-600" />}
 					highlight
 				/>
 				<StatCard
-					label="Con boleta"
-					value={String(conBoleta)}
+					label="Total liquidadas"
+					value={String(totalLiquidadas)}
 					icon={<FileCheck className="h-4 w-4 text-emerald-600" />}
 				/>
 				<StatCard
-					label="Sin boleta"
+					label="Pendientes de liquidar"
 					value={String(sinBoleta)}
 					icon={<Upload className="h-4 w-4 text-orange-500" />}
 				/>
@@ -709,16 +761,6 @@ function PagarInversionistas() {
 						}}
 					>
 						Pendientes
-					</Button>
-					<Button
-						variant={estadoBoletaFilter === "uploaded" ? "default" : "outline"}
-						size="sm"
-						onClick={() => {
-							setEstadoBoletaFilter("uploaded");
-							setPage(1);
-						}}
-					>
-						Subidas
 					</Button>
 					<Button
 						variant={

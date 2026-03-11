@@ -3056,6 +3056,7 @@ interface InversionistaResumen {
   total_a_recibir_sin_reinversion: number;
   total_reinversion: number;
   total_a_recibir_con_reinversion: number;
+  total_cuota: number;
   boleta_pendiente: BoletaPendiente | null;
 }
 
@@ -3085,6 +3086,7 @@ interface InversionistaResumenRow {
   total_a_recibir_sin_reinversion: number;
   total_reinversion: number;
   total_a_recibir_con_reinversion: number;
+  total_cuota: number;
 }
 
 function mapBoletasPendientes(
@@ -3268,6 +3270,65 @@ async function consultarResumenGlobalPorEstadoPago(
             )
             ELSE 0
           END`,
+      total_cuota: sql<number>`CASE ${inversionistas.tipo_reinversion}
+        WHEN 'sin_reinversion' THEN COALESCE(SUM(
+          ${pe.abono_capital}
+          + ${pe.abono_interes}
+          + CASE
+              WHEN ${inversionistas.emite_factura}
+                THEN ${pe.abono_iva_12}
+              ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
+            END
+        ), 0)
+        WHEN 'reinversion_capital' THEN COALESCE(SUM(
+          ${pe.abono_interes}
+          + CASE
+              WHEN ${inversionistas.emite_factura}
+                THEN ${pe.abono_iva_12}
+              ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
+            END
+        ), 0)
+        WHEN 'reinversion_interes' THEN COALESCE(SUM(
+          ${pe.abono_capital}
+          + CASE
+              WHEN ${inversionistas.emite_factura}
+                THEN ${pe.abono_iva_12}
+              ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
+            END
+        ), 0)
+        WHEN 'reinversion_total' THEN 0
+        WHEN 'reinversion_variable' THEN
+          COALESCE(SUM(
+            ${pe.abono_capital}
+            + ${pe.abono_interes}
+            + CASE
+                WHEN ${inversionistas.emite_factura}
+                  THEN ${pe.abono_iva_12}
+                ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
+              END
+          ), 0)
+          - LEAST(
+              COALESCE(${inversionistas.monto_reinversion}, 0)::numeric,
+              COALESCE(SUM(
+                ${pe.abono_capital}
+                + ${pe.abono_interes}
+                + CASE
+                    WHEN ${inversionistas.emite_factura}
+                      THEN ${pe.abono_iva_12}
+                    ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
+                  END
+              ), 0)
+            )
+        ELSE COALESCE(SUM(
+          ${pe.abono_capital}
+          + ${pe.abono_interes}
+          + CASE
+              WHEN ${inversionistas.emite_factura}
+                THEN ${pe.abono_iva_12}
+              ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
+            END
+        ), 0)
+      END`,
     })
     .from(inversionistas)
     .leftJoin(bancos, eq(inversionistas.banco_id, bancos.banco_id))
@@ -3305,6 +3366,7 @@ function mapResumenRow(
     total_a_recibir_sin_reinversion: inv.total_a_recibir_sin_reinversion,
     total_reinversion: inv.total_reinversion,
     total_a_recibir_con_reinversion: inv.total_a_recibir_con_reinversion,
+    total_cuota: inv.total_cuota,
     boleta_pendiente,
   };
 }

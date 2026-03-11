@@ -650,21 +650,24 @@ export async function buildInversionistaWorkbook(
   function toN(v: any) { return Number(v || 0); }
 
   // ── fila 1-2: logo + título
+  ws.getRow(1).height = 45;
+  ws.getRow(2).height = 35;
+
   const logo = await fetchImageBase64(opts?.logoUrl);
   if (logo) {
     const imgId = wb.addImage({ base64: logo.data, extension: logo.ext });
-    ws.addImage(imgId, "A1:B2");
+    ws.addImage(imgId, "A1:C2");
   }
 
-  ws.mergeCells("C1:O1");
-  ws.getCell("C1").value = "REPORTE DE INVERSIONES";
-  ws.getCell("C1").font = { bold: true, size: 14, color: { argb: CINV.navy } };
-  ws.getCell("C1").alignment = { vertical: "middle" };
+  ws.mergeCells("D1:O1");
+  ws.getCell("D1").value = "REPORTE DE INVERSIONES";
+  ws.getCell("D1").font = { bold: true, size: 14, color: { argb: CINV.navy } };
+  ws.getCell("D1").alignment = { vertical: "middle" };
 
-  ws.mergeCells("C2:O2");
-  ws.getCell("C2").value = inv.nombre_inversionista;
-  ws.getCell("C2").font = { bold: true, size: 12, color: { argb: CINV.blue } };
-  ws.getCell("C2").alignment = { vertical: "middle" };
+  ws.mergeCells("D2:O2");
+  ws.getCell("D2").value = inv.nombre_inversionista;
+  ws.getCell("D2").font = { bold: true, size: 12, color: { argb: CINV.blue } };
+  ws.getCell("D2").alignment = { vertical: "middle" };
 
   // ── fila 3: totales resumen (4 bloques)
   const sub = inv.subtotal;
@@ -706,7 +709,7 @@ export async function buildInversionistaWorkbook(
     const c = head.getCell(i);
     c.font = { bold: true, color: { argb: CINV.white } };
     c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINV.blue } };
-    c.alignment = { horizontal: "center", wrapText: true };
+    c.alignment = { horizontal: i === 13 || i === 15 ? "right" : "center", wrapText: true };
     c.border = { bottom: { style: "thin", color: { argb: CINV.line } } };
   }
   head.height = 28;
@@ -750,6 +753,8 @@ export async function buildInversionistaWorkbook(
 
       rr.getCell(7).font  = { color: { argb: CINV.navy } };
       rr.getCell(10).font = { color: { argb: CINV.navy } };
+      rr.getCell(13).alignment = { horizontal: "right" };
+      rr.getCell(15).alignment = { horizontal: "right" };
 
       if (rowIdx % 2 === 0) {
         for (let c = 1; c <= 15; c++) {

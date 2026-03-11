@@ -400,8 +400,8 @@ export const inversionistasRouter = new Elysia()
           inversionista.subtotal = totales.totales as any;
 
           const logoUrl = import.meta.env.LOGO_URL || "";
-          const filename = `reporte_liquidados_${id}_${Date.now()}.pdf`;
-          const { url } = await generarYSubirPDFInversionista(
+          const filename = `reporte_liquidados_${id}_${Date.now()}.xlsx`;
+          const { url } = await generarYSubirExcelInversionista(
             inversionista as any,
             filename,
             logoUrl

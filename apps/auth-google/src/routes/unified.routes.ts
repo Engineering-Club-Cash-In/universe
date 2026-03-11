@@ -5,7 +5,11 @@
 
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
+import { randomBytes } from "crypto";
+import { eq, and } from "drizzle-orm";
 import { auth } from "../lib/auth";
+import { db } from "../db/connection";
+import { users, accounts } from "../db/schema";
 import {
   registerExternalUser,
   type RegisterExternalUserPayload,
@@ -153,6 +157,104 @@ unifiedRoutes.post("/register-external-auth", requireAuth, async (c) => {
       message: error instanceof Error ? error.message : "Error al registrar usuario externo",
     });
   }
+});
+
+// ============================================
+// BULK IMPORT (público)
+// ============================================
+
+unifiedRoutes.post("/bulk-import-investors", async (c) => {
+  type InvestorRow = { nombre: string; dpi: string; correo: string };
+
+  const body = await c.req.json<InvestorRow[]>();
+
+  if (!Array.isArray(body) || body.length === 0) {
+    throw new HTTPException(400, { message: "Se requiere un arreglo de usuarios" });
+  }
+
+  const processRow = async ({ nombre, dpi, correo }: InvestorRow) => {
+    if (!correo?.trim()) {
+      throw new Error("Sin correo, omitido");
+    }
+
+    const email = correo.trim().toLowerCase();
+    const cleanDpi = dpi?.replaceAll(" ", "") ?? dpi;
+    const password = randomBytes(8).toString("hex");
+
+    try {
+      const created = await auth.api.signUpEmail({
+        body: { name: nombre, email, password },
+      });
+
+      await db
+        .update(users)
+        .set({ role: "INVESTOR", dpi: cleanDpi })
+        .where(eq(users.id, created.user.id));
+
+      return { correo: email, nombre, dpi: cleanDpi, password, status: "creado" };
+    } catch (signUpError) {
+      const [existing] = await db
+        .select()
+        .from(users)
+        .where(eq(users.email, email));
+
+      if (!existing) throw signUpError;
+
+      const ctx = await auth.$context;
+      const hashedPassword = await ctx.password.hash(password);
+
+      await Promise.all([
+        db
+          .update(users)
+          .set({ role: "INVESTOR", dpi: cleanDpi })
+          .where(eq(users.id, existing.id)),
+        db
+          .update(accounts)
+          .set({ password: hashedPassword })
+          .where(and(eq(accounts.userId, existing.id), eq(accounts.providerId, "credential"))),
+      ]);
+
+      return { correo: email, nombre, dpi: cleanDpi, password, status: "actualizado" };
+    }
+  };
+
+  // Procesar en lotes de 5 para no saturar el pool de conexiones
+  const BATCH_SIZE = 5;
+  const allSettled: PromiseSettledResult<Awaited<ReturnType<typeof processRow>>>[] = [];
+
+  for (let i = 0; i < body.length; i += BATCH_SIZE) {
+    const batch = body.slice(i, i + BATCH_SIZE);
+    const batchResults = await Promise.allSettled(batch.map(processRow));
+    allSettled.push(...batchResults);
+  }
+
+  const results = allSettled;
+
+  const success: object[] = [];
+  const errors: object[] = [];
+
+  results.forEach((result, i) => {
+    if (result.status === "fulfilled") {
+      success.push(result.value);
+    } else {
+      const { correo, nombre, dpi } = body[i];
+      const err = result.reason;
+      errors.push({
+        correo: correo?.trim() ?? null,
+        nombre,
+        dpi,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  return c.json({
+    total: body.length,
+    exitosos: success.length,
+    fallidos: errors.length,
+    success,
+    errors,
+  });
 });
 
 export default unifiedRoutes;

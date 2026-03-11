@@ -11,6 +11,7 @@ import {
 	Calculator,
 	Calendar,
 	Car,
+	Download,
 	ChevronLeft,
 	ChevronRight,
 	Clock,
@@ -2558,7 +2559,7 @@ function RouteComponent() {
 							</TabsContent>
 
 							<TabsContent value="documents" className="mt-6 space-y-4">
-								<DocumentsManager opportunityId={selectedOpportunity.id} />
+								<DocumentsManager opportunityId={selectedOpportunity.id} opportunityStatus={selectedOpportunity.status} />
 							</TabsContent>
 
 							<TabsContent value="coDebtors" className="mt-6 space-y-4">
@@ -3286,7 +3287,7 @@ function RouteComponent() {
 }
 
 // Documents Manager Component
-function DocumentsManager({ opportunityId }: { opportunityId: string }) {
+function DocumentsManager({ opportunityId, opportunityStatus }: { opportunityId: string; opportunityStatus: string }) {
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
 	const [description, setDescription] = useState("");
 	const [documentType, setDocumentType] = useState<string>("");
@@ -3301,6 +3302,20 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 		...orpc.getOpportunityDocuments.queryOptions({ input: { opportunityId } }),
 		enabled: !!opportunityId,
 	});
+
+	// Query for disbursement documents (only when opportunity is won)
+	const disbursementQuery = useQuery({
+		...orpc.getDisbursementForOpportunity.queryOptions({
+			input: { opportunityId },
+		}),
+		queryKey: ["getDisbursementForOpportunity", opportunityId],
+		enabled: opportunityStatus === "won",
+	});
+
+	const hasDisbursementDocs =
+		opportunityStatus === "won" &&
+		disbursementQuery.data &&
+		disbursementQuery.data.documents.length > 0;
 
 	// Upload a single document with a specific type
 	const uploadSingleDocument = async (docType: string) => {
@@ -3572,6 +3587,50 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 
 	return (
 		<div className="space-y-6">
+			{/* Disbursement documents - only shown for won opportunities with docs */}
+			{hasDisbursementDocs && (
+				<Card className="border-2 border-blue-500 bg-blue-50/50">
+					<CardHeader className="pb-3">
+						<CardTitle className="flex items-center gap-2 text-lg">
+							<Banknote className="h-5 w-5" />
+							Boletas de Desembolso
+							<Badge className="bg-blue-600">
+								{disbursementQuery.data!.documents.length} archivo
+								{disbursementQuery.data!.documents.length > 1 ? "s" : ""}
+							</Badge>
+						</CardTitle>
+					</CardHeader>
+					<CardContent>
+						<div className="space-y-2">
+							{disbursementQuery.data!.documents.map((doc) => (
+								<div
+									key={doc.id}
+									className="flex items-center justify-between rounded-md border border-blue-200 bg-white px-4 py-3"
+								>
+									<div className="flex min-w-0 items-center gap-3">
+										<FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
+										<div className="min-w-0">
+											<p className="truncate font-medium text-sm">
+												{doc.originalName}
+											</p>
+											<p className="text-muted-foreground text-xs">
+												{(doc.size / 1024).toFixed(0)} KB
+											</p>
+										</div>
+									</div>
+									<a href={doc.url} target="_blank" rel="noopener noreferrer">
+										<Button size="sm" variant="outline" className="h-8">
+											<Download className="mr-1 h-3 w-3" />
+											Descargar
+										</Button>
+									</a>
+								</div>
+							))}
+						</div>
+					</CardContent>
+				</Card>
+			)}
+
 			{/* Detalle de Análisis Section - Special highlighted section */}
 			<Card
 				className={`border-2 ${detalleDocuments.length > 0 ? "border-green-500 bg-green-50/50" : "border-amber-500 bg-amber-50/50"}`}

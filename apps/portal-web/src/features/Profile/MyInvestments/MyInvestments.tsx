@@ -1,7 +1,6 @@
 import {
   NavBar,
   IconSignDollar,
-  IconArrow,
   IconGraph,
   Loading,
   ModalChatBot,
@@ -171,35 +170,7 @@ export const MyInvestments = () => {
                 </div>
               </div>
 
-              {/* Total Rendimiento */}
-              <div
-                className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-4 lg:p-6"
-                style={
-                  {
-                    /*
-                borderRadius: "9.13px",
-                background:
-                  "linear-gradient(180deg, rgba(148, 153, 236, 0.25) 0%, rgba(84, 87, 134, 0.25) 100%)",
-                boxShadow:
-                  "0 2.282px 4.565px -2.282px rgba(0, 0, 0, 0.10), 0 4.565px 6.847px -1.141px rgba(0, 0, 0, 0.10), 0 0 0 0 rgba(0, 0, 0, 0.00), 0 0 0 0 rgba(0, 0, 0, 0.00)",
-             */
-                  }
-                }
-              >
-                <div className="flex items-center gap-4">
-                  <div className=" bg-green-200 text-green-700 p-4 lg:p-6 rounded-xl">
-                    <IconArrow width={24} height={24} />
-                  </div>
-                  <div>
-                    <p className="text-sm lg:text-base  mb-1">
-                      Rendimiento obtenido hasta ahora
-                    </p>
-                    <p className="text-lg lg:text-2xl font-bold">
-                      {formatCurrency(stats.rendimiento_estimado)}
-                    </p>
-                  </div>
-                </div>
-              </div>
+              
 
               {/* Inversiones Activas */}
               <div

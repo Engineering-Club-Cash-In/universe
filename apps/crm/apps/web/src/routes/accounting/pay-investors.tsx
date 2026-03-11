@@ -66,6 +66,7 @@ interface ResumenInversionista {
 	total_abono_interes: string;
 	total_abono_iva: string;
 	total_isr: string;
+	total_cuota?: string;
 	total_a_recibir_sin_reinversion: string;
 	total_reinversion: string;
 	total_a_recibir_con_reinversion: string;
@@ -305,7 +306,8 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 	const estadoResumen =
 		inv.estado_liquidacion_resumen ??
 		(tieneBoleta ? "uploaded" : "pending");
-	const montoPrincipal = inv.total_a_recibir_con_reinversion;
+	const montoPrincipal =
+		inv.total_cuota ?? inv.total_a_recibir_con_reinversion;
 	const badge =
 		estadoResumen === "liquidated"
 			? {

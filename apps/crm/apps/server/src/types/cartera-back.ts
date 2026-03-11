@@ -672,6 +672,7 @@ export interface ResumenGlobalInversionista {
 	total_abono_interes: string;
 	total_abono_iva: string;
 	total_isr: string;
+	total_cuota?: string;
 	total_a_recibir_sin_reinversion: string;
 	total_reinversion: string;
 	total_a_recibir_con_reinversion: string;

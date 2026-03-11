@@ -14,6 +14,16 @@ import {
 } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -26,6 +36,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
 import { PERMISSIONS } from "@/lib/roles";
@@ -59,11 +76,16 @@ interface ResumenInversionista {
 	total_abono_interes: string;
 	total_abono_iva: string;
 	total_isr: string;
+	total_cuota?: string;
 	total_a_recibir_sin_reinversion: string;
 	total_reinversion: string;
 	total_a_recibir_con_reinversion: string;
 	boleta_pendiente?: BoletaPendiente | null;
+	boleta_liquidacion?: BoletaPendiente | null;
+	estado_liquidacion_resumen?: "pending" | "uploaded" | "liquidated";
 }
+
+type EstadoBoletaFilter = "all" | "pending" | "liquidated";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -75,15 +97,34 @@ const formatQ = (value: string) => {
 	return `Q${num.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
+const invalidateResumenGlobalInversionistas = () =>
+	queryClient.invalidateQueries({
+		predicate: (query) =>
+			JSON.stringify(query.queryKey).includes("getResumenGlobalInversionistas"),
+	});
+
+const MONTH_OPTIONS = [
+	{ value: 1, label: "Enero" },
+	{ value: 2, label: "Febrero" },
+	{ value: 3, label: "Marzo" },
+	{ value: 4, label: "Abril" },
+	{ value: 5, label: "Mayo" },
+	{ value: 6, label: "Junio" },
+	{ value: 7, label: "Julio" },
+	{ value: 8, label: "Agosto" },
+	{ value: 9, label: "Septiembre" },
+	{ value: 10, label: "Octubre" },
+	{ value: 11, label: "Noviembre" },
+	{ value: 12, label: "Diciembre" },
+];
+
 // ─── Upload boleta hook ───────────────────────────────────────────────────────
 
 function useUploadBoleta() {
 	const createBoletaMutation = useMutation({
 		...orpc.createBoleta.mutationOptions(),
 		onSuccess: () => {
-			queryClient.invalidateQueries({
-				queryKey: orpc.getResumenGlobalInversionistas.queryOptions().queryKey,
-			});
+			invalidateResumenGlobalInversionistas();
 		},
 	});
 
@@ -270,7 +311,33 @@ function DetailItem({ label, value }: { label: string; value: string }) {
 
 function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 	const [dialogOpen, setDialogOpen] = useState(false);
+	const [confirmLiquidarSinBoletaOpen, setConfirmLiquidarSinBoletaOpen] =
+		useState(false);
 	const tieneBoleta = inv.boleta_pendiente != null;
+	const tieneBoletaLiquidacion = inv.boleta_liquidacion != null;
+	const estadoResumen =
+		inv.estado_liquidacion_resumen ??
+		(tieneBoleta ? "uploaded" : "pending");
+	const montoPrincipal =
+		inv.total_cuota ?? inv.total_a_recibir_con_reinversion;
+	const badge =
+		estadoResumen === "liquidated"
+			? {
+					label: "Liquidada",
+					className:
+						"bg-slate-100 text-slate-700 dark:bg-slate-900/60 dark:text-slate-300",
+				}
+			: estadoResumen === "uploaded"
+				? {
+						label: "Boleta",
+						className:
+							"bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400",
+					}
+				: {
+						label: "Pendiente",
+						className:
+							"bg-orange-50 text-orange-600 dark:bg-orange-950/60 dark:text-orange-400",
+					};
 
 	const liquidateMutation = useMutation({
 		...orpc.liquidateInversionista.mutationOptions(),
@@ -280,9 +347,7 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 				toast.error(res.error || res.message || "Error al liquidar");
 			} else {
 				toast.success(res?.message || "Liquidación completada correctamente");
-				queryClient.invalidateQueries({
-					queryKey: orpc.getResumenGlobalInversionistas.queryOptions().queryKey,
-				});
+				invalidateResumenGlobalInversionistas();
 			}
 		},
 		onError: (err) => {
@@ -298,22 +363,18 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 					<p className="truncate font-medium text-sm leading-snug">
 						{inv.nombre}
 					</p>
-					{tieneBoleta ? (
-						<span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-[11px] text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400">
-							<FileCheck className="h-3 w-3" />
-							Boleta
-						</span>
-					) : (
-						<span className="inline-flex shrink-0 items-center rounded-full bg-orange-50 px-2 py-0.5 font-medium text-[11px] text-orange-600 dark:bg-orange-950/60 dark:text-orange-400">
-							Pendiente
-						</span>
-					)}
+					<span
+						className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 font-medium text-[11px] ${badge.className}`}
+					>
+						{estadoResumen === "uploaded" && <FileCheck className="h-3 w-3" />}
+						{badge.label}
+					</span>
 				</div>
 
 				{/* Monto hero */}
 				<div className="px-5 pt-1.5 pb-4">
 					<p className="font-bold text-[28px] tabular-nums leading-none tracking-tighter">
-						{formatQ(inv.total_a_recibir_con_reinversion)}
+						{formatQ(montoPrincipal)}
 					</p>
 				</div>
 
@@ -364,7 +425,25 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 
 				{/* Acción */}
 				<div className="flex gap-2 px-4 pt-1 pb-4">
-					{tieneBoleta ? (
+					{estadoResumen === "liquidated" ? (
+						tieneBoletaLiquidacion ? (
+							<Button
+								variant="ghost"
+								size="sm"
+								className="h-8 flex-1 gap-1.5 text-xs"
+								onClick={() =>
+									window.open(inv.boleta_liquidacion!.boleta_url, "_blank")
+								}
+							>
+								<Eye className="h-3.5 w-3.5" />
+								Ver boleta
+							</Button>
+						) : (
+							<div className="flex h-8 flex-1 items-center justify-center rounded-md bg-muted font-medium text-muted-foreground text-xs">
+								Completada
+							</div>
+						)
+					) : tieneBoleta ? (
 						<Button
 							variant="ghost"
 							size="sm"
@@ -388,24 +467,31 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 						</Button>
 					)}
 
-					<Button
-						variant="default"
-						size="sm"
-						className="h-8 flex-1 gap-1.5 bg-emerald-600 text-xs hover:bg-emerald-700"
-						disabled={liquidateMutation.isPending}
-						onClick={() =>
-							liquidateMutation.mutate({
-								inversionista_id: inv.inversionista_id,
-							})
-						}
-					>
-						{liquidateMutation.isPending ? (
-							<Loader2 className="h-3.5 w-3.5 animate-spin" />
-						) : (
-							<Banknote className="h-3.5 w-3.5" />
-						)}
-						Liquidar
-					</Button>
+					{estadoResumen !== "liquidated" && (
+						<Button
+							variant="default"
+							size="sm"
+							className="h-8 flex-1 gap-1.5 bg-emerald-600 text-xs hover:bg-emerald-700"
+							disabled={liquidateMutation.isPending}
+							onClick={() => {
+								if (!tieneBoleta) {
+									setConfirmLiquidarSinBoletaOpen(true);
+									return;
+								}
+
+								liquidateMutation.mutate({
+									inversionista_id: inv.inversionista_id,
+								});
+							}}
+						>
+							{liquidateMutation.isPending ? (
+								<Loader2 className="h-3.5 w-3.5 animate-spin" />
+							) : (
+								<Banknote className="h-3.5 w-3.5" />
+							)}
+							Liquidar
+						</Button>
+					)}
 				</div>
 			</Card>
 
@@ -414,6 +500,36 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 				open={dialogOpen}
 				onOpenChange={setDialogOpen}
 			/>
+
+			<AlertDialog
+				open={confirmLiquidarSinBoletaOpen}
+				onOpenChange={setConfirmLiquidarSinBoletaOpen}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>¿Liquidar sin boleta?</AlertDialogTitle>
+						<AlertDialogDescription>
+							{inv.nombre} se liquidará sin una boleta subida. Esta acción
+							continuará el proceso de liquidación de todas formas.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel disabled={liquidateMutation.isPending}>
+							Cancelar
+						</AlertDialogCancel>
+						<AlertDialogAction
+							disabled={liquidateMutation.isPending}
+							onClick={() =>
+								liquidateMutation.mutate({
+									inversionista_id: inv.inversionista_id,
+								})
+							}
+						>
+							{liquidateMutation.isPending ? "Liquidando..." : "Liquidar sin boleta"}
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</>
 	);
 }
@@ -422,6 +538,8 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 
 function PagarInversionistas() {
 	const { data: session } = authClient.useSession();
+	const today = new Date();
+	const currentYear = today.getFullYear();
 	const userProfile = useQuery({
 		...orpc.getUserProfile.queryOptions(),
 		enabled: !!session,
@@ -431,13 +549,36 @@ function PagarInversionistas() {
 	const [search, setSearch] = useState("");
 	const [page, setPage] = useState(1);
 	const [downloadingExcel, setDownloadingExcel] = useState(false);
+	const [estadoBoletaFilter, setEstadoBoletaFilter] =
+		useState<EstadoBoletaFilter>("all");
+	const [mesFiltro, setMesFiltro] = useState(today.getMonth() + 1);
+	const [anioFiltro, setAnioFiltro] = useState(today.getFullYear());
+	const canAccessAccounting =
+		!!session && !!userRole && PERMISSIONS.canAccessAccounting(userRole);
+	const requiresPeriodo =
+		estadoBoletaFilter === "all" || estadoBoletaFilter === "liquidated";
+	const years = useMemo(() => {
+		return Array.from({ length: 5 }, (_, index) => currentYear - index);
+	}, [currentYear]);
+	const resumenInput = useMemo(
+		() => ({
+			estado: estadoBoletaFilter,
+			...(requiresPeriodo ? { mes: mesFiltro, anio: anioFiltro } : {}),
+		}),
+		[anioFiltro, estadoBoletaFilter, mesFiltro, requiresPeriodo],
+	);
 
 	const handleDownloadExcel = async () => {
 		setDownloadingExcel(true);
 		try {
 			const serverUrl = import.meta.env.VITE_SERVER_URL;
+			const queryParams = new URLSearchParams({ estado: estadoBoletaFilter });
+			if (requiresPeriodo) {
+				queryParams.set("mes", String(mesFiltro));
+				queryParams.set("anio", String(anioFiltro));
+			}
 			const res = await fetch(
-				`${serverUrl}/api/accounting/resumen-global-excel`,
+				`${serverUrl}/api/accounting/resumen-global-excel?${queryParams.toString()}`,
 				{ credentials: "include" },
 			);
 			if (!res.ok) {
@@ -457,17 +598,27 @@ function PagarInversionistas() {
 		}
 	};
 
-	const { data, isLoading, error } = useQuery({
-		...orpc.getResumenGlobalInversionistas.queryOptions(),
-		enabled:
-			!!session && !!userRole && PERMISSIONS.canAccessAccounting(userRole),
+	const pendientesQuery = useQuery({
+		...orpc.getResumenGlobalInversionistas.queryOptions({
+			input: resumenInput,
+		}),
+		enabled: canAccessAccounting,
 	});
-
-	const inversionistas = (data ?? []) as ResumenInversionista[];
+	const inversionistas = (pendientesQuery.data ?? []) as ResumenInversionista[];
+	const conBoleta = inversionistas.filter(
+		(inv) => inv.boleta_pendiente != null,
+	).length;
+	const totalLiquidadas = inversionistas.filter(
+		(inv) => inv.estado_liquidacion_resumen === "liquidated",
+	).length;
+	const pendientesDeLiquidar = inversionistas.filter(
+		(inv) => inv.estado_liquidacion_resumen !== "liquidated",
+	).length;
 
 	const filtered = useMemo(() => {
-		if (!search.trim()) return inversionistas;
-		const q = search.toLowerCase();
+		const q = search.trim().toLowerCase();
+		if (!q) return inversionistas;
+
 		return inversionistas.filter(
 			(inv) =>
 				inv.nombre.toLowerCase().includes(q) ||
@@ -500,7 +651,7 @@ function PagarInversionistas() {
 		);
 	}
 
-	if (isLoading) {
+	if (pendientesQuery.isLoading) {
 		return (
 			<div className="flex min-h-screen items-center justify-center">
 				<Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -508,7 +659,7 @@ function PagarInversionistas() {
 		);
 	}
 
-	if (error) {
+	if (pendientesQuery.error) {
 		return (
 			<div className="flex min-h-screen items-center justify-center">
 				<div className="text-center">
@@ -521,16 +672,13 @@ function PagarInversionistas() {
 		);
 	}
 
-	const totalARecibir = inversionistas.reduce(
-		(acc, inv) =>
-			acc + Number.parseFloat(inv.total_a_recibir_con_reinversion || "0"),
-		0,
-	);
-	const conBoleta = inversionistas.filter(
-		(inv) => inv.boleta_pendiente != null,
-	).length;
-	const sinBoleta = inversionistas.length - conBoleta;
-
+	const totalPendienteLiquidar = inversionistas
+		.filter((inv) => inv.estado_liquidacion_resumen !== "liquidated")
+		.reduce(
+			(acc, inv) =>
+				acc + Number.parseFloat(inv.total_a_recibir_con_reinversion || "0"),
+			0,
+		);
 	return (
 		<div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6">
 			{/* Header */}
@@ -567,19 +715,19 @@ function PagarInversionistas() {
 					icon={<CreditCard className="h-4 w-4 text-muted-foreground" />}
 				/>
 				<StatCard
-					label="Total a pagar"
-					value={formatQ(String(totalARecibir))}
+					label="Total pendiente de liquidar"
+					value={formatQ(String(totalPendienteLiquidar))}
 					icon={<Banknote className="h-4 w-4 text-emerald-600" />}
 					highlight
 				/>
 				<StatCard
-					label="Con boleta"
-					value={String(conBoleta)}
+					label="Total liquidadas"
+					value={String(totalLiquidadas)}
 					icon={<FileCheck className="h-4 w-4 text-emerald-600" />}
 				/>
 				<StatCard
-					label="Sin boleta"
-					value={String(sinBoleta)}
+					label="Pendientes de liquidar"
+					value={String(pendientesDeLiquidar)}
 					icon={<Upload className="h-4 w-4 text-orange-500" />}
 				/>
 			</div>
@@ -595,6 +743,80 @@ function PagarInversionistas() {
 						className="pl-9"
 					/>
 				</div>
+				<div className="flex flex-wrap gap-2">
+					<Button
+						variant={estadoBoletaFilter === "all" ? "default" : "outline"}
+						size="sm"
+						onClick={() => {
+							setEstadoBoletaFilter("all");
+							setPage(1);
+						}}
+					>
+						Todas
+					</Button>
+					<Button
+						variant={estadoBoletaFilter === "pending" ? "default" : "outline"}
+						size="sm"
+						onClick={() => {
+							setEstadoBoletaFilter("pending");
+							setPage(1);
+						}}
+					>
+						Pendientes
+					</Button>
+					<Button
+						variant={
+							estadoBoletaFilter === "liquidated" ? "default" : "outline"
+						}
+						size="sm"
+						onClick={() => {
+							setEstadoBoletaFilter("liquidated");
+							setPage(1);
+						}}
+					>
+						Liquidadas
+					</Button>
+				</div>
+				{requiresPeriodo && (
+					<div className="flex flex-wrap gap-2">
+						<Select
+							value={String(mesFiltro)}
+							onValueChange={(value) => {
+								setMesFiltro(Number(value));
+								setPage(1);
+							}}
+						>
+							<SelectTrigger size="sm" className="min-w-36">
+								<SelectValue placeholder="Mes" />
+							</SelectTrigger>
+							<SelectContent size="sm">
+								{MONTH_OPTIONS.map((month) => (
+									<SelectItem key={month.value} value={String(month.value)}>
+										{month.label}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+						<Select
+							value={String(anioFiltro)}
+							onValueChange={(value) => {
+								setAnioFiltro(Number(value));
+								setPage(1);
+							}}
+						>
+							<SelectTrigger size="sm" className="min-w-28">
+								<SelectValue placeholder="Año" />
+							</SelectTrigger>
+							<SelectContent size="sm">
+								{years.map((year) => (
+									<SelectItem key={year} value={String(year)}>
+										{year}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+					</div>
+				)}
 				<PaginationControls
 					page={safePage}
 					totalPages={totalPages}

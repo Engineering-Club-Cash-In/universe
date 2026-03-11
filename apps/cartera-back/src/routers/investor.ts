@@ -505,21 +505,16 @@ export const inversionistasRouter = new Elysia()
       inversionista.subtotal = totales.totales as any;
 
       const logoUrl = import.meta.env.LOGO_URL || "";
-      const ts = Date.now();
-      const filenamePdf   = `reporte_liquidados_${id}_${ts}.pdf`;
-      const filenameExcel = `reporte_liquidados_${id}_${ts}.xlsx`;
+      const filename = `reporte_liquidados_${id}_${Date.now()}.xlsx`;
+      const { url } = await generarYSubirExcelInversionista(inversionista as any, filename, logoUrl);
 
-      const [{ url }, { url: urlExcel }] = await Promise.all([
-        generarYSubirPDFInversionista(inversionista as any, filenamePdf, logoUrl),
-        generarYSubirExcelInversionista(inversionista as any, filenameExcel, logoUrl),
-      ]);
+      const liquidacionActualizada = await updateLiquidacionReporteUrl(Number(id), url);
 
       return {
         success: true,
         url,
-        url_excel: urlExcel,
-        filename: filenamePdf,
-        filename_excel: filenameExcel,
+        filename,
+        liquidacion: liquidacionActualizada || null,
       };
     } catch (error) {
       console.error("[investor/pdf-liquidados] Error:", error);

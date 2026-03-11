@@ -1,7 +1,6 @@
 import {
   NavBar,
   IconSignDollar,
-  IconArrow,
   IconGraph,
   Loading,
   ModalChatBot,

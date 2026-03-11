@@ -4,10 +4,34 @@ import { carteraBackClient } from "../services/cartera-back-client";
 
 export const accountingRouter = {
 	getResumenGlobalInversionistas: crmProcedure
+		.input(
+			z
+				.object({
+					inversionistaId: z.union([z.string(), z.number()]).optional(),
+					estado: z
+						.enum(["pending", "uploaded", "liquidated", "all"])
+						.optional()
+						.default("pending"),
+					mes: z.number().int().min(1).max(12).optional(),
+					anio: z.number().int().min(2000).max(2100).optional(),
+				})
+				.refine(
+					(value) =>
+						!["liquidated", "all"].includes(value.estado) ||
+						(value.mes !== undefined && value.anio !== undefined),
+					{
+						message:
+							"Los parámetros 'mes' y 'anio' son obligatorios cuando estado es 'liquidated' o 'all'.",
+						path: ["mes"],
+					},
+				),
+		)
 		.output(z.array(z.any()))
-		.handler(async () => {
+		.handler(async ({ input }) => {
 			try {
-				const data = await carteraBackClient.getResumenGlobalInversionistas();
+				const data = await carteraBackClient.getResumenGlobalInversionistas(
+					input,
+				);
 				const filtered = data.filter(
 					(item) => Number(item.total_a_recibir_con_reinversion) >= 0,
 				);

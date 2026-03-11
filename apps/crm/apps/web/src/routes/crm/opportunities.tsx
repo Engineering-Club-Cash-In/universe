@@ -565,6 +565,10 @@ function RouteComponent() {
 				selectedOpportunity.lead?.id || "none",
 			);
 			editOpportunityForm.setFieldValue(
+				"companyId",
+				selectedOpportunity.company?.id || "none",
+			);
+			editOpportunityForm.setFieldValue(
 				"vehicleId",
 				selectedOpportunity.vehicleId || "",
 			);
@@ -781,6 +785,14 @@ function RouteComponent() {
 			!!session?.user?.id,
 	});
 
+	const companiesQuery = useQuery({
+		...orpc.getCompanies.queryOptions(),
+		enabled:
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
+			!!session?.user?.id,
+	});
+
 	// Query for inversionistas
 	const inversionistasQuery = useQuery({
 		...orpc.getInversionistas.queryOptions({
@@ -886,6 +898,7 @@ function RouteComponent() {
 		defaultValues: {
 			title: "",
 			leadId: "none",
+			companyId: "none",
 			vehicleId: "",
 			creditType: "autocompra" as "autocompra" | "sobre_vehiculo",
 			loanPurpose: "" as "" | "personal" | "business",
@@ -948,6 +961,10 @@ function RouteComponent() {
 					creditType: value.creditType,
 					leadId:
 						value.leadId && value.leadId !== "none" ? value.leadId : undefined,
+					companyId:
+						value.companyId && value.companyId !== "none"
+							? value.companyId
+							: undefined,
 					vehicleId: value.vehicleId || null,
 					value: value.value || undefined,
 					expectedCloseDate: value.expectedCloseDate || undefined,
@@ -1024,6 +1041,7 @@ function RouteComponent() {
 			id: string;
 			title?: string;
 			leadId?: string;
+			companyId?: string;
 			vehicleId?: string | null;
 			creditType?: "autocompra" | "sobre_vehiculo";
 			status?: "open" | "won" | "lost" | "on_hold";
@@ -2751,6 +2769,33 @@ function RouteComponent() {
 									}}
 								</editOpportunityForm.Field>
 							</div>
+							<div>
+								<editOpportunityForm.Field name="companyId">
+									{(field) => (
+										<div className="space-y-2">
+											<Label htmlFor={field.name}>Empresa</Label>
+											<Combobox
+												options={[
+													{ value: "none", label: "Sin empresa" },
+													...(companiesQuery.data?.map((company) => ({
+														value: company.id,
+														label: company.name,
+													})) || []),
+												]}
+												value={field.state.value ?? "none"}
+												onChange={(value) =>
+													field.handleChange(value || "none")
+												}
+												placeholder="Seleccionar empresa"
+												width="full"
+											/>
+										</div>
+									)}
+								</editOpportunityForm.Field>
+							</div>
+						</div>
+
+						<div className="grid grid-cols-2 gap-4">
 							<div>
 								<editOpportunityForm.Field name="value">
 									{(field) => (

@@ -26,6 +26,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
 import { PERMISSIONS } from "@/lib/roles";
@@ -65,7 +72,7 @@ interface ResumenInversionista {
 	boleta_pendiente?: BoletaPendiente | null;
 }
 
-type EstadoBoletaFilter = "all" | "pending" | "uploaded";
+type EstadoBoletaFilter = "all" | "pending" | "uploaded" | "liquidated";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -77,21 +84,26 @@ const formatQ = (value: string) => {
 	return `Q${num.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
-const dedupeInversionistas = (items: ResumenInversionista[]) => {
-	const byId = new Map<number, ResumenInversionista>();
-
-	for (const item of items) {
-		byId.set(item.inversionista_id, item);
-	}
-
-	return [...byId.values()];
-};
-
 const invalidateResumenGlobalInversionistas = () =>
 	queryClient.invalidateQueries({
 		predicate: (query) =>
 			JSON.stringify(query.queryKey).includes("getResumenGlobalInversionistas"),
 	});
+
+const MONTH_OPTIONS = [
+	{ value: 1, label: "Enero" },
+	{ value: 2, label: "Febrero" },
+	{ value: 3, label: "Marzo" },
+	{ value: 4, label: "Abril" },
+	{ value: 5, label: "Mayo" },
+	{ value: 6, label: "Junio" },
+	{ value: 7, label: "Julio" },
+	{ value: 8, label: "Agosto" },
+	{ value: 9, label: "Septiembre" },
+	{ value: 10, label: "Octubre" },
+	{ value: 11, label: "Noviembre" },
+	{ value: 12, label: "Diciembre" },
+];
 
 // ─── Upload boleta hook ───────────────────────────────────────────────────────
 
@@ -436,6 +448,8 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 
 function PagarInversionistas() {
 	const { data: session } = authClient.useSession();
+	const today = new Date();
+	const currentYear = today.getFullYear();
 	const userProfile = useQuery({
 		...orpc.getUserProfile.queryOptions(),
 		enabled: !!session,
@@ -447,23 +461,32 @@ function PagarInversionistas() {
 	const [downloadingExcel, setDownloadingExcel] = useState(false);
 	const [estadoBoletaFilter, setEstadoBoletaFilter] =
 		useState<EstadoBoletaFilter>("all");
+	const [mesFiltro, setMesFiltro] = useState(today.getMonth() + 1);
+	const [anioFiltro, setAnioFiltro] = useState(today.getFullYear());
 	const canAccessAccounting =
 		!!session && !!userRole && PERMISSIONS.canAccessAccounting(userRole);
+	const requiresPeriodo =
+		estadoBoletaFilter === "all" || estadoBoletaFilter === "liquidated";
+	const years = useMemo(() => {
+		return Array.from({ length: 5 }, (_, index) => currentYear - index);
+	}, [currentYear]);
+	const resumenInput = useMemo(
+		() => ({
+			estado: estadoBoletaFilter,
+			...(requiresPeriodo ? { mes: mesFiltro, anio: anioFiltro } : {}),
+		}),
+		[anioFiltro, estadoBoletaFilter, mesFiltro, requiresPeriodo],
+	);
 
 	const handleDownloadExcel = async () => {
-		if (estadoBoletaFilter === "all") {
-			toast.error(
-				"Para exportar, selecciona Pendientes o Subidas. 'Todas' combina ambos listados localmente.",
-			);
-			return;
-		}
-
 		setDownloadingExcel(true);
 		try {
 			const serverUrl = import.meta.env.VITE_SERVER_URL;
-			const queryParams = new URLSearchParams({
-				estado: estadoBoletaFilter,
-			});
+			const queryParams = new URLSearchParams({ estado: estadoBoletaFilter });
+			if (requiresPeriodo) {
+				queryParams.set("mes", String(mesFiltro));
+				queryParams.set("anio", String(anioFiltro));
+			}
 			const res = await fetch(
 				`${serverUrl}/api/accounting/resumen-global-excel?${queryParams.toString()}`,
 				{ credentials: "include" },
@@ -487,27 +510,15 @@ function PagarInversionistas() {
 
 	const pendientesQuery = useQuery({
 		...orpc.getResumenGlobalInversionistas.queryOptions({
-			input: { estado: "pending" },
+			input: resumenInput,
 		}),
 		enabled: canAccessAccounting,
 	});
-
-	const subidasQuery = useQuery({
-		...orpc.getResumenGlobalInversionistas.queryOptions({
-			input: { estado: "uploaded" },
-		}),
-		enabled: canAccessAccounting,
-	});
-
-	const pendientes = (pendientesQuery.data ?? []) as ResumenInversionista[];
-	const subidas = (subidasQuery.data ?? []) as ResumenInversionista[];
-	const inversionistas = useMemo(() => {
-		if (estadoBoletaFilter === "pending") return pendientes;
-		if (estadoBoletaFilter === "uploaded") return subidas;
-		return dedupeInversionistas([...pendientes, ...subidas]);
-	}, [estadoBoletaFilter, pendientes, subidas]);
-	const conBoleta = subidas.length;
-	const sinBoleta = pendientes.length;
+	const inversionistas = (pendientesQuery.data ?? []) as ResumenInversionista[];
+	const conBoleta = inversionistas.filter(
+		(inv) => inv.boleta_pendiente != null,
+	).length;
+	const sinBoleta = inversionistas.length - conBoleta;
 
 	const filtered = useMemo(() => {
 		const q = search.trim().toLowerCase();
@@ -545,7 +556,7 @@ function PagarInversionistas() {
 		);
 	}
 
-	if (pendientesQuery.isLoading || subidasQuery.isLoading) {
+	if (pendientesQuery.isLoading) {
 		return (
 			<div className="flex min-h-screen items-center justify-center">
 				<Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -553,7 +564,7 @@ function PagarInversionistas() {
 		);
 	}
 
-	if (pendientesQuery.error || subidasQuery.error) {
+	if (pendientesQuery.error) {
 		return (
 			<div className="flex min-h-screen items-center justify-center">
 				<div className="text-center">
@@ -644,7 +655,7 @@ function PagarInversionistas() {
 							setPage(1);
 						}}
 					>
-						Todas ({inversionistas.length})
+						Todas
 					</Button>
 					<Button
 						variant={estadoBoletaFilter === "pending" ? "default" : "outline"}
@@ -654,7 +665,7 @@ function PagarInversionistas() {
 							setPage(1);
 						}}
 					>
-						Pendientes ({sinBoleta})
+						Pendientes
 					</Button>
 					<Button
 						variant={estadoBoletaFilter === "uploaded" ? "default" : "outline"}
@@ -664,9 +675,61 @@ function PagarInversionistas() {
 							setPage(1);
 						}}
 					>
-						Subidas ({conBoleta})
+						Subidas
+					</Button>
+					<Button
+						variant={
+							estadoBoletaFilter === "liquidated" ? "default" : "outline"
+						}
+						size="sm"
+						onClick={() => {
+							setEstadoBoletaFilter("liquidated");
+							setPage(1);
+						}}
+					>
+						Liquidadas
 					</Button>
 				</div>
+				{requiresPeriodo && (
+					<div className="flex flex-wrap gap-2">
+						<Select
+							value={String(mesFiltro)}
+							onValueChange={(value) => {
+								setMesFiltro(Number(value));
+								setPage(1);
+							}}
+						>
+							<SelectTrigger size="sm" className="min-w-36">
+								<SelectValue placeholder="Mes" />
+							</SelectTrigger>
+							<SelectContent size="sm">
+								{MONTH_OPTIONS.map((month) => (
+									<SelectItem key={month.value} value={String(month.value)}>
+										{month.label}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+						<Select
+							value={String(anioFiltro)}
+							onValueChange={(value) => {
+								setAnioFiltro(Number(value));
+								setPage(1);
+							}}
+						>
+							<SelectTrigger size="sm" className="min-w-28">
+								<SelectValue placeholder="Año" />
+							</SelectTrigger>
+							<SelectContent size="sm">
+								{years.map((year) => (
+									<SelectItem key={year} value={String(year)}>
+										{year}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+					</div>
+				)}
 				<PaginationControls
 					page={safePage}
 					totalPages={totalPages}

@@ -3121,6 +3121,15 @@ async function getBoletasPendientesMap(
   mes?: number,
   anio?: number
 ) {
+  return getBoletasMap(inversionistaIds, ["PENDIENTE"], mes, anio);
+}
+
+async function getBoletasMap(
+  inversionistaIds: number[],
+  estados: Array<"PENDIENTE" | "PROCESADO">,
+  mes?: number,
+  anio?: number
+) {
   const boletasPendientes = inversionistaIds.length > 0
     ? await db
         .select({
@@ -3136,7 +3145,7 @@ async function getBoletasPendientesMap(
         .where(
           and(
             inArray(boletasPagoInversionista.inversionista_id, inversionistaIds),
-            eq(boletasPagoInversionista.estado, "PENDIENTE"),
+            inArray(boletasPagoInversionista.estado, estados),
             ...(mes
               ? [sql`EXTRACT(MONTH FROM ${boletasPagoInversionista.fecha_subida}) = ${mes}`]
               : []),
@@ -3465,7 +3474,10 @@ export async function resumenGlobalLiquidaciones(
       ...liquidados.map((inv) => inv.inversionista_id),
     ])
   );
-  const boletaMap = await getBoletasPendientesMap(inversionistaIds, mes, anio);
+  const [boletaPendienteMap, boletaSubidaMap] = await Promise.all([
+    getBoletasPendientesMap(inversionistaIds, mes, anio),
+    getBoletasMap(inversionistaIds, ["PENDIENTE", "PROCESADO"], mes, anio),
+  ]);
 
   const noLiquidadosMap = new Map(
     noLiquidados.map((inv) => [inv.inversionista_id, inv])
@@ -3474,14 +3486,14 @@ export async function resumenGlobalLiquidaciones(
   const result: InversionistaResumenConEstado[] = [];
 
   for (const inv of noLiquidados) {
-    const hasBoletaPendiente = boletaMap.has(inv.inversionista_id);
+    const hasBoletaSubida = boletaSubidaMap.has(inv.inversionista_id);
     const estadoResumen = resolveEstadoLiquidacionResumen({
       requestedEstado: estado,
       hasNoLiquidado: true,
       hasLiquidado: liquidados.some(
         (liq) => liq.inversionista_id === inv.inversionista_id
       ),
-      hasBoletaPendiente,
+      hasBoletaPendiente: hasBoletaSubida,
     });
 
     if (!estadoResumen) {
@@ -3489,7 +3501,7 @@ export async function resumenGlobalLiquidaciones(
     }
 
     result.push({
-      ...mapResumenRow(inv, boletaMap.get(inv.inversionista_id) ?? null),
+      ...mapResumenRow(inv, boletaPendienteMap.get(inv.inversionista_id) ?? null),
       estado_liquidacion_resumen: estadoResumen,
     });
   }

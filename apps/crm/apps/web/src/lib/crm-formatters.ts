@@ -66,6 +66,18 @@ export const formatGuatemalaDate = (date: string | Date) => {
 	});
 };
 
+export const formatGuatemalaDateTime = (date: string | Date) => {
+	return new Date(date).toLocaleString("es-GT", {
+		timeZone: "America/Guatemala",
+		day: "2-digit",
+		month: "2-digit",
+		year: "numeric",
+		hour: "2-digit",
+		minute: "2-digit",
+		hour12: true,
+	});
+};
+
 export const formatDate = (date: string | Date) => {
 	const dateObj = typeof date === "string" ? new Date(date) : date;
 	const day = String(dateObj.getUTCDate()).padStart(2, "0");

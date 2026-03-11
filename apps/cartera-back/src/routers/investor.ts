@@ -9,6 +9,7 @@ import {
   liquidateByInvestorSchema,
   updateInvestor,
   resumenGlobalInversionistas,
+  resumenGlobalLiquidaciones,
   getLiquidaciones,
   getInvestorPerformance,
   reversePagosEspejoPorInversionista,
@@ -27,6 +28,7 @@ import { generarYSubirPDFInversionista, generarYSubirExcelInversionista } from "
 import { authMiddleware } from "./midleware";
 import { obtenerCreditosConPagosPendientes, calcularYRegistrarPagosEspejo } from "../controllers/payments";
 import { createBoleta, getBoletaById, getAllBoletas, getBoletasPendientes, updateBoleta, marcarBoletaComoProcesada, marcarBoletaComoPendiente, deleteBoleta, getBoletasStats } from "../controllers/liquidateInvestor";
+import { requierePeriodoLiquidacion } from "../utils/investorLiquidationSummary";
 // 🔥 IMPORTAR SERVICIO DE BOLETAS
  
 
@@ -452,6 +454,22 @@ export const inversionistasRouter = new Elysia()
     }
 
     try {
+      const todasLiquidaciones = await getLiquidaciones({ inversionista_id: Number(id), perPage: 999 });
+      let liquidacionReciente = todasLiquidaciones.liquidaciones?.[0];
+
+      if (fecha_liquidacion) {
+        const porFecha = todasLiquidaciones.liquidaciones?.find((l: any) =>
+          new Date(l.fecha_liquidacion).toISOString().slice(0, 10) === fecha_liquidacion
+        );
+        if (porFecha) liquidacionReciente = porFecha;
+      }
+
+      if (!liquidacionReciente) {
+        set.status = 404;
+        return { message: "Inversionista no encontrado o sin liquidaciones." };
+      }
+      const liquidacionId = liquidacionReciente.liquidacion_id;
+
       const result = await resumeInvestor(
         Number(id),
         1,
@@ -558,6 +576,51 @@ export const inversionistasRouter = new Elysia()
         anio: t.Optional(t.String()),
         excel: t.Optional(t.String()),
       }),
+    }
+  )
+  .get(
+    "/resumen-global-liquidaciones",
+    async ({ query, set }) => {
+      const { inversionistaId, mes, anio, estado = "pending", excel } = query;
+      const estadoFiltro = estado as "pending" | "uploaded" | "liquidated" | "all";
+
+      if (requierePeriodoLiquidacion(estadoFiltro) && (!mes || !anio)) {
+        set.status = 400;
+        return {
+          message:
+            "Los parámetros 'mes' y 'anio' son obligatorios cuando estado es 'liquidated' o 'all'.",
+        };
+      }
+
+      return resumenGlobalLiquidaciones(
+        inversionistaId ? Number(inversionistaId) : undefined,
+        mes ? Number(mes) : undefined,
+        anio ? Number(anio) : undefined,
+        estadoFiltro,
+        excel === "true"
+      );
+    },
+    {
+      query: t.Object({
+        inversionistaId: t.Optional(t.String()),
+        mes: t.Optional(t.String()),
+        anio: t.Optional(t.String()),
+        estado: t.Optional(
+          t.Union([
+            t.Literal("pending"),
+            t.Literal("uploaded"),
+            t.Literal("liquidated"),
+            t.Literal("all"),
+          ])
+        ),
+        excel: t.Optional(t.String()),
+      }),
+      detail: {
+        summary: "Obtiene el resumen global de liquidaciones por inversionista",
+        description:
+          "Devuelve inversionistas clasificados como pending, uploaded o liquidated usando pagos espejo. /resumen-global se mantiene sin cambios y sigue devolviendo solo NO_LIQUIDADO. Si no se envía estado, se usa pending. Para estado=liquidated y estado=all, mes y anio son obligatorios y el período se aplica al resumen consultado.",
+        tags: ["Inversionistas"],
+      },
     }
   )
   .post(

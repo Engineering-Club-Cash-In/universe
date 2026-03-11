@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import {
 	formatCurrency,
 	formatGuatemalaDate,
+	formatGuatemalaDateTime,
 	getClientTypeLabel,
 	getGenderLabel,
 	getLeadStatusBadgeColor,
@@ -576,7 +577,7 @@ export function LeadDetailModal({
 										Fecha de Creación
 									</Label>
 									<p className="text-sm">
-										{formatGuatemalaDate(displayLead.createdAt)}
+										{formatGuatemalaDateTime(displayLead.createdAt)}
 									</p>
 								</div>
 								{displayLead.convertedAt && (

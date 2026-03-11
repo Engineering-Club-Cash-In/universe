@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/server";
-import { and, eq, gt } from "drizzle-orm";
+import { and, desc, eq, gt } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import {
@@ -7,9 +7,12 @@ import {
 	creditApplications,
 	financialStatements,
 } from "../db/schema/client-forms";
-import { leads, opportunities } from "../db/schema/crm";
+import { coDebtors, leads, opportunities } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
 import { crmProcedure, publicProcedure } from "../lib/orpc";
+
+const formPersonTypeSchema = z.enum(["lead", "coDebtor"]);
+type FormPersonType = z.infer<typeof formPersonTypeSchema>;
 
 // Relaxed server-side validation schemas (all fields optional, only validates types)
 const referenciaCrediticiaServerSchema = z.object({
@@ -257,7 +260,115 @@ function sanitizeFormData(
 	return sanitized;
 }
 
-// Shared token validation for public endpoints
+function personWhereClause(
+	opportunityId: string,
+	personType: FormPersonType,
+	personId: string,
+) {
+	return and(
+		eq(creditApplications.opportunityId, opportunityId),
+		eq(creditApplications.personType, personType),
+		eq(creditApplications.personId, personId),
+	);
+}
+
+function financialPersonWhereClause(
+	opportunityId: string,
+	personType: FormPersonType,
+	personId: string,
+) {
+	return and(
+		eq(financialStatements.opportunityId, opportunityId),
+		eq(financialStatements.personType, personType),
+		eq(financialStatements.personId, personId),
+	);
+}
+
+type TokenRow = typeof clientFormTokens.$inferSelect;
+type FormRow = Record<string, unknown> | null;
+
+async function getOpportunityOrThrow(opportunityId: string) {
+	const [opp] = await db
+		.select()
+		.from(opportunities)
+		.where(eq(opportunities.id, opportunityId))
+		.limit(1);
+
+	if (!opp) {
+		throw new ORPCError("NOT_FOUND", {
+			message: "Oportunidad no encontrada",
+		});
+	}
+
+	return opp;
+}
+
+async function resolveParticipant(
+	opportunityId: string,
+	personType: FormPersonType,
+	personId: string,
+) {
+	const opp = await getOpportunityOrThrow(opportunityId);
+
+	if (personType === "lead") {
+		if (!opp.leadId || opp.leadId !== personId) {
+			throw new ORPCError("BAD_REQUEST", {
+				message: "El lead no pertenece a la oportunidad",
+			});
+		}
+
+		const [lead] = await db
+			.select()
+			.from(leads)
+			.where(eq(leads.id, personId))
+			.limit(1);
+
+		if (!lead) {
+			throw new ORPCError("NOT_FOUND", {
+				message: "Lead no encontrado",
+			});
+		}
+
+		return {
+			opp,
+			participantType: "lead" as const,
+			participant: lead,
+			displayName: [
+				lead.firstName,
+				lead.middleName,
+				lead.lastName,
+				lead.secondLastName,
+			]
+				.filter(Boolean)
+				.join(" "),
+		};
+	}
+
+	const [coDebtor] = await db
+		.select()
+		.from(coDebtors)
+		.where(
+			and(
+				eq(coDebtors.id, personId),
+				eq(coDebtors.opportunityId, opportunityId),
+			),
+		)
+		.limit(1);
+
+	if (!coDebtor) {
+		throw new ORPCError("NOT_FOUND", {
+			message: "Co-firmante no encontrado",
+		});
+	}
+
+	return {
+		opp,
+		participantType: "coDebtor" as const,
+		participant: coDebtor,
+		displayName: coDebtor.fullName,
+	};
+}
+
 async function getValidToken(token: string) {
 	const [tokenRow] = await db
 		.select()
@@ -285,25 +396,82 @@ async function getValidToken(token: string) {
 	return tokenRow;
 }
 
+async function resolveTokenParticipant(tokenRow: TokenRow): Promise<{
+	personType: FormPersonType;
+	personId: string;
+} | null> {
+	if (tokenRow.personType && tokenRow.personId) {
+		return {
+			personType: tokenRow.personType as FormPersonType,
+			personId: tokenRow.personId,
+		};
+	}
+
+	const opp = await getOpportunityOrThrow(tokenRow.opportunityId);
+	if (!opp.leadId) return null;
+
+	await db
+		.update(clientFormTokens)
+		.set({
+			personType: "lead",
+			personId: opp.leadId,
+		})
+		.where(eq(clientFormTokens.id, tokenRow.id));
+
+	return {
+		personType: "lead",
+		personId: opp.leadId,
+	};
+}
+
+async function getVehicleForOpportunity(opportunityId: string) {
+	const [opp] = await db
+		.select({ vehicleId: opportunities.vehicleId })
+		.from(opportunities)
+		.where(eq(opportunities.id, opportunityId))
+		.limit(1);
+
+	if (!opp?.vehicleId) return null;
+
+	const [vehicle] = await db
+		.select()
+		.from(vehicles)
+		.where(eq(vehicles.id, opp.vehicleId))
+		.limit(1);
+
+	return vehicle ?? null;
+}
+
+function serializeRow(row: unknown): FormRow {
+	if (!row) return null;
+	return JSON.parse(JSON.stringify(row)) as Record<string, unknown>;
+}
+
+function getParticipantNameFromForm(row: Record<string, unknown> | null): string {
+	if (!row) return "";
+	const fullName = [row.primerNombre, row.segundoNombre, row.primerApellido, row.segundoApellido]
+		.map((value) => (typeof value === "string" ? value.trim() : ""))
+		.filter(Boolean)
+		.join(" ");
+	return fullName;
+}
+
 export const clientFormsRouter = {
-	// Protected: Generate a token for an opportunity
 	generateFormToken: crmProcedure
-		.input(z.object({ opportunityId: z.string().uuid() }))
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				personType: formPersonTypeSchema,
+				personId: z.string().uuid(),
+			}),
+		)
 		.handler(async ({ input }) => {
-			// Check opportunity exists
-			const [opp] = await db
-				.select()
-				.from(opportunities)
-				.where(eq(opportunities.id, input.opportunityId))
-				.limit(1);
+			await resolveParticipant(
+				input.opportunityId,
+				input.personType,
+				input.personId,
+			);
 
-			if (!opp) {
-				throw new ORPCError("NOT_FOUND", {
-					message: "Oportunidad no encontrada",
-				});
-			}
-
-			// Create token with 7-day expiry
 			const expiresAt = new Date();
 			expiresAt.setDate(expiresAt.getDate() + 7);
 
@@ -311,68 +479,130 @@ export const clientFormsRouter = {
 				.insert(clientFormTokens)
 				.values({
 					opportunityId: input.opportunityId,
+					personType: input.personType,
+					personId: input.personId,
 					expiresAt,
 				})
 				.returning();
 
-			const url = `${process.env.FRONT_URL}/formulario/${tokenRow.token}`;
-			return { token: tokenRow.token, url };
+			return {
+				token: tokenRow.token,
+				url: `${process.env.FRONT_URL}/formulario/${tokenRow.token}`,
+			};
 		}),
 
-	// Public: Validate token and return data for pre-fill
 	validateFormToken: publicProcedure
 		.input(z.object({ token: z.string().uuid() }))
 		.handler(async ({ input }) => {
 			const tokenRow = await getValidToken(input.token);
+			const participantRef = await resolveTokenParticipant(tokenRow);
+			const vehicle = await getVehicleForOpportunity(tokenRow.opportunityId);
 
-			// Get opportunity + lead data for pre-fill
-			const [opp] = await db
-				.select()
-				.from(opportunities)
-				.where(eq(opportunities.id, tokenRow.opportunityId))
-				.limit(1);
-
-			let lead = null;
-			if (opp?.leadId) {
-				const [leadRow] = await db
-					.select()
-					.from(leads)
-					.where(eq(leads.id, opp.leadId))
-					.limit(1);
-				lead = leadRow ?? null;
-			}
-
-			let vehicle = null;
-			if (opp?.vehicleId) {
-				const [vehicleRow] = await db
-					.select()
-					.from(vehicles)
-					.where(eq(vehicles.id, opp.vehicleId))
-					.limit(1);
-				vehicle = vehicleRow ?? null;
-			}
-
-			// Check if forms already exist (partial submission)
 			const [existingCredit] = await db
 				.select()
 				.from(creditApplications)
-				.where(eq(creditApplications.opportunityId, tokenRow.opportunityId))
+				.where(
+					participantRef
+						? personWhereClause(
+								tokenRow.opportunityId,
+								participantRef.personType,
+								participantRef.personId,
+							)
+						: eq(creditApplications.opportunityId, tokenRow.opportunityId),
+				)
 				.limit(1);
 
 			const [existingFinancial] = await db
 				.select()
 				.from(financialStatements)
-				.where(eq(financialStatements.opportunityId, tokenRow.opportunityId))
+				.where(
+					participantRef
+						? financialPersonWhereClause(
+								tokenRow.opportunityId,
+								participantRef.personType,
+								participantRef.personId,
+							)
+						: eq(financialStatements.opportunityId, tokenRow.opportunityId),
+				)
 				.limit(1);
+
+			if (!participantRef) {
+				const displayName =
+					getParticipantNameFromForm(
+						serializeRow(existingCredit ?? existingFinancial),
+					) || "Titular";
+
+				return {
+					opportunityId: tokenRow.opportunityId,
+					personType: "lead" as const,
+					personId: null,
+					personDisplayName: displayName,
+					person: {
+						firstName: (existingCredit?.primerNombre as string | null) ?? "",
+						middleName: (existingCredit?.segundoNombre as string | null) ?? "",
+						lastName: (existingCredit?.primerApellido as string | null) ?? "",
+						secondLastName:
+							(existingCredit?.segundoApellido as string | null) ?? "",
+						dpi: (existingCredit?.dpi as string | null) ?? "",
+						nit: (existingCredit?.nit as string | null) ?? "",
+						email: (existingCredit?.email as string | null) ?? "",
+						phone: (existingCredit?.telMovil as string | null) ?? "",
+						direccion:
+							(existingCredit?.direccionResidencia as string | null) ?? "",
+					},
+					vehicle,
+					creditApplicationExists: !!existingCredit,
+					creditHasSignature: !!existingCredit?.firmaImagen,
+					financialStatementExists: !!existingFinancial,
+					existingCreditApplication: existingCredit
+						? {
+								primerNombre: existingCredit.primerNombre,
+								segundoNombre: existingCredit.segundoNombre,
+								primerApellido: existingCredit.primerApellido,
+								segundoApellido: existingCredit.segundoApellido,
+								apellidoCasada: existingCredit.apellidoCasada,
+								dpi: existingCredit.dpi,
+								nit: existingCredit.nit,
+							}
+						: null,
+				};
+			}
+
+			const { participant, participantType, displayName } =
+				await resolveParticipant(
+					tokenRow.opportunityId,
+					participantRef.personType,
+					participantRef.personId,
+				);
 
 			return {
 				opportunityId: tokenRow.opportunityId,
-				lead,
+				personType: participantType,
+				personId: participantRef.personId,
+				personDisplayName: displayName,
+				person:
+					participantType === "lead"
+						? {
+								firstName: participant.firstName,
+								middleName: participant.middleName,
+								lastName: participant.lastName,
+								secondLastName: participant.secondLastName,
+								dpi: participant.dpi,
+								nit: participant.nit,
+								email: participant.email,
+								phone: participant.phone,
+								direccion: participant.direccion,
+							}
+						: {
+								fullName: participant.fullName,
+								dpi: participant.dpi,
+								email: participant.email,
+								phone: participant.phone,
+							},
 				vehicle,
 				creditApplicationExists: !!existingCredit,
 				creditHasSignature: !!existingCredit?.firmaImagen,
 				financialStatementExists: !!existingFinancial,
-				// Only return fields needed for pre-fill, not the full row
 				existingCreditApplication: existingCredit
 					? {
 							primerNombre: existingCredit.primerNombre,
@@ -387,7 +617,6 @@ export const clientFormsRouter = {
 			};
 		}),
 
-	// Public: Submit credit application
 	submitCreditApplication: publicProcedure
 		.input(
 			z.object({
@@ -397,8 +626,8 @@ export const clientFormsRouter = {
 		)
 		.handler(async ({ input }) => {
 			const tokenRow = await getValidToken(input.token);
+			const participantRef = await resolveTokenParticipant(tokenRow);
 
-			// Validate data shape (strips unknown keys)
 			const parsed = creditApplicationServerSchema.safeParse(input.data);
 			if (!parsed.success) {
 				throw new ORPCError("BAD_REQUEST", {
@@ -406,9 +635,14 @@ export const clientFormsRouter = {
 				});
 			}
 
-			// Upsert credit application using validated data
 			const values = {
 				opportunityId: tokenRow.opportunityId,
+				...(participantRef
+					? {
+							personType: participantRef.personType,
+							personId: participantRef.personId,
+						}
+					: {}),
 				...sanitizeFormData(parsed.data as Record<string, unknown>),
 				updatedAt: new Date(),
 			};
@@ -417,7 +651,15 @@ export const clientFormsRouter = {
 				const [existing] = await db
 					.select()
 					.from(creditApplications)
-					.where(eq(creditApplications.opportunityId, tokenRow.opportunityId))
+					.where(
+						participantRef
+							? personWhereClause(
+									tokenRow.opportunityId,
+									participantRef.personType,
+									participantRef.personId,
+								)
+							: eq(creditApplications.opportunityId, tokenRow.opportunityId),
+					)
 					.limit(1);
 
 				if (existing) {
@@ -429,15 +671,14 @@ export const clientFormsRouter = {
 					await db.insert(creditApplications).values(values);
 				}
 
-				// Track partial completion
 				await db
 					.update(clientFormTokens)
 					.set({ creditSubmittedAt: new Date() })
 					.where(eq(clientFormTokens.id, tokenRow.id));
 			} catch (error) {
 				console.error(
-					"[submitCreditApplication] DB error for opportunity:",
-					tokenRow.opportunityId,
+					"[submitCreditApplication] DB error for token:",
+					tokenRow.id,
 					error,
 				);
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
@@ -448,7 +689,6 @@ export const clientFormsRouter = {
 			return { success: true };
 		}),
 
-	// Public: Sign credit application (add signature after submission)
 	signCreditApplication: publicProcedure
 		.input(
 			z.object({
@@ -460,12 +700,21 @@ export const clientFormsRouter = {
 		)
 		.handler(async ({ input }) => {
 			const tokenRow = await getValidToken(input.token);
+			const participantRef = await resolveTokenParticipant(tokenRow);
 
 			try {
 				const [existing] = await db
 					.select()
 					.from(creditApplications)
-					.where(eq(creditApplications.opportunityId, tokenRow.opportunityId))
+					.where(
+						participantRef
+							? personWhereClause(
+									tokenRow.opportunityId,
+									participantRef.personType,
+									participantRef.personId,
+								)
+							: eq(creditApplications.opportunityId, tokenRow.opportunityId),
+					)
 					.limit(1);
 
 				if (!existing) {
@@ -486,8 +735,8 @@ export const clientFormsRouter = {
 			} catch (error) {
 				if (error instanceof ORPCError) throw error;
 				console.error(
-					"[signCreditApplication] DB error for opportunity:",
-					tokenRow.opportunityId,
+					"[signCreditApplication] DB error for token:",
+					tokenRow.id,
 					error,
 				);
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
@@ -498,7 +747,6 @@ export const clientFormsRouter = {
 			return { success: true };
 		}),
 
-	// Public: Submit financial statement
 	submitFinancialStatement: publicProcedure
 		.input(
 			z.object({
@@ -508,8 +756,8 @@ export const clientFormsRouter = {
 		)
 		.handler(async ({ input }) => {
 			const tokenRow = await getValidToken(input.token);
+			const participantRef = await resolveTokenParticipant(tokenRow);
 
-			// Validate data shape (strips unknown keys)
 			const parsed = financialStatementServerSchema.safeParse(input.data);
 			if (!parsed.success) {
 				throw new ORPCError("BAD_REQUEST", {
@@ -517,9 +765,14 @@ export const clientFormsRouter = {
 				});
 			}
 
-			// Upsert financial statement using validated data
 			const values = {
 				opportunityId: tokenRow.opportunityId,
+				...(participantRef
+					? {
+							personType: participantRef.personType,
+							personId: participantRef.personId,
+						}
+					: {}),
 				...sanitizeFormData(parsed.data as Record<string, unknown>),
 				updatedAt: new Date(),
 			};
@@ -528,7 +781,15 @@ export const clientFormsRouter = {
 				const [existing] = await db
 					.select()
 					.from(financialStatements)
-					.where(eq(financialStatements.opportunityId, tokenRow.opportunityId))
+					.where(
+						participantRef
+							? financialPersonWhereClause(
+									tokenRow.opportunityId,
+									participantRef.personType,
+									participantRef.personId,
+								)
+							: eq(financialStatements.opportunityId, tokenRow.opportunityId),
+					)
 					.limit(1);
 
 				if (existing) {
@@ -540,15 +801,14 @@ export const clientFormsRouter = {
 					await db.insert(financialStatements).values(values);
 				}
 
-				// Mark token as used (both forms now submitted)
 				await db
 					.update(clientFormTokens)
 					.set({ used: true })
 					.where(eq(clientFormTokens.id, tokenRow.id));
 			} catch (error) {
 				console.error(
-					"[submitFinancialStatement] DB error for opportunity:",
-					tokenRow.opportunityId,
+					"[submitFinancialStatement] DB error for token:",
+					tokenRow.id,
 					error,
 				);
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
@@ -559,45 +819,227 @@ export const clientFormsRouter = {
 			return { success: true };
 		}),
 
-	// Protected: Get form data for viewing in CRM
 	getClientFormData: crmProcedure
 		.input(z.object({ opportunityId: z.string().uuid() }))
 		.handler(async ({ input }) => {
-			const [creditApp] = await db
+			const opp = await getOpportunityOrThrow(input.opportunityId);
+			const vehicle = await getVehicleForOpportunity(input.opportunityId);
+
+			const [lead] = opp.leadId
+				? await db
+						.select()
+						.from(leads)
+						.where(eq(leads.id, opp.leadId))
+						.limit(1)
+				: [null];
+
+			const coDebtorsList = await db
 				.select()
-				.from(creditApplications)
-				.where(eq(creditApplications.opportunityId, input.opportunityId))
-				.limit(1);
+				.from(coDebtors)
+				.where(eq(coDebtors.opportunityId, input.opportunityId))
+				.orderBy(coDebtors.createdAt);
 
-			const [financialStmt] = await db
-				.select()
-				.from(financialStatements)
-				.where(eq(financialStatements.opportunityId, input.opportunityId))
-				.limit(1);
-
-			return {
-				creditApplication: creditApp ?? null,
-				financialStatement: financialStmt ?? null,
-			};
-		}),
-
-	// Protected: Check if token exists for opportunity
-	getFormTokenByOpportunity: crmProcedure
-		.input(z.object({ opportunityId: z.string().uuid() }))
-		.handler(async ({ input }) => {
-			const [tokenRow] = await db
+			const tokenRows = await db
 				.select()
 				.from(clientFormTokens)
 				.where(eq(clientFormTokens.opportunityId, input.opportunityId))
-				.limit(1);
+				.orderBy(desc(clientFormTokens.createdAt));
 
-			if (!tokenRow) return null;
+			const creditRows = await db
+				.select()
+				.from(creditApplications)
+				.where(eq(creditApplications.opportunityId, input.opportunityId));
+
+			const financialRows = await db
+				.select()
+				.from(financialStatements)
+				.where(eq(financialStatements.opportunityId, input.opportunityId));
+
+			const latestTokens = new Map<string, TokenRow>();
+			for (const tokenRow of tokenRows) {
+				const key =
+					tokenRow.personType && tokenRow.personId
+						? `${tokenRow.personType}:${tokenRow.personId}`
+						: `legacy:${tokenRow.opportunityId}`;
+				if (!latestTokens.has(key)) {
+					latestTokens.set(key, tokenRow);
+				}
+			}
+
+			const creditByPerson = new Map(
+				creditRows.map((row) => [
+					row.personType && row.personId
+						? `${row.personType}:${row.personId}`
+						: `legacy:${row.opportunityId}`,
+					row,
+				]),
+			);
+			const financialByPerson = new Map(
+				financialRows.map((row) => [
+					row.personType && row.personId
+						? `${row.personType}:${row.personId}`
+						: `legacy:${row.opportunityId}`,
+					row,
+				]),
+			);
+			const participantMap = new Map<
+				string,
+				{
+					personType: "lead" | "coDebtor";
+					personId: string;
+					displayName: string;
+					roleLabel: string;
+					email: string | null;
+					phone: string | null;
+					canGenerateLink: boolean;
+				}
+			>();
+
+			if (lead) {
+				participantMap.set(`lead:${lead.id}`, {
+					personType: "lead",
+					personId: lead.id,
+					displayName: [
+						lead.firstName,
+						lead.middleName,
+						lead.lastName,
+						lead.secondLastName,
+					]
+						.filter(Boolean)
+						.join(" "),
+					roleLabel: "Titular",
+					email: lead.email,
+					phone: lead.phone,
+					canGenerateLink: true,
+				});
+			}
+
+			for (const [index, coDebtor] of coDebtorsList.entries()) {
+				participantMap.set(`coDebtor:${coDebtor.id}`, {
+					personType: "coDebtor",
+					personId: coDebtor.id,
+					displayName: coDebtor.fullName,
+					roleLabel: `Co-firmante ${index + 1}`,
+					email: coDebtor.email,
+					phone: coDebtor.phone,
+					canGenerateLink: true,
+				});
+			}
+
+			for (const tokenRow of tokenRows) {
+				if (!tokenRow.personType || !tokenRow.personId) continue;
+				const key = `${tokenRow.personType}:${tokenRow.personId}`;
+				if (participantMap.has(key)) continue;
+				const creditApp = serializeRow(creditByPerson.get(key) ?? null);
+				const financialStmt = serializeRow(financialByPerson.get(key) ?? null);
+				participantMap.set(key, {
+					personType: tokenRow.personType as "lead" | "coDebtor",
+					personId: tokenRow.personId,
+					displayName:
+						getParticipantNameFromForm(creditApp) ||
+						getParticipantNameFromForm(financialStmt) ||
+						(tokenRow.personType === "lead"
+							? "Titular historico"
+							: "Co-firmante historico"),
+					roleLabel:
+						tokenRow.personType === "lead"
+							? "Titular historico"
+							: "Co-firmante historico",
+					email:
+						(typeof creditApp?.email === "string" ? creditApp.email : null) ?? null,
+					phone:
+						(typeof creditApp?.telMovil === "string"
+							? creditApp.telMovil
+							: null) ?? null,
+					canGenerateLink: false,
+				});
+			}
+
+			if (
+				latestTokens.has(`legacy:${input.opportunityId}`) ||
+				creditByPerson.has(`legacy:${input.opportunityId}`) ||
+				financialByPerson.has(`legacy:${input.opportunityId}`)
+			) {
+				const creditApp = serializeRow(
+					creditByPerson.get(`legacy:${input.opportunityId}`) ?? null,
+				);
+				const financialStmt = serializeRow(
+					financialByPerson.get(`legacy:${input.opportunityId}`) ?? null,
+				);
+				participantMap.set(`legacy:${input.opportunityId}`, {
+					personType: "lead",
+					personId: `legacy:${input.opportunityId}`,
+					displayName:
+						getParticipantNameFromForm(creditApp) ||
+						getParticipantNameFromForm(financialStmt) ||
+						"Titular legacy",
+					roleLabel: "Titular legacy",
+					email:
+						(typeof creditApp?.email === "string" ? creditApp.email : null) ?? null,
+					phone:
+						(typeof creditApp?.telMovil === "string"
+							? creditApp.telMovil
+							: null) ?? null,
+					canGenerateLink: false,
+				});
+			}
+
+			const participants = Array.from(participantMap.entries()).map(
+				([key, participant]) => {
+					const latestToken = latestTokens.get(key) ?? null;
+					const creditApp = creditByPerson.get(key) ?? null;
+					const financialStmt = financialByPerson.get(key) ?? null;
+
+					return {
+						...participant,
+						latestToken: latestToken
+							? {
+									token: latestToken.token,
+									url: `${process.env.FRONT_URL}/formulario/${latestToken.token}`,
+									expiresAt: latestToken.expiresAt,
+									used: latestToken.used,
+									createdAt: latestToken.createdAt,
+								}
+							: null,
+						creditApplication: serializeRow(creditApp),
+						financialStatement: serializeRow(financialStmt),
+						creditApplicationExists: !!creditApp,
+						creditHasSignature: !!creditApp?.firmaImagen,
+						financialStatementExists: !!financialStmt,
+					};
+				},
+			);
 
 			return {
-				token: tokenRow.token,
+				opportunityId: input.opportunityId,
+				vehicle,
+				participants,
+			};
+		}),
+
+	getFormTokenByOpportunity: crmProcedure
+		.input(z.object({ opportunityId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			const tokenRows = await db
+				.select()
+				.from(clientFormTokens)
+				.where(eq(clientFormTokens.opportunityId, input.opportunityId))
+				.orderBy(desc(clientFormTokens.createdAt));
+
+			const latestTokens = new Map<string, TokenRow>();
+			for (const tokenRow of tokenRows) {
+				const key = `${tokenRow.personType}:${tokenRow.personId}`;
+				if (!latestTokens.has(key)) {
+					latestTokens.set(key, tokenRow);
+				}
+			}
+
+			return Array.from(latestTokens.values()).map((tokenRow) => ({
+				personType: tokenRow.personType,
+				personId: tokenRow.personId,
 				url: `${process.env.FRONT_URL}/formulario/${tokenRow.token}`,
 				expiresAt: tokenRow.expiresAt,
 				used: tokenRow.used,
-			};
+			}));
 		}),
 };

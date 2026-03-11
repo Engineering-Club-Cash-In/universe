@@ -349,7 +349,7 @@ export const inversionistasRouter = new Elysia()
     };
   })
   .post("/investor/reporte-liquidados", async ({ body, set }) => {
-    const { id } = body as { id?: number };
+    const { id, fecha_liquidacion } = body as { id?: number; fecha_liquidacion?: string };
 
     if (!id || isNaN(Number(id))) {
       set.status = 400;
@@ -357,6 +357,22 @@ export const inversionistasRouter = new Elysia()
     }
 
     try {
+      const todasLiquidaciones = await getLiquidaciones({ inversionista_id: Number(id), perPage: 999 });
+      let liquidacionReciente = todasLiquidaciones.liquidaciones?.[0];
+
+      if (fecha_liquidacion) {
+        const porFecha = todasLiquidaciones.liquidaciones?.find((l: any) =>
+          new Date(l.fecha_liquidacion).toISOString().slice(0, 10) === fecha_liquidacion
+        );
+        if (porFecha) liquidacionReciente = porFecha;
+      }
+
+      if (!liquidacionReciente) {
+        set.status = 404;
+        return { message: "Inversionista no encontrado o sin liquidaciones." };
+      }
+      const liquidacionId = liquidacionReciente.liquidacion_id;
+
       const result = await resumeInvestor(
         Number(id),
         1,
@@ -367,7 +383,8 @@ export const inversionistasRouter = new Elysia()
         false,
         undefined,
         "espejos",
-        true // soloLiquidados
+        true, // soloLiquidados
+        liquidacionId
       );
 
       if (!result.inversionistas.length) {
@@ -383,7 +400,8 @@ export const inversionistasRouter = new Elysia()
         "espejos",
         false,
         undefined,
-        true // soloLiquidados
+        true, // soloLiquidados
+        liquidacionId
       );
       inversionista.subtotal = totales.totales as any;
 

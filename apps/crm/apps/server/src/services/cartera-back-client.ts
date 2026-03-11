@@ -699,7 +699,7 @@ export class CarteraBackClient {
 		ResumenGlobalInversionista[]
 	> {
 		const response = await this.request<ResumenGlobalInversionista[]>(
-			"/resumen-global",
+			"/resumen-global-liquidaciones",
 			{ method: "GET" },
 			true,
 		);
@@ -708,7 +708,7 @@ export class CarteraBackClient {
 
 	async getResumenGlobalExcel(): Promise<{ success: boolean; url: string }> {
 		const response = await this.request<{ success: boolean; url: string }>(
-			"/resumen-global?excel=true",
+			"/resumen-global-liquidaciones?excel=true",
 			{ method: "GET" },
 			false,
 		);
@@ -747,7 +747,7 @@ export class CarteraBackClient {
 			method: "POST",
 			body: JSON.stringify(input),
 		});
-		this.cache.invalidate("resumen-global");
+		this.cache.invalidate("resumen-global-liquidaciones");
 		return response;
 	}
 
@@ -761,7 +761,7 @@ export class CarteraBackClient {
 				body: JSON.stringify({ inversionista_id }),
 			},
 		);
-		this.cache.invalidate("resumen-global");
+		this.cache.invalidate("resumen-global-liquidaciones");
 		return response;
 	}
 

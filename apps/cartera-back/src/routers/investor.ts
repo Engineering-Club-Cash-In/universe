@@ -487,17 +487,20 @@ export const inversionistasRouter = new Elysia()
       inversionista.subtotal = totales.totales as any;
 
       const logoUrl = import.meta.env.LOGO_URL || "";
-      const filenameExcel = `reporte_liquidados_${id}_${Date.now()}.xlsx`;
+      const ts = Date.now();
+      const filenamePdf   = `reporte_liquidados_${id}_${ts}.pdf`;
+      const filenameExcel = `reporte_liquidados_${id}_${ts}.xlsx`;
 
-      const { url: urlExcel } = await generarYSubirExcelInversionista(
-        inversionista as any,
-        filenameExcel,
-        logoUrl
-      );
+      const [{ url }, { url: urlExcel }] = await Promise.all([
+        generarYSubirPDFInversionista(inversionista as any, filenamePdf, logoUrl),
+        generarYSubirExcelInversionista(inversionista as any, filenameExcel, logoUrl),
+      ]);
 
       return {
         success: true,
+        url,
         url_excel: urlExcel,
+        filename: filenamePdf,
         filename_excel: filenameExcel,
       };
     } catch (error) {

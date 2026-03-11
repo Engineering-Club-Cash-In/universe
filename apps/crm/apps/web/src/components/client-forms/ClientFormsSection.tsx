@@ -190,12 +190,29 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 											</Button>
 										</div>
 										<div className="flex items-center gap-4 text-muted-foreground text-xs">
-											<span>
-												Expira:{" "}
-												{new Date(
-													participant.latestToken.expiresAt,
-												).toLocaleDateString("es-GT")}
-											</span>
+											{(() => {
+												const expiresDate = participant.latestToken?.expiresAt
+													? new Date(participant.latestToken.expiresAt)
+													: null;
+												const isValid =
+													expiresDate && !Number.isNaN(expiresDate.getTime());
+												const isExpired = isValid && expiresDate < new Date();
+												return (
+													<>
+														<span>
+															Expira:{" "}
+															{isValid
+																? expiresDate.toLocaleDateString("es-GT")
+																: "Sin fecha"}
+														</span>
+														{isExpired && (
+															<Badge variant="destructive" className="text-xs">
+																Expirado
+															</Badge>
+														)}
+													</>
+												);
+											})()}
 											{participant.latestToken.used && (
 												<Badge variant="outline" className="text-xs">
 													Usado
@@ -275,10 +292,8 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 										</Button>
 									)}
 								</div>
-							)}
-						</div>
-					);
-				})}
+							);
+						})}
 			</div>
 		</div>
 	);

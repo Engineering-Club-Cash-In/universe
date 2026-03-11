@@ -154,28 +154,26 @@ export function ModalEditCredit({
       investorsMirror: parsedInvestorsMirror, // 🆕 Campo para espejo
     },
     enableReinitialize: true,
-    validate: (values) => {
-      const errors: any = {};
-      const capital = Number(values.capital || 0);
+    // validate: (values) => {
+    //   const errors: any = {};
+    //   const capital = Number(values.capital || 0);
 
-      // 🔥 VALIDACIÓN 1: Inversionistas Principales
-      if (values.investors.length > 0) {
-        const sumaMontos = values.investors.reduce(
-          (sum, inv) => sum + Number(inv.monto_aportado || 0),
-          0
-        );
+    //   // 🔥 VALIDACIÓN 1: Inversionistas Principales
+    //   if (values.investors.length > 0) {
+    //     const sumaMontos = values.investors.reduce(
+    //       (sum, inv) => sum + Number(inv.monto_aportado || 0),
+    //       0
+    //     );
 
-        if (Math.abs(sumaMontos - capital) > 0.01) {
-          errors.investors = `La suma de montos aportados (Q${sumaMontos.toFixed(
-            2
-          )}) debe ser igual al capital (Q${capital.toFixed(2)})`;
-        }
-      }
+    //     if (Math.abs(sumaMontos - capital) > 0.01) {
+    //       errors.investors = `La suma de montos aportados (Q${sumaMontos.toFixed(
+    //         2
+    //       )}) debe ser igual al capital (Q${capital.toFixed(2)})`;
+    //     }
+    //   }
 
-
-
-      return errors;
-    },
+    //   return errors;
+    // },
     onSubmit: (values) => {
       if (Object.keys(formik.errors).length > 0) {
         Object.entries(formik.errors).forEach(([, error]) => {

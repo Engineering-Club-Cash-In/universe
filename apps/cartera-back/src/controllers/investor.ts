@@ -3114,7 +3114,7 @@ export async function resumenGlobalInversionistas(
       total_isr: sql<number>`COALESCE(SUM(
         CASE 
           WHEN ${inversionistas.emite_factura} THEN 0 
-          ELSE ${pe.abono_interes} * 0.07
+          ELSE ROUND(${pe.abono_interes} * 0.07, 2)
         END
       ), 0)`,
 
@@ -3126,7 +3126,7 @@ export async function resumenGlobalInversionistas(
         + CASE
             WHEN ${inversionistas.emite_factura}
               THEN ${pe.abono_iva_12}
-            ELSE -(${pe.abono_interes} * 0.07)
+            ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
           END
       ), 0)`,
 
@@ -3144,7 +3144,7 @@ export async function resumenGlobalInversionistas(
             + CASE
                 WHEN ${inversionistas.emite_factura}
                   THEN ${pe.abono_iva_12}
-                ELSE -(${pe.abono_interes} * 0.07)
+                ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
               END
           ), 0)
         )
@@ -3159,7 +3159,7 @@ export async function resumenGlobalInversionistas(
           + CASE
               WHEN ${inversionistas.emite_factura}
                 THEN ${pe.abono_iva_12}
-              ELSE -(${pe.abono_interes} * 0.07)
+              ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
             END
         ), 0)
         - CASE ${inversionistas.tipo_reinversion}
@@ -3175,7 +3175,7 @@ export async function resumenGlobalInversionistas(
                 + CASE
                     WHEN ${inversionistas.emite_factura}
                       THEN ${pe.abono_iva_12}
-                    ELSE -(${pe.abono_interes} * 0.07)
+                    ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
                   END
               ), 0)
             )
@@ -3629,10 +3629,18 @@ export async function getLiquidaciones({
  * Obtiene el rendimiento de un inversionista por DPI
  * @param dpi - DPI del inversionista
  */
-export async function getInvestorPerformance(dpi: string) {
-  console.log("[getInvestorPerformance] DPI:", dpi);
+export async function getInvestorPerformance(dpi?: string, email?: string) {
+  console.log("[getInvestorPerformance] DPI:", dpi, "Email:", email);
 
-  // 1️⃣ Buscar inversionista por DPI
+  if (!dpi && !email) {
+    throw new Error("Se requiere al menos 'dpi' o 'email'");
+  }
+
+  // 1️⃣ Buscar inversionista por DPI o email
+  const whereClause = dpi
+    ? eq(inversionistas.dpi, parseInt(dpi))
+    : eq(inversionistas.email, email!);
+
   const [inversionista] = await db
     .select({
       inversionista_id: inversionistas.inversionista_id,
@@ -3640,11 +3648,11 @@ export async function getInvestorPerformance(dpi: string) {
       dpi: inversionistas.dpi,
     })
     .from(inversionistas)
-    .where(eq(inversionistas.dpi, parseInt(dpi)))
+    .where(whereClause)
     .limit(1);
 
   if (!inversionista) {
-    throw new Error(`No se encontró inversionista con DPI: ${dpi}`);
+    throw new Error(`No se encontró inversionista con ${dpi ? 'DPI: ' + dpi : 'email: ' + email}`);
   }
 
   // 2️⃣ Obtener todas las inversiones del inversionista

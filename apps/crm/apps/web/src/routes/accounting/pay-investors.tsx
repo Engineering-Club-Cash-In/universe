@@ -70,6 +70,7 @@ interface ResumenInversionista {
 	total_reinversion: string;
 	total_a_recibir_con_reinversion: string;
 	boleta_pendiente?: BoletaPendiente | null;
+	boleta_liquidacion?: BoletaPendiente | null;
 	estado_liquidacion_resumen?: "pending" | "uploaded" | "liquidated";
 }
 
@@ -300,6 +301,7 @@ function DetailItem({ label, value }: { label: string; value: string }) {
 function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 	const [dialogOpen, setDialogOpen] = useState(false);
 	const tieneBoleta = inv.boleta_pendiente != null;
+	const tieneBoletaLiquidacion = inv.boleta_liquidacion != null;
 	const estadoResumen =
 		inv.estado_liquidacion_resumen ??
 		(tieneBoleta ? "uploaded" : "pending");
@@ -410,9 +412,23 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 				{/* Acción */}
 				<div className="flex gap-2 px-4 pt-1 pb-4">
 					{estadoResumen === "liquidated" ? (
-						<div className="flex h-8 flex-1 items-center justify-center rounded-md bg-muted font-medium text-muted-foreground text-xs">
-							Completada
-						</div>
+						tieneBoletaLiquidacion ? (
+							<Button
+								variant="ghost"
+								size="sm"
+								className="h-8 flex-1 gap-1.5 text-xs"
+								onClick={() =>
+									window.open(inv.boleta_liquidacion!.boleta_url, "_blank")
+								}
+							>
+								<Eye className="h-3.5 w-3.5" />
+								Ver boleta
+							</Button>
+						) : (
+							<div className="flex h-8 flex-1 items-center justify-center rounded-md bg-muted font-medium text-muted-foreground text-xs">
+								Completada
+							</div>
+						)
 					) : tieneBoleta ? (
 						<Button
 							variant="ghost"

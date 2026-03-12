@@ -1741,7 +1741,18 @@ export async function createBoleta(
       const investorData = resumen.inversionistas?.[0];
 
       if (investorData) {
-        investorData.subtotal = totales as any;
+        // Recalcular totales específicamente para esta liquidación (ya persistida)
+        // para asegurar consistencia entre el encabezado y el detalle del reporte.
+        const postTotales = await getInvestorTotalsGlobales(
+          data.inversionista_id,
+          undefined,
+          "espejos",
+          false,
+          undefined,
+          true, // soloLiquidados
+          txResult.liquidacion.liquidacion_id
+        );
+        investorData.subtotal = postTotales.totales as any;
 
         console.log("Generando Excel...");
         const logoUrl = process.env.LOGO_URL || "";

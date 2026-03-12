@@ -1988,6 +1988,13 @@ export function CreditDetailView({
 													{vehiculo?.origin || "N/A"}
 												</TableCell>
 											</TableRow>
+											<TableRow>
+												<TableCell>Clasificación</TableCell>
+												<TableCell className="text-right font-medium">
+													{vehicleInspection?.vehicleRating ||
+														(vehiculo?.isNew ? "Comercial" : "N/A")}
+												</TableCell>
+											</TableRow>
 											{/* Sección: Capacidad de Pago */}
 											<TableRow>
 												<TableCell className="pt-4 font-bold text-primary">

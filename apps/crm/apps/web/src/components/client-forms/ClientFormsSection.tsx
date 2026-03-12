@@ -292,7 +292,9 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 										</Button>
 									)}
 								</div>
-							);
+							)}
+							</div>
+						);
 						})}
 			</div>
 		</div>

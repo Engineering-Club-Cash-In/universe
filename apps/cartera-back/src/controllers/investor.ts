@@ -2,7 +2,11 @@
 import { z } from "zod";
 import { formatToUSD } from "../utils/functions/currencyConverter";
 import { USD_EXCHANGE_RATE } from "../utils/functions/const";
-import { generarYSubirPDFInversionista, generarPDFBuffer } from "../utils/functions/generalFunctions";
+import { 
+  generarYSubirPDFInversionista, 
+  generarPDFBuffer, 
+  generarYSubirExcelInversionista 
+} from "../utils/functions/generalFunctions";
 import { db } from "../database/index";
 import {
   bancos,
@@ -2652,20 +2656,30 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
         const inversionista = resumen.inversionistas?.[0];
 
         if (inversionista) {
-          inversionista.subtotal = totales as any;
+          // Recalcular totales específicamente para esta liquidación (ya persistida)
+          const postTotales = await getInvestorTotalsGlobales(
+            inv_id,
+            undefined,
+            "espejos",
+            false,
+            undefined,
+            true, // soloLiquidados
+            liquidacion.liquidacion_id
+          );
+          inversionista.subtotal = postTotales.totales as any;
 
-          console.log(`  📄 Generando PDF...`);
+          console.log(`  📄 Generando Excel...`);
           const logoUrl = process.env.LOGO_URL || "";
-          const filename = `liquidacion_${liquidacion.liquidacion_id}_${Date.now()}.pdf`;
-          const pdfResult = await generarYSubirPDFInversionista(
+          const filename = `liquidacion_${liquidacion.liquidacion_id}_${Date.now()}.xlsx`;
+          const excelResult = await generarYSubirExcelInversionista(
             inversionista as any,
             filename,
             logoUrl
           );
-          const url = pdfResult.url;
-          const pdfBuffer = Buffer.from(pdfResult.pdfBuffer);
+          const url = excelResult.url;
+          const excelBuffer = Buffer.from(excelResult.excelBuffer);
 
-          console.log(`  ✅ PDF generado: ${filename}`);
+          console.log(`  ✅ Excel generado: ${filename}`);
 
           // Actualizar liquidación con URL del reporte
           await db
@@ -2674,7 +2688,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
             .where(eq(liquidaciones.liquidacion_id, liquidacion.liquidacion_id));
 
           // Enviar correo (best-effort)
-          if (inversionista.email && pdfBuffer) {
+          if (inversionista.email && excelBuffer) {
             try {
               await sendLiquidationEmail({
                 to: inversionista.email,
@@ -2684,8 +2698,8 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
                 date: dayjs().format("DD/MM/YYYY"),
                 currencySymbol: inversionista.moneda === "dolares" ? "$" : "Q.",
                 attachment: {
-                  filename: `Liquidacion_${inversionista.nombre_inversionista.replace(/\s+/g, '_')}_${dayjs().format('YYYYMMDD')}.pdf`,
-                  content: pdfBuffer,
+                  filename: `Liquidacion_${inversionista.nombre_inversionista.replace(/\s+/g, '_')}_${dayjs().format('YYYYMMDD')}.xlsx`,
+                  content: excelBuffer,
                 }
               });
               console.log(`  📧 Correo enviado a ${inversionista.email}`);
@@ -2703,8 +2717,8 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
             boleta_url: boletaPendiente?.boleta_url ?? "",
           });
         }
-      } catch (pdfError) {
-        console.error(`  ❌ Error generando PDF (datos financieros ya guardados):`, pdfError);
+      } catch (excelError) {
+        console.error(`  ❌ Error generando Excel (datos financieros ya guardados):`, excelError);
       }
 
       totalPagosLiquidados += updateResult.rowCount ?? 0;
@@ -2729,7 +2743,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
   console.log(`\n✅ RESUMEN FINAL:`);
   console.log(`   - Liquidaciones creadas: ${totalLiquidaciones}`);
   console.log(`   - Pagos liquidados: ${totalPagosLiquidados}`);
-  console.log(`   - PDFs generados: ${reportesGenerados.length}`);
+  console.log(`   - Excels generados: ${reportesGenerados.length}`);
   console.log(`   - Boletas procesadas: ${reportesGenerados.length}`);
   console.log(`   - Inversionistas saltados: ${inversionistasSaltados}`);
   

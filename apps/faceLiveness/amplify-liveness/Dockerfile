@@ -3,11 +3,13 @@ FROM node:20-alpine AS build
 
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
-RUN npm install
+RUN npm install -g bun@latest
+
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
 
 COPY . .
-RUN npm run build
+RUN bun run build
 
 # Etapa 2: Servir con Nginx
 FROM nginx:alpine

@@ -2,15 +2,21 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { Amplify } from "aws-amplify";
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore
-import awsExports from "./aws-exports";
 import { BrowserRouter } from "react-router-dom";
 
 import "@aws-amplify/ui-react/styles.css";
 
-// Configura Amplify con tu backend de Cognito/Rekognition
-Amplify.configure(awsExports);
+const amplifyConfig = {
+  Auth: {
+    Cognito: {
+      identityPoolId: import.meta.env.VITE_AWS_COGNITO_IDENTITY_POOL_ID,
+      userPoolId: import.meta.env.VITE_AWS_USER_POOLS_ID,
+      userPoolClientId: import.meta.env.VITE_AWS_USER_POOLS_WEB_CLIENT_ID,
+    },
+  },
+};
+
+Amplify.configure(amplifyConfig);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

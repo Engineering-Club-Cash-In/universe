@@ -3242,7 +3242,7 @@ function RouteComponent() {
 				<DataTable
 					columns={opportunitiesColumns}
 					data={
-						opportunitiesQuery.data?.filter(
+						filteredData?.filter(
 							(opp) =>
 								// Filtro por estado (del Select del toolbar)
 								(stageFilter === "all" || opp.status === stageFilter) &&
@@ -3283,7 +3283,7 @@ function RouteComponent() {
 							</Badge>
 							{salesStagesQuery.data?.map((stage) => {
 								const count =
-									opportunitiesQuery.data?.filter(
+									filteredData?.filter(
 										(opp) =>
 											opp.stage?.id === stage.id &&
 											(stageFilter === "all" || opp.status === stageFilter) &&

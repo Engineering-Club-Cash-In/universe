@@ -24,7 +24,7 @@ bun run build
 
 ## Configuracion de Amplify
 
-La configuracion de Cognito se carga desde variables `VITE_*` en [main.tsx](/home/lralda/cci/universe/apps/faceLiveness/amplify-liveness/src/main.tsx).
+La configuracion de Cognito se carga desde variables `VITE_*` en [main.tsx](./src/main.tsx).
 
 Variables requeridas:
 

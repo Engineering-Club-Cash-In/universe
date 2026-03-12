@@ -5,6 +5,61 @@ import { Loader, ThemeProvider, View, Heading, Text, Button, Link } from "@aws-a
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL;
 const WA_SIMPLETECH = import.meta.env.VITE_WA_SIMPLETECH || "50212345678"; // Default number or get from environment variable
+const LIVENESS_DISPLAY_TEXT = {
+  a11yVideoLabelText: "Camara para verificacion de vida",
+  cancelLivenessCheckText: "Cancelar verificacion",
+  goodFitCaptionText: "Buen ajuste",
+  goodFitAltText: "Ilustracion de un rostro correctamente alineado dentro del ovalo.",
+  hintCenterFaceText: "Centra tu rostro",
+  hintCenterFaceInstructionText:
+    "Instruccion: Antes de iniciar la verificacion, asegurate de que la camara este centrada en la parte superior de tu pantalla y centra tu rostro. Cuando empiece la verificacion aparecera un ovalo en el centro. Se te pedira acercarte al ovalo y luego permanecer quieto. Despues de unos segundos, veras que la verificacion se completo.",
+  hintFaceOffCenterText: "Tu rostro no esta dentro del ovalo. Centralo frente a la camara.",
+  hintMoveFaceFrontOfCameraText: "Coloca tu rostro frente a la camara",
+  hintTooManyFacesText: "Asegurate de que solo haya un rostro frente a la camara",
+  hintFaceDetectedText: "Rostro detectado",
+  hintCanNotIdentifyText: "Coloca tu rostro frente a la camara",
+  hintTooCloseText: "Alejate un poco",
+  hintTooFarText: "Acercate un poco",
+  hintConnectingText: "Conectando...",
+  hintVerifyingText: "Verificando...",
+  hintCheckCompleteText: "Verificacion completada",
+  hintIlluminationTooBrightText: "Muevete a un lugar con menos luz",
+  hintIlluminationTooDarkText: "Muevete a un lugar con mas luz",
+  hintIlluminationNormalText: "Iluminacion adecuada",
+  hintHoldFaceForFreshnessText: "Permanece quieto",
+  hintMatchIndicatorText: "50% completado. Sigue acercandote.",
+  photosensitivityWarningHeadingText: "Advertencia de fotosensibilidad",
+  photosensitivityWarningBodyText:
+    "Esta verificacion muestra luces de colores. Ten cuidado si eres fotosensible.",
+  photosensitivityWarningInfoText:
+    "Algunas personas pueden experimentar crisis epilepticas al exponerse a luces de colores. Ten precaucion si tu o alguien de tu familia tiene una condicion epileptica.",
+  photosensitivityWarningLabelText: "Mas informacion sobre fotosensibilidad",
+  retryCameraPermissionsText: "Reintentar",
+  recordingIndicatorText: "Grabando",
+  startScreenBeginCheckText: "Iniciar verificacion",
+  tooFarCaptionText: "Demasiado lejos",
+  tooFarAltText: "Ilustracion de un rostro dentro del ovalo, pero todavia demasiado lejos.",
+  waitingCameraPermissionText: "Esperando tu permiso para usar la camara.",
+  errorLabelText: "Error",
+  connectionTimeoutHeaderText: "Tiempo de conexion agotado",
+  connectionTimeoutMessageText: "La conexion supero el tiempo de espera.",
+  timeoutHeaderText: "Tiempo agotado",
+  timeoutMessageText:
+    "No se pudo alinear el rostro dentro del ovalo a tiempo. Intenta de nuevo llenando el ovalo con tu rostro.",
+  faceDistanceHeaderText: "Se detecto movimiento hacia adelante",
+  faceDistanceMessageText: "Evita acercarte mientras se establece la conexion.",
+  multipleFacesHeaderText: "Se detectaron varios rostros",
+  multipleFacesMessageText:
+    "Asegurate de que solo haya un rostro frente a la camara al conectarte.",
+  clientHeaderText: "Error del dispositivo",
+  clientMessageText: "La verificacion fallo por un problema del dispositivo o navegador.",
+  serverHeaderText: "Problema del servidor",
+  serverMessageText: "No se pudo completar la verificacion por un problema del servidor.",
+  landscapeHeaderText: "La orientacion horizontal no es compatible",
+  landscapeMessageText: "Gira tu dispositivo a orientacion vertical.",
+  portraitMessageText: "Manten tu dispositivo en orientacion vertical durante toda la verificacion.",
+  tryAgainText: "Intentar de nuevo",
+};
 
 export function LivenessWithRenapValidation({ dpi }: { dpi: string }) {
   const [loading, setLoading] = useState(true);
@@ -120,6 +175,7 @@ const whatsappUrl = `https://wa.me/${WA_SIMPLETECH}?text=${message}`;
             region="us-east-1"
             onAnalysisComplete={handleAnalysisComplete}
             onError={handleError}
+            displayText={LIVENESS_DISPLAY_TEXT}
           />
         )
       )}

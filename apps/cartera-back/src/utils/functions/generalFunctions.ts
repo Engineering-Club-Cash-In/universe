@@ -717,69 +717,31 @@ export async function buildInversionistaWorkbook(
   // ── filas de datos
   let row = HEAD_ROW;
   let rowIdx = 0;
-
-  // Pre-calcular balances iniciales por crédito para el running balance
-  // El cr.monto_aportado que viene de la BD es el ACTUAL (post-liquidación si se llama desde liquidateByInvestorId)
-  const balancesInciales = new Map<number, number>();
-  for (const cr of inv.creditos) {
-    let sumaAbonosDelReporte = 0;
-    for (const pago of cr.pagos ?? []) {
-      sumaAbonosDelReporte += toN(pago.abono_capital);
-    }
-    // El balance antes de estos pagos era el actual + lo que se restó en este reporte
-    balancesInciales.set(cr.credito_id, toN(cr.monto_aportado) + sumaAbonosDelReporte);
-  }
-
-  // Totales manuales para evitar errores de SUM en el running balance
-  let tCapInicial = 0;
-  let tInteres = 0;
-  let tIva = 1; // dummy for numbering if needed, but we'll use actuals
-  let tIvaActual = 0;
-  let tIsr = 0;
-  let tAbonoCap = 0;
-  let tNetoInver = 0;
-  let tCapRestante = 0;
-
-  const creditosVistos = new Set<number>();
+  const firstDataRow = HEAD_ROW + 1;
 
   for (const cr of inv.creditos) {
-    const balanceFinal = toN(cr.monto_aportado);
-    const balanceInicial = balancesInciales.get(cr.credito_id) || balanceFinal;
-    
-    // El capital inicial/final global es la suma de los estados únicos de cada crédito
-    if (!creditosVistos.has(cr.credito_id)) {
-      tCapInicial += balanceInicial;
-      tCapRestante += balanceFinal;
-      creditosVistos.add(cr.credito_id);
-    }
-
     for (const pago of cr.pagos ?? []) {
       row++;
       rowIdx++;
       const rr = ws.getRow(row);
 
-      const abonoCap = toN(pago.abono_capital);
-      // Revertido a estático por petición del usuario: 
-      // Cada fila muestra el saldo final actual y lo que se abonó en ese pago específico.
-      const capAnterior = balanceFinal + abonoCap;
-      const capRestante = balanceFinal;
-
+      const capital = toN(cr.monto_aportado) + toN(pago.abono_capital);
       const tasaFmt = toN(pago.tasaInteresInvesor) / 100;
       const cuotaMes = `${pago.mes || "-"}${pago.cuota ? ` (Cuota #${pago.cuota})` : ""}`;
 
       rr.values = [
         pago.cuota ?? cr.meses_en_credito ?? "",
         cr.nombre_usuario ?? "",
-        capAnterior,
+        capital,
         String(cr.porcentaje_interes ?? "") + " %",
         String(pago.porcentaje_inversor ?? "") + " %",
         tasaFmt,
         toN(pago.abono_interes),
         toN(pago.abono_iva),
         toN(pago.isr),
-        abonoCap,
+        toN(pago.abono_capital),
         toN(pago.abonoGeneralInteres),
-        capRestante,
+        toN(cr.monto_aportado),
         cuotaMes,
         cr.plazo ?? "",
         cr.nit_usuario ?? "",
@@ -802,41 +764,30 @@ export async function buildInversionistaWorkbook(
       rr.eachCell(cell => {
         cell.border = { bottom: { style: "thin", color: { argb: CINV.line } } };
       });
-
-      // Acumular para totales
-      tInteres += toN(pago.abono_interes);
-      tIvaActual += toN(pago.abono_iva);
-      tIsr += toN(pago.isr);
-      tAbonoCap += abonoCap;
-      tNetoInver += toN(pago.abonoGeneralInteres);
     }
   }
 
-  // ── fila de totales con valores calculados manualmente
+  const lastDataRow = row;
+
+  // ── fila de totales con fórmulas SUM
   row++;
   const totalRow = ws.getRow(row);
+  const r1 = firstDataRow;
+  const r2 = lastDataRow;
 
   totalRow.getCell(1).value = "Total";
-  totalRow.getCell(3).value = tCapInicial;
+  // col 3: Capital = SUM(C:C) sobre filas de datos
+  totalRow.getCell(3).value  = { formula: `SUM(C${r1}:C${r2})` };
   totalRow.getCell(3).numFmt = numFmt;
-
-  totalRow.getCell(7).value = tInteres;
-  totalRow.getCell(7).numFmt = numFmt;
-
-  totalRow.getCell(8).value = tIvaActual;
-  totalRow.getCell(8).numFmt = numFmt;
-
-  totalRow.getCell(9).value = tIsr;
-  totalRow.getCell(9).numFmt = numFmt;
-
-  totalRow.getCell(10).value = tAbonoCap;
-  totalRow.getCell(10).numFmt = numFmt;
-
-  totalRow.getCell(11).value = tNetoInver;
-  totalRow.getCell(11).numFmt = numFmt;
-
-  totalRow.getCell(12).value = tCapRestante;
-  totalRow.getCell(12).numFmt = numFmt;
+  // col 7-12: fórmulas SUM para columnas numéricas
+  const sumCols: [number, string][] = [
+    [7,  "G"], [8,  "H"], [9,  "I"],
+    [10, "J"], [11, "K"], [12, "L"],
+  ];
+  for (const [ci, col] of sumCols) {
+    totalRow.getCell(ci).value  = { formula: `SUM(${col}${r1}:${col}${r2})` };
+    totalRow.getCell(ci).numFmt = numFmt;
+  }
   for (let c = 1; c <= 15; c++) {
     const cell = totalRow.getCell(c);
     cell.font = { bold: true, color: { argb: CINV.navy } };

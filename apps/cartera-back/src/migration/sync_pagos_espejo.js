@@ -93,7 +93,7 @@ function leerExcel(archivo) {
     if (isNaN(cap) || (cap === 0 && int === 0 && iva === 0)) continue;
     const k = normalizeKey(cliente);
     if (!excelMap[k]) excelMap[k] = [];
-    excelMap[k].push({ capital: cap.toFixed(10), interes: int.toFixed(10), iva: iva.toFixed(10), isr: isr.toFixed(10), cliente });
+    excelMap[k].push({ capital: cap.toFixed(2), interes: int.toFixed(2), iva: iva.toFixed(2), isr: isr.toFixed(2), cliente });
     totals.cap += cap;
     totals.int += int;
     totals.iva += iva;
@@ -154,9 +154,9 @@ async function procesarInversionista(c, invId, archivo, nombre) {
     const ex = entries.shift();
     if (entries.length === 0) delete excel.excelMap[k];
 
-    const capOk = Math.abs(Number(db.abono_capital) - Number(ex.capital)) < 0.000001;
-    const intOk = Math.abs(Number(db.abono_interes) - Number(ex.interes)) < 0.000001;
-    const ivaOk = Math.abs(Number(db.abono_iva_12) - Number(ex.iva)) < 0.000001;
+    const capOk = Math.abs(Number(db.abono_capital) - Number(ex.capital)) < 0.005;
+    const intOk = Math.abs(Number(db.abono_interes) - Number(ex.interes)) < 0.005;
+    const ivaOk = Math.abs(Number(db.abono_iva_12) - Number(ex.iva)) < 0.005;
 
     if (capOk && intOk && ivaOk) {
       console.log(`  OK   | ${db.cliente.substring(0, 35)}`);

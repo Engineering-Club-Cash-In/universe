@@ -2508,6 +2508,11 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
         continue;
       }
 
+      console.log(`  📋 Pagos NO_LIQUIDADO encontrados (${pagosNoLiquidados.length}):`);
+      for (const p of pagosNoLiquidados) {
+        console.log(`     espejo_id=${p.id} | pago_id=${p.pago_id} | credito_id=${p.credito_id} | capital=${p.abono_capital}`);
+      }
+
       // Totales pre-liquidación (espejos, no liquidados)
       const totalesResult = await getInvestorTotalsGlobales(inv_id, undefined, "espejos", false);
       const totales = totalesResult.totales;
@@ -2595,6 +2600,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
 
       let updateResult: any = { rowCount: 0 };
       if (pagosIds.length > 0) {
+        console.log(`  🔄 Marcando como LIQUIDADO ids: [${pagosIds.join(", ")}]`);
         updateResult = await db
           .update(pagos_credito_inversionistas_espejo)
           .set({
@@ -2604,7 +2610,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
           .where(inArray(pagos_credito_inversionistas_espejo.id, pagosIds));
       }
 
-      console.log(`  ✅ ${updateResult.rowCount ?? 0} pagos espejo actualizados`);
+      console.log(`  ✅ ${updateResult.rowCount ?? 0} pagos espejo actualizados (esperados: ${pagosIds.length})`);
 
       // Marcar cuotas como liquidado_inversionistas
       const allPagoIds = [...new Set(pagosNoLiquidados.map((p) => p.pago_id))];

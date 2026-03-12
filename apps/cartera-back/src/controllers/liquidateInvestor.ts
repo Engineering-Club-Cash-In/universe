@@ -17,7 +17,7 @@ import Big from "big.js";
 import fs from "fs"; // 🆕 Para escribir logs
 import path from "path/win32";
 import { resumeInvestor, getInvestorTotalsGlobales } from "./investor";
-import { generarYSubirPDFInversionista } from "../utils/functions/generalFunctions";
+import { generarYSubirExcelInversionista } from "../utils/functions/generalFunctions";
 import { sendLiquidationEmail } from "@cci/email";
 import dayjs from "dayjs";
 
@@ -1719,8 +1719,8 @@ export async function createBoleta(
     // FASE 3: POST-TRANSACCION (PDF + email, best-effort)
     // Los datos financieros ya estan committed
     // ========================================
-    let pdfUrl = "";
-    let pdfBuffer: Buffer | null = null;
+    let excelUrl = "";
+    let excelBuffer: Buffer | null = null;
 
     try {
       // Obtener resumen completo del inversionista para el PDF (post-tx, ya con datos liquidados)
@@ -1741,28 +1741,39 @@ export async function createBoleta(
       const investorData = resumen.inversionistas?.[0];
 
       if (investorData) {
-        investorData.subtotal = totales as any;
+        // Recalcular totales específicamente para esta liquidación (ya persistida)
+        // para asegurar consistencia entre el encabezado y el detalle del reporte.
+        const postTotales = await getInvestorTotalsGlobales(
+          data.inversionista_id,
+          undefined,
+          "espejos",
+          false,
+          undefined,
+          true, // soloLiquidados
+          txResult.liquidacion.liquidacion_id
+        );
+        investorData.subtotal = postTotales.totales as any;
 
-        console.log("Generando PDF...");
+        console.log("Generando Excel...");
         const logoUrl = process.env.LOGO_URL || "";
-        const filename = `liquidacion_${txResult.liquidacion.liquidacion_id}_${Date.now()}.pdf`;
-        const pdfResult = await generarYSubirPDFInversionista(
+        const filename = `liquidacion_${txResult.liquidacion.liquidacion_id}_${Date.now()}.xlsx`;
+        const excelResult = await generarYSubirExcelInversionista(
           investorData as any,
           filename,
           logoUrl
         );
-        pdfUrl = pdfResult.url;
-        pdfBuffer = Buffer.from(pdfResult.pdfBuffer);
+        excelUrl = excelResult.url;
+        excelBuffer = Buffer.from(excelResult.excelBuffer);
 
         await db
           .update(liquidaciones)
-          .set({ reporte_liquidacion_url: pdfUrl })
+          .set({ reporte_liquidacion_url: excelUrl })
           .where(eq(liquidaciones.liquidacion_id, txResult.liquidacion.liquidacion_id));
 
-        console.log(`PDF generado: ${filename}`);
+        console.log(`Excel generado: ${filename}`);
 
         // Enviar correo (best-effort)
-        if (investorData.email && pdfBuffer) {
+        if (investorData.email && excelBuffer) {
           try {
             const totalCuota = investorData.subtotal.total_cuota.toString();
 
@@ -1774,8 +1785,8 @@ export async function createBoleta(
               date: dayjs().format("DD/MM/YYYY"),
               currencySymbol: investorData.moneda === "dolares" ? "$" : "Q.",
               attachment: {
-                filename: `Liquidacion_${investorData.nombre_inversionista.replace(/\s+/g, '_')}_${dayjs().format('YYYYMMDD')}.pdf`,
-                content: pdfBuffer,
+                filename: `Liquidacion_${investorData.nombre_inversionista.replace(/\s+/g, '_')}_${dayjs().format('YYYYMMDD')}.xlsx`,
+                content: excelBuffer,
               }
             });
             console.log(`Correo enviado a ${investorData.email}`);
@@ -1784,8 +1795,8 @@ export async function createBoleta(
           }
         }
       }
-    } catch (pdfError) {
-      console.error("Error generando PDF (datos financieros ya guardados):", pdfError);
+    } catch (excelError) {
+      console.error("Error generando Excel (datos financieros ya guardados):", excelError);
     }
 
     console.log("========== BOLETA + LIQUIDACION COMPLETADA ==========\n");
@@ -1797,7 +1808,7 @@ export async function createBoleta(
         ...txResult.nuevaBoleta,
         inversionista_nombre: inversionistaBase.nombre,
         liquidacion_id: txResult.liquidacion.liquidacion_id,
-        reporte_url: pdfUrl || null,
+        reporte_url: excelUrl || null,
       },
     };
   } catch (error) {

@@ -127,7 +127,28 @@ export const findOrCreateAdvisorByName = async (
   console.log(`\n➕ NO ENCONTRADO - Creando: "${nombreSinTildes}"`);
   console.log(`========================================\n`);
 
- 
+  const [newAdvisor] = await db
+    .insert(asesores)
+    .values({ nombre: nombreSinTildes, activo })
+    .returning();
+
+  const emailSlug = nombreSinTildes
+    .toLowerCase()
+    .replace(/\s+/g, ".")
+    .replace(/[^a-z0-9.]/g, "");
+  const generatedEmail = `${emailSlug}@cashin.migration`;
+  const defaultPassword = await bcrypt.hash("migration2026", 10);
+
+  await db.insert(platform_users).values({
+    email: generatedEmail,
+    password_hash: defaultPassword,
+    role: "ASESOR",
+    is_active: true,
+    asesor_id: newAdvisor.asesor_id,
+  });
+
+  console.log(`✅ Asesor creado: ID ${newAdvisor.asesor_id} - "${nombreSinTildes}" (${generatedEmail})`);
+  return newAdvisor;
 };
 // GET: Obtener asesores (uno o todos, usando id o nombre como filtro)
 

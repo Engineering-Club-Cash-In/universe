@@ -269,9 +269,20 @@ export async function procesarCreditoDesdeExcelFull(
   const formatoCredito =
     filas.length > 1 ? "Pool" : filaRef.FormatoCredito || "Individual";
 
+  // fecha_creacion desde Excel (Fecha column)
+  const fechaCreacion = (() => {
+    try {
+      const d = new Date(filaRef.Fecha);
+      return isNaN(d.getTime()) ? new Date() : d;
+    } catch {
+      return new Date();
+    }
+  })();
+
   const creditData = {
     usuario_id: user.usuario_id,
     numero_credito_sifco: creditoBase,
+    fecha_creacion: fechaCreacion,
     capital: capital.toFixed(2),
     porcentaje_interes: porcentajeInteres.toFixed(4),
     cuota_interes: cuotaInteres.toFixed(2),

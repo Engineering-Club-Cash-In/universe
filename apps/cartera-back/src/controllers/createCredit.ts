@@ -262,7 +262,7 @@ const insertCreditAndRelated = async (creditData: CreditData): Promise<{
     .plus(creditData.gps ?? 0)
     .plus(creditData.membresias_pago ?? 0)
     .plus(creditData.otros ?? 0);
-
+es
   const deudatotalRedondeado = deudatotal.round(2);
 
   // Buscar o crear usuario con los nuevos campos opcionales
@@ -543,13 +543,17 @@ if (creditosInversionistasData.length > 0) {
 const generatePaymentDates = (plazo: number): string[] => {
   const fechas: string[] = [];
   const startDate = new Date();
-  
+
   const fechaHoy = new Date();
   const fechaHoyGuate = fechaHoy.toLocaleDateString("sv-SE", {
     timeZone: "America/Guatemala",
   });
-  
+
   fechas.push(fechaHoyGuate);
+
+  // Día de vencimiento: si se crea del 1-20 → día 15, si > 20 → día 30
+  const diaCreacion = parseInt(fechaHoyGuate.split("-")[2], 10);
+  const diaVencimiento = diaCreacion <= 20 ? 15 : 30;
 
   for (let i = 0; i < plazo; i++) {
     const anioBase = startDate.getFullYear();
@@ -557,7 +561,7 @@ const generatePaymentDates = (plazo: number): string[] => {
 
     // Último día del mes destino (ej: Feb → 28/29)
     const ultimoDiaMes = new Date(anioBase, mesBase + 1, 0).getDate();
-    const diaPago = Math.min(30, ultimoDiaMes);
+    const diaPago = Math.min(diaVencimiento, ultimoDiaMes);
 
     const fechaLocal = new Date(anioBase, mesBase, diaPago, 12, 0, 0);
     const fechaGuateStr = fechaLocal.toLocaleDateString("sv-SE", {

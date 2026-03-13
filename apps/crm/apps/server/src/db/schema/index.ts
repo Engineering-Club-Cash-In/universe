@@ -9,6 +9,7 @@ export * from "./crm";
 export * from "./documents";
 export * from "./insurance";
 export * from "./investments";
+export * from "./juridico-dashboard";
 export * from "./legal-contracts";
 export * from "./locations";
 export * from "./miniagent-credentials";

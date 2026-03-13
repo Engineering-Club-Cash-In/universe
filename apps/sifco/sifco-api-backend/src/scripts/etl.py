@@ -17,7 +17,7 @@ COLUMNAS_REQUERIDAS = [
 
 # Orden de meses para procesar (de más reciente a más antiguo)
 ORDEN_MESES = [
-    "Marzo 2026", "Febrero 2026", "Enero 2026", "Diciembre 2025", "Noviembre 2025",
+    "Mayo 2026", "Abril 2026", "Marzo 2026", "Febrero 2026", "Enero 2026", "Diciembre 2025", "Noviembre 2025",
     "Octubre 2025", "Septiembre 2025", "Agosto 2025", "Julio 2025",
     "Junio 2025", "Mayo 2025", "Abril 2025", "Marzo 2025",
     "Febrero 2025", "Enero 2025", "Diciembre 2024", "Noviembre 2024",
@@ -62,6 +62,27 @@ def cargar_hoja(xlsx, nombre_hoja):
     except Exception as e:
         print(f"  Error al cargar hoja '{nombre_hoja}': {e}")
         return None
+
+
+def normalizar_nombre(nombre):
+    """Normaliza un nombre para búsqueda: sin tildes, sin '/' y sin espacios extras"""
+    if pd.isna(nombre):
+        return ""
+    
+    import unicodedata
+    
+    # 1. Quitar tildes y normalizar caracteres
+    texto = unicodedata.normalize('NFD', str(nombre))
+    texto = texto.encode('ascii', 'ignore').decode('utf-8')
+    
+    # 2. Quitar todo después de '/' (codeudores)
+    if '/' in texto:
+        texto = texto.split('/')[0]
+        
+    # 3. Mayúsculas y limpieza de espacios
+    texto = " ".join(texto.upper().split())
+    
+    return texto
 
 
 def obtener_creditos_enero_2026(xlsx):
@@ -614,11 +635,25 @@ def procesar_creditos(xlsx, hojas_disponibles, grupos_creditos):
         creditos_info = []
         inversionistas_actuales = []
 
+        group_nombre_cliente = "Desconocido"
         for numero_credito in creditos:
+            # Obtener nombre del cliente para búsqueda por nombre (fallback)
+            nombre_cliente = None
+            if df_enero is not None:
+                col_buscar_nombre = encontrar_columna(df_enero, 'nombre')
+                col_buscar_credito = encontrar_columna(df_enero, 'crédito sifco', 'credito sifco')
+                if col_buscar_nombre and col_buscar_credito:
+                    fila_cliente = df_enero[df_enero[col_buscar_credito].astype(str).str.strip() == str(numero_credito).strip()]
+                    if not fila_cliente.empty:
+                        nombre_cliente = fila_cliente.iloc[0][col_buscar_nombre]
+                        if nombre_cliente and group_nombre_cliente == "Desconocido":
+                            group_nombre_cliente = str(nombre_cliente).strip()
+
             info_pago = buscar_ultimo_pago_optimizado(
                 hojas_cache,
                 hojas_disponibles,
-                numero_credito
+                numero_credito,
+                nombre_cliente=nombre_cliente
             )
 
             if info_pago:
@@ -645,6 +680,7 @@ def procesar_creditos(xlsx, hojas_disponibles, grupos_creditos):
 
         resultado.append({
             "numeroCredito": str(padre),
+            "nombreCliente": group_nombre_cliente,
             "creditos": creditos_info,
             "inversionistasActuales": inversionistas_actuales
         })
@@ -707,12 +743,13 @@ def obtener_cuota_y_monto(fila, columnas):
     return cuota, monto_boleta
 
 
-def buscar_ultimo_pago_optimizado(hojas_cache, hojas_disponibles, numero_credito):
+def buscar_ultimo_pago_optimizado(hojas_cache, hojas_disponibles, numero_credito, nombre_cliente=None):
     """
     Busca última cuota pagada.
     - Pagada: cuando Cuota == Monto boleta
     - Pago parcial: cuando Monto boleta > 0 pero != Cuota
     - Ignorar: cuando Monto boleta es 0, vacío o null
+    - Fallback: si no encuentra por numero_credito, intenta por nombre_cliente
     """
     # Ordenar hojas según ORDEN_MESES
     hojas_ordenadas = []
@@ -743,6 +780,23 @@ def buscar_ultimo_pago_optimizado(hojas_cache, hojas_disponibles, numero_credito
         # Buscar el crédito
         numero_str = str(numero_credito).strip()
         df_temp = df[df[col_buscar].astype(str).str.strip() == numero_str]
+
+        # Si no se encuentra por número de crédito, intentar por nombre de cliente (fallback)
+        if len(df_temp) == 0 and nombre_cliente:
+            col_nombre = encontrar_columna(df, 'nombre')
+            if col_nombre:
+                # Normalizar ambos para comparar
+                nombre_norm_buscado = normalizar_nombre(nombre_cliente)
+                df['_temp_nombre_norm'] = df[col_nombre].apply(normalizar_nombre)
+                
+                # Filtrar por nombre y asegurar que sea el registro más relevante (usamos el primero)
+                # OJO: Aquí se podría mejorar comparando cuotas si hay varios del mismo nombre
+                df_temp = df[df['_temp_nombre_norm'] == nombre_norm_buscado]
+                
+                if len(df_temp) > 0:
+                    # Si hay varias cuotas para el mismo nombre en el mismo mes, 
+                    # usualmente queremos la que tenga datos de pago reales
+                    pass
 
         if len(df_temp) > 0:
             fila = df_temp.iloc[0]

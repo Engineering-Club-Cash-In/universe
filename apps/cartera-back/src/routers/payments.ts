@@ -22,7 +22,7 @@ import { reversePayment } from "../controllers/reversePayment";
 import { revertPaymentToPending } from "../controllers/revertPaymentToPending";
 import { processInvestors } from "../controllers/processInvestors";
 import { ajustarCuotasConSIFCO, marcarCuotasPagadasHastaNumero, procesarPagosSIFCODesdeJSON } from "../controllers/migratePayments";
-import { updateInstallments, updateAllInstallments } from "../controllers/updateCredit";
+import { updateInstallments, updateAllInstallments, calcularDeudaTotal } from "../controllers/updateCredit";
 
 export const liquidatePaymentsSchema = z.object({
   pago_id: z.number().int().positive(),
@@ -1167,13 +1167,62 @@ export const paymentRouter = new Elysia()
   "/marcar-cuotas",
   async ({ body, set }) => {
     try {
-      const { numero_credito_sifco, hasta_cuota, fecha_primer_pago } = body;
+      const { numero_credito_sifco, hasta_cuota, fecha_primer_pago, updateCapital } = body;
 
       await marcarCuotasPagadasHastaNumero({
         numero_credito_sifco,
         hasta_cuota,
         fecha_primer_pago,
       });
+
+      if (updateCapital !== undefined) {
+        // 1. Upsert capital
+        await db
+          .update(creditos)
+          .set({ capital: updateCapital.toString() })
+          .where(eq(creditos.numero_credito_sifco, numero_credito_sifco));
+
+        // 2. Fetch updated credit
+        const [credito] = await db
+          .select()
+          .from(creditos)
+          .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
+          .limit(1);
+
+        if (!credito) {
+          set.status = 404;
+          return { success: false, message: "Crédito no encontrado tras actualizar capital" };
+        }
+
+        // 3. Recalculate total debt
+        const totals = calcularDeudaTotal({
+          capital: Number(credito.capital),
+          porcentaje_interes: Number(credito.porcentaje_interes),
+          seguro_10_cuotas: Number(credito.seguro_10_cuotas ?? 0),
+          membresias_pago: Number(credito.membresias_pago ?? 0),
+          otros: Number(credito.otros ?? 0),
+          gps: Number(credito.gps ?? 0),
+          cuota: Number(credito.cuota),
+          plazo: Number(credito.plazo),
+        });
+
+        // 4. Update debt total and other calculated fields
+        await db
+          .update(creditos)
+          .set({
+            deudatotal: totals.totalDeuda,
+            iva_12: totals.iva_12,
+            cuota_interes: totals.interes,
+          })
+          .where(eq(creditos.numero_credito_sifco, numero_credito_sifco));
+
+        // 5. Update installments
+        await updateInstallments({
+          numero_credito_sifco,
+          nueva_cuota: Number(credito.cuota),
+          all: false,
+        });
+      }
 
       set.status = 200;
       return {
@@ -1191,10 +1240,11 @@ export const paymentRouter = new Elysia()
       numero_credito_sifco: t.String(),
       hasta_cuota: t.Number(),
       fecha_primer_pago: t.Optional(t.String()),
+      updateCapital: t.Optional(t.Number()),
     }),
     detail: {
       tags: ["Créditos"],
-      summary: "Marcar cuotas pagadas hasta un número de cuota",
+      summary: "Marcar cuotas pagadas o actualizar capital y recalcular deuda",
     },
   }
 )

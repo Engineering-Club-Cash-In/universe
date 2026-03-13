@@ -7,7 +7,7 @@ import {
   inversionistas,
   usuarios,
 } from "../database/db";
-import { and, eq, ilike, sql } from "drizzle-orm";
+import { and, eq, ilike, inArray, sql } from "drizzle-orm";
 
 /** Quita tildes/acentos de un string */
 function removeAccents(str: string): string {
@@ -404,6 +404,210 @@ export const llenarTablaEspejo = async ({ body, query, set }: any) => {
     return {
       success: false,
       message: "Error al llenar tabla espejo",
+      error: String(error),
+    };
+  }
+};
+
+export const getCreditsWithMirrors = async ({ set }: any) => {
+  try {
+    const allCredits = await db
+      .select({
+        credito_id: creditos.credito_id,
+        numero_credito_sifco: creditos.numero_credito_sifco,
+        cliente: usuarios.nombre,
+        espejo: {
+          id: creditos_inversionistas_espejo.id,
+          inversionista_id: creditos_inversionistas_espejo.inversionista_id,
+          monto_aportado: creditos_inversionistas_espejo.monto_aportado,
+          cuota_inversionista: creditos_inversionistas_espejo.cuota_inversionista,
+        },
+        nombre_inversionista: inversionistas.nombre,
+        real_inversionista_id: creditos_inversionistas.inversionista_id
+      })
+      .from(creditos)
+      .innerJoin(usuarios, eq(usuarios.usuario_id, creditos.usuario_id))
+      .leftJoin(
+        creditos_inversionistas_espejo,
+        eq(creditos.credito_id, creditos_inversionistas_espejo.credito_id)
+      )
+      .leftJoin(
+        inversionistas,
+        eq(creditos_inversionistas_espejo.inversionista_id, inversionistas.inversionista_id)
+      )
+      .leftJoin(
+        creditos_inversionistas,
+        eq(creditos.credito_id, creditos_inversionistas.credito_id)
+      );
+
+    const creditMap = new Map<number, any>();
+
+    for (const row of allCredits) {
+      if (!creditMap.has(row.credito_id)) {
+        creditMap.set(row.credito_id, {
+          credito_id: row.credito_id,
+          numero_credito_sifco: row.numero_credito_sifco,
+          cliente: row.cliente,
+          mirrors: [],
+          hasBlockedInvestor: false
+        });
+      }
+
+      const entry = creditMap.get(row.credito_id);
+
+      if (row.real_inversionista_id === 86 || row.real_inversionista_id === 89) {
+          entry.hasBlockedInvestor = true;
+      }
+
+      if (row.espejo && row.espejo.id) {
+          if (row.espejo.inversionista_id === 86 || row.espejo.inversionista_id === 89) {
+              entry.hasBlockedInvestor = true;
+          } else {
+             const exists = entry.mirrors.some((m: any) => m.id === row.espejo?.id);
+             if (!exists && row.espejo) {
+                entry.mirrors.push({
+                    ...row.espejo,
+                    nombre_inversionista: row.nombre_inversionista
+                });
+             }
+          }
+      }
+    }
+
+    const conEspejo: any[] = [];
+    const sinEspejo: any[] = [];
+
+    for (const credit of creditMap.values()) {
+        const hasBlocked = credit.hasBlockedInvestor;
+        delete credit.hasBlockedInvestor;
+
+        if (hasBlocked) {
+            continue;
+        }
+
+        if (credit.mirrors.length > 0) {
+            conEspejo.push(credit);
+        } else {
+            delete credit.mirrors;
+            sinEspejo.push(credit);
+        }
+    }
+
+    set.status = 200;
+    return {
+      success: true,
+      con_espejo: conEspejo,
+      sin_espejo: sinEspejo
+    };
+
+  } catch (error) {
+    console.error("[getCreditsWithMirrors] Error:", error);
+    set.status = 500;
+    return {
+      success: false,
+      message: "Error al obtener creditos con espejo",
+      error: String(error),
+    };
+  }
+};
+
+export const getCreditsByInvestor = async ({ query, set }: any) => {
+  try {
+    const { id } = query;
+    if (!id) {
+      set.status = 400;
+      return { success: false, message: "Falta el parámetro 'id' (inversionista_id)" };
+    }
+
+    const targetId = Number(id);
+    if (isNaN(targetId)) {
+        set.status = 400;
+        return { success: false, message: "El ID debe ser un número válido" };
+    }
+
+    const realParticipations = await db
+      .select({ credito_id: creditos_inversionistas.credito_id })
+      .from(creditos_inversionistas)
+      .where(eq(creditos_inversionistas.inversionista_id, targetId));
+
+    const mirrorParticipations = await db
+      .select({ credito_id: creditos_inversionistas_espejo.credito_id })
+      .from(creditos_inversionistas_espejo)
+      .where(eq(creditos_inversionistas_espejo.inversionista_id, targetId));
+
+    const uniqueCreditIds = new Set<number>();
+    realParticipations.forEach(r => uniqueCreditIds.add(r.credito_id));
+    mirrorParticipations.forEach(m => uniqueCreditIds.add(m.credito_id));
+
+    const creditIds = Array.from(uniqueCreditIds);
+
+    if (creditIds.length === 0) {
+        return {
+            success: true,
+            message: "El inversionista no tiene créditos asociados.",
+            data: []
+        };
+    }
+
+    const creditsDetails = await db
+        .select({
+            credito_id: creditos.credito_id,
+            numero_credito_sifco: creditos.numero_credito_sifco,
+            cliente: usuarios.nombre,
+        })
+        .from(creditos)
+        .innerJoin(usuarios, eq(usuarios.usuario_id, creditos.usuario_id))
+        .where(inArray(creditos.credito_id, creditIds));
+
+    const allRealInvestors = await db
+        .select({
+            credito_id: creditos_inversionistas.credito_id,
+            inversionista_id: creditos_inversionistas.inversionista_id,
+            nombre: inversionistas.nombre,
+            monto_aportado: creditos_inversionistas.monto_aportado,
+            porcentaje: creditos_inversionistas.porcentaje_participacion_inversionista
+        })
+        .from(creditos_inversionistas)
+        .innerJoin(inversionistas, eq(inversionistas.inversionista_id, creditos_inversionistas.inversionista_id))
+        .where(inArray(creditos_inversionistas.credito_id, creditIds));
+
+    const allMirrorInvestors = await db
+        .select({
+            credito_id: creditos_inversionistas_espejo.credito_id,
+            inversionista_id: creditos_inversionistas_espejo.inversionista_id,
+            nombre: inversionistas.nombre,
+            monto_aportado: creditos_inversionistas_espejo.monto_aportado,
+            porcentaje: creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
+            cuota_inversionista: creditos_inversionistas_espejo.cuota_inversionista
+        })
+        .from(creditos_inversionistas_espejo)
+        .innerJoin(inversionistas, eq(inversionistas.inversionista_id, creditos_inversionistas_espejo.inversionista_id))
+        .where(inArray(creditos_inversionistas_espejo.credito_id, creditIds));
+
+    const results = creditsDetails.map(c => {
+        const realForThisCredit = allRealInvestors.filter(r => r.credito_id === c.credito_id);
+        const mirrorForThisCredit = allMirrorInvestors.filter(m => m.credito_id === c.credito_id);
+
+        return {
+            ...c,
+            inversionistas_originales: realForThisCredit,
+            inversionistas_espejos: mirrorForThisCredit
+        };
+    });
+
+    set.status = 200;
+    return {
+      success: true,
+      inversionista_consultado: targetId,
+      data: results
+    };
+
+  } catch (error) {
+    console.error("[getCreditsByInvestor] Error:", error);
+    set.status = 500;
+    return {
+      success: false,
+      message: "Error al obtener créditos por inversionista",
       error: String(error),
     };
   }

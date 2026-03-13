@@ -6,8 +6,8 @@
  * QUE HACE:
  *   Compara resultado_ultimos_pagos.json (ETL) contra cartera_actual_v2.json (DB snapshot).
  *   - Cuotas: si difieren, consulta la BD para verificar el estado de las cuotas faltantes
- *     (si tienen pagos, si están pagadas, fecha de pago, etc.)
  *   - Capital: compara solo por enteros (Math.trunc)
+ *   - Agrupa por crédito (sifco_base) e incluye array de inversionistas con nombre y capital
  *
  * USO:
  *   node src/migration/comparar_discrepancias.js
@@ -44,7 +44,6 @@ function parseCuota(raw) {
 }
 
 async function consultarCuotasEnDB(client, sifco, cuotasAVerificar) {
-  // Buscar credito_id por numero_credito_sifco
   const creditoRes = await client.query(
     `SELECT credito_id FROM cartera.creditos WHERE numero_credito_sifco = $1 LIMIT 1`,
     [sifco]
@@ -54,7 +53,6 @@ async function consultarCuotasEnDB(client, sifco, cuotasAVerificar) {
 
   const creditoId = creditoRes.rows[0].credito_id;
 
-  // Consultar las cuotas específicas con sus pagos
   const cuotasRes = await client.query(
     `SELECT
        cc.cuota_id,
@@ -76,7 +74,6 @@ async function consultarCuotasEnDB(client, sifco, cuotasAVerificar) {
     [creditoId, cuotasAVerificar]
   );
 
-  // Agrupar por numero_cuota
   const resultado = {};
   for (const row of cuotasRes.rows) {
     const numCuota = row.numero_cuota;
@@ -129,165 +126,167 @@ async function comparar() {
     }
   }
 
-  // Calcular totales ETL por SIFCO base
-  const totalesEtl = {};
+  // Pre-procesar ETL: agrupar por sifco_base
+  const gruposPorSifco = {};
   for (const grupo of etlRaw) {
+    const nombreGrupo = grupo.nombreCliente;
+    const inversionistasActuales = (grupo.inversionistasActuales || []).map(inv => ({
+      numeroCredito: inv.numeroCredito,
+      inversionista: inv.inversionista,
+      capital: inv.capital
+    }));
+
     for (const credito of (grupo.creditos || [])) {
       const sifcoBase = (credito.numeroCredito || '').split('_')[0];
-      totalesEtl[sifcoBase] = (totalesEtl[sifcoBase] || 0) + parseFloat(credito.capitalRestante || 0);
+      if (!gruposPorSifco[sifcoBase]) {
+        gruposPorSifco[sifcoBase] = {
+          sifcoBase,
+          nombreCliente: credito.nombreCliente || nombreGrupo,
+          cuotaEtl: parseCuota(credito.numeroCuota),
+          capitalTotal: 0,
+          inversionistas: inversionistasActuales
+        };
+      }
+      gruposPorSifco[sifcoBase].capitalTotal += parseFloat(credito.capitalRestante || 0);
     }
   }
 
   const client = await pool.connect();
   const discrepancias = [];
-  let encontradosSifco = 0, encontradosNombre = 0, noEncontrados = 0, totalProcesados = 0;
+  let encontradosSifco = 0, encontradosNombre = 0, noEncontrados = 0;
   let cuotasIguales = 0, cuotasDiferentes = 0;
   let capitalIgual = 0, capitalDiferente = 0;
 
   try {
-    for (const grupo of etlRaw) {
-      const nombreGrupo = grupo.nombreCliente;
-      for (const creditoEtl of (grupo.creditos || [])) {
-        totalProcesados++;
-        const sifcoEtl = creditoEtl.numeroCredito || '';
-        const sifcoBase = sifcoEtl.split('_')[0];
-        const nombreEtl = creditoEtl.nombreCliente || nombreGrupo;
-        const inversionistaEtl = creditoEtl.inversionista || 'N/A';
-        const capitalEtl = parseFloat(creditoEtl.capitalRestante || 0);
-        const capitalTotalEtl = totalesEtl[sifcoBase] || 0;
-        const cuotaEtl = parseCuota(creditoEtl.numeroCuota);
+    for (const sifcoBase of Object.keys(gruposPorSifco)) {
+      const grupo = gruposPorSifco[sifcoBase];
 
-        // Buscar match
-        let match = null;
-        let matchType = null;
+      // Buscar match
+      let match = null;
+      let matchType = null;
 
-        if (dbBySifco[sifcoBase]) {
-          match = dbBySifco[sifcoBase];
-          matchType = 'sifco';
-          encontradosSifco++;
-        } else {
-          const normName = normalizarNombre(nombreEtl);
-          if (dbByName[normName]) {
-            const matches = dbByName[normName];
-            match = matches.find(m => Math.abs(parseFloat(m.capital || 0) - capitalTotalEtl) < 50) || matches[0];
-            matchType = 'nombre';
-            encontradosNombre++;
-          }
+      if (dbBySifco[sifcoBase]) {
+        match = dbBySifco[sifcoBase];
+        matchType = 'sifco';
+        encontradosSifco++;
+      } else {
+        const normName = normalizarNombre(grupo.nombreCliente);
+        if (dbByName[normName]) {
+          const matches = dbByName[normName];
+          match = matches.find(m => Math.abs(parseFloat(m.capital || 0) - grupo.capitalTotal) < 50) || matches[0];
+          matchType = 'nombre';
+          encontradosNombre++;
+        }
+      }
+
+      if (!match) {
+        noEncontrados++;
+        continue;
+      }
+
+      const capDb = parseFloat(match.capital || 0);
+      const cuotaDb = parseInt(match.cuotas_pagadas || 0, 10);
+
+      // Comparar capital por enteros
+      const capitalEtlEntero = Math.trunc(grupo.capitalTotal);
+      const capitalDbEntero = Math.trunc(capDb);
+      const capitalCoincide = capitalEtlEntero === capitalDbEntero;
+
+      if (capitalCoincide) capitalIgual++;
+      else capitalDiferente++;
+
+      // Comparar cuotas
+      const cuotasCoinciden = grupo.cuotaEtl === cuotaDb;
+      if (cuotasCoinciden) cuotasIguales++;
+      else cuotasDiferentes++;
+
+      const entrada = {
+        sifco_base: sifcoBase,
+        nombre_etl: grupo.nombreCliente,
+        nombre_db: match.nombre_cliente,
+        match_type: matchType,
+        cuota_etl: grupo.cuotaEtl,
+        cuota_db: cuotaDb,
+        cuotas_coinciden: cuotasCoinciden,
+        capital_total_etl: grupo.capitalTotal,
+        capital_total_etl_entero: capitalEtlEntero,
+        capital_db: capDb,
+        capital_db_entero: capitalDbEntero,
+        capital_coincide: capitalCoincide,
+        inversionistas: grupo.inversionistas,
+        verificacion_cuotas_db: null
+      };
+
+      // Solo consultar DB si las cuotas NO coinciden
+      if (!cuotasCoinciden && grupo.cuotaEtl > cuotaDb) {
+        const cuotasAVerificar = [];
+        for (let i = cuotaDb + 1; i <= grupo.cuotaEtl; i++) {
+          cuotasAVerificar.push(i);
         }
 
-        if (!match) {
-          noEncontrados++;
-          continue;
-        }
+        const verificacion = await consultarCuotasEnDB(client, sifcoBase, cuotasAVerificar);
 
-        const capDb = parseFloat(match.capital || 0);
-        const cuotaDb = parseInt(match.cuotas_pagadas || 0, 10);
-
-        // Comparar capital por enteros
-        const capitalEtlEntero = Math.trunc(capitalTotalEtl);
-        const capitalDbEntero = Math.trunc(capDb);
-        const capitalCoincide = capitalEtlEntero === capitalDbEntero;
-
-        if (capitalCoincide) capitalIgual++;
-        else capitalDiferente++;
-
-        // Comparar cuotas
-        const cuotasCoinciden = cuotaEtl === cuotaDb;
-        if (cuotasCoinciden) cuotasIguales++;
-        else cuotasDiferentes++;
-
-        const entrada = {
-          sifco_etl: sifcoEtl,
-          sifco_base: sifcoBase,
-          nombre_etl: nombreEtl,
-          inversionista_etl: inversionistaEtl,
-          nombre_db: match.nombre_cliente,
-          match_type: matchType,
-          cuota_etl: cuotaEtl,
-          cuota_db: cuotaDb,
-          cuotas_coinciden: cuotasCoinciden,
-          capital_total_etl: capitalTotalEtl,
-          capital_total_etl_entero: capitalEtlEntero,
-          capital_db: capDb,
-          capital_db_entero: capitalDbEntero,
-          capital_coincide: capitalCoincide,
-          verificacion_cuotas_db: null
-        };
-
-        // Solo consultar DB si las cuotas NO coinciden
-        if (!cuotasCoinciden && cuotaEtl > cuotaDb) {
-          const cuotasAVerificar = [];
-          for (let i = cuotaDb + 1; i <= cuotaEtl; i++) {
-            cuotasAVerificar.push(i);
-          }
-
-          const verificacion = await consultarCuotasEnDB(client, sifcoBase, cuotasAVerificar);
-
-          if (verificacion) {
-            const detalle = [];
-            for (const numCuota of cuotasAVerificar) {
-              const info = verificacion[numCuota];
-              if (!info) {
-                detalle.push({
-                  numero_cuota: numCuota,
-                  estado: 'NO_ENCONTRADA_EN_DB',
-                  pagos: []
-                });
-                continue;
-              }
-
-              const tienePagos = info.pagos.length > 0;
-              // Verificar si algún pago es de marzo 2026
-              const esMarzo = (fecha) => {
-                if (!fecha) return false;
-                const d = new Date(fecha);
-                return d.getFullYear() === 2026 && d.getMonth() === 2; // 2 = marzo
-              };
-              const algunPagoPending = info.pagos.some(p => p.validation_status === 'pending');
-              const algunPagoEnMarzo = info.pagos.some(p => esMarzo(p.fecha_pago));
-
-              const algunPagado = info.pagos.some(p => p.pago_pagado === true);
-
-              let estado;
-              if (tienePagos && algunPagoPending && algunPagoEnMarzo) {
-                estado = 'PAGADA_PENDING_MARZO';
-              } else if (tienePagos && algunPagado) {
-                estado = 'PAGADA_NO_MARZO';
-              } else if (tienePagos && !algunPagado) {
-                estado = 'TIENE_PAGO_NO_PAGADA';
-              } else {
-                estado = 'SIN_PAGOS';
-              }
-
-              // Filtrar: no incluir las de marzo
-              if (estado === 'PAGADA_PENDING_MARZO') continue;
-
+        if (verificacion) {
+          const detalle = [];
+          for (const numCuota of cuotasAVerificar) {
+            const info = verificacion[numCuota];
+            if (!info) {
               detalle.push({
                 numero_cuota: numCuota,
-                estado,
-                fecha_pago: info.pagos.length > 0 ? info.pagos[info.pagos.length - 1].fecha_pago : null,
-                pagos: info.pagos.map(p => ({
-                  pago_id: p.pago_id,
-                  pagado: p.pago_pagado,
-                  validation_status: p.validation_status,
-                  fecha_pago: p.fecha_pago,
-                  cuota_pago: p.cuota_pago,
-                  monto_boleta: p.monto_boleta,
-                  monto_boleta_cuota: p.monto_boleta_cuota
-                }))
+                estado: 'NO_ENCONTRADA_EN_DB',
+                pagos: []
               });
+              continue;
             }
-            entrada.verificacion_cuotas_db = detalle;
-          } else {
-            entrada.verificacion_cuotas_db = 'CREDITO_NO_ENCONTRADO_EN_DB';
-          }
-        } else if (!cuotasCoinciden && cuotaEtl < cuotaDb) {
-          // DB tiene más cuotas que ETL - situación inversa
-          entrada.verificacion_cuotas_db = `DB_TIENE_MAS_CUOTAS (DB: ${cuotaDb}, ETL: ${cuotaEtl})`;
-        }
 
-        discrepancias.push(entrada);
+            const tienePagos = info.pagos.length > 0;
+            const esMarzo = (fecha) => {
+              if (!fecha) return false;
+              const d = new Date(fecha);
+              return d.getFullYear() === 2026 && d.getMonth() === 2;
+            };
+            const algunPagoPending = info.pagos.some(p => p.validation_status === 'pending');
+            const algunPagoEnMarzo = info.pagos.some(p => esMarzo(p.fecha_pago));
+            const algunPagado = info.pagos.some(p => p.pago_pagado === true);
+
+            let estado;
+            if (tienePagos && algunPagoPending && algunPagoEnMarzo) {
+              estado = 'PAGADA_PENDING_MARZO';
+            } else if (tienePagos && algunPagado) {
+              estado = 'PAGADA_NO_MARZO';
+            } else if (tienePagos && !algunPagado) {
+              estado = 'TIENE_PAGO_NO_PAGADA';
+            } else {
+              estado = 'SIN_PAGOS';
+            }
+
+            // Filtrar: no incluir las de marzo
+            if (estado === 'PAGADA_PENDING_MARZO') continue;
+
+            detalle.push({
+              numero_cuota: numCuota,
+              estado,
+              fecha_pago: info.pagos.length > 0 ? info.pagos[info.pagos.length - 1].fecha_pago : null,
+              pagos: info.pagos.map(p => ({
+                pago_id: p.pago_id,
+                pagado: p.pago_pagado,
+                validation_status: p.validation_status,
+                fecha_pago: p.fecha_pago,
+                cuota_pago: p.cuota_pago,
+                monto_boleta: p.monto_boleta,
+                monto_boleta_cuota: p.monto_boleta_cuota
+              }))
+            });
+          }
+          entrada.verificacion_cuotas_db = detalle;
+        } else {
+          entrada.verificacion_cuotas_db = 'CREDITO_NO_ENCONTRADO_EN_DB';
+        }
+      } else if (!cuotasCoinciden && grupo.cuotaEtl < cuotaDb) {
+        entrada.verificacion_cuotas_db = `DB_TIENE_MAS_CUOTAS (DB: ${cuotaDb}, ETL: ${grupo.cuotaEtl})`;
       }
+
+      discrepancias.push(entrada);
     }
   } finally {
     client.release();
@@ -310,7 +309,7 @@ async function comparar() {
 
   const reporte = {
     resumen: {
-      total_items_etl: totalProcesados,
+      total_creditos_etl: Object.keys(gruposPorSifco).length,
       total_creditos_con_discrepancia: discCuotas.length,
       total_cuotas_discrepantes: totalCuotasDisc,
       por_estado: conteoPorEstado
@@ -322,7 +321,16 @@ async function comparar() {
 
   console.log('Comparacion finalizada.');
   console.log('Resumen:');
-  console.log(`  Total items ETL:          ${totalProcesados}`);
+  console.log(`  Total creditos ETL:        ${Object.keys(gruposPorSifco).length}`);
+  console.log(`  Match por SIFCO:           ${encontradosSifco}`);
+  console.log(`  Match por Nombre:          ${encontradosNombre}`);
+  console.log(`  No encontrados:            ${noEncontrados}`);
+  console.log(`  ---`);
+  console.log(`  Cuotas iguales:            ${cuotasIguales}`);
+  console.log(`  Cuotas diferentes:         ${cuotasDiferentes}`);
+  console.log(`  Capital igual (entero):    ${capitalIgual}`);
+  console.log(`  Capital dif (entero):      ${capitalDiferente}`);
+  console.log(`  ---`);
   console.log(`  Creditos con discrepancia: ${discCuotas.length}`);
   console.log(`  Cuotas discrepantes:       ${totalCuotasDisc}`);
   console.log(`  Por estado:`);

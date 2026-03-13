@@ -14,7 +14,7 @@ import { consultarEstadoCuentaPrestamo } from "../services/sifcoIntegrations";
 
 interface UpdateInstallmentsParams {
   numero_credito_sifco: string;
-  nueva_cuota: number;
+  nueva_cuota?: number;
   all?: boolean;
 }
 
@@ -37,6 +37,7 @@ const updateInstallments = async ({
         seguro_10_cuotas: creditos.seguro_10_cuotas,
         gps: creditos.gps,
         membresias_pago: creditos.membresias_pago,
+        cuota: creditos.cuota,
       })
       .from(creditos)
       .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
@@ -86,7 +87,7 @@ const updateInstallments = async ({
   const gpsFijoPorMes = new Big(credito.gps ?? 0);
   const membresiasFijoPorMes = new Big(credito.membresias_pago ?? 0);
   const porcentajeInteres = new Big(credito.porcentaje_interes ?? 0).div(100);
-  const cuotaMensual = new Big(nueva_cuota);
+  const cuotaMensual = new Big(nueva_cuota ?? credito.cuota);
   const cuotaInteresCredito = credito.cuota_interes;
 
   // Capital en memoria (saldo actual)
@@ -383,7 +384,7 @@ const validateInvestorsCapital = (
 /**
  * Calcula la deuda total del crédito basándose en los parámetros
  */
-function calcularDeudaTotal({
+export function calcularDeudaTotal({
   capital,
   porcentaje_interes,
   seguro_10_cuotas,

@@ -16,7 +16,7 @@ import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagos
 import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment, aplicarMontoAPago } from "../controllers/registerPayment";
 import { eq } from "drizzle-orm";
 import { db } from "../database";
-import { creditos, pagos_credito } from "../database/db";
+import { creditos, pagos_credito, creditos_inversionistas, inversionistas } from "../database/db";
 import { revalidatePayment } from "../controllers/revalidatePayment";
 import { reversePayment } from "../controllers/reversePayment";
 import { revertPaymentToPending } from "../controllers/revertPaymentToPending";
@@ -1167,13 +1167,54 @@ export const paymentRouter = new Elysia()
   "/marcar-cuotas",
   async ({ body, set }) => {
     try {
-      const { numero_credito_sifco, hasta_cuota, fecha_primer_pago, updateCapital } = body;
+      const { numero_credito_sifco, hasta_cuota, fecha_primer_pago, updateCapital, inversionistas: invInput } = body;
 
       await marcarCuotasPagadasHastaNumero({
         numero_credito_sifco,
         hasta_cuota,
         fecha_primer_pago,
       });
+
+      if (invInput && invInput.length > 0) {
+        // 1. Fetch current credit ID
+        const creditResult = await db
+          .select({ credito_id: creditos.credito_id })
+          .from(creditos)
+          .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
+          .limit(1);
+
+        if (creditResult.length > 0) {
+          const credito_id = creditResult[0].credito_id;
+
+          // 2. Fetch current linked inversionistas for this credit
+          const linkedInversionistas = await db
+            .select({
+              id: creditos_inversionistas.id,
+              nombre: inversionistas.nombre,
+            })
+            .from(creditos_inversionistas)
+            .innerJoin(inversionistas, eq(creditos_inversionistas.inversionista_id, inversionistas.inversionista_id))
+            .where(eq(creditos_inversionistas.credito_id, credito_id));
+
+          const normalize = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+
+          for (const inputInv of invInput) {
+            if (!inputInv.nombre) continue;
+            
+            const normalizedInputName = normalize(inputInv.nombre);
+            const matched = linkedInversionistas.find(li => normalize(li.nombre) === normalizedInputName);
+
+            if (matched && inputInv.capital !== undefined && inputInv.capital !== "") {
+              await db
+                .update(creditos_inversionistas)
+                .set({ monto_aportado: inputInv.capital.toString() })
+                .where(eq(creditos_inversionistas.id, matched.id));
+              
+              console.log(`✅ Actualizado monto_aportado para inversionista ${inputInv.nombre} a ${inputInv.capital}`);
+            }
+          }
+        }
+      }
 
       if (updateCapital !== undefined) {
         // 1. Upsert capital
@@ -1183,6 +1224,7 @@ export const paymentRouter = new Elysia()
           .where(eq(creditos.numero_credito_sifco, numero_credito_sifco));
 
         // 2. Fetch updated credit
+        // Fetch updated credit
         const [credito] = await db
           .select()
           .from(creditos)
@@ -1227,7 +1269,7 @@ export const paymentRouter = new Elysia()
       set.status = 200;
       return {
         success: true,
-        message: `Cuotas marcadas hasta la cuota ${hasta_cuota} para crédito ${numero_credito_sifco}`,
+        message: `Proceso completado para crédito ${numero_credito_sifco}`,
       };
     } catch (error: any) {
       console.error("Error en marcar-cuotas:", error);
@@ -1241,10 +1283,14 @@ export const paymentRouter = new Elysia()
       hasta_cuota: t.Number(),
       fecha_primer_pago: t.Optional(t.String()),
       updateCapital: t.Optional(t.Number()),
+      inversionistas: t.Optional(t.Array(t.Object({
+        nombre: t.String(),
+        capital: t.Union([t.String(), t.Number()])
+      })))
     }),
     detail: {
       tags: ["Créditos"],
-      summary: "Marcar cuotas pagadas o actualizar capital y recalcular deuda",
+      summary: "Marcar cuotas pagadas, actualizar capitales de inversionistas y recalcular deuda",
     },
   }
 )

@@ -254,6 +254,14 @@ function RouteComponent() {
 						</p>
 					</div>
 				</div>
+				<div className="flex gap-2">
+					<Button variant="outline" asChild>
+						<Link to="/juridico/dashboard">Dashboard</Link>
+					</Button>
+					<Button asChild>
+						<Link to="/juridico/dashboard-data">Carga de datos</Link>
+					</Button>
+				</div>
 			</div>
 
 			{/* Stats Cards */}

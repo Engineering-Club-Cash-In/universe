@@ -12,6 +12,7 @@ import { cobrosRouter } from "./cobros";
 import { contractGenerationRouter } from "./contract-generation";
 import { crmRouter } from "./crm";
 import { insuranceRouter } from "./insurance";
+import { juridicoDashboardRouter } from "./juridico-dashboard";
 import { legalContractsRouter } from "./legal-contracts";
 import { locationsRouter } from "./locations";
 import { miniagentRouter } from "./miniagent";
@@ -309,6 +310,10 @@ export const disbursementRouter = {
 
 	// Upload (presigned URLs) — placed here to avoid TS7056 in appRouter
 	getUploadPresignedUrl: uploadRouter.getUploadPresignedUrl,
+
+	// Dashboard jurídico manual
+	getJuridicoDashboardSnapshot: juridicoDashboardRouter.getSnapshot,
+	updateJuridicoDashboardSnapshot: juridicoDashboardRouter.updateSnapshot,
 };
 
 export type AppRouter = typeof appRouter;

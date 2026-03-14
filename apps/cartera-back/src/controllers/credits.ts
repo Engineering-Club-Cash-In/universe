@@ -36,7 +36,7 @@ import {
   isNull,
 } from "drizzle-orm";
 import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./payments";
-import { Context } from "elysia/dist/context";
+
 
 export const getCreditoByNumero = async (numero_credito_sifco: string) => {
   try {
@@ -624,7 +624,7 @@ export async function getCreditosWithUserByMesAnio(
         if (cuotas_atrasadas == 0 ) {
           conditions.push(sql`${creditos.statusCredit} IN ('ACTIVO')`);
         } else {
-          conditions.push(sql`${creditos.statusCredit} IN ('ACTIVO', 'MOROSO')`);
+          conditions.push(sql`${creditos.statusCredit} IN ('ACTIVO', 'MOROSO', 'EN_CONVENIO')`);
         }
       } else {
         console.log(`🔎 Filtrando por estado: ${estado}`);

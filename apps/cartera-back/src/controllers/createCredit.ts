@@ -262,7 +262,7 @@ const insertCreditAndRelated = async (creditData: CreditData): Promise<{
     .plus(creditData.gps ?? 0)
     .plus(creditData.membresias_pago ?? 0)
     .plus(creditData.otros ?? 0);
-es
+ 
   const deudatotalRedondeado = deudatotal.round(2);
 
   // Buscar o crear usuario con los nuevos campos opcionales
@@ -835,6 +835,17 @@ export const insertCredit = async ({ body, set }: { body: unknown; set: SetConte
         .where(and(eq(platform_users.role, "ADMIN"), eq(platform_users.is_active, true)));
 
       const adminEmails = adminUsers.map((u) => u.email);
+
+      // Agregar el email del asesor asignado al crédito
+      const [asesorUser] = await db
+        .select({ email: platform_users.email })
+        .from(platform_users)
+        .where(and(eq(platform_users.asesor_id, creditDataForInsert.asesor_id), eq(platform_users.is_active, true)));
+
+      if (asesorUser && !adminEmails.includes(asesorUser.email)) {
+        adminEmails.push(asesorUser.email);
+        console.log(`📧 Asesor agregado a notificación: ${asesorUser.email}`);
+      }
 
       const investorNames: string[] = [];
       for (const inv of creditData.inversionistas) {

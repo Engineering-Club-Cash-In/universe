@@ -1,0 +1,1352 @@
+[
+  {
+    "numeroPrestamo": "01010214115350",
+    "comentario": "cancelar",
+    "cuotaEsperada": 20,
+    "cuotaEncontrada": 11,
+    "fechaCuota": "2025-12-28",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 51,
+    "cuotasPorCrear": 9
+  },
+  {
+    "numeroPrestamo": "01010214106990",
+    "comentario": "queda el de cartera",
+    "cuotaEsperada": 28,
+    "cuotaEncontrada": 27,
+    "fechaCuota": "2025-12-26",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 59,
+    "cuotasPorCrear": 1
+  },
+  {
+    "numeroPrestamo": "01010202101380",
+    "comentario": "quedo de ahuevo -- pero en cartera excel tiene otro capital",
+    "cuotaEsperada": 51,
+    "cuotaEncontrada": 50,
+    "fechaCuota": "2025-12-01",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214108510",
+    "comentario": "25860.54 --- eso deberia ser segun cartera Q26,257.12",
+    "cuotaEsperada": 24,
+    "cuotaEncontrada": 23,
+    "fechaCuota": "2025-12-26",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 59,
+    "cuotasPorCrear": 1
+  },
+  {
+    "numeroPrestamo": "01010214117990",
+    "comentario": "nitdoooooo cuadraddo",
+    "cuotaEsperada": 22,
+    "cuotaEncontrada": 6,
+    "fechaCuota": "2025-12-06",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 45,
+    "cuotasPorCrear": 15
+  },
+  {
+    "numeroPrestamo": "01010214104200",
+    "comentario": "se queda el de cartera -- diferente en sifco",
+    "cuotaEsperada": 39,
+    "cuotaEncontrada": 0,
+    "fechaCuota": "2025-12-06",
+    "plazoCompleto": 48,
+    "plazoEncontrado": 44,
+    "cuotasPorCrear": 4
+  },
+  {
+    "numeroPrestamo": "01010214108640",
+    "comentario": "solo se cambiaron 3 centavos",
+    "cuotaEsperada": 23,
+    "cuotaEncontrada": 22,
+    "fechaCuota": "2025-12-02",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010202105740",
+    "comentario": "concilaciones ------24053.11 cartera --- 25544.09 sifco",
+    "cuotaEsperada": 31,
+    "cuotaEncontrada": 30,
+    "fechaCuota": "2025-12-02",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214105930",
+    "comentario": "ese esta nitido",
+    "cuotaEsperada": 31,
+    "cuotaEncontrada": 30,
+    "fechaCuota": "2025-12-16",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214113070",
+    "comentario": "diferencia de un centvo ajustado",
+    "cuotaEsperada": 20,
+    "cuotaEncontrada": 15,
+    "fechaCuota": "2025-12-30",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 55,
+    "cuotasPorCrear": 5
+  },
+  {
+    "numeroPrestamo": "01010214113080",
+    "comentario": "es el mismo que el 01010214113070",
+    "cuotaEsperada": 20,
+    "cuotaEncontrada": 15,
+    "fechaCuota": "2025-12-30",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 55,
+    "cuotasPorCrear": 5
+  },
+  {
+    "numeroPrestamo": "01010214106280",
+    "comentario": "todo nice",
+    "cuotaEsperada": 29,
+    "cuotaEncontrada": 28,
+    "fechaCuota": "2025-12-04",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010202106270",
+    "comentario": "todo nice",
+    "cuotaEsperada": 29,
+    "cuotaEncontrada": 28,
+    "fechaCuota": "2025-12-04",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214105750",
+    "comentario": "todo nitido",
+    "cuotaEsperada": 31,
+    "cuotaEncontrada": 30,
+    "fechaCuota": "2025-12-07",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214103980",
+    "comentario": "nitido",
+    "cuotaEsperada": 39,
+    "cuotaEncontrada": 38,
+    "fechaCuota": "2025-12-07",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010202106640",
+    "comentario": "todo ok varia por centavos",
+    "cuotaEsperada": 28,
+    "cuotaEncontrada": 27,
+    "fechaCuota": "2025-12-07",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214106250",
+    "comentario": "todo ok",
+    "cuotaEsperada": 29,
+    "cuotaEncontrada": 28,
+    "fechaCuota": "2025-12-03",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214103370",
+    "comentario": "mayor capital en sifco, se queda el de cartera",
+    "cuotaEsperada": 42,
+    "cuotaEncontrada": 41,
+    "fechaCuota": "2025-12-08",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214105470",
+    "comentario": "mayor capital en sifco, se queda cartera -- diferencia de cuota",
+    "cuotaEsperada": 32,
+    "cuotaEncontrada": 31,
+    "fechaCuota": "2025-12-05",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214107830",
+    "comentario": "diferencia de 2 centavos se queda cartera",
+    "cuotaEsperada": 26,
+    "cuotaEncontrada": 25,
+    "fechaCuota": "2025-12-28",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010202102450",
+    "comentario": "diferencia 5 quetzales se queda cartera por diferencia de cuota",
+    "cuotaEsperada": 46,
+    "cuotaEncontrada": 45,
+    "fechaCuota": "2025-12-10",
+    "plazoCompleto": 48,
+    "plazoEncontrado": 48,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214117420",
+    "comentario": "todo nitido",
+    "cuotaEsperada": 23,
+    "cuotaEncontrada": 7,
+    "fechaCuota": "2025-12-02",
+    "plazoCompleto": 48,
+    "plazoEncontrado": 32,
+    "cuotasPorCrear": 16
+  },
+  {
+    "numeroPrestamo": "01010214104370",
+    "comentario": "todo nave",
+    "cuotaEsperada": 37,
+    "cuotaEncontrada": 36,
+    "fechaCuota": "2025-12-06",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214107060",
+    "comentario": "credito nitido ok",
+    "cuotaEsperada": 27,
+    "cuotaEncontrada": 26,
+    "fechaCuota": "2025-12-06",
+    "plazoCompleto": 48,
+    "plazoEncontrado": 48,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010202108250",
+    "comentario": "diferencia de 2 centavos por abonos",
+    "cuotaEsperada": 24,
+    "cuotaEncontrada": 23,
+    "fechaCuota": "2025-12-05",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214106610",
+    "comentario": "diferencia de centavos se queda cartera por diferencia de cuota",
+    "cuotaEsperada": 28,
+    "cuotaEncontrada": 27,
+    "fechaCuota": "2025-12-05",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214108690",
+    "comentario": "diferencia de 1 centavo se queda cartera",
+    "cuotaEsperada": 23,
+    "cuotaEncontrada": 22,
+    "fechaCuota": "2025-12-07",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214108680",
+    "comentario": "diferencia de 1 centavo cartera manda",
+    "cuotaEsperada": 23,
+    "cuotaEncontrada": 22,
+    "fechaCuota": "2025-12-07",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214108700",
+    "comentario": "diferencia de 19.34, diferencia de cuota se queda cartera ok",
+    "cuotaEsperada": 23,
+    "cuotaEncontrada": 22,
+    "fechaCuota": "2025-12-07",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214117560",
+    "comentario": "diferencia en 1 centavo se queda cartera",
+    "cuotaEsperada": 31,
+    "cuotaEncontrada": 7,
+    "fechaCuota": "2025-12-08",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 37,
+    "cuotasPorCrear": 23
+  },
+  {
+    "numeroPrestamo": "01010214108710",
+    "comentario": "cuadrado nitido",
+    "cuotaEsperada": 23,
+    "cuotaEncontrada": 22,
+    "fechaCuota": "2025-12-08",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010202108660",
+    "comentario": "descuadre en capital, se queda cartera por diferencia de abono capital",
+    "cuotaEsperada": 23,
+    "cuotaEncontrada": 22,
+    "fechaCuota": "2025-12-05",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214106940",
+    "comentario": "diferencia en centavos acumulativo de varios meses manda cartera",
+    "cuotaEsperada": 28,
+    "cuotaEncontrada": 27,
+    "fechaCuota": "2025-12-22",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214108200",
+    "comentario": "todo ok",
+    "cuotaEsperada": 25,
+    "cuotaEncontrada": 24,
+    "fechaCuota": "2025-12-21",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214104110",
+    "comentario": "diferencia de centavos manda cartera por diferencia de cuota",
+    "cuotaEsperada": 39,
+    "cuotaEncontrada": 38,
+    "fechaCuota": "2025-12-25",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214117520",
+    "comentario": "diferencia de capital, manda cartera por diferencia de cuota",
+    "cuotaEsperada": 31,
+    "cuotaEncontrada": 7,
+    "fechaCuota": "2025-12-07",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 37,
+    "cuotasPorCrear": 23
+  },
+  {
+    "numeroPrestamo": "01010214108270",
+    "comentario": "nitido cuadrado",
+    "cuotaEsperada": 24,
+    "cuotaEncontrada": 23,
+    "fechaCuota": "2025-12-12",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214109230",
+    "comentario": "nitido sin clavos",
+    "cuotaEsperada": 22,
+    "cuotaEncontrada": 21,
+    "fechaCuota": "2025-12-15",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010202105710",
+    "comentario": "nitido sin clavos diferencia de 10 centavos manda cartera diferencia de cuota",
+    "cuotaEsperada": 32,
+    "cuotaEncontrada": 31,
+    "fechaCuota": "2025-12-29",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214105260",
+    "comentario": "nitido diferencia de 3 quetzales por un abono mal aplicado",
+    "cuotaEsperada": 33,
+    "cuotaEncontrada": 32,
+    "fechaCuota": "2025-12-12",
+    "plazoCompleto": 36,
+    "plazoEncontrado": 36,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214108070",
+    "comentario": "diferencia de centavos se queda cartera varia por centavos la cuota manda cartera",
+    "cuotaEsperada": 25,
+    "cuotaEncontrada": 24,
+    "fechaCuota": "2025-12-15",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214117580",
+    "comentario": "nitido cuadrada",
+    "cuotaEsperada": 45,
+    "cuotaEncontrada": 7,
+    "fechaCuota": "2025-12-28",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 23,
+    "cuotasPorCrear": 37
+  },
+  {
+    "numeroPrestamo": "01010202107530",
+    "comentario": "nitido cuadrado",
+    "cuotaEsperada": 26,
+    "cuotaEncontrada": 25,
+    "fechaCuota": "2025-12-09",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214107550",
+    "comentario": "nitido sin error",
+    "cuotaEsperada": 26,
+    "cuotaEncontrada": 25,
+    "fechaCuota": "2025-12-13",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214104440",
+    "comentario": "diferencia de centavos en capital 28 centavos, varia por la cuota se queda cartera por diferencia de cuota",
+    "cuotaEsperada": 37,
+    "cuotaEncontrada": 36,
+    "fechaCuota": "2025-12-08",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214109160",
+    "comentario": "diferencia de centavos 7 se queda cartera por diferencia de cuota problemas de aproximacion",
+    "cuotaEsperada": 22,
+    "cuotaEncontrada": 21,
+    "fechaCuota": "2025-12-07",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214106800",
+    "comentario": "cuadrado nitido sin errores",
+    "cuotaEsperada": 28,
+    "cuotaEncontrada": 7,
+    "fechaCuota": "2025-12-14",
+    "plazoCompleto": 48,
+    "plazoEncontrado": 28,
+    "cuotasPorCrear": 20
+  },
+  {
+    "numeroPrestamo": "01010214106360",
+    "comentario": "diferencia en centavos se queda cartera por diferencia de cuota y abonos a capital",
+    "cuotaEsperada": 29,
+    "cuotaEncontrada": 28,
+    "fechaCuota": "2025-12-15",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214106340",
+    "comentario": "diferencia en centavos por cuota manda cartera",
+    "cuotaEsperada": 29,
+    "cuotaEncontrada": 28,
+    "fechaCuota": "2025-12-07",
+    "plazoCompleto": 38,
+    "plazoEncontrado": 38,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214107600",
+    "comentario": "sifco manda mal abono realizado en cartera en julio 2025 -- por eso manda sifco se manda a otros ver con alejandro (urgente) lo mando a otros en julio",
+    "cuotaEsperada": 26,
+    "cuotaEncontrada": 25,
+    "fechaCuota": "2025-12-15",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214107460",
+    "comentario": "diferencia de centavos manda cartera por diferencia de un abono",
+    "cuotaEsperada": 26,
+    "cuotaEncontrada": 25,
+    "fechaCuota": "2025-12-06",
+    "plazoCompleto": 48,
+    "plazoEncontrado": 47,
+    "cuotasPorCrear": 1
+  },
+  {
+    "numeroPrestamo": "01010214107960",
+    "comentario": "diferencia centavos manda cartera",
+    "cuotaEsperada": 25,
+    "cuotaEncontrada": 24,
+    "fechaCuota": "2025-12-07",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214117570",
+    "comentario": "diferencia grande abono a capital en sifco mal aplicado manda cartera",
+    "cuotaEsperada": 39,
+    "cuotaEncontrada": 7,
+    "fechaCuota": "2025-12-04",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 23,
+    "cuotasPorCrear": 37
+  },
+  {
+    "numeroPrestamo": "01010214104850",
+    "comentario": "todo nitido",
+    "cuotaEsperada": 35,
+    "cuotaEncontrada": 34,
+    "fechaCuota": "2025-12-14",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214104860",
+    "comentario": "todo nitido",
+    "cuotaEsperada": 35,
+    "cuotaEncontrada": 34,
+    "fechaCuota": "2025-12-14",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214103850",
+    "comentario": "diferencia de centavos se deja capital mayor de cartera diferencia de cuota en centavos",
+    "cuotaEsperada": 40,
+    "cuotaEncontrada": 39,
+    "fechaCuota": "2025-12-19",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214108780",
+    "comentario": "diferencia de cuota en centavos varia capital por centavos manda cartera",
+    "cuotaEsperada": 23,
+    "cuotaEncontrada": 22,
+    "fechaCuota": "2025-12-13",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214108880",
+    "comentario": "diferencia de cuota en centavos varia capital por centavos manda cartera",
+    "cuotaEsperada": 23,
+    "cuotaEncontrada": 22,
+    "fechaCuota": "2025-12-13",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214105320",
+    "comentario": "diferencia de 8 quetzales manda cartera por diferencia de cuota",
+    "cuotaEsperada": 33,
+    "cuotaEncontrada": 32,
+    "fechaCuota": "2025-12-17",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214112950",
+    "comentario": "diferencia de cuota manda cartera por diferencia de cuota y capital",
+    "cuotaEsperada": 46,
+    "cuotaEncontrada": 15,
+    "fechaCuota": "2025-12-18",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 30,
+    "cuotasPorCrear": 30
+  },
+  {
+    "numeroPrestamo": "01010214112940",
+    "comentario": "diferencia de cuota manda cartera por diferencia de cuota y capital",
+    "cuotaEsperada": 46,
+    "cuotaEncontrada": 15,
+    "fechaCuota": "2025-12-18",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 30,
+    "cuotasPorCrear": 30
+  },
+  {
+    "numeroPrestamo": "01010303200670",
+    "comentario": "diferencia de capitales por abonos a capitales manda cartera",
+    "cuotaEsperada": 29,
+    "cuotaEncontrada": 28,
+    "fechaCuota": "2025-12-16",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 57,
+    "cuotasPorCrear": 3
+  },
+  {
+    "numeroPrestamo": "01010214109130",
+    "comentario": "manda cartera diferencia de abono a capital",
+    "cuotaEsperada": 22,
+    "cuotaEncontrada": 21,
+    "fechaCuota": "2025-12-06",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214104010",
+    "comentario": "revision con alejandro se dejo el capital exacto que tiene pero hay que revisar si sifco o cartera manda, si se cambio la cuota del credito",
+    "cuotaEsperada": 39,
+    "cuotaEncontrada": 38,
+    "fechaCuota": "2025-12-14",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214106590",
+    "comentario": "todo ok",
+    "cuotaEsperada": 28,
+    "cuotaEncontrada": 27,
+    "fechaCuota": "2025-12-01",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214106670",
+    "comentario": "todo ok",
+    "cuotaEsperada": 28,
+    "cuotaEncontrada": 27,
+    "fechaCuota": "2025-12-08",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214108090",
+    "comentario": "todo ok",
+    "cuotaEsperada": 25,
+    "cuotaEncontrada": 24,
+    "fechaCuota": "2025-12-19",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214104040",
+    "comentario": "diferencia de centavos manda cartera",
+    "cuotaEsperada": 39,
+    "cuotaEncontrada": 38,
+    "fechaCuota": "2025-12-18",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010202117600",
+    "comentario": "revision con alejandro diferencia capital cuota diferente",
+    "cuotaEsperada": 37,
+    "cuotaEncontrada": 7,
+    "fechaCuota": "2025-12-19",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 31,
+    "cuotasPorCrear": 29
+  },
+  {
+    "numeroPrestamo": "01010214105490",
+    "comentario": "descuadre en centavos manda cartera por diferencia de cuota",
+    "cuotaEsperada": 32,
+    "cuotaEncontrada": 31,
+    "fechaCuota": "2025-12-08",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214108150",
+    "comentario": "todo ok queda cartera",
+    "cuotaEsperada": 25,
+    "cuotaEncontrada": 24,
+    "fechaCuota": "2025-12-19",
+    "plazoCompleto": 70,
+    "plazoEncontrado": 70,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214107570",
+    "comentario": "todo ok",
+    "cuotaEsperada": 26,
+    "cuotaEncontrada": 25,
+    "fechaCuota": "2025-12-14",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214108810",
+    "comentario": "todo ok",
+    "cuotaEsperada": 23,
+    "cuotaEncontrada": 22,
+    "fechaCuota": "2025-12-16",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214115390",
+    "comentario": "todo ok",
+    "cuotaEsperada": 23,
+    "cuotaEncontrada": 10,
+    "fechaCuota": "2025-12-16",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 48,
+    "cuotasPorCrear": 12
+  },
+  {
+    "numeroPrestamo": "01010214107220",
+    "comentario": "todo ok",
+    "cuotaEsperada": 27,
+    "cuotaEncontrada": 26,
+    "fechaCuota": "2025-12-23",
+    "plazoCompleto": 48,
+    "plazoEncontrado": 48,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214105330",
+    "comentario": "capital mayor en cartera centavos, se queda cartera por mal registro de pago en sifco 40 cc",
+    "cuotaEsperada": 33,
+    "cuotaEncontrada": 32,
+    "fechaCuota": "2025-12-19",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214103700",
+    "comentario": "todo ok",
+    "cuotaEsperada": 41,
+    "cuotaEncontrada": 40,
+    "fechaCuota": "2025-12-23",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214108380",
+    "comentario": "todo ok",
+    "cuotaEsperada": 24,
+    "cuotaEncontrada": 23,
+    "fechaCuota": "2025-12-19",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214106920",
+    "comentario": "todo ok",
+    "cuotaEsperada": 28,
+    "cuotaEncontrada": 27,
+    "fechaCuota": "2025-12-22",
+    "plazoCompleto": 36,
+    "plazoEncontrado": 36,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214108170",
+    "comentario": "diferencia de casi 12 centavos diferencia de cuota manda cartera",
+    "cuotaEsperada": 25,
+    "cuotaEncontrada": 24,
+    "fechaCuota": "2025-12-20",
+    "plazoCompleto": 48,
+    "plazoEncontrado": 48,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214104540",
+    "comentario": "diferencia de 1 quetzal diferencia de cuota manda cartera",
+    "cuotaEsperada": 37,
+    "cuotaEncontrada": 36,
+    "fechaCuota": "2025-12-22",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214103740",
+    "comentario": "todo ok varia por centavos diferencia en abono manda cartera",
+    "cuotaEsperada": 41,
+    "cuotaEncontrada": 40,
+    "fechaCuota": "2025-12-26",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214104880",
+    "comentario": "diferencia de 1 quetzal diferencia de cuota manda cartera",
+    "cuotaEsperada": 35,
+    "cuotaEncontrada": 34,
+    "fechaCuota": "2025-12-23",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214115120",
+    "comentario": "todo ok",
+    "cuotaEsperada": 23,
+    "cuotaEncontrada": 11,
+    "fechaCuota": "2025-12-09",
+    "plazoCompleto": 48,
+    "plazoEncontrado": 37,
+    "cuotasPorCrear": 11
+  },
+  {
+    "numeroPrestamo": "01010214115130",
+    "comentario": "todo ok",
+    "cuotaEsperada": 23,
+    "cuotaEncontrada": 11,
+    "fechaCuota": "2025-12-09",
+    "plazoCompleto": 48,
+    "plazoEncontrado": 37,
+    "cuotasPorCrear": 11
+  },
+  {
+    "numeroPrestamo": "01010214108050",
+    "comentario": "todo oki",
+    "cuotaEsperada": 25,
+    "cuotaEncontrada": 24,
+    "fechaCuota": "2025-12-15",
+    "plazoCompleto": 48,
+    "plazoEncontrado": 48,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214108100",
+    "comentario": "todo ok diferencia de centavos en capital y cuota manda cartera",
+    "cuotaEsperada": 25,
+    "cuotaEncontrada": 24,
+    "fechaCuota": "2025-12-19",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214106130",
+    "comentario": "todo ok",
+    "cuotaEsperada": 30,
+    "cuotaEncontrada": 29,
+    "fechaCuota": "2025-12-18",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214105110",
+    "comentario": "todo ok",
+    "cuotaEsperada": 34,
+    "cuotaEncontrada": 33,
+    "fechaCuota": "2025-12-24",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010202113040",
+    "comentario": "todo ok diferencia de centavos en capital y cuota manda cartera",
+    "cuotaEsperada": 45,
+    "cuotaEncontrada": 16,
+    "fechaCuota": "2025-12-26",
+    "plazoCompleto": 48,
+    "plazoEncontrado": 20,
+    "cuotasPorCrear": 28
+  },
+  {
+    "numeroPrestamo": "01010214109400",
+    "comentario": "manda cartera por un abono a capital pendiente de aplicar en sifco",
+    "cuotaEsperada": 22,
+    "cuotaEncontrada": 21,
+    "fechaCuota": "2025-12-26",
+    "plazoCompleto": 48,
+    "plazoEncontrado": 48,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214105310",
+    "comentario": "diferencia de capitales, manda sifco debido a una mala aplicacion de los abonos y diferencia de cuota",
+    "cuotaEsperada": 33,
+    "cuotaEncontrada": 32,
+    "fechaCuota": "2025-12-13",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214105300",
+    "comentario": "diferencia de capitales, manda CARTERA debido a una mala aplicacion de los abonos y diferencia de cuota",
+    "cuotaEsperada": 33,
+    "cuotaEncontrada": 32,
+    "fechaCuota": "2025-12-13",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214105290",
+    "comentario": "diferencia de capitales, manda CARTERA debido a una mala aplicacion de los abonos y diferencia de cuota",
+    "cuotaEsperada": 33,
+    "cuotaEncontrada": 32,
+    "fechaCuota": "2025-12-13",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214104570",
+    "comentario": "todo ok",
+    "cuotaEsperada": 23,
+    "cuotaEncontrada": 35,
+    "fechaCuota": "2025-12-10",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214107640",
+    "comentario": "cancelada",
+    "cuotaEsperada": 26,
+    "cuotaEncontrada": 25,
+    "fechaCuota": "2025-12-20",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214109380",
+    "comentario": "diferencia de capitales, manda CARTERA debido a una mala aplicacion de los abonos y diferencia de cuota",
+    "cuotaEsperada": 21,
+    "cuotaEncontrada": 20,
+    "fechaCuota": "2025-12-05",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214109390",
+    "comentario": "TODO OK",
+    "cuotaEsperada": 21,
+    "cuotaEncontrada": 20,
+    "fechaCuota": "2025-12-05",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214104910",
+    "comentario": "todo ok",
+    "cuotaEsperada": 34,
+    "cuotaEncontrada": 33,
+    "fechaCuota": "2025-12-02",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 36,
+    "cuotasPorCrear": 24
+  },
+  {
+    "numeroPrestamo": "01010214106750",
+    "comentario": "cancelado",
+    "cuotaEsperada": 28,
+    "cuotaEncontrada": 27,
+    "fechaCuota": "2025-12-14",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214104430",
+    "comentario": "manda cartera por diferencia de cuota y capital por un abono a capital mal aplicado en sifco",
+    "cuotaEsperada": 37,
+    "cuotaEncontrada": 36,
+    "fechaCuota": "2025-12-08",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214108230",
+    "comentario": "pendiente para validar si cobros ESPERAR CONFIRMACION",
+    "cuotaEsperada": 24,
+    "cuotaEncontrada": 23,
+    "fechaCuota": "2025-12-04",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214105730",
+    "comentario": "todo ok",
+    "cuotaEsperada": 32,
+    "cuotaEncontrada": 31,
+    "fechaCuota": "2025-12-30",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214108770",
+    "comentario": "todo ok",
+    "cuotaEsperada": 25,
+    "cuotaEncontrada": 24,
+    "fechaCuota": "2025-12-19",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010202108260",
+    "comentario": "todo ok",
+    "cuotaEsperada": 24,
+    "cuotaEncontrada": 23,
+    "fechaCuota": "2025-12-08",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214107540",
+    "comentario": "todo ok",
+    "cuotaEsperada": 26,
+    "cuotaEncontrada": 25,
+    "fechaCuota": "2025-12-10",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010202101800",
+    "comentario": "todo ok",
+    "cuotaEsperada": 49,
+    "cuotaEncontrada": 48,
+    "fechaCuota": "2025-12-07",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214104000",
+    "comentario": "cancelado",
+    "cuotaEsperada": 39,
+    "cuotaEncontrada": 38,
+    "fechaCuota": "2025-12-14",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214106420",
+    "comentario": "todo ok",
+    "cuotaEsperada": 29,
+    "cuotaEncontrada": 28,
+    "fechaCuota": "2025-12-17",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214109310",
+    "comentario": "todo ok",
+    "cuotaEsperada": 22,
+    "cuotaEncontrada": 21,
+    "fechaCuota": "2025-12-21",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214117710",
+    "comentario": "se queda capital de cartera por un abono a capital mal aplicado en sifco manda cartera",
+    "cuotaEsperada": 51,
+    "cuotaEncontrada": 8,
+    "fechaCuota": "2025-12-16",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 18,
+    "cuotasPorCrear": 42
+  },
+  {
+    "numeroPrestamo": "01010214108830",
+    "comentario": "todo ok",
+    "cuotaEsperada": 23,
+    "cuotaEncontrada": 22,
+    "fechaCuota": "2025-12-16",
+    "plazoCompleto": 36,
+    "plazoEncontrado": 36,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214117690",
+    "comentario": "ok",
+    "cuotaEsperada": 31,
+    "cuotaEncontrada": 7,
+    "fechaCuota": "2025-12-12",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 37,
+    "cuotasPorCrear": 23
+  },
+  {
+    "numeroPrestamo": "01010214106430",
+    "comentario": "ok",
+    "cuotaEsperada": 29,
+    "cuotaEncontrada": 28,
+    "fechaCuota": "2025-12-18",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214107690",
+    "comentario": "todo ok",
+    "cuotaEsperada": 26,
+    "cuotaEncontrada": 25,
+    "fechaCuota": "2025-12-22",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214103610",
+    "comentario": "capital diferente mayor en cartera, manda sifco debido a abono no aplicado en cartera",
+    "cuotaEsperada": 41,
+    "cuotaEncontrada": 40,
+    "fechaCuota": "2025-12-04",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214104090",
+    "comentario": "todo ok",
+    "cuotaEsperada": 39,
+    "cuotaEncontrada": 38,
+    "fechaCuota": "2025-12-24",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010202106090",
+    "comentario": "todo ok",
+    "cuotaEsperada": 30,
+    "cuotaEncontrada": 29,
+    "fechaCuota": "2025-12-12",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214108080",
+    "comentario": "todo ok",
+    "cuotaEsperada": 25,
+    "cuotaEncontrada": 24,
+    "fechaCuota": "2025-12-18",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214106660",
+    "comentario": "diferencia de 1 quetzal manda sifco",
+    "cuotaEsperada": 28,
+    "cuotaEncontrada": 27,
+    "fechaCuota": "2025-12-07",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214108670",
+    "comentario": "todo ok",
+    "cuotaEsperada": 23,
+    "cuotaEncontrada": 22,
+    "fechaCuota": "2025-12-07",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214108790",
+    "comentario": "todo ok",
+    "cuotaEsperada": 23,
+    "cuotaEncontrada": 22,
+    "fechaCuota": "2025-12-14",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214106020",
+    "comentario": "todo ok",
+    "cuotaEsperada": 30,
+    "cuotaEncontrada": 29,
+    "fechaCuota": "2025-12-11",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214107450",
+    "comentario": "todo ok",
+    "cuotaEsperada": 26,
+    "cuotaEncontrada": 25,
+    "fechaCuota": "2025-12-03",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214108910",
+    "comentario": "todo ok",
+    "cuotaEsperada": 23,
+    "cuotaEncontrada": 22,
+    "fechaCuota": "2025-12-23",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214118410",
+    "comentario": "todo ok",
+    "cuotaEsperada": 22,
+    "cuotaEncontrada": 6,
+    "fechaCuota": "2025-12-30",
+    "plazoCompleto": 24,
+    "plazoEncontrado": 10,
+    "cuotasPorCrear": 14
+  },
+  {
+    "numeroPrestamo": "01010214107850",
+    "comentario": "todo ok",
+    "cuotaEsperada": 26,
+    "cuotaEncontrada": 25,
+    "fechaCuota": "2025-12-29",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214104810",
+    "comentario": "cancelado",
+    "cuotaEsperada": 35,
+    "cuotaEncontrada": 34,
+    "fechaCuota": "2025-12-09",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214108930",
+    "comentario": "cancelado",
+    "cuotaEsperada": 23,
+    "cuotaEncontrada": 22,
+    "fechaCuota": "2025-12-23",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214109010",
+    "comentario": "TODO OK",
+    "cuotaEsperada": 23,
+    "cuotaEncontrada": 22,
+    "fechaCuota": "2025-12-27",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214109100",
+    "comentario": "TODO OK",
+    "cuotaEsperada": 22,
+    "cuotaEncontrada": 21,
+    "fechaCuota": "2025-12-06",
+    "plazoCompleto": 36,
+    "plazoEncontrado": 36,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214105010",
+    "comentario": "todo ok",
+    "cuotaEsperada": 34,
+    "cuotaEncontrada": 33,
+    "fechaCuota": "2025-12-13",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 36,
+    "cuotasPorCrear": 24
+  },
+  {
+    "numeroPrestamo": "01010214103840",
+    "comentario": "todo ok",
+    "cuotaEsperada": 40,
+    "cuotaEncontrada": 39,
+    "fechaCuota": "2025-12-12",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214105220",
+    "comentario": "todo ok",
+    "cuotaEsperada": 33,
+    "cuotaEncontrada": 32,
+    "fechaCuota": "2025-12-04",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  },
+  {
+    "numeroPrestamo": "01010214109200",
+    "comentario": "todo ok",
+    "cuotaEsperada": 22,
+    "cuotaEncontrada": 21,
+    "fechaCuota": "2025-12-11",
+    "plazoCompleto": 60,
+    "plazoEncontrado": 60,
+    "cuotasPorCrear": 0
+  }
+]

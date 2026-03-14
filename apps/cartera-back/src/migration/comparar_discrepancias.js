@@ -133,7 +133,9 @@ async function comparar() {
     const inversionistasActuales = (grupo.inversionistasActuales || []).map(inv => ({
       numeroCredito: inv.numeroCredito,
       inversionista: inv.inversionista,
-      capital: inv.capital
+      capital: inv.capital,
+      capitalRestante: inv.capitalRestante,
+      capitalUltimoPago: inv.capitalUltimoPago
     }));
 
     for (const credito of (grupo.creditos || [])) {

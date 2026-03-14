@@ -1169,12 +1169,13 @@ export const paymentRouter = new Elysia()
     try {
       const { numero_credito_sifco, hasta_cuota, fecha_primer_pago, updateCapital, inversionistas: invInput } = body;
 
-      await marcarCuotasPagadasHastaNumero({
-        numero_credito_sifco,
-        hasta_cuota,
-        fecha_primer_pago,
-      });
-
+      if (hasta_cuota) {
+        await marcarCuotasPagadasHastaNumero({
+          numero_credito_sifco,
+          hasta_cuota,
+          fecha_primer_pago,
+        });
+      }
       if (invInput && invInput.length > 0) {
         // 1. Fetch current credit ID
         const creditResult = await db
@@ -1280,7 +1281,7 @@ export const paymentRouter = new Elysia()
   {
     body: t.Object({
       numero_credito_sifco: t.String(),
-      hasta_cuota: t.Number(),
+      hasta_cuota: t.Optional(t.Number()),
       fecha_primer_pago: t.Optional(t.String()),
       updateCapital: t.Optional(t.Number()),
       inversionistas: t.Optional(t.Array(t.Object({

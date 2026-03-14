@@ -87,17 +87,17 @@ def normalizar_nombre(nombre):
 
 def obtener_creditos_enero_2026(xlsx):
     """
-    Obtiene todos los créditos de Enero 2026 que tienen Plazo válido (no vacío y no 0)
+    Obtiene todos los créditos de Febrero 2026 que tienen Plazo válido (no vacío y no 0)
     """
     print(f"\n{'='*60}")
-    print("PASO 1: Obteniendo créditos válidos de Enero 2026")
+    print("PASO 1: Obteniendo créditos válidos de Febrero 2026")
     print(f"{'='*60}")
 
-    df = cargar_hoja(xlsx, "Enero 2026")
+    df = cargar_hoja(xlsx, "Febrero 2026")
     if df is None:
-        raise Exception("No se pudo cargar la hoja 'Enero 2026'")
+        raise Exception("No se pudo cargar la hoja 'Febrero 2026'")
 
-    print(f"  Registros totales en Enero 2026: {len(df)}")
+    print(f"  Registros totales en Febrero 2026: {len(df)}")
 
     # Mostrar columnas disponibles
     print(f"\n  Columnas disponibles:")
@@ -126,7 +126,7 @@ def obtener_creditos_enero_2026(xlsx):
     print(f"  Registros con Plazo válido: {len(df_validos)}")
 
     # Guardar créditos válidos en Excel separado
-    archivo_creditos_validos = "creditos_validos_enero_2026.xlsx"
+    archivo_creditos_validos = "creditos_validos_febrero_2026.xlsx"
     df_validos.to_excel(archivo_creditos_validos, index=False)
     print(f"  Guardado en: {archivo_creditos_validos}")
 
@@ -369,23 +369,23 @@ def agregar_hijos_raros(df_creditos, grupos, col_credito):
     return grupos
 
 
-def extraer_inversionista_actual(df_enero, numero_credito):
+def extraer_inversionista_actual(df_febrero, numero_credito):
     """
     Busca un crédito en Enero 2026 y extrae:
     Inversionista, % Cash-In, % Inversionista, Capital
     """
-    col_credito = encontrar_columna(df_enero, 'crédito sifco', 'credito sifco')
+    col_credito = encontrar_columna(df_febrero, 'crédito sifco', 'credito sifco')
     if col_credito is None:
         return None
 
     numero_str = str(numero_credito).strip()
-    fila_df = df_enero[df_enero[col_credito].astype(str).str.strip() == numero_str]
+    fila_df = df_febrero[df_febrero[col_credito].astype(str).str.strip() == numero_str]
 
     if len(fila_df) == 0:
         return None
 
     fila = fila_df.iloc[0]
-    columnas_lista = list(df_enero.columns)
+    columnas_lista = list(df_febrero.columns)
 
     info = {
         "numeroCredito": numero_str,
@@ -393,6 +393,7 @@ def extraer_inversionista_actual(df_enero, numero_credito):
         "porcentajeCashIn": "",
         "porcentajeInversionista": "",
         "capital": "",
+        "capitalRestante": "",
         "cuota": ""
     }
 
@@ -419,6 +420,12 @@ def extraer_inversionista_actual(df_enero, numero_credito):
         val = fila.iloc[4]
         if pd.notna(val):
             info["capital"] = str(val)
+
+    # Capital restante - índice 25
+    if len(columnas_lista) > 25 and columnas_lista[25] == 'Capital restante':
+        val = fila.iloc[25]
+        if pd.notna(val):
+            info["capitalRestante"] = str(val)
 
     # Cuota - índice 37
     if len(columnas_lista) > 37 and columnas_lista[37] == 'Cuota':
@@ -620,10 +627,10 @@ def procesar_creditos(xlsx, hojas_disponibles, grupos_creditos):
             hojas_cache[hoja] = df
     print(f"  {len(hojas_cache)} hojas cargadas")
 
-    # Obtener df de Enero 2026 para inversionistas actuales
-    df_enero = hojas_cache.get("Enero 2026")
-    if df_enero is None:
-        print("  ADVERTENCIA: No se encontró hoja Enero 2026 para inversionistas actuales")
+    # Obtener df de Febrero 2026 para inversionistas actuales
+    df_febrero = hojas_cache.get("Febrero 2026")
+    if df_febrero is None:
+        print("  ADVERTENCIA: No se encontró hoja Febrero 2026 para inversionistas actuales")
 
     resultado = []
     total_grupos = len(grupos_creditos)
@@ -639,11 +646,11 @@ def procesar_creditos(xlsx, hojas_disponibles, grupos_creditos):
         for numero_credito in creditos:
             # Obtener nombre del cliente para búsqueda por nombre (fallback)
             nombre_cliente = None
-            if df_enero is not None:
-                col_buscar_nombre = encontrar_columna(df_enero, 'nombre')
-                col_buscar_credito = encontrar_columna(df_enero, 'crédito sifco', 'credito sifco')
+            if df_febrero is not None:
+                col_buscar_nombre = encontrar_columna(df_febrero, 'nombre')
+                col_buscar_credito = encontrar_columna(df_febrero, 'crédito sifco', 'credito sifco')
                 if col_buscar_nombre and col_buscar_credito:
-                    fila_cliente = df_enero[df_enero[col_buscar_credito].astype(str).str.strip() == str(numero_credito).strip()]
+                    fila_cliente = df_febrero[df_febrero[col_buscar_credito].astype(str).str.strip() == str(numero_credito).strip()]
                     if not fila_cliente.empty:
                         nombre_cliente = fila_cliente.iloc[0][col_buscar_nombre]
                         if nombre_cliente and group_nombre_cliente == "Desconocido":
@@ -672,10 +679,15 @@ def procesar_creditos(xlsx, hojas_disponibles, grupos_creditos):
                     "pagosParciales": []
                 })
 
-            # Extraer inversionista actual de Enero 2026
-            if df_enero is not None:
-                inv_info = extraer_inversionista_actual(df_enero, numero_credito)
+            # Extraer inversionista actual de Febrero 2026
+            if df_febrero is not None:
+                inv_info = extraer_inversionista_actual(df_febrero, numero_credito)
                 if inv_info:
+                    # Agregar capital restante del último pago del crédito
+                    if info_pago and info_pago.get("capitalRestante"):
+                        inv_info["capitalUltimoPago"] = info_pago["capitalRestante"]
+                    else:
+                        inv_info["capitalUltimoPago"] = ""
                     inversionistas_actuales.append(inv_info)
 
         resultado.append({

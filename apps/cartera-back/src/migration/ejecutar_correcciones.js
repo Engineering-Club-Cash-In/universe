@@ -3,7 +3,7 @@ const path = require('path');
 
 const REPORTE_PATH = path.join(__dirname, 'discrepancias_reporte.json');
 const COMENTARIOS_PATH = path.join(__dirname, 'reporteCreditos_comentarios.json');
-const BASE_URL = 'http://localhost:9000/payments/marcar-cuotas';
+const BASE_URL = 'http://localhost:9000/marcar-cuotas';
 const DELAY_MS = 5000;
 
 function sleep(ms) {
@@ -15,7 +15,7 @@ async function ejecutar() {
   const comentarios = JSON.parse(fs.readFileSync(COMENTARIOS_PATH, 'utf-8'));
   const comentariosSifco = new Set(comentarios.map(c => c.numeroPrestamo));
 
-  const allItems = data.discrepancias_cuotas || [];
+  const allItems = data.discrepancias || [];
   const ignorados = allItems.filter(item => comentariosSifco.has(item.sifco_base));
   const items = allItems.filter(item => !comentariosSifco.has(item.sifco_base));
 

@@ -1,0 +1,918 @@
+[
+  {
+    "sifco_base": "01010202101380",
+    "nombre_etl": "Gustavo Francisco Castro Orellana 2",
+    "nombre_db": "Gustavo Francisco Castro Orellana 2",
+    "match_type": "sifco",
+    "cuota_etl": 53,
+    "cuota_db": 52,
+    "cuotas_coinciden": false,
+    "capital_total_etl": 12367.058227650474,
+    "capital_total_etl_entero": 12367,
+    "capital_db": 12367.05,
+    "capital_db_entero": 12367,
+    "capital_coincide": true,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010202101380",
+        "inversionista": "Jose Antonio Rodriguez Batres",
+        "capital": "14018.930200285675",
+        "capitalRestante": "12367.058227650474",
+        "capitalUltimoPago": "12367.058227650474"
+      }
+    ],
+    "verificacion_cuotas_db": [
+      {
+        "numero_cuota": 53,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 20415,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "1887.39",
+            "monto_boleta": null,
+            "monto_boleta_cuota": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "sifco_base": "01010202105740",
+    "nombre_etl": "Jose David Jui Valenzuela",
+    "nombre_db": "Jose David Jui Valenzuela",
+    "match_type": "sifco",
+    "cuota_etl": 33,
+    "cuota_db": 30,
+    "cuotas_coinciden": false,
+    "capital_total_etl": 23522.350750842295,
+    "capital_total_etl_entero": 23522,
+    "capital_db": 24053.11,
+    "capital_db_entero": 24053,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010202105740",
+        "inversionista": "Cube Investments S.A.",
+        "capital": "24053.10637658891",
+        "capitalRestante": "23522.350750842295",
+        "capitalUltimoPago": "23522.350750842295"
+      }
+    ],
+    "verificacion_cuotas_db": [
+      {
+        "numero_cuota": 32,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 26350,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "1932.58",
+            "monto_boleta": null,
+            "monto_boleta_cuota": null
+          }
+        ]
+      },
+      {
+        "numero_cuota": 33,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 26351,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "1932.58",
+            "monto_boleta": null,
+            "monto_boleta_cuota": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "sifco_base": "01010214117570",
+    "nombre_etl": "Monica Maria Fuentes Rubio",
+    "nombre_db": "Monica Maria Fuentes Rubio",
+    "match_type": "sifco",
+    "cuota_etl": 41,
+    "cuota_db": 40,
+    "cuotas_coinciden": false,
+    "capital_total_etl": 12481.588516590391,
+    "capital_total_etl_entero": 12481,
+    "capital_db": 14307.29,
+    "capital_db_entero": 14307,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214117570",
+        "inversionista": "Milton Jose Barascout Ramirez",
+        "capital": "14307.286109943343",
+        "capitalRestante": "12481.588516590391",
+        "capitalUltimoPago": "12481.588516590391"
+      }
+    ],
+    "verificacion_cuotas_db": [
+      {
+        "numero_cuota": 41,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 65232,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "2081.19",
+            "monto_boleta": null,
+            "monto_boleta_cuota": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "sifco_base": "01010214104440",
+    "nombre_etl": "Jessica Valeska Colocho Mejivar",
+    "nombre_db": "Jessica Valeska Colocho Mejivar",
+    "match_type": "sifco",
+    "cuota_etl": 39,
+    "cuota_db": 38,
+    "cuotas_coinciden": false,
+    "capital_total_etl": 31767.22884603795,
+    "capital_total_etl_entero": 31767,
+    "capital_db": 33020.37,
+    "capital_db_entero": 33020,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214104440",
+        "inversionista": "Mario Estuardo Samperio Torrebiarte",
+        "capital": "33020.36668571789",
+        "capitalRestante": "31767.22884603795",
+        "capitalUltimoPago": "31767.22884603795"
+      }
+    ],
+    "verificacion_cuotas_db": [
+      {
+        "numero_cuota": 39,
+        "estado": "PAGADA_NO_MARZO",
+        "fecha_pago": "2026-03-10T19:41:33.000Z",
+        "pagos": [
+          {
+            "pago_id": 36251,
+            "pagado": true,
+            "validation_status": "validated",
+            "fecha_pago": "2026-03-10T19:41:33.000Z",
+            "cuota_pago": "2350.63",
+            "monto_boleta": "2350.63",
+            "monto_boleta_cuota": "2350.63"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "sifco_base": "01010214105930",
+    "nombre_etl": "Maria Andrea Guerra Arenales",
+    "nombre_db": "Maria Andrea Guerra Arenales",
+    "match_type": "sifco",
+    "cuota_etl": 33,
+    "cuota_db": 32,
+    "cuotas_coinciden": false,
+    "capital_total_etl": 46339.00125332497,
+    "capital_total_etl_entero": 46339,
+    "capital_db": 47686.83,
+    "capital_db_entero": 47686,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214105930",
+        "inversionista": "Jose Fernando Rios Gordillo",
+        "capital": "47686.83246786484",
+        "capitalRestante": "46339.00125332497",
+        "capitalUltimoPago": "46339.00125332497"
+      }
+    ],
+    "verificacion_cuotas_db": [
+      {
+        "numero_cuota": 33,
+        "estado": "PAGADA_NO_MARZO",
+        "fecha_pago": "2026-03-10T19:47:34.000Z",
+        "pagos": [
+          {
+            "pago_id": 27397,
+            "pagado": true,
+            "validation_status": "validated",
+            "fecha_pago": "2026-03-10T19:47:34.000Z",
+            "cuota_pago": "2865.35",
+            "monto_boleta": "2865.35",
+            "monto_boleta_cuota": "2865.35"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "sifco_base": "01010214104010",
+    "nombre_etl": "Kevin Rolando Vargas Rivas / Bryan David Vargas Rivas",
+    "nombre_db": "Kevin Rolando Vargas Rivas / Bryan David Vargas Rivas",
+    "match_type": "sifco",
+    "cuota_etl": 39,
+    "cuota_db": 38,
+    "cuotas_coinciden": false,
+    "capital_total_etl": 18187.801847417915,
+    "capital_total_etl_entero": 18187,
+    "capital_db": 18187.8,
+    "capital_db_entero": 18187,
+    "capital_coincide": true,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214104010",
+        "inversionista": "Juan Jose Massis",
+        "capital": "18187.801847417915",
+        "capitalRestante": "18187.801847417915",
+        "capitalUltimoPago": "18187.801847417915"
+      }
+    ],
+    "verificacion_cuotas_db": [
+      {
+        "numero_cuota": 39,
+        "estado": "PAGADA_NO_MARZO",
+        "fecha_pago": "2026-01-14T06:00:00.000Z",
+        "pagos": [
+          {
+            "pago_id": 38638,
+            "pagado": true,
+            "validation_status": "pending",
+            "fecha_pago": "2026-01-14T06:00:00.000Z",
+            "cuota_pago": "1421.93",
+            "monto_boleta": "1500.00",
+            "monto_boleta_cuota": "1500.00"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "sifco_base": "01010214108090",
+    "nombre_etl": "Marco Alejandro Correa Mancia / Andrea Maria Barrios Figueroa de Correa",
+    "nombre_db": "Marco Alejandro Correa Mancia / Andrea Maria Barrios Figueroa de Correa",
+    "match_type": "sifco",
+    "cuota_etl": 26,
+    "cuota_db": 25,
+    "cuotas_coinciden": false,
+    "capital_total_etl": 114288.32431594697,
+    "capital_total_etl_entero": 114288,
+    "capital_db": 114246.69,
+    "capital_db_entero": 114246,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214108090",
+        "inversionista": "Flujocapital",
+        "capital": "114288.32431594697",
+        "capitalRestante": "114288.32431594697",
+        "capitalUltimoPago": "114288.32431594697"
+      }
+    ],
+    "verificacion_cuotas_db": [
+      {
+        "numero_cuota": 26,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 91471,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "5428.47",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "sifco_base": "01010202113040",
+    "nombre_etl": "Carlos Daniel Wong",
+    "nombre_db": "Carlos Daniel Wong",
+    "match_type": "sifco",
+    "cuota_etl": 46,
+    "cuota_db": 45,
+    "cuotas_coinciden": false,
+    "capital_total_etl": 2812.9021139524966,
+    "capital_total_etl_entero": 2812,
+    "capital_db": 2812.91,
+    "capital_db_entero": 2812,
+    "capital_coincide": true,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010202113040",
+        "inversionista": "Post Net Guatemala S.A.",
+        "capital": "2812.9021139524966",
+        "capitalRestante": "2812.9021139524966",
+        "capitalUltimoPago": "2812.9021139524966"
+      }
+    ],
+    "verificacion_cuotas_db": [
+      {
+        "numero_cuota": 46,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 65350,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "1963.86",
+            "monto_boleta": null,
+            "monto_boleta_cuota": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "sifco_base": "01010214106430",
+    "nombre_etl": "Jacquelin Michel Arias Mejia",
+    "nombre_db": "Jacquelin Michel Arias Mejia",
+    "match_type": "sifco",
+    "cuota_etl": 30,
+    "cuota_db": 28,
+    "cuotas_coinciden": false,
+    "capital_total_etl": 27322.295433040003,
+    "capital_total_etl_entero": 27322,
+    "capital_db": 27322.3,
+    "capital_db_entero": 27322,
+    "capital_coincide": true,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214106430",
+        "inversionista": "Javier Arzu Perez",
+        "capital": "27322.295433040003",
+        "capitalRestante": "27322.295433040003",
+        "capitalUltimoPago": "27322.295433040003"
+      }
+    ],
+    "verificacion_cuotas_db": [
+      {
+        "numero_cuota": 29,
+        "estado": "PAGADA_NO_MARZO",
+        "fecha_pago": "2026-01-18T06:00:00.000Z",
+        "pagos": [
+          {
+            "pago_id": 50404,
+            "pagado": true,
+            "validation_status": "pending",
+            "fecha_pago": "2026-01-18T06:00:00.000Z",
+            "cuota_pago": "1711.70",
+            "monto_boleta": "1712.00",
+            "monto_boleta_cuota": "1712.00"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "sifco_base": "01010214107690",
+    "nombre_etl": "Axel Daniel Orellana Sequen",
+    "nombre_db": "Axel Daniel Orellana Sequen",
+    "match_type": "sifco",
+    "cuota_etl": 27,
+    "cuota_db": 26,
+    "cuotas_coinciden": false,
+    "capital_total_etl": 25262.748618681333,
+    "capital_total_etl_entero": 25262,
+    "capital_db": 25262.75,
+    "capital_db_entero": 25262,
+    "capital_coincide": true,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214107690",
+        "inversionista": "Autocash S.A.",
+        "capital": "25262.748618681333",
+        "capitalRestante": "25262.748618681333",
+        "capitalUltimoPago": "25262.748618681333"
+      }
+    ],
+    "verificacion_cuotas_db": [
+      {
+        "numero_cuota": 27,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 50463,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "1548.24",
+            "monto_boleta": null,
+            "monto_boleta_cuota": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "sifco_base": "01010214108670",
+    "nombre_etl": "Roberto Illescas Enriquez / Maria Jose Illescas Rodriguez",
+    "nombre_db": "Roberto Illescas Enriquez / Maria Jose Illescas Rodriguez",
+    "match_type": "sifco",
+    "cuota_etl": 24,
+    "cuota_db": 22,
+    "cuotas_coinciden": false,
+    "capital_total_etl": 28503.4584022947,
+    "capital_total_etl_entero": 28503,
+    "capital_db": 29076.59,
+    "capital_db_entero": 29076,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214108670",
+        "inversionista": "Autocash S.A.",
+        "capital": "28503.4584022947",
+        "capitalRestante": "28503.4584022947",
+        "capitalUltimoPago": "28503.4584022947"
+      }
+    ],
+    "verificacion_cuotas_db": [
+      {
+        "numero_cuota": 23,
+        "estado": "PAGADA_NO_MARZO",
+        "fecha_pago": "2025-12-07T06:00:00.000Z",
+        "pagos": [
+          {
+            "pago_id": 51772,
+            "pagado": true,
+            "validation_status": "no_required",
+            "fecha_pago": "2025-12-07T06:00:00.000Z",
+            "cuota_pago": "1664.21",
+            "monto_boleta": "1664.21",
+            "monto_boleta_cuota": "1664.21"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 24,
+        "estado": "PAGADA_NO_MARZO",
+        "fecha_pago": "2026-01-07T06:00:00.000Z",
+        "pagos": [
+          {
+            "pago_id": 51773,
+            "pagado": true,
+            "validation_status": "no_required",
+            "fecha_pago": "2026-01-07T06:00:00.000Z",
+            "cuota_pago": "1664.21",
+            "monto_boleta": "1664.21",
+            "monto_boleta_cuota": "1664.21"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "sifco_base": "01010214106020",
+    "nombre_etl": "Manuel Alejandro Perez Duarte",
+    "nombre_db": "Manuel Alejandro Perez Duarte",
+    "match_type": "sifco",
+    "cuota_etl": 31,
+    "cuota_db": 30,
+    "cuotas_coinciden": false,
+    "capital_total_etl": 21206.297091506443,
+    "capital_total_etl_entero": 21206,
+    "capital_db": 21206.32,
+    "capital_db_entero": 21206,
+    "capital_coincide": true,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214106020",
+        "inversionista": "Flujocapital",
+        "capital": "21206.297091506443",
+        "capitalRestante": "21206.297091506443",
+        "capitalUltimoPago": "21206.297091506443"
+      }
+    ],
+    "verificacion_cuotas_db": [
+      {
+        "numero_cuota": 31,
+        "estado": "PAGADA_NO_MARZO",
+        "fecha_pago": "2026-01-05T06:00:00.000Z",
+        "pagos": [
+          {
+            "pago_id": 52146,
+            "pagado": true,
+            "validation_status": "no_required",
+            "fecha_pago": "2026-01-05T06:00:00.000Z",
+            "cuota_pago": "1414.55",
+            "monto_boleta": "1414.55",
+            "monto_boleta_cuota": "1414.55"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "sifco_base": "01010214108910",
+    "nombre_etl": "Josue Azarael Perez Garcia",
+    "nombre_db": "Josue Azarael Perez Garcia",
+    "match_type": "sifco",
+    "cuota_etl": 23,
+    "cuota_db": 21,
+    "cuotas_coinciden": false,
+    "capital_total_etl": 53209.75506497797,
+    "capital_total_etl_entero": 53209,
+    "capital_db": 53209.76,
+    "capital_db_entero": 53209,
+    "capital_coincide": true,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214108910",
+        "inversionista": "Javier Arzu Perez",
+        "capital": "53209.75506497797",
+        "capitalRestante": "53209.75506497797",
+        "capitalUltimoPago": "53209.75506497797"
+      }
+    ],
+    "verificacion_cuotas_db": [
+      {
+        "numero_cuota": 22,
+        "estado": "PAGADA_NO_MARZO",
+        "fecha_pago": "2025-12-23T06:00:00.000Z",
+        "pagos": [
+          {
+            "pago_id": 52308,
+            "pagado": true,
+            "validation_status": "no_required",
+            "fecha_pago": "2025-12-23T06:00:00.000Z",
+            "cuota_pago": "2708.56",
+            "monto_boleta": "2708.56",
+            "monto_boleta_cuota": "2708.56"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 23,
+        "estado": "PAGADA_NO_MARZO",
+        "fecha_pago": "2026-01-23T06:00:00.000Z",
+        "pagos": [
+          {
+            "pago_id": 52309,
+            "pagado": true,
+            "validation_status": "no_required",
+            "fecha_pago": "2026-01-23T06:00:00.000Z",
+            "cuota_pago": "2708.56",
+            "monto_boleta": "2708.56",
+            "monto_boleta_cuota": "2708.56"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "sifco_base": "01010214107850",
+    "nombre_etl": "Mirian Marleny Solares Del Cid de Solares",
+    "nombre_db": "Mirian Marleny Solares Del Cid de Solares",
+    "match_type": "sifco",
+    "cuota_etl": 24,
+    "cuota_db": 22,
+    "cuotas_coinciden": false,
+    "capital_total_etl": 29258.736944892982,
+    "capital_total_etl_entero": 29258,
+    "capital_db": 30425.64,
+    "capital_db_entero": 30425,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214107850",
+        "inversionista": "Alexander Kachler Simons (AMJK)",
+        "capital": "28052.300860156716",
+        "capitalRestante": "28052.300860156716",
+        "capitalUltimoPago": "29258.736944892982"
+      }
+    ],
+    "verificacion_cuotas_db": [
+      {
+        "numero_cuota": 23,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 65516,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "1592.33",
+            "monto_boleta": null,
+            "monto_boleta_cuota": null
+          }
+        ]
+      },
+      {
+        "numero_cuota": 24,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 65517,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "1592.33",
+            "monto_boleta": null,
+            "monto_boleta_cuota": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "sifco_base": "01010214104810",
+    "nombre_etl": "Pablo Josue Alvarez Sanchez",
+    "nombre_db": "Pablo Josue Alvarez Sanchez",
+    "match_type": "sifco",
+    "cuota_etl": 37,
+    "cuota_db": 33,
+    "cuotas_coinciden": false,
+    "capital_total_etl": 0,
+    "capital_total_etl_entero": 0,
+    "capital_db": 91529.54,
+    "capital_db_entero": 91529,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214104810",
+        "inversionista": "Javier Arzu Perez",
+        "capital": "83271.44905734886",
+        "capitalRestante": "0.0",
+        "capitalUltimoPago": "0.0"
+      }
+    ],
+    "verificacion_cuotas_db": [
+      {
+        "numero_cuota": 34,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 65587,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "86663.8",
+            "monto_boleta": null,
+            "monto_boleta_cuota": null
+          }
+        ]
+      },
+      {
+        "numero_cuota": 35,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 65588,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "86663.8",
+            "monto_boleta": null,
+            "monto_boleta_cuota": null
+          }
+        ]
+      },
+      {
+        "numero_cuota": 36,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 65589,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "86663.8",
+            "monto_boleta": null,
+            "monto_boleta_cuota": null
+          }
+        ]
+      },
+      {
+        "numero_cuota": 37,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 65590,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "86663.8",
+            "monto_boleta": null,
+            "monto_boleta_cuota": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "sifco_base": "01010214109010",
+    "nombre_etl": "Vivian Maricela Rodriguez Alvarado de Melendez / Yessica Marina Melendez Lopez",
+    "nombre_db": "Vivian Maricela Rodriguez Alvarado de Melendez / Yessica Marina Melendez Lopez",
+    "match_type": "sifco",
+    "cuota_etl": 24,
+    "cuota_db": 23,
+    "cuotas_coinciden": false,
+    "capital_total_etl": 111341.25657902747,
+    "capital_total_etl_entero": 111341,
+    "capital_db": 113580.04,
+    "capital_db_entero": 113580,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214109010",
+        "inversionista": "Flujocapital",
+        "capital": "111341.25657902747",
+        "capitalRestante": "111341.25657902747",
+        "capitalUltimoPago": "111341.25657902747"
+      }
+    ],
+    "verificacion_cuotas_db": [
+      {
+        "numero_cuota": 24,
+        "estado": "PAGADA_NO_MARZO",
+        "fecha_pago": "2026-02-27T17:31:02.000Z",
+        "pagos": [
+          {
+            "pago_id": 65697,
+            "pagado": true,
+            "validation_status": "pending",
+            "fecha_pago": "2026-02-27T17:31:02.000Z",
+            "cuota_pago": "5115.51",
+            "monto_boleta": "5116.00",
+            "monto_boleta_cuota": "5116.00"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "sifco_base": "01010214105010",
+    "nombre_etl": "Gerson Abisay Chicoj Samayoa / Marco Otoniel Chicoj Samayoa",
+    "nombre_db": "Gerson Abisay Chicoj Samayoa / Marco Otoniel Chicoj Samayoa",
+    "match_type": "sifco",
+    "cuota_etl": 34,
+    "cuota_db": 33,
+    "cuotas_coinciden": false,
+    "capital_total_etl": 3399.6560938915236,
+    "capital_total_etl_entero": 3399,
+    "capital_db": 5060.28,
+    "capital_db_entero": 5060,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214105010",
+        "inversionista": "Inversiones Monaco S.A. (Oscar Jose Massis Massis)",
+        "capital": "3399.6560938915236",
+        "capitalRestante": "3399.6560938915236",
+        "capitalUltimoPago": "3399.6560938915236"
+      }
+    ],
+    "verificacion_cuotas_db": [
+      {
+        "numero_cuota": 34,
+        "estado": "PAGADA_NO_MARZO",
+        "fecha_pago": "2025-12-13T06:00:00.000Z",
+        "pagos": [
+          {
+            "pago_id": 111305,
+            "pagado": true,
+            "validation_status": "no_required",
+            "fecha_pago": "2025-12-13T06:00:00.000Z",
+            "cuota_pago": "2292.15",
+            "monto_boleta": "2292.15",
+            "monto_boleta_cuota": "2292.15"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "sifco_base": "01010214103840",
+    "nombre_etl": "Hector Daniel Rodriguez Pineda",
+    "nombre_db": "Hector Daniel Rodriguez Pineda",
+    "match_type": "sifco",
+    "cuota_etl": 40,
+    "cuota_db": 39,
+    "cuotas_coinciden": false,
+    "capital_total_etl": 32265.68403085584,
+    "capital_total_etl_entero": 32265,
+    "capital_db": 33613.83,
+    "capital_db_entero": 33613,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214103840",
+        "inversionista": "Christopher Schlosser Montes",
+        "capital": "32265.68403085584",
+        "capitalRestante": "32265.68403085584",
+        "capitalUltimoPago": "32265.68403085584"
+      }
+    ],
+    "verificacion_cuotas_db": [
+      {
+        "numero_cuota": 40,
+        "estado": "PAGADA_NO_MARZO",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 91688,
+            "pagado": true,
+            "validation_status": "pending",
+            "fecha_pago": "2026-02-27T21:51:00.000Z",
+            "cuota_pago": "2455.61",
+            "monto_boleta": "2932.61",
+            "monto_boleta_cuota": "2932.61"
+          },
+          {
+            "pago_id": 65869,
+            "pagado": true,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "2455.61",
+            "monto_boleta": null,
+            "monto_boleta_cuota": null
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "sifco_base": "01010214109200",
+    "nombre_etl": "Ronald Estuardo Mendez Siles / Yenifer Lourdes Rodriguez Lux",
+    "nombre_db": "Ronald Estuardo Mendez Siles / Yenifer Lourdes Rodriguez Lux",
+    "match_type": "sifco",
+    "cuota_etl": 23,
+    "cuota_db": 21,
+    "cuotas_coinciden": false,
+    "capital_total_etl": 46530.116224085825,
+    "capital_total_etl_entero": 46530,
+    "capital_db": 48319.23,
+    "capital_db_entero": 48319,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214109200",
+        "inversionista": "Flujocapital",
+        "capital": "46530.116224085825",
+        "capitalRestante": "46530.116224085825",
+        "capitalUltimoPago": "46530.116224085825"
+      }
+    ],
+    "verificacion_cuotas_db": [
+      {
+        "numero_cuota": 22,
+        "estado": "PAGADA_NO_MARZO",
+        "fecha_pago": "2025-12-11T06:00:00.000Z",
+        "pagos": [
+          {
+            "pago_id": 104934,
+            "pagado": true,
+            "validation_status": "no_required",
+            "fecha_pago": "2025-12-11T06:00:00.000Z",
+            "cuota_pago": "2469.48",
+            "monto_boleta": "2469.48",
+            "monto_boleta_cuota": "2469.48"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 23,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 65972,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "2469.48",
+            "monto_boleta": null,
+            "monto_boleta_cuota": null
+          }
+        ]
+      }
+    ]
+  }
+]

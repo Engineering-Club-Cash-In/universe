@@ -19,11 +19,15 @@ import { VEHICLE_DOCUMENT_TYPES } from "@/lib/document-constants";
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import { client } from "@/utils/orpc";
 
+type OpportunityDocument = Awaited<
+	ReturnType<typeof client.getOpportunityDocuments>
+>[number];
+type OpportunityDocumentType = OpportunityDocument["documentType"];
+
 interface OpportunityDocumentUploadProps {
 	opportunityId: string;
-	documents: any[];
+	documents: OpportunityDocument[];
 	isLoading: boolean;
-	onRefresh: () => void;
 	hasVehicle?: boolean;
 }
 
@@ -97,11 +101,12 @@ export function OpportunityDocumentUpload({
 	opportunityId,
 	documents,
 	isLoading,
-	onRefresh,
 	hasVehicle = false,
 }: OpportunityDocumentUploadProps) {
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
-	const [documentType, setDocumentType] = useState<string>("");
+	const [documentType, setDocumentType] = useState<
+		OpportunityDocumentType | ""
+	>("");
 	const [includeAll3Months, setIncludeAll3Months] = useState(false);
 
 	// Verificar si el documento seleccionado es de vehículo y no hay vehículo asignado
@@ -112,9 +117,15 @@ export function OpportunityDocumentUpload({
 
 	const queryClient = useQueryClient();
 
-	const uploadedTypes = new Set(
-		documents?.map((d: any) => d.documentType) || [],
-	);
+	const formatUploadedDate = (value: unknown) => {
+		if (!value) return "Fecha desconocida";
+		const date = new Date(value as string | number | Date);
+		return Number.isNaN(date.getTime())
+			? "Fecha desconocida"
+			: date.toLocaleDateString();
+	};
+
+	const uploadedTypes = new Set(documents?.map((d) => d.documentType) || []);
 
 	// Crear opciones para el combobox
 	const documentOptions = useMemo(() => {
@@ -132,18 +143,18 @@ export function OpportunityDocumentUpload({
 	}, [uploadedTypes]);
 
 	const uploadMutation = useMutation({
-		mutationFn: async (data: { file: File; documentType: string }) => {
-			const { key } = await uploadFileToR2WithRetry(
-				data.file,
-				{
-					resourceType: "opportunity_document",
-					resourceId: opportunityId,
-				},
-			);
+		mutationFn: async (data: {
+			file: File;
+			documentType: OpportunityDocumentType;
+		}) => {
+			const { key } = await uploadFileToR2WithRetry(data.file, {
+				resourceType: "opportunity_document",
+				resourceId: opportunityId,
+			});
 
 			return await client.uploadOpportunityDocument({
 				opportunityId,
-				documentType: data.documentType as any,
+				documentType: data.documentType,
 				file: {
 					name: data.file.name,
 					type: data.file.type,
@@ -157,7 +168,6 @@ export function OpportunityDocumentUpload({
 			queryClient.invalidateQueries({
 				queryKey: ["getOpportunityDocuments", opportunityId],
 			});
-			onRefresh();
 			setSelectedFile(null);
 			setDocumentType("");
 			const fileInput = document.getElementById(
@@ -179,7 +189,6 @@ export function OpportunityDocumentUpload({
 			queryClient.invalidateQueries({
 				queryKey: ["getOpportunityDocuments", opportunityId],
 			});
-			onRefresh();
 		},
 		onError: (error: Error) => {
 			toast.error(`Error al eliminar documento: ${error.message}`);
@@ -354,9 +363,9 @@ export function OpportunityDocumentUpload({
 					</div>
 				) : documents && documents.length > 0 ? (
 					<div className="space-y-2">
-						{documents.map((doc: any) => (
+						{documents.map((doc) => (
 							<div
-								key={doc.id}
+								key={doc.id ?? doc.filePath ?? doc.filename}
 								className="flex items-center justify-between rounded-lg border p-3"
 							>
 								<div className="flex-1">
@@ -364,8 +373,8 @@ export function OpportunityDocumentUpload({
 										{getDocumentTypeLabel(doc.documentType)}
 									</p>
 									<p className="text-muted-foreground text-xs">
-										{doc.originalName || doc.filename} •{" "}
-										{new Date(doc.uploadedAt).toLocaleDateString()}
+										{doc.originalName || doc.filename || "Documento sin nombre"}{" "}
+										• {formatUploadedDate(doc.uploadedAt)}
 									</p>
 								</div>
 								<div className="flex items-center gap-2">

@@ -21,10 +21,11 @@ import { eq, and } from "drizzle-orm";
 // ========================================
 
 interface Inversionista {
-  inversionista_id: number; 
+  inversionista_id: number;
   porcentaje_cash_in: number;
   porcentaje_inversion: number;
   monto_aportado: number;
+  fecha_inicio_participacion?: string;
 }
 
 interface Rubro {
@@ -97,6 +98,7 @@ interface InversionistaData {
   iva_cash_in: string;
   fecha_creacion: Date;
   cuota_inversionista: string;
+  fecha_inicio_participacion?: string;
 }
 
 interface CuotaInsertada {
@@ -183,7 +185,9 @@ const creditSchema = z.object({
         inversionista_id: z.number().int().positive(),
         monto_aportado: z.number().positive(),
         porcentaje_cash_in: z.number().min(0).max(100),
-        porcentaje_inversion: z.number().min(0).max(100), 
+        porcentaje_inversion: z.number().min(0).max(100),
+        tipo_inversion: z.enum(["compra_cartera", "reinversion"]).optional(),
+        fecha_inicio_participacion: z.string().optional(),
       })
     )
     .min(0),
@@ -494,7 +498,8 @@ const creditosInversionistasData: InversionistaData[] = creditData.inversionista
     iva_inversionista: ivaInversionista.toString(),
     iva_cash_in: ivaCashIn.toString(),
     fecha_creacion: new Date(),
-    cuota_inversionista: cuotaInversionista.toString(), // 🔥 CON LÓGICA CORRECTA
+    cuota_inversionista: cuotaInversionista.toString(),
+    ...(inv.fecha_inicio_participacion ? { fecha_inicio_participacion: inv.fecha_inicio_participacion } : {}),
   };
 });
 

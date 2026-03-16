@@ -1,0 +1,16 @@
+[
+  {
+    "sifco": "01010214110080",
+    "payload": {
+      "numero_credito_sifco": "01010214110080",
+      "updateCapital": 62357.09,
+      "inversionistas": [
+        {
+          "nombre": "Flujocapital",
+          "capital": 63758.11
+        }
+      ]
+    },
+    "error": "No hay cuotas pendientes por actualizar"
+  }
+]

@@ -1,0 +1,2473 @@
+{
+  "resumen": {
+    "total": 111
+  },
+  "discrepancias": [
+    {
+      "numero_credito_sifco": "01010214119240",
+      "nombre_cliente": "Angel Antonio Manzo Donis",
+      "capital_credito": 74652.09,
+      "suma_inversionistas": 74640.8,
+      "diferencia": -11.29,
+      "num_inversionistas": 2,
+      "capital_etl": 74652.09,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214119240",
+          "inversionista": "Flujocapital",
+          "capital": "74454.76328428432",
+          "capitalRestante": "73643.63570746029",
+          "capitalUltimoPago": "73643.63570746029"
+        },
+        {
+          "numeroCredito": "01010214119240_2",
+          "inversionista": "Tonejos S.A.",
+          "capital": "1019.5690765396822",
+          "capitalRestante": "1008.4578370255489",
+          "capitalUltimoPago": "1008.4578370255489"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214110010",
+      "nombre_cliente": "Juan Pablo Molina Cosenza",
+      "capital_credito": 38436.76,
+      "suma_inversionistas": 38339.21,
+      "diferencia": -97.55,
+      "num_inversionistas": 1,
+      "capital_etl": 38436.75,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214110010",
+          "inversionista": "Flujocapital",
+          "capital": "39130.75961200655",
+          "capitalRestante": "38436.74637348826",
+          "capitalUltimoPago": "38436.74637348826"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-28 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214119380",
+      "nombre_cliente": "Christopher Yoram Estrada Arana",
+      "capital_credito": 58594.27,
+      "suma_inversionistas": 58473.61,
+      "diferencia": -120.66,
+      "num_inversionistas": 2,
+      "capital_etl": 58594.27,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214119380",
+          "inversionista": "Flujocapital",
+          "capital": "58083.43488935434",
+          "capitalRestante": "57450.651595495496",
+          "capitalUltimoPago": "57450.651595495496"
+        },
+        {
+          "numeroCredito": "01010214119380_2",
+          "inversionista": "Rodrigo Rodas",
+          "capital": "1156.214463118487",
+          "capitalRestante": "1143.6188660988776",
+          "capitalUltimoPago": "1143.6188660988776"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214108460",
+      "nombre_cliente": "Helyn Areli Perez Roman",
+      "capital_credito": 24664.32,
+      "suma_inversionistas": 24416.55,
+      "diferencia": -247.77,
+      "num_inversionistas": 1,
+      "capital_etl": 24416.55,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214108460",
+          "inversionista": "Blokfund S.A.",
+          "capital": "24416.55",
+          "capitalRestante": "24416.55",
+          "capitalUltimoPago": "24664.32"
+        }
+      ],
+      "fecha_ultimo_pago": "2024-02-25 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214118380",
+      "nombre_cliente": "Raúl Eduardo Ortíz Rosales / Luis Fernando Díaz Vásquez",
+      "capital_credito": 108000.5,
+      "suma_inversionistas": 107735.41,
+      "diferencia": -265.09,
+      "num_inversionistas": 2,
+      "capital_etl": 108000.5,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214118380",
+          "inversionista": "Carlos Fernando Carrillo Cifuentes",
+          "capital": "77711.60419066834",
+          "capitalRestante": "77222.18232607156",
+          "capitalUltimoPago": "77222.18232607156"
+        },
+        {
+          "numeroCredito": "01010214118380_2",
+          "inversionista": "Flujocapital",
+          "capital": "30973.390403492234",
+          "capitalRestante": "30778.313362270903",
+          "capitalUltimoPago": "30778.313362270903"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-28 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214114400",
+      "nombre_cliente": "ALEJANDRA NOELIA HERNÁNDEZ SEQUEN/OSCAR GEOVANNY DÍAZ DUARTE",
+      "capital_credito": 28793.96,
+      "suma_inversionistas": 28484.29,
+      "diferencia": -309.67,
+      "num_inversionistas": 2,
+      "capital_etl": 28544.26,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214114400",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "21487.23977594805",
+          "capitalRestante": "21487.23977594805",
+          "capitalUltimoPago": "21487.23977594805"
+        },
+        {
+          "numeroCredito": "01010214114400_2",
+          "inversionista": "Anna Lisseth Lorenzo Rodas",
+          "capital": "7057.020807028219",
+          "capitalRestante": "7057.020807028219",
+          "capitalUltimoPago": "7306.717945543095"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-12-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214115190",
+      "nombre_cliente": "José Eduardo Quiñonez Esteban",
+      "capital_credito": 67537.15,
+      "suma_inversionistas": 67208.14,
+      "diferencia": -329.01,
+      "num_inversionistas": 2,
+      "capital_etl": 67537.15,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214115190",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "42816.5693180547",
+          "capitalRestante": "42816.5693180547",
+          "capitalUltimoPago": "42816.5693180547"
+        },
+        {
+          "numeroCredito": "01010214115190_2",
+          "inversionista": "Richard Kachler Ortega",
+          "capital": "24720.582709589504",
+          "capitalRestante": "24720.582709589504",
+          "capitalUltimoPago": "24720.582709589504"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214116940",
+      "nombre_cliente": "Aaron Josué Urrutia Ambrosy",
+      "capital_credito": 30375.34,
+      "suma_inversionistas": 29989.36,
+      "diferencia": -385.98,
+      "num_inversionistas": 2,
+      "capital_etl": 30375.33,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214116940",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "15737.564159260757",
+          "capitalRestante": "15540.095237136338",
+          "capitalUltimoPago": "15540.095237136338"
+        },
+        {
+          "numeroCredito": "01010214116940_2",
+          "inversionista": "Avinsa",
+          "capital": "15023.750342175632",
+          "capitalRestante": "14835.239347924182",
+          "capitalUltimoPago": "14835.239347924182"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-28 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214120500",
+      "nombre_cliente": "Domingo Rodrigo Sebastián Ignacio",
+      "capital_credito": 71141.67,
+      "suma_inversionistas": 70723.12,
+      "diferencia": -418.55,
+      "num_inversionistas": 1,
+      "capital_etl": 71141.66,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214120500",
+          "inversionista": "Juan Jose Massis",
+          "capital": "71553.2965334272",
+          "capitalRestante": "71141.65911518878",
+          "capitalUltimoPago": "71141.65911518878"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214120010",
+      "nombre_cliente": "Deisy Mishell De León Cerín",
+      "capital_credito": 40371.84,
+      "suma_inversionistas": 39939.28,
+      "diferencia": -432.56,
+      "num_inversionistas": 2,
+      "capital_etl": 40371.83,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214120010",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "40652.79672331448",
+          "capitalRestante": "40221.838708266165",
+          "capitalUltimoPago": "40221.838708266165"
+        },
+        {
+          "numeroCredito": "01010214120010_2",
+          "inversionista": "Felipe Gonzalez",
+          "capital": "151.59078194249759",
+          "capitalRestante": "149.98750707913155",
+          "capitalUltimoPago": "149.98750707913155"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-28 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214111850",
+      "nombre_cliente": "Mario Jose Duarte Perez",
+      "capital_credito": 27874.92,
+      "suma_inversionistas": 27435.04,
+      "diferencia": -439.88,
+      "num_inversionistas": 1,
+      "capital_etl": 27874.9,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214111850",
+          "inversionista": "Carlos Fernando Carrillo Cifuentes",
+          "capital": "28314.776216302245",
+          "capitalRestante": "27874.904456736123",
+          "capitalUltimoPago": "27874.904456736123"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214115950",
+      "nombre_cliente": "Steven José Jayes Lemus",
+      "capital_credito": 25223.43,
+      "suma_inversionistas": 24734.47,
+      "diferencia": -488.96,
+      "num_inversionistas": 2,
+      "capital_etl": 25223.42,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214115950",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "21452.42196819562",
+          "capitalRestante": "21044.472657261307",
+          "capitalUltimoPago": "21044.472657261307"
+        },
+        {
+          "numeroCredito": "01010214115950_2",
+          "inversionista": "Jessica Marchina",
+          "capital": "4259.961113513651",
+          "capitalRestante": "4178.94846022068",
+          "capitalUltimoPago": "4178.94846022068"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-28 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214115640",
+      "nombre_cliente": "Karla Susana Cruz Serrano de Unda",
+      "capital_credito": 37254.44,
+      "suma_inversionistas": 36758.61,
+      "diferencia": -495.83,
+      "num_inversionistas": 1,
+      "capital_etl": 37254.44,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214115640",
+          "inversionista": "Flujocapital",
+          "capital": "37742.09154035617",
+          "capitalRestante": "37254.43867823415",
+          "capitalUltimoPago": "37254.43867823415"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214118430",
+      "nombre_cliente": "Ana Gabriela Monterroso Pineda",
+      "capital_credito": 44706.94,
+      "suma_inversionistas": 44186.08,
+      "diferencia": -520.86,
+      "num_inversionistas": 2,
+      "capital_etl": 44706.94,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214118430",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "41942.06747676957",
+          "capitalRestante": "41459.0392103793",
+          "capitalUltimoPago": "41459.0392103793"
+        },
+        {
+          "numeroCredito": "01010214118430_2",
+          "inversionista": "Felipe Gonzalez",
+          "capital": "3285.735790334751",
+          "capitalRestante": "3247.896151612375",
+          "capitalUltimoPago": "3247.896151612375"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-28 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214118550",
+      "nombre_cliente": "José David Gómez Figueroa",
+      "capital_credito": 46294.21,
+      "suma_inversionistas": 45754.84,
+      "diferencia": -539.37,
+      "num_inversionistas": 2,
+      "capital_etl": 46294.21,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214118550",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "40262.0954606279",
+          "capitalRestante": "39798.413664366446",
+          "capitalUltimoPago": "39798.413664366446"
+        },
+        {
+          "numeroCredito": "01010214118550_2",
+          "inversionista": "Juan Guzmán",
+          "capital": "6571.471580669502",
+          "capitalRestante": "6495.79230322475",
+          "capitalUltimoPago": "6495.79230322475"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-28 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214107360",
+      "nombre_cliente": "Pablo Samuel Morales Tejeda",
+      "capital_credito": 24673.17,
+      "suma_inversionistas": 24116.93,
+      "diferencia": -556.24,
+      "num_inversionistas": 1,
+      "capital_etl": 24107.58,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214107360",
+          "inversionista": "Flujocapital",
+          "capital": "24107.583129204933",
+          "capitalRestante": "24107.583129204933",
+          "capitalUltimoPago": "24673.163974434436"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214109460",
+      "nombre_cliente": "Lilian Judith Colay Patzan 2",
+      "capital_credito": 31171.12,
+      "suma_inversionistas": 30597.77,
+      "diferencia": -573.35,
+      "num_inversionistas": 1,
+      "capital_etl": 31754.08,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214109460",
+          "inversionista": "Alexander Kachler Simons (AMJK)",
+          "capital": "31754.083066726118",
+          "capitalRestante": "31754.083066726118",
+          "capitalUltimoPago": "31754.083066726118"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214122190",
+      "nombre_cliente": "Erwing Eduardo Leal Posadas",
+      "capital_credito": 58445.89,
+      "suma_inversionistas": 57868.46,
+      "diferencia": -577.43,
+      "num_inversionistas": 2,
+      "capital_etl": 58445.89,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214122190",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "53482.19027703525",
+          "capitalRestante": "52958.97321468331",
+          "capitalUltimoPago": "52958.97321468331"
+        },
+        {
+          "numeroCredito": "01010214122190_2",
+          "inversionista": "Anna Lisseth Lorenzo Rodas",
+          "capital": "5541.129722964743",
+          "capitalRestante": "5486.920561316684",
+          "capitalUltimoPago": "5486.920561316684"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214112830",
+      "nombre_cliente": "Saira Areli Tun Coyoy",
+      "capital_credito": 39460.68,
+      "suma_inversionistas": 38866.87,
+      "diferencia": -593.81,
+      "num_inversionistas": 1,
+      "capital_etl": 39460.68,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214112830",
+          "inversionista": "Javier Arzu Perez",
+          "capital": "39460.68330019827",
+          "capitalRestante": "39460.68330019827",
+          "capitalUltimoPago": "39460.68330019827"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214118720",
+      "nombre_cliente": "Edson Geovani Meza López/Lesley Marisol Alozon López",
+      "capital_credito": 52554.35,
+      "suma_inversionistas": 51959.11,
+      "diferencia": -595.24,
+      "num_inversionistas": 2,
+      "capital_etl": 52554.35,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214118720",
+          "inversionista": "Flujocapital",
+          "capital": "52909.90477068034",
+          "capitalRestante": "52317.34617082777",
+          "capitalUltimoPago": "52317.34617082777"
+        },
+        {
+          "numeroCredito": "01010214118720_2",
+          "inversionista": "Josue Mente",
+          "capital": "239.68874648843212",
+          "capitalRestante": "237.0055174294378",
+          "capitalUltimoPago": "237.0055174294378"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214117920",
+      "nombre_cliente": "Alexis Antonio De León Castillo",
+      "capital_credito": 92813.73,
+      "suma_inversionistas": 92201.61,
+      "diferencia": -612.12,
+      "num_inversionistas": 2,
+      "capital_etl": 92813.74,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214117920",
+          "inversionista": "Flujocapital",
+          "capital": "92379.51924709091",
+          "capitalRestante": "91784.19451630334",
+          "capitalUltimoPago": "91784.19451630334"
+        },
+        {
+          "numeroCredito": "01010214117920_2",
+          "inversionista": "Jessica Marchina",
+          "capital": "1036.2222914507738",
+          "capitalRestante": "1029.540825947147",
+          "capitalUltimoPago": "1029.540825947147"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214120950",
+      "nombre_cliente": "Jonathan Waldemar Rodríguez Gálvez",
+      "capital_credito": 61703.28,
+      "suma_inversionistas": 61077.14,
+      "diferencia": -626.14,
+      "num_inversionistas": 1,
+      "capital_etl": 61703.29,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214120950",
+          "inversionista": "Juan Jose Massis",
+          "capital": "62329.420328",
+          "capitalRestante": "61703.2853895104",
+          "capitalUltimoPago": "61703.2853895104"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214115620",
+      "nombre_cliente": "MARELYN SIOMARA RAMÍREZ RAYMUNDO/SELVIN COBAR MORALES",
+      "capital_credito": 91295.34,
+      "suma_inversionistas": 90660.05,
+      "diferencia": -635.29,
+      "num_inversionistas": 2,
+      "capital_etl": 91295.33,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214115620",
+          "inversionista": "Flujocapital",
+          "capital": "90884.0307207314",
+          "capitalRestante": "90255.96943683969",
+          "capitalUltimoPago": "90255.96943683969"
+        },
+        {
+          "numeroCredito": "01010214115620_2",
+          "inversionista": "Marines Overall Salazar",
+          "capital": "1046.5899234016829",
+          "capitalRestante": "1039.362634114831",
+          "capitalUltimoPago": "1039.362634114831"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214115740",
+      "nombre_cliente": "Marvin Leonel Hernández Díaz",
+      "capital_credito": 46727.38,
+      "suma_inversionistas": 46075.73,
+      "diferencia": -651.65,
+      "num_inversionistas": 2,
+      "capital_etl": 46727.38,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214115740",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "36632.44924814314",
+          "capitalRestante": "36632.44924814314",
+          "capitalUltimoPago": "36632.44924814314"
+        },
+        {
+          "numeroCredito": "01010214115740_2",
+          "inversionista": "Javier Arzu Perez",
+          "capital": "10094.932117976825",
+          "capitalRestante": "10094.932117976825",
+          "capitalUltimoPago": "10094.932117976825"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214114590",
+      "nombre_cliente": "Santiago Soch Reynoso",
+      "capital_credito": 48280.09,
+      "suma_inversionistas": 47617.89,
+      "diferencia": -662.2,
+      "num_inversionistas": 2,
+      "capital_etl": 48280.08,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214114590",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "47347.64369117344",
+          "capitalRestante": "47347.64369117344",
+          "capitalUltimoPago": "47347.64369117344"
+        },
+        {
+          "numeroCredito": "01010214114590_2",
+          "inversionista": "Tonejos S.A.",
+          "capital": "932.4353800358916",
+          "capitalRestante": "932.4353800358916",
+          "capitalUltimoPago": "932.4353800358916"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214121230",
+      "nombre_cliente": "Ariel Alexander Morfín Velásquez",
+      "capital_credito": 66483.48,
+      "suma_inversionistas": 65808.85,
+      "diferencia": -674.63,
+      "num_inversionistas": 3,
+      "capital_etl": 66483.49,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214121230",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "64418.69390638146",
+          "capitalRestante": "63771.56556202066",
+          "capitalUltimoPago": "63771.56556202066"
+        },
+        {
+          "numeroCredito": "01010214121230_2",
+          "inversionista": "Maria Ines Rodas",
+          "capital": "969.0222693400005",
+          "capitalRestante": "959.2918434649125",
+          "capitalUltimoPago": "959.2918434649125"
+        },
+        {
+          "numeroCredito": "01010214121230_3",
+          "inversionista": "Manuel Carrera Mayen",
+          "capital": "1770.4168082785427",
+          "capitalRestante": "1752.6318126456274",
+          "capitalUltimoPago": "1752.6318126456274"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214108000",
+      "nombre_cliente": "Jharim Elizabeth Lopez Palma",
+      "capital_credito": 31588.38,
+      "suma_inversionistas": 30894.33,
+      "diferencia": -694.05,
+      "num_inversionistas": 1,
+      "capital_etl": 30894.33,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214108000",
+          "inversionista": "Flujocapital",
+          "capital": "30894.3280963712",
+          "capitalRestante": "30894.3280963712",
+          "capitalUltimoPago": "31588.379999999997"
+        }
+      ],
+      "fecha_ultimo_pago": "2024-02-06 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214119450",
+      "nombre_cliente": "Cristian Odahil López Garrido",
+      "capital_credito": 63180.24,
+      "suma_inversionistas": 62484.35,
+      "diferencia": -695.89,
+      "num_inversionistas": 1,
+      "capital_etl": 63180.23,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214119450",
+          "inversionista": "Autocash S.A.",
+          "capital": "63876.1183580895",
+          "capitalRestante": "63180.232146505405",
+          "capitalUltimoPago": "63180.232146505405"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-28 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214119710",
+      "nombre_cliente": "Carlos Roberto Mansilla Paz",
+      "capital_credito": 28397.11,
+      "suma_inversionistas": 27698.3,
+      "diferencia": -698.81,
+      "num_inversionistas": 3,
+      "capital_etl": 28397.11,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214119710",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "28777.24603063274",
+          "capitalRestante": "27999.69876394737",
+          "capitalUltimoPago": "27999.69876394737"
+        },
+        {
+          "numeroCredito": "01010214119710_2",
+          "inversionista": "Pedro Jose Ramirez Lopez",
+          "capital": "284.60917522818175",
+          "capitalRestante": "276.6806093720152",
+          "capitalUltimoPago": "276.6806093720152"
+        },
+        {
+          "numeroCredito": "01010214119710_3",
+          "inversionista": "Felipe Gonzalez",
+          "capital": "148.8384276288609",
+          "capitalRestante": "120.72891321302576",
+          "capitalUltimoPago": "120.72891321302576"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214112390",
+      "nombre_cliente": "Rony Armando Hernández Barreno",
+      "capital_credito": 30328.79,
+      "suma_inversionistas": 29617.27,
+      "diferencia": -711.52,
+      "num_inversionistas": 2,
+      "capital_etl": 30328.8,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214112390",
+          "inversionista": "Alexander Kachler Simons (AMJK)",
+          "capital": "19205.45471171869",
+          "capitalRestante": "18765.216350875562",
+          "capitalUltimoPago": "18765.216350875562"
+        },
+        {
+          "numeroCredito": "01010214112390_2",
+          "inversionista": "Autocash S.A.",
+          "capital": "11834.868336630772",
+          "capitalRestante": "11563.58412468617",
+          "capitalUltimoPago": "11563.58412468617"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214116160",
+      "nombre_cliente": "Roothman Scott León Monroy",
+      "capital_credito": 56471.26,
+      "suma_inversionistas": 55741.63,
+      "diferencia": -729.63,
+      "num_inversionistas": 1,
+      "capital_etl": 56471.26,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214116160",
+          "inversionista": "Flujocapital",
+          "capital": "57188.84517804609",
+          "capitalRestante": "56471.257777037266",
+          "capitalUltimoPago": "56471.257777037266"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214109620",
+      "nombre_cliente": "Missael Antonio Rayo Sandoval",
+      "capital_credito": 34038.3,
+      "suma_inversionistas": 33290.42,
+      "diferencia": -747.88,
+      "num_inversionistas": 1,
+      "capital_etl": 33290.42,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214109620",
+          "inversionista": "Flujocapital",
+          "capital": "33290.417407344896",
+          "capitalRestante": "33290.417407344896",
+          "capitalUltimoPago": "34038.3004"
+        }
+      ],
+      "fecha_ultimo_pago": "2024-08-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214121370",
+      "nombre_cliente": "Manuel Alberto Alvarez Padilla / Heydy Gabriela Caballeros Mena",
+      "capital_credito": 132419.72,
+      "suma_inversionistas": 131657.93,
+      "diferencia": -761.79,
+      "num_inversionistas": 2,
+      "capital_etl": 132419.72,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214121370",
+          "inversionista": "Katya Maer Perini",
+          "capital": "123563.352672",
+          "capitalRestante": "122868.1793968896",
+          "capitalUltimoPago": "122868.1793968896"
+        },
+        {
+          "numeroCredito": "01010214121370_2",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "9605.576496",
+          "capitalRestante": "9551.5401811328",
+          "capitalUltimoPago": "9551.5401811328"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010202102340",
+      "nombre_cliente": "Jairlen Manredo Juarez Garza 2",
+      "capital_credito": 37274.88,
+      "suma_inversionistas": 36512.27,
+      "diferencia": -762.61,
+      "num_inversionistas": 1,
+      "capital_etl": 36512.27,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010202102340",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "36512.27",
+          "capitalRestante": "36512.27",
+          "capitalUltimoPago": "37274.88"
+        }
+      ],
+      "fecha_ultimo_pago": "2024-02-18 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214110480",
+      "nombre_cliente": "Luis Estuardo Morales Reyes",
+      "capital_credito": 47651.08,
+      "suma_inversionistas": 46886.5,
+      "diferencia": -764.58,
+      "num_inversionistas": 1,
+      "capital_etl": 46109.09,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214110480",
+          "inversionista": "Inversiones Monaco S.A. (Oscar Jose Massis Massis)",
+          "capital": "46109.087934799034",
+          "capitalRestante": "46109.087934799034",
+          "capitalUltimoPago": "47651.07657018949"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-11-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214113320",
+      "nombre_cliente": "Edwin Oswaldo Gonzalez Trinidad",
+      "capital_credito": 53334.41,
+      "suma_inversionistas": 52545.08,
+      "diferencia": -789.33,
+      "num_inversionistas": 1,
+      "capital_etl": 53334.4,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214113320",
+          "inversionista": "Javier Arzu Perez",
+          "capital": "54123.730959567896",
+          "capitalRestante": "53334.399639688636",
+          "capitalUltimoPago": "53334.399639688636"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-28 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214122150",
+      "nombre_cliente": "Francisco Romeo Cifuentes Frutos",
+      "capital_credito": 83912.46,
+      "suma_inversionistas": 83069.51,
+      "diferencia": -842.95,
+      "num_inversionistas": 2,
+      "capital_etl": 83912.46,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214122150",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "44741.49",
+          "capitalRestante": "44303.784031999996",
+          "capitalUltimoPago": "44303.784031999996"
+        },
+        {
+          "numeroCredito": "01010214122150_2",
+          "inversionista": "Ana Lucia Salvatierra Mayen",
+          "capital": "40000.0",
+          "capitalRestante": "39608.68",
+          "capitalUltimoPago": "39608.68"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214118630",
+      "nombre_cliente": "Mario Fernando Ordóñez Montes",
+      "capital_credito": 74813.04,
+      "suma_inversionistas": 73965.69,
+      "diferencia": -847.35,
+      "num_inversionistas": 2,
+      "capital_etl": 74813.03,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214118630",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "72935.49696496612",
+          "capitalRestante": "72935.49696496612",
+          "capitalUltimoPago": "72935.49696496612"
+        },
+        {
+          "numeroCredito": "01010214118630_2",
+          "inversionista": "Juan Guzmán",
+          "capital": "1877.5364899781275",
+          "capitalRestante": "1877.5364899781275",
+          "capitalUltimoPago": "1877.5364899781275"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214120080",
+      "nombre_cliente": "Elder Armando Mendoza Samayoa",
+      "capital_credito": 150436.62,
+      "suma_inversionistas": 149551.53,
+      "diferencia": -885.09,
+      "num_inversionistas": 2,
+      "capital_etl": 150436.62,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214120080",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "138997.50100064013",
+          "capitalRestante": "138997.50100064013",
+          "capitalUltimoPago": "138997.50100064013"
+        },
+        {
+          "numeroCredito": "01010214120080_2",
+          "inversionista": "Milton Jose Barascout Ramirez",
+          "capital": "11439.115245319235",
+          "capitalRestante": "11439.115245319235",
+          "capitalUltimoPago": "11439.115245319235"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214117960",
+      "nombre_cliente": "Mario Noe Laines Vielman / Genesis Paola Laines Chavez",
+      "capital_credito": 29868.41,
+      "suma_inversionistas": 28954.04,
+      "diferencia": -914.37,
+      "num_inversionistas": 1,
+      "capital_etl": 29868.4,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214117960",
+          "inversionista": "Javier Arzu Perez",
+          "capital": "29868.40497177915",
+          "capitalRestante": "29868.40497177915",
+          "capitalUltimoPago": "29868.40497177915"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-27 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214122240",
+      "nombre_cliente": "Amalia Carolina Castillo Roldán",
+      "capital_credito": 173693.36,
+      "suma_inversionistas": 172716.16,
+      "diferencia": -977.2,
+      "num_inversionistas": 1,
+      "capital_etl": 173693.35,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214122240",
+          "inversionista": "MARIA ELENA ROCA MARROQUIN",
+          "capital": "174654.41",
+          "capitalRestante": "173693.350088",
+          "capitalUltimoPago": "173693.350088"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214113480",
+      "nombre_cliente": "Suyin Lucia Mayorga Davila",
+      "capital_credito": 68482.18,
+      "suma_inversionistas": 67499.96,
+      "diferencia": -982.22,
+      "num_inversionistas": 1,
+      "capital_etl": 68482.18,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214113480",
+          "inversionista": "Flujocapital",
+          "capital": "68482.17680597096",
+          "capitalRestante": "68482.17680597096",
+          "capitalUltimoPago": "68482.17680597096"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214105520",
+      "nombre_cliente": "Cesar Daniel Contreras Garcia / Leslie Priscilla de Contreras",
+      "capital_credito": 30144.13,
+      "suma_inversionistas": 29136.12,
+      "diferencia": -1008.01,
+      "num_inversionistas": 1,
+      "capital_etl": 29136.12,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214105520",
+          "inversionista": "Flujocapital",
+          "capital": "29136.118675202317",
+          "capitalRestante": "29136.118675202317",
+          "capitalUltimoPago": "30144.13260373088"
+        }
+      ],
+      "fecha_ultimo_pago": "2024-11-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010202102050",
+      "nombre_cliente": "Mariano Adolfo Garcia Galvez",
+      "capital_credito": 9759.64,
+      "suma_inversionistas": 8750.02,
+      "diferencia": -1009.62,
+      "num_inversionistas": 1,
+      "capital_etl": 8750.02,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010202102050",
+          "inversionista": "Flujocapital",
+          "capital": "8750.018639282365",
+          "capitalRestante": "8750.018639282365",
+          "capitalUltimoPago": "9759.64478825206"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-08-10 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214115990",
+      "nombre_cliente": "Miguel Eduardo Torres Cardoza",
+      "capital_credito": 81109.8,
+      "suma_inversionistas": 80092.08,
+      "diferencia": -1017.72,
+      "num_inversionistas": 2,
+      "capital_etl": 81109.8,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214115990",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "64051.506274960826",
+          "capitalRestante": "64051.506274960826",
+          "capitalUltimoPago": "64051.506274960826"
+        },
+        {
+          "numeroCredito": "01010214115990_2",
+          "inversionista": "Avinsa",
+          "capital": "17058.296636349",
+          "capitalRestante": "17058.296636349",
+          "capitalUltimoPago": "17058.296636349"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214119020",
+      "nombre_cliente": "Manolo Agustin Solís Alvarado",
+      "capital_credito": 92046,
+      "suma_inversionistas": 91015.14,
+      "diferencia": -1030.86,
+      "num_inversionistas": 1,
+      "capital_etl": 92046,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214119020",
+          "inversionista": "Flujocapital",
+          "capital": "92045.9953310536",
+          "capitalRestante": "92045.9953310536",
+          "capitalUltimoPago": "92045.9953310536"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214120570",
+      "nombre_cliente": "Jennifer Massiel Ramírez Pérez   / Dennis Wilfredo López  Ramírez",
+      "capital_credito": 105801.67,
+      "suma_inversionistas": 104710,
+      "diferencia": -1091.67,
+      "num_inversionistas": 1,
+      "capital_etl": 105801.67,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214120570",
+          "inversionista": "Carlos Fernando Carrillo Cifuentes",
+          "capital": "105801.6696705256",
+          "capitalRestante": "105801.6696705256",
+          "capitalUltimoPago": "105801.6696705256"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214109830",
+      "nombre_cliente": "Javier Alexander Hernandez Cordero",
+      "capital_credito": 36136.58,
+      "suma_inversionistas": 35004.4,
+      "diferencia": -1132.18,
+      "num_inversionistas": 1,
+      "capital_etl": 35004.4,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214109830",
+          "inversionista": "Flujocapital",
+          "capital": "35004.40258135984",
+          "capitalRestante": "35004.40258135984",
+          "capitalUltimoPago": "36136.58445023665"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-09-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214115020",
+      "nombre_cliente": "Olga Ileana López Girón",
+      "capital_credito": 61936.84,
+      "suma_inversionistas": 60736.18,
+      "diferencia": -1200.66,
+      "num_inversionistas": 1,
+      "capital_etl": 61936.83,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214115020",
+          "inversionista": "Flujocapital",
+          "capital": "61936.8331793834",
+          "capitalRestante": "61936.8331793834",
+          "capitalUltimoPago": "61936.8331793834"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214118980",
+      "nombre_cliente": "Gary Andrews Junior Cabrera Barrera",
+      "capital_credito": 105308.08,
+      "suma_inversionistas": 104095.29,
+      "diferencia": -1212.79,
+      "num_inversionistas": 2,
+      "capital_etl": 105308.07,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214118980",
+          "inversionista": "Flujocapital",
+          "capital": "84628.12791801977",
+          "capitalRestante": "83680.34427050981",
+          "capitalUltimoPago": "83680.34427050981"
+        },
+        {
+          "numeroCredito": "01010214118980_2",
+          "inversionista": "Alejandro Ricardo Ortega del Cid",
+          "capital": "21872.68725733709",
+          "capitalRestante": "21627.728403260353",
+          "capitalUltimoPago": "21627.728403260353"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214123960",
+      "nombre_cliente": "Javier Alfonso Tejada Lemus",
+      "capital_credito": 124414.43,
+      "suma_inversionistas": 123185.26,
+      "diferencia": -1229.17,
+      "num_inversionistas": 2,
+      "capital_etl": 124414.43,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214123960",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "115041.91843813536",
+          "capitalRestante": "113916.46404662855",
+          "capitalUltimoPago": "113916.46404662855"
+        },
+        {
+          "numeroCredito": "01010214123960_2",
+          "inversionista": "INVERSIONES CASCAI S.A.",
+          "capital": "10601.681561864645",
+          "capitalRestante": "10497.965633371456",
+          "capitalUltimoPago": "10497.965633371456"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-28 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214109020",
+      "nombre_cliente": "Herlin Veronica Lemus Estrada",
+      "capital_credito": 32711.26,
+      "suma_inversionistas": 31432.37,
+      "diferencia": -1278.89,
+      "num_inversionistas": 1,
+      "capital_etl": 32066.48,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214109020",
+          "inversionista": "Flujocapital",
+          "capital": "32066.481546486822",
+          "capitalRestante": "32066.481546486822",
+          "capitalUltimoPago": "33345.37028364741"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-12-28 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214117250",
+      "nombre_cliente": "Gustavo Francisco Castro Orellana",
+      "capital_credito": 104166.85,
+      "suma_inversionistas": 102881.41,
+      "diferencia": -1285.44,
+      "num_inversionistas": 2,
+      "capital_etl": 104166.86,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214117250",
+          "inversionista": "INVERSIONES CASCAI S.A.",
+          "capital": "86419.41715299968",
+          "capitalRestante": "85365.97336117008",
+          "capitalUltimoPago": "85365.97336117008"
+        },
+        {
+          "numeroCredito": "01010214117250_2",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "19032.88325755911",
+          "capitalRestante": "18800.885696286103",
+          "capitalUltimoPago": "18800.885696286103"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-28 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214122450",
+      "nombre_cliente": "Juan Pablo Sajché Santizo",
+      "capital_credito": 132051.82,
+      "suma_inversionistas": 130747.2,
+      "diferencia": -1304.62,
+      "num_inversionistas": 2,
+      "capital_etl": 132051.82,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214122450",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "119892.78039819344",
+          "capitalRestante": "118719.87114355138",
+          "capitalUltimoPago": "118719.87114355138"
+        },
+        {
+          "numeroCredito": "01010214122450_2",
+          "inversionista": "Werner Oswaldo Osoy Trejo",
+          "capital": "13463.659601806561",
+          "capitalRestante": "13331.945048448617",
+          "capitalUltimoPago": "13331.945048448617"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-28 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214123930",
+      "nombre_cliente": "Jose Ricardo Cárcamo Juárez/Gladiz Noemi Leonardo Cordon",
+      "capital_credito": 133366.63,
+      "suma_inversionistas": 132049.01,
+      "diferencia": -1317.62,
+      "num_inversionistas": 2,
+      "capital_etl": 133366.64,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214123930",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "122234.76876889216",
+          "capitalRestante": "121038.94931272697",
+          "capitalUltimoPago": "121038.94931272697"
+        },
+        {
+          "numeroCredito": "01010214123930_2",
+          "inversionista": "Milton Jose Barascout Ramirez",
+          "capital": "12449.481231107848",
+          "capitalRestante": "12327.688087273036",
+          "capitalUltimoPago": "12327.688087273036"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-28 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214121260",
+      "nombre_cliente": "Mario Edú Polanco Flores",
+      "capital_credito": 131263.75,
+      "suma_inversionistas": 129931.75,
+      "diferencia": -1332,
+      "num_inversionistas": 3,
+      "capital_etl": 131263.75,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214121260",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "130248.24802999425",
+          "capitalRestante": "128939.8167310679",
+          "capitalUltimoPago": "128939.8167310679"
+        },
+        {
+          "numeroCredito": "01010214121260_2",
+          "inversionista": "Fredy Aceituno",
+          "capital": "1700.6388357933947",
+          "capitalRestante": "1683.5595682347237",
+          "capitalUltimoPago": "1683.5595682347237"
+        },
+        {
+          "numeroCredito": "01010214121260_3",
+          "inversionista": "Luis Pedro Sandoval Ortiz",
+          "capital": "646.87230221237",
+          "capitalRestante": "640.374022719798",
+          "capitalUltimoPago": "640.374022719798"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214119160",
+      "nombre_cliente": "Cristian Fernando Paz Morales",
+      "capital_credito": 119131.2,
+      "suma_inversionistas": 117797.1,
+      "diferencia": -1334.1,
+      "num_inversionistas": 1,
+      "capital_etl": 119131.2,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214119160",
+          "inversionista": "Oscar Massis",
+          "capital": "119131.20298386387",
+          "capitalRestante": "119131.20298386387",
+          "capitalUltimoPago": "119131.20298386387"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214116050",
+      "nombre_cliente": "Jonathan Mishell Quiroa Hernández",
+      "capital_credito": 69990.35,
+      "suma_inversionistas": 68609.42,
+      "diferencia": -1380.93,
+      "num_inversionistas": 1,
+      "capital_etl": 68609.42,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214116050",
+          "inversionista": "Flujocapital",
+          "capital": "68609.42259638401",
+          "capitalRestante": "68609.42259638401",
+          "capitalUltimoPago": "69990.35"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-04-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214110080",
+      "nombre_cliente": "Diego Armando Padilla Lopez",
+      "capital_credito": 63758.11,
+      "suma_inversionistas": 62357.09,
+      "diferencia": -1401.02,
+      "num_inversionistas": 1,
+      "capital_etl": 62357.09,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214110080",
+          "inversionista": "Flujocapital",
+          "capital": "62357.09463580052",
+          "capitalRestante": "62357.09463580052",
+          "capitalUltimoPago": "63758.11257169919"
+        }
+      ],
+      "fecha_ultimo_pago": "2024-09-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010101001170",
+      "nombre_cliente": "Miguel Alejandro Martinez Del Cid / Wendy Marizol Del Cid Lopez",
+      "capital_credito": 43122.21,
+      "suma_inversionistas": 41720.02,
+      "diferencia": -1402.19,
+      "num_inversionistas": 1,
+      "capital_etl": 41720.03,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010101001170",
+          "inversionista": "Jose Fernando Rios Gordillo",
+          "capital": "43122.21251410786",
+          "capitalRestante": "41720.02568434487",
+          "capitalUltimoPago": "43122.21251410786"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-06 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214122400",
+      "nombre_cliente": "Wendy Paola Perez Flores/Byron Roberto Tún Gutierrez",
+      "capital_credito": 259806.67,
+      "suma_inversionistas": 258377.04,
+      "diferencia": -1429.63,
+      "num_inversionistas": 1,
+      "capital_etl": 259806.67,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214122400",
+          "inversionista": "Javier Arzu Perez",
+          "capital": "259806.67",
+          "capitalRestante": "259806.67",
+          "capitalUltimoPago": "259806.67"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214116500",
+      "nombre_cliente": "Irwin Armando Diaz Chajón",
+      "capital_credito": 125509.36,
+      "suma_inversionistas": 124047.61,
+      "diferencia": -1461.75,
+      "num_inversionistas": 1,
+      "capital_etl": 125509.36,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214116500",
+          "inversionista": "Javier Arzu Perez",
+          "capital": "125509.35807805682",
+          "capitalRestante": "125509.35807805682",
+          "capitalUltimoPago": "125509.35807805682"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214115460",
+      "nombre_cliente": "María Xiomara Aguilar Meza de Meléndez",
+      "capital_credito": 59502.26,
+      "suma_inversionistas": 58039.43,
+      "diferencia": -1462.83,
+      "num_inversionistas": 1,
+      "capital_etl": 58039.43,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214115460",
+          "inversionista": "Flujocapital",
+          "capital": "58039.434674718395",
+          "capitalRestante": "58039.434674718395",
+          "capitalUltimoPago": "59502.264012890286"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-10-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214120790",
+      "nombre_cliente": "Kenny Alejandro Canahuí Urrutia",
+      "capital_credito": 253174.92,
+      "suma_inversionistas": 251709.99,
+      "diferencia": -1464.93,
+      "num_inversionistas": 1,
+      "capital_etl": 253174.91,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214120790",
+          "inversionista": "Katya Maer Perini",
+          "capital": "254639.8400291615",
+          "capitalRestante": "253174.9138023844",
+          "capitalUltimoPago": "253174.9138023844"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-28 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01030214130110",
+      "nombre_cliente": "Pedro José Cabrera Navarro",
+      "capital_credito": 64144.7,
+      "suma_inversionistas": 62654.85,
+      "diferencia": -1489.85,
+      "num_inversionistas": 1,
+      "capital_etl": 62654.85,
+      "inversionistas": [
+        {
+          "numeroCredito": "01030214130110",
+          "inversionista": "Flujocapital",
+          "capital": "62654.84803191302",
+          "capitalRestante": "62654.84803191302",
+          "capitalUltimoPago": "64144.69670347855"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-05-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214117650",
+      "nombre_cliente": "Jhonathan Gustavo Najera Mayorga",
+      "capital_credito": 18623.16,
+      "suma_inversionistas": 17100.7,
+      "diferencia": -1522.46,
+      "num_inversionistas": 1,
+      "capital_etl": 17100.7,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214117650",
+          "inversionista": "Flujocapital",
+          "capital": "17100.700170917826",
+          "capitalRestante": "17100.700170917826",
+          "capitalUltimoPago": "18623.164025835114"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-09-17 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214112580",
+      "nombre_cliente": "Celin Yhovana Godínez Siles de Alvarez / Sergio Gonzalo Alvarez Ramírez",
+      "capital_credito": 59691.23,
+      "suma_inversionistas": 58160.82,
+      "diferencia": -1530.41,
+      "num_inversionistas": 1,
+      "capital_etl": 59691.22,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214112580",
+          "inversionista": "Diego Alejandro Mendieta Avila",
+          "capital": "59691.22461888258",
+          "capitalRestante": "59691.22461888258",
+          "capitalUltimoPago": "59691.22461888258"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214117500",
+      "nombre_cliente": "Obdin Francisco Barrientos Vargas",
+      "capital_credito": 128520.69,
+      "suma_inversionistas": 126979.93,
+      "diferencia": -1540.76,
+      "num_inversionistas": 2,
+      "capital_etl": 128520.7,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214117500",
+          "inversionista": "Tonejos S.A.",
+          "capital": "91697.63053250792",
+          "capitalRestante": "91697.63053250792",
+          "capitalUltimoPago": "91697.63053250792"
+        },
+        {
+          "numeroCredito": "01010214117500_2",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "36823.06451689751",
+          "capitalRestante": "36823.06451689751",
+          "capitalUltimoPago": "36823.06451689751"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214117930",
+      "nombre_cliente": "Yesica Estefani Peña Marroquín-Manuel Humberto Flores Gonzáles",
+      "capital_credito": 98082.88,
+      "suma_inversionistas": 96537.62,
+      "diferencia": -1545.26,
+      "num_inversionistas": 2,
+      "capital_etl": 96953.3,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214117930",
+          "inversionista": "Flujocapital",
+          "capital": "92715.92211245038",
+          "capitalRestante": "92715.92211245038",
+          "capitalUltimoPago": "93796.1251597663"
+        },
+        {
+          "numeroCredito": "01010214117930_2",
+          "inversionista": "INVERSIONES CASCAI S.A.",
+          "capital": "4237.382645582559",
+          "capitalRestante": "4237.382645582559",
+          "capitalUltimoPago": "4286.755158912823"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-12-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214115210",
+      "nombre_cliente": "Sergio Iván Ramírez Letona",
+      "capital_credito": 67413.92,
+      "suma_inversionistas": 65848.12,
+      "diferencia": -1565.8,
+      "num_inversionistas": 1,
+      "capital_etl": 65848.12,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214115210",
+          "inversionista": "Flujocapital",
+          "capital": "65848.12047612487",
+          "capitalRestante": "65848.12047612487",
+          "capitalUltimoPago": "67413.91601825453"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-08-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214119430",
+      "nombre_cliente": "Jonathan René Sajché Valenzuela",
+      "capital_credito": 78114.42,
+      "suma_inversionistas": 76488.91,
+      "diferencia": -1625.51,
+      "num_inversionistas": 1,
+      "capital_etl": 76488.91,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214119430",
+          "inversionista": "Flujocapital",
+          "capital": "76488.90852170826",
+          "capitalRestante": "76488.90852170826",
+          "capitalUltimoPago": "78114.4197712384"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-11-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214117070",
+      "nombre_cliente": "Emilce Yessenia Arana",
+      "capital_credito": 72752.28,
+      "suma_inversionistas": 71062.49,
+      "diferencia": -1689.79,
+      "num_inversionistas": 1,
+      "capital_etl": 71062.49,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214117070",
+          "inversionista": "Flujocapital",
+          "capital": "71062.4874513382",
+          "capitalRestante": "71062.4874513382",
+          "capitalUltimoPago": "72752.27693952668"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-11-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214116580",
+      "nombre_cliente": "Inversiones Billetera Express, Sociedada Anonima",
+      "capital_credito": 135201.21,
+      "suma_inversionistas": 133493.11,
+      "diferencia": -1708.1,
+      "num_inversionistas": 1,
+      "capital_etl": 135201.21,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214116580",
+          "inversionista": "Adriana Bahaia",
+          "capital": "135201.2056397653",
+          "capitalRestante": "135201.2056397653",
+          "capitalUltimoPago": "135201.2056397653"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214111790",
+      "nombre_cliente": "Edgar Rolando Cardona Mendez / Edgar Rolando Cardona",
+      "capital_credito": 56303.92,
+      "suma_inversionistas": 54554.59,
+      "diferencia": -1749.33,
+      "num_inversionistas": 1,
+      "capital_etl": 55429.25,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214111790",
+          "inversionista": "Flujocapital",
+          "capital": "55429.24610381389",
+          "capitalRestante": "55429.24610381389",
+          "capitalUltimoPago": "55429.24610381389"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214107440",
+      "nombre_cliente": "Diego Alejandro Palma Sochon",
+      "capital_credito": 43480.31,
+      "suma_inversionistas": 41687.43,
+      "diferencia": -1792.88,
+      "num_inversionistas": 1,
+      "capital_etl": 41687.43,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214107440",
+          "inversionista": "Flujocapital",
+          "capital": "41687.43105272183",
+          "capitalRestante": "41687.43105272183",
+          "capitalUltimoPago": "43480.307433003036"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-11-03 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214115330",
+      "nombre_cliente": "Marco Antonio Galindo Esquivel",
+      "capital_credito": 99588.71,
+      "suma_inversionistas": 97790.55,
+      "diferencia": -1798.16,
+      "num_inversionistas": 1,
+      "capital_etl": 99588.71,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214115330",
+          "inversionista": "Giancarlo Massis Massis",
+          "capital": "101386.86664112034",
+          "capitalRestante": "99588.70600069116",
+          "capitalUltimoPago": "99588.70600069116"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-28 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214109840",
+      "nombre_cliente": "Maria Jose Pineda Galicia",
+      "capital_credito": 35594.58,
+      "suma_inversionistas": 33734.63,
+      "diferencia": -1859.95,
+      "num_inversionistas": 1,
+      "capital_etl": 33734.63,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214109840",
+          "inversionista": "Flujocapital",
+          "capital": "33734.629090262475",
+          "capitalRestante": "33734.629090262475",
+          "capitalUltimoPago": "35594.58453049979"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-11-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214109280",
+      "nombre_cliente": "Dorty Nature SPA S.A. / Pablo Rene Ardon Lepe",
+      "capital_credito": 73593.04,
+      "suma_inversionistas": 71730.7,
+      "diferencia": -1862.34,
+      "num_inversionistas": 1,
+      "capital_etl": 71730.7,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214109280",
+          "inversionista": "Flujocapital",
+          "capital": "71730.69611878447",
+          "capitalRestante": "71730.69611878447",
+          "capitalUltimoPago": "73593.04326843303"
+        }
+      ],
+      "fecha_ultimo_pago": "2024-12-20 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214116190",
+      "nombre_cliente": "Jose Alfredo Jimenez Orozco",
+      "capital_credito": 79174.79,
+      "suma_inversionistas": 77310.29,
+      "diferencia": -1864.5,
+      "num_inversionistas": 2,
+      "capital_etl": 77283.17,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214116190",
+          "inversionista": "Flujocapital",
+          "capital": "76175.0267774322",
+          "capitalRestante": "76175.0267774322",
+          "capitalUltimoPago": "78039.5299346976"
+        },
+        {
+          "numeroCredito": "01010214116190_2",
+          "inversionista": "Rodrigo Rodas",
+          "capital": "1108.1424895801092",
+          "capitalRestante": "1108.1424895801092",
+          "capitalUltimoPago": "1135.2635534005392"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-11-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214107860",
+      "nombre_cliente": "Mariana Azucena Godoy Alay",
+      "capital_credito": 86570.96,
+      "suma_inversionistas": 84662.34,
+      "diferencia": -1908.62,
+      "num_inversionistas": 1,
+      "capital_etl": 84662.35,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214107860",
+          "inversionista": "Flujocapital",
+          "capital": "84662.34533373447",
+          "capitalRestante": "84662.34533373447",
+          "capitalUltimoPago": "84662.34533373447"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-28 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214108330",
+      "nombre_cliente": "Raul Alberto Zeledon Burgalin",
+      "capital_credito": 192783.37,
+      "suma_inversionistas": 190846.74,
+      "diferencia": -1936.63,
+      "num_inversionistas": 1,
+      "capital_etl": 138954.68,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214108330",
+          "inversionista": "Javier Arzu Perez",
+          "capital": "138954.677992",
+          "capitalRestante": "138954.677992",
+          "capitalUltimoPago": "192783.37"
+        }
+      ],
+      "fecha_ultimo_pago": "2024-02-18 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214116100",
+      "nombre_cliente": "Hugo Roberto Villegas Velásquez",
+      "capital_credito": 153491.28,
+      "suma_inversionistas": 151508.07,
+      "diferencia": -1983.21,
+      "num_inversionistas": 2,
+      "capital_etl": 153491.27,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214116100",
+          "inversionista": "Flujocapital",
+          "capital": "152557.04225228901",
+          "capitalRestante": "150642.82056212748",
+          "capitalUltimoPago": "150642.82056212748"
+        },
+        {
+          "numeroCredito": "01010214116100_2",
+          "inversionista": "Boris Gilberto Lemus Villatoro",
+          "capital": "2884.6430320859436",
+          "capitalRestante": "2848.445035024987",
+          "capitalUltimoPago": "2848.445035024987"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214106400",
+      "nombre_cliente": "Diego Jose David Loarca de Leon",
+      "capital_credito": 52397.78,
+      "suma_inversionistas": 50314.8,
+      "diferencia": -2082.98,
+      "num_inversionistas": 1,
+      "capital_etl": 50314.8,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214106400",
+          "inversionista": "Flujocapital",
+          "capital": "50314.79853717547",
+          "capitalRestante": "50314.79853717547",
+          "capitalUltimoPago": "52397.78431359404"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-07-28 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214118350",
+      "nombre_cliente": "Estefany Yissel Chiviliu Tepen",
+      "capital_credito": 197908.82,
+      "suma_inversionistas": 195663.23,
+      "diferencia": -2245.59,
+      "num_inversionistas": 1,
+      "capital_etl": 195663.23,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214118350",
+          "inversionista": "Flujocapital",
+          "capital": "195663.2347180491",
+          "capitalRestante": "195663.2347180491",
+          "capitalUltimoPago": "197908.81796705758"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-09-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214111230",
+      "nombre_cliente": "Meyra Damaris Boche Chavez de Diaz / Hansony Emanuel Boche Chavez",
+      "capital_credito": 54498.04,
+      "suma_inversionistas": 52165.42,
+      "diferencia": -2332.62,
+      "num_inversionistas": 1,
+      "capital_etl": 52165.42,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214111230",
+          "inversionista": "Flujocapital",
+          "capital": "52165.42460461828",
+          "capitalRestante": "52165.42460461828",
+          "capitalUltimoPago": "54498.041181767745"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-08-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214110360",
+      "nombre_cliente": "Miguel Angel Ramirez Coroy",
+      "capital_credito": 135461.94,
+      "suma_inversionistas": 133099.14,
+      "diferencia": -2362.8,
+      "num_inversionistas": 1,
+      "capital_etl": 135461.94,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214110360",
+          "inversionista": "Flujocapital",
+          "capital": "137824.7367340417",
+          "capitalRestante": "135461.94231117363",
+          "capitalUltimoPago": "135461.94231117363"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-28 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214119760",
+      "nombre_cliente": "Edmon Hernan Robinson Cubillo",
+      "capital_credito": 217882.71,
+      "suma_inversionistas": 215509.02,
+      "diferencia": -2373.69,
+      "num_inversionistas": 2,
+      "capital_etl": 217882.7,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214119760",
+          "inversionista": "Javier Arzu Perez",
+          "capital": "210433.51878805913",
+          "capitalRestante": "208202.75754273517",
+          "capitalUltimoPago": "208202.75754273517"
+        },
+        {
+          "numeroCredito": "01010214119760_2",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "9783.651075124266",
+          "capitalRestante": "9679.946413186353",
+          "capitalUltimoPago": "9679.946413186353"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214104240",
+      "nombre_cliente": "Gladys Elizabeth Ramirez Agustin / Raul Antonio Alarcon Peña",
+      "capital_credito": 33930.76,
+      "suma_inversionistas": 31509.42,
+      "diferencia": -2421.34,
+      "num_inversionistas": 1,
+      "capital_etl": 31509.42,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214104240",
+          "inversionista": "Flujocapital",
+          "capital": "31509.417793744266",
+          "capitalRestante": "31509.417793744266",
+          "capitalUltimoPago": "33930.75463489244"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-12-11 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214119500",
+      "nombre_cliente": "José Carlos Rafael Motta Ovando / Mayan Container Services, S.A.",
+      "capital_credito": 385144.58,
+      "suma_inversionistas": 382716.55,
+      "diferencia": -2428.03,
+      "num_inversionistas": 2,
+      "capital_etl": 385144.58,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214119500",
+          "inversionista": "Autocash S.A.",
+          "capital": "249457.48025292146",
+          "capitalRestante": "247407.42540609202",
+          "capitalUltimoPago": "247407.42540609202"
+        },
+        {
+          "numeroCredito": "01010214119500_2",
+          "inversionista": "Ragnar Magaña Pacheco",
+          "capital": "138877.8",
+          "capitalRestante": "137737.15704",
+          "capitalUltimoPago": "137737.15704"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-28 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214116710",
+      "nombre_cliente": "MARIO JULIAN DE PAZ LÓPEZ / YORLENNY MARICELA DE LEÓN",
+      "capital_credito": 116846.68,
+      "suma_inversionistas": 114348.54,
+      "diferencia": -2498.14,
+      "num_inversionistas": 1,
+      "capital_etl": 114348.54,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214116710",
+          "inversionista": "Flujocapital",
+          "capital": "114348.54377278678",
+          "capitalRestante": "114348.54377278678",
+          "capitalUltimoPago": "116846.67889680239"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-07-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214114410",
+      "nombre_cliente": "Ana Elisa Alvarez Zuñiga",
+      "capital_credito": 106980.66,
+      "suma_inversionistas": 104192.95,
+      "diferencia": -2787.71,
+      "num_inversionistas": 1,
+      "capital_etl": 104192.95,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214114410",
+          "inversionista": "Flujocapital",
+          "capital": "104192.95136605213",
+          "capitalRestante": "104192.95136605213",
+          "capitalUltimoPago": "106980.66280938547"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-10-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010202102090",
+      "nombre_cliente": "Ervin Ernesto Telon Polanco",
+      "capital_credito": 29885.61,
+      "suma_inversionistas": 26606.2,
+      "diferencia": -3279.41,
+      "num_inversionistas": 1,
+      "capital_etl": 26606.2,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010202102090",
+          "inversionista": "Flujocapital",
+          "capital": "26606.197058259208",
+          "capitalRestante": "26606.197058259208",
+          "capitalUltimoPago": "29885.610000000008"
+        }
+      ],
+      "fecha_ultimo_pago": "2024-02-12 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214107410",
+      "nombre_cliente": "Juan Antonio Carranza Ramirez",
+      "capital_credito": 79317.18,
+      "suma_inversionistas": 75922.27,
+      "diferencia": -3394.91,
+      "num_inversionistas": 1,
+      "capital_etl": 75922.27,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214107410",
+          "inversionista": "Flujocapital",
+          "capital": "75922.27271764047",
+          "capitalRestante": "75922.27271764047",
+          "capitalUltimoPago": "79317.17526131455"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-11-28 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214118190",
+      "nombre_cliente": "Rogelim Abidsai Valenzuela Muñoz",
+      "capital_credito": 73295.26,
+      "suma_inversionistas": 69330.9,
+      "diferencia": -3964.36,
+      "num_inversionistas": 2,
+      "capital_etl": 73295.26,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214118190",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "68904.78465134495",
+          "capitalRestante": "65369.13315348754",
+          "capitalUltimoPago": "65369.13315348754"
+        },
+        {
+          "numeroCredito": "01010214118190_2",
+          "inversionista": "Andres Alejandro Salvatierra Mayen",
+          "capital": "8354.837450286454",
+          "capitalRestante": "7926.128719451266",
+          "capitalUltimoPago": "7926.128719451266"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-28 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010202102180",
+      "nombre_cliente": "Carlos Andres Florian Solares",
+      "capital_credito": 37487.06,
+      "suma_inversionistas": 33329.21,
+      "diferencia": -4157.85,
+      "num_inversionistas": 1,
+      "capital_etl": 33329.21,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010202102180",
+          "inversionista": "Flujocapital",
+          "capital": "33329.214390629895",
+          "capitalRestante": "33329.214390629895",
+          "capitalUltimoPago": "37487.06404186796"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-09-24 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214105820",
+      "nombre_cliente": "Bryan Javier Arriaza Guitron",
+      "capital_credito": 12546.67,
+      "suma_inversionistas": 7733.81,
+      "diferencia": -4812.86,
+      "num_inversionistas": 1,
+      "capital_etl": 10120.19,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214105820",
+          "inversionista": "Flujocapital",
+          "capital": "10120.186843455233",
+          "capitalRestante": "10120.186843455233",
+          "capitalUltimoPago": "14933.047705176976"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-12-09 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214109350",
+      "nombre_cliente": "Santos Nicolas Mejia Itzep",
+      "capital_credito": 87726.76,
+      "suma_inversionistas": 82894.89,
+      "diferencia": -4831.87,
+      "num_inversionistas": 1,
+      "capital_etl": 82894.89,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214109350",
+          "inversionista": "Flujocapital",
+          "capital": "82894.88966898303",
+          "capitalRestante": "82894.88966898303",
+          "capitalUltimoPago": "87726.7601433825"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-06-26 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214105030",
+      "nombre_cliente": "Karla Paola España Giron",
+      "capital_credito": 17184.74,
+      "suma_inversionistas": 11634.91,
+      "diferencia": -5549.83,
+      "num_inversionistas": 1,
+      "capital_etl": 11634.91,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214105030",
+          "inversionista": "Inversiones Monaco S.A. (Oscar Jose Massis Massis)",
+          "capital": "11634.911400368062",
+          "capitalRestante": "11634.911400368062",
+          "capitalUltimoPago": "17184.739551291903"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-05-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214114920",
+      "nombre_cliente": "Tiendas Virtuales, Sociedad Anónima",
+      "capital_credito": 222965.18,
+      "suma_inversionistas": 217322.82,
+      "diferencia": -5642.36,
+      "num_inversionistas": 1,
+      "capital_etl": 217322.82,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214114920",
+          "inversionista": "Flujocapital",
+          "capital": "217322.82448304392",
+          "capitalRestante": "217322.82448304392",
+          "capitalUltimoPago": "222965.1765475342"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-10-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010202117700",
+      "nombre_cliente": "Jairo Fernando Herrera Juarez",
+      "capital_credito": 32025.85,
+      "suma_inversionistas": 26230.47,
+      "diferencia": -5795.38,
+      "num_inversionistas": 1,
+      "capital_etl": 32025.84,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010202117700",
+          "inversionista": "Flujocapital",
+          "capital": "32025.83893715966",
+          "capitalRestante": "32025.83893715966",
+          "capitalUltimoPago": "32025.83893715966"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-21 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214113970",
+      "nombre_cliente": "Eddy Fernando Pérez Sinay",
+      "capital_credito": 68782.58,
+      "suma_inversionistas": 62513.75,
+      "diferencia": -6268.83,
+      "num_inversionistas": 3,
+      "capital_etl": 68782.58,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214113970",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "54728.27309459115",
+          "capitalRestante": "50156.97808258029",
+          "capitalUltimoPago": "50156.97808258029"
+        },
+        {
+          "numeroCredito": "01010214113970_2",
+          "inversionista": "Central de Carga S.A.",
+          "capital": "12701.96002193475",
+          "capitalRestante": "11641.002950303255",
+          "capitalUltimoPago": "11641.002950303255"
+        },
+        {
+          "numeroCredito": "01010214113970_3",
+          "inversionista": "Andres Alejandro Salvatierra Mayen",
+          "capital": "7621.176013160851",
+          "capitalRestante": "6984.601770181953",
+          "capitalUltimoPago": "6984.601770181953"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-02-28 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214103540",
+      "nombre_cliente": "Pedro Rosales Lopez 2",
+      "capital_credito": 202256.57,
+      "suma_inversionistas": 195493.12,
+      "diferencia": -6763.45,
+      "num_inversionistas": 1,
+      "capital_etl": 195493.12,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214103540",
+          "inversionista": "Flujocapital",
+          "capital": "195493.12063095684",
+          "capitalRestante": "195493.12063095684",
+          "capitalUltimoPago": "202256.57000000004"
+        }
+      ],
+      "fecha_ultimo_pago": "2024-02-25 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214111580",
+      "nombre_cliente": "Yarol Antonio Cur Perez / Miriam Lucia Roldan Azurdia",
+      "capital_credito": 45864.94,
+      "suma_inversionistas": 38262.52,
+      "diferencia": -7602.42,
+      "num_inversionistas": 1,
+      "capital_etl": 38262.52,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214111580",
+          "inversionista": "Javier Arzu Perez",
+          "capital": "38262.52027958765",
+          "capitalRestante": "38262.52027958765",
+          "capitalUltimoPago": "45864.94354594922"
+        }
+      ],
+      "fecha_ultimo_pago": "2024-11-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214119120",
+      "nombre_cliente": "Industria de Bebida Vida Sociedad Anónima",
+      "capital_credito": 79251.47,
+      "suma_inversionistas": 71261.28,
+      "diferencia": -7990.19,
+      "num_inversionistas": 2,
+      "capital_etl": 162955.96,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214119120",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "77312.75772760286",
+          "capitalRestante": "77312.75772760286",
+          "capitalUltimoPago": "77312.75772760286"
+        },
+        {
+          "numeroCredito": "01010214119130",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "69322.56513716765",
+          "capitalRestante": "69322.56513716765",
+          "capitalUltimoPago": "69322.56513716765"
+        },
+        {
+          "numeroCredito": "01010214119120_2",
+          "inversionista": "Felipe Gonzalez",
+          "capital": "1938.7117937984",
+          "capitalRestante": "1938.7117937984",
+          "capitalUltimoPago": "1938.7117937984"
+        },
+        {
+          "numeroCredito": "01010214119130_2",
+          "inversionista": "Marines Overall Salazar",
+          "capital": "14381.92062983809",
+          "capitalRestante": "14381.92062983809",
+          "capitalUltimoPago": "14381.92062983809"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214118070",
+      "nombre_cliente": "Luis Felipe Hernández Reyes",
+      "capital_credito": 151273.7,
+      "suma_inversionistas": 75636.85,
+      "diferencia": -75636.85,
+      "num_inversionistas": 1,
+      "capital_etl": 75636.85,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214118070",
+          "inversionista": "Javier Arzu Perez",
+          "capital": "75636.85085322455",
+          "capitalRestante": "75636.85085322455",
+          "capitalUltimoPago": "75636.85085322455"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214106490",
+      "nombre_cliente": "Dora Maria Raguay Godinez",
+      "capital_credito": 526631.25,
+      "suma_inversionistas": 439867.12,
+      "diferencia": -86764.13,
+      "num_inversionistas": 4,
+      "capital_etl": 339252.06,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214106490",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "167251.01420309013",
+          "capitalRestante": "167251.01420309013",
+          "capitalUltimoPago": "175543.75"
+        },
+        {
+          "numeroCredito": "01010214106600",
+          "inversionista": "Carlos René Estuardo Matheu González",
+          "capital": "51953.665485216",
+          "capitalRestante": "51953.665485216",
+          "capitalUltimoPago": "62610.301348226996"
+        },
+        {
+          "numeroCredito": "01010214106490_2",
+          "inversionista": "Autocash S.A.",
+          "capital": "93878.06",
+          "capitalRestante": "93878.06",
+          "capitalUltimoPago": "175543.75"
+        },
+        {
+          "numeroCredito": "01010214106600_2",
+          "inversionista": "Richard Kachler Ortega",
+          "capital": "26169.324566124134",
+          "capitalRestante": "26169.324566124134",
+          "capitalUltimoPago": "175543.75"
+        }
+      ],
+      "fecha_ultimo_pago": "2024-03-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214123970",
+      "nombre_cliente": "Maynor Rocael Yalibat Cholom",
+      "capital_credito": 263786.36,
+      "suma_inversionistas": 144532.31,
+      "diferencia": -119254.05,
+      "num_inversionistas": 2,
+      "capital_etl": 131893.18,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214123970",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "119254.0512323929",
+          "capitalRestante": "119254.0512323929",
+          "capitalUltimoPago": "131893.18"
+        },
+        {
+          "numeroCredito": "01010214123970_2",
+          "inversionista": "Tonejos S.A.",
+          "capital": "12639.1287676071",
+          "capitalRestante": "12639.1287676071",
+          "capitalUltimoPago": "131893.18"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214114010",
+      "nombre_cliente": "Pablo Andree Dardón Arbizú",
+      "capital_credito": 296660.45,
+      "suma_inversionistas": 153616.2,
+      "diferencia": -143044.25,
+      "num_inversionistas": 2,
+      "capital_etl": 133746.76,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214124600",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "133746.76",
+          "capitalRestante": "133746.76",
+          "capitalUltimoPago": "143044.2457181579"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214118020",
+      "nombre_cliente": "Nery Estuardo Monterroso Calderón",
+      "capital_credito": 315100.61,
+      "suma_inversionistas": 160564.37,
+      "diferencia": -154536.24,
+      "num_inversionistas": 2,
+      "capital_etl": 64585.68,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214124630",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "64585.68",
+          "capitalRestante": "64585.68",
+          "capitalUltimoPago": "154536.2361604001"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-15 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214121620",
+      "nombre_cliente": "Evelyn Noemi Guerra De La Rosa",
+      "capital_credito": 506747.27,
+      "suma_inversionistas": 280477.02,
+      "diferencia": -226270.25,
+      "num_inversionistas": 3,
+      "capital_etl": 269519.23,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214121620",
+          "inversionista": "Cube Investments S.A.",
+          "capital": "225414.19819225423",
+          "capitalRestante": "225414.19819225423",
+          "capitalUltimoPago": "237228.03472410314"
+        },
+        {
+          "numeroCredito": "01010214121620_2",
+          "inversionista": "Giancarlo Massis Massis",
+          "capital": "32291.196121048673",
+          "capitalRestante": "32291.196121048673",
+          "capitalUltimoPago": "32291.196121048673"
+        },
+        {
+          "numeroCredito": "01010214121620_3",
+          "inversionista": "Richard Kachler Ortega",
+          "capital": "11813.83653184892",
+          "capitalRestante": "11813.83653184892",
+          "capitalUltimoPago": "237228.03472410314"
+        }
+      ],
+      "fecha_ultimo_pago": "2026-01-30 00:00:00"
+    },
+    {
+      "numero_credito_sifco": "01010214117950",
+      "nombre_cliente": "Eduardo Luis Godoy Rojas",
+      "capital_credito": 468020.09,
+      "suma_inversionistas": 231260.5,
+      "diferencia": -236759.59,
+      "num_inversionistas": 1,
+      "capital_etl": 316121.98,
+      "inversionistas": [
+        {
+          "numeroCredito": "01010214122210",
+          "inversionista": "MARIA ELENA ROCA MARROQUIN",
+          "capital": "316121.98",
+          "capitalRestante": "316121.98",
+          "capitalUltimoPago": "236759.59109841552"
+        }
+      ],
+      "fecha_ultimo_pago": "2025-12-15 00:00:00"
+    }
+  ]
+}

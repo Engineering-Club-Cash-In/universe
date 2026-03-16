@@ -56,7 +56,7 @@ export const sendLiquidationEmail = async ({
     const { data, error } = await resend.emails.send({
       from: `Club Cash In <no-reply@${domain}>`,
       to: [to],
-      subject: `Liquidación Procesada - Crédito ${creditNumber}`,
+      subject: `Liquidación Procesada - ${new Date().toLocaleString("es-GT", { month: "long", year: "numeric" })}`,
       react: React.createElement(LiquidationEmail, {
         investorName,
         amount,

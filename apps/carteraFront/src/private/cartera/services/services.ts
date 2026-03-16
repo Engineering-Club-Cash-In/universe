@@ -133,6 +133,7 @@ export interface Credito {
   membresias: string;
   formato_credito: string;
   statusCredit: string; // ACTIVO, CANCELADO, INCOBRABLE
+  permite_abono_capital?: boolean;
 }
 
 export interface Usuario {
@@ -399,6 +400,7 @@ export interface Credito {
   tipoCredito: string;
   royalti: string;
   mora: string;
+  permite_abono_capital?: boolean;
 }
 
 export interface Usuario {
@@ -660,6 +662,9 @@ export interface UpdateCreditBody {
   // Formato de crédito
   formato_credito?: string;
 
+  // Abono capital
+  permite_abono_capital?: boolean;
+
   // Inversionistas nuevos
   inversionistas?: InversionistaPayload[];
   inversionistas_espejo?: InversionistaPayload[];
@@ -715,6 +720,14 @@ export async function processInvestorsService({ pago_id, credito_id }: { pago_id
   });
   return res.data;
 }
+export async function recalcularPagosService({ numero_credito_sifco, numero_cuota }: { numero_credito_sifco: string; numero_cuota: number }) {
+  const res = await api.post(`${API_URL}/recalcular-pagos`, {
+    numero_credito_sifco,
+    numero_cuota,
+  });
+  return res.data;
+}
+
 export interface PagoCredito {
   id: number;
   mes: string;

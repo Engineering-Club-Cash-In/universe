@@ -219,6 +219,7 @@ export async function exportPagosToExcel(credito_sifco: string) {
     { header: "Monto Aplicado", key: "monto_aplicado", width: 15 },
     { header: "Fecha Pago", key: "fecha_pago", width: 20 },
     { header: "Observaciones", key: "observaciones", width: 40 },
+    { header: "Origen Pago", key: "origen_pago", width: 18 },
     { header: "Boletas", key: "boletas", width: 50 },
   ];
 
@@ -255,6 +256,7 @@ export async function exportPagosToExcel(credito_sifco: string) {
       monto_aplicado: pago.monto_aplicado,
       fecha_pago: pago.fecha_pago,
       observaciones: pago.observaciones,
+      origen_pago: pago.origen_pago ?? "",
       boletas: (pago as any).boletas?.join(", ") || "",
     };
 
@@ -384,6 +386,7 @@ export async function exportPagosConInversionistasExcel(
     { header: "Categoría Crédito", key: "categoriaCredito", width: 18 },
     { header: "Tipo de Pago", key: "tipoPago", width: 18 },
     { header: "Fecha Aplicado", key: "fechaAplicado", width: 20 },
+    { header: "Origen Pago", key: "origenPago", width: 18 },
     { header: "Boletas", key: "boletas", width: 50 },
   ];
 
@@ -454,6 +457,7 @@ export async function exportPagosConInversionistasExcel(
       categoriaCredito: item.usuario?.categoria ?? "",
       tipoPago,
       fechaAplicado: item.fechaAplicado ?? "",
+      origenPago: item.origenPago ?? "",
       boletas: boletas.map((b: any) => b.urlBoleta).filter(Boolean).join("\n"),
     };
 
@@ -680,6 +684,7 @@ export async function exportPagosAdvisorExcel(
     { header: "Pago Convenio", key: "pagoConvenio", width: 15 },
     { header: "Fecha Boleta", key: "fechaBoleta", width: 15 },
     { header: "Fecha Aplicado", key: "fechaAplicado", width: 20 },
+    { header: "Origen Pago", key: "origenPago", width: 18 },
   ];
 
   // Columnas dinámicas de boletas
@@ -751,6 +756,7 @@ export async function exportPagosAdvisorExcel(
       pagoConvenio: item.pagoConvenio,
       fechaBoleta: item.fechaBoleta,
       fechaAplicado: item.fechaAplicado,
+      origenPago: item.origenPago ?? "",
       bancoNombre: item.bancoNombre,
       cuentaEmpresaNombre: item.cuentaEmpresaNombre,
       cuentaEmpresaBanco: item.cuentaEmpresaBanco,

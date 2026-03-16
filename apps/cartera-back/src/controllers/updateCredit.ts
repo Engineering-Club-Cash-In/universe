@@ -301,6 +301,7 @@ const creditUpdateSchema = z.object({
   saldo_a_favor: z.number().min(0).optional(),
   // Formato de crédito manual
   formato_credito: z.string().max(50).optional(),
+  permite_abono_capital: z.boolean().optional(),
 });
 
 type CreditUpdateData = z.infer<typeof creditUpdateSchema>;
@@ -796,6 +797,7 @@ export const updateCredit = async ({ body, set }: any) => {
       direccion,
       saldo_a_favor,
       formato_credito,
+      permite_abono_capital,
       ...fieldsToUpdate
     } = parseResult.data;
 
@@ -880,6 +882,9 @@ export const updateCredit = async ({ body, set }: any) => {
     if (asesor_id !== undefined) {
       // ✅ Agregar al update
       updateFields.asesor_id = asesor_id;
+    }
+    if (permite_abono_capital !== undefined) {
+      updateFields.permite_abono_capital = permite_abono_capital;
     }
     // 5. Detectar cambios que afectan la deuda
     const changes = detectDebtAffectingChanges(fieldsToUpdate, current);

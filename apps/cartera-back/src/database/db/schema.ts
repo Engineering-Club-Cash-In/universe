@@ -152,6 +152,7 @@
       .notNull()
       .default(StatusCredit.ACTIVO),
     otros: numeric("otros", { precision: 18, scale: 2 }).notNull().default("0"), // Otros cargos o pagos adicionales
+    permite_abono_capital: boolean("permite_abono_capital").notNull().default(false),
   });
   export const cuotas_credito = customSchema.table("cuotas_credito", {
     cuota_id: serial("cuota_id").primaryKey(),
@@ -213,6 +214,12 @@
   });
 
   // 3. Pagos de crédito
+  export const origenPagoEnum = pgEnum('origen_pago', [
+    'transferencia',
+    'cheque',
+    'boleta',
+  ]);
+
   export const paymentValidationStatus = pgEnum('payment_validation_status', [
     'no_required',    // No necesita validación (pagos normales/automáticos)
     'pending',        // Pendiente de validación
@@ -291,6 +298,7 @@
     fecha_boleta: date("fecha_boleta"), // Fecha del pago en la boleta
     monto_aplicado: numeric("monto_aplicado", { precision: 18, scale: 2 }).notNull(),
     fecha_aplicado: timestamp("fecha_aplicado"), // Fecha en que se aplicó el pago al crédito
+    origen_pago: origenPagoEnum("origen_pago"),
   });
   export const boletas = customSchema.table("boletas", {
     id: serial("id").primaryKey(),

@@ -8,7 +8,7 @@ import {
 	Scale,
 	TrendingUp,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
 	CartesianGrid,
 	Line,
@@ -512,25 +512,25 @@ export function JuridicoDashboardEditor({
 		payload: JuridicoDashboardPayload;
 	}) => Promise<void> | void;
 }) {
+	const initialPayload =
+		snapshot?.payload || JURIDICO_DASHBOARD_TEMPLATE.payload;
 	const [periodLabel, setPeriodLabel] = useState(
 		snapshot?.periodLabel || JURIDICO_DASHBOARD_TEMPLATE.periodLabel,
 	);
 	const [notes, setNotes] = useState(
 		snapshot?.notes || JURIDICO_DASHBOARD_TEMPLATE.notes || "",
 	);
-	const [rawJson, setRawJson] = useState(() =>
-		JSON.stringify(
-			snapshot?.payload || JURIDICO_DASHBOARD_TEMPLATE.payload,
-			null,
-			2,
-		),
-	);
+	const [payload, setPayload] = useState<JuridicoDashboardPayload>(initialPayload);
+	const [rawJson, setRawJson] = useState(() => JSON.stringify(initialPayload, null, 2));
 	const [parseError, setParseError] = useState<string | null>(null);
+	const [showAdvancedEditor, setShowAdvancedEditor] = useState(false);
+	const orderRefs = useRef<Array<HTMLDivElement | null>>([]);
 
 	useEffect(() => {
 		if (!snapshot) return;
 		setPeriodLabel(snapshot.periodLabel);
 		setNotes(snapshot.notes || "");
+		setPayload(snapshot.payload);
 		setRawJson(JSON.stringify(snapshot.payload, null, 2));
 		setParseError(null);
 	}, [snapshot]);
@@ -538,6 +538,7 @@ export function JuridicoDashboardEditor({
 	const handleUseTemplate = () => {
 		setPeriodLabel(JURIDICO_DASHBOARD_TEMPLATE.periodLabel);
 		setNotes(JURIDICO_DASHBOARD_TEMPLATE.notes || "");
+		setPayload(JURIDICO_DASHBOARD_TEMPLATE.payload);
 		setRawJson(JSON.stringify(JURIDICO_DASHBOARD_TEMPLATE.payload, null, 2));
 		setParseError(null);
 	};
@@ -548,15 +549,139 @@ export function JuridicoDashboardEditor({
 		);
 	};
 
-	const handleSave = async () => {
-		let parsedPayload: JuridicoDashboardPayload;
+	const syncPayload = (
+		updater: (current: JuridicoDashboardPayload) => JuridicoDashboardPayload,
+	) => {
+		setPayload((current) => {
+			const next = updater(current);
+			setRawJson(JSON.stringify(next, null, 2));
+			return next;
+		});
+	};
 
-		try {
-			parsedPayload = JSON.parse(rawJson) as JuridicoDashboardPayload;
-		} catch {
-			setParseError("El JSON no es válido. Corrígelo antes de publicar.");
-			return;
+	const updateMetric = (index: number, value: string) => {
+		syncPayload((current) => {
+			const metrics = [...current.metrics];
+			const metric = { ...metrics[index] };
+			metric.value = Number(value) || 0;
+			metrics[index] = metric;
+			return { ...current, metrics };
+		});
+	};
+
+	const updateTrend = (
+		index: number,
+		key: "collectedAmount" | "casesIntervened",
+		value: string,
+	) => {
+		syncPayload((current) => {
+			const trend = [...current.trend];
+			const point = { ...trend[index] };
+			point[key] = Number(value) || 0;
+			trend[index] = point;
+			return { ...current, trend };
+		});
+	};
+
+	const updateFunnel = (index: number, value: string) => {
+		syncPayload((current) => {
+			const funnel = [...current.funnel];
+			const step = { ...funnel[index] };
+			step.value = Number(value) || 0;
+			funnel[index] = step;
+			return { ...current, funnel };
+		});
+	};
+
+	const updateOrder = (
+		index: number,
+		key: keyof JuridicoDashboardPayload["orders"][number],
+		value: string,
+	) => {
+		syncPayload((current) => {
+			const orders = [...current.orders];
+			const order = { ...orders[index] };
+			if (key === "daysInProcess") {
+				order.daysInProcess = Number(value) || 0;
+			} else {
+				order[key] = value;
+			}
+			orders[index] = order;
+			return { ...current, orders };
+		});
+	};
+
+	const addOrder = () => {
+		let nextIndex = -1;
+		syncPayload((current) => {
+			nextIndex = current.orders.length;
+			return {
+				...current,
+				orders: [
+					...current.orders,
+					{
+						id: `OS-${String(current.orders.length + 1).padStart(3, "0")}`,
+						court: "",
+						municipality: "",
+						assignedAt: "",
+						status: "",
+						daysInProcess: 0,
+						changeText: "",
+					},
+				],
+			};
+		});
+		requestAnimationFrame(() => {
+			orderRefs.current[nextIndex]?.scrollIntoView({
+				behavior: "smooth",
+				block: "start",
+			});
+		});
+	};
+
+	const removeOrder = (index: number) => {
+		syncPayload((current) => ({
+			...current,
+			orders: current.orders.filter((_, currentIndex) => currentIndex !== index),
+		}));
+	};
+
+	const updateQuality = (
+		index: number,
+		key: keyof JuridicoDashboardPayload["quality"][number],
+		value: string,
+	) => {
+		syncPayload((current) => {
+			const quality = [...current.quality];
+			const item = { ...quality[index] };
+			if (key === "pct") {
+				item.pct = Number(value) || 0;
+			} else if (key === "tone") {
+				item.tone = value as "success" | "warning" | "danger";
+			} else {
+				item[key] = value;
+			}
+			quality[index] = item;
+			return { ...current, quality };
+		});
+	};
+
+	const handleSave = async () => {
+		let parsedPayload = payload;
+
+		if (showAdvancedEditor) {
+			try {
+				parsedPayload = JSON.parse(rawJson) as JuridicoDashboardPayload;
+			} catch {
+				setParseError("El JSON no es válido. Corrígelo antes de publicar.");
+				return;
+			}
 		}
+
+		const maxFunnelValue = Math.max(
+			1,
+			...parsedPayload.funnel.map((step) => step.value || 0),
+		);
 
 		const nextPayload: JuridicoDashboardPayload = {
 			...parsedPayload,
@@ -564,6 +689,15 @@ export function JuridicoDashboardEditor({
 				...parsedPayload.header,
 				periodLabel,
 			},
+			metrics: parsedPayload.metrics.map((metric) => ({
+				...metric,
+				changeText: undefined,
+				changeTone: undefined,
+			})),
+			funnel: parsedPayload.funnel.map((step) => ({
+				...step,
+				pct: Math.round((step.value / maxFunnelValue) * 100),
+			})),
 		};
 
 		setParseError(null);
@@ -611,9 +745,17 @@ export function JuridicoDashboardEditor({
 						<Button variant="outline" onClick={handleUseTemplate}>
 							Usar plantilla
 						</Button>
-						<Button variant="outline" onClick={handleCopyTemplate}>
-							Copiar plantilla JSON
+						<Button
+							variant="outline"
+							onClick={() => setShowAdvancedEditor((current) => !current)}
+						>
+							{showAdvancedEditor ? "Ocultar JSON" : "Modo avanzado"}
 						</Button>
+						{showAdvancedEditor ? (
+							<Button variant="outline" onClick={handleCopyTemplate}>
+								Copiar plantilla JSON
+							</Button>
+						) : null}
 						<Button onClick={handleSave} disabled={isSaving || !periodLabel.trim()}>
 							{isSaving ? "Publicando..." : "Publicar dashboard"}
 						</Button>
@@ -622,33 +764,246 @@ export function JuridicoDashboardEditor({
 						<p className="font-medium text-red-600 text-sm">{parseError}</p>
 					) : null}
 					<div className="rounded-lg border bg-muted/40 p-4 text-muted-foreground text-sm">
-						Estructura esperada:
-						<ul className="mt-2 list-disc space-y-1 pl-5">
-							<li>`header`: título, subtítulo, período y fuente.</li>
-							<li>`metrics`: 4 a 6 métricas principales.</li>
-							<li>`trend`: historial mensual para gráfica.</li>
-							<li>`funnel`: etapas del embudo jurídico.</li>
-							<li>`orders`: tabla de órdenes de secuestro.</li>
-							<li>`quality`: indicadores del semáforo jurídico.</li>
-						</ul>
+						Edita los bloques de abajo como un formulario. El JSON queda solo
+						como respaldo para casos avanzados.
 					</div>
 				</CardContent>
 			</Card>
 
 			<Card>
 				<CardHeader>
-					<CardTitle>JSON del snapshot</CardTitle>
+					<CardTitle>Contenido del dashboard</CardTitle>
 					<CardDescription>
-						Pega aquí el dataset validado para el dashboard.
+						Ajusta la información visible sin tocar estructura técnica.
 					</CardDescription>
 				</CardHeader>
-				<CardContent>
-					<Textarea
-						value={rawJson}
-						onChange={(event) => setRawJson(event.target.value)}
-						className="min-h-[560px] font-mono text-xs"
-						spellCheck={false}
-					/>
+				<CardContent className="space-y-6">
+					<div className="space-y-3">
+						<h3 className="font-medium text-sm">Encabezado</h3>
+						<Input
+							value={payload.header.title}
+							onChange={(event) =>
+								syncPayload((current) => ({
+									...current,
+									header: { ...current.header, title: event.target.value },
+								}))
+							}
+							placeholder="Jurídico"
+						/>
+						<Input
+							value={payload.header.subtitle}
+							onChange={(event) =>
+								syncPayload((current) => ({
+									...current,
+									header: { ...current.header, subtitle: event.target.value },
+								}))
+							}
+							placeholder="Subtítulo"
+						/>
+						<Input
+							value={payload.header.sourceLabel || ""}
+							onChange={(event) =>
+								syncPayload((current) => ({
+									...current,
+									header: {
+										...current.header,
+										sourceLabel: event.target.value,
+									},
+								}))
+							}
+							placeholder="Fuente o nota de carga"
+						/>
+					</div>
+
+					<div className="space-y-3">
+						<h3 className="font-medium text-sm">Métricas principales</h3>
+						{payload.metrics.map((metric, index) => (
+							<div key={metric.label} className="grid gap-2 rounded-lg border p-3">
+								<div className="font-medium text-sm">{metric.label}</div>
+								<Input
+									type="number"
+									value={metric.value}
+									onChange={(event) => updateMetric(index, event.target.value)}
+									placeholder="Valor"
+								/>
+							</div>
+						))}
+					</div>
+
+					<div className="space-y-3">
+						<h3 className="font-medium text-sm">Tendencia mensual</h3>
+						{payload.trend.map((point, index) => (
+							<div
+								key={`${point.label}-${index}`}
+								className="grid gap-2 rounded-lg border p-3 md:grid-cols-3"
+							>
+								<div className="flex items-center font-medium text-sm">
+									{point.label}
+								</div>
+								<Input
+									type="number"
+									value={point.collectedAmount}
+									onChange={(event) =>
+										updateTrend(index, "collectedAmount", event.target.value)
+									}
+									placeholder="Monto"
+								/>
+								<Input
+									type="number"
+									value={point.casesIntervened}
+									onChange={(event) =>
+										updateTrend(index, "casesIntervened", event.target.value)
+									}
+									placeholder="Casos"
+								/>
+							</div>
+						))}
+					</div>
+
+					<div className="space-y-3">
+						<h3 className="font-medium text-sm">Embudo jurídico</h3>
+						{payload.funnel.map((step, index) => (
+							<div
+								key={`${step.label}-${index}`}
+								className="grid gap-2 rounded-lg border p-3 md:grid-cols-2"
+							>
+								<div className="flex items-center font-medium text-sm">
+									{step.label}
+								</div>
+								<Input
+									type="number"
+									value={step.value}
+									onChange={(event) => updateFunnel(index, event.target.value)}
+									placeholder="Valor"
+								/>
+							</div>
+						))}
+						<p className="text-muted-foreground text-xs">
+							El porcentaje se calcula automáticamente con base en el valor más
+							alto del embudo.
+						</p>
+					</div>
+
+					<div className="space-y-3">
+						<h3 className="font-medium text-sm">Órdenes</h3>
+						{payload.orders.map((order, index) => (
+							<div
+								key={order.id}
+								ref={(node) => {
+									orderRefs.current[index] = node;
+								}}
+								className="grid gap-2 rounded-lg border p-3"
+							>
+								<div className="flex justify-end">
+									<Button
+										type="button"
+										variant="ghost"
+										size="sm"
+										onClick={() => removeOrder(index)}
+									>
+										Eliminar
+									</Button>
+								</div>
+								<div className="grid gap-2 md:grid-cols-2">
+									<Input
+										value={order.id}
+										onChange={(event) =>
+											updateOrder(index, "id", event.target.value)
+										}
+										placeholder="Código"
+									/>
+									<Input
+										value={order.status}
+										onChange={(event) =>
+											updateOrder(index, "status", event.target.value)
+										}
+										placeholder="Estado"
+									/>
+								</div>
+								<div className="grid gap-2 md:grid-cols-2">
+									<Input
+										value={order.court}
+										onChange={(event) =>
+											updateOrder(index, "court", event.target.value)
+										}
+										placeholder="Juzgado"
+									/>
+									<Input
+										value={order.municipality}
+										onChange={(event) =>
+											updateOrder(index, "municipality", event.target.value)
+										}
+										placeholder="Municipio"
+									/>
+								</div>
+								<div className="grid gap-2 md:grid-cols-3">
+									<Input
+										value={order.assignedAt}
+										onChange={(event) =>
+											updateOrder(index, "assignedAt", event.target.value)
+										}
+										placeholder="Fecha asignación"
+									/>
+									<Input
+										type="number"
+										value={order.daysInProcess}
+										onChange={(event) =>
+											updateOrder(index, "daysInProcess", event.target.value)
+										}
+										placeholder="Días"
+									/>
+									<Input
+										value={order.changeText || ""}
+										onChange={(event) =>
+											updateOrder(index, "changeText", event.target.value)
+										}
+										placeholder="Avance o nota"
+									/>
+								</div>
+							</div>
+						))}
+						<Button type="button" variant="outline" onClick={addOrder}>
+							Nueva orden
+						</Button>
+					</div>
+
+					<div className="space-y-3">
+						<h3 className="font-medium text-sm">Semáforo de calidad</h3>
+						{payload.quality.map((item, index) => (
+							<div
+								key={`${item.label}-${index}`}
+								className="grid gap-2 rounded-lg border p-3 md:grid-cols-2"
+							>
+								<Input
+									value={item.label}
+									onChange={(event) =>
+										updateQuality(index, "label", event.target.value)
+									}
+									placeholder="Etiqueta"
+								/>
+								<Input
+									type="number"
+									value={item.pct}
+									onChange={(event) =>
+										updateQuality(index, "pct", event.target.value)
+									}
+									placeholder="Porcentaje"
+								/>
+							</div>
+						))}
+					</div>
+
+					{showAdvancedEditor ? (
+						<div className="space-y-3 border-t pt-4">
+							<h3 className="font-medium text-sm">JSON avanzado</h3>
+							<Textarea
+								value={rawJson}
+								onChange={(event) => setRawJson(event.target.value)}
+								className="min-h-[360px] font-mono text-xs"
+								spellCheck={false}
+							/>
+						</div>
+					) : null}
 				</CardContent>
 			</Card>
 		</div>

@@ -40,6 +40,7 @@ const pagoSchema = z.object({
   numeroAutorizacion: z.string().optional(),
   registerBy: z.string().min(1),
   fecha_boleta: z.string(),
+  origen_pago: z.enum(["transferencia", "cheque", "boleta"]).optional().default("transferencia"),
 });
 
 type PagoData = z.infer<typeof pagoSchema>;
@@ -499,7 +500,8 @@ export const insertPayment = async ({ body, set }: any) => {
       banco_id,
       numeroAutorizacion,
       registerBy,
-      fecha_boleta
+      fecha_boleta,
+      origen_pago,
     } = parseResult.data;
 
     // 2. Preparar datos
@@ -1068,6 +1070,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           registerBy: registerBy,
           fecha_boleta: fecha_boleta,
           monto_aplicado: totalPagado.toString(),
+          origen_pago: origen_pago,
         };
 
         // Insertar o actualizar pago
@@ -1433,6 +1436,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         pagoConvenio: montoConvenio.toString() || "0",
         fecha_boleta: fecha_boleta,
         monto_aplicado: abonoCapital.toString(),
+        origen_pago: origen_pago,
       };
 
       console.log("\n📝 ========== REGISTRANDO PAGO ==========");

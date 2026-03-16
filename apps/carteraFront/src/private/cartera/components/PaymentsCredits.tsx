@@ -30,6 +30,8 @@ import {
   Percent,
   Landmark,
   User,
+  MoreVertical,
+  RefreshCw,
 } from "lucide-react";
 import { usePagoForm } from "../hooks/registerPayment";
 import { Button } from "@/components/ui/button";
@@ -131,42 +133,71 @@ function formatDateTime(d: string) {
   const minutes = date.getMinutes().toString().padStart(2, "0");
   return `${day}/${month}/${year} ${hours}:${minutes}`;
 }
-const Campo = ({
-  label,
-  valor,
-  field,
-}: {
-  label: string;
-  valor: any;
-  field: string;
-}) => {
-  const { icon, color } = iconMap[field] ?? {
-    icon: <Info className="w-4 h-4 text-blue-300" />,
-    color: "text-blue-800",
-  };
-  return (
-    <div className="flex flex-col items-start border rounded-lg px-3 py-2 bg-white shadow-sm max-w-[220px] min-h-[64px]">
-      <div className="flex items-center gap-2 mb-1">
-        {icon}
-        <span className={`font-bold capitalize ${color} text-base`}>
-          {label.replace(/_/g, " ")}:
-        </span>
-      </div>
-      <span
-        className="font-semibold text-blue-900 break-all w-full text-lg"
-        style={{
-          overflowWrap: "break-word",
-          wordBreak: "break-all",
-          whiteSpace: "normal",
-          textAlign: "left",
-          minHeight: "1.5em",
-        }}
-      >
-        {valor ?? "--"}
-      </span>
-    </div>
-  );
+const FIELD_LABELS: Record<string, string> = {
+  pago_id: "ID Pago", numero_cuota: "# Cuota", pagado: "Estado",
+  liquidacion_inversionistas: "Liquidación", validationStatus: "Estado Validación",
+  monto_boleta: "Monto Boleta", monto_aplicado: "Monto Aplicado", cuota: "Cuota",
+  fecha_pago: "Fecha Pago", fecha_aplicado: "Fecha Aplicado", fecha_vencimiento: "Fecha Vencimiento",
+  abono_capital: "Capital", abono_interes: "Interés", abono_iva_12: "IVA 12%", abono_seguro: "Seguro",
+  capital_restante: "Capital", interes_restante: "Interés", iva_12_restante: "IVA 12%",
+  seguro_restante: "Seguro", gps_restante: "GPS", total_restante: "Total",
+  membresias: "Membresías", membresias_pago: "Membresías Pago", membresias_mes: "Membresías Mes",
 };
+
+const DETAIL_SECTIONS = [
+  { title: "Información General", icon: <Info className="w-4 h-4" />, color: "text-blue-700", bg: "bg-blue-50", border: "border-blue-200",
+    fields: ["pago_id", "numero_cuota", "pagado", "liquidacion_inversionistas", "validationStatus"] },
+  { title: "Montos", icon: <BadgeDollarSign className="w-4 h-4" />, color: "text-green-700", bg: "bg-green-50", border: "border-green-200",
+    fields: ["monto_boleta", "monto_aplicado", "cuota"] },
+  { title: "Fechas", icon: <CalendarDays className="w-4 h-4" />, color: "text-indigo-700", bg: "bg-indigo-50", border: "border-indigo-200",
+    fields: ["fecha_pago", "fecha_aplicado", "fecha_vencimiento"] },
+  { title: "Abonos", icon: <BadgeDollarSign className="w-4 h-4" />, color: "text-emerald-700", bg: "bg-emerald-50", border: "border-emerald-200",
+    fields: ["abono_capital", "abono_interes", "abono_iva_12", "abono_seguro"] },
+  { title: "Restantes", icon: <Landmark className="w-4 h-4" />, color: "text-orange-700", bg: "bg-orange-50", border: "border-orange-200",
+    fields: ["capital_restante", "interes_restante", "iva_12_restante", "seguro_restante", "gps_restante", "total_restante"] },
+  { title: "Membresías", icon: <Percent className="w-4 h-4" />, color: "text-purple-700", bg: "bg-purple-50", border: "border-purple-200",
+    fields: ["membresias", "membresias_pago", "membresias_mes"] },
+];
+
+function formatFieldValue(key: string, value: any): string {
+  if (value === null || value === undefined) return "--";
+  if (key === "pagado" || key === "liquidacion_inversionistas")
+    return value === true ? "Sí" : value === false ? "No" : String(value).replace(/_/g, " ");
+  if (typeof value === "boolean") return value ? "Sí" : "No";
+  if (key.startsWith("monto") || key.startsWith("cuota") || key.startsWith("abono") || key.endsWith("_restante") || key === "membresias" || key === "membresias_pago" || key === "membresias_mes")
+    return formatCurrency(value);
+  if (key.startsWith("fecha") && typeof value === "string" && value.includes("-"))
+    return key === "fecha_aplicado" ? formatDateTime(value) : formatDate(value);
+  return String(value);
+}
+
+const DetailSections = ({ pago }: { pago: any }) => (
+  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+    {DETAIL_SECTIONS.map((section) => {
+      const hasData = section.fields.some((f) => pago[f] !== undefined);
+      if (!hasData) return null;
+      return (
+        <div key={section.title} className={`rounded-xl border ${section.border} ${section.bg} overflow-hidden`}>
+          <div className={`flex items-center gap-2 px-3 py-2 ${section.color} font-bold text-sm border-b ${section.border}`}>
+            {section.icon}
+            {section.title}
+          </div>
+          <div className="px-3 py-2 space-y-1.5">
+            {section.fields.map((field) => {
+              if (pago[field] === undefined) return null;
+              return (
+                <div key={field} className="flex items-center justify-between text-sm">
+                  <span className="text-gray-500 font-medium">{FIELD_LABELS[field] || field.replace(/_/g, " ")}</span>
+                  <span className="font-bold text-gray-900 text-right">{formatFieldValue(field, pago[field])}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    })}
+  </div>
+);
 
 function colorEstado(estado: string) {
   if (estado === "LIQUIDADO")
@@ -183,7 +214,7 @@ export function PaymentsCredits() {
   );
   const falsePayment = useFalsePayment();
   const { user } = useAuth(); 
-  const { liquidandoId, handleLiquidar, handleReverse, reversePago, handleRevertToPending, revertPaymentToPending, handleRevalidatePayment, revalidatePayment, handleProcessInvestors, processInvestors } =
+  const { liquidandoId, handleLiquidar, handleReverse, reversePago, handleRevertToPending, revertPaymentToPending, handleRevalidatePayment, revalidatePayment, handleProcessInvestors, processInvestors, recalcularPagos, handleRecalcularPagos } =
     usePagoForm();
   const [mesFiltro, setMesFiltro] = useState<string>("");
   const [anioFiltro, setAnioFiltro] = useState<string>("");
@@ -361,7 +392,7 @@ const handleDownloadExcel = async () => {
                   <TableHead className="font-bold text-blue-700">
                     Pagado
                   </TableHead>
-                  <TableHead className="w-40 text-center font-bold text-blue-700">
+                  <TableHead className="w-16 text-center font-bold text-blue-700">
                     Acciones
                   </TableHead>
                   <TableHead className="font-bold text-blue-700">
@@ -415,121 +446,59 @@ const handleDownloadExcel = async () => {
                       </TableCell>
              <TableCell className="text-center">
               {user?.role === "ADMIN" ? (
-                <div className="flex gap-2 justify-center">
-                  {/* Botón Revertir Pago */}
-                  <Button
-                    className="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded font-bold shadow"
-                    onClick={() =>
-                      handleReverse(item.pago.pago_id, item.pago.credito_id,true)
-                    }
-                    disabled={
-                      item.pago.pagado === false ||
-                      item.pago.paymentFalse === true
-                    }
-                  >
-                    {reversePago.isPending ? (
-                      <>
-                        <Loader2 className="animate-spin w-4 h-4 mr-1" />
-                        Revirtiendo...
-                      </>
-                    ) : (
-                      "Revertir Pago"
-                    )}
-                  </Button>
-                  
-                  {/* Botón Revertir Pago / Inversiones */}
-                  <Button
-                    className="bg-orange-500 hover:bg-orange-600 text-white px-3 py-1 rounded font-bold shadow"
-                    onClick={() => {
-                      handleRevertToPending(item.pago.pago_id, item.pago.credito_id);
-                    }}
-                    disabled={
-                      item.pago.paymentFalse === true ||
-                      revertPaymentToPending.isPending
-                    }
-                  >
-                    {revertPaymentToPending.isPending ? (
-                      <>
-                        <Loader2 className="animate-spin w-4 h-4 mr-1" />
-                        Revirtiendo...
-                      </>
-                    ) : (
-                      "Revertir Especial"
-                    )}
-                  </Button>
-
-                  {/* Botón Procesar Inversionistas */}
-                  <Button
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded font-bold shadow"
-                    onClick={() => {
-                      handleProcessInvestors(item.pago.pago_id, item.pago.credito_id);
-                    }}
-                    disabled={
-                      processInvestors.isPending
-                    }
-                  >
-                    {processInvestors.isPending ? (
-                      <>
-                        <Loader2 className="animate-spin w-4 h-4 mr-1" />
-                        Procesando...
-                      </>
-                    ) : (
-                      "Proc. Inversionistas"
-                    )}
-                  </Button>
-
-                  {/* Botón Revalidar Pago */}
-                  <Button
-                    className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded font-bold shadow"
-                    onClick={() => {
-                      handleRevalidatePayment(item.pago.pago_id, item.pago.credito_id);
-                    }}
-                    disabled={
-                      item.pago.pagado === true ||
-                      item.pago.paymentFalse === true ||
-                      revalidatePayment.isPending
-                    }
-                  >
-                    {revalidatePayment.isPending ? (
-                      <>
-                        <Loader2 className="animate-spin w-4 h-4 mr-1" />
-                        Revalidando...
-                      </>
-                    ) : (
-                      "Revalidar Pago"
-                    )}
-                  </Button>
-
-                  {/* Botón Pago Falso */}
-                  <Button
-                    className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded font-bold shadow"
-                    onClick={() => {
-                      handleFalsePayment(
-                        item.pago.pago_id,
-                        item.pago.credito_id
-                      );
-                      refetch();
-                    }}
-                    disabled={
-                      falsePayment.isPending ||
-                      item.pago.pagado === true ||
-                      item.pago.paymentFalse === true
-                    }
-                  >
-                    {falsePayment.isPending ? (
-                      <>
-                        <Loader2 className="animate-spin w-4 h-4 mr-1" />
-                        Marcando falso...
-                      </>
-                    ) : (
-                      "Pago Falso"
-                    )}
-                  </Button>
-                </div>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="inline-flex items-center justify-center w-9 h-9 rounded-lg hover:bg-blue-100 transition">
+                      <MoreVertical className="w-5 h-5 text-blue-700" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent className="bg-white border border-blue-200 shadow-xl rounded-xl p-1 min-w-[200px] z-50">
+                    <DropdownMenuItem asChild>
+                      <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-yellow-50 text-yellow-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                        onClick={(e) => { e.stopPropagation(); handleReverse(item.pago.pago_id, item.pago.credito_id, true); }}
+                        disabled={item.pago.pagado === false || item.pago.paymentFalse === true}>
+                        {reversePago.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : null} Revertir Pago
+                      </button>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-orange-50 text-orange-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                        onClick={(e) => { e.stopPropagation(); handleRevertToPending(item.pago.pago_id, item.pago.credito_id); }}
+                        disabled={item.pago.paymentFalse === true || revertPaymentToPending.isPending}>
+                        {revertPaymentToPending.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : null} Revertir Especial
+                      </button>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-50 text-indigo-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                        onClick={(e) => { e.stopPropagation(); handleProcessInvestors(item.pago.pago_id, item.pago.credito_id); }}
+                        disabled={processInvestors.isPending}>
+                        {processInvestors.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : null} Proc. Inversionistas
+                      </button>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-purple-50 text-purple-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                        onClick={(e) => { e.stopPropagation(); handleRevalidatePayment(item.pago.pago_id, item.pago.credito_id); }}
+                        disabled={item.pago.pagado === true || item.pago.paymentFalse === true || revalidatePayment.isPending}>
+                        {revalidatePayment.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : null} Revalidar Pago
+                      </button>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-red-50 text-red-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                        onClick={(e) => { e.stopPropagation(); handleFalsePayment(item.pago.pago_id, item.pago.credito_id); refetch(); }}
+                        disabled={falsePayment.isPending || item.pago.pagado === true || item.pago.paymentFalse === true}>
+                        {falsePayment.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : null} Pago Falso
+                      </button>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-cyan-50 text-cyan-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                        onClick={(e) => { e.stopPropagation(); handleRecalcularPagos(item.pago.numero_credito_sifco, item.pago.numero_cuota); }}
+                        disabled={recalcularPagos.isPending}>
+                        {recalcularPagos.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : <RefreshCw className="w-4 h-4" />} Recalcular Pagos
+                      </button>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               ) : (
-                <span className="text-gray-400 font-semibold italic">
-                  No tienes permitido realizar acciones aquí
-                </span>
+                <span className="text-gray-400 font-semibold italic text-xs">Sin permisos</span>
               )}
             </TableCell>
 
@@ -576,32 +545,7 @@ const handleDownloadExcel = async () => {
                         >
                           <div className="p-6 space-y-6">
                             {/* Detalle de pago con iconos */}
-                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                              {Object.entries(item.pago)
-                                .filter(([key]) => key !== "boletas") // ⬅️ Aquí excluyes "boletas"
-                                .map(([key, value]) => (
-                                  <Campo
-                                    key={key}
-                                    label={
-                                      key === "paymentFalse"
-                                        ? "Pago falso"
-                                        : key
-                                    }
-                                    valor={
-                                      key === "paymentFalse"
-                                        ? value
-                                          ? "Sí"
-                                          : "No"
-                                        : typeof value === "boolean"
-                                        ? value
-                                          ? "Sí"
-                                          : "No"
-                                        : value ?? "--"
-                                    }
-                                    field={key}
-                                  />
-                                ))}
-                            </div>
+                            <DetailSections pago={item.pago} />
                             {user?.role === "ADMIN" && (
   <>
                             {/* INVERSIONISTAS DETALLE */}

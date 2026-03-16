@@ -39,7 +39,7 @@ import {
 import { authMiddleware } from "./midleware";
 import { getCreditosWithUserByMesAnioExcel } from "../controllers/reports";
 import { insertCredit } from "../controllers/createCredit";
-import {  updateAllInstallments, updateCredit, recalculateQuota } from "../controllers/updateCredit";
+import {  updateAllInstallments, updateCredit, recalculateQuota, recalcularPagosCredito } from "../controllers/updateCredit";
 import { updateDueDates, updateSingleDueDate, fixCreditosWithoutFebruary, updateDueDatesFromJson } from "../controllers/updateDueDate";
 import { creditos, cuotas_credito } from "../database/db";
 import { and, desc, eq } from "drizzle-orm";
@@ -1109,6 +1109,30 @@ export const creditRouter = new Elysia()
     detail: {
       summary: "Recalcular cuota mensual con fórmula PMT",
       description: "Recalcula la cuota mensual usando la fórmula PMT de Excel basándose en el capital actual, tasa de interés, plazo, seguro, GPS y membresías del crédito. Actualiza el crédito y todas las cuotas pendientes.",
+      tags: ["Créditos", "Cuotas"],
+    },
+  })
+  // ========================================
+  // ENDPOINT: RECALCULAR PAGOS DESDE CUOTA
+  // ========================================
+  .post("/recalcular-pagos", async ({ body, set }: any) => {
+    try {
+      const { numero_credito_sifco, numero_cuota } = body;
+      await recalcularPagosCredito({ numero_credito_sifco, numero_cuota });
+      set.status = 200;
+      return { success: true, message: `Pagos recalculados para ${numero_credito_sifco}` };
+    } catch (error: any) {
+      set.status = 500;
+      return { success: false, error: error.message };
+    }
+  }, {
+    body: t.Object({
+      numero_credito_sifco: t.String({ minLength: 1 }),
+      numero_cuota: t.Optional(t.Number()),
+    }),
+    detail: {
+      summary: "Recalcular pagos desde una cuota",
+      description: "Recalcula abonos y restantes de los pagos. Si se pasa numero_cuota, procesa desde esa cuota (pagadas y no pagadas). Si no, solo procesa las no pagadas.",
       tags: ["Créditos", "Cuotas"],
     },
   })

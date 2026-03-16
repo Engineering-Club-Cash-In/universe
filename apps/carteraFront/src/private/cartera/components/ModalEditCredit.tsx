@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useFormik } from "formik";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { useUpdateCredit } from "../hooks/updateCredit";
 import { useRecalculateQuota } from "../hooks/recalculateQuota";
@@ -104,6 +104,7 @@ export function ModalEditCredit({
 
   // Ref para acumular los cambios de saldo reinversion desde InvestorsList
   const saldoChangesRef = useRef<Record<number, number>>({});
+  const [nuevaCuota, setNuevaCuota] = useState<number | null>(null);
 
   const parseParticipantDate = (dateString?: string | Date | null) => {
     return dateString ? new Date(dateString).toISOString().split('T')[0] : "2025-12-01";
@@ -222,6 +223,9 @@ export function ModalEditCredit({
         // Formato de crédito
         formato_credito: values.formato_credito ?? undefined,
 
+        // Abono capital
+        permite_abono_capital: !!values.permite_abono_capital,
+
         // Lista Principal
         inversionistas: values.investors.map((i: InvestorItem) => ({
           inversionista_id: Number(i.inversionista_id),
@@ -310,8 +314,19 @@ export function ModalEditCredit({
               recalculateQuota(
                 { numero_credito_sifco: sifco },
                 {
-                  onSuccess: () => {
-                    onSuccess();
+                  onSuccess: (data: any) => {
+                    console.log("Recalculate response:", data);
+                    const raw = data?.cuota ?? data?.nueva_cuota ?? data?.newQuota ?? data?.data?.cuota ?? data?.data?.nueva_cuota ?? data?.result?.cuota;
+                    const cuotaRecalculada = Number(raw || 0);
+                    if (cuotaRecalculada > 0) {
+                      setNuevaCuota(cuotaRecalculada);
+                      formik.setFieldValue("cuota", cuotaRecalculada);
+                    } else {
+                      const currentCuota = Number(formik.values.cuota || 0);
+                      if (currentCuota > 0) {
+                        setNuevaCuota(currentCuota);
+                      }
+                    }
                   },
                 }
               );
@@ -397,8 +412,8 @@ export function ModalEditCredit({
                         name={name}
                         value={formik.values[name] ?? ""}
                         onFocus={(e) => e.target.select()}
-                        onChange={formik.handleChange}
-                        className="bg-blue-50 border-blue-200 text-gray-800"
+                        onChange={(e) => { formik.handleChange(e); if (name === "cuota") setNuevaCuota(null); }}
+                        className={`border-blue-200 text-gray-800 ${name === "cuota" && nuevaCuota !== null ? "bg-green-50 border-green-400 ring-2 ring-green-200" : "bg-blue-50"}`}
                         min={
                           [
                             "observaciones",
@@ -411,9 +426,52 @@ export function ModalEditCredit({
                         }
                         step="any"
                       />
+                      {name === "cuota" && nuevaCuota !== null && (
+                        <span className="text-xs font-semibold text-green-600 mt-1 flex items-center gap-1">
+                          Nueva cuota recalculada: Q{nuevaCuota.toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                        </span>
+                      )}
                     </div>
                   );
                 })}
+              </div>
+            </div>
+
+            {/* Opciones del crédito */}
+            <div className="mt-4 p-4 rounded-xl border border-blue-100 bg-blue-50/50">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-gray-800 font-bold text-sm">
+                    Permite Abono a Capital
+                  </Label>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Si está activo, el cliente puede abonar a capital aunque tenga cuotas atrasadas
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={!!formik.values.permite_abono_capital}
+                  onClick={() =>
+                    formik.setFieldValue(
+                      "permite_abono_capital",
+                      !formik.values.permite_abono_capital
+                    )
+                  }
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                    formik.values.permite_abono_capital
+                      ? "bg-green-500"
+                      : "bg-gray-300"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      formik.values.permite_abono_capital
+                        ? "translate-x-5"
+                        : "translate-x-0"
+                    }`}
+                  />
+                </button>
               </div>
             </div>
 

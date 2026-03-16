@@ -98,6 +98,7 @@ export async function getAllPagosWithCreditAndInversionistas(
         paymentFalse: pagos_credito.paymentFalse,
         monto_aplicado: pagos_credito.monto_aplicado,
         fecha_aplicado: pagos_credito.fecha_aplicado,
+        origen_pago: pagos_credito.origen_pago,
       })
       .from(pagos_credito)
       .innerJoin(creditos, eq(pagos_credito.credito_id, creditos.credito_id))
@@ -1371,6 +1372,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         p.abono_gps AS "abono_gps",
         p.validation_status AS "validation_status",
         p.monto_aplicado AS "monto_aplicado",
+        p.origen_pago AS "origenPago",
 
         -- 💳 Info del crédito
         json_build_object(
@@ -1482,6 +1484,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       validationStatus: r.validation_status,
       abono_gps: r.abono_gps,
       monto_aplicado: r.monto_aplicado,
+      origenPago: r.origenPago,
       credito: r.credito,
       cuota: r.cuota,
       usuario: r.usuario,

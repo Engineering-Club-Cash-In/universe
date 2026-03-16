@@ -10,6 +10,7 @@ import z from "zod";
 import { procesarCreditosMora } from "../migration/migrationLateFee";
 import { liquidarCuotasBatchInteligente, marcarLiquidadoInversionistasPorNombre } from "../controllers/liquidateInvestor";
 import { procesarInversionistasSoloExcel } from "../controllers/migrateInvestor";
+import { procesarCreditoDesdeExcelFull, CreditoAgrupadoExcel } from "../controllers/processFromExcelFull";
 
 const LiquidacionBatchItemSchema = t.Object({
   nombre_usuario: t.String({ minLength: 1 }),
@@ -563,6 +564,54 @@ export const sifcoRouter = new Elysia()
         5. Respuesta final: { success: true, inversionistas_procesados: X }
       `,
       tags: ["Inversionistas"],
+    },
+  }
+).post(
+  "/processFromExcelFull",
+  async ({ body, set }) => {
+    try {
+      console.log(`\n📥 ========== /processFromExcelFull ==========`);
+      console.log(`📋 Crédito: ${body.credito.creditoBase}`);
+      console.log(`📌 Hasta cuota: ${body.hasta_cuota ?? "no especificado"}`);
+
+      const resultado = await procesarCreditoDesdeExcelFull(
+        body.credito as CreditoAgrupadoExcel,
+        body.hasta_cuota
+      );
+
+      if (!resultado.success) {
+        set.status = 400;
+        return resultado;
+      }
+
+      return resultado;
+    } catch (error: any) {
+      console.error("❌ Error en /processFromExcelFull:", error);
+      set.status = 500;
+      return { success: false, error: error.message || "Error interno" };
+    }
+  },
+  {
+    body: t.Object({
+      credito: t.Object({
+        creditoBase: t.String(),
+        cliente: t.String(),
+        filas: t.Array(t.Any()),
+      }),
+      hasta_cuota: t.Optional(t.Number()),
+    }),
+    detail: {
+      summary: "Crear/actualizar crédito desde Excel con pagos y cuotas",
+      description: `
+        Lee un CreditoAgrupado del Excel, hace upsert del crédito, crea inversionistas
+        (SIN espejo), genera cuotas y pagos con amortización (igual que createCredit),
+        marca las cuotas pagadas hasta hasta_cuota y recalcula.
+
+        Las fechas se calculan automáticamente:
+        - Si hasta_cuota = 2 y Fecha del Excel = Feb-2026
+          → cuota 0 = Dic-2025, cuota 1 = Ene-2026, cuota 2 = Feb-2026 ✓
+      `,
+      tags: ["Créditos", "Migración"],
     },
   }
 ).post(

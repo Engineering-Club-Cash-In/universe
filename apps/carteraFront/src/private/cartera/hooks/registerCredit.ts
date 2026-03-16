@@ -35,6 +35,8 @@ export const creditSchema = z.object({
         porcentaje_cash_in: z.number().min(0).max(100),
         porcentaje_inversion: z.number().min(0).max(100),
         cuota_inversionista: z.number().min(0).optional(),
+        tipo_inversion: z.enum(["compra_cartera", "reinversion"]),
+        fecha_inicio_participacion: z.string().min(1, "Fecha requerida"),
       })
     )
     .min(1, "Debe agregar al menos un inversionista"),

@@ -1001,26 +1001,26 @@
     "creditos": [
       {
         "numeroCredito": "01010202121050",
-        "fechaUltimoPago": "Febrero 2026",
-        "numeroCuota": "2",
+        "fechaUltimoPago": "Marzo 2026",
+        "numeroCuota": "3",
         "cuota": "7725.25",
         "montoBoleta": "7725.25",
         "pagado": "Si",
-        "capitalRestante": "142201.36412238743",
+        "capitalRestante": "141377.43414328707",
         "inversionista": "Cube Investments S.A.",
-        "pago": "2026-02-15 00:00:00",
+        "pago": "2026-03-15 00:00:00",
         "pagosParciales": []
       },
       {
         "numeroCredito": "01010202121050_2",
-        "fechaUltimoPago": "Febrero 2026",
-        "numeroCuota": "2",
+        "fechaUltimoPago": "Marzo 2026",
+        "numeroCuota": "3",
         "cuota": "1831.41",
         "montoBoleta": "1831.41",
-        "pagado": "No",
-        "capitalRestante": "46489.39",
+        "pagado": "Atrasado",
+        "capitalRestante": "46220.023504",
         "inversionista": "Richard Kachler Ortega",
-        "pago": "2026-02-15 00:00:00",
+        "pago": "",
         "pagosParciales": []
       }
     ],
@@ -1033,7 +1033,7 @@
         "capital": "142998.51",
         "capitalRestante": "142201.36412238743",
         "cuota": "7725.25",
-        "capitalUltimoPago": "142201.36412238743"
+        "capitalUltimoPago": "141377.43414328707"
       },
       {
         "numeroCredito": "01010202121050_2",
@@ -1043,7 +1043,7 @@
         "capital": "46750.0",
         "capitalRestante": "46489.39",
         "cuota": "1831.41",
-        "capitalUltimoPago": "46489.39"
+        "capitalUltimoPago": "46220.023504"
       }
     ]
   },
@@ -1455,26 +1455,32 @@
     "creditos": [
       {
         "numeroCredito": "01010214117110",
-        "fechaUltimoPago": "Febrero 2026",
-        "numeroCuota": "9",
-        "cuota": "2606.22",
-        "montoBoleta": "2606.22",
-        "pagado": "No",
-        "capitalRestante": "56771.62760296696",
+        "fechaUltimoPago": "Marzo 2026",
+        "numeroCuota": "10",
+        "cuota": "2551.16",
+        "montoBoleta": "2551.16",
+        "pagado": "Atrasado",
+        "capitalRestante": "56057.680946696804",
         "inversionista": "Flujocapital",
-        "pago": "2026-02-15 00:00:00",
-        "pagosParciales": []
+        "pago": "2026-03-15 00:00:00",
+        "pagosParciales": [
+          {
+            "fecha": "Abril 2026",
+            "numeroCuota": "11",
+            "montoBoleta": "53.86"
+          }
+        ]
       },
       {
         "numeroCredito": "01010214117110_2",
-        "fechaUltimoPago": "Febrero 2026",
-        "numeroCuota": "9",
-        "cuota": "1647.64",
-        "montoBoleta": "1647.64",
-        "pagado": "No",
-        "capitalRestante": "54295.241633574355",
+        "fechaUltimoPago": "Marzo 2026",
+        "numeroCuota": "10",
+        "cuota": "1594.98",
+        "montoBoleta": "1594.98",
+        "pagado": "Si",
+        "capitalRestante": "53612.421693018405",
         "inversionista": "Autocash S.A.",
-        "pago": "2026-02-15 00:00:00",
+        "pago": "2026-03-15 00:00:00",
         "pagosParciales": []
       }
     ],
@@ -1487,7 +1493,7 @@
         "capital": "57527.928405750354",
         "capitalRestante": "56771.62760296696",
         "cuota": "2606.22",
-        "capitalUltimoPago": "56771.62760296696"
+        "capitalUltimoPago": "56057.680946696804"
       },
       {
         "numeroCredito": "01010214117110_2",
@@ -1497,7 +1503,7 @@
         "capital": "55018.569663232054",
         "capitalRestante": "54295.241633574355",
         "cuota": "1647.64",
-        "capitalUltimoPago": "54295.241633574355"
+        "capitalUltimoPago": "53612.421693018405"
       }
     ]
   },
@@ -5593,14 +5599,14 @@
     "creditos": [
       {
         "numeroCredito": "01010214112370",
-        "fechaUltimoPago": "Enero 2026",
-        "numeroCuota": "15",
+        "fechaUltimoPago": "Marzo 2026",
+        "numeroCuota": "17",
         "cuota": "1629.05",
         "montoBoleta": "1632.95",
-        "pagado": "Si",
-        "capitalRestante": "31614.483698245633",
+        "pagado": "Atrasado",
+        "capitalRestante": "30615.488694385676",
         "inversionista": "Javier Arzu Perez",
-        "pago": "2026-01-15 00:00:00",
+        "pago": "2026-03-15 00:00:00",
         "pagosParciales": []
       }
     ],
@@ -5611,9 +5617,9 @@
         "porcentajeCashIn": "0.15",
         "porcentajeInversionista": "0.85",
         "capital": "31614.483698245633",
-        "capitalRestante": "31614.483698245633",
+        "capitalRestante": "31119.147024376158",
         "cuota": "1629.05",
-        "capitalUltimoPago": "31614.483698245633"
+        "capitalUltimoPago": "30615.488694385676"
       }
     ]
   },
@@ -7807,38 +7813,38 @@
     "creditos": [
       {
         "numeroCredito": "01010214119820",
-        "fechaUltimoPago": "Febrero 2026",
-        "numeroCuota": "4",
+        "fechaUltimoPago": "Marzo 2026",
+        "numeroCuota": "5",
         "cuota": "3089.33",
         "montoBoleta": "3089.33",
         "pagado": "Si",
-        "capitalRestante": "71206.59001139407",
+        "capitalRestante": "70100.3937785855",
         "inversionista": "Cube Investments S.A.",
-        "pago": "2026-02-15 00:00:00",
+        "pago": "2026-03-15 00:00:00",
         "pagosParciales": []
       },
       {
         "numeroCredito": "01010214119820_2",
-        "fechaUltimoPago": "Febrero 2026",
-        "numeroCuota": "4",
+        "fechaUltimoPago": "Marzo 2026",
+        "numeroCuota": "5",
         "cuota": "129.03",
         "montoBoleta": "129.03",
-        "pagado": "No",
-        "capitalRestante": "3990.58351577074",
+        "pagado": "Atrasado",
+        "capitalRestante": "3928.5953188356884",
         "inversionista": "Oscar Massis",
-        "pago": "2026-02-15 00:00:00",
+        "pago": "2026-03-15 00:00:00",
         "pagosParciales": []
       },
       {
         "numeroCredito": "01010214119820_3",
-        "fechaUltimoPago": "Febrero 2026",
-        "numeroCuota": "4",
+        "fechaUltimoPago": "Marzo 2026",
+        "numeroCuota": "5",
         "cuota": "36.67",
         "montoBoleta": "36.67",
-        "pagado": "No",
-        "capitalRestante": "1134.231427322827",
+        "pagado": "Atrasado",
+        "capitalRestante": "1116.6165153018503",
         "inversionista": "Jhairo Najera",
-        "pago": "2026-02-15 00:00:00",
+        "pago": "2026-03-15 00:00:00",
         "pagosParciales": []
       }
     ],
@@ -7851,7 +7857,7 @@
         "capital": "72294.50920180377",
         "capitalRestante": "71206.59001139407",
         "cuota": "3089.33",
-        "capitalUltimoPago": "71206.59001139407"
+        "capitalUltimoPago": "70100.3937785855"
       },
       {
         "numeroCredito": "01010214119820_2",
@@ -7861,7 +7867,7 @@
         "capital": "4051.5475174771245",
         "capitalRestante": "3990.58351577074",
         "cuota": "129.03",
-        "capitalUltimoPago": "3990.58351577074"
+        "capitalUltimoPago": "3928.5953188356884"
       },
       {
         "numeroCredito": "01010214119820_3",
@@ -7871,7 +7877,7 @@
         "capital": "1151.5552983111988",
         "capitalRestante": "1134.231427322827",
         "cuota": "36.67",
-        "capitalUltimoPago": "1134.231427322827"
+        "capitalUltimoPago": "1116.6165153018503"
       }
     ]
   },
@@ -16309,14 +16315,14 @@
     "creditos": [
       {
         "numeroCredito": "01010214122250",
-        "fechaUltimoPago": "Febrero 2026",
-        "numeroCuota": "1",
+        "fechaUltimoPago": "Marzo 2026",
+        "numeroCuota": "2",
         "cuota": "4253.99",
         "montoBoleta": "4255.0",
-        "pagado": "No",
-        "capitalRestante": "145028.12374399998",
+        "pagado": "Atrasado",
+        "capitalRestante": "144212.18622289918",
         "inversionista": "MARIA ELENA ROCA MARROQUIN",
-        "pago": "2026-02-15 00:00:00",
+        "pago": "2026-03-15 00:00:00",
         "pagosParciales": []
       }
     ],
@@ -16329,7 +16335,7 @@
         "capital": "145830.58",
         "capitalRestante": "145028.12374399998",
         "cuota": "4253.99",
-        "capitalUltimoPago": "145028.12374399998"
+        "capitalUltimoPago": "144212.18622289918"
       }
     ]
   },
@@ -19981,14 +19987,14 @@
     "creditos": [
       {
         "numeroCredito": "01010214116430",
-        "fechaUltimoPago": "Enero 2026",
-        "numeroCuota": "9",
+        "fechaUltimoPago": "Febrero 2026",
+        "numeroCuota": "10",
         "cuota": "1752.36",
         "montoBoleta": "1752.36",
-        "pagado": "Si",
-        "capitalRestante": "51462.649181372595",
+        "pagado": "No",
+        "capitalRestante": "50835.78668761966",
         "inversionista": "Flujocapital",
-        "pago": "2026-01-15 00:00:00",
+        "pago": "2026-02-15 00:00:00",
         "pagosParciales": []
       }
     ],
@@ -19999,9 +20005,9 @@
         "porcentajeCashIn": "0.1405440468",
         "porcentajeInversionista": "0.8594559532",
         "capital": "51462.649181372595",
-        "capitalRestante": "51462.649181372595",
+        "capitalRestante": "50835.78668761966",
         "cuota": "1752.36",
-        "capitalUltimoPago": "51462.649181372595"
+        "capitalUltimoPago": "50835.78668761966"
       }
     ]
   },
@@ -21875,14 +21881,14 @@
     "creditos": [
       {
         "numeroCredito": "01010214120270",
-        "fechaUltimoPago": "Enero 2026",
-        "numeroCuota": "3",
+        "fechaUltimoPago": "Febrero 2026",
+        "numeroCuota": "4",
         "cuota": "6066.82",
         "montoBoleta": "6067.0",
         "pagado": "Si",
-        "capitalRestante": "209999.90926391355",
+        "capitalRestante": "208764.39619902373",
         "inversionista": "Cube Investments S.A.",
-        "pago": "2026-01-30 00:00:00",
+        "pago": "2026-02-28 00:00:00",
         "pagosParciales": []
       }
     ],
@@ -21893,9 +21899,9 @@
         "porcentajeCashIn": "1.0",
         "porcentajeInversionista": "0.0",
         "capital": "209999.90926391355",
-        "capitalRestante": "209999.90926391355",
+        "capitalRestante": "208764.39619902373",
         "cuota": "6066.82",
-        "capitalUltimoPago": "209999.90926391355"
+        "capitalUltimoPago": "208764.39619902373"
       }
     ]
   },
@@ -23007,14 +23013,14 @@
     "creditos": [
       {
         "numeroCredito": "01010214118950",
-        "fechaUltimoPago": "Febrero 2026",
-        "numeroCuota": "6",
+        "fechaUltimoPago": "Marzo 2026",
+        "numeroCuota": "7",
         "cuota": "4131.38",
         "montoBoleta": "4131.38",
-        "pagado": "No",
-        "capitalRestante": "136187.0472075836",
+        "pagado": "Atrasado",
+        "capitalRestante": "135329.343895671",
         "inversionista": "Flujocapital",
-        "pago": "2026-02-15 00:00:00",
+        "pago": "2026-03-15 00:00:00",
         "pagosParciales": []
       }
     ],
@@ -23027,7 +23033,7 @@
         "capital": "137030.5791823206",
         "capitalRestante": "136187.0472075836",
         "cuota": "4131.38",
-        "capitalUltimoPago": "136187.0472075836"
+        "capitalUltimoPago": "135329.343895671"
       }
     ]
   },
@@ -24117,14 +24123,14 @@
     "creditos": [
       {
         "numeroCredito": "01010214124130",
-        "fechaUltimoPago": "Febrero 2026",
-        "numeroCuota": "0",
+        "fechaUltimoPago": "Marzo 2026",
+        "numeroCuota": "1",
         "cuota": "6496.202295847886",
-        "montoBoleta": "",
-        "pagado": "Si",
-        "capitalRestante": "217427.98",
+        "montoBoleta": "6496.202295847886",
+        "pagado": "No",
+        "capitalRestante": "216231.5519356914",
         "inversionista": "Cube Investments S.A.",
-        "pago": "2026-02-15 00:00:00",
+        "pago": "2026-03-15 00:00:00",
         "pagosParciales": []
       }
     ],
@@ -24137,7 +24143,7 @@
         "capital": "217427.98",
         "capitalRestante": "217427.98",
         "cuota": "6496.202295847886",
-        "capitalUltimoPago": "217427.98"
+        "capitalUltimoPago": "216231.5519356914"
       }
     ]
   },
@@ -24519,14 +24525,14 @@
     "creditos": [
       {
         "numeroCredito": "01010202108260",
-        "fechaUltimoPago": "Enero 2026",
-        "numeroCuota": "25",
+        "fechaUltimoPago": "Febrero 2026",
+        "numeroCuota": "26",
         "cuota": "2042.67",
-        "montoBoleta": "2043.0",
-        "pagado": "Si",
-        "capitalRestante": "24642.316337915934",
+        "montoBoleta": "2042.67",
+        "pagado": "No",
+        "capitalRestante": "24262.40816686991",
         "inversionista": "Alexander Kachler Simons (AMJK)",
-        "pago": "2026-02-08 00:00:00",
+        "pago": "2026-03-08 00:00:00",
         "pagosParciales": []
       }
     ],
@@ -24537,9 +24543,9 @@
         "porcentajeCashIn": "0.2",
         "porcentajeInversionista": "0.8",
         "capital": "24642.316337915934",
-        "capitalRestante": "24642.316337915934",
+        "capitalRestante": "24262.40816686991",
         "cuota": "2042.67",
-        "capitalUltimoPago": "24642.316337915934"
+        "capitalUltimoPago": "24262.40816686991"
       }
     ]
   },
@@ -26607,14 +26613,14 @@
     "creditos": [
       {
         "numeroCredito": "01010202108660",
-        "fechaUltimoPago": "Enero 2026",
-        "numeroCuota": "24",
+        "fechaUltimoPago": "Febrero 2026",
+        "numeroCuota": "25",
         "cuota": "5617.77",
         "montoBoleta": "5617.77",
         "pagado": "Si",
-        "capitalRestante": "88744.04835290166",
+        "capitalRestante": "87439.76837755916",
         "inversionista": "Autocash S.A.",
-        "pago": "2026-02-05 00:00:00",
+        "pago": "2026-03-05 00:00:00",
         "pagosParciales": []
       }
     ],
@@ -26625,9 +26631,9 @@
         "porcentajeCashIn": "0.2",
         "porcentajeInversionista": "0.8",
         "capital": "88744.04835290166",
-        "capitalRestante": "88744.04835290166",
+        "capitalRestante": "87439.76837755916",
         "cuota": "5617.77",
-        "capitalUltimoPago": "88744.04835290166"
+        "capitalUltimoPago": "87439.76837755916"
       }
     ]
   },
@@ -28109,14 +28115,14 @@
     "creditos": [
       {
         "numeroCredito": "01010214106750",
-        "fechaUltimoPago": "Enero 2026",
-        "numeroCuota": "29",
+        "fechaUltimoPago": "Febrero 2026",
+        "numeroCuota": "30",
         "cuota": "1560.86",
         "montoBoleta": "1560.86",
-        "pagado": "No",
-        "capitalRestante": "25409.706715607583",
+        "pagado": "Atrasado",
+        "capitalRestante": "24778.31978842979",
         "inversionista": "Diego Alejandro Mendieta Avila",
-        "pago": "2026-02-14 00:00:00",
+        "pago": "2026-03-14 00:00:00",
         "pagosParciales": []
       }
     ],
@@ -28127,9 +28133,9 @@
         "porcentajeCashIn": "0.2",
         "porcentajeInversionista": "0.8",
         "capital": "25409.706715607583",
-        "capitalRestante": "25409.706715607583",
+        "capitalRestante": "24778.31978842979",
         "cuota": "1560.86",
-        "capitalUltimoPago": "25409.706715607583"
+        "capitalUltimoPago": "24778.31978842979"
       }
     ]
   },
@@ -28251,14 +28257,14 @@
     "creditos": [
       {
         "numeroCredito": "01010214107960",
-        "fechaUltimoPago": "Enero 2026",
-        "numeroCuota": "26",
+        "fechaUltimoPago": "Febrero 2026",
+        "numeroCuota": "27",
         "cuota": "3105.97",
         "montoBoleta": "3105.97",
-        "pagado": "No",
-        "capitalRestante": "61352.32970516515",
+        "pagado": "Atrasado",
+        "capitalRestante": "59999.698844211925",
         "inversionista": "Diego Alejandro Mendieta Avila",
-        "pago": "2026-02-07 00:00:00",
+        "pago": "2026-03-07 00:00:00",
         "pagosParciales": []
       }
     ],
@@ -28269,9 +28275,9 @@
         "porcentajeCashIn": "0.2",
         "porcentajeInversionista": "0.8",
         "capital": "61352.32970516515",
-        "capitalRestante": "61352.32970516515",
+        "capitalRestante": "59999.698844211925",
         "cuota": "3105.97",
-        "capitalUltimoPago": "61352.32970516515"
+        "capitalUltimoPago": "59999.698844211925"
       }
     ]
   },
@@ -29791,14 +29797,14 @@
     "creditos": [
       {
         "numeroCredito": "01010202118910",
-        "fechaUltimoPago": "Enero 2026",
-        "numeroCuota": "5",
+        "fechaUltimoPago": "Febrero 2026",
+        "numeroCuota": "6",
         "cuota": "2092.77",
-        "montoBoleta": "2093.0",
+        "montoBoleta": "2092.77",
         "pagado": "Si",
-        "capitalRestante": "32539.031116539336",
+        "capitalRestante": "32327.037582055058",
         "inversionista": "Cube Investments S.A.",
-        "pago": "2026-01-15 00:00:00",
+        "pago": "2026-02-15 00:00:00",
         "pagosParciales": []
       }
     ],
@@ -29809,9 +29815,9 @@
         "porcentajeCashIn": "1.0",
         "porcentajeInversionista": "0.0",
         "capital": "32539.031116539336",
-        "capitalRestante": "32539.031116539336",
+        "capitalRestante": "32327.037582055058",
         "cuota": "2092.77",
-        "capitalUltimoPago": "32539.031116539336"
+        "capitalUltimoPago": "32327.037582055058"
       }
     ]
   },
@@ -34701,14 +34707,14 @@
     "creditos": [
       {
         "numeroCredito": "01010214117520",
-        "fechaUltimoPago": "Enero 2026",
-        "numeroCuota": "32",
+        "fechaUltimoPago": "Febrero 2026",
+        "numeroCuota": "33",
         "cuota": "1843.12",
-        "montoBoleta": "1845.0",
-        "pagado": "No",
-        "capitalRestante": "26965.12989443403",
+        "montoBoleta": "1847.0",
+        "pagado": "Atrasado",
+        "capitalRestante": "26119.754076660523",
         "inversionista": "Jose Antonio Rodriguez Batres",
-        "pago": "2026-02-07 00:00:00",
+        "pago": "2026-03-07 00:00:00",
         "pagosParciales": []
       }
     ],
@@ -34719,9 +34725,9 @@
         "porcentajeCashIn": "0.2",
         "porcentajeInversionista": "0.8",
         "capital": "26965.12989443403",
-        "capitalRestante": "26965.12989443403",
+        "capitalRestante": "26119.754076660523",
         "cuota": "1843.12",
-        "capitalUltimoPago": "26965.12989443403"
+        "capitalUltimoPago": "26119.754076660523"
       }
     ]
   },
@@ -39351,7 +39357,7 @@
           {
             "fecha": "Enero 2026",
             "numeroCuota": "42",
-            "montoBoleta": "2500.0"
+            "montoBoleta": "3500.0"
           }
         ]
       }
@@ -46041,14 +46047,14 @@
     "creditos": [
       {
         "numeroCredito": "01010214124340",
-        "fechaUltimoPago": "Febrero 2026",
-        "numeroCuota": "0",
+        "fechaUltimoPago": "Marzo 2026",
+        "numeroCuota": "1",
         "cuota": "2143.9679175269207",
-        "montoBoleta": "",
-        "pagado": "Si",
-        "capitalRestante": "55084.65",
+        "montoBoleta": "2143.97",
+        "pagado": "No",
+        "capitalRestante": "54545.75740247308",
         "inversionista": "Cube Investments S.A.",
-        "pago": "2026-02-15 00:00:00",
+        "pago": "2026-03-15 00:00:00",
         "pagosParciales": []
       }
     ],
@@ -46061,7 +46067,7 @@
         "capital": "55084.65",
         "capitalRestante": "55084.65",
         "cuota": "2143.9679175269207",
-        "capitalUltimoPago": "55084.65"
+        "capitalUltimoPago": "54545.75740247308"
       }
     ]
   },
@@ -46401,14 +46407,14 @@
     "creditos": [
       {
         "numeroCredito": "01010214124480",
-        "fechaUltimoPago": "Febrero 2026",
-        "numeroCuota": "0",
+        "fechaUltimoPago": "Marzo 2026",
+        "numeroCuota": "1",
         "cuota": "2663.1296980544284",
-        "montoBoleta": "",
-        "pagado": "Si",
-        "capitalRestante": "75186.28",
+        "montoBoleta": "2663.13",
+        "pagado": "No",
+        "capitalRestante": "74772.55700594556",
         "inversionista": "Cube Investments S.A.",
-        "pago": "2026-02-15 00:00:00",
+        "pago": "2026-03-15 00:00:00",
         "pagosParciales": []
       }
     ],
@@ -46421,7 +46427,7 @@
         "capital": "75186.28",
         "capitalRestante": "75186.28",
         "cuota": "2663.1296980544284",
-        "capitalUltimoPago": "75186.28"
+        "capitalUltimoPago": "74772.55700594556"
       }
     ]
   },

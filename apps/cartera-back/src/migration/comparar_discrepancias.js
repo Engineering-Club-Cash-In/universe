@@ -31,6 +31,7 @@ const DIR = __dirname;
 const ETL_FILE = path.join(DIR, 'resultado_ultimos_pagos.json');
 const DB_FILE = path.join(DIR, 'cartera_actual_v2.json');
 const REPORTE_FILE = path.join(DIR, 'discrepancias_reporte.json');
+const MARZO_FILE = path.join(DIR, 'discrepancias_marzo.json');
 
 function normalizarNombre(nombre) {
   if (!nombre) return '';
@@ -202,8 +203,11 @@ async function comparar() {
       if (cuotasCoinciden) cuotasIguales++;
       else cuotasDiferentes++;
 
+      const sifcoDb = match.numero_credito_sifco;
+
       const entrada = {
         sifco_base: sifcoBase,
+        sifco_db: sifcoDb,
         nombre_etl: grupo.nombreCliente,
         nombre_db: match.nombre_cliente,
         match_type: matchType,
@@ -226,7 +230,7 @@ async function comparar() {
           cuotasAVerificar.push(i);
         }
 
-        const verificacion = await consultarCuotasEnDB(client, sifcoBase, cuotasAVerificar);
+        const verificacion = await consultarCuotasEnDB(client, sifcoDb, cuotasAVerificar);
 
         if (verificacion) {
           const detalle = [];
@@ -262,9 +266,6 @@ async function comparar() {
               estado = 'SIN_PAGOS';
             }
 
-            // Filtrar: no incluir las de marzo
-            if (estado === 'PAGADA_PENDING_MARZO') continue;
-
             detalle.push({
               numero_cuota: numCuota,
               estado,
@@ -285,7 +286,8 @@ async function comparar() {
           entrada.verificacion_cuotas_db = 'CREDITO_NO_ENCONTRADO_EN_DB';
         }
       } else if (!cuotasCoinciden && grupo.cuotaEtl < cuotaDb) {
-        entrada.verificacion_cuotas_db = `DB_TIENE_MAS_CUOTAS (DB: ${cuotaDb}, ETL: ${grupo.cuotaEtl})`;
+        // DB tiene más cuotas que ETL, descartar
+        continue;
       }
 
       discrepancias.push(entrada);
@@ -295,31 +297,78 @@ async function comparar() {
     await pool.end();
   }
 
-  // Solo discrepancias de cuotas (marzo ya fue filtrado arriba)
-  const discCuotas = discrepancias
-    .filter(d => !d.cuotas_coinciden && Array.isArray(d.verificacion_cuotas_db) && d.verificacion_cuotas_db.length > 0);
+  // Separar: las de marzo van a otro archivo
+  const discMarzo = [];
+  const discNoMarzo = [];
 
-  // Contar por estado
+  for (const d of discrepancias) {
+    const tieneDiscrepancia = !d.cuotas_coinciden || !d.capital_coincide;
+    if (!tieneDiscrepancia) continue;
+
+    if (Array.isArray(d.verificacion_cuotas_db)) {
+      const cuotasMarzo = d.verificacion_cuotas_db.filter(c => c.estado === 'PAGADA_PENDING_MARZO');
+      const cuotasNoMarzo = d.verificacion_cuotas_db.filter(c => c.estado !== 'PAGADA_PENDING_MARZO');
+
+      if (cuotasMarzo.length > 0) {
+        // Si tiene CUALQUIER cuota de marzo, todo el crédito va a marzo
+        discMarzo.push({ ...d });
+      } else {
+        // Sin cuotas de marzo: va al reporte principal
+        if (cuotasNoMarzo.length > 0 || !d.capital_coincide) {
+          discNoMarzo.push({ ...d, verificacion_cuotas_db: cuotasNoMarzo });
+        }
+      }
+    } else {
+      // Solo discrepancia de capital (cuotas coinciden)
+      discNoMarzo.push(d);
+    }
+  }
+
+  // Contar por estado (no-marzo)
   const conteoPorEstado = {};
   let totalCuotasDisc = 0;
-  for (const d of discCuotas) {
-    for (const c of d.verificacion_cuotas_db) {
-      conteoPorEstado[c.estado] = (conteoPorEstado[c.estado] || 0) + 1;
-      totalCuotasDisc++;
+  let soloCapital = 0;
+  for (const d of discNoMarzo) {
+    if (d.cuotas_coinciden && !d.capital_coincide) soloCapital++;
+    if (Array.isArray(d.verificacion_cuotas_db)) {
+      for (const c of d.verificacion_cuotas_db) {
+        conteoPorEstado[c.estado] = (conteoPorEstado[c.estado] || 0) + 1;
+        totalCuotasDisc++;
+      }
     }
   }
 
   const reporte = {
     resumen: {
       total_creditos_etl: Object.keys(gruposPorSifco).length,
-      total_creditos_con_discrepancia: discCuotas.length,
+      total_creditos_con_discrepancia: discNoMarzo.length,
+      solo_capital_diferente: soloCapital,
       total_cuotas_discrepantes: totalCuotasDisc,
       por_estado: conteoPorEstado
     },
-    discrepancias: discCuotas
+    discrepancias: discNoMarzo
+  };
+
+  // Reporte marzo
+  const conteoMarzo = {};
+  let totalMarzo = 0;
+  for (const d of discMarzo) {
+    for (const c of d.verificacion_cuotas_db) {
+      conteoMarzo[c.estado] = (conteoMarzo[c.estado] || 0) + 1;
+      totalMarzo++;
+    }
+  }
+  const reporteMarzo = {
+    resumen: {
+      total_creditos: discMarzo.length,
+      total_cuotas: totalMarzo,
+      por_estado: conteoMarzo
+    },
+    discrepancias: discMarzo
   };
 
   fs.writeFileSync(REPORTE_FILE, JSON.stringify(reporte, null, 2), 'utf-8');
+  fs.writeFileSync(MARZO_FILE, JSON.stringify(reporteMarzo, null, 2), 'utf-8');
 
   console.log('Comparacion finalizada.');
   console.log('Resumen:');
@@ -333,13 +382,17 @@ async function comparar() {
   console.log(`  Capital igual (entero):    ${capitalIgual}`);
   console.log(`  Capital dif (entero):      ${capitalDiferente}`);
   console.log(`  ---`);
-  console.log(`  Creditos con discrepancia: ${discCuotas.length}`);
+  console.log(`  Creditos con discrepancia: ${discNoMarzo.length}`);
+  console.log(`  Solo capital diferente:    ${soloCapital}`);
   console.log(`  Cuotas discrepantes:       ${totalCuotasDisc}`);
   console.log(`  Por estado:`);
   for (const [estado, count] of Object.entries(conteoPorEstado)) {
     console.log(`    ${estado}: ${count}`);
   }
+  console.log(`  ---`);
+  console.log(`  Marzo (archivo aparte):    ${discMarzo.length} creditos, ${totalMarzo} cuotas`);
   console.log(`Reporte: ${REPORTE_FILE}`);
+  console.log(`Marzo:   ${MARZO_FILE}`);
 }
 
 comparar().catch(e => { console.error(e); pool.end(); });

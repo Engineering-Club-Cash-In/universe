@@ -37,7 +37,7 @@ async function ejecutar() {
 
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
-    const sifco = item.sifco_base;
+    const sifco = item.sifco_db || item.sifco_base;
 
     const body = {
       numero_credito_sifco: sifco,

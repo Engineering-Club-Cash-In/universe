@@ -1,6 +1,103 @@
 [
   {
+    "sifco_base": "01010214106990",
+    "sifco_db": "01010214106990",
+    "nombre_etl": "Ricardo Augusto Moran Castellanos 2",
+    "nombre_db": "Ricardo Augusto Moran Castellanos 2",
+    "match_type": "sifco",
+    "cuota_etl": 30,
+    "cuota_db": 30,
+    "cuotas_coinciden": true,
+    "capital_total_etl": 60386.9802800746,
+    "capital_total_etl_entero": 60386,
+    "capital_db": 62139.83,
+    "capital_db_entero": 62139,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214106990",
+        "inversionista": "Javier Arzu Perez",
+        "capital": "29531.523830155973",
+        "capitalRestante": "28698.503430502595",
+        "capitalUltimoPago": "28698.503430502595"
+      },
+      {
+        "numeroCredito": "01010214106990_2",
+        "inversionista": "Cube Investments S.A.",
+        "capital": "32608.30728714792",
+        "capitalRestante": "31688.476849572005",
+        "capitalUltimoPago": "31688.476849572005"
+      }
+    ],
+    "verificacion_cuotas_db": null
+  },
+  {
+    "sifco_base": "01010214113070",
+    "sifco_db": "01010214113070",
+    "nombre_etl": "Brenda Liseth Vasquez Tista de Calvillo",
+    "nombre_db": "Brenda Liseth Vasquez Tista de Calvillo",
+    "match_type": "sifco",
+    "cuota_etl": 22,
+    "cuota_db": 22,
+    "cuotas_coinciden": true,
+    "capital_total_etl": 23649.15147786642,
+    "capital_total_etl_entero": 23649,
+    "capital_db": 38493.06,
+    "capital_db_entero": 38493,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214113070",
+        "inversionista": "Carlos René Estuardo Matheu González",
+        "capital": "24091.4451985311",
+        "capitalRestante": "23649.15147786642",
+        "capitalUltimoPago": "23649.15147786642"
+      },
+      {
+        "numeroCredito": "01010214113080",
+        "inversionista": "Ana Lucia Salvatierra Mayen",
+        "capital": "15121.515615596001",
+        "capitalRestante": "14843.897077938014",
+        "capitalUltimoPago": "14843.897077938014"
+      }
+    ],
+    "verificacion_cuotas_db": null
+  },
+  {
+    "sifco_base": "01010214113080",
+    "sifco_db": "01010214113070",
+    "nombre_etl": "Brenda Liseth Vasquez Tista de Calvillo",
+    "nombre_db": "Brenda Liseth Vasquez Tista de Calvillo",
+    "match_type": "nombre",
+    "cuota_etl": 22,
+    "cuota_db": 22,
+    "cuotas_coinciden": true,
+    "capital_total_etl": 14843.897077938014,
+    "capital_total_etl_entero": 14843,
+    "capital_db": 38493.06,
+    "capital_db_entero": 38493,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214113070",
+        "inversionista": "Carlos René Estuardo Matheu González",
+        "capital": "24091.4451985311",
+        "capitalRestante": "23649.15147786642",
+        "capitalUltimoPago": "23649.15147786642"
+      },
+      {
+        "numeroCredito": "01010214113080",
+        "inversionista": "Ana Lucia Salvatierra Mayen",
+        "capital": "15121.515615596001",
+        "capitalRestante": "14843.897077938014",
+        "capitalUltimoPago": "14843.897077938014"
+      }
+    ],
+    "verificacion_cuotas_db": null
+  },
+  {
     "sifco_base": "01010202101380",
+    "sifco_db": "01010202101380",
     "nombre_etl": "Gustavo Francisco Castro Orellana 2",
     "nombre_db": "Gustavo Francisco Castro Orellana 2",
     "match_type": "sifco",
@@ -41,64 +138,8 @@
     ]
   },
   {
-    "sifco_base": "01010202105740",
-    "nombre_etl": "Jose David Jui Valenzuela",
-    "nombre_db": "Jose David Jui Valenzuela",
-    "match_type": "sifco",
-    "cuota_etl": 33,
-    "cuota_db": 30,
-    "cuotas_coinciden": false,
-    "capital_total_etl": 23522.350750842295,
-    "capital_total_etl_entero": 23522,
-    "capital_db": 24053.11,
-    "capital_db_entero": 24053,
-    "capital_coincide": false,
-    "inversionistas": [
-      {
-        "numeroCredito": "01010202105740",
-        "inversionista": "Cube Investments S.A.",
-        "capital": "24053.10637658891",
-        "capitalRestante": "23522.350750842295",
-        "capitalUltimoPago": "23522.350750842295"
-      }
-    ],
-    "verificacion_cuotas_db": [
-      {
-        "numero_cuota": 32,
-        "estado": "TIENE_PAGO_NO_PAGADA",
-        "fecha_pago": null,
-        "pagos": [
-          {
-            "pago_id": 26350,
-            "pagado": false,
-            "validation_status": "no_required",
-            "fecha_pago": null,
-            "cuota_pago": "1932.58",
-            "monto_boleta": null,
-            "monto_boleta_cuota": null
-          }
-        ]
-      },
-      {
-        "numero_cuota": 33,
-        "estado": "TIENE_PAGO_NO_PAGADA",
-        "fecha_pago": null,
-        "pagos": [
-          {
-            "pago_id": 26351,
-            "pagado": false,
-            "validation_status": "no_required",
-            "fecha_pago": null,
-            "cuota_pago": "1932.58",
-            "monto_boleta": null,
-            "monto_boleta_cuota": null
-          }
-        ]
-      }
-    ]
-  },
-  {
     "sifco_base": "01010214117570",
+    "sifco_db": "01010214117570",
     "nombre_etl": "Monica Maria Fuentes Rubio",
     "nombre_db": "Monica Maria Fuentes Rubio",
     "match_type": "sifco",
@@ -139,7 +180,33 @@
     ]
   },
   {
+    "sifco_base": "01010214108200",
+    "sifco_db": "01010214108200",
+    "nombre_etl": "Nelva Azucena Flores Morales",
+    "nombre_db": "Nelva Azucena Flores Morales",
+    "match_type": "sifco",
+    "cuota_etl": 26,
+    "cuota_db": 26,
+    "cuotas_coinciden": true,
+    "capital_total_etl": 32841.525507334205,
+    "capital_total_etl_entero": 32841,
+    "capital_db": 32117.46,
+    "capital_db_entero": 32117,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214108200",
+        "inversionista": "Anna Lisseth Lorenzo Rodas",
+        "capital": "32841.525507334205",
+        "capitalRestante": "32841.525507334205",
+        "capitalUltimoPago": "32841.525507334205"
+      }
+    ],
+    "verificacion_cuotas_db": null
+  },
+  {
     "sifco_base": "01010214105930",
+    "sifco_db": "01010214105930",
     "nombre_etl": "Maria Andrea Guerra Arenales",
     "nombre_db": "Maria Andrea Guerra Arenales",
     "match_type": "sifco",
@@ -180,7 +247,1304 @@
     ]
   },
   {
+    "sifco_base": "01010214105290",
+    "sifco_db": "01010214119760",
+    "nombre_etl": "Edmon Hernan Robinson Cubillo",
+    "nombre_db": "Edmon Hernan Robinson Cubillo",
+    "match_type": "nombre",
+    "cuota_etl": 34,
+    "cuota_db": 4,
+    "cuotas_coinciden": false,
+    "capital_total_etl": 25786.414070478935,
+    "capital_total_etl_entero": 25786,
+    "capital_db": 217882.71,
+    "capital_db_entero": 217882,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214105290",
+        "inversionista": "Autocash S.A.",
+        "capital": "25786.414070478935",
+        "capitalRestante": "25786.414070478935",
+        "capitalUltimoPago": "25786.414070478935"
+      },
+      {
+        "numeroCredito": "01010214105300",
+        "inversionista": "Diego Eduardo Furlan de la Vega",
+        "capital": "44501.23305276035",
+        "capitalRestante": "44501.23305276035",
+        "capitalUltimoPago": "44501.23305276035"
+      },
+      {
+        "numeroCredito": "01010214105310",
+        "inversionista": "Javier Arzu Perez",
+        "capital": "66196.46580549759",
+        "capitalRestante": "66196.46580549759",
+        "capitalUltimoPago": "66196.46580549759"
+      }
+    ],
+    "verificacion_cuotas_db": [
+      {
+        "numero_cuota": 5,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77130,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 6,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77131,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 7,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77132,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 8,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77133,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 9,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77134,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 10,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77135,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 11,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77136,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 12,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77137,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 13,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77138,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 14,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77139,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 15,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77140,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 16,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77141,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 17,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77142,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 18,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77143,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 19,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77144,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 20,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77145,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 21,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77146,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 22,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77147,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 23,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77148,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 24,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77149,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 25,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77150,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 26,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77151,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 27,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77152,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 28,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77153,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 29,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77154,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 30,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77155,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 31,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77156,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 32,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77157,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 33,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77158,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 34,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77159,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "sifco_base": "01010214105300",
+    "sifco_db": "01010214119760",
+    "nombre_etl": "Edmon Hernan Robinson Cubillo",
+    "nombre_db": "Edmon Hernan Robinson Cubillo",
+    "match_type": "nombre",
+    "cuota_etl": 34,
+    "cuota_db": 4,
+    "cuotas_coinciden": false,
+    "capital_total_etl": 44501.23305276035,
+    "capital_total_etl_entero": 44501,
+    "capital_db": 217882.71,
+    "capital_db_entero": 217882,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214105290",
+        "inversionista": "Autocash S.A.",
+        "capital": "25786.414070478935",
+        "capitalRestante": "25786.414070478935",
+        "capitalUltimoPago": "25786.414070478935"
+      },
+      {
+        "numeroCredito": "01010214105300",
+        "inversionista": "Diego Eduardo Furlan de la Vega",
+        "capital": "44501.23305276035",
+        "capitalRestante": "44501.23305276035",
+        "capitalUltimoPago": "44501.23305276035"
+      },
+      {
+        "numeroCredito": "01010214105310",
+        "inversionista": "Javier Arzu Perez",
+        "capital": "66196.46580549759",
+        "capitalRestante": "66196.46580549759",
+        "capitalUltimoPago": "66196.46580549759"
+      }
+    ],
+    "verificacion_cuotas_db": [
+      {
+        "numero_cuota": 5,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77130,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 6,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77131,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 7,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77132,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 8,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77133,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 9,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77134,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 10,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77135,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 11,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77136,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 12,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77137,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 13,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77138,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 14,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77139,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 15,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77140,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 16,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77141,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 17,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77142,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 18,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77143,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 19,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77144,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 20,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77145,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 21,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77146,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 22,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77147,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 23,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77148,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 24,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77149,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 25,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77150,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 26,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77151,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 27,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77152,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 28,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77153,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 29,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77154,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 30,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77155,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 31,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77156,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 32,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77157,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 33,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77158,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      },
+      {
+        "numero_cuota": 34,
+        "estado": "TIENE_PAGO_NO_PAGADA",
+        "fecha_pago": null,
+        "pagos": [
+          {
+            "pago_id": 77159,
+            "pagado": false,
+            "validation_status": "no_required",
+            "fecha_pago": null,
+            "cuota_pago": "7421.79",
+            "monto_boleta": "0.00",
+            "monto_boleta_cuota": "0.00"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "sifco_base": "01010214105310",
+    "sifco_db": "01010214105310",
+    "nombre_etl": "Edmon Hernan Robinson Cubillo",
+    "nombre_db": "Edmon Hernan Robinson Cubillo",
+    "match_type": "sifco",
+    "cuota_etl": 34,
+    "cuota_db": 34,
+    "cuotas_coinciden": true,
+    "capital_total_etl": 66196.46580549759,
+    "capital_total_etl_entero": 66196,
+    "capital_db": 136484.16,
+    "capital_db_entero": 136484,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214105290",
+        "inversionista": "Autocash S.A.",
+        "capital": "25786.414070478935",
+        "capitalRestante": "25786.414070478935",
+        "capitalUltimoPago": "25786.414070478935"
+      },
+      {
+        "numeroCredito": "01010214105300",
+        "inversionista": "Diego Eduardo Furlan de la Vega",
+        "capital": "44501.23305276035",
+        "capitalRestante": "44501.23305276035",
+        "capitalUltimoPago": "44501.23305276035"
+      },
+      {
+        "numeroCredito": "01010214105310",
+        "inversionista": "Javier Arzu Perez",
+        "capital": "66196.46580549759",
+        "capitalRestante": "66196.46580549759",
+        "capitalUltimoPago": "66196.46580549759"
+      }
+    ],
+    "verificacion_cuotas_db": null
+  },
+  {
+    "sifco_base": "01010214112940",
+    "sifco_db": "01010214112950",
+    "nombre_etl": "William Alejandro Pinzon Reyes",
+    "nombre_db": "William Alejandro Pinzon Reyes",
+    "match_type": "nombre",
+    "cuota_etl": 47,
+    "cuota_db": 47,
+    "cuotas_coinciden": true,
+    "capital_total_etl": 6117.809713728683,
+    "capital_total_etl_entero": 6117,
+    "capital_db": 25957.88,
+    "capital_db_entero": 25957,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214112940",
+        "inversionista": "Diana Lowenthal",
+        "capital": "6117.809713728683",
+        "capitalRestante": "6117.809713728683",
+        "capitalUltimoPago": "6117.809713728683"
+      },
+      {
+        "numeroCredito": "01010214112950",
+        "inversionista": "Post Net Guatemala S.A.",
+        "capital": "19840.070384300005",
+        "capitalRestante": "19840.070384300005",
+        "capitalUltimoPago": "19840.070384300005"
+      }
+    ],
+    "verificacion_cuotas_db": null
+  },
+  {
+    "sifco_base": "01010214112950",
+    "sifco_db": "01010214112950",
+    "nombre_etl": "William Alejandro Pinzon Reyes",
+    "nombre_db": "William Alejandro Pinzon Reyes",
+    "match_type": "sifco",
+    "cuota_etl": 47,
+    "cuota_db": 47,
+    "cuotas_coinciden": true,
+    "capital_total_etl": 19840.070384300005,
+    "capital_total_etl_entero": 19840,
+    "capital_db": 25957.88,
+    "capital_db_entero": 25957,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214112940",
+        "inversionista": "Diana Lowenthal",
+        "capital": "6117.809713728683",
+        "capitalRestante": "6117.809713728683",
+        "capitalUltimoPago": "6117.809713728683"
+      },
+      {
+        "numeroCredito": "01010214112950",
+        "inversionista": "Post Net Guatemala S.A.",
+        "capital": "19840.070384300005",
+        "capitalRestante": "19840.070384300005",
+        "capitalUltimoPago": "19840.070384300005"
+      }
+    ],
+    "verificacion_cuotas_db": null
+  },
+  {
+    "sifco_base": "01010214108510",
+    "sifco_db": "01010214108510",
+    "nombre_etl": "Denis Alexander Morales Valle",
+    "nombre_db": "Denis Alexander Morales Valle",
+    "match_type": "sifco",
+    "cuota_etl": 25,
+    "cuota_db": 25,
+    "cuotas_coinciden": true,
+    "capital_total_etl": 26257.11822970144,
+    "capital_total_etl_entero": 26257,
+    "capital_db": 25860.54,
+    "capital_db_entero": 25860,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214108510",
+        "inversionista": "Flujocapital",
+        "capital": "26257.11822970144",
+        "capitalRestante": "26257.11822970144",
+        "capitalUltimoPago": "26257.11822970144"
+      }
+    ],
+    "verificacion_cuotas_db": null
+  },
+  {
+    "sifco_base": "01010214108780",
+    "sifco_db": "01010214108780",
+    "nombre_etl": "Roberto Estuardo Folgar Alvarez",
+    "nombre_db": "Roberto Estuardo Folgar Alvarez",
+    "match_type": "sifco",
+    "cuota_etl": 24,
+    "cuota_db": 24,
+    "cuotas_coinciden": true,
+    "capital_total_etl": 46369.712805944306,
+    "capital_total_etl_entero": 46369,
+    "capital_db": 60644.3,
+    "capital_db_entero": 60644,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214108780",
+        "inversionista": "Cube Investments S.A.",
+        "capital": "46369.712805944306",
+        "capitalRestante": "46369.712805944306",
+        "capitalUltimoPago": "46369.712805944306"
+      },
+      {
+        "numeroCredito": "01010214108880",
+        "inversionista": "Manuel Carrera Mayen",
+        "capital": "14274.587627822048",
+        "capitalRestante": "14274.587627822048",
+        "capitalUltimoPago": "14274.587627822048"
+      }
+    ],
+    "verificacion_cuotas_db": null
+  },
+  {
+    "sifco_base": "01010214108880",
+    "sifco_db": "01010214108780",
+    "nombre_etl": "Roberto Estuardo Folgar Alvarez",
+    "nombre_db": "Roberto Estuardo Folgar Alvarez",
+    "match_type": "nombre",
+    "cuota_etl": 24,
+    "cuota_db": 24,
+    "cuotas_coinciden": true,
+    "capital_total_etl": 14274.587627822048,
+    "capital_total_etl_entero": 14274,
+    "capital_db": 60644.3,
+    "capital_db_entero": 60644,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214108780",
+        "inversionista": "Cube Investments S.A.",
+        "capital": "46369.712805944306",
+        "capitalRestante": "46369.712805944306",
+        "capitalUltimoPago": "46369.712805944306"
+      },
+      {
+        "numeroCredito": "01010214108880",
+        "inversionista": "Manuel Carrera Mayen",
+        "capital": "14274.587627822048",
+        "capitalRestante": "14274.587627822048",
+        "capitalUltimoPago": "14274.587627822048"
+      }
+    ],
+    "verificacion_cuotas_db": null
+  },
+  {
+    "sifco_base": "01010214104850",
+    "sifco_db": "01010214104850",
+    "nombre_etl": "Carlos Roberto Sandoval / Bruno Roberto Hahmman Sandoval",
+    "nombre_db": "Carlos Roberto Sandoval / Bruno Roberto Hahmman Sandoval",
+    "match_type": "sifco",
+    "cuota_etl": 35,
+    "cuota_db": 35,
+    "cuotas_coinciden": true,
+    "capital_total_etl": 53572.91206985829,
+    "capital_total_etl_entero": 53572,
+    "capital_db": 61658.55,
+    "capital_db_entero": 61658,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214104850",
+        "inversionista": "Javier Arzu Perez",
+        "capital": "53572.91206985829",
+        "capitalRestante": "53572.91206985829",
+        "capitalUltimoPago": "53572.91206985829"
+      },
+      {
+        "numeroCredito": "01010214104860",
+        "inversionista": "Josue Mente",
+        "capital": "8085.636733402569",
+        "capitalRestante": "8085.636733402569",
+        "capitalUltimoPago": "8085.636733402569"
+      }
+    ],
+    "verificacion_cuotas_db": null
+  },
+  {
+    "sifco_base": "01010214104860",
+    "sifco_db": "01010214104850",
+    "nombre_etl": "Carlos Roberto Sandoval / Bruno Roberto Hahmman Sandoval",
+    "nombre_db": "Carlos Roberto Sandoval / Bruno Roberto Hahmman Sandoval",
+    "match_type": "nombre",
+    "cuota_etl": 35,
+    "cuota_db": 35,
+    "cuotas_coinciden": true,
+    "capital_total_etl": 8085.636733402569,
+    "capital_total_etl_entero": 8085,
+    "capital_db": 61658.55,
+    "capital_db_entero": 61658,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214104850",
+        "inversionista": "Javier Arzu Perez",
+        "capital": "53572.91206985829",
+        "capitalRestante": "53572.91206985829",
+        "capitalUltimoPago": "53572.91206985829"
+      },
+      {
+        "numeroCredito": "01010214104860",
+        "inversionista": "Josue Mente",
+        "capital": "8085.636733402569",
+        "capitalRestante": "8085.636733402569",
+        "capitalUltimoPago": "8085.636733402569"
+      }
+    ],
+    "verificacion_cuotas_db": null
+  },
+  {
     "sifco_base": "01010214104010",
+    "sifco_db": "01010214104010",
     "nombre_etl": "Kevin Rolando Vargas Rivas / Bryan David Vargas Rivas",
     "nombre_db": "Kevin Rolando Vargas Rivas / Bryan David Vargas Rivas",
     "match_type": "sifco",
@@ -222,6 +1586,7 @@
   },
   {
     "sifco_base": "01010214108090",
+    "sifco_db": "01010214108090",
     "nombre_etl": "Marco Alejandro Correa Mancia / Andrea Maria Barrios Figueroa de Correa",
     "nombre_db": "Marco Alejandro Correa Mancia / Andrea Maria Barrios Figueroa de Correa",
     "match_type": "sifco",
@@ -262,7 +1627,161 @@
     ]
   },
   {
+    "sifco_base": "01010214108810",
+    "sifco_db": "01010214108810",
+    "nombre_etl": "Jhony Alfredo Carrillo Corado / Mayra Elizabeth Rosales / Pablo Roberto Batz Gudiel",
+    "nombre_db": "Jhony Alfredo Carrillo Corado / Mayra Elizabeth Rosales / Pablo Roberto Batz Gudiel",
+    "match_type": "sifco",
+    "cuota_etl": 24,
+    "cuota_db": 24,
+    "cuotas_coinciden": true,
+    "capital_total_etl": 34616.037737102546,
+    "capital_total_etl_entero": 34616,
+    "capital_db": 41753.35,
+    "capital_db_entero": 41753,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214108810",
+        "inversionista": "Javier Arzu Perez",
+        "capital": "34616.037737102546",
+        "capitalRestante": "34616.037737102546",
+        "capitalUltimoPago": "34616.037737102546"
+      },
+      {
+        "numeroCredito": "01010214115390",
+        "inversionista": "Cube Investments S.A.",
+        "capital": "7137.314860817827",
+        "capitalRestante": "7137.314860817827",
+        "capitalUltimoPago": "7137.314860817827"
+      }
+    ],
+    "verificacion_cuotas_db": null
+  },
+  {
+    "sifco_base": "01010214115390",
+    "sifco_db": "01010214108810",
+    "nombre_etl": "Jhony Alfredo Carrillo Corado / Mayra Elizabeth Rosales / Pablo Roberto Batz Gudiel",
+    "nombre_db": "Jhony Alfredo Carrillo Corado / Mayra Elizabeth Rosales / Pablo Roberto Batz Gudiel",
+    "match_type": "nombre",
+    "cuota_etl": 24,
+    "cuota_db": 24,
+    "cuotas_coinciden": true,
+    "capital_total_etl": 7137.314860817827,
+    "capital_total_etl_entero": 7137,
+    "capital_db": 41753.35,
+    "capital_db_entero": 41753,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214108810",
+        "inversionista": "Javier Arzu Perez",
+        "capital": "34616.037737102546",
+        "capitalRestante": "34616.037737102546",
+        "capitalUltimoPago": "34616.037737102546"
+      },
+      {
+        "numeroCredito": "01010214115390",
+        "inversionista": "Cube Investments S.A.",
+        "capital": "7137.314860817827",
+        "capitalRestante": "7137.314860817827",
+        "capitalUltimoPago": "7137.314860817827"
+      }
+    ],
+    "verificacion_cuotas_db": null
+  },
+  {
+    "sifco_base": "01010202101800",
+    "sifco_db": "01010202101800",
+    "nombre_etl": "Jeinny Gabriela Roca Alvarado",
+    "nombre_db": "Jeinny Gabriela Roca Alvarado",
+    "match_type": "sifco",
+    "cuota_etl": 50,
+    "cuota_db": 50,
+    "cuotas_coinciden": true,
+    "capital_total_etl": 24099.70194162355,
+    "capital_total_etl_entero": 24099,
+    "capital_db": 26296.16,
+    "capital_db_entero": 26296,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010202101800",
+        "inversionista": "Milton Jose Barascout Ramirez",
+        "capital": "24099.70194162355",
+        "capitalRestante": "24099.70194162355",
+        "capitalUltimoPago": "24099.70194162355"
+      }
+    ],
+    "verificacion_cuotas_db": null
+  },
+  {
+    "sifco_base": "01010214115120",
+    "sifco_db": "01010214115120",
+    "nombre_etl": "Carlos Ramiro Diaz de Leon",
+    "nombre_db": "Carlos Ramiro Diaz de Leon",
+    "match_type": "sifco",
+    "cuota_etl": 24,
+    "cuota_db": 24,
+    "cuotas_coinciden": true,
+    "capital_total_etl": 32661.831458904875,
+    "capital_total_etl_entero": 32661,
+    "capital_db": 37106.94,
+    "capital_db_entero": 37106,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214115120",
+        "inversionista": "Juan José Luna Duraes",
+        "capital": "32661.831458904875",
+        "capitalRestante": "32661.831458904875",
+        "capitalUltimoPago": "32661.831458904875"
+      },
+      {
+        "numeroCredito": "01010214115130",
+        "inversionista": "Central de Carga S.A.",
+        "capital": "4445.1130958816",
+        "capitalRestante": "4445.1130958816",
+        "capitalUltimoPago": "4445.1130958816"
+      }
+    ],
+    "verificacion_cuotas_db": null
+  },
+  {
+    "sifco_base": "01010214115130",
+    "sifco_db": "01010214115120",
+    "nombre_etl": "Carlos Ramiro Diaz de Leon",
+    "nombre_db": "Carlos Ramiro Diaz de Leon",
+    "match_type": "nombre",
+    "cuota_etl": 24,
+    "cuota_db": 24,
+    "cuotas_coinciden": true,
+    "capital_total_etl": 4445.1130958816,
+    "capital_total_etl_entero": 4445,
+    "capital_db": 37106.94,
+    "capital_db_entero": 37106,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214115120",
+        "inversionista": "Juan José Luna Duraes",
+        "capital": "32661.831458904875",
+        "capitalRestante": "32661.831458904875",
+        "capitalUltimoPago": "32661.831458904875"
+      },
+      {
+        "numeroCredito": "01010214115130",
+        "inversionista": "Central de Carga S.A.",
+        "capital": "4445.1130958816",
+        "capitalRestante": "4445.1130958816",
+        "capitalUltimoPago": "4445.1130958816"
+      }
+    ],
+    "verificacion_cuotas_db": null
+  },
+  {
     "sifco_base": "01010202113040",
+    "sifco_db": "01010202113040",
     "nombre_etl": "Carlos Daniel Wong",
     "nombre_db": "Carlos Daniel Wong",
     "match_type": "sifco",
@@ -303,7 +1822,72 @@
     ]
   },
   {
+    "sifco_base": "01010214109380",
+    "sifco_db": "01010214109380",
+    "nombre_etl": "Lindsey Pamela Sanchez Moreno",
+    "nombre_db": "Lindsey Pamela Sanchez Moreno",
+    "match_type": "sifco",
+    "cuota_etl": 22,
+    "cuota_db": 22,
+    "cuotas_coinciden": true,
+    "capital_total_etl": 59964.66889397943,
+    "capital_total_etl_entero": 59964,
+    "capital_db": 89839.66,
+    "capital_db_entero": 89839,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214109380",
+        "inversionista": "Cube Investments S.A.",
+        "capital": "59964.66889397943",
+        "capitalRestante": "59964.66889397943",
+        "capitalUltimoPago": "59964.66889397943"
+      },
+      {
+        "numeroCredito": "01010214109390",
+        "inversionista": "Diego Alejandro Mendieta Avila (Rodrigo Mendieta)",
+        "capital": "29874.983731651682",
+        "capitalRestante": "29874.983731651682",
+        "capitalUltimoPago": "29874.983731651682"
+      }
+    ],
+    "verificacion_cuotas_db": null
+  },
+  {
+    "sifco_base": "01010214109390",
+    "sifco_db": "01010214109380",
+    "nombre_etl": "Lindsey Pamela Sanchez Moreno",
+    "nombre_db": "Lindsey Pamela Sanchez Moreno",
+    "match_type": "nombre",
+    "cuota_etl": 22,
+    "cuota_db": 22,
+    "cuotas_coinciden": true,
+    "capital_total_etl": 29874.983731651682,
+    "capital_total_etl_entero": 29874,
+    "capital_db": 89839.66,
+    "capital_db_entero": 89839,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214109380",
+        "inversionista": "Cube Investments S.A.",
+        "capital": "59964.66889397943",
+        "capitalRestante": "59964.66889397943",
+        "capitalUltimoPago": "59964.66889397943"
+      },
+      {
+        "numeroCredito": "01010214109390",
+        "inversionista": "Diego Alejandro Mendieta Avila (Rodrigo Mendieta)",
+        "capital": "29874.983731651682",
+        "capitalRestante": "29874.983731651682",
+        "capitalUltimoPago": "29874.983731651682"
+      }
+    ],
+    "verificacion_cuotas_db": null
+  },
+  {
     "sifco_base": "01010214104000",
+    "sifco_db": "01010214104000",
     "nombre_etl": "Christian Manolo Lopez Leal / Selvin Estuardo Galindo Leal",
     "nombre_db": "Christian Manolo Lopez Leal / Selvin Estuardo Galindo Leal",
     "match_type": "sifco",
@@ -369,48 +1953,8 @@
     ]
   },
   {
-    "sifco_base": "01010214106430",
-    "nombre_etl": "Jacquelin Michel Arias Mejia",
-    "nombre_db": "Jacquelin Michel Arias Mejia",
-    "match_type": "sifco",
-    "cuota_etl": 30,
-    "cuota_db": 28,
-    "cuotas_coinciden": false,
-    "capital_total_etl": 27322.295433040003,
-    "capital_total_etl_entero": 27322,
-    "capital_db": 27322.3,
-    "capital_db_entero": 27322,
-    "capital_coincide": true,
-    "inversionistas": [
-      {
-        "numeroCredito": "01010214106430",
-        "inversionista": "Javier Arzu Perez",
-        "capital": "27322.295433040003",
-        "capitalRestante": "27322.295433040003",
-        "capitalUltimoPago": "27322.295433040003"
-      }
-    ],
-    "verificacion_cuotas_db": [
-      {
-        "numero_cuota": 29,
-        "estado": "PAGADA_NO_MARZO",
-        "fecha_pago": "2026-01-18T06:00:00.000Z",
-        "pagos": [
-          {
-            "pago_id": 50404,
-            "pagado": true,
-            "validation_status": "pending",
-            "fecha_pago": "2026-01-18T06:00:00.000Z",
-            "cuota_pago": "1711.70",
-            "monto_boleta": "1712.00",
-            "monto_boleta_cuota": "1712.00"
-          }
-        ]
-      }
-    ]
-  },
-  {
     "sifco_base": "01010214107690",
+    "sifco_db": "01010214107690",
     "nombre_etl": "Axel Daniel Orellana Sequen",
     "nombre_db": "Axel Daniel Orellana Sequen",
     "match_type": "sifco",
@@ -451,7 +1995,33 @@
     ]
   },
   {
+    "sifco_base": "01010214103610",
+    "sifco_db": "01010214103610",
+    "nombre_etl": "Nancy del Rosario Roldan Montenegro de Chicas / Julio Roberto Chicas Polanco",
+    "nombre_db": "Nancy del Rosario Roldan Montenegro de Chicas / Julio Roberto Chicas Polanco",
+    "match_type": "sifco",
+    "cuota_etl": 41,
+    "cuota_db": 41,
+    "cuotas_coinciden": true,
+    "capital_total_etl": 44911.269824060306,
+    "capital_total_etl_entero": 44911,
+    "capital_db": 46072.21,
+    "capital_db_entero": 46072,
+    "capital_coincide": false,
+    "inversionistas": [
+      {
+        "numeroCredito": "01010214103610",
+        "inversionista": "Javier Arzu Perez",
+        "capital": "42813.20915710452",
+        "capitalRestante": "42813.20915710452",
+        "capitalUltimoPago": "44911.269824060306"
+      }
+    ],
+    "verificacion_cuotas_db": null
+  },
+  {
     "sifco_base": "01010214118410",
+    "sifco_db": "01010214118410",
     "nombre_etl": "Josue David Perez Ortiz",
     "nombre_db": "Josue David Perez Ortiz",
     "match_type": "sifco",
@@ -493,6 +2063,7 @@
   },
   {
     "sifco_base": "01010214107850",
+    "sifco_db": "01010214107850",
     "nombre_etl": "Mirian Marleny Solares Del Cid de Solares",
     "nombre_db": "Mirian Marleny Solares Del Cid de Solares",
     "match_type": "sifco",
@@ -550,6 +2121,7 @@
   },
   {
     "sifco_base": "01010214104810",
+    "sifco_db": "01010214104810",
     "nombre_etl": "Pablo Josue Alvarez Sanchez",
     "nombre_db": "Pablo Josue Alvarez Sanchez",
     "match_type": "sifco",
@@ -639,6 +2211,7 @@
   },
   {
     "sifco_base": "01010214109010",
+    "sifco_db": "01010214109010",
     "nombre_etl": "Vivian Maricela Rodriguez Alvarado de Melendez / Yessica Marina Melendez Lopez",
     "nombre_db": "Vivian Maricela Rodriguez Alvarado de Melendez / Yessica Marina Melendez Lopez",
     "match_type": "sifco",
@@ -680,6 +2253,7 @@
   },
   {
     "sifco_base": "01010214103840",
+    "sifco_db": "01010214103840",
     "nombre_etl": "Hector Daniel Rodriguez Pineda",
     "nombre_db": "Hector Daniel Rodriguez Pineda",
     "match_type": "sifco",
@@ -730,6 +2304,7 @@
   },
   {
     "sifco_base": "01010214109200",
+    "sifco_db": "01010214109200",
     "nombre_etl": "Ronald Estuardo Mendez Siles / Yenifer Lourdes Rodriguez Lux",
     "nombre_db": "Ronald Estuardo Mendez Siles / Yenifer Lourdes Rodriguez Lux",
     "match_type": "sifco",

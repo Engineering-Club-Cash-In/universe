@@ -4015,6 +4015,12 @@ export async function resumenGlobalLiquidaciones(
 
   return result;
 }
+
+export const isNullorEmpty = (value: string | number | null | undefined): value is null | undefined | "" => {
+  return value === null || value === undefined || value === "";
+}
+
+
 /**
  * Obtiene liquidaciones con sus pagos
  * @param inversionista_id - Filtrar por inversionista (opcional)
@@ -4058,10 +4064,10 @@ export async function getLiquidaciones({
   }
 
   // 🆕 Filtro por DPI
-  if (dpi) {
+  if (!isNullorEmpty(dpi)) {
     conditions.push(eq(inversionistas.dpi, parseInt(dpi)));
   }
-  if (email) {
+  if (!isNullorEmpty(email)) {
     conditions.push(eq(inversionistas.email, email));
   }
 

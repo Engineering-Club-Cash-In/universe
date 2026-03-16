@@ -636,6 +636,7 @@ await db
       fecha_pago: sql`EXCLUDED.fecha_pago`,
       estado_liquidacion: sql`EXCLUDED.estado_liquidacion`,
       credito_id: sql`EXCLUDED.credito_id`,
+      updated_at: sql`now()`,
     },
   });
 
@@ -2225,7 +2226,7 @@ export async function updatePagosEspejoPorCredito(
   }
 
   // 3. Armar el set dinámico solo con los campos que vienen
-  const setData: Record<string, string> = {};
+  const setData: Record<string, any> = {};
   if (abono_capital !== undefined) setData.abono_capital = abono_capital.toString();
   if (abono_interes !== undefined) setData.abono_interes = abono_interes.toString();
   if (abono_iva !== undefined) setData.abono_iva_12 = abono_iva.toString();
@@ -2235,6 +2236,7 @@ export async function updatePagosEspejoPorCredito(
   }
 
   // 4. Intentar actualizar registros existentes
+  setData.updated_at = new Date();
   const result = await db
     .update(pagos_credito_inversionistas_espejo)
     .set(setData)

@@ -247,7 +247,7 @@ export const reconcileEspejo = async ({ body, set }: any) => {
 
         if (registroLiquidado) {
           // 2g) UPDATE: Actualizar el registro LIQUIDADO existente
-          const updateData: any = { pago_id: pagoDelMes.pago_id };
+          const updateData: any = { pago_id: pagoDelMes.pago_id, updated_at: new Date() };
           if (abono_capital) updateData.abono_capital = abono_capital;
           if (abono_interes) updateData.abono_interes = abono_interes;
           if (abono_iva_12) updateData.abono_iva_12 = abono_iva_12;
@@ -277,6 +277,7 @@ export const reconcileEspejo = async ({ body, set }: any) => {
             accion = "UPDATE_EXISTING";
             const updateData: any = {
               estado_liquidacion: "LIQUIDADO",
+              updated_at: new Date(),
             };
             if (abono_capital) updateData.abono_capital = abono_capital;
             if (abono_interes) updateData.abono_interes = abono_interes;
@@ -354,7 +355,7 @@ export const reconcileEspejo = async ({ body, set }: any) => {
           if (fechaCuotaOtro > fechaFin) {
             await tx
               .update(pagos_credito_inversionistas_espejo)
-              .set({ estado_liquidacion: "NO_LIQUIDADO" })
+              .set({ estado_liquidacion: "NO_LIQUIDADO", updated_at: new Date() })
               .where(eq(pagos_credito_inversionistas_espejo.id, otro.id));
 
             // Marcar la cuota posterior como NO liquidada a inversionistas

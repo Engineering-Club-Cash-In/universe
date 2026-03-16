@@ -19,10 +19,11 @@ import {
   liquidaciones,
   pagos_credito,
   pagos_credito_inversionistas,
-  pagos_credito_inversionistas_espejo, // 🆕 NUEVO: Tabla espejo de pagos
+  pagos_credito_inversionistas_espejo,
   platform_users,
   reinversiones,
   usuarios,
+  liquidacion_locks,
 } from "../database/db/schema";
 import { eq, and, sql, inArray, ilike, like, desc, count, SQL } from "drizzle-orm";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
@@ -703,12 +704,13 @@ export async function processAndReplaceCreditInvestors(
   abono_capital: number,
   addition: boolean,
   inversionista_id: number,
-  updateMirror: boolean = false
+  updateMirror: boolean = false,
+  txOrDb: Pick<typeof db, 'query' | 'update'> = db
 ) {
 
 
   // 1. Fetch credit details
-  const credit = await db.query.creditos.findFirst({
+  const credit = await txOrDb.query.creditos.findFirst({
     where: (c, { eq }) => eq(c.credito_id, credito_id),
   });
 
@@ -717,7 +719,7 @@ export async function processAndReplaceCreditInvestors(
   }
 
   // 1.5 Verificar si el inversionista tiene permite_distribucion
-  const inversionista = await db.query.inversionistas.findFirst({
+  const inversionista = await txOrDb.query.inversionistas.findFirst({
     where: (i, { eq }) => eq(i.inversionista_id, inversionista_id),
   });
 
@@ -728,7 +730,7 @@ export async function processAndReplaceCreditInvestors(
   let investors;
 
   if (updateMirror) {
-    investors = await db.query.creditos_inversionistas_espejo.findMany({
+    investors = await txOrDb.query.creditos_inversionistas_espejo.findMany({
       where: (ci, { eq, and }) =>
         and(
           eq(ci.inversionista_id, inversionista_id),
@@ -736,7 +738,7 @@ export async function processAndReplaceCreditInvestors(
         ),
     });
   } else {
-    investors = await db.query.creditos_inversionistas.findMany({
+    investors = await txOrDb.query.creditos_inversionistas.findMany({
       where: (ci, { eq, and }) =>
         and(
           eq(ci.inversionista_id, inversionista_id),
@@ -808,17 +810,18 @@ export async function processAndReplaceCreditInvestors(
     };
 
     if (updateMirror) {
-      await db.update(creditos_inversionistas_espejo).set(setData)
+      await txOrDb.update(creditos_inversionistas_espejo).set({ ...setData, updated_at: new Date() })
         .where(eq(creditos_inversionistas_espejo.id, inv.id));
     } else {
-      await db.update(creditos_inversionistas).set(setData)
+      await txOrDb.update(creditos_inversionistas).set(setData)
         .where(eq(creditos_inversionistas.id, inv.id));
     }
 
     // Si permite_distribucion = true, también actualizar la OTRA tabla con los mismos valores
     if (permiteDistribucion) {
       const otraTabla = updateMirror ? creditos_inversionistas : creditos_inversionistas_espejo;
-      await db.update(otraTabla).set(setData)
+      const otraSetData = otraTabla === creditos_inversionistas_espejo ? { ...setData, updated_at: new Date() } : setData;
+      await txOrDb.update(otraTabla).set(otraSetData)
         .where(and(
           eq(otraTabla.inversionista_id, inversionista_id),
           eq(otraTabla.credito_id, credito_id)
@@ -923,6 +926,8 @@ export async function processAndReplaceCreditInvestorsReverse(
       .where(eq(creditos_inversionistas.id, inv.id));
   }
 }
+
+// !ESTA FUNCION NO DEBERIA DE USARSE:
 
 export async function reversePagosEspejoPorInversionista(
   inversionista_id: number
@@ -1941,6 +1946,7 @@ export async function revertirLiquidacion(liquidacion_id: number) {
         .set({
           estado_liquidacion: "NO_LIQUIDADO",
           liquidacion_id: null,
+          updated_at: new Date(),
         })
         .where(inArray(pagos_credito_inversionistas_espejo.id, pagosIds));
 
@@ -2127,6 +2133,7 @@ export async function upsertPagosEspejo(
           porcentaje_participacion: p.porcentaje_participacion,
           cuota:                    finalCuota,
           ...(p.estado_liquidacion && { estado_liquidacion: p.estado_liquidacion }),
+          updated_at: new Date(),
         })
         .where(eq(pagos_credito_inversionistas_espejo.id, p.id));
     })
@@ -2409,6 +2416,39 @@ export const liquidateByInvestorSchema = z.object({
   inversionista_id: z.number().optional(), // 🆕 Ahora es opcional
 });
 export async function liquidateByInvestorId(inversionista_id?: number) {
+  // Verificar si ya hay una liquidación en proceso para este inversionista (o masiva)
+  const lockExistente = await db
+    .select({ id: liquidacion_locks.id, started_at: liquidacion_locks.started_at })
+    .from(liquidacion_locks)
+    .where(
+      and(
+        inversionista_id
+          ? eq(liquidacion_locks.inversionista_id, inversionista_id)
+          : sql`${liquidacion_locks.inversionista_id} IS NULL`,
+        eq(liquidacion_locks.estado, "EN_PROCESO")
+      )
+    )
+    .limit(1);
+
+  if (lockExistente.length > 0) {
+    console.warn(`⚠️ Liquidación ya en proceso para: ${inversionista_id ?? "TODOS"}`);
+    return {
+      message: `Ya hay una liquidación en proceso para ${inversionista_id ? `inversionista ${inversionista_id}` : "todos los inversionistas"}. Iniciada: ${lockExistente[0].started_at}. Intente más tarde.`,
+      success: false,
+      error: "LIQUIDACION_EN_PROCESO",
+    };
+  }
+
+  // Crear lock en BD
+  const [lock] = await db
+    .insert(liquidacion_locks)
+    .values({
+      inversionista_id: inversionista_id ?? null,
+      estado: "EN_PROCESO",
+    })
+    .returning({ id: liquidacion_locks.id });
+
+  try {
   if (inversionista_id) {
     console.log(`Liquidando inversionista_id: ${inversionista_id}`);
   } else {
@@ -2525,114 +2565,121 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
 
       // ========================================
       // FASE 2: TRANSACCION (datos financieros)
+      // Si algo falla, se hace rollback de TODO
       // ========================================
+      const { liquidacion, updateResult } = await db.transaction(async (tx) => {
 
-      // Crear registro de liquidación
-      const [liquidacion] = await db
-        .insert(liquidaciones)
-        .values({
-          inversionista_id: inv_id,
-          boleta_id: boletaPendiente?.boleta_id ?? null,
-          total_pagos_liquidados: cantidadPagos,
-          total_capital: totales.total_abono_capital.toString(),
-          total_interes: totales.total_abono_interes.toString(),
-          total_iva: totales.total_abono_iva.toString(),
-          total_isr: totales.total_isr.toString(),
-          total_cuota: (totales.total_cuota_con_reinversion ?? 0).toString(),
-          reinversion_capital: reinvCapital.toString(),
-          reinversion_interes: reinvInteres.toString(),
-          reinversion_total: reinvTotal.toString(),
-          fecha_liquidacion: new Date(),
-        })
-        .returning();
-
-      console.log(`  ✅ Liquidación creada: liquidacion_id=${liquidacion.liquidacion_id}`);
-
-      // Marcar boleta como PROCESADO (solo si existe)
-      if (boletaPendiente) {
-        await db
-          .update(boletasPagoInversionista)
-          .set({ estado: "PROCESADO", fecha_procesado: new Date() })
-          .where(eq(boletasPagoInversionista.boleta_id, boletaPendiente.boleta_id));
-        console.log(`  ✅ Boleta ${boletaPendiente.boleta_id} marcada como PROCESADO`);
-      }
-
-      // Reinversiones
-      const montoReinvertido = new Big(reinvTotal);
-      if (montoReinvertido.gt(0)) {
-        await db.update(inversionistas)
-          .set({
-            saldo_reinversion: sql`${inversionistas.saldo_reinversion} + ${montoReinvertido.toFixed(2)}::numeric`,
+        // Crear registro de liquidación
+        const [liquidacion] = await tx
+          .insert(liquidaciones)
+          .values({
+            inversionista_id: inv_id,
+            boleta_id: boletaPendiente?.boleta_id ?? null,
+            total_pagos_liquidados: cantidadPagos,
+            total_capital: totales.total_abono_capital.toString(),
+            total_interes: totales.total_abono_interes.toString(),
+            total_iva: totales.total_abono_iva.toString(),
+            total_isr: totales.total_isr.toString(),
+            total_cuota: (totales.total_cuota_con_reinversion ?? 0).toString(),
+            reinversion_capital: reinvCapital.toString(),
+            reinversion_interes: reinvInteres.toString(),
+            reinversion_total: reinvTotal.toString(),
+            fecha_liquidacion: new Date(),
           })
-          .where(eq(inversionistas.inversionista_id, inv_id));
+          .returning();
 
-        await db.update(reinversiones)
-          .set({ monto_capital: "0", monto_interes: "0", monto_total: "0" })
-          .where(eq(reinversiones.inversionista_id, inv_id));
+        console.log(`  ✅ Liquidación creada: liquidacion_id=${liquidacion.liquidacion_id}`);
 
-        console.log(`  ✅ Saldo reinversión actualizado (+${montoReinvertido.toFixed(2)})`);
-      }
-
-      // Descontar capital por crédito y marcar pagos como LIQUIDADO
-      const creditosConPagos = new Map<number, typeof pagosNoLiquidados>();
-      for (const pago of pagosNoLiquidados) {
-        if (!creditosConPagos.has(pago.credito_id)) {
-          creditosConPagos.set(pago.credito_id, []);
+        // Marcar boleta como PROCESADO (solo si existe)
+        if (boletaPendiente) {
+          await tx
+            .update(boletasPagoInversionista)
+            .set({ estado: "PROCESADO", fecha_procesado: new Date() })
+            .where(eq(boletasPagoInversionista.boleta_id, boletaPendiente.boleta_id));
+          console.log(`  ✅ Boleta ${boletaPendiente.boleta_id} marcada como PROCESADO`);
         }
-        creditosConPagos.get(pago.credito_id)!.push(pago);
-      }
 
-      const pagosIds = pagosNoLiquidados.map((p) => p.id);
-
-      for (const [creditoId, pagosCred] of creditosConPagos) {
-        const sumaCapital = pagosCred.reduce((sum, p) => sum + Number(p.abono_capital || 0), 0);
-        if (sumaCapital > 0) {
-          await processAndReplaceCreditInvestors(
-            creditoId,
-            new Big(sumaCapital).toNumber(),
-            false,
-            inv_id,
-            true
-          );
-        }
-      }
-
-      let updateResult: any = { rowCount: 0 };
-      if (pagosIds.length > 0) {
-        updateResult = await db
-          .update(pagos_credito_inversionistas_espejo)
-          .set({
-            estado_liquidacion: "LIQUIDADO",
-            liquidacion_id: liquidacion.liquidacion_id,
-          })
-          .where(inArray(pagos_credito_inversionistas_espejo.id, pagosIds));
-      }
-
-      console.log(`  ✅ ${updateResult.rowCount ?? 0} pagos espejo actualizados`);
-
-      // Marcar cuotas como liquidado_inversionistas
-      const allPagoIds = [...new Set(pagosNoLiquidados.map((p) => p.pago_id))];
-      if (allPagoIds.length > 0) {
-        const cuotasDeLosPagos = await db
-          .select({ cuota_id: pagos_credito.cuota_id })
-          .from(pagos_credito)
-          .where(inArray(pagos_credito.pago_id, allPagoIds));
-
-        const uniqueCuotaIds = [...new Set(cuotasDeLosPagos.map((c) => c.cuota_id))];
-        if (uniqueCuotaIds.length > 0) {
-          const fechaGuatemala = new Date(
-            new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" })
-          );
-          await db
-            .update(cuotas_credito)
+        // Reinversiones
+        const montoReinvertido = new Big(reinvTotal);
+        if (montoReinvertido.gt(0)) {
+          await tx.update(inversionistas)
             .set({
-              liquidado_inversionistas: false,
-              fecha_liquidacion_inversionistas: fechaGuatemala,
+              saldo_reinversion: sql`${inversionistas.saldo_reinversion} + ${montoReinvertido.toFixed(2)}::numeric`,
             })
-            .where(inArray(cuotas_credito.cuota_id, uniqueCuotaIds));
-          console.log(`  ✅ ${uniqueCuotaIds.length} cuotas actualizadas`);
+            .where(eq(inversionistas.inversionista_id, inv_id));
+
+          await tx.update(reinversiones)
+            .set({ monto_capital: "0", monto_interes: "0", monto_total: "0" })
+            .where(eq(reinversiones.inversionista_id, inv_id));
+
+          console.log(`  ✅ Saldo reinversión actualizado (+${montoReinvertido.toFixed(2)})`);
         }
-      }
+
+        // Descontar capital por crédito y marcar pagos como LIQUIDADO
+        const creditosConPagos = new Map<number, typeof pagosNoLiquidados>();
+        for (const pago of pagosNoLiquidados) {
+          if (!creditosConPagos.has(pago.credito_id)) {
+            creditosConPagos.set(pago.credito_id, []);
+          }
+          creditosConPagos.get(pago.credito_id)!.push(pago);
+        }
+
+        const pagosIds = pagosNoLiquidados.map((p) => p.id);
+
+        for (const [creditoId, pagosCred] of creditosConPagos) {
+          const sumaCapital = pagosCred.reduce((sum, p) => sum + Number(p.abono_capital || 0), 0);
+          if (sumaCapital > 0) {
+            await processAndReplaceCreditInvestors(
+              creditoId,
+              new Big(sumaCapital).toNumber(),
+              false,
+              inv_id,
+              true,
+              tx
+            );
+          }
+        }
+
+        let updateResult: any = { rowCount: 0 };
+        if (pagosIds.length > 0) {
+          updateResult = await tx
+            .update(pagos_credito_inversionistas_espejo)
+            .set({
+              estado_liquidacion: "LIQUIDADO",
+              liquidacion_id: liquidacion.liquidacion_id,
+              updated_at: new Date(),
+            })
+            .where(inArray(pagos_credito_inversionistas_espejo.id, pagosIds));
+        }
+
+        console.log(`  ✅ ${updateResult.rowCount ?? 0} pagos espejo actualizados`);
+
+        // Marcar cuotas como liquidado_inversionistas
+        const allPagoIds = [...new Set(pagosNoLiquidados.map((p) => p.pago_id))];
+        if (allPagoIds.length > 0) {
+          const cuotasDeLosPagos = await tx
+            .select({ cuota_id: pagos_credito.cuota_id })
+            .from(pagos_credito)
+            .where(inArray(pagos_credito.pago_id, allPagoIds));
+
+          const uniqueCuotaIds = [...new Set(cuotasDeLosPagos.map((c) => c.cuota_id))];
+          if (uniqueCuotaIds.length > 0) {
+            const fechaGuatemala = new Date(
+              new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" })
+            );
+            await tx
+              .update(cuotas_credito)
+              .set({
+                liquidado_inversionistas: false,
+                fecha_liquidacion_inversionistas: fechaGuatemala,
+              })
+              .where(inArray(cuotas_credito.cuota_id, uniqueCuotaIds));
+            console.log(`  ✅ ${uniqueCuotaIds.length} cuotas actualizadas`);
+          }
+        }
+
+        return { liquidacion, updateResult };
+      });
 
       // ========================================
       // FASE 3: POST-TRANSACCION (PDF + email, best-effort)
@@ -2763,6 +2810,23 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
     reportes: reportesGenerados,
     errores: errores.length > 0 ? errores : undefined,
   };
+  } catch (err) {
+    // Marcar lock como FALLIDO con el error
+    await db.update(liquidacion_locks)
+      .set({ estado: "FALLIDO", finished_at: new Date(), error: err instanceof Error ? err.message : String(err) })
+      .where(eq(liquidacion_locks.id, lock.id));
+    throw err;
+  } finally {
+    // Marcar lock como COMPLETADO (si no falló)
+    await db.update(liquidacion_locks)
+      .set({ estado: "COMPLETADO", finished_at: new Date() })
+      .where(
+        and(
+          eq(liquidacion_locks.id, lock.id),
+          eq(liquidacion_locks.estado, "EN_PROCESO")
+        )
+      );
+  }
 }
 import dayjs from "dayjs";
 import "dayjs/locale/es";
@@ -4283,6 +4347,7 @@ export async function getInvestorPerformance(dpi?: string, email?: string) {
       inversionista_id: inversionistas.inversionista_id,
       nombre: inversionistas.nombre,
       dpi: inversionistas.dpi,
+      saldo_reinversion: inversionistas.saldo_reinversion,
     })
     .from(inversionistas)
     .where(whereClause)
@@ -4397,6 +4462,7 @@ export async function aplicarPagosEspejo(inversionistaId: number) {
         .update(creditos_inversionistas_espejo)
         .set({
           monto_aportado: nuevoMontoAportado,
+          updated_at: new Date(),
         })
         .where(
           and(

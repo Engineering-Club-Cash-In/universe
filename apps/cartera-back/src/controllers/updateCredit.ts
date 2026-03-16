@@ -1,5 +1,5 @@
 import Big from "big.js";
-import { eq, and, inArray, asc, gt, lte } from "drizzle-orm";
+import { eq, and, inArray, asc, gt, lte, gte } from "drizzle-orm";
 import { db } from "../database";
 import {
   creditos,
@@ -301,6 +301,7 @@ const creditUpdateSchema = z.object({
   saldo_a_favor: z.number().min(0).optional(),
   // Formato de crédito manual
   formato_credito: z.string().max(50).optional(),
+  permite_abono_capital: z.boolean().optional(),
 });
 
 type CreditUpdateData = z.infer<typeof creditUpdateSchema>;
@@ -796,6 +797,7 @@ export const updateCredit = async ({ body, set }: any) => {
       direccion,
       saldo_a_favor,
       formato_credito,
+      permite_abono_capital,
       ...fieldsToUpdate
     } = parseResult.data;
 
@@ -880,6 +882,9 @@ export const updateCredit = async ({ body, set }: any) => {
     if (asesor_id !== undefined) {
       // ✅ Agregar al update
       updateFields.asesor_id = asesor_id;
+    }
+    if (permite_abono_capital !== undefined) {
+      updateFields.permite_abono_capital = permite_abono_capital;
     }
     // 5. Detectar cambios que afectan la deuda
     const changes = detectDebtAffectingChanges(fieldsToUpdate, current);
@@ -1012,6 +1017,247 @@ export const updateCredit = async ({ body, set }: any) => {
     return { message: "Error al actualizar el crédito" };
   }
 };
+// ========================================
+// RECALCULAR PAGOS DESDE UNA CUOTA
+// ========================================
+
+interface RecalcularPagosParams {
+  numero_credito_sifco: string;
+  numero_cuota?: number; // Opcional: si se pasa, procesa desde esa cuota (pagadas y no pagadas). Si no, solo no pagadas.
+}
+
+export const recalcularPagosCredito = async ({
+  numero_credito_sifco,
+  numero_cuota,
+}: RecalcularPagosParams): Promise<void> => {
+  // 1️⃣ Obtener crédito
+  const [credito] = await db
+    .select({
+      credito_id: creditos.credito_id,
+      capital: creditos.capital,
+      porcentaje_interes: creditos.porcentaje_interes,
+      cuota_interes: creditos.cuota_interes,
+      seguro_10_cuotas: creditos.seguro_10_cuotas,
+      gps: creditos.gps,
+      membresias_pago: creditos.membresias_pago,
+      cuota: creditos.cuota,
+    })
+    .from(creditos)
+    .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
+    .limit(1);
+
+  if (!credito) {
+    throw new Error(`No se encontró el crédito: ${numero_credito_sifco}`);
+  }
+
+  // 2️⃣ Obtener pagos con su cuota
+  // Si numero_cuota está definido → desde esa cuota en adelante (pagadas y no pagadas)
+  // Si no → solo no pagadas
+  const whereConditions =
+    numero_cuota !== undefined
+      ? and(
+          eq(pagos_credito.credito_id, credito.credito_id),
+          gte(cuotas_credito.numero_cuota, numero_cuota),
+        )
+      : and(
+          eq(pagos_credito.credito_id, credito.credito_id),
+          eq(pagos_credito.pagado, false),
+        );
+
+  const rows = await db
+    .select()
+    .from(pagos_credito)
+    .innerJoin(cuotas_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
+    .where(whereConditions)
+    .orderBy(asc(cuotas_credito.numero_cuota), asc(pagos_credito.pago_id));
+
+  if (rows.length === 0) {
+    console.log(`⚠️ No hay pagos para actualizar en crédito ${numero_credito_sifco}`);
+    return;
+  }
+
+  // 3️⃣ Agrupar pagos por cuota_id
+  const pagosPorCuota = new Map<
+    number,
+    { numero_cuota: number; pagos: (typeof rows)[0]["pagos_credito"][] }
+  >();
+
+  for (const row of rows) {
+    const cuotaId = row.cuotas_credito.cuota_id;
+    if (!pagosPorCuota.has(cuotaId)) {
+      pagosPorCuota.set(cuotaId, {
+        numero_cuota: row.cuotas_credito.numero_cuota,
+        pagos: [],
+      });
+    }
+    pagosPorCuota.get(cuotaId)!.pagos.push(row.pagos_credito);
+  }
+
+  // 4️⃣ Constantes de amortización
+  const seguroFijo = new Big(credito.seguro_10_cuotas ?? 0);
+  const gpsFijo = new Big(credito.gps ?? 0);
+  const membresiasFijo = new Big(credito.membresias_pago ?? 0);
+  const porcentajeInteres = new Big(credito.porcentaje_interes ?? 0).div(100);
+  const cuotaMensual = new Big(credito.cuota);
+  let capitalEnMemoria = new Big(credito.capital);
+
+  // 5️⃣ Procesar cada cuota en orden
+  const actualizaciones: { pago_id: number; datos: Record<string, unknown> }[] = [];
+
+  const cuotasOrdenadas = [...pagosPorCuota.entries()].sort(
+    (a, b) => a[1].numero_cuota - b[1].numero_cuota,
+  );
+
+  for (const [, { numero_cuota: numCuota, pagos }] of cuotasOrdenadas) {
+    // Cuota 0 (desembolso) no se recalcula
+    if (numCuota === 0) continue;
+
+    // Amortización de esta cuota
+    const interesMes = capitalEnMemoria.times(porcentajeInteres).round(2);
+    const ivaMes = interesMes.times(0.12).round(2);
+    const abonoCapital = cuotaMensual
+      .minus(interesMes)
+      .minus(ivaMes)
+      .minus(seguroFijo)
+      .minus(gpsFijo)
+      .minus(membresiasFijo);
+
+    capitalEnMemoria = capitalEnMemoria.minus(abonoCapital);
+    if (capitalEnMemoria.lt(0)) capitalEnMemoria = new Big(0);
+
+    // Saldo base a distribuir entre pagos de esta cuota
+    let rem = {
+      interes: interesMes,
+      iva: ivaMes,
+      seguro: seguroFijo,
+      gps: gpsFijo,
+      membresias: membresiasFijo,
+      capital: abonoCapital,
+    };
+
+    // Procesar cada pago en orden por pago_id
+    const pagosOrdenados = [...pagos].sort((a, b) => a.pago_id - b.pago_id);
+    const abonosPorPago: { pago_id: number; abonos: Record<string, string> }[] = [];
+
+    for (const pago of pagosOrdenados) {
+      const montoAplicado = new Big(pago.monto_aplicado ?? 0);
+
+      if (montoAplicado.gt(0)) {
+        // Distribuir monto_aplicado contra el saldo restante en orden de prioridad
+        let disponible = montoAplicado;
+
+        const abono_interes = disponible.gte(rem.interes) ? rem.interes : disponible;
+        disponible = disponible.minus(abono_interes);
+        rem.interes = rem.interes.minus(abono_interes);
+
+        const abono_iva = disponible.gte(rem.iva) ? rem.iva : disponible;
+        disponible = disponible.minus(abono_iva);
+        rem.iva = rem.iva.minus(abono_iva);
+
+        const abono_seguro = disponible.gte(rem.seguro) ? rem.seguro : disponible;
+        disponible = disponible.minus(abono_seguro);
+        rem.seguro = rem.seguro.minus(abono_seguro);
+
+        const abono_gps = disponible.gte(rem.gps) ? rem.gps : disponible;
+        disponible = disponible.minus(abono_gps);
+        rem.gps = rem.gps.minus(abono_gps);
+
+        const abono_membresias = disponible.gte(rem.membresias) ? rem.membresias : disponible;
+        disponible = disponible.minus(abono_membresias);
+        rem.membresias = rem.membresias.minus(abono_membresias);
+
+        const abono_capital = disponible.gte(rem.capital) ? rem.capital : disponible;
+        rem.capital = rem.capital.minus(abono_capital);
+
+        const totalPagado = abono_interes
+          .plus(abono_iva)
+          .plus(abono_seguro)
+          .plus(abono_gps)
+          .plus(abono_membresias)
+          .plus(abono_capital);
+
+        abonosPorPago.push({
+          pago_id: pago.pago_id,
+          abonos: {
+            abono_interes: abono_interes.round(2).toString(),
+            abono_iva_12: abono_iva.round(2).toString(),
+            abono_seguro: abono_seguro.round(2).toString(),
+            abono_gps: abono_gps.round(2).toString(),
+            abono_capital: abono_capital.round(2).toString(),
+            membresias_pago:
+              pago.validationStatus === "pending"
+                ? abono_membresias.round(2).toString()
+                : "0",
+            membresias_mes:
+              pago.validationStatus === "pending"
+                ? abono_membresias.round(2).toString()
+                : "0",
+            pago_del_mes: totalPagado.round(2).toString(),
+          },
+        });
+      } else {
+        // Sin monto aplicado: abonos en 0
+        abonosPorPago.push({
+          pago_id: pago.pago_id,
+          abonos: {
+            abono_interes: "0",
+            abono_iva_12: "0",
+            abono_seguro: "0",
+            abono_gps: "0",
+            abono_capital: "0",
+            membresias_pago:
+              pago.validationStatus === "pending" ? pago.membresias_pago ?? "0" : "0",
+            membresias_mes:
+              pago.validationStatus === "pending" ? pago.membresias_mes ?? "0" : "0",
+            pago_del_mes: "0",
+          },
+        });
+      }
+    }
+
+    // Restantes finales (iguales para todos los pagos de la cuota)
+    const cuotaPagada =
+      rem.interes.eq(0) &&
+      rem.iva.eq(0) &&
+      rem.seguro.eq(0) &&
+      rem.gps.eq(0) &&
+      rem.membresias.eq(0) &&
+      rem.capital.eq(0);
+
+    for (const { pago_id, abonos } of abonosPorPago) {
+      actualizaciones.push({
+        pago_id,
+        datos: {
+          cuota: cuotaMensual.toString(),
+          cuota_interes: credito.cuota_interes,
+          ...abonos,
+          interes_restante: rem.interes.round(2).toString(),
+          iva_12_restante: rem.iva.round(2).toString(),
+          seguro_restante: rem.seguro.round(2).toString(),
+          gps_restante: rem.gps.round(2).toString(),
+          capital_restante: rem.capital.round(2).toString(),
+          total_restante: capitalEnMemoria.round(2).toString(),
+          membresias: membresiasFijo.toString(),
+          pagado: cuotaPagada,
+        },
+      });
+    }
+  }
+
+  // 6️⃣ Ejecutar todas las actualizaciones en una transacción
+  await db.transaction(async (tx) => {
+    await Promise.all(
+      actualizaciones.map(({ pago_id, datos }) =>
+        tx.update(pagos_credito).set(datos).where(eq(pagos_credito.pago_id, pago_id)),
+      ),
+    );
+  });
+
+  console.log(
+    `✅ ${actualizaciones.length} pagos recalculados para ${numero_credito_sifco}`,
+  );
+};
+
 interface UpdateAllInstallmentsParams {
   numero_credito_sifco?: string; // Opcional por si querés uno específico
 }

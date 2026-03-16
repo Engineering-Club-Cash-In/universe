@@ -1,34 +1,21 @@
 /**
  * ============================================================
- * SYNC PAGOS ESPEJO - Sincronizar pagos de inversionistas
+ * SYNC CAPITAL RESTANTE ESPEJO
  * ============================================================
  *
  * QUE HACE:
  *   Lee los Excels de liquidaciones de inversionistas (carpeta "Liquidaciones Marzo 2026")
- *   y compara los valores de cada crédito (abono_capital, abono_interes, abono_iva_12)
- *   contra los registros NO_LIQUIDADO en la tabla pagos_credito_inversionistas_espejo.
- *   Si hay diferencias, actualiza los valores en DB para que coincidan con el Excel.
- *
- * FLUJO:
- *   1. Recibe nombre de archivo Excel (o --all para todos)
- *   2. Extrae nombre del inversionista del nombre del archivo
- *   3. Busca el inversionista_id en la tabla cartera.inversionistas
- *   4. Lee la hoja "Febrero 2026" del Excel (última hoja si no existe)
- *   5. Extrae por cada crédito: cliente, amortización capital (col 9),
- *      interés inversor (col 6), IVA (col 7), ISR (col 8)
- *   6. Consulta en DB los pagos con estado_liquidacion = 'NO_LIQUIDADO'
- *      para ese inversionista
- *   7. Match por primeros 20 caracteres del nombre del cliente
- *   8. Si hay diferencia > 0.02, hace UPDATE en DB
- *   9. Al final verifica que los totales (suma) cuadren Excel vs DB
+ *   y compara la columna "CAPITAL RESTANTE" del Excel contra el campo "monto_aportado"
+ *   en la tabla creditos_inversionistas_espejo. Si hay diferencias, actualiza los valores
+ *   en DB para que coincidan con el Excel.
  *
  * USO:
- *   node src/migration/sync_pagos_espejo.js "NXGN INVESTMENTS.xlsx"
- *   node src/migration/sync_pagos_espejo.js "Ligia Haydee Fernandez.xlsx.xlsx"
- *   node src/migration/sync_pagos_espejo.js --all
+ *   node src/migration/sync_capital_restante_espejo.js "AVINSA.xlsx.xlsx"
+ *   node src/migration/sync_capital_restante_espejo.js "Javier Arzu Perez.xlsx.xlsx"
+ *   node src/migration/sync_capital_restante_espejo.js --all
  *
  * TABLAS QUE TOCA:
- *   - cartera.pagos_credito_inversionistas_espejo (UPDATE: abono_capital, abono_interes, abono_iva_12)
+ *   - cartera.creditos_inversionistas_espejo (UPDATE: monto_aportado)
  *
  * TABLAS QUE LEE:
  *   - cartera.inversionistas (buscar inversionista_id)
@@ -56,31 +43,33 @@ function leerExcel(archivo) {
   const ws = wb.Sheets[hoja];
   const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
-  // Buscar header dinámicamente y detectar índices de columnas
   let headerRow = 3;
-  let colCliente = 1, colInteres = 6, colIva = 7, colIsr = 8, colCapital = 9;
+  let colCliente = 1, colCapRestante = -1, colCapital = 9, colInteres = 6, colIva = 7;
   for (let i = 0; i < Math.min(10, data.length); i++) {
     const row = data[i];
     if (!row) continue;
     const rowStr = row.map(c => String(c || '').toLowerCase()).join(' ');
     if (rowStr.includes('capital') && rowStr.includes('cliente')) {
       headerRow = i;
-      // Detectar columnas por nombre del header
       for (let j = 0; j < row.length; j++) {
         const h = String(row[j] || '').toLowerCase().trim();
         if (h === 'cliente') colCliente = j;
+        else if (h === 'capital restante') colCapRestante = j;
+        else if (h.includes('amortización capital') || h.includes('amortizacion capital')) colCapital = j;
         else if (h.includes('interés inversor') || h === 'interés inversor') colInteres = j;
         else if (h === 'iva' || h === 'iva retenido') colIva = j;
-        else if (h === 'isr' || h === 'isr retenido') colIsr = j;
-        else if (h.includes('amortización capital') || h === 'amortización capital') colCapital = j;
       }
       break;
     }
   }
 
-  // excelMap: key -> array of entries (para manejar duplicados en Excel)
+  if (colCapRestante === -1) {
+    throw new Error('No se encontró columna CAPITAL RESTANTE en el Excel');
+  }
+
   const excelMap = {};
-  let totals = { cap: 0, int: 0, iva: 0, isr: 0, count: 0 };
+  let totalCapRestante = 0;
+  let count = 0;
   for (let i = headerRow + 1; i < data.length; i++) {
     const row = data[i];
     if (!row || !row[colCliente]) continue;
@@ -89,18 +78,15 @@ function leerExcel(archivo) {
     const cap = Number(row[colCapital] || 0);
     const int = Number(row[colInteres] || 0);
     const iva = Number(row[colIva] || 0);
-    const isr = Number(row[colIsr] || 0);
     if (isNaN(cap) || (cap === 0 && int === 0 && iva === 0)) continue;
+    const capRestante = Number(row[colCapRestante] || 0);
     const k = normalizeKey(cliente);
     if (!excelMap[k]) excelMap[k] = [];
-    excelMap[k].push({ capital: cap.toFixed(10), interes: int.toFixed(10), iva: iva.toFixed(10), isr: isr.toFixed(10), cliente });
-    totals.cap += cap;
-    totals.int += int;
-    totals.iva += iva;
-    totals.isr += isr;
-    totals.count++;
+    excelMap[k].push({ capRestante, cliente });
+    totalCapRestante += capRestante;
+    count++;
   }
-  return { hoja, excelMap, totals };
+  return { hoja, excelMap, totalCapRestante, count };
 }
 
 async function procesarInversionista(c, invId, archivo, nombre) {
@@ -111,76 +97,69 @@ async function procesarInversionista(c, invId, archivo, nombre) {
   let excel;
   try {
     excel = leerExcel(archivo);
-    console.log(`  Hoja: ${excel.hoja} | Créditos Excel: ${excel.totals.count}`);
+    console.log(`  Hoja: ${excel.hoja} | Créditos Excel: ${excel.count}`);
   } catch (e) {
     console.log(`  ERROR leyendo Excel: ${e.message}`);
     return { ok: 0, updated: 0, noMatch: 0 };
   }
 
-  const pagos = await c.query(
-    "SELECT pe.id, pe.abono_capital, pe.abono_interes, pe.abono_iva_12, u.nombre as cliente " +
-    "FROM cartera.pagos_credito_inversionistas_espejo pe " +
-    "JOIN cartera.creditos cr ON cr.credito_id = pe.credito_id " +
-    "JOIN cartera.usuarios u ON u.usuario_id = cr.usuario_id " +
-    "WHERE pe.inversionista_id = $1 AND pe.estado_liquidacion = 'NO_LIQUIDADO' ORDER BY u.nombre",
+  const rows = await c.query(
+    `SELECT cie.id, cie.monto_aportado, u.nombre as cliente
+     FROM cartera.creditos_inversionistas_espejo cie
+     JOIN cartera.creditos cr ON cr.credito_id = cie.credito_id
+     JOIN cartera.usuarios u ON u.usuario_id = cr.usuario_id
+     WHERE cie.inversionista_id = $1
+     ORDER BY u.nombre`,
     [invId]
   );
-  console.log(`  Pagos NO_LIQUIDADO en DB: ${pagos.rows.length}`);
+  console.log(`  Registros en DB: ${rows.rows.length}`);
 
   let ok = 0, updated = 0, noMatch = 0;
 
-  for (const db of pagos.rows) {
+  for (const db of rows.rows) {
     const k = normalizeKey(db.cliente);
     let entries = excel.excelMap[k];
 
-    // Fallback: si no hay match exacto, intentar con primeros 10 chars (maneja typos leves)
+    // Fallback: si no hay match exacto, intentar con primeros 10 chars
     if (!entries) {
       const kShort = db.cliente.normalize('NFD').replace(/[\u0300-\u036f]/g, '').substring(0, 10).toLowerCase();
-      const fallback = Object.entries(excel.excelMap).find(([ek, _]) => ek.startsWith(kShort));
+      const fallback = Object.entries(excel.excelMap).find(([ek]) => ek.startsWith(kShort));
       if (fallback) entries = fallback[1];
     }
 
-    if (!entries) {
-      console.log(`  NO MATCH -> 0 | ${db.cliente}`);
-      await c.query(
-        'UPDATE cartera.pagos_credito_inversionistas_espejo SET abono_capital = 0, abono_interes = 0, abono_iva_12 = 0 WHERE id = $1',
-        [db.id]
-      );
+    if (!entries || entries.length === 0) {
+      console.log(`  NO MATCH | ${db.cliente} | DB: ${Number(db.monto_aportado).toFixed(2)}`);
       noMatch++;
       continue;
     }
 
-    // Tomar el primer entry disponible (pop para que duplicados en DB tomen entradas distintas)
     const ex = entries.shift();
     if (entries.length === 0) delete excel.excelMap[k];
 
-    const capOk = Math.abs(Number(db.abono_capital) - Number(ex.capital)) < 0.000001;
-    const intOk = Math.abs(Number(db.abono_interes) - Number(ex.interes)) < 0.000001;
-    const ivaOk = Math.abs(Number(db.abono_iva_12) - Number(ex.iva)) < 0.000001;
+    const monto = Number(db.monto_aportado);
+    const diff = Math.abs(monto - ex.capRestante);
 
-    if (capOk && intOk && ivaOk) {
-      console.log(`  OK   | ${db.cliente.substring(0, 35)}`);
-      ok++;
-    } else {
+    if (diff > 0.005) {
       await c.query(
-        'UPDATE cartera.pagos_credito_inversionistas_espejo SET abono_capital = $1, abono_interes = $2, abono_iva_12 = $3 WHERE id = $4',
-        [ex.capital, ex.interes, ex.iva, db.id]
+        'UPDATE cartera.creditos_inversionistas_espejo SET monto_aportado = $1 WHERE id = $2',
+        [ex.capRestante.toFixed(10), db.id]
       );
-      console.log(`  UPDT | ${db.cliente.substring(0, 35).padEnd(37)} cap:${Number(db.abono_capital).toFixed(2).padStart(10)} -> ${ex.capital.padStart(10)} | int:${Number(db.abono_interes).toFixed(2).padStart(10)} -> ${ex.interes.padStart(10)} | iva:${Number(db.abono_iva_12).toFixed(2).padStart(8)} -> ${ex.iva.padStart(8)}`);
+      console.log(`  UPDT | ${db.cliente.substring(0, 45).padEnd(47)} | ${monto.toFixed(2).padStart(12)} -> ${ex.capRestante.toFixed(2).padStart(12)}`);
       updated++;
+    } else {
+      ok++;
     }
   }
 
   // Verificar totales
-  const r = await c.query(
-    "SELECT COALESCE(SUM(abono_capital::numeric),0) as cap, COALESCE(SUM(abono_interes::numeric),0) as int, COALESCE(SUM(abono_iva_12::numeric),0) as iva " +
-    "FROM cartera.pagos_credito_inversionistas_espejo WHERE inversionista_id = $1 AND estado_liquidacion = 'NO_LIQUIDADO'",
+  const t = await c.query(
+    'SELECT COALESCE(SUM(monto_aportado::numeric),0) as total FROM cartera.creditos_inversionistas_espejo WHERE inversionista_id = $1',
     [invId]
   );
-  const diffCap = Math.abs(Number(r.rows[0].cap) - excel.totals.cap);
-  const diffInt = Math.abs(Number(r.rows[0].int) - excel.totals.int);
-  const totalsOk = diffCap < 0.05 && diffInt < 0.05;
-  console.log(`  Totales: ${totalsOk ? 'OK' : 'DIFF'} (cap diff: ${diffCap.toFixed(2)}, int diff: ${diffInt.toFixed(2)})`);
+  const dbTotal = Number(t.rows[0].total);
+  const diffTotal = Math.abs(dbTotal - excel.totalCapRestante);
+  const totalsOk = diffTotal < 0.05;
+  console.log(`  Totales: ${totalsOk ? 'OK' : 'DIFF'} (DB: ${dbTotal.toFixed(2)} | Excel: ${excel.totalCapRestante.toFixed(2)} | diff: ${diffTotal.toFixed(2)})`);
 
   return { ok, updated, noMatch };
 }
@@ -190,12 +169,12 @@ async function run() {
 
   if (args.length === 0) {
     console.log('Uso:');
-    console.log('  node sync_pagos_espejo.js <nombre_archivo>          (busca inversionista por nombre del archivo)');
-    console.log('  node sync_pagos_espejo.js --all                     (procesa todos los archivos de la carpeta)');
+    console.log('  node sync_capital_restante_espejo.js <nombre_archivo>');
+    console.log('  node sync_capital_restante_espejo.js --all');
     console.log('\nEjemplos:');
-    console.log('  node sync_pagos_espejo.js "NXGN INVESTMENTS.xlsx"');
-    console.log('  node sync_pagos_espejo.js "Ligia Haydee Fernandez.xlsx.xlsx"');
-    console.log('  node sync_pagos_espejo.js --all');
+    console.log('  node sync_capital_restante_espejo.js "AVINSA.xlsx.xlsx"');
+    console.log('  node sync_capital_restante_espejo.js "Javier Arzu Perez.xlsx.xlsx"');
+    console.log('  node sync_capital_restante_espejo.js --all');
     process.exit(0);
   }
 
@@ -218,18 +197,15 @@ async function run() {
   }
 
   for (const archivo of archivos) {
-    // Extraer nombre del inversionista del archivo
     let nombreArchivo = archivo;
     while (nombreArchivo.toLowerCase().endsWith('.xlsx')) {
       nombreArchivo = nombreArchivo.slice(0, -5);
     }
     nombreArchivo = nombreArchivo.trim();
 
-    // Buscar en DB por nombre exacto o parcial
     const nombreNorm = nombreArchivo.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
     let inv = invMap[nombreNorm];
     if (!inv) {
-      // Buscar parcial
       for (const [key, val] of Object.entries(invMap)) {
         if (key.includes(nombreNorm) || nombreNorm.includes(key)) {
           inv = val;
@@ -261,4 +237,5 @@ async function run() {
   c.release();
   await pool.end();
 }
+
 run().catch(e => { console.error(e); pool.end(); });

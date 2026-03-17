@@ -782,40 +782,61 @@ const insertPayments = async (
 
 export const insertCredit = async ({ body, set }: { body: unknown; set: SetContext }) => {
   try {
-    console.log("body received for credit insertion:", body);
+    console.log("===== [INSERT CREDIT] START =====");
+    console.log("[INSERT CREDIT] body received:", JSON.stringify(body, null, 2));
+    console.log("[INSERT CREDIT] body type:", typeof body);
+
     // 1. Validar schema
+    console.log("[INSERT CREDIT] Step 1: Validating schema...");
     const parseResult = creditSchema.safeParse(body);
     if (!parseResult.success) {
+      console.log("[INSERT CREDIT] Schema validation FAILED");
+      console.log("[INSERT CREDIT] Zod errors (full):", JSON.stringify(parseResult.error.errors, null, 2));
+      console.log("[INSERT CREDIT] Zod errors (flattened fieldErrors):", JSON.stringify(parseResult.error.flatten().fieldErrors, null, 2));
+      console.log("[INSERT CREDIT] Zod errors (formErrors):", JSON.stringify(parseResult.error.flatten().formErrors, null, 2));
       set.status = 400;
       return {
         message: "Validation failed",
         errors: parseResult.error.flatten().fieldErrors,
       };
     }
+    console.log("[INSERT CREDIT] Schema validation PASSED");
 
     const creditData = parseResult.data;
+    console.log("[INSERT CREDIT] Parsed creditData:", JSON.stringify(creditData, null, 2));
 
     // 2. Validar datos del crédito
+    console.log("[INSERT CREDIT] Step 2: Validating credit data (business rules)...");
     const validation = validateCreditData(creditData, set);
     if (!validation.success) {
+      console.log("[INSERT CREDIT] Business validation FAILED:", JSON.stringify(validation.error, null, 2));
       return validation.error;
     }
+    console.log("[INSERT CREDIT] Business validation PASSED");
 
     // 3. Insertar crédito y datos relacionados
-    const { newCredit, creditDataForInsert, total_monto_cash_in, total_iva_cash_in } = 
+    console.log("[INSERT CREDIT] Step 3: Inserting credit and related data...");
+    const { newCredit, creditDataForInsert, total_monto_cash_in, total_iva_cash_in } =
       await insertCreditAndRelated(creditData);
+    console.log("[INSERT CREDIT] Credit inserted, credito_id:", newCredit.credito_id);
+    console.log("[INSERT CREDIT] creditDataForInsert:", JSON.stringify(creditDataForInsert, null, 2));
 
     // 4. Generar fechas de pago
+    console.log("[INSERT CREDIT] Step 4: Generating payment dates...");
     const fechas = generatePaymentDates(creditData.plazo);
+    console.log("[INSERT CREDIT] Generated", fechas.length, "payment dates");
 
     // 5. Insertar cuotas
+    console.log("[INSERT CREDIT] Step 5: Inserting installments...");
     const { cuotaInicial, cuotasInsertadas } = await insertInstallments(
       newCredit.credito_id,
       creditData.plazo,
       fechas
     );
+    console.log("[INSERT CREDIT] Installments inserted, cuotaInicial:", cuotaInicial, "total cuotas:", cuotasInsertadas.length);
 
     // 6. Insertar pagos
+    console.log("[INSERT CREDIT] Step 6: Inserting payments...");
     await insertPayments(
       creditData,
       newCredit,
@@ -826,8 +847,10 @@ export const insertCredit = async ({ body, set }: { body: unknown; set: SetConte
       cuotasInsertadas,
       fechas
     );
+    console.log("[INSERT CREDIT] Payments inserted successfully");
 
     // 7. Notificar a todos los admins por email
+    console.log("[INSERT CREDIT] Step 7: Sending email notifications...");
     try {
       const adminUsers = await db
         .select({ email: platform_users.email })
@@ -835,6 +858,7 @@ export const insertCredit = async ({ body, set }: { body: unknown; set: SetConte
         .where(and(eq(platform_users.role, "ADMIN"), eq(platform_users.is_active, true)));
 
       const adminEmails = adminUsers.map((u) => u.email);
+      console.log("[INSERT CREDIT] Admin emails found:", adminEmails);
 
       // Agregar el email del asesor asignado al crédito
       const [asesorUser] = await db
@@ -844,7 +868,7 @@ export const insertCredit = async ({ body, set }: { body: unknown; set: SetConte
 
       if (asesorUser && !adminEmails.includes(asesorUser.email)) {
         adminEmails.push(asesorUser.email);
-        console.log(`📧 Asesor agregado a notificación: ${asesorUser.email}`);
+        console.log(`[INSERT CREDIT] Asesor agregado a notificacion: ${asesorUser.email}`);
       }
 
       const investorNames: string[] = [];
@@ -856,6 +880,7 @@ export const insertCredit = async ({ body, set }: { body: unknown; set: SetConte
         if (investor) investorNames.push(`${investor.nombre} (Q.${inv.monto_aportado.toFixed(2)})`);
       }
 
+      console.log("[INSERT CREDIT] Sending notification to:", adminEmails, "investors:", investorNames);
       await sendNewCreditNotification({
         to: adminEmails,
         clientName: creditData.usuario,
@@ -866,14 +891,18 @@ export const insertCredit = async ({ body, set }: { body: unknown; set: SetConte
         interestRate: creditData.porcentaje_interes.toString(),
         investors: investorNames,
       });
+      console.log("[INSERT CREDIT] Email notification sent successfully");
     } catch (emailErr) {
-      console.error("Error sending new credit notification email:", emailErr);
+      console.error("[INSERT CREDIT] Error sending email notification:", emailErr);
     }
 
+    console.log("[INSERT CREDIT] SUCCESS - returning credit:", newCredit.credito_id);
+    console.log("===== [INSERT CREDIT] END =====");
     set.status = 201;
     return newCredit;
   } catch (error) {
-    console.log("Error inserting credit:", error);
+    console.log("[INSERT CREDIT] FATAL ERROR:", error);
+    console.log("[INSERT CREDIT] Error stack:", error instanceof Error ? error.stack : "no stack");
     set.status = 500;
     return { message: "Error inserting credit", error: String(error) };
   }

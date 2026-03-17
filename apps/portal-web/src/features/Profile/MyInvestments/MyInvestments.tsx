@@ -23,7 +23,7 @@ export const MyInvestments = () => {
     null,
   );
   const [currentPage, setCurrentPage] = useState(1);
-  const perPage = 10;
+  const perPage = 5;
   const [pagosPage, setPagosPage] = useState(1);
   const pagosPerPage = 25;
 
@@ -202,43 +202,6 @@ export const MyInvestments = () => {
               </div>
             </div>
           )}
-
-          {/* Historial de Liquidaciones - Card */}
-          <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-6 lg:p-8 mb-8">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div>
-                <h2 className="text-xl lg:text-2xl font-bold mb-1">
-                  Historial de Liquidaciones
-                </h2>
-                <p className="text-sm text-white/50">
-                  Historial de liquidaciones generadas en el sistema anterior
-                </p>
-              </div>
-              {historialReporte?.reporte_url && (
-                <a
-                  href={historialReporte.reporte_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-secondary text-white text-sm font-medium rounded-xl hover:bg-secondary/90 transition-[background-color] focus-visible:ring-2 focus-visible:ring-secondary focus-visible:ring-offset-2 focus-visible:ring-offset-black shrink-0"
-                >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                    />
-                  </svg>
-                  Ver Reporte General
-                </a>
-              )}
-            </div>
-          </div>
 
           {/* Lista de Liquidaciones */}
           <div>
@@ -700,6 +663,43 @@ export const MyInvestments = () => {
                 </p>
               </div>
             )}
+          </div>
+
+                    {/* Historial de Liquidaciones - Card */}
+          <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-6 lg:p-8 my-8">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <h2 className="text-xl lg:text-2xl font-bold mb-1">
+                  Historial de Liquidaciones
+                </h2>
+                <p className="text-sm text-white/50">
+                  Historial de liquidaciones generadas en el sistema anterior
+                </p>
+              </div>
+              {historialReporte?.reporte_url && (
+                <a
+                  href={historialReporte.reporte_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-secondary text-white text-sm font-medium rounded-xl hover:bg-secondary/90 transition-[background-color] focus-visible:ring-2 focus-visible:ring-secondary focus-visible:ring-offset-2 focus-visible:ring-offset-black shrink-0"
+                >
+                  <svg
+                    className="w-4 h-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                    />
+                  </svg>
+                  Ver Reporte General
+                </a>
+              )}
+            </div>
           </div>
         </div>
       </ContainerMenu>

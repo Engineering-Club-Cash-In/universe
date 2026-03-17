@@ -56,7 +56,7 @@ const juridicoDashboardSinglePayloadSchema = z.object({
 
 export const juridicoDashboardPayloadSchema = z.union([
 	juridicoDashboardSinglePayloadSchema,
-	z.array(juridicoDashboardSinglePayloadSchema),
+	z.array(juridicoDashboardSinglePayloadSchema).min(1),
 ]);
 
 export const updateJuridicoDashboardSnapshotInputSchema = z.object({

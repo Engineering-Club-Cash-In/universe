@@ -332,6 +332,27 @@ function normalizePeriod(label: string) {
 	return label.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+const SPANISH_MONTHS_MAP: Record<string, number> = {
+	enero: 0, febrero: 1, marzo: 2, abril: 3, mayo: 4, junio: 5,
+	julio: 6, agosto: 7, septiembre: 8, octubre: 9, noviembre: 10, diciembre: 11
+};
+
+function sortHistory(history: any[]) {
+	return [...history].sort((a, b) => {
+		const partsA = a.header.periodLabel.toLowerCase().split(" ");
+		const partsB = b.header.periodLabel.toLowerCase().split(" ");
+		
+		const monthA = SPANISH_MONTHS_MAP[partsA[0]] || 0;
+		const yearA = parseInt(partsA[1]) || 0;
+		
+		const monthB = SPANISH_MONTHS_MAP[partsB[0]] || 0;
+		const yearB = parseInt(partsB[1]) || 0;
+		
+		if (yearA !== yearB) return yearA - yearB;
+		return monthA - monthB;
+	});
+}
+
 export function JuridicoDashboardView({
 	snapshot,
 }: {
@@ -361,7 +382,9 @@ export function JuridicoDashboardView({
 
 	// NEW: The payload can now be a single object or an array (for history)
 	const rawPayload = snapshot.payload;
-	const history: any[] = (Array.isArray(rawPayload) ? rawPayload : [rawPayload]).filter(Boolean);
+	const history: any[] = sortHistory(
+		(Array.isArray(rawPayload) ? rawPayload : [rawPayload]).filter(Boolean),
+	);
 	const hasHistory = history.length > 1;
 
 	// Use the latest period by default if none selected
@@ -680,8 +703,11 @@ export function JuridicoDashboardEditor({
 		payload: JuridicoDashboardPayload;
 	}) => Promise<void> | void;
 }) {
-	const initialPayload =
-		snapshot?.payload || JURIDICO_DASHBOARD_TEMPLATE.payload;
+	const initialPayload = (() => {
+		const raw = snapshot?.payload;
+		const hist = sortHistory((Array.isArray(raw) ? raw : raw ? [raw] : []).filter(Boolean));
+		return hist[hist.length - 1] || JURIDICO_DASHBOARD_TEMPLATE.payload;
+	})();
 	const [periodLabel, setPeriodLabel] = useState(
 		snapshot?.periodLabel || JURIDICO_DASHBOARD_TEMPLATE.periodLabel,
 	);
@@ -711,7 +737,7 @@ export function JuridicoDashboardEditor({
 		
 		// If payload is array, take latest for current editor state
 		const rawPayload = snapshot.payload;
-		const history: any[] = (Array.isArray(rawPayload) ? rawPayload : [rawPayload]).filter(Boolean);
+		const history: any[] = sortHistory((Array.isArray(rawPayload) ? rawPayload : [rawPayload]).filter(Boolean));
 		const latest = history[history.length - 1] || JURIDICO_DASHBOARD_TEMPLATE.payload;
 		
 		// Priority: Payload header label correctly reflects the content
@@ -973,8 +999,8 @@ export function JuridicoDashboardEditor({
 			(h: any) => normalizePeriod(h.header.periodLabel) !== normalizedCurrent
 		);
 
-		// Append new record and keep last 12
-		const updatedHistory = [...otherHistory, currentSnapshot].slice(-12);
+		// Append new record and keep last 12, then SORT chronologically
+		const updatedHistory = sortHistory([...otherHistory, currentSnapshot]).slice(-12);
 
 		setParseError(null);
 		await onSave({
@@ -1286,7 +1312,7 @@ export function JuridicoDashboardEditor({
 										<SelectValue placeholder="Editar existente..." />
 									</SelectTrigger>
 									<SelectContent>
-										{(snapshot.payload as unknown as any[]).map((m: any) => (
+										{sortHistory(snapshot.payload as unknown as any[]).map((m: any) => (
 											<SelectItem 
 												key={m.header.periodLabel} 
 												value={m.header.periodLabel}

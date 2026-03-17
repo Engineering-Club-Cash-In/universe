@@ -91,13 +91,15 @@ const buildInitialValues = (amount?: string, defaultMessage?: string): FormInves
 export const useFormInvestor = (
   initialAmount?: string,
   defaultMessage?: string,
-  source?: string
+  source?: string,
+  campaign?: string
 ) => {
   const navigate = useNavigate();
   const [serverError, setServerError] = useState<string>("");
 
   const mutation = useMutation({
-    mutationFn: (values: FormInvestorValues) => sendLeadInvestor(values, source),
+    mutationFn: (values: FormInvestorValues) =>
+      sendLeadInvestor(values, source, campaign),
     onSuccess: (data) => {
       console.log("Lead investor enviado exitosamente:", data);
       setServerError("");

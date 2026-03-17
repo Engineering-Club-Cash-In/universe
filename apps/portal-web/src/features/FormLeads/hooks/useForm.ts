@@ -56,12 +56,13 @@ const initialValues: FormLeadsValues = {
   descripcion: "",
 };
 
-export const useFormLeads = (source?: string) => {
+export const useFormLeads = (source?: string, campaign?: string) => {
   const navigate = useNavigate();
   const [serverError, setServerError] = useState<string>("");
 
   const mutation = useMutation({
-    mutationFn: (values: FormLeadsValues) => sendLead(values, source),
+    mutationFn: (values: FormLeadsValues) =>
+      sendLead(values, source, campaign),
     onSuccess: (data) => {
       console.log("Lead enviado exitosamente:", data);
       setServerError("");

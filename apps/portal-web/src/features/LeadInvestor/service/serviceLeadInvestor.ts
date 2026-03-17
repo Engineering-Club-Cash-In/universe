@@ -13,9 +13,14 @@ interface LeadInvestorPayload {
   proposedAmount: number;
   notes: string;
   source?: string;
+  campaign?: string;
 }
 
-export const sendLeadInvestor = async (data: FormInvestorValues, source?: string) => {
+export const sendLeadInvestor = async (
+  data: FormInvestorValues,
+  source?: string,
+  campaign?: string
+) => {
   const payload: LeadInvestorPayload = {
     profileType: data.profileType,
     name: data.nombreCompleto,
@@ -36,6 +41,10 @@ export const sendLeadInvestor = async (data: FormInvestorValues, source?: string
 
   if (source) {
     payload.source = source;
+  }
+
+  if (campaign) {
+    payload.campaign = campaign;
   }
 
   const response = await apiCRM.post("/api/public/investment-lead", payload);

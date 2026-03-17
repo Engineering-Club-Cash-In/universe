@@ -9,6 +9,7 @@ interface LeadInvestorProps {
   initialTerm?: string;
   initialType?: string;
   source?: string;
+  campaign?: string;
 }
 
 export const LeadInvestor = ({
@@ -16,6 +17,7 @@ export const LeadInvestor = ({
   initialTerm,
   initialType,
   source,
+  campaign,
 }: LeadInvestorProps) => {
   const imageUrl = urlImage + "/Frame 1321315308.png";
   const isMobile = useIsMobile();
@@ -57,6 +59,7 @@ export const LeadInvestor = ({
             initialTerm={initialTerm}
             initialType={initialType}
             source={source}
+            campaign={campaign}
           />
         </div>
       </div>

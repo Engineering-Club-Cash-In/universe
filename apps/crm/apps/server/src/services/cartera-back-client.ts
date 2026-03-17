@@ -237,7 +237,11 @@ export class CarteraBackClient {
 
 					if (!res.ok) {
 						const errorText = await res.text();
-						let errorData: { error?: string; message?: string } = {};
+						let errorData: {
+							error?: string;
+							message?: string;
+							errors?: Record<string, string[] | undefined>;
+						} = {};
 
 						try {
 							errorData = JSON.parse(errorText);
@@ -252,8 +256,11 @@ export class CarteraBackClient {
 						}
 
 						if (res.status === 400) {
+							const validationDetails = errorData.errors
+								? ` | fieldErrors: ${JSON.stringify(errorData.errors)}`
+								: "";
 							throw new Error(
-								`Validation failed: ${errorData.error || errorData.message}`,
+								`Validation failed: ${errorData.error || errorData.message || errorText}${validationDetails}`,
 							);
 						}
 

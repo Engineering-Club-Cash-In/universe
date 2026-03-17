@@ -3407,6 +3407,7 @@ interface InversionistaResumen {
   total_cuota: number;
   boleta_pendiente: BoletaPendiente | null;
   boleta_liquidacion: BoletaPendiente | null;
+  reporte_liquidacion_url: string | null;
 }
 
 type EstadoPagoResumen = "NO_LIQUIDADO" | "LIQUIDADO";
@@ -3436,6 +3437,7 @@ interface InversionistaResumenRow {
   total_reinversion: number;
   total_a_recibir_con_reinversion: number;
   total_cuota: number;
+  reporte_liquidacion_url?: string | null;
 }
 
 function mapBoletasPendientes(
@@ -3793,6 +3795,7 @@ async function consultarResumenGlobalDesdeLiquidaciones(
       total_cuota: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0)`,
       total_a_recibir_con_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0)`,
       total_a_recibir_sin_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0) + COALESCE(SUM(${liquidaciones.reinversion_total}), 0)`,
+      reporte_liquidacion_url: sql<string | null>`MAX(${liquidaciones.reporte_liquidacion_url})`,
     })
     .from(liquidaciones)
     .innerJoin(
@@ -3835,6 +3838,7 @@ function mapResumenRow(
     total_cuota: inv.total_cuota,
     boleta_pendiente,
     boleta_liquidacion,
+    reporte_liquidacion_url: inv.reporte_liquidacion_url ?? null,
   };
 }
 

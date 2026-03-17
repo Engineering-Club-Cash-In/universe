@@ -378,7 +378,7 @@ export const llenarTablaEspejo = async ({ body, query, set }: any) => {
         if (existente) {
           await tx
             .update(creditos_inversionistas_espejo)
-            .set(dataEspejo)
+            .set({ ...dataEspejo, updated_at: new Date() })
             .where(eq(creditos_inversionistas_espejo.id, existente.id));
         } else {
           await tx

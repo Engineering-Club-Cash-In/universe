@@ -292,48 +292,8 @@ export function ListaCreditosPagos() {
   }, [data]);
 
 
-  if (isLoading) {
-    return (
-      <div className="fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
-        <div className="text-center space-y-6">
-          <div className="relative">
-            <div className="w-24 h-24 border-8 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto"></div>
-          </div>
-          <div className="space-y-2">
-            <h2 className="text-2xl font-bold text-gray-800">
-              Cargando créditos
-            </h2>
-            <p className="text-gray-600">Por favor espera un momento...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (isError)
-    return <div className="text-red-500">{(error as any)?.message}</div>;
-
-  if (!data || data.data.length === 0) {
-    return (
-      <div className="fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
-        <span className="bg-blue-100 p-5 rounded-full mb-4 flex items-center justify-center shadow">
-          <Info className="text-blue-500 w-12 h-12" />
-        </span>
-        <p className="text-blue-700 text-xl font-bold text-center">
-          No se encontraron resultados.
-        </p>
-        <p className="text-gray-500 text-base mt-2 text-center">
-          Prueba cambiando los filtros o verifica tu búsqueda.
-        </p>
-        <button
-          onClick={() => window.location.reload()}
-          className="mt-8 flex items-center gap-2 px-6 py-2 rounded-xl bg-blue-600 text-white font-bold shadow hover:bg-blue-700 transition-all"
-        >
-          <RefreshCw className="w-5 h-5" /> Reintentar
-        </button>
-      </div>
-    );
-  }
+  const showTable = !isLoading && !isError && data && data.data.length > 0;
+  const showEmpty = !isLoading && !isError && (!data || data.data.length === 0);
 
   return (
 
@@ -599,82 +559,118 @@ export function ListaCreditosPagos() {
         </div>
       )}
 
-      {/* Tabla responsive */}
-      {isMobile ? (
-        <MobileView
-          data={data}
-          expandedRow={expandedRow}
-          setExpandedRow={setExpandedRow}
-          navigate={navigate}
-          handleOpenModal={handleOpenModal}
-          handleOpenEdit={handleOpenEdit}
-          setSelectedCreditMora={setSelectedCreditMora}
-          setOpenMoraModal={setOpenMoraModal}
-          setSelectedCreditMarcarCuotas={setSelectedCreditMarcarCuotas}
-          setOpenMarcarCuotasModal={setOpenMarcarCuotasModal}
-          setSelectedCreditForReport={setSelectedCreditForReport}
-          setReportModalOpen={setReportModalOpen}
-          handleActivarConvenio={handleActivarConvenio}
-          user={user}
-          canViewReports={canViewReports}
-          canCreateConvenio={canCreateConvenio}
-          canCancel={canCancel}
-          canActivate={canActivate}
-          toggleCancelacionMutation={toggleCancelacionMutation}
-          refetch={refetch}
-        />
-      ) : (
-        <DesktopView
-          data={data}
-          expandedRow={expandedRow}
-          setExpandedRow={setExpandedRow}
-          navigate={navigate}
-          handleOpenModal={handleOpenModal}
-          handleOpenEdit={handleOpenEdit}
-          setSelectedCreditMora={setSelectedCreditMora}
-          setOpenMoraModal={setOpenMoraModal}
-          setSelectedCreditMarcarCuotas={setSelectedCreditMarcarCuotas}
-          setOpenMarcarCuotasModal={setOpenMarcarCuotasModal}
-          setSelectedCreditForReport={setSelectedCreditForReport}
-          setReportModalOpen={setReportModalOpen}
-          handleActivarConvenio={handleActivarConvenio}
-          activateCreditMutation={activateCreditMutation}
-          toggleCancelacionMutation={toggleCancelacionMutation}
-          user={user}
-          canViewReports={canViewReports}
-          canEdit={canEdit}
-          canCancel={canCancel}
-          canActivate={canActivate}
-          canViewPayments={canViewPayments}
-          canCreateConvenio={canCreateConvenio}
-          refetch={refetch}
-        />
+      {/* Estado: cargando */}
+      {isLoading && (
+        <div className="flex flex-col items-center justify-center py-20">
+          <div className="w-16 h-16 border-[6px] border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
+          <p className="text-lg font-semibold text-gray-700">Cargando créditos...</p>
+        </div>
       )}
 
-      {/* Paginación */}
-      <div className="flex justify-between items-center mt-6 px-1">
-        <button
-          className="px-5 py-2 rounded-xl bg-gray-100 text-gray-700 font-bold disabled:opacity-50 transition"
-          onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
-          disabled={page <= 1 || isFetching}
-        >
-          Anterior
-        </button>
-        <span className="text-gray-800 font-bold text-lg">
-          Página {data.page} de {data.totalPages}
-        </span>
-        <button
-          className="px-5 py-2 rounded-xl bg-gray-100 text-gray-700 font-bold disabled:opacity-50 transition"
-          onClick={() =>
-            setPage((prev) => Math.min(prev + 1, data.totalPages ?? 1))
-          }
-          disabled={page >= (data.totalPages ?? 1) || isFetching}
-        >
-          Siguiente
-        </button>
-      </div>
-      {isFetching && (
-        <div className="text-blue-500 mt-2">Cargando página...</div>
+      {/* Estado: error */}
+      {isError && (
+        <div className="flex flex-col items-center justify-center py-20">
+          <Info className="text-red-400 w-12 h-12 mb-3" />
+          <p className="text-red-600 font-semibold">Error al cargar los créditos</p>
+          <p className="text-gray-500 text-sm mt-1">{(error as any)?.message}</p>
+          <button
+            onClick={() => refetch()}
+            className="mt-4 flex items-center gap-2 px-5 py-2 rounded-xl bg-blue-600 text-white font-bold shadow hover:bg-blue-700 transition"
+          >
+            <RefreshCw className="w-4 h-4" /> Reintentar
+          </button>
+        </div>
+      )}
+
+      {/* Estado: sin resultados */}
+      {showEmpty && (
+        <div className="flex flex-col items-center justify-center py-20">
+          <Info className="text-blue-400 w-12 h-12 mb-3" />
+          <p className="text-blue-700 text-lg font-bold">No se encontraron resultados</p>
+          <p className="text-gray-500 text-sm mt-1">Prueba cambiando los filtros o verifica tu búsqueda.</p>
+        </div>
+      )}
+
+      {/* Tabla responsive */}
+      {showTable && (
+        <>
+          {isMobile ? (
+            <MobileView
+              data={data}
+              expandedRow={expandedRow}
+              setExpandedRow={setExpandedRow}
+              navigate={navigate}
+              handleOpenModal={handleOpenModal}
+              handleOpenEdit={handleOpenEdit}
+              setSelectedCreditMora={setSelectedCreditMora}
+              setOpenMoraModal={setOpenMoraModal}
+              setSelectedCreditMarcarCuotas={setSelectedCreditMarcarCuotas}
+              setOpenMarcarCuotasModal={setOpenMarcarCuotasModal}
+              setSelectedCreditForReport={setSelectedCreditForReport}
+              setReportModalOpen={setReportModalOpen}
+              handleActivarConvenio={handleActivarConvenio}
+              user={user}
+              canViewReports={canViewReports}
+              canCreateConvenio={canCreateConvenio}
+              canCancel={canCancel}
+              canActivate={canActivate}
+              toggleCancelacionMutation={toggleCancelacionMutation}
+              refetch={refetch}
+            />
+          ) : (
+            <DesktopView
+              data={data}
+              expandedRow={expandedRow}
+              setExpandedRow={setExpandedRow}
+              navigate={navigate}
+              handleOpenModal={handleOpenModal}
+              handleOpenEdit={handleOpenEdit}
+              setSelectedCreditMora={setSelectedCreditMora}
+              setOpenMoraModal={setOpenMoraModal}
+              setSelectedCreditMarcarCuotas={setSelectedCreditMarcarCuotas}
+              setOpenMarcarCuotasModal={setOpenMarcarCuotasModal}
+              setSelectedCreditForReport={setSelectedCreditForReport}
+              setReportModalOpen={setReportModalOpen}
+              handleActivarConvenio={handleActivarConvenio}
+              activateCreditMutation={activateCreditMutation}
+              toggleCancelacionMutation={toggleCancelacionMutation}
+              user={user}
+              canViewReports={canViewReports}
+              canEdit={canEdit}
+              canCancel={canCancel}
+              canActivate={canActivate}
+              canViewPayments={canViewPayments}
+              canCreateConvenio={canCreateConvenio}
+              refetch={refetch}
+            />
+          )}
+
+          {/* Paginación */}
+          <div className="flex justify-between items-center mt-6 px-1">
+            <button
+              className="px-5 py-2 rounded-xl bg-gray-100 text-gray-700 font-bold disabled:opacity-50 transition"
+              onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
+              disabled={page <= 1 || isFetching}
+            >
+              Anterior
+            </button>
+            <span className="text-gray-800 font-bold text-lg">
+              Página {data.page} de {data.totalPages}
+            </span>
+            <button
+              className="px-5 py-2 rounded-xl bg-gray-100 text-gray-700 font-bold disabled:opacity-50 transition"
+              onClick={() =>
+                setPage((prev) => Math.min(prev + 1, data.totalPages ?? 1))
+              }
+              disabled={page >= (data.totalPages ?? 1) || isFetching}
+            >
+              Siguiente
+            </button>
+          </div>
+          {isFetching && (
+            <div className="text-blue-500 mt-2">Cargando página...</div>
+          )}
+        </>
       )}
 
       <ModalEditCredit

@@ -4,7 +4,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { DollarSign, Percent, Info, FileText, Building2, CheckCircle2, Calendar } from "lucide-react";
+import { DollarSign, Percent, Info, FileText, Building2, CheckCircle2, Calendar, ChevronsUpDown, Check } from "lucide-react";
+import { Combobox, Transition } from "@headlessui/react";
+import { Fragment, useMemo } from "react";
 import { toast } from "sonner";
 import { MiniCardCredito } from "./cardInfo";
 import { OpcionesExcesoModal } from "./excessModal";
@@ -18,7 +20,7 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 import { useBancos } from "../hooks/bancos";
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import {
   Dialog,
   DialogContent,
@@ -82,12 +84,48 @@ export function PagoForm() {
     convenioActivoInfo,
     cuotaSeleccionada,
     abonosCuota,
+    permiteAbonoCapital,
   } = usePagoForm();
 
   const { bancos, loading: loadingBancos } = useBancos();
 
   // 🎯 Estado para el modal de confirmación
   const [modalConfirmacionOpen, setModalConfirmacionOpen] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [bancoQuery, setBancoQuery] = useState("");
+
+  const filteredBancos = useMemo(
+    () =>
+      bancoQuery === ""
+        ? bancos
+        : bancos.filter((b) =>
+            b.nombre.toLowerCase().includes(bancoQuery.toLowerCase())
+          ),
+    [bancos, bancoQuery]
+  );
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const files = Array.from(e.dataTransfer.files).filter(
+      (f) => f.type.startsWith("image/") || f.type === "application/pdf"
+    );
+    if (files.length + archivosParaSubir.length > 3) {
+      toast.error("Solo puedes seleccionar hasta 3 archivos en total");
+      return;
+    }
+    setArchivosParaSubir([...archivosParaSubir, ...files]);
+  }, [archivosParaSubir, setArchivosParaSubir]);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  }, []);
 
   // 🎯 Handler para abrir el modal
   const handleAbrirConfirmacion = async (e: React.MouseEvent) => {
@@ -400,7 +438,7 @@ export function PagoForm() {
         open={modalExcesoOpen}
         mode={modalMode}
         onClose={() => setModalExcesoOpen(false)}
-        onAbonoCapital={cuotasAtrasadasInfo && cuotasAtrasadasInfo.total > 0 ? undefined : handleAbonoCapital}
+        onAbonoCapital={permiteAbonoCapital || !(cuotasAtrasadasInfo && cuotasAtrasadasInfo.total > 0) ? handleAbonoCapital : undefined}
         onAbonoSiguienteCuota={handleAbonoSiguienteCuota}
         excedente={excedente}
         onAbonoOtros={handleAbonoOtros}
@@ -528,162 +566,254 @@ export function PagoForm() {
             className="flex-1 flex flex-col gap-5 w-full"
             style={{ minHeight: 0 }}
           >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {fields.map((field) => (
-                <div
-                  key={field.name}
-                  className="min-h-[92px] flex flex-col justify-end w-full"
-                >
-                  <Label
-                    className={`text-gray-900 font-semibold mb-1 flex items-center text-lg ${
-                      field.name === "observaciones"
-                        ? "flex-col items-start gap-0"
-                        : ""
-                    }`}
-                  >
-                    {field.icon}
-                    <span>
-                      {field.label}
-                      {field.required && <span className="text-red-500 ml-1">*</span>}
-                    </span>
+            {/* === SECCIÓN: MONTO === */}
+            <div className="rounded-xl border border-blue-100 bg-blue-50/30 p-4 space-y-4">
+              <h3 className="text-sm font-bold text-blue-700 uppercase tracking-wide flex items-center gap-2">
+                <DollarSign className="w-4 h-4" />
+                Monto del Pago
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1">
+                  <Label className="text-gray-700 font-semibold text-sm">
+                    Monto Boleta <span className="text-red-500">*</span>
                   </Label>
                   <Input
-                    id={field.name}
-                    name={field.name}
-                    type={field.type}
-                    value={
-                      formik.values[field.name as keyof typeof formik.values] ??
-                      ""
-                    }
+                    id="monto_boleta"
+                    name="monto_boleta"
+                    type="number"
+                    value={formik.values.monto_boleta ?? ""}
                     onChange={formik.handleChange}
                     onBlur={formik.handleBlur}
-                    className={[
-                      "w-full max-w-full border rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg bg-white/70",
-                      formik.errors[field.name as keyof typeof formik.values] &&
-                      formik.touched[field.name as keyof typeof formik.values]
+                    className={`border rounded-lg px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white ${
+                      formik.errors.monto_boleta && formik.touched.monto_boleta
                         ? "border-red-500 focus:ring-red-500"
-                        : "border-gray-300",
-                    ].join(" ")}
+                        : "border-gray-300"
+                    }`}
                   />
-                  {formik.errors[field.name as keyof typeof formik.values] &&
-                    formik.touched[
-                      field.name as keyof typeof formik.values
-                    ] && (
-                      <div className="text-red-500 text-sm mt-1">
-                        {
-                          formik.errors[
-                            field.name as keyof typeof formik.values
-                          ]
-                        }
-                      </div>
-                    )}
-                </div>
-              ))}
-
-              {/* Campo Banco */}
-              <div className="min-h-[92px] flex flex-col justify-end w-full">
-                <Label className="text-gray-900 font-semibold mb-1 flex items-center text-lg">
-                  <Building2 className="text-blue-500 mr-2 w-5 h-5" />
-                  <span>Banco <span className="text-red-500">*</span></span>
-                </Label>
-                <Select
-                  value={formik.values.banco_id?.toString() || ""}
-                  onValueChange={(value) => {
-                    formik.setFieldValue("banco_id", Number(value));
-                    formik.setFieldTouched("banco_id", true, false);
-                  }}
-                  disabled={loadingBancos}
-                >
-                  <SelectTrigger className={`w-full border rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg bg-white [&>span]:text-gray-900 ${
-                    formik.errors.banco_id && formik.touched.banco_id && !formik.values.banco_id
-                      ? "border-red-500 focus:ring-red-500"
-                      : "border-gray-300"
-                  }`}>
-                    <SelectValue
-                      placeholder="Selecciona un banco"
-                      className="text-gray-900"
-                    />
-                  </SelectTrigger>
-                  <SelectContent className="bg-white border border-gray-200 shadow-lg">
-                    {bancos.map((banco) => (
-                      <SelectItem
-                        key={banco.banco_id}
-                        value={banco.banco_id.toString()}
-                        className="text-gray-900 hover:bg-blue-50 cursor-pointer"
-                      >
-                        {banco.nombre}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {formik.errors.banco_id && formik.touched.banco_id && !formik.values.banco_id && (
-                  <div className="text-red-500 text-sm mt-1">
-                    {formik.errors.banco_id}
-                  </div>
-                )}
-              </div> 
-              {/* Campo Número de Autorización */}
-              <div className="min-h-[92px] flex flex-col justify-end w-full">
-                <Label className="text-gray-900 font-semibold mb-1 flex items-center text-lg">
-                  <FileText className="text-blue-500 mr-2 w-5 h-5" />
-                  <span>Número de Autorización (Opcional)</span>
-                </Label>
-                <Input
-                  id="numeroAutorizacion"
-                  name="numeroAutorizacion"
-                  type="text"
-                  value={formik.values.numeroAutorizacion ?? ""}
-                  onChange={formik.handleChange}
-                  onBlur={formik.handleBlur}
-                  placeholder="Ej: 123456789"
-                  className={`w-full max-w-full border rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg bg-white/70 ${
-                    formik.errors.numeroAutorizacion && formik.touched.numeroAutorizacion
-                      ? "border-red-500 focus:ring-red-500"
-                      : "border-gray-300"
-                  }`}
-                />
-                {formik.errors.numeroAutorizacion &&
-                  formik.touched.numeroAutorizacion && (
-                    <div className="text-red-500 text-sm mt-1">
-                      {formik.errors.numeroAutorizacion}
-                    </div>
+                  {formik.errors.monto_boleta && formik.touched.monto_boleta && (
+                    <div className="text-red-500 text-xs mt-0.5">{formik.errors.monto_boleta}</div>
                   )}
-              </div>
-
-              {/* Fecha Boleta */}
-              <div className="min-h-[92px] flex flex-col justify-end w-full">
-                <Label className="text-gray-900 font-semibold mb-1 flex items-center text-lg">
-                  <Calendar className="text-blue-500 mr-2 w-5 h-5" />
-                  <span>Fecha Boleta <span className="text-red-500">*</span></span>
-                </Label>
-                <DatePickerMUI
-                  value={formik.values.fecha_boleta}
-                  onChange={(value) => {
-                    formik.setFieldValue("fecha_boleta", value);
-                    formik.setFieldTouched("fecha_boleta", true, false);
-                  }}
-                />
-                {formik.errors.fecha_boleta && formik.touched.fecha_boleta && formik.values.fecha_boleta === "" && (
-                  <div className="text-red-500 text-sm mt-1">
-                    {formik.errors.fecha_boleta}
-                  </div>
-                )}
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label className="text-gray-700 font-semibold text-sm">
+                    Otros (Opcional)
+                  </Label>
+                  <Input
+                    id="otros"
+                    name="otros"
+                    type="number"
+                    value={formik.values.otros ?? ""}
+                    onChange={formik.handleChange}
+                    onBlur={formik.handleBlur}
+                    className="border rounded-lg px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white border-gray-300"
+                  />
+                </div>
               </div>
             </div>
- {/* Boletas */}
-            <div className="flex flex-col gap-1 mb-2">
-              <Label className="text-gray-900 font-semibold mb-1 flex items-center text-lg">
-                <Info className="text-blue-500 mr-2 w-5 h-5" />
-                <span>Boletas / Comprobantes</span>
-              </Label>
-              <div className="relative flex items-center">
+
+            {/* === SECCIÓN: DATOS BANCARIOS === */}
+            <div className="rounded-xl border border-green-100 bg-green-50/30 p-4 space-y-4">
+              <h3 className="text-sm font-bold text-green-700 uppercase tracking-wide flex items-center gap-2">
+                <Building2 className="w-4 h-4" />
+                Datos Bancarios
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1">
+                  <Label className="text-gray-700 font-semibold text-sm">
+                    Banco <span className="text-red-500">*</span>
+                  </Label>
+                  <Combobox
+                    value={formik.values.banco_id ?? ""}
+                    onChange={(value: any) => {
+                      formik.setFieldValue("banco_id", Number(value));
+                      formik.setFieldTouched("banco_id", true, false);
+                      setBancoQuery("");
+                    }}
+                    disabled={loadingBancos}
+                  >
+                    <div className="relative">
+                      <div className="relative w-full">
+                        <Combobox.Input
+                          className={`w-full border rounded-lg pl-3 pr-10 py-2.5 text-gray-900 bg-white font-medium focus:ring-2 focus:ring-blue-400 focus:border-blue-500 focus:outline-none placeholder:text-gray-400 transition-all shadow-sm ${
+                            formik.errors.banco_id && formik.touched.banco_id && !formik.values.banco_id
+                              ? "border-red-500"
+                              : "border-gray-300"
+                          }`}
+                          displayValue={(id: any) =>
+                            id === ""
+                              ? ""
+                              : bancos.find((b) => b.banco_id === id)?.nombre || ""
+                          }
+                          onChange={(e) => setBancoQuery(e.target.value)}
+                          onFocus={(e) => e.target.select()}
+                          placeholder="Buscar banco..."
+                        />
+                        <Combobox.Button className="absolute inset-y-0 right-0 flex items-center pr-3">
+                          <ChevronsUpDown className="h-5 w-5 text-gray-400 hover:text-gray-600 transition-colors" />
+                        </Combobox.Button>
+                      </div>
+                      <Transition
+                        as={Fragment as any}
+                        leave="transition ease-in duration-100"
+                        leaveFrom="opacity-100"
+                        leaveTo="opacity-0"
+                        afterLeave={() => setBancoQuery("")}
+                      >
+                        <Combobox.Options className="absolute z-50 mt-2 w-full max-h-60 overflow-auto rounded-xl bg-white py-2 shadow-2xl border-2 border-blue-200 focus:outline-none">
+                          {filteredBancos.length === 0 && bancoQuery !== "" ? (
+                            <div className="relative cursor-default select-none py-4 px-4 text-center text-gray-500 text-sm">
+                              No se encontró banco
+                            </div>
+                          ) : (
+                            filteredBancos.map((banco) => (
+                              <Combobox.Option
+                                key={banco.banco_id}
+                                value={banco.banco_id}
+                                className={({ active, selected }) =>
+                                  `relative cursor-pointer select-none py-2.5 pl-10 pr-4 transition-colors ${
+                                    active
+                                      ? "bg-blue-50 text-blue-900"
+                                      : selected
+                                        ? "bg-blue-50 text-blue-900"
+                                        : "bg-white text-gray-700 hover:bg-gray-50"
+                                  }`
+                                }
+                              >
+                                {({ selected }) => (
+                                  <>
+                                    <span className={`block truncate ${selected ? "font-bold" : "font-medium"}`}>
+                                      {banco.nombre}
+                                    </span>
+                                    {selected && (
+                                      <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-green-600">
+                                        <Check className="h-5 w-5" />
+                                      </span>
+                                    )}
+                                  </>
+                                )}
+                              </Combobox.Option>
+                            ))
+                          )}
+                        </Combobox.Options>
+                      </Transition>
+                    </div>
+                  </Combobox>
+                  {formik.errors.banco_id && formik.touched.banco_id && !formik.values.banco_id && (
+                    <div className="text-red-500 text-xs mt-0.5">{formik.errors.banco_id}</div>
+                  )}
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label className="text-gray-700 font-semibold text-sm">
+                    Origen de Pago <span className="text-red-500">*</span>
+                  </Label>
+                  <Select
+                    value={formik.values.origen_pago || undefined}
+                    onValueChange={(value) => {
+                      formik.setFieldValue("origen_pago", value);
+                      formik.setFieldTouched("origen_pago", true, false);
+                    }}
+                  >
+                    <SelectTrigger className={`w-full border rounded-lg px-3 py-2.5 text-gray-900 bg-white [&>span]:text-gray-900 ${
+                      formik.errors.origen_pago && formik.touched.origen_pago && !formik.values.origen_pago
+                        ? "border-red-500"
+                        : "border-gray-300"
+                    }`}>
+                      <SelectValue placeholder="Seleccionar origen..." />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white border border-gray-200 shadow-lg">
+                      <SelectItem value="transferencia" className="text-gray-900 hover:bg-blue-50 cursor-pointer">Transferencia</SelectItem>
+                      <SelectItem value="cheque" className="text-gray-900 hover:bg-blue-50 cursor-pointer">Cheque</SelectItem>
+                      <SelectItem value="boleta" className="text-gray-900 hover:bg-blue-50 cursor-pointer">Boleta</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {formik.errors.origen_pago && formik.touched.origen_pago && !formik.values.origen_pago && (
+                    <div className="text-red-500 text-xs mt-0.5">{formik.errors.origen_pago}</div>
+                  )}
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label className="text-gray-700 font-semibold text-sm">
+                    No. Autorización (Opcional)
+                  </Label>
+                  <Input
+                    id="numeroAutorizacion"
+                    name="numeroAutorizacion"
+                    type="text"
+                    value={formik.values.numeroAutorizacion ?? ""}
+                    onChange={formik.handleChange}
+                    onBlur={formik.handleBlur}
+                    placeholder="Ej: 123456789"
+                    className={`border rounded-lg px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white ${
+                      formik.errors.numeroAutorizacion && formik.touched.numeroAutorizacion
+                        ? "border-red-500 focus:ring-red-500"
+                        : "border-gray-300"
+                    }`}
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label className="text-gray-700 font-semibold text-sm">
+                    Fecha Boleta <span className="text-red-500">*</span>
+                  </Label>
+                  <DatePickerMUI
+                    value={formik.values.fecha_boleta}
+                    onChange={(value) => {
+                      formik.setFieldValue("fecha_boleta", value);
+                      formik.setFieldTouched("fecha_boleta", true, false);
+                    }}
+                  />
+                  {formik.errors.fecha_boleta && formik.touched.fecha_boleta && formik.values.fecha_boleta === "" && (
+                    <div className="text-red-500 text-xs mt-0.5">{formik.errors.fecha_boleta}</div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* === SECCIÓN: OBSERVACIONES === */}
+            <div className="rounded-xl border border-gray-100 bg-gray-50/30 p-4 space-y-4">
+              <h3 className="text-sm font-bold text-gray-600 uppercase tracking-wide flex items-center gap-2">
+                <FileText className="w-4 h-4" />
+                Observaciones y Archivos
+              </h3>
+              <div className="flex flex-col gap-1">
+                <Label className="text-gray-700 font-semibold text-sm">
+                  Observaciones (Opcional)
+                </Label>
+                <Input
+                  id="observaciones"
+                  name="observaciones"
+                  type="text"
+                  value={formik.values.observaciones ?? ""}
+                  onChange={formik.handleChange}
+                  onBlur={formik.handleBlur}
+                  placeholder="Notas adicionales..."
+                  className="border rounded-lg px-3 py-2.5 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white border-gray-300"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label className="text-gray-700 font-semibold text-sm">
+                  Boletas / Comprobantes
+                </Label>
+                <label
+                  htmlFor="boleta-upload"
+                  className={`flex items-center justify-center gap-2 w-full border-2 border-dashed rounded-lg px-4 py-3 cursor-pointer transition text-sm ${
+                    isDragging
+                      ? "border-blue-500 bg-blue-50 text-blue-600"
+                      : "border-gray-300 hover:border-blue-400 hover:bg-blue-50/50 text-gray-500"
+                  }`}
+                  onDrop={handleDrop}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                >
+                  <Info className="w-4 h-4" />
+                  {isDragging
+                    ? "Suelta los archivos aquí"
+                    : "Haz clic o arrastra archivos aquí (max. 3)"}
+                </label>
                 <input
                   id="boleta-upload"
                   type="file"
                   accept="image/*,application/pdf"
                   multiple
-                  className="w-full"
-                  style={{ minHeight: 44 }}
+                  className="hidden"
                   onChange={(e) => {
                     const files = Array.from(e.target.files ?? []);
                     if (files.length + archivosParaSubir.length > 3) {
@@ -694,37 +824,36 @@ export function PagoForm() {
                     e.target.value = "";
                   }}
                 />
-              </div>
-
-              {archivosParaSubir.length > 0 && (
-                <ul className="mt-2 text-xs text-green-700 space-y-1">
-                  {archivosParaSubir.map((file, i) => (
-                    <li key={i} className="flex items-center gap-2">
-                      <span>{file.name}</span>
-                      <button
-                        type="button"
-                        className="text-red-600 hover:underline"
-                        onClick={() => {
-                          setArchivosParaSubir(
-                            archivosParaSubir.filter((_, idx) => idx !== i)
-                          );
-                        }}
+                {archivosParaSubir.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {archivosParaSubir.map((file, i) => (
+                      <span
+                        key={i}
+                        className="inline-flex items-center gap-1.5 bg-green-50 border border-green-200 text-green-800 text-xs font-medium px-2.5 py-1 rounded-full"
                       >
-                        Quitar
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <span className="text-xs text-gray-500 mt-1">
-                Puedes subir hasta 3 archivos de boleta.
-              </span>
+                        <FileText className="w-3 h-3" />
+                        {file.name}
+                        <button
+                          type="button"
+                          className="text-red-500 hover:text-red-700 ml-1 font-bold"
+                          onClick={() => {
+                            setArchivosParaSubir(
+                              archivosParaSubir.filter((_, idx) => idx !== i)
+                            );
+                          }}
+                        >
+                          x
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* 🎯 BOTÓN MODIFICADO - Ahora abre el modal */}
             <Button
               type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-5 px-4 rounded-xl text-2xl shadow transition"
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-4 rounded-xl text-xl shadow-lg transition"
               disabled={formik.isSubmitting}
             >
               {formik.isSubmitting ? "Registrando..." : "Registrar Pago"}

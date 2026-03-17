@@ -98,6 +98,7 @@ export async function getAllPagosWithCreditAndInversionistas(
         paymentFalse: pagos_credito.paymentFalse,
         monto_aplicado: pagos_credito.monto_aplicado,
         fecha_aplicado: pagos_credito.fecha_aplicado,
+        origen_pago: pagos_credito.origen_pago,
       })
       .from(pagos_credito)
       .innerJoin(creditos, eq(pagos_credito.credito_id, creditos.credito_id))
@@ -636,6 +637,7 @@ await db
       fecha_pago: sql`EXCLUDED.fecha_pago`,
       estado_liquidacion: sql`EXCLUDED.estado_liquidacion`,
       credito_id: sql`EXCLUDED.credito_id`,
+      updated_at: sql`now()`,
     },
   });
 
@@ -1370,6 +1372,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         p.abono_gps AS "abono_gps",
         p.validation_status AS "validation_status",
         p.monto_aplicado AS "monto_aplicado",
+        p.origen_pago AS "origenPago",
 
         -- 💳 Info del crédito
         json_build_object(
@@ -1481,6 +1484,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       validationStatus: r.validation_status,
       abono_gps: r.abono_gps,
       monto_aplicado: r.monto_aplicado,
+      origenPago: r.origenPago,
       credito: r.credito,
       cuota: r.cuota,
       usuario: r.usuario,
@@ -2225,7 +2229,7 @@ export async function updatePagosEspejoPorCredito(
   }
 
   // 3. Armar el set dinámico solo con los campos que vienen
-  const setData: Record<string, string> = {};
+  const setData: Record<string, any> = {};
   if (abono_capital !== undefined) setData.abono_capital = abono_capital.toString();
   if (abono_interes !== undefined) setData.abono_interes = abono_interes.toString();
   if (abono_iva !== undefined) setData.abono_iva_12 = abono_iva.toString();
@@ -2235,6 +2239,7 @@ export async function updatePagosEspejoPorCredito(
   }
 
   // 4. Intentar actualizar registros existentes
+  setData.updated_at = new Date();
   const result = await db
     .update(pagos_credito_inversionistas_espejo)
     .set(setData)

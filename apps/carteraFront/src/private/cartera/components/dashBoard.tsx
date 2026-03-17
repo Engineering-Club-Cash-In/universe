@@ -57,6 +57,13 @@ const menuOptions = [
     roles: ["ADMIN"],
   },
   {
+    key: "liquidaciones-inversionistas",
+    label: "Liquidaciones Inversionistas",
+    icon: <Receipt className="h-5 w-5" />,
+    path: "/liquidaciones-inversionistas",
+    roles: ["ADMIN"],
+  },
+  {
     key: "advisors",
     label: "Usuarios",
     icon: <ListOrdered className="h-5 w-5" />,

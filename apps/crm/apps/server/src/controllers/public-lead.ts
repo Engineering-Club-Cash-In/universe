@@ -1,4 +1,4 @@
-import { and, asc, count, eq, gte, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, or } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -177,10 +177,14 @@ export async function createOpportunityForLead(
 /**
  * Verifica si un lead ya tiene una oportunidad creada en las últimas 24 horas.
  */
-export async function hasRecentOpportunity(leadId: string): Promise<boolean> {
+export async function getRecentOpportunity(leadId: string) {
 	const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 	const [recent] = await db
-		.select({ id: opportunities.id })
+		.select({
+			id: opportunities.id,
+			source: opportunities.source,
+			campaign: opportunities.campaign,
+		})
 		.from(opportunities)
 		.where(
 			and(
@@ -188,8 +192,9 @@ export async function hasRecentOpportunity(leadId: string): Promise<boolean> {
 				gte(opportunities.createdAt, twentyFourHoursAgo),
 			),
 		)
+		.orderBy(desc(opportunities.createdAt))
 		.limit(1);
-	return !!recent;
+	return recent;
 }
 
 export async function createPublicLead(c: Context) {
@@ -247,7 +252,19 @@ export async function createPublicLead(c: Context) {
 			}
 
 			// Verificar oportunidad reciente antes de crear una nueva
-			if (await hasRecentOpportunity(existingLead.id)) {
+			const recentOpportunity = await getRecentOpportunity(existingLead.id);
+			if (recentOpportunity) {
+				if (body.source || body.campaign) {
+					await db
+						.update(opportunities)
+						.set({
+							source,
+							campaign,
+							updatedAt: new Date(),
+						})
+						.where(eq(opportunities.id, recentOpportunity.id));
+				}
+
 				return c.json(
 					{
 						success: true,

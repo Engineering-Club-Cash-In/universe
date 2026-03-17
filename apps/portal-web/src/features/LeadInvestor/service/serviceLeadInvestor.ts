@@ -1,5 +1,6 @@
 import type { FormInvestorValues } from "../hooks/useFormInvestor";
 import { apiCRM } from "@/lib/api/apiCRM";
+import { normalizeInvestmentLeadSource } from "@/lib/leadAttribution";
 
 interface LeadInvestorPayload {
   profileType: string;
@@ -39,8 +40,10 @@ export const sendLeadInvestor = async (
     payload.name = data.representanteLegal;
   }
 
-  if (source) {
-    payload.source = source;
+  const normalizedSource = normalizeInvestmentLeadSource(source);
+
+  if (normalizedSource) {
+    payload.source = normalizedSource;
   }
 
   if (campaign) {

@@ -1,5 +1,6 @@
 import type { FormLeadsValues } from "../hooks/useForm";
 import { apiCRM } from "@/lib/api/apiCRM";
+import { normalizeCreditLeadSource } from "@/lib/leadAttribution";
 
 interface LeadPayload {
   firstName: string;
@@ -35,8 +36,10 @@ export const sendLead = async (
     notes: data.descripcion || "",
   };
 
-  if (source) {
-    payload.source = source;
+  const normalizedSource = normalizeCreditLeadSource(source);
+
+  if (normalizedSource) {
+    payload.source = normalizedSource;
   }
 
   if (campaign) {

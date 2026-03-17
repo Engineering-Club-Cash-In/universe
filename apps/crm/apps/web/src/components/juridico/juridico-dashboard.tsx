@@ -74,7 +74,7 @@ const getNextShortMonth = (currentShort: string) => {
 	return SPANISH_SHORT_MONTHS[(index + 1) % 12];
 };
 
-interface JuridicoDashboardPayload {
+export interface JuridicoDashboardPayload {
 	header: {
 		title: string;
 		subtitle: string;
@@ -339,16 +339,29 @@ const SPANISH_MONTHS_MAP: Record<string, number> = {
 
 function sortHistory(history: any[]) {
 	return [...history].sort((a, b) => {
-		const partsA = a.header.periodLabel.toLowerCase().split(" ");
-		const partsB = b.header.periodLabel.toLowerCase().split(" ");
+		const labelA = a.header.periodLabel.toLowerCase();
+		const labelB = b.header.periodLabel.toLowerCase();
 		
-		const monthA = SPANISH_MONTHS_MAP[partsA[0]] || 0;
-		const yearA = parseInt(partsA[1]) || 0;
-		
-		const monthB = SPANISH_MONTHS_MAP[partsB[0]] || 0;
-		const yearB = parseInt(partsB[1]) || 0;
+		// Robust year parsing (find any 4-digit number)
+		const yearA = parseInt(labelA.match(/\d{4}/)?.[0] || "0");
+		const yearB = parseInt(labelB.match(/\d{4}/)?.[0] || "0");
 		
 		if (yearA !== yearB) return yearA - yearB;
+
+		// Robust month parsing (find if any month key is present in the label)
+		// This handles "Septiembre" vs "Setiembre" if we add those variations
+		const findMonth = (label: string) => {
+			for (const [key, value] of Object.entries(SPANISH_MONTHS_MAP)) {
+				if (label.includes(key)) return value;
+			}
+			// Special case for common typo "Setiembre"
+			if (label.includes("setiembre")) return 8; // Septiembre
+			return -1;
+		};
+
+		const monthA = findMonth(labelA);
+		const monthB = findMonth(labelB);
+		
 		return monthA - monthB;
 	});
 }

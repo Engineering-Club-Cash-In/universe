@@ -2,8 +2,9 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, Trash2, BookCopy, Wallet } from "lucide-react";
-import { useRef, useState, useEffect } from "react";
+import { Plus, Trash2, BookCopy, Wallet, ChevronsUpDown, Check } from "lucide-react";
+import { useRef, useState, useEffect, Fragment } from "react";
+import { Combobox, Transition } from "@headlessui/react";
 import { DatePickerMUI } from "./calendar";
 import type { InversionistaPayload } from "../services/services";
 

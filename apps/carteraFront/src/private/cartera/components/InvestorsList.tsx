@@ -2,8 +2,9 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, Trash2, BookCopy, Wallet } from "lucide-react";
-import { useRef, useState, useEffect } from "react";
+import { Plus, Trash2, BookCopy, Wallet, ChevronsUpDown, Check } from "lucide-react";
+import { useRef, useState, useEffect, Fragment } from "react";
+import { Combobox, Transition } from "@headlessui/react";
 import { DatePickerMUI } from "./calendar";
 import type { InversionistaPayload } from "../services/services";
 
@@ -52,6 +53,8 @@ export function InvestorsList({
 }: InvestorsListProps) {
   // Estado local para saber qué items tienen el espejo expandido
   const [expandedMirrors, setExpandedMirrors] = useState<Set<number>>(new Set());
+  const [investorQueries, setInvestorQueries] = useState<Record<number, string>>({});
+  const [mirrorQueries, setMirrorQueries] = useState<Record<number, string>>({});
 
   // Track nuevos inversionistas y su tipo de inversión
   const [newInvestorIndices, setNewInvestorIndices] = useState<Set<number>>(new Set());
@@ -251,19 +254,83 @@ export function InvestorsList({
             <div className="flex flex-wrap gap-4 items-end">
               <div className="flex-1 min-w-[200px]">
                 <Label className="text-blue-900 font-semibold">Inversionista (Fiscal)</Label>
-                <select
-                  name={`${fieldName}.${index}.inversionista_id`}
+                <Combobox
                   value={inv.inversionista_id}
-                  onChange={formik.handleChange}
-                  className="w-full border rounded px-3 py-2 bg-white h-10 mt-1"
+                  onChange={(value: any) => {
+                    formik.setFieldValue(`${fieldName}.${index}.inversionista_id`, Number(value));
+                    setInvestorQueries((prev) => ({ ...prev, [index]: "" }));
+                  }}
                 >
-                  <option value={0}>Seleccione un inversionista</option>
-                  {investorsOptions.map((opt) => (
-                    <option key={opt.inversionista_id} value={opt.inversionista_id}>
-                      {opt.nombre}
-                    </option>
-                  ))}
-                </select>
+                  <div className="relative mt-1">
+                    <div className="relative w-full">
+                      <Combobox.Input
+                        className="w-full border rounded pl-3 pr-10 py-2 bg-white h-10 font-medium focus:ring-2 focus:ring-blue-400 focus:border-blue-500 focus:outline-none placeholder:text-gray-400 transition-all"
+                        displayValue={(id: any) =>
+                          id === 0 || id === ""
+                            ? ""
+                            : investorsOptions.find((o) => o.inversionista_id === Number(id))?.nombre || ""
+                        }
+                        onChange={(e) => setInvestorQueries((prev) => ({ ...prev, [index]: e.target.value }))}
+                        onFocus={(e) => e.target.select()}
+                        placeholder="Buscar inversionista..."
+                      />
+                      <Combobox.Button className="absolute inset-y-0 right-0 flex items-center pr-3">
+                        <ChevronsUpDown className="h-5 w-5 text-gray-400 hover:text-gray-600 transition-colors" />
+                      </Combobox.Button>
+                    </div>
+                    <Transition
+                      as={Fragment as any}
+                      leave="transition ease-in duration-100"
+                      leaveFrom="opacity-100"
+                      leaveTo="opacity-0"
+                      afterLeave={() => setInvestorQueries((prev) => ({ ...prev, [index]: "" }))}
+                    >
+                      <Combobox.Options className="absolute z-50 mt-2 w-full max-h-60 overflow-auto rounded-xl bg-white py-2 shadow-2xl border-2 border-blue-200 focus:outline-none">
+                        {(() => {
+                          const q = (investorQueries[index] || "").toLowerCase();
+                          const filtered = q === ""
+                            ? investorsOptions
+                            : investorsOptions.filter((o) => o.nombre.toLowerCase().includes(q));
+                          if (filtered.length === 0) {
+                            return (
+                              <div className="relative cursor-default select-none py-4 px-4 text-center text-gray-500 text-sm">
+                                No se encontró inversionista
+                              </div>
+                            );
+                          }
+                          return filtered.map((opt) => (
+                            <Combobox.Option
+                              key={opt.inversionista_id}
+                              value={opt.inversionista_id}
+                              className={({ active, selected }) =>
+                                `relative cursor-pointer select-none py-2.5 pl-10 pr-4 transition-colors ${
+                                  active
+                                    ? "bg-blue-50 text-blue-900"
+                                    : selected
+                                      ? "bg-blue-50 text-blue-900"
+                                      : "bg-white text-gray-700 hover:bg-gray-50"
+                                }`
+                              }
+                            >
+                              {({ selected }) => (
+                                <>
+                                  <span className={`block truncate ${selected ? "font-bold" : "font-medium"}`}>
+                                    {opt.nombre}
+                                  </span>
+                                  {selected && (
+                                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-green-600">
+                                      <Check className="h-5 w-5" />
+                                    </span>
+                                  )}
+                                </>
+                              )}
+                            </Combobox.Option>
+                          ));
+                        })()}
+                      </Combobox.Options>
+                    </Transition>
+                  </div>
+                </Combobox>
               </div>
               <div className="w-32">
                 <Label className="text-blue-900">Monto</Label>
@@ -413,22 +480,84 @@ export function InvestorsList({
                 <div className="flex flex-wrap gap-4 items-end">
                     <div className="flex-1 min-w-[200px]">
                         <Label className="text-purple-900 font-semibold text-xs">Inversionista Espejo</Label>
-                        <select
-                        name={`investorsMirror.${index}.inversionista_id`}
-                        value={invMirror.inversionista_id}
-                        onChange={formik.handleChange}
-                        disabled={isNew}
-                        className={`w-full border rounded px-3 py-2 h-9 mt-1 text-sm border-purple-200 focus:ring-purple-500 ${
-                          isNew ? "bg-gray-100 cursor-not-allowed text-gray-500" : "bg-white"
-                        }`}
+                        <Combobox
+                          value={invMirror.inversionista_id}
+                          onChange={(value: any) => {
+                            formik.setFieldValue(`investorsMirror.${index}.inversionista_id`, Number(value));
+                            setMirrorQueries((prev) => ({ ...prev, [index]: "" }));
+                          }}
+                          disabled={isNew}
                         >
-                        <option value={0}>Seleccione (Opcional)</option>
-                        {investorsOptions.map((opt) => (
-                            <option key={opt.inversionista_id} value={opt.inversionista_id}>
-                            {opt.nombre}
-                            </option>
-                        ))}
-                        </select>
+                          <div className="relative mt-1">
+                            <div className="relative w-full">
+                              <Combobox.Input
+                                className="w-full border rounded pl-3 pr-10 py-2 bg-white h-9 text-sm font-medium border-purple-200 focus:ring-2 focus:ring-purple-400 focus:border-purple-500 focus:outline-none placeholder:text-gray-400 transition-all"
+                                displayValue={(id: any) =>
+                                  id === 0 || id === ""
+                                    ? ""
+                                    : investorsOptions.find((o) => o.inversionista_id === Number(id))?.nombre || ""
+                                }
+                                onChange={(e) => setMirrorQueries((prev) => ({ ...prev, [index]: e.target.value }))}
+                                onFocus={(e) => e.target.select()}
+                                placeholder="Buscar inversionista..."
+                              />
+                              <Combobox.Button className="absolute inset-y-0 right-0 flex items-center pr-3">
+                                <ChevronsUpDown className="h-4 w-4 text-gray-400 hover:text-gray-600 transition-colors" />
+                              </Combobox.Button>
+                            </div>
+                            <Transition
+                              as={Fragment as any}
+                              leave="transition ease-in duration-100"
+                              leaveFrom="opacity-100"
+                              leaveTo="opacity-0"
+                              afterLeave={() => setMirrorQueries((prev) => ({ ...prev, [index]: "" }))}
+                            >
+                              <Combobox.Options className="absolute z-50 mt-2 w-full max-h-60 overflow-auto rounded-xl bg-white py-2 shadow-2xl border-2 border-purple-200 focus:outline-none">
+                                {(() => {
+                                  const q = (mirrorQueries[index] || "").toLowerCase();
+                                  const filtered = q === ""
+                                    ? investorsOptions
+                                    : investorsOptions.filter((o) => o.nombre.toLowerCase().includes(q));
+                                  if (filtered.length === 0) {
+                                    return (
+                                      <div className="relative cursor-default select-none py-4 px-4 text-center text-gray-500 text-sm">
+                                        No se encontró inversionista
+                                      </div>
+                                    );
+                                  }
+                                  return filtered.map((opt) => (
+                                    <Combobox.Option
+                                      key={opt.inversionista_id}
+                                      value={opt.inversionista_id}
+                                      className={({ active, selected }) =>
+                                        `relative cursor-pointer select-none py-2.5 pl-10 pr-4 transition-colors ${
+                                          active
+                                            ? "bg-purple-50 text-purple-900"
+                                            : selected
+                                              ? "bg-purple-50 text-purple-900"
+                                              : "bg-white text-gray-700 hover:bg-gray-50"
+                                        }`
+                                      }
+                                    >
+                                      {({ selected }) => (
+                                        <>
+                                          <span className={`block truncate ${selected ? "font-bold" : "font-medium"}`}>
+                                            {opt.nombre}
+                                          </span>
+                                          {selected && (
+                                            <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-green-600">
+                                              <Check className="h-5 w-5" />
+                                            </span>
+                                          )}
+                                        </>
+                                      )}
+                                    </Combobox.Option>
+                                  ));
+                                })()}
+                              </Combobox.Options>
+                            </Transition>
+                          </div>
+                        </Combobox>
                     </div>
                     <div className="w-32">
                         <Label className="text-purple-900 text-xs">Monto Espejo</Label>

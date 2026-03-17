@@ -1533,7 +1533,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
 
                             <DropdownMenuSeparator className="bg-gray-200 my-1" />
 
-                            {/* Validar Pago */}
+                            {/* Validar Pago (solo validar, sin facturar) */}
                             <DropdownMenuItem
                               onClick={() => {
                                 if (
@@ -1541,19 +1541,72 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                                   pago.validationStatus !== "validated" &&
                                   tieneCuentaAsignada(pago)
                                 ) {
-                                  // 🔥 PRIMERO validamos el pago
                                   setValidandoPagoId(pago.pagoId);
-
                                   aplicarPago(pago.pagoId, {
                                     onSuccess: () => {
                                       setValidandoPagoId(null);
+                                    },
+                                    onError: () => {
+                                      setValidandoPagoId(null);
+                                    },
+                                  });
+                                }
+                              }}
+                              disabled={
+                                user?.role !== "ADMIN" ||
+                                isPending ||
+                                validandoPagoId === pago.pagoId ||
+                                pago.validationStatus === "validated" ||
+                                !tieneCuentaAsignada(pago)
+                              }
+                              className={`cursor-pointer py-2.5 px-3 flex items-center rounded-lg transition ${
+                                pago.validationStatus === "validated" ||
+                                user?.role !== "ADMIN" ||
+                                !tieneCuentaAsignada(pago)
+                                  ? "opacity-50 text-gray-400 bg-gray-50"
+                                  : "text-green-700 hover:text-green-900 hover:bg-green-50"
+                              }`}
+                            >
+                              <Check
+                                className={`w-4 h-4 mr-2 flex-shrink-0 ${
+                                  pago.validationStatus === "validated" ||
+                                  user?.role !== "ADMIN" ||
+                                  !tieneCuentaAsignada(pago)
+                                    ? "text-gray-400"
+                                    : "text-green-600"
+                                }`}
+                              />
+                              <span className="font-semibold">
+                                {validandoPagoId === pago.pagoId
+                                  ? "Validando..."
+                                  : pago.validationStatus === "validated"
+                                    ? "Ya Validado"
+                                    : !tieneCuentaAsignada(pago)
+                                      ? "Sin Cuenta"
+                                      : "Validar Pago"}
+                              </span>
+                              {user?.role !== "ADMIN" && (
+                                <span className="ml-auto text-xs text-gray-400 font-normal">
+                                  Admin
+                                </span>
+                              )}
+                            </DropdownMenuItem>
 
-                                      // 🔥 DESPUÉS generamos la factura automáticamente
+                            {/* Validar y Facturar (ambas acciones encadenadas) */}
+                            <DropdownMenuItem
+                              onClick={() => {
+                                if (
+                                  user?.role === "ADMIN" &&
+                                  pago.validationStatus !== "validated" &&
+                                  tieneCuentaAsignada(pago)
+                                ) {
+                                  setValidandoPagoId(pago.pagoId);
+                                  aplicarPago(pago.pagoId, {
+                                    onSuccess: () => {
+                                      setValidandoPagoId(null);
                                       setGenerandoFacturaId(pago.pagoId);
-
                                       setTimeout(() => {
                                         handleFacturarPago(pago.pagoId);
-                                        // El generandoFacturaId lo limpias en el onSuccess de handleFacturarPago
                                       }, 200);
                                     },
                                     onError: () => {

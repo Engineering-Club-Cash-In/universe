@@ -68,6 +68,8 @@ type CreditCategory =
 	| "Hipotecario"
 	| "Vehículo";
 
+type PaymentDay = 15 | 30;
+
 // Type for existing investor from DB
 type ExistingInvestor = {
 	inversionista_id: number;
@@ -105,13 +107,13 @@ export function InvestmentAssignmentSection({
 	const [editDireccion, setEditDireccion] = useState<string>("");
 	const [editNit, setEditNit] = useState<string>("");
 	// Default: si estamos del 1-20 del mes es 15, si es 21-31 es último día (31)
-	const getDefaultDiaPago = () => {
+	const getDefaultDiaPago = (): PaymentDay => {
 		const today = new Date();
 		const dayOfMonth = today.getDate();
-		return dayOfMonth <= 20 ? 15 : 31;
+		return dayOfMonth <= 20 ? 15 : 30;
 	};
 	const [editDiaPagoMensual, setEditDiaPagoMensual] =
-		useState<number>(getDefaultDiaPago);
+		useState<PaymentDay>(getDefaultDiaPago);
 
 	// Función para calcular la categoría automáticamente basándose en creditType y vehicle.isNew
 	const getAutomaticCategoria = (
@@ -199,7 +201,8 @@ export function InvestmentAssignmentSection({
 			setEditNit(selectedOpportunity.nit || "");
 			// Día de pago: usar el de la oportunidad o calcular default según fecha actual
 			setEditDiaPagoMensual(
-				selectedOpportunity.diaPagoMensual || getDefaultDiaPago(),
+				(selectedOpportunity.diaPagoMensual as PaymentDay) ||
+					getDefaultDiaPago(),
 			);
 			// Limpiar inversionistas seleccionados
 			setSelectedInversionistas([]);
@@ -221,7 +224,7 @@ export function InvestmentAssignmentSection({
 			inversionistas?: string;
 			categoria: CreditCategory;
 			nit: string;
-			diaPagoMensual: number;
+				diaPagoMensual: PaymentDay;
 		}) => {
 			return client.assignInvestorAndAdvance({
 				opportunityId,
@@ -945,7 +948,7 @@ export function InvestmentAssignmentSection({
 										<Select
 											value={editDiaPagoMensual.toString()}
 											onValueChange={(value) =>
-												setEditDiaPagoMensual(Number(value))
+												setEditDiaPagoMensual(Number(value) as PaymentDay)
 											}
 										>
 											<SelectTrigger>

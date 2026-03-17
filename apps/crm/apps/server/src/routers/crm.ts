@@ -1330,7 +1330,7 @@ export const crmRouter = {
 				tasaInteres: z.string().optional(),
 				cuotaMensual: z.string().optional(),
 				fechaInicio: z.string().optional(),
-				diaPagoMensual: z.number().int().min(1).max(31).optional(),
+				diaPagoMensual: z.union([z.literal(15), z.literal(30)]).optional(),
 				// Additional fields
 				seguro: z.number().optional(),
 				gps: z.number().optional(),
@@ -5179,7 +5179,7 @@ export const crmRouter = {
 					"Vehículo",
 				]),
 				nit: z.string(),
-				diaPagoMensual: z.number().min(1).max(31),
+				diaPagoMensual: z.union([z.literal(15), z.literal(30)]),
 			}),
 		)
 		.handler(async ({ input, context }) => {

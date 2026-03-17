@@ -28,6 +28,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { getVehicleStatistics, getVehicleById } from "../services/vehicles";
+import { generateInspectionPdf } from "../lib/generate-inspection-pdf";
 import { vehiclesApi, client } from "../utils/orpc";
 import { toast } from "sonner";
 import { INSPECTION_AREAS } from "../lib/inspection-data";
@@ -78,6 +79,7 @@ interface DashboardVehicle {
   testDrive: string;
   status: string;
   photos: number;
+  allPhotos?: any[];
   hasScanner: boolean;
   alerts: string[];
   trim: string;
@@ -92,7 +94,9 @@ interface DashboardVehicle {
   paintCondition: number | null;
   hasAgencyHistory: boolean | null;
   failedChecks: { area: string; checkpoint: string; status?: string; comment?: string | null }[];
+  all360Items?: any[];
   checklistIssues?: { id?: string; item: string; severity: string; notes?: string | null; evidence?: any[] }[];
+  allChecklistItems?: any[];
   rejectionEvidenceUrl?: string | null;
   aiValuation?: {
     aiSuggestedValue?: number | null;
@@ -435,6 +439,7 @@ export default function VehiclesDashboard() {
       testDrive: latestInspection?.testDrive ? 'Sí' : 'No',
       status: latestInspection?.status || vehicle.status || 'pending',
       photos: vehicle.photos?.length || 0,
+      allPhotos: vehicle.photos || [],
       hasScanner: latestInspection?.scannerUsed || false,
       alerts: (latestInspection?.alerts as string[]) || [],
       trim: vehicle.trim || '',
@@ -480,6 +485,8 @@ export default function VehiclesDashboard() {
             evidence: item.evidence || [],
           }))
         : [],
+      all360Items: latestInspection?.inspection360Items || [],
+      allChecklistItems: latestInspection?.checklistItems || [],
       rejectionEvidenceUrl: latestInspection?.rejectionEvidenceUrl,
     };
   }, []);
@@ -1344,13 +1351,26 @@ export default function VehiclesDashboard() {
         }}
       >
         <DialogContent className="min-w-[90vw] max-w-7xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {selectedVehicle?.vehicleMake} {selectedVehicle?.vehicleModel}
-            </DialogTitle>
-            <DialogDescription>
-              {selectedVehicle?.licensePlate} - {selectedVehicle?.vinNumber}
-            </DialogDescription>
+          <DialogHeader className="flex flex-row items-start justify-between pr-8">
+            <div>
+              <DialogTitle>
+                {selectedVehicle?.vehicleMake} {selectedVehicle?.vehicleModel}
+              </DialogTitle>
+              <DialogDescription>
+                {selectedVehicle?.licensePlate} - {selectedVehicle?.vinNumber}
+              </DialogDescription>
+            </div>
+            {selectedVehicle && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-0!"
+                onClick={() => generateInspectionPdf(selectedVehicle)}
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                Descargar Informe PDF
+              </Button>
+            )}
           </DialogHeader>
 
           {isModalLoading ? (

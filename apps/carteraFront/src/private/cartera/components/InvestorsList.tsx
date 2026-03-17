@@ -479,14 +479,13 @@ export function InvestorsList({
                 <div className="flex flex-wrap gap-4 items-end">
                     <div className="flex-1 min-w-[200px]">
                         <Label className="text-purple-900 font-semibold text-xs">Inversionista Espejo</Label>
-                        <select
-                        name={`investorsMirror.${index}.inversionista_id`}
-                        value={invMirror.inversionista_id}
-                        onChange={formik.handleChange}
-                        disabled={isNew}
-                        className={`w-full border rounded px-3 py-2 h-9 mt-1 text-sm border-purple-200 focus:ring-purple-500 ${
-                          isNew ? "bg-gray-100 cursor-not-allowed text-gray-500" : "bg-white"
-                        }`}
+                        <Combobox
+                          value={invMirror.inversionista_id}
+                          onChange={(value: any) => {
+                            formik.setFieldValue(`investorsMirror.${index}.inversionista_id`, Number(value));
+                            setMirrorQueries((prev) => ({ ...prev, [index]: "" }));
+                          }}
+                          disabled={isNew}
                         >
                           <div className="relative mt-1">
                             <div className="relative w-full">

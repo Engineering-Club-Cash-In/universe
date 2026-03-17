@@ -18,6 +18,30 @@ import {
 import { useCatalogs } from "../hooks/catalogs";
 import { OtrosField } from "./rubros";
 import React from "react";
+
+/** Fecha por defecto según tipo de inversión */
+function getDefaultFechaInicio(tipo: "compra_cartera" | "reinversion"): string {
+  const now = new Date();
+  if (tipo === "compra_cartera") {
+    // Primer día del mes actual
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  }
+  // Reinversión: 3 meses atrás
+  const d = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
+/** Rango permitido para compra de cartera (mes actual) */
+function getCurrentMonthRange(): { min: string; max: string } {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth() + 1;
+  const lastDay = new Date(y, m, 0).getDate();
+  return {
+    min: `${y}-${String(m).padStart(2, "0")}-01`,
+    max: `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`,
+  };
+}
 const categorias = [
   "Contraseña",
   "CV Vehículo",
@@ -442,6 +466,65 @@ export function CreditForm() {
                     />
                   </div>
 
+                  <div>
+                    <Label className="text-gray-900 font-medium mb-2">
+                      Tipo de Inversión
+                    </Label>
+                    <select
+                      name={`inversionistas.${index}.tipo_inversion`}
+                      value={inv.tipo_inversion ?? "compra_cartera"}
+                      onChange={(e) => {
+                        const tipo = e.target.value as "compra_cartera" | "reinversion";
+                        formik.setFieldValue(`inversionistas.${index}.tipo_inversion`, tipo);
+                        formik.setFieldValue(
+                          `inversionistas.${index}.fecha_inicio_participacion`,
+                          getDefaultFechaInicio(tipo)
+                        );
+                      }}
+                      className="w-full border rounded px-3 py-2 bg-white text-gray-900"
+                    >
+                      <option value="compra_cartera">Compra de Cartera</option>
+                      <option value="reinversion">Reinversión</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <Label className="text-gray-900 font-medium mb-2">
+                      Fecha Inicio Participación
+                    </Label>
+                    {inv.tipo_inversion === "reinversion" ? (
+                      <>
+                        <Input
+                          type="date"
+                          value={inv.fecha_inicio_participacion ?? ""}
+                          disabled
+                          className="text-gray-900 bg-gray-100 cursor-not-allowed"
+                        />
+                        <div className="text-xs text-gray-500 mt-1">
+                          * Reinversión: 3 meses antes del mes actual (no editable)
+                        </div>
+                      </>
+                    ) : (
+                      <Input
+                        type="date"
+                        name={`inversionistas.${index}.fecha_inicio_participacion`}
+                        value={inv.fecha_inicio_participacion ?? ""}
+                        min={getCurrentMonthRange().min}
+                        max={getCurrentMonthRange().max}
+                        onChange={formik.handleChange}
+                        onBlur={formik.handleBlur}
+                        className="text-gray-900"
+                      />
+                    )}
+                  </div>
+
+                  <div className="col-span-2 bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                    <p className="text-xs text-yellow-700">
+                      <strong>Nota:</strong> Para nuevos inversionistas, la cuenta padre e hija (espejo) se crean con los mismos datos.
+                      El espejo no es editable en este formulario.
+                    </p>
+                  </div>
+
                   <div className="col-span-2 flex justify-end">
                     <Button
                       variant="outline"
@@ -463,12 +546,17 @@ export function CreditForm() {
               <Button
                 type="button"
                 onClick={() => {
+                    const tipoDefault = "compra_cartera" as const;
                   formik.setFieldValue("inversionistas", [
                     ...formik.values.inversionistas,
                     {
                       inversionista_id: 0,
-                      porcentaje_participacion: 0,
+                      monto_aportado: 0,
+                      porcentaje_cash_in: 0,
+                      porcentaje_inversion: 100,
                       cuota_inversionista: 0,
+                      tipo_inversion: tipoDefault,
+                      fecha_inicio_participacion: getDefaultFechaInicio(tipoDefault),
                     },
                   ]);
                 }}

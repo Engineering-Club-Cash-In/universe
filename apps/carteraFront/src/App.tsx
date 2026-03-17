@@ -15,6 +15,7 @@ import { BancosManager } from "./private/cartera/components/bank";
 import { CreatePaymentAgreementForm } from "./private/cartera/components/paymentAgreement";
 import { FacturasGenericas } from "./private/cartera/components/FacturasGenericas";
 import EfectividadAsesores from "./private/cartera/components/EfectividadAsesores";
+import { HistorialLiquidaciones } from "./private/cartera/components/HistorialLiquidaciones";
 
 // 🔒 Rutas privadas
 function PrivateRoute({ children }: { children: JSX.Element }) {
@@ -105,6 +106,15 @@ function App() {
           element={
             <RoleRoute allowedRoles={["ADMIN"]}>
               <TableInvestors />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="liquidaciones-inversionistas"
+          element={
+            <RoleRoute allowedRoles={["ADMIN"]}>
+              <HistorialLiquidaciones />
             </RoleRoute>
           }
         />

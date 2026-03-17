@@ -1,13 +1,12 @@
 import {
 	boolean,
-	pgSchema,
+	pgEnum,
+	pgTable,
 	text,
 	timestamp,
 } from "drizzle-orm/pg-core";
 
-export const authSchema = pgSchema("public");
-
-export const userRoleEnum = authSchema.enum("user_role", [
+export const userRoleEnum = pgEnum("user_role", [
 	"admin",
 	"sales",
 	"sales_supervisor",
@@ -21,7 +20,7 @@ export const userRoleEnum = authSchema.enum("user_role", [
 	"investment_manager",
 ]);
 
-export const user = authSchema.table("user", {
+export const user = pgTable("user", {
 	id: text("id").primaryKey(),
 	name: text("name").notNull(),
 	email: text("email").notNull().unique(),
@@ -36,7 +35,7 @@ export const user = authSchema.table("user", {
 	updatedAt: timestamp("updated_at").notNull(),
 });
 
-export const session = authSchema.table("session", {
+export const session = pgTable("session", {
 	id: text("id").primaryKey(),
 	expiresAt: timestamp("expires_at").notNull(),
 	token: text("token").notNull().unique(),
@@ -50,7 +49,7 @@ export const session = authSchema.table("session", {
 		.references(() => user.id, { onDelete: "cascade" }),
 });
 
-export const account = authSchema.table("account", {
+export const account = pgTable("account", {
 	id: text("id").primaryKey(),
 	accountId: text("account_id").notNull(),
 	providerId: text("provider_id").notNull(),
@@ -68,7 +67,7 @@ export const account = authSchema.table("account", {
 	updatedAt: timestamp("updated_at").notNull(),
 });
 
-export const verification = authSchema.table("verification", {
+export const verification = pgTable("verification", {
 	id: text("id").primaryKey(),
 	identifier: text("identifier").notNull(),
 	value: text("value").notNull(),

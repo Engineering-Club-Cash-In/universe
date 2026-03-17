@@ -98,20 +98,6 @@ function RouteComponent() {
 			) : (
 				<JuridicoDashboardView snapshot={snapshotQuery.data ?? null} />
 			)}
-
-			<Card>
-				<CardHeader>
-					<CardTitle>Fuente de verdad</CardTitle>
-					<CardDescription>
-						Este dashboard no depende del CRM actual. Consume exclusivamente el
-						snapshot publicado desde la sección de carga de datos de Jurídico.
-					</CardDescription>
-				</CardHeader>
-				<CardContent className="text-muted-foreground text-sm">
-					Úsalo para presentar indicadores ejecutivos aunque todavía no exista
-					integración automática con otras tablas del sistema.
-				</CardContent>
-			</Card>
 		</div>
 	);
 }

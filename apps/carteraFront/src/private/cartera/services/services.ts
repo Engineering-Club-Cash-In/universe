@@ -133,6 +133,7 @@ export interface Credito {
   membresias: string;
   formato_credito: string;
   statusCredit: string; // ACTIVO, CANCELADO, INCOBRABLE
+  permite_abono_capital?: boolean;
 }
 
 export interface Usuario {
@@ -399,6 +400,7 @@ export interface Credito {
   tipoCredito: string;
   royalti: string;
   mora: string;
+  permite_abono_capital?: boolean;
 }
 
 export interface Usuario {
@@ -660,6 +662,9 @@ export interface UpdateCreditBody {
   // Formato de crédito
   formato_credito?: string;
 
+  // Abono capital
+  permite_abono_capital?: boolean;
+
   // Inversionistas nuevos
   inversionistas?: InversionistaPayload[];
   inversionistas_espejo?: InversionistaPayload[];
@@ -715,6 +720,14 @@ export async function processInvestorsService({ pago_id, credito_id }: { pago_id
   });
   return res.data;
 }
+export async function recalcularPagosService({ numero_credito_sifco, numero_cuota }: { numero_credito_sifco: string; numero_cuota: number }) {
+  const res = await api.post(`${API_URL}/recalcular-pagos`, {
+    numero_credito_sifco,
+    numero_cuota,
+  });
+  return res.data;
+}
+
 export interface PagoCredito {
   id: number;
   mes: string;
@@ -1902,6 +1915,49 @@ export const inversionistasService = {
 
 };
 
+// Historial de liquidaciones
+export interface BoletaLiquidacion {
+  boleta_id: number;
+  boleta_url: string;
+  estado: string;
+  notas: string | null;
+  monto_boleta: string;
+  fecha_subida: string;
+}
+
+export interface LiquidacionResumen {
+  inversionista_id: number;
+  nombre: string;
+  emite_factura: boolean;
+  reinversion: string;
+  banco: string | null;
+  tipo_cuenta: string | null;
+  numero_cuenta: string | null;
+  total_abono_capital: number;
+  total_abono_interes: number;
+  total_abono_iva: number;
+  total_isr: number;
+  total_a_recibir_sin_reinversion: number;
+  total_reinversion: number;
+  total_a_recibir_con_reinversion: number;
+  total_cuota: number;
+  boleta_pendiente: string | null;
+  boleta_liquidacion: BoletaLiquidacion | null;
+  reporte_liquidacion_url: string | null;
+  estado_liquidacion_resumen: string;
+}
+
+export async function getResumenGlobalLiquidaciones(params: {
+  mes: number;
+  anio: number;
+  estado?: string;
+}): Promise<LiquidacionResumen[]> {
+  const { data } = await api.get(`${API_URL}/resumen-global-liquidaciones`, {
+    params: { mes: params.mes, anio: params.anio, estado: params.estado ?? "liquidated" },
+  });
+  return data;
+}
+
 // 📁 types/pagos-pendientes.types.ts
 
 /**
@@ -2178,11 +2234,16 @@ export async function actualizarCuentaPagoService(
       null, // No body porque usamos query params
       {
         params: {
-          pagoId: pagoId.toString(), // 👈 Convertir a string
-          cuentaEmpresaId: cuentaEmpresaId.toString(), // 👈 Convertir a string
+          pagoId: pagoId.toString(),
+          cuentaEmpresaId: cuentaEmpresaId.toString(),
         },
       }
     );
+
+    // Si el backend responde 200 pero sin campo success, asumimos éxito
+    if (data.success === undefined) {
+      return { ...data, success: true, message: data.message || "Cuenta actualizada correctamente" };
+    }
 
     return data;
   } catch (error: any) {

@@ -10,6 +10,7 @@ import {
   revertPaymentToPendingService,
   revalidatePaymentService,
   processInvestorsService,
+  recalcularPagosService,
   uploadFileService,
   type AbonosCuotaResponse,
   type CancelacionCredito,
@@ -38,7 +39,8 @@ export const pagoSchema = z.object({
   url_boletas: z.array(z.string().max(500)),
   banco_id: z.number().int().positive({ message: "Debe seleccionar un banco" }),
   numeroAutorizacion: z.string().optional(),
-  registerBy: z.string().min(1, { message: "Usuario registrador requerido" })
+  registerBy: z.string().min(1, { message: "Usuario registrador requerido" }),
+  origen_pago: z.enum(["transferencia", "cheque", "boleta"], { required_error: "Debe seleccionar un origen de pago" }),
 });
 
 export type PagoFormValues = z.infer<typeof pagoSchema>;
@@ -77,6 +79,7 @@ const [resetBuscador, setResetBuscador] = useState(false);
     cuotas: any[];
     cuotaMasAntigua?: number;
   } | null>(null);
+  const [permiteAbonoCapital, setPermiteAbonoCapital] = useState<boolean>(false);
 const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
   convenio_id: number;
   credito_id: number;
@@ -148,7 +151,8 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
       url_boletas: [],
       banco_id: 0,
       numeroAutorizacion: "",
-      registerBy: user?.email || ""
+      registerBy: user?.email || "",
+      origen_pago: undefined as any,
     },
     validate: zodToFormikValidate(pagoSchema),
     onSubmit: async (values, { setSubmitting, setStatus, resetForm }) => {
@@ -195,6 +199,7 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
         setDataCredito(null); // Limpiar datos del crédito
         setCuotaActualInfo(null);
         setCuotasAtrasadasInfo(null);
+        setPermiteAbonoCapital(false);
         setCuotasPendientesInfo(null);
         setModalExcesoOpen(false); // Cerrar modal de exceso
         setExcedente(0); // Reiniciar excedente
@@ -235,6 +240,7 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
         setDataCredito(result);
         setCuotaActualInfo(null);
         setCuotasAtrasadasInfo(null);
+        setPermiteAbonoCapital(false);
         setCuotasPendientesInfo(null);
         setCuotaSeleccionada(0);
         setSaldoAFavorUser(0);
@@ -300,6 +306,8 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
             ? result.cuotasAtrasadas[0].numero_cuota
             : undefined,
       });
+
+      setPermiteAbonoCapital(!!result.credito?.permite_abono_capital);
 
       setCuotasPendientesInfo({
         total: result.cuotasPendientes.length,
@@ -642,6 +650,25 @@ const handleAbonoOtros = () => {
   const revalidatePayment = useRevalidatePayment();
   const processInvestors = useProcessInvestors();
 
+  function useRecalcularPagos() {
+    return useMutation({
+      mutationFn: recalcularPagosService,
+      onSuccess: () => {
+        toast.success("Pagos recalculados correctamente");
+        queryClient.invalidateQueries({ queryKey: ["pagosByCredito"] });
+      },
+      onError: (err: any) => {
+        toast.error("Error al recalcular pagos: " + (err?.response?.data?.message || "Error desconocido"));
+      },
+    });
+  }
+
+  const recalcularPagos = useRecalcularPagos();
+
+  function handleRecalcularPagos(numero_credito_sifco: string, numero_cuota: number) {
+    recalcularPagos.mutate({ numero_credito_sifco, numero_cuota }, {});
+  }
+
   // Handler:
   function handleReverse(pago_id: number, credito_id: number, reverseAccounting: boolean) {
     reversePago.mutate({ pago_id, credito_id, reverseAccounting }, {});
@@ -700,6 +727,7 @@ async function handleResetCredito() {
         setDataCredito(null);
         setCuotaActualInfo(null);
         setCuotasAtrasadasInfo(null);
+        setPermiteAbonoCapital(false);
         setCuotasPendientesInfo(null);
         setModalExcesoOpen(false);
         setExcedente(0);
@@ -726,6 +754,7 @@ async function handleResetCredito() {
     errorCredito,
     cuotaActualInfo,
     cuotasAtrasadasInfo,
+    permiteAbonoCapital,
     cuotasPendientesInfo,
     useReversePagosInversionistas,
     // Para el modal de excedente:
@@ -748,6 +777,8 @@ async function handleResetCredito() {
     revalidatePayment,
     processInvestors,
     handleProcessInvestors,
+    recalcularPagos,
+    handleRecalcularPagos,
     setCuotaSeleccionada,
     setFileToUpload,
     fileToUpload,

@@ -12,7 +12,6 @@ import {
   resumenGlobalLiquidaciones,
   getLiquidaciones,
   getInvestorPerformance,
-  reversePagosEspejoPorInversionista,
   getInvestorTotalsGlobales,
   getInvestorMirrorSummary,
   upsertPagosEspejo,             // 🆕 Recalcular pagos espejo desde el front
@@ -250,7 +249,7 @@ export const inversionistasRouter = new Elysia()
         console.log("[liquidate-inversionista-pagos] Request body:", body);
         const bodyData = body && typeof body === 'object' ? body : {};
         const parseResult = liquidateByInvestorSchema.safeParse(bodyData);
-        
+
         if (!parseResult.success) {
           set.status = 400;
           return {
@@ -265,9 +264,21 @@ export const inversionistasRouter = new Elysia()
           console.warn("⚠️ ¡ALERTA! Se va a liquidar TODOS los pagos del sistema");
         }
 
-        const result = await liquidateByInvestorId(inversionista_id);
-        set.status = 200;
-        return result;
+        // Lanzar liquidación en background y responder inmediatamente
+        // Si algo falla, los pagos quedan como NO_LIQUIDADO (pendientes)
+        liquidateByInvestorId(inversionista_id).then((result) => {
+          console.log(`[liquidate-inversionista-pagos] Background OK para inversionista ${inversionista_id}:`, result.message);
+        }).catch((err) => {
+          console.error(`[liquidate-inversionista-pagos] Background ERROR para inversionista ${inversionista_id}:`, err);
+        });
+
+        set.status = 202;
+        return {
+          message: inversionista_id
+            ? `Liquidación iniciada para inversionista ${inversionista_id}. Se procesará en segundo plano.`
+            : "Liquidación masiva iniciada. Se procesará en segundo plano.",
+          inversionista_id: inversionista_id ?? "TODOS",
+        };
       } catch (error) {
         console.error("[liquidate-inversionista-pagos] Error:", error);
         set.status = 500;
@@ -282,7 +293,7 @@ export const inversionistasRouter = new Elysia()
         inversionista_id: t.Optional(t.Number()),
       })),
       detail: {
-        summary: "Liquida todos los pagos de un inversionista",
+        summary: "Liquida todos los pagos de un inversionista (async, responde inmediato)",
         tags: ["Pagos/Inversionistas"],
       },
     }
@@ -683,44 +694,6 @@ export const inversionistasRouter = new Elysia()
           error: t.String(),
         }),
       },
-    }
-  )
-  .post(
-    "/reversePagosEspejo",
-    async ({ body, set }) => {
-      try {
-        const { inversionistaId } = body;
-
-        console.log(`🔄 Revirtiendo pagos espejo para inversionista ${inversionistaId}`);
-
-        const resultado = await reversePagosEspejoPorInversionista(inversionistaId);
-
-        set.status = 200;
-        return {
-          ...resultado,
-          success: true,
-          message: "✅ Pagos espejo revertidos correctamente",
-        };
-      } catch (error: any) {
-        console.error("❌ Error en POST /reversePagosEspejo:", error);
-        set.status = 500;
-        return {
-          success: false,
-          error: error.message || "Error al revertir pagos espejo",
-        };
-      }
-    },
-    {
-      detail: {
-        summary: "Revertir todos los pagos espejo de un inversionista",
-        tags: ["Pagos Espejo"],
-      },
-      body: t.Object({
-        inversionistaId: t.Number({
-          description: "ID del inversionista",
-          minimum: 1,
-        }),
-      }),
     }
   )
   .get(

@@ -40,6 +40,7 @@ const pagoSchema = z.object({
   numeroAutorizacion: z.string().optional(),
   registerBy: z.string().min(1),
   fecha_boleta: z.string(),
+  origen_pago: z.enum(["transferencia", "cheque", "boleta"]).optional().default("transferencia"),
 });
 
 type PagoData = z.infer<typeof pagoSchema>;
@@ -499,7 +500,8 @@ export const insertPayment = async ({ body, set }: any) => {
       banco_id,
       numeroAutorizacion,
       registerBy,
-      fecha_boleta
+      fecha_boleta,
+      origen_pago,
     } = parseResult.data;
 
     // 2. Preparar datos
@@ -1068,6 +1070,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           registerBy: registerBy,
           fecha_boleta: fecha_boleta,
           monto_aplicado: totalPagado.toString(),
+          origen_pago: origen_pago,
         };
 
         // Insertar o actualizar pago
@@ -1309,11 +1312,12 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
       .limit(1);
 
     const abonoCapital = new Big(abono_directo_capital ?? 0);
-    // Si la última cuota pagada tiene vencimiento >= hoy → está al día → capital
+    // Si el crédito permite abono a capital, se salta la validación de estar al día
+    const permiteAbonoCapital = credito.permite_abono_capital === true;
     const fechaVenc = ultimaCuotaPagada?.fecha_vencimiento ?? null;
     const estaAlDia = ultimaCuotaPagada && fechaVenc && fechaVenc >= hoy;
 
-    if (estaAlDia && abonoCapital.gt(0)) {
+    if ((estaAlDia || permiteAbonoCapital) && abonoCapital.gt(0)) {
       console.log("\n💰 ========== ABONO DIRECTO A CAPITAL ==========");
       console.log(`💵 Monto: Q${abonoCapital.toString()}`);
 
@@ -1354,8 +1358,8 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         .insert(cuotas_credito)
         .values({
           credito_id: credito_id,
-          numero_cuota: ultimaCuotaPagada.numero_cuota,
-          fecha_vencimiento: ultimaCuotaPagada.fecha_vencimiento,
+          numero_cuota: ultimaCuotaPagada?.numero_cuota ?? cuotasPendientes[0]?.cuotas_credito?.numero_cuota ?? 0,
+          fecha_vencimiento: ultimaCuotaPagada?.fecha_vencimiento ?? cuotasPendientes[0]?.cuotas_credito?.fecha_vencimiento ?? new Date().toISOString().slice(0, 10),
           pagado: true,
         })
         .returning();
@@ -1433,6 +1437,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         pagoConvenio: montoConvenio.toString() || "0",
         fecha_boleta: fecha_boleta,
         monto_aplicado: abonoCapital.toString(),
+        origen_pago: origen_pago,
       };
 
       console.log("\n📝 ========== REGISTRANDO PAGO ==========");

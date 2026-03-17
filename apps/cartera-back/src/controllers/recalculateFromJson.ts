@@ -821,7 +821,7 @@ export async function actualizarCuotasInversionistas(creditosAgrupados: CreditoA
         // Actualizar espejo
         await db
           .update(creditos_inversionistas_espejo)
-          .set({ cuota_inversionista: invActual.cuota })
+          .set({ cuota_inversionista: invActual.cuota, updated_at: new Date() })
           .where(
             and(
               eq(creditos_inversionistas_espejo.credito_id, creditoDB.credito_id),

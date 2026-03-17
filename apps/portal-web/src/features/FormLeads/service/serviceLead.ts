@@ -10,9 +10,10 @@ interface LeadPayload {
   creditType: string;
   loanPurpose: string;
   notes: string;
+  source?: string;
 }
 
-export const sendLead = async (data: FormLeadsValues) => {
+export const sendLead = async (data: FormLeadsValues, source?: string) => {
   // Separar nombre completo en firstName y lastName
   const nameParts = data.nombreCompleto.trim().split(" ");
   const firstName = nameParts[0] || "";
@@ -28,6 +29,10 @@ export const sendLead = async (data: FormLeadsValues) => {
     loanPurpose: "personal",
     notes: data.descripcion || "",
   };
+
+  if (source) {
+    payload.source = source;
+  }
 
   const response = await apiCRM.post("/api/public/lead", payload);
   return response.data;

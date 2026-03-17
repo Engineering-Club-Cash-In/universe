@@ -57,9 +57,15 @@ interface FormularioInvestorProps {
   initialAmount?: string;
   initialTerm?: string;
   initialType?: string;
+  source?: string;
 }
 
-export const FormularioInvestor = ({ initialAmount, initialTerm, initialType }: FormularioInvestorProps) => {
+export const FormularioInvestor = ({
+  initialAmount,
+  initialTerm,
+  initialType,
+  source,
+}: FormularioInvestorProps) => {
   const {
     values,
     errors,
@@ -71,7 +77,11 @@ export const FormularioInvestor = ({ initialAmount, initialTerm, initialType }: 
     handleSubmit,
     isSubmitting,
     serverError,
-  } = useFormInvestor(initialAmount, buildDefaultMessage(initialAmount, initialTerm, initialType));
+  } = useFormInvestor(
+    initialAmount,
+    buildDefaultMessage(initialAmount, initialTerm, initialType),
+    source
+  );
   const isMobile = useIsMobile();
 
   const handleProfileSelect = (type: ProfileType) => {

@@ -977,7 +977,7 @@ function RouteComponent() {
 					cuotaMensual: value.cuotaMensual ? value.cuotaMensual : undefined,
 					fechaInicio: value.fechaInicio || undefined,
 					diaPagoMensual: value.diaPagoMensual
-						? Number.parseInt(value.diaPagoMensual, 10)
+						? (Number.parseInt(value.diaPagoMensual, 10) as 15 | 30)
 						: undefined,
 					seguro: value.seguro ? Number.parseFloat(value.seguro) : undefined,
 					gps: value.gps ? Number.parseFloat(value.gps) : undefined,
@@ -1055,7 +1055,7 @@ function RouteComponent() {
 			tasaInteres?: string;
 			cuotaMensual?: string;
 			fechaInicio?: string;
-			diaPagoMensual?: number;
+			diaPagoMensual?: 15 | 30;
 			seguro?: number;
 			gps?: number;
 			categoria?:

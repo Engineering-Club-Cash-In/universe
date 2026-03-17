@@ -823,9 +823,10 @@ export const insertCredit = async ({ body, set }: { body: unknown; set: SetConte
     console.log("[INSERT CREDIT] creditDataForInsert:", JSON.stringify(creditDataForInsert, null, 2));
 
     // 4. Generar fechas de pago
-    console.log("[INSERT CREDIT] Step 4: Generating payment dates...");
-    const fechas = generatePaymentDates(creditData.plazo);
-    console.log("[INSERT CREDIT] Generated", fechas.length, "payment dates");
+    const fechas = generatePaymentDates(
+      creditData.plazo,
+      creditData.dia_pago_mensual,
+    );
 
     // 5. Insertar cuotas
     console.log("[INSERT CREDIT] Step 5: Inserting installments...");

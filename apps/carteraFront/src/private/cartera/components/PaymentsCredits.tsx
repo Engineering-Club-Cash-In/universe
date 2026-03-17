@@ -142,6 +142,7 @@ const FIELD_LABELS: Record<string, string> = {
   capital_restante: "Capital", interes_restante: "Interés", iva_12_restante: "IVA 12%",
   seguro_restante: "Seguro", gps_restante: "GPS", total_restante: "Total",
   membresias: "Membresías", membresias_pago: "Membresías Pago", membresias_mes: "Membresías Mes",
+  mora: "Mora", otros: "Otros", reserva: "Reserva", observaciones: "Observaciones",
 };
 
 const DETAIL_SECTIONS = [
@@ -157,6 +158,8 @@ const DETAIL_SECTIONS = [
     fields: ["capital_restante", "interes_restante", "iva_12_restante", "seguro_restante", "gps_restante", "total_restante"] },
   { title: "Membresías", icon: <Percent className="w-4 h-4" />, color: "text-purple-700", bg: "bg-purple-50", border: "border-purple-200",
     fields: ["membresias", "membresias_pago", "membresias_mes"] },
+  { title: "Mora, Otros y Observaciones", icon: <FileText className="w-4 h-4" />, color: "text-red-700", bg: "bg-red-50", border: "border-red-200",
+    fields: ["mora", "otros", "reserva", "observaciones"] },
 ];
 
 function formatFieldValue(key: string, value: any): string {
@@ -164,7 +167,7 @@ function formatFieldValue(key: string, value: any): string {
   if (key === "pagado" || key === "liquidacion_inversionistas")
     return value === true ? "Sí" : value === false ? "No" : String(value).replace(/_/g, " ");
   if (typeof value === "boolean") return value ? "Sí" : "No";
-  if (key.startsWith("monto") || key.startsWith("cuota") || key.startsWith("abono") || key.endsWith("_restante") || key === "membresias" || key === "membresias_pago" || key === "membresias_mes")
+  if (key.startsWith("monto") || key.startsWith("cuota") || key.startsWith("abono") || key.endsWith("_restante") || key === "membresias" || key === "membresias_pago" || key === "membresias_mes" || key === "mora" || key === "otros" || key === "reserva")
     return formatCurrency(value);
   if (key.startsWith("fecha") && typeof value === "string" && value.includes("-"))
     return key === "fecha_aplicado" ? formatDateTime(value) : formatDate(value);

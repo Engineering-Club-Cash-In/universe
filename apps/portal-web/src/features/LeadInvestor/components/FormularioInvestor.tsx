@@ -58,6 +58,7 @@ interface FormularioInvestorProps {
   initialTerm?: string;
   initialType?: string;
   source?: string;
+  campaign?: string;
 }
 
 export const FormularioInvestor = ({
@@ -65,6 +66,7 @@ export const FormularioInvestor = ({
   initialTerm,
   initialType,
   source,
+  campaign,
 }: FormularioInvestorProps) => {
   const {
     values,
@@ -80,7 +82,8 @@ export const FormularioInvestor = ({
   } = useFormInvestor(
     initialAmount,
     buildDefaultMessage(initialAmount, initialTerm, initialType),
-    source
+    source,
+    campaign
   );
   const isMobile = useIsMobile();
 

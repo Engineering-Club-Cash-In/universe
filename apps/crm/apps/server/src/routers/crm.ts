@@ -510,6 +510,7 @@ export const crmRouter = {
 				jobTitle: z.string().optional(),
 				companyId: z.string().uuid().optional(),
 				source: z.enum(leadSourceEnum.enumValues),
+				campaign: z.string().min(1).optional(),
 				assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
 				notes: z.string().optional(),
 			}),
@@ -568,6 +569,8 @@ export const crmRouter = {
 							.set({
 								assignedTo,
 								status: "new",
+								source: input.source,
+								campaign: input.campaign,
 								updatedAt: new Date(),
 							})
 							.where(eq(leads.id, existingLead.id))
@@ -595,6 +598,7 @@ export const crmRouter = {
 							assignedTo,
 							createdBy: context.userId,
 							source: input.source,
+							campaign: input.campaign,
 						});
 
 						return lead;
@@ -656,6 +660,7 @@ export const crmRouter = {
 				jobTitle: z.string().optional(),
 				companyId: z.string().uuid().optional(),
 				source: z.enum(leadSourceEnum.enumValues).optional(),
+				campaign: z.string().min(1).optional(),
 				status: z
 					.enum(["new", "contacted", "qualified", "unqualified", "converted"])
 					.optional(),
@@ -710,6 +715,21 @@ export const crmRouter = {
 				await db
 					.update(opportunities)
 					.set({ nit: updateData.nit || null, updatedAt: new Date() })
+					.where(eq(opportunities.leadId, id));
+			}
+
+			if (updateData.source !== undefined || updateData.campaign !== undefined) {
+				await db
+					.update(opportunities)
+					.set({
+						...(updateData.source !== undefined
+							? { source: updateData.source }
+							: {}),
+						...(updateData.campaign !== undefined
+							? { campaign: updateData.campaign }
+							: {}),
+						updatedAt: new Date(),
+					})
 					.where(eq(opportunities.leadId, id));
 			}
 
@@ -1212,6 +1232,7 @@ export const crmRouter = {
 				vehicleId: z.string().uuid().optional(),
 				creditType: z.enum(["autocompra", "sobre_vehiculo"]),
 				source: z.enum(leadSourceEnum.enumValues).optional(),
+				campaign: z.string().min(1).optional(),
 				loanPurpose: z.enum(["personal", "business"]).optional(),
 				value: z.string().optional(), // Will be converted to decimal
 				stageId: z.string().uuid(),
@@ -1268,6 +1289,7 @@ export const crmRouter = {
 			// If a lead is provided, get the company and source from the lead
 			let companyId = input.companyId;
 			let source = input.source;
+			let campaign = input.campaign;
 			let leadNit: string | null = null;
 			if (input.leadId) {
 				const lead = await db
@@ -1283,6 +1305,9 @@ export const crmRouter = {
 					if (!source && lead[0].source) {
 						source = lead[0].source;
 					}
+					if (!campaign && lead[0].campaign) {
+						campaign = lead[0].campaign;
+					}
 					// Copy NIT from lead to opportunity
 					if (lead[0].nit) {
 						leadNit = lead[0].nit;
@@ -1296,6 +1321,7 @@ export const crmRouter = {
 					...input,
 					companyId,
 					source,
+					campaign,
 					nit: leadNit,
 					assignedTo,
 					expectedCloseDate: input.expectedCloseDate
@@ -1317,6 +1343,8 @@ export const crmRouter = {
 				companyId: z.string().uuid().optional(),
 				vehicleId: z.string().uuid().nullable().optional(),
 				creditType: z.enum(["autocompra", "sobre_vehiculo"]).optional(),
+				source: z.enum(leadSourceEnum.enumValues).optional(),
+				campaign: z.string().min(1).optional(),
 				value: z.string().optional(),
 				stageId: z.string().uuid().optional(),
 				probability: z.number().min(0).max(100).optional(),
@@ -6083,6 +6111,7 @@ export const crmRouter = {
 						facebook: "Facebook",
 						instagram: "Instagram",
 						google: "Google",
+						meta: "Meta",
 						Whatsapp: "WhatsApp",
 					};
 					byMedio = medioRows.map((r) => ({

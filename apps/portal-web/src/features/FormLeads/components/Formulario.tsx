@@ -41,7 +41,7 @@ const CREDIT_OPTIONS: {
 ];
 
 export const Formulario = () => {
-  const { type, source } = useSearch({ from: "/leads" });
+  const { type, source, campaign } = useSearch({ from: "/leads" });
   const {
     values,
     errors,
@@ -53,7 +53,7 @@ export const Formulario = () => {
     handleSubmit,
     isSubmitting,
     serverError,
-  } = useFormLeads(source);
+  } = useFormLeads(source, campaign);
   const isMobile = useIsMobile();
 
   // Preseleccionar tipo de crédito según param de URL (?type=buy | ?type=sell)

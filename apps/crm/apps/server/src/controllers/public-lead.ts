@@ -2,8 +2,15 @@ import { and, asc, count, eq, gte, or } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
-import { leads, opportunities, salesStages } from "../db/schema/crm";
+import {
+	leadSourceEnum,
+	leads,
+	opportunities,
+	salesStages,
+} from "../db/schema/crm";
 import { getOnlyRenapInfoController } from "./bot";
+
+type LeadSource = (typeof leadSourceEnum.enumValues)[number];
 
 /**
  * Encuentra al usuario de ventas con menos oportunidades asignadas.
@@ -128,14 +135,8 @@ export async function createOpportunityForLead(
 	lastName: string,
 	systemUserId: string,
 	notes = "",
-	source?:
-		| "website"
-		| "referral"
-		| "cold_call"
-		| "email"
-		| "social_media"
-		| "event"
-		| "other",
+	source?: LeadSource,
+	campaign?: string,
 	loanPurpose?: "personal" | "business",
 	creditType?: "autocompra" | "sobre_vehiculo",
 ) {
@@ -164,6 +165,7 @@ export async function createOpportunityForLead(
 			updatedAt: new Date(),
 			notes: notes,
 			source: source,
+			campaign,
 			loanPurpose: loanPurpose,
 			creditType: creditType ?? "autocompra",
 		})
@@ -220,6 +222,11 @@ export async function createPublicLead(c: Context) {
 
 		// --- Lead existente ---
 		if (existingLead) {
+			const source = body.source || existingLead.source || "website";
+			const campaign =
+				body.campaign || existingLead.campaign || undefined;
+			let leadData = existingLead;
+
 			if (body.isRegister) {
 				return c.json(
 					{ success: true, data: existingLead, message: "Lead ya existe" },
@@ -246,7 +253,8 @@ export async function createPublicLead(c: Context) {
 				existingLead.lastName,
 				existingLead.assignedTo,
 				body.notes ?? "",
-				body.source || existingLead.source || "website",
+				source,
+				campaign,
 				body.loanPurpose,
 				creditType,
 			);
@@ -259,7 +267,12 @@ export async function createPublicLead(c: Context) {
 			) {
 				const [updatedLead] = await db
 					.update(leads)
-					.set({ email: body.email, updatedAt: new Date() })
+					.set({
+						email: body.email,
+						source,
+						campaign,
+						updatedAt: new Date(),
+					})
 					.where(eq(leads.id, existingLead.id))
 					.returning();
 
@@ -274,10 +287,22 @@ export async function createPublicLead(c: Context) {
 				);
 			}
 
+			if (body.source || body.campaign) {
+				[leadData] = await db
+					.update(leads)
+					.set({
+						source,
+						campaign,
+						updatedAt: new Date(),
+					})
+					.where(eq(leads.id, existingLead.id))
+					.returning();
+			}
+
 			return c.json(
 				{
 					success: true,
-					data: existingLead,
+					data: leadData,
 					message: "Lead ya existe con el mismo email o DPI",
 					opportunity,
 				},
@@ -320,6 +345,7 @@ export async function createPublicLead(c: Context) {
 				jobTitle: body.jobTitle,
 				notes: body.notes,
 				source: body.source || "website",
+				campaign: body.campaign,
 				status: "new",
 				assignedTo: salesUserForLead.id,
 				createdBy: salesUserForLead.id,
@@ -339,6 +365,7 @@ export async function createPublicLead(c: Context) {
 			salesUserForLead.id,
 			body.notes ?? "",
 			body.source || "website",
+			body.campaign,
 			body.loanPurpose,
 			creditType,
 		);

@@ -92,6 +92,13 @@
 			"when": 1773388800000,
 			"tag": "0017_juridico_dashboard_snapshots",
 			"breakpoints": true
+		},
+		{
+			"idx": 13,
+			"version": "7",
+			"when": 1773705600000,
+			"tag": "0018_add_campaign_tracking",
+			"breakpoints": true
 		}
 	]
 }

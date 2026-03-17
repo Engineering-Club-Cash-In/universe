@@ -21,6 +21,11 @@ export const investmentLeadSourceEnum = pgEnum("investment_lead_source", [
 	"email",
 	"social_media",
 	"event",
+	"other",
+	"facebook",
+	"instagram",
+	"google",
+	"meta",
 	"whatsapp",
 ]);
 
@@ -91,6 +96,7 @@ export const investmentLeads = pgTable("investment_leads", {
 	email: text("email"),
 	phones: text("phones").array(),
 	source: investmentLeadSourceEnum("source"),
+	campaign: text("campaign"),
 	proposedAmount: decimal("proposed_amount", { precision: 16, scale: 2 }),
 	assignedTo: text("assigned_to").references(() => user.id),
 	userId: text("user_id").references(() => user.id, { onDelete: "set null" }),

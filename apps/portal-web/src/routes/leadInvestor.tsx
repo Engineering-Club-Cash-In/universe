@@ -7,6 +7,7 @@ interface LeadInvestorSearch {
   term?: string;
   type?: string;
   source?: string;
+  campaign?: string;
 }
 
 export const Route = createFileRoute("/leadInvestor")({
@@ -15,19 +16,22 @@ export const Route = createFileRoute("/leadInvestor")({
     const term = typeof search.term === "string" ? search.term : undefined;
     const type = typeof search.type === "string" ? search.type : undefined;
     const source = typeof search.source === "string" ? search.source : undefined;
+    const campaign =
+      typeof search.campaign === "string" ? search.campaign : undefined;
 
     return {
       ...(amount ? { amount } : {}),
       ...(term ? { term } : {}),
       ...(type ? { type } : {}),
       ...(source ? { source } : {}),
+      ...(campaign ? { campaign } : {}),
     };
   },
   component: RouteComponent,
 });
 
 function RouteComponent() {
-  const { amount, term, type, source } = Route.useSearch();
+  const { amount, term, type, source, campaign } = Route.useSearch();
 
   return (
     <Page>
@@ -36,6 +40,7 @@ function RouteComponent() {
         initialTerm={term}
         initialType={type}
         source={source}
+        campaign={campaign}
       />
     </Page>
   );

@@ -234,12 +234,24 @@ export async function createPublicLead(c: Context) {
 				);
 			}
 
+			if (body.source || body.campaign) {
+				[leadData] = await db
+					.update(leads)
+					.set({
+						source,
+						campaign,
+						updatedAt: new Date(),
+					})
+					.where(eq(leads.id, existingLead.id))
+					.returning();
+			}
+
 			// Verificar oportunidad reciente antes de crear una nueva
 			if (await hasRecentOpportunity(existingLead.id)) {
 				return c.json(
 					{
 						success: true,
-						data: existingLead,
+						data: leadData,
 						message:
 							"Lead ya tiene una oportunidad reciente (últimas 24 horas)",
 					},
@@ -285,18 +297,6 @@ export async function createPublicLead(c: Context) {
 					},
 					200,
 				);
-			}
-
-			if (body.source || body.campaign) {
-				[leadData] = await db
-					.update(leads)
-					.set({
-						source,
-						campaign,
-						updatedAt: new Date(),
-					})
-					.where(eq(leads.id, existingLead.id))
-					.returning();
 			}
 
 			return c.json(

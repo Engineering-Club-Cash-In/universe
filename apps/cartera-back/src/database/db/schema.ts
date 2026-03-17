@@ -346,11 +346,21 @@
       iva_cash_in: numeric("iva_cash_in", { precision: 18, scale: 2 }).notNull().default("0"),
       fecha_creacion: timestamp("fecha_creacion", { withTimezone: true }).notNull().$default(() => new Date()),
       fecha_inicio_participacion: date("fecha_inicio_participacion").notNull().default("2025-12-01"),
+      updated_at: timestamp("updated_at").defaultNow(),
     },
     (t) => ({
       uxCreditoInvEspejo: uniqueIndex("ux_credito_inversionista_espejo").on(t.credito_id, t.inversionista_id),
     })
   );
+
+  export const liquidacion_locks = customSchema.table("liquidacion_locks", {
+    id: serial("id").primaryKey(),
+    inversionista_id: integer("inversionista_id"),
+    estado: varchar("estado", { length: 20 }).notNull().default("EN_PROCESO"),
+    started_at: timestamp("started_at").defaultNow(),
+    finished_at: timestamp("finished_at"),
+    error: text("error"),
+  });
 
   export const credit_cancelations = customSchema.table("credit_cancelations", {
     id: serial("id").primaryKey(),
@@ -502,6 +512,8 @@
         () => liquidaciones.liquidacion_id,
         { onDelete: "set null" } // Si se borra la liquidación, el campo queda en null
       ),
+
+      updated_at: timestamp("updated_at").defaultNow(),
     },
     (table) => ({
       uniquePagoInversionistaEspejo: unique("unique_pago_inversionista_espejo").on(

@@ -164,7 +164,7 @@ const creditSchema = z.object({
   como_se_entero: z.string().max(100), 
   plazo: z.number().int().min(1).max(360),
   cuota: z.number().min(0),
-  dia_pago_mensual: z.union([z.literal(15), z.literal(30)]).optional().default(30),
+  dia_pago_mensual: z.number().int().min(1).max(31),
   membresias_pago: z.number().min(0),
   porcentaje_royalti: z.number().min(0),
   royalti: z.number().min(0),
@@ -548,12 +548,12 @@ if (creditosInversionistasData.length > 0) {
 const generatePaymentDates = (plazo: number, diaPagoMensual: 15 | 30): string[] => {
   const fechas: string[] = [];
   const startDate = new Date();
-  
+
   const fechaHoy = new Date();
   const fechaHoyGuate = fechaHoy.toLocaleDateString("sv-SE", {
     timeZone: "America/Guatemala",
   });
-  
+
   fechas.push(fechaHoyGuate);
 
   for (let i = 0; i < plazo; i++) {
@@ -822,11 +822,9 @@ export const insertCredit = async ({ body, set }: { body: unknown; set: SetConte
     console.log("[INSERT CREDIT] Credit inserted, credito_id:", newCredit.credito_id);
     console.log("[INSERT CREDIT] creditDataForInsert:", JSON.stringify(creditDataForInsert, null, 2));
 
-    // 4. Generar fechas de pago
-    const fechas = generatePaymentDates(
-      creditData.plazo,
-      creditData.dia_pago_mensual,
-    );
+    // 4. Generar fechas de pago (día <= 20 → pago el 15, día > 20 → pago el 30)
+    const diaPago: 15 | 30 = creditData.dia_pago_mensual <= 20 ? 15 : 30;
+    const fechas = generatePaymentDates(creditData.plazo, diaPago);
 
     // 5. Insertar cuotas
     console.log("[INSERT CREDIT] Step 5: Inserting installments...");

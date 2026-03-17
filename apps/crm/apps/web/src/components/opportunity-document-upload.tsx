@@ -125,17 +125,20 @@ export function OpportunityDocumentUpload({
 			: date.toLocaleDateString();
 	};
 
-	const uploadedTypes = new Set(documents?.map((d) => d.documentType) || []);
+	const uploadedTypes = new Set<OpportunityDocumentType>(
+		documents?.map((d) => d.documentType) || [],
+	);
 
 	// Crear opciones para el combobox
 	const documentOptions = useMemo(() => {
-		const options: { value: string; label: string }[] = [];
+		const options: { value: OpportunityDocumentType; label: string }[] = [];
 		for (const [_category, types] of Object.entries(documentCategories)) {
 			for (const type of types) {
-				const label = getDocumentTypeLabel(type);
+				const typedType = type as OpportunityDocumentType;
+				const label = getDocumentTypeLabel(typedType);
 				options.push({
-					value: type,
-					label: uploadedTypes.has(type) ? `${label} ✓` : label,
+					value: typedType,
+					label: uploadedTypes.has(typedType) ? `${label} ✓` : label,
 				});
 			}
 		}
@@ -259,13 +262,15 @@ export function OpportunityDocumentUpload({
 					<div className="grid gap-3 sm:grid-cols-2">
 						<div className="space-y-1.5">
 							<Label>Tipo de Documento</Label>
-							<Combobox
-								options={documentOptions}
-								value={documentType}
-								onChange={setDocumentType}
-								placeholder="Buscar tipo de documento..."
-								width="full"
-								popOverWidth="full"
+								<Combobox
+									options={documentOptions}
+									value={documentType}
+									onChange={(value) =>
+										setDocumentType((value as OpportunityDocumentType | "") ?? "")
+									}
+									placeholder="Buscar tipo de documento..."
+									width="full"
+									popOverWidth="full"
 								isInModal={true}
 							/>
 						</div>

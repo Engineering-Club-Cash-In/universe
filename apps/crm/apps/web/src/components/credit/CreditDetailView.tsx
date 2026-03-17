@@ -73,6 +73,8 @@ type CreditCategory =
 	| "Hipotecario"
 	| "Vehículo";
 
+type PaymentDay = 15 | 30;
+
 // Tipo para inversionista seleccionado
 interface SelectedInversionista {
 	inversionista_id: number;
@@ -221,7 +223,7 @@ export function CreditDetailView({
 	const [editInversionistas, setEditInversionistas] = useState<
 		SelectedInversionista[]
 	>([]);
-	const [editDiaPagoMensual, setEditDiaPagoMensual] = useState<number>(15);
+	const [editDiaPagoMensual, setEditDiaPagoMensual] = useState<PaymentDay>(15);
 
 	// Inicializar valores desde opportunity
 	useEffect(() => {
@@ -238,7 +240,7 @@ export function CreditDetailView({
 		setEditDireccion(lead?.direccion || leadDireccion || "");
 		setEditNit(opportunity.nit || "");
 		setEditCategoria((opportunity.categoria as CreditCategory) || "");
-		setEditDiaPagoMensual(opportunity.diaPagoMensual || 15);
+			setEditDiaPagoMensual((opportunity.diaPagoMensual as PaymentDay) || 15);
 
 		// Parsear inversionistas existentes
 		if (opportunity.inversionistas) {
@@ -1042,7 +1044,7 @@ export function CreditDetailView({
 											<Select
 												value={String(editDiaPagoMensual)}
 												onValueChange={(value) =>
-													setEditDiaPagoMensual(Number(value))
+													setEditDiaPagoMensual(Number(value) as PaymentDay)
 												}
 											>
 												<SelectTrigger className="mt-1">

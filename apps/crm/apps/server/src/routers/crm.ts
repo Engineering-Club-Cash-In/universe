@@ -719,8 +719,21 @@ export const crmRouter = {
 			}
 
 			if (updateData.source !== undefined || updateData.campaign !== undefined) {
-				await db
-					.update(opportunities)
+				const [activeOpportunity] = await db
+					.select({ id: opportunities.id })
+					.from(opportunities)
+					.where(
+						and(
+							eq(opportunities.leadId, id),
+							inArray(opportunities.status, ["open", "on_hold"]),
+						),
+					)
+					.orderBy(desc(opportunities.createdAt))
+					.limit(1);
+
+				if (activeOpportunity) {
+					await db
+						.update(opportunities)
 					.set({
 						...(updateData.source !== undefined
 							? { source: updateData.source }
@@ -730,7 +743,8 @@ export const crmRouter = {
 							: {}),
 						updatedAt: new Date(),
 					})
-					.where(eq(opportunities.leadId, id));
+						.where(eq(opportunities.id, activeOpportunity.id));
+				}
 			}
 
 			return updatedLead[0];

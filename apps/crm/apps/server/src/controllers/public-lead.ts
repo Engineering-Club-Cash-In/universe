@@ -189,6 +189,10 @@ export async function getRecentOpportunity(leadId: string) {
 		.where(
 			and(
 				eq(opportunities.leadId, leadId),
+				or(
+					eq(opportunities.status, "open"),
+					eq(opportunities.status, "on_hold"),
+				),
 				gte(opportunities.createdAt, twentyFourHoursAgo),
 			),
 		)

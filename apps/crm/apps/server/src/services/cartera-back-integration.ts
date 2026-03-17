@@ -150,6 +150,7 @@ export interface CreateCreditoParams {
 	departamento?: string | null;
 	codigo_postal?: string | null;
 	pais?: string | null;
+	dia_pago_mensual?: 15 | 30;
 }
 
 export interface CreateCreditoResult {
@@ -190,6 +191,7 @@ export async function createCreditoInCarteraBack(
 			// Nuevos campos adicionales
 			categoria: params.categoria,
 			nit: params.nit,
+			dia_pago_mensual: params.dia_pago_mensual,
 			royalti: params.royalti ?? 0,
 			porcentaje_royalti: params.porcentaje_royalti ?? 0,
 			inversionistas: params.inversionistas,

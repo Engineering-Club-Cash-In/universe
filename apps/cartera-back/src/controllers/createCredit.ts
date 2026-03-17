@@ -164,6 +164,7 @@ const creditSchema = z.object({
   como_se_entero: z.string().max(100), 
   plazo: z.number().int().min(1).max(360),
   cuota: z.number().min(0),
+  dia_pago_mensual: z.number().int().min(1).max(31),
   membresias_pago: z.number().min(0),
   porcentaje_royalti: z.number().min(0),
   royalti: z.number().min(0),
@@ -544,15 +545,15 @@ if (creditosInversionistasData.length > 0) {
 // 3. GENERACIÓN DE FECHAS
 // ========================================
 
-const generatePaymentDates = (plazo: number): string[] => {
+const generatePaymentDates = (plazo: number, diaPagoMensual: 15 | 30): string[] => {
   const fechas: string[] = [];
   const startDate = new Date();
-  
+
   const fechaHoy = new Date();
   const fechaHoyGuate = fechaHoy.toLocaleDateString("sv-SE", {
     timeZone: "America/Guatemala",
   });
-  
+
   fechas.push(fechaHoyGuate);
 
   for (let i = 0; i < plazo; i++) {
@@ -561,7 +562,7 @@ const generatePaymentDates = (plazo: number): string[] => {
 
     // Último día del mes destino (ej: Feb → 28/29)
     const ultimoDiaMes = new Date(anioBase, mesBase + 1, 0).getDate();
-    const diaPago = Math.min(30, ultimoDiaMes);
+    const diaPago = Math.min(diaPagoMensual, ultimoDiaMes);
 
     const fechaLocal = new Date(anioBase, mesBase, diaPago, 12, 0, 0);
     const fechaGuateStr = fechaLocal.toLocaleDateString("sv-SE", {
@@ -821,9 +822,9 @@ export const insertCredit = async ({ body, set }: { body: unknown; set: SetConte
     console.log("[INSERT CREDIT] Credit inserted, credito_id:", newCredit.credito_id);
     console.log("[INSERT CREDIT] creditDataForInsert:", JSON.stringify(creditDataForInsert, null, 2));
 
-    // 4. Generar fechas de pago
-    console.log("[INSERT CREDIT] Step 4: Generating payment dates...");
-    const fechas = generatePaymentDates(creditData.plazo);
+    // 4. Generar fechas de pago (día <= 20 → pago el 15, día > 20 → pago el 30)
+    const diaPago: 15 | 30 = creditData.dia_pago_mensual <= 20 ? 15 : 30;
+    const fechas = generatePaymentDates(creditData.plazo, diaPago);
     console.log("[INSERT CREDIT] Generated", fechas.length, "payment dates");
 
     // 5. Insertar cuotas

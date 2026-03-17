@@ -2234,11 +2234,16 @@ export async function actualizarCuentaPagoService(
       null, // No body porque usamos query params
       {
         params: {
-          pagoId: pagoId.toString(), // 👈 Convertir a string
-          cuentaEmpresaId: cuentaEmpresaId.toString(), // 👈 Convertir a string
+          pagoId: pagoId.toString(),
+          cuentaEmpresaId: cuentaEmpresaId.toString(),
         },
       }
     );
+
+    // Si el backend responde 200 pero sin campo success, asumimos éxito
+    if (data.success === undefined) {
+      return { ...data, success: true, message: data.message || "Cuenta actualizada correctamente" };
+    }
 
     return data;
   } catch (error: any) {

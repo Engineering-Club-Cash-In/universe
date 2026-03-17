@@ -41,6 +41,13 @@ export const DEFAULT_CODIGO_POSTAL = "01001";
 /** Credit number prefix for CRM-generated credits */
 export const CREDIT_NUMBER_PREFIX = "CRM";
 
+function normalizePaymentDay(day: number | null | undefined): 15 | 30 | null {
+	if (day == null) return null;
+	if (day === 15 || day === 30) return day;
+	if (day === 31) return 30;
+	return null;
+}
+
 // ============================================================================
 // FACTURACIÓN CONSTANTS (valores fijos para facturas)
 // ============================================================================
@@ -760,6 +767,14 @@ async function createCredit(
 		const gastosAdministrativos = opportunity.gastosAdministrativos
 			? Number(opportunity.gastosAdministrativos)
 			: 0;
+		const diaPagoMensual = normalizePaymentDay(opportunity.diaPagoMensual);
+
+		if (diaPagoMensual == null) {
+			return {
+				success: false,
+				error: "La oportunidad debe tener día de pago 15 o 30 para crear el crédito en cartera-back",
+			};
+		}
 
 		const creditoResult = await createCreditoInCarteraBack({
 			opportunityId: opportunity.id,
@@ -772,6 +787,7 @@ async function createCredit(
 			porcentaje_interes: Number.parseFloat(opportunity.tasaInteres as string),
 			plazo: opportunity.numeroCuotas as number,
 			cuota: Number.parseFloat(opportunity.cuotaMensual as string),
+			dia_pago_mensual: diaPagoMensual,
 			tipoCredito: opportunity.creditType || "autocompra",
 			observaciones: `Crédito generado desde CRM - Oportunidad: ${opportunity.title}`,
 			seguro_10_cuotas: seguro,

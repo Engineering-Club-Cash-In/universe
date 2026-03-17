@@ -4,7 +4,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { DollarSign, Percent, Info, FileText, Building2, CheckCircle2, Calendar } from "lucide-react";
+import { DollarSign, Percent, Info, FileText, Building2, CheckCircle2, Calendar, ChevronsUpDown, Check } from "lucide-react";
+import { Combobox, Transition } from "@headlessui/react";
+import { Fragment, useMemo } from "react";
 import { toast } from "sonner";
 import { MiniCardCredito } from "./cardInfo";
 import { OpcionesExcesoModal } from "./excessModal";
@@ -18,7 +20,7 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 import { useBancos } from "../hooks/bancos";
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import {
   Dialog,
   DialogContent,
@@ -89,6 +91,41 @@ export function PagoForm() {
 
   // 🎯 Estado para el modal de confirmación
   const [modalConfirmacionOpen, setModalConfirmacionOpen] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [bancoQuery, setBancoQuery] = useState("");
+
+  const filteredBancos = useMemo(
+    () =>
+      bancoQuery === ""
+        ? bancos
+        : bancos.filter((b) =>
+            b.nombre.toLowerCase().includes(bancoQuery.toLowerCase())
+          ),
+    [bancos, bancoQuery]
+  );
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const files = Array.from(e.dataTransfer.files).filter(
+      (f) => f.type.startsWith("image/") || f.type === "application/pdf"
+    );
+    if (files.length + archivosParaSubir.length > 3) {
+      toast.error("Solo puedes seleccionar hasta 3 archivos en total");
+      return;
+    }
+    setArchivosParaSubir([...archivosParaSubir, ...files]);
+  }, [archivosParaSubir, setArchivosParaSubir]);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  }, []);
 
   // 🎯 Handler para abrir el modal
   const handleAbrirConfirmacion = async (e: React.MouseEvent) => {
@@ -585,33 +622,82 @@ export function PagoForm() {
                   <Label className="text-gray-700 font-semibold text-sm">
                     Banco <span className="text-red-500">*</span>
                   </Label>
-                  <Select
-                    value={formik.values.banco_id?.toString() || ""}
-                    onValueChange={(value) => {
+                  <Combobox
+                    value={formik.values.banco_id ?? ""}
+                    onChange={(value: any) => {
                       formik.setFieldValue("banco_id", Number(value));
                       formik.setFieldTouched("banco_id", true, false);
+                      setBancoQuery("");
                     }}
                     disabled={loadingBancos}
                   >
-                    <SelectTrigger className={`w-full border rounded-lg px-3 py-2.5 text-gray-900 bg-white [&>span]:text-gray-900 ${
-                      formik.errors.banco_id && formik.touched.banco_id && !formik.values.banco_id
-                        ? "border-red-500"
-                        : "border-gray-300"
-                    }`}>
-                      <SelectValue placeholder="Selecciona un banco" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-white border border-gray-200 shadow-lg">
-                      {bancos.map((banco) => (
-                        <SelectItem
-                          key={banco.banco_id}
-                          value={banco.banco_id.toString()}
-                          className="text-gray-900 hover:bg-blue-50 cursor-pointer"
-                        >
-                          {banco.nombre}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    <div className="relative">
+                      <div className="relative w-full">
+                        <Combobox.Input
+                          className={`w-full border rounded-lg pl-3 pr-10 py-2.5 text-gray-900 bg-white font-medium focus:ring-2 focus:ring-blue-400 focus:border-blue-500 focus:outline-none placeholder:text-gray-400 transition-all shadow-sm ${
+                            formik.errors.banco_id && formik.touched.banco_id && !formik.values.banco_id
+                              ? "border-red-500"
+                              : "border-gray-300"
+                          }`}
+                          displayValue={(id: any) =>
+                            id === ""
+                              ? ""
+                              : bancos.find((b) => b.banco_id === id)?.nombre || ""
+                          }
+                          onChange={(e) => setBancoQuery(e.target.value)}
+                          onFocus={(e) => e.target.select()}
+                          placeholder="Buscar banco..."
+                        />
+                        <Combobox.Button className="absolute inset-y-0 right-0 flex items-center pr-3">
+                          <ChevronsUpDown className="h-5 w-5 text-gray-400 hover:text-gray-600 transition-colors" />
+                        </Combobox.Button>
+                      </div>
+                      <Transition
+                        as={Fragment as any}
+                        leave="transition ease-in duration-100"
+                        leaveFrom="opacity-100"
+                        leaveTo="opacity-0"
+                        afterLeave={() => setBancoQuery("")}
+                      >
+                        <Combobox.Options className="absolute z-50 mt-2 w-full max-h-60 overflow-auto rounded-xl bg-white py-2 shadow-2xl border-2 border-blue-200 focus:outline-none">
+                          {filteredBancos.length === 0 && bancoQuery !== "" ? (
+                            <div className="relative cursor-default select-none py-4 px-4 text-center text-gray-500 text-sm">
+                              No se encontró banco
+                            </div>
+                          ) : (
+                            filteredBancos.map((banco) => (
+                              <Combobox.Option
+                                key={banco.banco_id}
+                                value={banco.banco_id}
+                                className={({ active, selected }) =>
+                                  `relative cursor-pointer select-none py-2.5 pl-10 pr-4 transition-colors ${
+                                    active
+                                      ? "bg-blue-50 text-blue-900"
+                                      : selected
+                                        ? "bg-blue-50 text-blue-900"
+                                        : "bg-white text-gray-700 hover:bg-gray-50"
+                                  }`
+                                }
+                              >
+                                {({ selected }) => (
+                                  <>
+                                    <span className={`block truncate ${selected ? "font-bold" : "font-medium"}`}>
+                                      {banco.nombre}
+                                    </span>
+                                    {selected && (
+                                      <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-green-600">
+                                        <Check className="h-5 w-5" />
+                                      </span>
+                                    )}
+                                  </>
+                                )}
+                              </Combobox.Option>
+                            ))
+                          )}
+                        </Combobox.Options>
+                      </Transition>
+                    </div>
+                  </Combobox>
                   {formik.errors.banco_id && formik.touched.banco_id && !formik.values.banco_id && (
                     <div className="text-red-500 text-xs mt-0.5">{formik.errors.banco_id}</div>
                   )}
@@ -708,10 +794,19 @@ export function PagoForm() {
                 </Label>
                 <label
                   htmlFor="boleta-upload"
-                  className="flex items-center justify-center gap-2 w-full border-2 border-dashed border-gray-300 rounded-lg px-4 py-3 cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition text-gray-500 text-sm"
+                  className={`flex items-center justify-center gap-2 w-full border-2 border-dashed rounded-lg px-4 py-3 cursor-pointer transition text-sm ${
+                    isDragging
+                      ? "border-blue-500 bg-blue-50 text-blue-600"
+                      : "border-gray-300 hover:border-blue-400 hover:bg-blue-50/50 text-gray-500"
+                  }`}
+                  onDrop={handleDrop}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
                 >
                   <Info className="w-4 h-4" />
-                  Haz clic para seleccionar archivos (max. 3)
+                  {isDragging
+                    ? "Suelta los archivos aquí"
+                    : "Haz clic o arrastra archivos aquí (max. 3)"}
                 </label>
                 <input
                   id="boleta-upload"

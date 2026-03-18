@@ -2,21 +2,46 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Page } from "@/components";
 import { LeadInvestor } from "@/features/LeadInvestor";
 
+interface LeadInvestorSearch {
+  amount?: string;
+  term?: string;
+  type?: string;
+  source?: string;
+  campaign?: string;
+}
+
 export const Route = createFileRoute("/leadInvestor")({
-  validateSearch: (search: Record<string, unknown>) => ({
-    amount: typeof search.amount === "string" ? search.amount : undefined,
-    term: typeof search.term === "string" ? search.term : undefined,
-    type: typeof search.type === "string" ? search.type : undefined,
-  }),
+  validateSearch: (search: Record<string, unknown>): LeadInvestorSearch => {
+    const amount = typeof search.amount === "string" ? search.amount : undefined;
+    const term = typeof search.term === "string" ? search.term : undefined;
+    const type = typeof search.type === "string" ? search.type : undefined;
+    const source = typeof search.source === "string" ? search.source : undefined;
+    const campaign =
+      typeof search.campaign === "string" ? search.campaign : undefined;
+
+    return {
+      ...(amount ? { amount } : {}),
+      ...(term ? { term } : {}),
+      ...(type ? { type } : {}),
+      ...(source ? { source } : {}),
+      ...(campaign ? { campaign } : {}),
+    };
+  },
   component: RouteComponent,
 });
 
 function RouteComponent() {
-  const { amount, term, type } = Route.useSearch();
+  const { amount, term, type, source, campaign } = Route.useSearch();
 
   return (
     <Page>
-      <LeadInvestor initialAmount={amount} initialTerm={term} initialType={type} />
+      <LeadInvestor
+        initialAmount={amount}
+        initialTerm={term}
+        initialType={type}
+        source={source}
+        campaign={campaign}
+      />
     </Page>
   );
 }

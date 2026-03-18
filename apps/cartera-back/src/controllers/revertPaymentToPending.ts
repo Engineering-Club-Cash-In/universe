@@ -177,17 +177,17 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
         for (const factura of facturasDelPago) {
           console.log(`\n🧾 Procesando factura ${factura.serie}-${factura.numero} (${factura.uuid})`);
 
-          // const resultadoCofidi = await anularFacturaEnCofidi({
-          //   uuid: factura.uuid,
-          //   motivo: `Reversión automática del pago ID: ${pago_id}`,
-          //   factura: {
-          //     receptor_nit: factura.receptor_nit,
-          //     fecha_certificacion: factura.fecha_certificacion,
-          //     fecha_emision: factura.fecha_emision,
-          //   },
-          // });
+          const resultadoCofidi = await anularFacturaEnCofidi({
+            uuid: factura.uuid,
+            motivo: `Reversión automática del pago ID: ${pago_id}`,
+            factura: {
+              receptor_nit: factura.receptor_nit,
+              fecha_certificacion: factura.fecha_certificacion,
+              fecha_emision: factura.fecha_emision,
+            },
+          });
 
-          // if (resultadoCofidi.success && resultadoCofidi.anulado) {
+          if (resultadoCofidi.success && resultadoCofidi.anulado) {
             try {
               await tx
                 .update(facturas_electronicas)
@@ -216,15 +216,15 @@ export const revertPaymentToPending = async ({ body, set }: any) => {
                 mensaje: "Anulada en COFIDI pero error al actualizar BD",
               });
             }
-          // } else {
-          //   console.error(`❌ Error al anular en COFIDI:`, resultadoCofidi.mensaje);
-          //   facturasConError.push({
-          //     factura_id: factura.factura_id,
-          //     uuid: factura.uuid,
-          //     error: resultadoCofidi.error,
-          //     mensaje: resultadoCofidi.mensaje,
-          //   });
-          // }
+           } else {
+             console.error(`❌ Error al anular en COFIDI:`, resultadoCofidi.mensaje);
+             facturasConError.push({
+               factura_id: factura.factura_id,
+               uuid: factura.uuid,
+               error: resultadoCofidi.error,
+               mensaje: resultadoCofidi.mensaje,
+             });
+          }
         }
         console.log(`\n📊 Resumen anulación facturas: ✅ Anuladas: ${facturasAnuladas.length} | ❌ Con error: ${facturasConError.length}`);
       }

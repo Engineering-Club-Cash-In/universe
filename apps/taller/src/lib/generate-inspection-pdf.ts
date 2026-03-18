@@ -408,9 +408,14 @@ export async function generateInspectionPdf(vehicle: any) {
   doc.setTextColor(0, 0, 0);
   y += 8;
   const splitResult = doc.splitTextToSize(vehicle.inspectionResult || "Sin observaciones generadas.", 180);
+  const textHeight = splitResult.length * 5;
+  if (y + textHeight > 280) {
+    doc.addPage();
+    y = 20;
+  }
   doc.text(splitResult, 14, y);
 
-  y += splitResult.length * 5 + 10;
+  y += textHeight + 10;
 
 
   // Save

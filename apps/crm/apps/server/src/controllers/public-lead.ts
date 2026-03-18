@@ -207,6 +207,13 @@ export async function createPublicLead(c: Context) {
 		const creditType = body.creditType || "autocompra";
 		const hasDpi = !!(body.dpi && body.dpi.trim() !== "");
 
+		if (hasDpi && String(body.dpi).trim().length !== 13) {
+			return c.json(
+				{ success: false, error: "DPI inválido, debe tener 13 dígitos" },
+				400,
+			);
+		}
+
 		// Buscar lead existente: por email+DPI si hay DPI, solo por email si no
 		const whereClause = hasDpi
 			? or(eq(leads.email, body.email), eq(leads.dpi, body.dpi))

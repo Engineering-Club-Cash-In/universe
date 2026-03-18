@@ -91,7 +91,7 @@ export const INSPECTION_AREAS: InspectionCategory[] = [
         points: [
             { id: "prueba_obd2", label: "Prueba de escaner OBD2" },
             { id: "cables_bujias", label: "Cables de bujías y bobinas" },
-            { id: "arneses_electricos", label: "Arnéses eléctricos" },
+            { id: "arneses_electricos", label: "Arneses eléctricos" },
             { id: "estado_bateria", label: "Estado de la batería (terminales limpios, sin corrosión)" },
             { id: "ac_calefaccion_accesorios", label: "Funcionamiento del aire acondicionado, calefacción, radio y otros accesorios" },
             { id: "limpiaparabrisas_liquido", label: "Limpiaparabrisas y líquido lavaparabrisas operativos" },

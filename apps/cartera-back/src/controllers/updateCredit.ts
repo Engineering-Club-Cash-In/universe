@@ -1184,14 +1184,8 @@ export const recalcularPagosCredito = async ({
             abono_seguro: abono_seguro.round(2).toString(),
             abono_gps: abono_gps.round(2).toString(),
             abono_capital: abono_capital.round(2).toString(),
-            membresias_pago:
-              pago.validationStatus === "pending"
-                ? abono_membresias.round(2).toString()
-                : "0",
-            membresias_mes:
-              pago.validationStatus === "pending"
-                ? abono_membresias.round(2).toString()
-                : "0",
+            membresias_pago: abono_membresias.round(2).toString(),
+            membresias_mes: abono_membresias.round(2).toString(),
             pago_del_mes: totalPagado.round(2).toString(),
           },
         });
@@ -1205,10 +1199,8 @@ export const recalcularPagosCredito = async ({
             abono_seguro: "0",
             abono_gps: "0",
             abono_capital: "0",
-            membresias_pago:
-              pago.validationStatus === "pending" ? pago.membresias_pago ?? "0" : "0",
-            membresias_mes:
-              pago.validationStatus === "pending" ? pago.membresias_mes ?? "0" : "0",
+            membresias_pago: pago.membresias_pago ?? "0",
+            membresias_mes: pago.membresias_mes ?? "0",
             pago_del_mes: "0",
           },
         });
@@ -1237,7 +1229,7 @@ export const recalcularPagosCredito = async ({
           gps_restante: rem.gps.round(2).toString(),
           capital_restante: rem.capital.round(2).toString(),
           total_restante: capitalEnMemoria.round(2).toString(),
-          membresias: membresiasFijo.toString(),
+          membresias: rem.membresias.round(2).toString(),
           pagado: cuotaPagada,
         },
       });

@@ -65,6 +65,7 @@ const valuationSchema = z.object({
   tireConditionSpare: z.string().optional(),
   paintCondition: z.string().optional(),
   hasAgencyHistory: z.string().optional(),
+  inspectionResult: z.string({ message: "Las observaciones generales son requeridas" }).min(1, { message: "Las observaciones generales son requeridas" }),
 });
 
 type ValuationFormValues = z.infer<typeof valuationSchema>;
@@ -147,6 +148,7 @@ export default function VehicleValuation({
       hasAgencyHistory: "",
       scannerResult: undefined,
       missingAirbag: "",
+      inspectionResult: "",
     },
   });
 
@@ -739,6 +741,25 @@ export default function VehicleValuation({
                     <FormControl>
                       <Textarea
                         placeholder="Observaciones sobre estado físico, legal o técnico del vehículo"
+                        className="min-h-[100px]"
+                        {...field}
+                        value={field.value || ""}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="inspectionResult"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Observaciones generales de la inspección</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder="Describa el estado general del vehículo y observaciones relevantes"
                         className="min-h-[100px]"
                         {...field}
                         value={field.value || ""}

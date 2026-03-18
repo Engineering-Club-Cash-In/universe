@@ -386,6 +386,7 @@ export default function VehicleInspectionWizard() {
                   }}
                   onReject={() => {
                     if (window.confirm("¿Está seguro de querer rechazar el vehículo y finalizar la inspección ahora? Esto guardará el registro como RECHAZADO y lo enviará al dashboard.")) {
+                      const reason = window.prompt("Por favor, ingrese un breve dictamen o motivo de rechazo (opcional):");
                       setChecklistCompleted(true);
                       
                       // Preparar datos mínimos requeridos para una inspección rechazada
@@ -397,7 +398,7 @@ export default function VehicleInspectionWizard() {
                         scannerUsed: "No",
                         airbagWarning: "No",
                         testDrive: "No",
-                        inspectionResult: formData.inspectionResult || "VEHÍCULO RECHAZADO: Se detectaron criterios críticos de rechazo durante la evaluación.",
+                        inspectionResult: reason || formData.inspectionResult || "VEHÍCULO RECHAZADO: Se detectaron criterios críticos de rechazo durante la evaluación.",
                         status: "rejected"
                       };
                       

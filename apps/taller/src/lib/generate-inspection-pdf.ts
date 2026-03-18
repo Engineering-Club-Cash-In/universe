@@ -17,16 +17,29 @@ export async function generateInspectionPdf(vehicle: any) {
   try {
     const defaultLogo = "https://pub-8081c8d6e5e743f9adfc9e0db92e5a88.r2.dev/reports/LOGO_NUEVO_CASHIN.png";
     const rawLogoUrl = import.meta.env.VITE_LOGO_URL || defaultLogo;
-    // Use wsrv.nl proxy to bypass CORS restrictions and compress the image to reduce PDF size
-    const logoUrl = `https://wsrv.nl/?url=${rawLogoUrl.replace(/^https?:\/\//, '')}&w=200&output=png`;
+    const strippedLogoUrl = rawLogoUrl.replace(/^https?:\/\//, "");
+    const encodedLogoUrl = encodeURIComponent(strippedLogoUrl);
+    const logoUrl = `https://wsrv.nl/?url=${encodedLogoUrl}&w=200&output=png`;
     
-    const response = await fetch(logoUrl);
-    const blob = await response.blob();
-    logoBase64 = await new Promise<string>((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.readAsDataURL(blob);
-    });
+    try {
+      const response = await fetch(logoUrl);
+      if (response.ok) {
+        const blob = await response.blob();
+        if (blob.type.startsWith('image/')) {
+          logoBase64 = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.readAsDataURL(blob);
+          });
+        } else {
+          console.warn("Respuesta del proxy logo no es imagen", blob.type);
+        }
+      } else {
+        console.warn("Fallo el fetch del logo", response.status);
+      }
+    } catch (e) {
+      console.warn("Fallo el request del proxy del logo", e);
+    }
   } catch (e) {
     console.error("No se pudo cargar el logo", e);
   }
@@ -144,21 +157,17 @@ export async function generateInspectionPdf(vehicle: any) {
       check.checkpoint,
       check.status,
       check.comment || "",
-      check.evidenceUrl ? "Ver evidencia" : ""
     ]);
 
     autoTable(doc, {
       startY: y + 5,
-      head: [["Área", "Punto de revisión", "Estado", "Comentarios", "Evidencia"]],
+      head: [["Área", "Punto de revisión", "Estado", "Comentarios"]],
       body: checksData,
       theme: 'grid',
       styles: { fontSize: 8, cellPadding: 2 },
       headStyles: { fillColor: primaryColor as any, textColor: [255, 255, 255] },
       alternateRowStyles: { fillColor: [245, 247, 250] },
       willDrawCell: function (data) {
-        if (data.section === "body" && data.column.index === 4 && data.cell.text[0] === "Ver evidencia") {
-          doc.setTextColor(0, 102, 204); // Link color
-        }
         if (data.section === "body" && data.column.index === 2) {
           const status = data.cell.text[0];
           if (status === "BAD" || status === "LEGACY_BAD") doc.setTextColor(200, 50, 50);
@@ -169,16 +178,6 @@ export async function generateInspectionPdf(vehicle: any) {
       didDrawCell: function (data) {
         // Reset color safely
         doc.setTextColor(0, 0, 0);
-        
-        // Add link silently without redrawing text
-        if (data.section === "body" && data.column.index === 4 && data.cell.text[0] === "Ver evidencia") {
-          const check = vehicle.all360Items[data.row.index];
-          if (check && check.evidenceUrl) {
-            doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, {
-              url: check.evidenceUrl
-            });
-          }
-        }
       }
     });
     y = (doc as any).lastAutoTable.finalY + 12;
@@ -213,7 +212,7 @@ export async function generateInspectionPdf(vehicle: any) {
 
     autoTable(doc, {
       startY: y + 5,
-      head: [["Punto Evaludado", "Anomalía", "Gravedad", "Notas Adicionales", "Evidencia"]],
+      head: [["Punto Evaluado", "Anomalía", "Gravedad", "Notas Adicionales", "Evidencia"]],
       body: checklistData,
       theme: 'grid',
       styles: { fontSize: 8, cellPadding: 2 },
@@ -296,7 +295,14 @@ export async function generateInspectionPdf(vehicle: any) {
       photosByCategory[cat].push(p);
     });
 
-    const preferredOrder = ['exterior', 'interior', 'motor', 'llantas', 'daños', 'otros'];
+    const preferredOrder = [
+      'exterior',
+      'interior',
+      'engine', 'motor',
+      'wheels', 'llantas',
+      'damage', 'daños',
+      'others', 'otros'
+    ];
     let mainPhotos: any[] = [];
     
     preferredOrder.forEach(cat => {

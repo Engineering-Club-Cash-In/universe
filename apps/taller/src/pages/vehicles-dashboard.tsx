@@ -79,7 +79,7 @@ interface DashboardVehicle {
   testDrive: string;
   status: string;
   photos: number;
-  allPhotos?: any[];
+  allPhotos?: VehiclePhoto[];
   hasScanner: boolean;
   alerts: string[];
   trim: string;
@@ -94,9 +94,9 @@ interface DashboardVehicle {
   paintCondition: number | null;
   hasAgencyHistory: boolean | null;
   failedChecks: { area: string; checkpoint: string; status?: string; comment?: string | null }[];
-  all360Items?: any[];
-  checklistIssues?: { id?: string; item: string; severity: string; notes?: string | null; evidence?: any[] }[];
-  allChecklistItems?: any[];
+  all360Items?: VehicleInspection360Item[];
+  checklistIssues?: { id?: string; item: string; severity: string; notes?: string | null; evidence?: ChecklistItemEvidence[] }[];
+  allChecklistItems?: InspectionChecklistItem[];
   rejectionEvidenceUrl?: string | null;
   aiValuation?: {
     aiSuggestedValue?: number | null;
@@ -439,7 +439,7 @@ export default function VehiclesDashboard() {
       testDrive: latestInspection?.testDrive ? 'Sí' : 'No',
       status: latestInspection?.status || vehicle.status || 'pending',
       photos: vehicle.photos?.length || 0,
-      allPhotos: vehicle.photos || [],
+      allPhotos: latestInspection && vehicle.photos ? vehicle.photos.filter((p: any) => p.inspectionId === latestInspection.id || !p.inspectionId) : vehicle.photos || [],
       hasScanner: latestInspection?.scannerUsed || false,
       alerts: (latestInspection?.alerts as string[]) || [],
       trim: vehicle.trim || '',
@@ -1365,7 +1365,15 @@ export default function VehiclesDashboard() {
                 variant="outline"
                 size="sm"
                 className="mt-0!"
-                onClick={() => generateInspectionPdf(selectedVehicle)}
+                disabled={isModalLoading}
+                onClick={async () => {
+                  try {
+                    await generateInspectionPdf(selectedVehicle);
+                  } catch (e) {
+                    console.error("Error al generar el informe de inspección en PDF:", e);
+                    toast.error("No se pudo generar el informe PDF. Inténtalo de nuevo más tarde.");
+                  }
+                }}
               >
                 <FileText className="h-4 w-4 mr-2" />
                 Descargar Informe PDF

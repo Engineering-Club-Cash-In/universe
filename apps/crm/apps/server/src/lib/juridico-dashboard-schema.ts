@@ -37,7 +37,7 @@ export const juridicoDashboardQualityItemSchema = z.object({
 	tone: z.enum(["success", "warning", "danger"]),
 });
 
-export const juridicoDashboardPayloadSchema = z.object({
+const juridicoDashboardSinglePayloadSchema = z.object({
 	header: z.object({
 		title: z.string().min(1).default("Jurídico"),
 		subtitle: z
@@ -53,6 +53,11 @@ export const juridicoDashboardPayloadSchema = z.object({
 	orders: z.array(juridicoDashboardOrderSchema).max(20).default([]),
 	quality: z.array(juridicoDashboardQualityItemSchema).min(1).max(5),
 });
+
+export const juridicoDashboardPayloadSchema = z.union([
+	juridicoDashboardSinglePayloadSchema,
+	z.array(juridicoDashboardSinglePayloadSchema).min(1),
+]);
 
 export const updateJuridicoDashboardSnapshotInputSchema = z.object({
 	periodLabel: z.string().min(1),

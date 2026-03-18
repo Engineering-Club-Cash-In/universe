@@ -513,6 +513,23 @@ const handleAbonoCapital = () => {
   setModalExcesoOpen(false);
   formik.handleSubmit();
 };
+const handleAbonoCapitalDirecto = () => {
+  if (!cuotaSeleccionada || cuotaSeleccionada === 0) {
+    toast.error("Debes seleccionar una cuota antes de continuar");
+    return;
+  }
+
+  const montoBoleta = Number(formik.values.monto_boleta) || 0;
+
+  console.log("=== ABONO DIRECTO A CAPITAL ===");
+  console.log("Monto boleta completo:", montoBoleta);
+  console.log("Cuota seleccionada:", cuotaSeleccionada);
+
+  formik.values.abono_directo_capital = montoBoleta;
+  formik.values.cuotaApagar = cuotaSeleccionada;
+
+  formik.handleSubmit();
+};
 const handleAbonoSiguienteCuota = () => {
   // ✅ Validar que haya cuota seleccionada
   if (!cuotaSeleccionada || cuotaSeleccionada === 0) {
@@ -763,7 +780,8 @@ async function handleResetCredito() {
     setModalExcesoOpen,
     excedente,
     handleAbonoCapital,
-    handleAbonoSiguienteCuota, 
+    handleAbonoCapitalDirecto,
+    handleAbonoSiguienteCuota,
     handleAbonoOtros,
     useLiquidatePagosInversionistas,
     modalMode,

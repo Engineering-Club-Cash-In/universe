@@ -66,6 +66,7 @@ export function PagoForm() {
     setModalExcesoOpen,
     excedente,
     handleAbonoCapital,
+    handleAbonoCapitalDirecto,
     handleAbonoSiguienteCuota,
     handleAbonoOtros,
     modalMode,
@@ -415,18 +416,40 @@ export function PagoForm() {
       )}
     </div>
 
-    <DialogFooter className="gap-2 mt-6">
+    {permiteAbonoCapital && !cuotaActualInfo?.pagada && !(cuotasAtrasadasInfo && cuotasAtrasadasInfo.total > 0) && (
+      <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl p-4 border-2 border-green-200 mt-2">
+        <div className="flex items-center gap-2 mb-2">
+          <DollarSign className="w-5 h-5 text-green-600" />
+          <span className="font-bold text-green-800 text-sm">Opcion disponible: Abono directo a capital</span>
+        </div>
+        <p className="text-xs text-green-700 mb-3">
+          Este credito permite abonar directamente a capital. El monto completo de la boleta (Q{Number(formik.values.monto_boleta || 0).toFixed(2)}) se aplicara como reduccion al saldo de capital.
+        </p>
+        <Button
+          onClick={() => {
+            setModalConfirmacionOpen(false);
+            handleAbonoCapitalDirecto();
+          }}
+          disabled={formik.isSubmitting}
+          className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 text-base shadow-md transition-all"
+        >
+          {formik.isSubmitting ? "Procesando..." : "Abonar todo a Capital"}
+        </Button>
+      </div>
+    )}
+
+    <DialogFooter className="gap-3 mt-6">
       <Button
         variant="outline"
         onClick={() => setModalConfirmacionOpen(false)}
-        className="px-6 py-2 text-base bg-gray-500 hover:bg-gray-600 text-white border-gray-500"
+        className="px-6 py-2.5 text-base bg-gray-100 hover:bg-gray-200 text-gray-700 border-gray-300"
       >
         Cancelar
       </Button>
       <Button
         onClick={handleConfirmarPago}
         disabled={formik.isSubmitting}
-        className={`px-8 py-2 text-base font-bold ${creditoCanceladoInfo ? "bg-red-600 hover:bg-red-700" : "bg-blue-600 hover:bg-blue-700"}`}
+        className={`px-8 py-2.5 text-base font-bold shadow-md transition-all ${creditoCanceladoInfo ? "bg-red-600 hover:bg-red-700" : "bg-blue-600 hover:bg-blue-700"}`}
       >
         {formik.isSubmitting ? "Procesando..." : creditoCanceladoInfo ? "Confirmar Cancelacion" : "Confirmar Pago"}
       </Button>

@@ -156,7 +156,7 @@ export const prepareInspectionData = (formData: any, sectionTimes?: Record<strin
     inspectionDate: formData.inspectionDate,
     inspectionResult: formData.inspectionResult,
     vehicleRating: formData.vehicleRating,
-    marketValue: formData.marketValue,
+    marketValue: formData.marketValue || undefined,
     currentConditionValue: formData.currentConditionValue,
     vehicleEquipment: formData.vehicleEquipment,
     importantConsiderations: formData.importantConsiderations,

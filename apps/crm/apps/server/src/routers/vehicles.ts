@@ -1020,9 +1020,10 @@ export const vehiclesRouter = {
 					}
 
 					// 2. Create inspection - Clean numeric values
-					const cleanValue = (value: string): string => {
-						// Remove formatting but keep as string for the database
-						return Number.parseFloat(value.replace(/[,_\s]/g, "")).toString();
+					const cleanValue = (value: string | undefined): string => {
+						if (!value || value.trim() === "") return "0";
+						const parsed = Number.parseFloat(value.replace(/[,_\s]/g, ""));
+						return Number.isNaN(parsed) ? "0" : parsed.toString();
 					};
 
 					const [newInspection] = await tx

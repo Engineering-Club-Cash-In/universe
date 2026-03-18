@@ -65,6 +65,7 @@ export const investmentDocumentTypeEnum = pgEnum("investment_document_type", [
 	"bank_statement",
 	"investment_receipt",
 	"other",
+	"contract",
 ]);
 
 export const investmentDocumentStatusEnum = pgEnum(

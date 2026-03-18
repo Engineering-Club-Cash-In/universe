@@ -3,8 +3,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Database, LayoutDashboard, Scale } from "lucide-react";
 import { toast } from "sonner";
 import {
-	type JuridicoDashboardPayload,
 	JuridicoDashboardEditor,
+	type JuridicoDashboardPayload,
 } from "@/components/juridico/juridico-dashboard";
 import { Button } from "@/components/ui/button";
 import {
@@ -104,8 +104,8 @@ function RouteComponent() {
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="text-sm">
-					No se mezcla con Admin y no depende de tablas del CRM. El control queda
-					dentro del módulo de Jurídico.
+					No se mezcla con Admin y no depende de tablas del CRM. El control
+					queda dentro del módulo de Jurídico.
 				</CardContent>
 			</Card>
 
@@ -123,8 +123,8 @@ function RouteComponent() {
 					<CardHeader>
 						<CardTitle>No se pudo cargar la publicación actual</CardTitle>
 						<CardDescription>
-							Se bloqueó la edición para evitar sobrescribir datos existentes con
-							la plantilla.
+							Se bloqueó la edición para evitar sobrescribir datos existentes
+							con la plantilla.
 						</CardDescription>
 					</CardHeader>
 					<CardContent className="text-muted-foreground text-sm">

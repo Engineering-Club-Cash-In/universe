@@ -736,10 +736,7 @@ app.get("/api/accounting/resumen-global-excel", async (c) => {
 		return c.json(result);
 	} catch (err: any) {
 		console.error("[ResumenGlobalExcel] Error:", err);
-		return c.json(
-			{ error: err.message || "Error al descargar Excel" },
-			500,
-		);
+		return c.json({ error: err.message || "Error al descargar Excel" }, 500);
 	}
 });
 

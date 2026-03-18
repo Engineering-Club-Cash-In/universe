@@ -88,12 +88,18 @@ const buildInitialValues = (amount?: string, defaultMessage?: string): FormInves
   mensaje: defaultMessage || "",
 });
 
-export const useFormInvestor = (initialAmount?: string, defaultMessage?: string) => {
+export const useFormInvestor = (
+  initialAmount?: string,
+  defaultMessage?: string,
+  source?: string,
+  campaign?: string
+) => {
   const navigate = useNavigate();
   const [serverError, setServerError] = useState<string>("");
 
   const mutation = useMutation({
-    mutationFn: sendLeadInvestor,
+    mutationFn: (values: FormInvestorValues) =>
+      sendLeadInvestor(values, source, campaign),
     onSuccess: (data) => {
       console.log("Lead investor enviado exitosamente:", data);
       setServerError("");

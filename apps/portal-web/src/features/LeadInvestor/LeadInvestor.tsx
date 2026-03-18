@@ -8,9 +8,17 @@ interface LeadInvestorProps {
   initialAmount?: string;
   initialTerm?: string;
   initialType?: string;
+  source?: string;
+  campaign?: string;
 }
 
-export const LeadInvestor = ({ initialAmount, initialTerm, initialType }: LeadInvestorProps) => {
+export const LeadInvestor = ({
+  initialAmount,
+  initialTerm,
+  initialType,
+  source,
+  campaign,
+}: LeadInvestorProps) => {
   const imageUrl = urlImage + "/Frame 1321315308.png";
   const isMobile = useIsMobile();
 
@@ -46,7 +54,13 @@ export const LeadInvestor = ({ initialAmount, initialTerm, initialType }: LeadIn
           </div>
         </div>
         <div className="py-12 lg:py-0 lg:-mt-6 px-10 lg:px-30 xl:px-40">
-          <FormularioInvestor initialAmount={initialAmount} initialTerm={initialTerm} initialType={initialType} />
+          <FormularioInvestor
+            initialAmount={initialAmount}
+            initialTerm={initialTerm}
+            initialType={initialType}
+            source={source}
+            campaign={campaign}
+          />
         </div>
       </div>
     </div>

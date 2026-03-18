@@ -300,16 +300,36 @@ export default function Header() {
 						{session &&
 							userRole &&
 							PERMISSIONS.canAccessInvestments(userRole) && (
-								<Button
-									variant={isActive("/inversiones") ? "secondary" : "ghost"}
-									size="sm"
-									asChild
-								>
-									<Link to="/inversiones">
-										<TrendingUp className="mr-2 h-4 w-4" />
-										Inversiones
-									</Link>
-								</Button>
+								<DropdownMenu>
+									<DropdownMenuTrigger asChild>
+										<Button
+											variant={isActive("/inversiones") ? "secondary" : "ghost"}
+											size="sm"
+											className="gap-1"
+										>
+											<TrendingUp className="h-4 w-4" />
+											Inversiones
+											<ChevronDown className="h-3 w-3 opacity-50" />
+										</Button>
+									</DropdownMenuTrigger>
+									<DropdownMenuContent align="start" className="w-56">
+										<DropdownMenuItem asChild>
+											<Link to="/inversiones" className="cursor-pointer">
+												<Target className="mr-2 h-4 w-4" />
+												Leads
+											</Link>
+										</DropdownMenuItem>
+										<DropdownMenuItem asChild>
+											<Link
+												to="/inversiones/liquidaciones"
+												className="cursor-pointer"
+											>
+												<Landmark className="mr-2 h-4 w-4" />
+												Inversionistas
+											</Link>
+										</DropdownMenuItem>
+									</DropdownMenuContent>
+								</DropdownMenu>
 							)}
 
 						{/* Contabilidad Dropdown */}

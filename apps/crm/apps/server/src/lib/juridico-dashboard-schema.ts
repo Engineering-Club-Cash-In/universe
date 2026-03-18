@@ -5,7 +5,9 @@ export const juridicoDashboardMetricSchema = z.object({
 	label: z.string().min(1),
 	helper: z.string().optional(),
 	changeText: z.string().optional(),
-	changeTone: z.enum(["neutral", "positive", "warning", "danger"]).default("neutral"),
+	changeTone: z
+		.enum(["neutral", "positive", "warning", "danger"])
+		.default("neutral"),
 });
 
 export const juridicoDashboardTrendPointSchema = z.object({

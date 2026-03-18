@@ -346,11 +346,16 @@ export interface CarteraBoleta {
 export interface CarteraInversionista {
 	inversionista_id: number;
 	nombre: string;
+	dpi: number | null;
+	email: string | null;
 	emite_factura: boolean;
 	reinversion: boolean;
+	tipo_reinversion: string;
 	banco: BancoEnum | null;
+	banco_id: number | null;
 	tipo_cuenta: TipoCuentaEnum | null;
 	numero_cuenta: string | null;
+	moneda: "quetzales" | "dolares";
 }
 
 export interface CreateInversionistaInput {

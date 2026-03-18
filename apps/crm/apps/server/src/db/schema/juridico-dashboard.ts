@@ -1,4 +1,11 @@
-import { jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import {
+	jsonb,
+	pgTable,
+	text,
+	timestamp,
+	uniqueIndex,
+	uuid,
+} from "drizzle-orm/pg-core";
 import type { JuridicoDashboardPayload } from "../../lib/juridico-dashboard-schema";
 import { user } from "./auth";
 

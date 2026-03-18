@@ -555,6 +555,17 @@ export class CarteraBackClient {
 	}
 
 	// ========================================================================
+	// BANCOS (BANKS)
+	// ========================================================================
+
+	async getBancos(): Promise<{ banco_id: number; nombre: string }[]> {
+		const response = await this.request<{
+			data: { banco_id: number; nombre: string }[];
+		}>("/bancos", { method: "GET" }, true);
+		return response.data ?? [];
+	}
+
+	// ========================================================================
 	// INVERSIONISTAS (INVESTORS)
 	// ========================================================================
 
@@ -704,9 +715,7 @@ export class CarteraBackClient {
 
 	async getResumenGlobalInversionistas(
 		filters: ResumenGlobalInversionistasFilters = {},
-	): Promise<
-		ResumenGlobalInversionista[]
-	> {
+	): Promise<ResumenGlobalInversionista[]> {
 		const queryParams = new URLSearchParams();
 
 		if (filters.inversionistaId !== undefined) {

@@ -11,10 +11,10 @@ import {
 	Calculator,
 	Calendar,
 	Car,
-	Download,
 	ChevronLeft,
 	ChevronRight,
 	Clock,
+	Download,
 	ExternalLink,
 	FileSignature,
 	FileSpreadsheet,
@@ -79,7 +79,6 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
-import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import {
 	formatDate,
 	formatGuatemalaDate,
@@ -93,6 +92,7 @@ import {
 	opportunitiesColumns,
 } from "@/lib/opportunities/columns";
 import { getRoleLabel, PERMISSIONS, ROLES } from "@/lib/roles";
+import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import {
 	getMissingFieldsForNewVehicle,
 	renderNewVehicleBadges,
@@ -231,9 +231,7 @@ function DraggableOpportunityCard({
 					</div>
 					{opportunity.closedAt && (
 						<div className="flex items-center justify-between">
-							<span className="text-muted-foreground text-xs">
-								Cierre real
-							</span>
+							<span className="text-muted-foreground text-xs">Cierre real</span>
 							<span className="text-muted-foreground text-xs">
 								{formatGuatemalaDate(opportunity.closedAt)}
 							</span>
@@ -2577,7 +2575,10 @@ function RouteComponent() {
 							</TabsContent>
 
 							<TabsContent value="documents" className="mt-6 space-y-4">
-								<DocumentsManager opportunityId={selectedOpportunity.id} opportunityStatus={selectedOpportunity.status} />
+								<DocumentsManager
+									opportunityId={selectedOpportunity.id}
+									opportunityStatus={selectedOpportunity.status}
+								/>
 							</TabsContent>
 
 							<TabsContent value="coDebtors" className="mt-6 space-y-4">
@@ -3332,7 +3333,13 @@ function RouteComponent() {
 }
 
 // Documents Manager Component
-function DocumentsManager({ opportunityId, opportunityStatus }: { opportunityId: string; opportunityStatus: string }) {
+function DocumentsManager({
+	opportunityId,
+	opportunityStatus,
+}: {
+	opportunityId: string;
+	opportunityStatus: string;
+}) {
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
 	const [description, setDescription] = useState("");
 	const [documentType, setDocumentType] = useState<string>("");
@@ -3366,13 +3373,10 @@ function DocumentsManager({ opportunityId, opportunityStatus }: { opportunityId:
 	const uploadSingleDocument = async (docType: string) => {
 		if (!selectedFile) return;
 
-		const { key } = await uploadFileToR2WithRetry(
-			selectedFile,
-			{
-				resourceType: "opportunity_document",
-				resourceId: opportunityId,
-			},
-		);
+		const { key } = await uploadFileToR2WithRetry(selectedFile, {
+			resourceType: "opportunity_document",
+			resourceId: opportunityId,
+		});
 
 		return await client.uploadOpportunityDocument({
 			opportunityId,

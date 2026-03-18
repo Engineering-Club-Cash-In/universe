@@ -65,6 +65,7 @@ const valuationSchema = z.object({
   tireConditionSpare: z.string().optional(),
   paintCondition: z.string().optional(),
   hasAgencyHistory: z.string().optional(),
+  marketValue: z.string().optional(),
   inspectionResult: z.string({ message: "Las observaciones generales son requeridas" }).min(1, { message: "Las observaciones generales son requeridas" }),
 });
 
@@ -79,6 +80,7 @@ interface VehicleValuationProps {
 
 interface AIValuationResult {
   suggestedValue: number;
+  baseMarketValue?: number;
   reasoning: string;
   marketAnalysis: string;
   depreciationFactors: string[];
@@ -135,6 +137,7 @@ export default function VehicleValuation({
       currentConditionValue: "",
       vehicleEquipment: "",
       importantConsiderations: "",
+      marketValue: "",
       scannerUsed: "No",
       airbagWarning: "No",
       tiresCondition: "",
@@ -265,6 +268,7 @@ export default function VehicleValuation({
 
       const aiResult: AIValuationResult = {
         suggestedValue: result.valuation.suggestedValue,
+        baseMarketValue: result.valuation.baseMarketValue,
         reasoning: result.valuation.reasoning,
         marketAnalysis: result.valuation.marketAnalysis,
         depreciationFactors: result.valuation.depreciationFactors,
@@ -277,6 +281,9 @@ export default function VehicleValuation({
 
       // Auto-fill suggested value
       form.setValue("currentConditionValue", aiResult.suggestedValue.toString());
+      if (aiResult.baseMarketValue != null) {
+        form.setValue("marketValue", aiResult.baseMarketValue.toString());
+      }
 
       // Auto-fill commercial classification if available
       if (aiResult.commercialClassification) {
@@ -683,35 +690,74 @@ export default function VehicleValuation({
                 )}
               />
 
-              <FormField
-                control={form.control}
-                name="currentConditionValue"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="flex items-center gap-2">
-                      Valor vehículo condiciones actuales
-                      {aiValuation && (
-                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">
-                          IA: Q{aiValuation.suggestedValue.toLocaleString()}
-                        </span>
-                      )}
-                    </FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="Valor en moneda local"
-                        value={formatCurrency(field.value)}
-                        onChange={(e) => {
-                          const result = handleCurrencyInput(e.target.value);
-                          field.onChange(result.raw);
-                        }}
-                        onBlur={field.onBlur}
-                        name={field.name}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="marketValue"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="flex items-center gap-2">
+                        Valor de mercado
+                        {aiValuation?.baseMarketValue && (
+                          <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
+                            IA: Sugerido
+                          </span>
+                        )}
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="Valor de mercado referencial"
+                          value={formatCurrency(field.value || "")}
+                          onChange={(e) => {
+                            const result = handleCurrencyInput(e.target.value);
+                            field.onChange(result.raw);
+                          }}
+                          onBlur={field.onBlur}
+                          name={field.name}
+                          readOnly={aiValuation?.baseMarketValue != null}
+                          className={
+                            aiValuation?.baseMarketValue != null
+                              ? "bg-slate-50 cursor-not-allowed border-green-200"
+                              : "border-green-200"
+                          }
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="currentConditionValue"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="flex items-center gap-2">
+                        Valor en condiciones actuales
+                        {aiValuation && (
+                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">
+                            IA: Q{aiValuation.suggestedValue.toLocaleString()}
+                          </span>
+                        )}
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="Valor en moneda local"
+                          value={formatCurrency(field.value || "")}
+                          onChange={(e) => {
+                            const result = handleCurrencyInput(e.target.value);
+                            field.onChange(result.raw);
+                          }}
+                          onBlur={field.onBlur}
+                          name={field.name}
+                          className="border-green-400"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
 
               <FormField
                 control={form.control}

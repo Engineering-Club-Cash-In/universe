@@ -394,8 +394,11 @@ export async function generateInspectionPdf(vehicle: any) {
   doc.setFont("helvetica", "normal");
   doc.setTextColor(0, 0, 0);
   y += 10;
-  doc.text(`Valor Comercial Sugerido: ${formatCurrency(vehicle.suggestedCommercialValue || 0)}`, 14, y);
-  doc.text(`Valor Actual Condición: ${formatCurrency(vehicle.currentConditionValue || 0)}`, 105, y);
+  doc.text(`Valor de Mercado: ${formatCurrency(vehicle.marketValue || 0)}`, 14, y);
+  doc.text(`Valor Comercial Sugerido: ${formatCurrency(vehicle.suggestedCommercialValue || 0)}`, 105, y);
+  
+  y += 8;
+  doc.text(`Valor Actual Condición: ${formatCurrency(vehicle.currentConditionValue || 0)}`, 14, y);
 
   y += 16;
   doc.setFontSize(12);

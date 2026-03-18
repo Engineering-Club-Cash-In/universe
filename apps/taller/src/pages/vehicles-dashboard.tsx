@@ -1692,44 +1692,7 @@ export default function VehiclesDashboard() {
                             </div>
                           </div>
 
-                          {/* IA Valuation Section */}
-                          <div>
-                            {selectedVehicle.aiValuation ? (
-                              <div className="pt-3 border-t border-dashed border-slate-200">
-                                <>
-                                  <div className="mb-2 flex items-center gap-1.5">
-                                    <Sparkles className="h-4 w-4 text-slate-950" />
-                                    <span className="font-bold text-xs uppercase tracking-tight text-slate-950">Valoración IA</span>
-                                  </div>
-                                  <div className="grid grid-cols-2 gap-4">
-                                    <div className="flex flex-col gap-1">
-                                      <span className="text-[10px] font-bold text-slate-600 uppercase tracking-tight">Valor de Mercado</span>
-                                      <span className="font-bold text-lg text-slate-950">
-                                        {selectedVehicle.aiValuation.aiSuggestedValue && !isNaN(Number(selectedVehicle.aiValuation.aiSuggestedValue))
-                                          ? Number(selectedVehicle.aiValuation.aiSuggestedValue).toLocaleString("es-GT", {
-                                              style: "currency",
-                                              currency: "GTQ",
-                                              minimumFractionDigits: 0,
-                                              maximumFractionDigits: 0,
-                                            })
-                                          : "N/A"}
-                                      </span>
-                                    </div>
-                                    <div className="flex flex-col gap-1 items-end">
-                                      <span className="text-[10px] font-bold text-slate-600 uppercase tracking-tight mb-1">Clasificación</span>
-                                      <Badge variant="outline" className="font-bold uppercase text-[10px] border-slate-300 text-slate-900 bg-slate-50">
-                                        {selectedVehicle.aiValuation.aiCommercialClassification || "N/A"}
-                                      </Badge>
-                                    </div>
-                                  </div>
-                                </>
-                              </div>
-                            ) : (
-                              <div className="p-4 rounded-lg border border-slate-100 bg-slate-50 text-slate-700 text-sm text-center">
-                                Sin información de IA disponible
-                              </div>
-                            )}
-                          </div>
+
                         </CardContent>
                       </Card>
                     </div>
@@ -2052,6 +2015,8 @@ export default function VehiclesDashboard() {
                           value={editForm.marketValue}
                           onChange={(e) => setEditForm(prev => ({ ...prev, marketValue: e.target.value }))}
                           type="number"
+                          readOnly
+                          className="bg-slate-50 cursor-not-allowed border-green-200"
                         />
                       </div>
 

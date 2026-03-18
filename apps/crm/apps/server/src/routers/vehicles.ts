@@ -1020,10 +1020,18 @@ export const vehiclesRouter = {
 					}
 
 					// 2. Create inspection - Clean numeric values
-					const cleanValue = (value: string | undefined): string => {
-						if (!value || value.trim() === "") return "0";
-						const parsed = Number.parseFloat(value.replace(/[,_\s]/g, ""));
-						return Number.isNaN(parsed) ? "0" : parsed.toString();
+					const cleanValue = (value: string | undefined): string | null => {
+						// Treat empty/whitespace-only values as unknown (NULL in DB)
+						if (!value || value.trim() === "") {
+							return null;
+						}
+						const normalized = value.replace(/[,_\s]/g, "");
+						const parsed = Number.parseFloat(normalized);
+						if (Number.isNaN(parsed)) {
+							// Non-empty but invalid numeric string: fail validation rather than coercing to "0"
+							throw new ORPCError("BAD_REQUEST", { message: "Invalid monetary value provided" });
+						}
+						return parsed.toString();
 					};
 
 					const [newInspection] = await tx

@@ -2171,15 +2171,25 @@ export const cobrosRouter = {
 					perPage: input.perPage,
 				});
 
+				// Obtener bancos para mapear banco_id → nombre
+				const bancos = await carteraBackClient.getBancos();
+				const bancosMap = new Map(bancos.map((b) => [b.banco_id, b.nombre]));
+
 				return {
-					inversionistas: result.data.map((inv) => ({
+					inversionistas: result.data.map((inv: any) => ({
 						inversionistaId: inv.inversionista_id,
 						nombre: inv.nombre,
+						dpi: inv.dpi ?? null,
+						email: inv.email ?? null,
 						emiteFactura: inv.emite_factura,
-						reinversion: inv.reinversion,
-						banco: inv.banco,
-						tipoCuenta: inv.tipo_cuenta,
-						numeroCuenta: inv.numero_cuenta,
+						reinversion:
+							inv.reinversion ?? inv.tipo_reinversion !== "sin_reinversion",
+						banco: inv.banco_id
+							? (bancosMap.get(inv.banco_id) ?? null)
+							: (inv.banco ?? null),
+						tipoCuenta: inv.tipo_cuenta ?? null,
+						numeroCuenta: inv.numero_cuenta ?? null,
+						moneda: inv.moneda ?? "quetzales",
 					})),
 					pagination: {
 						page: result.page,

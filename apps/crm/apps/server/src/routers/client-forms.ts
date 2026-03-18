@@ -447,9 +447,16 @@ function serializeRow(row: unknown): FormRow {
 	return JSON.parse(JSON.stringify(row)) as Record<string, unknown>;
 }
 
-function getParticipantNameFromForm(row: Record<string, unknown> | null): string {
+function getParticipantNameFromForm(
+	row: Record<string, unknown> | null,
+): string {
 	if (!row) return "";
-	const fullName = [row.primerNombre, row.segundoNombre, row.primerApellido, row.segundoApellido]
+	const fullName = [
+		row.primerNombre,
+		row.segundoNombre,
+		row.primerApellido,
+		row.segundoApellido,
+	]
 		.map((value) => (typeof value === "string" ? value.trim() : ""))
 		.filter(Boolean)
 		.join(" ");
@@ -826,11 +833,7 @@ export const clientFormsRouter = {
 			const vehicle = await getVehicleForOpportunity(input.opportunityId);
 
 			const [lead] = opp.leadId
-				? await db
-						.select()
-						.from(leads)
-						.where(eq(leads.id, opp.leadId))
-						.limit(1)
+				? await db.select().from(leads).where(eq(leads.id, opp.leadId)).limit(1)
 				: [null];
 
 			const coDebtorsList = await db
@@ -946,7 +949,8 @@ export const clientFormsRouter = {
 							? "Titular historico"
 							: "Co-firmante historico",
 					email:
-						(typeof creditApp?.email === "string" ? creditApp.email : null) ?? null,
+						(typeof creditApp?.email === "string" ? creditApp.email : null) ??
+						null,
 					phone:
 						(typeof creditApp?.telMovil === "string"
 							? creditApp.telMovil
@@ -975,7 +979,8 @@ export const clientFormsRouter = {
 						"Titular legacy",
 					roleLabel: "Titular legacy",
 					email:
-						(typeof creditApp?.email === "string" ? creditApp.email : null) ?? null,
+						(typeof creditApp?.email === "string" ? creditApp.email : null) ??
+						null,
 					phone:
 						(typeof creditApp?.telMovil === "string"
 							? creditApp.telMovil

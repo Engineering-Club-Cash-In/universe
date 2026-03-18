@@ -37,9 +37,11 @@ import { Route as AdminUsersRouteImport } from './routes/admin/users'
 import { Route as AdminSettingsRouteImport } from './routes/admin/settings'
 import { Route as AdminImportRouteImport } from './routes/admin/import'
 import { Route as AccountingPayInvestorsRouteImport } from './routes/accounting/pay-investors'
+import { Route as InversionesLiquidacionesIndexRouteImport } from './routes/inversiones/liquidaciones.index'
 import { Route as CrmAnalysisIndexRouteImport } from './routes/crm/analysis/index'
 import { Route as AdminReportsIndexRouteImport } from './routes/admin/reports/index'
 import { Route as JuridicoGenerateOpportunityIdRouteImport } from './routes/juridico/generate.$opportunityId'
+import { Route as InversionesLiquidacionesInversionistaIdRouteImport } from './routes/inversiones/liquidaciones.$inversionistaId'
 import { Route as CrmAnalysisOpportunityIdRouteImport } from './routes/crm/analysis/$opportunityId'
 import { Route as CrmAdminMiniagentRouteImport } from './routes/crm/admin/miniagent'
 
@@ -184,6 +186,12 @@ const AccountingPayInvestorsRoute = AccountingPayInvestorsRouteImport.update({
   path: '/accounting/pay-investors',
   getParentRoute: () => rootRouteImport,
 } as any)
+const InversionesLiquidacionesIndexRoute =
+  InversionesLiquidacionesIndexRouteImport.update({
+    id: '/inversiones/liquidaciones/',
+    path: '/inversiones/liquidaciones/',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const CrmAnalysisIndexRoute = CrmAnalysisIndexRouteImport.update({
   id: '/crm/analysis/',
   path: '/crm/analysis/',
@@ -198,6 +206,12 @@ const JuridicoGenerateOpportunityIdRoute =
   JuridicoGenerateOpportunityIdRouteImport.update({
     id: '/juridico/generate/$opportunityId',
     path: '/juridico/generate/$opportunityId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const InversionesLiquidacionesInversionistaIdRoute =
+  InversionesLiquidacionesInversionistaIdRouteImport.update({
+    id: '/inversiones/liquidaciones/$inversionistaId',
+    path: '/inversiones/liquidaciones/$inversionistaId',
     getParentRoute: () => rootRouteImport,
   } as any)
 const CrmAnalysisOpportunityIdRoute =
@@ -243,9 +257,11 @@ export interface FileRoutesByFullPath {
   '/vehicles/': typeof VehiclesIndexRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
+  '/inversiones/liquidaciones/$inversionistaId': typeof InversionesLiquidacionesInversionistaIdRoute
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
   '/admin/reports/': typeof AdminReportsIndexRoute
   '/crm/analysis/': typeof CrmAnalysisIndexRoute
+  '/inversiones/liquidaciones/': typeof InversionesLiquidacionesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -278,9 +294,11 @@ export interface FileRoutesByTo {
   '/vehicles': typeof VehiclesIndexRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
+  '/inversiones/liquidaciones/$inversionistaId': typeof InversionesLiquidacionesInversionistaIdRoute
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
   '/admin/reports': typeof AdminReportsIndexRoute
   '/crm/analysis': typeof CrmAnalysisIndexRoute
+  '/inversiones/liquidaciones': typeof InversionesLiquidacionesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -314,9 +332,11 @@ export interface FileRoutesById {
   '/vehicles/': typeof VehiclesIndexRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
+  '/inversiones/liquidaciones/$inversionistaId': typeof InversionesLiquidacionesInversionistaIdRoute
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
   '/admin/reports/': typeof AdminReportsIndexRoute
   '/crm/analysis/': typeof CrmAnalysisIndexRoute
+  '/inversiones/liquidaciones/': typeof InversionesLiquidacionesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -351,9 +371,11 @@ export interface FileRouteTypes {
     | '/vehicles/'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
+    | '/inversiones/liquidaciones/$inversionistaId'
     | '/juridico/generate/$opportunityId'
     | '/admin/reports/'
     | '/crm/analysis/'
+    | '/inversiones/liquidaciones/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -386,9 +408,11 @@ export interface FileRouteTypes {
     | '/vehicles'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
+    | '/inversiones/liquidaciones/$inversionistaId'
     | '/juridico/generate/$opportunityId'
     | '/admin/reports'
     | '/crm/analysis'
+    | '/inversiones/liquidaciones'
   id:
     | '__root__'
     | '/'
@@ -421,9 +445,11 @@ export interface FileRouteTypes {
     | '/vehicles/'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
+    | '/inversiones/liquidaciones/$inversionistaId'
     | '/juridico/generate/$opportunityId'
     | '/admin/reports/'
     | '/crm/analysis/'
+    | '/inversiones/liquidaciones/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -457,9 +483,11 @@ export interface RootRouteChildren {
   VehiclesIndexRoute: typeof VehiclesIndexRoute
   CrmAdminMiniagentRoute: typeof CrmAdminMiniagentRoute
   CrmAnalysisOpportunityIdRoute: typeof CrmAnalysisOpportunityIdRoute
+  InversionesLiquidacionesInversionistaIdRoute: typeof InversionesLiquidacionesInversionistaIdRoute
   JuridicoGenerateOpportunityIdRoute: typeof JuridicoGenerateOpportunityIdRoute
   AdminReportsIndexRoute: typeof AdminReportsIndexRoute
   CrmAnalysisIndexRoute: typeof CrmAnalysisIndexRoute
+  InversionesLiquidacionesIndexRoute: typeof InversionesLiquidacionesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -660,6 +688,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AccountingPayInvestorsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/inversiones/liquidaciones/': {
+      id: '/inversiones/liquidaciones/'
+      path: '/inversiones/liquidaciones'
+      fullPath: '/inversiones/liquidaciones/'
+      preLoaderRoute: typeof InversionesLiquidacionesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/crm/analysis/': {
       id: '/crm/analysis/'
       path: '/crm/analysis'
@@ -679,6 +714,13 @@ declare module '@tanstack/react-router' {
       path: '/juridico/generate/$opportunityId'
       fullPath: '/juridico/generate/$opportunityId'
       preLoaderRoute: typeof JuridicoGenerateOpportunityIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/inversiones/liquidaciones/$inversionistaId': {
+      id: '/inversiones/liquidaciones/$inversionistaId'
+      path: '/inversiones/liquidaciones/$inversionistaId'
+      fullPath: '/inversiones/liquidaciones/$inversionistaId'
+      preLoaderRoute: typeof InversionesLiquidacionesInversionistaIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/crm/analysis/$opportunityId': {
@@ -729,9 +771,12 @@ const rootRouteChildren: RootRouteChildren = {
   VehiclesIndexRoute: VehiclesIndexRoute,
   CrmAdminMiniagentRoute: CrmAdminMiniagentRoute,
   CrmAnalysisOpportunityIdRoute: CrmAnalysisOpportunityIdRoute,
+  InversionesLiquidacionesInversionistaIdRoute:
+    InversionesLiquidacionesInversionistaIdRoute,
   JuridicoGenerateOpportunityIdRoute: JuridicoGenerateOpportunityIdRoute,
   AdminReportsIndexRoute: AdminReportsIndexRoute,
   CrmAnalysisIndexRoute: CrmAnalysisIndexRoute,
+  InversionesLiquidacionesIndexRoute: InversionesLiquidacionesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

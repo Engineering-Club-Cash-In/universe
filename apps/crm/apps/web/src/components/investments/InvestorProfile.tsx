@@ -117,6 +117,7 @@ export function InvestorProfile({
 				.map((p) => p.value)
 				.filter((v) => v.trim() !== "");
 			return client.createInvestor({
+				opportunityId,
 				investmentLeadId,
 				clientType: data.clientType as
 					| "individual"

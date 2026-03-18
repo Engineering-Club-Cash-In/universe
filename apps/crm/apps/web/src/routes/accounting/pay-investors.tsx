@@ -316,10 +316,8 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 	const tieneBoleta = inv.boleta_pendiente != null;
 	const tieneBoletaLiquidacion = inv.boleta_liquidacion != null;
 	const estadoResumen =
-		inv.estado_liquidacion_resumen ??
-		(tieneBoleta ? "uploaded" : "pending");
-	const montoPrincipal =
-		inv.total_cuota ?? inv.total_a_recibir_con_reinversion;
+		inv.estado_liquidacion_resumen ?? (tieneBoleta ? "uploaded" : "pending");
+	const montoPrincipal = inv.total_cuota ?? inv.total_a_recibir_con_reinversion;
 	const badge =
 		estadoResumen === "liquidated"
 			? {
@@ -525,7 +523,9 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 								})
 							}
 						>
-							{liquidateMutation.isPending ? "Liquidando..." : "Liquidar sin boleta"}
+							{liquidateMutation.isPending
+								? "Liquidando..."
+								: "Liquidar sin boleta"}
 						</AlertDialogAction>
 					</AlertDialogFooter>
 				</AlertDialogContent>

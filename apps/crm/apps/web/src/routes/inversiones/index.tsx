@@ -8,6 +8,7 @@ import {
 	AlertCircle,
 	Banknote,
 	Clock,
+	Download,
 	Landmark,
 	Plus,
 	Target,
@@ -18,6 +19,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import invariant from "tiny-invariant";
+import * as XLSX from "xlsx";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -119,7 +121,7 @@ function DraggableInvestmentCard({
 		>
 			<Card
 				ref={ref}
-				className={`cursor-pointer p-3 transition-shadow hover:shadow-md ${
+				className={`cursor-pointer rounded-lg border p-3 shadow-sm transition-shadow hover:shadow-md ${
 					isDragging ? "opacity-50" : ""
 				}`}
 			>
@@ -197,12 +199,12 @@ function DroppableInvestmentColumn({
 	}, 0);
 
 	return (
-		<Card
-			className={`flex max-h-[75vh] min-w-72 shrink-0 flex-col ${
+		<div
+			className={`flex max-h-[75vh] min-w-72 shrink-0 flex-col rounded-xl border bg-muted/30 ${
 				isDraggedOver ? "ring-2 ring-blue-500" : ""
 			}`}
 		>
-			<CardHeader className="shrink-0 pb-3">
+			<div className="shrink-0 px-4 pt-4 pb-2">
 				<div className="flex items-center justify-between">
 					<Badge
 						style={{ backgroundColor: stage.color, color: "white" }}
@@ -211,13 +213,13 @@ function DroppableInvestmentColumn({
 						{items.length} leads
 					</Badge>
 				</div>
-				<CardTitle className="font-medium text-sm">{stage.name}</CardTitle>
-				<CardDescription className="text-xs">
+				<p className="mt-1.5 font-medium text-sm">{stage.name}</p>
+				<p className="text-muted-foreground text-xs">
 					{totalAmount > 0 ? `Q${totalAmount.toLocaleString("es-GT")}` : "—"}{" "}
 					monto total
-				</CardDescription>
-			</CardHeader>
-			<CardContent className="min-h-0 space-y-3 overflow-y-auto" ref={ref}>
+				</p>
+			</div>
+			<div className="flex min-h-0 flex-col gap-3 overflow-y-auto px-3 pb-3" ref={ref}>
 				{items.length === 0 ? (
 					<div className="py-8 text-center text-muted-foreground">
 						<Target className="mx-auto mb-2 h-8 w-8 opacity-50" />
@@ -228,8 +230,8 @@ function DroppableInvestmentColumn({
 						<DraggableInvestmentCard key={item.opportunity.id} item={item} />
 					))
 				)}
-			</CardContent>
-		</Card>
+			</div>
+		</div>
 	);
 }
 
@@ -418,10 +420,12 @@ function RouteComponent() {
 		onSuccess: () => {
 			toast.success("Etapa actualizada correctamente");
 			queryClient.invalidateQueries({
-				queryKey: orpc.getInvestmentOpportunities.queryOptions({ input: {} }).queryKey,
+				queryKey: orpc.getInvestmentOpportunities.queryOptions({ input: {} })
+					.queryKey,
 			});
 			queryClient.invalidateQueries({
-				queryKey: orpc.getInvestmentDashboardStats.queryOptions({ input: {} }).queryKey,
+				queryKey: orpc.getInvestmentDashboardStats.queryOptions({ input: {} })
+					.queryKey,
 			});
 		},
 		onError: (error) => {
@@ -473,14 +477,67 @@ function RouteComponent() {
 
 	function handleRefresh() {
 		queryClient.invalidateQueries({
-			queryKey: orpc.getInvestmentOpportunities.queryOptions({ input: {} }).queryKey,
+			queryKey: orpc.getInvestmentOpportunities.queryOptions({ input: {} })
+				.queryKey,
 		});
 		queryClient.invalidateQueries({
-			queryKey: orpc.getInvestmentDashboardStats.queryOptions({ input: {} }).queryKey,
+			queryKey: orpc.getInvestmentDashboardStats.queryOptions({ input: {} })
+				.queryKey,
 		});
 	}
 
 	const stats = statsQuery.data;
+
+	function handleExportExcel() {
+		if (!allItems.length) {
+			toast.error("No hay datos para exportar");
+			return;
+		}
+
+		const stageMap = Object.fromEntries(
+			INVESTMENT_STAGES.map((s) => [s.id, s.name]),
+		);
+
+		const rows = allItems.map((item) => {
+			const name = item.investor
+				? `${item.investor.firstName} ${item.investor.lastName}`
+				: (item.lead?.name ?? "Sin nombre");
+			const email = item.lead?.email ?? "";
+			const phones = item.lead?.phones?.join(", ") ?? "";
+			const amount = item.lead?.proposedAmount
+				? Number.parseFloat(item.lead.proposedAmount)
+				: "";
+			const stage =
+				stageMap[item.opportunity.stage as string] ?? item.opportunity.stage;
+
+			return {
+				Nombre: name,
+				Correo: email,
+				Teléfonos: phones,
+				"Monto Propuesto": amount,
+				Etapa: stage,
+			};
+		});
+
+		const ws = XLSX.utils.json_to_sheet(rows);
+
+		// Ajustar anchos de columna
+		ws["!cols"] = [
+			{ wch: 30 },
+			{ wch: 30 },
+			{ wch: 20 },
+			{ wch: 18 },
+			{ wch: 20 },
+		];
+
+		const wb = XLSX.utils.book_new();
+		XLSX.utils.book_append_sheet(wb, ws, "Leads Inversiones");
+		XLSX.writeFile(
+			wb,
+			`leads-inversiones-${new Date().toISOString().slice(0, 10)}.xlsx`,
+		);
+		toast.success("Reporte exportado correctamente");
+	}
 
 	return (
 		<div className="flex h-full flex-col">
@@ -497,6 +554,15 @@ function RouteComponent() {
 						</div>
 					</div>
 					<div className="flex items-center gap-2">
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={handleExportExcel}
+							disabled={!allItems.length}
+						>
+							<Download className="mr-2 h-4 w-4" />
+							Exportar Excel
+						</Button>
 						<CreateLeadDialog onSuccess={handleRefresh} />
 					</div>
 				</div>

@@ -4131,13 +4131,12 @@ export async function getLiquidaciones({
     conditions.push(eq(liquidaciones.liquidacion_id, liquidacion_id));
   }
 
-  // 🆕 Filtro por DPI
-  if (!isNullorEmpty(dpi)) {
+   if (!isNullorEmpty(email)) {
+    conditions.push(eq(inversionistas.email, email));
+  } else if (!isNullorEmpty(dpi)) {
     conditions.push(eq(inversionistas.dpi, parseInt(dpi)));
   }
-  if (!isNullorEmpty(email)) {
-    conditions.push(eq(inversionistas.email, email));
-  }
+ 
 
   // 📊 Query principal con joins
   const query = db

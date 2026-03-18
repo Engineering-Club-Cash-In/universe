@@ -825,6 +825,7 @@ export const insertCredit = async ({ body, set }: { body: unknown; set: SetConte
     // 4. Generar fechas de pago (día <= 20 → pago el 15, día > 20 → pago el 30)
     const diaPago: 15 | 30 = creditData.dia_pago_mensual <= 20 ? 15 : 30;
     const fechas = generatePaymentDates(creditData.plazo, diaPago);
+    console.log("[INSERT CREDIT] Generated", fechas.length, "payment dates");
 
     // 5. Insertar cuotas
     console.log("[INSERT CREDIT] Step 5: Inserting installments...");

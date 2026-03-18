@@ -7,6 +7,7 @@ export const vehicleValuationSchema = z.object({
 		.describe("Valor sugerido del vehículo en Quetzales. Este es el valor EN CONDICIONES ACTUALES (ya descontados los daños físicos, llantas, etc.)"),
 	baseMarketValue: z
 		.number()
+		.optional()
 		.describe("Valor de mercado base en Quetzales (sin tomar en cuenta estado físico ni daños actuales, solo basado en marca, modelo y año del vehículo en el mercado)"),
 	reasoning: z.string().describe("Razón detallada de la valoración"),
 	marketAnalysis: z

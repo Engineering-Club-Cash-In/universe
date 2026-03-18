@@ -281,7 +281,7 @@ export default function VehicleValuation({
 
       // Auto-fill suggested value
       form.setValue("currentConditionValue", aiResult.suggestedValue.toString());
-      if (aiResult.baseMarketValue) {
+      if (aiResult.baseMarketValue != null) {
         form.setValue("marketValue", aiResult.baseMarketValue.toString());
       }
 
@@ -714,8 +714,12 @@ export default function VehicleValuation({
                           }}
                           onBlur={field.onBlur}
                           name={field.name}
-                          readOnly // NO se debería poder modificar
-                          className="bg-slate-50 cursor-not-allowed border-green-200"
+                          readOnly={aiValuation?.baseMarketValue != null}
+                          className={
+                            aiValuation?.baseMarketValue != null
+                              ? "bg-slate-50 cursor-not-allowed border-green-200"
+                              : "border-green-200"
+                          }
                         />
                       </FormControl>
                       <FormMessage />

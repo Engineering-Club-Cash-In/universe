@@ -1013,7 +1013,10 @@ export const crmRouter = {
 						),
 				})
 				.from(opportunityStageHistory)
-				.innerJoin(salesStages, eq(opportunityStageHistory.toStageId, salesStages.id))
+				.innerJoin(
+					salesStages,
+					eq(opportunityStageHistory.toStageId, salesStages.id),
+				)
 				.where(gte(salesStages.closurePercentage, 90))
 				.groupBy(opportunityStageHistory.opportunityId)
 				.as("first_closed_stage_dates");

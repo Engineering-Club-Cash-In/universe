@@ -224,7 +224,7 @@ export function InvestmentAssignmentSection({
 			inversionistas?: string;
 			categoria: CreditCategory;
 			nit: string;
-				diaPagoMensual: PaymentDay;
+			diaPagoMensual: PaymentDay;
 		}) => {
 			return client.assignInvestorAndAdvance({
 				opportunityId,

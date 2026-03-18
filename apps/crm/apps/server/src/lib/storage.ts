@@ -6,8 +6,8 @@ import {
 	PutObjectCommand,
 	S3Client,
 } from "@aws-sdk/client-s3";
-import { ORPCError } from "@orpc/server";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { ORPCError } from "@orpc/server";
 
 // Configuración de Cloudflare R2
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
@@ -113,6 +113,7 @@ export const UPLOAD_RESOURCE_TYPES = [
 	"notification_document",
 	"legal_contract_pdf",
 	"bank_statement",
+	"investment_document",
 ] as const;
 
 export type UploadResourceType = (typeof UPLOAD_RESOURCE_TYPES)[number];
@@ -149,6 +150,8 @@ export function buildUploadPrefix(
 			return `legal-contracts/${resourceId}`;
 		case "bank_statement":
 			return `bank-statements/${resourceId}`;
+		case "investment_document":
+			return `investment-documents/${resourceId}`;
 	}
 }
 
@@ -175,7 +178,9 @@ export interface R2ObjectMetadata {
 	contentType?: string;
 }
 
-export async function getR2ObjectMetadata(key: string): Promise<R2ObjectMetadata> {
+export async function getR2ObjectMetadata(
+	key: string,
+): Promise<R2ObjectMetadata> {
 	try {
 		const command = new HeadObjectCommand({
 			Bucket: R2_BUCKET_NAME,
@@ -215,9 +220,11 @@ export function resolveMimeType(file: UploadFileLike): string {
 	return file.type || "";
 }
 
-export function validateResolvedMimeType(
-	file: UploadFileLike,
-): { valid: boolean; mimeType?: string; error?: string } {
+export function validateResolvedMimeType(file: UploadFileLike): {
+	valid: boolean;
+	mimeType?: string;
+	error?: string;
+} {
 	const mimeType = resolveMimeType(file);
 
 	if (!ALLOWED_DOCUMENT_TYPES.includes(mimeType)) {

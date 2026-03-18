@@ -9,7 +9,8 @@ type UploadResourceType =
 	| "vehicle_document"
 	| "notification_document"
 	| "legal_contract_pdf"
-	| "bank_statement";
+	| "bank_statement"
+	| "investment_document";
 
 interface UploadTarget {
 	resourceType: UploadResourceType;

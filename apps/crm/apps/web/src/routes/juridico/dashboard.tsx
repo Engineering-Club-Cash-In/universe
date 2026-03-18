@@ -79,7 +79,9 @@ function RouteComponent() {
 				<Card>
 					<CardHeader>
 						<CardTitle>Cargando dashboard</CardTitle>
-						<CardDescription>Consultando la última versión publicada.</CardDescription>
+						<CardDescription>
+							Consultando la última versión publicada.
+						</CardDescription>
 					</CardHeader>
 				</Card>
 			) : snapshotQuery.isError ? (

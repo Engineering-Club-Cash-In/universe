@@ -9,11 +9,11 @@ import { vehicles } from "../db/schema/vehicles";
 import { protectedProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
-	MAX_FILE_SIZE,
-	UPLOAD_RESOURCE_TYPES,
 	buildUploadPrefix,
 	generatePresignedUploadUrl,
 	generateUniqueFilename,
+	MAX_FILE_SIZE,
+	UPLOAD_RESOURCE_TYPES,
 	validateResolvedMimeType,
 } from "../lib/storage";
 
@@ -46,7 +46,9 @@ async function assertCanUploadToResource(params: {
 
 	switch (resourceType) {
 		case "opportunity_document": {
-			if (!["admin", "sales", "sales_supervisor", "analyst"].includes(userRole)) {
+			if (
+				!["admin", "sales", "sales_supervisor", "analyst"].includes(userRole)
+			) {
 				throw new ORPCError("FORBIDDEN", {
 					message: "No tienes permiso para subir documentos",
 				});
@@ -76,7 +78,9 @@ async function assertCanUploadToResource(params: {
 		}
 
 		case "vehicle_document": {
-			if (!["admin", "sales", "sales_supervisor", "analyst"].includes(userRole)) {
+			if (
+				!["admin", "sales", "sales_supervisor", "analyst"].includes(userRole)
+			) {
 				throw new ORPCError("FORBIDDEN", {
 					message: "No tienes permiso para subir documentos",
 				});
@@ -134,7 +138,8 @@ async function assertCanUploadToResource(params: {
 				!isSupervisorWithAccess
 			) {
 				throw new ORPCError("FORBIDDEN", {
-					message: "No tienes permiso para subir documentos a esta notificación",
+					message:
+						"No tienes permiso para subir documentos a esta notificación",
 				});
 			}
 			return;
@@ -207,6 +212,16 @@ async function assertCanUploadToResource(params: {
 					message: "Lead u oportunidad no encontrada",
 				});
 			}
+			return;
+		}
+
+		case "investment_document": {
+			if (!PERMISSIONS.canAccessInvestments(userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para subir documentos de inversión",
+				});
+			}
+			return;
 		}
 	}
 }

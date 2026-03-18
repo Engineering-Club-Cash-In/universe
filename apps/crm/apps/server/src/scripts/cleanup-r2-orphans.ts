@@ -1,7 +1,7 @@
 import {
+	type _Object,
 	DeleteObjectCommand,
 	ListObjectsV2Command,
-	type _Object,
 	S3Client,
 } from "@aws-sdk/client-s3";
 import { isNotNull } from "drizzle-orm";
@@ -68,7 +68,10 @@ function normalizeStoredKey(key: string | null): string | null {
 	return key;
 }
 
-function isOlderThanThreshold(lastModified: Date | undefined, cutoff: Date): boolean {
+function isOlderThanThreshold(
+	lastModified: Date | undefined,
+	cutoff: Date,
+): boolean {
 	if (!lastModified) {
 		return false;
 	}
@@ -207,7 +210,10 @@ async function main() {
 		}
 	}
 
-	const totalBytes = orphanedObjects.reduce((sum, object) => sum + object.size, 0);
+	const totalBytes = orphanedObjects.reduce(
+		(sum, object) => sum + object.size,
+		0,
+	);
 
 	console.log(
 		JSON.stringify(

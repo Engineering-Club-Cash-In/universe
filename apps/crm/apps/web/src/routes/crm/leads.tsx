@@ -2094,7 +2094,9 @@ function RouteComponent() {
 												<span className="text-muted-foreground">-</span>
 											)}
 										</TableCell>
-										<TableCell>{formatGuatemalaDateTime(lead.createdAt)}</TableCell>
+										<TableCell>
+											{formatGuatemalaDateTime(lead.createdAt)}
+										</TableCell>
 										<TableCell className="text-right">
 											<DropdownMenu>
 												<DropdownMenuTrigger asChild>

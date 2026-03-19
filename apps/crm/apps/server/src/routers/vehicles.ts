@@ -71,6 +71,8 @@ export const vehiclesRouter = {
 					excludeStatus: z
 						.enum(["pending", "available", "sold", "maintenance", "auction"])
 						.optional(),
+					// Filtro de propiedad: "owned" = solo Cash In, "not_owned" = solo externos, undefined = todos
+					ownership: z.enum(["owned", "not_owned"]).optional(),
 				})
 				.optional(),
 		)
@@ -81,6 +83,7 @@ export const vehiclesRouter = {
 			const status = input?.status;
 			const category = input?.category;
 			const excludeStatus = input?.excludeStatus;
+			const ownership = input?.ownership;
 
 			// Build conditions
 			const conditions = [];
@@ -109,6 +112,13 @@ export const vehiclesRouter = {
 			// Excluir vehículos con cierto status
 			if (excludeStatus) {
 				conditions.push(not(eq(vehicles.status, excludeStatus as any)));
+			}
+
+			// Filtro de propiedad
+			if (ownership === "owned") {
+				conditions.push(eq(vehicles.isOwned, true));
+			} else if (ownership === "not_owned") {
+				conditions.push(eq(vehicles.isOwned, false));
 			}
 
 			// Category filters
@@ -374,6 +384,7 @@ export const vehiclesRouter = {
 				companyId: z.string().nullable().optional(),
 				status: z.string().optional().default("pending"),
 				isNew: z.boolean().optional().default(false),
+				isOwned: z.boolean().optional().default(false),
 				// Campos para contratos legales
 				seats: z.number().nullable().optional(),
 				doors: z.number().nullable().optional(),
@@ -429,6 +440,7 @@ export const vehiclesRouter = {
 				transmission: z.string().optional(),
 				companyId: z.string().nullable().optional(),
 				status: z.string().optional().default("pending"),
+				isOwned: z.boolean().optional().default(false),
 				// Campos para contratos legales
 				seats: z.number().nullable().optional(),
 				doors: z.number().nullable().optional(),
@@ -483,6 +495,7 @@ export const vehiclesRouter = {
 					transmission: z.string().nullable().optional(),
 					companyId: z.string().nullable().optional(),
 					isNew: z.boolean().optional(),
+					isOwned: z.boolean().optional(),
 					status: z
 						.enum(["pending", "available", "sold", "maintenance", "auction"])
 						.optional(),

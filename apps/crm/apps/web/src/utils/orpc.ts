@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import type {
 	appRouter,
 	disbursementRouter,
+	manualVehicleRouter,
 } from "../../../server/src/routers/index";
 import type { investmentsRouter } from "../../../server/src/routers/investments";
 
@@ -63,6 +64,7 @@ export const link = new RPCLink({
 // Merge router types to avoid TS7056 with declaration emit
 // See: https://orpc.dev/docs/advanced/exceeds-the-maximum-length-problem
 type MergedRouter = typeof appRouter &
+	typeof manualVehicleRouter &
 	typeof investmentsRouter &
 	typeof disbursementRouter;
 

@@ -201,12 +201,12 @@ export function DisbursementView({
 						{disbursementQuery.data!.documents.map((doc: DisbursementDoc) => (
 							<div
 								key={doc.id}
-								className="flex items-center justify-between rounded-md border bg-background px-4 py-3"
+								className="flex flex-col gap-3 sm:flex-row sm:items-center justify-between rounded-md border bg-background px-4 py-3"
 							>
-								<div className="flex min-w-0 items-center gap-3">
+								<div className="flex min-w-0 flex-1 items-center gap-3">
 									<FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
-									<div className="min-w-0">
-										<p className="truncate font-medium text-sm">
+									<div className="min-w-0 flex-1">
+										<p className="font-medium text-sm break-all whitespace-normal">
 											{doc.originalName}
 										</p>
 										<p className="text-muted-foreground text-xs">

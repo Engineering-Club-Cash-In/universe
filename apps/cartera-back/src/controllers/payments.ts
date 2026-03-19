@@ -1267,19 +1267,19 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     // 📅 Rango de fechas (zona Guatemala UTC-6)
     if (fechaInicio) {
       whereClauses.push(
-        `(p.fecha_pago AT TIME ZONE 'America/Guatemala')::date >= '${fechaInicio}'::date`
+        `(p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date >= '${fechaInicio}'::date`
       );
     }
     if (fechaFin) {
       whereClauses.push(
-        `(p.fecha_pago AT TIME ZONE 'America/Guatemala')::date <= '${fechaFin}'::date`
+        `(p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date <= '${fechaFin}'::date`
       );
     }
 
     // 📅 Filtros individuales de día/mes/año (legacy, compatibilidad)
-    if (anio && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(YEAR FROM p.fecha_pago AT TIME ZONE 'America/Guatemala') = ${anio}`);
-    if (mes && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(MONTH FROM p.fecha_pago AT TIME ZONE 'America/Guatemala') = ${mes}`);
-    if (dia && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(DAY FROM p.fecha_pago AT TIME ZONE 'America/Guatemala') = ${dia}`);
+    if (anio && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(YEAR FROM p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala') = ${anio}`);
+    if (mes && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(MONTH FROM p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala') = ${mes}`);
+    if (dia && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(DAY FROM p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala') = ${dia}`);
 
     whereClauses.push(
       `p.validation_status IN ('validated', 'pending' ,'reset', 'capital')`
@@ -1335,7 +1335,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         p.pago_id AS "pagoId",
         p.monto_boleta AS "montoBoleta",
         p.numeroAutorizacion AS "numeroAutorizacion",
-        TO_CHAR(p.fecha_pago, 'YYYY-MM-DD HH24:MI:SS') AS "fechaPago",
+        TO_CHAR(p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD HH24:MI:SS') AS "fechaPago",
 
         -- 💸 Campos propios del pago
         p.mora AS "mora",

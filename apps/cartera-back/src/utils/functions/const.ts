@@ -38,21 +38,19 @@ export const CLUB_CASHIN_CONFIG = {
   ],
 };
 
-// 🆕 Configuración SE PRESTA SOCIEDAD ANONIMA - Ambiente de Pruebas
+// 🔥 Configuración SE PRESTA SOCIEDAD ANONIMA - Producción
 export const SE_PRESTA_SAT_CONFIG = {
-  requestor: "20FA80E7-ABC0-48F9-8069-1229FA2BA6CA",
-  user: "20FA80E7-ABC0-48F9-8069-1229FA2BA6CA",
-  userName: "ADMINISTRADOR",
-  endpointUrl:
-    "https://portaltest.cofidiguatemala.com:8443/webservicefront/factwsfront.asmx",
+  requestor: process.env.SE_PRESTA_REQUESTOR!,
+  user: process.env.SE_PRESTA_REQUESTOR!,
+  userName: process.env.SE_PRESTA_USER!,
+  endpointUrl: process.env.CUBE_COFIDI_URL!,
   nit: "52956032",
 };
 
 export const SE_PRESTA_COFIDI_CONFIG = {
-  requestor: "20FA80E7-ABC0-48F9-8069-1229FA2BA6CA",
+  requestor: process.env.SE_PRESTA_REQUESTOR!,
   nit: "52956032",
-  endpointUrl:
-    "https://portaltest.cofidiguatemala.com:8443/nitfel/consultanit.asmx",
+  endpointUrl: process.env.CUBE_COFIDI_NIT_URL!,
 };
 
 export const SE_PRESTA_CONFIG = {
@@ -79,26 +77,24 @@ export const SE_PRESTA_CONFIG = {
     },
   ],
   // Portal Web credentials
-  portalUrl: "https://portaltest.cofidiguatemala.com:8443/invoice/login",
-  portalUser: "ADMINISTRADOR",
-  portalPassword: "t0nP0.MH",
+  portalUrl: "https://portal.cofidiguatemala.com/factura/login.aspx",
+  portalUser: process.env.SE_PRESTA_USER!,
+  portalPassword: process.env.SE_PRESTA_PASSWORD!,
 };
 
-// 🆕 Configuración AMJK INVERSIONES, SOCIEDAD ANONIMA - Ambiente de Pruebas
+// 🔥 Configuración AMJK INVERSIONES, SOCIEDAD ANONIMA - Producción
 export const AMJK_SAT_CONFIG = {
-  requestor: "027221F2-3831-4240-B6B2-0EB0E9E8B055",
-  user: "027221F2-3831-4240-B6B2-0EB0E9E8B055",
-  userName: "ADMINISTRADOR",
-  endpointUrl:
-    "https://portaltest.cofidiguatemala.com:8443/webservicefront/factwsfront.asmx",
+  requestor: process.env.AMJK_REQUESTOR!,
+  user: process.env.AMJK_REQUESTOR!,
+  userName: process.env.AMJK_USER!,
+  endpointUrl: process.env.CUBE_COFIDI_URL!,
   nit: "100691455",
 };
 
 export const AMJK_COFIDI_CONFIG = {
-  requestor: "027221F2-3831-4240-B6B2-0EB0E9E8B055",
+  requestor: process.env.AMJK_REQUESTOR!,
   nit: "100691455",
-  endpointUrl:
-    "https://portaltest.cofidiguatemala.com:8443/nitfel/consultanit.asmx",
+  endpointUrl: process.env.CUBE_COFIDI_NIT_URL!,
 };
 
 export const AMJK_CONFIG = {
@@ -124,26 +120,24 @@ export const AMJK_CONFIG = {
       codigoEscenario: "2",
     },
   ],
-  portalUrl: "https://portaltest.cofidiguatemala.com:8443/invoice/login",
-  portalUser: "ADMINISTRADOR",
-  portalPassword: "t0nP0.MH",
+  portalUrl: "https://portal.cofidiguatemala.com/factura/login.aspx",
+  portalUser: process.env.AMJK_USER!,
+  portalPassword: process.env.AMJK_PASSWORD!,
 };
 
-// 🆕 Configuración CREACION E IMAGEN SOCIEDAD ANONIMA - Ambiente de Pruebas
+// 🔥 Configuración CREACION E IMAGEN SOCIEDAD ANONIMA - Producción
 export const CREACION_IMAGEN_SAT_CONFIG = {
-  requestor: "605B3161-4A6B-49E7-98E3-549CD51CF05C",
-  user: "605B3161-4A6B-49E7-98E3-549CD51CF05C",
-  userName: "ADMINISTRADOR",
-  endpointUrl:
-    "https://portaltest.cofidiguatemala.com:8443/webservicefront/factwsfront.asmx",
+  requestor: process.env.CREACION_IMAGEN_REQUESTOR!,
+  user: process.env.CREACION_IMAGEN_REQUESTOR!,
+  userName: process.env.CREACION_IMAGEN_USER!,
+  endpointUrl: process.env.CUBE_COFIDI_URL!,
   nit: "2694247K",
 };
 
 export const CREACION_IMAGEN_COFIDI_CONFIG = {
-  requestor: "605B3161-4A6B-49E7-98E3-549CD51CF05C",
+  requestor: process.env.CREACION_IMAGEN_REQUESTOR!,
   nit: "2694247K",
-  endpointUrl:
-    "https://portaltest.cofidiguatemala.com:8443/nitfel/consultanit.asmx",
+  endpointUrl: process.env.CUBE_COFIDI_NIT_URL!,
 };
 
 export const CREACION_IMAGEN_CONFIG = {
@@ -169,26 +163,24 @@ export const CREACION_IMAGEN_CONFIG = {
       codigoEscenario: "2",
     },
   ],
-  portalUrl: "https://portaltest.cofidiguatemala.com:8443/invoice/login",
-  portalUser: "ADMINISTRADOR",
-  portalPassword: "J+1]YasB",
+  portalUrl: "https://portal.cofidiguatemala.com/factura/login.aspx",
+  portalUser: process.env.CREACION_IMAGEN_USER!,
+  portalPassword: process.env.CREACION_IMAGEN_PASSWORD!,
 };
 
-// 🆕 Configuración GRUPO BATRO, SOCIEDAD ANONIMA - Ambiente de Pruebas
+// ⚠️ Configuración GRUPO BATRO - Pendiente credenciales productivas
 export const GRUPO_BATRO_SAT_CONFIG = {
-  requestor: "420A3F18-E411-464C-A394-DC2FF520AF0C",
-  user: "420A3F18-E411-464C-A394-DC2FF520AF0C",
-  userName: "ADMINISTRADOR",
-  endpointUrl:
-    "https://portaltest.cofidiguatemala.com:8443/webservicefront/factwsfront.asmx",
+  requestor: process.env.GRUPO_BATRO_REQUESTOR!,
+  user: process.env.GRUPO_BATRO_REQUESTOR!,
+  userName: process.env.GRUPO_BATRO_USER!,
+  endpointUrl: process.env.CUBE_COFIDI_URL!,
   nit: "54603064",
 };
 
 export const GRUPO_BATRO_COFIDI_CONFIG = {
-  requestor: "420A3F18-E411-464C-A394-DC2FF520AF0C",
+  requestor: process.env.GRUPO_BATRO_REQUESTOR!,
   nit: "54603064",
-  endpointUrl:
-    "https://portaltest.cofidiguatemala.com:8443/nitfel/consultanit.asmx",
+  endpointUrl: process.env.CUBE_COFIDI_NIT_URL!,
 };
 
 export const GRUPO_BATRO_CONFIG = {
@@ -215,25 +207,23 @@ export const GRUPO_BATRO_CONFIG = {
     },
   ],
   portalUrl: "https://portaltest.cofidiguatemala.com:8443/invoice/login",
-  portalUser: "ADMINISTRADOR",
-  portalPassword: "/KFb96[t",
+  portalUser: process.env.GRUPO_BATRO_USER!,
+  portalPassword: process.env.GRUPO_BATRO_PASSWORD!,
 };
 
-// 🆕 Configuración AUTOCASH, SOCIEDAD ANONIMA - Ambiente de Pruebas
+// 🔥 Configuración AUTOCASH, SOCIEDAD ANONIMA - Producción
 export const AUTOCASH_SAT_CONFIG = {
-  requestor: "E0C08C51-4CAF-4C09-86A4-5377C7F5DFC8",
-  user: "E0C08C51-4CAF-4C09-86A4-5377C7F5DFC8",
-  userName: "ADMINISTRADOR",
-  endpointUrl:
-    "https://portaltest.cofidiguatemala.com:8443/webservicefront/factwsfront.asmx",
+  requestor: process.env.AUTOCASH_REQUESTOR!,
+  user: process.env.AUTOCASH_REQUESTOR!,
+  userName: process.env.AUTOCASH_USER!,
+  endpointUrl: process.env.CUBE_COFIDI_URL!,
   nit: "96896035",
 };
 
 export const AUTOCASH_COFIDI_CONFIG = {
-  requestor: "E0C08C51-4CAF-4C09-86A4-5377C7F5DFC8",
+  requestor: process.env.AUTOCASH_REQUESTOR!,
   nit: "96896035",
-  endpointUrl:
-    "https://portaltest.cofidiguatemala.com:8443/nitfel/consultanit.asmx",
+  endpointUrl: process.env.CUBE_COFIDI_NIT_URL!,
 };
 
 export const AUTOCASH_CONFIG = {
@@ -259,9 +249,9 @@ export const AUTOCASH_CONFIG = {
       codigoEscenario: "2",
     },
   ],
-  portalUrl: "https://portaltest.cofidiguatemala.com:8443/invoice/login",
-  portalUser: "ADMINISTRADOR",
-  portalPassword: "96896035",
+  portalUrl: "https://portal.cofidiguatemala.com/factura/login.aspx",
+  portalUser: process.env.AUTOCASH_USER!,
+  portalPassword: process.env.AUTOCASH_PASSWORD!,
 };
 
 // ============================================

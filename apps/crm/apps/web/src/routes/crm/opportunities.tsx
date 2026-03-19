@@ -1996,7 +1996,7 @@ function RouteComponent() {
 
 			{/* Opportunity Details Modal */}
 			<Dialog open={isDetailsDialogOpen} onOpenChange={setIsDetailsDialogOpen}>
-				<DialogContent className="max-h-[90vh] w-[90vw] min-w-[800px] max-w-5xl overflow-y-auto">
+				<DialogContent className="max-h-[90vh] w-fit min-w-[320px] md:min-w-[850px] max-w-[95vw] overflow-y-auto overflow-x-hidden">
 					<DialogHeader>
 						<DialogTitle>Detalles de la Oportunidad</DialogTitle>
 					</DialogHeader>
@@ -2011,7 +2011,7 @@ function RouteComponent() {
 								}
 							}}
 						>
-							<TabsList className="grid w-full grid-cols-6">
+							<TabsList className="flex w-full overflow-x-auto gap-2 p-1">
 								<TabsTrigger value="details">Detalles</TabsTrigger>
 								<TabsTrigger value="documents">Documentos</TabsTrigger>
 								<TabsTrigger value="coDebtors">Co-firmantes</TabsTrigger>
@@ -3654,12 +3654,12 @@ function DocumentsManager({
 							{disbursementQuery.data!.documents.map((doc) => (
 								<div
 									key={doc.id}
-									className="flex items-center justify-between rounded-md border border-blue-200 bg-white px-4 py-3"
+									className="flex flex-col gap-3 sm:flex-row sm:items-center justify-between rounded-md border border-blue-200 bg-white px-4 py-3"
 								>
-									<div className="flex min-w-0 items-center gap-3">
+									<div className="flex min-w-0 flex-1 items-center gap-3">
 										<FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
-										<div className="min-w-0">
-											<p className="truncate font-medium text-sm">
+										<div className="min-w-0 flex-1">
+											<p className="font-medium text-sm break-all whitespace-normal">
 												{doc.originalName}
 											</p>
 											<p className="text-muted-foreground text-xs">
@@ -3713,12 +3713,14 @@ function DocumentsManager({
 							{detalleDocuments.map((detalleDoc) => (
 								<div
 									key={detalleDoc.id}
-									className="flex items-center justify-between rounded-lg border border-green-200 bg-white p-4"
+									className="flex flex-col gap-3 sm:flex-row sm:items-center justify-between rounded-lg border border-green-200 bg-white p-4"
 								>
-									<div className="flex items-center gap-3">
-										<span className="text-3xl">📊</span>
-										<div>
-											<p className="font-medium">{detalleDoc.originalName}</p>
+									<div className="flex min-w-0 flex-1 items-center gap-3">
+										<span className="text-3xl shrink-0">📊</span>
+										<div className="min-w-0 flex-1">
+											<p className="font-medium break-all whitespace-normal">
+												{detalleDoc.originalName}
+											</p>
 											<p className="text-muted-foreground text-xs">
 												Subido el{" "}
 												{new Date(detalleDoc.uploadedAt).toLocaleString(

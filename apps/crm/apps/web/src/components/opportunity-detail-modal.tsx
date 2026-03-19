@@ -195,7 +195,7 @@ export function OpportunityDetailModal({
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="max-h-[90vh] w-[90vw] min-w-[800px] max-w-5xl overflow-y-auto">
+			<DialogContent className="max-h-[90vh] w-fit min-w-[320px] md:min-w-[850px] max-w-[95vw] overflow-y-auto overflow-x-hidden">
 				<DialogHeader>
 					<DialogTitle>Detalles de la Oportunidad</DialogTitle>
 				</DialogHeader>
@@ -208,9 +208,7 @@ export function OpportunityDetailModal({
 						}
 					}}
 				>
-					<TabsList
-						className={`grid w-full ${isWon ? (readOnly ? "grid-cols-6" : "grid-cols-7") : readOnly ? "grid-cols-5" : "grid-cols-6"}`}
-					>
+					<TabsList className="flex w-full overflow-x-auto gap-2 p-1 mb-4">
 						<TabsTrigger value="details">Detalles</TabsTrigger>
 						<TabsTrigger value="documents">Documentos</TabsTrigger>
 						<TabsTrigger value="coDebtors">Co-firmantes</TabsTrigger>

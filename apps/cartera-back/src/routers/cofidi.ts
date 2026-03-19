@@ -1057,15 +1057,15 @@ if (facturasExistentes.length > 0) {
         usuario_departamento: usuarios.departamento,
       })
       .from(facturas_electronicas)
-      .innerJoin(
+      .leftJoin(
         pagos_credito,
         eq(facturas_electronicas.pago_id, pagos_credito.pago_id)
       )
-      .innerJoin(
+      .leftJoin(
         creditos,
         eq(pagos_credito.credito_id, creditos.credito_id)
       )
-      .innerJoin(
+      .leftJoin(
         usuarios,
         eq(creditos.usuario_id, usuarios.usuario_id)
       )
@@ -1185,7 +1185,7 @@ if (facturasExistentes.length > 0) {
         ID="DatosAnulacion" 
         NumeroDocumentoAAnular="${facturaCompleta.factura_uuid}" 
         NITEmisor="${CLUB_CASHIN_CONFIG.emisor.nit}" 
-        IDReceptor="${facturaCompleta.usuario_nit || 'CF'}" 
+        IDReceptor="${facturaCompleta.usuario_nit || facturaCompleta.factura_receptor_nit || 'CF'}"
         FechaEmisionDocumentoAnular="${fechaEmisionDocumento}" 
         FechaHoraAnulacion="${fechaHoraAnulacion}" 
         MotivoAnulacion="${motivo}"/>

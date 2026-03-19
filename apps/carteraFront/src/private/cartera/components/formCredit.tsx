@@ -101,12 +101,6 @@ const fields = [
     icon: <BookUser className="text-blue-500 mr-2 w-5 h-5" />,
   },
   {
-    name: "asesor",
-    label: "Asesor",
-    type: "text",
-    icon: <User className="text-blue-500 mr-2 w-5 h-5" />,
-  },
-  {
     name: "plazo",
     label: "Plazo",
     type: "number",
@@ -155,6 +149,42 @@ const fields = [
     type: "number",
     icon: <Percent className="text-blue-500 mr-2 w-5 h-5" />,
   },
+  {
+    name: "dia_pago_mensual",
+    label: "Día de Pago Mensual",
+    type: "number",
+    icon: <Calendar className="text-blue-500 mr-2 w-5 h-5" />,
+  },
+  {
+    name: "direccion",
+    label: "Dirección",
+    type: "text",
+    icon: <FileText className="text-blue-500 mr-2 w-5 h-5" />,
+  },
+  {
+    name: "municipio",
+    label: "Municipio",
+    type: "text",
+    icon: <FileText className="text-blue-500 mr-2 w-5 h-5" />,
+  },
+  {
+    name: "departamento",
+    label: "Departamento",
+    type: "text",
+    icon: <FileText className="text-blue-500 mr-2 w-5 h-5" />,
+  },
+  {
+    name: "codigo_postal",
+    label: "Código Postal",
+    type: "text",
+    icon: <FileText className="text-blue-500 mr-2 w-5 h-5" />,
+  },
+  {
+    name: "pais",
+    label: "País",
+    type: "text",
+    icon: <FileText className="text-blue-500 mr-2 w-5 h-5" />,
+  },
 ];
 
 export function CreditForm() {
@@ -162,9 +192,8 @@ export function CreditForm() {
   // Define the type for an investor
   type Investor = { inversionista_id: number; nombre: string };
 
-  const { investors, advisors } = useCatalogs() as {
+  const { investors } = useCatalogs() as {
     investors: Investor[];
-    advisors: any[];
     loading: boolean;
   };
   const reservaEditadoPorUsuario = React.useRef(false);
@@ -201,41 +230,6 @@ export function CreditForm() {
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {fields.map((field) => {
-                if (field.name === "asesor") {
-                  return (
-                    <div key={field.name} className="grid gap-1 w-full">
-                      <Label className="text-gray-900 font-medium mb-1 flex items-center">
-                        {field.icon}
-                        Asesor
-                      </Label>
-                      <select
-                        id="asesor"
-                        name="asesor"
-                        value={formik.values.asesor}
-                        onChange={formik.handleChange}
-                        onBlur={formik.handleBlur}
-                        className={[
-                          "w-full border rounded-lg px-3 py-2 bg-white text-gray-900",
-                          formik.errors.asesor && formik.touched.asesor
-                            ? "border-red-500 focus:ring-red-500"
-                            : "border-gray-300",
-                        ].join(" ")}
-                      >
-                        <option value="">Seleccione un asesor</option>
-                        {advisors.map((adv) => (
-                          <option key={adv.id} value={adv.nombre}>
-                            {adv.nombre}
-                          </option>
-                        ))}
-                      </select>
-                      {formik.errors.asesor && formik.touched.asesor && (
-                        <div className="text-red-500 text-xs">
-                          {formik.errors.asesor}
-                        </div>
-                      )}
-                    </div>
-                  );
-                }
                 if (field.name === "categoria") {
                   return (
                     <div key={field.name} className="grid gap-1 w-full">
@@ -454,20 +448,6 @@ export function CreditForm() {
                   </div>
                   <div>
                     <Label className="text-gray-900 font-medium mb-2">
-                      Cuota
-                    </Label>
-                    <Input
-                      type="number"
-                      name={`inversionistas.${index}.cuota_inversionista`}
-                      value={inv.cuota_inversionista ?? ""}
-                      onChange={formik.handleChange}
-                      onBlur={formik.handleBlur}
-                      className="text-gray-900"
-                    />
-                  </div>
-
-                  <div>
-                    <Label className="text-gray-900 font-medium mb-2">
                       Tipo de Inversión
                     </Label>
                     <select
@@ -554,7 +534,6 @@ export function CreditForm() {
                       monto_aportado: 0,
                       porcentaje_cash_in: 0,
                       porcentaje_inversion: 100,
-                      cuota_inversionista: 0,
                       tipo_inversion: tipoDefault,
                       fecha_inicio_participacion: getDefaultFechaInicio(tipoDefault),
                     },

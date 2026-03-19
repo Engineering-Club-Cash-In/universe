@@ -41,18 +41,19 @@ const normalizeManualValuationAmount = (value: string): string | null => {
 		return null;
 	}
 
+	if (THOUSANDS_PATTERN.test(sanitized)) {
+		return sanitized.replace(/,/g, "");
+	}
+
 	if (COMMA_DECIMAL_PATTERN.test(sanitized)) {
 		return null;
 	}
 
-	if (
-		!PLAIN_NUMBER_PATTERN.test(sanitized) &&
-		!THOUSANDS_PATTERN.test(sanitized)
-	) {
+	if (!PLAIN_NUMBER_PATTERN.test(sanitized)) {
 		return null;
 	}
 
-	return sanitized.replace(/,/g, "");
+	return sanitized;
 };
 
 export function ManualVehicleValuationDialog({
@@ -62,9 +63,9 @@ export function ManualVehicleValuationDialog({
 	vehicleLabel,
 }: ManualVehicleValuationDialogProps) {
 	const queryClient = useQueryClient();
-	const [vehicleRating, setVehicleRating] = useState<"Comercial" | "No comercial">(
-		"Comercial",
-	);
+	const [vehicleRating, setVehicleRating] = useState<
+		"Comercial" | "No comercial"
+	>("Comercial");
 	const [marketValue, setMarketValue] = useState("");
 	const [suggestedCommercialValue, setSuggestedCommercialValue] = useState("");
 	const [bankValue, setBankValue] = useState("");
@@ -166,7 +167,9 @@ export function ManualVehicleValuationDialog({
 			queryClient.invalidateQueries({
 				queryKey: ["getLatestInspectionByVehicleId", vehicleId],
 			});
-			queryClient.invalidateQueries({ queryKey: ["getVehicleById", vehicleId] });
+			queryClient.invalidateQueries({
+				queryKey: ["getVehicleById", vehicleId],
+			});
 			onOpenChange(false);
 		},
 		onError: (error: any) => {

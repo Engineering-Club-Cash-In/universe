@@ -76,22 +76,23 @@ const normalizeManualValuationAmount = (
 		});
 	}
 
+	if (MANUAL_VALUATION_THOUSANDS_PATTERN.test(sanitized)) {
+		return sanitized.replace(/,/g, "");
+	}
+
 	if (MANUAL_VALUATION_COMMA_DECIMAL_PATTERN.test(sanitized)) {
 		throw new ORPCError("BAD_REQUEST", {
 			message: `${fieldLabel} debe usar punto para decimales`,
 		});
 	}
 
-	if (
-		!MANUAL_VALUATION_PLAIN_NUMBER_PATTERN.test(sanitized) &&
-		!MANUAL_VALUATION_THOUSANDS_PATTERN.test(sanitized)
-	) {
+	if (!MANUAL_VALUATION_PLAIN_NUMBER_PATTERN.test(sanitized)) {
 		throw new ORPCError("BAD_REQUEST", {
 			message: `${fieldLabel} debe ser un número válido`,
 		});
 	}
 
-	return sanitized.replace(/,/g, "");
+	return sanitized;
 };
 
 export const vehiclesRouter = {
@@ -1182,7 +1183,9 @@ export const vehiclesRouter = {
 						const parsed = Number.parseFloat(normalized);
 						if (Number.isNaN(parsed)) {
 							// Non-empty but invalid numeric string: fail validation rather than coercing to "0"
-							throw new ORPCError("BAD_REQUEST", { message: "Invalid monetary value provided" });
+							throw new ORPCError("BAD_REQUEST", {
+								message: "Invalid monetary value provided",
+							});
 						}
 						return parsed.toString();
 					};

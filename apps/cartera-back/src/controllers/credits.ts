@@ -582,7 +582,8 @@ export async function getCreditosWithUserByMesAnio(
   nombre_usuario?: string,
   email_asesor?: string,
   cuotas_atrasadas?: number,
-  proximidad_pago?: ProximidadPago
+  proximidad_pago?: ProximidadPago,
+  is_vehiculo_propio?: boolean
 ): Promise<{
   data: CreditoConInfo[];
   page: number;
@@ -652,6 +653,11 @@ export async function getCreditosWithUserByMesAnio(
     if (cuotas_atrasadas && cuotas_atrasadas > 0) {
       console.log(`🔎 Filtrando por cuotas atrasadas >= ${cuotas_atrasadas}`);
       conditions.push(eq(moras_credito.cuotas_atrasadas, cuotas_atrasadas));
+    }
+
+    if (is_vehiculo_propio) {
+      console.log(`🔎 Filtrando solo vehículos propios`);
+      conditions.push(eq(creditos.is_vehiculo_propio, true));
     }
   } catch (err) {
     console.error("❌ Error construyendo filtros:", err);

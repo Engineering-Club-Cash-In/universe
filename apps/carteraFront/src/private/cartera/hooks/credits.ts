@@ -36,6 +36,9 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
   // 🆕 Nuevos states para filtros con valor inicial
   const [asesorId, setAsesorId] = useState<number | undefined>(options?.initialAsesorId);
   
+  // 🆕 Filtro vehículo propio
+  const [isVehiculoPropio, setIsVehiculoPropio] = useState<boolean | undefined>(undefined);
+
   // 🔥 Estado local del input (lo que escribe el usuario)
   const [nombreUsuarioInput, setNombreUsuarioInput] = useState("");
   // 🔥 Estado que realmente dispara la búsqueda
@@ -54,6 +57,7 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
       excel,
       asesorId,
       nombreUsuario, // 👈 Este es el que realmente busca
+      isVehiculoPropio,
     ],
     queryFn: () =>
       getCreditosPaginados({
@@ -66,6 +70,7 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
         excel,
         asesor_id: asesorId,
         nombre_usuario: nombreUsuario.trim() !== "" ? nombreUsuario : undefined,
+        is_vehiculo_propio: isVehiculoPropio,
       }),
     staleTime: 1000 * 60,
     refetchOnWindowFocus: false,
@@ -115,6 +120,7 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
     setNombreUsuarioInput("");
     setNombreUsuario("");
     setAsesorId(options?.initialAsesorId);
+    setIsVehiculoPropio(undefined);
     setPage(1);
   };
 
@@ -172,5 +178,8 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
     clearNombreUsuario,        // 👈 Para limpiar
     // 🆕 Limpiar todos
     clearAllFilters,
+    // 🆕 Filtro vehículo propio
+    isVehiculoPropio,
+    setIsVehiculoPropio,
   };
 }

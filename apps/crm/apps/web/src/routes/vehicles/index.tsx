@@ -22,13 +22,13 @@ import {
 	FileText,
 	FolderOpen,
 	Info,
+	MessageCircle,
 	Pencil,
 	Plus,
 	Search,
 	Sparkles,
 	Wrench,
 	XCircle,
-	MessageCircle,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -1741,7 +1741,7 @@ function VehiclesDashboard() {
 														{filteredPhotos.map((photo: any, index: number) => (
 															<Card
 																key={photo.id || index}
-																className="overflow-hidden cursor-pointer"
+																className="cursor-pointer overflow-hidden"
 																onClick={() => setSelectedPhoto(photo)}
 															>
 																<CardContent className="p-0">
@@ -1751,11 +1751,12 @@ function VehiclesDashboard() {
 																			alt={photo.title || `Foto ${index + 1}`}
 																			className="h-full w-full object-cover transition-transform hover:scale-105"
 																		/>
-																		{photo.valuatorComment && !photo.noCommentsChecked && (
-																			<div className="absolute top-1.5 right-1.5 rounded-full bg-amber-500 p-1">
-																				<MessageCircle className="h-3 w-3 text-white" />
-																			</div>
-																		)}
+																		{photo.valuatorComment &&
+																			!photo.noCommentsChecked && (
+																				<div className="absolute top-1.5 right-1.5 rounded-full bg-amber-500 p-1">
+																					<MessageCircle className="h-3 w-3 text-white" />
+																				</div>
+																			)}
 																	</div>
 																	<div className="p-2">
 																		<p className="line-clamp-1 font-medium text-xs">
@@ -1796,7 +1797,7 @@ function VehiclesDashboard() {
 																		(photo: any, index: number) => (
 																			<Card
 																				key={photo.id || index}
-																				className="overflow-hidden cursor-pointer"
+																				className="cursor-pointer overflow-hidden"
 																				onClick={() => setSelectedPhoto(photo)}
 																			>
 																				<CardContent className="p-0">
@@ -1811,11 +1812,12 @@ function VehiclesDashboard() {
 																							}
 																							className="h-full w-full object-cover transition-transform hover:scale-105"
 																						/>
-																						{photo.valuatorComment && !photo.noCommentsChecked && (
-																							<div className="absolute top-1.5 right-1.5 rounded-full bg-amber-500 p-1">
-																								<MessageCircle className="h-3 w-3 text-white" />
-																							</div>
-																						)}
+																						{photo.valuatorComment &&
+																							!photo.noCommentsChecked && (
+																								<div className="absolute top-1.5 right-1.5 rounded-full bg-amber-500 p-1">
+																									<MessageCircle className="h-3 w-3 text-white" />
+																								</div>
+																							)}
 																					</div>
 																					<div className="p-2">
 																						<p className="line-clamp-1 font-medium text-xs">
@@ -1845,29 +1847,33 @@ function VehiclesDashboard() {
 									</Card>
 								)}
 								{/* Photo detail dialog */}
-								<Dialog open={!!selectedPhoto} onOpenChange={(open) => !open && setSelectedPhoto(null)}>
-									<DialogContent className="max-w-lg p-0 gap-0 overflow-hidden">
+								<Dialog
+									open={!!selectedPhoto}
+									onOpenChange={(open) => !open && setSelectedPhoto(null)}
+								>
+									<DialogContent className="max-w-lg gap-0 overflow-hidden p-0">
 										{selectedPhoto && (
 											<>
 												<img
 													src={selectedPhoto.url}
 													alt={selectedPhoto.title}
-													className="w-full max-h-[60vh] object-contain bg-black"
+													className="max-h-[60vh] w-full bg-black object-contain"
 												/>
-												<div className="p-4 space-y-2">
+												<div className="space-y-2 p-4">
 													<DialogHeader>
 														<DialogTitle className="text-sm">
 															{selectedPhoto.title}
 														</DialogTitle>
 													</DialogHeader>
-													{selectedPhoto.valuatorComment && !selectedPhoto.noCommentsChecked && (
-														<div className="flex gap-2 items-start rounded-md bg-amber-50 border border-amber-200 p-3">
-															<MessageCircle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
-															<p className="text-sm text-amber-900">
-																{selectedPhoto.valuatorComment}
-															</p>
-														</div>
-													)}
+													{selectedPhoto.valuatorComment &&
+														!selectedPhoto.noCommentsChecked && (
+															<div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3">
+																<MessageCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-600" />
+																<p className="text-amber-900 text-sm">
+																	{selectedPhoto.valuatorComment}
+																</p>
+															</div>
+														)}
 												</div>
 											</>
 										)}

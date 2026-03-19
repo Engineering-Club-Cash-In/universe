@@ -262,15 +262,15 @@ export function OpportunityDocumentUpload({
 					<div className="grid gap-3 sm:grid-cols-2">
 						<div className="space-y-1.5">
 							<Label>Tipo de Documento</Label>
-								<Combobox
-									options={documentOptions}
-									value={documentType}
-									onChange={(value) =>
-										setDocumentType((value as OpportunityDocumentType | "") ?? "")
-									}
-									placeholder="Buscar tipo de documento..."
-									width="full"
-									popOverWidth="full"
+							<Combobox
+								options={documentOptions}
+								value={documentType}
+								onChange={(value) =>
+									setDocumentType((value as OpportunityDocumentType | "") ?? "")
+								}
+								placeholder="Buscar tipo de documento..."
+								width="full"
+								popOverWidth="full"
 								isInModal={true}
 							/>
 						</div>

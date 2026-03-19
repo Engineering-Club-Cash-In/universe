@@ -587,6 +587,7 @@
     permite_distribucion: boolean("permite_distribucion").notNull().default(false),
     monto_reinversion: numeric("monto_reinversion", { precision: 18, scale: 2 }),
     saldo_reinversion: numeric("saldo_reinversion", { precision: 18, scale: 2 }).notNull().default("0"),
+    dpi_rep_legal: varchar("dpi_rep_legal", { length: 20 }),
   });
 
   export const reinversiones = customSchema.table("reinversiones", {

@@ -12,12 +12,14 @@ import {
 	Info,
 	Landmark,
 	MessageSquare,
+	ScrollText,
 	TrendingDown,
 	XCircle,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { InvestmentCalculator } from "@/components/investments/InvestmentCalculator";
+import { InvestmentContracts } from "@/components/investments/InvestmentContracts";
 import { InvestmentDocuments } from "@/components/investments/InvestmentDocuments";
 import { InvestmentInteractions } from "@/components/investments/InvestmentInteractions";
 import { InvestorProfile } from "@/components/investments/InvestorProfile";
@@ -448,7 +450,8 @@ function RouteComponent() {
 				}).queryKey,
 			});
 			queryClient.invalidateQueries({
-				queryKey: orpc.getInvestmentOpportunities.queryOptions({ input: {} }).queryKey,
+				queryKey: orpc.getInvestmentOpportunities.queryOptions({ input: {} })
+					.queryKey,
 			});
 			queryClient.invalidateQueries({
 				queryKey: orpc.getInvestmentDashboardStats.queryOptions().queryKey,
@@ -625,6 +628,10 @@ function RouteComponent() {
 							<FileText className="mr-1.5 h-3.5 w-3.5" />
 							Documentos
 						</TabsTrigger>
+						<TabsTrigger value="contratos">
+							<ScrollText className="mr-1.5 h-3.5 w-3.5" />
+							Contratos
+						</TabsTrigger>
 						<TabsTrigger value="interacciones">
 							<MessageSquare className="mr-1.5 h-3.5 w-3.5" />
 							Interacciones
@@ -782,6 +789,15 @@ function RouteComponent() {
 					{/* Documentos Tab */}
 					<TabsContent value="documentos">
 						<InvestmentDocuments
+							opportunityId={opportunityId}
+							investorId={investor?.id}
+							documents={documents}
+						/>
+					</TabsContent>
+
+					{/* Contratos Tab */}
+					<TabsContent value="contratos">
+						<InvestmentContracts
 							opportunityId={opportunityId}
 							investorId={investor?.id}
 							documents={documents}

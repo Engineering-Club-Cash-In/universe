@@ -750,11 +750,21 @@ export function CoDebtorsView({ opportunityId }: CoDebtorsViewProps) {
 					<Input
 						id="dpi"
 						value={formData.dpi}
-						onChange={(e) =>
-							setFormData((prev) => ({ ...prev, dpi: e.target.value }))
-						}
-						placeholder="Ej: 1234567890101"
+						onChange={(e) => {
+							const val = e.target.value.replace(/\D/g, "").slice(0, 13);
+							setFormData((prev) => ({ ...prev, dpi: val }));
+						}}
+						placeholder="1234567890101"
+						maxLength={13}
+						inputMode="numeric"
 					/>
+					{formData.dpi &&
+						formData.dpi.length > 0 &&
+						formData.dpi.length !== 13 && (
+							<p className="text-destructive text-xs">
+								El DPI debe tener 13 dígitos ({formData.dpi.length}/13)
+							</p>
+						)}
 				</div>
 			</div>
 

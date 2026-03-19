@@ -1251,8 +1251,7 @@ export function DynamicContractWizard({
 			}
 		} catch (error: any) {
 			console.error("Error fetching documents data:", error);
-			const message =
-				error?.message || "Error al obtener datos de documentos";
+			const message = error?.message || "Error al obtener datos de documentos";
 			toast.error(message);
 		} finally {
 			setIsLoadingFields(false);

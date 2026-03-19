@@ -999,13 +999,10 @@ function UploadDocumentsDialog({
 
 	const uploadMutation = useMutation({
 		mutationFn: async (file: File) => {
-			const { key } = await uploadFileToR2WithRetry(
-				file,
-				{
-					resourceType: "notification_document",
-					resourceId: notificationId,
-				},
-			);
+			const { key } = await uploadFileToR2WithRetry(file, {
+				resourceType: "notification_document",
+				resourceId: notificationId,
+			});
 
 			return await client.addDocumentToNotification({
 				notificationId,

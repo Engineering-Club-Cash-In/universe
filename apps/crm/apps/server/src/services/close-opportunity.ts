@@ -772,7 +772,8 @@ async function createCredit(
 		if (diaPagoMensual == null) {
 			return {
 				success: false,
-				error: "La oportunidad debe tener día de pago 15 o 30 para crear el crédito en cartera-back",
+				error:
+					"La oportunidad debe tener día de pago 15 o 30 para crear el crédito en cartera-back",
 			};
 		}
 

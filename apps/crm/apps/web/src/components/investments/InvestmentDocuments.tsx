@@ -1,6 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle, Clock, FileText, Upload, XCircle } from "lucide-react";
-import { useState } from "react";
+import {
+	CheckCircle,
+	Clock,
+	FileText,
+	Loader2,
+	Upload,
+	XCircle,
+} from "lucide-react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,7 +19,6 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
 	Select,
@@ -22,6 +28,7 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import { client, orpc } from "@/utils/orpc";
 
 const DOC_TYPE_LABELS: Record<string, string> = {
@@ -99,12 +106,14 @@ export function InvestmentDocuments({
 	canReview = false,
 }: InvestmentDocumentsProps) {
 	const queryClient = useQueryClient();
+	const fileInputRef = useRef<HTMLInputElement>(null);
 
 	// Upload dialog state
 	const [uploadOpen, setUploadOpen] = useState(false);
 	const [uploadDocType, setUploadDocType] = useState<string>("");
-	const [uploadFileUrl, setUploadFileUrl] = useState("");
-	const [uploadFileName, setUploadFileName] = useState("");
+	const [selectedFile, setSelectedFile] = useState<File | null>(null);
+	const [uploading, setUploading] = useState(false);
+	const [uploadProgress, setUploadProgress] = useState(0);
 
 	// Rejection dialog state
 	const [rejectOpen, setRejectOpen] = useState(false);
@@ -123,6 +132,7 @@ export function InvestmentDocuments({
 			documentType: string;
 			fileUrl: string;
 			fileName?: string;
+			mimeType?: string;
 		}) => {
 			if (!investorId) {
 				throw new Error(
@@ -143,14 +153,15 @@ export function InvestmentDocuments({
 					| "other",
 				fileUrl: data.fileUrl,
 				fileName: data.fileName || undefined,
+				mimeType: data.mimeType || undefined,
 			});
 		},
 		onSuccess: () => {
 			toast.success("Documento subido exitosamente");
 			setUploadOpen(false);
-			setUploadFileUrl("");
-			setUploadFileName("");
+			setSelectedFile(null);
 			setUploadDocType("");
+			setUploadProgress(0);
 			invalidate();
 		},
 		onError: (error: Error) => {
@@ -192,20 +203,46 @@ export function InvestmentDocuments({
 		},
 	});
 
-	const handleUpload = () => {
+	const handleUpload = async () => {
 		if (!uploadDocType) {
 			toast.error("Selecciona el tipo de documento");
 			return;
 		}
-		if (!uploadFileUrl.trim()) {
-			toast.error("Ingresa la URL del archivo");
+		if (!selectedFile) {
+			toast.error("Selecciona un archivo");
 			return;
 		}
-		uploadMutation.mutate({
-			documentType: uploadDocType,
-			fileUrl: uploadFileUrl.trim(),
-			fileName: uploadFileName.trim() || undefined,
-		});
+		if (!investorId) {
+			toast.error("Primero crea el perfil del inversionista");
+			return;
+		}
+
+		setUploading(true);
+		setUploadProgress(0);
+
+		try {
+			// 1. Subir a R2
+			const { key } = await uploadFileToR2WithRetry(
+				selectedFile,
+				{
+					resourceType: "investment_document",
+					resourceId: opportunityId,
+				},
+				{ onProgress: setUploadProgress },
+			);
+
+			// 2. Guardar referencia en DB
+			uploadMutation.mutate({
+				documentType: uploadDocType,
+				fileUrl: key,
+				fileName: selectedFile.name,
+				mimeType: selectedFile.type,
+			});
+		} catch (error) {
+			toast.error("Error al subir el archivo");
+		} finally {
+			setUploading(false);
+		}
 	};
 
 	const handleReject = () => {
@@ -227,8 +264,8 @@ export function InvestmentDocuments({
 
 	const openUploadDialog = (docType?: string) => {
 		setUploadDocType(docType ?? "");
-		setUploadFileUrl("");
-		setUploadFileName("");
+		setSelectedFile(null);
+		setUploadProgress(0);
 		setUploadOpen(true);
 	};
 
@@ -261,6 +298,7 @@ export function InvestmentDocuments({
 							size="sm"
 							variant="outline"
 							onClick={() => openUploadDialog()}
+							disabled={!investorId}
 						>
 							<Upload className="mr-1 h-4 w-4" />
 							Subir documento
@@ -268,6 +306,12 @@ export function InvestmentDocuments({
 					</div>
 				</CardHeader>
 				<CardContent>
+					{!investorId && (
+						<p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-amber-700 text-sm dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+							Primero crea el perfil del inversionista para poder subir
+							documentos.
+						</p>
+					)}
 					<div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
 						{ALL_DOC_TYPES.map((docType) => {
 							const uploaded = docsByType[docType] ?? [];
@@ -308,7 +352,7 @@ export function InvestmentDocuments({
 									</div>
 
 									<div className="flex flex-wrap gap-2">
-										{!latestDoc && (
+										{!latestDoc && investorId && (
 											<Button
 												size="sm"
 												variant="outline"
@@ -332,7 +376,7 @@ export function InvestmentDocuments({
 											</Button>
 										)}
 
-										{latestDoc && latestDoc.fileUrl.startsWith("https://") && (
+										{latestDoc && latestDoc.fileUrl.startsWith("http") && (
 											<Button
 												size="sm"
 												variant="ghost"
@@ -375,7 +419,7 @@ export function InvestmentDocuments({
 						})}
 					</div>
 
-					{totalUploaded === 0 && (
+					{totalUploaded === 0 && investorId && (
 						<p className="mt-4 text-center text-muted-foreground text-sm">
 							No se han subido documentos aún.
 						</p>
@@ -407,39 +451,89 @@ export function InvestmentDocuments({
 						</div>
 
 						<div className="space-y-2">
-							<Label htmlFor="fileUrl">URL del Archivo</Label>
-							<Input
-								id="fileUrl"
-								type="url"
-								placeholder="https://..."
-								value={uploadFileUrl}
-								onChange={(e) => setUploadFileUrl(e.target.value)}
+							<Label>Archivo</Label>
+							<input
+								ref={fileInputRef}
+								type="file"
+								accept=".pdf,.jpg,.jpeg,.png,.webp"
+								className="hidden"
+								onChange={(e) => {
+									const file = e.target.files?.[0];
+									if (file) {
+										if (file.size > 10 * 1024 * 1024) {
+											toast.error("El archivo no puede superar 10MB");
+											return;
+										}
+										setSelectedFile(file);
+									}
+								}}
 							/>
+							<div
+								className="flex cursor-pointer flex-col items-center gap-2 rounded-lg border-2 border-dashed p-6 transition-colors hover:border-primary/50 hover:bg-muted/50"
+								onClick={() => fileInputRef.current?.click()}
+								onKeyDown={(e) => {
+									if (e.key === "Enter") fileInputRef.current?.click();
+								}}
+							>
+								{selectedFile ? (
+									<>
+										<FileText className="h-8 w-8 text-primary" />
+										<div className="text-center">
+											<p className="font-medium text-sm">{selectedFile.name}</p>
+											<p className="text-muted-foreground text-xs">
+												{(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+											</p>
+										</div>
+									</>
+								) : (
+									<>
+										<Upload className="h-8 w-8 text-muted-foreground" />
+										<p className="text-muted-foreground text-sm">
+											Haz click para seleccionar un archivo
+										</p>
+										<p className="text-muted-foreground text-xs">
+											PDF, JPG, PNG (máx. 10MB)
+										</p>
+									</>
+								)}
+							</div>
 						</div>
 
-						<div className="space-y-2">
-							<Label htmlFor="fileName">
-								Nombre del Archivo{" "}
-								<span className="text-muted-foreground">(opcional)</span>
-							</Label>
-							<Input
-								id="fileName"
-								placeholder="nombre-archivo.pdf"
-								value={uploadFileName}
-								onChange={(e) => setUploadFileName(e.target.value)}
-							/>
-						</div>
+						{uploading && (
+							<div className="space-y-1">
+								<div className="flex items-center justify-between text-xs">
+									<span className="text-muted-foreground">Subiendo...</span>
+									<span className="font-medium">{uploadProgress}%</span>
+								</div>
+								<div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+									<div
+										className="h-full rounded-full bg-primary transition-all"
+										style={{ width: `${uploadProgress}%` }}
+									/>
+								</div>
+							</div>
+						)}
 					</div>
 					<DialogFooter>
 						<Button
 							variant="outline"
 							onClick={() => setUploadOpen(false)}
-							disabled={uploadMutation.isPending}
+							disabled={uploading || uploadMutation.isPending}
 						>
 							Cancelar
 						</Button>
-						<Button onClick={handleUpload} disabled={uploadMutation.isPending}>
-							{uploadMutation.isPending ? "Subiendo..." : "Subir"}
+						<Button
+							onClick={handleUpload}
+							disabled={uploading || uploadMutation.isPending || !selectedFile}
+						>
+							{uploading || uploadMutation.isPending ? (
+								<>
+									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+									Subiendo...
+								</>
+							) : (
+								"Subir"
+							)}
 						</Button>
 					</DialogFooter>
 				</DialogContent>

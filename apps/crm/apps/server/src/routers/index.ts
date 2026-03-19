@@ -316,4 +316,8 @@ export const disbursementRouter = {
 	updateJuridicoDashboardSnapshot: juridicoDashboardRouter.updateSnapshot,
 };
 
+export const manualVehicleRouter = {
+	upsertManualVehicleValuation: vehiclesRouter.upsertManualValuation,
+};
+
 export type AppRouter = typeof appRouter;

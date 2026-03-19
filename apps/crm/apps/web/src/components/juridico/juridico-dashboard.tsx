@@ -74,7 +74,7 @@ const getNextShortMonth = (currentShort: string) => {
 	return SPANISH_SHORT_MONTHS[(index + 1) % 12];
 };
 
-export interface JuridicoDashboardPayload {
+export interface JuridicoDashboardSinglePayload {
 	header: {
 		title: string;
 		subtitle: string;
@@ -113,20 +113,21 @@ export interface JuridicoDashboardPayload {
 		pct: number;
 		tone: "success" | "warning" | "danger";
 	}>;
-	history?: Array<{
-		periodLabel: string;
-		metrics: JuridicoDashboardPayload["metrics"];
-		funnel: JuridicoDashboardPayload["funnel"];
-		orders: JuridicoDashboardPayload["orders"];
-		quality: JuridicoDashboardPayload["quality"];
-	}>;
 }
 
+export type JuridicoDashboardPayload =
+	| JuridicoDashboardSinglePayload
+	| JuridicoDashboardSinglePayload[];
+
 interface SnapshotRecord {
+	id?: string;
+	scope?: string;
 	periodLabel: string;
 	notes: string | null;
 	payload: JuridicoDashboardPayload;
 	publishedAt: string | Date;
+	updatedBy?: string;
+	updatedAt?: string | Date;
 }
 
 export const JURIDICO_DASHBOARD_TEMPLATE: SnapshotRecord = {
@@ -228,7 +229,9 @@ export const JURIDICO_DASHBOARD_TEMPLATE: SnapshotRecord = {
 	publishedAt: new Date().toISOString(),
 };
 
-function formatMetricValue(metric: JuridicoDashboardPayload["metrics"][number]) {
+function formatMetricValue(
+	metric: JuridicoDashboardSinglePayload["metrics"][number],
+) {
 	const label = metric.label.toLowerCase();
 
 	if (label.includes("recaudación")) {
@@ -256,7 +259,7 @@ function getToneClasses(
 }
 
 function getFunnelClasses(
-	tone: JuridicoDashboardPayload["funnel"][number]["tone"] = "primary",
+	tone: JuridicoDashboardSinglePayload["funnel"][number]["tone"] = "primary",
 ) {
 	if (tone === "success") return "bg-emerald-500";
 	if (tone === "warning") return "bg-amber-500";
@@ -265,7 +268,7 @@ function getFunnelClasses(
 }
 
 function getQualityClasses(
-	tone: JuridicoDashboardPayload["quality"][number]["tone"],
+	tone: JuridicoDashboardSinglePayload["quality"][number]["tone"],
 ) {
 	if (tone === "success") return "bg-emerald-500";
 	if (tone === "warning") return "bg-amber-500";
@@ -310,7 +313,7 @@ const juridicoDashboardQualityItemSchema = z.object({
 	tone: z.enum(["success", "warning", "danger"]),
 });
 
-const juridicoDashboardPayloadSchema = z.object({
+const juridicoDashboardSinglePayloadSchema = z.object({
 	header: z.object({
 		title: z.string().min(1).default("Jurídico"),
 		subtitle: z
@@ -337,7 +340,7 @@ const SPANISH_MONTHS_MAP: Record<string, number> = {
 	julio: 6, agosto: 7, septiembre: 8, octubre: 9, noviembre: 10, diciembre: 11
 };
 
-function sortHistory(history: any[]) {
+function sortHistory(history: JuridicoDashboardSinglePayload[]) {
 	return [...history].sort((a, b) => {
 		const labelA = a.header.periodLabel.toLowerCase();
 		const labelB = b.header.periodLabel.toLowerCase();
@@ -395,7 +398,7 @@ export function JuridicoDashboardView({
 
 	// NEW: The payload can now be a single object or an array (for history)
 	const rawPayload = snapshot.payload;
-	const history: any[] = sortHistory(
+	const history = sortHistory(
 		(Array.isArray(rawPayload) ? rawPayload : [rawPayload]).filter(Boolean),
 	);
 	const hasHistory = history.length > 1;
@@ -419,7 +422,7 @@ export function JuridicoDashboardView({
 	const normalizedActive = activePeriod ? normalizePeriod(activePeriod) : null;
 	const selectedSnapshot =
 		normalizedActive
-			? history.find((h: any) => normalizePeriod(h.header.periodLabel) === normalizedActive) ||
+			? history.find((h) => normalizePeriod(h.header.periodLabel) === normalizedActive) ||
 				latestPeriod
 			: latestPeriod;
 
@@ -450,7 +453,7 @@ export function JuridicoDashboardView({
 											<SelectValue placeholder="Seleccionar periodo" />
 										</SelectTrigger>
 										<SelectContent>
-											{history.map((h: any) => (
+											{history.map((h) => (
 												<SelectItem 
 													key={h.header.periodLabel} 
 													value={normalizePeriod(h.header.periodLabel)}
@@ -496,7 +499,7 @@ export function JuridicoDashboardView({
 			</div>
 
 			<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-				{selectedSnapshot.metrics.map((metric: any) => (
+				{selectedSnapshot.metrics.map((metric) => (
 					<Card key={metric.label}>
 						<CardHeader className="pb-2">
 							<CardDescription>{metric.label}</CardDescription>
@@ -529,7 +532,7 @@ export function JuridicoDashboardView({
 						</CardDescription>
 					</CardHeader>
 					<CardContent className="space-y-4">
-						{selectedSnapshot.funnel.map((step: any) => (
+						{selectedSnapshot.funnel.map((step) => (
 							<div key={step.label} className="space-y-2">
 								<div className="flex items-center justify-between text-sm">
 									<span className="text-muted-foreground">{step.label}</span>
@@ -632,7 +635,7 @@ export function JuridicoDashboardView({
 								No hay órdenes cargadas para este período.
 							</p>
 						) : (
-							selectedSnapshot.orders.map((order: any) => (
+							selectedSnapshot.orders.map((order) => (
 								<div
 									key={order.id}
 									className="grid gap-3 rounded-lg border p-4 md:grid-cols-[0.8fr_0.9fr_0.8fr_0.7fr_0.7fr]"
@@ -682,7 +685,7 @@ export function JuridicoDashboardView({
 						</CardDescription>
 					</CardHeader>
 					<CardContent className="space-y-4">
-						{selectedSnapshot.quality.map((item: any) => (
+						{selectedSnapshot.quality.map((item) => (
 							<div key={item.label} className="space-y-2">
 								<div className="flex items-center justify-between text-sm">
 									<div className="flex items-center gap-2">
@@ -718,7 +721,11 @@ export function JuridicoDashboardEditor({
 }) {
 	const initialPayload = (() => {
 		const raw = snapshot?.payload;
-		const hist = sortHistory((Array.isArray(raw) ? raw : raw ? [raw] : []).filter(Boolean));
+		const hist = sortHistory(
+			(Array.isArray(raw) ? raw : raw ? [raw] : []).filter(
+				Boolean,
+			) as JuridicoDashboardSinglePayload[],
+		);
 		return hist[hist.length - 1] || JURIDICO_DASHBOARD_TEMPLATE.payload;
 	})();
 	const [periodLabel, setPeriodLabel] = useState(
@@ -729,7 +736,8 @@ export function JuridicoDashboardEditor({
 			"<!--DASHBOARD_HISTORY:",
 		)[0].trim(),
 	);
-	const [payload, setPayload] = useState<JuridicoDashboardPayload>(initialPayload);
+	const [payload, setPayload] =
+		useState<JuridicoDashboardSinglePayload>(initialPayload);
 	const [rawJson, setRawJson] = useState(() => JSON.stringify(initialPayload, null, 2));
 	const [validationErrors, setValidationErrors] = useState<string[]>([]);
 	const [parseError, setParseError] = useState<string | null>(null);
@@ -750,7 +758,11 @@ export function JuridicoDashboardEditor({
 		
 		// If payload is array, take latest for current editor state
 		const rawPayload = snapshot.payload;
-		const history: any[] = sortHistory((Array.isArray(rawPayload) ? rawPayload : [rawPayload]).filter(Boolean));
+		const history = sortHistory(
+			(Array.isArray(rawPayload) ? rawPayload : [rawPayload]).filter(
+				Boolean,
+			) as JuridicoDashboardSinglePayload[],
+		);
 		const latest = history[history.length - 1] || JURIDICO_DASHBOARD_TEMPLATE.payload;
 		
 		// Priority: Payload header label correctly reflects the content
@@ -770,7 +782,7 @@ export function JuridicoDashboardEditor({
 
 				// Track actual validity for indicators
 				setSectionsPresence({
-					header: juridicoDashboardPayloadSchema.shape.header.safeParse(currentPayload.header).success,
+					header: juridicoDashboardSinglePayloadSchema.shape.header.safeParse(currentPayload.header).success,
 					metrics: z.array(juridicoDashboardMetricSchema).min(4).max(6).safeParse(currentPayload.metrics).success,
 					trend: z.array(juridicoDashboardTrendPointSchema).min(1).max(12).safeParse(currentPayload.trend).success,
 					funnel: z.array(juridicoDashboardFunnelStepSchema).min(3).max(6).safeParse(currentPayload.funnel).success,
@@ -778,7 +790,7 @@ export function JuridicoDashboardEditor({
 					quality: z.array(juridicoDashboardQualityItemSchema).min(1).max(5).safeParse(currentPayload.quality).success,
 				});
 
-				const result = juridicoDashboardPayloadSchema.safeParse(currentPayload);
+				const result = juridicoDashboardSinglePayloadSchema.safeParse(currentPayload);
 				if (!result.success) {
 					// Humanize Zod errors
 					const humanErrors = result.error.issues.map((issue) => {
@@ -819,7 +831,9 @@ export function JuridicoDashboardEditor({
 	const handleNewMonth = () => {
 		// Get latest available data from history or template
 		const rawPayload = snapshot?.payload;
-		const historyList: any[] = (Array.isArray(rawPayload) ? rawPayload : [rawPayload]).filter(Boolean);
+		const historyList = (
+			Array.isArray(rawPayload) ? rawPayload : [rawPayload]
+		).filter(Boolean) as JuridicoDashboardSinglePayload[];
 		const base = historyList[historyList.length - 1] || JURIDICO_DASHBOARD_TEMPLATE.payload;
 
 		const nextPeriodHeader = getNextMonthLabel(base.header.periodLabel);
@@ -833,18 +847,18 @@ export function JuridicoDashboardEditor({
 			{ label: nextTrendLabel, collectedAmount: 0, casesIntervened: 0 }
 		];
 
-		const cleanPayload: JuridicoDashboardPayload = {
+		const cleanPayload: JuridicoDashboardSinglePayload = {
 			...base,
 			header: {
 				...base.header,
 				periodLabel: nextPeriodHeader,
 				sourceLabel: base.header.sourceLabel || "",
 			},
-			metrics: base.metrics.map((m: any) => ({ ...m, value: 0, changeText: "" })),
+			metrics: base.metrics.map((m) => ({ ...m, value: 0, changeText: "" })),
 			trend: newTrend,
-			funnel: base.funnel.map((s: any) => ({ ...s, value: 0, pct: 0 })),
+			funnel: base.funnel.map((s) => ({ ...s, value: 0, pct: 0 })),
 			orders: [],
-			quality: base.quality.map((q: any) => ({ ...q, pct: 0 })),
+			quality: base.quality.map((q) => ({ ...q, pct: 0 })),
 		};
 		
 		setPeriodLabel(nextPeriodHeader);
@@ -861,7 +875,9 @@ export function JuridicoDashboardEditor({
 	};
 
 	const syncPayload = (
-		updater: (current: JuridicoDashboardPayload) => JuridicoDashboardPayload,
+		updater: (
+			current: JuridicoDashboardSinglePayload,
+		) => JuridicoDashboardSinglePayload,
 	) => {
 		setPayload((current) => {
 			const next = updater(current);
@@ -906,7 +922,7 @@ export function JuridicoDashboardEditor({
 
 	const updateOrder = (
 		index: number,
-		key: keyof JuridicoDashboardPayload["orders"][number],
+		key: keyof JuridicoDashboardSinglePayload["orders"][number],
 		value: string,
 	) => {
 		syncPayload((current) => {
@@ -959,7 +975,7 @@ export function JuridicoDashboardEditor({
 
 	const updateQuality = (
 		index: number,
-		key: keyof JuridicoDashboardPayload["quality"][number],
+		key: keyof JuridicoDashboardSinglePayload["quality"][number],
 		value: string,
 	) => {
 		syncPayload((current) => {
@@ -982,7 +998,7 @@ export function JuridicoDashboardEditor({
 
 		if (showAdvancedEditor) {
 			try {
-				parsedData = JSON.parse(rawJson) as JuridicoDashboardPayload;
+				parsedData = JSON.parse(rawJson) as JuridicoDashboardSinglePayload;
 				setPayload(parsedData);
 			} catch (e) {
 				setParseError("El JSON no es válido");
@@ -992,7 +1008,9 @@ export function JuridicoDashboardEditor({
 
 		// --- SMART UPSERT ARRAY LOGIC ---
 		const rawPayload = snapshot?.payload;
-		const history: any[] = Array.isArray(rawPayload) ? rawPayload : rawPayload ? [rawPayload] : [];
+		const history = (
+			Array.isArray(rawPayload) ? rawPayload : rawPayload ? [rawPayload] : []
+		) as JuridicoDashboardSinglePayload[];
 		
 		// Priority: Use the label from the JSON content to avoid mismatches
 		const currentPeriodLabel = parsedData.header.periodLabel || periodLabel;
@@ -1080,7 +1098,7 @@ export function JuridicoDashboardEditor({
 			<div className="space-y-3">
 				<h3 className="font-medium text-sm">Métricas principales (4 a 6)</h3>
 				<div className="grid gap-3 sm:grid-cols-2">
-					{payload?.metrics?.map((metric: any, index: number) => (
+					{payload?.metrics?.map((metric, index: number) => (
 						<div key={`${metric.label}-${index}`} className="grid gap-2 rounded-lg border p-3">
 							<div className="font-medium text-xs text-muted-foreground">
 								{metric.label}
@@ -1108,7 +1126,7 @@ export function JuridicoDashboardEditor({
 			<div className="space-y-3">
 				<h3 className="font-medium text-sm">Tendencia mensual</h3>
 				<div className="max-h-[300px] overflow-y-auto pr-2">
-					{payload?.trend?.map((point: any, index: number) => (
+					{payload?.trend?.map((point, index: number) => (
 						<div
 							key={`${point.label}-${index}`}
 							className="mb-3 grid gap-2 rounded-lg border p-3 md:grid-cols-3"
@@ -1143,7 +1161,7 @@ export function JuridicoDashboardEditor({
 		<div className="space-y-8">
 			<div className="space-y-3">
 				<h3 className="font-medium text-sm">Embudo jurídico</h3>
-				{payload?.funnel?.map((step: any, index: number) => (
+				{payload?.funnel?.map((step, index: number) => (
 					<div
 						key={`${step.label}-${index}`}
 						className="grid gap-2 rounded-lg border p-3 md:grid-cols-2"
@@ -1260,7 +1278,7 @@ export function JuridicoDashboardEditor({
 
 			<div className="space-y-3">
 				<h3 className="font-medium text-sm">Semáforo de calidad</h3>
-				{payload?.quality?.map((item: any, index: number) => (
+				{payload?.quality?.map((item, index: number) => (
 					<div
 						key={`${item.label}-${index}`}
 						className="grid gap-2 rounded-lg border p-3 md:grid-cols-2"
@@ -1306,11 +1324,12 @@ export function JuridicoDashboardEditor({
 					<div className="space-y-2">
 						<div className="flex items-center justify-between font-medium text-sm">
 							<label htmlFor="periodLabel">Período visible</label>
-							{(Array.isArray(snapshot?.payload) && (snapshot.payload as unknown as any[]).length > 0) && (
+							{Array.isArray(snapshot?.payload) && snapshot.payload.length > 0 && (
 								<Select
 									value={periodLabel}
 									onValueChange={(val) => {
-										const history = (snapshot.payload as unknown as any[]);
+										const history =
+											snapshot.payload as JuridicoDashboardSinglePayload[];
 										const selected = history.find(
 											(m) => normalizePeriod(m.header.periodLabel) === normalizePeriod(val)
 										);
@@ -1325,7 +1344,9 @@ export function JuridicoDashboardEditor({
 										<SelectValue placeholder="Editar existente..." />
 									</SelectTrigger>
 									<SelectContent>
-										{sortHistory(snapshot.payload as unknown as any[]).map((m: any) => (
+										{sortHistory(
+											snapshot.payload as JuridicoDashboardSinglePayload[],
+										).map((m) => (
 											<SelectItem 
 												key={m.header.periodLabel} 
 												value={m.header.periodLabel}

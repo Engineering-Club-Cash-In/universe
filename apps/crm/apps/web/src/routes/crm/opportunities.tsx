@@ -46,6 +46,7 @@ import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
 import { ConsolidatedCreditSummary } from "@/components/credit/ConsolidatedCreditSummary";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
 import { ConfirmContractsSignedModal } from "@/components/crm/ConfirmContractsSignedModal";
+import { ManualVehicleValuationDialog } from "@/components/crm/ManualVehicleValuationDialog";
 import { DataTable } from "@/components/data-table";
 import { NotesTimeline } from "@/components/notes-timeline";
 import { Badge } from "@/components/ui/badge";
@@ -353,6 +354,8 @@ function RouteComponent() {
 	const queryClient = useQueryClient();
 	const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 	const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
+	const [isManualValuationDialogOpen, setIsManualValuationDialogOpen] =
+		useState(false);
 	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 	const [isChangeStageDialogOpen, setIsChangeStageDialogOpen] = useState(false);
 	const [selectedOpportunity, setSelectedOpportunity] =
@@ -756,6 +759,9 @@ function RouteComponent() {
 	});
 
 	const canFilterBySalesperson =
+		userProfile.data?.role === ROLES.ADMIN ||
+		userProfile.data?.role === ROLES.SALES_SUPERVISOR;
+	const canManageManualVehicleValuation =
 		userProfile.data?.role === ROLES.ADMIN ||
 		userProfile.data?.role === ROLES.SALES_SUPERVISOR;
 
@@ -2218,9 +2224,22 @@ function RouteComponent() {
 									{/* Vehicle Info */}
 									{selectedOpportunity.vehicle && (
 										<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-											<Label className="font-semibold text-muted-foreground text-sm">
-												Vehículo
-											</Label>
+											<div className="flex items-start justify-between gap-3">
+												<Label className="font-semibold text-muted-foreground text-sm">
+													Vehículo
+												</Label>
+												{canManageManualVehicleValuation && (
+													<Button
+														size="sm"
+														variant="outline"
+														onClick={() =>
+															setIsManualValuationDialogOpen(true)
+														}
+													>
+														Cargar valores mínimos
+													</Button>
+												)}
+											</div>
 											<div className="flex items-center gap-3">
 												<Car className="h-5 w-5 text-muted-foreground" />
 												<div className="flex flex-col gap-1">
@@ -3328,6 +3347,15 @@ function RouteComponent() {
 				isLoading={confirmContractsSignedMutation.isPending}
 				opportunityTitle={opportunityToConfirmSigned?.title}
 			/>
+
+			{selectedOpportunity?.vehicle?.id && (
+				<ManualVehicleValuationDialog
+					open={isManualValuationDialogOpen}
+					onOpenChange={setIsManualValuationDialogOpen}
+					vehicleId={selectedOpportunity.vehicle.id}
+					vehicleLabel={`${selectedOpportunity.vehicle.year} ${selectedOpportunity.vehicle.make} ${selectedOpportunity.vehicle.model}${selectedOpportunity.vehicle.licensePlate ? ` • ${selectedOpportunity.vehicle.licensePlate}` : ""}`}
+				/>
+			)}
 		</div>
 	);
 }

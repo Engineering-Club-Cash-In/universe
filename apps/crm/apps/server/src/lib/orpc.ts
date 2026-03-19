@@ -123,10 +123,11 @@ const requireCrmOrCobros = o.middleware(async ({ context, next }) => {
 
 	if (
 		!PERMISSIONS.canAccessCRM(userRole) &&
-		!PERMISSIONS.canAccessCobros(userRole)
+		!PERMISSIONS.canAccessCobros(userRole) &&
+		!PERMISSIONS.canAccessInvestments(userRole)
 	) {
 		throw new ORPCError("FORBIDDEN", {
-			message: "CRM or Cobros access required",
+			message: "CRM, Cobros or Investments access required",
 		});
 	}
 

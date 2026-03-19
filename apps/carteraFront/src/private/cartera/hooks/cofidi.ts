@@ -13,8 +13,10 @@ import {
   getPagoCompleto,
   facturarGenerico,
   getFacturasGenericas,
+  exportFacturasGenericasExcel,
   type FacturarGenericoRequest,
-  type GetFacturasGenericasParams
+  type GetFacturasGenericasParams,
+  type GetFacturasGenericasExcelResponse
 } from '../services/services';
 
 export const useFacturarPagoCompleto = () => {
@@ -168,5 +170,27 @@ export const useFacturasGenericas = (params: GetFacturasGenericasParams) => {
       limit: params.limit || 10,
     }),
     staleTime: 1000 * 60 * 5 // 5 minutos
+  });
+};
+
+// 🔥 Hook para exportar facturas genéricas a Excel
+export const useExportFacturasExcel = () => {
+  return useMutation<
+    GetFacturasGenericasExcelResponse,
+    Error,
+    Omit<GetFacturasGenericasParams, 'excel' | 'page' | 'limit'>
+  >({
+    mutationFn: exportFacturasGenericasExcel,
+    onSuccess: (data) => {
+      if (data.success && data.url) {
+        toast.success(`Excel generado: ${data.total_facturas} facturas`);
+        window.open(data.url, '_blank');
+      } else {
+        toast.error(data.mensaje || 'Error al generar Excel');
+      }
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Error al exportar Excel');
+    },
   });
 };

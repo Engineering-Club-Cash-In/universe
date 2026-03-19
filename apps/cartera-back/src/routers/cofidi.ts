@@ -15,7 +15,9 @@ import {
   pagos_credito_inversionistas,
   usuarios,
 } from "../database/db";
-import { eq, desc, and, sql } from "drizzle-orm";
+import { eq, desc, and, sql, gte, lte } from "drizzle-orm";
+import ExcelJS from "exceljs";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { NITSoapClient } from "../cofidi/nitGenerator";
 import {
   SAT_CONFIG,
@@ -2213,16 +2215,18 @@ if (facturasExistentes.length > 0) {
     "/facturas-genericas",
     async ({ query, set }) => {
       try {
-        const { created_by, nit, page = "1", limit = "10" } = query;
+        const { created_by, nit, fecha_inicio, fecha_fin, excel, tipo, page = "1", limit = "10" } = query;
+        const isExcel = excel === "true";
 
-        // Paginación
+        // Paginación (solo si no es Excel)
         const pageNum = Math.max(1, parseInt(page));
-        const limitNum = Math.min(100, Math.max(1, parseInt(limit))); // Max 100 por página
+        const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
         const offset = (pageNum - 1) * limitNum;
 
         console.log("📋 ========== BUSCANDO FACTURAS ==========");
         console.log(`👤 Usuario: ${created_by || "N/A"} | 🏷️ NIT: ${nit || "N/A"}`);
-        console.log(`📄 Página: ${pageNum} | Límite: ${limitNum}`);
+        console.log(`📅 Desde: ${fecha_inicio || "N/A"} | Hasta: ${fecha_fin || "N/A"}`);
+        console.log(`📊 Excel: ${isExcel} | 📄 Página: ${pageNum} | Límite: ${limitNum}`);
 
         // Construir condiciones dinámicamente
         const conditions = [eq(facturas_electronicas.status, "ACTIVA")];
@@ -2235,14 +2239,30 @@ if (facturasExistentes.length > 0) {
           conditions.push(eq(facturas_electronicas.receptor_nit, nit));
         }
 
+        if (fecha_inicio) {
+          conditions.push(gte(facturas_electronicas.fecha_emision, new Date(fecha_inicio)));
+        }
+
+        if (fecha_fin) {
+          const fin = new Date(fecha_fin);
+          fin.setHours(23, 59, 59, 999);
+          conditions.push(lte(facturas_electronicas.fecha_emision, fin));
+        }
+
+        if (tipo === "pago") {
+          conditions.push(sql`${facturas_electronicas.pago_id} IS NOT NULL`);
+        } else if (tipo === "credito_nuevo") {
+          conditions.push(sql`${facturas_electronicas.pago_id} IS NULL`);
+        }
+
         // Contar total de registros
         const [{ count: totalCount }] = await db
           .select({ count: sql<number>`count(*)::int` })
           .from(facturas_electronicas)
           .where(and(...conditions));
 
-        // Obtener facturas paginadas
-        const facturas = await db
+        // Obtener facturas (sin paginación si es Excel)
+        const baseQuery = db
           .select({
             factura_id: facturas_electronicas.factura_id,
             pago_id: facturas_electronicas.pago_id,
@@ -2263,13 +2283,194 @@ if (facturasExistentes.length > 0) {
           })
           .from(facturas_electronicas)
           .where(and(...conditions))
-          .orderBy(desc(facturas_electronicas.fecha_emision))
-          .limit(limitNum)
-          .offset(offset);
+          .orderBy(desc(facturas_electronicas.fecha_emision));
 
-        console.log(`✅ ${facturas.length} facturas en página ${pageNum}`);
+        const facturas = isExcel
+          ? await baseQuery
+          : await baseQuery.limit(limitNum).offset(offset);
 
-        // Calcular totales de la página
+        console.log(`✅ ${facturas.length} facturas ${isExcel ? "para Excel" : `en página ${pageNum}`}`);
+
+        // ============================================
+        // 📊 GENERAR EXCEL
+        // ============================================
+        if (isExcel) {
+          const workbook = new ExcelJS.Workbook();
+          const sheet = workbook.addWorksheet("Facturas");
+
+          // Logo
+          const logoUrl = process.env.LOGO_URL || "";
+          if (logoUrl) {
+            try {
+              const logoResponse = await fetch(logoUrl);
+              const logoBuffer = Buffer.from(await logoResponse.arrayBuffer());
+              const logoImage = workbook.addImage({
+                buffer: logoBuffer,
+                extension: "png",
+              });
+              sheet.addImage(logoImage, {
+                tl: { col: 0, row: 0 },
+                ext: { width: 180, height: 50 },
+              });
+            } catch (e) {
+              console.log("⚠️ No se pudo cargar el logo:", e);
+            }
+          }
+
+          // Espacio para el logo
+          sheet.addRow([]);
+          sheet.addRow([]);
+          sheet.addRow([]);
+
+          // Título
+          const rangoFechas = fecha_inicio && fecha_fin
+            ? `Del ${fecha_inicio} al ${fecha_fin}`
+            : fecha_inicio
+            ? `Desde ${fecha_inicio}`
+            : fecha_fin
+            ? `Hasta ${fecha_fin}`
+            : "Todas las fechas";
+
+          const titleRow = sheet.addRow(["REPORTE DE FACTURAS ELECTRÓNICAS"]);
+          titleRow.font = { bold: true, size: 14, color: { argb: "FF1A3C7A" } };
+          sheet.mergeCells(titleRow.number, 1, titleRow.number, 13);
+          titleRow.alignment = { horizontal: "center" };
+
+          const subtitleRow = sheet.addRow([`${rangoFechas} | ${facturas.length} facturas | NIT: ${nit || "Todos"}`]);
+          subtitleRow.font = { size: 10, color: { argb: "FF666666" } };
+          sheet.mergeCells(subtitleRow.number, 1, subtitleRow.number, 13);
+          subtitleRow.alignment = { horizontal: "center" };
+
+          sheet.addRow([]);
+
+          // Headers
+          const headers = [
+            "No.", "Serie", "Número", "UUID", "Tipo Doc.",
+            "NIT Receptor", "Nombre Receptor", "Subtotal",
+            "IVA (12%)", "Total", "Tipo", "Fecha Emisión", "Fecha Certificación",
+          ];
+
+          const headerRow = sheet.addRow(headers);
+          headerRow.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 10 };
+          headerRow.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FF1A3C7A" },
+          };
+          headerRow.alignment = { horizontal: "center", vertical: "middle" };
+          headerRow.height = 25;
+
+          // Data
+          let totalMonto = 0;
+          let totalIva = 0;
+
+          facturas.forEach((f, index) => {
+            const montoTotal = parseFloat(f.monto_total as string);
+            const montoIva = parseFloat(f.monto_iva as string);
+            const subtotal = montoTotal - montoIva;
+            totalMonto += montoTotal;
+            totalIva += montoIva;
+
+            const row = sheet.addRow([
+              index + 1,
+              f.serie,
+              f.numero,
+              f.uuid,
+              f.tipo_documento,
+              f.receptor_nit,
+              f.receptor_nombre,
+              subtotal,
+              montoIva,
+              montoTotal,
+              f.pago_id ? "Pago de cuota" : "Crédito nuevo",
+              f.fecha_emision ? new Date(f.fecha_emision).toLocaleDateString("es-GT", { timeZone: "America/Guatemala" }) : "",
+              f.fecha_certificacion ? new Date(f.fecha_certificacion).toLocaleDateString("es-GT", { timeZone: "America/Guatemala" }) : "",
+            ]);
+
+            if (index % 2 === 0) {
+              row.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF5F7FA" } };
+            }
+            row.getCell(8).numFmt = "Q#,##0.00";
+            row.getCell(9).numFmt = "Q#,##0.00";
+            row.getCell(10).numFmt = "Q#,##0.00";
+          });
+
+          // Totales
+          sheet.addRow([]);
+          const totalsRow = sheet.addRow([
+            "", "", "", "", "", "", "TOTALES:",
+            totalMonto - totalIva, totalIva, totalMonto, "", "", "",
+          ]);
+          totalsRow.font = { bold: true, size: 11 };
+          totalsRow.getCell(7).alignment = { horizontal: "right" };
+          totalsRow.getCell(8).numFmt = "Q#,##0.00";
+          totalsRow.getCell(9).numFmt = "Q#,##0.00";
+          totalsRow.getCell(10).numFmt = "Q#,##0.00";
+          totalsRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8EDF5" } };
+
+          // Auto-width
+          sheet.columns.forEach((col) => {
+            let maxLength = 12;
+            col.eachCell?.({ includeEmpty: true }, (cell) => {
+              const len = cell.value ? cell.value.toString().length : 0;
+              if (len > maxLength) maxLength = len;
+            });
+            col.width = Math.min(maxLength + 2, 40);
+          });
+
+          // Freeze header + bordes
+          sheet.views = [{ state: "frozen", ySplit: 7 }];
+          const dataStart = 7;
+          const dataEnd = dataStart + facturas.length;
+          for (let r = dataStart; r <= dataEnd; r++) {
+            const row = sheet.getRow(r);
+            for (let c = 1; c <= 13; c++) {
+              row.getCell(c).border = {
+                top: { style: "thin", color: { argb: "FFD0D5DD" } },
+                bottom: { style: "thin", color: { argb: "FFD0D5DD" } },
+                left: { style: "thin", color: { argb: "FFD0D5DD" } },
+                right: { style: "thin", color: { argb: "FFD0D5DD" } },
+              };
+            }
+          }
+
+          // Subir a R2
+          const buffer = await workbook.xlsx.writeBuffer();
+          const filename = `reportes/facturas_${Date.now()}.xlsx`;
+
+          const s3 = new S3Client({
+            endpoint: process.env.BUCKET_REPORTS_URL,
+            region: "auto",
+            credentials: {
+              accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
+              secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
+            },
+          });
+
+          await s3.send(
+            new PutObjectCommand({
+              Bucket: process.env.BUCKET_REPORTS,
+              Key: filename,
+              Body: Buffer.from(buffer),
+              ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            })
+          );
+
+          const publicUrl = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
+          console.log(`📊 Excel generado: ${publicUrl}`);
+
+          return {
+            success: true,
+            mensaje: `Excel generado con ${facturas.length} facturas`,
+            url: publicUrl,
+            total_facturas: facturas.length,
+            monto_total: totalMonto.toFixed(2),
+          };
+        }
+
+        // ============================================
+        // 📄 RESPUESTA NORMAL (JSON paginado)
+        // ============================================
         const montoTotalPagina = facturas.reduce(
           (sum, f) => sum + parseFloat(f.monto_total as string),
           0
@@ -2292,10 +2493,13 @@ if (facturasExistentes.length > 0) {
             filtros: {
               created_by: created_by || null,
               nit: nit || null,
+              fecha_inicio: fecha_inicio || null,
+              fecha_fin: fecha_fin || null,
+              tipo: tipo || null,
             },
             facturas: facturas.map((f) => ({
               ...f,
-              es_generica: f.pago_id === null,
+              tipo: f.pago_id ? "Pago de cuota" : "Crédito nuevo",
               link_pdf: f.pdf_url,
             })),
           },
@@ -2315,11 +2519,17 @@ if (facturasExistentes.length > 0) {
       query: t.Object({
         created_by: t.Optional(t.String()),
         nit: t.Optional(t.String()),
+        fecha_inicio: t.Optional(t.String()),
+        fecha_fin: t.Optional(t.String()),
+        excel: t.Optional(t.String()),
+        tipo: t.Optional(t.String()),
         page: t.Optional(t.String()),
         limit: t.Optional(t.String()),
       }),
     }
-  );
+  )
+
+;
 
 // ============================================
 // 🔥 FUNCIÓN HELPER PARA CERTIFICAR FACTURA

@@ -34,6 +34,7 @@ import {
 	publicProcedure,
 	tallerOrCrmProcedure,
 } from "../lib/orpc";
+import { ROLES } from "../lib/roles";
 import {
 	buildUploadPrefix,
 	deleteFileFromR2,
@@ -644,6 +645,106 @@ export const vehiclesRouter = {
 			}
 
 			return newInspection;
+		}),
+
+	upsertManualValuation: crmProcedure
+		.input(
+			z.object({
+				vehicleId: z.string().uuid(),
+				vehicleRating: z.enum(["Comercial", "No comercial"]),
+				marketValue: z.string().trim(),
+				suggestedCommercialValue: z.string().trim(),
+				bankValue: z.string().trim(),
+				currentConditionValue: z.string().trim(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const userRole = context.userRole || "";
+			const canManageManualValuation =
+				userRole === ROLES.ADMIN || userRole === ROLES.SALES_SUPERVISOR;
+
+			if (!canManageManualValuation) {
+				throw new ORPCError("FORBIDDEN", {
+					message:
+						"Solo administradores y supervisores de ventas pueden cargar valores manuales",
+				});
+			}
+
+			const [vehicle] = await db
+				.select({ id: vehicles.id })
+				.from(vehicles)
+				.where(eq(vehicles.id, input.vehicleId))
+				.limit(1);
+
+			if (!vehicle) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Vehículo no encontrado",
+				});
+			}
+
+			const [latestInspection] = await db
+				.select()
+				.from(vehicleInspections)
+				.where(eq(vehicleInspections.vehicleId, input.vehicleId))
+				.orderBy(
+					desc(vehicleInspections.inspectionDate),
+					desc(vehicleInspections.createdAt),
+				)
+				.limit(1);
+
+			const isManualValuation =
+				latestInspection &&
+				latestInspection.technicianName === "Actualizacion manual CRM" &&
+				latestInspection.inspectionResult ===
+					"Actualización manual de valores comerciales del vehículo";
+
+			const manualValuationData = {
+				vehicleRating: input.vehicleRating,
+				marketValue: input.marketValue,
+				suggestedCommercialValue: input.suggestedCommercialValue,
+				bankValue: input.bankValue,
+				currentConditionValue: input.currentConditionValue,
+				technicianName: "Actualizacion manual CRM",
+				inspectionDate: new Date(),
+				inspectionResult:
+					"Actualización manual de valores comerciales del vehículo",
+				vehicleEquipment: "Pendiente de inspección completa",
+				status: "pending" as const,
+				alerts: [] as string[],
+				sectionTimes: {},
+				scannerUsed: false,
+				airbagWarning: false,
+				testDrive: false,
+				hasSpareTire: false,
+				hasAgencyHistory: false,
+				updatedAt: new Date(),
+			};
+
+			if (isManualValuation) {
+				const [updatedInspection] = await db
+					.update(vehicleInspections)
+					.set(manualValuationData)
+					.where(eq(vehicleInspections.id, latestInspection.id))
+					.returning();
+
+				return {
+					action: "updated" as const,
+					inspection: updatedInspection,
+				};
+			}
+
+			const [newInspection] = await db
+				.insert(vehicleInspections)
+				.values({
+					vehicleId: input.vehicleId,
+					...manualValuationData,
+				})
+				.returning();
+
+			return {
+				action: "created" as const,
+				inspection: newInspection,
+			};
 		}),
 
 	// Update inspection

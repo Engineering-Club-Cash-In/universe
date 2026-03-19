@@ -46,6 +46,7 @@ import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
 import { ConsolidatedCreditSummary } from "@/components/credit/ConsolidatedCreditSummary";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
 import { ConfirmContractsSignedModal } from "@/components/crm/ConfirmContractsSignedModal";
+import { ManualVehicleValuationDialog } from "@/components/crm/ManualVehicleValuationDialog";
 import { DataTable } from "@/components/data-table";
 import { NotesTimeline } from "@/components/notes-timeline";
 import { Badge } from "@/components/ui/badge";
@@ -353,6 +354,8 @@ function RouteComponent() {
 	const queryClient = useQueryClient();
 	const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 	const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
+	const [isManualValuationDialogOpen, setIsManualValuationDialogOpen] =
+		useState(false);
 	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 	const [isChangeStageDialogOpen, setIsChangeStageDialogOpen] = useState(false);
 	const [selectedOpportunity, setSelectedOpportunity] =
@@ -756,6 +759,9 @@ function RouteComponent() {
 	});
 
 	const canFilterBySalesperson =
+		userProfile.data?.role === ROLES.ADMIN ||
+		userProfile.data?.role === ROLES.SALES_SUPERVISOR;
+	const canManageManualVehicleValuation =
 		userProfile.data?.role === ROLES.ADMIN ||
 		userProfile.data?.role === ROLES.SALES_SUPERVISOR;
 
@@ -1996,7 +2002,7 @@ function RouteComponent() {
 
 			{/* Opportunity Details Modal */}
 			<Dialog open={isDetailsDialogOpen} onOpenChange={setIsDetailsDialogOpen}>
-				<DialogContent className="max-h-[90vh] w-[90vw] min-w-[800px] max-w-5xl overflow-y-auto">
+				<DialogContent className="max-h-[90vh] w-fit min-w-[320px] md:min-w-[850px] max-w-[95vw] overflow-y-auto overflow-x-hidden">
 					<DialogHeader>
 						<DialogTitle>Detalles de la Oportunidad</DialogTitle>
 					</DialogHeader>
@@ -2011,7 +2017,7 @@ function RouteComponent() {
 								}
 							}}
 						>
-							<TabsList className="grid w-full grid-cols-6">
+							<TabsList className="flex w-full overflow-x-auto gap-2 p-1">
 								<TabsTrigger value="details">Detalles</TabsTrigger>
 								<TabsTrigger value="documents">Documentos</TabsTrigger>
 								<TabsTrigger value="coDebtors">Co-firmantes</TabsTrigger>
@@ -2218,9 +2224,22 @@ function RouteComponent() {
 									{/* Vehicle Info */}
 									{selectedOpportunity.vehicle && (
 										<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-											<Label className="font-semibold text-muted-foreground text-sm">
-												Vehículo
-											</Label>
+											<div className="flex items-start justify-between gap-3">
+												<Label className="font-semibold text-muted-foreground text-sm">
+													Vehículo
+												</Label>
+												{canManageManualVehicleValuation && (
+													<Button
+														size="sm"
+														variant="outline"
+														onClick={() =>
+															setIsManualValuationDialogOpen(true)
+														}
+													>
+														Cargar valores mínimos
+													</Button>
+												)}
+											</div>
 											<div className="flex items-center gap-3">
 												<Car className="h-5 w-5 text-muted-foreground" />
 												<div className="flex flex-col gap-1">
@@ -3328,6 +3347,15 @@ function RouteComponent() {
 				isLoading={confirmContractsSignedMutation.isPending}
 				opportunityTitle={opportunityToConfirmSigned?.title}
 			/>
+
+			{selectedOpportunity?.vehicle?.id && (
+				<ManualVehicleValuationDialog
+					open={isManualValuationDialogOpen}
+					onOpenChange={setIsManualValuationDialogOpen}
+					vehicleId={selectedOpportunity.vehicle.id}
+					vehicleLabel={`${selectedOpportunity.vehicle.year} ${selectedOpportunity.vehicle.make} ${selectedOpportunity.vehicle.model}${selectedOpportunity.vehicle.licensePlate ? ` • ${selectedOpportunity.vehicle.licensePlate}` : ""}`}
+				/>
+			)}
 		</div>
 	);
 }
@@ -3654,12 +3682,12 @@ function DocumentsManager({
 							{disbursementQuery.data!.documents.map((doc) => (
 								<div
 									key={doc.id}
-									className="flex items-center justify-between rounded-md border border-blue-200 bg-white px-4 py-3"
+									className="flex flex-col gap-3 sm:flex-row sm:items-center justify-between rounded-md border border-blue-200 bg-white px-4 py-3"
 								>
-									<div className="flex min-w-0 items-center gap-3">
+									<div className="flex min-w-0 flex-1 items-center gap-3">
 										<FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
-										<div className="min-w-0">
-											<p className="truncate font-medium text-sm">
+										<div className="min-w-0 flex-1">
+											<p className="font-medium text-sm break-all whitespace-normal">
 												{doc.originalName}
 											</p>
 											<p className="text-muted-foreground text-xs">
@@ -3713,12 +3741,14 @@ function DocumentsManager({
 							{detalleDocuments.map((detalleDoc) => (
 								<div
 									key={detalleDoc.id}
-									className="flex items-center justify-between rounded-lg border border-green-200 bg-white p-4"
+									className="flex flex-col gap-3 sm:flex-row sm:items-center justify-between rounded-lg border border-green-200 bg-white p-4"
 								>
-									<div className="flex items-center gap-3">
-										<span className="text-3xl">📊</span>
-										<div>
-											<p className="font-medium">{detalleDoc.originalName}</p>
+									<div className="flex min-w-0 flex-1 items-center gap-3">
+										<span className="text-3xl shrink-0">📊</span>
+										<div className="min-w-0 flex-1">
+											<p className="font-medium break-all whitespace-normal">
+												{detalleDoc.originalName}
+											</p>
 											<p className="text-muted-foreground text-xs">
 												Subido el{" "}
 												{new Date(detalleDoc.uploadedAt).toLocaleString(

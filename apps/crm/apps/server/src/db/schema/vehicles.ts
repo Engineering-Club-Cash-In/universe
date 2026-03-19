@@ -148,6 +148,9 @@ export const vehicles = pgTable("vehicles", {
 	deducible: decimal("deducible", { precision: 12, scale: 2 }),
 	tipoCobertura: text("tipo_cobertura"), // "basica", "amplia", "total"
 
+	// Ownership flag - true if vehicle belongs to the company
+	isOwned: boolean("is_owned").notNull().default(false),
+
 	// General notes
 	notes: text("notes"),
 

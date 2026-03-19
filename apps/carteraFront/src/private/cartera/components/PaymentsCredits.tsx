@@ -459,7 +459,7 @@ const handleDownloadExcel = async () => {
                     <DropdownMenuItem asChild>
                       <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-yellow-50 text-yellow-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
                         onClick={(e) => { e.stopPropagation(); handleReverse(item.pago.pago_id, item.pago.credito_id, true); }}
-                        disabled={item.pago.pagado === false || item.pago.paymentFalse === true}>
+                        disabled={item.pago.paymentFalse === true}>
                         {reversePago.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : null} Revertir Pago
                       </button>
                     </DropdownMenuItem>

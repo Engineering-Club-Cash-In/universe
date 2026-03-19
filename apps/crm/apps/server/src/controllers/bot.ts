@@ -15,6 +15,7 @@ import { getRenapData } from "@/functions/getRenapInfo";
 import { generateUniqueFilename, uploadFileFromUrlToR2 } from "@/lib/storage";
 import { salesUser } from "@/utils/constants";
 import { db } from "../db";
+import { validarDpi } from "../utils/cui-validation";
 import { otpController } from "./otp";
 
 // Type for document type enum
@@ -304,6 +305,15 @@ function normalizeDate(dateStr: string | null | undefined): string | null {
  */
 export const getRenapInfoController = async (dpi: string, phone: string) => {
 	console.log(`[DEBUG] Starting RENAP process for DPI: ${dpi}`);
+
+	// Validar DPI
+	const resultadoDpi = validarDpi(dpi);
+	if (!resultadoDpi.valid) {
+		return {
+			success: false,
+			message: resultadoDpi.error,
+		};
+	}
 
 	// 1. Fetch data from RENAP API
 	const renapResponse = await getRenapData(dpi);

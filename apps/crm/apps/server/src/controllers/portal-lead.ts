@@ -8,6 +8,7 @@ import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { vehiclePhotos, vehicles } from "../db/schema/vehicles";
 import { getFileUrl, getFileUrlWithBucketInKey } from "../lib/storage";
 import { getOnlyRenapInfoController } from "./bot";
+import { validarDpi } from "../utils/cui-validation";
 import {
 	createOpportunityForLead,
 	getSalesUserWithLeastLeads,
@@ -180,6 +181,17 @@ export async function updateLeadByEmail(c: Context) {
 		}
 
 		const existingLead = result.lead;
+
+		// Validar DPI si se envía
+		if (dpi !== undefined && dpi.trim() !== "") {
+			const resultadoDpi = validarDpi(dpi);
+			if (!resultadoDpi.valid) {
+				return c.json(
+					{ success: false, error: resultadoDpi.error },
+					400,
+				);
+			}
+		}
 
 		// Check if new DPI or phone already exists in another lead
 		if (dpi !== undefined || phone !== undefined) {
@@ -611,9 +623,19 @@ export async function createPortalRegisterLead(c: Context) {
 		const lastName = rest.join(" ") || "-";
 
 		const email: string = body.correo.trim();
-		const dpi: string = body.dpi.trim();
+		const dpiRaw: string = body.dpi.trim();
 		const phone: string | undefined = body.telefono?.trim();
 		const notes: string | undefined = body.descripcion?.trim();
+
+		// Validar DPI
+		const resultadoDpi = validarDpi(dpiRaw);
+		if (!resultadoDpi.valid) {
+			return c.json(
+				{ success: false, error: resultadoDpi.error },
+				400,
+			);
+		}
+		const dpi = resultadoDpi.dpiLimpio;
 
 		// Verificar si ya existe un lead con ese DPI (o email)
 		const [existingLead] = await db

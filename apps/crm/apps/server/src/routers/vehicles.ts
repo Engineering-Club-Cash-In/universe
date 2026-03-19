@@ -639,10 +639,32 @@ export const vehiclesRouter = {
 			z.object({
 				vehicleId: z.string().uuid(),
 				vehicleRating: z.enum(["Comercial", "No comercial"]),
-				marketValue: z.string().min(1),
-				suggestedCommercialValue: z.string().min(1),
-				bankValue: z.string().min(1),
-				currentConditionValue: z.string().min(1),
+				marketValue: z
+					.string()
+					.trim()
+					.regex(/^\d+(\.\d+)?$/, {
+						message: "El valor de mercado debe ser un número decimal válido",
+					}),
+				suggestedCommercialValue: z
+					.string()
+					.trim()
+					.regex(/^\d+(\.\d+)?$/, {
+						message:
+							"El valor comercial sugerido debe ser un número decimal válido",
+					}),
+				bankValue: z
+					.string()
+					.trim()
+					.regex(/^\d+(\.\d+)?$/, {
+						message: "El valor bancario debe ser un número decimal válido",
+					}),
+				currentConditionValue: z
+					.string()
+					.trim()
+					.regex(/^\d+(\.\d+)?$/, {
+						message:
+							"El valor en condición actual debe ser un número decimal válido",
+					}),
 			}),
 		)
 		.handler(async ({ input, context }) => {

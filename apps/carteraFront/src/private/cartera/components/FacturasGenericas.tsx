@@ -14,17 +14,21 @@ import {
   X,
   DollarSign,
   Calendar,
+  CalendarRange,
   User,
   Download,
   AlertTriangle,
   Building2,
+  Search,
+  FileSpreadsheet,
 } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/Provider/authProvider";
-import { useFacturarGenerico, useFacturasGenericas, useAnularFactura } from "../hooks/cofidi";
-import type { FacturaGenericaItem, EmisorKey } from "../services/services";
+import { useFacturarGenerico, useFacturasGenericas, useAnularFactura, useExportFacturasExcel } from "../hooks/cofidi";
+import { DatePickerMUI } from "./calendar";
+import type { FacturaGenericaItem, EmisorKey, TipoFacturaGenerica } from "../services/services";
 
 // --- Utilidades ---
 const formatCurrency = (val?: string | number | null) =>
@@ -105,6 +109,12 @@ export function FacturasGenericas() {
   const [limit, setLimit] = useState(10);
   const [nitBusqueda, setNitBusqueda] = useState("");
   const [nitFiltro, setNitFiltro] = useState("");
+  const [fechaInicio, setFechaInicio] = useState("");
+  const [fechaFin, setFechaFin] = useState("");
+  const [fechaInicioFiltro, setFechaInicioFiltro] = useState("");
+  const [fechaFinFiltro, setFechaFinFiltro] = useState("");
+  const [tipoFactura, setTipoFactura] = useState<TipoFacturaGenerica | "">("");
+  const [tipoFacturaFiltro, setTipoFacturaFiltro] = useState<TipoFacturaGenerica | "">("");
 
   // Estados para anulación
   const [facturaParaAnular, setFacturaParaAnular] = useState<string | null>(null);
@@ -113,8 +123,12 @@ export function FacturasGenericas() {
   // Hooks
   const { mutate: facturar, isPending: isFacturando } = useFacturarGenerico();
   const anularFactura = useAnularFactura();
+  const exportExcel = useExportFacturasExcel();
   const { data, isLoading, refetch } = useFacturasGenericas({
     nit: nitFiltro || undefined,
+    fecha_inicio: fechaInicioFiltro || undefined,
+    fecha_fin: fechaFinFiltro || undefined,
+    tipo: tipoFacturaFiltro || undefined,
     page,
     limit,
   });
@@ -223,44 +237,199 @@ export function FacturasGenericas() {
           </Button>
         </div>
 
-        {/* Buscar por NIT */}
-        <div className="mb-4 p-3 bg-white rounded-lg border border-purple-200">
+        {/* Filtros */}
+        <div className="mb-4 bg-white rounded-xl border border-purple-200 shadow-sm overflow-hidden">
+          {/* Header filtros */}
+          <div className="bg-gradient-to-r from-purple-50 to-indigo-50 px-4 py-2.5 border-b border-purple-100">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Search className="w-4 h-4 text-purple-600" />
+                <span className="font-semibold text-purple-800 text-sm">Filtros</span>
+              </div>
+              {(nitFiltro || fechaInicioFiltro || fechaFinFiltro || tipoFacturaFiltro) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNitBusqueda("");
+                    setNitFiltro("");
+                    setFechaInicio("");
+                    setFechaFin("");
+                    setFechaInicioFiltro("");
+                    setFechaFinFiltro("");
+                    setTipoFactura("");
+                    setTipoFacturaFiltro("");
+                    setPage(1);
+                  }}
+                  className="text-xs font-semibold text-purple-600 hover:text-purple-800 hover:underline transition"
+                >
+                  Limpiar filtros
+                </button>
+              )}
+            </div>
+          </div>
+
           <form
             onSubmit={(e) => {
               e.preventDefault();
               setNitFiltro(nitBusqueda.trim());
+              setFechaInicioFiltro(fechaInicio);
+              setFechaFinFiltro(fechaFin);
+              setTipoFacturaFiltro(tipoFactura);
               setPage(1);
             }}
-            className="flex items-center gap-3"
+            className="p-4 space-y-4"
           >
-            <label className="text-sm font-semibold text-purple-700 whitespace-nowrap">
-              Buscar por NIT:
-            </label>
-            <Input
-              placeholder="Ingresa NIT..."
-              value={nitBusqueda}
-              onChange={(e) => setNitBusqueda(e.target.value)}
-              className="border-purple-300 text-gray-900 max-w-xs"
-            />
-            <Button
-              type="submit"
-              className="bg-purple-600 hover:bg-purple-700 text-white"
-            >
-              Buscar
-            </Button>
-            {nitFiltro && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
+              {/* NIT */}
+              <div>
+                <label className="flex items-center gap-1.5 text-xs font-semibold text-purple-700 mb-1.5">
+                  <User className="w-3.5 h-3.5" />
+                  NIT del Receptor
+                </label>
+                <Input
+                  placeholder="Ej: 12345678"
+                  value={nitBusqueda}
+                  onChange={(e) => setNitBusqueda(e.target.value)}
+                  className="border-purple-200 text-gray-900 focus:border-purple-500 focus:ring-purple-500/20"
+                />
+              </div>
+
+              {/* Tipo */}
+              <div>
+                <label className="flex items-center gap-1.5 text-xs font-semibold text-purple-700 mb-1.5">
+                  <FileText className="w-3.5 h-3.5" />
+                  Tipo
+                </label>
+                <select
+                  value={tipoFactura}
+                  onChange={(e) => setTipoFactura(e.target.value as TipoFacturaGenerica | "")}
+                  className="w-full h-10 rounded-md border border-purple-200 bg-white px-3 text-sm text-gray-900 focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 transition"
+                >
+                  <option value="">Todas</option>
+                  <option value="pago">Pago de cuota</option>
+                  <option value="credito_nuevo">Crédito nuevo</option>
+                </select>
+              </div>
+
+              {/* Fecha Inicio */}
+              <div>
+                <label className="flex items-center gap-1.5 text-xs font-semibold text-purple-700 mb-1.5">
+                  <CalendarRange className="w-3.5 h-3.5" />
+                  Desde
+                </label>
+                <DatePickerMUI
+                  value={fechaInicio}
+                  onChange={(value) => setFechaInicio(value)}
+                  disableFuture={false}
+                />
+              </div>
+
+              {/* Fecha Fin */}
+              <div>
+                <label className="flex items-center gap-1.5 text-xs font-semibold text-purple-700 mb-1.5">
+                  <CalendarRange className="w-3.5 h-3.5" />
+                  Hasta
+                </label>
+                <DatePickerMUI
+                  value={fechaFin}
+                  onChange={(value) => setFechaFin(value)}
+                  disableFuture={false}
+                />
+              </div>
+
+              {/* Botón Buscar */}
+              <div>
+                <Button
+                  type="submit"
+                  className="w-full bg-purple-600 hover:bg-purple-700 text-white gap-2 h-10"
+                >
+                  <Search className="w-4 h-4" />
+                  Buscar
+                </Button>
+              </div>
+            </div>
+
+            {/* Chips de filtros activos + Exportar Excel */}
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pt-1">
+              {/* Chips */}
+              <div className="flex flex-wrap gap-2">
+                {nitFiltro && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-semibold">
+                    NIT: {nitFiltro}
+                    <button
+                      type="button"
+                      onClick={() => { setNitBusqueda(""); setNitFiltro(""); setPage(1); }}
+                      className="hover:text-purple-900"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                )}
+                {tipoFacturaFiltro && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-100 text-amber-700 rounded-full text-xs font-semibold">
+                    Tipo: {tipoFacturaFiltro === "pago" ? "Pago de cuota" : "Crédito nuevo"}
+                    <button
+                      type="button"
+                      onClick={() => { setTipoFactura(""); setTipoFacturaFiltro(""); setPage(1); }}
+                      className="hover:text-amber-900"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                )}
+                {fechaInicioFiltro && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-100 text-indigo-700 rounded-full text-xs font-semibold">
+                    Desde: {fechaInicioFiltro}
+                    <button
+                      type="button"
+                      onClick={() => { setFechaInicio(""); setFechaInicioFiltro(""); setPage(1); }}
+                      className="hover:text-indigo-900"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                )}
+                {fechaFinFiltro && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-100 text-indigo-700 rounded-full text-xs font-semibold">
+                    Hasta: {fechaFinFiltro}
+                    <button
+                      type="button"
+                      onClick={() => { setFechaFin(""); setFechaFinFiltro(""); setPage(1); }}
+                      className="hover:text-indigo-900"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                )}
+              </div>
+
+              {/* Exportar Excel */}
               <Button
                 type="button"
-                variant="outline"
-                onClick={() => {
-                  setNitBusqueda("");
-                  setNitFiltro("");
-                  setPage(1);
-                }}
+                onClick={() =>
+                  exportExcel.mutate({
+                    nit: nitFiltro || undefined,
+                    fecha_inicio: fechaInicioFiltro || undefined,
+                    fecha_fin: fechaFinFiltro || undefined,
+                    tipo: tipoFacturaFiltro || undefined,
+                  })
+                }
+                disabled={exportExcel.isPending}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2 shadow-sm"
               >
-                Limpiar
+                {exportExcel.isPending ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Generando...
+                  </>
+                ) : (
+                  <>
+                    <FileSpreadsheet className="w-4 h-4" />
+                    Exportar Excel
+                  </>
+                )}
               </Button>
-            )}
+            </div>
           </form>
         </div>
 

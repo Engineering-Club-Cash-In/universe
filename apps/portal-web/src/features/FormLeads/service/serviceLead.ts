@@ -1,5 +1,6 @@
 import type { FormLeadsValues } from "../hooks/useForm";
 import { apiCRM } from "@/lib/api/apiCRM";
+import { normalizeCreditLeadSource } from "@/lib/leadAttribution";
 
 interface LeadPayload {
   firstName: string;
@@ -10,9 +11,15 @@ interface LeadPayload {
   creditType: string;
   loanPurpose: string;
   notes: string;
+  source?: string;
+  campaign?: string;
 }
 
-export const sendLead = async (data: FormLeadsValues) => {
+export const sendLead = async (
+  data: FormLeadsValues,
+  source?: string,
+  campaign?: string
+) => {
   // Separar nombre completo en firstName y lastName
   const nameParts = data.nombreCompleto.trim().split(" ");
   const firstName = nameParts[0] || "";
@@ -28,6 +35,16 @@ export const sendLead = async (data: FormLeadsValues) => {
     loanPurpose: "personal",
     notes: data.descripcion || "",
   };
+
+  const normalizedSource = normalizeCreditLeadSource(source);
+
+  if (normalizedSource) {
+    payload.source = normalizedSource;
+  }
+
+  if (campaign) {
+    payload.campaign = campaign;
+  }
 
   const response = await apiCRM.post("/api/public/lead", payload);
   return response.data;

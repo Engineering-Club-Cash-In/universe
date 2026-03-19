@@ -64,7 +64,6 @@ const formSchema = z.object({
   fuelType: z.enum(["Gasolina", "Diesel", "Eléctrico", "Híbrido"], { message: "El tipo de combustible es requerido" }),
   transmission: z.enum(["Automático", "Manual"], { message: "La transmisión es requerida" }),
   traction: z.enum(["FWD (Delantera)", "RWD (Trasera)", "AWD (Integral)", "4x4"], { message: "La tracción es requerida" }),
-  inspectionResult: z.string({ message: "Las observaciones son requeridas" }).min(1, { message: "Las observaciones son requeridas" }),
 
   // Section 3: Test Drive
   testDrive: z.enum(["Sí", "No"], { message: "Esta información es requerida" }),
@@ -113,7 +112,6 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       fuelType: undefined,
       transmission: undefined,
       traction: undefined,
-      inspectionResult: "",
       testDrive: undefined,
       noTestDriveReason: "",
       ...formData,
@@ -199,7 +197,6 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       fuelType: undefined,
       transmission: undefined,
       traction: undefined,
-      inspectionResult: "",
       testDrive: undefined,
       noTestDriveReason: "",
     });
@@ -227,7 +224,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
     // Clear validation errors for fields that OCR cannot fill
     const nonOCRFields: Array<keyof z.infer<typeof formSchema>> = [
       'technicianName', 'inspectionDate', 'milesMileage', 'kmMileage',
-      'fuelType', 'transmission', 'traction', 'inspectionResult', 'testDrive', 'noTestDriveReason'
+      'fuelType', 'transmission', 'traction', 'testDrive', 'noTestDriveReason'
     ];
 
     for (const field of nonOCRFields) {
@@ -264,7 +261,6 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       fuelType: "Gasolina" as const,
       transmission: "Automático" as const,
       traction: "FWD (Delantera)" as const,
-      inspectionResult: "Vehículo en excelentes condiciones generales. Motor sin ruidos anormales, transmisión automática funcionando suavemente. Carrocería sin golpes mayores, pintura en buen estado. Interior bien conservado sin desgaste excesivo.",
       testDrive: "Sí" as const,
     };
 
@@ -704,25 +700,6 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                   )}
                 />
               </div>
-
-              <FormField
-                control={form.control}
-                name="inspectionResult"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Observaciones generales de la inspección</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        placeholder="Describa el estado general del vehículo y observaciones relevantes"
-                        className="min-h-[100px]"
-                        {...field}
-                        value={field.value || ""}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
             </CardContent>
           </Card>
 

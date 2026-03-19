@@ -27,6 +27,7 @@ export interface InspectionData {
   inspectionDate: Date;
   inspectionResult: string;
   vehicleRating: 'Comercial' | 'No comercial';
+  marketValue?: string;
   currentConditionValue: string;
   vehicleEquipment: string;
   importantConsiderations?: string;
@@ -50,6 +51,7 @@ export interface InspectionData {
   hasAgencyHistory?: boolean;
   aiValuation?: {
     suggestedValue: number;
+    baseMarketValue?: number;
     reasoning: string;
     marketAnalysis: string;
     depreciationFactors: string[];
@@ -154,6 +156,7 @@ export const prepareInspectionData = (formData: any, sectionTimes?: Record<strin
     inspectionDate: formData.inspectionDate,
     inspectionResult: formData.inspectionResult,
     vehicleRating: formData.vehicleRating,
+    marketValue: formData.marketValue || undefined,
     currentConditionValue: formData.currentConditionValue,
     vehicleEquipment: formData.vehicleEquipment,
     importantConsiderations: formData.importantConsiderations,

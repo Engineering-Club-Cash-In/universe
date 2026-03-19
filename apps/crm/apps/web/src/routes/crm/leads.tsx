@@ -1315,11 +1315,24 @@ function RouteComponent() {
 																name={field.name}
 																value={field.state.value}
 																onBlur={field.handleBlur}
-																onChange={(e) =>
-																	field.handleChange(e.target.value)
-																}
-																placeholder="0000 00000 0000"
+																onChange={(e) => {
+																	const val = e.target.value
+																		.replace(/\D/g, "")
+																		.slice(0, 13);
+																	field.handleChange(val);
+																}}
+																placeholder="1234567890101"
+																maxLength={13}
+																inputMode="numeric"
 															/>
+															{field.state.value &&
+																field.state.value.length > 0 &&
+																field.state.value.length !== 13 && (
+																	<p className="text-destructive text-xs">
+																		El DPI debe tener 13 dígitos (
+																		{field.state.value.length}/13)
+																	</p>
+																)}
 														</div>
 													)}
 												</createLeadForm.Field>

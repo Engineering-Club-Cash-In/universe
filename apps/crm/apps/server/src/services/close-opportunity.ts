@@ -131,6 +131,7 @@ interface CreateCreditParams {
 	lead: LeadData;
 	numeroSifco: string;
 	userId: string;
+	isVehicleOwned?: boolean;
 }
 
 interface CreateCreditResult {
@@ -813,6 +814,7 @@ async function createCredit(
 			otros: gastosAdministrativos,
 			codigo_postal: DEFAULT_CODIGO_POSTAL,
 			pais: renapInfoData ? renapInfoData.bornedIn : undefined,
+			is_vehiculo_propio: params.isVehicleOwned ?? false,
 		});
 
 		if (!creditoResult.success) {
@@ -1034,6 +1036,7 @@ export async function closeOpportunity(
 		let vehicleData:
 			| {
 					isNew: boolean;
+					isOwned: boolean;
 					vinNumber: string | null;
 					licensePlate: string | null;
 					origin: string | null;
@@ -1048,6 +1051,7 @@ export async function closeOpportunity(
 			const [vehicleTemp] = await db
 				.select({
 					isNew: vehicles.isNew,
+					isOwned: vehicles.isOwned,
 					vinNumber: vehicles.vinNumber,
 					licensePlate: vehicles.licensePlate,
 					origin: vehicles.origin,
@@ -1117,6 +1121,7 @@ export async function closeOpportunity(
 			lead,
 			numeroSifco,
 			userId,
+			isVehicleOwned: vehicleData?.isOwned ?? false,
 		});
 
 		if (!creditResult.success) {

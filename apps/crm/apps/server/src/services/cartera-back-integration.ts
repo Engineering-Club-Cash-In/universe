@@ -142,6 +142,7 @@ export interface CreateCreditoParams {
 	membresias_pago?: number;
 	reserva?: number;
 	inversionistas?: any[];
+	is_vehiculo_propio?: boolean;
 	// campos para la facturacion
 	direccion?: string;
 	rubros?: any[];
@@ -200,6 +201,7 @@ export async function createCreditoInCarteraBack(
 			como_se_entero: "",
 			otros: params.otros ?? 0,
 			reserva: params.reserva ?? 0,
+			is_vehiculo_propio: params.is_vehiculo_propio ?? false,
 			municipio: params.municipio || "",
 			departamento: params.departamento || "",
 			codigo_postal: params.codigo_postal || "",

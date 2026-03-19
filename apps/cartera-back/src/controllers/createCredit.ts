@@ -71,6 +71,7 @@ interface CreditDataForInsert {
   royalti: string;
   tipoCredito: string;
   mora: string;
+  is_vehiculo_propio: boolean;
 }
 
 interface NewCredit {
@@ -172,6 +173,7 @@ const creditSchema = z.object({
   nit: z.string().max(1000),
   otros: z.number().min(0),
   reserva: z.number().min(0),
+  is_vehiculo_propio: z.boolean().optional().default(false),
   
   // Nuevos campos opcionales para dirección del usuario
   direccion: z.string().max(300).optional().nullable(),
@@ -316,6 +318,7 @@ const insertCreditAndRelated = async (creditData: CreditData): Promise<{
     royalti: creditData.royalti?.toString() ?? "0",
     tipoCredito: "Nuevo",
     mora: "0",
+    is_vehiculo_propio: creditData.is_vehiculo_propio ?? false,
   };
 
   console.log("Credit data to insert:", creditDataForInsert);

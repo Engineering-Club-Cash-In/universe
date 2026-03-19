@@ -455,8 +455,9 @@ export const getCreditosPaginados = async (params: {
   numero_credito_sifco?: string;
   estado: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO" | "EN_CONVENIO";
   excel: boolean;
-  asesor_id?: number;        // 👈 NUEVO
-  nombre_usuario?: string;   // 👈 NUEVO
+  asesor_id?: number;
+  nombre_usuario?: string;
+  is_vehiculo_propio?: boolean;
 }): Promise<GetCreditosResponse> => {
   const BACK_URL = import.meta.env.VITE_BACK_URL || "";
   const response = await api.get(`${BACK_URL}/getAllCredits`, {
@@ -473,8 +474,11 @@ export const getCreditosPaginados = async (params: {
       ...(params.asesor_id && {           // 👈 NUEVO
         asesor_id: params.asesor_id,
       }),
-      ...(params.nombre_usuario && {      // 👈 NUEVO
+      ...(params.nombre_usuario && {
         nombre_usuario: params.nombre_usuario,
+      }),
+      ...(params.is_vehiculo_propio !== undefined && {
+        is_vehiculo_propio: params.is_vehiculo_propio,
       }),
     },
   });

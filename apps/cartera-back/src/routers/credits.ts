@@ -130,6 +130,7 @@ export const creditRouter = new Elysia()
     email_asesor,        // 🆕 NUEVO
     cuotas_atrasadas,    // 🆕 NUEVO
     proximidad_pago,     // 🆕 NUEVO
+    is_vehiculo_propio,
   } = query as Record<string, string>;
 
   // Validar parámetros requeridos
@@ -170,6 +171,9 @@ export const creditRouter = new Elysia()
   const proximidadPagoParam = proximidad_pago
     ? (String(proximidad_pago) as "TODAY" | "WEEK" | "TWO_WEEKS" | "MONTH" | "DUEMONTH")
     : undefined;
+
+  // Filtro vehiculo propio
+  const isVehiculoPropioParam = is_vehiculo_propio === "true" ? true : undefined;
 
   // Validaciones
   if (
@@ -216,9 +220,10 @@ export const creditRouter = new Elysia()
         estado: estadoParam,
         asesor_id: asesorIdNum,
         nombre_usuario: nombreUsuarioParam,
-        email_asesor: emailAsesorParam,           // 🆕 NUEVO
-        cuotas_atrasadas: cuotasAtrasadasNum,     // 🆕 NUEVO
-        proximidad_pago: proximidadPagoParam,     // 🆕 NUEVO
+        email_asesor: emailAsesorParam,
+        cuotas_atrasadas: cuotasAtrasadasNum,
+        proximidad_pago: proximidadPagoParam,
+        is_vehiculo_propio: isVehiculoPropioParam,
         excel: true,
       });
       set.status = 200;
@@ -234,9 +239,10 @@ export const creditRouter = new Elysia()
         estadoParam,
         asesorIdNum,
         nombreUsuarioParam,
-        emailAsesorParam,           // 🆕 NUEVO
-        cuotasAtrasadasNum,         // 🆕 NUEVO
-        proximidadPagoParam         // 🆕 NUEVO
+        emailAsesorParam,
+        cuotasAtrasadasNum,
+        proximidadPagoParam,
+        isVehiculoPropioParam
       );
       set.status = 200;
       return result;

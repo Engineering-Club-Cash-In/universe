@@ -153,6 +153,7 @@
       .default(StatusCredit.ACTIVO),
     otros: numeric("otros", { precision: 18, scale: 2 }).notNull().default("0"), // Otros cargos o pagos adicionales
     permite_abono_capital: boolean("permite_abono_capital").notNull().default(false),
+    is_vehiculo_propio: boolean("is_vehiculo_propio").notNull().default(false), // true si el vehículo es propiedad de Cash In
   });
   export const cuotas_credito = customSchema.table("cuotas_credito", {
     cuota_id: serial("cuota_id").primaryKey(),

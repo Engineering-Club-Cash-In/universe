@@ -60,19 +60,38 @@ const MANUAL_VALUATION_TECHNICIAN_NAME = "Actualizacion manual CRM";
 const MANUAL_VALUATION_RESULT =
 	"Actualización manual de valores comerciales del vehículo";
 
+const MANUAL_VALUATION_COMMA_DECIMAL_PATTERN = /^\d+,\d+$/;
+const MANUAL_VALUATION_THOUSANDS_PATTERN = /^\d{1,3}(,\d{3})+(\.\d+)?$/;
+const MANUAL_VALUATION_PLAIN_NUMBER_PATTERN = /^\d+(\.\d+)?$/;
+
 const normalizeManualValuationAmount = (
 	value: string,
 	fieldLabel: string,
 ): string => {
-	const normalized = value.replace(/[Qq\s,]/g, "");
+	const sanitized = value.replace(/[Qq\s]/g, "");
 
-	if (!normalized || !/^\d+(\.\d+)?$/.test(normalized)) {
+	if (!sanitized) {
 		throw new ORPCError("BAD_REQUEST", {
 			message: `${fieldLabel} debe ser un número válido`,
 		});
 	}
 
-	return normalized;
+	if (MANUAL_VALUATION_COMMA_DECIMAL_PATTERN.test(sanitized)) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: `${fieldLabel} debe usar punto para decimales`,
+		});
+	}
+
+	if (
+		!MANUAL_VALUATION_PLAIN_NUMBER_PATTERN.test(sanitized) &&
+		!MANUAL_VALUATION_THOUSANDS_PATTERN.test(sanitized)
+	) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: `${fieldLabel} debe ser un número válido`,
+		});
+	}
+
+	return sanitized.replace(/,/g, "");
 };
 
 export const vehiclesRouter = {

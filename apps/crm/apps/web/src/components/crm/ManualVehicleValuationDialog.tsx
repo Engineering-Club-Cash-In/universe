@@ -30,14 +30,29 @@ type ManualVehicleValuationDialogProps = {
 };
 
 const MANUAL_TECHNICIAN_NAME = "Actualizacion manual CRM";
-const normalizeManualValuationAmount = (value: string): string | null => {
-	const normalized = value.replace(/[Qq\s,]/g, "");
+const COMMA_DECIMAL_PATTERN = /^\d+,\d+$/;
+const THOUSANDS_PATTERN = /^\d{1,3}(,\d{3})+(\.\d+)?$/;
+const PLAIN_NUMBER_PATTERN = /^\d+(\.\d+)?$/;
 
-	if (!normalized) {
+const normalizeManualValuationAmount = (value: string): string | null => {
+	const sanitized = value.replace(/[Qq\s]/g, "");
+
+	if (!sanitized) {
 		return null;
 	}
 
-	return /^\d+(\.\d+)?$/.test(normalized) ? normalized : null;
+	if (COMMA_DECIMAL_PATTERN.test(sanitized)) {
+		return null;
+	}
+
+	if (
+		!PLAIN_NUMBER_PATTERN.test(sanitized) &&
+		!THOUSANDS_PATTERN.test(sanitized)
+	) {
+		return null;
+	}
+
+	return sanitized.replace(/,/g, "");
 };
 
 export function ManualVehicleValuationDialog({
@@ -65,19 +80,19 @@ export function ManualVehicleValuationDialog({
 	const fieldErrors = {
 		marketValue:
 			marketValue && !normalizedMarketValue
-				? "Ingresa un monto numérico válido"
+				? "Ingresa un monto válido. Usa punto para decimales"
 				: "",
 		suggestedCommercialValue:
 			suggestedCommercialValue && !normalizedSuggestedCommercialValue
-				? "Ingresa un monto numérico válido"
+				? "Ingresa un monto válido. Usa punto para decimales"
 				: "",
 		bankValue:
 			bankValue && !normalizedBankValue
-				? "Ingresa un monto numérico válido"
+				? "Ingresa un monto válido. Usa punto para decimales"
 				: "",
 		currentConditionValue:
 			currentConditionValue && !normalizedCurrentConditionValue
-				? "Ingresa un monto numérico válido"
+				? "Ingresa un monto válido. Usa punto para decimales"
 				: "",
 	};
 

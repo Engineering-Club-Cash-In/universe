@@ -7,10 +7,12 @@ import { registerExternalUser } from "../services";
 
 interface CompleteProfileFormProps {
   onSuccess: () => void;
+  onlyApi?: boolean; // Si es true, no actualiza el rol en better-auth (usado para completar perfil desde admin)
 }
 
 export const CompleteProfileForm = ({
   onSuccess,
+  onlyApi = false,
 }: CompleteProfileFormProps) => {
   const { user } = useAuth();
   const [dpi, setDpi] = useState("");
@@ -27,10 +29,12 @@ export const CompleteProfileForm = ({
       }
 
       // 1. Actualizar usuario en better-auth
-      await authClient.updateUser({
-        dpi: dpi,
-        role: userType,
-      } as any);
+      if (!onlyApi) {
+        await authClient.updateUser({
+          dpi: dpi,
+          role: userType,
+        } as any);
+      }
 
       await registerExternalUser({
         userType: userType,

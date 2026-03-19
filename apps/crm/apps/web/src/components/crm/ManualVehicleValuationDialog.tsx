@@ -129,6 +129,13 @@ export function ManualVehicleValuationDialog({
 			queryClient.invalidateQueries({ queryKey: ["getVehicleById", vehicleId] });
 			onOpenChange(false);
 		},
+		onError: (error: any) => {
+			const message =
+				error?.message && typeof error.message === "string"
+					? error.message
+					: "Ocurrió un error al guardar la valoración. Inténtalo nuevamente.";
+			toast.error(message);
+		},
 	});
 
 	const isManualValuation =

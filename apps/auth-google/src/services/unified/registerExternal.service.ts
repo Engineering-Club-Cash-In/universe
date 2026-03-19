@@ -65,11 +65,6 @@ export const registerExternalUser = async (
         nombre: fullName,
         dpi: parseInt(dpi, 10),
         email: email,
-        emite_factura: false,
-        tipo_reinversion: "sin_reinversion",
-        banco: null,
-        tipo_cuenta: null,
-        numero_cuenta: "",
       });
 
       return {

@@ -960,11 +960,7 @@ export const updateCredit = async ({ body, set }: any) => {
       .returning();
 
 
-       await updateInstallments({
-        numero_credito_sifco:
-          numero_credito_sifco ?? current.numero_credito_sifco,
-        nueva_cuota: cuota,
-      });
+        
 
     // 9. Actualizar inversionistas (Principal)
     if (inversionistas && inversionistas.length > 0) {

@@ -2771,11 +2771,26 @@ export interface FacturaGenericaItem {
   link_pdf: string;
 }
 
+export type TipoFacturaGenerica = 'pago' | 'credito_nuevo';
+
 export interface GetFacturasGenericasParams {
   created_by?: number;
   nit?: string;
+  fecha_inicio?: string;
+  fecha_fin?: string;
+  tipo?: TipoFacturaGenerica;
+  excel?: string;
   page?: number;
   limit?: number;
+}
+
+export interface GetFacturasGenericasExcelResponse {
+  success: boolean;
+  mensaje?: string;
+  url?: string;
+  total_facturas?: number;
+  monto_total?: string;
+  error?: string;
 }
 
 export interface FacturasGenericasPagination {
@@ -2813,11 +2828,48 @@ export const getFacturasGenericas = async (
   if (params.nit) {
     queryParams.nit = params.nit;
   }
+  if (params.fecha_inicio) {
+    queryParams.fecha_inicio = params.fecha_inicio;
+  }
+  if (params.fecha_fin) {
+    queryParams.fecha_fin = params.fecha_fin;
+  }
+  if (params.tipo) {
+    queryParams.tipo = params.tipo;
+  }
+  if (params.excel) {
+    queryParams.excel = params.excel;
+  }
   if (params.page) {
     queryParams.page = params.page.toString();
   }
   if (params.limit) {
     queryParams.limit = params.limit.toString();
+  }
+
+  const response = await api.get('/api/dte/facturas-genericas', { params: queryParams });
+  return response.data;
+};
+
+export const exportFacturasGenericasExcel = async (
+  params: Omit<GetFacturasGenericasParams, 'excel' | 'page' | 'limit'>
+): Promise<GetFacturasGenericasExcelResponse> => {
+  const queryParams: Record<string, string> = { excel: 'true' };
+
+  if (params.created_by) {
+    queryParams.created_by = params.created_by.toString();
+  }
+  if (params.nit) {
+    queryParams.nit = params.nit;
+  }
+  if (params.fecha_inicio) {
+    queryParams.fecha_inicio = params.fecha_inicio;
+  }
+  if (params.fecha_fin) {
+    queryParams.fecha_fin = params.fecha_fin;
+  }
+  if (params.tipo) {
+    queryParams.tipo = params.tipo;
   }
 
   const response = await api.get('/api/dte/facturas-genericas', { params: queryParams });

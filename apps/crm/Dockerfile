@@ -11,7 +11,7 @@ COPY apps/crm/apps/server/package.json ./apps/crm/apps/server/
 COPY packages/infornet ./packages/infornet
 COPY packages/sms ./packages/sms
 
-WORKDIR /app/apps/crm/apps/web
+WORKDIR /app/apps/crm
 RUN bun install --frozen-lockfile
 
 # Stage 2: Build (invalidated only on source changes)

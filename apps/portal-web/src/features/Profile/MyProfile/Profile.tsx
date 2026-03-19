@@ -9,7 +9,7 @@ export const Profile = () => {
   const { user, isLoading } = useProfile();
   const [isCompletingProfile, setIsCompletingProfile] = useState(false);
 
-  const needsProfileCompletion = !user?.dpi && !isCompletingProfile;
+  const needsProfileCompletion = !user?.dpi && !isCompletingProfile && user?.role !== "INVESTOR";
 
   const handleProfileCompleted = () => {
     // Activar estado de carga antes de recargar

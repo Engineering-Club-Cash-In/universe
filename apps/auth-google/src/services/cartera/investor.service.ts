@@ -14,10 +14,10 @@ export interface CreateInvestorPayload {
   dpi: number;
   email?: string;
   emite_factura?: boolean;
-  tipo_reinversion: string;
+  tipo_reinversion?: string;
   banco?: string | null;
   tipo_cuenta?: string | null;
-  numero_cuenta?: string;
+  numero_cuenta?: string | null;
 }
 
 export interface CreateInvestorResponse {

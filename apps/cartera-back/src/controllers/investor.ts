@@ -313,15 +313,6 @@ export const insertInvestor = async ({ body, set }: any) => {
       if (inv.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inv.email)) {
         errores.push(`Inversionista #${index + 1}: email inválido`);
       }
-      // 🔥 Validar emite_factura si viene
-      if (
-        inv.emite_factura !== undefined &&
-        typeof inv.emite_factura !== "boolean"
-      ) {
-        errores.push(
-          `Inversionista #${index + 1}: emite_factura debe ser boolean`
-        );
-      }
 
       // 🔥 Si viene banco (nombre o id), resolverlo
       if (inv.banco) {

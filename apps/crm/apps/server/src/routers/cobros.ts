@@ -920,26 +920,6 @@ export const cobrosRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			// Verificar que el usuario tenga acceso al caso
-			if (!PERMISSIONS.canViewAllCasosCobros(context.userRole)) {
-				const caso = await db
-					.select()
-					.from(casosCobros)
-					.where(
-						and(
-							eq(casosCobros.id, input.casoCobroId),
-							eq(casosCobros.responsableCobros, context.userId),
-						),
-					)
-					.limit(1);
-
-				if (!caso.length) {
-					throw new ORPCError("FORBIDDEN", {
-						message: "No tienes permiso para acceder a este caso",
-					});
-				}
-			}
-
 			const nuevoContacto = await db
 				.insert(contactosCobros)
 				.values({
@@ -972,25 +952,6 @@ export const cobrosRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			// Verificar acceso al caso
-			if (!PERMISSIONS.canViewAllCasosCobros(context.userRole)) {
-				const caso = await db
-					.select()
-					.from(casosCobros)
-					.where(
-						and(
-							eq(casosCobros.id, input.casoCobroId),
-							eq(casosCobros.responsableCobros, context.userId),
-						),
-					)
-					.limit(1);
-
-				if (!caso.length) {
-					throw new ORPCError("FORBIDDEN", {
-						message: "No tienes permiso para acceder a este caso",
-					});
-				}
-			}
 			console.log(
 				"Obteniendo historial de contactos para el caso:",
 				input.casoCobroId,

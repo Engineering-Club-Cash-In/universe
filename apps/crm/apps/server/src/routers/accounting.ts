@@ -17,11 +17,13 @@ export const accountingRouter = {
 				})
 				.refine(
 					(value) =>
+						// Si se filtra por inversionista específico, mes/anio son opcionales
+						value.inversionistaId !== undefined ||
 						!["liquidated", "all"].includes(value.estado) ||
 						(value.mes !== undefined && value.anio !== undefined),
 					{
 						message:
-							"Los parámetros 'mes' y 'anio' son obligatorios cuando estado es 'liquidated' o 'all'.",
+							"Los parámetros 'mes' y 'anio' son obligatorios cuando estado es 'liquidated' o 'all' sin inversionistaId.",
 						path: ["mes"],
 					},
 				),
@@ -29,9 +31,8 @@ export const accountingRouter = {
 		.output(z.array(z.any()))
 		.handler(async ({ input }) => {
 			try {
-				const data = await carteraBackClient.getResumenGlobalInversionistas(
-					input,
-				);
+				const data =
+					await carteraBackClient.getResumenGlobalInversionistas(input);
 				const filtered = data.filter(
 					(item) => Number(item.total_a_recibir_con_reinversion) >= 0,
 				);

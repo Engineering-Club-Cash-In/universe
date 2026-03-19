@@ -67,6 +67,7 @@ import {
 	getMissingFieldsForCompletion,
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
+import { validarDpi } from "../utils/cui-validation";
 import { scoreLead } from "../services/lead-scoring";
 import { createNotification } from "./notifications";
 
@@ -527,8 +528,17 @@ export const crmRouter = {
 				});
 			}
 
-			// Normalizar DPI: quitar espacios en blanco
-			const normalizedDpi = input.dpi?.replace(/\s/g, "") || undefined;
+			// Normalizar y validar DPI
+			let normalizedDpi: string | undefined;
+			if (input.dpi) {
+				const resultado = validarDpi(input.dpi);
+				if (!resultado.valid) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: resultado.error,
+					});
+				}
+				normalizedDpi = resultado.dpiLimpio;
+			}
 
 			// Validar DPI duplicado
 			if (normalizedDpi) {
@@ -672,6 +682,17 @@ export const crmRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			const { id, assignedTo, ...updateData } = input;
+
+			// Validar DPI si se envía
+			if (updateData.dpi) {
+				const resultado = validarDpi(updateData.dpi);
+				if (!resultado.valid) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: resultado.error,
+					});
+				}
+				updateData.dpi = resultado.dpiLimpio;
+			}
 
 			// Admin and juridico can update any lead, others only their own
 			const canUpdateAnyLead = context.userRole !== "sales";
@@ -1048,7 +1069,10 @@ export const crmRouter = {
 						),
 				})
 				.from(opportunityStageHistory)
-				.innerJoin(salesStages, eq(opportunityStageHistory.toStageId, salesStages.id))
+				.innerJoin(
+					salesStages,
+					eq(opportunityStageHistory.toStageId, salesStages.id),
+				)
 				.where(gte(salesStages.closurePercentage, 90))
 				.groupBy(opportunityStageHistory.opportunityId)
 				.as("first_closed_stage_dates");
@@ -5628,6 +5652,14 @@ export const crmRouter = {
 			}),
 		)
 		.handler(async ({ input }) => {
+			// Validar DPI del co-deudor
+			const resultadoDpi = validarDpi(input.dpi);
+			if (!resultadoDpi.valid) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: resultadoDpi.error,
+				});
+			}
+
 			// Verificar que la oportunidad existe
 			const [opportunity] = await db
 				.select({ id: opportunities.id })
@@ -5646,7 +5678,7 @@ export const crmRouter = {
 				.values({
 					opportunityId: input.opportunityId,
 					fullName: input.fullName,
-					dpi: input.dpi,
+					dpi: resultadoDpi.dpiLimpio,
 					age: input.age,
 					gender: input.gender,
 					maritalStatus: input.maritalStatus,
@@ -5690,6 +5722,17 @@ export const crmRouter = {
 		)
 		.handler(async ({ input }) => {
 			const { id, ...updateData } = input;
+
+			// Validar DPI si se envía
+			if (updateData.dpi) {
+				const resultadoDpi = validarDpi(updateData.dpi);
+				if (!resultadoDpi.valid) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: resultadoDpi.error,
+					});
+				}
+				updateData.dpi = resultadoDpi.dpiLimpio;
+			}
 
 			const [updatedCoDebtor] = await db
 				.update(coDebtors)

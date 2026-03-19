@@ -1815,17 +1815,67 @@ export async function aplicarPagoAlCredito(pago_id: number) {
         `   💵 Membresías restante: ${membresias_restante.toString()}`
       );
 
-      // Solo actualizar el pago para validarlo (NO aplica al crédito)
+      // Validar el pago
       await db
         .update(pagos_credito)
         .set({ validationStatus: "validated", fecha_aplicado: new Date() })
         .where(eq(pagos_credito.pago_id, pago_id));
 
+      // Aunque tenga restantes, si hay abono a capital, aplicarlo al crédito
+      const abonoCapitalPago = new Big(pago.abono_capital ?? 0);
+      if (abonoCapitalPago.gt(0) && pago.credito_id !== null) {
+        console.log("💰 Aplicando abono a capital aunque tenga restantes:", abonoCapitalPago.toString());
+
+        const [creditoParc] = await db
+          .select()
+          .from(creditos)
+          .where(eq(creditos.credito_id, pago.credito_id))
+          .limit(1);
+
+        if (creditoParc) {
+          const capitalAct = new Big(creditoParc.capital ?? 0);
+
+          console.log("💰 Capital actual:", capitalAct.toString());
+          console.log("💰 Abono capital del pago:", abonoCapitalPago.toString());
+
+          const nuevoCapitalParc = capitalAct.minus(abonoCapitalPago);
+          const cuotaInteresParc = nuevoCapitalParc
+            .times(new Big(creditoParc.porcentaje_interes).div(100))
+            .round(2);
+          const iva12Parc = cuotaInteresParc.times(0.12).round(2);
+          const seguroParc = new Big(creditoParc.seguro_10_cuotas ?? 0);
+          const gpsParc = new Big(creditoParc.gps ?? 0);
+          const membresiasParc = new Big(creditoParc.membresias_pago ?? 0);
+
+          const nuevaDeudaParc = nuevoCapitalParc
+            .plus(cuotaInteresParc)
+            .plus(iva12Parc)
+            .plus(seguroParc)
+            .plus(gpsParc)
+            .plus(membresiasParc)
+            .round(2);
+
+          await db
+            .update(creditos)
+            .set({
+              capital: nuevoCapitalParc.toString(),
+              deudatotal: nuevaDeudaParc.toString(),
+              iva_12: iva12Parc.toString(),
+              cuota_interes: cuotaInteresParc.toString(),
+            })
+            .where(eq(creditos.credito_id, pago.credito_id));
+
+          console.log("💰 Nuevo capital:", nuevoCapitalParc.toString());
+          console.log("✅ Capital aplicado al crédito (con restantes pendientes)");
+        }
+      }
+
       return {
         success: true,
-        applied: false,
-        message:
-          "Pago validado, pero no aplicado al crédito (tiene restantes pendientes)",
+        applied: abonoCapitalPago.gt(0),
+        message: abonoCapitalPago.gt(0)
+          ? "Pago validado con restantes pendientes, abono a capital aplicado"
+          : "Pago validado, pero no aplicado al crédito (tiene restantes pendientes)",
         restantes: {
           capital: capital_restante_pago.toString(),
           interes: interes_restante.toString(),

@@ -240,7 +240,7 @@ export function CreditDetailView({
 		setEditDireccion(lead?.direccion || leadDireccion || "");
 		setEditNit(opportunity.nit || "");
 		setEditCategoria((opportunity.categoria as CreditCategory) || "");
-			setEditDiaPagoMensual((opportunity.diaPagoMensual as PaymentDay) || 15);
+		setEditDiaPagoMensual((opportunity.diaPagoMensual as PaymentDay) || 15);
 
 		// Parsear inversionistas existentes
 		if (opportunity.inversionistas) {

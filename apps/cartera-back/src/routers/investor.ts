@@ -583,11 +583,12 @@ export const inversionistasRouter = new Elysia()
       const { inversionistaId, mes, anio, estado = "pending", excel } = query;
       const estadoFiltro = estado as "pending" | "uploaded" | "liquidated" | "all";
 
-      if (requierePeriodoLiquidacion(estadoFiltro) && (!mes || !anio)) {
+      // Si hay inversionistaId, permitir liquidated/all sin mes/anio (trae todo el historial)
+      if (requierePeriodoLiquidacion(estadoFiltro) && (!mes || !anio) && !inversionistaId) {
         set.status = 400;
         return {
           message:
-            "Los parámetros 'mes' y 'anio' son obligatorios cuando estado es 'liquidated' o 'all'.",
+            "Los parámetros 'mes' y 'anio' son obligatorios cuando estado es 'liquidated' o 'all' sin inversionistaId.",
         };
       }
 

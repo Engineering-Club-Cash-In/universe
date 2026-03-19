@@ -42,7 +42,9 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 			personId: string;
 		}) => client.generateFormToken({ opportunityId, ...input }),
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["clientFormData", opportunityId] });
+			queryClient.invalidateQueries({
+				queryKey: ["clientFormData", opportunityId],
+			});
 			toast.success("Enlace generado exitosamente");
 		},
 		onError: () => {
@@ -55,7 +57,10 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 			await navigator.clipboard.writeText(url);
 			setCopiedKey(key);
 			toast.success("Enlace copiado al portapapeles");
-			setTimeout(() => setCopiedKey((current) => (current === key ? null : current)), 2000);
+			setTimeout(
+				() => setCopiedKey((current) => (current === key ? null : current)),
+				2000,
+			);
 		} catch {
 			toast.error("Error al copiar el enlace");
 		}
@@ -69,7 +74,7 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 		);
 	}
 
-		const participants: ClientFormParticipant[] = data?.participants ?? [];
+	const participants: ClientFormParticipant[] = data?.participants ?? [];
 	const completedCount = participants.filter(
 		(participant) =>
 			participant.creditApplicationExists &&
@@ -103,7 +108,9 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 							<div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
 								<div>
 									<div className="flex items-center gap-2">
-										<span className="font-medium">{participant.displayName}</span>
+										<span className="font-medium">
+											{participant.displayName}
+										</span>
 										<Badge variant="outline">{participant.roleLabel}</Badge>
 									</div>
 									<div className="text-muted-foreground text-sm">
@@ -182,9 +189,7 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 														personId: participant.personId,
 													})
 												}
-												disabled={
-													isGenerating || !participant.canGenerateLink
-												}
+												disabled={isGenerating || !participant.canGenerateLink}
 											>
 												{isGenerating ? "Regenerando..." : "Nuevo enlace"}
 											</Button>
@@ -261,7 +266,8 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 								</div>
 							</div>
 
-							{(participant.creditApplication || participant.financialStatement) && (
+							{(participant.creditApplication ||
+								participant.financialStatement) && (
 								<div className="flex flex-wrap gap-3">
 									{participant.creditApplication && (
 										<Button
@@ -269,7 +275,10 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 											size="sm"
 											onClick={() =>
 												generateCreditApplicationPdf(
-													participant.creditApplication as Record<string, unknown>,
+													participant.creditApplication as Record<
+														string,
+														unknown
+													>,
 												)
 											}
 										>
@@ -283,7 +292,10 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 											size="sm"
 											onClick={() =>
 												generateFinancialStatementPdf(
-													participant.financialStatement as Record<string, unknown>,
+													participant.financialStatement as Record<
+														string,
+														unknown
+													>,
 												)
 											}
 										>
@@ -293,9 +305,9 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 									)}
 								</div>
 							)}
-							</div>
-						);
-						})}
+						</div>
+					);
+				})}
 			</div>
 		</div>
 	);

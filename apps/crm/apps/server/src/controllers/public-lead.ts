@@ -8,6 +8,7 @@ import {
 	opportunities,
 	salesStages,
 } from "../db/schema/crm";
+import { validarDpi } from "../utils/cui-validation";
 import { getOnlyRenapInfoController } from "./bot";
 
 type LeadSource = (typeof leadSourceEnum.enumValues)[number];
@@ -217,6 +218,17 @@ export async function createPublicLead(c: Context) {
 
 		const creditType = body.creditType || "autocompra";
 		const hasDpi = !!(body.dpi && body.dpi.trim() !== "");
+
+		if (hasDpi) {
+			const resultadoDpi = validarDpi(body.dpi);
+			if (!resultadoDpi.valid) {
+				return c.json(
+					{ success: false, error: resultadoDpi.error },
+					400,
+				);
+			}
+			body.dpi = resultadoDpi.dpiLimpio;
+		}
 
 		// Buscar lead existente: por email+DPI si hay DPI, solo por email si no
 		const whereClause = hasDpi

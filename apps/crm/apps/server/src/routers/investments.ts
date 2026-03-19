@@ -24,6 +24,7 @@ import {
 	investmentProcedure,
 } from "../lib/orpc";
 import { ROLES } from "../lib/roles";
+import { getFileUrl } from "../lib/storage";
 import { createNotification } from "./notifications";
 
 export const investmentsRouter = {
@@ -249,10 +250,25 @@ export const investmentsRouter = {
 						.orderBy(desc(investmentStageHistory.createdAt)),
 				]);
 
+			// Generar signed URLs para documentos que tienen key de R2
+			const documentsWithUrls = await Promise.all(
+				documents.map(async (doc) => {
+					if (doc.fileUrl && !doc.fileUrl.startsWith("http")) {
+						try {
+							const signedUrl = await getFileUrl(doc.fileUrl);
+							return { ...doc, fileUrl: signedUrl, fileKey: doc.fileUrl };
+						} catch {
+							return { ...doc, fileKey: doc.fileUrl };
+						}
+					}
+					return { ...doc, fileKey: null };
+				}),
+			);
+
 			return {
 				...result,
 				scenarios,
-				documents,
+				documents: documentsWithUrls,
 				interactions,
 				stageHistory,
 			};
@@ -643,6 +659,7 @@ export const investmentsRouter = {
 	createInvestor: investmentProcedure
 		.input(
 			z.object({
+				opportunityId: z.string().uuid().optional(),
 				investmentLeadId: z.string().uuid().optional(),
 				clientType: z
 					.enum(["individual", "empresa_individual", "sociedad_anonima"])
@@ -662,7 +679,22 @@ export const investmentsRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			const [investor] = await db.insert(investors).values(input).returning();
+			const { opportunityId, ...investorData } = input;
+			const [investor] = await db
+				.insert(investors)
+				.values(investorData)
+				.returning();
+
+			// Enlazar el investor con la oportunidad
+			if (opportunityId) {
+				await db
+					.update(investmentOpportunities)
+					.set({
+						investorId: investor.id,
+						updatedAt: new Date(),
+					})
+					.where(eq(investmentOpportunities.id, opportunityId));
+			}
 
 			return investor;
 		}),
@@ -739,8 +771,9 @@ export const investmentsRouter = {
 					"bank_statement",
 					"investment_receipt",
 					"other",
+					"contract",
 				]),
-				fileUrl: z.string().url(),
+				fileUrl: z.string().min(1),
 				fileName: z.string().optional(),
 				mimeType: z.string().optional(),
 			}),

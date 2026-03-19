@@ -1064,6 +1064,7 @@ export const vehiclesRouter = {
 				aiValuation: z
 					.object({
 						suggestedValue: z.number(),
+						baseMarketValue: z.number().optional(),
 						reasoning: z.string(),
 						marketAnalysis: z.string(),
 						depreciationFactors: z.array(z.string()),
@@ -1120,9 +1121,18 @@ export const vehiclesRouter = {
 					}
 
 					// 2. Create inspection - Clean numeric values
-					const cleanValue = (value: string): string => {
-						// Remove formatting but keep as string for the database
-						return Number.parseFloat(value.replace(/[,_\s]/g, "")).toString();
+					const cleanValue = (value: string | undefined): string | null => {
+						// Treat empty/whitespace-only values as unknown (NULL in DB)
+						if (!value || value.trim() === "") {
+							return null;
+						}
+						const normalized = value.replace(/[,_\s]/g, "");
+						const parsed = Number.parseFloat(normalized);
+						if (Number.isNaN(parsed)) {
+							// Non-empty but invalid numeric string: fail validation rather than coercing to "0"
+							throw new ORPCError("BAD_REQUEST", { message: "Invalid monetary value provided" });
+						}
+						return parsed.toString();
 					};
 
 					const [newInspection] = await tx
@@ -1140,6 +1150,7 @@ export const vehiclesRouter = {
 							),
 							// Save AI recommendations if provided
 							aiSuggestedValue: input.aiValuation?.suggestedValue?.toString(),
+							// TODO: baseMarketValue may also be mapped if there's a specific column for it, but the client maps it to marketValue above
 							aiReasoning: input.aiValuation?.reasoning,
 							aiMarketAnalysis: input.aiValuation?.marketAnalysis,
 							aiDepreciationFactors: input.aiValuation?.depreciationFactors,
@@ -1509,9 +1520,14 @@ RANGOS DE VALORES TÍPICOS (Referencia):
 - Premium: Q200,000 - Q500,000+
 
 CLASIFICACIÓN COMERCIAL:
-Debes clasificar el vehículo como "Comercial" o "No comercial" basándote en qué tan fácil es venderlo:
-- Comercial: Vehículos con alta demanda en Guatemala, marcas populares (Toyota, Mazda, Honda, Nissan, Kia, Hyundai, etc.), modelos comunes, pickups, sedanes y SUVs que se venden rápidamente.
-- No comercial: Vehículos de nicho, marcas poco conocidas en el mercado local, modelos muy específicos, deportivos de lujo, o vehículos que por sus características tardan más en encontrar comprador.
+Debes clasificar el vehículo como "Comercial" o "No comercial" basándote ÚNICA Y EXCLUSIVAMENTE en qué tan fácil es vender la MARCA Y MODELO en el mercado, IGNORANDO POR COMPLETO EL ESTADO FÍSICO O LOS DAÑOS DEL VEHÍCULO:
+- Comercial: Vehículos con alta demanda en Guatemala, marcas populares y modelos comunes. ¡IMPORTANTE! Incluso si un vehículo "Comercial" está destruido o en pésimo estado, SIGUE SIENDO COMERCIAL porque pertenece a un modelo de alta demanda. (Ejemplo: Un Toyota Corolla o Mazda CX-5 siempre es Comercial, aunque tenga daños graves).
+- No comercial: Vehículos de nicho, marcas poco conocidas, modelos con poco movimiento en el mercado guatemalteco. Estrictamente por su baja demanda de modelo, no por daños. (Ejemplo: Un Hyundai Veloster o Volkswagen Passat siempre será No Comercial, aunque esté nítido físicamente).
+
+VALOR DE MERCADO BASE Y VALOR SUGERIDO:
+Recuerda que debes proveer dos valores:
+1. baseMarketValue: Valor del vehículo funcionando y sin choques de acuerdo al mercado.
+2. suggestedValue: Valor final ya castigado por los daños físicos y mecánicos (condición actual).
 
 Proporciona una valoración conservadora pero realista para el mercado guatemalteco.`,
 						},

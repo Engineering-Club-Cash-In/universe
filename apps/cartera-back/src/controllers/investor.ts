@@ -313,15 +313,6 @@ export const insertInvestor = async ({ body, set }: any) => {
       if (inv.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inv.email)) {
         errores.push(`Inversionista #${index + 1}: email inválido`);
       }
-      // 🔥 Validar emite_factura si viene
-      if (
-        inv.emite_factura !== undefined &&
-        typeof inv.emite_factura !== "boolean"
-      ) {
-        errores.push(
-          `Inversionista #${index + 1}: emite_factura debe ser boolean`
-        );
-      }
 
       // 🔥 Si viene banco (nombre o id), resolverlo
       if (inv.banco) {
@@ -526,15 +517,20 @@ export const getInvestors = async ({ query, set }: any) => {
         ? result[0]
         : { message: "Inversionista no encontrado" };
     }
-    if(query.email){  
+    if(query.email){
       const result = await db
         .select()
         .from(inversionistas)
         .where(eq(inversionistas.email, query.email));
       set.status = result.length ? 200 : 404;
-      return result.length
-        ? result[0]
-        : { message: "Inversionista no encontrado con ese email" };
+      if (!result.length) {
+        return { message: "Inversionista no encontrado con ese email" };
+      }
+      const investor = result[0];
+      if (investor.dpi_rep_legal) {
+        return { ...investor, dpi: investor.dpi_rep_legal };
+      }
+      return investor;
     }
 
     // Buscar por DPI
@@ -3408,6 +3404,8 @@ interface InversionistaResumen {
   boleta_pendiente: BoletaPendiente | null;
   boleta_liquidacion: BoletaPendiente | null;
   reporte_liquidacion_url: string | null;
+  mes_liquidacion?: number | null;
+  anio_liquidacion?: number | null;
 }
 
 type EstadoPagoResumen = "NO_LIQUIDADO" | "LIQUIDADO";
@@ -3438,6 +3436,8 @@ interface InversionistaResumenRow {
   total_a_recibir_con_reinversion: number;
   total_cuota: number;
   reporte_liquidacion_url?: string | null;
+  mes_liquidacion?: number | null;
+  anio_liquidacion?: number | null;
 }
 
 function mapBoletasPendientes(
@@ -3605,24 +3605,23 @@ async function consultarResumenGlobalPorEstadoPago(
     condicionesJoinPagos.push(sql`EXTRACT(YEAR FROM ${pe.fecha_pago}) = ${anio}`);
   }
 
-  return db
-    .select({
-      inversionista_id: inversionistas.inversionista_id,
-      nombre: inversionistas.nombre,
-      emite_factura: inversionistas.emite_factura,
-      reinversion: inversionistas.tipo_reinversion,
-      banco_nombre: bancos.nombre,
-      tipo_cuenta: inversionistas.tipo_cuenta,
-      numero_cuenta: inversionistas.numero_cuenta,
-      total_abono_capital: sql<number>`COALESCE(SUM(${pe.abono_capital}), 0)`,
-      total_abono_interes: sql<number>`COALESCE(SUM(${pe.abono_interes}), 0)`,
-      total_abono_iva: sql<number>`COALESCE(SUM(${pe.abono_iva_12}), 0)`,
-      total_isr: sql<number>`COALESCE(SUM(
-        CASE
-          WHEN ${inversionistas.emite_factura} THEN 0
-          ELSE ROUND(${pe.abono_interes} * 0.07, 2)
-        END
-      ), 0)`,
+  const selectObj: Record<string, any> = {
+    inversionista_id: inversionistas.inversionista_id,
+    nombre: inversionistas.nombre,
+    emite_factura: inversionistas.emite_factura,
+    reinversion: inversionistas.tipo_reinversion,
+    banco_nombre: bancos.nombre,
+    tipo_cuenta: inversionistas.tipo_cuenta,
+    numero_cuenta: inversionistas.numero_cuenta,
+    total_abono_capital: sql<number>`COALESCE(SUM(${pe.abono_capital}), 0)`,
+    total_abono_interes: sql<number>`COALESCE(SUM(${pe.abono_interes}), 0)`,
+    total_abono_iva: sql<number>`COALESCE(SUM(${pe.abono_iva_12}), 0)`,
+    total_isr: sql<number>`COALESCE(SUM(
+      CASE
+        WHEN ${inversionistas.emite_factura} THEN 0
+        ELSE ROUND(${pe.abono_interes} * 0.07, 2)
+      END
+    ), 0)`,
       total_a_recibir_sin_reinversion: sql<number>`COALESCE(SUM(
         ${pe.abono_capital}
         + ${pe.abono_interes}
@@ -3739,21 +3738,40 @@ async function consultarResumenGlobalPorEstadoPago(
             END
         ), 0)
       END`,
-    })
+  };
+
+  // Si no hay filtro de mes/anio, agrupar por mes para obtener un registro por período
+  const agruparPorMes = !mes && !anio;
+  if (agruparPorMes) {
+    selectObj.mes_liquidacion = sql<number>`EXTRACT(MONTH FROM ${pe.fecha_pago})::int`;
+    selectObj.anio_liquidacion = sql<number>`EXTRACT(YEAR FROM ${pe.fecha_pago})::int`;
+  }
+
+  const groupByFields = [
+    inversionistas.inversionista_id,
+    inversionistas.nombre,
+    inversionistas.emite_factura,
+    inversionistas.tipo_reinversion,
+    inversionistas.monto_reinversion,
+    bancos.nombre,
+    inversionistas.tipo_cuenta,
+    inversionistas.numero_cuenta,
+  ];
+
+  if (agruparPorMes) {
+    groupByFields.push(
+      sql`EXTRACT(MONTH FROM ${pe.fecha_pago})` as any,
+      sql`EXTRACT(YEAR FROM ${pe.fecha_pago})` as any,
+    );
+  }
+
+  return db
+    .select(selectObj as any)
     .from(inversionistas)
     .leftJoin(bancos, eq(inversionistas.banco_id, bancos.banco_id))
     .leftJoin(pe, and(...condicionesJoinPagos))
     .where(and(...condicionesWhere))
-    .groupBy(
-      inversionistas.inversionista_id,
-      inversionistas.nombre,
-      inversionistas.emite_factura,
-      inversionistas.tipo_reinversion,
-      inversionistas.monto_reinversion,
-      bancos.nombre,
-      inversionistas.tipo_cuenta,
-      inversionistas.numero_cuenta
-    )
+    .groupBy(...groupByFields)
     .having(excel ? undefined : sql`COUNT(${pe.id}) > 0`);
 }
 
@@ -3778,25 +3796,52 @@ async function consultarResumenGlobalDesdeLiquidaciones(
     condicionesWhere.push(sql`EXTRACT(YEAR FROM ${liquidaciones.fecha_liquidacion}) = ${anio}`);
   }
 
+  // Si no hay filtro de mes/anio, agrupar por mes para obtener un registro por período
+  const agruparPorMes = !mes && !anio;
+
+  const selectFields: Record<string, any> = {
+    inversionista_id: inversionistas.inversionista_id,
+    nombre: inversionistas.nombre,
+    emite_factura: inversionistas.emite_factura,
+    reinversion: inversionistas.tipo_reinversion,
+    banco_nombre: bancos.nombre,
+    tipo_cuenta: inversionistas.tipo_cuenta,
+    numero_cuenta: inversionistas.numero_cuenta,
+    total_abono_capital: sql<number>`COALESCE(SUM(${liquidaciones.total_capital}), 0)`,
+    total_abono_interes: sql<number>`COALESCE(SUM(${liquidaciones.total_interes}), 0)`,
+    total_abono_iva: sql<number>`COALESCE(SUM(${liquidaciones.total_iva}), 0)`,
+    total_isr: sql<number>`COALESCE(SUM(${liquidaciones.total_isr}), 0)`,
+    total_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.reinversion_total}), 0)`,
+    total_cuota: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0)`,
+    total_a_recibir_con_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0)`,
+    total_a_recibir_sin_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0) + COALESCE(SUM(${liquidaciones.reinversion_total}), 0)`,
+    reporte_liquidacion_url: sql<string | null>`MAX(${liquidaciones.reporte_liquidacion_url})`,
+  };
+
+  if (agruparPorMes) {
+    selectFields.mes_liquidacion = sql<number>`EXTRACT(MONTH FROM ${liquidaciones.fecha_liquidacion})::int`;
+    selectFields.anio_liquidacion = sql<number>`EXTRACT(YEAR FROM ${liquidaciones.fecha_liquidacion})::int`;
+  }
+
+  const groupByFields = [
+    inversionistas.inversionista_id,
+    inversionistas.nombre,
+    inversionistas.emite_factura,
+    inversionistas.tipo_reinversion,
+    bancos.nombre,
+    inversionistas.tipo_cuenta,
+    inversionistas.numero_cuenta,
+  ];
+
+  if (agruparPorMes) {
+    groupByFields.push(
+      sql`EXTRACT(MONTH FROM ${liquidaciones.fecha_liquidacion})` as any,
+      sql`EXTRACT(YEAR FROM ${liquidaciones.fecha_liquidacion})` as any,
+    );
+  }
+
   return db
-    .select({
-      inversionista_id: inversionistas.inversionista_id,
-      nombre: inversionistas.nombre,
-      emite_factura: inversionistas.emite_factura,
-      reinversion: inversionistas.tipo_reinversion,
-      banco_nombre: bancos.nombre,
-      tipo_cuenta: inversionistas.tipo_cuenta,
-      numero_cuenta: inversionistas.numero_cuenta,
-      total_abono_capital: sql<number>`COALESCE(SUM(${liquidaciones.total_capital}), 0)`,
-      total_abono_interes: sql<number>`COALESCE(SUM(${liquidaciones.total_interes}), 0)`,
-      total_abono_iva: sql<number>`COALESCE(SUM(${liquidaciones.total_iva}), 0)`,
-      total_isr: sql<number>`COALESCE(SUM(${liquidaciones.total_isr}), 0)`,
-      total_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.reinversion_total}), 0)`,
-      total_cuota: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0)`,
-      total_a_recibir_con_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0)`,
-      total_a_recibir_sin_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0) + COALESCE(SUM(${liquidaciones.reinversion_total}), 0)`,
-      reporte_liquidacion_url: sql<string | null>`MAX(${liquidaciones.reporte_liquidacion_url})`,
-    })
+    .select(selectFields as any)
     .from(liquidaciones)
     .innerJoin(
       inversionistas,
@@ -3804,15 +3849,7 @@ async function consultarResumenGlobalDesdeLiquidaciones(
     )
     .leftJoin(bancos, eq(inversionistas.banco_id, bancos.banco_id))
     .where(and(...condicionesWhere))
-    .groupBy(
-      inversionistas.inversionista_id,
-      inversionistas.nombre,
-      inversionistas.emite_factura,
-      inversionistas.tipo_reinversion,
-      bancos.nombre,
-      inversionistas.tipo_cuenta,
-      inversionistas.numero_cuenta
-    );
+    .groupBy(...groupByFields);
 }
 
 function mapResumenRow(
@@ -3839,6 +3876,8 @@ function mapResumenRow(
     boleta_pendiente,
     boleta_liquidacion,
     reporte_liquidacion_url: inv.reporte_liquidacion_url ?? null,
+    ...(inv.mes_liquidacion != null ? { mes_liquidacion: inv.mes_liquidacion } : {}),
+    ...(inv.anio_liquidacion != null ? { anio_liquidacion: inv.anio_liquidacion } : {}),
   };
 }
 
@@ -4131,13 +4170,12 @@ export async function getLiquidaciones({
     conditions.push(eq(liquidaciones.liquidacion_id, liquidacion_id));
   }
 
-  // 🆕 Filtro por DPI
-  if (!isNullorEmpty(dpi)) {
+   if (!isNullorEmpty(email)) {
+    conditions.push(eq(inversionistas.email, email));
+  } else if (!isNullorEmpty(dpi)) {
     conditions.push(eq(inversionistas.dpi, parseInt(dpi)));
   }
-  if (!isNullorEmpty(email)) {
-    conditions.push(eq(inversionistas.email, email));
-  }
+ 
 
   // 📊 Query principal con joins
   const query = db

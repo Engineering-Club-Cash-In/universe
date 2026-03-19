@@ -68,13 +68,10 @@ export function VehicleDocumentUpload({
 			documentType: string;
 			description?: string;
 		}) => {
-			const { key } = await uploadFileToR2WithRetry(
-				data.file,
-				{
-					resourceType: "vehicle_document",
-					resourceId: vehicleId,
-				},
-			);
+			const { key } = await uploadFileToR2WithRetry(data.file, {
+				resourceType: "vehicle_document",
+				resourceId: vehicleId,
+			});
 
 			return await client.uploadVehicleDocument({
 				vehicleId,

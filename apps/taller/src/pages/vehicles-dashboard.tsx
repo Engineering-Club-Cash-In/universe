@@ -28,6 +28,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { getVehicleStatistics, getVehicleById } from "../services/vehicles";
+import { generateInspectionPdf } from "../lib/generate-inspection-pdf";
 import { vehiclesApi, client } from "../utils/orpc";
 import { toast } from "sonner";
 import { INSPECTION_AREAS } from "../lib/inspection-data";
@@ -78,6 +79,7 @@ interface DashboardVehicle {
   testDrive: string;
   status: string;
   photos: number;
+  allPhotos?: VehiclePhoto[];
   hasScanner: boolean;
   alerts: string[];
   trim: string;
@@ -92,7 +94,9 @@ interface DashboardVehicle {
   paintCondition: number | null;
   hasAgencyHistory: boolean | null;
   failedChecks: { area: string; checkpoint: string; status?: string; comment?: string | null }[];
-  checklistIssues?: { id?: string; item: string; severity: string; notes?: string | null; evidence?: any[] }[];
+  all360Items?: VehicleInspection360Item[];
+  checklistIssues?: { id?: string; item: string; severity: string; notes?: string | null; evidence?: ChecklistItemEvidence[] }[];
+  allChecklistItems?: InspectionChecklistItem[];
   rejectionEvidenceUrl?: string | null;
   aiValuation?: {
     aiSuggestedValue?: number | null;
@@ -435,6 +439,7 @@ export default function VehiclesDashboard() {
       testDrive: latestInspection?.testDrive ? 'Sí' : 'No',
       status: latestInspection?.status || vehicle.status || 'pending',
       photos: vehicle.photos?.length || 0,
+      allPhotos: latestInspection && vehicle.photos ? vehicle.photos.filter((p: any) => p.inspectionId === latestInspection.id || !p.inspectionId) : vehicle.photos || [],
       hasScanner: latestInspection?.scannerUsed || false,
       alerts: (latestInspection?.alerts as string[]) || [],
       trim: vehicle.trim || '',
@@ -480,6 +485,8 @@ export default function VehiclesDashboard() {
             evidence: item.evidence || [],
           }))
         : [],
+      all360Items: latestInspection?.inspection360Items || [],
+      allChecklistItems: latestInspection?.checklistItems || [],
       rejectionEvidenceUrl: latestInspection?.rejectionEvidenceUrl,
     };
   }, []);
@@ -1344,13 +1351,34 @@ export default function VehiclesDashboard() {
         }}
       >
         <DialogContent className="min-w-[90vw] max-w-7xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {selectedVehicle?.vehicleMake} {selectedVehicle?.vehicleModel}
-            </DialogTitle>
-            <DialogDescription>
-              {selectedVehicle?.licensePlate} - {selectedVehicle?.vinNumber}
-            </DialogDescription>
+          <DialogHeader className="flex flex-row items-start justify-between pr-8">
+            <div>
+              <DialogTitle>
+                {selectedVehicle?.vehicleMake} {selectedVehicle?.vehicleModel}
+              </DialogTitle>
+              <DialogDescription>
+                {selectedVehicle?.licensePlate} - {selectedVehicle?.vinNumber}
+              </DialogDescription>
+            </div>
+            {selectedVehicle && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-0!"
+                disabled={isModalLoading}
+                onClick={async () => {
+                  try {
+                    await generateInspectionPdf(selectedVehicle);
+                  } catch (e) {
+                    console.error("Error al generar el informe de inspección en PDF:", e);
+                    toast.error("No se pudo generar el informe PDF. Inténtalo de nuevo más tarde.");
+                  }
+                }}
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                Descargar Informe PDF
+              </Button>
+            )}
           </DialogHeader>
 
           {isModalLoading ? (
@@ -1664,44 +1692,7 @@ export default function VehiclesDashboard() {
                             </div>
                           </div>
 
-                          {/* IA Valuation Section */}
-                          <div>
-                            {selectedVehicle.aiValuation ? (
-                              <div className="pt-3 border-t border-dashed border-slate-200">
-                                <>
-                                  <div className="mb-2 flex items-center gap-1.5">
-                                    <Sparkles className="h-4 w-4 text-slate-950" />
-                                    <span className="font-bold text-xs uppercase tracking-tight text-slate-950">Valoración IA</span>
-                                  </div>
-                                  <div className="grid grid-cols-2 gap-4">
-                                    <div className="flex flex-col gap-1">
-                                      <span className="text-[10px] font-bold text-slate-600 uppercase tracking-tight">Valor de Mercado</span>
-                                      <span className="font-bold text-lg text-slate-950">
-                                        {selectedVehicle.aiValuation.aiSuggestedValue && !isNaN(Number(selectedVehicle.aiValuation.aiSuggestedValue))
-                                          ? Number(selectedVehicle.aiValuation.aiSuggestedValue).toLocaleString("es-GT", {
-                                              style: "currency",
-                                              currency: "GTQ",
-                                              minimumFractionDigits: 0,
-                                              maximumFractionDigits: 0,
-                                            })
-                                          : "N/A"}
-                                      </span>
-                                    </div>
-                                    <div className="flex flex-col gap-1 items-end">
-                                      <span className="text-[10px] font-bold text-slate-600 uppercase tracking-tight mb-1">Clasificación</span>
-                                      <Badge variant="outline" className="font-bold uppercase text-[10px] border-slate-300 text-slate-900 bg-slate-50">
-                                        {selectedVehicle.aiValuation.aiCommercialClassification || "N/A"}
-                                      </Badge>
-                                    </div>
-                                  </div>
-                                </>
-                              </div>
-                            ) : (
-                              <div className="p-4 rounded-lg border border-slate-100 bg-slate-50 text-slate-700 text-sm text-center">
-                                Sin información de IA disponible
-                              </div>
-                            )}
-                          </div>
+
                         </CardContent>
                       </Card>
                     </div>
@@ -2024,6 +2015,8 @@ export default function VehiclesDashboard() {
                           value={editForm.marketValue}
                           onChange={(e) => setEditForm(prev => ({ ...prev, marketValue: e.target.value }))}
                           type="number"
+                          readOnly
+                          className="bg-slate-50 cursor-not-allowed border-green-200"
                         />
                       </div>
 

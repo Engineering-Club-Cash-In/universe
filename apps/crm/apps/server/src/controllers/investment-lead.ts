@@ -3,6 +3,7 @@ import type { Context } from "hono";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import {
+	investmentLeadSourceEnum,
 	investmentAuditLog,
 	investmentLeads,
 	investmentOpportunities,
@@ -15,6 +16,9 @@ const INVESTMENT_ROLES = [
 	"investment_manager",
 	"admin",
 ] as const;
+
+type InvestmentLeadSource =
+	(typeof investmentLeadSourceEnum.enumValues)[number];
 
 /**
  * Obtiene el usuario con menos leads de inversión asignados
@@ -48,14 +52,8 @@ interface CreateInvestmentLeadInput {
 	name: string;
 	email?: string;
 	phones?: string[];
-	source?:
-		| "website"
-		| "referral"
-		| "cold_call"
-		| "email"
-		| "social_media"
-		| "event"
-		| "whatsapp";
+	source?: InvestmentLeadSource;
+	campaign?: string;
 	proposedAmount?: number;
 	assignedTo?: string;
 	userId?: string;
@@ -78,6 +76,7 @@ export async function createInvestmentLeadWithOpportunity(
 			...rest,
 			assignedTo,
 			source: input.source ?? "website",
+			campaign: input.campaign,
 			proposedAmount: proposedAmount?.toString(),
 		})
 		.returning();
@@ -97,7 +96,11 @@ export async function createInvestmentLeadWithOpportunity(
 	await db.insert(investmentAuditLog).values({
 		investmentOpportunityId: opportunity.id,
 		action: "lead_created",
-		details: { leadId: lead.id, source: input.source },
+		details: {
+			leadId: lead.id,
+			source: input.source,
+			campaign: input.campaign,
+		},
 		performedBy,
 	});
 
@@ -135,6 +138,7 @@ export async function createInvestmentLeadController(c: Context) {
 						: [body.phones]
 					: undefined,
 				source: body.source,
+				campaign: body.campaign,
 				proposedAmount: body.proposedAmount,
 				assignedTo: assignedAdvisorId,
 				userId: body.userId,

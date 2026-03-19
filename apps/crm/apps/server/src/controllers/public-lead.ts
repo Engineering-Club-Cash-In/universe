@@ -1,9 +1,16 @@
-import { and, asc, count, eq, gte, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, or } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
-import { leads, opportunities, salesStages } from "../db/schema/crm";
+import {
+	leadSourceEnum,
+	leads,
+	opportunities,
+	salesStages,
+} from "../db/schema/crm";
 import { getOnlyRenapInfoController } from "./bot";
+
+type LeadSource = (typeof leadSourceEnum.enumValues)[number];
 
 /**
  * Encuentra al usuario de ventas con menos oportunidades asignadas.
@@ -128,14 +135,8 @@ export async function createOpportunityForLead(
 	lastName: string,
 	systemUserId: string,
 	notes = "",
-	source?:
-		| "website"
-		| "referral"
-		| "cold_call"
-		| "email"
-		| "social_media"
-		| "event"
-		| "other",
+	source?: LeadSource,
+	campaign?: string,
 	loanPurpose?: "personal" | "business",
 	creditType?: "autocompra" | "sobre_vehiculo",
 ) {
@@ -164,6 +165,7 @@ export async function createOpportunityForLead(
 			updatedAt: new Date(),
 			notes: notes,
 			source: source,
+			campaign,
 			loanPurpose: loanPurpose,
 			creditType: creditType ?? "autocompra",
 		})
@@ -175,19 +177,28 @@ export async function createOpportunityForLead(
 /**
  * Verifica si un lead ya tiene una oportunidad creada en las últimas 24 horas.
  */
-export async function hasRecentOpportunity(leadId: string): Promise<boolean> {
+export async function getRecentOpportunity(leadId: string) {
 	const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 	const [recent] = await db
-		.select({ id: opportunities.id })
+		.select({
+			id: opportunities.id,
+			source: opportunities.source,
+			campaign: opportunities.campaign,
+		})
 		.from(opportunities)
 		.where(
 			and(
 				eq(opportunities.leadId, leadId),
+				or(
+					eq(opportunities.status, "open"),
+					eq(opportunities.status, "on_hold"),
+				),
 				gte(opportunities.createdAt, twentyFourHoursAgo),
 			),
 		)
+		.orderBy(desc(opportunities.createdAt))
 		.limit(1);
-	return !!recent;
+	return recent;
 }
 
 export async function createPublicLead(c: Context) {
@@ -207,6 +218,13 @@ export async function createPublicLead(c: Context) {
 		const creditType = body.creditType || "autocompra";
 		const hasDpi = !!(body.dpi && body.dpi.trim() !== "");
 
+		if (hasDpi && String(body.dpi).trim().length !== 13) {
+			return c.json(
+				{ success: false, error: "DPI inválido, debe tener 13 dígitos" },
+				400,
+			);
+		}
+
 		// Buscar lead existente: por email+DPI si hay DPI, solo por email si no
 		const whereClause = hasDpi
 			? or(eq(leads.email, body.email), eq(leads.dpi, body.dpi))
@@ -220,6 +238,11 @@ export async function createPublicLead(c: Context) {
 
 		// --- Lead existente ---
 		if (existingLead) {
+			const source = body.source || existingLead.source || "website";
+			const campaign =
+				body.campaign || existingLead.campaign || undefined;
+			let leadData = existingLead;
+
 			if (body.isRegister) {
 				return c.json(
 					{ success: true, data: existingLead, message: "Lead ya existe" },
@@ -227,12 +250,36 @@ export async function createPublicLead(c: Context) {
 				);
 			}
 
+			if (body.source || body.campaign) {
+				[leadData] = await db
+					.update(leads)
+					.set({
+						source,
+						campaign,
+						updatedAt: new Date(),
+					})
+					.where(eq(leads.id, existingLead.id))
+					.returning();
+			}
+
 			// Verificar oportunidad reciente antes de crear una nueva
-			if (await hasRecentOpportunity(existingLead.id)) {
+			const recentOpportunity = await getRecentOpportunity(existingLead.id);
+			if (recentOpportunity) {
+				if (body.source || body.campaign) {
+					await db
+						.update(opportunities)
+						.set({
+							source,
+							campaign,
+							updatedAt: new Date(),
+						})
+						.where(eq(opportunities.id, recentOpportunity.id));
+				}
+
 				return c.json(
 					{
 						success: true,
-						data: existingLead,
+						data: leadData,
 						message:
 							"Lead ya tiene una oportunidad reciente (últimas 24 horas)",
 					},
@@ -246,7 +293,8 @@ export async function createPublicLead(c: Context) {
 				existingLead.lastName,
 				existingLead.assignedTo,
 				body.notes ?? "",
-				body.source || existingLead.source || "website",
+				source,
+				campaign,
 				body.loanPurpose,
 				creditType,
 			);
@@ -259,7 +307,12 @@ export async function createPublicLead(c: Context) {
 			) {
 				const [updatedLead] = await db
 					.update(leads)
-					.set({ email: body.email, updatedAt: new Date() })
+					.set({
+						email: body.email,
+						source,
+						campaign,
+						updatedAt: new Date(),
+					})
 					.where(eq(leads.id, existingLead.id))
 					.returning();
 
@@ -277,7 +330,7 @@ export async function createPublicLead(c: Context) {
 			return c.json(
 				{
 					success: true,
-					data: existingLead,
+					data: leadData,
 					message: "Lead ya existe con el mismo email o DPI",
 					opportunity,
 				},
@@ -320,6 +373,7 @@ export async function createPublicLead(c: Context) {
 				jobTitle: body.jobTitle,
 				notes: body.notes,
 				source: body.source || "website",
+				campaign: body.campaign,
 				status: "new",
 				assignedTo: salesUserForLead.id,
 				createdBy: salesUserForLead.id,
@@ -339,6 +393,7 @@ export async function createPublicLead(c: Context) {
 			salesUserForLead.id,
 			body.notes ?? "",
 			body.source || "website",
+			body.campaign,
 			body.loanPurpose,
 			creditType,
 		);

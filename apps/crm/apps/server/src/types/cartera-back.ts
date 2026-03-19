@@ -119,6 +119,7 @@ export interface CreateCreditoInput {
 	porcentaje_royalti?: number;
 	otros?: number;
 	reserva?: number;
+	is_vehiculo_propio?: boolean;
 	// campos para la facturacion
 	direccion?: string;
 	municipio?: string;

@@ -34,6 +34,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Card,
 	CardContent,
@@ -140,6 +141,7 @@ function VehiclesDashboard() {
 	const [searchTerm, setSearchTerm] = useState("");
 	const [debouncedSearch, setDebouncedSearch] = useState("");
 	const [filterStatus, setFilterStatus] = useState("all");
+	const [filterOwnership, setFilterOwnership] = useState("all");
 	const [selectedVehicle, setSelectedVehicle] = useState<any>(null);
 	const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 	const [activeTab, setActiveTab] = useState("general");
@@ -173,9 +175,10 @@ function VehiclesDashboard() {
 				offset: page * pageSize,
 				query: debouncedSearch || undefined,
 				status: filterStatus !== "all" ? filterStatus : undefined,
+				ownership: filterOwnership !== "all" ? (filterOwnership as "owned" | "not_owned") : undefined,
 			},
 		}),
-		queryKey: ["getVehicles", page, pageSize, debouncedSearch, filterStatus],
+		queryKey: ["getVehicles", page, pageSize, debouncedSearch, filterStatus, filterOwnership],
 		placeholderData: keepPreviousData,
 	});
 	const { data: statistics } = useQuery(
@@ -301,6 +304,7 @@ function VehiclesDashboard() {
 		fuelType: "",
 		transmission: "",
 		kmMileage: 0,
+		isOwned: false,
 		// Datos técnicos para contratos
 		seats: null as number | null,
 		doors: null as number | null,
@@ -339,6 +343,7 @@ function VehiclesDashboard() {
 				fuelType: data.fuelType || undefined,
 				transmission: data.transmission || undefined,
 				kmMileage: data.kmMileage ?? undefined,
+				isOwned: data.isOwned,
 				seats: data.seats ?? undefined,
 				doors: data.doors ?? undefined,
 				axles: data.axles ?? undefined,
@@ -364,6 +369,7 @@ function VehiclesDashboard() {
 				fuelType: "",
 				transmission: "",
 				kmMileage: 0,
+				isOwned: false,
 				seats: null,
 				doors: null,
 				axles: 2,
@@ -394,6 +400,7 @@ function VehiclesDashboard() {
 		transmission: "",
 		kmMileage: 0,
 		isNew: false,
+		isOwned: false,
 		status: "pending" as
 			| "pending"
 			| "available"
@@ -426,6 +433,7 @@ function VehiclesDashboard() {
 					fuelType: data.fuelType || null,
 					transmission: data.transmission || null,
 					kmMileage: data.kmMileage,
+					isOwned: data.isOwned,
 					status: data.status,
 					// Campos para contratos legales
 					seats: data.seats,
@@ -583,6 +591,36 @@ function VehiclesDashboard() {
 											<SelectItem value="auction">Remate</SelectItem>
 										</SelectContent>
 									</Select>
+									<div className="flex items-center rounded-md border">
+										<Button
+											type="button"
+											variant="ghost"
+											size="sm"
+											className={`rounded-none rounded-l-md px-3 text-xs ${filterOwnership === "all" ? "bg-muted font-semibold" : ""}`}
+											onClick={() => { setFilterOwnership("all"); setPage(0); }}
+										>
+											Todos
+										</Button>
+										<Button
+											type="button"
+											variant="ghost"
+											size="sm"
+											className={`rounded-none border-x px-3 text-xs ${filterOwnership === "owned" ? "font-semibold" : ""}`}
+											style={filterOwnership === "owned" ? { backgroundColor: "#4E57EA15", color: "#4E57EA" } : {}}
+											onClick={() => { setFilterOwnership("owned"); setPage(0); }}
+										>
+											Cash In
+										</Button>
+										<Button
+											type="button"
+											variant="ghost"
+											size="sm"
+											className={`rounded-none rounded-r-md px-3 text-xs ${filterOwnership === "not_owned" ? "bg-muted font-semibold" : ""}`}
+											onClick={() => { setFilterOwnership("not_owned"); setPage(0); }}
+										>
+											Externos
+										</Button>
+									</div>
 								</div>
 							</div>
 
@@ -614,8 +652,13 @@ function VehiclesDashboard() {
 												return (
 													<TableRow key={vehicle.id}>
 														<TableCell>
-															<div className="font-medium">
+															<div className="flex items-center gap-2 font-medium">
 																{vehicle.make} {vehicle.model}
+																{vehicle.isOwned && (
+																	<Badge variant="outline" className="text-xs" style={{ borderColor: "#4E57EA50", backgroundColor: "#4E57EA15", color: "#4E57EA" }}>
+																		CashIn
+																	</Badge>
+																)}
 															</div>
 															<div className="text-muted-foreground text-sm">
 																{vehicle.year} - {vehicle.color}
@@ -760,6 +803,7 @@ function VehiclesDashboard() {
 																					vehicle.transmission || "",
 																				kmMileage: vehicle.kmMileage || 0,
 																				isNew: vehicle.isNew || false,
+																				isOwned: vehicle.isOwned || false,
 																				status: vehicle.status || "pending",
 																				// Campos para contratos legales
 																				seats: vehicle.seats ?? null,
@@ -1049,6 +1093,7 @@ function VehiclesDashboard() {
 											transmission: selectedVehicle.transmission || "",
 											kmMileage: selectedVehicle.kmMileage || 0,
 											isNew: selectedVehicle.isNew || false,
+											isOwned: selectedVehicle.isOwned || false,
 											status: selectedVehicle.status || "pending",
 											seats: selectedVehicle.seats ?? null,
 											doors: selectedVehicle.doors ?? null,
@@ -1912,16 +1957,14 @@ function VehiclesDashboard() {
 
 			{/* Dialog para crear vehículo nuevo */}
 			<Dialog open={isNewVehicleOpen} onOpenChange={setIsNewVehicleOpen}>
-				<DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+				<DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle className="flex items-center gap-2">
 							<Sparkles className="h-5 w-5 text-blue-500" />
 							Registrar Vehículo Nuevo
 						</DialogTitle>
 						<DialogDescription>
-							Ingresa los datos básicos del vehículo nuevo. Los datos
-							adicionales (VIN, placa, etc.) pueden completarse después cuando
-							lleguen del dealer.
+							Los campos con * son requeridos. El resto puede completarse después.
 						</DialogDescription>
 					</DialogHeader>
 
@@ -1939,14 +1982,12 @@ function VehiclesDashboard() {
 							}
 							createNewVehicleMutation.mutate(newVehicleForm);
 						}}
-						className="space-y-6"
+						className="space-y-5"
 					>
-						{/* Campos Requeridos */}
-						<div className="space-y-4">
-							<h4 className="font-medium text-sm">
-								Información Básica (Requerida)
-							</h4>
-							<div className="grid grid-cols-2 gap-4">
+						{/* Información Básica */}
+						<div className="space-y-3">
+							<h4 className="font-medium text-sm">Información Básica</h4>
+							<div className="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-3">
 								<div className="space-y-2">
 									<Label htmlFor="make">Marca *</Label>
 									<Input
@@ -2011,7 +2052,7 @@ function VehiclesDashboard() {
 										required
 									/>
 								</div>
-								<div className="col-span-2 space-y-2">
+								<div className="space-y-2">
 									<Label htmlFor="vehicleType">Tipo de Vehículo *</Label>
 									<Select
 										value={newVehicleForm.vehicleType}
@@ -2046,15 +2087,30 @@ function VehiclesDashboard() {
 										</SelectContent>
 									</Select>
 								</div>
+								<div className="space-y-2">
+									<Label htmlFor="origin">Origen</Label>
+									<Select
+										value={newVehicleForm.origin}
+										onValueChange={(value) =>
+											setNewVehicleForm({ ...newVehicleForm, origin: value })
+										}
+									>
+										<SelectTrigger>
+											<SelectValue placeholder="Seleccionar origen" />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="Nacional">Nacional</SelectItem>
+											<SelectItem value="Importado">Importado</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
 							</div>
 						</div>
 
-						{/* Campos Opcionales */}
-						<div className="space-y-4">
-							<h4 className="font-medium text-muted-foreground text-sm">
-								Información Adicional (Opcional - puede completarse después)
-							</h4>
-							<div className="grid grid-cols-2 gap-4">
+						{/* Identificación y Mecánica */}
+						<div className="space-y-3">
+							<h4 className="font-medium text-muted-foreground text-sm">Identificación y Mecánica</h4>
+							<div className="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-3">
 								<div className="space-y-2">
 									<Label htmlFor="licensePlate">Placa</Label>
 									<Input
@@ -2084,24 +2140,21 @@ function VehiclesDashboard() {
 									/>
 								</div>
 								<div className="space-y-2">
-									<Label htmlFor="origin">Origen</Label>
-									<Select
-										value={newVehicleForm.origin}
-										onValueChange={(value) =>
-											setNewVehicleForm({ ...newVehicleForm, origin: value })
+									<Label htmlFor="motorNumber">No. Motor</Label>
+									<Input
+										id="motorNumber"
+										value={newVehicleForm.motorNumber}
+										onChange={(e) =>
+											setNewVehicleForm({
+												...newVehicleForm,
+												motorNumber: e.target.value,
+											})
 										}
-									>
-										<SelectTrigger>
-											<SelectValue placeholder="Seleccionar origen" />
-										</SelectTrigger>
-										<SelectContent>
-											<SelectItem value="Nacional">Nacional</SelectItem>
-											<SelectItem value="Importado">Importado</SelectItem>
-										</SelectContent>
-									</Select>
+										placeholder="Número de motor"
+									/>
 								</div>
 								<div className="space-y-2">
-									<Label htmlFor="fuelType">Tipo de Combustible</Label>
+									<Label htmlFor="fuelType">Combustible</Label>
 									<Select
 										value={newVehicleForm.fuelType}
 										onValueChange={(value) =>
@@ -2119,7 +2172,7 @@ function VehiclesDashboard() {
 										</SelectContent>
 									</Select>
 								</div>
-								<div className="col-span-2 space-y-2">
+								<div className="space-y-2">
 									<Label htmlFor="transmission">Transmisión</Label>
 									<Select
 										value={newVehicleForm.transmission}
@@ -2138,29 +2191,6 @@ function VehiclesDashboard() {
 											<SelectItem value="Manual">Manual</SelectItem>
 										</SelectContent>
 									</Select>
-								</div>
-							</div>
-						</div>
-
-						{/* Identificación adicional */}
-						<div className="space-y-4">
-							<h4 className="font-medium text-muted-foreground text-sm">
-								Identificación y Kilometraje
-							</h4>
-							<div className="grid grid-cols-2 gap-4">
-								<div className="space-y-2">
-									<Label htmlFor="motorNumber">Número de Motor</Label>
-									<Input
-										id="motorNumber"
-										value={newVehicleForm.motorNumber}
-										onChange={(e) =>
-											setNewVehicleForm({
-												...newVehicleForm,
-												motorNumber: e.target.value,
-											})
-										}
-										placeholder="Número de motor"
-									/>
 								</div>
 								<div className="space-y-2">
 									<Label htmlFor="kmMileage">Kilometraje</Label>
@@ -2181,12 +2211,10 @@ function VehiclesDashboard() {
 							</div>
 						</div>
 
-						{/* Datos técnicos para contratos */}
-						<div className="space-y-4">
-							<h4 className="font-medium text-muted-foreground text-sm">
-								Datos Técnicos para Contratos
-							</h4>
-							<div className="grid grid-cols-3 gap-4">
+						{/* Datos para Contratos */}
+						<div className="space-y-3">
+							<h4 className="font-medium text-muted-foreground text-sm">Datos para Contratos</h4>
+							<div className="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-3">
 								<div className="space-y-2">
 									<Label htmlFor="seats">Asientos</Label>
 									<Input
@@ -2203,7 +2231,7 @@ function VehiclesDashboard() {
 										}
 										min={1}
 										max={50}
-										placeholder="Ej: 5"
+										placeholder="5"
 									/>
 								</div>
 								<div className="space-y-2">
@@ -2222,7 +2250,7 @@ function VehiclesDashboard() {
 										}
 										min={2}
 										max={6}
-										placeholder="Ej: 4"
+										placeholder="4"
 									/>
 								</div>
 								<div className="space-y-2">
@@ -2241,11 +2269,11 @@ function VehiclesDashboard() {
 										}
 										min={2}
 										max={10}
-										placeholder="Ej: 2"
+										placeholder="2"
 									/>
 								</div>
 								<div className="space-y-2">
-									<Label htmlFor="vehicleUse">Uso del Vehículo</Label>
+									<Label htmlFor="vehicleUse">Uso</Label>
 									<Select
 										value={newVehicleForm.vehicleUse}
 										onValueChange={(value) =>
@@ -2256,7 +2284,7 @@ function VehiclesDashboard() {
 										}
 									>
 										<SelectTrigger>
-											<SelectValue placeholder="Seleccionar uso" />
+											<SelectValue placeholder="Seleccionar" />
 										</SelectTrigger>
 										<SelectContent>
 											<SelectItem value="Particular">Particular</SelectItem>
@@ -2275,7 +2303,7 @@ function VehiclesDashboard() {
 												series: e.target.value,
 											})
 										}
-										placeholder="Serie del vehículo"
+										placeholder="Serie"
 									/>
 								</div>
 								<div className="space-y-2">
@@ -2289,10 +2317,26 @@ function VehiclesDashboard() {
 												iscvCode: e.target.value,
 											})
 										}
-										placeholder="Código ISCV"
+										placeholder="ISCV"
 									/>
 								</div>
 							</div>
+						</div>
+
+						<div className="flex items-center space-x-2">
+							<Checkbox
+								id="isOwned"
+								checked={newVehicleForm.isOwned}
+								onCheckedChange={(checked) =>
+									setNewVehicleForm({
+										...newVehicleForm,
+										isOwned: checked === true,
+									})
+								}
+							/>
+							<Label htmlFor="isOwned" className="cursor-pointer text-sm">
+								Vehículo propiedad de Cash In
+							</Label>
 						</div>
 
 						<DialogFooter>
@@ -2318,7 +2362,7 @@ function VehiclesDashboard() {
 
 			{/* Dialog para editar vehículo */}
 			<Dialog open={isEditVehicleOpen} onOpenChange={setIsEditVehicleOpen}>
-				<DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+				<DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle className="flex items-center gap-2">
 							<Pencil className="h-5 w-5 text-blue-500" />
@@ -2354,12 +2398,94 @@ function VehiclesDashboard() {
 							}
 							updateVehicleMutation.mutate(editVehicleForm);
 						}}
-						className="space-y-6"
+						className="space-y-5"
 					>
-						{/* Campos Principales */}
-						<div className="space-y-4">
+						{/* Estado del Vehículo - fila completa */}
+						<div className="space-y-2">
+							<h4 className="font-medium text-sm">Estado del Vehículo</h4>
+							{editVehicleForm.status === "sold" &&
+							userProfile?.role &&
+							userProfile.role !== ROLES.ADMIN &&
+							userProfile.role !== ROLES.SALES_SUPERVISOR ? (
+								<div className="space-y-1">
+									<div className="flex h-10 w-full items-center rounded-md border bg-muted px-3 py-2 text-sm opacity-60">
+										<span className="font-medium">Vendido</span>
+									</div>
+									<p className="text-muted-foreground text-xs">
+										Solo un administrador o supervisor de ventas puede cambiar
+										el estado de un vehículo vendido.
+									</p>
+								</div>
+							) : (
+								<Select
+									value={editVehicleForm.status}
+									onValueChange={(
+										value:
+											| "pending"
+											| "available"
+											| "sold"
+											| "maintenance"
+											| "auction",
+									) =>
+										setEditVehicleForm({
+											...editVehicleForm,
+											status: value,
+										})
+									}
+								>
+									<SelectTrigger>
+										<SelectValue placeholder="Seleccionar estado" />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="pending">
+											<div className="flex flex-col">
+												<span className="font-medium">Pendiente</span>
+												<span className="text-muted-foreground text-xs">
+													En espera o Próximo a la venta
+												</span>
+											</div>
+										</SelectItem>
+										<SelectItem value="available">
+											<div className="flex flex-col">
+												<span className="font-medium">Disponible</span>
+												<span className="text-muted-foreground text-xs">
+													Listo para venta o financiamiento
+												</span>
+											</div>
+										</SelectItem>
+										<SelectItem value="sold">
+											<div className="flex flex-col">
+												<span className="font-medium">Vendido</span>
+												<span className="text-muted-foreground text-xs">
+													Vehículo ya fue vendido/financiado
+												</span>
+											</div>
+										</SelectItem>
+										<SelectItem value="maintenance">
+											<div className="flex flex-col">
+												<span className="font-medium">En Mantenimiento</span>
+												<span className="text-muted-foreground text-xs">
+													En reparación o servicio técnico
+												</span>
+											</div>
+										</SelectItem>
+										<SelectItem value="auction">
+											<div className="flex flex-col">
+												<span className="font-medium">En Remate</span>
+												<span className="text-muted-foreground text-xs">
+													Disponible para subasta/remate
+												</span>
+											</div>
+										</SelectItem>
+									</SelectContent>
+								</Select>
+							)}
+						</div>
+
+						{/* Información Básica */}
+						<div className="space-y-3">
 							<h4 className="font-medium text-sm">Información Básica</h4>
-							<div className="grid grid-cols-2 gap-4">
+							<div className="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-3">
 								<div className="space-y-2">
 									<Label htmlFor="edit-make">Marca *</Label>
 									<Input
@@ -2460,120 +2586,36 @@ function VehiclesDashboard() {
 									</Select>
 								</div>
 								<div className="space-y-2">
-									<Label htmlFor="edit-kmMileage">Kilometraje</Label>
-									<Input
-										id="edit-kmMileage"
-										type="number"
-										value={editVehicleForm.kmMileage}
-										onChange={(e) =>
-											setEditVehicleForm({
-												...editVehicleForm,
-												kmMileage: Number.parseInt(e.target.value) || 0,
-											})
+									<Label htmlFor="edit-origin">Origen</Label>
+									<Select
+										value={editVehicleForm.origin}
+										onValueChange={(value) =>
+											setEditVehicleForm({ ...editVehicleForm, origin: value })
 										}
-										min={0}
-										placeholder="0"
-									/>
+									>
+										<SelectTrigger>
+											<SelectValue placeholder="Seleccionar origen" />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="Nacional">Nacional</SelectItem>
+											<SelectItem value="Importado">Importado</SelectItem>
+										</SelectContent>
+									</Select>
 								</div>
 							</div>
 						</div>
 
-						{/* Estado del Vehículo */}
-						<div className="space-y-4">
-							<h4 className="font-medium text-sm">Estado del Vehículo</h4>
-							<div className="space-y-2">
-								<Label htmlFor="edit-status">Estado *</Label>
-								{editVehicleForm.status === "sold" &&
-								userProfile?.role &&
-								userProfile.role !== ROLES.ADMIN &&
-								userProfile.role !== ROLES.SALES_SUPERVISOR ? (
-									<div className="space-y-1">
-										<div className="flex h-10 w-full items-center rounded-md border bg-muted px-3 py-2 text-sm opacity-60">
-											<span className="font-medium">Vendido</span>
-										</div>
-										<p className="text-muted-foreground text-xs">
-											Solo un administrador o supervisor de ventas puede cambiar
-											el estado de un vehículo vendido.
-										</p>
-									</div>
-								) : (
-									<Select
-										value={editVehicleForm.status}
-										onValueChange={(
-											value:
-												| "pending"
-												| "available"
-												| "sold"
-												| "maintenance"
-												| "auction",
-										) =>
-											setEditVehicleForm({
-												...editVehicleForm,
-												status: value,
-											})
-										}
-									>
-										<SelectTrigger>
-											<SelectValue placeholder="Seleccionar estado" />
-										</SelectTrigger>
-										<SelectContent>
-											<SelectItem value="pending">
-												<div className="flex flex-col">
-													<span className="font-medium">Pendiente</span>
-													<span className="text-muted-foreground text-xs">
-														En espera o Próximo a la venta
-													</span>
-												</div>
-											</SelectItem>
-											<SelectItem value="available">
-												<div className="flex flex-col">
-													<span className="font-medium">Disponible</span>
-													<span className="text-muted-foreground text-xs">
-														Listo para venta o financiamiento
-													</span>
-												</div>
-											</SelectItem>
-											<SelectItem value="sold">
-												<div className="flex flex-col">
-													<span className="font-medium">Vendido</span>
-													<span className="text-muted-foreground text-xs">
-														Vehículo ya fue vendido/financiado
-													</span>
-												</div>
-											</SelectItem>
-											<SelectItem value="maintenance">
-												<div className="flex flex-col">
-													<span className="font-medium">En Mantenimiento</span>
-													<span className="text-muted-foreground text-xs">
-														En reparación o servicio técnico
-													</span>
-												</div>
-											</SelectItem>
-											<SelectItem value="auction">
-												<div className="flex flex-col">
-													<span className="font-medium">En Remate</span>
-													<span className="text-muted-foreground text-xs">
-														Disponible para subasta/remate
-													</span>
-												</div>
-											</SelectItem>
-										</SelectContent>
-									</Select>
-								)}
-							</div>
-						</div>
-
-						{/* Campos de Identificación */}
-						<div className="space-y-4">
-							<h4 className="font-medium text-sm">
-								Identificación del Vehículo
+						{/* Identificación y Mecánica */}
+						<div className="space-y-3">
+							<h4 className="font-medium text-muted-foreground text-sm">
+								Identificación y Mecánica
 								{editVehicleForm.isNew && (
 									<span className="ml-2 font-normal text-amber-600 text-xs">
 										(requeridos para completar la oportunidad)
 									</span>
 								)}
 							</h4>
-							<div className="grid grid-cols-2 gap-4">
+							<div className="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-3">
 								<div className="space-y-2">
 									<Label htmlFor="edit-licensePlate">Placa</Label>
 									<Input
@@ -2603,7 +2645,7 @@ function VehiclesDashboard() {
 									/>
 								</div>
 								<div className="space-y-2">
-									<Label htmlFor="edit-motorNumber">Número de Motor</Label>
+									<Label htmlFor="edit-motorNumber">No. Motor</Label>
 									<Input
 										id="edit-motorNumber"
 										value={editVehicleForm.motorNumber}
@@ -2617,24 +2659,7 @@ function VehiclesDashboard() {
 									/>
 								</div>
 								<div className="space-y-2">
-									<Label htmlFor="edit-origin">Origen</Label>
-									<Select
-										value={editVehicleForm.origin}
-										onValueChange={(value) =>
-											setEditVehicleForm({ ...editVehicleForm, origin: value })
-										}
-									>
-										<SelectTrigger>
-											<SelectValue placeholder="Seleccionar origen" />
-										</SelectTrigger>
-										<SelectContent>
-											<SelectItem value="Nacional">Nacional</SelectItem>
-											<SelectItem value="Importado">Importado</SelectItem>
-										</SelectContent>
-									</Select>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="edit-fuelType">Tipo de Combustible</Label>
+									<Label htmlFor="edit-fuelType">Combustible</Label>
 									<Select
 										value={editVehicleForm.fuelType}
 										onValueChange={(value) =>
@@ -2655,7 +2680,7 @@ function VehiclesDashboard() {
 										</SelectContent>
 									</Select>
 								</div>
-								<div className="col-span-2 space-y-2">
+								<div className="space-y-2">
 									<Label htmlFor="edit-transmission">Transmisión</Label>
 									<Select
 										value={editVehicleForm.transmission}
@@ -2675,18 +2700,34 @@ function VehiclesDashboard() {
 										</SelectContent>
 									</Select>
 								</div>
+								<div className="space-y-2">
+									<Label htmlFor="edit-kmMileage">Kilometraje</Label>
+									<Input
+										id="edit-kmMileage"
+										type="number"
+										value={editVehicleForm.kmMileage}
+										onChange={(e) =>
+											setEditVehicleForm({
+												...editVehicleForm,
+												kmMileage: Number.parseInt(e.target.value) || 0,
+											})
+										}
+										min={0}
+										placeholder="0"
+									/>
+								</div>
 							</div>
 						</div>
 
-						{/* Campos para Contratos Legales */}
-						<div className="space-y-4">
-							<h4 className="font-medium text-sm">
-								Datos Técnicos para Contratos
+						{/* Datos para Contratos */}
+						<div className="space-y-3">
+							<h4 className="font-medium text-muted-foreground text-sm">
+								Datos para Contratos
 								<span className="ml-2 font-normal text-muted-foreground text-xs">
 									(requeridos para generar contratos legales)
 								</span>
 							</h4>
-							<div className="grid grid-cols-3 gap-4">
+							<div className="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-3">
 								<div className="space-y-2">
 									<Label htmlFor="edit-seats">Asientos</Label>
 									<Input
@@ -2793,6 +2834,22 @@ function VehiclesDashboard() {
 									/>
 								</div>
 							</div>
+						</div>
+
+						<div className="flex items-center space-x-2">
+							<Checkbox
+								id="edit-isOwned"
+								checked={editVehicleForm.isOwned}
+								onCheckedChange={(checked) =>
+									setEditVehicleForm({
+										...editVehicleForm,
+										isOwned: checked === true,
+									})
+								}
+							/>
+							<Label htmlFor="edit-isOwned" className="cursor-pointer text-sm">
+								Vehículo propiedad de Cash In
+							</Label>
 						</div>
 
 						<DialogFooter>

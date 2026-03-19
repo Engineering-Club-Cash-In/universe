@@ -79,6 +79,8 @@ export function ListaCreditosPagos() {
     setNombreUsuarioInput,
     handleSearchNombreUsuario,
     clearNombreUsuario,
+    isVehiculoPropio,
+    setIsVehiculoPropio,
   } = useCreditosPaginadosWithFilters({
     initialAsesorId: !isAdmin && userAsesorId ? userAsesorId : undefined,
   });
@@ -548,6 +550,20 @@ export function ListaCreditosPagos() {
           <FileSpreadsheet className="w-5 h-5" />
           Descargar Excel
         </button>
+
+        {/* Filtro Vehículo Cash-In */}
+        <label className="flex items-center gap-2 font-medium text-blue-800 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={isVehiculoPropio === true}
+            onChange={(e) => {
+              setIsVehiculoPropio(e.target.checked ? true : undefined);
+              setPage(1);
+            }}
+            className="w-4 h-4 rounded border-blue-300 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm">Solo Vehículo Cash-In</span>
+        </label>
       </div>
 
       {isFetching && !isLoading && (
@@ -1110,8 +1126,13 @@ function MobileView({
           </div>
 
           {/* Estado */}
-          <p className="text-sm text-gray-700">
-            <strong>Usuario:</strong> {item.usuarios.nombre}
+          <p className="text-sm text-gray-700 flex items-center gap-2 flex-wrap">
+            <span><strong>Usuario:</strong> {item.usuarios.nombre}</span>
+            {item.creditos.is_vehiculo_propio && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ backgroundColor: 'rgba(78,87,234,0.1)', color: '#4E57EA', border: '1px solid rgba(78,87,234,0.25)' }}>
+                🚗 V. Cash-In
+              </span>
+            )}
           </p>
           <p className="text-sm text-gray-700">
             <strong>Deuda Total:</strong> Q
@@ -1362,7 +1383,14 @@ function DesktopView({
                   {item.creditos.numero_credito_sifco}
                 </TableCell>
                 <TableCell className="text-indigo-700 font-bold text-center">
-                  {item.usuarios.nombre}
+                  <div className="flex items-center justify-center gap-2">
+                    {item.usuarios.nombre}
+                    {item.creditos.is_vehiculo_propio && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ backgroundColor: 'rgba(78,87,234,0.1)', color: '#4E57EA', border: '1px solid rgba(78,87,234,0.25)' }}>
+                        🚗 V. Cash-In
+                      </span>
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell className="text-green-600 font-bold text-center">
                   Q

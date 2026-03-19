@@ -526,15 +526,20 @@ export const getInvestors = async ({ query, set }: any) => {
         ? result[0]
         : { message: "Inversionista no encontrado" };
     }
-    if(query.email){  
+    if(query.email){
       const result = await db
         .select()
         .from(inversionistas)
         .where(eq(inversionistas.email, query.email));
       set.status = result.length ? 200 : 404;
-      return result.length
-        ? result[0]
-        : { message: "Inversionista no encontrado con ese email" };
+      if (!result.length) {
+        return { message: "Inversionista no encontrado con ese email" };
+      }
+      const investor = result[0];
+      if (investor.dpi_rep_legal) {
+        return { ...investor, dpi: investor.dpi_rep_legal };
+      }
+      return investor;
     }
 
     // Buscar por DPI

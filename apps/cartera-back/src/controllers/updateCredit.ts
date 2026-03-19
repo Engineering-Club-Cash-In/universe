@@ -1135,8 +1135,13 @@ export const recalcularPagosCredito = async ({
       capital: abonoCapital,
     };
 
-    // Procesar cada pago en orden por pago_id
-    const pagosOrdenados = [...pagos].sort((a, b) => a.pago_id - b.pago_id);
+    // Procesar cada pago en orden cronológico por fecha_pago
+    const pagosOrdenados = [...pagos].sort((a, b) => {
+      const fechaA = a.fecha_pago ? new Date(a.fecha_pago).getTime() : 0;
+      const fechaB = b.fecha_pago ? new Date(b.fecha_pago).getTime() : 0;
+      if (fechaA !== fechaB) return fechaA - fechaB;
+      return a.pago_id - b.pago_id; // fallback por pago_id si misma fecha
+    });
     const abonosPorPago: { pago_id: number; abonos: Record<string, string> }[] = [];
 
     for (const pago of pagosOrdenados) {

@@ -56,6 +56,24 @@ const ALLOWED_MIME_TYPES = [
 	"video/mp4",
 	"video/quicktime",
 ];
+const MANUAL_VALUATION_TECHNICIAN_NAME = "Actualizacion manual CRM";
+const MANUAL_VALUATION_RESULT =
+	"Actualización manual de valores comerciales del vehículo";
+
+const normalizeManualValuationAmount = (
+	value: string,
+	fieldLabel: string,
+): string => {
+	const normalized = value.replace(/[Qq\s,]/g, "");
+
+	if (!normalized || !/^\d+(\.\d+)?$/.test(normalized)) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: `${fieldLabel} debe ser un número válido`,
+		});
+	}
+
+	return normalized;
+};
 
 export const vehiclesRouter = {
 	// Get all vehicles with their latest inspection and photos
@@ -669,6 +687,23 @@ export const vehiclesRouter = {
 				});
 			}
 
+			const normalizedMarketValue = normalizeManualValuationAmount(
+				input.marketValue,
+				"Valor mercado",
+			);
+			const normalizedSuggestedCommercialValue = normalizeManualValuationAmount(
+				input.suggestedCommercialValue,
+				"Valor comercial sugerido",
+			);
+			const normalizedBankValue = normalizeManualValuationAmount(
+				input.bankValue,
+				"Valor bancario",
+			);
+			const normalizedCurrentConditionValue = normalizeManualValuationAmount(
+				input.currentConditionValue,
+				"Valor condiciones actuales",
+			);
+
 			const [latestInspection] = await db
 				.select()
 				.from(vehicleInspections)
@@ -681,20 +716,18 @@ export const vehiclesRouter = {
 
 			const isManualValuation =
 				latestInspection &&
-				latestInspection.technicianName === "Actualizacion manual CRM" &&
-				latestInspection.inspectionResult ===
-					"Actualización manual de valores comerciales del vehículo";
+				latestInspection.technicianName === MANUAL_VALUATION_TECHNICIAN_NAME &&
+				latestInspection.inspectionResult === MANUAL_VALUATION_RESULT;
 
 			const manualValuationData = {
 				vehicleRating: input.vehicleRating,
-				marketValue: input.marketValue,
-				suggestedCommercialValue: input.suggestedCommercialValue,
-				bankValue: input.bankValue,
-				currentConditionValue: input.currentConditionValue,
-				technicianName: "Actualizacion manual CRM",
+				marketValue: normalizedMarketValue,
+				suggestedCommercialValue: normalizedSuggestedCommercialValue,
+				bankValue: normalizedBankValue,
+				currentConditionValue: normalizedCurrentConditionValue,
+				technicianName: MANUAL_VALUATION_TECHNICIAN_NAME,
 				inspectionDate: new Date(),
-				inspectionResult:
-					"Actualización manual de valores comerciales del vehículo",
+				inspectionResult: MANUAL_VALUATION_RESULT,
 				vehicleEquipment: "Pendiente de inspección completa",
 				status: "pending" as const,
 				alerts: [] as string[],

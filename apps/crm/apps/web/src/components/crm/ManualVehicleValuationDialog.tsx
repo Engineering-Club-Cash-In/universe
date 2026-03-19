@@ -30,15 +30,14 @@ type ManualVehicleValuationDialogProps = {
 };
 
 const MANUAL_TECHNICIAN_NAME = "Actualizacion manual CRM";
-const clientWithManualValuation = client as typeof client & {
-	upsertManualVehicleValuation: (input: {
-		vehicleId: string;
-		vehicleRating: "Comercial" | "No comercial";
-		marketValue: string;
-		suggestedCommercialValue: string;
-		bankValue: string;
-		currentConditionValue: string;
-	}) => Promise<{ action: "created" | "updated"; inspection: { id: string } }>;
+const normalizeManualValuationAmount = (value: string): string | null => {
+	const normalized = value.replace(/[Qq\s,]/g, "");
+
+	if (!normalized) {
+		return null;
+	}
+
+	return /^\d+(\.\d+)?$/.test(normalized) ? normalized : null;
 };
 
 export function ManualVehicleValuationDialog({
@@ -55,6 +54,32 @@ export function ManualVehicleValuationDialog({
 	const [suggestedCommercialValue, setSuggestedCommercialValue] = useState("");
 	const [bankValue, setBankValue] = useState("");
 	const [currentConditionValue, setCurrentConditionValue] = useState("");
+	const normalizedMarketValue = normalizeManualValuationAmount(marketValue);
+	const normalizedSuggestedCommercialValue = normalizeManualValuationAmount(
+		suggestedCommercialValue,
+	);
+	const normalizedBankValue = normalizeManualValuationAmount(bankValue);
+	const normalizedCurrentConditionValue = normalizeManualValuationAmount(
+		currentConditionValue,
+	);
+	const fieldErrors = {
+		marketValue:
+			marketValue && !normalizedMarketValue
+				? "Ingresa un monto numérico válido"
+				: "",
+		suggestedCommercialValue:
+			suggestedCommercialValue && !normalizedSuggestedCommercialValue
+				? "Ingresa un monto numérico válido"
+				: "",
+		bankValue:
+			bankValue && !normalizedBankValue
+				? "Ingresa un monto numérico válido"
+				: "",
+		currentConditionValue:
+			currentConditionValue && !normalizedCurrentConditionValue
+				? "Ingresa un monto numérico válido"
+				: "",
+	};
 
 	const latestInspectionQuery = useQuery({
 		...orpc.getLatestInspectionByVehicleId.queryOptions({
@@ -108,13 +133,13 @@ export function ManualVehicleValuationDialog({
 
 	const saveMutation = useMutation({
 		mutationFn: async () => {
-			return clientWithManualValuation.upsertManualVehicleValuation({
+			return client.upsertManualVehicleValuation({
 				vehicleId,
 				vehicleRating,
-				marketValue,
-				suggestedCommercialValue,
-				bankValue,
-				currentConditionValue,
+				marketValue: normalizedMarketValue ?? "",
+				suggestedCommercialValue: normalizedSuggestedCommercialValue ?? "",
+				bankValue: normalizedBankValue ?? "",
+				currentConditionValue: normalizedCurrentConditionValue ?? "",
 			});
 		},
 		onSuccess: (result) => {
@@ -141,10 +166,10 @@ export function ManualVehicleValuationDialog({
 	const isManualValuation =
 		latestInspection?.technicianName === MANUAL_TECHNICIAN_NAME;
 	const isDisabled =
-		!marketValue ||
-		!suggestedCommercialValue ||
-		!bankValue ||
-		!currentConditionValue ||
+		!normalizedMarketValue ||
+		!normalizedSuggestedCommercialValue ||
+		!normalizedBankValue ||
+		!normalizedCurrentConditionValue ||
 		saveMutation.isPending;
 
 	return (
@@ -222,6 +247,11 @@ export function ManualVehicleValuationDialog({
 								onChange={(event) => setMarketValue(event.target.value)}
 								placeholder="60000"
 							/>
+							{fieldErrors.marketValue ? (
+								<p className="text-destructive text-xs">
+									{fieldErrors.marketValue}
+								</p>
+							) : null}
 						</div>
 
 						<div className="space-y-2">
@@ -238,6 +268,11 @@ export function ManualVehicleValuationDialog({
 								}}
 								placeholder="56000"
 							/>
+							{fieldErrors.suggestedCommercialValue ? (
+								<p className="text-destructive text-xs">
+									{fieldErrors.suggestedCommercialValue}
+								</p>
+							) : null}
 						</div>
 
 						<div className="space-y-2">
@@ -248,6 +283,11 @@ export function ManualVehicleValuationDialog({
 								onChange={(event) => setBankValue(event.target.value)}
 								placeholder="47000"
 							/>
+							{fieldErrors.bankValue ? (
+								<p className="text-destructive text-xs">
+									{fieldErrors.bankValue}
+								</p>
+							) : null}
 						</div>
 
 						<div className="space-y-2 sm:col-span-2">
@@ -260,6 +300,11 @@ export function ManualVehicleValuationDialog({
 								}
 								placeholder="56000"
 							/>
+							{fieldErrors.currentConditionValue ? (
+								<p className="text-destructive text-xs">
+									{fieldErrors.currentConditionValue}
+								</p>
+							) : null}
 						</div>
 					</div>
 				</div>

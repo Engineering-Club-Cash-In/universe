@@ -1,17 +1,15 @@
 export const SAT_CONFIG = {
-  requestor: "F547950A-1B0E-49D7-BFB5-42E313FF6740",
-  user: "F547950A-1B0E-49D7-BFB5-42E313FF6740",
-  userName: "ADMINISTRADOR",
-  endpointUrl:
-    "https://portaltest.cofidiguatemala.com:8443/webservicefront/factwsfront.asmx",
+  requestor: process.env.CUBE_REQUESTOR!,
+  user: process.env.CUBE_REQUESTOR!,
+  userName: process.env.CUBE_USER!,
+  endpointUrl: process.env.CUBE_COFIDI_URL!,
   entity: "98766430",
 };
 
 export const COFIDI_CONFIG = {
-  requestor: "F547950A-1B0E-49D7-BFB5-42E313FF6740",
+  requestor: process.env.CUBE_REQUESTOR!,
   entity: "98766430",
-  endpointUrl:
-    "https://portaltest.cofidiguatemala.com:8443/nitfel/consultanit.asmx",
+  endpointUrl: process.env.CUBE_COFIDI_NIT_URL!,
 };
 
 export const CLUB_CASHIN_CONFIG = {

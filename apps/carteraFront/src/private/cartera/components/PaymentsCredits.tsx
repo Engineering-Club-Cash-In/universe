@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { getPagosByCredito } from "../services/services";
+import { getPagosByCredito, getHistorialCambioFecha, type HistorialCambioFecha } from "../services/services";
 import {
   Table,
   TableBody,
@@ -175,7 +175,7 @@ function formatFieldValue(key: string, value: any): string {
 }
 
 const DetailSections = ({ pago }: { pago: any }) => (
-  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
     {DETAIL_SECTIONS.map((section) => {
       const hasData = section.fields.some((f) => pago[f] !== undefined);
       if (!hasData) return null;
@@ -227,6 +227,21 @@ export function PaymentsCredits() {
   }>();
   const navigate = useNavigate();
   const [openIdx, setOpenIdx] = useState<number | null>(null);
+  const [historialFecha, setHistorialFecha] = useState<HistorialCambioFecha[]>([]);
+
+  React.useEffect(() => {
+    if (!numero_credito_sifco) return;
+    console.log("Cargando historial de cambio de fecha para crédito:", numero_credito_sifco);
+    getHistorialCambioFecha(numero_credito_sifco)
+      .then((res) => {
+        console.log("Historial respuesta:", res);
+        setHistorialFecha(Array.isArray(res) ? res : []);
+      })
+      .catch((err) => {
+        console.error("Error al cargar historial:", err);
+        setHistorialFecha([]);
+      });
+  }, [numero_credito_sifco]);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["pagosByCredito", numero_credito_sifco],
@@ -291,7 +306,7 @@ const handleDownloadExcel = async () => {
     falsePayment.mutate({ pago_id, credito_id });
   };
   return (
-    <div className="fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
+    <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
       <div className="w-full max-w-6xl mx-auto">
         <button
           className="mb-6 px-6 py-2 bg-blue-50 hover:bg-blue-100 rounded-lg font-bold text-blue-700 shadow"
@@ -299,7 +314,7 @@ const handleDownloadExcel = async () => {
         >
           ← Volver
         </button>
-        <Label className="block text-3xl md:text-4xl font-extrabold mb-2 text-blue-700 text-center drop-shadow">
+        <Label className="block text-3xl md:text-4xl font-extrabold mb-2 text-blue-700 text-center">
           Historial de Pagos del Crédito
         </Label>
         <Label className="block text-xl md:text-2xl font-bold mb-8 text-blue-600 text-center">
@@ -354,8 +369,25 @@ const handleDownloadExcel = async () => {
             Descargar Excel
           </button>
         </div>
+
         </div>
 
+          {historialFecha.length > 0 && (
+            <div className="flex items-center gap-3 bg-blue-50 border-2 border-blue-200 rounded-xl px-4 py-2 shadow-md flex-wrap w-fit mx-auto mt-3">
+              <Calendar className="w-4 h-4 text-blue-500 shrink-0" />
+              <span className="text-blue-800 font-semibold text-sm shrink-0">Cambios fecha inicio:</span>
+              {historialFecha.map((h) => (
+                <span key={h.id} className="inline-flex items-center gap-1.5 bg-white border border-blue-200 rounded-lg px-3 py-1.5 text-sm">
+                  <span className="text-gray-400 line-through">{h.fecha_inicio_anterior}</span>
+                  <span className="text-gray-400">&rarr;</span>
+                  <span className="font-semibold text-blue-700">{h.fecha_inicio_nueva}</span>
+                  <span className="text-gray-400 text-xs ml-1">({new Date(h.created_at).toLocaleDateString("es-GT")})</span>
+                </span>
+              ))}
+            </div>
+          )}
+
+        <div className="mt-6" />
         {isLoading ? (
           <div className="text-blue-500 text-center py-16 text-xl font-bold">
             Cargando pagos...

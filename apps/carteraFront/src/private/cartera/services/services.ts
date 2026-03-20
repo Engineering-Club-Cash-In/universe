@@ -3023,3 +3023,31 @@ export async function marcarCuotasService(body: MarcarCuotasBody) {
   const { data } = await api.post("/marcar-cuotas", body);
   return data;
 }
+
+// Cambiar fecha de inicio (cuota 1)
+export interface CambiarFechaInicioBody {
+  numero_credito_sifco: string;
+  nueva_fecha_inicio: string;
+  changed_by: string;
+  razon: string;
+}
+
+export async function cambiarFechaInicioService(body: CambiarFechaInicioBody) {
+  const { data } = await api.post("/cambiar-fecha-inicio", body);
+  return data;
+}
+
+// Historial de cambios de fecha de inicio
+export interface HistorialCambioFecha {
+  id: number;
+  fecha_inicio_anterior: string;
+  fecha_inicio_nueva: string;
+  changed_by: string;
+  razon: string;
+  created_at: string;
+}
+
+export async function getHistorialCambioFecha(numeroCreditoSifco: string): Promise<HistorialCambioFecha[]> {
+  const { data } = await api.get(`/historial-cambio-fecha/${numeroCreditoSifco}`);
+  return data.historial ?? [];
+}

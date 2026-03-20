@@ -264,7 +264,7 @@ export const INVERSIONISTAS_FACTURADORES = [
     satConfig: SE_PRESTA_SAT_CONFIG,
   },
   {
-    keywords: ["AMJK", "(AMJK)", "AMJK INVERSIONES", "KACHLER"],
+    keywords: ["AMJK", "(AMJK)", "AMJK INVERSIONES"],
     config: AMJK_CONFIG,
     satConfig: AMJK_SAT_CONFIG,
   },

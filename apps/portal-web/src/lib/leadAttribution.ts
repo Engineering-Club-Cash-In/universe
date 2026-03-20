@@ -34,7 +34,7 @@ function normalizeSource(
 ): string | undefined {
   if (!source) return undefined;
   const normalized = source.trim().toLowerCase();
-  return sourceMap[normalized] ?? "other";
+  return sourceMap[normalized] ?? "website";
 }
 
 export function normalizeCreditLeadSource(source?: string): string | undefined {

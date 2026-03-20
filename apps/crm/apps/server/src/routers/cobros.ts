@@ -28,6 +28,7 @@ import { calcularDiasMoraExactos } from "../lib/mora-utils";
 import {
 	cobrosProcedure,
 	cobrosSupervisorProcedure,
+	crmCobrosOrInvestmentsProcedure,
 	crmOrCobrosProcedure,
 } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
@@ -2109,7 +2110,7 @@ export const cobrosRouter = {
 	// ========================================================================
 
 	// Listar todos los inversionistas
-	getInversionistas: crmOrCobrosProcedure
+	getInversionistas: crmCobrosOrInvestmentsProcedure
 		.input(
 			z.object({
 				page: z.number().min(1).optional().default(1),

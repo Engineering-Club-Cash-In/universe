@@ -62,7 +62,7 @@ export const CalculatorCredit = () => {
   const resultado = calcularCredito();
 
   return (
-    <div className="relative w-full mt-12 lg:mt-56 mb-16 lg:mb-30 flex px-6 lg:px-0">
+    <section className="relative w-full mt-12 lg:mt-32 mb-16 lg:mb-30 flex px-8 lg:px-20">
       {/* Imagen a la izquierda */}
       <div className="relative w-[438px] shrink-0 hidden lg:block">
         <img
@@ -81,7 +81,7 @@ export const CalculatorCredit = () => {
       </div>
 
       {/* Container de la calculadora a la derecha */}
-      <div className="flex-1 flex justify-center ">
+      <div className="flex-1 flex justify-center">
         <div className="relative lg:max-w-3/4 w-full">
           {/* Div decorativo izquierdo */}
           <div
@@ -224,6 +224,6 @@ export const CalculatorCredit = () => {
         onClose={() => setIsModalOpen(false)}
         options={[optionCreditVehicle]}
       />
-    </div>
+    </section>
   );
 };

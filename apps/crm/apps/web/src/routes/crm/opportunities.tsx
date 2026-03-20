@@ -1308,25 +1308,35 @@ function RouteComponent() {
 		() =>
 			salesStagesQuery.data?.map((stage) => {
 				const stageOpportunities =
-					filteredData?.filter(
-						(opp) =>
-							opp.stage?.id === stage.id &&
-							(stageFilter === "all" || opp.status === stageFilter) &&
-							(showLostOpportunities || opp.status !== "lost") &&
-							(!debouncedBoardSearch.trim() ||
-								`${opp.lead?.firstName ?? ""} ${opp.lead?.lastName ?? ""}`
-									.toLowerCase()
-									.includes(debouncedBoardSearch.trim().toLowerCase()) ||
-								(opp.title ?? "")
-									.toLowerCase()
-									.includes(debouncedBoardSearch.trim().toLowerCase()) ||
-								(opp.lead?.phone ?? "")
-									.toLowerCase()
-									.includes(debouncedBoardSearch.trim().toLowerCase()) ||
-								opp.id
-									.toLowerCase()
-									.includes(debouncedBoardSearch.trim().toLowerCase())),
-					) || [];
+					filteredData
+						?.filter(
+							(opp) =>
+								opp.stage?.id === stage.id &&
+								(stageFilter === "all" || opp.status === stageFilter) &&
+								(showLostOpportunities || opp.status !== "lost") &&
+								(!debouncedBoardSearch.trim() ||
+									`${opp.lead?.firstName ?? ""} ${opp.lead?.lastName ?? ""}`
+										.toLowerCase()
+										.includes(debouncedBoardSearch.trim().toLowerCase()) ||
+									(opp.title ?? "")
+										.toLowerCase()
+										.includes(debouncedBoardSearch.trim().toLowerCase()) ||
+									(opp.lead?.phone ?? "")
+										.toLowerCase()
+										.includes(debouncedBoardSearch.trim().toLowerCase()) ||
+									opp.id
+										.toLowerCase()
+										.includes(debouncedBoardSearch.trim().toLowerCase())),
+						)
+						.sort((a, b) => {
+							const dateA = a.latestStageChangedAt
+								? new Date(a.latestStageChangedAt).getTime()
+								: 0;
+							const dateB = b.latestStageChangedAt
+								? new Date(b.latestStageChangedAt).getTime()
+								: 0;
+							return dateB - dateA; // Most recent first
+						}) || [];
 
 				const totalValue = stageOpportunities.reduce(
 					(sum, opp) => sum + (Number.parseFloat(opp.value || "0") || 0),

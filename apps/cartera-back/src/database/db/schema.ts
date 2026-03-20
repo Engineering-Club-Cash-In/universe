@@ -904,3 +904,16 @@
 
     created_at: timestamp("created_at").defaultNow(),
   });
+
+  // Historial de cambios de fecha de inicio de crédito
+  export const historial_cambio_fecha = customSchema.table("historial_cambio_fecha", {
+    id: serial("id").primaryKey(),
+    credito_id: integer("credito_id")
+      .notNull()
+      .references(() => creditos.credito_id),
+    fecha_inicio_anterior: date("fecha_inicio_anterior").notNull(),
+    fecha_inicio_nueva: date("fecha_inicio_nueva").notNull(),
+    razon: text("razon").notNull(),
+    changed_by: varchar("changed_by", { length: 150 }).notNull(),
+    created_at: timestamp("created_at").defaultNow(),
+  });

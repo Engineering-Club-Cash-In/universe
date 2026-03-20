@@ -22,7 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import React from "react";
-import { Hash, Info, ListOrdered, RefreshCw } from "lucide-react";
+import { Hash, Info, ListOrdered, RefreshCw, CalendarClock } from "lucide-react";
 import { useMemo } from "react";
 import { AlertCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -36,6 +36,7 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import { useAuth } from "@/Provider/authProvider";
 import { ModalCreateMora } from "./createMoraModal";
 import { ModalMarcarCuotas } from "./ModalMarcarCuotas";
+import { ModalCambiarFechaInicio } from "./ModalCambiarFechaInicio";
 import { useReport } from "../hooks/reports";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { usePaymentAgreements,useTogglePaymentAgreementStatus } from "../hooks/paymentagreement";
@@ -89,6 +90,8 @@ export function ListaCreditosPagos() {
   const [creditToEdit, setCreditToEdit] = useState<any | null>(null);
   const [investorsToEdit, setInvestorsToEdit] = useState<any[]>([]);
   const [investorsMirrorToEdit, setInvestorsMirrorToEdit] = useState<any[]>([]);
+  const [fechaInicioModalOpen, setFechaInicioModalOpen] = useState(false);
+  const [selectedCreditFechaInicio, setSelectedCreditFechaInicio] = useState<{ sifco: string; fechaActual: string | null } | null>(null);
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
 
@@ -632,6 +635,8 @@ export function ListaCreditosPagos() {
               canActivate={canActivate}
               toggleCancelacionMutation={toggleCancelacionMutation}
               refetch={refetch}
+              setSelectedCreditFechaInicio={setSelectedCreditFechaInicio}
+              setFechaInicioModalOpen={setFechaInicioModalOpen}
             />
           ) : (
             <DesktopView
@@ -658,6 +663,8 @@ export function ListaCreditosPagos() {
               canViewPayments={canViewPayments}
               canCreateConvenio={canCreateConvenio}
               refetch={refetch}
+              setSelectedCreditFechaInicio={setSelectedCreditFechaInicio}
+              setFechaInicioModalOpen={setFechaInicioModalOpen}
             />
           )}
 
@@ -751,6 +758,27 @@ export function ListaCreditosPagos() {
           }, 50);
         }}
       />
+
+      {/* Modal de Cambiar Fecha Inicio */}
+      {selectedCreditFechaInicio && (
+        <ModalCambiarFechaInicio
+          open={fechaInicioModalOpen}
+          onClose={() => {
+            setFechaInicioModalOpen(false);
+            setSelectedCreditFechaInicio(null);
+          }}
+          numeroCreditoSifco={selectedCreditFechaInicio.sifco}
+          fechaActual={selectedCreditFechaInicio.fechaActual}
+          changedBy={user?.email ?? user?.name ?? "admin"}
+          onSuccess={() => {
+            setTimeout(() => {
+              queryClient.invalidateQueries({
+                queryKey: ["creditos-paginados", mes, anio, page, perPage],
+              });
+            }, 50);
+          }}
+        />
+      )}
 
       {/* Modal de Reportes */}
       {reportModalOpen && selectedCreditForReport && (
@@ -1103,6 +1131,8 @@ function MobileView({
   canActivate,
   toggleCancelacionMutation,
   refetch,
+  setSelectedCreditFechaInicio,
+  setFechaInicioModalOpen,
 }: any) {
   return (
     <div className="space-y-4">
@@ -1258,6 +1288,19 @@ function MobileView({
                 >
                   <CheckCircle2 className="w-4 h-4 mr-1" /> Marcar Cuotas
                 </Button>
+                <Button
+                  variant="outline"
+                  className="text-blue-700 border-blue-300 hover:bg-blue-50"
+                  onClick={() => {
+                    setSelectedCreditFechaInicio({
+                      sifco: item.creditos.numero_credito_sifco,
+                      fechaActual: item.fecha_inicio ?? null,
+                    });
+                    setFechaInicioModalOpen(true);
+                  }}
+                >
+                  <CalendarClock className="w-4 h-4 mr-1" /> Cambiar fecha inicio
+                </Button>
 
               </>
             )}
@@ -1342,6 +1385,8 @@ function DesktopView({
   canViewPayments,
   canCreateConvenio,
   refetch,
+  setSelectedCreditFechaInicio,
+  setFechaInicioModalOpen,
 }: any) {
   return (
 <div className="w-full max-w-7xl mx-auto">
@@ -1518,6 +1563,23 @@ function DesktopView({
                             </Button>
                           )}
 
+                          {user?.role === "ADMIN" && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex items-center gap-1 text-blue-700 border-blue-300 hover:bg-blue-50"
+                              onClick={() => {
+                                setSelectedCreditFechaInicio({
+                                  sifco: item.creditos.numero_credito_sifco,
+                                  fechaActual: item.fecha_inicio ?? null,
+                                });
+                                setFechaInicioModalOpen(true);
+                              }}
+                            >
+                              <CalendarClock className="w-4 h-4" /> Cambiar fecha inicio
+                            </Button>
+                          )}
+
                         {canViewReports(item.creditos.statusCredit) &&
                           user?.role === "ADMIN" && (
                             <Button
@@ -1691,36 +1753,37 @@ function DetallesCredito({
             : "grid grid-cols-2 gap-3 text-center"
         }
       >
-        {[
-          ["Capital", item.creditos.capital],
-          ["Porcentaje Interés", `${item.creditos.porcentaje_interes}%`],
-          ["Deuda Total", item.creditos.deudatotal],
-          ["Cuota", item.creditos.cuota],
-          ["Cuota Interés", item.creditos.cuota_interes],
-          ["IVA 12%", item.creditos.iva_12],
-          ["Seguro 10 Cuotas", item.creditos.seguro_10_cuotas],
-          ["GPS", item.creditos.gps],
-          ["Membresías", item.creditos.membresias],
-          ["Royalti", item.creditos.royalti],
-          ["Plazo", item.creditos.plazo],
-          ["Formato Crédito", item.creditos.formato_credito],
-        ].map(([label, value]) => (
+        {([
+          { label: "Capital", value: item.creditos.capital, isMoney: true },
+          { label: "Porcentaje Interés", value: `${item.creditos.porcentaje_interes}%` },
+          { label: "Deuda Total", value: item.creditos.deudatotal, isMoney: true },
+          { label: "Cuota", value: item.creditos.cuota, isMoney: true },
+          { label: "Cuota Interés", value: item.creditos.cuota_interes, isMoney: true },
+          { label: "IVA 12%", value: item.creditos.iva_12, isMoney: true },
+          { label: "Seguro 10 Cuotas", value: item.creditos.seguro_10_cuotas, isMoney: true },
+          { label: "GPS", value: item.creditos.gps, isMoney: true },
+          { label: "Membresías", value: item.creditos.membresias, isMoney: true },
+          { label: "Royalti", value: item.creditos.royalti, isMoney: true },
+          { label: "Plazo", value: `${item.creditos.plazo} meses` },
+          { label: "Formato Crédito", value: item.creditos.formato_credito },
+          ...(item.fecha_inicio ? [{ label: "Fecha Primera Cuota", value: new Date(item.fecha_inicio + "T12:00:00").toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" }), isDate: true }] : []),
+        ] as { label: string; value: any; isMoney?: boolean; isDate?: boolean }[]).map((field) => (
           <div
-            key={label}
+            key={field.label}
             className={`p-3 rounded-lg bg-white border shadow-sm ${
               fullWidth
                 ? "hover:shadow-md transition"
                 : "flex flex-col items-center"
             }`}
           >
-            <span className="font-bold text-blue-700">{label}:</span>
+            <span className="font-bold text-blue-700">{field.label}:</span>
             <p className="text-gray-800">
-              {typeof value === "number"
-                ? `Q${Number(value).toLocaleString("es-GT", {
+              {field.isMoney
+                ? `Q${Number(field.value).toLocaleString("es-GT", {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })}`
-                : value}
+                : field.value ?? "--"}
             </p>
           </div>
         ))}

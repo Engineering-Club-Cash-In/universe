@@ -538,6 +538,7 @@ export interface CreditoConInfo {
     monto_inversionista: string;
     cuota_inversionista: string;
   }[];
+  fecha_inicio?: string | null;
 }
 
 // 🔥 Función auxiliar para calcular proximidad (con zona horaria de Guatemala)
@@ -966,6 +967,31 @@ export async function getCreditosWithUserByMesAnio(
     }
   }
 
+  // 5.5 Fecha de inicio (cuota 1) de cada crédito
+  let fechaInicioMap: Record<number, string> = {};
+  if (creditosIds.length > 0) {
+    try {
+      const cuotasUno = await db
+        .select({
+          credito_id: cuotas_credito.credito_id,
+          fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+        })
+        .from(cuotas_credito)
+        .where(
+          and(
+            inArray(cuotas_credito.credito_id, creditosIds),
+            eq(cuotas_credito.numero_cuota, 1)
+          )
+        );
+
+      cuotasUno.forEach((c) => {
+        fechaInicioMap[c.credito_id] = c.fecha_vencimiento as string;
+      });
+    } catch (err) {
+      console.error("Error consultando fecha inicio:", err);
+    }
+  }
+
   // 6️⃣ Cancelaciones & Incobrables
   let cancelacionesMap: Record<number, CreditCancelation> = {};
   let incobrablesMap: Record<number, BadDebt> = {};
@@ -1057,6 +1083,7 @@ export async function getCreditosWithUserByMesAnio(
           .toString();
 
         const proxima_cuota = proximasCuotasMap[creditoId] || null;
+        const fecha_inicio = fechaInicioMap[creditoId] || null;
 
         creditosUnicos.set(creditoId, {
           creditos: row.creditos,
@@ -1071,10 +1098,11 @@ export async function getCreditosWithUserByMesAnio(
           mora,
           deuda_total_con_mora,
           proxima_cuota,
+          fecha_inicio,
         });
       }
     });
-    
+
     data = Array.from(creditosUnicos.values());
     console.log(`✅ Créditos únicos mapeados: ${data.length}`);
   } catch (err) {

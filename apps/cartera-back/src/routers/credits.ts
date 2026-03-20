@@ -40,7 +40,7 @@ import { authMiddleware } from "./midleware";
 import { getCreditosWithUserByMesAnioExcel } from "../controllers/reports";
 import { insertCredit } from "../controllers/createCredit";
 import {  updateAllInstallments, updateCredit, recalculateQuota, recalcularPagosCredito } from "../controllers/updateCredit";
-import { updateDueDates, updateSingleDueDate, fixCreditosWithoutFebruary, updateDueDatesFromJson } from "../controllers/updateDueDate";
+import { updateDueDates, updateSingleDueDate, fixCreditosWithoutFebruary, updateDueDatesFromJson, cambiarFechaInicio, getHistorialCambioFecha } from "../controllers/updateDueDate";
 import { creditos, cuotas_credito } from "../database/db";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../database"; 
@@ -1313,6 +1313,47 @@ export const creditRouter = new Elysia()
       detail: {
         tags: ["Créditos"],
         summary: "Actualizar NIT del usuario de un crédito",
+      },
+    }
+  )
+  // ========================================
+  // ENDPOINT: CAMBIAR FECHA DE INICIO
+  // ========================================
+  .post(
+    "/cambiar-fecha-inicio",
+    async ({ body, set }) => {
+      return cambiarFechaInicio({ body, set });
+    },
+    {
+      body: t.Object({
+        numero_credito_sifco: t.String(),
+        nueva_fecha_inicio: t.String(),
+        changed_by: t.String(),
+        razon: t.String(),
+      }),
+      detail: {
+        tags: ["Créditos"],
+        summary: "Cambiar fecha de inicio de un crédito",
+        description:
+          "Cambia la fecha de inicio (cuota 0) y recalcula fecha_vencimiento de todas las cuotas. No modifica montos ni abonos. Guarda historial del cambio.",
+      },
+    }
+  )
+  // ========================================
+  // ENDPOINT: HISTORIAL CAMBIO FECHA
+  // ========================================
+  .get(
+    "/historial-cambio-fecha/:numero_credito_sifco",
+    async ({ params, set }) => {
+      return getHistorialCambioFecha({
+        numero_credito_sifco: params.numero_credito_sifco,
+        set,
+      });
+    },
+    {
+      detail: {
+        tags: ["Créditos"],
+        summary: "Obtener historial de cambios de fecha de inicio",
       },
     }
   )

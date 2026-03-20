@@ -40,7 +40,7 @@ export const pagoSchema = z.object({
   banco_id: z.number().int().positive({ message: "Debe seleccionar un banco" }),
   numeroAutorizacion: z.string().optional(),
   registerBy: z.string().min(1, { message: "Usuario registrador requerido" }),
-  origen_pago: z.enum(["transferencia", "cheque", "boleta"], { required_error: "Debe seleccionar un origen de pago" }),
+  origen_pago: z.enum(["transferencia", "cheque", "boleta"], { errorMap: () => ({ message: "Debe seleccionar un origen de pago" }) }),
 });
 
 export type PagoFormValues = z.infer<typeof pagoSchema>;
@@ -152,7 +152,7 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
       banco_id: 0,
       numeroAutorizacion: "",
       registerBy: user?.email || "",
-      origen_pago: undefined as any,
+      origen_pago: "" as any,
     },
     validate: zodToFormikValidate(pagoSchema),
     onSubmit: async (values, { setSubmitting, setStatus, resetForm }) => {

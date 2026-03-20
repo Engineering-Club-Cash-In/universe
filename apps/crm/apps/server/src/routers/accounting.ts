@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { crmProcedure } from "../lib/orpc";
+import { crmCobrosOrInvestmentsProcedure, crmProcedure } from "../lib/orpc";
 import { carteraBackClient } from "../services/cartera-back-client";
 
 export const accountingRouter = {
-	getResumenGlobalInversionistas: crmProcedure
+	getResumenGlobalInversionistas: crmCobrosOrInvestmentsProcedure
 		.input(
 			z
 				.object({

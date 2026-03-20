@@ -56,6 +56,44 @@ const ALLOWED_MIME_TYPES = [
 	"video/mp4",
 	"video/quicktime",
 ];
+const MANUAL_VALUATION_TECHNICIAN_NAME = "Actualizacion manual CRM";
+const MANUAL_VALUATION_RESULT =
+	"Actualización manual de valores comerciales del vehículo";
+
+const MANUAL_VALUATION_COMMA_DECIMAL_PATTERN = /^\d+,\d+$/;
+const MANUAL_VALUATION_THOUSANDS_PATTERN = /^\d{1,3}(,\d{3})+(\.\d+)?$/;
+const MANUAL_VALUATION_PLAIN_NUMBER_PATTERN = /^\d+(\.\d+)?$/;
+
+const normalizeManualValuationAmount = (
+	value: string,
+	fieldLabel: string,
+): string => {
+	const sanitized = value.replace(/[Qq\s]/g, "");
+
+	if (!sanitized) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: `${fieldLabel} debe ser un número válido`,
+		});
+	}
+
+	if (MANUAL_VALUATION_THOUSANDS_PATTERN.test(sanitized)) {
+		return sanitized.replace(/,/g, "");
+	}
+
+	if (MANUAL_VALUATION_COMMA_DECIMAL_PATTERN.test(sanitized)) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: `${fieldLabel} debe usar punto para decimales`,
+		});
+	}
+
+	if (!MANUAL_VALUATION_PLAIN_NUMBER_PATTERN.test(sanitized)) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: `${fieldLabel} debe ser un número válido`,
+		});
+	}
+
+	return sanitized;
+};
 
 export const vehiclesRouter = {
 	// Get all vehicles with their latest inspection and photos
@@ -682,6 +720,23 @@ export const vehiclesRouter = {
 				});
 			}
 
+			const normalizedMarketValue = normalizeManualValuationAmount(
+				input.marketValue,
+				"Valor mercado",
+			);
+			const normalizedSuggestedCommercialValue = normalizeManualValuationAmount(
+				input.suggestedCommercialValue,
+				"Valor comercial sugerido",
+			);
+			const normalizedBankValue = normalizeManualValuationAmount(
+				input.bankValue,
+				"Valor bancario",
+			);
+			const normalizedCurrentConditionValue = normalizeManualValuationAmount(
+				input.currentConditionValue,
+				"Valor condiciones actuales",
+			);
+
 			const [latestInspection] = await db
 				.select()
 				.from(vehicleInspections)
@@ -694,20 +749,18 @@ export const vehiclesRouter = {
 
 			const isManualValuation =
 				latestInspection &&
-				latestInspection.technicianName === "Actualizacion manual CRM" &&
-				latestInspection.inspectionResult ===
-					"Actualización manual de valores comerciales del vehículo";
+				latestInspection.technicianName === MANUAL_VALUATION_TECHNICIAN_NAME &&
+				latestInspection.inspectionResult === MANUAL_VALUATION_RESULT;
 
 			const manualValuationData = {
 				vehicleRating: input.vehicleRating,
-				marketValue: input.marketValue,
-				suggestedCommercialValue: input.suggestedCommercialValue,
-				bankValue: input.bankValue,
-				currentConditionValue: input.currentConditionValue,
-				technicianName: "Actualizacion manual CRM",
+				marketValue: normalizedMarketValue,
+				suggestedCommercialValue: normalizedSuggestedCommercialValue,
+				bankValue: normalizedBankValue,
+				currentConditionValue: normalizedCurrentConditionValue,
+				technicianName: MANUAL_VALUATION_TECHNICIAN_NAME,
 				inspectionDate: new Date(),
-				inspectionResult:
-					"Actualización manual de valores comerciales del vehículo",
+				inspectionResult: MANUAL_VALUATION_RESULT,
 				vehicleEquipment: "Pendiente de inspección completa",
 				status: "pending" as const,
 				alerts: [] as string[],
@@ -1143,7 +1196,9 @@ export const vehiclesRouter = {
 						const parsed = Number.parseFloat(normalized);
 						if (Number.isNaN(parsed)) {
 							// Non-empty but invalid numeric string: fail validation rather than coercing to "0"
-							throw new ORPCError("BAD_REQUEST", { message: "Invalid monetary value provided" });
+							throw new ORPCError("BAD_REQUEST", {
+								message: "Invalid monetary value provided",
+							});
 						}
 						return parsed.toString();
 					};

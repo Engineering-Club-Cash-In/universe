@@ -148,6 +148,7 @@ export function PagoForm() {
         numeroAutorizacion: "Número de Autorización",
         credito_id: "Crédito",
         usuario_id: "Usuario",
+        origen_pago: "Origen de Pago",
       };
 
       const errores = Object.entries(errors)
@@ -730,7 +731,7 @@ export function PagoForm() {
                     Origen de Pago <span className="text-red-500">*</span>
                   </Label>
                   <Select
-                    value={formik.values.origen_pago || undefined}
+                    value={formik.values.origen_pago || ""}
                     onValueChange={(value) => {
                       formik.setFieldValue("origen_pago", value);
                       formik.setFieldTouched("origen_pago", true, false);

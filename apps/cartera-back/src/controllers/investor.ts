@@ -314,8 +314,25 @@ export const insertInvestor = async ({ body, set }: any) => {
         errores.push(`Inversionista #${index + 1}: email inválido`);
       }
 
-      // 🔥 Si viene banco (nombre o id), resolverlo
-      if (inv.banco) {
+      // Si viene banco_id directamente, validar que exista
+      if (inv.banco_id) {
+        const bancoExiste = await db
+          .select()
+          .from(bancos)
+          .where(eq(bancos.banco_id, Number(inv.banco_id)))
+          .limit(1);
+
+        if (bancoExiste.length === 0) {
+          errores.push(
+            `Inversionista #${index + 1}: banco con ID ${inv.banco_id} no existe`
+          );
+        } else {
+          inv._banco_id = Number(inv.banco_id);
+        }
+      }
+
+      // Si viene banco (nombre o id), resolverlo
+      if (!inv._banco_id && inv.banco) {
         let banco_id = null;
 
         if (typeof inv.banco === "number") {

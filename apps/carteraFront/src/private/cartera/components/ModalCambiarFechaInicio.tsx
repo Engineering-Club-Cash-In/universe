@@ -6,7 +6,30 @@ import { useMutation } from "@tanstack/react-query";
 import { cambiarFechaInicioService } from "../services/services";
 import { toast } from "sonner";
 import { CalendarClock } from "lucide-react";
-import { DatePickerMUI } from "./calendar";
+
+const MESES = [
+  { value: 1, label: "Enero" },
+  { value: 2, label: "Febrero" },
+  { value: 3, label: "Marzo" },
+  { value: 4, label: "Abril" },
+  { value: 5, label: "Mayo" },
+  { value: 6, label: "Junio" },
+  { value: 7, label: "Julio" },
+  { value: 8, label: "Agosto" },
+  { value: 9, label: "Septiembre" },
+  { value: 10, label: "Octubre" },
+  { value: 11, label: "Noviembre" },
+  { value: 12, label: "Diciembre" },
+];
+
+function getDiasPermitidos(mes: number, anio: number): number[] {
+  if (mes === 2) {
+    // Febrero: 15 y último día (28 o 29)
+    const ultimoDia = new Date(anio, 2, 0).getDate();
+    return [15, ultimoDia];
+  }
+  return [15, 30];
+}
 
 export function ModalCambiarFechaInicio({
   open,
@@ -23,22 +46,29 @@ export function ModalCambiarFechaInicio({
   changedBy: string;
   onSuccess?: () => void;
 }) {
-  const [nuevaFecha, setNuevaFecha] = useState("");
+  const now = new Date();
+  const [mes, setMes] = useState(now.getMonth() + 1);
+  const [anio, setAnio] = useState(now.getFullYear());
+  const [dia, setDia] = useState<number | "">(15);
   const [razon, setRazon] = useState("");
+
+  const diasPermitidos = getDiasPermitidos(mes, anio);
 
   const mutation = useMutation({
     mutationFn: cambiarFechaInicioService,
   });
 
   const handleSubmit = () => {
-    if (!nuevaFecha) {
-      toast.error("Selecciona una nueva fecha");
+    if (!dia) {
+      toast.error("Selecciona un día");
       return;
     }
     if (!razon.trim()) {
       toast.error("Ingresa una razón para el cambio");
       return;
     }
+
+    const nuevaFecha = `${anio}-${String(mes).padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
 
     mutation.mutate(
       {
@@ -63,7 +93,9 @@ export function ModalCambiarFechaInicio({
   };
 
   const handleClose = () => {
-    setNuevaFecha("");
+    setMes(now.getMonth() + 1);
+    setAnio(now.getFullYear());
+    setDia(15);
     setRazon("");
     onClose();
   };
@@ -75,6 +107,9 @@ export function ModalCambiarFechaInicio({
         year: "numeric",
       })
     : "No definida";
+
+  // Años disponibles: actual -1 hasta actual +2
+  const aniosDisponibles = Array.from({ length: 4 }, (_, i) => now.getFullYear() - 1 + i);
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -102,16 +137,63 @@ export function ModalCambiarFechaInicio({
 
         <div className="grid gap-4">
           <div>
-            <Label className="text-gray-800 font-semibold mb-1">
+            <Label className="text-gray-800 font-semibold mb-2 block">
               Nueva fecha de inicio
             </Label>
-            <div className="[&_.MuiInputBase-root]:h-10 [&_.MuiInputBase-root]:text-sm [&_.MuiInputBase-root]:bg-white [&_.MuiOutlinedInput-notchedOutline]:border-gray-200 [&_.MuiOutlinedInput-notchedOutline]:rounded-md">
-              <DatePickerMUI
-                disableFuture={false}
-                value={nuevaFecha}
-                onChange={(val) => setNuevaFecha(val)}
-              />
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Día</label>
+                <select
+                  value={dia}
+                  onChange={(e) => setDia(Number(e.target.value))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white text-gray-900 focus:ring-2 focus:ring-blue-400"
+                >
+                  {diasPermitidos.map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Mes</label>
+                <select
+                  value={mes}
+                  onChange={(e) => {
+                    const nuevoMes = Number(e.target.value);
+                    setMes(nuevoMes);
+                    // Si el día actual no es válido para el nuevo mes, resetear a 15
+                    const nuevosDias = getDiasPermitidos(nuevoMes, anio);
+                    if (!nuevosDias.includes(dia as number)) {
+                      setDia(15);
+                    }
+                  }}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white text-gray-900 focus:ring-2 focus:ring-blue-400"
+                >
+                  {MESES.map((m) => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Año</label>
+                <select
+                  value={anio}
+                  onChange={(e) => {
+                    const nuevoAnio = Number(e.target.value);
+                    setAnio(nuevoAnio);
+                    const nuevosDias = getDiasPermitidos(mes, nuevoAnio);
+                    if (!nuevosDias.includes(dia as number)) {
+                      setDia(15);
+                    }
+                  }}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white text-gray-900 focus:ring-2 focus:ring-blue-400"
+                >
+                  {aniosDisponibles.map((a) => (
+                    <option key={a} value={a}>{a}</option>
+                  ))}
+                </select>
+              </div>
             </div>
+            <p className="text-xs text-gray-400 mt-1.5">Solo días 15 o 30 (28/29 en febrero)</p>
           </div>
 
           <div>

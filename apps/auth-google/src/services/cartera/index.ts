@@ -20,10 +20,12 @@ export {
 export {
   createInvestor,
   getInvestorProfile,
+  getInvestorDocuments,
   getBancos,
   type CreateInvestorPayload,
   type CreateInvestorResponse,
   type InvestorProfile,
+  type InvestorDocument,
   type Banco,
 } from "./investor.service";
 

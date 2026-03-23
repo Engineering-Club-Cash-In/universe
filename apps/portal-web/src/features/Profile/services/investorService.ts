@@ -34,6 +34,18 @@ export interface InvestorProfile {
   numero_cuenta: string | null;
 }
 
+export interface InvestorDocument {
+  documento_id: number;
+  inversionista_id: number;
+  key: string;
+  nombre: string;
+  descripcion: string | null;
+  visible: boolean;
+  created_at: string;
+  created_by: string | null;
+  url: string;
+}
+
 export interface Banco {
   banco_id: number;
   nombre: string;
@@ -72,6 +84,23 @@ export const getInvestorProfile = async (
     return response.data.data;
   } catch (error) {
     console.error("Error al obtener perfil del inversionista:", error);
+    throw error;
+  }
+};
+
+/**
+ * Obtener documentos del inversionista por email
+ */
+export const getInvestorDocuments = async (
+  email: string
+): Promise<InvestorDocument[]> => {
+  try {
+    const response = await apiAuth.get<{ data: InvestorDocument[] }>(
+      `/api/cartera/investor-documents/client/${encodeURIComponent(email)}`
+    );
+    return response.data.data;
+  } catch (error) {
+    console.error("Error al obtener documentos del inversionista:", error);
     throw error;
   }
 };

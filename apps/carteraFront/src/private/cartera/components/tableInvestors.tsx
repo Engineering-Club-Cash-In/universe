@@ -16,7 +16,7 @@ import {
   Search,
   Trash2,
   Upload,
-
+  FileText,
 } from "lucide-react";
 import {
   useGetInvestors,
@@ -57,6 +57,7 @@ import { Input } from "@/components/ui/input";
 import { Fragment, useState, useEffect, useMemo } from "react";
 import { ConfirmationModal } from "@/components/ui/confirmation-modal";
 import { CrearBoletaInversionista } from "./investorPayment";
+import { InvestorDocumentsModal } from "./investorDocuments";
 import { toast } from "sonner";
 
 const PER_PAGE_OPTIONS = [5, 10, 20, 50, 100, 200, 500];
@@ -80,6 +81,10 @@ export function TableInvestors() {
 
   // 🆕 Estado para el buscador interno de créditos asociados
   const [creditSearchQuery, setCreditSearchQuery] = useState<Record<number, string>>({});
+
+  // Estado para modal de documentos
+  const [showDocumentsModal, setShowDocumentsModal] = useState(false);
+  const [investorForDocs, setInvestorForDocs] = useState<{ id: number; nombre: string } | null>(null);
 
   // 🆕 Modal Revertir Pagos
   const [showRevertirModal, setShowRevertirModal] = useState(false);
@@ -1116,6 +1121,19 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 </DropdownMenuItem>
 
                 <DropdownMenuSeparator className="my-1" />
+
+                {/* Ver Documentos */}
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setInvestorForDocs({ id: inv.inversionista_id, nombre: inv.nombre_inversionista });
+                    setShowDocumentsModal(true);
+                  }}
+                  className="cursor-pointer rounded-lg px-3 py-2.5 focus:bg-indigo-50"
+                >
+                  <FileText className="mr-2.5 h-4 w-4 text-indigo-500" />
+                  <span className="text-sm font-medium text-gray-700">Ver Documentos</span>
+                </DropdownMenuItem>
 
                 {/* Editar */}
                 <DropdownMenuItem
@@ -2166,6 +2184,15 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
   }}
   inversionistaPredeterminado={inversionistaParaBoleta}
 />
+
+      <InvestorDocumentsModal
+        open={showDocumentsModal}
+        onClose={() => {
+          setShowDocumentsModal(false);
+          setInvestorForDocs(null);
+        }}
+        investor={investorForDocs}
+      />
 
       {/* 🆕 Modal de Confirmación para Revertir */}
       <ConfirmationModal

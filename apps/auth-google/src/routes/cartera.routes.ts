@@ -10,6 +10,7 @@ import {
   // Investor
   createInvestor,
   getInvestorProfile,
+  getInvestorDocuments,
   getBancos,
   // Investments
   getLiquidaciones,
@@ -130,6 +131,38 @@ carteraRoutes.get("/bancos", async (c) => {
     }
     throw new HTTPException(500, {
       message: error instanceof Error ? error.message : "Error al obtener bancos",
+    });
+  }
+});
+
+// ============================================
+// RUTAS DE DOCUMENTOS DE INVERSIONISTAS
+// ============================================
+
+/**
+ * GET /api/cartera/investor-documents/client/:email
+ * Obtener documentos de un inversionista por email
+ */
+carteraRoutes.get("/investor-documents/client/:email", async (c) => {
+  try {
+    const email = c.req.param("email");
+
+    if (!email) {
+      throw new HTTPException(400, { message: "El parámetro email es requerido" });
+    }
+
+    const documents = await getInvestorDocuments(email);
+
+    return c.json({
+      success: true,
+      data: documents,
+    });
+  } catch (error) {
+    if (error instanceof HTTPException) {
+      throw error;
+    }
+    throw new HTTPException(500, {
+      message: error instanceof Error ? error.message : "Error al obtener documentos del inversionista",
     });
   }
 });

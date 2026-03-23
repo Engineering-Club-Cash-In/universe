@@ -312,7 +312,7 @@ function DroppableStageColumn({
 				</div>
 				<CardTitle className="font-medium text-sm">{stage.name}</CardTitle>
 				<CardDescription className="text-xs">
-					Q{totalValue.toLocaleString()} valor total
+					Q{totalValue.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} valor total
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="min-h-0 space-y-3 overflow-y-auto" ref={ref}>
@@ -1438,7 +1438,7 @@ function RouteComponent() {
 							<>
 								<div className="font-bold text-2xl">{totalOpportunities}</div>
 								<p className="text-muted-foreground text-xs">
-									Q{totalValue.toLocaleString()} en pipeline
+									Q{totalValue.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} en pipeline
 								</p>
 							</>
 						)}
@@ -1491,7 +1491,7 @@ function RouteComponent() {
 							<Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
 						) : (
 							<div className="font-bold text-2xl text-green-700">
-								Q{placedAmount.toLocaleString()}
+								Q{placedAmount.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 							</div>
 						)}
 					</CardContent>
@@ -1530,7 +1530,7 @@ function RouteComponent() {
 										className="mt-0.5 text-muted-foreground text-sm"
 										style={{ fontVariantNumeric: "tabular-nums" }}
 									>
-										Q{stageValue.toLocaleString()}
+										Q{stageValue.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 									</p>
 								</CardContent>
 							</Card>

@@ -258,7 +258,7 @@ function RouteComponent() {
 							</CardHeader>
 							<CardContent>
 								<div className="font-bold text-2xl text-green-700">
-									Q{(crmStats.data.placedAmount || 0).toLocaleString()}
+									Q{(crmStats.data.placedAmount || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 								</div>
 							</CardContent>
 						</Card>
@@ -340,7 +340,7 @@ function RouteComponent() {
 							</CardHeader>
 							<CardContent>
 								<div className="font-bold text-2xl text-green-700">
-									Q{(crmStats.data.placedAmount || 0).toLocaleString()}
+									Q{(crmStats.data.placedAmount || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 								</div>
 							</CardContent>
 						</Card>
@@ -425,7 +425,7 @@ function RouteComponent() {
 							</CardHeader>
 							<CardContent>
 								<div className="font-bold text-2xl text-green-700">
-									Q{(crmStats.data.placedAmount || 0).toLocaleString()}
+									Q{(crmStats.data.placedAmount || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 								</div>
 							</CardContent>
 						</Card>

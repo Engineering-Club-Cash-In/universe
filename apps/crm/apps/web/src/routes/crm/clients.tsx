@@ -538,7 +538,7 @@ function RouteComponent() {
 					</CardHeader>
 					<CardContent>
 						<div className="font-bold text-2xl">
-							Q{(statsQuery.data?.totalValue ?? 0).toLocaleString()}
+							Q{(statsQuery.data?.totalValue ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 						</div>
 						<p className="text-muted-foreground text-xs">
 							En créditos cerrados

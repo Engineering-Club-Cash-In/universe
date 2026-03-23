@@ -523,7 +523,7 @@ function AnalysisPage() {
 													<TableCell>
 														{opportunity.value ? (
 															<span className="font-medium">
-																Q{Number(opportunity.value).toLocaleString()}
+																Q{Number(opportunity.value).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 															</span>
 														) : (
 															<span className="text-muted-foreground">
@@ -931,7 +931,7 @@ function DisbursementSection({
 											</div>
 											<div className="text-right">
 												<p className="font-medium">
-													Q{Number(opp.value).toLocaleString()}
+													Q{Number(opp.value).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 												</p>
 												<div className="flex items-center gap-2">
 													{opp.hasChecklist ? (

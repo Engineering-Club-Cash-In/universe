@@ -24,7 +24,9 @@ import {
   reinversiones,
   usuarios,
   liquidacion_locks,
+  documentos_inversionista,
 } from "../database/db/schema";
+import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
 import { eq, and, sql, inArray, ilike, like, desc, count, SQL } from "drizzle-orm";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import Big from "big.js";
@@ -520,25 +522,51 @@ export const insertInvestor = async ({ body, set }: any) => {
     };
   }
 };
+// Helper: agrupa rows de left join inversionista + documentos en un solo objeto con array de documentos
+async function agruparInversionistasConDocumentos(
+  rows: { inversionista: typeof inversionistas.$inferSelect; documento: typeof documentos_inversionista.$inferSelect | null }[]
+) {
+  const map = new Map<number, any>();
+
+  for (const row of rows) {
+    const id = row.inversionista.inversionista_id;
+    if (!map.has(id)) {
+      map.set(id, { ...row.inversionista, documentos: [] });
+    }
+    if (row.documento) {
+      const url = await getSignedDocumentUrl(row.documento.key);
+      map.get(id)!.documentos.push({ ...row.documento, url });
+    }
+  }
+
+  return Array.from(map.values());
+}
+
 // GET: Obtener inversionistas (uno o todos)
 export const getInvestors = async ({ query, set }: any) => {
   try {
     // Buscar por ID
     if (query.id) {
-      const result = await db
-        .select()
+      const rows = await db
+        .select({ inversionista: inversionistas, documento: documentos_inversionista })
         .from(inversionistas)
+        .leftJoin(documentos_inversionista, eq(inversionistas.inversionista_id, documentos_inversionista.inversionista_id))
         .where(eq(inversionistas.inversionista_id, query.id));
+
+      const result = await agruparInversionistasConDocumentos(rows);
       set.status = result.length ? 200 : 404;
       return result.length
         ? result[0]
         : { message: "Inversionista no encontrado" };
     }
     if(query.email){
-      const result = await db
-        .select()
+      const rows = await db
+        .select({ inversionista: inversionistas, documento: documentos_inversionista })
         .from(inversionistas)
+        .leftJoin(documentos_inversionista, eq(inversionistas.inversionista_id, documentos_inversionista.inversionista_id))
         .where(eq(inversionistas.email, query.email));
+
+      const result = await agruparInversionistasConDocumentos(rows);
       set.status = result.length ? 200 : 404;
       if (!result.length) {
         return { message: "Inversionista no encontrado con ese email" };
@@ -558,10 +586,13 @@ export const getInvestors = async ({ query, set }: any) => {
         return { message: "DPI debe ser un número válido" };
       }
 
-      const result = await db
-        .select()
+      const rows = await db
+        .select({ inversionista: inversionistas, documento: documentos_inversionista })
         .from(inversionistas)
+        .leftJoin(documentos_inversionista, eq(inversionistas.inversionista_id, documentos_inversionista.inversionista_id))
         .where(eq(inversionistas.dpi, dpiNumber));
+
+      const result = await agruparInversionistasConDocumentos(rows);
       set.status = result.length ? 200 : 404;
       return result.length
         ? result[0]
@@ -570,10 +601,13 @@ export const getInvestors = async ({ query, set }: any) => {
 
     // Buscar por nombre
     if (query.nombre) {
-      const result = await db
-        .select()
+      const rows = await db
+        .select({ inversionista: inversionistas, documento: documentos_inversionista })
         .from(inversionistas)
+        .leftJoin(documentos_inversionista, eq(inversionistas.inversionista_id, documentos_inversionista.inversionista_id))
         .where(eq(inversionistas.nombre, query.nombre));
+
+      const result = await agruparInversionistasConDocumentos(rows);
       set.status = result.length ? 200 : 404;
       return result.length
         ? result
@@ -581,7 +615,12 @@ export const getInvestors = async ({ query, set }: any) => {
     }
 
     // Si no hay query, trae todos
-    const all = await db.select().from(inversionistas);
+    const rows = await db
+      .select({ inversionista: inversionistas, documento: documentos_inversionista })
+      .from(inversionistas)
+      .leftJoin(documentos_inversionista, eq(inversionistas.inversionista_id, documentos_inversionista.inversionista_id));
+
+    const all = await agruparInversionistasConDocumentos(rows);
     set.status = 200;
     return all;
   } catch (error) {

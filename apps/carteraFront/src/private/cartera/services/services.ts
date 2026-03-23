@@ -3051,3 +3051,42 @@ export async function getHistorialCambioFecha(numeroCreditoSifco: string): Promi
   const { data } = await api.get(`/historial-cambio-fecha/${numeroCreditoSifco}`);
   return data.historial ?? [];
 }
+
+// ─── Investor Documents ──────────────────────────────────────────────────────
+
+export async function getInvestorDocuments(inversionistaId: number) {
+  const { data } = await api.get(`/investor-documents/admin/${inversionistaId}`);
+  return data;
+}
+
+export async function uploadInvestorDocument(params: {
+  file: File;
+  inversionista_id: number;
+  nombre: string;
+  descripcion?: string;
+  visible?: boolean;
+  created_by?: string;
+}) {
+  const formData = new FormData();
+  formData.append("file", params.file);
+  formData.append("inversionista_id", String(params.inversionista_id));
+  formData.append("nombre", params.nombre);
+  if (params.descripcion) formData.append("descripcion", params.descripcion);
+  if (params.visible !== undefined) formData.append("visible", String(params.visible));
+  if (params.created_by) formData.append("created_by", params.created_by);
+
+  const { data } = await api.post("/investor-documents", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+}
+
+export async function toggleDocumentVisibility(documentoId: number, visible: boolean) {
+  const { data } = await api.put(`/investor-documents/${documentoId}/visibility`, { visible });
+  return data;
+}
+
+export async function deleteInvestorDocument(documentoId: number) {
+  const { data } = await api.patch(`/investor-documents/${documentoId}/delete`);
+  return data;
+}

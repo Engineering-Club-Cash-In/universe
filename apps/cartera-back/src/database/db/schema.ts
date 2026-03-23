@@ -921,3 +921,21 @@
     changed_by: varchar("changed_by", { length: 150 }).notNull(),
     created_at: timestamp("created_at").defaultNow(),
   });
+
+  // ========================================
+  // DOCUMENTOS / CONTRATOS DE INVERSIONISTAS
+  // ========================================
+  export const documentos_inversionista = customSchema.table("documentos_inversionista", {
+    documento_id: serial("documento_id").primaryKey(),
+    inversionista_id: integer("inversionista_id")
+      .notNull()
+      .references(() => inversionistas.inversionista_id, { onDelete: "cascade" }),
+    key: varchar("key", { length: 500 }).notNull(),
+    nombre: varchar("nombre", { length: 300 }).notNull(),
+    descripcion: varchar("descripcion", { length: 500 }),
+    visible: boolean("visible").notNull().default(false),
+    created_at: timestamp("created_at").defaultNow().notNull(),
+    created_by: varchar("created_by", { length: 250 }),
+  }, (table) => ({
+    inversionistaIdx: index("idx_docs_inversionista").on(table.inversionista_id),
+  }));

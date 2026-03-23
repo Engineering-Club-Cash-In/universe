@@ -16,6 +16,7 @@ import {
   montos_adicionales,
   moras_credito,
   pagos_credito,
+  pagos_credito_inversionistas,
   platform_users,
   usuarios,
 } from "../database/db/schema";
@@ -52,6 +53,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
             "PENDIENTE_CANCELACION",
             "MOROSO",
             "EN_CONVENIO",
+            "INCOBRABLE"
           ])
         )
       )
@@ -1389,23 +1391,132 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
       }
 
       // accion === "INCOBRABLE"
-      // a) Set UNCOLLECTIBLE
-      await tx
-        .update(creditos)
-        .set({ statusCredit: "INCOBRABLE" })
+      // a) Obtener crédito actual
+      const [creditoActual] = await tx
+        .select()
+        .from(creditos)
         .where(eq(creditos.credito_id, creditId));
 
-      // b) Register bad debt
+      if (!creditoActual) {
+        return { ok: false, message: "Crédito no encontrado" };
+      }
+
+      // b) Capital = monto_incobrable, plazo = 1, cuota = capital completo
+      const capitalIncobrable = new Big(monto_cancelacion!);
+
+      // c) Borrar pagos existentes (en orden por FKs)
+      //    NO se tocan: creditos_inversionistas_espejo, pagos_credito_inversionistas_espejo
+      const pagosDelCredito = await tx
+        .select({ pago_id: pagos_credito.pago_id })
+        .from(pagos_credito)
+        .where(eq(pagos_credito.credito_id, creditId));
+
+      const pagoIds = pagosDelCredito.map(p => p.pago_id);
+
+      if (pagoIds.length > 0) {
+        // Borrar boletas de esos pagos
+        await tx
+          .delete(boletas)
+          .where(inArray(boletas.pago_id, pagoIds));
+
+        // Borrar pagos_credito_inversionistas (NO espejo)
+        await tx
+          .delete(pagos_credito_inversionistas)
+          .where(inArray(pagos_credito_inversionistas.pago_id, pagoIds));
+
+        // Borrar pagos_credito
+        await tx
+          .delete(pagos_credito)
+          .where(inArray(pagos_credito.pago_id, pagoIds));
+
+        console.log(`🗑️ Eliminados ${pagoIds.length} pagos del crédito #${creditId}`);
+      }
+
+      // d) Borrar todas las cuotas y dejar solo 1
+      await tx
+        .delete(cuotas_credito)
+        .where(eq(cuotas_credito.credito_id, creditId));
+
+      await tx.insert(cuotas_credito).values({
+        credito_id: creditId,
+        numero_cuota: 1,
+        fecha_vencimiento: new Date().toISOString().split("T")[0],
+        pagado: false,
+      });
+
+      // e) Actualizar crédito: INCOBRABLE, plazo 1, cuota = capital completo
+      await tx
+        .update(creditos)
+        .set({
+          statusCredit: "INCOBRABLE",
+          capital: capitalIncobrable.toString(),
+          plazo: 1,
+          porcentaje_interes: "0",
+          cuota_interes: "0",
+          iva_12: "0",
+          membresias_pago: "0",
+          membresias: "0",
+          seguro_10_cuotas: "0",
+          gps: "0",
+          royalti: "0",
+          porcentaje_royalti: "0",
+          otros: "0",
+          cuota: capitalIncobrable.toString(),
+          deudatotal: capitalIncobrable.toString(),
+        })
+        .where(eq(creditos.credito_id, creditId));
+
+      // f) Obtener la cuota recién creada para el pago base
+      const [cuotaCreada] = await tx
+        .select({ cuota_id: cuotas_credito.cuota_id })
+        .from(cuotas_credito)
+        .where(eq(cuotas_credito.credito_id, creditId));
+
+      // g) Crear pago base con capital_restante = capital
+      await tx.insert(pagos_credito).values({
+        credito_id: creditId,
+        cuota: capitalIncobrable.toString(),
+        cuota_interes: "0",
+        cuota_id: cuotaCreada.cuota_id,
+        abono_capital: "0",
+        abono_interes: "0",
+        abono_iva_12: "0",
+        abono_interes_ci: "0",
+        abono_iva_ci: "0",
+        abono_seguro: "0",
+        abono_gps: "0",
+        pago_del_mes: "0",
+        monto_boleta: "0",
+        capital_restante: capitalIncobrable.toString(),
+        interes_restante: "0",
+        iva_12_restante: "0",
+        seguro_restante: "0",
+        gps_restante: "0",
+        total_restante: capitalIncobrable.toString(),
+        membresias: "0",
+        membresias_pago: "0",
+        membresias_mes: "0",
+        mora: "0",
+        monto_boleta_cuota: "0",
+        seguro_total: "0",
+        pagado: false,
+        registerBy: "SISTEMA-INCOBRABLE",
+        pagoConvenio: "0",
+        monto_aplicado: "0",
+        observaciones: `Pago base - Crédito marcado como incobrable: ${motivo}`,
+      });
+
+      // h) Register bad debt
       await tx.insert(bad_debts).values({
         credit_id: creditId,
-        motivo: motivo!, // validated above
+        motivo: motivo!,
         observaciones: observaciones ?? "",
         monto_incobrable: monto_cancelacion!.toString(),
       });
 
       return {
         ok: true,
-        message: "Crédito marcado como incobrable correctamente",
+        message: `Crédito #${creditId} marcado como incobrable. Capital: Q${capitalIncobrable.toString()}, Plazo: 1, Cuota: Q${capitalIncobrable.toString()}, ${pagoIds.length} pagos eliminados.`,
       };
     });
 

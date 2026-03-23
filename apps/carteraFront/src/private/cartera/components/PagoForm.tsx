@@ -730,26 +730,23 @@ export function PagoForm() {
                   <Label className="text-gray-700 font-semibold text-sm">
                     Origen de Pago <span className="text-red-500">*</span>
                   </Label>
-                  <Select
+                  <select
                     value={formik.values.origen_pago || ""}
-                    onValueChange={(value) => {
-                      formik.setFieldValue("origen_pago", value);
+                    onChange={(e) => {
+                      formik.setFieldValue("origen_pago", e.target.value);
                       formik.setFieldTouched("origen_pago", true, false);
                     }}
-                  >
-                    <SelectTrigger className={`w-full border rounded-lg px-3 py-2.5 text-gray-900 bg-white [&>span]:text-gray-900 ${
+                    className={`w-full border rounded-lg px-3 py-2.5 text-gray-900 bg-white ${
                       formik.errors.origen_pago && formik.touched.origen_pago && !formik.values.origen_pago
                         ? "border-red-500"
                         : "border-gray-300"
-                    }`}>
-                      <SelectValue placeholder="Seleccionar origen..." />
-                    </SelectTrigger>
-                    <SelectContent className="bg-white border border-gray-200 shadow-lg">
-                      <SelectItem value="transferencia" className="text-gray-900 hover:bg-blue-50 cursor-pointer">Transferencia</SelectItem>
-                      <SelectItem value="cheque" className="text-gray-900 hover:bg-blue-50 cursor-pointer">Cheque</SelectItem>
-                      <SelectItem value="boleta" className="text-gray-900 hover:bg-blue-50 cursor-pointer">Boleta</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    }`}
+                  >
+                    <option value="" disabled>Seleccionar origen...</option>
+                    <option value="transferencia">Transferencia</option>
+                    <option value="cheque">Cheque</option>
+                    <option value="boleta">Boleta</option>
+                  </select>
                   {formik.errors.origen_pago && formik.touched.origen_pago && !formik.values.origen_pago && (
                     <div className="text-red-500 text-xs mt-0.5">{formik.errors.origen_pago}</div>
                   )}

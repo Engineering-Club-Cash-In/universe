@@ -100,6 +100,18 @@ export type OpportunityForModal = {
 	} | null;
 };
 
+
+function formatLeadFullName(lead: {
+	firstName?: string | null;
+	middleName?: string | null;
+	lastName?: string | null;
+	secondLastName?: string | null;
+}) {
+	return [lead.firstName, lead.middleName, lead.lastName, lead.secondLastName]
+		.filter((part): part is string => Boolean(part && part.trim()))
+		.join(" ");
+}
+
 type OpportunityDetailModalProps = {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
@@ -129,6 +141,14 @@ export function OpportunityDetailModal({
 }: OpportunityDetailModalProps) {
 	const [opportunityHistory, setOpportunityHistory] = useState<any[]>([]);
 	const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+	const leadQuery = useQuery({
+		...orpc.getLeads.queryOptions({
+			input: { id: opportunity?.lead?.id ?? "", limit: 1 },
+		}),
+		enabled: open && !!opportunity?.lead?.id,
+		queryKey: ["getLeads", opportunity?.lead?.id, "opportunity-modal"],
+	});
 
 	// Query for contracts associated with the opportunity
 	const opportunityContractsQuery = useQuery({
@@ -189,6 +209,24 @@ export function OpportunityDetailModal({
 
 	const canViewContracts =
 		userRole && PERMISSIONS.canViewOpportunityContracts(userRole);
+	const fullLead = leadQuery.data?.data?.[0];
+	const displayLead = fullLead
+		? {
+			...opportunity.lead,
+			firstName: fullLead.firstName,
+			middleName: fullLead.middleName,
+			lastName: fullLead.lastName,
+			secondLastName: fullLead.secondLastName,
+			dpi: fullLead.dpi,
+			email: fullLead.email,
+			phone: fullLead.phone,
+			age: fullLead.age,
+			direccion: fullLead.direccion,
+			departamento: fullLead.departamento,
+			municipio: fullLead.municipio,
+			zona: fullLead.zona,
+		}
+		: opportunity.lead;
 	const canAccessCRM = userRole && PERMISSIONS.canAccessCRM(userRole);
 	const isAccounting = userRole && PERMISSIONS.canAccessAccounting(userRole);
 	const isWon = opportunity?.status === "won";
@@ -268,7 +306,7 @@ export function OpportunityDetailModal({
 						{/* Details Grid */}
 						<div className="grid grid-cols-2 gap-6">
 							{/* Lead Information */}
-							{opportunity.lead && (
+							{displayLead && (
 								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
 									<Label className="font-semibold text-muted-foreground text-sm">
 										Lead
@@ -280,41 +318,40 @@ export function OpportunityDetailModal({
 												className="cursor-pointer font-medium text-primary hover:underline"
 												role="button"
 												tabIndex={0}
-												onClick={() => onNavigateToLead(opportunity.lead!.id)}
+												onClick={() => onNavigateToLead(displayLead!.id)}
 												onKeyDown={(e) => {
 													if (e.key === "Enter" || e.key === " ") {
 														e.preventDefault();
-														onNavigateToLead(opportunity.lead!.id);
+														onNavigateToLead(displayLead!.id);
 													}
 												}}
 											>
-												{opportunity.lead.firstName} {opportunity.lead.lastName}
+												{formatLeadFullName(displayLead)}
 											</span>
 										) : (
 											<Link
 												to="/crm/leads"
 												search={{
-													leadId: opportunity.lead.id,
+													leadId: displayLead.id,
 												}}
 												className="font-medium text-primary hover:underline"
 												onClick={() => onOpenChange(false)}
 											>
 												<span className="font-medium">
-													{opportunity.lead.firstName}{" "}
-													{opportunity.lead.lastName}
+													{formatLeadFullName(displayLead)}
 												</span>
 											</Link>
 										)}
 									</div>
-									{opportunity.lead.dpi && (
+									{displayLead.dpi && (
 										<div className="flex items-center gap-3 text-muted-foreground text-sm">
-											<span className="font-mono">{opportunity.lead.dpi}</span>
+											<span className="font-mono">{displayLead.dpi}</span>
 										</div>
 									)}
-									{opportunity.lead.email && (
+									{displayLead.email && (
 										<div className="flex items-center gap-3 text-muted-foreground text-sm">
 											<Mail className="h-4 w-4" />
-											<span>{opportunity.lead.email}</span>
+											<span>{displayLead.email}</span>
 										</div>
 									)}
 								</div>

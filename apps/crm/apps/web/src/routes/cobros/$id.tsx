@@ -259,10 +259,12 @@ function RouteComponent() {
 					? {
 							id: matchingOpportunity.lead.id,
 							firstName: matchingOpportunity.lead.firstName,
+							middleName: matchingOpportunity.lead.middleName,
 							lastName: matchingOpportunity.lead.lastName,
+							secondLastName: matchingOpportunity.lead.secondLastName,
 							email: matchingOpportunity.lead.email,
-							phone: null,
-							dpi: null,
+							phone: matchingOpportunity.lead.phone,
+							dpi: matchingOpportunity.lead.dpi,
 						}
 					: null,
 				stage: matchingOpportunity.stage

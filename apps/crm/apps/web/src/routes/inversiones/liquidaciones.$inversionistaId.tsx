@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
 	ArrowLeft,
@@ -8,18 +8,27 @@ import {
 	ChevronRight,
 	CreditCard,
 	Download,
+	Eye,
+	EyeOff,
 	FileText,
 	Filter,
 	Landmark,
 	Loader2,
 	Mail,
+	Plus,
 	RefreshCw,
 	Shield,
+	Trash2,
+	Upload,
 	Users,
 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
 	Select,
 	SelectContent,
@@ -59,6 +68,308 @@ function formatQ(value: number | string | null | undefined): string {
 
 function getMesLabel(mes: number): string {
 	return MESES.find((m) => m.value === mes)?.label ?? "";
+}
+
+// ─── Investor Documents ──────────────────────────────────────────────────────
+
+function InvestorDocumentsSection({
+	inversionistaId,
+}: {
+	inversionistaId: number;
+}) {
+	const queryClient = useQueryClient();
+	const fileInputRef = useRef<HTMLInputElement>(null);
+	const [showUpload, setShowUpload] = useState(false);
+	const [nombre, setNombre] = useState("");
+	const [descripcion, setDescripcion] = useState("");
+	const [visible, setVisible] = useState(false);
+	const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
+	const docsQuery = useQuery({
+		...orpc.getInvestorDocumentsAdmin.queryOptions({
+			input: { inversionistaId },
+		}),
+	});
+
+	const invalidateDocs = () => {
+		queryClient.invalidateQueries({
+			queryKey: orpc.getInvestorDocumentsAdmin.queryOptions({
+				input: { inversionistaId },
+			}).queryKey,
+			refetchType: "all",
+		});
+	};
+
+	const createMutation = useMutation({
+		...orpc.createInvestorDocument.mutationOptions(),
+		onSuccess: () => {
+			toast.success("Documento creado exitosamente");
+			invalidateDocs();
+			setShowUpload(false);
+			setNombre("");
+			setDescripcion("");
+			setVisible(false);
+			setSelectedFile(null);
+		},
+		onError: (err: any) => {
+			toast.error(err?.message ?? "Error al crear documento");
+		},
+	});
+
+	const toggleVisibilityMutation = useMutation({
+		...orpc.toggleInvestorDocumentVisibility.mutationOptions(),
+		onSuccess: () => {
+			toast.success("Visibilidad actualizada");
+			invalidateDocs();
+		},
+		onError: (err: any) => {
+			toast.error(err?.message ?? "Error al actualizar visibilidad");
+		},
+	});
+
+	const deleteMutation = useMutation({
+		...orpc.deleteInvestorDocument.mutationOptions(),
+		onSuccess: () => {
+			toast.success("Documento eliminado");
+			invalidateDocs();
+		},
+		onError: (err: any) => {
+			toast.error(err?.message ?? "Error al eliminar documento");
+		},
+	});
+
+	const handleUpload = async () => {
+		if (!selectedFile) return;
+		const arrayBuffer = await selectedFile.arrayBuffer();
+		const base64 = btoa(
+			new Uint8Array(arrayBuffer).reduce(
+				(data, byte) => data + String.fromCharCode(byte),
+				"",
+			),
+		);
+		const finalNombre = nombre.trim() || selectedFile.name;
+		createMutation.mutate({
+			inversionistaId,
+			nombre: finalNombre,
+			descripcion: descripcion.trim() || undefined,
+			visible,
+			fileBase64: base64,
+			fileMimeType: selectedFile.type || "application/octet-stream",
+		});
+	};
+
+	const docs = (docsQuery.data as any)?.data ?? [];
+
+	return (
+		<div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+			<div className="mb-4 flex items-center justify-between">
+				<h2 className="flex items-center gap-2 font-bold text-sm">
+					<FileText className="h-4 w-4 text-primary" />
+					Documentos
+				</h2>
+				<div className="flex items-center gap-2">
+					<Button
+						variant="outline"
+						size="icon"
+						className="h-8 w-8"
+						onClick={() => docsQuery.refetch()}
+						disabled={docsQuery.isLoading}
+					>
+						{docsQuery.isLoading ? (
+							<Loader2 className="h-3.5 w-3.5 animate-spin" />
+						) : (
+							<RefreshCw className="h-3.5 w-3.5" />
+						)}
+					</Button>
+					<Button
+						variant={showUpload ? "secondary" : "outline"}
+						size="sm"
+						className="h-8 gap-1.5"
+						onClick={() => setShowUpload((v) => !v)}
+					>
+						<Plus className="h-3.5 w-3.5" />
+						Subir
+					</Button>
+				</div>
+			</div>
+
+			{/* Upload form */}
+			{showUpload && (
+				<div className="mb-4 space-y-3 rounded-lg border bg-muted/50 p-4">
+					<div>
+						<input
+							ref={fileInputRef}
+							type="file"
+							onChange={(e) => {
+								const file = e.target.files?.[0] ?? null;
+								setSelectedFile(file);
+								if (file && !nombre.trim()) {
+									setNombre(file.name);
+								}
+							}}
+							className="hidden"
+						/>
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							className="gap-2"
+							onClick={() => fileInputRef.current?.click()}
+						>
+							<FileText className="h-3.5 w-3.5" />
+							{selectedFile ? selectedFile.name : "Seleccionar archivo"}
+						</Button>
+					</div>
+					<div className="space-y-1">
+						<Label htmlFor="doc-nombre" className="text-xs">
+							Nombre (opcional)
+						</Label>
+						<Input
+							id="doc-nombre"
+							value={nombre}
+							onChange={(e) => setNombre(e.target.value)}
+							placeholder="Se usará el nombre del archivo si se deja vacío"
+						/>
+					</div>
+					<div className="space-y-1">
+						<Label htmlFor="doc-descripcion" className="text-xs">
+							Descripción (opcional)
+						</Label>
+						<Input
+							id="doc-descripcion"
+							value={descripcion}
+							onChange={(e) => setDescripcion(e.target.value)}
+							placeholder="Descripción breve"
+						/>
+					</div>
+					<div className="flex items-center gap-2">
+						<Checkbox
+							id="doc-visible"
+							checked={visible}
+							onCheckedChange={(checked) =>
+								setVisible(checked === true)
+							}
+						/>
+						<Label htmlFor="doc-visible" className="text-xs">
+							Visible para el inversionista
+						</Label>
+					</div>
+					<div className="flex gap-2">
+						<Button
+							size="sm"
+							disabled={!selectedFile || createMutation.isPending}
+							onClick={handleUpload}
+							className="gap-1.5"
+						>
+							{createMutation.isPending ? (
+								<Loader2 className="h-3.5 w-3.5 animate-spin" />
+							) : (
+								<Upload className="h-3.5 w-3.5" />
+							)}
+							Subir documento
+						</Button>
+						<Button
+							variant="ghost"
+							size="sm"
+							onClick={() => setShowUpload(false)}
+						>
+							Cancelar
+						</Button>
+					</div>
+				</div>
+			)}
+
+			{/* Documents list */}
+			{docsQuery.isLoading && (
+				<div className="flex items-center gap-2 py-4 text-muted-foreground text-xs">
+					<Loader2 className="h-3.5 w-3.5 animate-spin" />
+					Cargando documentos...
+				</div>
+			)}
+
+			{!docsQuery.isLoading && docs.length === 0 && (
+				<p className="py-2 text-muted-foreground text-xs italic">
+					Sin documentos
+				</p>
+			)}
+
+			{docs.length > 0 && (
+				<div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+					{docs.map((doc: any) => (
+						<div
+							key={doc.documento_id}
+							className="flex items-center justify-between gap-2 rounded-lg border bg-background px-3 py-2"
+						>
+							<div className="min-w-0 flex-1">
+								<p className="truncate font-medium text-xs">{doc.nombre}</p>
+								{doc.descripcion && (
+									<p className="truncate text-[10px] text-muted-foreground">
+										{doc.descripcion}
+									</p>
+								)}
+								<div className="mt-0.5 flex items-center gap-2">
+									<Badge
+										variant="outline"
+										className={
+											doc.visible
+												? "border-green-300 bg-green-50 text-[10px] text-green-700 dark:border-green-700 dark:bg-green-950 dark:text-green-300"
+												: "text-[10px]"
+										}
+									>
+										{doc.visible ? "Visible" : "Oculto"}
+									</Badge>
+									
+								</div>
+							</div>
+							<div className="flex shrink-0 items-center gap-1">
+								{doc.url && (
+									<a href={doc.url} target="_blank" rel="noopener noreferrer">
+										<Button variant="ghost" size="icon" className="h-7 w-7">
+											<Download className="h-3.5 w-3.5" />
+										</Button>
+									</a>
+								)}
+								<Button
+									variant="ghost"
+									size="icon"
+									className="h-7 w-7"
+									onClick={() =>
+										toggleVisibilityMutation.mutate({
+											documentoId: doc.documento_id,
+											visible: !doc.visible,
+										})
+									}
+									disabled={toggleVisibilityMutation.isPending}
+									title={doc.visible ? "Ocultar" : "Hacer visible"}
+								>
+									{doc.visible ? (
+										<EyeOff className="h-3.5 w-3.5" />
+									) : (
+										<Eye className="h-3.5 w-3.5" />
+									)}
+								</Button>
+								<Button
+									variant="ghost"
+									size="icon"
+									className="h-7 w-7 text-destructive hover:text-destructive"
+									onClick={() => {
+										if (confirm("¿Estás seguro de eliminar este documento?")) {
+											deleteMutation.mutate({
+												documentoId: doc.documento_id,
+											});
+										}
+									}}
+									disabled={deleteMutation.isPending}
+								>
+									<Trash2 className="h-3.5 w-3.5" />
+								</Button>
+							</div>
+						</div>
+					))}
+				</div>
+			)}
+		</div>
+	);
 }
 
 // ─── Liquidacion Card ────────────────────────────────────────────────────────
@@ -258,9 +569,8 @@ function InvestorLiquidacionesPage() {
 
 	return (
 		<div className="flex h-full flex-col">
-			{/* Header */}
+			{/* Header — Nombre */}
 			<div className="shrink-0 border-b bg-background px-6 py-5">
-				{/* Back + Name */}
 				<div className="flex items-center gap-3">
 					<Button variant="ghost" size="icon" className="shrink-0" asChild>
 						<Link to="/inversiones/liquidaciones">
@@ -284,208 +594,214 @@ function InvestorLiquidacionesPage() {
 						</div>
 					</div>
 				</div>
+			</div>
 
-				{/* Info cards */}
+			{/* Scrollable content */}
+			<div className="flex-1 overflow-y-auto p-6 space-y-6">
+				{/* Datos del inversionista */}
 				{investor && (
-					<div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-						{investor.email && (
+					<div>
+						<div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+							{investor.email && (
+								<div className="flex items-center gap-2.5 rounded-lg border bg-card px-3 py-2">
+									<Mail className="h-4 w-4 shrink-0 text-muted-foreground" />
+									<div className="min-w-0">
+										<p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+											Correo
+										</p>
+										<p className="truncate font-medium text-xs">
+											{investor.email}
+										</p>
+									</div>
+								</div>
+							)}
+							{investor.banco && (
+								<div className="flex items-center gap-2.5 rounded-lg border bg-card px-3 py-2">
+									<Landmark className="h-4 w-4 shrink-0 text-muted-foreground" />
+									<div className="min-w-0">
+										<p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+											Banco
+										</p>
+										<p className="truncate font-medium text-xs">
+											{investor.banco} · {investor.tipoCuenta}
+										</p>
+									</div>
+								</div>
+							)}
+							{investor.numeroCuenta && (
+								<div className="flex items-center gap-2.5 rounded-lg border bg-card px-3 py-2">
+									<CreditCard className="h-4 w-4 shrink-0 text-muted-foreground" />
+									<div className="min-w-0">
+										<p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+											No. Cuenta
+										</p>
+										<p className="truncate font-medium font-mono text-xs">
+											{investor.numeroCuenta}
+										</p>
+									</div>
+								</div>
+							)}
 							<div className="flex items-center gap-2.5 rounded-lg border bg-card px-3 py-2">
-								<Mail className="h-4 w-4 shrink-0 text-muted-foreground" />
+								<Banknote className="h-4 w-4 shrink-0 text-muted-foreground" />
 								<div className="min-w-0">
 									<p className="text-[10px] text-muted-foreground uppercase tracking-wide">
-										Correo
+										Moneda
 									</p>
-									<p className="truncate font-medium text-xs">
-										{investor.email}
+									<p className="font-medium text-xs">
+										{investor.moneda === "dolares"
+											? "Dólares (USD)"
+											: "Quetzales (GTQ)"}
 									</p>
 								</div>
 							</div>
-						)}
-						{investor.banco && (
-							<div className="flex items-center gap-2.5 rounded-lg border bg-card px-3 py-2">
-								<Landmark className="h-4 w-4 shrink-0 text-muted-foreground" />
-								<div className="min-w-0">
-									<p className="text-[10px] text-muted-foreground uppercase tracking-wide">
-										Banco
-									</p>
-									<p className="truncate font-medium text-xs">
-										{investor.banco} · {investor.tipoCuenta}
-									</p>
-								</div>
-							</div>
-						)}
-						{investor.numeroCuenta && (
-							<div className="flex items-center gap-2.5 rounded-lg border bg-card px-3 py-2">
-								<CreditCard className="h-4 w-4 shrink-0 text-muted-foreground" />
-								<div className="min-w-0">
-									<p className="text-[10px] text-muted-foreground uppercase tracking-wide">
-										No. Cuenta
-									</p>
-									<p className="truncate font-medium font-mono text-xs">
-										{investor.numeroCuenta}
-									</p>
-								</div>
-							</div>
-						)}
-						<div className="flex items-center gap-2.5 rounded-lg border bg-card px-3 py-2">
-							<Banknote className="h-4 w-4 shrink-0 text-muted-foreground" />
-							<div className="min-w-0">
-								<p className="text-[10px] text-muted-foreground uppercase tracking-wide">
-									Moneda
-								</p>
-								<p className="font-medium text-xs">
-									{investor.moneda === "dolares"
-										? "Dólares (USD)"
-										: "Quetzales (GTQ)"}
-								</p>
-							</div>
+						</div>
+
+						{/* Badges */}
+						<div className="mt-3 flex flex-wrap gap-1.5">
+							{investor.emiteFactura && (
+								<Badge
+									variant="outline"
+									className="border-blue-300 bg-blue-50 text-[10px] text-blue-700 dark:border-blue-700 dark:bg-blue-950 dark:text-blue-300"
+								>
+									Factura
+								</Badge>
+							)}
+							{investor.reinversion && (
+								<Badge
+									variant="outline"
+									className="border-purple-300 bg-purple-50 text-[10px] text-purple-700 dark:border-purple-700 dark:bg-purple-950 dark:text-purple-300"
+								>
+									Reinversión
+								</Badge>
+							)}
 						</div>
 					</div>
 				)}
 
-				{/* Badges */}
-				{investor && (
-					<div className="mt-3 flex flex-wrap gap-1.5">
-						{investor.emiteFactura && (
-							<Badge
-								variant="outline"
-								className="border-blue-300 bg-blue-50 text-[10px] text-blue-700 dark:border-blue-700 dark:bg-blue-950 dark:text-blue-300"
+				{/* Documentos */}
+				<InvestorDocumentsSection inversionistaId={investorIdNum} />
+
+				{/* Filtro por mes */}
+				<div>
+					<div className="flex flex-wrap items-center justify-between gap-4">
+						<div className="flex items-center gap-2">
+							<Button
+								variant={filterByMonth ? "secondary" : "outline"}
+								size="sm"
+								className="h-9 gap-2"
+								onClick={() => {
+									setFilterByMonth((v) => !v);
+									setPage(1);
+								}}
 							>
-								Factura
-							</Badge>
-						)}
-						{investor.reinversion && (
-							<Badge
-								variant="outline"
-								className="border-purple-300 bg-purple-50 text-[10px] text-purple-700 dark:border-purple-700 dark:bg-purple-950 dark:text-purple-300"
-							>
-								Reinversión
-							</Badge>
-						)}
-					</div>
-				)}
+								<Filter className="h-4 w-4" />
+								{filterByMonth ? "Quitar filtro" : "Filtrar por mes"}
+							</Button>
 
-				{/* Filtros */}
-				<div className="mt-4 flex flex-wrap items-center justify-between gap-4">
-					<div className="flex items-center gap-2">
-						<Button
-							variant={filterByMonth ? "secondary" : "outline"}
-							size="sm"
-							className="h-9 gap-2"
-							onClick={() => {
-								setFilterByMonth((v) => !v);
-								setPage(1);
-							}}
-						>
-							<Filter className="h-4 w-4" />
-							{filterByMonth ? "Quitar filtro" : "Filtrar por mes"}
-						</Button>
+							{filterByMonth && (
+								<>
+									<Button
+										variant="outline"
+										size="icon"
+										className="h-9 w-9"
+										onClick={goToPrevMonth}
+									>
+										<ChevronLeft className="h-4 w-4" />
+									</Button>
 
-						{filterByMonth && (
-							<>
-								<Button
-									variant="outline"
-									size="icon"
-									className="h-9 w-9"
-									onClick={goToPrevMonth}
-								>
-									<ChevronLeft className="h-4 w-4" />
-								</Button>
-
-								<Select
-									value={String(mes)}
-									onValueChange={(v) => {
-										setMes(Number(v));
-										setPage(1);
-									}}
-								>
-									<SelectTrigger className="h-9 w-[150px]">
-										<CalendarDays className="mr-2 h-4 w-4" />
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent>
-										{MESES.map((m) => (
-											<SelectItem key={m.value} value={String(m.value)}>
-												{m.label}
-											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
-
-								<Select
-									value={String(anio)}
-									onValueChange={(v) => {
-										setAnio(Number(v));
-										setPage(1);
-									}}
-								>
-									<SelectTrigger className="h-9 w-[100px]">
-										<SelectValue />
-									</SelectTrigger>
-									<SelectContent>
-										{Array.from({ length: 6 }, (_, i) => {
-											const y = new Date().getFullYear() - i;
-											return (
-												<SelectItem key={y} value={String(y)}>
-													{y}
+									<Select
+										value={String(mes)}
+										onValueChange={(v) => {
+											setMes(Number(v));
+											setPage(1);
+										}}
+									>
+										<SelectTrigger className="h-9 w-[150px]">
+											<CalendarDays className="mr-2 h-4 w-4" />
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											{MESES.map((m) => (
+												<SelectItem key={m.value} value={String(m.value)}>
+													{m.label}
 												</SelectItem>
-											);
-										})}
-									</SelectContent>
-								</Select>
+											))}
+										</SelectContent>
+									</Select>
 
-								<Button
-									variant="outline"
-									size="icon"
-									className="h-9 w-9"
-									onClick={goToNextMonth}
-								>
-									<ChevronRight className="h-4 w-4" />
-								</Button>
-							</>
-						)}
+									<Select
+										value={String(anio)}
+										onValueChange={(v) => {
+											setAnio(Number(v));
+											setPage(1);
+										}}
+									>
+										<SelectTrigger className="h-9 w-[100px]">
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											{Array.from({ length: 6 }, (_, i) => {
+												const y = new Date().getFullYear() - i;
+												return (
+													<SelectItem key={y} value={String(y)}>
+														{y}
+													</SelectItem>
+												);
+											})}
+										</SelectContent>
+									</Select>
+
+									<Button
+										variant="outline"
+										size="icon"
+										className="h-9 w-9"
+										onClick={goToNextMonth}
+									>
+										<ChevronRight className="h-4 w-4" />
+									</Button>
+								</>
+							)}
+						</div>
+
+						<Button
+							variant="outline"
+							size="icon"
+							className="h-9 w-9"
+							onClick={() => refetch()}
+							disabled={isLoading}
+							title="Refrescar"
+						>
+							{isLoading ? (
+								<Loader2 className="h-4 w-4 animate-spin" />
+							) : (
+								<RefreshCw className="h-4 w-4" />
+							)}
+						</Button>
 					</div>
 
-					<Button
-						variant="outline"
-						size="icon"
-						className="h-9 w-9"
-						onClick={() => refetch()}
-						disabled={isLoading}
-						title="Refrescar"
-					>
-						{isLoading ? (
-							<Loader2 className="h-4 w-4 animate-spin" />
-						) : (
-							<RefreshCw className="h-4 w-4" />
-						)}
-					</Button>
-				</div>
-
-				<div className="mt-3 flex items-center justify-between">
-					<span className="text-muted-foreground text-sm">
-						{items.length} resultado
-						{items.length !== 1 ? "s" : ""}
-						{filterByMonth && (
-							<>
-								{" — "}
-								<span className="font-medium text-foreground">
-									{getMesLabel(mes)} {anio}
-								</span>
-							</>
-						)}
-						{!filterByMonth && " — Todas las liquidaciones"}
-					</span>
-					{totalPages > 1 && (
+					<div className="mt-3 flex items-center justify-between">
 						<span className="text-muted-foreground text-sm">
-							Página {page} de {totalPages}
+							{items.length} resultado
+							{items.length !== 1 ? "s" : ""}
+							{filterByMonth && (
+								<>
+									{" — "}
+									<span className="font-medium text-foreground">
+										{getMesLabel(mes)} {anio}
+									</span>
+								</>
+							)}
+							{!filterByMonth && " — Todas las liquidaciones"}
 						</span>
-					)}
+						{totalPages > 1 && (
+							<span className="text-muted-foreground text-sm">
+								Página {page} de {totalPages}
+							</span>
+						)}
+					</div>
 				</div>
-			</div>
 
-			{/* Content */}
-			<div className="flex-1 overflow-y-auto p-6">
+				{/* Liquidaciones */}
 				{isLoading && (
 					<div className="flex items-center justify-center py-20">
 						<Loader2 className="h-8 w-8 animate-spin text-primary" />

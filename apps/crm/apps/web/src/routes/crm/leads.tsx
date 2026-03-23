@@ -3129,7 +3129,7 @@ function RouteComponent() {
 															</Badge>
 														)}
 														{opp.value && (
-															<span>Q{Number(opp.value).toLocaleString()}</span>
+															<span>Q{Number(opp.value).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
 														)}
 													</div>
 												</div>

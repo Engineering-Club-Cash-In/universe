@@ -6,7 +6,11 @@ import { iniciarTareasProgramadas } from "../schedule";
  
 
 const app = new Elysia()
-  .use(cors())
+  .use(cors({
+    origin: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  }))
   .use(routers.defaultRouter)
   .use(routers.inversionistasRouter)
   .use(routers.advisorRouter)
@@ -24,7 +28,8 @@ const app = new Elysia()
   .use(routers.recalculateFromJsonRouter)
   .use(routers.mirrorInvestorRouter)
   .use(routers.notificationsRouter)
-  .use(routers.reconcileEspejoRouter);
+  .use(routers.reconcileEspejoRouter)
+  .use(routers.investorDocumentsRouter);
 
 // 🚀 Iniciar tareas programadas ANTES de levantar el servidor
 iniciarTareasProgramadas();

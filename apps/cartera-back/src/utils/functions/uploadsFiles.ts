@@ -1,4 +1,5 @@
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { v4 as uuidv4 } from "uuid";
 
 export const s3 = new S3Client({
@@ -47,4 +48,49 @@ export async function uploadFileController({ request, set }: any) {
     set.status = 500;
     return { error: "Error uploading file" };
   }
+}
+
+const SIGNED_URL_EXPIRY = 3600; // 1 hora
+
+export async function uploadDocumentoInversionista(
+  file: Blob & { name?: string },
+  inversionistaId: number
+): Promise<string> {
+  let ext = "";
+  if ("name" in file && file.name) {
+    const parts = file.name.split(".");
+    if (parts.length > 1) ext = "." + parts.pop();
+  }
+  const filename = `${uuidv4()}${ext}`;
+  const key = `documentos-inversionista/${inversionistaId}/${filename}`;
+
+  const buffer = Buffer.from(await file.arrayBuffer());
+
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: process.env.R2_BUCKET,
+      Key: key,
+      Body: buffer,
+      ContentType: file.type || "application/octet-stream",
+    })
+  );
+
+  return key;
+}
+
+export async function getSignedDocumentUrl(key: string): Promise<string> {
+  const command = new GetObjectCommand({
+    Bucket: process.env.R2_BUCKET,
+    Key: key,
+  });
+  return getSignedUrl(s3, command, { expiresIn: SIGNED_URL_EXPIRY });
+}
+
+export async function deleteDocumentoFromR2(key: string): Promise<void> {
+  await s3.send(
+    new DeleteObjectCommand({
+      Bucket: process.env.R2_BUCKET,
+      Key: key,
+    })
+  );
 }

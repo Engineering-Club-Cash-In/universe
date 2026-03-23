@@ -51,7 +51,7 @@ export const Menu = () => {
       id: "/documents",
       label: "Documentos",
       icon: <IconDocument />,
-      roles: ["CLIENT"], // Solo para clientes
+      roles: ["CLIENT", "INVESTOR"],
     },
   ];
 

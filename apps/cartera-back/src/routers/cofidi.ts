@@ -48,6 +48,12 @@ const EMISORES_CONFIG = {
 
 type EmisorKey = keyof typeof EMISORES_CONFIG;
 
+// 🔥 Mapa inverso: NIT emisor → config (para anulación automática)
+const EMISOR_POR_NIT: Record<string, { config: typeof CLUB_CASHIN_CONFIG; satConfig: typeof SAT_CONFIG }> = {};
+for (const [, value] of Object.entries(EMISORES_CONFIG)) {
+  EMISOR_POR_NIT[value.config.emisor.nit] = value as any;
+}
+
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
 
 function generarIdInternoRandom(): string {
@@ -1177,54 +1183,63 @@ if (facturasExistentes.length > 0) {
     console.log('📋 Tipo documento:', facturaCompleta.factura_tipo_documento);
 
     // ============================================
-    // 4️⃣ CONSTRUIR XML DE ANULACIÓN
+    // 6️⃣ ANULAR EN COFIDI/SAT (detectar emisor automáticamente)
     // ============================================
-    const xmlAnulacion = `<?xml version="1.0" encoding="UTF-8"?>
+    console.log('📡 Intentando anulación con cada emisor...');
+
+    const emisoresParaIntentar = Object.entries(EMISORES_CONFIG);
+    let resultado: any = null;
+    let emisorUsado = "";
+
+    for (const [emisorKey, emisorConf] of emisoresParaIntentar) {
+      const nitEmisor = emisorConf.config.emisor.nit;
+
+      // Reconstruir XML con el NIT del emisor correcto
+      const xmlAnulacionEmisor = `<?xml version="1.0" encoding="UTF-8"?>
 <dte:GTAnulacionDocumento xmlns:dte="http://www.sat.gob.gt/dte/fel/0.1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Version="0.1" xsi:schemaLocation="http://www.sat.gob.gt/dte/fel/0.1.0 GT_AnulacionDocumento-0.1.0.xsd">
   <dte:SAT>
     <dte:AnulacionDTE ID="DatosCertificados">
-      <dte:DatosGenerales 
-        ID="DatosAnulacion" 
-        NumeroDocumentoAAnular="${facturaCompleta.factura_uuid}" 
-        NITEmisor="${CLUB_CASHIN_CONFIG.emisor.nit}" 
-        IDReceptor="${facturaCompleta.usuario_nit || facturaCompleta.factura_receptor_nit || 'CF'}"
-        FechaEmisionDocumentoAnular="${fechaEmisionDocumento}" 
-        FechaHoraAnulacion="${fechaHoraAnulacion}" 
+      <dte:DatosGenerales
+        ID="DatosAnulacion"
+        NumeroDocumentoAAnular="${facturaCompleta.factura_uuid}"
+        NITEmisor="${nitEmisor}"
+        IDReceptor="${facturaCompleta.factura_receptor_nit || 'CF'}"
+        FechaEmisionDocumentoAnular="${fechaEmisionDocumento}"
+        FechaHoraAnulacion="${fechaHoraAnulacion}"
         MotivoAnulacion="${motivo}"/>
     </dte:AnulacionDTE>
   </dte:SAT>
 </dte:GTAnulacionDocumento>`;
 
-    console.log('📄 XML de anulación construido');
-    if (process.env.NODE_ENV === 'development') {
-      console.log('📝 XML completo:\n', xmlAnulacion);
+      const xmlBase64Emisor = Buffer.from(xmlAnulacionEmisor, 'utf-8').toString('base64');
+
+      const satClient = new SATClientService(
+        {
+          requestor: emisorConf.satConfig.requestor,
+          user: emisorConf.satConfig.user || emisorConf.satConfig.requestor,
+          userName: emisorConf.satConfig.userName,
+          entity: nitEmisor
+        },
+        emisorConf.satConfig.endpointUrl
+      );
+
+      console.log(`   🔄 Intentando con ${emisorKey} (NIT: ${nitEmisor})...`);
+
+      try {
+        resultado = await satClient.anularDocumento(uuid, xmlBase64Emisor);
+        if (resultado.anulado) {
+          emisorUsado = emisorKey;
+          console.log(`   ✅ Anulado exitosamente con ${emisorKey}`);
+          break;
+        }
+        console.log(`   ❌ ${emisorKey}: ${resultado.descripcion || 'No anulado'}`);
+      } catch (e) {
+        console.log(`   ❌ ${emisorKey}: Error - ${(e as Error).message}`);
+      }
     }
 
-    // ============================================
-    // 5️⃣ CONVERTIR A BASE64
-    // ============================================
-    const xmlBase64 = Buffer.from(xmlAnulacion, 'utf-8').toString('base64');
-    console.log('🔐 XML convertido a Base64');
-
-    // ============================================
-    // 6️⃣ ANULAR EN COFIDI/SAT
-    // ============================================
-    console.log('📡 Enviando solicitud de anulación a COFIDI...');
-    
-    const satClient = new SATClientService(
-      {
-        requestor: SAT_CONFIG.requestor,
-        user: SAT_CONFIG.user,
-        userName: SAT_CONFIG.userName,
-        entity: SAT_CONFIG.entity
-      },
-      SAT_CONFIG.endpointUrl
-    );
-
-    const resultado = await satClient.anularDocumento(uuid, xmlBase64);
-
     // 🔥 VALIDACIÓN: Error en COFIDI
-    if (!resultado.anulado) {
+    if (!resultado || !resultado.anulado) {
       console.error('❌ COFIDI rechazó la anulación');
       console.error('📋 Respuesta:', resultado);
       
@@ -2278,6 +2293,8 @@ if (facturasExistentes.length > 0) {
             fecha_emision: facturas_electronicas.fecha_emision,
             fecha_certificacion: facturas_electronicas.fecha_certificacion,
             status: facturas_electronicas.status,
+            emisor_nit: facturas_electronicas.emisor_nit,
+            emisor_nombre: facturas_electronicas.emisor_nombre,
             created_by: facturas_electronicas.created_by,
             created_at: facturas_electronicas.created_at,
           })
@@ -2904,13 +2921,15 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
           ]
         ).toString(),
         pdf_url: pdfUrl,
+        emisor_nit: emisorConfig.emisor.nit,
+        emisor_nombre: emisorConfig.emisor.nombreEmisor,
         receptor_nit: receptorXML["@_IDReceptor"],
         receptor_nombre: receptorXML["@_NombreReceptor"],
-        
+
         // 🔥 CONVERTIR A HORA DE GUATEMALA ANTES DE GUARDAR
         fecha_emision: new Date(datosGenerales["@_FechaHoraEmision"]),
         fecha_certificacion: convertirAGuatemala(certificacion["dte:FechaHoraCertificacion"]),
-        
+
         status: "ACTIVA",
         created_by: created_by || null,
       })

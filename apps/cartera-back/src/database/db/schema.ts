@@ -737,6 +737,10 @@
     pdf_url: varchar("pdf_url", { length: 500 }).notNull(),
     xml_url: varchar("xml_url", { length: 500 }),
     
+    // Emisor
+    emisor_nit: varchar("emisor_nit", { length: 30 }),
+    emisor_nombre: varchar("emisor_nombre", { length: 200 }),
+
     // Receptor
     receptor_nit: varchar("receptor_nit", { length: 30 }).notNull(),
     receptor_nombre: varchar("receptor_nombre", { length: 200 }).notNull(),

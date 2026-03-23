@@ -2350,19 +2350,19 @@ if (facturasExistentes.length > 0) {
 
           const titleRow = sheet.addRow(["REPORTE DE FACTURAS ELECTRÓNICAS"]);
           titleRow.font = { bold: true, size: 14, color: { argb: "FF1A3C7A" } };
-          sheet.mergeCells(titleRow.number, 1, titleRow.number, 13);
+          sheet.mergeCells(titleRow.number, 1, titleRow.number, 15);
           titleRow.alignment = { horizontal: "center" };
 
           const subtitleRow = sheet.addRow([`${rangoFechas} | ${facturas.length} facturas | NIT: ${nit || "Todos"}`]);
           subtitleRow.font = { size: 10, color: { argb: "FF666666" } };
-          sheet.mergeCells(subtitleRow.number, 1, subtitleRow.number, 13);
+          sheet.mergeCells(subtitleRow.number, 1, subtitleRow.number, 15);
           subtitleRow.alignment = { horizontal: "center" };
 
           sheet.addRow([]);
 
           // Headers
           const headers = [
-            "No.", "Serie", "Número", "UUID", "Tipo Doc.",
+            "No.", "NIT Emisor", "Emisor", "Serie", "Número", "UUID", "Tipo Doc.",
             "NIT Receptor", "Nombre Receptor", "Subtotal",
             "IVA (12%)", "Total", "Tipo", "Fecha Emisión", "Fecha Certificación",
           ];
@@ -2390,6 +2390,8 @@ if (facturasExistentes.length > 0) {
 
             const row = sheet.addRow([
               index + 1,
+              f.emisor_nit || "N/A",
+              f.emisor_nombre || "N/A",
               f.serie,
               f.numero,
               f.uuid,
@@ -2407,22 +2409,22 @@ if (facturasExistentes.length > 0) {
             if (index % 2 === 0) {
               row.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF5F7FA" } };
             }
-            row.getCell(8).numFmt = "Q#,##0.00";
-            row.getCell(9).numFmt = "Q#,##0.00";
             row.getCell(10).numFmt = "Q#,##0.00";
+            row.getCell(11).numFmt = "Q#,##0.00";
+            row.getCell(12).numFmt = "Q#,##0.00";
           });
 
           // Totales
           sheet.addRow([]);
           const totalsRow = sheet.addRow([
-            "", "", "", "", "", "", "TOTALES:",
+            "", "", "", "", "", "", "", "", "TOTALES:",
             totalMonto - totalIva, totalIva, totalMonto, "", "", "",
           ]);
           totalsRow.font = { bold: true, size: 11 };
-          totalsRow.getCell(7).alignment = { horizontal: "right" };
-          totalsRow.getCell(8).numFmt = "Q#,##0.00";
-          totalsRow.getCell(9).numFmt = "Q#,##0.00";
+          totalsRow.getCell(9).alignment = { horizontal: "right" };
           totalsRow.getCell(10).numFmt = "Q#,##0.00";
+          totalsRow.getCell(11).numFmt = "Q#,##0.00";
+          totalsRow.getCell(12).numFmt = "Q#,##0.00";
           totalsRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8EDF5" } };
 
           // Auto-width
@@ -2441,7 +2443,7 @@ if (facturasExistentes.length > 0) {
           const dataEnd = dataStart + facturas.length;
           for (let r = dataStart; r <= dataEnd; r++) {
             const row = sheet.getRow(r);
-            for (let c = 1; c <= 13; c++) {
+            for (let c = 1; c <= 15; c++) {
               row.getCell(c).border = {
                 top: { style: "thin", color: { argb: "FFD0D5DD" } },
                 bottom: { style: "thin", color: { argb: "FFD0D5DD" } },

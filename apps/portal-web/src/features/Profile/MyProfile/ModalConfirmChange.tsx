@@ -48,7 +48,7 @@ export const ModalConfirmChange = ({
   const updateMutation = useMutation({
     mutationFn: async ({ field, value }: { field: FieldType; value: string }) => {
       const email = user?.email;
-      const dpi = user?.dpi;
+      const dpi = user?.dpi ?? profileData?.dpi;
 
       // Si es campo de inversionista, actualizar en Cartera
       if (isInvestorField || user?.role === "INVESTOR") {

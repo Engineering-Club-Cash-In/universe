@@ -111,7 +111,6 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
   const [archivosParaSubir, setArchivosParaSubir] = useState<File[]>([]);
   const [abonosCuota, setAbonosCuota] = useState<AbonosCuotaResponse | null>(null);
   const { user } = useAuth(); //
-  console.log(user)
 
   // Fetch abonos cuando cambia la cuota seleccionada
   useEffect(() => {

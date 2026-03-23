@@ -438,6 +438,11 @@ export const cambiarFechaInicio = async ({
 
     const { numero_credito_sifco, nueva_fecha_inicio, changed_by, razon } = parseResult.data;
 
+    // Cuota mínima a partir de la cual, si está pagada, se bloquea el cambio de fecha.
+    // Ej: 2 = permite cambio si solo cuotas 0 y/o 1 están pagadas.
+    //     1 = solo permite si únicamente cuota 0 está pagada.
+    const CUOTA_MINIMA_BLOQUEO = 2;
+
     console.log(`\n${"=".repeat(60)}`);
     console.log(`CAMBIAR FECHA DE INICIO: ${numero_credito_sifco}`);
     console.log(`Nueva fecha inicio: ${nueva_fecha_inicio}`);
@@ -462,6 +467,7 @@ export const cambiarFechaInicio = async ({
         cuota_id: cuotas_credito.cuota_id,
         fecha_vencimiento: cuotas_credito.fecha_vencimiento,
         numero_cuota: cuotas_credito.numero_cuota,
+        pagado: cuotas_credito.pagado,
       })
       .from(cuotas_credito)
       .where(eq(cuotas_credito.credito_id, creditoDb.credito_id))
@@ -470,6 +476,18 @@ export const cambiarFechaInicio = async ({
     if (todasLasCuotas.length === 0) {
       set.status = 400;
       return { success: false, message: "El crédito no tiene cuotas" };
+    }
+
+    // 2.5 Validar que no haya cuotas >= CUOTA_MINIMA_BLOQUEO pagadas
+    const cuotaPagadaMayor = todasLasCuotas.find(
+      (c) => c.numero_cuota >= CUOTA_MINIMA_BLOQUEO && c.pagado
+    );
+    if (cuotaPagadaMayor) {
+      set.status = 400;
+      return {
+        success: false,
+        message: `No se puede cambiar la fecha de inicio porque la cuota ${cuotaPagadaMayor.numero_cuota} ya está pagada. Solo se permite el cambio si únicamente las cuotas menores a ${CUOTA_MINIMA_BLOQUEO} están pagadas.`,
+      };
     }
 
     // 3. Guardar historial del cambio (fecha anterior de cuota 1)

@@ -66,14 +66,6 @@ carteraRoutes.post("/investor", async (c) => {
   try {
     const body = await c.req.json<CreateInvestorPayload>();
 
-    if (!body.dpi) {
-      throw new HTTPException(400, { message: "El campo dpi es requerido" });
-    }
-
-    if (!body.tipo_reinversion) {
-      throw new HTTPException(400, { message: "El campo tipo_reinversion es requerido" });
-    }
-
     const result = await createInvestor(body);
 
     return c.json({

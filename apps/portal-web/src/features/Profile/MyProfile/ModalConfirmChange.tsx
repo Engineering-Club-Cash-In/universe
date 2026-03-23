@@ -48,7 +48,7 @@ export const ModalConfirmChange = ({
   const updateMutation = useMutation({
     mutationFn: async ({ field, value }: { field: FieldType; value: string }) => {
       const email = user?.email;
-      const dpi = user?.dpi;
+      const dpi = user?.dpi ?? profileData?.dpi;
 
       // Si es campo de inversionista, actualizar en Cartera
       if (isInvestorField || user?.role === "INVESTOR") {
@@ -64,7 +64,7 @@ export const ModalConfirmChange = ({
         if (field === 'tipo_cuenta') payload.tipo_cuenta = value;
         if (field === 'numero_cuenta') payload.numero_cuenta = value;
 
-        return createInvestor({...profileData, ...payload });
+        return createInvestor({ ...payload });
       }
 
       // Si es campo de cliente, actualizar en CRM

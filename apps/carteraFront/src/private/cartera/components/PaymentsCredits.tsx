@@ -36,6 +36,7 @@ import {
 import { usePagoForm } from "../hooks/registerPayment";
 import { Button } from "@/components/ui/button";
 import { useFalsePayment } from "../hooks/falsePayments";
+import { useReciboPago } from "../hooks/useReciboPago";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -216,6 +217,7 @@ export function PaymentsCredits() {
     {}
   );
   const falsePayment = useFalsePayment();
+  const reciboPago = useReciboPago();
   const { user } = useAuth(); 
   const { liquidandoId, handleLiquidar, handleReverse, reversePago, handleRevertToPending, revertPaymentToPending, handleRevalidatePayment, revalidatePayment, handleProcessInvestors, processInvestors, recalcularPagos, handleRecalcularPagos } =
     usePagoForm();
@@ -530,8 +532,22 @@ const handleDownloadExcel = async () => {
                         {recalcularPagos.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : <RefreshCw className="w-4 h-4" />} Recalcular Pagos
                       </button>
                     </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-emerald-50 text-emerald-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                        onClick={(e) => { e.stopPropagation(); reciboPago.mutate(item.pago.pago_id); }}
+                        disabled={reciboPago.isPending}>
+                        {reciboPago.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : <FileText className="w-4 h-4" />} Recibo de Pago
+                      </button>
+                    </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
+              ) : user?.role === "ASESOR" ? (
+                <button
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  onClick={(e) => { e.stopPropagation(); reciboPago.mutate(item.pago.pago_id); }}
+                  disabled={reciboPago.isPending}>
+                  {reciboPago.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : <FileText className="w-4 h-4" />} Recibo
+                </button>
               ) : (
                 <span className="text-gray-400 font-semibold italic text-xs">Sin permisos</span>
               )}

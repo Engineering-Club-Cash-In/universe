@@ -12,7 +12,7 @@ import { z } from "zod";
 import { promises as fs } from "fs";
 import { mapPagosPorCreditos, mapPagosDesdeJson } from "../migration/migration";
 import { authMiddleware } from "./midleware";
-import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagosToExcel } from "../controllers/reports";
+import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagosToExcel, generateReciboPagoPDF } from "../controllers/reports";
 import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment, aplicarMontoAPago } from "../controllers/registerPayment";
 import { eq } from "drizzle-orm";
 import { db } from "../database";
@@ -83,7 +83,29 @@ export const paymentRouter = new Elysia()
     return { message: "Error consultando pagos", error: String(error) };
   }
 })
- 
+
+  .get("/recibo-pago/:pagoId", async ({ params, set }) => {
+    try {
+      const pagoId = Number(params.pagoId);
+      if (!pagoId || isNaN(pagoId)) {
+        set.status = 400;
+        return { message: "El parámetro 'pagoId' debe ser un número válido" };
+      }
+      const result = await generateReciboPagoPDF(pagoId);
+      set.status = 200;
+      return result;
+    } catch (error: any) {
+      console.error("❌ Error en /recibo-pago:", error);
+      set.status = error.message?.includes("No se encontró") ? 404 : 500;
+      return { message: error.message || "Error generando recibo de pago" };
+    }
+  }, {
+    detail: {
+      summary: "Genera recibo de pago en PDF",
+      description: "Recibe un pago_id, genera un PDF con el recibo de pago estilo Club Cash-In y lo sube a R2. Devuelve el link del PDF.",
+      tags: ["Pagos", "Reportes", "PDF"],
+    },
+  })
 
   .get("/payments", async ({ query, set }) => {
     const { mes, anio, page, perPage, numero_credito_sifco } = query;

@@ -1,8 +1,11 @@
 import ExcelJS from "exceljs";
+import puppeteer from "puppeteer";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getCreditosWithUserByMesAnio } from "./credits";
 import { getAllPagosWithCreditAndInversionistas, getPagosConInversionistas } from "./payments";
 import { fetchImageBase64 } from "../utils/functions/internReportCancelations";
+import { db } from "../database";
+import { sql } from "drizzle-orm";
 
 const LOGO_URL = process.env.LOGO_URL || "https://pub-8081c8d6e5e743f9adfc9e0db92e5a88.r2.dev/reports/logo-cashin.png";
 
@@ -196,85 +199,198 @@ export async function exportPagosToExcel(credito_sifco: string) {
     throw new Error(`No hay pagos para el crédito ${credito_sifco}`);
   }
 
-  console.log(`📊 Generando Excel con ${pagosData.length} pagos...`);
+  // Filtrar solo pagos pagados
+  const pagosFiltrados = pagosData.filter(
+    ({ pago }) => pago.pagado === true
+  );
+
+  if (!pagosFiltrados.length) {
+    throw new Error(`No hay pagos pagados para el crédito ${credito_sifco}`);
+  }
+
+  console.log(`📊 Generando Excel con ${pagosFiltrados.length} pagos pagados...`);
 
   // 2️⃣ Crear workbook
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Pagos");
 
-  // 3️⃣ Definir columnas base de "pago"
-  const columns: any[] = [
-    { header: "Pago ID", key: "pago_id", width: 12 },
-    { header: "Número Crédito", key: "numero_credito_sifco", width: 20 },
-    { header: "Número Cuota", key: "numero_cuota", width: 15 },
-    { header: "Cuota", key: "cuota", width: 15 },
-    { header: "Abono Capital", key: "abono_capital", width: 15 },
-    { header: "Abono Interés", key: "abono_interes", width: 15 },
-    { header: "Abono IVA 12%", key: "abono_iva_12", width: 15 },
-    { header: "Seguro", key: "abono_seguro", width: 15 },
-    { header: "GPS", key: "abono_gps", width: 15 },
-    { header: "Mora", key: "mora", width: 15 },
-    { header: "Capital Restante", key: "capital_restante", width: 18 },
-    { header: "Interés Restante", key: "interes_restante", width: 18 },
-    { header: "IVA Restante", key: "iva_12_restante", width: 18 },
-    { header: "Total Restante", key: "total_restante", width: 18 },
-    { header: "Monto Aplicado", key: "monto_aplicado", width: 15 },
+  // Info del crédito (del primer pago)
+  const primerPago = pagosFiltrados[0].pago;
+  const nombreDeudor = primerPago.usuario_nombre ?? "";
+  const numCredito = primerPago.numero_credito_sifco ?? credito_sifco;
+
+  // 3️⃣ Definir columnas (sin inversionistas)
+  const columns = [
+    { header: "No.", key: "no", width: 6 },
+    { header: "Pago ID", key: "pago_id", width: 10 },
+    { header: "# Cuota", key: "numero_cuota", width: 10 },
+    { header: "Cuota", key: "cuota", width: 14 },
+    { header: "Capital", key: "abono_capital", width: 14 },
+    { header: "Interés", key: "abono_interes", width: 14 },
+    { header: "IVA 12%", key: "abono_iva_12", width: 14 },
+    { header: "Seguro", key: "abono_seguro", width: 12 },
+    { header: "GPS", key: "abono_gps", width: 12 },
+    { header: "Mora", key: "mora", width: 12 },
+    { header: "Monto Aplicado", key: "monto_aplicado", width: 16 },
+    { header: "Capital Restante", key: "capital_restante", width: 16 },
+    { header: "Total Restante", key: "total_restante", width: 16 },
     { header: "Fecha Pago", key: "fecha_pago", width: 20 },
-    { header: "Observaciones", key: "observaciones", width: 40 },
-    { header: "Origen Pago", key: "origen_pago", width: 18 },
-    { header: "Boletas", key: "boletas", width: 50 },
+    { header: "Origen Pago", key: "origen_pago", width: 15 },
+    { header: "Observaciones", key: "observaciones", width: 35 },
+    { header: "Boletas", key: "boletas", width: 45 },
   ];
 
-  // 4️⃣ Buscar el máximo de inversionistas en cualquier pago
-  const maxInversionistas = Math.max(
-    ...pagosData.map((pd) => pd.pagosInversionistas.length)
-  );
+  const totalCols = columns.length;
+  sheet.columns = columns.map((c) => ({ key: c.key, width: c.width }));
 
-  for (let i = 1; i <= maxInversionistas; i++) {
-    columns.push({ header: `Inv${i}_Nombre`, key: `inv${i}_nombre`, width: 25 });
-    columns.push({ header: `Inv${i}_EmiteFactura`, key: `inv${i}_factura`, width: 15 });
-    columns.push({ header: `Inv${i}_Monto`, key: `inv${i}_monto`, width: 15 });
+  // 4️⃣ Logo
+  const logo = await fetchImageBase64(LOGO_URL);
+  if (logo) {
+    const imgId = workbook.addImage({ base64: logo.data, extension: logo.ext });
+    sheet.addImage(imgId, "A1:B3");
+    sheet.addRow([]);
+    sheet.addRow([]);
+    sheet.addRow([]);
   }
 
-  sheet.columns = columns;
+  // 5️⃣ Título del reporte
+  const titleRow = sheet.addRow([`Estado de Cuenta - ${numCredito}`]);
+  titleRow.font = { bold: true, size: 14, color: { argb: "1F4E79" } };
+  sheet.mergeCells(titleRow.number, 1, titleRow.number, totalCols);
+  titleRow.alignment = { horizontal: "center", vertical: "middle" };
+  titleRow.height = 30;
 
-  // 5️⃣ Agregar filas
-  pagosData.forEach(({ pago, pagosInversionistas }) => {
-    const row: any = {
-      pago_id: pago.pago_id,
-      numero_credito_sifco: pago.numero_credito_sifco,
-      numero_cuota: pago.numero_cuota,
-      cuota: pago.cuota,
-      abono_capital: pago.abono_capital,
-      abono_interes: pago.abono_interes,
-      abono_iva_12: pago.abono_iva_12,
-      abono_seguro: pago.abono_seguro,
-      abono_gps: pago.abono_gps,
-      mora: pago.mora,
-      capital_restante: pago.capital_restante,
-      interes_restante: pago.interes_restante,
-      iva_12_restante: pago.iva_12_restante,
-      total_restante: pago.total_restante,
-      monto_aplicado: pago.monto_aplicado,
-      fecha_pago: pago.fecha_pago,
-      observaciones: pago.observaciones,
-      origen_pago: pago.origen_pago ?? "",
-      boletas: (pago as any).boletas?.join(", ") || "",
+  // Sub-título con nombre del deudor
+  const subtitleRow = sheet.addRow([`Cliente: ${nombreDeudor}`]);
+  subtitleRow.font = { bold: true, size: 11, color: { argb: "4472C4" } };
+  sheet.mergeCells(subtitleRow.number, 1, subtitleRow.number, totalCols);
+  subtitleRow.alignment = { horizontal: "center", vertical: "middle" };
+
+  // Fecha de generación
+  const fechaRow = sheet.addRow([`Generado: ${new Date().toLocaleDateString("es-GT", { year: "numeric", month: "long", day: "numeric" })}`]);
+  fechaRow.font = { italic: true, size: 9, color: { argb: "808080" } };
+  sheet.mergeCells(fechaRow.number, 1, fechaRow.number, totalCols);
+  fechaRow.alignment = { horizontal: "center" };
+
+  // Fila vacía de separación
+  sheet.addRow([]);
+
+  // 6️⃣ Header de columnas
+  const headerLabels = columns.map((c) => c.header);
+  const headerRow = sheet.addRow(headerLabels);
+  headerRow.font = { bold: true, color: { argb: "FFFFFF" }, size: 10 };
+  headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "1F4E79" } };
+  headerRow.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+  headerRow.height = 30;
+  headerRow.eachCell((cell) => {
+    cell.border = {
+      top: { style: "thin", color: { argb: "0D3B66" } },
+      bottom: { style: "thin", color: { argb: "0D3B66" } },
+      left: { style: "thin", color: { argb: "0D3B66" } },
+      right: { style: "thin", color: { argb: "0D3B66" } },
     };
-
-    pagosInversionistas.forEach((inv, index) => {
-      const i = index + 1;
-      row[`inv${i}_nombre`] = inv.nombre;
-      row[`inv${i}_factura`] = inv.emite_factura ? "Sí" : "No";
-      row[`inv${i}_monto`] = inv.abono_capital || 0; // Using abono_capital instead of monto
-    });
-
-    sheet.addRow(row);
   });
 
-  // 6️⃣ Buffer + subir a S3
-  const buffer = await workbook.xlsx.writeBuffer();
-  const fileKey = `reportes/pagos_${credito_sifco}_${Date.now()}.xlsx`;
+  // 7️⃣ Estilos
+  const currencyFormat = '"Q"#,##0.00';
+  const currencyCols = new Set([
+    "cuota", "abono_capital", "abono_interes", "abono_iva_12",
+    "abono_seguro", "abono_gps", "mora", "monto_aplicado",
+    "capital_restante", "total_restante",
+  ]);
+  const thinBorder = {
+    top: { style: "thin" as const, color: { argb: "D9D9D9" } },
+    bottom: { style: "thin" as const, color: { argb: "D9D9D9" } },
+    left: { style: "thin" as const, color: { argb: "D9D9D9" } },
+    right: { style: "thin" as const, color: { argb: "D9D9D9" } },
+  };
+
+  // 8️⃣ Agregar filas de datos
+  let totalMontoAplicado = 0;
+  let totalCapital = 0;
+  let totalInteres = 0;
+
+  pagosFiltrados.forEach(({ pago }, index) => {
+    const montoAplicado = Number(pago.monto_aplicado || 0);
+    const capitalPago = Number(pago.abono_capital || 0);
+    const interesPago = Number(pago.abono_interes || 0);
+    totalMontoAplicado += montoAplicado;
+    totalCapital += capitalPago;
+    totalInteres += interesPago;
+
+    const rowData: any = {};
+    rowData.no = index + 1;
+    rowData.pago_id = pago.pago_id;
+    rowData.numero_cuota = pago.numero_cuota;
+    rowData.cuota = Number(pago.cuota || 0);
+    rowData.abono_capital = capitalPago;
+    rowData.abono_interes = interesPago;
+    rowData.abono_iva_12 = Number(pago.abono_iva_12 || 0);
+    rowData.abono_seguro = Number(pago.abono_seguro || 0);
+    rowData.abono_gps = Number(pago.abono_gps || 0);
+    rowData.mora = Number(pago.mora || 0);
+    rowData.monto_aplicado = montoAplicado;
+    rowData.capital_restante = Number(pago.capital_restante || 0);
+    rowData.total_restante = Number(pago.total_restante || 0);
+    rowData.fecha_pago = pago.fecha_pago;
+    rowData.origen_pago = pago.origen_pago ?? "";
+    rowData.observaciones = pago.observaciones ?? "";
+    rowData.boletas = (pago as any).boletas?.join(", ") || "";
+
+    const dataRow = sheet.addRow(rowData);
+    const isEven = index % 2 === 0;
+    dataRow.eachCell((cell, colNumber) => {
+      cell.border = thinBorder;
+      cell.alignment = { vertical: "middle", horizontal: "center" };
+      if (isEven) {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "F2F7FB" } };
+      }
+      const colKey = columns[colNumber - 1]?.key;
+      if (colKey && currencyCols.has(colKey)) {
+        cell.numFmt = currencyFormat;
+      }
+    });
+    dataRow.font = { size: 9 };
+  });
+
+  // 9️⃣ Fila de totales
+  sheet.addRow([]);
+  const totalsRow = sheet.addRow([]);
+  totalsRow.getCell(1).value = "TOTALES";
+  totalsRow.getCell(1).font = { bold: true, size: 10, color: { argb: "FFFFFF" } };
+  // Capital total
+  const capitalColIdx = columns.findIndex((c) => c.key === "abono_capital") + 1;
+  const interesColIdx = columns.findIndex((c) => c.key === "abono_interes") + 1;
+  const montoColIdx = columns.findIndex((c) => c.key === "monto_aplicado") + 1;
+
+  if (capitalColIdx) { totalsRow.getCell(capitalColIdx).value = totalCapital; totalsRow.getCell(capitalColIdx).numFmt = currencyFormat; }
+  if (interesColIdx) { totalsRow.getCell(interesColIdx).value = totalInteres; totalsRow.getCell(interesColIdx).numFmt = currencyFormat; }
+  if (montoColIdx) { totalsRow.getCell(montoColIdx).value = totalMontoAplicado; totalsRow.getCell(montoColIdx).numFmt = currencyFormat; }
+
+  totalsRow.font = { bold: true, size: 10, color: { argb: "FFFFFF" } };
+  totalsRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "1F4E79" } };
+  totalsRow.eachCell((cell) => {
+    cell.border = {
+      top: { style: "medium" as const, color: { argb: "0D3B66" } },
+      bottom: { style: "medium" as const, color: { argb: "0D3B66" } },
+      left: { style: "thin" as const, color: { argb: "0D3B66" } },
+      right: { style: "thin" as const, color: { argb: "0D3B66" } },
+    };
+    cell.alignment = { horizontal: "center", vertical: "middle" };
+  });
+
+  // 🔟 Resumen al final
+  sheet.addRow([]);
+  const resumenTitleRow = sheet.addRow(["Resumen"]);
+  resumenTitleRow.font = { bold: true, size: 11, color: { argb: "1F4E79" } };
+  sheet.addRow([`Total Pagos Validados: ${pagosFiltrados.length}`]).font = { size: 10 };
+  sheet.addRow([`Total Capital Abonado: Q${totalCapital.toLocaleString("es-GT", { minimumFractionDigits: 2 })}`]).font = { size: 10 };
+  sheet.addRow([`Total Interés Abonado: Q${totalInteres.toLocaleString("es-GT", { minimumFractionDigits: 2 })}`]).font = { size: 10 };
+  sheet.addRow([`Total Monto Aplicado: Q${totalMontoAplicado.toLocaleString("es-GT", { minimumFractionDigits: 2 })}`]).font = { size: 10 };
+
+  // 📤 Buffer + subir a S3
+  const arrayBuffer = await workbook.xlsx.writeBuffer();
+  const uint8Array = new Uint8Array(arrayBuffer);
   const s3 = new S3Client({
     endpoint: process.env.BUCKET_REPORTS_URL,
     region: "auto",
@@ -283,19 +399,17 @@ export async function exportPagosToExcel(credito_sifco: string) {
       secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
     },
   });
-  const filename = `reportes/pagos_${Date.now()}.xlsx`;
-  const arrayBuffer = await workbook.xlsx.writeBuffer();
-const uint8Array = new Uint8Array(arrayBuffer);
+  const filename = `reportes/pagos_${credito_sifco}_${Date.now()}.xlsx`;
   await s3.send(
     new PutObjectCommand({
       Bucket: process.env.BUCKET_REPORTS,
       Key: filename,
       Body: uint8Array,
-    ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  })
-);
+      ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    })
+  );
 
-  console.log("✅ Reporte de pagos subido a S3:", fileKey);
+  console.log("✅ Reporte de pagos subido a S3:", filename);
 
   const url = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
   return {
@@ -855,4 +969,311 @@ export async function exportPagosAdvisorExcel(
     total: result.data.length,
     excelUrl,
   };
+}
+
+/**
+ * Genera un recibo de pago en PDF y lo sube a R2
+ */
+export async function generateReciboPagoPDF(pagoId: number) {
+  // 1️⃣ Traer datos del pago con crédito, usuario y cuota
+  const result = await db.execute(sql`
+    SELECT
+      p.pago_id,
+      p.monto_boleta,
+      p.monto_aplicado,
+      p.cuota,
+      p.abono_capital,
+      p.abono_interes,
+      p.abono_iva_12,
+      p.abono_seguro,
+      p.abono_gps,
+      p.mora,
+      p.otros,
+      p.reserva,
+      p.membresias_pago,
+      p.pago_convenio,
+      p.observaciones,
+      TO_CHAR(p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD HH24:MI:SS') AS fecha_pago,
+      p.origen_pago,
+      c.numero_credito_sifco,
+      u.nombre AS usuario_nombre,
+      u.nit AS usuario_nit,
+      cq.numero_cuota
+    FROM cartera.pagos_credito p
+    INNER JOIN cartera.creditos c ON c.credito_id = p.credito_id
+    INNER JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
+    LEFT JOIN cartera.cuotas_credito cq ON cq.cuota_id = p.cuota_id
+    WHERE p.pago_id = ${pagoId}
+  `);
+
+  if (!result.rows.length) {
+    throw new Error(`No se encontró el pago con ID ${pagoId}`);
+  }
+
+  const pago = result.rows[0] as any;
+
+  const montoBoleta = Number(pago.monto_boleta || 0);
+  const montoAplicado = Number(pago.monto_aplicado || 0);
+  const abonoCapital = Number(pago.abono_capital || 0);
+  const abonoInteres = Number(pago.abono_interes || 0);
+  const abonoIva = Number(pago.abono_iva_12 || 0);
+  const abonoSeguro = Number(pago.abono_seguro || 0);
+  const abonoGps = Number(pago.abono_gps || 0);
+  const mora = Number(pago.mora || 0);
+  const otros = Number(pago.otros || 0);
+  const reserva = Number(pago.reserva || 0);
+  const membresias = Number(pago.membresias_pago || 0);
+  const pagoConvenio = Number(pago.pago_convenio || 0);
+
+  // Abono capital solo si los demás abonos son 0
+  const otrosAbonosSonCero = abonoInteres === 0 && abonoIva === 0 && abonoSeguro === 0 && abonoGps === 0;
+  const mostrarAbonoCapital = otrosAbonosSonCero && abonoCapital > 0;
+
+  const formatQ = (n: number) => `Q${n.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const fechaPago = pago.fecha_pago
+    ? new Date(pago.fecha_pago).toLocaleDateString("es-GT", { year: "numeric", month: "long", day: "numeric" })
+    : "N/A";
+
+  // Construir filas del detalle (solo lo esencial)
+  const desgloseRows: string[] = [];
+
+  desgloseRows.push(`<tr><td>Monto Boleta</td><td>${formatQ(montoBoleta)}</td></tr>`);
+  if (mostrarAbonoCapital) {
+    desgloseRows.push(`<tr><td>Abono a Capital</td><td>${formatQ(abonoCapital)}</td></tr>`);
+  }
+  if (mora > 0) desgloseRows.push(`<tr><td>Mora</td><td>${formatQ(mora)}</td></tr>`);
+  if (otros > 0) desgloseRows.push(`<tr><td>Otros</td><td>${formatQ(otros)}</td></tr>`);
+
+  // 2️⃣ Generar HTML del recibo
+  const html = `
+  <!DOCTYPE html>
+  <html>
+  <head>
+    <meta charset="UTF-8">
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: 'Segoe UI', Arial, sans-serif; background: #f5f5f5; padding: 40px; }
+      .recibo {
+        max-width: 500px;
+        margin: 0 auto;
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+        overflow: hidden;
+      }
+      .header {
+        background: linear-gradient(135deg, #1F4E79, #2E75B6);
+        color: #fff;
+        padding: 30px 30px 25px;
+        text-align: center;
+      }
+      .header img {
+        width: 120px;
+        margin-bottom: 12px;
+      }
+      .header h1 {
+        font-size: 20px;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .header p {
+        font-size: 12px;
+        opacity: 0.85;
+      }
+      .badge {
+        display: inline-block;
+        background: rgba(255,255,255,0.2);
+        padding: 4px 14px;
+        border-radius: 20px;
+        font-size: 11px;
+        margin-top: 10px;
+        letter-spacing: 0.5px;
+      }
+      .body { padding: 25px 30px; }
+      .info-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-bottom: 20px;
+      }
+      .info-item {
+        background: #f8fafc;
+        border-radius: 8px;
+        padding: 10px 12px;
+      }
+      .info-item.full { grid-column: 1 / -1; }
+      .info-label {
+        font-size: 10px;
+        color: #8899a6;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 2px;
+      }
+      .info-value {
+        font-size: 13px;
+        color: #1a1a2e;
+        font-weight: 500;
+      }
+      .divider {
+        border: none;
+        border-top: 1px dashed #e0e0e0;
+        margin: 20px 0;
+      }
+      .desglose h3 {
+        font-size: 13px;
+        color: #1F4E79;
+        margin-bottom: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      .desglose table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .desglose td {
+        padding: 8px 0;
+        font-size: 13px;
+        color: #333;
+      }
+      .desglose td:last-child {
+        text-align: right;
+        font-weight: 500;
+      }
+      .desglose tr:not(:last-child) td {
+        border-bottom: 1px solid #f0f0f0;
+      }
+      .total-row {
+        background: linear-gradient(135deg, #1F4E79, #2E75B6);
+        border-radius: 8px;
+        padding: 14px 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 16px;
+      }
+      .total-row span:first-child {
+        color: rgba(255,255,255,0.85);
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      .total-row span:last-child {
+        color: #fff;
+        font-size: 20px;
+        font-weight: 700;
+      }
+      .footer {
+        background: #f8fafc;
+        padding: 16px 30px;
+        text-align: center;
+        border-top: 1px solid #eee;
+      }
+      .footer p {
+        font-size: 10px;
+        color: #999;
+      }
+      ${pago.observaciones ? `.obs { background: #fffbeb; border-left: 3px solid #f59e0b; padding: 10px 12px; border-radius: 0 6px 6px 0; margin-top: 16px; font-size: 12px; color: #92400e; }` : ""}
+    </style>
+  </head>
+  <body>
+    <div class="recibo">
+      <div class="header">
+        <img src="${LOGO_URL}" alt="Cash-In" />
+        <h1>Recibo de Pago</h1>
+        <p>Club Cash-In</p>
+        <div class="badge">No. ${pago.pago_id}</div>
+      </div>
+      <div class="body">
+        <div class="info-grid">
+          <div class="info-item full">
+            <div class="info-label">Cliente</div>
+            <div class="info-value">${pago.usuario_nombre}</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">NIT</div>
+            <div class="info-value">${pago.usuario_nit || "C/F"}</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Crédito</div>
+            <div class="info-value">${pago.numero_credito_sifco}</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Cuota No.</div>
+            <div class="info-value">${pago.numero_cuota ?? "N/A"}</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Fecha</div>
+            <div class="info-value">${fechaPago}</div>
+          </div>
+          ${pago.origen_pago ? `
+          <div class="info-item">
+            <div class="info-label">Origen</div>
+            <div class="info-value">${pago.origen_pago}</div>
+          </div>` : ""}
+        </div>
+
+        <hr class="divider" />
+
+        <div class="desglose">
+          <h3>Desglose del Pago</h3>
+          <table>
+            ${desgloseRows.join("")}
+          </table>
+        </div>
+
+        <div class="total-row">
+          <span>Monto Aplicado</span>
+          <span>${formatQ(montoAplicado)}</span>
+        </div>
+
+        ${pago.observaciones ? `<div class="obs">${pago.observaciones}</div>` : ""}
+      </div>
+      <div class="footer">
+        <p>Este documento es un comprobante de pago generado por el sistema de Club Cash-In.</p>
+        <p>Generado el ${new Date().toLocaleDateString("es-GT", { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
+      </div>
+    </div>
+  </body>
+  </html>`;
+
+  // 3️⃣ Generar PDF con Puppeteer
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  });
+  const page = await browser.newPage();
+  await page.setContent(html, { waitUntil: "networkidle0" });
+  const pdfData = await page.pdf({
+    format: "A4",
+    printBackground: true,
+    margin: { top: "10mm", bottom: "10mm", left: "10mm", right: "10mm" },
+  });
+  await browser.close();
+
+  // 4️⃣ Subir a R2
+  const fileBuffer = Buffer.from(pdfData);
+  const filename = `recibos/recibo_pago_${pagoId}_${Date.now()}.pdf`;
+  const s3 = new S3Client({
+    endpoint: process.env.BUCKET_REPORTS_URL,
+    region: "auto",
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
+    },
+  });
+
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: process.env.BUCKET_REPORTS as string,
+      Key: filename,
+      Body: fileBuffer,
+      ContentType: "application/pdf",
+    })
+  );
+
+  const url = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
+  console.log("✅ Recibo de pago PDF subido:", url);
+
+  return { pdfUrl: url };
 }

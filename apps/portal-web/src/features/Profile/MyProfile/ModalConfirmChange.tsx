@@ -64,7 +64,7 @@ export const ModalConfirmChange = ({
         if (field === 'tipo_cuenta') payload.tipo_cuenta = value;
         if (field === 'numero_cuenta') payload.numero_cuenta = value;
 
-        return createInvestor({...profileData, ...payload });
+        return createInvestor({ ...payload });
       }
 
       // Si es campo de cliente, actualizar en CRM

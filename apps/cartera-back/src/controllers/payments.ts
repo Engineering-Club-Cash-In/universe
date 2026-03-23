@@ -1308,9 +1308,9 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       );
     }
 
-    // ✅ Solo créditos activos
+    // ✅ Créditos activos y cancelados
     whereClauses.push(
-      `c."statusCredit" IN ('ACTIVO', 'MOROSO','PENDIENTE_CANCELACION','EN_CONVENIO')`
+      `c."statusCredit" IN ('ACTIVO', 'MOROSO','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO')`
     );
     const whereSQL = whereClauses.length
       ? `WHERE ${whereClauses.join(" AND ")}`

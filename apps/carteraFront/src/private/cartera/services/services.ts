@@ -2596,7 +2596,11 @@ export const getPagoCompleto = async (pagoId: number): Promise<PagoCompletoRespo
   const response = await api.get(`/api/dte/pago-completo/${pagoId}`);
   return response.data;
 };
- 
+
+export const generarReciboPago = async (pagoId: number): Promise<{ pdfUrl: string }> => {
+  const response = await api.get<{ pdfUrl: string }>(`/recibo-pago/${pagoId}`);
+  return response.data;
+};
 
 // 🔥 TIPOS
 export interface Boleta {

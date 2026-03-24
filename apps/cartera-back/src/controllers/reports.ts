@@ -208,109 +208,21 @@ export async function exportPagosToExcel(credito_sifco: string) {
     throw new Error(`No hay pagos pagados para el crédito ${credito_sifco}`);
   }
 
-  console.log(`📊 Generando Excel con ${pagosFiltrados.length} pagos pagados...`);
+  console.log(`📊 Generando PDF con ${pagosFiltrados.length} pagos pagados...`);
 
-  // 2️⃣ Crear workbook
-  const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet("Pagos");
-
-  // Info del crédito (del primer pago)
   const primerPago = pagosFiltrados[0].pago;
   const nombreDeudor = primerPago.usuario_nombre ?? "";
   const numCredito = primerPago.numero_credito_sifco ?? credito_sifco;
+  const fechaGen = new Date().toLocaleDateString("es-GT", { year: "numeric", month: "long", day: "numeric" });
 
-  // 3️⃣ Definir columnas (sin inversionistas)
-  const columns = [
-    { header: "No.", key: "no", width: 6 },
-    { header: "Pago ID", key: "pago_id", width: 10 },
-    { header: "# Cuota", key: "numero_cuota", width: 10 },
-    { header: "Cuota", key: "cuota", width: 14 },
-    { header: "Capital", key: "abono_capital", width: 14 },
-    { header: "Interés", key: "abono_interes", width: 14 },
-    { header: "IVA 12%", key: "abono_iva_12", width: 14 },
-    { header: "Seguro", key: "abono_seguro", width: 12 },
-    { header: "GPS", key: "abono_gps", width: 12 },
-    { header: "Mora", key: "mora", width: 12 },
-    { header: "Monto Aplicado", key: "monto_aplicado", width: 16 },
-    { header: "Capital Restante", key: "capital_restante", width: 16 },
-    { header: "Total Restante", key: "total_restante", width: 16 },
-    { header: "Fecha Pago", key: "fecha_pago", width: 20 },
-    { header: "Origen Pago", key: "origen_pago", width: 15 },
-    { header: "Observaciones", key: "observaciones", width: 35 },
-    { header: "Boletas", key: "boletas", width: 45 },
-  ];
+  const formatQ = (n: number) => `Q${n.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-  const totalCols = columns.length;
-  sheet.columns = columns.map((c) => ({ key: c.key, width: c.width }));
-
-  // 4️⃣ Logo
-  const logo = await fetchImageBase64(LOGO_URL);
-  if (logo) {
-    const imgId = workbook.addImage({ base64: logo.data, extension: logo.ext });
-    sheet.addImage(imgId, "A1:B3");
-    sheet.addRow([]);
-    sheet.addRow([]);
-    sheet.addRow([]);
-  }
-
-  // 5️⃣ Título del reporte
-  const titleRow = sheet.addRow([`Estado de Cuenta - ${numCredito}`]);
-  titleRow.font = { bold: true, size: 14, color: { argb: "1F4E79" } };
-  sheet.mergeCells(titleRow.number, 1, titleRow.number, totalCols);
-  titleRow.alignment = { horizontal: "center", vertical: "middle" };
-  titleRow.height = 30;
-
-  // Sub-título con nombre del deudor
-  const subtitleRow = sheet.addRow([`Cliente: ${nombreDeudor}`]);
-  subtitleRow.font = { bold: true, size: 11, color: { argb: "4472C4" } };
-  sheet.mergeCells(subtitleRow.number, 1, subtitleRow.number, totalCols);
-  subtitleRow.alignment = { horizontal: "center", vertical: "middle" };
-
-  // Fecha de generación
-  const fechaRow = sheet.addRow([`Generado: ${new Date().toLocaleDateString("es-GT", { year: "numeric", month: "long", day: "numeric" })}`]);
-  fechaRow.font = { italic: true, size: 9, color: { argb: "808080" } };
-  sheet.mergeCells(fechaRow.number, 1, fechaRow.number, totalCols);
-  fechaRow.alignment = { horizontal: "center" };
-
-  // Fila vacía de separación
-  sheet.addRow([]);
-
-  // 6️⃣ Header de columnas
-  const headerLabels = columns.map((c) => c.header);
-  const headerRow = sheet.addRow(headerLabels);
-  headerRow.font = { bold: true, color: { argb: "FFFFFF" }, size: 10 };
-  headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "1F4E79" } };
-  headerRow.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
-  headerRow.height = 30;
-  headerRow.eachCell((cell) => {
-    cell.border = {
-      top: { style: "thin", color: { argb: "0D3B66" } },
-      bottom: { style: "thin", color: { argb: "0D3B66" } },
-      left: { style: "thin", color: { argb: "0D3B66" } },
-      right: { style: "thin", color: { argb: "0D3B66" } },
-    };
-  });
-
-  // 7️⃣ Estilos
-  const currencyFormat = '"Q"#,##0.00';
-  const currencyCols = new Set([
-    "cuota", "abono_capital", "abono_interes", "abono_iva_12",
-    "abono_seguro", "abono_gps", "mora", "monto_aplicado",
-    "capital_restante", "total_restante",
-  ]);
-  const thinBorder = {
-    top: { style: "thin" as const, color: { argb: "D9D9D9" } },
-    bottom: { style: "thin" as const, color: { argb: "D9D9D9" } },
-    left: { style: "thin" as const, color: { argb: "D9D9D9" } },
-    right: { style: "thin" as const, color: { argb: "D9D9D9" } },
-  };
-
-  // 8️⃣ Agregar filas de datos
+  // Calcular totales
   let totalMontoAplicado = 0;
   let totalCapital = 0;
   let totalInteres = 0;
 
-  pagosFiltrados.forEach(({ pago }, index) => {
+  const tableRows = pagosFiltrados.map(({ pago }, index) => {
     const montoAplicado = Number(pago.monto_aplicado || 0);
     const capitalPago = Number(pago.abono_capital || 0);
     const interesPago = Number(pago.abono_interes || 0);
@@ -318,79 +230,206 @@ export async function exportPagosToExcel(credito_sifco: string) {
     totalCapital += capitalPago;
     totalInteres += interesPago;
 
-    const rowData: any = {};
-    rowData.no = index + 1;
-    rowData.pago_id = pago.pago_id;
-    rowData.numero_cuota = pago.numero_cuota;
-    rowData.cuota = Number(pago.cuota || 0);
-    rowData.abono_capital = capitalPago;
-    rowData.abono_interes = interesPago;
-    rowData.abono_iva_12 = Number(pago.abono_iva_12 || 0);
-    rowData.abono_seguro = Number(pago.abono_seguro || 0);
-    rowData.abono_gps = Number(pago.abono_gps || 0);
-    rowData.mora = Number(pago.mora || 0);
-    rowData.monto_aplicado = montoAplicado;
-    rowData.capital_restante = Number(pago.capital_restante || 0);
-    rowData.total_restante = Number(pago.total_restante || 0);
-    rowData.fecha_pago = pago.fecha_pago;
-    rowData.origen_pago = pago.origen_pago ?? "";
-    rowData.observaciones = pago.observaciones ?? "";
-    rowData.boletas = (pago as any).boletas?.join(", ") || "";
+    const fechaPago = pago.fecha_pago
+      ? new Date(pago.fecha_pago).toLocaleDateString("es-GT", { year: "numeric", month: "2-digit", day: "2-digit" })
+      : "";
 
-    const dataRow = sheet.addRow(rowData);
     const isEven = index % 2 === 0;
-    dataRow.eachCell((cell, colNumber) => {
-      cell.border = thinBorder;
-      cell.alignment = { vertical: "middle", horizontal: "center" };
-      if (isEven) {
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "F2F7FB" } };
+    return `<tr class="${isEven ? "even" : ""}">
+      <td>${index + 1}</td>
+      <td>${pago.pago_id}</td>
+      <td>${pago.numero_cuota ?? ""}</td>
+      <td class="money">${formatQ(Number(pago.cuota || 0))}</td>
+      <td class="money">${formatQ(capitalPago)}</td>
+      <td class="money">${formatQ(interesPago)}</td>
+      <td class="money">${formatQ(Number(pago.abono_iva_12 || 0))}</td>
+      <td class="money">${formatQ(Number(pago.abono_seguro || 0))}</td>
+      <td class="money">${formatQ(Number(pago.abono_gps || 0))}</td>
+      <td class="money">${formatQ(Number(pago.mora || 0))}</td>
+      <td class="money total">${formatQ(montoAplicado)}</td>
+      <td class="money">${formatQ(Number(pago.capital_restante || 0))}</td>
+      <td class="money">${formatQ(Number(pago.total_restante || 0))}</td>
+      <td>${fechaPago}</td>
+    </tr>`;
+  }).join("");
+
+  // 2️⃣ HTML del reporte
+  const html = `
+  <!DOCTYPE html>
+  <html>
+  <head>
+    <meta charset="UTF-8">
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: 'Segoe UI', Arial, sans-serif; padding: 20px 25px; color: #333; }
+      .header-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+        padding-bottom: 12px;
+        border-bottom: 3px solid #1F4E79;
       }
-      const colKey = columns[colNumber - 1]?.key;
-      if (colKey && currencyCols.has(colKey)) {
-        cell.numFmt = currencyFormat;
+      .header-bar img { height: 50px; }
+      .header-bar .title-block { text-align: right; }
+      .header-bar h1 { font-size: 18px; color: #1F4E79; margin: 0; }
+      .header-bar p { font-size: 10px; color: #888; margin: 0; }
+      .info-bar {
+        display: flex;
+        justify-content: space-between;
+        background: #f0f5fa;
+        border-radius: 6px;
+        padding: 8px 14px;
+        margin-bottom: 12px;
+        font-size: 11px;
       }
-    });
-    dataRow.font = { size: 9 };
+      .info-bar span { color: #555; }
+      .info-bar strong { color: #1F4E79; }
+      table { width: 100%; border-collapse: collapse; font-size: 8px; }
+      th {
+        background: #1F4E79;
+        color: #fff;
+        padding: 6px 4px;
+        text-align: center;
+        font-weight: 600;
+        font-size: 7.5px;
+        white-space: nowrap;
+        border: 1px solid #0D3B66;
+      }
+      td {
+        padding: 4px 3px;
+        text-align: center;
+        border-bottom: 1px solid #e8e8e8;
+        white-space: nowrap;
+      }
+      td.money { text-align: right; font-family: 'Consolas', monospace; font-size: 7.5px; }
+      td.total { font-weight: 600; color: #1F4E79; }
+      tr.even td { background: #f8fafc; }
+      tr:hover td { background: #eef3f9; }
+      .totals-row td {
+        background: #1F4E79 !important;
+        color: #fff;
+        font-weight: 700;
+        font-size: 8px;
+        padding: 6px 4px;
+        border: 1px solid #0D3B66;
+      }
+      .totals-row td.money { text-align: right; color: #fff; }
+      .summary {
+        margin-top: 14px;
+        display: flex;
+        gap: 12px;
+      }
+      .summary-card {
+        flex: 1;
+        background: #f0f5fa;
+        border-radius: 6px;
+        padding: 10px 14px;
+        text-align: center;
+        border-top: 3px solid #1F4E79;
+      }
+      .summary-card .label { font-size: 9px; color: #888; text-transform: uppercase; margin-bottom: 2px; }
+      .summary-card .value { font-size: 14px; font-weight: 700; color: #1F4E79; }
+      .footer {
+        margin-top: 16px;
+        text-align: center;
+        font-size: 8px;
+        color: #aaa;
+        border-top: 1px solid #eee;
+        padding-top: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header-bar">
+      <img src="${LOGO_URL}" alt="Cash-In" />
+      <div class="title-block">
+        <h1>Estado de Cuenta</h1>
+        <p>Club Cash-In</p>
+      </div>
+    </div>
+
+    <div class="info-bar">
+      <span><strong>Crédito:</strong> ${numCredito}</span>
+      <span><strong>Cliente:</strong> ${nombreDeudor}</span>
+      <span><strong>Generado:</strong> ${fechaGen}</span>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>No.</th>
+          <th>Pago ID</th>
+          <th># Cuota</th>
+          <th>Cuota</th>
+          <th>Capital</th>
+          <th>Interés</th>
+          <th>IVA 12%</th>
+          <th>Seguro</th>
+          <th>GPS</th>
+          <th>Mora</th>
+          <th>Monto Aplicado</th>
+          <th>Capital Rest.</th>
+          <th>Total Rest.</th>
+          <th>Fecha Pago</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${tableRows}
+        <tr class="totals-row">
+          <td colspan="4">TOTALES</td>
+          <td class="money">${formatQ(totalCapital)}</td>
+          <td class="money">${formatQ(totalInteres)}</td>
+          <td colspan="4"></td>
+          <td class="money">${formatQ(totalMontoAplicado)}</td>
+          <td colspan="3"></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="summary">
+      <div class="summary-card">
+        <div class="label">Total Pagos</div>
+        <div class="value">${pagosFiltrados.length}</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">Capital Abonado</div>
+        <div class="value">${formatQ(totalCapital)}</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">Interés Abonado</div>
+        <div class="value">${formatQ(totalInteres)}</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">Monto Aplicado</div>
+        <div class="value">${formatQ(totalMontoAplicado)}</div>
+      </div>
+    </div>
+
+    <div class="footer">
+      Este documento fue generado por el sistema de Club Cash-In &mdash; ${fechaGen}
+    </div>
+  </body>
+  </html>`;
+
+  // 3️⃣ Generar PDF con Puppeteer (landscape para que quepan las columnas)
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
-
-  // 9️⃣ Fila de totales
-  sheet.addRow([]);
-  const totalsRow = sheet.addRow([]);
-  totalsRow.getCell(1).value = "TOTALES";
-  totalsRow.getCell(1).font = { bold: true, size: 10, color: { argb: "FFFFFF" } };
-  // Capital total
-  const capitalColIdx = columns.findIndex((c) => c.key === "abono_capital") + 1;
-  const interesColIdx = columns.findIndex((c) => c.key === "abono_interes") + 1;
-  const montoColIdx = columns.findIndex((c) => c.key === "monto_aplicado") + 1;
-
-  if (capitalColIdx) { totalsRow.getCell(capitalColIdx).value = totalCapital; totalsRow.getCell(capitalColIdx).numFmt = currencyFormat; }
-  if (interesColIdx) { totalsRow.getCell(interesColIdx).value = totalInteres; totalsRow.getCell(interesColIdx).numFmt = currencyFormat; }
-  if (montoColIdx) { totalsRow.getCell(montoColIdx).value = totalMontoAplicado; totalsRow.getCell(montoColIdx).numFmt = currencyFormat; }
-
-  totalsRow.font = { bold: true, size: 10, color: { argb: "FFFFFF" } };
-  totalsRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "1F4E79" } };
-  totalsRow.eachCell((cell) => {
-    cell.border = {
-      top: { style: "medium" as const, color: { argb: "0D3B66" } },
-      bottom: { style: "medium" as const, color: { argb: "0D3B66" } },
-      left: { style: "thin" as const, color: { argb: "0D3B66" } },
-      right: { style: "thin" as const, color: { argb: "0D3B66" } },
-    };
-    cell.alignment = { horizontal: "center", vertical: "middle" };
+  const page = await browser.newPage();
+  await page.setContent(html, { waitUntil: "networkidle0" });
+  const pdfData = await page.pdf({
+    format: "A4",
+    landscape: true,
+    printBackground: true,
+    margin: { top: "10mm", bottom: "10mm", left: "8mm", right: "8mm" },
   });
+  await browser.close();
 
-  // 🔟 Resumen al final
-  sheet.addRow([]);
-  const resumenTitleRow = sheet.addRow(["Resumen"]);
-  resumenTitleRow.font = { bold: true, size: 11, color: { argb: "1F4E79" } };
-  sheet.addRow([`Total Pagos Validados: ${pagosFiltrados.length}`]).font = { size: 10 };
-  sheet.addRow([`Total Capital Abonado: Q${totalCapital.toLocaleString("es-GT", { minimumFractionDigits: 2 })}`]).font = { size: 10 };
-  sheet.addRow([`Total Interés Abonado: Q${totalInteres.toLocaleString("es-GT", { minimumFractionDigits: 2 })}`]).font = { size: 10 };
-  sheet.addRow([`Total Monto Aplicado: Q${totalMontoAplicado.toLocaleString("es-GT", { minimumFractionDigits: 2 })}`]).font = { size: 10 };
-
-  // 📤 Buffer + subir a S3
-  const arrayBuffer = await workbook.xlsx.writeBuffer();
-  const uint8Array = new Uint8Array(arrayBuffer);
+  // 4️⃣ Subir a R2
+  const fileBuffer = Buffer.from(pdfData);
+  const filename = `reportes/estado_cuenta_${credito_sifco}_${Date.now()}.pdf`;
   const s3 = new S3Client({
     endpoint: process.env.BUCKET_REPORTS_URL,
     region: "auto",
@@ -399,17 +438,17 @@ export async function exportPagosToExcel(credito_sifco: string) {
       secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
     },
   });
-  const filename = `reportes/pagos_${credito_sifco}_${Date.now()}.xlsx`;
+
   await s3.send(
     new PutObjectCommand({
       Bucket: process.env.BUCKET_REPORTS,
       Key: filename,
-      Body: uint8Array,
-      ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      Body: fileBuffer,
+      ContentType: "application/pdf",
     })
   );
 
-  console.log("✅ Reporte de pagos subido a S3:", filename);
+  console.log("✅ Estado de cuenta PDF subido:", filename);
 
   const url = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
   return {

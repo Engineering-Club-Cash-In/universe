@@ -464,7 +464,7 @@ function OpportunityDocumentsPage() {
 							<p className="font-medium text-muted-foreground text-sm">Valor</p>
 							<p className="mt-1 font-medium">
 								{opportunity.value
-									? `Q${Number(opportunity.value).toLocaleString()}`
+									? `Q${Number(opportunity.value).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 									: "Sin valor"}
 							</p>
 						</div>

@@ -2104,16 +2104,16 @@ function QuoterPage() {
 																{row.period}
 															</TableCell>
 															<TableCell className="text-right">
-																Q{row.initialBalance.toFixed(2)}
+																Q{row.initialBalance.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 															</TableCell>
 															<TableCell className="text-right">
-																Q{row.interestPlusVAT.toFixed(2)}
+																Q{row.interestPlusVAT.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 															</TableCell>
 															<TableCell className="text-right">
-																Q{row.principal.toFixed(2)}
+																Q{row.principal.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 															</TableCell>
 															<TableCell className="text-right">
-																Q{row.finalBalance.toFixed(2)}
+																Q{row.finalBalance.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 															</TableCell>
 														</TableRow>
 													))}
@@ -2422,10 +2422,10 @@ function QuotationDetailDialog({
 										.map((row: any) => (
 											<TableRow key={row.period}>
 												<TableCell>{row.period}</TableCell>
-												<TableCell>Q{row.initialBalance.toFixed(2)}</TableCell>
-												<TableCell>Q{row.interestPlusVAT.toFixed(2)}</TableCell>
-												<TableCell>Q{row.principal.toFixed(2)}</TableCell>
-												<TableCell>Q{row.finalBalance.toFixed(2)}</TableCell>
+												<TableCell>Q{row.initialBalance.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+												<TableCell>Q{row.interestPlusVAT.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+												<TableCell>Q{row.principal.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+												<TableCell>Q{row.finalBalance.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
 											</TableRow>
 										))}
 								</TableBody>

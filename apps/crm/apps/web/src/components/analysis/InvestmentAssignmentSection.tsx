@@ -558,6 +558,8 @@ export function InvestmentAssignmentSection({
 		return new Intl.NumberFormat("es-GT", {
 			style: "currency",
 			currency: "GTQ",
+			minimumFractionDigits: 2,
+			maximumFractionDigits: 2,
 		}).format(Number(value));
 	};
 

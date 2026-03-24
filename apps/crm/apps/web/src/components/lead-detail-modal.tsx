@@ -95,6 +95,18 @@ type LeadDetailModalProps = {
 	onEdit?: () => void;
 };
 
+
+function formatLeadFullName(lead: {
+	firstName?: string | null;
+	middleName?: string | null;
+	lastName?: string | null;
+	secondLastName?: string | null;
+}) {
+	return [lead.firstName, lead.middleName, lead.lastName, lead.secondLastName]
+		.filter((part): part is string => Boolean(part && part.trim()))
+		.join(" ");
+}
+
 // Helper function for source badge color
 function getSourceBadgeColor(source: string): string {
 	const colors: Record<string, string> = {

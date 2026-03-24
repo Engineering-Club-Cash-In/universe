@@ -167,13 +167,13 @@ function EmbudoRow({
 						<div className="flex items-center justify-end gap-2">
 							<span className="text-muted-foreground text-xs">Mora:</span>
 							<span className="font-medium">
-								Q{Number(estadoStats.montoTotal || 0).toLocaleString()}
+								Q{Number(estadoStats.montoTotal || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 							</span>
 						</div>
 						<div className="flex items-center justify-end gap-2">
 							<span className="text-muted-foreground text-xs">Capital:</span>
 							<span className="font-medium">
-								Q{Number(estadoStats.sumaCapital || 0).toLocaleString()}
+								Q{Number(estadoStats.sumaCapital || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 							</span>
 						</div>
 					</div>
@@ -234,15 +234,15 @@ function EmbudoRow({
 											{caso.numeroCredito || "-"}
 										</td>
 										<td className="py-2 text-right tabular-nums">
-											Q{Number(caso.montoFinanciado || 0).toLocaleString()}
+											Q{Number(caso.montoFinanciado || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 										</td>
 										<td className="py-2 text-right text-red-600 tabular-nums">
 											{Number(caso.montoEnMora || 0) > 0
-												? `Q${Number(caso.montoEnMora).toLocaleString()}`
+												? `Q${Number(caso.montoEnMora).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 												: "-"}
 										</td>
 										<td className="py-2 pr-3 text-right tabular-nums">
-											Q{Number(caso.cuotaMensual || 0).toLocaleString()}
+											Q{Number(caso.cuotaMensual || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 										</td>
 									</tr>
 								))}
@@ -638,7 +638,7 @@ function RouteComponent() {
 							Q
 							{stats
 								.reduce((sum, s) => sum + Number(s.montoTotal || 0), 0)
-								.toLocaleString()}
+								.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 						</div>
 						<p className="text-muted-foreground text-xs">
 							Suma de todos los montos en mora
@@ -658,7 +658,7 @@ function RouteComponent() {
 							Q
 							{stats
 								.reduce((sum, s) => sum + Number(s.sumaCapital || 0), 0)
-								.toLocaleString()}
+								.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 						</div>
 						<p className="text-muted-foreground text-xs">
 							Suma de todos los capitales

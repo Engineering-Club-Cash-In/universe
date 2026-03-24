@@ -939,3 +939,23 @@
   }, (table) => ({
     inversionistaIdx: index("idx_docs_inversionista").on(table.inversionista_id),
   }));
+
+  // ========================================
+  // ABONOS A CAPITAL
+  // ========================================
+  export const tipoAbonoEnum = customSchema.enum("tipo_abono", [
+    "CANCELACION",
+    "CAPITAL",
+  ]);
+
+  export const abonos_capital = customSchema.table("abonos_capital", {
+    abono_id: serial("abono_id").primaryKey(),
+    credito_id: integer("credito_id")
+      .notNull()
+      .references(() => creditos.credito_id),
+    monto: numeric("monto", { precision: 18, scale: 6 }).notNull(),
+    tipo: tipoAbonoEnum("tipo").notNull(),
+    liquidado: boolean("liquidado").notNull().default(false),
+    created_at: timestamp("created_at").defaultNow(),
+    updated_at: timestamp("updated_at").defaultNow(),
+  });

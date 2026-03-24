@@ -152,7 +152,7 @@ export const opportunitiesColumns: ColumnDef<Opportunity>[] = [
 			const numericValue = value ? Number.parseFloat(value) : null;
 			return numericValue !== null ? (
 				<span className="font-medium text-green-600 tabular-nums">
-					Q{numericValue.toLocaleString()}
+					Q{numericValue.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 				</span>
 			) : (
 				<span className="text-muted-foreground">—</span>

@@ -1077,6 +1077,18 @@ export const crmRouter = {
 				.groupBy(opportunityStageHistory.opportunityId)
 				.as("first_closed_stage_dates");
 
+			const latestStageHistory = db
+				.select({
+					opportunityId: opportunityStageHistory.opportunityId,
+					latestStageChangedAt:
+						sql<Date>`max(${opportunityStageHistory.changedAt})`.as(
+							"latest_stage_changed_at",
+						),
+				})
+				.from(opportunityStageHistory)
+				.groupBy(opportunityStageHistory.opportunityId)
+				.as("latest_stage_history");
+
 			const selectFields = {
 				id: opportunities.id,
 				title: opportunities.title,
@@ -1092,6 +1104,10 @@ export const crmRouter = {
 				closedAt:
 					sql<Date | null>`coalesce(${opportunities.actualCloseDate}, ${firstClosedStageDates.firstClosedStageAt})`.as(
 						"closed_at",
+					),
+				latestStageChangedAt:
+					sql<Date>`coalesce(${latestStageHistory.latestStageChangedAt}, ${opportunities.createdAt})`.as(
+						"latest_stage_changed_at",
 					),
 				updatedAt: opportunities.updatedAt,
 				numeroSifco: opportunities.numeroSifco,
@@ -1169,6 +1185,10 @@ export const crmRouter = {
 				.leftJoin(
 					firstClosedStageDates,
 					eq(opportunities.id, firstClosedStageDates.opportunityId),
+				)
+				.leftJoin(
+					latestStageHistory,
+					eq(opportunities.id, latestStageHistory.opportunityId),
 				)
 				.leftJoin(companies, eq(opportunities.companyId, companies.id))
 				.leftJoin(leads, eq(opportunities.leadId, leads.id))

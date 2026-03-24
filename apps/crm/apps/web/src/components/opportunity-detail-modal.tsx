@@ -47,16 +47,6 @@ import {
 import { getRoleLabel, PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
-function formatLeadFullName(lead: {
-	firstName?: string | null;
-	middleName?: string | null;
-	lastName?: string | null;
-	secondLastName?: string | null;
-}) {
-	return [lead.firstName, lead.middleName, lead.lastName, lead.secondLastName]
-		.filter((part): part is string => Boolean(part && part.trim()))
-		.join(" ");
-}
 
 // Type for the opportunity data
 export type OpportunityForModal = {

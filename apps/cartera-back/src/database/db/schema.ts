@@ -953,6 +953,9 @@
     credito_id: integer("credito_id")
       .notNull()
       .references(() => creditos.credito_id),
+    inversionista_id: integer("inversionista_id")
+      .notNull()
+      .references(() => inversionistas.inversionista_id),
     monto: numeric("monto", { precision: 18, scale: 6 }).notNull(),
     tipo: tipoAbonoEnum("tipo").notNull(),
     liquidado: boolean("liquidado").notNull().default(false),

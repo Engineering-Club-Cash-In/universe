@@ -1,4 +1,4 @@
-import { InvestorsLogo } from "@/features/footer/icons";
+import { InvestorsLogoTemp } from "../components/InvestorsLogoTemp";
 import { IconArrow } from "@/components";
 import { motion } from "framer-motion";
 import { useIsMobile } from "@/hooks";
@@ -15,9 +15,9 @@ export const HeaderInvestor = () => {
       <div className="flex gap-20">
         <div className="flex flex-col items-center lg:items-start gap-6 lg:gap-12 w-full lg:w-3/5">
           <div>
-            <InvestorsLogo
+            <InvestorsLogoTemp
               width={isMobile ? "200px" : "320px"}
-              height={isMobile ? "80px" : "128px"}
+              height={isMobile ? "60px" : "120px"}
             />
           </div>
           <p className="text-xl text-center lg:text-start lg:text-header-3 lg:pr-30">

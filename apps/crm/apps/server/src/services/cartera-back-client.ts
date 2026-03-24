@@ -592,6 +592,34 @@ export class CarteraBackClient {
 		};
 	}
 
+	async getInvestorRendimiento(
+		email: string,
+	): Promise<{
+		success: boolean;
+		data: {
+			inversionista_id: number;
+			nombre: string;
+			dpi: string;
+			capital_total_aportado: number;
+			cantidad_inversiones: number;
+			rendimiento_estimado: number;
+		};
+	}> {
+		const queryParams = new URLSearchParams({ email });
+		const response = await this.request<{
+			success: boolean;
+			data: {
+				inversionista_id: number;
+				nombre: string;
+				dpi: string;
+				capital_total_aportado: number;
+				cantidad_inversiones: number;
+				rendimiento_estimado: number;
+			};
+		}>(`/inversionistas/rendimiento?${queryParams}`, { method: "GET" }, true);
+		return response;
+	}
+
 	async getInvestorReport(
 		params: GetInvestorReportParams,
 	): Promise<InversionistaReporte> {
@@ -809,6 +837,98 @@ export class CarteraBackClient {
 			},
 		);
 		this.cache.invalidate("resumen-global-liquidaciones");
+		return response;
+	}
+
+	// ========================================================================
+	// INVESTOR DOCUMENTS (DOCUMENTOS DE INVERSIONISTA)
+	// ========================================================================
+
+	async createInvestorDocument(input: {
+		file: File | Blob;
+		inversionista_id: number;
+		nombre: string;
+		descripcion?: string;
+		visible?: boolean;
+		created_by?: string;
+	}): Promise<{
+		success: boolean;
+		message: string;
+		data?: Record<string, any>;
+	}> {
+		const url = `${this.config.baseUrl}/investor-documents`;
+		const formData = new FormData();
+		formData.append("file", input.file, input.nombre);
+		formData.append("inversionista_id", String(input.inversionista_id));
+		formData.append("nombre", input.nombre);
+		if (input.descripcion) formData.append("descripcion", input.descripcion);
+		if (input.visible !== undefined)
+			formData.append("visible", String(input.visible));
+		if (input.created_by) formData.append("created_by", input.created_by);
+
+		const response = await fetch(url, {
+			method: "POST",
+			body: formData,
+			...(this.config.apiKey && {
+				headers: { Authorization: `Bearer ${this.config.apiKey}` },
+			}),
+			signal: AbortSignal.timeout(this.config.timeout),
+		});
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new Error(`Error al crear documento: ${errorText}`);
+		}
+
+		this.cache.invalidate("investor-documents");
+		return response.json();
+	}
+
+	async getInvestorDocumentsAdmin(
+		inversionistaId: number,
+	): Promise<{ success: boolean; data: Record<string, any>[] }> {
+		const response = await this.request<{
+			success: boolean;
+			data: Record<string, any>[];
+		}>(`/investor-documents/admin/${inversionistaId}`, { method: "GET" }, true);
+		return response;
+	}
+
+	async toggleInvestorDocumentVisibility(
+		documentoId: number,
+		visible: boolean,
+	): Promise<{
+		success: boolean;
+		message: string;
+		data?: Record<string, any>;
+	}> {
+		const response = await this.request<{
+			success: boolean;
+			message: string;
+			data?: Record<string, any>;
+		}>(`/investor-documents/${documentoId}/visibility`, {
+			method: "PUT",
+			body: JSON.stringify({ visible }),
+		});
+		this.cache.invalidate("investor-documents");
+		return response;
+	}
+
+	async deleteInvestorDocument(
+		documentoId: number,
+	): Promise<{
+		success: boolean;
+		message: string;
+		data?: Record<string, any>;
+	}> {
+		const response = await this.request<{
+			success: boolean;
+			message: string;
+			data?: Record<string, any>;
+		}>(`/investor-documents/${documentoId}/delete`, {
+			method: "PATCH",
+		});
+		this.cache.invalidate("investor-documents");
 		return response;
 	}
 

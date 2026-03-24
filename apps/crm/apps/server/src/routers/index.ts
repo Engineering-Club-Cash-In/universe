@@ -12,6 +12,7 @@ import { cobrosRouter } from "./cobros";
 import { contractGenerationRouter } from "./contract-generation";
 import { crmRouter } from "./crm";
 import { insuranceRouter } from "./insurance";
+import { investorDocumentsRouter } from "./investor-documents";
 import { juridicoDashboardRouter } from "./juridico-dashboard";
 import { legalContractsRouter } from "./legal-contracts";
 import { locationsRouter } from "./locations";
@@ -288,6 +289,14 @@ export const appRouter = {
 	adminSetMiniAgentCredentials: adminMiniagentRouter.setMiniAgentCredentials,
 	adminDeleteMiniAgentCredentials:
 		adminMiniagentRouter.deleteMiniAgentCredentials,
+
+	// Investor Documents routes (Documentos de inversionista)
+	getInvestorRendimiento: investorDocumentsRouter.getInvestorRendimiento,
+	getInvestorDocumentsAdmin: investorDocumentsRouter.getInvestorDocumentsAdmin,
+	createInvestorDocument: investorDocumentsRouter.createInvestorDocument,
+	toggleInvestorDocumentVisibility:
+		investorDocumentsRouter.toggleInvestorDocumentVisibility,
+	deleteInvestorDocument: investorDocumentsRouter.deleteInvestorDocument,
 
 	// Accounting routes (Contabilidad)
 	getResumenGlobalInversionistas:

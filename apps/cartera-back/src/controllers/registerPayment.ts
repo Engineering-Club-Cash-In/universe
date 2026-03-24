@@ -763,6 +763,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
               eq(pagos_credito.credito_id, credito.credito_id)
             )
           )
+          .orderBy(asc(pagos_credito.pago_id))
           .limit(1);
         // Inicializar variables de abono
         // 2. OBTENER LOS RESTANTES DEL PAGO EXISTENTE (no de la cuota)

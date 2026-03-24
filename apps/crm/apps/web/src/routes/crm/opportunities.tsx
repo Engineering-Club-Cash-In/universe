@@ -1628,6 +1628,8 @@ function RouteComponent() {
 							<SelectItem value="email">Correo Electrónico</SelectItem>
 							<SelectItem value="social_media">Redes Sociales</SelectItem>
 							<SelectItem value="event">Evento</SelectItem>
+							<SelectItem value="agency">Agencia</SelectItem>
+							<SelectItem value="property">Predio</SelectItem>
 							<SelectItem value="other">Otro</SelectItem>
 						</SelectContent>
 					</Select>

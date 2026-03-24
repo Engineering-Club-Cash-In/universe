@@ -25,6 +25,7 @@ import {
   usuarios,
   liquidacion_locks,
   documentos_inversionista,
+  abonos_capital,
 } from "../database/db/schema";
 import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
 import { eq, and, sql, inArray, ilike, like, desc, count, SQL } from "drizzle-orm";
@@ -164,6 +165,9 @@ async function consultarPagosInversionista(
       estado_liquidacion: tabla.estado_liquidacion,
       fecha_vencimiento_cuota: cuotas_credito.fecha_vencimiento,
       fecha_pago_efectivo_cuota: cuotas_credito.fecha_liquidacion_inversionistas,
+      abono_capital_id: config.origen === "espejo"
+        ? (tabla as any).abono_capital_id
+        : sql<number | null>`null`,
       origen: sql<OrigenDatos>`${config.origen}`.as('origen'),
     })
     .from(tabla)
@@ -1336,6 +1340,27 @@ export async function resumeInvestor(
           }
 
           // 🧮 Detalle de pagos
+          // Pre-cargar abonos a capital referenciados por los pagos
+          const abonoIds = pagos
+            .map((p) => (p as any).abono_capital_id)
+            .filter((id): id is number => id != null);
+
+          let abonosMap = new Map<number, { monto: string; tipo: string }>();
+          if (abonoIds.length > 0) {
+            const abonos = await db
+              .select({
+                abono_id: abonos_capital.abono_id,
+                monto: abonos_capital.monto,
+                tipo: abonos_capital.tipo,
+              })
+              .from(abonos_capital)
+              .where(inArray(abonos_capital.abono_id, abonoIds));
+
+            for (const a of abonos) {
+              abonosMap.set(a.abono_id, { monto: a.monto, tipo: a.tipo });
+            }
+          }
+
           const pagos_detalle = pagos
             .sort((a, b) => {
               // 🔥 ORDENAR POR FECHA DE VENCIMIENTO DE LA CUOTA
@@ -1439,6 +1464,10 @@ const mes = fechaParaMes
                   )
                 ),
                 estado_liquidacion: pago.estado_liquidacion,
+                abono_capital_id: (pago as any).abono_capital_id ?? null,
+                abono_capital_detalle: (pago as any).abono_capital_id
+                  ? abonosMap.get((pago as any).abono_capital_id) ?? null
+                  : null,
               };
             });
 
@@ -2588,6 +2617,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
           pago_id: pagos_credito_inversionistas_espejo.pago_id,
           credito_id: pagos_credito_inversionistas_espejo.credito_id,
           abono_capital: pagos_credito_inversionistas_espejo.abono_capital,
+          abono_capital_id: pagos_credito_inversionistas_espejo.abono_capital_id,
         })
         .from(pagos_credito_inversionistas_espejo)
         .where(
@@ -2705,6 +2735,22 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
         }
 
         console.log(`  ✅ ${updateResult.rowCount ?? 0} pagos espejo actualizados`);
+
+        // Marcar abonos a capital como liquidados
+        const abonoIdsALiquidar = [
+          ...new Set(
+            pagosNoLiquidados
+              .map((p) => p.abono_capital_id)
+              .filter((id): id is number => id != null)
+          ),
+        ];
+        if (abonoIdsALiquidar.length > 0) {
+          await tx
+            .update(abonos_capital)
+            .set({ liquidado: true, updated_at: new Date() })
+            .where(inArray(abonos_capital.abono_id, abonoIdsALiquidar));
+          console.log(`  ✅ ${abonoIdsALiquidar.length} abono(s) a capital marcados como liquidados`);
+        }
 
         // Marcar cuotas como liquidado_inversionistas
         const allPagoIds = [...new Set(pagosNoLiquidados.map((p) => p.pago_id))];

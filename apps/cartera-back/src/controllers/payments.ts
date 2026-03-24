@@ -10,6 +10,7 @@ import {
   pagos_credito_inversionistas_espejo,
   boletas,
   cuotas_credito,
+  abonos_capital,
 } from "../database/db/schema";
 import { desc, gte } from "drizzle-orm";
 import Big from "big.js";
@@ -590,6 +591,31 @@ export async function insertPagosCreditoInversionistas(
       `      porcentaje_participacion_inversionista: ${inv.porcentaje_participacion_inversionista}`
     );
 
+    // ── Buscar abonos a capital NO liquidados para este crédito/inversionista ──
+    const abonosNoLiquidados = await db
+      .select()
+      .from(abonos_capital)
+      .where(
+        and(
+          eq(abonos_capital.credito_id, credito_id),
+          eq(abonos_capital.inversionista_id, inv.inversionista_id),
+          eq(abonos_capital.liquidado, false)
+        )
+      );
+
+    let abonoCapitalId: number | null = null;
+    if (abonosNoLiquidados.length > 0) {
+      let montoAbono = new Big(0);
+      for (const abono of abonosNoLiquidados) {
+        montoAbono = montoAbono.plus(abono.monto);
+      }
+      abono_capital = abono_capital.plus(montoAbono);
+      abonoCapitalId = abonosNoLiquidados[0].abono_id;
+
+      console.log(`   💰 Abono a capital encontrado (id: ${abonoCapitalId}): +${montoAbono.toFixed(6)}`);
+      console.log(`      abono_capital con abono sumado: ${abono_capital.toString()}`);
+    }
+
     const resultado = {
       pago_id,
       inversionista_id: inv.inversionista_id,
@@ -602,6 +628,7 @@ export async function insertPagosCreditoInversionistas(
         : inv.porcentaje_participacion_inversionista,
       cuota: currentPago?.cuota ?? "0",
       estado_liquidacion: "NO_LIQUIDADO" as const,
+      abono_capital_id: abonoCapitalId,
     };
 
     console.log(`   ✅ Resultado final para ${inv.nombre}:`, {
@@ -620,26 +647,10 @@ export async function insertPagosCreditoInversionistas(
 
   // 4. Insertar todos los registros (ESPEJO)
   const resolvedInserts = await Promise.all(inserts);
-await db
-  .insert(pagos_credito_inversionistas_espejo)
-  .values(resolvedInserts)
-  .onConflictDoUpdate({
-    target: [
-      pagos_credito_inversionistas_espejo.pago_id,
-      pagos_credito_inversionistas_espejo.inversionista_id,
-    ],
-    set: {
-      abono_capital: sql`EXCLUDED.abono_capital`,
-      abono_interes: sql`EXCLUDED.abono_interes`,
-      abono_iva_12: sql`EXCLUDED.abono_iva_12`,
-      porcentaje_participacion: sql`EXCLUDED.porcentaje_participacion`,
-      cuota: sql`EXCLUDED.cuota`,
-      fecha_pago: sql`EXCLUDED.fecha_pago`,
-      estado_liquidacion: sql`EXCLUDED.estado_liquidacion`,
-      credito_id: sql`EXCLUDED.credito_id`,
-      updated_at: sql`now()`,
-    },
-  });
+
+  await db
+    .insert(pagos_credito_inversionistas_espejo)
+    .values(resolvedInserts);
 
   return resolvedInserts;
 }
@@ -2092,7 +2103,7 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number) {
             credito.creditoId,
             false,  // excludeCube
             false,  // cuotaPagada
-            false,   // updateCredito ← omite el UPDATE a creditos_inversionistas_espejo
+            false,  // updateCredito ← omite el UPDATE a creditos_inversionistas_espejo
             inversionistaId
           );
 

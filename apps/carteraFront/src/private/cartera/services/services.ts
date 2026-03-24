@@ -548,8 +548,11 @@ export interface PagoData {
     paymentFalse:boolean
     boletas:string[]
     monto_aplicado: string | null;
-    // Agrega más campos si los necesitas
-    // Puedes agregar campos extra si necesitas
+    abono_capital_id?: number | null;
+    abono_capital_detalle?: {
+      monto: string;
+      tipo: string;
+    } | null;
   };
   inversionistasData: {
     id: number;
@@ -581,6 +584,11 @@ export interface PagoData {
     fecha_pago: string;
     estado_liquidacion: "NO_LIQUIDADO" | "POR_LIQUIDAR" | "LIQUIDADO";
     cuota: string;
+    abono_capital_id?: number | null;
+    abono_capital_detalle?: {
+      monto: string;
+      tipo: string;
+    } | null;
   }[];
 }
 export const getPagosByCredito = async (
@@ -745,6 +753,11 @@ export interface PagoCredito {
   fecha_pago: string;
    abonoGeneralInteres?:number
      tasaInteresInvesor?:number
+  abono_capital_id?: number | null;
+  abono_capital_detalle?: {
+    monto: string;
+    tipo: string;
+  } | null;
 }
 
 // Detalle de cada crédito en el que participa un inversionista

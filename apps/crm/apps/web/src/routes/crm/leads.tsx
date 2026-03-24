@@ -86,6 +86,17 @@ import {
 import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
+function formatLeadFullName(lead: {
+	firstName?: string | null;
+	middleName?: string | null;
+	lastName?: string | null;
+	secondLastName?: string | null;
+}) {
+	return [lead.firstName, lead.middleName, lead.lastName, lead.secondLastName]
+		.filter((part): part is string => Boolean(part && part.trim()))
+		.join(" ");
+}
+
 export const Route = createFileRoute("/crm/leads")({
 	component: RouteComponent,
 	validateSearch: z.object({
@@ -790,6 +801,10 @@ function RouteComponent() {
 				return "bg-pink-100 text-pink-800";
 			case "event":
 				return "bg-purple-100 text-purple-800";
+			case "agency":
+				return "bg-teal-100 text-teal-800";
+			case "property":
+				return "bg-amber-100 text-amber-800";
 			default:
 				return "bg-gray-100 text-gray-800";
 		}
@@ -1234,6 +1249,8 @@ function RouteComponent() {
 																	| "email"
 																	| "social_media"
 																	| "event"
+																	| "agency"
+																	| "property"
 																	| "other",
 															)
 														}
@@ -1262,6 +1279,8 @@ function RouteComponent() {
 																Redes Sociales
 															</SelectItem>
 															<SelectItem value="event">Evento</SelectItem>
+															<SelectItem value="agency">Agencia</SelectItem>
+															<SelectItem value="property">Predio</SelectItem>
 															<SelectItem value="other">Otro</SelectItem>
 														</SelectContent>
 													</Select>
@@ -2232,7 +2251,7 @@ function RouteComponent() {
 							<div className="flex items-start justify-between">
 								<div>
 									<h3 className="font-semibold text-lg">
-										{selectedLead.firstName} {selectedLead.lastName}
+										{formatLeadFullName(selectedLead)}
 									</h3>
 									{selectedLead.email && (
 										<p className="text-muted-foreground text-sm">

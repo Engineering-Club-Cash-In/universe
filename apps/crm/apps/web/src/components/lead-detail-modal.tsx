@@ -27,6 +27,17 @@ import {
 } from "@/lib/crm-formatters";
 import { client, orpc } from "@/utils/orpc";
 
+function formatLeadFullName(lead: {
+	firstName?: string | null;
+	middleName?: string | null;
+	lastName?: string | null;
+	secondLastName?: string | null;
+}) {
+	return [lead.firstName, lead.middleName, lead.lastName, lead.secondLastName]
+		.filter((part): part is string => Boolean(part && part.trim()))
+		.join(" ");
+}
+
 // Type for the lead data
 export type LeadForModal = {
 	id: string;
@@ -83,18 +94,6 @@ type LeadDetailModalProps = {
 	readOnly?: boolean;
 	onEdit?: () => void;
 };
-
-
-function formatLeadFullName(lead: {
-	firstName?: string | null;
-	middleName?: string | null;
-	lastName?: string | null;
-	secondLastName?: string | null;
-}) {
-	return [lead.firstName, lead.middleName, lead.lastName, lead.secondLastName]
-		.filter((part): part is string => Boolean(part && part.trim()))
-		.join(" ");
-}
 
 // Helper function for source badge color
 function getSourceBadgeColor(source: string): string {

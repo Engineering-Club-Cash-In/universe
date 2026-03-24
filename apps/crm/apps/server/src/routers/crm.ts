@@ -1038,22 +1038,7 @@ export const crmRouter = {
 					createdMonth: z.number().min(1).max(12).optional(),
 					createdYear: z.number().optional(),
 					// NEW: Filtro por fuente/medio
-					source: z
-						.enum([
-							"website",
-							"referral",
-							"cold_call",
-							"email",
-							"social_media",
-							"event",
-							"other",
-							"facebook",
-							"instagram",
-							"google",
-							"meta",
-							"Whatsapp",
-						])
-						.optional(),
+					source: z.enum(leadSourceEnum.enumValues).optional(),
 				})
 				.optional(),
 		)
@@ -1141,7 +1126,9 @@ export const crmRouter = {
 				lead: {
 					id: leads.id,
 					firstName: leads.firstName,
+					middleName: leads.middleName,
 					lastName: leads.lastName,
+					secondLastName: leads.secondLastName,
 					email: leads.email,
 					phone: leads.phone,
 					age: leads.age,

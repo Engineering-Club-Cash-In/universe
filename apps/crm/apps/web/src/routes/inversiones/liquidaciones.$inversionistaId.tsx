@@ -7,17 +7,20 @@ import {
 	ChevronLeft,
 	ChevronRight,
 	CreditCard,
+	DollarSign,
 	Download,
 	Eye,
 	EyeOff,
 	FileText,
 	Filter,
 	Landmark,
+	Layers,
 	Loader2,
 	Mail,
 	Plus,
 	RefreshCw,
 	Shield,
+	TrendingUp,
 	Trash2,
 	Upload,
 	Users,
@@ -525,6 +528,15 @@ function InvestorLiquidacionesPage() {
 		);
 	}, [investorsQuery.data, investorIdNum]);
 
+	// Fetch rendimiento/stats
+	const rendimientoQuery = useQuery({
+		...orpc.getInvestorRendimiento.queryOptions({
+			input: { email: investor?.email ?? "" },
+		}),
+		enabled: !!investor?.email,
+	});
+	const stats = (rendimientoQuery.data as any)?.data ?? null;
+
 	// Fetch liquidaciones
 	const { data, isLoading, isError, refetch } = useQuery({
 		...orpc.getResumenGlobalInversionistas.queryOptions({
@@ -654,6 +666,32 @@ function InvestorLiquidacionesPage() {
 									</p>
 								</div>
 							</div>
+							{stats && (
+								<>
+									<div className="flex items-center gap-2.5 rounded-lg border bg-card px-3 py-2">
+										<DollarSign className="h-4 w-4 shrink-0 text-muted-foreground" />
+										<div className="min-w-0">
+											<p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+												Capital aportado
+											</p>
+											<p className="truncate font-medium text-xs">
+												{formatQ(stats.capital_total_aportado)}
+											</p>
+										</div>
+									</div>
+									<div className="flex items-center gap-2.5 rounded-lg border bg-card px-3 py-2">
+										<Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
+										<div className="min-w-0">
+											<p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+												Inversiones
+											</p>
+											<p className="font-medium text-xs">
+												{stats.cantidad_inversiones}
+											</p>
+										</div>
+									</div>
+								</>
+							)}
 						</div>
 
 						{/* Badges */}

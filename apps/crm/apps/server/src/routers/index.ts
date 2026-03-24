@@ -291,6 +291,7 @@ export const appRouter = {
 		adminMiniagentRouter.deleteMiniAgentCredentials,
 
 	// Investor Documents routes (Documentos de inversionista)
+	getInvestorRendimiento: investorDocumentsRouter.getInvestorRendimiento,
 	getInvestorDocumentsAdmin: investorDocumentsRouter.getInvestorDocumentsAdmin,
 	createInvestorDocument: investorDocumentsRouter.createInvestorDocument,
 	toggleInvestorDocumentVisibility:

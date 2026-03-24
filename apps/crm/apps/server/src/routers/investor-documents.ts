@@ -3,6 +3,19 @@ import { crmCobrosOrInvestmentsProcedure } from "../lib/orpc";
 import { carteraBackClient } from "../services/cartera-back-client";
 
 export const investorDocumentsRouter = {
+	getInvestorRendimiento: crmCobrosOrInvestmentsProcedure
+		.input(
+			z.object({
+				email: z.string().email(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const result = await carteraBackClient.getInvestorRendimiento(
+				input.email,
+			);
+			return result;
+		}),
+
 	getInvestorDocumentsAdmin: crmCobrosOrInvestmentsProcedure
 		.input(
 			z.object({

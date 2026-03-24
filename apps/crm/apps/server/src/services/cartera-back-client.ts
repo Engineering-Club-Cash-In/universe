@@ -592,6 +592,34 @@ export class CarteraBackClient {
 		};
 	}
 
+	async getInvestorRendimiento(
+		email: string,
+	): Promise<{
+		success: boolean;
+		data: {
+			inversionista_id: number;
+			nombre: string;
+			dpi: string;
+			capital_total_aportado: number;
+			cantidad_inversiones: number;
+			rendimiento_estimado: number;
+		};
+	}> {
+		const queryParams = new URLSearchParams({ email });
+		const response = await this.request<{
+			success: boolean;
+			data: {
+				inversionista_id: number;
+				nombre: string;
+				dpi: string;
+				capital_total_aportado: number;
+				cantidad_inversiones: number;
+				rendimiento_estimado: number;
+			};
+		}>(`/inversionistas/rendimiento?${queryParams}`, { method: "GET" }, true);
+		return response;
+	}
+
 	async getInvestorReport(
 		params: GetInvestorReportParams,
 	): Promise<InversionistaReporte> {

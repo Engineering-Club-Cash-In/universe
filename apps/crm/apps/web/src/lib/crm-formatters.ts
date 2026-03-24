@@ -22,6 +22,10 @@ export const getSourceLabel = (source: string) => {
 			return "Instagram";
 		case "google":
 			return "Google";
+		case "agency":
+			return "Agencia";
+		case "property":
+			return "Predio";
 		default:
 			return source;
 	}

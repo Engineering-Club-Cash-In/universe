@@ -101,6 +101,17 @@ import {
 import { isVehicleAvailable } from "@/utils/constants";
 import { client, orpc } from "@/utils/orpc";
 
+function formatLeadFullName(lead: {
+	firstName?: string | null;
+	middleName?: string | null;
+	lastName?: string | null;
+	secondLastName?: string | null;
+}) {
+	return [lead.firstName, lead.middleName, lead.lastName, lead.secondLastName]
+		.filter((part): part is string => Boolean(part && part.trim()))
+		.join(" ");
+}
+
 const MONTH_NAMES = [
 	"Enero",
 	"Febrero",
@@ -168,7 +179,7 @@ function DraggableOpportunityCard({
 				{opportunity.lead && (
 					<div className="flex items-center gap-1 text-muted-foreground text-xs">
 						<Users className="h-3 w-3" />
-						{opportunity.lead.firstName} {opportunity.lead.lastName}
+						{formatLeadFullName(opportunity.lead)}
 					</div>
 				)}
 				{opportunity.value && (
@@ -1638,6 +1649,8 @@ function RouteComponent() {
 							<SelectItem value="email">Correo Electrónico</SelectItem>
 							<SelectItem value="social_media">Redes Sociales</SelectItem>
 							<SelectItem value="event">Evento</SelectItem>
+							<SelectItem value="agency">Agencia</SelectItem>
+							<SelectItem value="property">Predio</SelectItem>
 							<SelectItem value="other">Otro</SelectItem>
 						</SelectContent>
 					</Select>
@@ -1793,7 +1806,7 @@ function RouteComponent() {
 													{ value: "none", label: "Sin lead" },
 													...(leadsQuery.data?.data?.map((lead) => ({
 														value: lead.id,
-														label: `${lead.firstName} ${lead.lastName}`,
+														label: formatLeadFullName(lead),
 													})) || []),
 												]}
 												value={field.state.value ?? null}
@@ -2147,8 +2160,7 @@ function RouteComponent() {
 														}
 													}}
 												>
-													{selectedOpportunity.lead.firstName}{" "}
-													{selectedOpportunity.lead.lastName}
+													{formatLeadFullName(selectedOpportunity.lead)}
 												</span>
 											</div>
 											{selectedOpportunity.lead.email && (
@@ -2761,7 +2773,7 @@ function RouteComponent() {
 										const queryLeads =
 											leadsQuery.data?.data?.map((lead) => ({
 												value: lead.id,
-												label: `${lead.firstName} ${lead.lastName}`,
+												label: formatLeadFullName(lead),
 											})) || [];
 										const currentLead = selectedOpportunity?.lead;
 										const hasCurrentInResults =

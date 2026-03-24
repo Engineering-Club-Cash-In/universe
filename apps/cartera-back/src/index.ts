@@ -29,7 +29,8 @@ const app = new Elysia()
   .use(routers.mirrorInvestorRouter)
   .use(routers.notificationsRouter)
   .use(routers.reconcileEspejoRouter)
-  .use(routers.investorDocumentsRouter);
+  .use(routers.investorDocumentsRouter)
+  .use(routers.abonosCapitalRouter);
 
 // 🚀 Iniciar tareas programadas ANTES de levantar el servidor
 iniciarTareasProgramadas();

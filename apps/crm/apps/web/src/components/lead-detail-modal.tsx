@@ -84,6 +84,18 @@ type LeadDetailModalProps = {
 	onEdit?: () => void;
 };
 
+
+function formatLeadFullName(lead: {
+	firstName?: string | null;
+	middleName?: string | null;
+	lastName?: string | null;
+	secondLastName?: string | null;
+}) {
+	return [lead.firstName, lead.middleName, lead.lastName, lead.secondLastName]
+		.filter((part): part is string => Boolean(part && part.trim()))
+		.join(" ");
+}
+
 // Helper function for source badge color
 function getSourceBadgeColor(source: string): string {
 	const colors: Record<string, string> = {
@@ -215,8 +227,7 @@ export function LeadDetailModal({
 					<div className="flex items-start justify-between">
 						<div>
 							<h3 className="font-semibold text-lg">
-								{displayLead.firstName} {displayLead.middleName || ""}{" "}
-								{displayLead.lastName} {displayLead.secondLastName || ""}
+								{formatLeadFullName(displayLead)}
 							</h3>
 							<p className="text-muted-foreground text-sm">
 								{displayLead.email}
@@ -253,8 +264,7 @@ export function LeadDetailModal({
 										Nombre Completo
 									</Label>
 									<p className="font-medium text-sm">
-										{displayLead.firstName} {displayLead.middleName || ""}{" "}
-										{displayLead.lastName} {displayLead.secondLastName || ""}
+										{formatLeadFullName(displayLead)}
 									</p>
 								</div>
 								<div>

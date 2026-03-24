@@ -86,6 +86,17 @@ import {
 import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
+function formatLeadFullName(lead: {
+	firstName?: string | null;
+	middleName?: string | null;
+	lastName?: string | null;
+	secondLastName?: string | null;
+}) {
+	return [lead.firstName, lead.middleName, lead.lastName, lead.secondLastName]
+		.filter((part): part is string => Boolean(part && part.trim()))
+		.join(" ");
+}
+
 export const Route = createFileRoute("/crm/leads")({
 	component: RouteComponent,
 	validateSearch: z.object({
@@ -2240,7 +2251,7 @@ function RouteComponent() {
 							<div className="flex items-start justify-between">
 								<div>
 									<h3 className="font-semibold text-lg">
-										{selectedLead.firstName} {selectedLead.lastName}
+										{formatLeadFullName(selectedLead)}
 									</h3>
 									{selectedLead.email && (
 										<p className="text-muted-foreground text-sm">

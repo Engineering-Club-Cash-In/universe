@@ -600,7 +600,7 @@ export function OpportunityDetailModal({
 														</span>
 													)}
 													<span className="text-muted-foreground text-xs">
-														Q{Number(quotation.vehicleValue).toLocaleString()} •{" "}
+														Q{Number(quotation.vehicleValue).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} •{" "}
 														{quotation.termMonths} meses •{" "}
 														{quotation.status === "draft"
 															? "Borrador"
@@ -613,7 +613,7 @@ export function OpportunityDetailModal({
 												</div>
 												<div className="text-right">
 													<p className="font-bold text-green-600">
-														Q{Number(quotation.monthlyPayment).toLocaleString()}
+														Q{Number(quotation.monthlyPayment).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 													</p>
 													<p className="text-muted-foreground text-xs">
 														cuota mensual

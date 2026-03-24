@@ -678,7 +678,7 @@ function VehiclesDashboard() {
 																		Q
 																		{Number(
 																			latestInspection.suggestedCommercialValue,
-																		).toLocaleString("es-GT")}
+																		).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 																	</div>
 																	<div
 																		className={
@@ -963,7 +963,7 @@ function VehiclesDashboard() {
 												<span className="font-medium">Valor Comercial: </span>Q
 												{Number(
 													auctionInspection.suggestedCommercialValue,
-												).toLocaleString("es-GT")}
+												).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 											</p>
 											{auctionPrice !== null && auctionPrice > 0 && (
 												<p
@@ -980,7 +980,7 @@ function VehiclesDashboard() {
 														Number(auctionInspection.suggestedCommercialValue) -
 															auctionPrice,
 														0,
-													).toLocaleString("es-GT")}
+													).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 												</p>
 											)}
 										</div>
@@ -1277,7 +1277,7 @@ function VehiclesDashboard() {
 																				Q
 																				{Number(
 																					inspection.marketValue,
-																				).toLocaleString("es-GT")}
+																				).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 																			</div>
 																			<div className="font-medium text-muted-foreground">
 																				Valor comercial sugerido:
@@ -1286,7 +1286,7 @@ function VehiclesDashboard() {
 																				Q
 																				{Number(
 																					inspection.suggestedCommercialValue,
-																				).toLocaleString("es-GT")}
+																				).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 																			</div>
 																			<div className="text-pretty font-medium text-muted-foreground">
 																				Valor actual condición:
@@ -1295,7 +1295,7 @@ function VehiclesDashboard() {
 																				Q
 																				{Number(
 																					inspection.currentConditionValue,
-																				).toLocaleString("es-GT")}
+																				).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 																			</div>
 																		</div>
 
@@ -1317,7 +1317,7 @@ function VehiclesDashboard() {
 																							Q
 																							{Number(
 																								inspection.aiSuggestedValue,
-																							).toLocaleString("es-GT")}
+																							).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 																						</p>
 																					</div>
 																					<div className="flex flex-col items-end">

@@ -173,13 +173,13 @@ export function DisbursementView({
 							Monto a desembolsar
 						</span>
 						<p className="font-bold text-2xl text-green-600">
-							Q{amountToFinance.toLocaleString()}
+							Q{amountToFinance.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 						</p>
 					</div>
 					<div className="rounded-lg border bg-muted/30 p-4">
 						<span className="text-muted-foreground text-xs">Gastos</span>
 						<p className="font-bold text-2xl text-orange-600">
-							Q{gastos.toLocaleString()}
+							Q{gastos.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 						</p>
 					</div>
 				</div>

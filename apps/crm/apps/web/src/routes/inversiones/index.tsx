@@ -74,7 +74,7 @@ function formatAmount(amount: string | null | undefined): string {
 	if (!amount) return "—";
 	const num = Number.parseFloat(amount);
 	if (Number.isNaN(num)) return "—";
-	return `Q${num.toLocaleString("es-GT")}`;
+	return `Q${num.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -215,7 +215,7 @@ function DroppableInvestmentColumn({
 				</div>
 				<p className="mt-1.5 font-medium text-sm">{stage.name}</p>
 				<p className="text-muted-foreground text-xs">
-					{totalAmount > 0 ? `Q${totalAmount.toLocaleString("es-GT")}` : "—"}{" "}
+					{totalAmount > 0 ? `Q${totalAmount.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}{" "}
 					monto total
 				</p>
 			</div>

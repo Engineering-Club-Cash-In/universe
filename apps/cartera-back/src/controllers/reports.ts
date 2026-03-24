@@ -243,8 +243,7 @@ export async function exportPagosToExcel(credito_sifco: string) {
       <td class="money">${formatQ(capitalPago)}</td>
       <td class="money">${formatQ(interesPago)}</td>
       <td class="money">${formatQ(Number(pago.abono_iva_12 || 0))}</td>
-      <td class="money">${formatQ(Number(pago.abono_seguro || 0))}</td>
-      <td class="money">${formatQ(Number(pago.abono_gps || 0))}</td>
+      <td class="money">${formatQ(Number(pago.abono_seguro || 0) + Number(pago.abono_gps || 0) + Number(pago.membresias_pago || 0))}</td>
       <td class="money">${formatQ(Number(pago.mora || 0))}</td>
       <td class="money total">${formatQ(montoAplicado)}</td>
       <td class="money">${formatQ(Number(pago.capital_restante || 0))}</td>
@@ -365,8 +364,7 @@ export async function exportPagosToExcel(credito_sifco: string) {
           <th>Capital</th>
           <th>Interés</th>
           <th>IVA 12%</th>
-          <th>Seguro</th>
-          <th>GPS</th>
+          <th>Servicios</th>
           <th>Mora</th>
           <th>Monto Aplicado</th>
           <th>Capital Rest.</th>
@@ -380,7 +378,7 @@ export async function exportPagosToExcel(credito_sifco: string) {
           <td colspan="4">TOTALES</td>
           <td class="money">${formatQ(totalCapital)}</td>
           <td class="money">${formatQ(totalInteres)}</td>
-          <td colspan="4"></td>
+          <td colspan="3"></td>
           <td class="money">${formatQ(totalMontoAplicado)}</td>
           <td colspan="3"></td>
         </tr>

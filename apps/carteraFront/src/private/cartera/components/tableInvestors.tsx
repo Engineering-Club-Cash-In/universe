@@ -1347,7 +1347,19 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                                   {/* 💵 ABONO CAPITAL */}
                                   <div className="bg-white rounded-lg p-2 border border-blue-200">
-                                    <div className="text-xs text-blue-700">💵 Abono Capital</div>
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-xs text-blue-700">💵 Abono Capital</span>
+                                      {pago.abono_capital_detalle && (
+                                        <div className="flex items-center gap-1">
+                                          <span className="inline-flex items-center px-1 py-0 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+                                            {pago.abono_capital_detalle.tipo}
+                                          </span>
+                                          <span className="inline-flex items-center px-1 py-0 rounded text-[10px] font-semibold bg-blue-100 text-blue-800 border border-blue-300">
+                                            +{inv.currencySymbol} {Number(pago.abono_capital_detalle.monto).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
                                     {isDraft ? (
                                       <div className="flex items-center mt-1">
                                         <span className="text-blue-900 font-bold text-sm mr-1">{inv.currencySymbol}</span>
@@ -1891,7 +1903,19 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                             <div className="grid grid-cols-2 gap-2">
                               {/* 💵 ABONO CAPITAL */}
                               <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-2 border border-blue-200">
-                                <div className="text-xs text-blue-700">💵 Abono Capital</div>
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs text-blue-700">💵 Abono Capital</span>
+                                  {pago.abono_capital_detalle && (
+                                    <div className="flex items-center gap-1">
+                                      <span className="inline-flex items-center px-1 py-0 rounded text-[9px] font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+                                        {pago.abono_capital_detalle.tipo}
+                                      </span>
+                                      <span className="inline-flex items-center px-1 py-0 rounded text-[9px] font-semibold bg-blue-100 text-blue-800 border border-blue-300">
+                                        +{inv.currencySymbol} {Number(pago.abono_capital_detalle.monto).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
                                 {isDraft ? (
                                   <div className="flex items-center mt-1">
                                     <span className="text-blue-900 font-bold text-sm mr-1">{inv.currencySymbol}</span>

@@ -275,6 +275,24 @@ export const investmentAuditLog = pgTable("investment_audit_log", {
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// --- Investor Activity Log (acciones sobre inversionistas) ---
+export const investorActivityLogActionEnum = pgEnum(
+	"investor_activity_log_action",
+	["document_created", "document_deleted", "document_visibility_toggled"],
+);
+
+export const investorActivityLog = pgTable("investor_activity_log", {
+	id: uuid("id").primaryKey().defaultRandom(),
+	inversionistaId: integer("inversionista_id").notNull(),
+	action: investorActivityLogActionEnum("action").notNull(),
+	details: jsonb("details"),
+	performedBy: text("performed_by")
+		.notNull()
+		.references(() => user.id),
+	performedByName: text("performed_by_name"),
+	createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 // --- Investment Non-Advance Survey ---
 export const investmentNonAdvanceSurvey = pgTable(
 	"investment_non_advance_survey",

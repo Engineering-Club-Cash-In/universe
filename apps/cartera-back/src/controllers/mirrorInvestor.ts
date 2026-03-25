@@ -675,6 +675,7 @@ export const asignarReinversionEspejo = async ({ body, set }: any) => {
     const resultados: any[] = [];
     const omitidos: any[] = [];
     let idsActuales: number[] = [];
+    let desaparecidos: number[] = [];
 
     await db.transaction(async (tx) => {
       // 1) Obtener todos los IDs de créditos espejo actuales para este inversionista
@@ -687,7 +688,7 @@ export const asignarReinversionEspejo = async ({ body, set }: any) => {
       const idsEnviados = asignaciones.map((a: any) => a.id_credito_inversionista_espejo);
 
       // 2) Identificar IDs desaparecidos (están en la base pero no en el body)
-      const desaparecidos = idsActuales.filter((id) => !idsEnviados.includes(id));
+      desaparecidos = idsActuales.filter((id) => !idsEnviados.includes(id));
 
       // 3) Actualizar los que SÍ vienen en el arreglo
       for (const req of asignaciones) {
@@ -719,7 +720,7 @@ export const asignarReinversionEspejo = async ({ body, set }: any) => {
     set.status = 200;
     return {
       success: true,
-      message: `Sincronización completada. Actualizados: ${resultados.length}, Marcados sin reinversión: ${idsActuales.length - resultados.length}, Omitidos: ${omitidos.length}.`,
+      message: `Sincronización completada. Actualizados: ${resultados.length}, Marcados sin reinversión: ${desaparecidos.length}, Omitidos: ${omitidos.length}.`,
       resultados,
       omitidos
     };

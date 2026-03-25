@@ -508,6 +508,12 @@
         .default("NO_LIQUIDADO"),
       cuota: numeric("cuota", { precision: 18, scale: 2 }).notNull(),
 
+      // FK al abono a capital asociado (nullable)
+      abono_capital_id: integer("abono_capital_id").references(
+        () => abonos_capital.abono_id,
+        { onDelete: "set null" }
+      ),
+ 
       // 🆕 ENLACE A LIQUIDACIÓN
       liquidacion_id: integer("liquidacion_id").references(
         () => liquidaciones.liquidacion_id,
@@ -517,10 +523,6 @@
       updated_at: timestamp("updated_at").defaultNow(),
     },
     (table) => ({
-      uniquePagoInversionistaEspejo: unique("unique_pago_inversionista_espejo").on(
-        table.pago_id,
-        table.inversionista_id
-      ),
       // 🆕 Índice para búsquedas por liquidación
       liquidacionIdxEspejo: index("idx_pagos_liquidacion_espejo").on(
         table.liquidacion_id

@@ -190,8 +190,20 @@ const DetailSections = ({ pago }: { pago: any }) => (
             {section.fields.map((field) => {
               if (pago[field] === undefined) return null;
               return (
-                <div key={field} className="flex items-center justify-between text-sm">
-                  <span className="text-gray-500 font-medium">{FIELD_LABELS[field] || field.replace(/_/g, " ")}</span>
+                <div key={field} className="flex items-center justify-between text-sm gap-1">
+                  <span className="text-gray-500 font-medium flex items-center gap-1">
+                    {FIELD_LABELS[field] || field.replace(/_/g, " ")}
+                    {field === "abono_capital" && pago.abono_capital_detalle && (
+                      <>
+                        <span className="inline-flex items-center px-1 py-0 rounded text-[9px] font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+                          {pago.abono_capital_detalle.tipo}
+                        </span>
+                        <span className="inline-flex items-center px-1 py-0 rounded text-[9px] font-semibold bg-blue-100 text-blue-800 border border-blue-300">
+                          +{formatCurrency(pago.abono_capital_detalle.monto)}
+                        </span>
+                      </>
+                    )}
+                  </span>
                   <span className="font-bold text-gray-900 text-right">{formatFieldValue(field, pago[field])}</span>
                 </div>
               );
@@ -832,6 +844,16 @@ const handleDownloadExcel = async () => {
                                                       pagoInv.abono_capital
                                                     )}
                                                   </span>
+                                                  {pagoInv.abono_capital_detalle && (
+                                                    <>
+                                                      <span className="inline-flex items-center px-1 py-0 rounded text-[9px] font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+                                                        {pagoInv.abono_capital_detalle.tipo}
+                                                      </span>
+                                                      <span className="inline-flex items-center px-1 py-0 rounded text-[9px] font-semibold bg-blue-100 text-blue-800 border border-blue-300">
+                                                        +{formatCurrency(pagoInv.abono_capital_detalle.monto)}
+                                                      </span>
+                                                    </>
+                                                  )}
                                                 </div>
                                               </TableCell>
                                               <TableCell className="border px-2 py-1 font-semibold">

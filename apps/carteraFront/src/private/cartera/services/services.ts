@@ -763,6 +763,8 @@ export interface PagoCredito {
 // Detalle de cada crédito en el que participa un inversionista
 export interface CreditoInversionistaData {
   credito_id: number;
+  credito_inversionista_espejo_id?: number;
+  tipo_reinversion?: string;
   numero_credito_sifco: string;
   nombre_usuario: string;
   nit_usuario: string;
@@ -3106,4 +3108,39 @@ export async function toggleDocumentVisibility(documentoId: number, visible: boo
 export async function deleteInvestorDocument(documentoId: number) {
   const { data } = await api.patch(`/investor-documents/${documentoId}/delete`);
   return data;
+}
+
+// ============================================================
+// asignarReinversion — POST /asignar-reinversion
+// ============================================================
+export type TipoReinversionEspejo =
+  | "sin_reinversion"
+  | "reinversion_capital"
+  | "reinversion_interes"
+  | "reinversion_total"
+  | "reinversion_variable"
+  | "reinversion_combinada";
+
+export interface AsignarReinversionPayload {
+  asignaciones: {
+    id_inversionista: number;
+    id_credito_inversionista_espejo: number;
+    tipo_reinversion: TipoReinversionEspejo;
+  }[];
+}
+
+export interface AsignarReinversionResponse {
+  success: boolean;
+  message: string;
+  actualizados: number;
+}
+
+export async function asignarReinversionService(
+  payload: AsignarReinversionPayload
+): Promise<AsignarReinversionResponse> {
+  const res = await api.post<AsignarReinversionResponse>(
+    `${import.meta.env.VITE_BACK_URL}/asignar-reinversion`,
+    payload
+  );
+  return res.data;
 }

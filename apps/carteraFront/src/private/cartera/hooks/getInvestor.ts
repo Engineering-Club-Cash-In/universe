@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { 
+import {
   getInvestorServices,
   getInvestorTotalsService,
   calcularPagosEspejoService,
@@ -10,9 +10,12 @@ import {
   downloadInvestorPDFService,
   recalcularPagosEspejoService,
   reversePagosEspejoService,
+  asignarReinversionService,
   type RecalcularPagoPayload,
   type LiquidateByInvestorRequest,
   type LiquidateByInvestorResponse,
+  type AsignarReinversionPayload,
+  type AsignarReinversionResponse,
 } from "../services/services";
 
 // ============================================
@@ -335,6 +338,26 @@ export function useReversePagosEspejo() {
     },
     onError: (error: Error) => {
       console.error("❌ Error revirtiendo pagos:", error);
+    },
+  });
+}
+
+// ============================================================
+// useAsignarReinversion
+// ============================================================
+export function useAsignarReinversion() {
+  const queryClient = useQueryClient();
+
+  return useMutation<AsignarReinversionResponse, Error, AsignarReinversionPayload>({
+    mutationFn: (payload) => asignarReinversionService(payload),
+
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: investorsQueryKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: ["investor-mirror-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["investor-totals"] });
+    },
+    onError: (error: Error) => {
+      console.error("Error asignando reinversión:", error);
     },
   });
 }

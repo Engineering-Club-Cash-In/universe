@@ -4,8 +4,10 @@ import {
 	ArrowLeft,
 	Banknote,
 	CalendarDays,
+	ChevronDown,
 	ChevronLeft,
 	ChevronRight,
+	Clock,
 	CreditCard,
 	DollarSign,
 	Download,
@@ -20,8 +22,8 @@ import {
 	Plus,
 	RefreshCw,
 	Shield,
-	TrendingUp,
 	Trash2,
+	TrendingUp,
 	Upload,
 	Users,
 } from "lucide-react";
@@ -39,6 +41,8 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { authClient } from "@/lib/auth-client";
+import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute(
@@ -77,8 +81,10 @@ function getMesLabel(mes: number): string {
 
 function InvestorDocumentsSection({
 	inversionistaId,
+	isManager,
 }: {
 	inversionistaId: number;
+	isManager: boolean;
 }) {
 	const queryClient = useQueryClient();
 	const fileInputRef = useRef<HTMLInputElement>(null);
@@ -97,6 +103,12 @@ function InvestorDocumentsSection({
 	const invalidateDocs = () => {
 		queryClient.invalidateQueries({
 			queryKey: orpc.getInvestorDocumentsAdmin.queryOptions({
+				input: { inversionistaId },
+			}).queryKey,
+			refetchType: "all",
+		});
+		queryClient.invalidateQueries({
+			queryKey: orpc.getInvestorActivityLog.queryOptions({
 				input: { inversionistaId },
 			}).queryKey,
 			refetchType: "all",
@@ -245,18 +257,18 @@ function InvestorDocumentsSection({
 							placeholder="Descripción breve"
 						/>
 					</div>
-					<div className="flex items-center gap-2">
-						<Checkbox
-							id="doc-visible"
-							checked={visible}
-							onCheckedChange={(checked) =>
-								setVisible(checked === true)
-							}
-						/>
-						<Label htmlFor="doc-visible" className="text-xs">
-							Visible para el inversionista
-						</Label>
-					</div>
+					{isManager && (
+						<div className="flex items-center gap-2">
+							<Checkbox
+								id="doc-visible"
+								checked={visible}
+								onCheckedChange={(checked) => setVisible(checked === true)}
+							/>
+							<Label htmlFor="doc-visible" className="text-xs">
+								Visible para el inversionista
+							</Label>
+						</div>
+					)}
 					<div className="flex gap-2">
 						<Button
 							size="sm"
@@ -321,7 +333,6 @@ function InvestorDocumentsSection({
 									>
 										{doc.visible ? "Visible" : "Oculto"}
 									</Badge>
-									
 								</div>
 							</div>
 							<div className="flex shrink-0 items-center gap-1">
@@ -336,14 +347,23 @@ function InvestorDocumentsSection({
 									variant="ghost"
 									size="icon"
 									className="h-7 w-7"
-									onClick={() =>
+									onClick={() => {
+										if (!isManager) return;
 										toggleVisibilityMutation.mutate({
+											inversionistaId,
 											documentoId: doc.documento_id,
 											visible: !doc.visible,
-										})
+											documentoNombre: doc.nombre,
+										});
+									}}
+									disabled={!isManager || toggleVisibilityMutation.isPending}
+									title={
+										!isManager
+											? "Solo el gerente de inversiones puede cambiar la visibilidad"
+											: doc.visible
+												? "Ocultar"
+												: "Hacer visible"
 									}
-									disabled={toggleVisibilityMutation.isPending}
-									title={doc.visible ? "Ocultar" : "Hacer visible"}
 								>
 									{doc.visible ? (
 										<EyeOff className="h-3.5 w-3.5" />
@@ -358,7 +378,9 @@ function InvestorDocumentsSection({
 									onClick={() => {
 										if (confirm("¿Estás seguro de eliminar este documento?")) {
 											deleteMutation.mutate({
+												inversionistaId,
 												documentoId: doc.documento_id,
+												documentoNombre: doc.nombre,
 											});
 										}
 									}}
@@ -369,6 +391,120 @@ function InvestorDocumentsSection({
 							</div>
 						</div>
 					))}
+				</div>
+			)}
+		</div>
+	);
+}
+
+// ─── Activity Log ─────────────────────────────────────────────────────────────
+
+const ACTION_LABELS: Record<string, string> = {
+	document_created: "Documento creado",
+	document_deleted: "Documento eliminado",
+	document_visibility_toggled: "Visibilidad cambiada",
+};
+
+const ACTION_COLORS: Record<string, string> = {
+	document_created:
+		"border-green-300 bg-green-50 text-green-700 dark:border-green-700 dark:bg-green-950 dark:text-green-300",
+	document_deleted:
+		"border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-950 dark:text-red-300",
+	document_visibility_toggled:
+		"border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300",
+};
+
+function InvestorActivityLogSection({
+	inversionistaId,
+}: {
+	inversionistaId: number;
+}) {
+	const [open, setOpen] = useState(false);
+	const logsQuery = useQuery({
+		...orpc.getInvestorActivityLog.queryOptions({
+			input: { inversionistaId },
+		}),
+		enabled: open,
+	});
+
+	const logs = logsQuery.data ?? [];
+
+	return (
+		<div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+			<button
+				type="button"
+				className="flex w-full items-center justify-between"
+				onClick={() => setOpen((v) => !v)}
+			>
+				<h2 className="flex items-center gap-2 font-bold text-sm">
+					<Clock className="h-4 w-4 text-primary" />
+					Historial de actividad
+				</h2>
+				<ChevronDown
+					className={`h-4 w-4 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
+				/>
+			</button>
+
+			{open && (
+				<div className="mt-4">
+					{logsQuery.isLoading && (
+						<div className="flex items-center gap-2 py-4 text-muted-foreground text-xs">
+							<Loader2 className="h-3.5 w-3.5 animate-spin" />
+							Cargando historial...
+						</div>
+					)}
+
+					{!logsQuery.isLoading && logs.length === 0 && (
+						<p className="py-2 text-muted-foreground text-xs italic">
+							Sin actividad registrada
+						</p>
+					)}
+
+					{logs.length > 0 && (
+				<div className="space-y-2">
+					{logs.map((log: any) => {
+						const details = log.details as Record<string, any> | null;
+						return (
+							<div
+								key={log.id}
+								className="flex items-start gap-3 rounded-lg border bg-background px-3 py-2"
+							>
+								<div className="min-w-0 flex-1">
+									<div className="flex flex-wrap items-center gap-2">
+										<Badge
+											variant="outline"
+											className={`text-[10px] ${ACTION_COLORS[log.action] ?? ""}`}
+										>
+											{ACTION_LABELS[log.action] ?? log.action}
+										</Badge>
+										{details?.nombre || details?.documentoNombre ? (
+											<span className="truncate font-medium text-xs">
+												{details.nombre ?? details.documentoNombre}
+											</span>
+										) : null}
+										{log.action === "document_visibility_toggled" &&
+											details?.visible !== undefined && (
+												<Badge variant="outline" className="text-[10px]">
+													{details.visible ? "Visible" : "Oculto"}
+												</Badge>
+											)}
+									</div>
+									<p className="mt-0.5 text-[10px] text-muted-foreground">
+										{log.performedByName} ·{" "}
+										{new Date(log.createdAt).toLocaleString("es-GT", {
+											day: "2-digit",
+											month: "short",
+											year: "numeric",
+											hour: "2-digit",
+											minute: "2-digit",
+										})}
+									</p>
+								</div>
+							</div>
+						);
+					})}
+				</div>
+			)}
 				</div>
 			)}
 		</div>
@@ -507,6 +643,9 @@ function LiquidacionCard({ item }: { item: any }) {
 function InvestorLiquidacionesPage() {
 	const { inversionistaId } = Route.useParams();
 	const investorIdNum = Number(inversionistaId);
+	const { data: session } = authClient.useSession();
+	const userRole = (session?.user as any)?.role ?? "";
+	const isManager = PERMISSIONS.canValidateInvestmentFunds(userRole);
 
 	const now = new Date();
 	const [filterByMonth, setFilterByMonth] = useState(false);
@@ -609,7 +748,7 @@ function InvestorLiquidacionesPage() {
 			</div>
 
 			{/* Scrollable content */}
-			<div className="flex-1 overflow-y-auto p-6 space-y-6">
+			<div className="flex-1 space-y-6 overflow-y-auto p-6">
 				{/* Datos del inversionista */}
 				{investor && (
 					<div>
@@ -716,8 +855,18 @@ function InvestorLiquidacionesPage() {
 					</div>
 				)}
 
+				{/* Historial de actividad — solo manager/admin */}
+				{isManager && (
+					<InvestorActivityLogSection inversionistaId={investorIdNum} />
+				)}
+
 				{/* Documentos */}
-				<InvestorDocumentsSection inversionistaId={investorIdNum} />
+				<InvestorDocumentsSection
+					inversionistaId={investorIdNum}
+					isManager={isManager}
+				/>
+
+				
 
 				{/* Filtro por mes */}
 				<div>

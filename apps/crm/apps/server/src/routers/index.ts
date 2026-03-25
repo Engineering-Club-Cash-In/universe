@@ -297,6 +297,7 @@ export const appRouter = {
 	toggleInvestorDocumentVisibility:
 		investorDocumentsRouter.toggleInvestorDocumentVisibility,
 	deleteInvestorDocument: investorDocumentsRouter.deleteInvestorDocument,
+	getInvestorActivityLog: investorDocumentsRouter.getInvestorActivityLog,
 
 	// Accounting routes (Contabilidad)
 	getResumenGlobalInversionistas:

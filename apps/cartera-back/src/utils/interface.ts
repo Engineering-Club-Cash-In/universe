@@ -38,6 +38,7 @@ export interface CreditoData {
   total_abono_iva: number;       // 👈 number
   total_isr: number;             // 👈 number
   total_cuota: number;           // 👈 number
+  tipo_reinversion?: string | null; // Solo aplica cuando el inversionista tiene reinversion_combinada
 }
 
 
@@ -64,7 +65,7 @@ export interface InversionistaReporte {
   emite_factura: boolean;
   nombre_inversionista: string;
   email: string | null;
-  reinversion: boolean;
+  reinversion: string;
   banco: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;

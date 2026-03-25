@@ -243,11 +243,36 @@ if (facturasExistentes.length > 0) {
         ? pagoData.nit.split('/').map((n: string) => n.trim().replace(/-/g, '')).filter((n: string) => n.length > 0)
         : [];
 
+      const nitReceptor = nitsDisponibles.length > 0 ? nitsDisponibles[0] : "CF";
+
+      // 🔥 Consultar nombre del receptor en SAT via COFIDI
+      let nombreReceptor = pagoData.nombre
+        ? pagoData.nombre.split('/')[0].trim()
+        : "CONSUMIDOR FINAL";
+
+      if (nitReceptor && nitReceptor !== "CF") {
+        try {
+          const nitClient = new NITSoapClient(COFIDI_CONFIG.endpointUrl);
+          const resultadoNit = await nitClient.consultarNIT({
+            nit: nitReceptor,
+            entity: COFIDI_CONFIG.entity,
+            requestor: COFIDI_CONFIG.requestor,
+          });
+
+          if (resultadoNit.success && resultadoNit.nombre) {
+            nombreReceptor = resultadoNit.nombre;
+            console.log(`✅ NIT receptor encontrado en SAT: ${nombreReceptor}`);
+          } else {
+            console.log(`⚠️ NIT no encontrado en SAT, usando nombre del sistema: ${nombreReceptor}`);
+          }
+        } catch (nitError) {
+          console.error("❌ Error consultando NIT del receptor:", nitError);
+        }
+      }
+
       const receptor = {
-        idReceptor: nitsDisponibles.length > 0 ? nitsDisponibles[0] : "CF",
-        nombreReceptor: pagoData.nombre
-          ? pagoData.nombre.split('/')[0].trim() // 🔥 Tomar solo el primer nombre
-          : pagoData.nombre,
+        idReceptor: nitReceptor,
+        nombreReceptor: nombreReceptor,
         direccion: pagoData.direccion
           ? {
               direccion: pagoData.direccion,

@@ -50,6 +50,7 @@ export const mirrorInvestorRouter = new Elysia()
           inversionista_id: t.Number(),
           asignaciones: t.Array(
               t.Object({
+                  id_inversionista: t.Number(),
                   id_credito_inversionista_espejo: t.Number(),
                   tipo_reinversion: t.Enum({
                       sin_reinversion: "sin_reinversion",

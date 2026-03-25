@@ -1,11 +1,13 @@
 // components/InvestorModal.tsx
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useForm } from "react-hook-form";
 import { useInvestor } from "../hooks/investor";
 import { useBancos } from "../hooks/bancos";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { InvestorPayload } from "../services/services";
+import { ModalReinversionCombinada } from "./ModalReinversionCombinada";
 
 interface InvestorModalProps {
   open: boolean;
@@ -15,9 +17,11 @@ interface InvestorModalProps {
 }
 
 export function InvestorModal({ open, onClose, mode, initialData }: InvestorModalProps) {
-  const { insertInvestor } = useInvestor(); // 🔥 Solo usamos insertInvestor (hace upsert)
+  const { insertInvestor } = useInvestor();
   const { bancos, loading: loadingBancos, loadBancos } = useBancos();
   const queryClient = useQueryClient();
+  const [showCombinada, setShowCombinada] = useState(false);
+  const [prevTipoReinversion, setPrevTipoReinversion] = useState<string>("sin_reinversion");
 
   const { register, handleSubmit, reset, watch, setValue } = useForm<InvestorPayload>({
     defaultValues: {
@@ -102,8 +106,8 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
 
   if (!open) return null;
 
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+  return createPortal(
+    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-[9998]">
       <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md">
         <h2 className="text-xl font-bold mb-6 text-blue-700 text-center">
           {mode === "create" ? "Crear Inversionista" : "Editar Inversionista"}
@@ -184,21 +188,40 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
           {/* Tipo de Reinversión */}
           <div>
             <label className="block text-sm text-blue-800 mb-1">Tipo de Reinversión</label>
-            <select
-              {...register("tipo_reinversion", {
-                onChange: (e) => {
-                  if (e.target.value !== "reinversion_variable") {
-                    setValue("monto_reinversion", 0);
-                  }
-                },
-              })}
-              className="bg-white text-blue-900 border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
-            >
-              <option value="sin_reinversion">Sin Reinversión</option>
-              <option value="reinversion_capital">Reinversión Capital</option>
-              <option value="reinversion_interes">Reinversión Interés</option>
-              <option value="reinversion_variable">Reinversión Variable</option>
-            </select>
+            <div className="flex gap-2">
+              <select
+                {...register("tipo_reinversion", {
+                  onChange: (e) => {
+                    const prev = watch("tipo_reinversion") ?? "sin_reinversion";
+                    const val = e.target.value;
+                    if (val !== "reinversion_variable") {
+                      setValue("monto_reinversion", 0);
+                    }
+                    if (val === "reinversion_combinada") {
+                      setPrevTipoReinversion(prev === "reinversion_combinada" ? "sin_reinversion" : prev);
+                      setShowCombinada(true);
+                    }
+                  },
+                })}
+                className="bg-white text-blue-900 border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+              >
+                <option value="sin_reinversion">Sin Reinversión</option>
+                <option value="reinversion_capital">Reinversión Capital</option>
+                <option value="reinversion_interes">Reinversión Interés</option>
+                <option value="reinversion_total">Reinversión Total</option>
+                <option value="reinversion_variable">Reinversión Variable</option>
+                <option value="reinversion_combinada">Reinversión Combinada</option>
+              </select>
+              {watch("tipo_reinversion") === "reinversion_combinada" && mode === "update" && initialData?.inversionista_id && (
+                <button
+                  type="button"
+                  onClick={() => setShowCombinada(true)}
+                  className="px-3 py-2 rounded-lg bg-purple-100 hover:bg-purple-200 text-purple-700 font-semibold text-sm transition whitespace-nowrap border border-purple-300"
+                >
+                  Configurar
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Monto Reinversión */}
@@ -268,6 +291,50 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
           </div>
         </form>
       </div>
-    </div>
+
+      {/* Modal de Reinversión Combinada */}
+      {mode === "update" && initialData?.inversionista_id && (
+        <ModalReinversionCombinada
+          open={showCombinada}
+          onClose={() => {
+            setShowCombinada(false);
+            // Si cancela, regresar al tipo de reinversión que tenía antes
+            const currentVal = watch("tipo_reinversion");
+            if (currentVal === "reinversion_combinada") {
+              setValue("tipo_reinversion", prevTipoReinversion);
+              setValue("re_inversion", prevTipoReinversion);
+            }
+          }}
+          inversionistaId={initialData.inversionista_id}
+          inversionistaNombre={initialData.nombre}
+          onSaved={() => {
+            // Guardar el inversionista con reinversion_combinada y cerrar todo
+            const currentFormData = watch();
+            const payload = {
+              ...currentFormData,
+              dpi: currentFormData.dpi ? Number(currentFormData.dpi) : null,
+              banco: currentFormData.banco ? Number(currentFormData.banco) : null,
+              monto_reinversion: currentFormData.monto_reinversion ? Number(currentFormData.monto_reinversion) : 0,
+              tipo_reinversion: "reinversion_combinada",
+              re_inversion: "reinversion_combinada",
+            };
+            insertInvestor.mutate(payload, {
+              onSuccess: () => {
+                toast.success("Inversionista actualizado con reinversión combinada.");
+                queryClient.invalidateQueries({ queryKey: ["investors"] });
+                queryClient.invalidateQueries({ queryKey: ["investor-mirror-summary"] });
+                queryClient.invalidateQueries({ queryKey: ["investor-totals"] });
+                reset();
+                onClose();
+              },
+              onError: (error: any) => {
+                toast.error(`Error al actualizar inversionista: ${error.message || ""}`);
+              },
+            });
+          }}
+        />
+      )}
+    </div>,
+    document.body
   );
 }

@@ -102,6 +102,7 @@ async function consultarCreditosInversionista(
       cuota_inversionista: tabla.cuota_inversionista,
       origen: sql<OrigenDatos>`${config.origen}`.as('origen'),
       tipo_reinversion: config.origen === "espejo" ? (tabla as any).tipo_reinversion : sql<string | null>`NULL`.as("tipo_reinversion"),
+      credito_inversionista_espejo_id: config.origen === "espejo" ? (tabla as typeof creditos_inversionistas_espejo).id : sql<number | null>`NULL`.as("credito_inversionista_espejo_id"),
     })
     .from(tabla)
     .where(inArray(tabla.inversionista_id, inversionistaIds));
@@ -1512,6 +1513,8 @@ const mes = fechaParaMes
             monto_aportado: formatValue(c.monto_aportado),
             porcentaje_inversionista: c.porcentaje_inversionista,
             cuota_inversionista: formatValue(c.cuota_inversionista),
+            tipo_reinversion: (c as any).tipo_reinversion ?? null,
+            credito_inversionista_espejo_id: (c as any).credito_inversionista_espejo_id ?? null,
             plazo: credito.plazo,
             pagos: pagos_detalle,
             total_abono_capital: formatValue(total_abono_capital.toString()),

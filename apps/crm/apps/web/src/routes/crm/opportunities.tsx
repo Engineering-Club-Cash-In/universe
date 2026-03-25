@@ -29,6 +29,7 @@ import {
 	Plus,
 	RefreshCw,
 	Search,
+	StickyNote,
 	Target,
 	Trash2,
 	TrendingUp,
@@ -399,6 +400,16 @@ function RouteComponent() {
 	const processedOpportunityIdRef = useRef<string | null>(null);
 	const prevOpenRef = useRef(isCreateDialogOpen);
 	const prevDetailsOpenRef = useRef(isDetailsDialogOpen);
+
+	const disbursementNotesQuery = useQuery({
+		...orpc.getDisbursementNotes.queryOptions({
+			input: { opportunityId: selectedOpportunity?.id ?? "" },
+		}),
+		enabled:
+			isDetailsDialogOpen &&
+			!!selectedOpportunity?.id &&
+			selectedOpportunity?.status === "won",
+	});
 
 	// Month/year filter for placed amounts alignment with dashboard
 	const [month, setMonth] = useState(() => new Date().getMonth() + 1);
@@ -2492,6 +2503,20 @@ function RouteComponent() {
 													No hay cotizaciones asociadas a esta oportunidad
 												</p>
 											)}
+										</div>
+									)}
+
+								{/* Disbursement Notes */}
+								{selectedOpportunity.status === "won" &&
+									disbursementNotesQuery.data?.notes && (
+										<div className="rounded-lg border bg-muted/20 px-4 py-3">
+											<div className="flex items-center gap-2 text-muted-foreground text-xs">
+												<StickyNote className="h-3.5 w-3.5" />
+												Notas de desembolso
+											</div>
+											<p className="mt-1 whitespace-pre-wrap text-sm">
+												{disbursementNotesQuery.data.notes}
+											</p>
 										</div>
 									)}
 

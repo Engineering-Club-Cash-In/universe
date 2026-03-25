@@ -1161,6 +1161,7 @@ export const crmRouter = {
 					kmMileage: vehicles.kmMileage,
 					status: vehicles.status,
 					isNew: vehicles.isNew,
+					isOwned: vehicles.isOwned,
 					fuelType: vehicles.fuelType,
 					transmission: vehicles.transmission,
 				},
@@ -2792,7 +2793,9 @@ export const crmRouter = {
 				conditions.push(
 					or(
 						ilike(leads.firstName, searchPattern),
+						ilike(leads.middleName, searchPattern),
 						ilike(leads.lastName, searchPattern),
+						ilike(leads.secondLastName, searchPattern),
 						ilike(leads.email, searchPattern),
 						ilike(leads.phone, searchPattern),
 						ilike(leads.dpi, searchPattern),
@@ -2825,7 +2828,9 @@ export const crmRouter = {
 				.select({
 					id: leads.id,
 					firstName: leads.firstName,
+					middleName: leads.middleName,
 					lastName: leads.lastName,
+					secondLastName: leads.secondLastName,
 					email: leads.email,
 					phone: leads.phone,
 					dpi: leads.dpi,
@@ -4482,6 +4487,21 @@ export const crmRouter = {
 	// ============================================================
 	// DISBURSEMENT CHECKLIST ENDPOINTS (90% → 100%)
 	// ============================================================
+
+	// Get disbursement notes for an opportunity (lightweight, no stage check)
+	getDisbursementNotes: crmProcedure
+		.input(z.object({ opportunityId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			const [checklist] = await db
+				.select({ notes: disbursementChecklists.notes })
+				.from(disbursementChecklists)
+				.where(
+					eq(disbursementChecklists.opportunityId, input.opportunityId),
+				)
+				.limit(1);
+
+			return { notes: checklist?.notes ?? null };
+		}),
 
 	// Get or create disbursement checklist for an opportunity
 	getDisbursementChecklist: analystProcedure

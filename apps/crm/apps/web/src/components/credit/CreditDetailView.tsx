@@ -2556,6 +2556,22 @@ export function CreditDetailView({
 								</Dialog>
 							</div>
 						</CardHeader>
+						{vehiculo && (
+							<div className="mx-6 mb-2 flex items-center gap-2 rounded-md border bg-muted/50 px-3 py-2">
+								<Car className="h-4 w-4 shrink-0 text-muted-foreground" />
+								<span className="text-muted-foreground text-sm">
+									{vehicleString}
+								</span>
+								{(vehiculo as any).isOwned && (
+									<Badge
+										variant="outline"
+										className="border-sky-300 bg-sky-50 text-[10px] text-sky-700 dark:border-sky-700 dark:bg-sky-950 dark:text-sky-300"
+									>
+										Cash In
+									</Badge>
+								)}
+							</div>
+						)}
 						<CardContent>
 							{checksQuery.isLoading ? (
 								<p className="text-center text-muted-foreground">

@@ -2426,12 +2426,16 @@ function VehiclesDashboard() {
 											| "sold"
 											| "maintenance"
 											| "auction",
-									) =>
+									) => {
+										const wasVendido = editVehicleForm.status === "sold";
 										setEditVehicleForm({
 											...editVehicleForm,
 											status: value,
-										})
-									}
+											...(wasVendido && value !== "sold"
+												? { isOwned: true }
+												: {}),
+										});
+									}}
 								>
 									<SelectTrigger>
 										<SelectValue placeholder="Seleccionar estado" />

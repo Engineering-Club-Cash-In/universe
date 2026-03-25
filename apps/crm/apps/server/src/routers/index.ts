@@ -80,6 +80,7 @@ export const appRouter = {
 	updateAnalysisChecklistVehicleVerification:
 		crmRouter.updateAnalysisChecklistVehicleVerification,
 	// Disbursement checklist (90% → 100%)
+	getDisbursementNotes: crmRouter.getDisbursementNotes,
 	getDisbursementChecklist: crmRouter.getDisbursementChecklist,
 	updateDisbursementChecklistItem: crmRouter.updateDisbursementChecklistItem,
 	updateDisbursementChecklistNotes: crmRouter.updateDisbursementChecklistNotes,

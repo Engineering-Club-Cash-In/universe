@@ -88,22 +88,44 @@ export async function generateInspectionPdf(vehicle: any) {
   doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
-  doc.text("Marca/Modelo:", 14, y);
-  doc.text("VIN:", 14, y + 6);
+  doc.text("Marca/Modelo/Año:", 14, y);
+  doc.text("Versión/Equip.:", 14, y + 6);
+  doc.text("Placa:", 14, y + 12);
+  doc.text("VIN/Chasis:", 14, y + 18);
+  doc.text("No. Motor:", 14, y + 24);
+  doc.text("Tipo:", 14, y + 30);
+  doc.text("Procedencia:", 14, y + 36);
+
   doc.text("Color:", 105, y);
-  doc.text("Kilometraje:", 105, y + 6);
-  doc.text("Combustible:", 105, y + 12);
+  doc.text("Millas:", 105, y + 6);
+  doc.text("Kilómetros:", 105, y + 12);
+  doc.text("Combustible:", 105, y + 18);
+  doc.text("Cilindros:", 105, y + 24);
+  doc.text("Motor (CC):", 105, y + 30);
+  doc.text("Transmisión:", 105, y + 36);
+  doc.text("Tracción:", 105, y + 42);
 
   doc.setFont("helvetica", "normal");
   doc.setTextColor(0, 0, 0);
-  doc.text(`${vehicle.vehicleMake} ${vehicle.vehicleModel} ${vehicle.vehicleYear}`, 45, y);
-  doc.text(vehicle.vinNumber, 45, y + 6);
-  doc.text(vehicle.color, 135, y);
-  doc.text(`${Number(vehicle.kmMileage).toLocaleString()} km`, 135, y + 6);
-  doc.text(vehicle.fuelType, 135, y + 12);
+  doc.text(`${vehicle.vehicleMake || ""} ${vehicle.vehicleModel || ""} ${vehicle.vehicleYear || ""}`, 47, y);
+  doc.text(vehicle.trim || "N/A", 47, y + 6);
+  doc.text(vehicle.licensePlate || "N/A", 47, y + 12);
+  doc.text(vehicle.vinNumber || "N/A", 47, y + 18);
+  doc.text(vehicle.motorNumber || "N/A", 47, y + 24);
+  doc.text(vehicle.vehicleType || "N/A", 47, y + 30);
+  doc.text(vehicle.origin || "N/A", 47, y + 36);
+
+  doc.text(vehicle.color || "N/A", 135, y);
+  doc.text(vehicle.milesMileage ? `${Number(vehicle.milesMileage).toLocaleString()} mi` : "N/A", 135, y + 6);
+  doc.text(`${Number(vehicle.kmMileage).toLocaleString()} km`, 135, y + 12);
+  doc.text(vehicle.fuelType || "N/A", 135, y + 18);
+  doc.text(vehicle.cylinders || "N/A", 135, y + 24);
+  doc.text(vehicle.engineCC || "N/A", 135, y + 30);
+  doc.text(vehicle.transmission || "N/A", 135, y + 36);
+  doc.text(vehicle.traction || "N/A", 135, y + 42);
 
   // Conditions
-  y += 22;
+  y += 52;
   doc.setFontSize(14);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
@@ -152,27 +174,131 @@ export async function generateInspectionPdf(vehicle: any) {
   doc.text("Revisión 360", 14, y);
 
   if (vehicle.all360Items && vehicle.all360Items.length > 0) {
-    const checksData = vehicle.all360Items.map((check: any) => [
-      formatAreaName(check.area),
-      check.checkpoint,
-      check.status,
-      check.comment || "",
-    ]);
+    const getStandardCategory = (area: string) => {
+      if (!area) return "Otros";
+      const raw = area.toLowerCase().replace(/_/g, ' ');
+      if (raw.includes('exterior')) return "Exterior";
+      if (raw.includes('aro') || raw.includes('llanta')) return "Aros y Llantas";
+      if (raw.includes('interior')) return "Interior";
+      if (raw.includes('seguridad')) return "Seguridad";
+      if (raw.includes('herramienta')) return "Herramientas";
+      if (raw.includes('electric') || raw.includes('eléctric')) return "Sistema Eléctrico, Electrónico y Otros";
+      if (raw.includes('motor') || raw.includes('transmisi')) return "Motor y Transmisión";
+      if (raw.includes('identificacion') || raw.includes('identificación') || raw.includes('numeros')) return "Números de identificación del vehículo";
+      if (raw.includes('freno') || raw.includes('suspen')) return "Frenos y Suspensión";
+      if (raw.includes('tren') || raw.includes('direcci')) return "Tren Delantero y Dirección";
+      if (raw.includes('chasis')) return "Chasis";
+      return formatAreaName(area);
+    };
+
+    const sortedItems = [...vehicle.all360Items].sort((a: any, b: any) => {
+      const categoryOrder = [
+        "Exterior",
+        "Aros y Llantas",
+        "Interior",
+        "Seguridad",
+        "Herramientas",
+        "Sistema Eléctrico, Electrónico y Otros",
+        "Motor y Transmisión",
+        "Números de identificación del vehículo",
+        "Frenos y Suspensión",
+        "Tren Delantero y Dirección",
+        "Chasis",
+      ];
+      
+      const stdA = getStandardCategory(a.area);
+      const stdB = getStandardCategory(b.area);
+
+      const getIndex = (stdCat: string) => {
+        const index = categoryOrder.indexOf(stdCat);
+        return index !== -1 ? index : 998;
+      };
+
+      const indexA = getIndex(stdA);
+      const indexB = getIndex(stdB);
+      
+      if (indexA !== indexB) {
+        return indexA - indexB;
+      }
+      
+      if (stdA !== stdB) {
+         return stdA.localeCompare(stdB);
+      }
+      
+      return (a.checkpoint || "").localeCompare(b.checkpoint || "");
+    });
+
+    const checksData: any[] = [];
+    let currentArea = "";
+
+    sortedItems.forEach((check: any) => {
+      const areaName = getStandardCategory(check.area).toUpperCase();
+      if (areaName !== currentArea) {
+        currentArea = areaName;
+        checksData.push([
+          { content: `Área: ${areaName}`, colSpan: 3, styles: { fillColor: primaryColor as any, textColor: [255, 255, 255], fontStyle: 'bold', halign: 'left' } }
+        ]);
+        checksData.push([
+          { content: "Punto de Verificación", styles: { fillColor: primaryColor as any, textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' } },
+          { content: "ESTADO", styles: { fillColor: primaryColor as any, textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center', cellWidth: 25 } },
+          { content: "Comentarios", styles: { fillColor: primaryColor as any, textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' } }
+        ]);
+      }
+      let commentStr = check.comment || "";
+      if (check.checkpoint.toLowerCase().includes("compresiones") && check.metadata) {
+        try {
+          const mData = typeof check.metadata === 'string' ? JSON.parse(check.metadata) : check.metadata;
+          if (mData && typeof mData === 'object') {
+
+            // Use vehicle cylinder count to limit the loop
+            let cylCount = 8;
+            if (vehicle.cylinders) {
+              const parsed = parseInt(vehicle.cylinders.toString().replace(/\D/g, ''), 10);
+              if (!isNaN(parsed) && parsed > 0 && parsed <= 16) {
+                cylCount = parsed;
+              }
+            }
+
+            const psiList: string[] = [];
+            for (let i = 1; i <= cylCount; i++) {
+              const val = mData[`cilindro_${i}`];  // Actual DB key format: cilindro_N
+              if (val !== undefined && val !== null && val !== "" && val !== 0 && val !== "0") {
+                psiList.push(`• C${i}: ${val} PSI`);
+              }
+            }
+
+            if (psiList.length > 0) {
+              commentStr += (commentStr ? "\n\n" : "") + `Presiones Registradas:\n${psiList.join('\n')}`;
+            }
+          }
+        } catch (e) { /* ignore */ }
+      }
+
+      checksData.push([
+        check.checkpoint,
+        check.status,
+        commentStr,
+      ]);
+    });
 
     autoTable(doc, {
       startY: y + 5,
-      head: [["Área", "Punto de revisión", "Estado", "Comentarios"]],
       body: checksData,
       theme: 'grid',
       styles: { fontSize: 8, cellPadding: 2 },
-      headStyles: { fillColor: primaryColor as any, textColor: [255, 255, 255] },
       alternateRowStyles: { fillColor: [245, 247, 250] },
+      columnStyles: {
+        0: { cellWidth: 55 },   // Punto de Verificación — más corto
+        1: { cellWidth: 22, halign: 'center' },  // ESTADO — fijo
+        2: { cellWidth: 'auto' },  // Comentarios — ocupa el resto del espacio
+      },
       willDrawCell: function (data) {
-        if (data.section === "body" && data.column.index === 2) {
+        if (data.section === "body" && data.column.index === 1) {
           const status = data.cell.text[0];
           if (status === "BAD" || status === "LEGACY_BAD") doc.setTextColor(200, 50, 50);
           else if (status === "REGULAR") doc.setTextColor(200, 150, 50);
           else if (status === "GOOD" || status === "OK") doc.setTextColor(50, 150, 50);
+          else if (status === "ESTADO") doc.setTextColor(255, 255, 255);
         }
       },
       didDrawCell: function (data) {
@@ -205,34 +331,29 @@ export async function generateInspectionPdf(vehicle: any) {
     const checklistData = vehicle.allChecklistItems.map((item: any) => [
       item.item,
       item.checked ? "Sí" : "No",
-      item.severity === "critical" ? "Crítico" : item.severity === "warning" ? "Advertencia" : item.severity,
       item.notes || "",
       (item.evidence && item.evidence.length > 0) ? `Fotos: ${item.evidence.map((_: any, i: number) => `[${i + 1}]`).join(' ')}` : ""
     ]);
 
     autoTable(doc, {
       startY: y + 5,
-      head: [["Punto Evaluado", "Anomalía", "Gravedad", "Notas Adicionales", "Evidencia"]],
+      head: [["Punto Evaluado", "Anomalía", "Notas Adicionales", "Evidencia"]],
       body: checklistData,
       theme: 'grid',
       styles: { fontSize: 8, cellPadding: 2 },
       headStyles: { fillColor: primaryColor as any, textColor: [255, 255, 255] },
       alternateRowStyles: { fillColor: [245, 247, 250] },
       willDrawCell: function (data) {
-        if (data.section === "body" && data.column.index === 4 && data.cell.text.length > 0 && data.cell.text[0].startsWith("Fotos:")) {
+        if (data.section === "body" && data.column.index === 3 && data.cell.text.length > 0 && data.cell.text[0].startsWith("Fotos:")) {
           doc.setTextColor(0, 102, 204); // Link color
         }
         if (data.section === "body" && data.column.index === 1 && data.cell.text[0] === "Sí") {
            doc.setTextColor(200, 50, 50); // Red if marked anomaly
         }
-        if (data.section === "body" && data.column.index === 2) {
-           if (data.cell.text[0] === "Crítico") doc.setTextColor(200, 50, 50);
-           else if (data.cell.text[0] === "Advertencia") doc.setTextColor(200, 150, 50);
-        }
       },
       didDrawCell: function (data) {
         doc.setTextColor(0, 0, 0); // reset
-        if (data.section === "body" && data.column.index === 4 && data.cell.text.length > 0 && data.cell.text[0].startsWith("Fotos:")) {
+        if (data.section === "body" && data.column.index === 3 && data.cell.text.length > 0 && data.cell.text[0].startsWith("Fotos:")) {
           const check = vehicle.allChecklistItems[data.row.index];
           if (check && check.evidence && check.evidence.length > 0) {
             const padding = typeof data.cell.styles.cellPadding === 'number' 
@@ -287,65 +408,74 @@ export async function generateInspectionPdf(vehicle: any) {
   doc.text("Registro Fotográfico Principal", 14, y);
 
   if (vehicle.allPhotos && vehicle.allPhotos.length > 0) {
-    // Select one photo per available category
-    const photosByCategory: Record<string, any[]> = {};
-    vehicle.allPhotos.forEach((p: any) => {
-      const cat = p.category ? p.category.toLowerCase() : 'otros';
-      if (!photosByCategory[cat]) photosByCategory[cat] = [];
-      photosByCategory[cat].push(p);
-    });
-
-    const preferredOrder = [
-      'exterior',
-      'interior',
-      'engine', 'motor',
-      'wheels', 'llantas',
-      'damage', 'daños',
-      'others', 'otros'
-    ];
-    let mainPhotos: any[] = [];
-    
-    preferredOrder.forEach(cat => {
-      // Find matches treating 'fotografías exteriores' as 'exterior', etc.
-      const matchedKeys = Object.keys(photosByCategory).filter(k => k.includes(cat));
-      if (matchedKeys.length > 0) {
-        mainPhotos.push(photosByCategory[matchedKeys[0]][0]);
-        // Remove so we don't pick it again
-        delete photosByCategory[matchedKeys[0]];
-      }
-    });
-
-    // Add any remaining categories
-    Object.keys(photosByCategory).forEach(cat => {
-      if (photosByCategory[cat].length > 0) {
-        mainPhotos.push(photosByCategory[cat][0]);
-      }
-    });
-
-    // Limit to max 6 photos to keep it concise
-    mainPhotos = mainPhotos.slice(0, 6);
-    
-    const formatCategoryName = (cat: string) => {
-      const map: Record<string, string> = {
-        'exterior': 'Exterior',
-        'interior': 'Interior',
-        'engine': 'Motor',
-        'wheels': 'Llantas',
-        'damage': 'Daños',
-        'others': 'Otros'
-      };
-      return map[cat.toLowerCase()] || cat.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    const getStandardPhotoCategory = (cat: string) => {
+      const raw = cat.toLowerCase().replace(/_/g, ' ');
+      if (raw.includes('exterior')) return "Exterior";
+      if (raw.includes('interior')) return "Interior";
+      if (raw.includes('motor') || raw.includes('engine')) return "Motor";
+      if (raw.includes('llanta') || raw.includes('wheel') || raw.includes('rueda')) return "Ruedas y Neumáticos";
+      if (raw.includes('daño') || raw.includes('damage')) return "Daños y Áreas Específicas";
+      return "Otros";
     };
 
-    const photosTableData = mainPhotos.map((photo: any) => [
-      formatCategoryName(photo.category || "Otros"),
-      photo.title || photo.photoType || "Sin título",
-      photo.url ? "Ver foto" : "N/A"
-    ]);
+    const photosByCategoryAndType: Record<string, Record<string, any[]>> = {};
+
+    vehicle.allPhotos.forEach((p: any) => {
+      const dbCat = p.category ? p.category : 'otros';
+      const normCat = getStandardPhotoCategory(dbCat);
+      const type = p.photoType || p.title || "Otro";
+
+      if (!photosByCategoryAndType[normCat]) photosByCategoryAndType[normCat] = {};
+      if (!photosByCategoryAndType[normCat][type]) photosByCategoryAndType[normCat][type] = [];
+      photosByCategoryAndType[normCat][type].push(p);
+    });
+
+    const preferredCatOrder = [
+      'Exterior', 'Ruedas y Neumáticos', 'Interior', 'Motor', 'Daños y Áreas Específicas', 'Otros'
+    ];
+    
+    const photosTableData: any[] = [];
+    const urlMap = new Map<number, string>();
+    let rIndex = 0;
+    
+    preferredCatOrder.forEach(cat => {
+      if (photosByCategoryAndType[cat]) {
+        photosTableData.push([
+          { content: `Categoría: ${cat.toUpperCase()}`, colSpan: 3, styles: { fillColor: primaryColor as any, textColor: [255, 255, 255], fontStyle: 'bold', halign: 'left' } }
+        ]);
+        rIndex++;
+
+        const typesInCat = Object.keys(photosByCategoryAndType[cat]).sort();
+        typesInCat.forEach(type => {
+            const photos = photosByCategoryAndType[cat][type];
+            photos.sort((a, b) => {
+              const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+              const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+              return timeB - timeA;
+            });
+            const mostRecentPhoto = photos[0];
+            
+            photosTableData.push([
+              mostRecentPhoto.title || mostRecentPhoto.photoType || "Sin título",
+              mostRecentPhoto.comment || "", // Strict user comments
+              mostRecentPhoto.url ? "Ver foto" : "N/A"
+            ]);
+            
+            if (mostRecentPhoto.url) {
+              let photoUrl = mostRecentPhoto.url;
+              if (!photoUrl.startsWith('http')) {
+                 photoUrl = 'https://' + photoUrl;
+              }
+              urlMap.set(rIndex, photoUrl);
+            }
+            rIndex++;
+        });
+      }
+    });
 
     autoTable(doc, {
       startY: y + 5,
-      head: [["Categoría", "Descripción", "Enlace"]],
+      head: [["Descripción", "Comentarios", "Enlace"]],
       body: photosTableData,
       theme: 'grid',
       styles: { fontSize: 8, cellPadding: 3 },
@@ -359,11 +489,9 @@ export async function generateInspectionPdf(vehicle: any) {
       didDrawCell: function (data) {
         doc.setTextColor(0, 0, 0); // reset
         if (data.section === "body" && data.column.index === 2 && data.cell.text[0] === "Ver foto") {
-          const photo = mainPhotos[data.row.index];
-          if (photo && photo.url) {
-            doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, {
-              url: photo.url
-            });
+          const url = urlMap.get(data.row.index);
+          if (url) {
+            doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url });
           }
         }
       }

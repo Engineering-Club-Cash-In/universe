@@ -101,6 +101,7 @@ async function consultarCreditosInversionista(
       porcentaje_inversionista: tabla.porcentaje_participacion_inversionista,
       cuota_inversionista: tabla.cuota_inversionista,
       origen: sql<OrigenDatos>`${config.origen}`.as('origen'),
+      tipo_reinversion: config.origen === "espejo" ? (tabla as any).tipo_reinversion : sql<string | null>`NULL`.as("tipo_reinversion"),
     })
     .from(tabla)
     .where(inArray(tabla.inversionista_id, inversionistaIds));
@@ -1392,7 +1393,12 @@ const mes = fechaParaMes
                 abonoGeneralInteres = abono_interes.minus(isr);
               }
 
-              switch (inv.reinversion) {
+              let reinversionActual = inv.reinversion;
+              if (inv.reinversion === "reinversion_combinada") {
+                reinversionActual = c.tipo_reinversion || "sin_reinversion";
+              }
+
+              switch (reinversionActual) {
                 case "sin_reinversion":
                   cuota_inversor = abono_capital
                     .plus(abono_interes)
@@ -1802,7 +1808,12 @@ export async function getInvestorTotalsGlobales(
       let reinvInteres = new Big(0);
       const interesTotal = abono_interes.plus(inv.emite_factura ? abono_iva : isr.neg());
 
-      switch (inv.reinversion) {
+      let reinversionActual = inv.reinversion;
+      if (inv.reinversion === "reinversion_combinada") {
+        reinversionActual = c.tipo_reinversion || "sin_reinversion";
+      }
+
+      switch (reinversionActual) {
         case "sin_reinversion":
           cuota_inversor = abono_capital.plus(interesTotal);
           break;
@@ -3694,6 +3705,7 @@ async function consultarResumenGlobalPorEstadoPago(
   }
 
   const pe = pagos_credito_inversionistas_espejo;
+  const ce = creditos_inversionistas_espejo;
   const condicionesJoinPagos: any[] = [
     eq(inversionistas.inversionista_id, pe.inversionista_id),
     eq(pe.estado_liquidacion, estadoPago),
@@ -3738,6 +3750,14 @@ async function consultarResumenGlobalPorEstadoPago(
         WHEN 'reinversion_capital' THEN COALESCE(SUM(${pe.abono_capital}), 0)
         WHEN 'reinversion_interes' THEN COALESCE(SUM(${pe.abono_interes}), 0)
         WHEN 'reinversion_total' THEN COALESCE(SUM(${pe.abono_capital} + ${pe.abono_interes}), 0)
+        WHEN 'reinversion_combinada' THEN COALESCE(SUM(
+          CASE ${ce.tipo_reinversion}
+            WHEN 'reinversion_capital' THEN ${pe.abono_capital}
+            WHEN 'reinversion_interes' THEN ${pe.abono_interes}
+            WHEN 'reinversion_total' THEN ${pe.abono_capital} + ${pe.abono_interes}
+            ELSE 0
+          END
+        ), 0)
         WHEN 'reinversion_variable' THEN LEAST(
           COALESCE(${inversionistas.monto_reinversion}, 0)::numeric,
           COALESCE(SUM(
@@ -3767,6 +3787,14 @@ async function consultarResumenGlobalPorEstadoPago(
             WHEN 'reinversion_capital' THEN COALESCE(SUM(${pe.abono_capital}), 0)
             WHEN 'reinversion_interes' THEN COALESCE(SUM(${pe.abono_interes}), 0)
             WHEN 'reinversion_total' THEN COALESCE(SUM(${pe.abono_capital} + ${pe.abono_interes}), 0)
+            WHEN 'reinversion_combinada' THEN COALESCE(SUM(
+              CASE ${ce.tipo_reinversion}
+                WHEN 'reinversion_capital' THEN ${pe.abono_capital}
+                WHEN 'reinversion_interes' THEN ${pe.abono_interes}
+                WHEN 'reinversion_total' THEN ${pe.abono_capital} + ${pe.abono_interes}
+                ELSE 0
+              END
+            ), 0)
             WHEN 'reinversion_variable' THEN LEAST(
               COALESCE(${inversionistas.monto_reinversion}, 0)::numeric,
               COALESCE(SUM(
@@ -3808,6 +3836,20 @@ async function consultarResumenGlobalPorEstadoPago(
             END
         ), 0)
         WHEN 'reinversion_total' THEN 0
+        WHEN 'reinversion_combinada' THEN COALESCE(SUM(
+          CASE ${ce.tipo_reinversion}
+            WHEN 'reinversion_total' THEN 0
+            WHEN 'reinversion_capital' THEN (
+              ${pe.abono_interes} + CASE WHEN ${inversionistas.emite_factura} THEN ${pe.abono_iva_12} ELSE -ROUND(${pe.abono_interes} * 0.07, 2) END
+            )
+            WHEN 'reinversion_interes' THEN (
+              ${pe.abono_capital} + CASE WHEN ${inversionistas.emite_factura} THEN ${pe.abono_iva_12} ELSE -ROUND(${pe.abono_interes} * 0.07, 2) END
+            )
+            ELSE (
+               ${pe.abono_capital} + ${pe.abono_interes} + CASE WHEN ${inversionistas.emite_factura} THEN ${pe.abono_iva_12} ELSE -ROUND(${pe.abono_interes} * 0.07, 2) END
+            )
+          END
+        ), 0)
         WHEN 'reinversion_variable' THEN
           COALESCE(SUM(
             ${pe.abono_capital}
@@ -3867,14 +3909,17 @@ async function consultarResumenGlobalPorEstadoPago(
     );
   }
 
-  return db
+  const result = await db
     .select(selectObj as any)
     .from(inversionistas)
     .leftJoin(bancos, eq(inversionistas.banco_id, bancos.banco_id))
     .leftJoin(pe, and(...condicionesJoinPagos))
+    .leftJoin(ce, and(eq(pe.credito_id, ce.credito_id), eq(pe.inversionista_id, ce.inversionista_id)))
     .where(and(...condicionesWhere))
     .groupBy(...groupByFields)
     .having(excel ? undefined : sql`COUNT(${pe.id}) > 0`);
+
+  return result as unknown as InversionistaResumenRow[];
 }
 
 async function consultarResumenGlobalDesdeLiquidaciones(
@@ -3942,7 +3987,7 @@ async function consultarResumenGlobalDesdeLiquidaciones(
     );
   }
 
-  return db
+  const result = await db
     .select(selectFields as any)
     .from(liquidaciones)
     .innerJoin(
@@ -3952,6 +3997,8 @@ async function consultarResumenGlobalDesdeLiquidaciones(
     .leftJoin(bancos, eq(inversionistas.banco_id, bancos.banco_id))
     .where(and(...condicionesWhere))
     .groupBy(...groupByFields);
+
+  return result as unknown as InversionistaResumenRow[];
 }
 
 function mapResumenRow(

@@ -1,5 +1,5 @@
 import { Elysia, t } from "elysia";
-import { llenarTablaEspejo, getCreditsWithMirrors, getCreditsByInvestor } from "../controllers/mirrorInvestor";
+import { llenarTablaEspejo, getCreditsWithMirrors, getCreditsByInvestor, asignarReinversionEspejo } from "../controllers/mirrorInvestor";
 
 export const mirrorInvestorRouter = new Elysia()
   .post("/llenar-tabla-espejo", llenarTablaEspejo, {
@@ -43,6 +43,29 @@ export const mirrorInvestorRouter = new Elysia()
           summary: "Obtener créditos asociados a un inversionista (Real o Espejo)",
           description: "Devuelve todos los créditos donde el ID proporcionado participa, junto con sus inversionistas originales y espejo.",
           tags: ["Inversionistas", "Espejo"]
+      }
+  })
+  .post("/asignar-reinversion", asignarReinversionEspejo, {
+      body: t.Object({
+          asignaciones: t.Array(
+              t.Object({
+                  id_credito_inversionista_espejo: t.Number(),
+                  tipo_reinversion: t.Enum({
+                      sin_reinversion: "sin_reinversion",
+                      reinversion_capital: "reinversion_capital",
+                      reinversion_interes: "reinversion_interes",
+                      reinversion_total: "reinversion_total",
+                      reinversion_variable: "reinversion_variable",
+                      reinversion_combinada: "reinversion_combinada",
+                  })
+              }),
+              { minItems: 1 }
+          )
+      }),
+      detail: {
+          summary: "Asignar tipo de reinversión a créditos espejo",
+          description: "Recibe un arreglo con id_credito_inversionista_espejo y el tipo_reinversion para actualizar en lote.",
+          tags: ["Inversionistas", "Espejo", "Reinversión"]
       }
   });
 

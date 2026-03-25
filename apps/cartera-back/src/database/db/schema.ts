@@ -24,6 +24,15 @@
   }
   export const userRoleEnum = pgEnum("user_role", ["ADMIN", "ASESOR","CONTA"]);
   export const customSchema = pgSchema("cartera");
+
+  export const tipoReinversionEnum = customSchema.enum("tipo_reinversion", [
+    "sin_reinversion",
+    "reinversion_capital",
+    "reinversion_interes",
+    "reinversion_total",
+    "reinversion_variable",
+    "reinversion_combinada"
+  ]);
   export const admins = customSchema.table("admins", {
     admin_id: serial("admin_id").primaryKey(),
     nombre: varchar("nombre", { length: 150 }).notNull(),
@@ -348,6 +357,7 @@
       fecha_creacion: timestamp("fecha_creacion", { withTimezone: true }).notNull().$default(() => new Date()),
       fecha_inicio_participacion: date("fecha_inicio_participacion").notNull().default("2025-12-01"),
       updated_at: timestamp("updated_at").defaultNow(),
+      tipo_reinversion: tipoReinversionEnum("tipo_reinversion"),
     },
     (t) => ({
       uxCreditoInvEspejo: uniqueIndex("ux_credito_inversionista_espejo").on(t.credito_id, t.inversionista_id),
@@ -562,13 +572,7 @@
     "Capital"
   ]);
 
-    export const tipoReinversionEnum = customSchema.enum("tipo_reinversion", [
-      "sin_reinversion",
-      "reinversion_capital",
-      "reinversion_interes",
-      "reinversion_total",
-      "reinversion_variable"
-    ]);
+
 
   export const tipoMonedaEnum = customSchema.enum("tipo_moneda", ["quetzales", "dolares"]);
 

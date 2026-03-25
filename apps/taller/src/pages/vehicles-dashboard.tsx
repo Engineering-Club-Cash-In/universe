@@ -70,6 +70,11 @@ interface DashboardVehicle {
   vehicleType: string;
   color: string;
   fuelType: string;
+  motorNumber?: string;
+  milesMileage?: string | number;
+  cylinders?: string;
+  engineCC?: string;
+  transmission?: string;
   vehicleRating: string;
   marketValue: string;
   suggestedCommercialValue: string;
@@ -93,7 +98,7 @@ interface DashboardVehicle {
   tireConditionSpare?: number;
   paintCondition: number | null;
   hasAgencyHistory: boolean | null;
-  failedChecks: { area: string; checkpoint: string; status?: string; comment?: string | null }[];
+  failedChecks: { area: string; checkpoint: string; status?: string; comment?: string | null; metadata?: any }[];
   all360Items?: VehicleInspection360Item[];
   checklistIssues?: { id?: string; item: string; severity: string; notes?: string | null; evidence?: ChecklistItemEvidence[] }[];
   allChecklistItems?: InspectionChecklistItem[];
@@ -430,6 +435,11 @@ export default function VehiclesDashboard() {
       vehicleType: vehicle.vehicleType || '',
       color: vehicle.color || '',
       fuelType: vehicle.fuelType || '',
+      motorNumber: vehicle.motorNumber || '',
+      milesMileage: vehicle.milesMileage?.toString() || '',
+      cylinders: vehicle.cylinders || '',
+      engineCC: vehicle.engineCC || '',
+      transmission: vehicle.transmission || '',
       vehicleRating: latestInspection?.vehicleRating || 'Pendiente',
       marketValue: latestInspection?.marketValue || '0',
       suggestedCommercialValue: latestInspection?.suggestedCommercialValue || '0',
@@ -471,7 +481,8 @@ export default function VehiclesDashboard() {
             area: item.area,
             checkpoint: item.checkpoint,
             status: item.status,
-            comment: item.comment
+            comment: item.comment,
+            metadata: item.metadata,
           }))
         : [],
       checklistIssues: latestInspection?.checklistItems
@@ -1445,32 +1456,49 @@ export default function VehiclesDashboard() {
                             <div className="text-muted-foreground">Marca</div>
                             <div className="font-medium">{selectedVehicle.vehicleMake}</div>
 
-                            <div className="text-muted-foreground">Modelo</div>
+                            <div className="text-muted-foreground">Línea del vehículo</div>
                             <div className="font-medium">{selectedVehicle.vehicleModel}</div>
 
-                            <div className="text-muted-foreground">Versión/Trim</div>
+                            <div className="text-muted-foreground">Versión/Equipamiento</div>
                             <div className="font-medium">{selectedVehicle.trim || "N/A"}</div>
 
                             <div className="text-muted-foreground">Año</div>
                             <div className="font-medium">{selectedVehicle.vehicleYear}</div>
 
-                            <div className="text-muted-foreground">Tipo</div>
+                            <div className="text-muted-foreground">Procedencia</div>
+                            <div className="font-medium">{selectedVehicle.origin || "N/A"}</div>
+
+                            <div className="text-muted-foreground">Tipo de vehículo</div>
                             <div className="font-medium">{selectedVehicle.vehicleType}</div>
+                            
+                            <div className="text-muted-foreground">Transmisión</div>
+                            <div className="font-medium">{selectedVehicle.transmission || "N/A"}</div>
 
                             <div className="text-muted-foreground">Tracción</div>
                             <div className="font-medium">{selectedVehicle.traction || "N/A"}</div>
+                            
+                            <div className="text-muted-foreground">Cilindros</div>
+                            <div className="font-medium">{selectedVehicle.cylinders || "N/A"}</div>
+                            
+                            <div className="text-muted-foreground">Motor (CC)</div>
+                            <div className="font-medium">{selectedVehicle.engineCC || "N/A"}</div>
                           </div>
 
                           <div className="pt-2 border-t space-y-2">
                             <div className="flex items-center gap-2 text-sm">
                               <Hash className="h-3.5 w-3.5 text-muted-foreground" />
-                              <span className="text-muted-foreground">Placa:</span>
+                              <span className="text-muted-foreground">No. de placa:</span>
                               <span className="font-mono font-medium">{selectedVehicle.licensePlate}</span>
                             </div>
                             <div className="flex items-start gap-2 text-sm">
                               <Hash className="h-3.5 w-3.5 text-muted-foreground mt-0.5" />
-                              <span className="text-muted-foreground">VIN:</span>
+                              <span className="text-muted-foreground">No. VIN/Chasis:</span>
                               <span className="font-mono text-xs break-all">{selectedVehicle.vinNumber}</span>
+                            </div>
+                            <div className="flex items-start gap-2 text-sm">
+                              <Hash className="h-3.5 w-3.5 text-muted-foreground mt-0.5" />
+                              <span className="text-muted-foreground">No. de Motor:</span>
+                              <span className="font-mono text-xs break-all">{selectedVehicle.motorNumber || "N/A"}</span>
                             </div>
                             <div className="flex items-center gap-2 text-sm">
                               <Palette className="h-3.5 w-3.5 text-muted-foreground" />
@@ -1479,7 +1507,12 @@ export default function VehiclesDashboard() {
                             </div>
                             <div className="flex items-center gap-2 text-sm">
                               <Gauge className="h-3.5 w-3.5 text-muted-foreground" />
-                              <span className="text-muted-foreground">Kilometraje:</span>
+                              <span className="text-muted-foreground">Millas recorridas:</span>
+                              <span className="font-medium">{selectedVehicle.milesMileage ? `${Number(selectedVehicle.milesMileage).toLocaleString()} mi` : "N/A"}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-sm">
+                              <Gauge className="h-3.5 w-3.5 text-muted-foreground" />
+                              <span className="text-muted-foreground">Kilómetros recorridos:</span>
                               <span className="font-medium">{Number(selectedVehicle.kmMileage).toLocaleString()} km</span>
                             </div>
                             <div className="flex items-center gap-2 text-sm">
@@ -1741,6 +1774,40 @@ export default function VehiclesDashboard() {
                                         {check.comment}
                                       </p>
                                     )}
+                                    {check.metadata && check.checkpoint.toLowerCase().includes("compresiones") && (() => {
+                                      try {
+                                        const mData = typeof check.metadata === 'string' ? JSON.parse(check.metadata) : check.metadata;
+                                        let cylCount = 8;
+                                        if (selectedVehicle.cylinders) {
+                                           const parsed = parseInt(selectedVehicle.cylinders.toString().replace(/\D/g, ''), 10);
+                                           if (!isNaN(parsed) && parsed > 0 && parsed <= 16) cylCount = parsed;
+                                        }
+
+                                        const validPts = [];
+                                        for (let i = 1; i <= cylCount; i++) {
+                                          const val = mData[`c${i}`];
+                                          if (val !== undefined && val !== null && val !== 0 && val !== "0" && val !== "") {
+                                             validPts.push({ c: i, val });
+                                          }
+                                        }
+
+                                        if (validPts.length === 0) return null;
+
+                                        return (
+                                          <div className="mt-2 text-xs">
+                                            <div className="font-semibold text-slate-700 mb-1">Presiones Registradas:</div>
+                                            <div className="grid grid-cols-4 sm:grid-cols-8 gap-2 border-t border-slate-100 pt-2">
+                                              {validPts.map((pt) => (
+                                                <div key={pt.c} className="text-center bg-slate-50 rounded flex flex-col items-center border border-slate-200 shadow-sm py-1.5 transition-colors hover:border-blue-200 hover:bg-blue-50/50">
+                                                  <p className="text-[10px] text-blue-600 font-semibold mb-0.5">C{pt.c}</p>
+                                                  <p className="font-mono text-xs font-bold text-slate-700">{String(pt.val)} <span className="text-[9px] font-normal text-slate-500">PSI</span></p>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        );
+                                      } catch(e) { return null; }
+                                    })()}
                                   </div>
                                 </div>
                               );

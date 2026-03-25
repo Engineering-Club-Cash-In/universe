@@ -651,3 +651,62 @@ export const getCreditsByInvestor = async ({ query, set }: any) => {
     };
   }
 };
+
+/**
+ * Controller: asignarReinversionEspejo
+ *
+ * Body:
+ * {
+ *   asignaciones: [{
+ *     id_credito_inversionista_espejo: number,
+ *     tipo_reinversion: string
+ *   }]
+ * }
+ */
+export const asignarReinversionEspejo = async ({ body, set }: any) => {
+  try {
+    const { asignaciones } = body;
+
+    const resultados: any[] = [];
+    const omitidos: any[] = [];
+
+    await db.transaction(async (tx) => {
+      for (const req of asignaciones) {
+        const { id_credito_inversionista_espejo, tipo_reinversion } = req;
+        const [registro] = await tx
+          .select()
+          .from(creditos_inversionistas_espejo)
+          .where(eq(creditos_inversionistas_espejo.id, id_credito_inversionista_espejo))
+          .limit(1);
+
+        if (!registro) {
+          omitidos.push({ id_credito_inversionista_espejo, razon: "No existe el registro" });
+          continue;
+        }
+
+        await tx
+          .update(creditos_inversionistas_espejo)
+          .set({ tipo_reinversion, updated_at: new Date() })
+          .where(eq(creditos_inversionistas_espejo.id, id_credito_inversionista_espejo));
+
+        resultados.push({ id_credito_inversionista_espejo, tipo_reinversion });
+      }
+    });
+
+    set.status = 200;
+    return {
+      success: true,
+      message: `Se asignó reinversión a ${resultados.length} registros, ${omitidos.length} omitidos.`,
+      resultados,
+      omitidos
+    };
+  } catch (error) {
+    console.error("[asignarReinversionEspejo] Error:", error);
+    set.status = 500;
+    return {
+      success: false,
+      message: "Error al asignar tipos de reinversión",
+      error: String(error)
+    };
+  }
+};

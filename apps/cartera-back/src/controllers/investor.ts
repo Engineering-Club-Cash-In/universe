@@ -1552,6 +1552,7 @@ const mes = fechaParaMes
         banco: inv.banco_nombre,
         tipo_cuenta: inv.tipo_cuenta,
         numero_cuenta: inv.numero_cuenta,
+        re_inversion: inv.reinversion,
         reinversion: inv.reinversion,
         monto_reinversion: inv.monto_reinversion,
         saldo_reinversion: inv.saldo_reinversion,
@@ -3195,11 +3196,12 @@ export function generarHTMLReporte(
 
         // Calcular subtotales del grupo
         let grpCapital = 0, grpInteres = 0, grpMontaAportado = 0;
-        const rows = credGrupo.map(c =>
-          (c.pagos && c.pagos.length > 0 ? c.pagos.map(pago => {
+        const rows = credGrupo.map(c => {
+          // Sumar monto_aportado UNA SOLA VEZ por crédito, no por pago
+          grpMontaAportado += Number(c.monto_aportado || 0);
+          return (c.pagos && c.pagos.length > 0 ? c.pagos.map(pago => {
             grpCapital += Number(pago.abono_capital || 0);
             grpInteres += Number(pago.abonoGeneralInteres || 0);
-            grpMontaAportado += Number(c.monto_aportado || 0);
             return `<tr>
               <td>${pago.cuota ?? c.meses_en_credito ?? ''}</td>
               <td>${c.nombre_usuario ?? ''}</td>
@@ -3217,8 +3219,8 @@ export function generarHTMLReporte(
               <td>${c.plazo ?? ''}</td>
               <td>${c.nit_usuario ?? ''}</td>
             </tr>`;
-          }).join('') : '')
-        ).join('');
+          }).join('') : '');
+        }).join('');
 
         return `
           <div style="margin-top:20px;margin-bottom:10px;">

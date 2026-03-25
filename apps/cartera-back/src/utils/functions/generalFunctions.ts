@@ -724,14 +724,14 @@ export async function buildInversionistaWorkbook(
       titleRow.getCell(2).value = labelMapR[grupo ?? ""] ?? "Sin tipo definido";
       titleRow.getCell(2).font = { bold: true, size: 11, color: { argb: CINV.white } };
       titleRow.getCell(2).fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINV.blue } };
+      row += 1; // header va una fila debajo del título
     } else {
-      row += 1;
+      row += 1; // en modo normal el header es directo en fila 6
     }
 
-    const headRowIdx = row + 1;
-    row = headRowIdx;
+    const headRowIdx = row;
     if (!headerRowSet) {
-      firstHeaderRow = row;
+      firstHeaderRow = headRowIdx;
       headerRowSet = true;
     }
 

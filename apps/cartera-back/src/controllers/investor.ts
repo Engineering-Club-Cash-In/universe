@@ -1531,6 +1531,7 @@ const mes = fechaParaMes
             total_cuota: formatValue(total_cuota.round(2).toString()),
             meses_en_credito,
             origen: c.origen, // 🆕 NUEVO: Indica si viene de tabla original o espejo
+            tipo_reinversion: inv.reinversion === "reinversion_combinada" ? c.tipo_reinversion : null,
           };
         })
       );
@@ -1551,7 +1552,7 @@ const mes = fechaParaMes
         banco: inv.banco_nombre,
         tipo_cuenta: inv.tipo_cuenta,
         numero_cuenta: inv.numero_cuenta,
-        re_inversion: inv.reinversion,
+        reinversion: inv.reinversion,
         monto_reinversion: inv.monto_reinversion,
         saldo_reinversion: inv.saldo_reinversion,
         tieneBoletaPendiente: inv.tiene_boleta_pendiente,
@@ -2304,6 +2305,7 @@ export async function getInvestorMirrorSummary(
     .select({
       credito_id:          creditos_inversionistas_espejo.credito_id,
       monto_aportado_base: creditos_inversionistas_espejo.monto_aportado,
+      tipo_reinversion:    creditos_inversionistas_espejo.tipo_reinversion,
     })
     .from(creditos_inversionistas_espejo)
     .where(eq(creditos_inversionistas_espejo.inversionista_id, inv.inversionista_id));
@@ -2423,7 +2425,13 @@ export async function getInvestorMirrorSummary(
       let reinvInteres = new Big(0);
       const interesTotal = abono_interes.plus(inv.emite_factura ? abono_iva : isr.neg());
 
-      switch (inv.reinversion) {
+      // Para reinversión combinada, aplicar la regla específica del crédito
+      let reinversionActual = inv.reinversion;
+      if (inv.reinversion === "reinversion_combinada") {
+        reinversionActual = credito.tipo_reinversion || "sin_reinversion";
+      }
+
+      switch (reinversionActual) {
         case "sin_reinversion":
           cuota_inversor = abono_capital.plus(interesTotal);
           break;
@@ -3152,6 +3160,91 @@ export function generarHTMLReporte(
         } emite factura</span>
       </div>
     </div>
+    ${inversionista.reinversion === 'reinversion_combinada' ? (() => {
+      // Agrupar créditos por tipo_reinversion
+      const labelMap: Record<string, string> = {
+        reinversion_capital: 'Reinversión Capital',
+        reinversion_interes: 'Reinversión Interés',
+        reinversion_total:   'Reinversión Total',
+        sin_reinversion:     'Sin Reinversión',
+      };
+
+      // Orden fijo de grupos
+      const grupos = ['reinversion_capital', 'reinversion_interes', 'reinversion_total', 'sin_reinversion', null];
+      const tableHead = `
+        <thead><tr>
+          <th>Meses en crédito</th><th>Nombre</th><th>Capital</th>
+          <th>% Interés</th><th>% Inversionista</th><th>Tasa interés inversor</th>
+          <th>Interés Inversor</th><th>IVA</th><th>ISR</th>
+          <th>Abono capital</th><th>% Inv. Neto</th><th>Capital restante</th>
+          <th>Cuota de mes</th><th>Plazo</th><th>NIT</th>
+        </tr></thead>`;
+
+      return grupos.map(grupo => {
+        const credGrupo = creditosData.filter(c => (c.tipo_reinversion ?? null) === grupo);
+        if (credGrupo.length === 0) return '';
+
+        const label = labelMap[grupo ?? ''] ?? 'Sin tipo definido';
+        const colorBadge: Record<string, string> = {
+          reinversion_capital: '#0485c2',
+          reinversion_interes: '#16a34a',
+          reinversion_total:   '#7c3aed',
+          sin_reinversion:     '#64748b',
+        };
+        const badge = colorBadge[grupo ?? ''] ?? '#64748b';
+
+        // Calcular subtotales del grupo
+        let grpCapital = 0, grpInteres = 0, grpMontaAportado = 0;
+        const rows = credGrupo.map(c =>
+          (c.pagos && c.pagos.length > 0 ? c.pagos.map(pago => {
+            grpCapital += Number(pago.abono_capital || 0);
+            grpInteres += Number(pago.abonoGeneralInteres || 0);
+            grpMontaAportado += Number(c.monto_aportado || 0);
+            return `<tr>
+              <td>${pago.cuota ?? c.meses_en_credito ?? ''}</td>
+              <td>${c.nombre_usuario ?? ''}</td>
+              <td>${fmt(Big(c.monto_aportado || 0).add(Big(pago.abono_capital || 0)).toFixed(2))}</td>
+              <td>${c.porcentaje_interes ?? ''} %</td>
+              <td>${pago.porcentaje_inversor ?? ''} %</td>
+              <td>${Big(pago.tasaInteresInvesor || 0).div(100).toFixed(2)} %</td>
+              <td>${fmt(pago.abono_interes)}</td>
+              <td>${fmt(pago.abono_iva)}</td>
+              <td>${fmt(pago.isr)}</td>
+              <td>${fmt(pago.abono_capital)}</td>
+              <td>${fmt(pago.abonoGeneralInteres)}</td>
+              <td>${fmt(c.monto_aportado)}</td>
+              <td>${pago.mes || '-'}${pago.cuota ? ` (Cuota #${pago.cuota})` : ''}</td>
+              <td>${c.plazo ?? ''}</td>
+              <td>${c.nit_usuario ?? ''}</td>
+            </tr>`;
+          }).join('') : '')
+        ).join('');
+
+        return `
+          <div style="margin-top:20px;margin-bottom:10px;">
+            <div style="display:inline-block;background:${badge};color:#fff;font-weight:700;font-size:1.1rem;padding:5px 18px;border-radius:20px;margin-bottom:10px;margin-left:50px;">
+              ${label}
+            </div>
+            <div class="table-wrapper" style="margin-top:0;">
+              <table>
+                ${tableHead}
+                <tbody>
+                  ${rows}
+                  <tr class="total">
+                    <td>Total ${label}</td><td></td>
+                    <td>${fmt(grpMontaAportado + grpCapital)}</td>
+                    <td></td><td></td><td></td><td></td><td></td><td></td>
+                    <td>${fmt(grpCapital)}</td>
+                    <td>${fmt(grpInteres)}</td>
+                    <td>${fmt(grpMontaAportado)}</td>
+                    <td></td><td></td><td></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>`;
+      }).join('');
+    })() : `
     <div class="table-wrapper">
       <table>
         <thead>
@@ -3227,6 +3320,7 @@ export function generarHTMLReporte(
         </tbody>
       </table>
     </div>
+    `}
     <div style="display:flex;gap:80px;margin:28px 50px 0 50px;">
       <div style="text-align:center;min-width:220px;">
         <div style="font-size:2.2rem;font-weight:bold;color:#1d293b;">
@@ -3246,6 +3340,7 @@ export function generarHTMLReporte(
         </div>
         <div style="color:#8c98b5;font-size:1.15rem;margin-top:4px;">Total Reinversión</div>
       </div>
+    </div>
     </div>
     <div class="footer">
       Generado por Club Cashin.com · ${fechaHoy}

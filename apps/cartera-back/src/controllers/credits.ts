@@ -37,6 +37,7 @@ import {
   isNull,
 } from "drizzle-orm";
 import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./payments";
+import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 
 
 export const getCreditoByNumero = async (numero_credito_sifco: string) => {
@@ -1391,6 +1392,14 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
       }
 
       // accion === "INCOBRABLE"
+      // TODO: Distribuir abono a capital en tabla espejo (CANCELACION)
+      // try {
+      //   await distribuirAbonoCapitalEspejo(creditId, monto_cancelacion!.toString(), "CANCELACION");
+      //   console.log("✅ Abono capital (incobrable) distribuido en tabla abonos_capital (espejo)");
+      // } catch (err) {
+      //   console.error("⚠️ Error al distribuir abono en espejo (incobrable):", err);
+      // }
+
       // a) Obtener crédito actual
       const [creditoActual] = await tx
         .select()
@@ -1404,35 +1413,42 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
       // b) Capital = monto_incobrable, plazo = 1, cuota = capital completo
       const capitalIncobrable = new Big(monto_cancelacion!);
 
-      // c) Borrar pagos existentes (en orden por FKs)
-      //    NO se tocan: creditos_inversionistas_espejo, pagos_credito_inversionistas_espejo
-      const pagosDelCredito = await tx
+      // c) Borrar solo pagos no pagados (para no romper FKs del espejo)
+      const pagosNoPagados = await tx
         .select({ pago_id: pagos_credito.pago_id })
         .from(pagos_credito)
-        .where(eq(pagos_credito.credito_id, creditId));
+        .where(
+          and(
+            eq(pagos_credito.credito_id, creditId),
+            eq(pagos_credito.pagado, false)
+          )
+        );
 
-      const pagoIds = pagosDelCredito.map(p => p.pago_id);
+      const pagoIds = pagosNoPagados.map(p => p.pago_id);
 
       if (pagoIds.length > 0) {
-        // Borrar boletas de esos pagos
         await tx
           .delete(boletas)
           .where(inArray(boletas.pago_id, pagoIds));
 
-        // Borrar pagos_credito_inversionistas (NO espejo)
         await tx
           .delete(pagos_credito_inversionistas)
           .where(inArray(pagos_credito_inversionistas.pago_id, pagoIds));
 
-        // Borrar pagos_credito
         await tx
           .delete(pagos_credito)
           .where(inArray(pagos_credito.pago_id, pagoIds));
 
-        console.log(`🗑️ Eliminados ${pagoIds.length} pagos del crédito #${creditId}`);
+        console.log(`🗑️ Eliminados ${pagoIds.length} pagos no pagados del crédito #${creditId}`);
       }
 
-      // d) Borrar todas las cuotas y dejar solo 1
+      // d) Desvincular cuota_id de pagos restantes para poder borrar cuotas
+      await tx
+        .update(pagos_credito)
+        .set({ cuota_id: null })
+        .where(eq(pagos_credito.credito_id, creditId));
+
+      // Borrar todas las cuotas y dejar solo 1
       await tx
         .delete(cuotas_credito)
         .where(eq(cuotas_credito.credito_id, creditId));
@@ -1813,6 +1829,14 @@ export async function resetCredit({
     await db
       .delete(cuotas_credito)
       .where(eq(cuotas_credito.credito_id, credito.credito_id));
+
+    // 12.5 Distribuir abono a capital en tabla espejo (CANCELACION)
+    try {
+      await distribuirAbonoCapitalEspejo(credito.credito_id, abonoCapital.toString(), "CANCELACION");
+      console.log("✅ Abono capital (reset) distribuido en tabla abonos_capital (espejo)");
+    } catch (err) {
+      console.error("⚠️ Error al distribuir abono en espejo (reset):", err);
+    }
 
     // 13. Distribuir pago entre inversionistas (ANTES de reiniciar, necesita monto_aportado)
     if (nuevoPago?.pago_id) {

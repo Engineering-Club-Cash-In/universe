@@ -18,6 +18,7 @@ import { updateMora } from "./latefee";
 import { insertPagosCreditoInversionistas, insertPagosCreditoInversionistasV2 } from "./payments";
 import { processAndReplaceCreditInvestors } from "./investor"; 
 import { processConvenioPayment } from "./paymentAgreement";
+import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import { convertirAHoraGuatemala } from "../utils/functions/generalFunctions";
 
 // ========================================
@@ -745,8 +746,8 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         `💰 Disponible antes de cuota: $${disponible_restante.toString()}`
       );
       if (disponible_restante.gt(0)) {
-        // Verificar si existe pago previo
-        const [existingPago] = await db
+        // Verificar si existe pago previo - priorizar el original (no_required)
+        const allExistingPagos = await db
           .select({ pago: pagos_credito })
           .from(pagos_credito)
           .innerJoin(
@@ -763,8 +764,12 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
               eq(pagos_credito.credito_id, credito.credito_id)
             )
           )
-          .orderBy(asc(pagos_credito.pago_id))
-          .limit(1);
+          .orderBy(asc(pagos_credito.pago_id));
+
+        // Priorizar el pago original (no_required) sobre cualquier otro
+        const existingPago = allExistingPagos.find(
+          (p) => p.pago.validationStatus === "no_required"
+        ) ?? allExistingPagos[0];
         // Inicializar variables de abono
         // 2. OBTENER LOS RESTANTES DEL PAGO EXISTENTE (no de la cuota)
         const interes_restante = new Big(
@@ -2254,6 +2259,14 @@ export async function aplicarAbonoCapitalInversionistas(
   pago_id: number
 ) {
   console.log("\n💵 ========== APLICANDO ABONO A CAPITAL ==========");
+
+  // Distribuir abono a capital en tabla espejo
+  try {
+    await distribuirAbonoCapitalEspejo(credito_id, abono_capital);
+    console.log("✅ Abono distribuido en tabla abonos_capital (espejo)");
+  } catch (err) {
+    console.error("⚠️ Error al distribuir abono en espejo:", err);
+  }
 
   const abonoCapitalBig = new Big(abono_capital);
   console.log(`💵 Abono Total: ${abonoCapitalBig.toString()}`);

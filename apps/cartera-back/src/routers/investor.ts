@@ -21,6 +21,7 @@ import {
   updateLiquidacionReporteUrl,
   getLiquidacionesPorFecha,
   revertirLiquidacion,
+  fixCubeInvestment,
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
 import { generarYSubirPDFInversionista, generarYSubirExcelInversionista } from "../utils/functions/generalFunctions";
@@ -36,6 +37,7 @@ export const inversionistasRouter = new Elysia()
   .get("/investor", getInvestors)
   .post("/investor/update", updateInvestor)
   .post("/investor/saldo-reinversion", updateSaldoReinversion)
+  .post("/investor/fix-cube", fixCubeInvestment)
   .get("/getInvestorsWithFullCredits", getInvestorsWithCredits)
   .get(
     "/getInvestors",

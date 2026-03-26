@@ -102,7 +102,7 @@ async function consultarCreditosInversionista(
       cuota_inversionista: tabla.cuota_inversionista,
       origen: sql<OrigenDatos>`${config.origen}`.as('origen'),
       tipo_reinversion: config.origen === "espejo" ? (tabla as any).tipo_reinversion : sql<string | null>`NULL`.as("tipo_reinversion"),
-      credito_inversionista_espejo_id: config.origen === "espejo" ? (tabla as typeof creditos_inversionistas_espejo).id : sql<number | null>`NULL`.as("credito_inversionista_espejo_id"),
+      credito_inversionista_espejo_id: config.origen === "espejo" ? (tabla as unknown as typeof creditos_inversionistas_espejo).id : sql<number | null>`NULL`.as("credito_inversionista_espejo_id"),
     })
     .from(tabla)
     .where(inArray(tabla.inversionista_id, inversionistaIds));
@@ -1513,7 +1513,6 @@ const mes = fechaParaMes
             monto_aportado: formatValue(c.monto_aportado),
             porcentaje_inversionista: c.porcentaje_inversionista,
             cuota_inversionista: formatValue(c.cuota_inversionista),
-            tipo_reinversion: (c as any).tipo_reinversion ?? null,
             credito_inversionista_espejo_id: (c as any).credito_inversionista_espejo_id ?? null,
             plazo: credito.plazo,
             pagos: pagos_detalle,
@@ -3584,6 +3583,106 @@ export const updateInvestor = async ({ body, set }: any) => {
     return { message: "Error updating investors", error: String(error) };
   }
 };
+
+export const fixCubeInvestment = async ({ set }: any) => {
+  try {
+    const CUBE_INVESTMENT_ID = 86;
+
+    console.log(`🚀 Iniciando corrección para Cube Investment (ID: ${CUBE_INVESTMENT_ID})`);
+
+    // 1. Obtener todos los créditos del inversionista en la tabla original
+    const originalCredits = await db
+      .select()
+      .from(creditos_inversionistas)
+      .where(eq(creditos_inversionistas.inversionista_id, CUBE_INVESTMENT_ID));
+
+    // 2. Obtener todos los créditos del inversionista en la tabla espejo
+    const mirrorCredits = await db
+      .select()
+      .from(creditos_inversionistas_espejo)
+      .where(eq(creditos_inversionistas_espejo.inversionista_id, CUBE_INVESTMENT_ID));
+
+    const mirrorCreditsMap = new Map(mirrorCredits.map((c) => [c.credito_id, c]));
+
+    const results = {
+      updatedOriginal: 0,
+      updatedMirror: 0,
+      createdMirror: 0,
+    };
+
+    // 3. Procesar originales
+    for (const oc of originalCredits) {
+      // Verificar si ya tiene los porcentajes correctos para evitar updates innecesarios
+      const isCorrect = Number(oc.porcentaje_participacion_inversionista) === 0 && 
+                        Number(oc.porcentaje_cash_in) === 100;
+
+      if (!isCorrect) {
+        // Actualizar porcentajes en original
+        console.log(`📝 Corrigiendo porcentajes para crédito ${oc.credito_id} en tabla original`);
+        await db
+          .update(creditos_inversionistas)
+          .set({
+            porcentaje_participacion_inversionista: "0",
+            porcentaje_cash_in: "100",
+          })
+          .where(eq(creditos_inversionistas.id, oc.id));
+        results.updatedOriginal++;
+      }
+
+      // Verificar si existe en espejo
+      if (!mirrorCreditsMap.has(oc.credito_id)) {
+        // Crear en espejo si no existe
+        console.log(`➕ Creando registro espejo faltante para crédito ${oc.credito_id}`);
+        await db.insert(creditos_inversionistas_espejo).values({
+          credito_id: oc.credito_id,
+          inversionista_id: oc.inversionista_id,
+          cuota_inversionista: oc.cuota_inversionista,
+          porcentaje_participacion_inversionista: "0",
+          monto_aportado: oc.monto_aportado,
+          porcentaje_cash_in: "100",
+          monto_inversionista: oc.monto_inversionista,
+          monto_cash_in: oc.monto_cash_in,
+          iva_inversionista: oc.iva_inversionista,
+          iva_cash_in: oc.iva_cash_in,
+          fecha_creacion: oc.fecha_creacion,
+          fecha_inicio_participacion: oc.fecha_inicio_participacion,
+        });
+        results.createdMirror++;
+      }
+    }
+
+    // 4. Procesar espejos existentes (para asegurar que todos tengan 0/100)
+    for (const mc of mirrorCredits) {
+      const isCorrect = Number(mc.porcentaje_participacion_inversionista) === 0 && 
+                        Number(mc.porcentaje_cash_in) === 100;
+
+      if (!isCorrect) {
+        console.log(`📝 Corrigiendo porcentajes para crédito ${mc.credito_id} en tabla espejo`);
+        await db
+          .update(creditos_inversionistas_espejo)
+          .set({
+            porcentaje_participacion_inversionista: "0",
+            porcentaje_cash_in: "100",
+          })
+          .where(eq(creditos_inversionistas_espejo.id, mc.id));
+        results.updatedMirror++;
+      }
+    }
+
+    console.log(`✅ Proceso finalizado. Originales: ${results.updatedOriginal}, Espejos actualizados: ${results.updatedMirror}, Espejos creados: ${results.createdMirror}`);
+
+    set.status = 200;
+    return {
+      message: "Proceso completado para Cube Investment (ID: 86)",
+      results,
+    };
+  } catch (error) {
+    console.error("❌ Error en fixCubeInvestment:", error);
+    set.status = 500;
+    return { message: "Error fixing Cube Investment", error: String(error) };
+  }
+};
+
 interface BoletaPendiente {
   boleta_id: number;
   boleta_url: string;

@@ -520,6 +520,20 @@ function RouteComponent() {
 			return;
 		}
 
+		// Validate: at 90% can only advance to 100%, cannot go back
+		if (
+			opportunity &&
+			targetStage &&
+			currentStage &&
+			currentStage.closurePercentage === 90 &&
+			targetStage.closurePercentage < 100
+		) {
+			toast.error(
+				"Las oportunidades en etapa del 90% solo pueden avanzar al 100%. No es posible retroceder.",
+			);
+			return;
+		}
+
 		// Intercept 85% → 90%+: open confirm contracts signed modal
 		if (
 			opportunity &&
@@ -973,6 +987,15 @@ function RouteComponent() {
 				}
 				if (!value.stageId || value.stageId === "") {
 					return { form: "La etapa es requerida" };
+				}
+				// At 90%, can only go to 100%
+				if (selectedOpportunity?.stage?.closurePercentage === 90) {
+					const targetStage = salesStagesQuery.data?.find(
+						(s) => s.id === value.stageId,
+					);
+					if (targetStage && targetStage.closurePercentage < 100 && targetStage.closurePercentage !== 90) {
+						return { form: "Las oportunidades en 90% solo pueden avanzar al 100%" };
+					}
 				}
 				return undefined;
 			},
@@ -2983,11 +3006,18 @@ function RouteComponent() {
 													<SelectValue placeholder="Seleccionar etapa" />
 												</SelectTrigger>
 												<SelectContent>
-													{salesStagesQuery.data?.map((stage) => (
-														<SelectItem key={stage.id} value={stage.id}>
-															{stage.name} ({stage.closurePercentage}%)
-														</SelectItem>
-													))}
+													{salesStagesQuery.data
+														?.filter((stage) => {
+															if (selectedOpportunity?.stage?.closurePercentage === 90) {
+																return stage.closurePercentage === 90 || stage.closurePercentage === 100;
+															}
+															return true;
+														})
+														.map((stage) => (
+															<SelectItem key={stage.id} value={stage.id}>
+																{stage.name} ({stage.closurePercentage}%)
+															</SelectItem>
+														))}
 												</SelectContent>
 											</Select>
 										</div>

@@ -661,7 +661,12 @@ function InvestorLiquidacionesPage() {
 			input: { id: investorIdNum, page: 1, perPage: 1 },
 		}),
 	});
-	const investor = (investorsQuery.data?.inversionistas as any[])?.[0] ?? null;
+	const investor = useMemo(() => {
+		const raw = investorsQuery.data?.inversionistas;
+		if (!raw) return null;
+		// Con id cartera devuelve objeto directo, sin id devuelve array
+		return Array.isArray(raw) ? raw[0] ?? null : raw;
+	}, [investorsQuery.data]);
 
 	// Fetch rendimiento/stats
 	const rendimientoQuery = useQuery({

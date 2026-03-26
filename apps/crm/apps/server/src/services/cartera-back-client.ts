@@ -573,6 +573,7 @@ export class CarteraBackClient {
 		params: GetInvestorsParams = {},
 	): Promise<PaginatedResponse<CarteraInversionista>> {
 		const queryParams = new URLSearchParams({
+			...(params.id && { id: params.id.toString() }),
 			...(params.page && { page: params.page.toString() }),
 			...(params.perPage && { perPage: params.perPage.toString() }),
 		});

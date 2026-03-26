@@ -19,6 +19,7 @@ import {
 	Layers,
 	Loader2,
 	Mail,
+	Phone,
 	Plus,
 	RefreshCw,
 	Shield,
@@ -654,18 +655,13 @@ function InvestorLiquidacionesPage() {
 	const [page, setPage] = useState(1);
 	const PER_PAGE = 25;
 
-	// Fetch investor info from list
+	// Fetch investor info by ID from cartera
 	const investorsQuery = useQuery({
 		...orpc.getInversionistas.queryOptions({
-			input: { page: 1, perPage: 100 },
+			input: { id: investorIdNum, page: 1, perPage: 1 },
 		}),
 	});
-	const investor = useMemo(() => {
-		const list = investorsQuery.data?.inversionistas ?? [];
-		return (list as any[]).find(
-			(inv: any) => inv.inversionistaId === investorIdNum,
-		);
-	}, [investorsQuery.data, investorIdNum]);
+	const investor = (investorsQuery.data?.inversionistas as any[])?.[0] ?? null;
 
 	// Fetch rendimiento/stats
 	const rendimientoQuery = useQuery({
@@ -763,6 +759,26 @@ function InvestorLiquidacionesPage() {
 										<p className="truncate font-medium text-xs">
 											{investor.email}
 										</p>
+									</div>
+								</div>
+							)}
+							{investor.celular && (
+								<div className="flex items-center gap-2.5 rounded-lg border bg-card px-3 py-2">
+									<Phone className="h-4 w-4 shrink-0 text-muted-foreground" />
+									<div className="min-w-0">
+										<p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+											Celular
+										</p>
+										<div className="flex flex-wrap gap-1">
+											{investor.celular.split(",").map((num: string) => (
+												<span
+													key={num.trim()}
+													className="rounded bg-muted px-1.5 py-0.5 font-medium font-mono text-xs"
+												>
+													{num.trim()}
+												</span>
+											))}
+										</div>
 									</div>
 								</div>
 							)}

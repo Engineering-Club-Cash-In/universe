@@ -47,6 +47,7 @@ export const mirrorInvestorRouter = new Elysia()
   })
   .post("/asignar-reinversion", asignarReinversionEspejo, {
       body: t.Object({
+          inversionista_id: t.Number(),
           asignaciones: t.Array(
               t.Object({
                   id_inversionista: t.Number(),
@@ -60,7 +61,7 @@ export const mirrorInvestorRouter = new Elysia()
                       reinversion_combinada: "reinversion_combinada",
                   })
               }),
-              { minItems: 1 }
+              { minItems: 0 }
           )
       }),
       detail: {

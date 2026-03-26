@@ -1140,8 +1140,8 @@ export async function closeOpportunity(
 
 		// 3. Generate invoices in background (fire-and-forget)
 		// This runs asynchronously after the credit is created
-		// Skip invoice generation if the vehicle belongs to a company (has companyId)
-		const vehicleHasCompany = opportunity.vehicleId && vehicleData?.companyId;
+		// Skip invoice generation if the vehicle is owned
+		const vehicleHasCompany = vehicleData?.isOwned
 
 		if (isCarteraBackEnabled() && !vehicleHasCompany) {
 			const royalti = opportunity.royalti

@@ -69,7 +69,10 @@ export async function generateInspectionPdf(vehicle: any) {
   doc.setFontSize(10);
   const dateStr = vehicle.inspectionDate ? new Date(vehicle.inspectionDate).toLocaleDateString("es-GT") : "N/A";
   doc.text(`Fecha: ${dateStr}`, 196, y, { align: "right" });
-  doc.text(`Técnico: ${vehicle.technicianName || "N/A"}`, 196, y + 6, { align: "right" });
+  
+  const technicianText = `Técnico: ${vehicle.technicianName || "N/A"}`;
+  const technicianLines = doc.splitTextToSize(technicianText, 80);
+  doc.text(technicianLines, 196, y + 6, { align: "right" });
 
   // Divider
   y += 20;
@@ -84,91 +87,138 @@ export async function generateInspectionPdf(vehicle: any) {
   doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
   doc.text("Datos del Vehículo", 14, y);
 
-  y += 8;
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
-  doc.text("Marca/Modelo/Año:", 14, y);
-  doc.text("Versión/Equip.:", 14, y + 6);
-  doc.text("Placa:", 14, y + 12);
-  doc.text("VIN/Chasis:", 14, y + 18);
-  doc.text("No. Motor:", 14, y + 24);
-  doc.text("Tipo:", 14, y + 30);
-  doc.text("Procedencia:", 14, y + 36);
+  // Vehicle Info Table
+  const vehicleInfoRows = [
+    [
+      { content: "Marca/Modelo/Año:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      `${vehicle.vehicleMake || ""} ${vehicle.vehicleModel || ""} ${vehicle.vehicleYear || ""}`,
+      { content: "Color:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      vehicle.color || "N/A"
+    ],
+    [
+      { content: "Versión/Equip.:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      vehicle.trim || "N/A",
+      { content: "Millas:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      vehicle.milesMileage ? `${Number(vehicle.milesMileage).toLocaleString()} mi` : "N/A"
+    ],
+    [
+      { content: "Placa:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      vehicle.licensePlate || "N/A",
+      { content: "Kilómetros:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      vehicle.kmMileage ? `${Number(vehicle.kmMileage).toLocaleString()} km` : "N/A"
+    ],
+    [
+      { content: "VIN/Chasis:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      vehicle.vinNumber || "N/A",
+      { content: "Combustible:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      vehicle.fuelType || "N/A"
+    ],
+    [
+      { content: "No. Motor:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      vehicle.motorNumber || "N/A",
+      { content: "Cilindros:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      vehicle.cylinders || "N/A"
+    ],
+    [
+      { content: "Tipo:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      vehicle.vehicleType || "N/A",
+      { content: "Motor (CC):", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      vehicle.engineCC || "N/A"
+    ],
+    [
+      { content: "Procedencia:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      vehicle.origin || "N/A",
+      { content: "Transmisión:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      vehicle.transmission || "N/A"
+    ],
+    [
+      "",
+      "",
+      { content: "Tracción:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      vehicle.traction || "N/A"
+    ],
+  ];
 
-  doc.text("Color:", 105, y);
-  doc.text("Millas:", 105, y + 6);
-  doc.text("Kilómetros:", 105, y + 12);
-  doc.text("Combustible:", 105, y + 18);
-  doc.text("Cilindros:", 105, y + 24);
-  doc.text("Motor (CC):", 105, y + 30);
-  doc.text("Transmisión:", 105, y + 36);
-  doc.text("Tracción:", 105, y + 42);
+  autoTable(doc, {
+    startY: y + 5,
+    body: vehicleInfoRows,
+    theme: "plain",
+    styles: { fontSize: 10, cellPadding: { top: 1, bottom: 1, left: 0, right: 1 }, font: "helvetica" },
+    columnStyles: {
+      0: { cellWidth: 36 },
+      1: { cellWidth: 55 },
+      2: { cellWidth: 30 },
+      3: { cellWidth: "auto" },
+    },
+    margin: { left: 14, right: 14 }
+  });
 
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(0, 0, 0);
-  doc.text(`${vehicle.vehicleMake || ""} ${vehicle.vehicleModel || ""} ${vehicle.vehicleYear || ""}`, 47, y);
-  doc.text(vehicle.trim || "N/A", 47, y + 6);
-  doc.text(vehicle.licensePlate || "N/A", 47, y + 12);
-  doc.text(vehicle.vinNumber || "N/A", 47, y + 18);
-  doc.text(vehicle.motorNumber || "N/A", 47, y + 24);
-  doc.text(vehicle.vehicleType || "N/A", 47, y + 30);
-  doc.text(vehicle.origin || "N/A", 47, y + 36);
+  y = (doc as any).lastAutoTable.finalY;
+ 
+   // Conditions
+   y += 12;
+   doc.setFontSize(14);
+   doc.setFont("helvetica", "bold");
+   doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+   doc.text("Condiciones Generales", 14, y);
 
-  doc.text(vehicle.color || "N/A", 135, y);
-  doc.text(vehicle.milesMileage ? `${Number(vehicle.milesMileage).toLocaleString()} mi` : "N/A", 135, y + 6);
-  doc.text(`${Number(vehicle.kmMileage).toLocaleString()} km`, 135, y + 12);
-  doc.text(vehicle.fuelType || "N/A", 135, y + 18);
-  doc.text(vehicle.cylinders || "N/A", 135, y + 24);
-  doc.text(vehicle.engineCC || "N/A", 135, y + 30);
-  doc.text(vehicle.transmission || "N/A", 135, y + 36);
-  doc.text(vehicle.traction || "N/A", 135, y + 42);
+  // General Conditions Table
+  const conditionRows = [
+    [
+      { content: "Pintura:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      `${vehicle.paintCondition || 0}%`,
+      { content: "Llantas (Prom):", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      `${vehicle.tiresCondition || 0}%`,
+      { content: "Prueba manejo:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      vehicle.testDrive || "N/A"
+    ],
+    [
+      { content: "Llanta Del. Izq:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      `${vehicle.tireConditionFrontLeft || 0}%`,
+      { content: "Llanta Tras. Izq:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      `${vehicle.tireConditionRearLeft || 0}%`,
+      { content: "Scanner:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      vehicle.hasScanner ? 'Sí' : 'No'
+    ],
+    [
+      { content: "Llanta Del. Der:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      `${vehicle.tireConditionFrontRight || 0}%`,
+      { content: "Llanta Tras. Der:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      `${vehicle.tireConditionRearRight || 0}%`,
+      "",
+      ""
+    ],
+    [
+      { content: "Testigo Airbag:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      vehicle.airbagWarning || "N/A",
+      "",
+      "",
+      "",
+      ""
+    ]
+  ];
 
-  // Conditions
-  y += 52;
-  doc.setFontSize(14);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-  doc.text("Condiciones Generales", 14, y);
+  autoTable(doc, {
+    startY: y + 5,
+    body: conditionRows,
+    theme: "plain",
+    styles: { fontSize: 10, cellPadding: { top: 1, bottom: 1, left: 0, right: 1 }, font: "helvetica" },
+    columnStyles: {
+      0: { cellWidth: 33 },
+      1: { cellWidth: 28 },
+      2: { cellWidth: 33 },
+      3: { cellWidth: 32 },
+      4: { cellWidth: 32 },
+      5: { cellWidth: "auto" },
+    },
+    margin: { left: 14, right: 14 }
+  });
 
-  y += 8;
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+  y = (doc as any).lastAutoTable.finalY;
   
-  doc.text("Pintura:", 14, y);
-  doc.text("Llanta Del. Izq:", 14, y + 6);
-  doc.text("Llanta Del. Der:", 14, y + 12);
-  doc.text("Testigo Airbag:", 14, y + 18);
-
-  doc.text("Llantas (Prom):", 75, y);
-  doc.text("Llanta Tras. Izq:", 75, y + 6);
-  doc.text("Llanta Tras. Der:", 75, y + 12);
-
-  doc.text("Prueba manejo:", 140, y);
-  doc.text("Scanner:", 140, y + 6);
-
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(0, 0, 0);
-  
-  doc.text(`${vehicle.paintCondition || 0}%`, 47, y);
-  doc.text(`${vehicle.tireConditionFrontLeft || 0}%`, 47, y + 6);
-  doc.text(`${vehicle.tireConditionFrontRight || 0}%`, 47, y + 12);
-  doc.text(vehicle.airbagWarning, 47, y + 18);
-
-  doc.text(`${vehicle.tiresCondition || 0}%`, 110, y);
-  doc.text(`${vehicle.tireConditionRearLeft || 0}%`, 110, y + 6);
-  doc.text(`${vehicle.tireConditionRearRight || 0}%`, 110, y + 12);
-
-  doc.text(vehicle.testDrive, 172, y);
-  doc.text(vehicle.hasScanner ? 'Sí' : 'No', 172, y + 6);
-  
-  // Update Y for the following sections
-  y += 12;
-
-  // All 360 Check items
-  y += 18;
-  doc.setFontSize(14);
+   // All 360 Check items
+   y += 12;
+   doc.setFontSize(14);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
   doc.text("Revisión 360", 14, y);
@@ -518,17 +568,38 @@ export async function generateInspectionPdf(vehicle: any) {
   doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
   doc.text("Valoración Comercial", 14, y);
 
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(0, 0, 0);
-  y += 10;
-  doc.text(`Valor de Mercado: ${formatCurrency(vehicle.marketValue || 0)}`, 14, y);
-  doc.text(`Valor Comercial Sugerido: ${formatCurrency(vehicle.suggestedCommercialValue || 0)}`, 105, y);
-  
-  y += 8;
-  doc.text(`Valor Actual Condición: ${formatCurrency(vehicle.currentConditionValue || 0)}`, 14, y);
+  // Valuation Table
+  const valuationRows = [
+    [
+      { content: "Valor de Mercado:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      formatCurrency(vehicle.marketValue || 0),
+      { content: "Valor Comercial Sugerido:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      formatCurrency(vehicle.suggestedCommercialValue || 0)
+    ],
+    [
+      { content: "Valor Actual Condición:", styles: { fontStyle: "bold" as const, textColor: secondaryColor as any } },
+      formatCurrency(vehicle.currentConditionValue || 0),
+      "",
+      ""
+    ]
+  ];
 
-  y += 16;
+  autoTable(doc, {
+    startY: y + 2,
+    body: valuationRows,
+    theme: "plain",
+    styles: { fontSize: 10, cellPadding: { top: 1, bottom: 1, left: 0, right: 1 }, font: "helvetica" },
+    columnStyles: {
+      0: { cellWidth: 35 },
+      1: { cellWidth: 55 },
+      2: { cellWidth: 45 },
+      3: { cellWidth: "auto" },
+    },
+    margin: { left: 14, right: 14 }
+  });
+
+  y = (doc as any).lastAutoTable.finalY + 12;
+
   doc.setFontSize(12);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);

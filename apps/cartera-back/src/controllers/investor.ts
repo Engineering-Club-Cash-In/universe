@@ -102,7 +102,7 @@ async function consultarCreditosInversionista(
       cuota_inversionista: tabla.cuota_inversionista,
       origen: sql<OrigenDatos>`${config.origen}`.as('origen'),
       tipo_reinversion: config.origen === "espejo" ? (tabla as any).tipo_reinversion : sql<string | null>`NULL`.as("tipo_reinversion"),
-      credito_inversionista_espejo_id: config.origen === "espejo" ? (tabla as typeof creditos_inversionistas_espejo).id : sql<number | null>`NULL`.as("credito_inversionista_espejo_id"),
+      credito_inversionista_espejo_id: config.origen === "espejo" ? (tabla as unknown as typeof creditos_inversionistas_espejo).id : sql<number | null>`NULL`.as("credito_inversionista_espejo_id"),
     })
     .from(tabla)
     .where(inArray(tabla.inversionista_id, inversionistaIds));
@@ -1513,7 +1513,6 @@ const mes = fechaParaMes
             monto_aportado: formatValue(c.monto_aportado),
             porcentaje_inversionista: c.porcentaje_inversionista,
             cuota_inversionista: formatValue(c.cuota_inversionista),
-            tipo_reinversion: (c as any).tipo_reinversion ?? null,
             credito_inversionista_espejo_id: (c as any).credito_inversionista_espejo_id ?? null,
             plazo: credito.plazo,
             pagos: pagos_detalle,
@@ -3584,6 +3583,333 @@ export const updateInvestor = async ({ body, set }: any) => {
     return { message: "Error updating investors", error: String(error) };
   }
 };
+
+export const fixCubeInvestment = async ({ set }: any) => {
+  try {
+    const CUBE_INVESTMENT_ID = 86;
+
+    console.log(`🚀 Iniciando corrección para Cube Investment (ID: ${CUBE_INVESTMENT_ID})`);
+
+    // 1. Obtener todos los créditos del inversionista en la tabla original
+    const originalCredits = await db
+      .select()
+      .from(creditos_inversionistas)
+      .where(eq(creditos_inversionistas.inversionista_id, CUBE_INVESTMENT_ID));
+
+    // 2. Obtener todos los créditos del inversionista en la tabla espejo
+    const mirrorCredits = await db
+      .select()
+      .from(creditos_inversionistas_espejo)
+      .where(eq(creditos_inversionistas_espejo.inversionista_id, CUBE_INVESTMENT_ID));
+
+    const mirrorCreditsMap = new Map(mirrorCredits.map((c) => [c.credito_id, c]));
+
+    const results = {
+      updatedOriginal: 0,
+      updatedMirror: 0,
+      createdMirror: 0,
+    };
+
+    // 3. Procesar originales
+    for (const oc of originalCredits) {
+      // Verificar si ya tiene los porcentajes correctos para evitar updates innecesarios
+      const isCorrect = Number(oc.porcentaje_participacion_inversionista) === 0 && 
+                        Number(oc.porcentaje_cash_in) === 100;
+
+      if (!isCorrect) {
+        // Actualizar porcentajes en original
+        console.log(`📝 Corrigiendo porcentajes para crédito ${oc.credito_id} en tabla original`);
+        await db
+          .update(creditos_inversionistas)
+          .set({
+            porcentaje_participacion_inversionista: "0",
+            porcentaje_cash_in: "100",
+          })
+          .where(eq(creditos_inversionistas.id, oc.id));
+        results.updatedOriginal++;
+      }
+
+      // Verificar si existe en espejo
+      if (!mirrorCreditsMap.has(oc.credito_id)) {
+        // Crear en espejo si no existe
+        console.log(`➕ Creando registro espejo faltante para crédito ${oc.credito_id}`);
+        await db.insert(creditos_inversionistas_espejo).values({
+          credito_id: oc.credito_id,
+          inversionista_id: oc.inversionista_id,
+          cuota_inversionista: oc.cuota_inversionista,
+          porcentaje_participacion_inversionista: "0",
+          monto_aportado: oc.monto_aportado,
+          porcentaje_cash_in: "100",
+          monto_inversionista: oc.monto_inversionista,
+          monto_cash_in: oc.monto_cash_in,
+          iva_inversionista: oc.iva_inversionista,
+          iva_cash_in: oc.iva_cash_in,
+          fecha_creacion: oc.fecha_creacion,
+          fecha_inicio_participacion: oc.fecha_inicio_participacion,
+        });
+        results.createdMirror++;
+      }
+    }
+
+    // 4. Procesar espejos existentes (para asegurar que todos tengan 0/100)
+    for (const mc of mirrorCredits) {
+      const isCorrect = Number(mc.porcentaje_participacion_inversionista) === 0 && 
+                        Number(mc.porcentaje_cash_in) === 100;
+
+      if (!isCorrect) {
+        console.log(`📝 Corrigiendo porcentajes para crédito ${mc.credito_id} en tabla espejo`);
+        await db
+          .update(creditos_inversionistas_espejo)
+          .set({
+            porcentaje_participacion_inversionista: "0",
+            porcentaje_cash_in: "100",
+          })
+          .where(eq(creditos_inversionistas_espejo.id, mc.id));
+        results.updatedMirror++;
+      }
+    }
+
+    console.log(`✅ Proceso finalizado. Originales: ${results.updatedOriginal}, Espejos actualizados: ${results.updatedMirror}, Espejos creados: ${results.createdMirror}`);
+
+    set.status = 200;
+    return {
+      message: "Proceso completado para Cube Investment (ID: 86)",
+      results,
+    };
+  } catch (error) {
+    console.error("❌ Error en fixCubeInvestment:", error);
+    set.status = 500;
+    return { message: "Error fixing Cube Investment", error: String(error) };
+  }
+};
+
+export const reconcileMirrorPercentages = async ({ set }: any) => {
+  try {
+    console.log("🚀 Iniciando RECONCILIACIÓN SELECTIVA de porcentajes espejo...");
+
+    // 1. Obtener todos los registros originales con info completa
+    const allOriginals = await db
+      .select({
+        id: creditos_inversionistas.id,
+        inversionista_id: creditos_inversionistas.inversionista_id,
+        inversionista_nombre: inversionistas.nombre,
+        credito_id: creditos_inversionistas.credito_id,
+        p_inversor: creditos_inversionistas.porcentaje_participacion_inversionista,
+        p_cashin: creditos_inversionistas.porcentaje_cash_in,
+        sifco: creditos.numero_credito_sifco,
+        cliente: usuarios.nombre,
+      })
+      .from(creditos_inversionistas)
+      .innerJoin(creditos, eq(creditos_inversionistas.credito_id, creditos.credito_id))
+      .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+      .innerJoin(inversionistas, eq(creditos_inversionistas.inversionista_id, inversionistas.inversionista_id));
+
+    const allMirrors = await db.select().from(creditos_inversionistas_espejo);
+
+    // 2. Mapear espejos
+    const mirrorMap = new Map();
+    allMirrors.forEach((m) => {
+      const key = `${m.inversionista_id}_${m.credito_id}`;
+      mirrorMap.set(key, m);
+    });
+
+    const results = {
+      totalOriginals: allOriginals.length,
+      updatedSwappedCount: 0,
+      updatedSwapped: [] as any[],      // ✅ Corregidos (Invertidos)
+      discrepanciesOtherCount: 0,
+      discrepanciesOther: [] as any[],    // 📉 Reportados pero NO actualizados
+      missingMirrorsCount: 0,
+      missingMirrors: [] as any[],       // ➕ Sin espejo (Solo reporte)
+      unchangedMirrors: 0,
+    };
+
+    // 3. Procesar cada registro
+    for (const oc of allOriginals) {
+      const key = `${oc.inversionista_id}_${oc.credito_id}`;
+      const mc = mirrorMap.get(key);
+
+      if (mc) {
+        const pInvOriginal = Number(oc.p_inversor);
+        const pCashOriginal = Number(oc.p_cashin);
+        
+        const pInvMirror = Number(mc.porcentaje_participacion_inversionista);
+        const pCashMirror = Number(mc.porcentaje_cash_in);
+
+        if (pInvOriginal !== pInvMirror || pCashOriginal !== pCashMirror) {
+          
+          const isSwapped = pInvOriginal === pCashMirror && pCashOriginal === pInvMirror;
+
+          const data = {
+            inversionista_id: oc.inversionista_id,
+            inversionista_nombre: oc.inversionista_nombre,
+            credito_id: oc.credito_id,
+            sifco: oc.sifco,
+            cliente: oc.cliente,
+            mirror_id: mc.id,
+            original: { inversor: pInvOriginal, cashin: pCashOriginal },
+            mirror: { inversor: pInvMirror, cashin: pCashMirror }
+          };
+
+          if (isSwapped) {
+            // ✅ SOLO actualizamos si están invertidos
+            console.log(`✅ Corrigiendo valores invertidos en espejo para ID ${mc.id}`);
+            await db
+              .update(creditos_inversionistas_espejo)
+              .set({
+                porcentaje_participacion_inversionista: oc.p_inversor,
+                porcentaje_cash_in: oc.p_cashin,
+              })
+              .where(eq(creditos_inversionistas_espejo.id, mc.id));
+            
+            results.updatedSwappedCount++;
+            results.updatedSwapped.push(data);
+          } else {
+            // 📈 Otros descuadres: SOLO reportamos según instrucción
+            results.discrepanciesOtherCount++;
+            results.discrepanciesOther.push(data);
+          }
+        } else {
+          results.unchangedMirrors++;
+        }
+      } else {
+        results.missingMirrorsCount++;
+        results.missingMirrors.push({
+          inversionista_id: oc.inversionista_id,
+          inversionista_nombre: oc.inversionista_nombre,
+          credito_id: oc.credito_id,
+          sifco: oc.sifco,
+          cliente: oc.cliente
+        });
+      }
+    }
+
+    console.log(`✅ Reconciliación finalizada. Actualizados (Swapped): ${results.updatedSwappedCount}, Otros descuadres: ${results.discrepanciesOtherCount}`);
+
+    set.status = 200;
+    return {
+      success: true,
+      message: "Proceso de corrección selectiva finalizado. Solo los valores invertidos fueron actualizados.",
+      data: results
+    };
+  } catch (error) {
+    console.error("❌ Error en reconcileMirrorPercentages:", error);
+    set.status = 500;
+    return { success: false, message: "Error en la reconciliación", error: String(error) };
+  }
+};
+
+export const auditMirrorPercentages = async ({ set }: any) => {
+  try {
+    console.log("🔍 Iniciando AUDITORÍA de porcentajes espejo (Solo lectura)...");
+
+    // 1. Obtener todos los registros originales con info de cliente, SIFCO e Inversionista
+    const allOriginals = await db
+      .select({
+        id: creditos_inversionistas.id,
+        inversionista_id: creditos_inversionistas.inversionista_id,
+        inversionista_nombre: inversionistas.nombre,
+        credito_id: creditos_inversionistas.credito_id,
+        p_inversor: creditos_inversionistas.porcentaje_participacion_inversionista,
+        p_cashin: creditos_inversionistas.porcentaje_cash_in,
+        sifco: creditos.numero_credito_sifco,
+        cliente: usuarios.nombre,
+      })
+      .from(creditos_inversionistas)
+      .innerJoin(creditos, eq(creditos_inversionistas.credito_id, creditos.credito_id))
+      .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+      .innerJoin(inversionistas, eq(creditos_inversionistas.inversionista_id, inversionistas.inversionista_id));
+
+    const allMirrors = await db.select().from(creditos_inversionistas_espejo);
+
+    // 2. Mapear espejos
+    const mirrorMap = new Map();
+    allMirrors.forEach((m) => {
+      const key = `${m.inversionista_id}_${m.credito_id}`;
+      mirrorMap.set(key, m);
+    });
+
+    const results = {
+      totalOriginals: allOriginals.length,
+      discrepanciesCount: 0,
+      discrepanciesSwapped: [] as any[], // 🔄 Valores invertidos (80/20 vs 20/80)
+      discrepanciesOther: [] as any[],   // 📉 Otros descuadres (ej. decimales)
+      missingMirrorsCount: 0,
+      missingMirrors: [] as any[],
+      correctMirrorsCount: 0,
+    };
+
+    // 3. Auditar
+    for (const oc of allOriginals) {
+      const key = `${oc.inversionista_id}_${oc.credito_id}`;
+      const mc = mirrorMap.get(key);
+
+      if (mc) {
+        const pInvOriginal = Number(oc.p_inversor);
+        const pCashOriginal = Number(oc.p_cashin);
+        
+        const pInvMirror = Number(mc.porcentaje_participacion_inversionista);
+        const pCashMirror = Number(mc.porcentaje_cash_in);
+
+        if (pInvOriginal !== pInvMirror || pCashOriginal !== pCashMirror) {
+          results.discrepanciesCount++;
+
+          const isSwapped = pInvOriginal === pCashMirror && pCashOriginal === pInvMirror;
+          
+          const discrepancyData = {
+            inversionista_id: oc.inversionista_id,
+            inversionista_nombre: oc.inversionista_nombre,
+            credito_id: oc.credito_id,
+            sifco: oc.sifco,
+            cliente: oc.cliente,
+            mirror_id: mc.id,
+            original: {
+              inversor: pInvOriginal,
+              cashin: pCashOriginal
+            },
+            mirror: {
+              inversor: pInvMirror,
+              cashin: pCashMirror
+            }
+          };
+
+          if (isSwapped) {
+            results.discrepanciesSwapped.push(discrepancyData);
+          } else {
+            results.discrepanciesOther.push(discrepancyData);
+          }
+        } else {
+          results.correctMirrorsCount++;
+        }
+      } else {
+        results.missingMirrorsCount++;
+        results.missingMirrors.push({
+          inversionista_id: oc.inversionista_id,
+          inversionista_nombre: oc.inversionista_nombre,
+          credito_id: oc.credito_id,
+          sifco: oc.sifco,
+          cliente: oc.cliente
+        });
+      }
+    }
+
+    console.log(`✅ Auditoría finalizada. Discrepancias: ${results.discrepanciesCount}, Faltantes: ${results.missingMirrorsCount}`);
+
+    set.status = 200;
+    return {
+      success: true,
+      message: "Auditoría de porcentajes espejo completada con información de clientes",
+      data: results
+    };
+  } catch (error) {
+    console.error("❌ Error en auditMirrorPercentages:", error);
+    set.status = 500;
+    return { success: false, message: "Error en la auditoría", error: String(error) };
+  }
+};
+
+
+
 interface BoletaPendiente {
   boleta_id: number;
   boleta_url: string;

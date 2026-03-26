@@ -2,6 +2,7 @@ import { Button, IconStart } from "@/components";
 import { motion } from "framer-motion";
 import { useNavigate } from "@tanstack/react-router";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { InvestorIsotipo } from "../components/InvestorIsotipo";
 
 export const Now = () => {
   const navigate = useNavigate();
@@ -19,7 +20,10 @@ export const Now = () => {
               "linear-gradient(133deg, rgba(23, 23, 23, 0.15) 1.88%, rgba(78, 87, 234, 0.15) 49.37%, rgba(23, 23, 23, 0.15) 97.39%)",
           }}
         >
-          <div className="p-8 md:p-12 flex flex-col items-center text-center">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-10 pointer-events-none">
+            <InvestorIsotipo width={isMobile ? "180" : "300"} height={isMobile ? "180" : "300"} />
+          </div>
+          <div className="p-8 md:p-12 flex flex-col items-center text-center relative z-10">
             {/* Badge/Bottom Sheet con icono */}
             <motion.div
               className="text-secondary inline-flex items-center gap-4  px-4 py-2 rounded-full mb-6"

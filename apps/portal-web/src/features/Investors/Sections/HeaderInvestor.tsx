@@ -16,7 +16,7 @@ export const HeaderInvestor = () => {
         <div className="flex flex-col items-center lg:items-start gap-6 lg:gap-12 w-full lg:w-3/5">
           <div>
             <InvestorsLogoTemp
-              width={isMobile ? "200px" : "320px"}
+              width={isMobile ? "60px" : "120px"}
               height={isMobile ? "60px" : "120px"}
             />
           </div>

@@ -1,5 +1,6 @@
 import { IconShield, IconArrow, IconUserCheck, IconClock } from "@/components";
 import { useIsMobile } from "@/hooks";
+import { InvestorIsotipo } from "../components/InvestorIsotipo";
 
 export const WhyInvest = () => {
   interface Item {
@@ -83,19 +84,22 @@ export const WhyInvest = () => {
           {items.map((item, index) => (
             <div
               key={index}
-              className="flex flex-col p-4 lg:p-6 gap-4 lg:gap-6 border border-white/20 overflow-hidden"
+              className="flex flex-col p-4 lg:p-6 xl:p-8 gap-4 lg:gap-6 border border-white/20 overflow-hidden relative"
               style={{
                 borderRadius: "24px",
                 background: "linear-gradient(180deg, #0A0A0A 0%, #000 100%)",
               }}
             >
-              <div className="w-full flex justify-center">
+              <div className="absolute bottom-0 left-1/2 -translate-x-1/2 opacity-20 pointer-events-none">
+                <InvestorIsotipo width={isMobile ? "100" : "160"} height={isMobile ? "100" : "160"} />
+              </div>
+              <div className="w-full flex justify-center relative z-10">
                 <div className="p-4 text-secondary rounded-xl border border-secondary w-max">
                   {item.icon}
                 </div>
               </div>
-              <h3 className="text-sm lg:text-xl font-semibold">{item.title}</h3>
-              <p className="text-sm lg:text-base text-gray leading-6">{item.description}</p>
+              <h3 className="text-sm lg:text-xl font-semibold relative z-10">{item.title}</h3>
+              <p className="text-sm lg:text-base text-gray leading-6 relative z-10">{item.description}</p>
             </div>
           ))}
         </div>

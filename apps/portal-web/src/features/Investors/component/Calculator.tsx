@@ -2,11 +2,13 @@ import { useState } from "react";
 import { IconCalculator, Select, Input, IconArrow } from "@/components";
 import { motion } from "framer-motion";
 import { useNavigate } from "@tanstack/react-router";
+import { useIsMobile } from "@/hooks";
 import {
   calculateCompoundInvestment,
   calculateTraditionalInvestment,
   calculateInterestOnlyInvestment,
 } from "../functions/investmentCalculations";
+import { InvestorIsotipo } from "../components/InvestorIsotipo";
 
 // Constantes de configuración
 const INTEREST_RATE = 1.5; // 1.5% mensual
@@ -14,6 +16,7 @@ const INVESTOR_PERCENTAGE = 70; // 70% para el inversionista
 
 export const Calculator: React.FC = () => {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const [amount, setAmount] = useState("");
   const [term, setTerm] = useState("");
   const [investmentType, setInvestmentType] = useState("tradicional");
@@ -166,7 +169,7 @@ export const Calculator: React.FC = () => {
 
         {/* Segundo Grid - Visualización */}
         <div
-          className="flex flex-col gap-4 justify-center p-4 lg:p-8 mt-6 lg:mt-0"
+          className="flex flex-col gap-4 justify-center p-4 lg:p-8 mt-6 lg:mt-0 relative overflow-hidden"
           style={{
             borderRadius: "13.765px",
             border: "1.721px solid rgba(78, 87, 234, 0.30)",
@@ -174,6 +177,9 @@ export const Calculator: React.FC = () => {
               "linear-gradient(135deg, rgba(78, 87, 234, 0.15) 25%, rgba(0, 0, 0, 0.02) 95.71%)",
           }}
         >
+          <div className="absolute top-0 right-0 opacity-20 pointer-events-none">
+            <InvestorIsotipo width={isMobile ? "70" : "120"} height={isMobile ? "70" : "120"} />
+          </div>
           <div className="flex gap-2 text-sm text-secondary">
             <div className=" ">
               <IconArrow width={"24px"} height={"24px"} />

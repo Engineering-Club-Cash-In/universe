@@ -2113,6 +2113,7 @@ export const cobrosRouter = {
 	getInversionistas: crmCobrosOrInvestmentsProcedure
 		.input(
 			z.object({
+				id: z.number().int().positive().optional(),
 				page: z.number().min(1).optional().default(1),
 				perPage: z.number().min(1).max(100).optional().default(20),
 			}),
@@ -2129,6 +2130,7 @@ export const cobrosRouter = {
 
 			try {
 				const result = await carteraBackClient.getInvestors({
+					id: input.id,
 					page: input.page,
 					perPage: input.perPage,
 				});
@@ -2152,6 +2154,7 @@ export const cobrosRouter = {
 						tipoCuenta: inv.tipo_cuenta ?? null,
 						numeroCuenta: inv.numero_cuenta ?? null,
 						moneda: inv.moneda ?? "quetzales",
+						celular: inv.celular ?? null,
 					})),
 					pagination: {
 						page: result.page,

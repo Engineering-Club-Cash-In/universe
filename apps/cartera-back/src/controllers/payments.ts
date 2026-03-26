@@ -612,12 +612,17 @@ export async function insertPagosCreditoInversionistas(
     if (abonosNoLiquidados.length > 0) {
       let montoAbono = new Big(0);
       for (const abono of abonosNoLiquidados) {
-        montoAbono = montoAbono.plus(abono.monto);
+        // Solo sumar si es tipo CAPITAL; CANCELACION ya fue sumado previamente
+        if (abono.tipo === "CAPITAL") {
+          montoAbono = montoAbono.plus(abono.monto);
+        }
       }
-      abono_capital = abono_capital.plus(montoAbono);
+      if (!montoAbono.eq(0)) {
+        abono_capital = abono_capital.plus(montoAbono);
+      }
       abonoCapitalId = abonosNoLiquidados[0].abono_id;
 
-      console.log(`   💰 Abono a capital encontrado (id: ${abonoCapitalId}): +${montoAbono.toFixed(6)}`);
+      console.log(`   💰 Abono a capital encontrado (id: ${abonoCapitalId}): +${montoAbono.toFixed(6)} (tipo: ${abonosNoLiquidados[0].tipo})`);
       console.log(`      abono_capital con abono sumado: ${abono_capital.toString()}`);
     }
 

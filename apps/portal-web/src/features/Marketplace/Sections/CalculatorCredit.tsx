@@ -1,7 +1,6 @@
-import { Select, Input, ModalChatBot } from "@/components";
+import { Select, Input, Button } from "@/components";
 import { useState } from "react";
-import { useModalOptionsCall } from "@/hooks";
-import { motion } from "framer-motion";
+import { openWhatsApp, useIsMobile } from "@/hooks";
 
 export const CalculatorCredit = () => {
   const IMAGE = import.meta.env.VITE_IMAGE_URL + "/calculator.jpg";
@@ -9,8 +8,7 @@ export const CalculatorCredit = () => {
   const [monto, setMonto] = useState<string>("");
   const [enganche, setEnganche] = useState<string>("10");
   const [tiempo, setTiempo] = useState<string>("12");
-  const { isModalOpen, setIsModalOpen, optionCreditVehicle } =
-    useModalOptionsCall();
+  const isMobile = useIsMobile();
 
   // Opciones de enganche (porcentajes)
   const engancheOptions = [
@@ -44,17 +42,17 @@ export const CalculatorCredit = () => {
     const montoEnganche = (montoNumero * engancheNumero) / 100;
     const montoFinanciar = montoNumero - montoEnganche;
 
-    // Tasa de interés anual (ejemplo: 12%)
-    const tasaAnual = 12;
-    const tasaMensual = tasaAnual / 12 / 100;
+    // Tasa de interés mensual: 1.5% + IVA (12%)
+    const tasaMensual = 1.5 / 100;
+    const tasaEfectiva = tasaMensual * 1.12;
 
-    // Calcular pago mensual usando fórmula de amortización
+    // Calcular pago mensual usando fórmula de amortización (incluye IVA sobre interés)
     const pagoMensual =
-      (montoFinanciar * tasaMensual * Math.pow(1 + tasaMensual, tiempoNumero)) /
-      (Math.pow(1 + tasaMensual, tiempoNumero) - 1);
+      (montoFinanciar * tasaEfectiva * Math.pow(1 + tasaEfectiva, tiempoNumero)) /
+      (Math.pow(1 + tasaEfectiva, tiempoNumero) - 1);
 
     return {
-      interes: tasaAnual,
+      interes: 1.5,
       pagoMensual: Number.isNaN(pagoMensual) ? 0 : pagoMensual,
     };
   };
@@ -62,7 +60,7 @@ export const CalculatorCredit = () => {
   const resultado = calcularCredito();
 
   return (
-    <section className="relative w-full mt-12 lg:mt-32 mb-16 lg:mb-30 flex px-8 lg:px-20">
+    <section className="relative w-full mt-12 lg:mt-64 mb-16 lg:mb-30 flex px-8 lg:px-20">
       {/* Imagen a la izquierda */}
       <div className="relative w-[438px] shrink-0 hidden lg:block">
         <img
@@ -112,9 +110,9 @@ export const CalculatorCredit = () => {
           <div
             style={{
               background:
-                "linear-gradient(180deg, rgba(90, 93, 143, 0.05) 0%, rgba(154, 159, 245, 0.05) 100%)",
+                "linear-gradient(133deg, rgba(78, 87, 234, 0.25) 2.68%, rgba(23, 23, 23, 0.25) 50%), #171717",
             }}
-            className="relative rounded-xl p-6 lg:p-8 border border-primary/50 flex flex-col items-center"
+            className="relative rounded-xl p-6 lg:p-8 border border-secondary/50 flex flex-col items-center"
           >
             <div className="w-full lg:w-3/4 ">
               <h2 className="text-center lg:text-header-body mb-2">
@@ -197,33 +195,28 @@ export const CalculatorCredit = () => {
                       </span>
                     </div>
                   </div>
+                  <p className="text-xs text-white/40 mt-3 text-center">
+                    *Esta calculadora es solo una referencia estimada y no refleja las condiciones finales del crédito.
+                  </p>
                 </div>
-                <div className="w-full flex justify-center">
-                  {/* Botón Aplicar al Crédito */}
-                  <motion.button
-                    onClick={() => setIsModalOpen(true)}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    className="w-full xl:w-1/2 mt-2 lg:mt-6 py-2 lg:py-4 rounded-lg lg:font-semibold text-white lg:text-lg"
-                    style={{
-                      background:
-                        "linear-gradient(180deg, #9A9FF5 0%, #5A5D8F 100%)",
+                <div className="w-full flex justify-center mt-2 lg:mt-6">
+                  <Button
+                    onClick={() => {
+                      const msg = monto
+                        ? `Hola, estoy interesado en un crédito vehicular. Monto: Q${Number(monto).toLocaleString()}, Enganche: ${enganche}%, Plazo: ${tiempo} meses.`
+                        : "Hola, estoy interesado en obtener más información sobre el crédito vehicular.";
+                      openWhatsApp(msg);
                     }}
+                    size={isMobile ? "sm" : "md"}
                   >
                     Aplicar al crédito
-                  </motion.button>
+                  </Button>
                 </div>
               </div>
             </div>
           </div>
         </div>
       </div>
-
-      <ModalChatBot
-        open={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        options={[optionCreditVehicle]}
-      />
     </section>
   );
 };

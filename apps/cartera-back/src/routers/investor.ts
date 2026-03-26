@@ -361,6 +361,64 @@ export const inversionistasRouter = new Elysia()
       filename,
     };
   })
+  .post("/investor/excel", async ({ body, set }) => {
+    const { id } = body as { id?: number };
+
+    if (!id || isNaN(Number(id))) {
+      set.status = 400;
+      return { message: "El parámetro 'id' es obligatorio y debe ser numérico." };
+    }
+
+    try {
+      const result = await resumeInvestor(
+        Number(id),
+        1,
+        999999,
+        undefined,
+        undefined,
+        undefined,
+        false,
+        undefined,
+        "espejos"
+      );
+
+      if (!result.inversionistas.length) {
+        set.status = 404;
+        return { message: "Inversionista no encontrado." };
+      }
+
+      const inversionista = result.inversionistas[0];
+
+      const totales = await getInvestorTotalsGlobales(
+        Number(id),
+        undefined,
+        "espejos",
+        false
+      );
+      inversionista.subtotal = totales.totales as any;
+
+      const logoUrl = import.meta.env.LOGO_URL || "";
+      const filename = `reporte_inversionista_${id}_${Date.now()}.xlsx`;
+      const { url } = await generarYSubirExcelInversionista(
+        inversionista as any,
+        filename,
+        logoUrl
+      );
+
+      return {
+        success: true,
+        url,
+        filename,
+      };
+    } catch (error) {
+      console.error("[POST /investor/excel] Error:", error);
+      set.status = 500;
+      return {
+        message: "Error al generar el Excel",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  })
   .post("/investor/reporte-liquidados-masivo", async ({ body, set }) => {
     const { fecha_liquidacion } = body as { fecha_liquidacion?: string };
 

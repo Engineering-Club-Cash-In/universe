@@ -15,6 +15,7 @@ import {
 	FileText,
 	History,
 	Mail,
+	StickyNote,
 	Target,
 	UserPlus,
 	Users,
@@ -184,6 +185,14 @@ export function OpportunityDetailModal({
 		}),
 		enabled: open && !!opportunity?.id,
 		queryKey: ["getOpportunityDocuments", opportunity?.id],
+	});
+
+	// Query for disbursement notes (only for won opportunities)
+	const disbursementNotesQuery = useQuery({
+		...orpc.getDisbursementNotes.queryOptions({
+			input: { opportunityId: opportunity?.id ?? "" },
+		}),
+		enabled: open && !!opportunity?.id && opportunity?.status === "won",
 	});
 
 	// Load history when history tab is opened
@@ -630,6 +639,20 @@ export function OpportunityDetailModal({
 								)}
 							</div>
 						)}
+
+						{/* Disbursement Notes */}
+						{opportunity.status === "won" &&
+							disbursementNotesQuery.data?.notes && (
+								<div className="rounded-lg border bg-muted/20 px-4 py-3">
+									<div className="flex items-center gap-2 text-muted-foreground text-xs">
+										<StickyNote className="h-3.5 w-3.5" />
+										Notas de desembolso
+									</div>
+									<p className="mt-1 whitespace-pre-wrap text-sm">
+										{disbursementNotesQuery.data.notes}
+									</p>
+								</div>
+							)}
 
 						{/* Opportunity ID */}
 						<div className="rounded-lg border bg-muted/20 px-4 py-3">

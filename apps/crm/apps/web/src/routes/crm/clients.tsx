@@ -82,6 +82,17 @@ export const Route = createFileRoute("/crm/clients")({
 });
 
 // Helper functions
+function formatLeadFullName(lead: {
+	firstName?: string | null;
+	middleName?: string | null;
+	lastName?: string | null;
+	secondLastName?: string | null;
+}) {
+	return [lead.firstName, lead.middleName, lead.lastName, lead.secondLastName]
+		.filter((part): part is string => Boolean(part && part.trim()))
+		.join(" ");
+}
+
 const getClientTypeLabel = (type: string) => {
 	switch (type) {
 		case "individual":
@@ -622,7 +633,7 @@ function RouteComponent() {
 													<User className="h-4 w-4 text-muted-foreground" />
 													<div>
 														<div className="font-medium">
-															{clientData.firstName} {clientData.lastName}
+															{formatLeadFullName(clientData)}
 														</div>
 														{clientData.dpi && (
 															<div className="text-muted-foreground text-xs">
@@ -792,7 +803,7 @@ function RouteComponent() {
 								<div className="min-w-0 flex-1">
 									<div className="flex items-center gap-2">
 										<h3 className="truncate font-semibold text-xl">
-											{selectedClient.firstName} {selectedClient.lastName}
+											{formatLeadFullName(selectedClient)}
 										</h3>
 										<Badge variant="outline" className="shrink-0 text-xs">
 											{getClientTypeLabel(selectedClient.clientType)}
@@ -1001,7 +1012,7 @@ function RouteComponent() {
 													Nombre Completo
 												</p>
 												<p className="font-medium text-sm">
-													{selectedClient.firstName} {selectedClient.lastName}
+													{formatLeadFullName(selectedClient)}
 												</p>
 											</div>
 											<div>

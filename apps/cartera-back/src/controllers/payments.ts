@@ -393,7 +393,7 @@ export async function insertPagosCreditoInversionistas(
     `\n🔍 Inversionistas después de filtrar (excludeCube=${excludeCube}, inversionista_id=${inversionista_id ?? 'todos'}): ${filteredInversionistas.length}`
   );
   filteredInversionistas.forEach((inv, idx) => {
-    console.log(`   ${idx + 1}. ${inv.nombre}`);
+    console.log(`   ${idx + 1}. ${inv.nombre} | cuota_inversionista: [${inv.cuota_inversionista}] (type: ${typeof inv.cuota_inversionista}) | Big: ${new Big(inv.cuota_inversionista || 0).toString()}`);
   });
 
   if (filteredInversionistas.length === 0) {
@@ -410,6 +410,8 @@ export async function insertPagosCreditoInversionistas(
         : maxIdx,
     0
   );
+  const mayorCuotaInversionistaId =
+    filteredInversionistas[indexMayorCuota].inversionista_id;
 
   console.log(`\n🏆 Mayor cuota encontrada:`);
   console.log(`   Índice: ${indexMayorCuota}`);
@@ -418,6 +420,9 @@ export async function insertPagosCreditoInversionistas(
   );
   console.log(
     `   Valor cuota: ${filteredInversionistas[indexMayorCuota].cuota_inversionista}`
+  );
+  console.log(
+    `   inversionista_id: ${mayorCuotaInversionistaId}`
   );
 
   // Si se pasa inversionista_id, solo procesar ese inversionista
@@ -529,7 +534,7 @@ export async function insertPagosCreditoInversionistas(
       `   📊 totalIVA (cash_in + inversionista): ${totalIVA.toString()}`
     );
 
-    if (idx === indexMayorCuota && !excludeCube) {
+    if (inv.inversionista_id === mayorCuotaInversionistaId && !excludeCube) {
       console.log(
         `   🏆 ES EL MAYOR INVERSIONISTA - Aplicando descuentos completos`
       );

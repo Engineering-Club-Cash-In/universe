@@ -699,7 +699,9 @@ export const vehiclesRouter = {
 		.handler(async ({ input, context }) => {
 			const userRole = context.userRole || "";
 			const canManageManualValuation =
-				userRole === ROLES.ADMIN || userRole === ROLES.SALES_SUPERVISOR;
+				userRole === ROLES.ADMIN ||
+				userRole === ROLES.SALES_SUPERVISOR ||
+				userRole === ROLES.SALES;
 
 			if (!canManageManualValuation) {
 				throw new ORPCError("FORBIDDEN", {

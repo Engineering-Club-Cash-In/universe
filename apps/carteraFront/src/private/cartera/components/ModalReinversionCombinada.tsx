@@ -90,7 +90,6 @@ export function ModalReinversionCombinada({
   const handleGuardar = () => {
     // Solo enviar los que el usuario cambió
     const cambios = Object.entries(asignaciones).map(([espejoId, tipo]) => ({
-      id_inversionista: inversionistaId,
       id_credito_inversionista_espejo: Number(espejoId),
       tipo_reinversion: tipo,
     }));
@@ -101,7 +100,7 @@ export function ModalReinversionCombinada({
     }
 
     asignarReinversion(
-      { asignaciones: cambios },
+      { inversionista_id: inversionistaId, asignaciones: cambios },
       {
         onSuccess: () => {
           toast.success("Reinversión combinada guardada correctamente.");

@@ -22,6 +22,8 @@ import {
   getLiquidacionesPorFecha,
   revertirLiquidacion,
   fixCubeInvestment,
+  reconcileMirrorPercentages,
+  auditMirrorPercentages,
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
 import { generarYSubirPDFInversionista, generarYSubirExcelInversionista } from "../utils/functions/generalFunctions";
@@ -38,6 +40,8 @@ export const inversionistasRouter = new Elysia()
   .post("/investor/update", updateInvestor)
   .post("/investor/saldo-reinversion", updateSaldoReinversion)
   .post("/investor/fix-cube", fixCubeInvestment)
+  .post("/investor/reconcile-mirror-percentages", reconcileMirrorPercentages)
+  .post("/investor/audit-mirror-percentages", auditMirrorPercentages)
   .get("/getInvestorsWithFullCredits", getInvestorsWithCredits)
   .get(
     "/getInvestors",

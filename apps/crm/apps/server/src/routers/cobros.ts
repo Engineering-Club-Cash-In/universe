@@ -2139,8 +2139,13 @@ export const cobrosRouter = {
 				const bancos = await carteraBackClient.getBancos();
 				const bancosMap = new Map(bancos.map((b) => [b.banco_id, b.nombre]));
 
+				// Con id cartera devuelve objeto directo, sin id devuelve array
+				const inversionistasList = Array.isArray(result.data)
+					? result.data
+					: [result.data];
+
 				return {
-					inversionistas: result.data.map((inv: any) => ({
+					inversionistas: inversionistasList.map((inv: any) => ({
 						inversionistaId: inv.inversionista_id,
 						nombre: inv.nombre,
 						dpi: inv.dpi ?? null,

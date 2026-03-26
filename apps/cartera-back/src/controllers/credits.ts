@@ -1830,6 +1830,26 @@ export async function resetCredit({
       .delete(cuotas_credito)
       .where(eq(cuotas_credito.credito_id, credito.credito_id));
 
+    // 12.1 Crear cuota 1 para que el pago de cierre quede enlazado
+    const [cuotaCierre] = await db
+      .insert(cuotas_credito)
+      .values({
+        credito_id: credito.credito_id,
+        numero_cuota: 1,
+        fecha_vencimiento: new Date().toISOString(),
+        liquidado_inversionistas: false,
+        pagado: true,
+      })
+      .returning();
+
+    // 12.2 Enlazar el pago de cierre a la cuota recién creada
+    if (nuevoPago?.pago_id && cuotaCierre?.cuota_id) {
+      await db
+        .update(pagos_credito)
+        .set({ cuota_id: cuotaCierre.cuota_id })
+        .where(eq(pagos_credito.pago_id, nuevoPago.pago_id));
+    }
+
     // 12.5 Distribuir abono a capital en tabla espejo (CANCELACION)
     try {
       await distribuirAbonoCapitalEspejo(credito.credito_id, abonoCapital.toString(), "CANCELACION");

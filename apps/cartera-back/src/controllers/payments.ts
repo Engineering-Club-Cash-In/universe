@@ -2045,6 +2045,7 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number) {
             "MOROSO",
             "PENDIENTE_CANCELACION",
             "EN_CONVENIO",
+            "CANCELADO",
           ])
         )
       );

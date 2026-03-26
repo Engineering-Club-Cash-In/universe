@@ -2706,3 +2706,149 @@ export async function aplicarMontoAPago(pago_id: number, monto: number, fecha_pa
     };
   }
 }
+
+/**
+ * Edita campos de un pago existente (abonos, restantes, mora, otros, etc.)
+ * Solo actualiza los campos que se envíen. Recalcula monto_aplicado y pagado automáticamente.
+ */
+export async function editarPago(pago_id: number, campos: {
+  abono_capital?: string;
+  abono_interes?: string;
+  abono_iva_12?: string;
+  abono_seguro?: string;
+  abono_gps?: string;
+  capital_restante?: string;
+  interes_restante?: string;
+  iva_12_restante?: string;
+  seguro_restante?: string;
+  gps_restante?: string;
+  membresias?: string;
+  membresias_pago?: string;
+  otros?: string;
+  mora?: string;
+  monto_boleta?: string;
+  monto_aplicado?: string;
+  observaciones?: string;
+  pagado?: boolean;
+  fecha_pago?: string;
+  origen_pago?: "transferencia" | "cheque" | "boleta";
+}) {
+  try {
+    // 1. Verificar que el pago existe
+    const [pago] = await db
+      .select()
+      .from(pagos_credito)
+      .where(eq(pagos_credito.pago_id, pago_id))
+      .limit(1);
+
+    if (!pago) {
+      return { success: false, message: `Pago ${pago_id} no encontrado` };
+    }
+
+    // 2. Construir objeto de update solo con los campos enviados
+    const updateData: Record<string, any> = {};
+
+    // Abonos
+    if (campos.abono_capital !== undefined) updateData.abono_capital = campos.abono_capital;
+    if (campos.abono_interes !== undefined) updateData.abono_interes = campos.abono_interes;
+    if (campos.abono_iva_12 !== undefined) updateData.abono_iva_12 = campos.abono_iva_12;
+    if (campos.abono_seguro !== undefined) updateData.abono_seguro = campos.abono_seguro;
+    if (campos.abono_gps !== undefined) updateData.abono_gps = campos.abono_gps;
+
+    // Restantes
+    if (campos.capital_restante !== undefined) updateData.capital_restante = campos.capital_restante;
+    if (campos.interes_restante !== undefined) updateData.interes_restante = campos.interes_restante;
+    if (campos.iva_12_restante !== undefined) updateData.iva_12_restante = campos.iva_12_restante;
+    if (campos.seguro_restante !== undefined) updateData.seguro_restante = campos.seguro_restante;
+    if (campos.gps_restante !== undefined) updateData.gps_restante = campos.gps_restante;
+
+    // Membresías
+    if (campos.membresias !== undefined) updateData.membresias = campos.membresias;
+    if (campos.membresias_pago !== undefined) updateData.membresias_pago = campos.membresias_pago;
+
+    // Otros campos
+    if (campos.otros !== undefined) updateData.otros = campos.otros;
+    if (campos.mora !== undefined) updateData.mora = campos.mora;
+    if (campos.monto_boleta !== undefined) updateData.monto_boleta = campos.monto_boleta;
+    if (campos.observaciones !== undefined) updateData.observaciones = campos.observaciones;
+    if (campos.fecha_pago !== undefined) updateData.fecha_pago = new Date(campos.fecha_pago);
+    if (campos.origen_pago !== undefined) updateData.origen_pago = campos.origen_pago;
+
+    // 3. Recalcular monto_aplicado si se enviaron abonos
+    const abonoCapital = new Big(campos.abono_capital ?? pago.abono_capital ?? 0);
+    const abonoInteres = new Big(campos.abono_interes ?? pago.abono_interes ?? 0);
+    const abonoIva = new Big(campos.abono_iva_12 ?? pago.abono_iva_12 ?? 0);
+    const abonoSeguro = new Big(campos.abono_seguro ?? pago.abono_seguro ?? 0);
+    const abonoGps = new Big(campos.abono_gps ?? pago.abono_gps ?? 0);
+    const abonoMembresias = new Big(campos.membresias_pago ?? pago.membresias_pago ?? 0);
+
+    if (campos.monto_aplicado !== undefined) {
+      updateData.monto_aplicado = campos.monto_aplicado;
+    } else if (
+      campos.abono_capital !== undefined ||
+      campos.abono_interes !== undefined ||
+      campos.abono_iva_12 !== undefined ||
+      campos.abono_seguro !== undefined ||
+      campos.abono_gps !== undefined ||
+      campos.membresias_pago !== undefined
+    ) {
+      const nuevoMontoAplicado = abonoCapital
+        .plus(abonoInteres)
+        .plus(abonoIva)
+        .plus(abonoSeguro)
+        .plus(abonoGps)
+        .plus(abonoMembresias);
+      updateData.monto_aplicado = nuevoMontoAplicado.toString();
+    }
+
+    // 4. Recalcular pagado si se enviaron restantes
+    if (campos.pagado !== undefined) {
+      updateData.pagado = campos.pagado;
+    } else if (
+      campos.capital_restante !== undefined ||
+      campos.interes_restante !== undefined ||
+      campos.iva_12_restante !== undefined ||
+      campos.seguro_restante !== undefined ||
+      campos.gps_restante !== undefined ||
+      campos.membresias !== undefined
+    ) {
+      const capRest = new Big(campos.capital_restante ?? pago.capital_restante ?? 0);
+      const intRest = new Big(campos.interes_restante ?? pago.interes_restante ?? 0);
+      const ivaRest = new Big(campos.iva_12_restante ?? pago.iva_12_restante ?? 0);
+      const segRest = new Big(campos.seguro_restante ?? pago.seguro_restante ?? 0);
+      const gpsRest = new Big(campos.gps_restante ?? pago.gps_restante ?? 0);
+      const memRest = new Big(campos.membresias ?? pago.membresias ?? 0);
+
+      const todosEnCero = capRest.eq(0) && intRest.eq(0) && ivaRest.eq(0) &&
+        segRest.eq(0) && gpsRest.eq(0) && memRest.eq(0);
+
+      updateData.pagado = todosEnCero;
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return { success: false, message: "No se enviaron campos para actualizar" };
+    }
+
+    // 5. Ejecutar update
+    const [pagoActualizado] = await db
+      .update(pagos_credito)
+      .set(updateData)
+      .where(eq(pagos_credito.pago_id, pago_id))
+      .returning();
+
+    console.log(`✅ Pago ${pago_id} editado. Campos: ${Object.keys(updateData).join(", ")}`);
+
+    return {
+      success: true,
+      message: "Pago actualizado correctamente",
+      data: pagoActualizado,
+    };
+  } catch (error: any) {
+    console.error("❌ Error en editarPago:", error);
+    return {
+      success: false,
+      message: "Error al editar el pago",
+      error: error.message,
+    };
+  }
+}

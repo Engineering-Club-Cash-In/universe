@@ -4627,10 +4627,6 @@ export async function resumenGlobalLiquidaciones(
     getBoletasLiquidacionMap(inversionistaIds, mes, anio),
   ]);
 
-  const noLiquidadosMap = new Map(
-    noLiquidados.map((inv) => [inv.inversionista_id, inv])
-  );
-
   const result: InversionistaResumenConEstado[] = [];
 
   for (const inv of noLiquidados) {
@@ -4638,9 +4634,7 @@ export async function resumenGlobalLiquidaciones(
     const estadoResumen = resolveEstadoLiquidacionResumen({
       requestedEstado: estado,
       hasNoLiquidado: true,
-      hasLiquidado: liquidados.some(
-        (liq) => liq.inversionista_id === inv.inversionista_id
-      ),
+      hasLiquidado: false, // 🆕 Forzamos false para que el primer loop solo genere estados pendientes/subidos
       hasBoletaPendiente: hasBoletaSubida,
     });
 
@@ -4659,10 +4653,6 @@ export async function resumenGlobalLiquidaciones(
   }
 
   for (const inv of liquidados) {
-    if (noLiquidadosMap.has(inv.inversionista_id)) {
-      continue;
-    }
-
     const estadoResumen = resolveEstadoLiquidacionResumen({
       requestedEstado: estado,
       hasNoLiquidado: false,

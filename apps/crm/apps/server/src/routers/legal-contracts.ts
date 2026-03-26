@@ -24,6 +24,7 @@ import {
 	verifyUploadedDocumentInR2,
 } from "../lib/storage";
 import { closeOpportunity } from "../services/close-opportunity";
+import { sendContractLinksToLead } from "./messaging";
 import { createNotification } from "./notifications";
 
 // Standardized env var naming: R2_BUCKET_* pattern
@@ -984,6 +985,14 @@ export const legalContractsRouter = {
 					changedBy: context.userId,
 					reason: "Contratos firmados confirmados - Avanza a formalización",
 				});
+			});
+
+			// Enviar links de contratos por WhatsApp al cliente (si aplica)
+			if (opportunity.leadId) sendContractLinksToLead({
+				leadId: opportunity.leadId,
+				opportunityId: input.opportunityId,
+			}).catch((err) => {
+				console.error("[confirmContractsSigned] Error enviando WhatsApp:", err);
 			});
 
 			// Notificar a análisis que está lista para desembolso

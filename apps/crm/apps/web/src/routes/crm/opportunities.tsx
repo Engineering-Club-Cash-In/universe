@@ -520,16 +520,16 @@ function RouteComponent() {
 			return;
 		}
 
-		// Validate: at 90% can only advance to 100%, cannot go back
+		// Validate: at 90% or 100% cannot go back
 		if (
 			opportunity &&
 			targetStage &&
 			currentStage &&
-			currentStage.closurePercentage === 90 &&
-			targetStage.closurePercentage < 100
+			currentStage.closurePercentage >= 90 &&
+			targetStage.closurePercentage < currentStage.closurePercentage
 		) {
 			toast.error(
-				"Las oportunidades en etapa del 90% solo pueden avanzar al 100%. No es posible retroceder.",
+				"Las oportunidades en etapa del 90% o 100% no pueden retroceder.",
 			);
 			return;
 		}
@@ -988,13 +988,14 @@ function RouteComponent() {
 				if (!value.stageId || value.stageId === "") {
 					return { form: "La etapa es requerida" };
 				}
-				// At 90%, can only go to 100%
-				if (selectedOpportunity?.stage?.closurePercentage === 90) {
+				// At 90% or 100%, cannot go back
+				const currentPct = selectedOpportunity?.stage?.closurePercentage;
+				if (currentPct != null && currentPct >= 90) {
 					const targetStage = salesStagesQuery.data?.find(
 						(s) => s.id === value.stageId,
 					);
-					if (targetStage && targetStage.closurePercentage < 100 && targetStage.closurePercentage !== 90) {
-						return { form: "Las oportunidades en 90% solo pueden avanzar al 100%" };
+					if (targetStage && targetStage.closurePercentage < currentPct) {
+						return { form: "Las oportunidades en 90% o 100% no pueden retroceder" };
 					}
 				}
 				return undefined;
@@ -3008,8 +3009,9 @@ function RouteComponent() {
 												<SelectContent>
 													{salesStagesQuery.data
 														?.filter((stage) => {
-															if (selectedOpportunity?.stage?.closurePercentage === 90) {
-																return stage.closurePercentage === 90 || stage.closurePercentage === 100;
+															const current = selectedOpportunity?.stage?.closurePercentage;
+															if (current != null && current >= 90) {
+																return stage.closurePercentage >= current;
 															}
 															return true;
 														})

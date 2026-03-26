@@ -3177,6 +3177,7 @@ export type TipoReinversionEspejo =
 export interface AsignarReinversionPayload {
   inversionista_id: number;
   asignaciones: {
+    id_inversionista: number;
     id_credito_inversionista_espejo: number;
     tipo_reinversion: TipoReinversionEspejo;
   }[];

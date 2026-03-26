@@ -34,10 +34,12 @@ import {
 import { Combobox, Transition } from "@headlessui/react";
 import {
   useAplicarPago,
+  useEditPayment,
   usePagosConInversionistas,
 } from "../hooks/reportPayments";
 import {
   getPagosConInversionistasService,
+  type CancelacionPago,
   type CuentaEmpresa,
   type Investor,
   type PagoDataInvestor,
@@ -117,6 +119,114 @@ function useIsMobile() {
   return isMobile;
 }
 
+// --- componente de rubros de cancelación para pagos reset ---
+function CancelacionRubros({
+  cancelacion,
+  pagoId,
+  onSuccess,
+}: {
+  cancelacion: CancelacionPago;
+  pagoId: number;
+  onSuccess: () => void;
+}) {
+  const editPayment = useEditPayment();
+
+  // Armar la lista de rubros seleccionables desde la cancelación
+  const rubrosBase: { nombre: string; monto: number }[] = [
+    { nombre: "Traspaso", monto: Number(cancelacion.traspaso) || 0 },
+    { nombre: "Garantía Mobiliaria", monto: Number(cancelacion.garantiaMobiliaria) || 0 },
+    { nombre: "Otros", monto: Number(cancelacion.otros) || 0 },
+    { nombre: "Cuotas Atrasadas", monto: cancelacion.cuotasAtrasadas || 0 },
+    ...(cancelacion.montosAdicionales || []).map((ma) => ({
+      nombre: ma.concepto,
+      monto: Number(ma.monto) || 0,
+    })),
+  ].filter((r) => r.monto > 0);
+
+  const [selected, setSelected] = React.useState<Record<number, boolean>>({});
+
+  const total = rubrosBase.reduce(
+    (sum, r, i) => (selected[i] ? sum + r.monto : sum),
+    0,
+  );
+
+  const toggleRubro = (idx: number) => {
+    setSelected((prev) => ({ ...prev, [idx]: !prev[idx] }));
+  };
+
+  const handleGuardar = () => {
+    editPayment.mutate(
+      { pagoId, params: { otros: total } },
+      {
+        onSuccess: () => {
+          toast.success("Rubros de cancelación aplicados correctamente");
+          onSuccess();
+        },
+        onError: (error: any) => {
+          toast.error(error?.response?.data?.message || "Error al aplicar rubros");
+        },
+      },
+    );
+  };
+
+  return (
+    <div className="mt-4 p-4 bg-orange-50 border-2 border-orange-200 rounded-xl">
+      <h5 className="text-orange-800 font-bold flex items-center gap-2 mb-1">
+        <RotateCcw className="w-5 h-5" />
+        Cancelación — {cancelacion.motivo}
+      </h5>
+      {cancelacion.observaciones && (
+        <p className="text-orange-700 text-sm mb-3">{cancelacion.observaciones}</p>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 mb-4">
+        {rubrosBase.map((rubro, idx) => (
+          <label
+            key={idx}
+            className={`flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all ${
+              selected[idx]
+                ? "border-orange-400 bg-orange-100"
+                : "border-gray-200 bg-white hover:border-orange-300"
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={!!selected[idx]}
+              onChange={() => toggleRubro(idx)}
+              className="w-4 h-4 accent-orange-600"
+            />
+            <div className="flex-1">
+              <span className="font-semibold text-gray-800 text-sm">{rubro.nombre}</span>
+              <span className="block text-orange-700 font-bold">
+                {formatCurrency(rubro.monto)}
+              </span>
+            </div>
+          </label>
+        ))}
+      </div>
+
+      <div className="flex items-center justify-between bg-white border-2 border-orange-200 rounded-lg p-3">
+        <div>
+          <span className="text-sm text-gray-600">Total seleccionado:</span>
+          <span className="ml-2 text-xl font-bold text-orange-700">
+            {formatCurrency(total)}
+          </span>
+        </div>
+        <Button
+          onClick={handleGuardar}
+          disabled={editPayment.isPending || total === 0}
+          className="bg-orange-600 hover:bg-orange-700 text-white font-semibold px-6"
+        >
+          {editPayment.isPending ? (
+            <Loader2 className="w-4 h-4 animate-spin mr-2" />
+          ) : null}
+          {editPayment.isPending ? "Guardando..." : "Aplicar como Otros"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 // --- componente principal ---
 export function PaymentsTable() {
   const [validandoPagoId, setValidandoPagoId] = useState<number | null>(null);
@@ -165,6 +275,7 @@ export function PaymentsTable() {
     number | undefined
   >();
   const [soloAplicados, setSoloAplicados] = React.useState<boolean | undefined>(undefined);
+  const [validationStatusFilter, setValidationStatusFilter] = React.useState<string>("");
   const [queryInv, setQueryInv] = React.useState("");
   const filteredInvestors = queryInv === ""
     ? investors
@@ -315,6 +426,12 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
         bgColor: "bg-blue-100",
         icon: <DollarSign className="w-4 h-4" />,
       },
+      reset: {
+        label: "Reset",
+        color: "text-orange-700",
+        bgColor: "bg-orange-100",
+        icon: <RotateCcw className="w-4 h-4" />,
+      },
     };
 
     return configs[status] || configs.no_required;
@@ -344,6 +461,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
     soloAplicados,
     inversionistaId,
     usuarioNombre: usuarioNombre || undefined,
+    validationStatus: validationStatusFilter || undefined,
   });
 
   const pagos: PagoDataInvestor[] = data?.data || [];
@@ -381,6 +499,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
         soloAplicados,
         inversionistaId,
         usuarioNombre: usuarioNombre || undefined,
+        validationStatus: validationStatusFilter || undefined,
         excel: true,
       });
 
@@ -419,6 +538,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
         soloAplicados,
         inversionistaId,
         usuarioNombre: usuarioNombre || undefined,
+        validationStatus: validationStatusFilter || undefined,
         reportAdvisor: true,
       });
 
@@ -743,6 +863,29 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                   <option value="">Todos</option>
                   <option value="true">Aplicados</option>
                   <option value="false">Pendientes</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Estado Validación</label>
+                <select
+                  value={validationStatusFilter}
+                  onChange={(e) => { setValidationStatusFilter(e.target.value); setPage(1); }}
+                  className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs font-medium bg-gray-50/50 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all"
+                  style={{
+                    color: validationStatusFilter === "validated" ? "#15803d"
+                      : validationStatusFilter === "pending" ? "#a16207"
+                      : validationStatusFilter === "reset" ? "#c2410c"
+                      : validationStatusFilter === "capital" ? "#1d4ed8"
+                      : validationStatusFilter === "no_required" ? "#374151"
+                      : "#1f2937"
+                  }}
+                >
+                  <option value="" style={{ color: "#1f2937" }}>Todos</option>
+                  <option value="validated" style={{ color: "#15803d" }}>Validado</option>
+                  <option value="pending" style={{ color: "#a16207" }}>Pendiente</option>
+                  <option value="reset" style={{ color: "#c2410c" }}>Reset</option>
+                  <option value="capital" style={{ color: "#1d4ed8" }}>Capital</option>
+                  <option value="no_required" style={{ color: "#374151" }}>No Requiere</option>
                 </select>
               </div>
               <div>
@@ -1347,6 +1490,15 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                           </div>
                         ))}
                     </div>
+
+                    {/* Rubros de cancelación (solo reset) */}
+                    {pago.validationStatus === "reset" && pago.cancelacion && (
+                      <CancelacionRubros
+                        cancelacion={pago.cancelacion}
+                        pagoId={pago.pagoId}
+                        onSuccess={() => refetch()}
+                      />
+                    )}
                   </div>
                 </div>
               );
@@ -1981,6 +2133,15 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                             </div>
                           ))}
                       </div>
+
+                      {/* Rubros de cancelación (solo reset) */}
+                      {pago.validationStatus === "reset" && pago.cancelacion && (
+                        <CancelacionRubros
+                          cancelacion={pago.cancelacion}
+                          pagoId={pago.pagoId}
+                          onSuccess={() => refetch()}
+                        />
+                      )}
                     </div>
                   )}
                 </div>
@@ -2266,9 +2427,10 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
         }}
         pagoId={pagoIdParaVerFacturas}
         onFacturasActualizadas={() => {
-          refetch(); // Refrescar la tabla cuando se anule una factura
+          refetch();
         }}
       />
+
     </div>
   );
 }

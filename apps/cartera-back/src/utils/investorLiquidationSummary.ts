@@ -29,7 +29,7 @@ export function resolveEstadoLiquidacionResumen({
   }
 
   if (requestedEstado === "liquidated") {
-    return !hasNoLiquidado && hasLiquidado ? "liquidated" : null;
+    return hasLiquidado ? "liquidated" : null;
   }
 
   if (hasNoLiquidado) {

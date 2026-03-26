@@ -3,9 +3,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getPagosConInversionistasService,
   pagosService,
+  editPaymentService,
   type AplicarPagoResponse,
+  type EditPaymentParams,
   type GetPagosParams,
-  type GetPagosResponse, 
+  type GetPagosResponse,
 } from "../services/services"; 
 
 /**
@@ -67,6 +69,24 @@ export function useAplicarPago() {
       // ❌ Mostrar error
       console.error("Error al aplicar pago:", error);
       alert(error.message || "Error al aplicar el pago al crédito");
+    },
+  });
+}
+
+/**
+ * 🔹 Hook para editar un pago (PATCH /editPayment/:id)
+ */
+export function useEditPayment() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ pagoId, params }: { pagoId: number; params: EditPaymentParams }) =>
+      editPaymentService(pagoId, params),
+
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["pagos-inversionistas"],
+      });
     },
   });
 }

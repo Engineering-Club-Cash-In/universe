@@ -13,7 +13,7 @@ import { promises as fs } from "fs";
 import { mapPagosPorCreditos, mapPagosDesdeJson } from "../migration/migration";
 import { authMiddleware } from "./midleware";
 import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagosToExcel, generateReciboPagoPDF } from "../controllers/reports";
-import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment, aplicarMontoAPago } from "../controllers/registerPayment";
+import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment, aplicarMontoAPago, editarPago } from "../controllers/registerPayment";
 import { eq } from "drizzle-orm";
 import { db } from "../database";
 import { creditos, pagos_credito } from "../database/db";
@@ -44,6 +44,20 @@ export const paymentRouter = new Elysia()
   .post("/revertPaymentToPending", revertPaymentToPending)
   .post("/revalidatePayment", revalidatePayment)
   .post("/processInvestors", processInvestors)
+
+  // Endpoint para editar un pago (abonos, restantes, mora, otros, etc.)
+  .patch("/editPayment/:pagoId", async ({ params, body, set }: any) => {
+    const pagoId = Number(params.pagoId);
+    if (!pagoId || isNaN(pagoId)) {
+      set.status = 400;
+      return { success: false, message: "pago_id inválido" };
+    }
+    const result = await editarPago(pagoId, body);
+    if (!result.success) {
+      set.status = result.message.includes("no encontrado") ? 404 : 400;
+    }
+    return result;
+  })
 
   // Nuevo endpoint para buscar pagos por SIFCO y/o fecha
   .get("/paymentByCredit", async ({ query, set }) => {
@@ -292,6 +306,7 @@ export const paymentRouter = new Elysia()
           fechaFin,
           inversionistaId,
           usuarioNombre,
+          validationStatus,
           categoriaCredito,
           tipoCredito,
           formatoCredito,

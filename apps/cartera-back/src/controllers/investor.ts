@@ -3683,6 +3683,233 @@ export const fixCubeInvestment = async ({ set }: any) => {
   }
 };
 
+export const reconcileMirrorPercentages = async ({ set }: any) => {
+  try {
+    console.log("🚀 Iniciando RECONCILIACIÓN SELECTIVA de porcentajes espejo...");
+
+    // 1. Obtener todos los registros originales con info completa
+    const allOriginals = await db
+      .select({
+        id: creditos_inversionistas.id,
+        inversionista_id: creditos_inversionistas.inversionista_id,
+        inversionista_nombre: inversionistas.nombre,
+        credito_id: creditos_inversionistas.credito_id,
+        p_inversor: creditos_inversionistas.porcentaje_participacion_inversionista,
+        p_cashin: creditos_inversionistas.porcentaje_cash_in,
+        sifco: creditos.numero_credito_sifco,
+        cliente: usuarios.nombre,
+      })
+      .from(creditos_inversionistas)
+      .innerJoin(creditos, eq(creditos_inversionistas.credito_id, creditos.credito_id))
+      .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+      .innerJoin(inversionistas, eq(creditos_inversionistas.inversionista_id, inversionistas.inversionista_id));
+
+    const allMirrors = await db.select().from(creditos_inversionistas_espejo);
+
+    // 2. Mapear espejos
+    const mirrorMap = new Map();
+    allMirrors.forEach((m) => {
+      const key = `${m.inversionista_id}_${m.credito_id}`;
+      mirrorMap.set(key, m);
+    });
+
+    const results = {
+      totalOriginals: allOriginals.length,
+      updatedSwappedCount: 0,
+      updatedSwapped: [] as any[],      // ✅ Corregidos (Invertidos)
+      discrepanciesOtherCount: 0,
+      discrepanciesOther: [] as any[],    // 📉 Reportados pero NO actualizados
+      missingMirrorsCount: 0,
+      missingMirrors: [] as any[],       // ➕ Sin espejo (Solo reporte)
+      unchangedMirrors: 0,
+    };
+
+    // 3. Procesar cada registro
+    for (const oc of allOriginals) {
+      const key = `${oc.inversionista_id}_${oc.credito_id}`;
+      const mc = mirrorMap.get(key);
+
+      if (mc) {
+        const pInvOriginal = Number(oc.p_inversor);
+        const pCashOriginal = Number(oc.p_cashin);
+        
+        const pInvMirror = Number(mc.porcentaje_participacion_inversionista);
+        const pCashMirror = Number(mc.porcentaje_cash_in);
+
+        if (pInvOriginal !== pInvMirror || pCashOriginal !== pCashMirror) {
+          
+          const isSwapped = pInvOriginal === pCashMirror && pCashOriginal === pInvMirror;
+
+          const data = {
+            inversionista_id: oc.inversionista_id,
+            inversionista_nombre: oc.inversionista_nombre,
+            credito_id: oc.credito_id,
+            sifco: oc.sifco,
+            cliente: oc.cliente,
+            mirror_id: mc.id,
+            original: { inversor: pInvOriginal, cashin: pCashOriginal },
+            mirror: { inversor: pInvMirror, cashin: pCashMirror }
+          };
+
+          if (isSwapped) {
+            // ✅ SOLO actualizamos si están invertidos
+            console.log(`✅ Corrigiendo valores invertidos en espejo para ID ${mc.id}`);
+            await db
+              .update(creditos_inversionistas_espejo)
+              .set({
+                porcentaje_participacion_inversionista: oc.p_inversor,
+                porcentaje_cash_in: oc.p_cashin,
+              })
+              .where(eq(creditos_inversionistas_espejo.id, mc.id));
+            
+            results.updatedSwappedCount++;
+            results.updatedSwapped.push(data);
+          } else {
+            // 📈 Otros descuadres: SOLO reportamos según instrucción
+            results.discrepanciesOtherCount++;
+            results.discrepanciesOther.push(data);
+          }
+        } else {
+          results.unchangedMirrors++;
+        }
+      } else {
+        results.missingMirrorsCount++;
+        results.missingMirrors.push({
+          inversionista_id: oc.inversionista_id,
+          inversionista_nombre: oc.inversionista_nombre,
+          credito_id: oc.credito_id,
+          sifco: oc.sifco,
+          cliente: oc.cliente
+        });
+      }
+    }
+
+    console.log(`✅ Reconciliación finalizada. Actualizados (Swapped): ${results.updatedSwappedCount}, Otros descuadres: ${results.discrepanciesOtherCount}`);
+
+    set.status = 200;
+    return {
+      success: true,
+      message: "Proceso de corrección selectiva finalizado. Solo los valores invertidos fueron actualizados.",
+      data: results
+    };
+  } catch (error) {
+    console.error("❌ Error en reconcileMirrorPercentages:", error);
+    set.status = 500;
+    return { success: false, message: "Error en la reconciliación", error: String(error) };
+  }
+};
+
+export const auditMirrorPercentages = async ({ set }: any) => {
+  try {
+    console.log("🔍 Iniciando AUDITORÍA de porcentajes espejo (Solo lectura)...");
+
+    // 1. Obtener todos los registros originales con info de cliente, SIFCO e Inversionista
+    const allOriginals = await db
+      .select({
+        id: creditos_inversionistas.id,
+        inversionista_id: creditos_inversionistas.inversionista_id,
+        inversionista_nombre: inversionistas.nombre,
+        credito_id: creditos_inversionistas.credito_id,
+        p_inversor: creditos_inversionistas.porcentaje_participacion_inversionista,
+        p_cashin: creditos_inversionistas.porcentaje_cash_in,
+        sifco: creditos.numero_credito_sifco,
+        cliente: usuarios.nombre,
+      })
+      .from(creditos_inversionistas)
+      .innerJoin(creditos, eq(creditos_inversionistas.credito_id, creditos.credito_id))
+      .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+      .innerJoin(inversionistas, eq(creditos_inversionistas.inversionista_id, inversionistas.inversionista_id));
+
+    const allMirrors = await db.select().from(creditos_inversionistas_espejo);
+
+    // 2. Mapear espejos
+    const mirrorMap = new Map();
+    allMirrors.forEach((m) => {
+      const key = `${m.inversionista_id}_${m.credito_id}`;
+      mirrorMap.set(key, m);
+    });
+
+    const results = {
+      totalOriginals: allOriginals.length,
+      discrepanciesCount: 0,
+      discrepanciesSwapped: [] as any[], // 🔄 Valores invertidos (80/20 vs 20/80)
+      discrepanciesOther: [] as any[],   // 📉 Otros descuadres (ej. decimales)
+      missingMirrorsCount: 0,
+      missingMirrors: [] as any[],
+      correctMirrorsCount: 0,
+    };
+
+    // 3. Auditar
+    for (const oc of allOriginals) {
+      const key = `${oc.inversionista_id}_${oc.credito_id}`;
+      const mc = mirrorMap.get(key);
+
+      if (mc) {
+        const pInvOriginal = Number(oc.p_inversor);
+        const pCashOriginal = Number(oc.p_cashin);
+        
+        const pInvMirror = Number(mc.porcentaje_participacion_inversionista);
+        const pCashMirror = Number(mc.porcentaje_cash_in);
+
+        if (pInvOriginal !== pInvMirror || pCashOriginal !== pCashMirror) {
+          results.discrepanciesCount++;
+
+          const isSwapped = pInvOriginal === pCashMirror && pCashOriginal === pInvMirror;
+          
+          const discrepancyData = {
+            inversionista_id: oc.inversionista_id,
+            inversionista_nombre: oc.inversionista_nombre,
+            credito_id: oc.credito_id,
+            sifco: oc.sifco,
+            cliente: oc.cliente,
+            mirror_id: mc.id,
+            original: {
+              inversor: pInvOriginal,
+              cashin: pCashOriginal
+            },
+            mirror: {
+              inversor: pInvMirror,
+              cashin: pCashMirror
+            }
+          };
+
+          if (isSwapped) {
+            results.discrepanciesSwapped.push(discrepancyData);
+          } else {
+            results.discrepanciesOther.push(discrepancyData);
+          }
+        } else {
+          results.correctMirrorsCount++;
+        }
+      } else {
+        results.missingMirrorsCount++;
+        results.missingMirrors.push({
+          inversionista_id: oc.inversionista_id,
+          inversionista_nombre: oc.inversionista_nombre,
+          credito_id: oc.credito_id,
+          sifco: oc.sifco,
+          cliente: oc.cliente
+        });
+      }
+    }
+
+    console.log(`✅ Auditoría finalizada. Discrepancias: ${results.discrepanciesCount}, Faltantes: ${results.missingMirrorsCount}`);
+
+    set.status = 200;
+    return {
+      success: true,
+      message: "Auditoría de porcentajes espejo completada con información de clientes",
+      data: results
+    };
+  } catch (error) {
+    console.error("❌ Error en auditMirrorPercentages:", error);
+    set.status = 500;
+    return { success: false, message: "Error en la auditoría", error: String(error) };
+  }
+};
+
+
+
 interface BoletaPendiente {
   boleta_id: number;
   boleta_url: string;

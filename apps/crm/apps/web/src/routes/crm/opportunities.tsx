@@ -797,7 +797,8 @@ function RouteComponent() {
 	const canFilterBySalesperson =
 		userProfile.data?.role === ROLES.ADMIN ||
 		userProfile.data?.role === ROLES.SALES_SUPERVISOR;
-	const canManageManualVehicleValuation = canFilterBySalesperson;
+	const canManageManualVehicleValuation =
+		canFilterBySalesperson || userProfile.data?.role === ROLES.SALES;
 
 	const crmUsersQuery = useQuery({
 		...orpc.getCrmUsers.queryOptions(),

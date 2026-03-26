@@ -44,6 +44,11 @@ import {
   DropdownMenuTrigger,
 } from "@radix-ui/react-dropdown-menu";
 import { useAuth } from "@/Provider/authProvider";
+import { editPaymentService, type EditPaymentParams } from "../services/services";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DollarSign, Pencil } from "lucide-react";
 // Iconos y colores por atributo
 const iconMap: Record<string, { icon: React.ReactNode; color: string }> = {
   pago_id: {
@@ -134,12 +139,180 @@ function formatDateTime(d: string) {
   const minutes = date.getMinutes().toString().padStart(2, "0");
   return `${day}/${month}/${year} ${hours}:${minutes}`;
 }
+// --- Hook para editar pago ---
+function useEditPayment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ pagoId, params }: { pagoId: number; params: EditPaymentParams }) =>
+      editPaymentService(pagoId, params),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pagosByCredito"] });
+    },
+  });
+}
+
+// --- Configuración de campos editables ---
+interface EditField {
+  key: string;
+  label: string;
+  group: "abonos" | "restantes" | "general";
+}
+
+const EDIT_FIELDS: EditField[] = [
+  { key: "abono_capital", label: "Abono Capital", group: "abonos" },
+  { key: "abono_interes", label: "Abono Interés", group: "abonos" },
+  { key: "abono_iva_12", label: "Abono IVA 12%", group: "abonos" },
+  { key: "abono_seguro", label: "Abono Seguro", group: "abonos" },
+  { key: "abono_gps", label: "Abono GPS", group: "abonos" },
+  { key: "capital_restante", label: "Capital Restante", group: "restantes" },
+  { key: "interes_restante", label: "Interés Restante", group: "restantes" },
+  { key: "iva_12_restante", label: "IVA 12% Restante", group: "restantes" },
+  { key: "seguro_restante", label: "Seguro Restante", group: "restantes" },
+  { key: "gps_restante", label: "GPS Restante", group: "restantes" },
+  { key: "monto_boleta", label: "Monto Boleta", group: "general" },
+  { key: "monto_aplicado", label: "Monto Aplicado", group: "general" },
+  { key: "mora", label: "Mora", group: "general" },
+  { key: "otros", label: "Otros", group: "general" },
+  { key: "membresias", label: "Membresías", group: "general" },
+  { key: "observaciones", label: "Observaciones", group: "general" },
+];
+
+// --- Modal de edición de pago ---
+function EditPaymentModal({
+  pago,
+  open,
+  onClose,
+  onSuccess,
+}: {
+  pago: any;
+  open: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const editPayment = useEditPayment();
+
+  const buildInitial = () => {
+    const vals: Record<string, string> = {};
+    for (const f of EDIT_FIELDS) {
+      vals[f.key] = pago[f.key] != null ? String(pago[f.key]) : "";
+    }
+    return vals;
+  };
+
+  const [formValues, setFormValues] = React.useState<Record<string, string>>(buildInitial);
+
+  React.useEffect(() => {
+    if (open) setFormValues(buildInitial());
+  }, [open, pago?.pago_id]);
+
+  const handleChange = (key: string, value: string) => {
+    setFormValues((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleSave = () => {
+    // Mandar todos los campos que tengan valor (el backend acepta parcial)
+    const payload: Record<string, string> = {};
+    for (const f of EDIT_FIELDS) {
+      const val = formValues[f.key];
+      if (val !== undefined && val !== "") {
+        payload[f.key] = val;
+      }
+    }
+
+    if (Object.keys(payload).length === 0) {
+      toast.info("No hay campos con valor para guardar");
+      return;
+    }
+
+    editPayment.mutate(
+      { pagoId: pago.pago_id, params: payload },
+      {
+        onSuccess: () => {
+          toast.success("Pago actualizado correctamente");
+          onSuccess();
+          onClose();
+        },
+        onError: (error: any) => {
+          toast.error(error?.response?.data?.message || "Error al actualizar pago");
+        },
+      },
+    );
+  };
+
+  const renderGroup = (group: string, title: string, icon: React.ReactNode) => {
+    const fields = EDIT_FIELDS.filter((f) => f.group === group);
+    return (
+      <div>
+        <h4 className="text-sm font-bold text-blue-800 flex items-center gap-2 mb-3 border-b border-blue-100 pb-2">
+          {icon}
+          {title}
+        </h4>
+        <div className="grid grid-cols-2 gap-3">
+          {fields.map((field) => (
+            <div key={field.key} className="space-y-1">
+              <Label className="text-xs font-semibold text-gray-700">{field.label}</Label>
+              <Input
+                type={field.key === "observaciones" ? "text" : "number"}
+                step="0.01"
+                value={formValues[field.key] ?? ""}
+                onChange={(e) => handleChange(field.key, e.target.value)}
+                className="h-9 text-sm border-gray-300 focus:border-blue-500"
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="bg-white text-gray-900 shadow-2xl rounded-xl border border-blue-200 max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="text-blue-900 flex items-center gap-2">
+            <Pencil className="w-5 h-5" />
+            Editar Pago — Cuota #{pago?.numero_cuota} (ID {pago?.pago_id})
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-5 mt-2">
+          {renderGroup("abonos", "Abonos", <DollarSign className="w-4 h-4 text-green-600" />)}
+          {renderGroup("restantes", "Restantes", <DollarSign className="w-4 h-4 text-blue-600" />)}
+          {renderGroup("general", "General", <FileText className="w-4 h-4 text-violet-600" />)}
+        </div>
+
+        <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-gray-200">
+          <Button
+            variant="outline"
+            onClick={onClose}
+            className="border-gray-300"
+          >
+            Cancelar
+          </Button>
+          <Button
+            onClick={handleSave}
+            disabled={editPayment.isPending}
+            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+          >
+            {editPayment.isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin mr-2" />
+            ) : (
+              <Pencil className="w-4 h-4 mr-2" />
+            )}
+            {editPayment.isPending ? "Guardando..." : "Guardar Cambios"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 const FIELD_LABELS: Record<string, string> = {
   pago_id: "ID Pago", numero_cuota: "# Cuota", pagado: "Estado",
   liquidacion_inversionistas: "Liquidación", validationStatus: "Estado Validación",
   monto_boleta: "Monto Boleta", monto_aplicado: "Monto Aplicado", cuota: "Cuota",
   fecha_pago: "Fecha Pago", fecha_aplicado: "Fecha Aplicado", fecha_vencimiento: "Fecha Vencimiento",
-  abono_capital: "Capital", abono_interes: "Interés", abono_iva_12: "IVA 12%", abono_seguro: "Seguro",
+  abono_capital: "Capital", abono_interes: "Interés", abono_iva_12: "IVA 12%", abono_seguro: "Seguro", abono_gps: "GPS",
   capital_restante: "Capital", interes_restante: "Interés", iva_12_restante: "IVA 12%",
   seguro_restante: "Seguro", gps_restante: "GPS", total_restante: "Total",
   membresias: "Membresías", membresias_pago: "Membresías Pago", membresias_mes: "Membresías Mes",
@@ -154,7 +327,7 @@ const DETAIL_SECTIONS = [
   { title: "Fechas", icon: <CalendarDays className="w-4 h-4" />, color: "text-indigo-700", bg: "bg-indigo-50", border: "border-indigo-200",
     fields: ["fecha_pago", "fecha_aplicado", "fecha_vencimiento"] },
   { title: "Abonos", icon: <BadgeDollarSign className="w-4 h-4" />, color: "text-emerald-700", bg: "bg-emerald-50", border: "border-emerald-200",
-    fields: ["abono_capital", "abono_interes", "abono_iva_12", "abono_seguro"] },
+    fields: ["abono_capital", "abono_interes", "abono_iva_12", "abono_seguro", "abono_gps"] },
   { title: "Restantes", icon: <Landmark className="w-4 h-4" />, color: "text-orange-700", bg: "bg-orange-50", border: "border-orange-200",
     fields: ["capital_restante", "interes_restante", "iva_12_restante", "seguro_restante", "gps_restante", "total_restante"] },
   { title: "Membresías", icon: <Percent className="w-4 h-4" />, color: "text-purple-700", bg: "bg-purple-50", border: "border-purple-200",
@@ -241,6 +414,8 @@ export function PaymentsCredits() {
   }>();
   const navigate = useNavigate();
   const [openIdx, setOpenIdx] = useState<number | null>(null);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [pagoParaEditar, setPagoParaEditar] = useState<any | null>(null);
   const [historialFecha, setHistorialFecha] = useState<HistorialCambioFecha[]>([]);
 
   React.useEffect(() => {
@@ -549,6 +724,12 @@ const handleDownloadExcel = async () => {
                         onClick={(e) => { e.stopPropagation(); reciboPago.mutate(item.pago.pago_id); }}
                         disabled={reciboPago.isPending}>
                         {reciboPago.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : <FileText className="w-4 h-4" />} Recibo de Pago
+                      </button>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-amber-50 text-amber-700 transition"
+                        onClick={(e) => { e.stopPropagation(); setPagoParaEditar(item.pago); setEditModalOpen(true); }}>
+                        <Pencil className="w-4 h-4" /> Editar Pago
                       </button>
                     </DropdownMenuItem>
                   </DropdownMenuContent>
@@ -960,6 +1141,19 @@ const handleDownloadExcel = async () => {
           </div>
         )}
       </div>
+
+      {/* Modal de edición de pago */}
+      {pagoParaEditar && (
+        <EditPaymentModal
+          pago={pagoParaEditar}
+          open={editModalOpen}
+          onClose={() => {
+            setEditModalOpen(false);
+            setPagoParaEditar(null);
+          }}
+          onSuccess={() => refetch()}
+        />
+      )}
     </div>
   );
 }

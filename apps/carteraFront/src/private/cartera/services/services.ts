@@ -740,6 +740,35 @@ export async function recalcularPagosService({ numero_credito_sifco, numero_cuot
   return res.data;
 }
 
+// Editar un pago (PATCH)
+export interface EditPaymentParams {
+  abono_capital?: string;
+  abono_interes?: string;
+  abono_iva_12?: string;
+  abono_seguro?: string;
+  abono_gps?: string;
+  capital_restante?: string;
+  interes_restante?: string;
+  iva_12_restante?: string;
+  seguro_restante?: string;
+  gps_restante?: string;
+  membresias?: string;
+  membresias_pago?: string;
+  otros?: string;
+  mora?: string;
+  monto_boleta?: string;
+  monto_aplicado?: string;
+  observaciones?: string;
+  pagado?: boolean;
+  fecha_pago?: string;
+  origen_pago?: string;
+}
+
+export async function editPaymentService(pagoId: number, params: EditPaymentParams) {
+  const { data } = await api.patch(`${API_URL}/editPayment/${pagoId}`, params);
+  return data;
+}
+
 export interface PagoCredito {
   id: number;
   mes: string;
@@ -1625,6 +1654,27 @@ export interface UsuarioPago {
   Categoria: string;
 }
 
+// 🔄 Monto adicional dentro de una cancelación
+export interface MontoAdicionalCancelacion {
+  concepto: string;
+  monto: string;
+}
+
+// 🔄 Cancelación asociada a un pago reset
+export interface CancelacionPago {
+  id: number;
+  motivo: string;
+  observaciones?: string | null;
+  fechaCancelacion?: string;
+  montoCancelacion: string;
+  activo?: boolean;
+  traspaso: string;
+  garantiaMobiliaria: string;
+  otros: string;
+  cuotasAtrasadas: number;
+  montosAdicionales?: MontoAdicionalCancelacion[];
+}
+
 // 💵 Objeto principal del pago
 export interface PagoDataInvestor {
   pagoId: number;
@@ -1664,6 +1714,9 @@ export interface PagoDataInvestor {
   cuentaEmpresaBanco: string | null;
   cuentaEmpresaNombre: string | null;
   cuentaEmpresaNumero: string | null;
+
+  // 🔄 Cancelación (solo presente en pagos reset)
+  cancelacion?: CancelacionPago | null;
 }
 
 // 💰 Totales generales de todos los pagos

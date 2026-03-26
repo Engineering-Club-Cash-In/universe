@@ -1292,9 +1292,13 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     if (mes && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(MONTH FROM p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala') = ${mes}`);
     if (dia && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(DAY FROM p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala') = ${dia}`);
 
-    whereClauses.push(
-      `p.validation_status IN ('validated', 'pending' ,'reset', 'capital')`
-    );
+    if (validationStatus) {
+      whereClauses.push(`p.validation_status = '${validationStatus}'`);
+    } else {
+      whereClauses.push(
+        `p.validation_status IN ('validated', 'pending' ,'reset', 'capital')`
+      );
+    }
 
     if (inversionistaId) {
       whereClauses.push(`
@@ -1450,7 +1454,37 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
           )
           FROM cartera.boletas bol
           WHERE bol.pago_id = p.pago_id
-        ), '[]'::json) AS "boletas"
+        ), '[]'::json) AS "boletas",
+
+        -- 🔴 Cancelación del crédito (solo si validation_status = 'reset')
+        CASE WHEN p.validation_status = 'reset' THEN (
+          SELECT json_build_object(
+            'id', cc.id,
+            'motivo', cc.motivo,
+            'observaciones', cc.observaciones,
+            'fechaCancelacion', TO_CHAR(cc.fecha_cancelacion AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD HH24:MI:SS'),
+            'montoCancelacion', cc.monto_cancelacion,
+            'activo', cc.activo,
+            'traspaso', cc.traspaso,
+            'garantiaMobiliaria', cc.garantia_mobiliaria,
+            'otros', cc.otros,
+            'cuotasAtrasadas', cc.cuotas_atrasadas,
+            'montosAdicionales', COALESCE((
+              SELECT json_agg(
+                json_build_object(
+                  'concepto', ma.concepto,
+                  'monto', ma.monto
+                )
+              )
+              FROM cartera.montos_adicionales ma
+              WHERE ma.credit_id = cc.credit_id
+            ), '[]'::json)
+          )
+          FROM cartera.credit_cancelations cc
+          WHERE cc.credit_id = p.credito_id
+          ORDER BY cc.id DESC
+          LIMIT 1
+        ) ELSE NULL END AS "cancelacion"
 
       FROM cartera.pagos_credito p
       LEFT JOIN cartera.creditos c ON c.credito_id = p.credito_id
@@ -1509,6 +1543,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         : JSON.parse(
             typeof r.boletas === "string" ? r.boletas : "[]"
           ),
+      cancelacion: r.cancelacion ?? null,
     }));
 
     interface TotalesGenerales {

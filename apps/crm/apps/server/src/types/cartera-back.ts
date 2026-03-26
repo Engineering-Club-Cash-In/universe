@@ -357,6 +357,7 @@ export interface CarteraInversionista {
 	tipo_cuenta: TipoCuentaEnum | null;
 	numero_cuenta: string | null;
 	moneda: "quetzales" | "dolares";
+	celular: string | null;
 }
 
 export interface CreateInversionistaInput {
@@ -535,6 +536,7 @@ export interface GetPaymentsParams {
 }
 
 export interface GetInvestorsParams {
+	id?: number;
 	page?: number;
 	perPage?: number;
 }

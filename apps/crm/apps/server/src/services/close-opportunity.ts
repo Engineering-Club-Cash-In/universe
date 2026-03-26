@@ -230,15 +230,30 @@ interface InversionistaCartera {
  * CRM: { inversionista_id, nombre, porcentaje_participacion, monto_aportado, porcentaje_cash_in }
  * Cartera: { inversionista_id, monto_aportado, porcentaje_cash_in, porcentaje_inversion }
  */
+/** ID del inversionista Cash In cuyo porcentaje es fijo */
+const CASH_IN_INVERSIONISTA_ID = 86;
+const CASH_IN_PORCENTAJE_CASH_IN = 100;
+const CASH_IN_PORCENTAJE_INVERSION = 0;
+
 function transformInversionistasForCartera(
 	inversionistas: InversionistaCRM[],
 ): InversionistaCartera[] {
-	return inversionistas.map((inv) => ({
-		inversionista_id: inv.inversionista_id,
-		monto_aportado: inv.monto_aportado,
-		porcentaje_cash_in: inv.porcentaje_cash_in,
-		porcentaje_inversion: inv.porcentaje_participacion,
-	}));
+	return inversionistas.map((inv) => {
+		if (inv.inversionista_id === CASH_IN_INVERSIONISTA_ID) {
+			return {
+				inversionista_id: inv.inversionista_id,
+				monto_aportado: inv.monto_aportado,
+				porcentaje_cash_in: CASH_IN_PORCENTAJE_CASH_IN,
+				porcentaje_inversion: CASH_IN_PORCENTAJE_INVERSION,
+			};
+		}
+		return {
+			inversionista_id: inv.inversionista_id,
+			monto_aportado: inv.monto_aportado,
+			porcentaje_cash_in: inv.porcentaje_cash_in,
+			porcentaje_inversion: inv.porcentaje_participacion,
+		};
+	});
 }
 
 /**

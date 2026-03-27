@@ -838,6 +838,14 @@ export const legalContractsRouter = {
 				});
 			}
 
+			// Enviar links de contratos por WhatsApp al cliente (si aplica)
+			if (opportunity.leadId) sendContractLinksToLead({
+				leadId: opportunity.leadId,
+				opportunityId: input.opportunityId,
+			}).catch((err) => {
+				console.error("[confirmContractsSigned] Error enviando WhatsApp:", err);
+			});
+
 			return {
 				success: true,
 				message:
@@ -985,14 +993,6 @@ export const legalContractsRouter = {
 					changedBy: context.userId,
 					reason: "Contratos firmados confirmados - Avanza a formalización",
 				});
-			});
-
-			// Enviar links de contratos por WhatsApp al cliente (si aplica)
-			if (opportunity.leadId) sendContractLinksToLead({
-				leadId: opportunity.leadId,
-				opportunityId: input.opportunityId,
-			}).catch((err) => {
-				console.error("[confirmContractsSigned] Error enviando WhatsApp:", err);
 			});
 
 			// Notificar a análisis que está lista para desembolso

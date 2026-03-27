@@ -975,6 +975,7 @@
     id: serial("id").primaryKey(),
     nombre: varchar("nombre", { length: 200 }).notNull(),
     observaciones: text("observaciones"),
+    moneda: varchar("moneda", { length: 10 }).notNull().default("GTQ"),
     fecha: timestamp("fecha", { withTimezone: true })
       .notNull()
       .default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),

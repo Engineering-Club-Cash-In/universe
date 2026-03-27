@@ -27,15 +27,15 @@ import {
   useDeleteReciboGenerico,
   useReciboGenericoPdf,
 } from "../hooks/useRecibosGenericos";
-import type { ReciboGenerico } from "../services/services";
+import type { ReciboGenerico, MonedaRecibo } from "../services/services";
 
 // --- Utilidades ---
-const formatCurrency = (val?: string | number | null) =>
+const formatCurrency = (val?: string | number | null, moneda: MonedaRecibo = "GTQ") =>
   val == null || isNaN(Number(val))
     ? "--"
-    : Number(val).toLocaleString("es-GT", {
+    : Number(val).toLocaleString(moneda === "USD" ? "en-US" : "es-GT", {
         style: "currency",
-        currency: "GTQ",
+        currency: moneda,
         minimumFractionDigits: 2,
       });
 
@@ -74,17 +74,22 @@ export function RecibosGenericos() {
 
   const isSaving = isCreando || isActualizando;
 
+  const todayStr = new Date().toISOString().split("T")[0];
+
   // Formik
   const formik = useFormik({
     initialValues: {
       nombre: "",
+      fecha: todayStr,
+      moneda: "GTQ" as MonedaRecibo,
       observaciones: "",
       montos: [{ concepto: "", monto: "" }] as { concepto: string; monto: string }[],
     },
-    enableReinitialize: true,
+    enableReinitialize: false,
     validate: (values) => {
       const errors: any = {};
       if (!values.nombre.trim()) errors.nombre = "El nombre es requerido";
+      if (!values.fecha) errors.fecha = "La fecha es requerida";
       if (values.montos.length === 0) errors.montos = "Debe agregar al menos un monto";
       const montosErrors: any[] = [];
       values.montos.forEach((m, i) => {
@@ -99,6 +104,8 @@ export function RecibosGenericos() {
     onSubmit: (values, { resetForm }) => {
       const payload = {
         nombre: values.nombre.trim(),
+        fecha: values.fecha ? `${values.fecha}T12:00:00` : undefined,
+        moneda: values.moneda,
         observaciones: values.observaciones.trim() || undefined,
         montos: values.montos.map((m) => ({
           concepto: m.concepto.trim(),
@@ -141,7 +148,7 @@ export function RecibosGenericos() {
   const openCreate = () => {
     setEditingRecibo(null);
     formik.resetForm({
-      values: { nombre: "", observaciones: "", montos: [{ concepto: "", monto: "" }] },
+      values: { nombre: "", fecha: todayStr, moneda: "GTQ" as MonedaRecibo, observaciones: "", montos: [{ concepto: "", monto: "" }] },
     });
     setModalOpen(true);
   };
@@ -151,6 +158,8 @@ export function RecibosGenericos() {
     formik.resetForm({
       values: {
         nombre: recibo.nombre,
+        fecha: recibo.fecha ? recibo.fecha.split("T")[0] : todayStr,
+        moneda: recibo.moneda || "GTQ",
         observaciones: recibo.observaciones || "",
         montos: recibo.montos.map((m) => ({ concepto: m.concepto, monto: m.monto })),
       },
@@ -271,6 +280,7 @@ export function RecibosGenericos() {
                   <th className="text-left px-4 py-3 font-semibold text-gray-700">Nombre</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-700">Fecha</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-700">Observaciones</th>
+                  <th className="text-center px-4 py-3 font-semibold text-gray-700">Moneda</th>
                   <th className="text-right px-4 py-3 font-semibold text-gray-700">Total</th>
                   <th className="text-center px-4 py-3 font-semibold text-gray-700">Acciones</th>
                 </tr>
@@ -296,11 +306,17 @@ export function RecibosGenericos() {
                       <td className="px-4 py-3 text-gray-500 max-w-[200px] truncate">
                         {r.observaciones || "--"}
                       </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold ${
+                          r.moneda === "USD"
+                            ? "bg-green-100 text-green-700"
+                            : "bg-blue-100 text-blue-700"
+                        }`}>
+                          {r.moneda === "USD" ? "$ USD" : "Q GTQ"}
+                        </span>
+                      </td>
                       <td className="px-4 py-3 text-right font-bold text-green-700">
-                        <div className="flex items-center justify-end gap-1">
-                          <DollarSign className="h-4 w-4" />
-                          {formatCurrency(total)}
-                        </div>
+                        {formatCurrency(total, r.moneda || "GTQ")}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-center gap-1">
@@ -373,6 +389,33 @@ export function RecibosGenericos() {
                 {formik.errors.nombre && formik.touched.nombre && (
                   <span className="text-xs text-red-500">{formik.errors.nombre as string}</span>
                 )}
+              </div>
+
+              {/* Fecha */}
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-medium text-gray-700">Fecha *</label>
+                <DatePickerMUI
+                  value={formik.values.fecha}
+                  onChange={(v) => formik.setFieldValue("fecha", v)}
+                  disableFuture={false}
+                />
+                {formik.errors.fecha && formik.touched.fecha && (
+                  <span className="text-xs text-red-500">{formik.errors.fecha as string}</span>
+                )}
+              </div>
+
+              {/* Moneda */}
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-medium text-gray-700">Moneda</label>
+                <select
+                  name="moneda"
+                  value={formik.values.moneda}
+                  onChange={formik.handleChange}
+                  className="w-full h-10 rounded-lg border border-blue-200 bg-white px-3 text-sm text-gray-900 font-medium focus:ring-2 focus:ring-blue-400 focus:border-blue-500 transition"
+                >
+                  <option value="GTQ">Q - Quetzales (GTQ)</option>
+                  <option value="USD">$ - Dólares (USD)</option>
+                </select>
               </div>
 
               {/* Observaciones */}
@@ -452,7 +495,7 @@ export function RecibosGenericos() {
                 <div className="flex justify-end items-center gap-2 pt-2 border-t border-gray-100">
                   <span className="text-sm font-semibold text-gray-600">Total:</span>
                   <span className="text-lg font-bold text-green-700">
-                    {formatCurrency(totalMontos)}
+                    {formatCurrency(totalMontos, formik.values.moneda)}
                   </span>
                 </div>
               </div>

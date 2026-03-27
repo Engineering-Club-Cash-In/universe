@@ -31,6 +31,8 @@ export const recibosGenericosRouter = new Elysia({
       body: t.Object({
         nombre: t.String(),
         observaciones: t.Optional(t.String()),
+        fecha: t.Optional(t.String()),
+        moneda: t.Optional(t.String()),
         montos: t.Array(
           t.Object({
             concepto: t.String(),
@@ -102,6 +104,7 @@ export const recibosGenericosRouter = new Elysia({
       body: t.Object({
         nombre: t.Optional(t.String()),
         observaciones: t.Optional(t.String()),
+        moneda: t.Optional(t.String()),
         montos: t.Optional(
           t.Array(
             t.Object({

@@ -13,6 +13,8 @@ api.interceptors.request.use((config) => {
 
 // ===================== TIPOS =====================
 
+export type MonedaRecibo = "GTQ" | "USD";
+
 export interface ReciboGenericoMonto {
   id: number;
   recibo_id: number;
@@ -24,6 +26,7 @@ export interface ReciboGenerico {
   id: number;
   nombre: string;
   observaciones: string | null;
+  moneda: MonedaRecibo;
   fecha: string;
   created_at: string;
   montos: ReciboGenericoMonto[];
@@ -31,12 +34,16 @@ export interface ReciboGenerico {
 
 export interface CreateReciboGenericoPayload {
   nombre: string;
+  fecha?: string;
+  moneda?: MonedaRecibo;
   observaciones?: string;
   montos: { concepto: string; monto: string }[];
 }
 
 export interface UpdateReciboGenericoPayload {
   nombre?: string;
+  fecha?: string;
+  moneda?: MonedaRecibo;
   observaciones?: string;
   montos?: { concepto: string; monto: string }[];
 }

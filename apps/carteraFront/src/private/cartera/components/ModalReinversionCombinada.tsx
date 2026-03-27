@@ -101,7 +101,7 @@ export function ModalReinversionCombinada({
     }
 
     asignarReinversion(
-      { asignaciones: cambios },
+      { inversionista_id: inversionistaId, asignaciones: cambios },
       {
         onSuccess: () => {
           toast.success("Reinversión combinada guardada correctamente.");

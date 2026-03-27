@@ -327,6 +327,8 @@ export const disbursementRouter = {
 	// Messaging routes (WhatsApp via SimpleTech) — separado para evitar TS7056
 	sendWhatsAppMessage: messagingRouter.sendWhatsAppMessage,
 	getContractLinksMessage: messagingRouter.getContractLinksMessage,
+	getWhatsappLog: messagingRouter.getWhatsappLog,
+	updateWhatsappLog: messagingRouter.updateWhatsappLog,
 
 	// Dashboard jurídico manual
 	getJuridicoDashboardSnapshot: juridicoDashboardRouter.getSnapshot,

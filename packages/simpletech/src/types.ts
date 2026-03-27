@@ -132,6 +132,30 @@ export type Message =
   | AudioMessage;
 
 // =============================================================================
+// Auth / Token
+// =============================================================================
+
+/**
+ * Credenciales para obtener un token via /auth.php/token
+ */
+export interface TokenRequest {
+  /** Nombre de usuario */
+  username: string;
+  /** Contrasena */
+  password: string;
+}
+
+/**
+ * Respuesta de la API al solicitar un token
+ */
+export interface TokenResponse {
+  /** "success" o "error" */
+  status: 'success' | 'error';
+  /** Token JWT si fue exitoso, mensaje de error si fallo */
+  data: string;
+}
+
+// =============================================================================
 // Request / Response
 // =============================================================================
 

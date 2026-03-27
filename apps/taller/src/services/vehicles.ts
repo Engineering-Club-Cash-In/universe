@@ -228,10 +228,10 @@ export const getVehicleById = async (id: string) => {
   }
 };
 
-// Search vehicles
-export const searchVehicles = async (query?: string, status?: "pending" | "available" | "sold" | "maintenance" | "auction", vehicleType?: string, fuelType?: string) => {
+// Search only vehicles with previous inspections
+export const searchInspectedVehicles = async (query?: string, status?: "pending" | "available" | "sold" | "maintenance" | "auction", vehicleType?: string, fuelType?: string) => {
   try {
-    const vehicles = await client.searchVehicles({
+    const vehicles = await client.searchInspectedVehicles({
       query,
       status,
       vehicleType,
@@ -242,7 +242,7 @@ export const searchVehicles = async (query?: string, status?: "pending" | "avail
       data: vehicles
     };
   } catch (error) {
-    console.error('Error searching vehicles:', error);
+    console.error('Error searching inspected vehicles:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Error desconocido'

@@ -4,7 +4,7 @@ import type { RouterClient } from "@orpc/server";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { QueryCache, QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import type { appRouter } from "../../../crm/apps/server/src/routers/index";
+import type { AppRouter } from "../../../crm/apps/server/src/routers/index";
 
 export const queryClient = new QueryClient({
   queryCache: new QueryCache({
@@ -31,7 +31,7 @@ export const link = new RPCLink({
   },
 });
 
-export const client: RouterClient<typeof appRouter> = createORPCClient(link);
+export const client: RouterClient<AppRouter> = createORPCClient(link);
 
 export const orpc = createTanstackQueryUtils(client);
 
@@ -56,6 +56,10 @@ export const vehiclesApi = {
 
   // Search vehicles
   search: (params: Parameters<typeof client.searchVehicles>[0]) => client.searchVehicles(params),
+
+  // Search only vehicles with inspections
+  searchInspected: (params: Parameters<typeof client.searchInspectedVehicles>[0]) =>
+    client.searchInspectedVehicles(params),
 
   // Create full inspection (main method for Taller app)
   createFullInspection: (data: Parameters<typeof client.createFullVehicleInspection>[0]) =>

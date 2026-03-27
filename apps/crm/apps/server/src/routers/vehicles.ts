@@ -640,6 +640,79 @@ export const vehiclesRouter = {
 			return result;
 		}),
 
+	// Search ONLY vehicles with recorded inspections
+	searchWithInspections: tallerOrCrmProcedure
+		.input(
+			z.object({
+				query: z.string().optional(),
+				status: z
+					.enum(["pending", "available", "sold", "maintenance", "auction"])
+					.optional(),
+				vehicleType: z.string().optional(),
+				fuelType: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const conditions = [];
+
+			if (input.query) {
+				conditions.push(
+					or(
+						ilike(vehicles.make, `%${input.query}%`),
+						ilike(vehicles.model, `%${input.query}%`),
+						ilike(vehicles.licensePlate, `%${input.query}%`),
+						ilike(vehicles.vinNumber, `%${input.query}%`),
+					),
+				);
+			}
+
+			if (input.status) {
+				conditions.push(eq(vehicles.status, input.status));
+			}
+
+			if (input.vehicleType) {
+				conditions.push(eq(vehicles.vehicleType, input.vehicleType));
+			}
+
+			if (input.fuelType) {
+				conditions.push(eq(vehicles.fuelType, input.fuelType));
+			}
+
+			// Use innerJoin to ensure the vehicle has at least one inspection
+			const result = await db
+				.selectDistinct({
+					id: vehicles.id,
+					make: vehicles.make,
+					model: vehicles.model,
+					year: vehicles.year,
+					licensePlate: vehicles.licensePlate,
+					vinNumber: vehicles.vinNumber,
+					motorNumber: vehicles.motorNumber,
+					color: vehicles.color,
+					vehicleType: vehicles.vehicleType,
+					milesMileage: vehicles.milesMileage,
+					kmMileage: vehicles.kmMileage,
+					origin: vehicles.origin,
+					cylinders: vehicles.cylinders,
+					engineCC: vehicles.engineCC,
+					fuelType: vehicles.fuelType,
+					transmission: vehicles.transmission,
+					trim: vehicles.trim,
+					traction: vehicles.traction,
+					status: vehicles.status,
+					createdAt: vehicles.createdAt,
+				})
+				.from(vehicles)
+				.innerJoin(
+					vehicleInspections,
+					eq(vehicles.id, vehicleInspections.vehicleId),
+				)
+				.where(conditions.length > 0 ? and(...conditions) : undefined)
+				.orderBy(desc(vehicles.createdAt));
+
+			return result;
+		}),
+
 	// Create vehicle inspection
 	createInspection: protectedProcedure
 		.input(
@@ -944,43 +1017,116 @@ export const vehiclesRouter = {
 			return inspection || null;
 		}),
 
-	// Validate if license plate is already used by a different VIN
+	// Validate if license plate or VIN is already used
 	validateLicensePlate: publicProcedure
 		.input(
 			z.object({
-				licensePlate: z.string(),
+				licensePlate: z.string().optional(),
 				vinNumber: z.string().optional(),
 				id: z.string().optional(),
 			}),
 		)
 		.handler(async ({ input }) => {
-			if (!input.licensePlate) return { valid: true };
+			if (!input.licensePlate && !input.vinNumber) return { valid: true };
 
-			const existingWithPlate = await db
-				.select({ vinNumber: vehicles.vinNumber, id: vehicles.id })
-				.from(vehicles)
-				.where(
-					and(
-						eq(vehicles.licensePlate, input.licensePlate),
-						input.id ? not(eq(vehicles.id, input.id)) : undefined,
-					),
-				)
-				.limit(1);
+			// 1. Check License Plate (Normalized)
+			let existingWithPlate: any[] = [];
+			if (input.licensePlate) {
+				const cleanInputPlate = input.licensePlate
+					.replace(/[^a-zA-Z0-9]/g, "")
+					.toUpperCase();
 
-			// If plate exists but it belongs to another VIN
-			if (
-				existingWithPlate.length > 0 &&
-				existingWithPlate[0].vinNumber &&
-				input.vinNumber &&
-				existingWithPlate[0].vinNumber !== input.vinNumber
-			) {
+				existingWithPlate = await db
+					.select()
+					.from(vehicles)
+					.where(
+						and(
+							sql`REPLACE(REPLACE(UPPER(${vehicles.licensePlate}), ' ', ''), '-', '') = ${cleanInputPlate}`,
+							input.id ? not(eq(vehicles.id, input.id)) : undefined,
+						),
+					)
+					.limit(1);
+			}
+
+			// 2. Check VIN Number (Normalized)
+			let existingWithVin: any[] = [];
+			if (input.vinNumber) {
+				const cleanInputVin = input.vinNumber
+					.replace(/[^a-zA-Z0-9]/g, "")
+					.toUpperCase();
+
+				existingWithVin = await db
+					.select()
+					.from(vehicles)
+					.where(
+						and(
+							sql`REPLACE(REPLACE(UPPER(${vehicles.vinNumber}), ' ', ''), '-', '') = ${cleanInputVin}`,
+							input.id ? not(eq(vehicles.id, input.id)) : undefined,
+						),
+					)
+					.limit(1);
+			}
+
+			const foundVehicle = existingWithPlate[0] || existingWithVin[0];
+
+			if (foundVehicle) {
+				// We compare normalized versions for the flags
+				const cleanInputPlate = input.licensePlate
+					? input.licensePlate.replace(/[^a-zA-Z0-9]/g, "").toUpperCase()
+					: "";
+				const cleanFoundPlate = foundVehicle.licensePlate
+					? foundVehicle.licensePlate.replace(/[^a-zA-Z0-9]/g, "").toUpperCase()
+					: "";
+
+				const cleanInputVin = input.vinNumber
+					? input.vinNumber.replace(/[^a-zA-Z0-9]/g, "").toUpperCase()
+					: "";
+				const cleanFoundVin = foundVehicle.vinNumber
+					? foundVehicle.vinNumber.replace(/[^a-zA-Z0-9]/g, "").toUpperCase()
+					: "";
+
+				const plateMatches = cleanInputPlate && cleanFoundPlate === cleanInputPlate;
+				const vinMatches = cleanInputVin && cleanFoundVin === cleanInputVin;
+
+				if (plateMatches && vinMatches) {
+					return {
+						valid: false,
+						alreadyExists: true,
+						vehicle: foundVehicle,
+						message: `Este vehículo ya está registrado (Placa: ${foundVehicle.licensePlate}, VIN: ${foundVehicle.vinNumber}).`,
+					};
+				}
+
+				// Case B: Plate exists but with a different VIN
+				if (plateMatches && input.vinNumber && vinMatches === false) {
+					return {
+						valid: false,
+						alreadyExists: true,
+						vehicle: foundVehicle,
+						message: `La placa "${input.licensePlate}" ya está registrada con el chasis/VIN "${foundVehicle.vinNumber}".`,
+					};
+				}
+
+				// Case C: VIN exists but with a different Plate
+				if (vinMatches && input.licensePlate && plateMatches === false) {
+					return {
+						valid: false,
+						alreadyExists: true,
+						vehicle: foundVehicle,
+						message: `El chasis/VIN "${input.vinNumber}" ya está registrado con la placa "${foundVehicle.licensePlate}".`,
+					};
+				}
+
+				// Case D: Only one was provided and it matches
 				return {
 					valid: false,
-					message: `La placa "${input.licensePlate}" ya está registrada con el chasis/VIN "${existingWithPlate[0].vinNumber}".`,
+					alreadyExists: true,
+					vehicle: foundVehicle,
+					message: `El vehículo ya está registrado.`,
 				};
 			}
 
-			return { valid: true, message: "" };
+			return { valid: true, message: "", alreadyExists: false };
 		}),
 
 	// Get statistics
@@ -1164,16 +1310,17 @@ export const vehiclesRouter = {
 			// Start a transaction
 			try {
 				return await db.transaction(async (tx) => {
-					// 1. Identify or create vehicle by ID
+					// 1. Identify or create vehicle by ID - Sanitize blank IDs
 					let vehicleId: string;
-					const vehicleInputId = input.vehicle.id;
+					const { id: rawId, ...vehicleData } = input.vehicle;
+					const vehicleInputId = rawId && rawId.trim() !== "" ? rawId : undefined;
 
 					if (vehicleInputId) {
 						// Try to update existing vehicle by ID
 						const [updated] = await tx
 							.update(vehicles)
 							.set({
-								...input.vehicle,
+								...vehicleData,
 								updatedAt: new Date(),
 							})
 							.where(eq(vehicles.id, vehicleInputId))
@@ -1186,18 +1333,19 @@ export const vehiclesRouter = {
 							const [newVehicle] = await tx
 								.insert(vehicles)
 								.values({
-									...input.vehicle,
+									id: vehicleInputId,
+									...vehicleData,
 									status: "pending",
 								} as NewVehicle)
 								.returning();
 							vehicleId = newVehicle.id;
 						}
 					} else {
-						// Create new vehicle (no ID provided)
+						// Create new vehicle (no ID provided or ID was blank)
 						const [newVehicle] = await tx
 							.insert(vehicles)
 							.values({
-								...input.vehicle,
+								...vehicleData,
 								status: "pending",
 							} as NewVehicle)
 							.returning();

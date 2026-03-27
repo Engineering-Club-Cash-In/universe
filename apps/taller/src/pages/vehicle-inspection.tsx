@@ -5,9 +5,9 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { toast, Toaster } from "sonner";
-import { Sparkles, Search, Check, FileSearch, History, Car, Loader2 } from "lucide-react";
+import { Sparkles, Search, Check, FileSearch, History, Car, Loader2, ShieldAlert } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
-import { searchVehicles } from "../services/vehicles";
+import { searchInspectedVehicles } from "../services/vehicles";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,6 +37,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
 import VehicleRegistrationOCR from "../components/vehicle-registration-ocr";
 const formSchema = z.object({
   // Section 1: Technician Info
@@ -97,6 +102,13 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
   // Check if dev mode is enabled
   const isDevMode = import.meta.env.VITE_DEV_MODE === 'TRUE';
   
+  const [inspectionType, setInspectionType] = useState<"new" | "existing">("new");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [duplicateVehicle, setDuplicateVehicle] = useState<any | null>(null);
+  const [selectedVehicle, setSelectedVehicle] = useState<any | null>(null);
+
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -131,10 +143,17 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
   useImperativeHandle(ref, () => ({
     triggerValidation: async () => {
       const values = form.getValues();
+      console.log("=== triggerValidation debug ===");
+      console.log("inspectionType:", inspectionType);
+      console.log("vinVerification:", values.vinVerification);
       
       // Validación manual de seguridad para inspección nueva
       if (inspectionType === 'new' && !values.vinVerification) {
-        toast.error("Debe confirmar que ha verificado el VIN con la tarjeta de circulación");
+        form.setError("vinVerification", {
+          type: "manual",
+          message: "Debe confirmar la verificación del VIN"
+        });
+        toast.error("Confirmación requerida: Marque la casilla de verificación de VIN");
         const element = document.getElementById("vin-verification-container");
         element?.scrollIntoView({ behavior: "smooth", block: "center" });
         return false;
@@ -164,13 +183,31 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       setFormData(values);
       return true;
     }
-  }));
+  }), [inspectionType, form, setFormData]);
 
-  const [inspectionType, setInspectionType] = useState<"new" | "existing">("new");
-  const [searchTerm, setSearchTerm] = useState("");
-  const [searchResults, setSearchResults] = useState<any[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
+  const handleCheckDuplicate = async (overridePlate?: string, overrideVin?: string) => {
+    const plate = overridePlate || form.getValues("licensePlate");
+    const vin = overrideVin || form.getValues("vinNumber");
 
+    if (!plate && !vin) {
+      setDuplicateVehicle(null);
+      return;
+    }
+
+    const result = await validateVehiclePlate(plate, vin, form.getValues("vehicleId"));
+    if (result.success && result.data?.alreadyExists) {
+      const vehicle = result.data.vehicle;
+      setDuplicateVehicle(vehicle);
+      
+      // Auto-cargar datos si estamos en modo "Nueva Inspección"
+      if (inspectionType === "new") {
+        selectVehicle(vehicle);
+        toast.info(`Sincronización automática: Datos cargados para ${vehicle.licensePlate}`);
+      }
+    } else {
+      setDuplicateVehicle(null);
+    }
+  };
   const handleSearch = async (query: string) => {
     setSearchTerm(query);
     if (query.length < 3) {
@@ -180,7 +217,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
 
     setIsSearching(true);
     try {
-      const result = await searchVehicles(query);
+      const result = await searchInspectedVehicles(query);
       if (result.success) {
         setSearchResults(result.data || []);
       }
@@ -218,6 +255,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
     // Clear search results
     setSearchResults([]);
     setSearchTerm("");
+    setSelectedVehicle(vehicle);
     toast.success("Información del vehículo cargada correctamente");
   };
 
@@ -229,10 +267,28 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
   }, [formSubmitted]);
 
   async function onSubmit(values: FormValues) {
+    // Validación manual de seguridad para inspección nueva al hacer SUBMIT (Guardar y Continuar)
+    if (inspectionType === 'new' && !values.vinVerification) {
+      form.setError("vinVerification", {
+        type: "manual",
+        message: "Debe confirmar la verificación del VIN"
+      });
+      toast.error("Confirmación requerida: Marque la casilla de verificación de VIN");
+      const element = document.getElementById("vin-verification-container");
+      element?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+
     // Validate license plate
     const validationResult = await validateVehiclePlate(values.licensePlate, values.vinNumber, values.vehicleId);
     
     if (!validationResult.success || !validationResult.data?.valid) {
+      // If it's an exact match but the user is in "new" mode, we should tell them
+      if (inspectionType === "new" && validationResult.data?.alreadyExists) {
+        setDuplicateVehicle(validationResult.data.vehicle);
+        toast.error("Este vehículo ya existe en el sistema.");
+        return;
+      }
       toast.error(validationResult.data?.message || "La placa ya está en uso con otro chasis.");
       return;
     }
@@ -310,6 +366,13 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
     const currentData = form.getValues();
     const updatedData = { ...currentData, ...mappedData };
     setFormData(updatedData);
+
+    // After updating the form with OCR data, check for duplicates immediately
+    // Use the mappedData directly to avoid waiting for form state update
+    handleCheckDuplicate(
+      mappedData.licensePlate as string, 
+      mappedData.vinNumber as string
+    );
 
     toast.success('Información de la tarjeta aplicada al formulario');
   };
@@ -461,7 +524,10 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
 
                 <button
                   type="button"
-                  onClick={() => setInspectionType("existing")}
+                  onClick={() => {
+                    setInspectionType("existing");
+                    setSelectedVehicle(null);
+                  }}
                   className={cn(
                     "flex flex-col items-center gap-3 p-4 rounded-xl border-2 transition-all text-left",
                     inspectionType === "existing" 
@@ -502,15 +568,49 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                 </CardTitle>
               </CardHeader>
               <CardContent className="px-3 pb-4 sm:px-6 space-y-4">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input 
-                    placeholder="Busque por placa, marca o línea..." 
-                    className="pl-10 h-12 text-lg"
-                    value={searchTerm}
-                    onChange={(e) => handleSearch(e.target.value)}
-                  />
-                </div>
+                  {selectedVehicle ? (
+                  <div className="animate-in zoom-in-95 fade-in duration-300">
+                    <div className="p-4 rounded-xl border-2 border-primary bg-primary/5 flex items-center justify-between shadow-sm">
+                      <div className="flex items-center gap-4">
+                        <div className="h-12 w-12 bg-primary rounded-full flex items-center justify-center text-white shadow-md">
+                          <Car className="h-7 w-7" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                             <div className="font-black text-2xl text-primary tracking-tight">
+                              {selectedVehicle.licensePlate}
+                             </div>
+                             <span className="bg-primary/10 text-primary text-[10px] font-bold px-2 py-0.5 rounded-full border border-primary/20 uppercase">
+                               Seleccionado
+                             </span>
+                          </div>
+                          <div className="text-base text-muted-foreground font-medium">
+                            {selectedVehicle.make} {selectedVehicle.model} — {selectedVehicle.year}
+                          </div>
+                        </div>
+                      </div>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        type="button"
+                        onClick={() => setSelectedVehicle(null)}
+                        className="hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors"
+                      >
+                        Cambiar Vehículo
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input 
+                      placeholder="Busque por placa, marca o línea..." 
+                      className="pl-10 h-12 text-lg"
+                      value={searchTerm}
+                      onChange={(e) => handleSearch(e.target.value)}
+                    />
+                  </div>
+                )}
 
                 {isSearching && (
                   <div className="flex items-center justify-center p-8">
@@ -637,7 +737,14 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                     <FormItem>
                       <FormLabel>Número de placa</FormLabel>
                       <FormControl>
-                        <Input placeholder="Ej. P-345JKL" {...field} />
+                        <Input 
+                          placeholder="Ej. P-345JKL" 
+                          {...field} 
+                          onBlur={() => {
+                            field.onBlur();
+                            handleCheckDuplicate();
+                          }}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -654,6 +761,10 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                         <Input
                           placeholder="Número de identificación del vehículo"
                           {...field}
+                          onBlur={() => {
+                            field.onBlur();
+                            handleCheckDuplicate();
+                          }}
                         />
                       </FormControl>
                       <FormMessage />
@@ -661,6 +772,26 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                   )}
                 />
               </div>
+
+              {inspectionType === "new" && duplicateVehicle && (
+                <div className="mt-2 w-full animate-in fade-in slide-in-from-top-4 duration-300">
+                  <Alert className="border-amber-200 bg-amber-50 text-amber-900 shadow-sm flex flex-col sm:flex-row items-start gap-4">
+                    <div className="bg-amber-100 p-2 rounded-full text-amber-600 shrink-0 hidden sm:block">
+                      <ShieldAlert className="h-5 w-5" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <AlertTitle className="font-bold text-amber-800 flex items-center gap-2 mb-1">
+                        <ShieldAlert className="h-4 w-4 sm:hidden shrink-0" />
+                        Registro Encontrado (Datos Sincronizados)
+                      </AlertTitle>
+                      <AlertDescription className="text-amber-700 text-sm leading-relaxed">
+                        Este vehículo ya existe en nuestra base de datos ({duplicateVehicle.licensePlate}). 
+                        Se han cargado automáticamente los datos técnicos almacenados para garantizar la integridad de la información.
+                      </AlertDescription>
+                    </div>
+                  </Alert>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
                 <FormField
@@ -984,8 +1115,25 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
           </Card>
 
           {inspectionType === "new" && (
-            <Card id="vin-verification-container" className="border-amber-200 bg-amber-50 mb-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
+            <Card
+              id="vin-verification-container"
+              className={cn(
+                "mb-4 animate-in fade-in slide-in-from-bottom-4 duration-300 transition-all border-2",
+                form.formState.errors.vinVerification
+                  ? "border-red-500 bg-red-50 ring-4 ring-red-500/10 shadow-lg"
+                  : "border-amber-200 bg-amber-50 shadow-sm"
+              )}
+            >
               <CardContent className="p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2 text-amber-800 font-bold text-sm uppercase tracking-wider">
+                    <ShieldAlert className="h-4 w-4" />
+                    Validación de Seguridad
+                  </div>
+                  <span className="bg-red-100 text-red-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-red-200 uppercase">
+                    Requerido
+                  </span>
+                </div>
                 <FormField
                   control={form.control}
                   name="vinVerification"
@@ -1002,13 +1150,17 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                         <FormLabel className="text-base font-semibold text-amber-900 cursor-pointer">
                           He verificado que el VIN ingresado coincide con la Tarjeta de Circulación
                         </FormLabel>
-                        <p className="text-sm text-amber-700">
+                        <p className={cn(
+                          "text-sm",
+                          form.formState.errors.vinVerification ? "text-red-700 font-medium" : "text-amber-700"
+                        )}>
                           Confirmación obligatoria para garantizar la integridad de los datos del vehículo nuevo.
                         </p>
                       </div>
                     </FormItem>
                   )}
                 />
+                <FormMessage className="mt-2 text-red-600 font-bold" />
               </CardContent>
             </Card>
           )}

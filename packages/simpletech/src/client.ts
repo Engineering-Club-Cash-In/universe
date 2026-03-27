@@ -230,7 +230,17 @@ export class SimpleTechClient {
           );
         }
 
-        return JSON.parse(responseText) as SendResponse;
+        const parsed = JSON.parse(responseText) as SendResponse;
+
+        if (!parsed.results) {
+          throw new ConnectionError(
+            `Respuesta inesperada de la API: ${responseText}`,
+            response.status,
+            responseText,
+          );
+        }
+
+        return parsed;
       } catch (error) {
         if (error instanceof ConnectionError) {
           throw error;
@@ -291,11 +301,12 @@ export class SimpleTechClient {
   }
 
   private processResponse(response: SendResponse): SimpleTechResult {
-    const failed = response.results.filter(r => r.error !== '');
+    const results = response.results ?? [];
+    const failed = results.filter(r => r.error !== '');
 
     return {
       success: failed.length === 0,
-      results: response.results,
+      results,
       failed,
     };
   }

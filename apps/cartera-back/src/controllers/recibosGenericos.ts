@@ -102,6 +102,7 @@ export async function updateReciboGenerico(
     nombre?: string;
     observaciones?: string;
     moneda?: string;
+    fecha?: string;
     montos?: { concepto: string; monto: string }[];
   }
 ) {
@@ -109,6 +110,7 @@ export async function updateReciboGenerico(
   if (data.nombre !== undefined) updateFields.nombre = data.nombre;
   if (data.observaciones !== undefined) updateFields.observaciones = data.observaciones;
   if (data.moneda !== undefined) updateFields.moneda = data.moneda;
+  if (data.fecha !== undefined) updateFields.fecha = new Date(data.fecha);
 
   if (Object.keys(updateFields).length > 0) {
     await db

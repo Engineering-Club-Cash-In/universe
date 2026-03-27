@@ -216,14 +216,15 @@ export default function VehicleInspectionWizard() {
       </Dialog>
 
       {/* Header */}
-      <div className="bg-white border-b">
-        <div className="container mx-auto px-2 sm:px-4 py-1 flex items-center justify-between">
-          <div className="text-left">
-            <h1 className="text-2xl sm:text-3xl font-bold">Nueva Inspección de Vehículo</h1>
-            <p className="text-sm sm:text-base text-muted-foreground mt-1">
+      <div className="bg-white border-b sticky top-0 z-50 w-full">
+        <div className="w-full px-2 sm:px-4 py-2 flex items-center justify-between gap-3 overflow-hidden">
+          <div className="flex-1 min-w-0 overflow-hidden">
+            <h1 className="text-lg sm:text-2xl md:text-3xl font-bold truncate">Nueva Inspección</h1>
+            <p className="text-[10px] sm:text-sm text-muted-foreground mt-0.5 truncate sm:whitespace-normal">
               Complete todos los pasos para registrar la inspección
             </p>
           </div>
+          <div className="flex-shrink-0">
           {/* Icon-only on mobile, full button on desktop */}
           <Button
             variant="destructive"
@@ -252,90 +253,105 @@ export default function VehicleInspectionWizard() {
           </Button>
         </div>
       </div>
+      </div>
 
-      {/* Progress Bar */}
-      <div className="bg-white border-b">
-        <div className="container mx-auto px-2 sm:px-4 py-1 sm:py-2">
+      {/* Progress Bar & Stepper Area */}
+      <div className="bg-white border-b overflow-hidden w-full max-w-full">
+        <div className="w-full px-2 sm:px-4 py-1 sm:py-2">
           <div className="space-y-4">
-            <Progress value={progress} className="h-2" />
+            <Progress value={progress} className="h-1.5 sm:h-2" />
 
-            {/* Steps Indicator */}
-            <div className="flex justify-between">
-              {STEPS.map((step, index) => {
-                const StepIconComponent = step.icon;
-                const isActive = index === currentStep;
+            {/* Steps Indicator - Scrollable on mobile */}
+            <div className="overflow-x-auto scrollbar-hide py-1 -mx-2 px-2 sm:mx-0 sm:px-0">
+              <div className="flex justify-between min-w-max sm:min-w-0 sm:w-full gap-4 sm:gap-0">
+                {STEPS.map((step, index) => {
+                  const StepIconComponent = step.icon;
+                  const isActive = index === currentStep;
 
-                // Lógica de completado actualizada para 5 pasos
-                const isCompleted =
-                  (index === 0 && basicInfoCompleted) ||
-                  (index === 1 && inspection360Completed) ||
-                  (index === 2 && checklistCompleted) ||
-                  (index === 3 && photosCompleted) ||
-                  (index === 4 && valuationCompleted);
+                  // Lógica de completado actualizada para 5 pasos
+                  const isCompleted =
+                    (index === 0 && basicInfoCompleted) ||
+                    (index === 1 && inspection360Completed) ||
+                    (index === 2 && checklistCompleted) ||
+                    (index === 3 && photosCompleted) ||
+                    (index === 4 && valuationCompleted);
 
-                const isPast = index < currentStep;
+                  const isPast = index < currentStep;
 
-                return (
-                  <div
-                    key={step.id}
-                    className={cn(
-                      "flex flex-col items-center gap-2 flex-1",
-                      isActive && "text-primary",
-                      !isActive && !isPast && "text-muted-foreground"
-                    )}
-                  >
+                  return (
                     <div
+                      key={step.id}
                       className={cn(
-                        "relative flex items-center justify-center w-10 h-10 rounded-full border-2",
-                        isActive && "border-primary bg-primary/10",
-                        isCompleted && "border-green-500 bg-green-50",
-                        !isActive && !isCompleted && "border-gray-300 bg-white"
+                        "flex flex-col items-center gap-2 px-2 sm:px-0 sm:flex-1 min-w-[75px] sm:min-w-0 transition-all duration-300",
+                        isActive && "text-primary scale-105 sm:scale-100",
+                        !isActive && !isPast && "text-muted-foreground"
                       )}
                     >
-                      {isCompleted ? (
-                        <CheckCircle className="h-5 w-5 text-green-500" />
-                      ) : (
-                        <StepIconComponent
-                          className={cn(
-                            "h-5 w-5",
-                            isActive && "text-primary",
-                            !isActive && "text-gray-400"
-                          )}
-                        />
-                      )}
-                    </div>
-                    <div className="text-center">
-                      <div className={cn(
-                        "text-[10px] sm:text-sm font-medium leading-tight",
-                        !isActive && !isPast && "text-gray-400"
-                      )}>
-                        {step.title}
+                      <div
+                        className={cn(
+                          "relative flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10 rounded-full border-2 transition-all",
+                          isActive && "border-primary bg-primary/10 shadow-sm",
+                          isCompleted && "border-green-500 bg-green-50",
+                          !isActive && !isCompleted && "border-gray-300 bg-white"
+                        )}
+                      >
+                        {isCompleted ? (
+                          <CheckCircle className="h-4 w-4 sm:h-5 sm:w-5 text-green-500" />
+                        ) : (
+                          <StepIconComponent
+                            className={cn(
+                              "h-4 w-4 sm:h-5 sm:w-5",
+                              isActive && "text-primary",
+                              !isActive && "text-gray-400"
+                            )}
+                          />
+                        )}
                       </div>
-                      <div className="text-xs text-muted-foreground hidden sm:block">
-                        {step.description}
+                      <div className="text-center max-w-[80px] sm:max-w-none">
+                        <div className={cn(
+                          "text-[9px] sm:text-xs md:text-sm font-medium leading-tight line-clamp-2 sm:line-clamp-1",
+                          isActive ? "text-primary font-bold" : "text-gray-500",
+                          !isActive && !isPast && "text-gray-400"
+                        )}>
+                          {step.title}
+                        </div>
+                        <div className="text-[10px] text-muted-foreground hidden lg:block mt-0.5">
+                          {step.description}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>
       </div>
 
       {/* Step Content */}
-      <div className="container mx-auto px-2 sm:px-4 py-3 sm:py-6">
-        <div className="bg-white rounded-lg shadow-sm">
+      <div className="w-full px-1 sm:px-4 py-3 sm:py-6 overflow-hidden max-w-full">
+        <div className="max-w-7xl mx-auto bg-white rounded-lg shadow-sm border overflow-hidden">
           {/* Step Header */}
           <div className="border-b px-3 sm:px-6 py-1 sm:py-2">
             <div className="flex items-center gap-2 sm:gap-3">
               <StepIcon className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
-              <div>
-                <h2 className="text-xl sm:text-2xl font-semibold">{currentStepData.title}</h2>
-                <p className="text-sm sm:text-base text-muted-foreground">
-                  {currentStepData.description}
-                </p>
-              </div>
+              {currentStep === 3 ? (
+                <div className="flex flex-col space-y-2 min-w-0 overflow-hidden">
+                  <h1 className="text-xl sm:text-3xl font-bold truncate">
+                    Fotos de Inspección
+                  </h1>
+                  <p className="text-xs sm:text-base text-muted-foreground truncate sm:whitespace-normal">
+                    Capture imágenes claras de cada área requerida.
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <h2 className="text-xl sm:text-2xl font-semibold">{currentStepData.title}</h2>
+                  <p className="text-sm sm:text-base text-muted-foreground">
+                    {currentStepData.description}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 

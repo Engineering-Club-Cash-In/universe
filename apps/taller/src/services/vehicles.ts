@@ -20,6 +20,7 @@ export interface VehicleData {
   companyId?: string | null;
   trim?: string;
   traction?: string;
+  id?: string;
 }
 
 export interface InspectionData {
@@ -149,6 +150,7 @@ export const prepareInspectionData = (formData: any, sectionTimes?: Record<strin
     transmission: formData.transmission,
     trim: formData.trim,
     traction: formData.traction,
+    id: formData.vehicleId,
   };
 
   const inspectionData: InspectionData = {
@@ -265,11 +267,12 @@ export const getVehicleStatistics = async () => {
   }
 };
 // Validate vehicle plate uniqueness
-export const validateVehiclePlate = async (licensePlate: string, vinNumber?: string) => {
+export const validateVehiclePlate = async (licensePlate: string, vinNumber?: string, id?: string) => {
   try {
     const result = await client.validateLicensePlate({
       licensePlate,
-      vinNumber
+      vinNumber,
+      id
     });
     return {
       success: true,

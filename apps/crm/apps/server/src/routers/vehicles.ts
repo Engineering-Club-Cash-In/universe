@@ -950,15 +950,21 @@ export const vehiclesRouter = {
 			z.object({
 				licensePlate: z.string(),
 				vinNumber: z.string().optional(),
+				id: z.string().optional(),
 			}),
 		)
 		.handler(async ({ input }) => {
 			if (!input.licensePlate) return { valid: true };
 
 			const existingWithPlate = await db
-				.select({ vinNumber: vehicles.vinNumber })
+				.select({ vinNumber: vehicles.vinNumber, id: vehicles.id })
 				.from(vehicles)
-				.where(eq(vehicles.licensePlate, input.licensePlate))
+				.where(
+					and(
+						eq(vehicles.licensePlate, input.licensePlate),
+						input.id ? not(eq(vehicles.id, input.id)) : undefined,
+					),
+				)
 				.limit(1);
 
 			// If plate exists but it belongs to another VIN
@@ -1015,6 +1021,7 @@ export const vehiclesRouter = {
 			z.object({
 				// Vehicle data
 				vehicle: z.object({
+					id: z.string().optional(),
 					make: z.string(),
 					model: z.string(),
 					year: z.number(),
@@ -1157,27 +1164,36 @@ export const vehiclesRouter = {
 			// Start a transaction
 			try {
 				return await db.transaction(async (tx) => {
-					// 1. Check if vehicle exists by VIN or create new
+					// 1. Identify or create vehicle by ID
 					let vehicleId: string;
-					const existingVehicle = await tx
-						.select()
-						.from(vehicles)
-						.where(eq(vehicles.vinNumber, input.vehicle.vinNumber))
-						.limit(1);
+					const vehicleInputId = input.vehicle.id;
 
-					if (existingVehicle.length > 0) {
-						// Update existing vehicle
+					if (vehicleInputId) {
+						// Try to update existing vehicle by ID
 						const [updated] = await tx
 							.update(vehicles)
 							.set({
 								...input.vehicle,
 								updatedAt: new Date(),
 							})
-							.where(eq(vehicles.vinNumber, input.vehicle.vinNumber))
+							.where(eq(vehicles.id, vehicleInputId))
 							.returning();
-						vehicleId = updated.id;
+						
+						if (updated) {
+							vehicleId = updated.id;
+						} else {
+							// Fallback: If ID not found, create new vehicle with that ID
+							const [newVehicle] = await tx
+								.insert(vehicles)
+								.values({
+									...input.vehicle,
+									status: "pending",
+								} as NewVehicle)
+								.returning();
+							vehicleId = newVehicle.id;
+						}
 					} else {
-						// Create new vehicle
+						// Create new vehicle (no ID provided)
 						const [newVehicle] = await tx
 							.insert(vehicles)
 							.values({

@@ -105,6 +105,7 @@ export const recibosGenericosRouter = new Elysia({
         nombre: t.Optional(t.String()),
         observaciones: t.Optional(t.String()),
         moneda: t.Optional(t.String()),
+        fecha: t.Optional(t.String()),
         montos: t.Optional(
           t.Array(
             t.Object({

@@ -754,6 +754,7 @@ export interface EditPaymentParams {
   gps_restante?: string;
   membresias?: string;
   membresias_pago?: string;
+  membresias_mes?: string;
   otros?: string;
   mora?: string;
   monto_boleta?: string;

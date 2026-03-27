@@ -1,5 +1,6 @@
 import { ORPCError } from "@orpc/server";
-import { SimpleTechClient } from "@repo/simpletech";
+// @ts-ignore - getToken existe en el package pero TS no lo resuelve bien
+import { getToken, SimpleTechClient } from "@repo/simpletech";
 import { and, count, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
@@ -32,12 +33,36 @@ async function resolvePdfUrl(
 	}
 }
 
-const simpletechClient = process.env.SIMPLETECH_TOKEN
-	? new SimpleTechClient({
-			credentials: { token: process.env.SIMPLETECH_TOKEN },
-			baseUrl: process.env.SIMPLETECH_BASE_URL!,
-		})
-	: null;
+let cachedClient: { client: SimpleTechClient; obtainedAt: number } | null =
+	null;
+const SIX_DAYS_MS = 6 * 24 * 60 * 60 * 1000;
+
+async function getSimpletechClient(): Promise<SimpleTechClient | null> {
+	if (
+		!process.env.SIMPLETECH_BASE_URL ||
+		!process.env.SIMPLETECH_USERNAME ||
+		!process.env.SIMPLETECH_PASSWORD
+	) {
+		return null;
+	}
+
+	if (cachedClient && Date.now() - cachedClient.obtainedAt < SIX_DAYS_MS) {
+		return cachedClient.client;
+	}
+
+	const token = await getToken(process.env.SIMPLETECH_BASE_URL, {
+		username: process.env.SIMPLETECH_USERNAME,
+		password: process.env.SIMPLETECH_PASSWORD,
+	});
+
+	const client = new SimpleTechClient({
+		credentials: { token },
+		baseUrl: process.env.SIMPLETECH_BASE_URL,
+	});
+
+	cachedClient = { client, obtainedAt: Date.now() };
+	return client;
+}
 
 export interface ContractLink {
 	contractName: string;
@@ -144,8 +169,10 @@ export async function sendContractLinksToLead(params: {
 	let leadStatus: "sent" | "pending" | "failed" = "pending";
 	let leadReason: string | undefined;
 
-	if (!simpletechClient) {
-		leadReason = "SIMPLETECH_TOKEN no configurado";
+	const stClient = await getSimpletechClient();
+
+	if (!stClient) {
+		leadReason = "Servicio de mensajería no configurado";
 	} else if (hasCoDebtors) {
 		leadReason = "La oportunidad tiene cofirmantes";
 	} else if (contracts.length === 0) {
@@ -158,7 +185,7 @@ export async function sendContractLinksToLead(params: {
 	} else {
 		// Todo OK — intentar enviar
 		try {
-			await simpletechClient.sendText(
+			await stClient.sendText(
 				lead.phone,
 				"WHATSAPP",
 				leadMessage!,
@@ -237,13 +264,14 @@ export const messagingRouter = {
 				});
 			}
 
-			if (!simpletechClient) {
+			const stClientGeneric = await getSimpletechClient();
+			if (!stClientGeneric) {
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
 					message: "Servicio de mensajería no configurado",
 				});
 			}
 
-			const result = await simpletechClient.sendText(
+			const result = await stClientGeneric.sendText(
 				lead.phone,
 				"WHATSAPP",
 				input.message,
@@ -432,11 +460,12 @@ export const messagingRouter = {
 			let status: "sent" | "failed" = "failed";
 			let reason: string | null = null;
 
-			if (!simpletechClient) {
+			const stClientUpdate = await getSimpletechClient();
+			if (!stClientUpdate) {
 				reason = "Servicio de mensajería no configurado";
 			} else {
 				try {
-					await simpletechClient.sendText(
+					await stClientUpdate.sendText(
 						input.phone,
 						"WHATSAPP",
 						message,

@@ -230,7 +230,17 @@ export class SimpleTechClient {
           );
         }
 
-        return JSON.parse(responseText) as SendResponse;
+        const parsed = JSON.parse(responseText) as SendResponse;
+
+        if (!parsed.results) {
+          throw new ConnectionError(
+            `Respuesta inesperada de la API: ${responseText}`,
+            response.status,
+            responseText,
+          );
+        }
+
+        return parsed;
       } catch (error) {
         if (error instanceof ConnectionError) {
           throw error;
@@ -291,11 +301,12 @@ export class SimpleTechClient {
   }
 
   private processResponse(response: SendResponse): SimpleTechResult {
-    const failed = response.results.filter(r => r.error !== '');
+    const results = response.results ?? [];
+    const failed = results.filter(r => r.error !== '');
 
     return {
       success: failed.length === 0,
-      results: response.results,
+      results,
       failed,
     };
   }
@@ -440,92 +451,4 @@ export function createClientFromEnv(): SimpleTechClient {
   }
 
   return new SimpleTechClient(config);
-}
-
-// =============================================================================
-// Autenticacion
-// =============================================================================
-
-const AUTH_ENDPOINT = '/auth.php/token';
-
-/**
- * Obtiene un token de autenticacion para la API de SimpleTech
- *
- * El token es valido por 7 dias. Cada vez que se genera uno nuevo, el anterior se invalida.
- *
- * @example
- * ```typescript
- * const token = await getToken('https://your-instance.simpletech.com', {
- *   username: 'user',
- *   password: 'pass',
- * });
- *
- * const client = new SimpleTechClient({
- *   credentials: { token },
- *   baseUrl: 'https://your-instance.simpletech.com',
- * });
- * ```
- */
-export async function getToken(
-  baseUrl: string,
-  credentials: import('./types').TokenRequest,
-  timeout: number = DEFAULT_TIMEOUT,
-): Promise<string> {
-  if (!baseUrl) {
-    throw new ValidationError('baseUrl es requerido', 'baseUrl');
-  }
-  if (!credentials.username) {
-    throw new ValidationError('username es requerido', 'username');
-  }
-  if (!credentials.password) {
-    throw new ValidationError('password es requerido', 'password');
-  }
-
-  const url = `${baseUrl}${AUTH_ENDPOINT}`;
-
-  try {
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'username': credentials.username,
-        'password': credentials.password,
-      },
-      signal: AbortSignal.timeout(timeout),
-    });
-
-    const responseText = await response.text();
-
-    if (!response.ok) {
-      throw new ConnectionError(
-        `Error HTTP ${response.status}: ${response.statusText}`,
-        response.status,
-        responseText,
-      );
-    }
-
-    const data = JSON.parse(responseText) as import('./types').TokenResponse;
-
-    if (data.status !== 'success') {
-      throw new SimpleTechError(`Error al obtener token: ${data.data}`);
-    }
-
-    return data.data;
-  } catch (error) {
-    if (error instanceof SimpleTechError) {
-      throw error;
-    }
-
-    if ((error as Error).name === 'TimeoutError' ||
-        (error as Error).name === 'AbortError') {
-      throw new ConnectionError(`Timeout: La peticion excedio ${timeout}ms`);
-    }
-
-    if ((error as Error).name === 'SyntaxError') {
-      throw new ConnectionError('Respuesta JSON invalida del servidor');
-    }
-
-    throw new ConnectionError(
-      `Error de conexion: ${(error as Error).message}`
-    );
-  }
 }

@@ -50,18 +50,32 @@ async function getSimpletechClient(): Promise<SimpleTechClient | null> {
 		return cachedClient.client;
 	}
 
-	const token = await getToken(process.env.SIMPLETECH_BASE_URL, {
-		username: process.env.SIMPLETECH_USERNAME,
-		password: process.env.SIMPLETECH_PASSWORD,
-	});
+	try {
+		console.log("[SimpleTech] Obteniendo token desde:", process.env.SIMPLETECH_BASE_URL);
+		const token = await getToken(process.env.SIMPLETECH_BASE_URL, {
+			username: process.env.SIMPLETECH_USERNAME,
+			password: process.env.SIMPLETECH_PASSWORD,
+		});
+		console.log("[SimpleTech] Token obtenido correctamente");
 
-	const client = new SimpleTechClient({
-		credentials: { token },
-		baseUrl: process.env.SIMPLETECH_BASE_URL,
-	});
+		const client = new SimpleTechClient({
+			credentials: { token },
+			baseUrl: process.env.SIMPLETECH_BASE_URL,
+		});
 
-	cachedClient = { client, obtainedAt: Date.now() };
-	return client;
+		cachedClient = { client, obtainedAt: Date.now() };
+		return client;
+	} catch (err) {
+		console.error("[SimpleTech] Error obteniendo token:", err);
+		console.error("[SimpleTech] Error detalle:", JSON.stringify(err, Object.getOwnPropertyNames(err as object)));
+		return null;
+	}
+}
+
+function normalizePhone(phone: string): string {
+	const digits = phone.replace(/\D/g, "");
+	if (digits.startsWith("502")) return `+${digits}`;
+	return `+502${digits}`;
 }
 
 export interface ContractLink {
@@ -185,13 +199,17 @@ export async function sendContractLinksToLead(params: {
 	} else {
 		// Todo OK — intentar enviar
 		try {
-			await stClient.sendText(
-				lead.phone,
+			console.log("[SimpleTech] Enviando auto a:", lead.phone, "mensaje:", leadMessage!.substring(0, 100) + "...");
+			const sendResult = await stClient.sendText(
+				normalizePhone(lead.phone),
 				"WHATSAPP",
 				leadMessage!,
 			);
+			console.log("[SimpleTech] Resultado envío auto:", JSON.stringify(sendResult));
 			leadStatus = "sent";
 		} catch (err) {
+			console.error("[SimpleTech] Error envío auto:", err);
+			console.error("[SimpleTech] Error detalle:", JSON.stringify(err, Object.getOwnPropertyNames(err as object)));
 			leadStatus = "failed";
 			leadReason =
 				err instanceof Error ? err.message : "Error desconocido";
@@ -272,7 +290,7 @@ export const messagingRouter = {
 			}
 
 			const result = await stClientGeneric.sendText(
-				lead.phone,
+				normalizePhone(lead.phone),
 				"WHATSAPP",
 				input.message,
 			);
@@ -465,13 +483,17 @@ export const messagingRouter = {
 				reason = "Servicio de mensajería no configurado";
 			} else {
 				try {
-					await stClientUpdate.sendText(
-						input.phone,
+					console.log("[SimpleTech] Enviando manual a:", input.phone, "mensaje:", message.substring(0, 100) + "...");
+					const sendResult = await stClientUpdate.sendText(
+						normalizePhone(input.phone),
 						"WHATSAPP",
 						message,
 					);
+					console.log("[SimpleTech] Resultado envío manual:", JSON.stringify(sendResult));
 					status = "sent";
 				} catch (err) {
+					console.error("[SimpleTech] Error envío manual:", err);
+					console.error("[SimpleTech] Error detalle:", JSON.stringify(err, Object.getOwnPropertyNames(err as object)));
 					reason =
 						err instanceof Error
 							? err.message

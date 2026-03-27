@@ -210,6 +210,7 @@ export function ModalEditCredit({
         capital: Number(values.capital),
         porcentaje_interes: Number(values.porcentaje_interes),
         plazo: Number(values.plazo),
+        asesor_id: Number(values.asesor_id) || undefined,
 
         observaciones: values.observaciones ?? "",
         mora: Number(values.mora ?? 0),

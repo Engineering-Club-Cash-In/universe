@@ -13,6 +13,8 @@ const LOGO_URL = process.env.LOGO_URL || "https://pub-8081c8d6e5e743f9adfc9e0db9
 export async function createReciboGenerico(data: {
   nombre: string;
   observaciones?: string;
+  fecha?: string;
+  moneda?: string;
   montos: { concepto: string; monto: string }[];
 }) {
   const [recibo] = await db
@@ -20,6 +22,8 @@ export async function createReciboGenerico(data: {
     .values({
       nombre: data.nombre,
       observaciones: data.observaciones,
+      ...(data.fecha ? { fecha: new Date(data.fecha) } : {}),
+      ...(data.moneda ? { moneda: data.moneda } : {}),
     })
     .returning();
 
@@ -97,12 +101,14 @@ export async function updateReciboGenerico(
   data: {
     nombre?: string;
     observaciones?: string;
+    moneda?: string;
     montos?: { concepto: string; monto: string }[];
   }
 ) {
   const updateFields: Record<string, any> = {};
   if (data.nombre !== undefined) updateFields.nombre = data.nombre;
   if (data.observaciones !== undefined) updateFields.observaciones = data.observaciones;
+  if (data.moneda !== undefined) updateFields.moneda = data.moneda;
 
   if (Object.keys(updateFields).length > 0) {
     await db
@@ -147,8 +153,9 @@ export async function generateReciboGenericoPDF(reciboId: number) {
     throw new Error(`No se encontró el recibo con ID ${reciboId}`);
   }
 
+  const simbolo = recibo.moneda === "USD" ? "$" : "Q";
   const formatQ = (n: number) =>
-    `Q${n.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    `${simbolo}${n.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const fechaRecibo = recibo.fecha
     ? new Date(recibo.fecha).toLocaleDateString("es-GT", {

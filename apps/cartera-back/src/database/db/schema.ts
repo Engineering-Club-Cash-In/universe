@@ -969,3 +969,24 @@
     created_at: timestamp("created_at").defaultNow(),
     updated_at: timestamp("updated_at").defaultNow(),
   });
+
+  // ── Recibos genéricos (sin FK a créditos) ──
+  export const recibos_genericos = customSchema.table("recibos_genericos", {
+    id: serial("id").primaryKey(),
+    nombre: varchar("nombre", { length: 200 }).notNull(),
+    observaciones: text("observaciones"),
+    fecha: timestamp("fecha", { withTimezone: true })
+      .notNull()
+      .default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
+    created_at: timestamp("created_at", { withTimezone: true })
+      .default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
+  });
+
+  export const recibo_generico_montos = customSchema.table("recibo_generico_montos", {
+    id: serial("id").primaryKey(),
+    recibo_id: integer("recibo_id")
+      .notNull()
+      .references(() => recibos_genericos.id, { onDelete: "cascade" }),
+    concepto: varchar("concepto", { length: 300 }).notNull(),
+    monto: numeric("monto", { precision: 18, scale: 2 }).notNull(),
+  });

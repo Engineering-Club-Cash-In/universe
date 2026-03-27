@@ -991,3 +991,17 @@
     concepto: varchar("concepto", { length: 300 }).notNull(),
     monto: numeric("monto", { precision: 18, scale: 2 }).notNull(),
   });
+
+  // ── Audit logs ──
+  export const audit_logs = customSchema.table("audit_logs", {
+    id: serial("id").primaryKey(),
+    user_id: integer("user_id"),
+    user_email: varchar("user_email", { length: 200 }),
+    method: varchar("method", { length: 10 }).notNull(),
+    path: varchar("path", { length: 500 }).notNull(),
+    status_code: integer("status_code"),
+    body: text("body"),
+    created_at: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
+  });

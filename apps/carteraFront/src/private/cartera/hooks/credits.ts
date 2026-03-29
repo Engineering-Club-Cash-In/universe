@@ -29,7 +29,7 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
   const [perPage, setPerPage] = useState(10);
   const [creditoSifco, setCreditoSifco] = useState("");
   const [estado, setEstado] = useState<
-    "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO" | "EN_CONVENIO"
+    "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO" | "EN_CONVENIO" | "CAIDO"
   >("ACTIVO");
   const [excel, setExcel] = useState(false);
 
@@ -131,6 +131,7 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
     { value: "PENDIENTE_CANCELACION", label: "Pendiente de Cancelación", color: "bg-blue-100 text-blue-800" },
     { value: "MOROSO", label: "Moroso", color: "bg-purple-100 text-purple-800" },
     { value: "EN_CONVENIO", label: "En Convenio", color: "bg-indigo-100 text-indigo-800" },
+    { value: "CAIDO", label: "Caído", color: "bg-gray-200 text-gray-800" },
   ];
 
   return {

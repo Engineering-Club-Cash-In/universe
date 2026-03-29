@@ -353,6 +353,7 @@ export interface CreditoUsuarioPago {
   asesor: Asesor; // 👈 corregí el typo "aseor" -> "asesor"
   cancelacion?: CreditCancelation | null;
   incobrable?: BadDebt | null;
+  caido?: CreditoCaido | null;
   rubros: Rubro[];
   mora: Mora | null;
   deuda_total_con_mora: string;
@@ -453,7 +454,7 @@ export const getCreditosPaginados = async (params: {
   page?: number;
   perPage?: number;
   numero_credito_sifco?: string;
-  estado: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO" | "EN_CONVENIO";
+  estado: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO" | "EN_CONVENIO" | "CAIDO";
   excel: boolean;
   asesor_id?: number;
   nombre_usuario?: string;
@@ -1486,7 +1487,7 @@ export async function getPlatformUsersServiceFrontend(): Promise<PlatformUser[]>
 }
 
 
-export type EstadoCredito = "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO";
+export type EstadoCredito = "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO" | "EN_CONVENIO" | "CAIDO";
 
 export interface Mora {
   mora_id: number;
@@ -1874,7 +1875,9 @@ export interface CreditoInfo {
     | "CANCELADO"
     | "INCOBRABLE"
     | "PENDIENTE_CANCELACION"
-    | "MOROSO";
+    | "MOROSO"
+    | "EN_CONVENIO"
+    | "CAIDO";
   monto_mora: string; // 💰 Total de mora por crédito
   cuotas_atrasadas: number; // 📆 Cuotas vencidas
 }
@@ -3196,6 +3199,78 @@ export async function asignarReinversionService(
   const res = await api.post<AsignarReinversionResponse>(
     `${import.meta.env.VITE_BACK_URL}/asignar-reinversion`,
     payload
+  );
+  return res.data;
+}
+
+// ===================== CRÉDITOS CAÍDOS =====================
+
+export interface CreditoCaido {
+  id: number;
+  credit_id: number;
+  motivo: string;
+  observaciones: string | null;
+  fecha_caida: string;
+  created_at: string;
+}
+
+export interface MarcarCaidoPayload {
+  credito_id: number;
+  motivo: string;
+  observaciones?: string;
+}
+
+export interface MarcarCaidoResponse {
+  success: boolean;
+  message: string;
+  data: CreditoCaido;
+}
+
+export async function marcarCreditoCaido(
+  payload: MarcarCaidoPayload
+): Promise<MarcarCaidoResponse> {
+  const res = await api.post<MarcarCaidoResponse>(
+    `${API_URL}/fallen-credits`,
+    payload
+  );
+  return res.data;
+}
+
+export interface FallenCreditItem {
+  credito: any;
+  usuario: any;
+  asesor: any;
+  caido: CreditoCaido;
+}
+
+export interface GetFallenCreditsResponse {
+  data: FallenCreditItem[];
+  page: number;
+  perPage: number;
+  totalCount: number;
+  totalPages: number;
+}
+
+export async function getFallenCredits(params: {
+  page?: number;
+  perPage?: number;
+  numero_credito_sifco?: string;
+  fecha_desde?: string;
+  fecha_hasta?: string;
+}): Promise<GetFallenCreditsResponse> {
+  const res = await api.get<GetFallenCreditsResponse>(
+    `${API_URL}/fallen-credits`,
+    {
+      params: {
+        page: params.page ?? 1,
+        perPage: params.perPage ?? 10,
+        ...(params.numero_credito_sifco && {
+          numero_credito_sifco: params.numero_credito_sifco,
+        }),
+        ...(params.fecha_desde && { fecha_desde: params.fecha_desde }),
+        ...(params.fecha_hasta && { fecha_hasta: params.fecha_hasta }),
+      },
+    }
   );
   return res.data;
 }

@@ -581,7 +581,8 @@ export async function getCreditosWithUserByMesAnio(
     | "INCOBRABLE"
     | "PENDIENTE_CANCELACION"
     | "MOROSO"
-    | "EN_CONVENIO",
+    | "EN_CONVENIO"
+    | "CAIDO",
   asesor_id?: number,
   nombre_usuario?: string,
   email_asesor?: string,
@@ -1456,7 +1457,7 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
       await tx.insert(cuotas_credito).values({
         credito_id: creditId,
         numero_cuota: 1,
-        fecha_vencimiento: new Date().toISOString().split("T")[0],
+        fecha_vencimiento: new Date().toLocaleDateString("sv-SE", { timeZone: "America/Guatemala" }),
         pagado: false,
       });
 
@@ -1718,7 +1719,10 @@ export async function resetCredit({
     );
 
     // 6. Calcular abonos reales
-    const abonoCapital = new Big(credito.capital ?? "0");
+    const capitalOriginal = new Big(credito.capital ?? "0");
+    const abonoCapital = statusCredit === "INCOBRABLE"
+      ? capitalOriginal.minus(new Big(montoIncobrable!))
+      : capitalOriginal;
     const abonoInteres = new Big(credito.cuota_interes ?? "0").times(n);
     const abonoIva = new Big(credito.iva_12 ?? "0").times(n);
     const abonoSeguro = new Big(credito.seguro_10_cuotas ?? "0").times(n);
@@ -1836,7 +1840,7 @@ export async function resetCredit({
       .values({
         credito_id: credito.credito_id,
         numero_cuota: 1,
-        fecha_vencimiento: new Date().toISOString(),
+        fecha_vencimiento: new Date().toLocaleDateString("sv-SE", { timeZone: "America/Guatemala" }),
         liquidado_inversionistas: false,
         pagado: true,
       })
@@ -1894,31 +1898,114 @@ export async function resetCredit({
     }
 
     // 16. Al final: zerear el crédito y ponerle el status
-    await db
-      .update(creditos)
-      .set({
-        capital: "0",
-        porcentaje_interes: "0",
-        deudatotal:
-          montoIncobrable !== undefined ? String(montoIncobrable) : "0",
+    const fechaHoyGT = new Date().toLocaleDateString("sv-SE", { timeZone: "America/Guatemala" });
+
+    if (statusCredit === "INCOBRABLE") {
+      const capitalIncobrable = new Big(montoIncobrable!);
+
+      // 16a. Actualizar crédito: capital = incobrable, lo demás en 0
+      await db
+        .update(creditos)
+        .set({
+          capital: capitalIncobrable.toString(),
+          porcentaje_interes: "0",
+          deudatotal: capitalIncobrable.toString(),
+          cuota_interes: "0",
+          cuota: capitalIncobrable.toString(),
+          iva_12: "0",
+          seguro_10_cuotas: "0",
+          gps: "0",
+          membresias_pago: "0",
+          membresias: "0",
+          porcentaje_royalti: "0",
+          royalti: "0",
+          otros: "0",
+          plazo: 1,
+          statusCredit: "INCOBRABLE",
+        })
+        .where(eq(creditos.credito_id, creditId));
+
+      // 16b. Crear cuota pendiente para el monto incobrable
+      const [cuotaPendiente] = await db
+        .insert(cuotas_credito)
+        .values({
+          credito_id: credito.credito_id,
+          numero_cuota: 1,
+          fecha_vencimiento: fechaHoyGT,
+          pagado: false,
+        })
+        .returning();
+
+      // 16c. Crear pago placeholder (no pagado) con capital_restante = incobrable
+      await db.insert(pagos_credito).values({
+        credito_id: credito.credito_id,
+        cuota_id: cuotaPendiente.cuota_id,
+        cuota: capitalIncobrable.toString(),
         cuota_interes: "0",
-        cuota: "0",
-        iva_12: "0",
-        seguro_10_cuotas: "0",
-        gps: "0",
-        membresias_pago: "0",
+        abono_capital: "0",
+        abono_interes: "0",
+        abono_iva_12: "0",
+        abono_interes_ci: "0",
+        abono_iva_ci: "0",
+        abono_seguro: "0",
+        abono_gps: "0",
+        pago_del_mes: "0",
+        monto_boleta: "0",
+        capital_restante: capitalIncobrable.toString(),
+        interes_restante: "0",
+        iva_12_restante: "0",
+        seguro_restante: "0",
+        gps_restante: "0",
+        total_restante: capitalIncobrable.toString(),
         membresias: "0",
-        porcentaje_royalti: "0",
-        royalti: "0",
-        otros: "0",
-        statusCredit: statusCredit,
-      })
-      .where(eq(creditos.credito_id, creditId));
+        membresias_pago: "0",
+        membresias_mes: "0",
+        mora: "0",
+        monto_boleta_cuota: "0",
+        seguro_total: "0",
+        pagado: false,
+        registerBy: "SISTEMA-INCOBRABLE",
+        pagoConvenio: "0",
+        monto_aplicado: "0",
+        observaciones: `Pago base - Crédito marcado como incobrable (reset)`,
+      });
+
+      // 16d. Registrar en bad_debts
+      await db.insert(bad_debts).values({
+        credit_id: creditId,
+        motivo: cancelacion?.motivo ?? "Incobrable",
+        observaciones: cancelacion?.observaciones ?? "",
+        monto_incobrable: capitalIncobrable.toString(),
+      });
+    } else {
+      // CANCELADO: zerear todo
+      await db
+        .update(creditos)
+        .set({
+          capital: "0",
+          porcentaje_interes: "0",
+          deudatotal: "0",
+          cuota_interes: "0",
+          cuota: "0",
+          iva_12: "0",
+          seguro_10_cuotas: "0",
+          gps: "0",
+          membresias_pago: "0",
+          membresias: "0",
+          porcentaje_royalti: "0",
+          royalti: "0",
+          otros: "0",
+          statusCredit: "CANCELADO",
+        })
+        .where(eq(creditos.credito_id, creditId));
+    }
 
     // 17. Retorno OK
     return {
       ok: true,
-      message: "Crédito reiniciado y pago creado exitosamente.",
+      message: statusCredit === "INCOBRABLE"
+        ? `Crédito reiniciado como incobrable. Deuda pendiente: ${montoIncobrable}`
+        : "Crédito reiniciado y pago creado exitosamente.",
     };
   } catch (error) {
     console.error("[ERROR] resetCredit:", error);

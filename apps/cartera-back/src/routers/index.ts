@@ -19,6 +19,7 @@ import { reconcileEspejoRouter } from "./reconcileEspejo";
 import { investorDocumentsRouter } from "./investorDocuments";
 import { abonosCapitalRouter } from "./abonosCapital";
 import { recibosGenericosRouter } from "./recibosGenericos";
+import { fallenCreditsRouter } from "./fallenCredits";
 export {
-    defaultRouter,inversionistasRouter,advisorRouter,usersRouter,creditRouter,paymentRouter,uploadRouter,sifcoRouter,authRouter,morasRouter,bancosRouter,cuentasRoutes,paymentAgreementsRouter,dteController,recalculateFromJsonRouter,mirrorInvestorRouter,notificationsRouter,reconcileEspejoRouter,investorDocumentsRouter,abonosCapitalRouter,recibosGenericosRouter
+    defaultRouter,inversionistasRouter,advisorRouter,usersRouter,creditRouter,paymentRouter,uploadRouter,sifcoRouter,authRouter,morasRouter,bancosRouter,cuentasRoutes,paymentAgreementsRouter,dteController,recalculateFromJsonRouter,mirrorInvestorRouter,notificationsRouter,reconcileEspejoRouter,investorDocumentsRouter,abonosCapitalRouter,recibosGenericosRouter,fallenCreditsRouter
 }   

@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/Provider/authProvider";
 import { useNavigate } from "react-router-dom";
+import { CASHIN_LOGO_URL } from "@/lib/constants";
 
 const API_URL = import.meta.env.VITE_BACK_URL || "http://localhost:7000";
 
@@ -98,9 +99,9 @@ export default function LoginPage() {
         {/* 🔥 Logo */}
         <div className="flex flex-col items-center mb-4">
           <img
-            src="/logo-cashin.png"
+            src={CASHIN_LOGO_URL}
             alt="Club Cashin Logo"
-            className="h-12 mb-2"
+            className="h-16 mb-2"
             style={{ objectFit: "contain" }}
           />
           {/* 🔥 Título personalizado */}

@@ -3,7 +3,7 @@ import { accountingRouter } from "./accounting";
 import { adminRouter } from "./admin";
 import { adminImportRouter } from "./admin-import";
 import { adminMiniagentRouter } from "./admin-miniagent";
-import { auctionRouter } from "./auctionVehicles"; // Import the auction router
+import { auctionRouter } from "./auctionVehicles";
 import { authRouter } from "./auth";
 import { bankAnalysisRouter } from "./bank-analysis";
 import { checksRouter } from "./checks";
@@ -25,29 +25,11 @@ import * as reportsRouter from "./reports";
 import { uploadRouter } from "./upload";
 import { vehiclesRouter } from "./vehicles";
 import { vendorsRouter } from "./vendors";
-const healthRouter = {
-	healthCheck: publicProcedure.handler(() => {
-		return "OK";
-	}),
-};
 
-const adminRoutes = {
-	// Admin routes (prefixed for clarity)
-	adminOnlyData: adminRouter.getStats,
-	getAllUsers: adminRouter.getAllUsers,
-	updateUserRole: adminRouter.updateUserRole,
-	toggleUserSuspension: adminRouter.toggleUserSuspension,
-	deleteUser: adminRouter.deleteUser,
-	createUser: adminRouter.createUser,
-};
-
-const adminImportRoutes = {
-	// Admin Import routes
-	setupImportacion: adminImportRouter.setupImportacion,
-	analizarImportacionCreditos: adminImportRouter.analizarImportacionCreditos,
-};
-
-const crmRoutes = {
+/**
+ * CRM specific routes
+ */
+export const crmAppRouter = {
 	// CRM routes
 	getSalesStages: crmRouter.getSalesStages,
 	getCrmUsers: crmRouter.getCrmUsers,
@@ -110,23 +92,10 @@ const crmRoutes = {
 	getConsolidatedCreditAnalysis: crmRouter.getConsolidatedCreditAnalysis,
 };
 
-const clientFormsRoutes = {
-	// Client Forms routes (Formularios del cliente - link público)
-	generateFormToken: clientFormsRouter.generateFormToken,
-	validateFormToken: clientFormsRouter.validateFormToken,
-	submitCreditApplication: clientFormsRouter.submitCreditApplication,
-	signCreditApplication: clientFormsRouter.signCreditApplication,
-	submitFinancialStatement: clientFormsRouter.submitFinancialStatement,
-	getClientFormData: clientFormsRouter.getClientFormData,
-	getFormTokenByOpportunity: clientFormsRouter.getFormTokenByOpportunity,
-};
-
-const bankAnalysisRoutes = {
-	// Bank Analysis routes (Análisis de estados de cuenta)
-	analyzeBankStatements: bankAnalysisRouter.analyzeBankStatements,
-};
-
-const vehicleRoutes = {
+/**
+ * Vehicles specific routes
+ */
+export const vehicleAppRouter = {
 	// Vehicles routes
 	getVehicles: vehiclesRouter.getAll,
 	getVehicleById: vehiclesRouter.getById,
@@ -135,6 +104,7 @@ const vehicleRoutes = {
 	updateVehicle: vehiclesRouter.update,
 	deleteVehicle: vehiclesRouter.delete,
 	searchVehicles: vehiclesRouter.search,
+	searchInspectedVehicles: vehiclesRouter.searchWithInspections,
 	createVehicleInspection: vehiclesRouter.createInspection,
 	updateVehicleInspection: vehiclesRouter.updateInspection,
 	uploadVehiclePhoto: vehiclesRouter.uploadPhoto,
@@ -151,7 +121,10 @@ const vehicleRoutes = {
 	validateLicensePlate: vehiclesRouter.validateLicensePlate,
 };
 
-const cobrosRoutes = {
+/**
+ * Cobros specific routes
+ */
+export const cobrosAppRouter = {
 	// Cobros routes
 	getCobrosDashboardStats: cobrosRouter.getDashboardStats,
 	getCasosCobros: cobrosRouter.getCasosCobros,
@@ -189,7 +162,44 @@ const cobrosRoutes = {
 	upsertMetasMora: cobrosRouter.upsertMetasMora,
 };
 
-const legalContractRoutes = {
+/**
+ * Admin specific routes
+ */
+export const adminAppRouter = {
+	// Admin routes
+	adminOnlyData: adminRouter.getStats,
+	getAllUsers: adminRouter.getAllUsers,
+	updateUserRole: adminRouter.updateUserRole,
+	toggleUserSuspension: adminRouter.toggleUserSuspension,
+	deleteUser: adminRouter.deleteUser,
+	createUser: adminRouter.createUser,
+
+	// Admin Import routes
+	setupImportacion: adminImportRouter.setupImportacion,
+	analizarImportacionCreditos: adminImportRouter.analizarImportacionCreditos,
+};
+
+/**
+ * Client Forms and Bank Analysis routes
+ */
+export const formsAppRouter = {
+	// Client Forms routes (Formularios del cliente - link público)
+	generateFormToken: clientFormsRouter.generateFormToken,
+	validateFormToken: clientFormsRouter.validateFormToken,
+	submitCreditApplication: clientFormsRouter.submitCreditApplication,
+	signCreditApplication: clientFormsRouter.signCreditApplication,
+	submitFinancialStatement: clientFormsRouter.submitFinancialStatement,
+	getClientFormData: clientFormsRouter.getClientFormData,
+	getFormTokenByOpportunity: clientFormsRouter.getFormTokenByOpportunity,
+
+	// Bank Analysis routes (Análisis de estados de cuenta)
+	analyzeBankStatements: bankAnalysisRouter.analyzeBankStatements,
+};
+
+/**
+ * Legal and Contract Generation routes
+ */
+export const legalAppRouter = {
 	// Legal Contracts routes (Jurídico)
 	createLegalContract: legalContractsRouter.createLegalContract,
 	updateLegalContract: legalContractsRouter.updateLegalContract,
@@ -208,9 +218,7 @@ const legalContractRoutes = {
 		legalContractsRouter.getOpportunitiesForContracts,
 	approveOpportunityLegal: legalContractsRouter.approveOpportunityLegal,
 	confirmContractsSigned: legalContractsRouter.confirmContractsSigned,
-};
 
-const contractGenerationRoutes = {
 	// Contract Generation routes (Generación automática de contratos)
 	getContractTypes: contractGenerationRouter.getContractTypes,
 	getDocumentsByDpi: contractGenerationRouter.getDocumentsByDpi,
@@ -227,7 +235,10 @@ const contractGenerationRoutes = {
 	regenerateContracts: contractGenerationRouter.regenerateContracts,
 };
 
-const vendorRoutes = {
+/**
+ * Miscellaneous routes (Vendors, Notes, Notifications, etc.)
+ */
+export const miscAppRouter = {
 	// Vendors routes
 	getVendors: vendorsRouter.getAll,
 	getVendorById: vendorsRouter.getById,
@@ -236,18 +247,14 @@ const vendorRoutes = {
 	updateVendor: vendorsRouter.update,
 	deleteVendor: vendorsRouter.delete,
 	searchVendors: vendorsRouter.search,
-};
 
-const noteRoutes = {
 	// Notes routes
 	getEntityNotes: notesRouter.getEntityNotes,
 	createNote: notesRouter.createNote,
 	updateNote: notesRouter.updateNote,
 	togglePinNote: notesRouter.togglePinNote,
 	deleteNote: notesRouter.deleteNote,
-};
 
-const notificationRoutes = {
 	// Notifications routes
 	getUnreadNotificationCount: notificationsRouter.getUnreadNotificationCount,
 	getAllNotifications: notificationsRouter.getAllNotifications,
@@ -260,9 +267,7 @@ const notificationRoutes = {
 	getAccountDocumentsByOpportunities:
 		notificationsRouter.getAccountDocumentsByOpportunities,
 	markAllNotificationsAsRead: notificationsRouter.markAllNotificationsAsRead,
-};
 
-const quotationRoutes = {
 	// Quotations routes
 	createQuotation: quotationsRouter.createQuotation,
 	getQuotations: quotationsRouter.getQuotations,
@@ -270,9 +275,7 @@ const quotationRoutes = {
 	updateQuotation: quotationsRouter.updateQuotation,
 	deleteQuotation: quotationsRouter.deleteQuotation,
 	listQuotationsByOpportunity: quotationsRouter.listQuotationsByOpportunity,
-};
 
-const checkRoutes = {
 	// Credit Checks routes (Emisión de Cheques)
 	createCheck: checksRouter.createCheck,
 	getChecksByOpportunity: checksRouter.getChecksByOpportunity,
@@ -280,23 +283,17 @@ const checkRoutes = {
 	updateCheck: checksRouter.updateCheck,
 	deleteCheck: checksRouter.deleteCheck,
 	getChecksSummary: checksRouter.getChecksSummary,
-};
 
-const locationRoutes = {
 	// Guatemala Locations routes (Catálogo de ubicaciones)
 	getDepartamentos: locationsRouter.getDepartamentos,
 	getMunicipiosByDepartamento: locationsRouter.getMunicipiosByDepartamento,
 	getAllLocations: locationsRouter.getAllLocations,
 	seedLocations: locationsRouter.seedLocations,
-};
 
-const insuranceRoutes = {
 	// Insurance routes
 	getInsuranceCost: insuranceRouter.getInsuranceCost,
-};
 
-const auctionRoutes = {
-	// Auction routes (subastas 🚗💸)
+	// Auction routes
 	createAuction: auctionRouter.createAuction,
 	closeAuction: auctionRouter.closeAuction,
 	getAuctions: auctionRouter.getAuctions,
@@ -304,8 +301,11 @@ const auctionRoutes = {
 	cancelAuction: auctionRouter.cancelAuction,
 };
 
-const reportRoutes = {
-	// Reports routes (reportes 📊)
+/**
+ * Reports and Accounting routes
+ */
+export const reportsAppRouter = {
+	// Reports routes
 	getDashboardExecutivo: reportsRouter.getDashboardExecutivo,
 	getReporteCobranza: reportsRouter.getReporteCobranza,
 	getReporteCartera: reportsRouter.getReporteCartera,
@@ -314,22 +314,16 @@ const reportRoutes = {
 	// Reportes unificados (cartera-back + CRM)
 	getReporteCarteraCompleto: reportesCarteraRouter.getReporteCarteraCompleto,
 	getReporteEficienciaCobros: reportesCarteraRouter.getReporteEficienciaCobros,
-};
 
-const miniagentRoutes = {
 	// MiniAgent routes
 	getMiniAgentCredentials: miniagentRouter.getMiniAgentCredentials,
-};
 
-const adminMiniagentRoutes = {
 	// Admin MiniAgent routes
 	adminListUsersWithCredentials: adminMiniagentRouter.listUsersWithCredentials,
 	adminSetMiniAgentCredentials: adminMiniagentRouter.setMiniAgentCredentials,
 	adminDeleteMiniAgentCredentials:
 		adminMiniagentRouter.deleteMiniAgentCredentials,
-};
 
-const investorDocumentRoutes = {
 	// Investor Documents routes (Documentos de inversionista)
 	getInvestorRendimiento: investorDocumentsRouter.getInvestorRendimiento,
 	getInvestorDocumentsAdmin: investorDocumentsRouter.getInvestorDocumentsAdmin,
@@ -338,9 +332,7 @@ const investorDocumentRoutes = {
 		investorDocumentsRouter.toggleInvestorDocumentVisibility,
 	deleteInvestorDocument: investorDocumentsRouter.deleteInvestorDocument,
 	getInvestorActivityLog: investorDocumentsRouter.getInvestorActivityLog,
-};
 
-const accountingRoutes = {
 	// Accounting routes (Contabilidad)
 	getResumenGlobalInversionistas:
 		accountingRouter.getResumenGlobalInversionistas,
@@ -348,62 +340,28 @@ const accountingRoutes = {
 	liquidateInversionista: accountingRouter.liquidateInversionista,
 };
 
-type BaseAppRouter = typeof healthRouter &
-	typeof authRouter &
-	typeof adminRoutes &
-	typeof adminImportRoutes &
-	typeof crmRoutes &
-	typeof clientFormsRoutes &
-	typeof bankAnalysisRoutes &
-	typeof vehicleRoutes &
-	typeof cobrosRoutes &
-	typeof legalContractRoutes &
-	typeof contractGenerationRoutes &
-	typeof vendorRoutes &
-	typeof noteRoutes &
-	typeof notificationRoutes &
-	typeof quotationRoutes &
-	typeof checkRoutes &
-	typeof locationRoutes &
-	typeof insuranceRoutes &
-	typeof auctionRoutes &
-	typeof reportRoutes &
-	typeof miniagentRoutes &
-	typeof adminMiniagentRoutes &
-	typeof investorDocumentRoutes &
-	typeof accountingRoutes;
-
-export const appRouter: BaseAppRouter = {
-	...healthRouter,
-	...authRouter,
-	...adminRoutes,
-	...adminImportRoutes,
-	...crmRoutes,
-	...clientFormsRoutes,
-	...bankAnalysisRoutes,
-	...vehicleRoutes,
-	...cobrosRoutes,
-	...legalContractRoutes,
-	...contractGenerationRoutes,
-	...vendorRoutes,
-	...noteRoutes,
-	...notificationRoutes,
-	...quotationRoutes,
-	...checkRoutes,
-	...locationRoutes,
-	...insuranceRoutes,
-	...auctionRoutes,
-	...reportRoutes,
-	...miniagentRoutes,
-	...adminMiniagentRoutes,
-	...investorDocumentRoutes,
-	...accountingRoutes,
+const healthRouter = {
+	healthCheck: publicProcedure.handler(() => {
+		return "OK";
+	}),
 };
 
-// Investment routes exported separately to avoid TS7056 with declaration emit.
-// The investmentsRouter type is too complex for TypeScript to serialize in a
-// single appRouter declaration. Client merges both types.
-// See: https://orpc.dev/docs/advanced/exceeds-the-maximum-length-problem
+/**
+ * Main application router
+ * We use Object.assign to combine parts to avoid TS7056: "type of this node exceeds the maximum length"
+ */
+export const appRouter = Object.assign(
+	healthRouter,
+	authRouter,
+	crmAppRouter,
+	vehicleAppRouter,
+	cobrosAppRouter,
+	adminAppRouter,
+	formsAppRouter,
+	legalAppRouter,
+	miscAppRouter,
+	reportsAppRouter,
+);
 
 // Disbursement routes exported separately to avoid TS7056 with declaration emit.
 export const disbursementRouter = {
@@ -424,4 +382,14 @@ export const manualVehicleRouter = {
 	upsertManualVehicleValuation: vehiclesRouter.upsertManualValuation,
 };
 
-export type AppRouter = typeof appRouter;
+// Merged AppRouter type to avoid serialization limit
+export type AppRouter = typeof healthRouter &
+	typeof authRouter &
+	typeof crmAppRouter &
+	typeof vehicleAppRouter &
+	typeof cobrosAppRouter &
+	typeof adminAppRouter &
+	typeof formsAppRouter &
+	typeof legalAppRouter &
+	typeof miscAppRouter &
+	typeof reportsAppRouter;

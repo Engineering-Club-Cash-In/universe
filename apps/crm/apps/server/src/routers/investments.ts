@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { createInvestmentLeadWithOpportunity } from "../controllers/investment-lead";
 import { db } from "../db";
@@ -167,7 +167,9 @@ export const investmentsRouter = {
 				.optional(),
 		)
 		.handler(async ({ input, context }) => {
-			const conditions = [eq(investmentOpportunities.status, "open")];
+			const conditions = [
+				inArray(investmentOpportunities.status, ["open", "won"]),
+			];
 
 			if (input?.stage) {
 				conditions.push(eq(investmentOpportunities.stage, input.stage));

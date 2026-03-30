@@ -3,8 +3,8 @@ import type { Context } from "hono";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import {
-	investmentLeadSourceEnum,
 	investmentAuditLog,
+	type investmentLeadSourceEnum,
 	investmentLeads,
 	investmentOpportunities,
 	investmentStageHistory,
@@ -81,13 +81,13 @@ export async function createInvestmentLeadWithOpportunity(
 		})
 		.returning();
 
-	// Crear oportunidad automaticamente en etapa Prospeccion
+	// Crear oportunidad automaticamente en etapa de recoleccion de datos
 	const [opportunity] = await db
 		.insert(investmentOpportunities)
 		.values({
 			investmentLeadId: lead.id,
 			assignedAdvisorId: assignedTo,
-			stage: "prospecting",
+			stage: "data_collection",
 			status: "open",
 		})
 		.returning();
@@ -107,7 +107,7 @@ export async function createInvestmentLeadWithOpportunity(
 	// Registrar stage history
 	await db.insert(investmentStageHistory).values({
 		investmentOpportunityId: opportunity.id,
-		toStage: "prospecting",
+		toStage: "data_collection",
 		changedBy: performedBy,
 	});
 

@@ -3,7 +3,7 @@ import { accountingRouter } from "./accounting";
 import { adminRouter } from "./admin";
 import { adminImportRouter } from "./admin-import";
 import { adminMiniagentRouter } from "./admin-miniagent";
-import { auctionRouter } from "./auctionVehicles"; // Import the auction router
+import { auctionRouter } from "./auctionVehicles";
 import { authRouter } from "./auth";
 import { bankAnalysisRouter } from "./bank-analysis";
 import { checksRouter } from "./checks";
@@ -25,26 +25,11 @@ import * as reportsRouter from "./reports";
 import { uploadRouter } from "./upload";
 import { vehiclesRouter } from "./vehicles";
 import { vendorsRouter } from "./vendors";
-export const appRouter = {
-	healthCheck: publicProcedure.handler(() => {
-		return "OK";
-	}),
 
-	// Auth routes
-	...authRouter,
-
-	// Admin routes (prefixed for clarity)
-	adminOnlyData: adminRouter.getStats,
-	getAllUsers: adminRouter.getAllUsers,
-	updateUserRole: adminRouter.updateUserRole,
-	toggleUserSuspension: adminRouter.toggleUserSuspension,
-	deleteUser: adminRouter.deleteUser,
-	createUser: adminRouter.createUser,
-
-	// Admin Import routes
-	setupImportacion: adminImportRouter.setupImportacion,
-	analizarImportacionCreditos: adminImportRouter.analizarImportacionCreditos,
-
+/**
+ * CRM specific routes
+ */
+export const crmAppRouter = {
 	// CRM routes
 	getSalesStages: crmRouter.getSalesStages,
 	getCrmUsers: crmRouter.getCrmUsers,
@@ -105,19 +90,12 @@ export const appRouter = {
 	updateCoDebtor: crmRouter.updateCoDebtor,
 	deleteCoDebtor: crmRouter.deleteCoDebtor,
 	getConsolidatedCreditAnalysis: crmRouter.getConsolidatedCreditAnalysis,
+};
 
-	// Client Forms routes (Formularios del cliente - link público)
-	generateFormToken: clientFormsRouter.generateFormToken,
-	validateFormToken: clientFormsRouter.validateFormToken,
-	submitCreditApplication: clientFormsRouter.submitCreditApplication,
-	signCreditApplication: clientFormsRouter.signCreditApplication,
-	submitFinancialStatement: clientFormsRouter.submitFinancialStatement,
-	getClientFormData: clientFormsRouter.getClientFormData,
-	getFormTokenByOpportunity: clientFormsRouter.getFormTokenByOpportunity,
-
-	// Bank Analysis routes (Análisis de estados de cuenta)
-	analyzeBankStatements: bankAnalysisRouter.analyzeBankStatements,
-
+/**
+ * Vehicles specific routes
+ */
+export const vehicleAppRouter = {
 	// Vehicles routes
 	getVehicles: vehiclesRouter.getAll,
 	getVehicleById: vehiclesRouter.getById,
@@ -126,6 +104,7 @@ export const appRouter = {
 	updateVehicle: vehiclesRouter.update,
 	deleteVehicle: vehiclesRouter.delete,
 	searchVehicles: vehiclesRouter.search,
+	searchInspectedVehicles: vehiclesRouter.searchWithInspections,
 	createVehicleInspection: vehiclesRouter.createInspection,
 	updateVehicleInspection: vehiclesRouter.updateInspection,
 	uploadVehiclePhoto: vehiclesRouter.uploadPhoto,
@@ -140,7 +119,12 @@ export const appRouter = {
 	uploadVehicleDocument: vehiclesRouter.uploadVehicleDocument,
 	deleteVehicleDocument: vehiclesRouter.deleteVehicleDocument,
 	validateLicensePlate: vehiclesRouter.validateLicensePlate,
+};
 
+/**
+ * Cobros specific routes
+ */
+export const cobrosAppRouter = {
 	// Cobros routes
 	getCobrosDashboardStats: cobrosRouter.getDashboardStats,
 	getCasosCobros: cobrosRouter.getCasosCobros,
@@ -176,7 +160,46 @@ export const appRouter = {
 	getMetasMora: cobrosRouter.getMetasMora,
 	getMetasMoraAnual: cobrosRouter.getMetasMoraAnual,
 	upsertMetasMora: cobrosRouter.upsertMetasMora,
+};
 
+/**
+ * Admin specific routes
+ */
+export const adminAppRouter = {
+	// Admin routes
+	adminOnlyData: adminRouter.getStats,
+	getAllUsers: adminRouter.getAllUsers,
+	updateUserRole: adminRouter.updateUserRole,
+	toggleUserSuspension: adminRouter.toggleUserSuspension,
+	deleteUser: adminRouter.deleteUser,
+	createUser: adminRouter.createUser,
+
+	// Admin Import routes
+	setupImportacion: adminImportRouter.setupImportacion,
+	analizarImportacionCreditos: adminImportRouter.analizarImportacionCreditos,
+};
+
+/**
+ * Client Forms and Bank Analysis routes
+ */
+export const formsAppRouter = {
+	// Client Forms routes (Formularios del cliente - link público)
+	generateFormToken: clientFormsRouter.generateFormToken,
+	validateFormToken: clientFormsRouter.validateFormToken,
+	submitCreditApplication: clientFormsRouter.submitCreditApplication,
+	signCreditApplication: clientFormsRouter.signCreditApplication,
+	submitFinancialStatement: clientFormsRouter.submitFinancialStatement,
+	getClientFormData: clientFormsRouter.getClientFormData,
+	getFormTokenByOpportunity: clientFormsRouter.getFormTokenByOpportunity,
+
+	// Bank Analysis routes (Análisis de estados de cuenta)
+	analyzeBankStatements: bankAnalysisRouter.analyzeBankStatements,
+};
+
+/**
+ * Legal and Contract Generation routes
+ */
+export const legalAppRouter = {
 	// Legal Contracts routes (Jurídico)
 	createLegalContract: legalContractsRouter.createLegalContract,
 	updateLegalContract: legalContractsRouter.updateLegalContract,
@@ -210,7 +233,12 @@ export const appRouter = {
 	getGeneratedContracts: contractGenerationRouter.getGeneratedContracts,
 	getGenerationSnapshot: contractGenerationRouter.getGenerationSnapshot,
 	regenerateContracts: contractGenerationRouter.regenerateContracts,
+};
 
+/**
+ * Miscellaneous routes (Vendors, Notes, Notifications, etc.)
+ */
+export const miscAppRouter = {
 	// Vendors routes
 	getVendors: vendorsRouter.getAll,
 	getVendorById: vendorsRouter.getById,
@@ -265,14 +293,19 @@ export const appRouter = {
 	// Insurance routes
 	getInsuranceCost: insuranceRouter.getInsuranceCost,
 
-	// Auction routes (subastas 🚗💸)
+	// Auction routes
 	createAuction: auctionRouter.createAuction,
 	closeAuction: auctionRouter.closeAuction,
 	getAuctions: auctionRouter.getAuctions,
 	addAuctionExpense: auctionRouter.addAuctionExpense,
 	cancelAuction: auctionRouter.cancelAuction,
+};
 
-	// Reports routes (reportes 📊)
+/**
+ * Reports and Accounting routes
+ */
+export const reportsAppRouter = {
+	// Reports routes
 	getDashboardExecutivo: reportsRouter.getDashboardExecutivo,
 	getReporteCobranza: reportsRouter.getReporteCobranza,
 	getReporteCartera: reportsRouter.getReporteCartera,
@@ -307,10 +340,28 @@ export const appRouter = {
 	liquidateInversionista: accountingRouter.liquidateInversionista,
 };
 
-// Investment routes exported separately to avoid TS7056 with declaration emit.
-// The investmentsRouter type is too complex for TypeScript to serialize in a
-// single appRouter declaration. Client merges both types.
-// See: https://orpc.dev/docs/advanced/exceeds-the-maximum-length-problem
+const healthRouter = {
+	healthCheck: publicProcedure.handler(() => {
+		return "OK";
+	}),
+};
+
+/**
+ * Main application router
+ * We use Object.assign to combine parts to avoid TS7056: "type of this node exceeds the maximum length"
+ */
+export const appRouter = Object.assign(
+	healthRouter,
+	authRouter,
+	crmAppRouter,
+	vehicleAppRouter,
+	cobrosAppRouter,
+	adminAppRouter,
+	formsAppRouter,
+	legalAppRouter,
+	miscAppRouter,
+	reportsAppRouter,
+);
 
 // Disbursement routes exported separately to avoid TS7056 with declaration emit.
 export const disbursementRouter = {
@@ -331,4 +382,14 @@ export const manualVehicleRouter = {
 	upsertManualVehicleValuation: vehiclesRouter.upsertManualValuation,
 };
 
-export type AppRouter = typeof appRouter;
+// Merged AppRouter type to avoid serialization limit
+export type AppRouter = typeof healthRouter &
+	typeof authRouter &
+	typeof crmAppRouter &
+	typeof vehicleAppRouter &
+	typeof cobrosAppRouter &
+	typeof adminAppRouter &
+	typeof formsAppRouter &
+	typeof legalAppRouter &
+	typeof miscAppRouter &
+	typeof reportsAppRouter;

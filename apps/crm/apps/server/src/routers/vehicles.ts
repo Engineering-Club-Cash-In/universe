@@ -640,6 +640,79 @@ export const vehiclesRouter = {
 			return result;
 		}),
 
+	// Search ONLY vehicles with recorded inspections
+	searchWithInspections: tallerOrCrmProcedure
+		.input(
+			z.object({
+				query: z.string().optional(),
+				status: z
+					.enum(["pending", "available", "sold", "maintenance", "auction"])
+					.optional(),
+				vehicleType: z.string().optional(),
+				fuelType: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const conditions = [];
+
+			if (input.query) {
+				conditions.push(
+					or(
+						ilike(vehicles.make, `%${input.query}%`),
+						ilike(vehicles.model, `%${input.query}%`),
+						ilike(vehicles.licensePlate, `%${input.query}%`),
+						ilike(vehicles.vinNumber, `%${input.query}%`),
+					),
+				);
+			}
+
+			if (input.status) {
+				conditions.push(eq(vehicles.status, input.status));
+			}
+
+			if (input.vehicleType) {
+				conditions.push(eq(vehicles.vehicleType, input.vehicleType));
+			}
+
+			if (input.fuelType) {
+				conditions.push(eq(vehicles.fuelType, input.fuelType));
+			}
+
+			// Use innerJoin to ensure the vehicle has at least one inspection
+			const result = await db
+				.selectDistinct({
+					id: vehicles.id,
+					make: vehicles.make,
+					model: vehicles.model,
+					year: vehicles.year,
+					licensePlate: vehicles.licensePlate,
+					vinNumber: vehicles.vinNumber,
+					motorNumber: vehicles.motorNumber,
+					color: vehicles.color,
+					vehicleType: vehicles.vehicleType,
+					milesMileage: vehicles.milesMileage,
+					kmMileage: vehicles.kmMileage,
+					origin: vehicles.origin,
+					cylinders: vehicles.cylinders,
+					engineCC: vehicles.engineCC,
+					fuelType: vehicles.fuelType,
+					transmission: vehicles.transmission,
+					trim: vehicles.trim,
+					traction: vehicles.traction,
+					status: vehicles.status,
+					createdAt: vehicles.createdAt,
+				})
+				.from(vehicles)
+				.innerJoin(
+					vehicleInspections,
+					eq(vehicles.id, vehicleInspections.vehicleId),
+				)
+				.where(conditions.length > 0 ? and(...conditions) : undefined)
+				.orderBy(desc(vehicles.createdAt));
+
+			return result;
+		}),
+
 	// Create vehicle inspection
 	createInspection: protectedProcedure
 		.input(
@@ -944,37 +1017,71 @@ export const vehiclesRouter = {
 			return inspection || null;
 		}),
 
-	// Validate if license plate is already used by a different VIN
+	// Validate if license plate or VIN is already used
 	validateLicensePlate: publicProcedure
 		.input(
 			z.object({
-				licensePlate: z.string(),
+				licensePlate: z.string().optional(),
 				vinNumber: z.string().optional(),
+				id: z.string().optional(),
 			}),
 		)
 		.handler(async ({ input }) => {
-			if (!input.licensePlate) return { valid: true };
+			if (!input.licensePlate && !input.vinNumber) return { valid: true };
 
-			const existingWithPlate = await db
-				.select({ vinNumber: vehicles.vinNumber })
-				.from(vehicles)
-				.where(eq(vehicles.licensePlate, input.licensePlate))
-				.limit(1);
+			let foundVehicle = null;
 
-			// If plate exists but it belongs to another VIN
-			if (
-				existingWithPlate.length > 0 &&
-				existingWithPlate[0].vinNumber &&
-				input.vinNumber &&
-				existingWithPlate[0].vinNumber !== input.vinNumber
-			) {
+			// 1. Priority: Find by Plate exactly
+			if (input.licensePlate) {
+				const cleanInputPlate = input.licensePlate
+					.replace(/[^a-zA-Z0-9]/g, "")
+					.toUpperCase();
+
+				const existingWithPlate = await db
+					.select()
+					.from(vehicles)
+					.where(
+						and(
+							sql`REPLACE(REPLACE(UPPER(${vehicles.licensePlate}), ' ', ''), '-', '') = ${cleanInputPlate}`,
+							input.id ? not(eq(vehicles.id, input.id)) : undefined,
+						),
+					)
+					.limit(1);
+				
+				foundVehicle = existingWithPlate[0] || null;
+			}
+
+			// 2. Fallback: Find by VIN exactly (only if not found by plate)
+			if (!foundVehicle && input.vinNumber) {
+				const cleanInputVin = input.vinNumber
+					.replace(/[^a-zA-Z0-9]/g, "")
+					.toUpperCase();
+
+				const existingWithVin = await db
+					.select()
+					.from(vehicles)
+					.where(
+						and(
+							sql`REPLACE(REPLACE(UPPER(${vehicles.vinNumber}), ' ', ''), '-', '') = ${cleanInputVin}`,
+							input.id ? not(eq(vehicles.id, input.id)) : undefined,
+						),
+					)
+					.limit(1);
+				
+				foundVehicle = existingWithVin[0] || null;
+			}
+
+			// 3. Result
+			if (foundVehicle) {
 				return {
 					valid: false,
-					message: `La placa "${input.licensePlate}" ya está registrada con el chasis/VIN "${existingWithPlate[0].vinNumber}".`,
+					alreadyExists: true,
+					vehicle: foundVehicle,
+					message: `Vehículo registrado encontrado.`,
 				};
 			}
 
-			return { valid: true, message: "" };
+			return { valid: true, message: "", alreadyExists: false };
 		}),
 
 	// Get statistics
@@ -1015,6 +1122,7 @@ export const vehiclesRouter = {
 			z.object({
 				// Vehicle data
 				vehicle: z.object({
+					id: z.string().optional(),
 					make: z.string(),
 					model: z.string(),
 					year: z.number(),
@@ -1157,31 +1265,42 @@ export const vehiclesRouter = {
 			// Start a transaction
 			try {
 				return await db.transaction(async (tx) => {
-					// 1. Check if vehicle exists by VIN or create new
+					// 1. Identify or create vehicle by ID - Sanitize blank IDs
 					let vehicleId: string;
-					const existingVehicle = await tx
-						.select()
-						.from(vehicles)
-						.where(eq(vehicles.vinNumber, input.vehicle.vinNumber))
-						.limit(1);
+					const { id: rawId, ...vehicleData } = input.vehicle;
+					const vehicleInputId = rawId && rawId.trim() !== "" ? rawId : undefined;
 
-					if (existingVehicle.length > 0) {
-						// Update existing vehicle
+					if (vehicleInputId) {
+						// Try to update existing vehicle by ID
 						const [updated] = await tx
 							.update(vehicles)
 							.set({
-								...input.vehicle,
+								...vehicleData,
 								updatedAt: new Date(),
 							})
-							.where(eq(vehicles.vinNumber, input.vehicle.vinNumber))
+							.where(eq(vehicles.id, vehicleInputId))
 							.returning();
-						vehicleId = updated.id;
+						
+						if (updated) {
+							vehicleId = updated.id;
+						} else {
+							// Fallback: If ID not found, create new vehicle with that ID
+							const [newVehicle] = await tx
+								.insert(vehicles)
+								.values({
+									id: vehicleInputId,
+									...vehicleData,
+									status: "pending",
+								} as NewVehicle)
+								.returning();
+							vehicleId = newVehicle.id;
+						}
 					} else {
-						// Create new vehicle
+						// Create new vehicle (no ID provided or ID was blank)
 						const [newVehicle] = await tx
 							.insert(vehicles)
 							.values({
-								...input.vehicle,
+								...vehicleData,
 								status: "pending",
 							} as NewVehicle)
 							.returning();

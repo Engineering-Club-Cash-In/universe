@@ -425,6 +425,25 @@ function RouteComponent() {
 		enabled: !!session,
 	});
 
+	const resetToFirstStageMutation = useMutation({
+		mutationFn: (data: { opportunityIds: string[] }) =>
+			client.resetToFirstStage(data),
+		onSuccess: () => {
+			toast.success("Oportunidades movidas a la primera etapa");
+			queryClient.invalidateQueries({
+				queryKey: orpc.getInvestmentOpportunities.queryOptions({ input: {} })
+					.queryKey,
+			});
+			queryClient.invalidateQueries({
+				queryKey: orpc.getInvestmentDashboardStats.queryOptions({ input: {} })
+					.queryKey,
+			});
+		},
+		onError: (error) => {
+			toast.error(`Error al reasignar etapa: ${error.message}`);
+		},
+	});
+
 	const advanceStageMutation = useMutation({
 		mutationFn: (data: { opportunityId: string; reason?: string }) =>
 			client.advanceInvestmentStage(data),
@@ -675,9 +694,26 @@ function RouteComponent() {
 											})}
 										</div>
 									</div>
+									<Button
+										size="sm"
+										variant="outline"
+										className="mt-1 border-amber-400 text-amber-900 hover:bg-amber-100"
+										disabled={resetToFirstStageMutation.isPending}
+										onClick={() =>
+											resetToFirstStageMutation.mutate({
+												opportunityIds: unknownStageItems.map(
+													(item) => item.opportunity.id,
+												),
+											})
+										}
+									>
+										{resetToFirstStageMutation.isPending
+											? "Moviendo..."
+											: `Mover ${unknownStageItems.length === 1 ? "esta oportunidad" : "todas"} a "${INVESTMENT_ACTIVE_STAGES[0].name}"`}
+									</Button>
 								</div>
 							</div>
-						)}
+							)}
 						<div className="flex gap-4">
 							{INVESTMENT_ACTIVE_STAGES.map((stage) => (
 								<DroppableInvestmentColumn

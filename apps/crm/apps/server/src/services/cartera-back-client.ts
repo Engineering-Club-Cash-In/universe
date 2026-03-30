@@ -555,6 +555,19 @@ export class CarteraBackClient {
 	}
 
 	// ========================================================================
+	// NIT VALIDATION
+	// ========================================================================
+
+	async consultarNit(
+		nit: string,
+	): Promise<{ success: boolean; data?: { nit: string; nombre: string | null }; mensaje: string }> {
+		return this.request("/consultarNit", {
+			method: "POST",
+			body: JSON.stringify({ nit }),
+		});
+	}
+
+	// ========================================================================
 	// BANCOS (BANKS)
 	// ========================================================================
 

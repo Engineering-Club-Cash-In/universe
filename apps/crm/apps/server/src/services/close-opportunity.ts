@@ -1126,6 +1126,49 @@ export async function closeOpportunity(
 
 		console.log("[CloseOpportunity] Lead data found:", lead.id);
 
+		// Validate NIT against cartera-back before proceeding
+		if (opportunity.nit) {
+			const nitLimpio = opportunity.nit.replace(/[-\s]/g, "").toUpperCase();
+			console.log(
+				`[CloseOpportunity] Validating NIT: ${nitLimpio}`,
+			);
+
+			if (nitLimpio.length < 5 && nitLimpio !== "CF") {
+				return {
+					success: false,
+					error: `El NIT "${opportunity.nit}" es inválido. Debe tener al menos 5 caracteres o ser "CF".`,
+				};
+			}
+
+			try {
+				const nitResult = await carteraBackClient.consultarNit(nitLimpio);
+
+				if (!nitResult.success) {
+					return {
+						success: false,
+						error: `NIT inválido: ${nitResult.mensaje}. Corrige el NIT antes de cerrar la oportunidad.`,
+					};
+				}
+
+				if (nitResult.data?.nombre === null) {
+					return {
+						success: false,
+						error: `El NIT "${opportunity.nit}" no fue encontrado en el registro de SAT. Verifica que sea correcto antes de cerrar.`,
+					};
+				}
+
+				console.log(
+					`[CloseOpportunity] NIT validated: ${nitResult.data?.nombre}`,
+				);
+			} catch (error) {
+				console.error("[CloseOpportunity] Error validating NIT:", error);
+				return {
+					success: false,
+					error: `No se pudo validar el NIT contra SAT. Intenta de nuevo o verifica la conexión con cartera.`,
+				};
+			}
+		}
+
 		// Generate unique SIFCO credit number using UUID
 		const numeroSifco = generateNumeroSifco();
 		console.log(`[CloseOpportunity] Generated numero SIFCO: ${numeroSifco}`);

@@ -147,6 +147,7 @@ interface PagoData {
   observaciones: string;
   paymentFalse: boolean;
   pagoConvenio: string;
+  monto_aplicado: string;
 }
 
 // ========================================
@@ -519,8 +520,8 @@ console.log(`   - Cuota total del crédito: Q${cuotaTotal.toFixed(2)}`);
 console.log(`   - Suma de cuotas inversionistas: Q${sumaCuotasCalculadas.toFixed(2)}`);
 console.log(`   - Diferencia: Q${cuotaTotal.minus(sumaCuotasCalculadas).abs().toFixed(2)}`);
 
-// Validar con tolerancia de 0.01 por redondeo
-if (cuotaTotal.minus(sumaCuotasCalculadas).abs().gt(0.01)) {
+// Validar con tolerancia de 0.01 por redondeo (skip si cuota es 0)
+if (cuotaTotal.gt(0) && cuotaTotal.minus(sumaCuotasCalculadas).abs().gt(0.01)) {
   throw new Error(
     `Error en cálculo de cuotas: La suma de cuotas inversionistas (${sumaCuotasCalculadas.toFixed(2)}) no coincide con la cuota total (${cuotaTotal.toFixed(2)})`
   );
@@ -693,6 +694,7 @@ const insertPayments = async (
     observaciones: "",
     paymentFalse: false,
     pagoConvenio: "0",
+    monto_aplicado: "0",
   });
 
   // Cuota mensual
@@ -751,8 +753,8 @@ const insertPayments = async (
       gps_restante: gpsRestanteMes.toString(),
       total_restante: capitalEnMemoria.round(2).toString(),  // El capital que falta en total
       membresias: membresiasFijoPorMes.toString(),
-      membresias_pago: membresiasFijoPorMes.toString(),
-      membresias_mes: membresiasFijoPorMes.toString(),
+      membresias_pago: "0",
+      membresias_mes: "0",
       otros: "",
       mora: "0",
       monto_boleta_cuota: "0",
@@ -866,7 +868,6 @@ export const insertCredit = async ({ body, set }: { body: unknown; set: SetConte
       const adminEmails = adminUsers.map((u) => u.email);
       console.log("[INSERT CREDIT] Admin emails found:", adminEmails);
 
-      // Agregar el email del asesor asignado al crédito
       const [asesorUser] = await db
         .select({ email: platform_users.email })
         .from(platform_users)

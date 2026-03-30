@@ -5,4 +5,4 @@ export const CENTINELA_API_KEY = process.env.CENTINELA_API_KEY || "";
 
 export const CLOUDFRONT_URL = "https://d2lr9bkbpuw8hs.cloudfront.net/";
 
-export const salesUser = "f14eedec-4721-4065-977d-bae827783f5c";
+export const salesUser = "a3a22b77-87f2-4949-a051-aa907f0323d5";

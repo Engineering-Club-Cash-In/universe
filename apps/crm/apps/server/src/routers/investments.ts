@@ -413,6 +413,57 @@ export const investmentsRouter = {
 			return updated;
 		}),
 
+	resetToFirstStage: investmentProcedure
+		.input(
+			z.object({
+				opportunityIds: z.array(z.string().uuid()).min(1),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const firstStage = INVESTMENT_STAGE_FLOW[0];
+			const results = [];
+
+			for (const oppId of input.opportunityIds) {
+				const [opp] = await db
+					.select()
+					.from(investmentOpportunities)
+					.where(eq(investmentOpportunities.id, oppId))
+					.limit(1);
+
+				if (!opp) continue;
+
+				const [updated] = await db
+					.update(investmentOpportunities)
+					.set({
+						stage: firstStage,
+						status: "open",
+						stageEnteredAt: new Date(),
+						updatedAt: new Date(),
+					})
+					.where(eq(investmentOpportunities.id, oppId))
+					.returning();
+
+				await db.insert(investmentStageHistory).values({
+					investmentOpportunityId: oppId,
+					fromStage: opp.stage,
+					toStage: firstStage,
+					changedBy: context.userId,
+					reason: "Reasignada a primera etapa desde etapa no reconocida",
+				});
+
+				await db.insert(investmentAuditLog).values({
+					investmentOpportunityId: oppId,
+					action: "stage_reset",
+					details: { from: opp.stage, to: firstStage },
+					performedBy: context.userId,
+				});
+
+				results.push(updated);
+			}
+
+			return results;
+		}),
+
 	// ============ SCENARIOS (Calculadora) ============
 
 	calculateInvestmentScenario: investmentProcedure

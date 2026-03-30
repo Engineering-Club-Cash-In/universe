@@ -98,6 +98,7 @@
     PENDIENTE_CANCELACION = "PENDIENTE_CANCELACION",
     MOROSO = "MOROSO",
     EN_CONVENIO = "EN_CONVENIO",
+    CAIDO = "CAIDO",
   }
   // 2. Créditos
 
@@ -156,7 +157,7 @@
     }).notNull(),
   
     statusCredit: text("statusCredit", {
-      enum: ["ACTIVO", "CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION","MOROSO", "EN_CONVENIO"],
+      enum: ["ACTIVO", "CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION","MOROSO", "EN_CONVENIO", "CAIDO"],
     })
       .notNull()
       .default(StatusCredit.ACTIVO),
@@ -405,6 +406,17 @@
       precision: 18,
       scale: 2,
     }).notNull(),
+  });
+
+  export const creditos_caidos = customSchema.table("creditos_caidos", {
+    id: serial("id").primaryKey(),
+    credit_id: integer("credit_id")
+      .notNull()
+      .references(() => creditos.credito_id, { onDelete: "cascade" }),
+    motivo: text("motivo").notNull(),
+    observaciones: text("observaciones"),
+    fecha_caida: timestamp("fecha_caida", { withTimezone: true }).default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
+    created_at: timestamp("created_at", { withTimezone: true }).default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
   });
 
   export const montos_adicionales = customSchema.table("montos_adicionales", {
@@ -990,4 +1002,18 @@
       .references(() => recibos_genericos.id, { onDelete: "cascade" }),
     concepto: varchar("concepto", { length: 300 }).notNull(),
     monto: numeric("monto", { precision: 18, scale: 2 }).notNull(),
+  });
+
+  // ── Audit logs ──
+  export const audit_logs = customSchema.table("audit_logs", {
+    id: serial("id").primaryKey(),
+    user_id: integer("user_id"),
+    user_email: varchar("user_email", { length: 200 }),
+    method: varchar("method", { length: 10 }).notNull(),
+    path: varchar("path", { length: 500 }).notNull(),
+    status_code: integer("status_code"),
+    body: text("body"),
+    created_at: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
   });

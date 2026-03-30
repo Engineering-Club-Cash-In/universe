@@ -153,7 +153,8 @@ export const creditRouter = new Elysia()
     | "INCOBRABLE"
     | "PENDIENTE_CANCELACION"
     | "EN_CONVENIO"
-    | "MOROSO";
+    | "MOROSO"
+    | "CAIDO";
   
   // Convertir asesor_id a número si existe
   const asesorIdNum = asesor_id ? Number(asesor_id) : undefined;

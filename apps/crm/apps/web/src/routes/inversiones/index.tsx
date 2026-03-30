@@ -542,7 +542,7 @@ function RouteComponent() {
 	}
 
 	return (
-		<div className="flex h-full flex-col">
+		<div className="flex h-full min-w-0 flex-col overflow-hidden">
 			{/* Header */}
 			<div className="border-b bg-background px-6 py-4">
 				<div className="flex items-center justify-between">

@@ -5,7 +5,7 @@ import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { QueryCache, QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type {
-	appRouter,
+	AppRouter,
 	disbursementRouter,
 	manualVehicleRouter,
 } from "../../../server/src/routers/index";
@@ -63,7 +63,7 @@ export const link = new RPCLink({
 
 // Merge router types to avoid TS7056 with declaration emit
 // See: https://orpc.dev/docs/advanced/exceeds-the-maximum-length-problem
-type MergedRouter = typeof appRouter &
+type MergedRouter = AppRouter &
 	typeof manualVehicleRouter &
 	typeof investmentsRouter &
 	typeof disbursementRouter;

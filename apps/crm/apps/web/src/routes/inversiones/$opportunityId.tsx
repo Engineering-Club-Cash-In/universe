@@ -36,7 +36,10 @@ import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
-import { formatOpportunityStatus } from "@/lib/investment-labels";
+import {
+	formatInvestmentStage,
+	formatOpportunityStatus,
+} from "@/lib/investment-labels";
 import { INVESTMENT_STAGES } from "@/lib/investment-stage-config";
 import { client, orpc } from "@/utils/orpc";
 
@@ -189,6 +192,104 @@ function MarkAsLostDialog({
 	);
 }
 
+// ─── Audit Helpers ───────────────────────────────────────────────────────────
+
+const AUDIT_ACTION_LABELS: Record<string, string> = {
+	stage_advanced: "Etapa avanzada",
+	marked_as_lost: "Marcada como perdida",
+	scenario_created: "Escenario creado",
+	scenario_accepted: "Escenario aceptado",
+	document_uploaded: "Documento subido",
+	document_approved: "Documento aprobado",
+	document_rejected: "Documento rechazado",
+	interaction_created: "Interacción registrada",
+	funds_validated: "Fondos validados",
+	signature_updated: "Firmas actualizadas",
+	non_advance_survey_submitted: "Encuesta de no avance enviada",
+};
+
+function formatAuditAction(action: string): string {
+	return AUDIT_ACTION_LABELS[action] ?? action;
+}
+
+function formatAuditDetails(
+	action: string,
+	details: Record<string, unknown>,
+): React.ReactNode {
+	const str = (key: string) => String(details[key] ?? "");
+
+	switch (action) {
+		case "stage_advanced":
+			return (
+				<span>
+					{details.from ? (
+						<>De <strong>{formatInvestmentStage(str("from"))}</strong> a </>
+					) : null}
+					<strong>{formatInvestmentStage(str("to"))}</strong>
+				</span>
+			);
+		case "marked_as_lost":
+			return (
+				<span>
+					Etapa anterior: <strong>{formatInvestmentStage(str("previousStage"))}</strong>
+					{details.reason ? <> — Razón: {str("reason")}</> : null}
+				</span>
+			);
+		case "scenario_created":
+			return (
+				<span>
+					Modalidad: <strong>{str("modality")}</strong>
+					{details.amount ? <> — Monto: Q{Number(details.amount).toLocaleString("es-GT")}</> : null}
+				</span>
+			);
+		case "scenario_accepted":
+			return <span>Escenario seleccionado</span>;
+		case "document_uploaded":
+			return (
+				<span>
+					Tipo: <strong>{str("documentType")}</strong>
+					{details.fileName ? <> — Archivo: {str("fileName")}</> : null}
+				</span>
+			);
+		case "document_approved":
+		case "document_rejected":
+			return (
+				<span>
+					Documento {action === "document_approved" ? "aprobado" : "rechazado"}
+					{details.documentType ? <> — Tipo: {str("documentType")}</> : null}
+				</span>
+			);
+		case "interaction_created":
+			return (
+				<span>
+					Tipo: <strong>{str("type")}</strong>
+					{details.date ? <> — Fecha: {str("date")}</> : null}
+				</span>
+			);
+		case "signature_updated":
+			return (
+				<span>
+					{details.completed ? "Completadas" : "Pendientes"}
+					{details.total != null ? <> — Total: {String(details.total)}</> : null}
+				</span>
+			);
+		case "non_advance_survey_submitted":
+			return (
+				<span>
+					Razón: {str("reason")}
+				</span>
+			);
+		default:
+			return (
+				<span>
+					{Object.entries(details)
+						.map(([k, v]) => `${k}: ${v}`)
+						.join(" — ")}
+				</span>
+			);
+	}
+}
+
 // ─── Audit Log Tab ────────────────────────────────────────────────────────────
 
 function AuditLogTab({
@@ -277,11 +378,13 @@ function AuditLogTab({
 							>
 								<History className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
 								<div className="min-w-0 flex-1">
-									<p className="font-medium text-sm">{entry.action}</p>
+									<p className="font-medium text-sm">
+										{formatAuditAction(entry.action)}
+									</p>
 									{entry.details != null && (
-										<pre className="mt-1 overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-xs">
-											{JSON.stringify(entry.details, null, 2)}
-										</pre>
+										<div className="mt-1 text-muted-foreground text-xs">
+											{formatAuditDetails(entry.action, entry.details as Record<string, unknown>)}
+										</div>
 									)}
 									<p className="mt-1 text-muted-foreground text-xs">
 										{formatDateTime(entry.createdAt)}

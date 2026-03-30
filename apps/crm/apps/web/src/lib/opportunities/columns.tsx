@@ -1,5 +1,6 @@
 import type { ColumnDef } from "@tanstack/react-table";
 import { ArrowUpDown, Calendar, Car, User } from "lucide-react";
+import { WhatsappLogBadge } from "@/components/crm/WhatsappLogBadge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -52,6 +53,9 @@ export const opportunitiesColumns: ColumnDef<Opportunity>[] = [
 		cell: ({ row }) => {
 			const title = row.getValue("title") as string;
 			const analysisStatus = row.original.analysisStatus;
+			const closurePercentage =
+				row.original.stage?.closurePercentage ?? 0;
+			const leadId = row.original.lead?.id;
 
 			return (
 				<div className="flex flex-col gap-1">
@@ -68,6 +72,12 @@ export const opportunitiesColumns: ColumnDef<Opportunity>[] = [
 						>
 							Reenviado a Análisis
 						</Badge>
+					)}
+					{closurePercentage === 85 && leadId && (
+						<WhatsappLogBadge
+							opportunityId={row.original.id}
+							leadId={leadId}
+						/>
 					)}
 				</div>
 			);

@@ -25,14 +25,13 @@ import * as reportsRouter from "./reports";
 import { uploadRouter } from "./upload";
 import { vehiclesRouter } from "./vehicles";
 import { vendorsRouter } from "./vendors";
-export const appRouter = {
+const healthRouter = {
 	healthCheck: publicProcedure.handler(() => {
 		return "OK";
 	}),
+};
 
-	// Auth routes
-	...authRouter,
-
+const adminRoutes = {
 	// Admin routes (prefixed for clarity)
 	adminOnlyData: adminRouter.getStats,
 	getAllUsers: adminRouter.getAllUsers,
@@ -40,11 +39,15 @@ export const appRouter = {
 	toggleUserSuspension: adminRouter.toggleUserSuspension,
 	deleteUser: adminRouter.deleteUser,
 	createUser: adminRouter.createUser,
+};
 
+const adminImportRoutes = {
 	// Admin Import routes
 	setupImportacion: adminImportRouter.setupImportacion,
 	analizarImportacionCreditos: adminImportRouter.analizarImportacionCreditos,
+};
 
+const crmRoutes = {
 	// CRM routes
 	getSalesStages: crmRouter.getSalesStages,
 	getCrmUsers: crmRouter.getCrmUsers,
@@ -105,7 +108,9 @@ export const appRouter = {
 	updateCoDebtor: crmRouter.updateCoDebtor,
 	deleteCoDebtor: crmRouter.deleteCoDebtor,
 	getConsolidatedCreditAnalysis: crmRouter.getConsolidatedCreditAnalysis,
+};
 
+const clientFormsRoutes = {
 	// Client Forms routes (Formularios del cliente - link público)
 	generateFormToken: clientFormsRouter.generateFormToken,
 	validateFormToken: clientFormsRouter.validateFormToken,
@@ -114,10 +119,14 @@ export const appRouter = {
 	submitFinancialStatement: clientFormsRouter.submitFinancialStatement,
 	getClientFormData: clientFormsRouter.getClientFormData,
 	getFormTokenByOpportunity: clientFormsRouter.getFormTokenByOpportunity,
+};
 
+const bankAnalysisRoutes = {
 	// Bank Analysis routes (Análisis de estados de cuenta)
 	analyzeBankStatements: bankAnalysisRouter.analyzeBankStatements,
+};
 
+const vehicleRoutes = {
 	// Vehicles routes
 	getVehicles: vehiclesRouter.getAll,
 	getVehicleById: vehiclesRouter.getById,
@@ -140,7 +149,9 @@ export const appRouter = {
 	uploadVehicleDocument: vehiclesRouter.uploadVehicleDocument,
 	deleteVehicleDocument: vehiclesRouter.deleteVehicleDocument,
 	validateLicensePlate: vehiclesRouter.validateLicensePlate,
+};
 
+const cobrosRoutes = {
 	// Cobros routes
 	getCobrosDashboardStats: cobrosRouter.getDashboardStats,
 	getCasosCobros: cobrosRouter.getCasosCobros,
@@ -176,7 +187,9 @@ export const appRouter = {
 	getMetasMora: cobrosRouter.getMetasMora,
 	getMetasMoraAnual: cobrosRouter.getMetasMoraAnual,
 	upsertMetasMora: cobrosRouter.upsertMetasMora,
+};
 
+const legalContractRoutes = {
 	// Legal Contracts routes (Jurídico)
 	createLegalContract: legalContractsRouter.createLegalContract,
 	updateLegalContract: legalContractsRouter.updateLegalContract,
@@ -195,7 +208,9 @@ export const appRouter = {
 		legalContractsRouter.getOpportunitiesForContracts,
 	approveOpportunityLegal: legalContractsRouter.approveOpportunityLegal,
 	confirmContractsSigned: legalContractsRouter.confirmContractsSigned,
+};
 
+const contractGenerationRoutes = {
 	// Contract Generation routes (Generación automática de contratos)
 	getContractTypes: contractGenerationRouter.getContractTypes,
 	getDocumentsByDpi: contractGenerationRouter.getDocumentsByDpi,
@@ -210,7 +225,9 @@ export const appRouter = {
 	getGeneratedContracts: contractGenerationRouter.getGeneratedContracts,
 	getGenerationSnapshot: contractGenerationRouter.getGenerationSnapshot,
 	regenerateContracts: contractGenerationRouter.regenerateContracts,
+};
 
+const vendorRoutes = {
 	// Vendors routes
 	getVendors: vendorsRouter.getAll,
 	getVendorById: vendorsRouter.getById,
@@ -219,14 +236,18 @@ export const appRouter = {
 	updateVendor: vendorsRouter.update,
 	deleteVendor: vendorsRouter.delete,
 	searchVendors: vendorsRouter.search,
+};
 
+const noteRoutes = {
 	// Notes routes
 	getEntityNotes: notesRouter.getEntityNotes,
 	createNote: notesRouter.createNote,
 	updateNote: notesRouter.updateNote,
 	togglePinNote: notesRouter.togglePinNote,
 	deleteNote: notesRouter.deleteNote,
+};
 
+const notificationRoutes = {
 	// Notifications routes
 	getUnreadNotificationCount: notificationsRouter.getUnreadNotificationCount,
 	getAllNotifications: notificationsRouter.getAllNotifications,
@@ -239,7 +260,9 @@ export const appRouter = {
 	getAccountDocumentsByOpportunities:
 		notificationsRouter.getAccountDocumentsByOpportunities,
 	markAllNotificationsAsRead: notificationsRouter.markAllNotificationsAsRead,
+};
 
+const quotationRoutes = {
 	// Quotations routes
 	createQuotation: quotationsRouter.createQuotation,
 	getQuotations: quotationsRouter.getQuotations,
@@ -247,7 +270,9 @@ export const appRouter = {
 	updateQuotation: quotationsRouter.updateQuotation,
 	deleteQuotation: quotationsRouter.deleteQuotation,
 	listQuotationsByOpportunity: quotationsRouter.listQuotationsByOpportunity,
+};
 
+const checkRoutes = {
 	// Credit Checks routes (Emisión de Cheques)
 	createCheck: checksRouter.createCheck,
 	getChecksByOpportunity: checksRouter.getChecksByOpportunity,
@@ -255,23 +280,31 @@ export const appRouter = {
 	updateCheck: checksRouter.updateCheck,
 	deleteCheck: checksRouter.deleteCheck,
 	getChecksSummary: checksRouter.getChecksSummary,
+};
 
+const locationRoutes = {
 	// Guatemala Locations routes (Catálogo de ubicaciones)
 	getDepartamentos: locationsRouter.getDepartamentos,
 	getMunicipiosByDepartamento: locationsRouter.getMunicipiosByDepartamento,
 	getAllLocations: locationsRouter.getAllLocations,
 	seedLocations: locationsRouter.seedLocations,
+};
 
+const insuranceRoutes = {
 	// Insurance routes
 	getInsuranceCost: insuranceRouter.getInsuranceCost,
+};
 
+const auctionRoutes = {
 	// Auction routes (subastas 🚗💸)
 	createAuction: auctionRouter.createAuction,
 	closeAuction: auctionRouter.closeAuction,
 	getAuctions: auctionRouter.getAuctions,
 	addAuctionExpense: auctionRouter.addAuctionExpense,
 	cancelAuction: auctionRouter.cancelAuction,
+};
 
+const reportRoutes = {
 	// Reports routes (reportes 📊)
 	getDashboardExecutivo: reportsRouter.getDashboardExecutivo,
 	getReporteCobranza: reportsRouter.getReporteCobranza,
@@ -281,16 +314,22 @@ export const appRouter = {
 	// Reportes unificados (cartera-back + CRM)
 	getReporteCarteraCompleto: reportesCarteraRouter.getReporteCarteraCompleto,
 	getReporteEficienciaCobros: reportesCarteraRouter.getReporteEficienciaCobros,
+};
 
+const miniagentRoutes = {
 	// MiniAgent routes
 	getMiniAgentCredentials: miniagentRouter.getMiniAgentCredentials,
+};
 
+const adminMiniagentRoutes = {
 	// Admin MiniAgent routes
 	adminListUsersWithCredentials: adminMiniagentRouter.listUsersWithCredentials,
 	adminSetMiniAgentCredentials: adminMiniagentRouter.setMiniAgentCredentials,
 	adminDeleteMiniAgentCredentials:
 		adminMiniagentRouter.deleteMiniAgentCredentials,
+};
 
+const investorDocumentRoutes = {
 	// Investor Documents routes (Documentos de inversionista)
 	getInvestorRendimiento: investorDocumentsRouter.getInvestorRendimiento,
 	getInvestorDocumentsAdmin: investorDocumentsRouter.getInvestorDocumentsAdmin,
@@ -299,12 +338,66 @@ export const appRouter = {
 		investorDocumentsRouter.toggleInvestorDocumentVisibility,
 	deleteInvestorDocument: investorDocumentsRouter.deleteInvestorDocument,
 	getInvestorActivityLog: investorDocumentsRouter.getInvestorActivityLog,
+};
 
+const accountingRoutes = {
 	// Accounting routes (Contabilidad)
 	getResumenGlobalInversionistas:
 		accountingRouter.getResumenGlobalInversionistas,
 	createBoleta: accountingRouter.createBoleta,
 	liquidateInversionista: accountingRouter.liquidateInversionista,
+};
+
+type BaseAppRouter = typeof healthRouter &
+	typeof authRouter &
+	typeof adminRoutes &
+	typeof adminImportRoutes &
+	typeof crmRoutes &
+	typeof clientFormsRoutes &
+	typeof bankAnalysisRoutes &
+	typeof vehicleRoutes &
+	typeof cobrosRoutes &
+	typeof legalContractRoutes &
+	typeof contractGenerationRoutes &
+	typeof vendorRoutes &
+	typeof noteRoutes &
+	typeof notificationRoutes &
+	typeof quotationRoutes &
+	typeof checkRoutes &
+	typeof locationRoutes &
+	typeof insuranceRoutes &
+	typeof auctionRoutes &
+	typeof reportRoutes &
+	typeof miniagentRoutes &
+	typeof adminMiniagentRoutes &
+	typeof investorDocumentRoutes &
+	typeof accountingRoutes;
+
+export const appRouter: BaseAppRouter = {
+	...healthRouter,
+	...authRouter,
+	...adminRoutes,
+	...adminImportRoutes,
+	...crmRoutes,
+	...clientFormsRoutes,
+	...bankAnalysisRoutes,
+	...vehicleRoutes,
+	...cobrosRoutes,
+	...legalContractRoutes,
+	...contractGenerationRoutes,
+	...vendorRoutes,
+	...noteRoutes,
+	...notificationRoutes,
+	...quotationRoutes,
+	...checkRoutes,
+	...locationRoutes,
+	...insuranceRoutes,
+	...auctionRoutes,
+	...reportRoutes,
+	...miniagentRoutes,
+	...adminMiniagentRoutes,
+	...investorDocumentRoutes,
+	...accountingRoutes,
 };
 
 // Investment routes exported separately to avoid TS7056 with declaration emit.

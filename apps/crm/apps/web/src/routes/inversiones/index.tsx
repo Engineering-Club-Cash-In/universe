@@ -22,13 +22,7 @@ import invariant from "tiny-invariant";
 import * as XLSX from "xlsx";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import {
 	Dialog,
 	DialogContent,
@@ -47,22 +41,16 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
+import { formatInvestmentStage } from "@/lib/investment-labels";
+import {
+	INVESTMENT_ACTIVE_STAGES,
+	type InvestmentStageConfig,
+} from "@/lib/investment-stage-config";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/inversiones/")({
 	component: RouteComponent,
 });
-
-const INVESTMENT_STAGES = [
-	{ id: "prospecting", name: "Prospección", color: "#6366f1" },
-	{ id: "contacted", name: "Contactado", color: "#8b5cf6" },
-	{ id: "negotiation", name: "Negociación", color: "#f59e0b" },
-	{ id: "acceptance_signatures", name: "Aceptado/Firmas", color: "#3b82f6" },
-	{ id: "welcome", name: "Bienvenida", color: "#10b981" },
-	{ id: "closed", name: "Cerrado", color: "#22c55e" },
-] as const;
-
-type StageId = (typeof INVESTMENT_STAGES)[number]["id"];
 
 function getDaysInStage(updatedAt: string | Date | null): number {
 	if (!updatedAt) return 0;
@@ -75,6 +63,24 @@ function formatAmount(amount: string | null | undefined): string {
 	const num = Number.parseFloat(amount);
 	if (Number.isNaN(num)) return "—";
 	return `Q${num.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function canAdvanceToNextStage(
+	currentStage: string,
+	targetStage: string,
+): boolean {
+	const currentStageIdx = INVESTMENT_ACTIVE_STAGES.findIndex(
+		(stage) => stage.id === currentStage,
+	);
+	const targetStageIdx = INVESTMENT_ACTIVE_STAGES.findIndex(
+		(stage) => stage.id === targetStage,
+	);
+
+	if (currentStageIdx === -1 || targetStageIdx === -1) {
+		return false;
+	}
+
+	return targetStageIdx === currentStageIdx + 1;
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -164,7 +170,7 @@ function DroppableInvestmentColumn({
 	items,
 	onDrop,
 }: {
-	stage: (typeof INVESTMENT_STAGES)[number];
+	stage: InvestmentStageConfig;
 	items: InvestmentOpportunityItem[];
 	onDrop: (opportunityId: string, newStage: string) => void;
 }) {
@@ -215,11 +221,16 @@ function DroppableInvestmentColumn({
 				</div>
 				<p className="mt-1.5 font-medium text-sm">{stage.name}</p>
 				<p className="text-muted-foreground text-xs">
-					{totalAmount > 0 ? `Q${totalAmount.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}{" "}
+					{totalAmount > 0
+						? `Q${totalAmount.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+						: "—"}{" "}
 					monto total
 				</p>
 			</div>
-			<div className="flex min-h-0 flex-col gap-3 overflow-y-auto px-3 pb-3" ref={ref}>
+			<div
+				className="flex min-h-0 flex-col gap-3 overflow-y-auto px-3 pb-3"
+				ref={ref}
+			>
 				{items.length === 0 ? (
 					<div className="py-8 text-center text-muted-foreground">
 						<Target className="mx-auto mb-2 h-8 w-8 opacity-50" />
@@ -434,41 +445,37 @@ function RouteComponent() {
 	});
 
 	const allItems = opportunitiesQuery.data ?? [];
+	const activeStageIds = new Set<string>(
+		INVESTMENT_ACTIVE_STAGES.map((stage) => stage.id),
+	);
 
 	// Filter out "lost" — only show open pipeline
 	const openItems = allItems.filter(
 		(item) => item.opportunity.stage !== "lost",
 	);
+	const unknownStageItems = openItems.filter(
+		(item) => !activeStageIds.has(String(item.opportunity.stage)),
+	);
+	const activeStageItems = openItems.filter((item) =>
+		activeStageIds.has(String(item.opportunity.stage)),
+	);
 
-	const itemsByStage = INVESTMENT_STAGES.reduce(
+	const itemsByStage = INVESTMENT_ACTIVE_STAGES.reduce(
 		(acc, stage) => {
-			acc[stage.id] = openItems.filter(
-				(item) => item.opportunity.stage === stage.id,
+			acc[stage.id] = activeStageItems.filter(
+				(item) => String(item.opportunity.stage) === stage.id,
 			);
 			return acc;
 		},
-		{} as Record<StageId, typeof openItems>,
+		{} as Partial<Record<string, typeof openItems>>,
 	);
 
 	function handleDrop(opportunityId: string, newStage: string) {
-		// Find the current stage of the opportunity
 		const item = allItems.find((i) => i.opportunity.id === opportunityId);
 		if (!item) return;
 
-		const currentStageIdx = INVESTMENT_STAGES.findIndex(
-			(s) => s.id === item.opportunity.stage,
-		);
-		const targetStageIdx = INVESTMENT_STAGES.findIndex(
-			(s) => s.id === newStage,
-		);
-
-		// Only allow advancing to the immediate next stage
-		if (targetStageIdx !== currentStageIdx + 1) {
-			if (targetStageIdx <= currentStageIdx) {
-				toast.error("No se puede retroceder de etapa");
-			} else {
-				toast.error("Solo se puede avanzar una etapa a la vez");
-			}
+		if (!canAdvanceToNextStage(item.opportunity.stage, newStage)) {
+			toast.error("Solo se permite avanzar a la siguiente etapa");
 			return;
 		}
 
@@ -494,10 +501,6 @@ function RouteComponent() {
 			return;
 		}
 
-		const stageMap = Object.fromEntries(
-			INVESTMENT_STAGES.map((s) => [s.id, s.name]),
-		);
-
 		const rows = allItems.map((item) => {
 			const name = item.investor
 				? `${item.investor.firstName} ${item.investor.lastName}`
@@ -507,8 +510,7 @@ function RouteComponent() {
 			const amount = item.lead?.proposedAmount
 				? Number.parseFloat(item.lead.proposedAmount)
 				: "";
-			const stage =
-				stageMap[item.opportunity.stage as string] ?? item.opportunity.stage;
+			const stage = formatInvestmentStage(item.opportunity.stage);
 
 			return {
 				Nombre: name,
@@ -635,15 +637,57 @@ function RouteComponent() {
 						</div>
 					</div>
 				) : (
-					<div className="flex gap-4">
-						{INVESTMENT_STAGES.map((stage) => (
-							<DroppableInvestmentColumn
-								key={stage.id}
-								stage={stage}
-								items={itemsByStage[stage.id] ?? []}
-								onDrop={handleDrop}
-							/>
-						))}
+					<div className="space-y-4">
+						{unknownStageItems.length > 0 && (
+							<div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-950">
+								<div className="flex items-start gap-3">
+									<AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+									<div className="space-y-2">
+										<div>
+											<p className="font-medium text-sm">
+												Oportunidades en etapas no reconocidas
+											</p>
+											<p className="text-sm/6">
+												Estas oportunidades siguen abiertas, pero su etapa no
+												pertenece al funnel activo configurado.
+											</p>
+										</div>
+										<div className="space-y-2">
+											{unknownStageItems.map((item) => {
+												const displayName = item.investor
+													? `${item.investor.firstName} ${item.investor.lastName}`
+													: (item.lead?.name ?? "Sin nombre");
+
+												return (
+													<div
+														key={item.opportunity.id}
+														className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-background/80 px-3 py-2 text-sm"
+													>
+														<Badge variant="outline">
+															{formatInvestmentStage(item.opportunity.stage)}
+														</Badge>
+														<span className="font-medium">{displayName}</span>
+														<span className="text-muted-foreground">
+															ID: {item.opportunity.id.slice(0, 8)}
+														</span>
+													</div>
+												);
+											})}
+										</div>
+									</div>
+								</div>
+							</div>
+						)}
+						<div className="flex gap-4">
+							{INVESTMENT_ACTIVE_STAGES.map((stage) => (
+								<DroppableInvestmentColumn
+									key={stage.id}
+									stage={stage}
+									items={itemsByStage[stage.id] ?? []}
+									onDrop={handleDrop}
+								/>
+							))}
+						</div>
 					</div>
 				)}
 			</div>

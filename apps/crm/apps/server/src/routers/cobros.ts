@@ -1814,7 +1814,7 @@ export const cobrosRouter = {
 					etiquetas: casoCobro?.etiquetas || [],
 
 					// Datos del contrato (cartera primero, fallback a nuestra BD)
-					montoFinanciado: creditoCompleto.credito.deudatotal,
+					montoFinanciado: creditoCompleto.credito.capital ?? creditoCompleto.credito.deudatotal ?? "0.00",
 					cuotaMensual:
 						creditoCompleto.credito.cuota || oportunidadData?.cuotaMensual,
 					numeroCuotas: creditoCompleto.credito.plazo,

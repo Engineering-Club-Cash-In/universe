@@ -2,6 +2,8 @@
  * Labels en español para los enums del módulo de inversiones.
  */
 
+import { INVESTMENT_STAGES } from "@/lib/investment-stage-config";
+
 const LEAD_SOURCE_LABELS: Record<string, string> = {
 	website: "Sitio web",
 	referral: "Referido",
@@ -28,4 +30,11 @@ export function formatOpportunityStatus(
 ): string {
 	if (!status) return "—";
 	return OPPORTUNITY_STATUS_LABELS[status] ?? status;
+}
+
+export function formatInvestmentStage(
+	stage: string | null | undefined,
+): string {
+	if (!stage) return "—";
+	return INVESTMENT_STAGES.find((item) => item.id === stage)?.name ?? stage;
 }

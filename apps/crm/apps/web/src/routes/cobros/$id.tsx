@@ -247,6 +247,12 @@ function RouteComponent() {
 	// Función para abrir el modal de detalle de oportunidad
 	const handleOpenOpportunityDetail = () => {
 		if (matchingOpportunity) {
+			const leadDpi =
+				matchingOpportunity.lead &&
+				"dpi" in matchingOpportunity.lead &&
+				typeof matchingOpportunity.lead.dpi === "string"
+					? matchingOpportunity.lead.dpi
+					: null;
 			const opportunityForModal: OpportunityForModal = {
 				id: matchingOpportunity.id,
 				title: matchingOpportunity.title,
@@ -264,7 +270,7 @@ function RouteComponent() {
 							secondLastName: matchingOpportunity.lead.secondLastName,
 							email: matchingOpportunity.lead.email,
 							phone: matchingOpportunity.lead.phone,
-							dpi: matchingOpportunity.lead.dpi,
+							dpi: leadDpi,
 						}
 					: null,
 				stage: matchingOpportunity.stage

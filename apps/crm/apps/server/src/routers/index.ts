@@ -3,7 +3,7 @@ import { accountingRouter } from "./accounting";
 import { adminRouter } from "./admin";
 import { adminImportRouter } from "./admin-import";
 import { adminMiniagentRouter } from "./admin-miniagent";
-import { auctionRouter } from "./auctionVehicles"; // Import the auction router
+import { auctionRouter } from "./auctionVehicles";
 import { authRouter } from "./auth";
 import { bankAnalysisRouter } from "./bank-analysis";
 import { checksRouter } from "./checks";
@@ -162,7 +162,6 @@ export const cobrosAppRouter = {
 	upsertMetasMora: cobrosRouter.upsertMetasMora,
 };
 
-
 /**
  * Admin specific routes
  */
@@ -294,7 +293,7 @@ export const miscAppRouter = {
 	// Insurance routes
 	getInsuranceCost: insuranceRouter.getInsuranceCost,
 
-	// Auction routes (subastas 🚗💸)
+	// Auction routes
 	createAuction: auctionRouter.createAuction,
 	closeAuction: auctionRouter.closeAuction,
 	getAuctions: auctionRouter.getAuctions,
@@ -306,7 +305,7 @@ export const miscAppRouter = {
  * Reports and Accounting routes
  */
 export const reportsAppRouter = {
-	// Reports routes (reportes 📊)
+	// Reports routes
 	getDashboardExecutivo: reportsRouter.getDashboardExecutivo,
 	getReporteCobranza: reportsRouter.getReporteCobranza,
 	getReporteCartera: reportsRouter.getReporteCartera,
@@ -341,16 +340,18 @@ export const reportsAppRouter = {
 	liquidateInversionista: accountingRouter.liquidateInversionista,
 };
 
+const healthRouter = {
+	healthCheck: publicProcedure.handler(() => {
+		return "OK";
+	}),
+};
+
 /**
  * Main application router
  * We use Object.assign to combine parts to avoid TS7056: "type of this node exceeds the maximum length"
  */
 export const appRouter = Object.assign(
-	{
-		healthCheck: publicProcedure.handler(() => {
-			return "OK";
-		}),
-	},
+	healthRouter,
 	authRouter,
 	crmAppRouter,
 	vehicleAppRouter,
@@ -382,9 +383,8 @@ export const manualVehicleRouter = {
 };
 
 // Merged AppRouter type to avoid serialization limit
-export type AppRouter = {
-	healthCheck: any;
-} & typeof authRouter &
+export type AppRouter = typeof healthRouter &
+	typeof authRouter &
 	typeof crmAppRouter &
 	typeof vehicleAppRouter &
 	typeof cobrosAppRouter &

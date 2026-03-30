@@ -1029,14 +1029,15 @@ export const vehiclesRouter = {
 		.handler(async ({ input }) => {
 			if (!input.licensePlate && !input.vinNumber) return { valid: true };
 
-			// 1. Check License Plate (Normalized)
-			let existingWithPlate: any[] = [];
+			let foundVehicle = null;
+
+			// 1. Priority: Find by Plate exactly
 			if (input.licensePlate) {
 				const cleanInputPlate = input.licensePlate
 					.replace(/[^a-zA-Z0-9]/g, "")
 					.toUpperCase();
 
-				existingWithPlate = await db
+				const existingWithPlate = await db
 					.select()
 					.from(vehicles)
 					.where(
@@ -1046,16 +1047,17 @@ export const vehiclesRouter = {
 						),
 					)
 					.limit(1);
+				
+				foundVehicle = existingWithPlate[0] || null;
 			}
 
-			// 2. Check VIN Number (Normalized)
-			let existingWithVin: any[] = [];
-			if (input.vinNumber) {
+			// 2. Fallback: Find by VIN exactly (only if not found by plate)
+			if (!foundVehicle && input.vinNumber) {
 				const cleanInputVin = input.vinNumber
 					.replace(/[^a-zA-Z0-9]/g, "")
 					.toUpperCase();
 
-				existingWithVin = await db
+				const existingWithVin = await db
 					.select()
 					.from(vehicles)
 					.where(
@@ -1065,64 +1067,17 @@ export const vehiclesRouter = {
 						),
 					)
 					.limit(1);
+				
+				foundVehicle = existingWithVin[0] || null;
 			}
 
-			const foundVehicle = existingWithPlate[0] || existingWithVin[0];
-
+			// 3. Result
 			if (foundVehicle) {
-				// We compare normalized versions for the flags
-				const cleanInputPlate = input.licensePlate
-					? input.licensePlate.replace(/[^a-zA-Z0-9]/g, "").toUpperCase()
-					: "";
-				const cleanFoundPlate = foundVehicle.licensePlate
-					? foundVehicle.licensePlate.replace(/[^a-zA-Z0-9]/g, "").toUpperCase()
-					: "";
-
-				const cleanInputVin = input.vinNumber
-					? input.vinNumber.replace(/[^a-zA-Z0-9]/g, "").toUpperCase()
-					: "";
-				const cleanFoundVin = foundVehicle.vinNumber
-					? foundVehicle.vinNumber.replace(/[^a-zA-Z0-9]/g, "").toUpperCase()
-					: "";
-
-				const plateMatches = cleanInputPlate && cleanFoundPlate === cleanInputPlate;
-				const vinMatches = cleanInputVin && cleanFoundVin === cleanInputVin;
-
-				if (plateMatches && vinMatches) {
-					return {
-						valid: false,
-						alreadyExists: true,
-						vehicle: foundVehicle,
-						message: `Este vehículo ya está registrado (Placa: ${foundVehicle.licensePlate}, VIN: ${foundVehicle.vinNumber}).`,
-					};
-				}
-
-				// Case B: Plate exists but with a different VIN
-				if (plateMatches && input.vinNumber && vinMatches === false) {
-					return {
-						valid: false,
-						alreadyExists: true,
-						vehicle: foundVehicle,
-						message: `La placa "${input.licensePlate}" ya está registrada con el chasis/VIN "${foundVehicle.vinNumber}".`,
-					};
-				}
-
-				// Case C: VIN exists but with a different Plate
-				if (vinMatches && input.licensePlate && plateMatches === false) {
-					return {
-						valid: false,
-						alreadyExists: true,
-						vehicle: foundVehicle,
-						message: `El chasis/VIN "${input.vinNumber}" ya está registrado con la placa "${foundVehicle.licensePlate}".`,
-					};
-				}
-
-				// Case D: Only one was provided and it matches
 				return {
 					valid: false,
 					alreadyExists: true,
 					vehicle: foundVehicle,
-					message: `El vehículo ya está registrado.`,
+					message: `Vehículo registrado encontrado.`,
 				};
 			}
 

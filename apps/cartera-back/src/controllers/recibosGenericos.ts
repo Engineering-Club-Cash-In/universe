@@ -164,6 +164,7 @@ export async function generateReciboGenericoPDF(reciboId: number) {
         year: "numeric",
         month: "long",
         day: "numeric",
+        timeZone: "America/Guatemala",
       })
     : "N/A";
 
@@ -323,7 +324,7 @@ export async function generateReciboGenericoPDF(reciboId: number) {
       </div>
       <div class="footer">
         <p>Este documento es un recibo generado por el sistema de Club Cash-In.</p>
-        <p>Generado el ${new Date().toLocaleDateString("es-GT", { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
+        <p>Generado el ${new Date().toLocaleDateString("es-GT", { year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "America/Guatemala" })}</p>
       </div>
     </div>
   </body>

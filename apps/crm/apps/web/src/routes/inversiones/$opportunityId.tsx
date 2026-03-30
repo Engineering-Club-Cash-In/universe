@@ -4,9 +4,7 @@ import {
 	AlertCircle,
 	ArrowLeft,
 	ArrowRight,
-	CheckCircle2,
 	ChevronRight,
-	Clock,
 	FileText,
 	History,
 	Info,
@@ -25,13 +23,7 @@ import { InvestmentInteractions } from "@/components/investments/InvestmentInter
 import { InvestorProfile } from "@/components/investments/InvestorProfile";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
 	Dialog,
 	DialogContent,
@@ -44,6 +36,11 @@ import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
+import {
+	formatInvestmentStage,
+	formatOpportunityStatus,
+} from "@/lib/investment-labels";
+import { INVESTMENT_STAGES } from "@/lib/investment-stage-config";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/inversiones/$opportunityId")({
@@ -52,55 +49,40 @@ export const Route = createFileRoute("/inversiones/$opportunityId")({
 
 // ─── Stage Config ─────────────────────────────────────────────────────────────
 
-const STAGE_CONFIG: Record<
-	string,
-	{ label: string; color: string; bgColor: string }
-> = {
-	prospecting: {
-		label: "Prospección",
-		color: "#6366f1",
-		bgColor: "bg-indigo-100 text-indigo-800",
-	},
-	contacted: {
-		label: "Contactado",
-		color: "#8b5cf6",
-		bgColor: "bg-purple-100 text-purple-800",
-	},
-	negotiation: {
-		label: "Negociación",
-		color: "#f59e0b",
-		bgColor: "bg-amber-100 text-amber-800",
-	},
-	acceptance_signatures: {
-		label: "Aceptado/Firmas",
-		color: "#3b82f6",
-		bgColor: "bg-blue-100 text-blue-800",
-	},
-	welcome: {
-		label: "Bienvenida",
-		color: "#10b981",
-		bgColor: "bg-emerald-100 text-emerald-800",
-	},
-	closed: {
-		label: "Cerrado",
-		color: "#22c55e",
-		bgColor: "bg-green-100 text-green-800",
-	},
-	lost: {
-		label: "Perdido",
-		color: "#ef4444",
-		bgColor: "bg-red-100 text-red-800",
-	},
-};
+const STAGE_CONFIG = Object.fromEntries(
+	INVESTMENT_STAGES.map((stage) => [
+		stage.id,
+		{
+			label: stage.name,
+			color: stage.color,
+		},
+	]),
+) satisfies Record<string, { label: string; color: string }>;
 
-function StageBadge({ stage }: { stage: string }) {
-	const config = STAGE_CONFIG[stage] ?? {
-		label: stage,
-		bgColor: "bg-gray-100 text-gray-800",
+const WON_STAGE_ID = "initial_onboarding_senior_handoff";
+
+function formatUnknownStageLabel(stage: string | null | undefined): string {
+	if (!stage) return "Etapa desconocida";
+	return stage
+		.split(/[_-]+/)
+		.filter(Boolean)
+		.map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+		.join(" ");
+}
+
+function StageBadge({ stage }: { stage: string | null | undefined }) {
+	const config = (stage ? STAGE_CONFIG[stage] : undefined) ?? {
+		label: formatUnknownStageLabel(stage),
+		color: "#6b7280",
 	};
+
 	return (
 		<span
-			className={`inline-flex items-center rounded-full px-2.5 py-0.5 font-medium text-xs ${config.bgColor}`}
+			className="inline-flex items-center rounded-full px-2.5 py-0.5 font-medium text-xs"
+			style={{
+				backgroundColor: `${config.color}1A`,
+				color: config.color,
+			}}
 		>
 			{config.label}
 		</span>
@@ -210,112 +192,102 @@ function MarkAsLostDialog({
 	);
 }
 
-// ─── Negotiation Checklist ────────────────────────────────────────────────────
+// ─── Audit Helpers ───────────────────────────────────────────────────────────
 
-function NegotiationChecklist({
-	opportunity,
-}: {
-	opportunity: {
-		scenariosCompleted: boolean | null;
-		documentsApproved: boolean | null;
-		kycCompleted: boolean | null;
-		profileCompleted: boolean | null;
-		webappProfileCreated: boolean | null;
-	};
-}) {
-	const items = [
-		{
-			key: "scenariosCompleted",
-			label: "Escenarios de inversión",
-			done: opportunity.scenariosCompleted,
-		},
-		{
-			key: "documentsApproved",
-			label: "Documentación aprobada",
-			done: opportunity.documentsApproved,
-		},
-		{
-			key: "kycCompleted",
-			label: "KYC completado",
-			done: opportunity.kycCompleted,
-		},
-		{
-			key: "profileCompleted",
-			label: "Perfil del inversionista",
-			done: opportunity.profileCompleted,
-		},
-		{
-			key: "webappProfileCreated",
-			label: "Perfil en webapp CCI",
-			done: opportunity.webappProfileCreated,
-		},
-	];
+const AUDIT_ACTION_LABELS: Record<string, string> = {
+	stage_advanced: "Etapa avanzada",
+	marked_as_lost: "Marcada como perdida",
+	scenario_created: "Escenario creado",
+	scenario_accepted: "Escenario aceptado",
+	document_uploaded: "Documento subido",
+	document_approved: "Documento aprobado",
+	document_rejected: "Documento rechazado",
+	interaction_created: "Interacción registrada",
+	funds_validated: "Fondos validados",
+	signature_updated: "Firmas actualizadas",
+	non_advance_survey_submitted: "Encuesta de no avance enviada",
+};
 
-	const completedCount = items.filter((i) => i.done).length;
-
-	return (
-		<Card>
-			<CardHeader className="pb-3">
-				<CardTitle className="text-sm">Requisitos de Negociación</CardTitle>
-				<CardDescription className="text-xs">
-					{completedCount}/{items.length} completados
-				</CardDescription>
-			</CardHeader>
-			<CardContent className="space-y-2">
-				{items.map((item) => (
-					<div key={item.key} className="flex items-center gap-2">
-						{item.done ? (
-							<CheckCircle2 className="h-4 w-4 text-green-500" />
-						) : (
-							<AlertCircle className="h-4 w-4 text-amber-500" />
-						)}
-						<span
-							className={`text-sm ${item.done ? "text-foreground" : "text-muted-foreground"}`}
-						>
-							{item.label}
-						</span>
-					</div>
-				))}
-			</CardContent>
-		</Card>
-	);
+function formatAuditAction(action: string): string {
+	return AUDIT_ACTION_LABELS[action] ?? action;
 }
 
-// ─── Signatures Progress ──────────────────────────────────────────────────────
+function formatAuditDetails(
+	action: string,
+	details: Record<string, unknown>,
+): React.ReactNode {
+	const str = (key: string) => String(details[key] ?? "");
 
-function SignaturesProgress({
-	completed,
-	total,
-}: {
-	completed: number;
-	total: number;
-}) {
-	const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
-
-	return (
-		<Card>
-			<CardHeader className="pb-3">
-				<CardTitle className="text-sm">Progreso de Firmas</CardTitle>
-				<CardDescription className="text-xs">
-					{completed} de {total} firmas completadas
-				</CardDescription>
-			</CardHeader>
-			<CardContent>
-				<div className="space-y-2">
-					<div className="flex items-center justify-between text-sm">
-						<span className="text-muted-foreground">Avance</span>
-						<span className="font-medium">{percentage}%</span>
-					</div>
-					<div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-						<div
-							className="h-full rounded-full bg-blue-500 transition-all duration-300"
-							style={{ width: `${percentage}%` }}
-						/>
-					</div>
-				</div>
-			</CardContent>
-		</Card>
-	);
+	switch (action) {
+		case "stage_advanced":
+			return (
+				<span>
+					{details.from ? (
+						<>De <strong>{formatInvestmentStage(str("from"))}</strong> a </>
+					) : null}
+					<strong>{formatInvestmentStage(str("to"))}</strong>
+				</span>
+			);
+		case "marked_as_lost":
+			return (
+				<span>
+					Etapa anterior: <strong>{formatInvestmentStage(str("previousStage"))}</strong>
+					{details.reason ? <> — Razón: {str("reason")}</> : null}
+				</span>
+			);
+		case "scenario_created":
+			return (
+				<span>
+					Modalidad: <strong>{str("modality")}</strong>
+					{details.amount ? <> — Monto: Q{Number(details.amount).toLocaleString("es-GT")}</> : null}
+				</span>
+			);
+		case "scenario_accepted":
+			return <span>Escenario seleccionado</span>;
+		case "document_uploaded":
+			return (
+				<span>
+					Tipo: <strong>{str("documentType")}</strong>
+					{details.fileName ? <> — Archivo: {str("fileName")}</> : null}
+				</span>
+			);
+		case "document_approved":
+		case "document_rejected":
+			return (
+				<span>
+					Documento {action === "document_approved" ? "aprobado" : "rechazado"}
+					{details.documentType ? <> — Tipo: {str("documentType")}</> : null}
+				</span>
+			);
+		case "interaction_created":
+			return (
+				<span>
+					Tipo: <strong>{str("type")}</strong>
+					{details.date ? <> — Fecha: {str("date")}</> : null}
+				</span>
+			);
+		case "signature_updated":
+			return (
+				<span>
+					{details.completed ? "Completadas" : "Pendientes"}
+					{details.total != null ? <> — Total: {String(details.total)}</> : null}
+				</span>
+			);
+		case "non_advance_survey_submitted":
+			return (
+				<span>
+					Razón: {str("reason")}
+				</span>
+			);
+		default:
+			return (
+				<span>
+					{Object.entries(details)
+						.map(([k, v]) => `${k}: ${v}`)
+						.join(" — ")}
+				</span>
+			);
+	}
 }
 
 // ─── Audit Log Tab ────────────────────────────────────────────────────────────
@@ -406,11 +378,13 @@ function AuditLogTab({
 							>
 								<History className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
 								<div className="min-w-0 flex-1">
-									<p className="font-medium text-sm">{entry.action}</p>
+									<p className="font-medium text-sm">
+										{formatAuditAction(entry.action)}
+									</p>
 									{entry.details != null && (
-										<pre className="mt-1 overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-xs">
-											{JSON.stringify(entry.details, null, 2)}
-										</pre>
+										<div className="mt-1 text-muted-foreground text-xs">
+											{formatAuditDetails(entry.action, entry.details as Record<string, unknown>)}
+										</div>
 									)}
 									<p className="mt-1 text-muted-foreground text-xs">
 										{formatDateTime(entry.createdAt)}
@@ -516,9 +490,10 @@ function RouteComponent() {
 	const displayName = investor
 		? `${investor.firstName} ${investor.lastName}`
 		: (lead?.name ?? "Sin nombre");
-	const currentStage = opportunity.stage;
+	const currentStage: string = opportunity.stage;
 	const isLost = currentStage === "lost" || opportunity.status === "lost";
-	const isClosed = currentStage === "closed";
+	const isClosed =
+		!isLost && (currentStage === WON_STAGE_ID || opportunity.status === "won");
 	const canAdvance = !isLost && !isClosed;
 
 	return (
@@ -548,6 +523,11 @@ function RouteComponent() {
 							<div className="flex flex-wrap items-center gap-2">
 								<h1 className="font-bold text-xl">{displayName}</h1>
 								<StageBadge stage={currentStage} />
+								{isClosed && (
+									<Badge className="bg-green-100 text-green-800 hover:bg-green-100">
+										Ganada
+									</Badge>
+								)}
 								{isLost && (
 									<Badge variant="destructive" className="text-xs">
 										Perdida
@@ -580,22 +560,6 @@ function RouteComponent() {
 						)}
 					</div>
 				</div>
-
-				{/* Stage-specific progress */}
-				{currentStage === "negotiation" && (
-					<div className="mt-4 max-w-sm">
-						<NegotiationChecklist opportunity={opportunity} />
-					</div>
-				)}
-
-				{currentStage === "acceptance_signatures" && (
-					<div className="mt-4 max-w-sm">
-						<SignaturesProgress
-							completed={opportunity.signaturesCompleted ?? 0}
-							total={opportunity.signaturesTotal ?? 0}
-						/>
-					</div>
-				)}
 
 				{isLost && opportunity.lostReason && (
 					<div className="mt-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 dark:border-red-900 dark:bg-red-950">
@@ -741,7 +705,7 @@ function RouteComponent() {
 											Estado
 										</span>
 										<span className="font-medium text-sm">
-											{opportunity.status}
+											{formatOpportunityStatus(opportunity.status)}
 										</span>
 									</div>
 									<Separator />

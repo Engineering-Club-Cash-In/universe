@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { createInvestmentLeadWithOpportunity } from "../controllers/investment-lead";
 import { db } from "../db";
@@ -26,6 +26,19 @@ import {
 import { ROLES } from "../lib/roles";
 import { getFileUrl } from "../lib/storage";
 import { createNotification } from "./notifications";
+
+const INVESTMENT_STAGE_FLOW = [
+	"data_collection",
+	"basic_profile_validation",
+	"profiling_and_qualification",
+	"model_presentation",
+	"active_follow_up",
+	"verbal_commitment_contract_sent",
+	"ticket_closure_transfer_activation",
+	"initial_onboarding_senior_handoff",
+] as const;
+
+const INVESTMENT_STAGE_VALUES = [...INVESTMENT_STAGE_FLOW, "lost"] as const;
 
 export const investmentsRouter = {
 	// ============ LEADS ============
@@ -149,22 +162,14 @@ export const investmentsRouter = {
 		.input(
 			z
 				.object({
-					stage: z
-						.enum([
-							"prospecting",
-							"contacted",
-							"negotiation",
-							"acceptance_signatures",
-							"welcome",
-							"closed",
-							"lost",
-						])
-						.optional(),
+					stage: z.enum(INVESTMENT_STAGE_VALUES).optional(),
 				})
 				.optional(),
 		)
 		.handler(async ({ input, context }) => {
-			const conditions = [eq(investmentOpportunities.status, "open")];
+			const conditions = [
+				inArray(investmentOpportunities.status, ["open", "won"]),
+			];
 
 			if (input?.stage) {
 				conditions.push(eq(investmentOpportunities.stage, input.stage));
@@ -296,135 +301,27 @@ export const investmentsRouter = {
 				});
 			}
 
-			// Definir orden de etapas y gates
-			const stageOrder = [
-				"prospecting",
-				"contacted",
-				"negotiation",
-				"acceptance_signatures",
-				"welcome",
-				"closed",
-			] as const;
-
-			const currentIndex = stageOrder.indexOf(
-				opp.stage as (typeof stageOrder)[number],
+			const currentIndex = INVESTMENT_STAGE_FLOW.indexOf(
+				opp.stage as (typeof INVESTMENT_STAGE_FLOW)[number],
 			);
-			if (currentIndex === -1 || currentIndex >= stageOrder.length - 1) {
+			if (
+				currentIndex === -1 ||
+				currentIndex >= INVESTMENT_STAGE_FLOW.length - 1
+			) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: "No se puede avanzar desde esta etapa",
 				});
 			}
 
-			const nextStage = stageOrder[currentIndex + 1];
-
-			// Validar gates segun etapa actual
-			switch (opp.stage) {
-				case "prospecting": {
-					// Gate: al menos una interaccion registrada
-					const [interaction] = await db
-						.select()
-						.from(investmentInteractions)
-						.where(eq(investmentInteractions.investmentOpportunityId, opp.id))
-						.limit(1);
-					if (!interaction) {
-						throw new ORPCError("BAD_REQUEST", {
-							message:
-								"Debe registrar al menos una interaccion antes de avanzar",
-						});
-					}
-					break;
-				}
-				case "contacted": {
-					// Gate: al menos una interaccion
-					const [interaction] = await db
-						.select()
-						.from(investmentInteractions)
-						.where(eq(investmentInteractions.investmentOpportunityId, opp.id))
-						.limit(1);
-					if (!interaction) {
-						throw new ORPCError("BAD_REQUEST", {
-							message:
-								"Debe registrar al menos una interaccion antes de avanzar",
-						});
-					}
-					break;
-				}
-				case "negotiation": {
-					// Gate: todos los checklist completados
-					if (
-						!opp.scenariosCompleted ||
-						!opp.documentsApproved ||
-						!opp.kycCompleted ||
-						!opp.profileCompleted ||
-						!opp.webappProfileCreated
-					) {
-						const missing = [];
-						if (!opp.scenariosCompleted)
-							missing.push("escenarios de inversion");
-						if (!opp.documentsApproved) missing.push("documentacion aprobada");
-						if (!opp.kycCompleted) missing.push("KYC completado");
-						if (!opp.profileCompleted) missing.push("perfil del inversionista");
-						if (!opp.webappProfileCreated) missing.push("perfil en webapp CCI");
-						throw new ORPCError("BAD_REQUEST", {
-							message: `Faltan requisitos: ${missing.join(", ")}`,
-						});
-					}
-					// Notificar a juridico, contabilidad, gerencia
-					const [lead] = await db
-						.select()
-						.from(investmentLeads)
-						.where(eq(investmentLeads.id, opp.investmentLeadId))
-						.limit(1);
-
-					await createNotification({
-						titulo: `Nueva inversion en etapa de firmas - ${lead?.name}`,
-						descripcion: `La inversion de ${lead?.name} esta lista para generacion de contratos`,
-						type: "action_required",
-						createdBy: context.userId,
-						createdByRole: context.userRole,
-						assignedToRole: "juridico",
-						relatedEntityType: "opportunity",
-						relatedEntityId: opp.id,
-					});
-					await createNotification({
-						titulo: `Nueva inversion aprobada - ${lead?.name}`,
-						descripcion: `La inversion de ${lead?.name} paso a etapa de firmas`,
-						type: "aviso",
-						createdBy: context.userId,
-						createdByRole: context.userRole,
-						assignedToRole: "accounting",
-						relatedEntityType: "opportunity",
-						relatedEntityId: opp.id,
-					});
-					break;
-				}
-				case "acceptance_signatures": {
-					// Gate: todas las firmas completadas
-					if (opp.signaturesCompleted < opp.signaturesTotal) {
-						throw new ORPCError("BAD_REQUEST", {
-							message: `Faltan firmas: ${opp.signaturesCompleted}/${opp.signaturesTotal}`,
-						});
-					}
-					break;
-				}
-				case "welcome": {
-					// Gate: fondos validados por gerente
-					if (!opp.fundsValidated) {
-						throw new ORPCError("BAD_REQUEST", {
-							message:
-								"Los fondos deben ser validados por el gerente de inversiones",
-						});
-					}
-					break;
-				}
-			}
+			const nextStage = INVESTMENT_STAGE_FLOW[currentIndex + 1];
 
 			// Actualizar etapa (con condicion de stage actual para evitar race condition)
 			const [updated] = await db
 				.update(investmentOpportunities)
 				.set({
 					stage: nextStage,
-					status: nextStage === "closed" ? "won" : "open",
+					status:
+						nextStage === "initial_onboarding_senior_handoff" ? "won" : "open",
 					stageEnteredAt: new Date(),
 					updatedAt: new Date(),
 				})

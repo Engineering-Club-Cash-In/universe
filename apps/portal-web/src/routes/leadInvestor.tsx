@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Page } from "@/components";
 import { LeadInvestor } from "@/features/LeadInvestor";
+import { useSEO } from "@/lib/seo";
 
 interface LeadInvestorSearch {
   amount?: string;
@@ -32,6 +33,13 @@ export const Route = createFileRoute("/leadInvestor")({
 
 function RouteComponent() {
   const { amount, term, type, source, campaign } = Route.useSearch();
+
+  useSEO({
+    title: "Invertí con CashIn",
+    description:
+      "Conviértete en inversionista con Club CashIn. Completa tu registro y haz crecer tu capital en la primera plataforma Fintech P2P Lending de Centroamérica.",
+    canonical: "https://clubcashin.com/leadInvestor",
+  });
 
   return (
     <Page>

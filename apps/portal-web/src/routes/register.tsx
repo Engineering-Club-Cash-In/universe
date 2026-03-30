@@ -2,6 +2,7 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { Page } from "@/components";
 import { Register } from "@/features/Login/Register";
 import { authClient } from "@/lib/auth";
+import { useSEO } from "@/lib/seo";
 
 // Verificar si ya tiene sesión activa
 const checkIfLoggedIn = async () => {
@@ -23,6 +24,12 @@ export const Route = createFileRoute("/register")({
 });
 
 function RouteComponent() {
+  useSEO({
+    title: "Registro",
+    description: "Crea tu cuenta en Club CashIn.",
+    noindex: true,
+  });
+
   return (
     <Page>
       <Register />

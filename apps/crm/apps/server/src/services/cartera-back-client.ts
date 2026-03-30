@@ -561,7 +561,7 @@ export class CarteraBackClient {
 	async consultarNit(
 		nit: string,
 	): Promise<{ success: boolean; data?: { nit: string; nombre: string | null }; mensaje: string }> {
-		return this.request("/consultarNit", {
+		return this.request("/api/dte/consultarNit", {
 			method: "POST",
 			body: JSON.stringify({ nit }),
 		});

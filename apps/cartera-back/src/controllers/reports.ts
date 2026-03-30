@@ -16,7 +16,7 @@ export async function getCreditosWithUserByMesAnioExcel(
     page?: number;
     perPage?: number;
     numero_credito_sifco?: string;
-    estado?: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO" | "EN_CONVENIO";
+    estado?: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO" | "EN_CONVENIO" | "CAIDO";
     asesor_id?: number;
     nombre_usuario?: string;
     email_asesor?: string; // 🆕 NUEVO

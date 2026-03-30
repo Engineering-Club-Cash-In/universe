@@ -36,7 +36,7 @@ export const creditSchema = z.object({
     .array(
       z.object({
         inversionista_id: z.number().int().positive(),
-        monto_aportado: z.number().positive("Monto debe ser mayor a 0"),
+        monto_aportado: z.number().nonnegative("Monto no puede ser negativo"),
         porcentaje_cash_in: z.number().min(0).max(100),
         porcentaje_inversion: z.number().min(0).max(100),
         tipo_inversion: z.enum(["compra_cartera", "reinversion"]).optional(),

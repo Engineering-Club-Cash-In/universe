@@ -49,6 +49,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DollarSign, Pencil } from "lucide-react";
+import { toast } from "sonner";
 // Iconos y colores por atributo
 const iconMap: Record<string, { icon: React.ReactNode; color: string }> = {
   pago_id: {
@@ -164,16 +165,18 @@ const EDIT_FIELDS: EditField[] = [
   { key: "abono_iva_12", label: "Abono IVA 12%", group: "abonos" },
   { key: "abono_seguro", label: "Abono Seguro", group: "abonos" },
   { key: "abono_gps", label: "Abono GPS", group: "abonos" },
+  { key: "membresias_pago", label: "Membresías Pago", group: "abonos" },
+  { key: "membresias_mes", label: "Membresías Mes", group: "abonos" },
   { key: "capital_restante", label: "Capital Restante", group: "restantes" },
   { key: "interes_restante", label: "Interés Restante", group: "restantes" },
   { key: "iva_12_restante", label: "IVA 12% Restante", group: "restantes" },
   { key: "seguro_restante", label: "Seguro Restante", group: "restantes" },
   { key: "gps_restante", label: "GPS Restante", group: "restantes" },
+  { key: "membresias", label: "Membresías Restante", group: "restantes" },
   { key: "monto_boleta", label: "Monto Boleta", group: "general" },
   { key: "monto_aplicado", label: "Monto Aplicado", group: "general" },
   { key: "mora", label: "Mora", group: "general" },
   { key: "otros", label: "Otros", group: "general" },
-  { key: "membresias", label: "Membresías", group: "general" },
   { key: "observaciones", label: "Observaciones", group: "general" },
 ];
 
@@ -228,9 +231,9 @@ function EditPaymentModal({
       { pagoId: pago.pago_id, params: payload },
       {
         onSuccess: () => {
+          onClose();
           toast.success("Pago actualizado correctamente");
           onSuccess();
-          onClose();
         },
         onError: (error: any) => {
           toast.error(error?.response?.data?.message || "Error al actualizar pago");

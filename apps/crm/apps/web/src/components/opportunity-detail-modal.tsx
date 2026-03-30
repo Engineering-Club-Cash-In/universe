@@ -220,22 +220,22 @@ export function OpportunityDetailModal({
 	const canViewContracts =
 		userRole && PERMISSIONS.canViewOpportunityContracts(userRole);
 	const fullLead = leadQuery.data?.data?.[0];
-	const displayLead = fullLead
+	const displayLead: OpportunityForModal["lead"] = fullLead
 		? {
-			...opportunity.lead,
-			firstName: fullLead.firstName,
-			middleName: fullLead.middleName,
-			lastName: fullLead.lastName,
-			secondLastName: fullLead.secondLastName,
-			dpi: fullLead.dpi,
-			email: fullLead.email,
-			phone: fullLead.phone,
-			age: fullLead.age,
-			direccion: fullLead.direccion,
-			departamento: fullLead.departamento,
-			municipio: fullLead.municipio,
-			zona: fullLead.zona,
-		}
+				id: opportunity.lead?.id ?? fullLead.id,
+				firstName: fullLead.firstName,
+				middleName: fullLead.middleName,
+				lastName: fullLead.lastName,
+				secondLastName: fullLead.secondLastName,
+				dpi: fullLead.dpi,
+				email: fullLead.email,
+				phone: fullLead.phone,
+				age: fullLead.age,
+				direccion: fullLead.direccion,
+				departamento: fullLead.departamento,
+				municipio: fullLead.municipio,
+				zona: fullLead.zona,
+			}
 		: opportunity.lead;
 	const canAccessCRM = userRole && PERMISSIONS.canAccessCRM(userRole);
 	const isAccounting = userRole && PERMISSIONS.canAccessAccounting(userRole);
@@ -323,16 +323,16 @@ export function OpportunityDetailModal({
 									</Label>
 									<div className="flex items-center gap-3">
 										<Users className="h-5 w-5 text-muted-foreground" />
-										{onNavigateToLead ? (
+										{onNavigateToLead && displayLead.id ? (
 											<span
 												className="cursor-pointer font-medium text-primary hover:underline"
 												role="button"
 												tabIndex={0}
-												onClick={() => onNavigateToLead(displayLead!.id)}
+												onClick={() => onNavigateToLead(displayLead.id)}
 												onKeyDown={(e) => {
 													if (e.key === "Enter" || e.key === " ") {
 														e.preventDefault();
-														onNavigateToLead(displayLead!.id);
+														onNavigateToLead(displayLead.id);
 													}
 												}}
 											>

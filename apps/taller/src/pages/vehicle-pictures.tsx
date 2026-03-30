@@ -829,17 +829,15 @@ export default function VehiclePictures({
     inspectionSteps.find((step) => step.id === activeStep)?.icon || Car;
 
   return (
-    <div className="container mx-auto py-4 px-2 sm:py-8 sm:px-4">
-      <div className="flex flex-col space-y-4 sm:space-y-6 max-w-4xl mx-auto">
-        <div className="flex flex-col space-y-2">
-          <h1 className="text-2xl sm:text-3xl font-bold">
-            Fotos de Inspección del Vehículo
+    <div className="w-full py-4 px-1 sm:py-8 sm:px-4 overflow-hidden">
+      <div className="flex flex-col space-y-4 sm:space-y-6 max-w-4xl mx-auto w-full overflow-hidden">
+        <div className="flex flex-col space-y-2 min-w-0 overflow-hidden">
+          <h1 className="text-xl sm:text-3xl font-bold truncate sm:whitespace-normal">
+            Fotos de Inspección
           </h1>
-          <p className="text-muted-foreground">
-            Complete la inspección fotográfica tomando fotos claras de cada
-            área requerida.
+          <p className="text-xs sm:text-base text-muted-foreground line-clamp-2 sm:line-clamp-none">
+            Capture imágenes claras de cada área requerida.
           </p>
-
           {isDevMode && (
             <Button
               onClick={fillWithDummyPhotos}
@@ -852,20 +850,22 @@ export default function VehiclePictures({
           )}
 
           <div className="flex flex-col gap-4 mt-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-4">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <Progress value={progress} className="w-32 sm:w-40 h-2" />
-                <span className="text-sm text-muted-foreground whitespace-nowrap">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mt-6">
+            <div className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto">
+              {/* Progress and status */}
+              <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start">
+                <Progress value={progress} className="flex-1 sm:w-32 h-2" />
+                <span className="text-xs sm:text-sm text-muted-foreground whitespace-nowrap font-medium">
                   {completedPhotos}/{totalPhotos} fotos
                 </span>
               </div>
 
-              <div className="flex items-center p-1 bg-muted rounded-lg border">
+              {/* View Mode Buttons */}
+              <div className="flex items-center p-1 bg-muted rounded-lg border w-full sm:w-auto justify-center sm:justify-start">
                 <Button
                   variant={viewMode === 'wizard' ? 'secondary' : 'ghost'}
                   size="sm"
-                  className="h-7 px-3 text-xs gap-1.5"
+                  className="flex-1 sm:flex-none h-7 px-3 text-xs gap-1.5"
                   onClick={() => setViewMode('wizard')}
                 >
                   <ListChecks className="h-3.5 w-3.5" />
@@ -874,7 +874,7 @@ export default function VehiclePictures({
                 <Button
                   variant={viewMode === 'gallery' ? 'secondary' : 'ghost'}
                   size="sm"
-                  className="h-7 px-3 text-xs gap-1.5"
+                  className="flex-1 sm:flex-none h-7 px-3 text-xs gap-1.5"
                   onClick={() => setViewMode('gallery')}
                 >
                   <LayoutGrid className="h-3.5 w-3.5" />
@@ -882,7 +882,6 @@ export default function VehiclePictures({
                 </Button>
               </div>
             </div>
-
             <Button
               onClick={handleFinish}
               disabled={!isComplete}

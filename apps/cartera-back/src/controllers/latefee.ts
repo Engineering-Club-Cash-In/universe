@@ -377,7 +377,7 @@ export async function procesarMoras() {
       
       const isOverdue = fechaVenc < hoy;
       const isUnpaid = c.pagado === false;
-      const statusExcluidos = ["EN_CONVENIO", "INCOBRABLE", "CANCELADO", "PENDIENTE_CANCELACION"];
+      const statusExcluidos = ["EN_CONVENIO", "INCOBRABLE", "CANCELADO", "PENDIENTE_CANCELACION","CAIDO"];
       const isEligible = !statusExcluidos.includes(c.statusCredit ?? "");
 
       if (isOverdue && isUnpaid) {

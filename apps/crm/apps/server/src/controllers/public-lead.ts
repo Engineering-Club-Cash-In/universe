@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, or } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -176,11 +176,13 @@ export async function createOpportunityForLead(
 }
 
 /**
- * Verifica si un lead ya tiene una oportunidad creada en las últimas 24 horas.
+ * Verifica si un lead ya tiene una oportunidad abierta con el mismo source.
  */
-export async function getRecentOpportunity(leadId: string) {
-	const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-	const [recent] = await db
+export async function getOpenOpportunityBySource(
+	leadId: string,
+	source: LeadSource,
+) {
+	const [existing] = await db
 		.select({
 			id: opportunities.id,
 			source: opportunities.source,
@@ -194,12 +196,12 @@ export async function getRecentOpportunity(leadId: string) {
 					eq(opportunities.status, "open"),
 					eq(opportunities.status, "on_hold"),
 				),
-				gte(opportunities.createdAt, twentyFourHoursAgo),
+				eq(opportunities.source, source),
 			),
 		)
 		.orderBy(desc(opportunities.createdAt))
 		.limit(1);
-	return recent;
+	return existing;
 }
 
 export async function createPublicLead(c: Context) {
@@ -267,18 +269,20 @@ export async function createPublicLead(c: Context) {
 					.returning();
 			}
 
-			// Verificar oportunidad reciente antes de crear una nueva
-			const recentOpportunity = await getRecentOpportunity(existingLead.id);
-			if (recentOpportunity) {
-				if (body.source || body.campaign) {
+			// Verificar si ya tiene una oportunidad abierta con el mismo source
+			const existingOpportunity = await getOpenOpportunityBySource(
+				existingLead.id,
+				source,
+			);
+			if (existingOpportunity) {
+				if (body.campaign) {
 					await db
 						.update(opportunities)
 						.set({
-							source,
 							campaign,
 							updatedAt: new Date(),
 						})
-						.where(eq(opportunities.id, recentOpportunity.id));
+						.where(eq(opportunities.id, existingOpportunity.id));
 				}
 
 				return c.json(
@@ -286,7 +290,7 @@ export async function createPublicLead(c: Context) {
 						success: true,
 						data: leadData,
 						message:
-							"Lead ya tiene una oportunidad reciente (últimas 24 horas)",
+							"Lead ya tiene una oportunidad abierta con el mismo source",
 					},
 					200,
 				);

@@ -445,7 +445,11 @@ function RouteComponent() {
 	});
 
 	const retreatMutation = useMutation({
-		mutationFn: (data: { opportunityId: string; reason?: string }) =>
+		mutationFn: (data: {
+			opportunityId: string;
+			expectedCurrentStage: string;
+			reason?: string;
+		}) =>
 			client.retreatInvestmentStage(data),
 		onSuccess: () => {
 			toast.success("Etapa regresada correctamente");
@@ -478,6 +482,7 @@ function RouteComponent() {
 	function confirmRetreatStage() {
 		retreatMutation.mutate({
 			opportunityId,
+			expectedCurrentStage: currentStage as (typeof INVESTMENT_ACTIVE_STAGES)[number]["id"],
 			reason: "Regreso manual de etapa por corrección",
 		});
 	}

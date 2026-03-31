@@ -435,6 +435,7 @@ function RouteComponent() {
 	const queryClient = useQueryClient();
 	const [pendingRetreat, setPendingRetreat] = useState<{
 		opportunityId: string;
+		expectedCurrentStage: string;
 		targetStage: string;
 	} | null>(null);
 
@@ -487,7 +488,11 @@ function RouteComponent() {
 	});
 
 	const retreatStageMutation = useMutation({
-		mutationFn: (data: { opportunityId: string; reason?: string }) =>
+		mutationFn: (data: {
+			opportunityId: string;
+			expectedCurrentStage: string;
+			reason?: string;
+		}) =>
 			client.retreatInvestmentStage(data),
 		onSuccess: () => {
 			toast.success("Etapa regresada correctamente");
@@ -544,6 +549,7 @@ function RouteComponent() {
 		if (canRetreatToPreviousStage(item.opportunity.stage, newStage)) {
 			setPendingRetreat({
 				opportunityId,
+				expectedCurrentStage: item.opportunity.stage,
 				targetStage: newStage,
 			});
 			return;
@@ -587,8 +593,9 @@ function RouteComponent() {
 		}
 
 		if (
+			item.opportunity.stage !== pendingRetreat.expectedCurrentStage ||
 			!canRetreatToPreviousStage(
-				item.opportunity.stage,
+				pendingRetreat.expectedCurrentStage,
 				pendingRetreat.targetStage,
 			)
 		) {
@@ -602,6 +609,7 @@ function RouteComponent() {
 
 		retreatStageMutation.mutate({
 			opportunityId: pendingRetreat.opportunityId,
+			expectedCurrentStage: pendingRetreat.expectedCurrentStage,
 			reason: "Regreso manual de etapa por corrección desde tablero",
 		});
 	}

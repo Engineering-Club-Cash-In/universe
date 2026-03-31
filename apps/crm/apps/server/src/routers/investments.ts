@@ -350,6 +350,7 @@ export const investmentsRouter = {
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
+				expectedCurrentStage: z.enum(INVESTMENT_STAGE_FLOW),
 				reason: z.string().optional(),
 			}),
 		)
@@ -366,7 +367,16 @@ export const investmentsRouter = {
 				});
 			}
 
-			const previousStage = getPreviousInvestmentStage(opp.stage);
+			if (opp.stage !== input.expectedCurrentStage) {
+				throw new ORPCError("CONFLICT", {
+					message:
+						"La etapa cambió antes de confirmar. Recargue la pagina.",
+				});
+			}
+
+			const previousStage = getPreviousInvestmentStage(
+				input.expectedCurrentStage,
+			);
 			if (!previousStage) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: "No se puede regresar desde esta etapa",
@@ -384,7 +394,10 @@ export const investmentsRouter = {
 				.where(
 					and(
 						eq(investmentOpportunities.id, opp.id),
-						eq(investmentOpportunities.stage, opp.stage),
+						eq(
+							investmentOpportunities.stage,
+							input.expectedCurrentStage,
+						),
 					),
 				)
 				.returning();
@@ -398,7 +411,7 @@ export const investmentsRouter = {
 
 			await db.insert(investmentStageHistory).values({
 				investmentOpportunityId: opp.id,
-				fromStage: opp.stage,
+				fromStage: input.expectedCurrentStage,
 				toStage: previousStage,
 				changedBy: context.userId,
 				reason: input.reason,
@@ -407,7 +420,7 @@ export const investmentsRouter = {
 			await db.insert(investmentAuditLog).values({
 				investmentOpportunityId: opp.id,
 				action: "stage_retreated",
-				details: { from: opp.stage, to: previousStage },
+				details: { from: input.expectedCurrentStage, to: previousStage },
 				performedBy: context.userId,
 			});
 

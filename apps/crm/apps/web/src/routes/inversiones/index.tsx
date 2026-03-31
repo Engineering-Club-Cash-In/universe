@@ -433,9 +433,10 @@ function CreateLeadDialog({ onSuccess }: { onSuccess: () => void }) {
 function RouteComponent() {
 	const { data: session } = authClient.useSession();
 	const queryClient = useQueryClient();
-	const [pendingRetreatOpportunityId, setPendingRetreatOpportunityId] = useState<
-		string | null
-	>(null);
+	const [pendingRetreat, setPendingRetreat] = useState<{
+		opportunityId: string;
+		targetStage: string;
+	} | null>(null);
 
 	const opportunitiesQuery = useQuery({
 		...orpc.getInvestmentOpportunities.queryOptions({ input: {} }),
@@ -490,7 +491,7 @@ function RouteComponent() {
 			client.retreatInvestmentStage(data),
 		onSuccess: () => {
 			toast.success("Etapa regresada correctamente");
-			setPendingRetreatOpportunityId(null);
+			setPendingRetreat(null);
 			queryClient.invalidateQueries({
 				queryKey: orpc.getInvestmentOpportunities.queryOptions({ input: {} })
 					.queryKey,
@@ -541,7 +542,10 @@ function RouteComponent() {
 		}
 
 		if (canRetreatToPreviousStage(item.opportunity.stage, newStage)) {
-			setPendingRetreatOpportunityId(opportunityId);
+			setPendingRetreat({
+				opportunityId,
+				targetStage: newStage,
+			});
 			return;
 		}
 
@@ -569,10 +573,35 @@ function RouteComponent() {
 	}
 
 	function confirmBoardRetreat() {
-		if (!pendingRetreatOpportunityId) return;
+		if (!pendingRetreat) return;
+
+		const item = allItems.find(
+			(candidate) => candidate.opportunity.id === pendingRetreat.opportunityId,
+		);
+
+		if (!item) {
+			setPendingRetreat(null);
+			handleRefresh();
+			toast.error("La oportunidad ya no está disponible. Se recargó el tablero.");
+			return;
+		}
+
+		if (
+			!canRetreatToPreviousStage(
+				item.opportunity.stage,
+				pendingRetreat.targetStage,
+			)
+		) {
+			setPendingRetreat(null);
+			handleRefresh();
+			toast.error(
+				"La oportunidad cambió de etapa antes de confirmar. Se actualizó el tablero.",
+			);
+			return;
+		}
 
 		retreatStageMutation.mutate({
-			opportunityId: pendingRetreatOpportunityId,
+			opportunityId: pendingRetreat.opportunityId,
 			reason: "Regreso manual de etapa por corrección desde tablero",
 		});
 	}
@@ -793,9 +822,9 @@ function RouteComponent() {
 				)}
 			</div>
 			<RetreatStageConfirmDialog
-				open={pendingRetreatOpportunityId !== null}
+				open={pendingRetreat !== null}
 				onOpenChange={(open) => {
-					if (!open) setPendingRetreatOpportunityId(null);
+					if (!open) setPendingRetreat(null);
 				}}
 				onConfirm={confirmBoardRetreat}
 				isLoading={retreatStageMutation.isPending}

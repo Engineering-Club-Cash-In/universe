@@ -4,6 +4,7 @@ import {
 	AlertCircle,
 	ArrowLeft,
 	ArrowRight,
+	ArrowUpLeft,
 	ChevronRight,
 	FileText,
 	History,
@@ -17,6 +18,7 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 import { InvestmentCalculator } from "@/components/investments/InvestmentCalculator";
+import { RetreatStageConfirmDialog } from "@/components/investments/RetreatStageConfirmDialog";
 import { InvestmentContracts } from "@/components/investments/InvestmentContracts";
 import { InvestmentDocuments } from "@/components/investments/InvestmentDocuments";
 import { InvestmentInteractions } from "@/components/investments/InvestmentInteractions";
@@ -40,7 +42,10 @@ import {
 	formatInvestmentStage,
 	formatOpportunityStatus,
 } from "@/lib/investment-labels";
-import { INVESTMENT_STAGES } from "@/lib/investment-stage-config";
+import {
+	INVESTMENT_ACTIVE_STAGES,
+	INVESTMENT_STAGES,
+} from "@/lib/investment-stage-config";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/inversiones/$opportunityId")({
@@ -196,6 +201,7 @@ function MarkAsLostDialog({
 
 const AUDIT_ACTION_LABELS: Record<string, string> = {
 	stage_advanced: "Etapa avanzada",
+	stage_retreated: "Etapa regresada",
 	marked_as_lost: "Marcada como perdida",
 	scenario_created: "Escenario creado",
 	scenario_accepted: "Escenario aceptado",
@@ -220,6 +226,7 @@ function formatAuditDetails(
 
 	switch (action) {
 		case "stage_advanced":
+		case "stage_retreated":
 			return (
 				<span>
 					{details.from ? (
@@ -405,6 +412,7 @@ function RouteComponent() {
 	const { opportunityId } = Route.useParams();
 	const { data: session } = authClient.useSession();
 	const queryClient = useQueryClient();
+	const [isRetreatDialogOpen, setIsRetreatDialogOpen] = useState(false);
 
 	const query = useQuery({
 		...orpc.getInvestmentOpportunityById.queryOptions({
@@ -436,8 +444,39 @@ function RouteComponent() {
 		},
 	});
 
+	const retreatMutation = useMutation({
+		mutationFn: (data: { opportunityId: string; reason?: string }) =>
+			client.retreatInvestmentStage(data),
+		onSuccess: () => {
+			toast.success("Etapa regresada correctamente");
+			setIsRetreatDialogOpen(false);
+			queryClient.invalidateQueries({
+				queryKey: orpc.getInvestmentOpportunityById.queryOptions({
+					input: { id: opportunityId },
+				}).queryKey,
+			});
+			queryClient.invalidateQueries({
+				queryKey: orpc.getInvestmentOpportunities.queryOptions({ input: {} })
+					.queryKey,
+			});
+			queryClient.invalidateQueries({
+				queryKey: orpc.getInvestmentDashboardStats.queryOptions().queryKey,
+			});
+		},
+		onError: (error) => {
+			toast.error(`No se pudo regresar la etapa: ${error.message}`);
+		},
+	});
+
 	function handleAdvanceStage() {
 		advanceMutation.mutate({ opportunityId });
+	}
+
+	function confirmRetreatStage() {
+		retreatMutation.mutate({
+			opportunityId,
+			reason: "Regreso manual de etapa por corrección",
+		});
 	}
 
 	function handleRefresh() {
@@ -495,6 +534,10 @@ function RouteComponent() {
 	const isClosed =
 		!isLost && (currentStage === WON_STAGE_ID || opportunity.status === "won");
 	const canAdvance = !isLost && !isClosed;
+	const currentStageIndex = INVESTMENT_ACTIVE_STAGES.findIndex(
+		(stage) => stage.id === currentStage,
+	);
+	const canRetreat = currentStageIndex > 0;
 
 	return (
 		<div className="flex h-full flex-col">
@@ -542,6 +585,19 @@ function RouteComponent() {
 
 					{/* Actions */}
 					<div className="flex flex-wrap items-center gap-2">
+						{canRetreat && (
+							<Button
+								size="sm"
+								variant="outline"
+								onClick={() => setIsRetreatDialogOpen(true)}
+								disabled={retreatMutation.isPending}
+							>
+								<ArrowUpLeft className="mr-2 h-4 w-4" />
+								{retreatMutation.isPending
+									? "Regresando..."
+									: "Regresar Etapa"}
+							</Button>
+						)}
 						{canAdvance && (
 							<Button
 								size="sm"
@@ -560,6 +616,12 @@ function RouteComponent() {
 						)}
 					</div>
 				</div>
+				<RetreatStageConfirmDialog
+					open={isRetreatDialogOpen}
+					onOpenChange={setIsRetreatDialogOpen}
+					onConfirm={confirmRetreatStage}
+					isLoading={retreatMutation.isPending}
+				/>
 
 				{isLost && opportunity.lostReason && (
 					<div className="mt-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 dark:border-red-900 dark:bg-red-950">

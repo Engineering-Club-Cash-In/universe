@@ -20,6 +20,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import invariant from "tiny-invariant";
 import * as XLSX from "xlsx";
+import { RetreatStageConfirmDialog } from "@/components/investments/RetreatStageConfirmDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -81,6 +82,24 @@ function canAdvanceToNextStage(
 	}
 
 	return targetStageIdx === currentStageIdx + 1;
+}
+
+function canRetreatToPreviousStage(
+	currentStage: string,
+	targetStage: string,
+): boolean {
+	const currentStageIdx = INVESTMENT_ACTIVE_STAGES.findIndex(
+		(stage) => stage.id === currentStage,
+	);
+	const targetStageIdx = INVESTMENT_ACTIVE_STAGES.findIndex(
+		(stage) => stage.id === targetStage,
+	);
+
+	if (currentStageIdx === -1 || targetStageIdx === -1) {
+		return false;
+	}
+
+	return targetStageIdx === currentStageIdx - 1;
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -414,6 +433,9 @@ function CreateLeadDialog({ onSuccess }: { onSuccess: () => void }) {
 function RouteComponent() {
 	const { data: session } = authClient.useSession();
 	const queryClient = useQueryClient();
+	const [pendingRetreatOpportunityId, setPendingRetreatOpportunityId] = useState<
+		string | null
+	>(null);
 
 	const opportunitiesQuery = useQuery({
 		...orpc.getInvestmentOpportunities.queryOptions({ input: {} }),
@@ -463,6 +485,26 @@ function RouteComponent() {
 		},
 	});
 
+	const retreatStageMutation = useMutation({
+		mutationFn: (data: { opportunityId: string; reason?: string }) =>
+			client.retreatInvestmentStage(data),
+		onSuccess: () => {
+			toast.success("Etapa regresada correctamente");
+			setPendingRetreatOpportunityId(null);
+			queryClient.invalidateQueries({
+				queryKey: orpc.getInvestmentOpportunities.queryOptions({ input: {} })
+					.queryKey,
+			});
+			queryClient.invalidateQueries({
+				queryKey: orpc.getInvestmentDashboardStats.queryOptions({ input: {} })
+					.queryKey,
+			});
+		},
+		onError: (error) => {
+			toast.error(`No se pudo regresar la etapa: ${error.message}`);
+		},
+	});
+
 	const allItems = opportunitiesQuery.data ?? [];
 	const activeStageIds = new Set<string>(
 		INVESTMENT_ACTIVE_STAGES.map((stage) => stage.id),
@@ -493,12 +535,26 @@ function RouteComponent() {
 		const item = allItems.find((i) => i.opportunity.id === opportunityId);
 		if (!item) return;
 
-		if (!canAdvanceToNextStage(item.opportunity.stage, newStage)) {
-			toast.error("Solo se permite avanzar a la siguiente etapa");
+		if (canAdvanceToNextStage(item.opportunity.stage, newStage)) {
+			advanceStageMutation.mutate({ opportunityId });
 			return;
 		}
 
-		advanceStageMutation.mutate({ opportunityId });
+		if (canRetreatToPreviousStage(item.opportunity.stage, newStage)) {
+			setPendingRetreatOpportunityId(opportunityId);
+			return;
+		}
+
+		if (
+			advanceStageMutation.isPending ||
+			retreatStageMutation.isPending
+		) {
+			return;
+		}
+
+		toast.error(
+			"Solo se permite mover a la etapa inmediata siguiente o anterior",
+		);
 	}
 
 	function handleRefresh() {
@@ -509,6 +565,15 @@ function RouteComponent() {
 		queryClient.invalidateQueries({
 			queryKey: orpc.getInvestmentDashboardStats.queryOptions({ input: {} })
 				.queryKey,
+		});
+	}
+
+	function confirmBoardRetreat() {
+		if (!pendingRetreatOpportunityId) return;
+
+		retreatStageMutation.mutate({
+			opportunityId: pendingRetreatOpportunityId,
+			reason: "Regreso manual de etapa por corrección desde tablero",
 		});
 	}
 
@@ -727,6 +792,14 @@ function RouteComponent() {
 					</div>
 				)}
 			</div>
+			<RetreatStageConfirmDialog
+				open={pendingRetreatOpportunityId !== null}
+				onOpenChange={(open) => {
+					if (!open) setPendingRetreatOpportunityId(null);
+				}}
+				onConfirm={confirmBoardRetreat}
+				isLoading={retreatStageMutation.isPending}
+			/>
 		</div>
 	);
 }

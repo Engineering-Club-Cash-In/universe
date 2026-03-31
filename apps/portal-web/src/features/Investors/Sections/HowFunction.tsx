@@ -1,5 +1,5 @@
 import { IconAddUser, IconWallet, IconQ } from "@/components";
-import { Calculator } from "../component/Calculator";
+import { Calculator } from "../components/Calculator";
 import { useIsMobile } from "@/hooks";
 
 export const HowFunction = () => {

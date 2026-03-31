@@ -1,4 +1,4 @@
-import { InvestorIsotipo } from "./InvestorIsotipo";
+import logoCashin from "../assets/logoInversiones.png";
 
 interface InvestorsLogoTempProps {
   width?: string;
@@ -10,15 +10,10 @@ export const InvestorsLogoTemp = ({
   width = "128px",
 }: InvestorsLogoTempProps) => {
   return (
-    <div className="flex items-center gap-4" >
-      <div className="h-full aspect-square">
-        <InvestorIsotipo height={height} width={width} />
-      </div>
-      <div className="flex flex-col">
-        <span className="text-white font-bold text-2xl md:text-4xl lg:text-6xl xl:text-[72px] leading-tight">
-          CashIn
-        </span>
-      </div>
-    </div>
+    <img
+      src={logoCashin}
+      alt="Club CashIn Inversión"
+      style={{ width, height, objectFit: "contain" }}
+    />
   );
 };

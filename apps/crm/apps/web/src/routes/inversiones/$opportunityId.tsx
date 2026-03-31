@@ -468,6 +468,9 @@ function RouteComponent() {
 		},
 	});
 
+	const isStageTransitionPending =
+		advanceMutation.isPending || retreatMutation.isPending;
+
 	function handleAdvanceStage() {
 		advanceMutation.mutate({ opportunityId });
 	}
@@ -590,11 +593,13 @@ function RouteComponent() {
 								size="sm"
 								variant="outline"
 								onClick={() => setIsRetreatDialogOpen(true)}
-								disabled={retreatMutation.isPending}
+								disabled={isStageTransitionPending}
 							>
 								<ArrowUpLeft className="mr-2 h-4 w-4" />
 								{retreatMutation.isPending
 									? "Regresando..."
+									: advanceMutation.isPending
+										? "Avanzando..."
 									: "Regresar Etapa"}
 							</Button>
 						)}
@@ -602,10 +607,14 @@ function RouteComponent() {
 							<Button
 								size="sm"
 								onClick={handleAdvanceStage}
-								disabled={advanceMutation.isPending}
+								disabled={isStageTransitionPending}
 							>
 								<ArrowRight className="mr-2 h-4 w-4" />
-								{advanceMutation.isPending ? "Avanzando..." : "Avanzar Etapa"}
+								{advanceMutation.isPending
+									? "Avanzando..."
+									: retreatMutation.isPending
+										? "Regresando..."
+										: "Avanzar Etapa"}
 							</Button>
 						)}
 						{!isLost && !isClosed && (
@@ -620,7 +629,7 @@ function RouteComponent() {
 					open={isRetreatDialogOpen}
 					onOpenChange={setIsRetreatDialogOpen}
 					onConfirm={confirmRetreatStage}
-					isLoading={retreatMutation.isPending}
+					isLoading={isStageTransitionPending}
 				/>
 
 				{isLost && opportunity.lostReason && (

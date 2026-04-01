@@ -588,7 +588,8 @@ export async function getCreditosWithUserByMesAnio(
   email_asesor?: string,
   cuotas_atrasadas?: number,
   proximidad_pago?: ProximidadPago,
-  is_vehiculo_propio?: boolean
+  is_vehiculo_propio?: boolean,
+  inversionista_ids?: number[]
 ): Promise<{
   data: CreditoConInfo[];
   page: number;
@@ -663,6 +664,13 @@ export async function getCreditosWithUserByMesAnio(
     if (is_vehiculo_propio) {
       console.log(`🔎 Filtrando solo vehículos propios`);
       conditions.push(eq(creditos.is_vehiculo_propio, true));
+    }
+
+    if (inversionista_ids && inversionista_ids.length > 0) {
+      console.log(`🔎 Filtrando por inversionistas: ${inversionista_ids}`);
+      conditions.push(
+        inArray(creditos_inversionistas.inversionista_id, inversionista_ids)
+      );
     }
   } catch (err) {
     console.error("❌ Error construyendo filtros:", err);
@@ -744,6 +752,14 @@ export async function getCreditosWithUserByMesAnio(
       query = query.innerJoin(
         cuotas_credito,
         eq(creditos.credito_id, cuotas_credito.credito_id)
+      ) as any;
+    }
+
+    // 🔥 JOIN con creditos_inversionistas si filtramos por inversionistas
+    if (inversionista_ids && inversionista_ids.length > 0) {
+      query = query.innerJoin(
+        creditos_inversionistas,
+        eq(creditos.credito_id, creditos_inversionistas.credito_id)
       ) as any;
     }
 
@@ -1141,6 +1157,14 @@ export async function getCreditosWithUserByMesAnio(
       countQuery = countQuery.innerJoin(
         cuotas_credito,
         eq(creditos.credito_id, cuotas_credito.credito_id)
+      ) as any;
+    }
+
+    // 🔥 JOIN con creditos_inversionistas si filtramos por inversionistas
+    if (inversionista_ids && inversionista_ids.length > 0) {
+      countQuery = countQuery.innerJoin(
+        creditos_inversionistas,
+        eq(creditos.credito_id, creditos_inversionistas.credito_id)
       ) as any;
     }
 

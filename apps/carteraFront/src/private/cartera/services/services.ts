@@ -466,6 +466,7 @@ export const getCreditosPaginados = async (params: {
   asesor_id?: number;
   nombre_usuario?: string;
   is_vehiculo_propio?: boolean;
+  inversionista_ids?: string;
 }): Promise<GetCreditosResponse> => {
   const BACK_URL = import.meta.env.VITE_BACK_URL || "";
   const response = await api.get(`${BACK_URL}/getAllCredits`, {
@@ -487,6 +488,9 @@ export const getCreditosPaginados = async (params: {
       }),
       ...(params.is_vehiculo_propio !== undefined && {
         is_vehiculo_propio: params.is_vehiculo_propio,
+      }),
+      ...(params.inversionista_ids && {
+        inversionista_ids: params.inversionista_ids,
       }),
     },
   });

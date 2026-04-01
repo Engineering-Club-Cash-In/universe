@@ -49,6 +49,10 @@ interface SyncError {
  * Genera dos archivos JSON: éxitos y errores.
  */
 export async function syncTodosLosClientes() {
+  if (!sifcoDb) {
+    throw new Error("La conexión a SIFCO no está disponible. Verifique SIFCO_DB_URL.");
+  }
+
   const exitos: SyncExito[] = [];
   const errores: SyncError[] = [];
   const outputDir = join(process.cwd(), "src", "scripts");
@@ -133,6 +137,10 @@ export async function syncClienteCompleto(clienteSifco: {
   DireccionEMailSecundario: string;
   ExcluirDeMensajesDeCorreo: number;
 }) {
+  if (!sifcoDb) {
+    throw new Error("La conexión a SIFCO no está disponible. Verifique SIFCO_DB_URL.");
+  }
+
   const pasos: string[] = [];
   const prestamosDetalle: SyncExito["prestamos"] = [];
   const codigoCliente = clienteSifco.CodigoCliente;

@@ -23,6 +23,7 @@ export async function getCreditosWithUserByMesAnioExcel(
     cuotas_atrasadas?: number; // 🆕 NUEVO
     proximidad_pago?: "TODAY" | "WEEK" | "TWO_WEEKS" | "MONTH" | "DUEMONTH";
     is_vehiculo_propio?: boolean;
+    inversionista_ids?: number[];
     excel?: boolean;
   }
 ) {
@@ -41,7 +42,8 @@ export async function getCreditosWithUserByMesAnioExcel(
     rest.email_asesor,
     rest.cuotas_atrasadas,
     rest.proximidad_pago,
-    rest.is_vehiculo_propio
+    rest.is_vehiculo_propio,
+    rest.inversionista_ids
   );
 
   if (!excel) return result; // si no piden excel, devolvemos JSON normal

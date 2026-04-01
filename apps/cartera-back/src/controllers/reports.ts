@@ -1314,3 +1314,138 @@ export async function generateReciboPagoPDF(pagoId: number) {
 
   return { pdfUrl: url };
 }
+
+export async function getPagosByVencimiento({
+  mes,
+  anio,
+  page = 1,
+  pageSize = 20,
+  numero_credito_sifco,
+  nombre_usuario,
+}: {
+  mes: number;
+  anio: number;
+  page?: number;
+  pageSize?: number;
+  numero_credito_sifco?: string;
+  nombre_usuario?: string;
+}) {
+  const fechaInicio = `${anio}-${String(mes).padStart(2, "0")}-01`;
+  const fechaFinDate = new Date(anio, mes, 0);
+  const fechaFin = `${anio}-${String(mes).padStart(2, "0")}-${String(fechaFinDate.getDate()).padStart(2, "0")}`;
+
+  // Filtros dinámicos
+  const filters: any[] = [
+    sql`p.fecha_vencimiento >= ${fechaInicio}`,
+    sql`p.fecha_vencimiento <= ${fechaFin}`,
+  ];
+  if (numero_credito_sifco) {
+    filters.push(sql`c.numero_credito_sifco ILIKE ${"%" + numero_credito_sifco + "%"}`);
+  }
+  if (nombre_usuario) {
+    filters.push(sql`u.nombre ILIKE ${"%" + nombre_usuario + "%"}`);
+  }
+  const whereClause = sql.join(filters, sql` AND `);
+
+  // Subquery para los porcentajes de Cube por crédito (1 solo query)
+  // cube_pct = (porcentaje_cash_in / 100) * (monto_aportado / sum_montos)
+  const cubeSubquery = sql`
+    LEFT JOIN LATERAL (
+      SELECT
+        CASE
+          WHEN sum_montos.total > 0 THEN
+            (ci_cube.porcentaje_cash_in::numeric / 100.0) * (ci_cube.monto_aportado::numeric / sum_montos.total)
+          ELSE 0
+        END AS cube_pct
+      FROM cartera.creditos_inversionistas ci_cube
+      INNER JOIN cartera.inversionistas inv_cube
+        ON ci_cube.inversionista_id = inv_cube.inversionista_id
+      CROSS JOIN LATERAL (
+        SELECT COALESCE(SUM(ci_all.monto_aportado::numeric), 0) AS total
+        FROM cartera.creditos_inversionistas ci_all
+        WHERE ci_all.credito_id = p.credito_id
+      ) sum_montos
+      WHERE ci_cube.credito_id = p.credito_id
+        AND LOWER(TRIM(inv_cube.nombre)) = 'cube investments s.a.'
+      LIMIT 1
+    ) cube_data ON true
+  `;
+
+  // 1. Count + totales globales en un solo query
+  const totalesResult = await db.execute<any>(sql`
+    SELECT
+      COUNT(*)::int AS total_count,
+      COALESCE(SUM(p.capital_restante::numeric), 0) AS total_capital_restante,
+      COALESCE(SUM(p.interes_restante::numeric), 0) AS total_interes_restante,
+      COALESCE(SUM(p.iva_12_restante::numeric), 0) AS total_iva_12_restante,
+      COALESCE(SUM(p.seguro_restante::numeric), 0) AS total_seguro_restante,
+      COALESCE(SUM(p.gps_restante::numeric), 0) AS total_gps_restante,
+      COALESCE(SUM(p.membresias::numeric), 0) AS total_membresias,
+      COALESCE(SUM(p.interes_restante::numeric * COALESCE(cube_data.cube_pct, 0)), 0) AS total_interes_cube,
+      COALESCE(SUM(p.iva_12_restante::numeric * COALESCE(cube_data.cube_pct, 0)), 0) AS total_iva_cube
+    FROM cartera.pagos_credito p
+    INNER JOIN cartera.creditos c ON p.credito_id = c.credito_id
+    INNER JOIN cartera.usuarios u ON c.usuario_id = u.usuario_id
+    INNER JOIN cartera.cuotas_credito q ON p.cuota_id = q.cuota_id
+    ${cubeSubquery}
+    WHERE ${whereClause}
+  `);
+
+  const totalesRow = totalesResult.rows[0];
+  const total = Number(totalesRow?.total_count ?? 0);
+  const offset = (page - 1) * pageSize;
+
+  // 2. Pagos paginados con Cube ya calculado
+  const pagosResult = await db.execute<any>(sql`
+    SELECT
+      p.pago_id,
+      p.credito_id,
+      c.numero_credito_sifco,
+      u.nombre AS nombre_usuario,
+      p.cuota_id,
+      q.numero_cuota,
+      p.fecha_vencimiento,
+      p.fecha_pago,
+      p.pagado,
+      p.monto_boleta,
+      p.cuota,
+      p.capital_restante,
+      p.interes_restante,
+      p.iva_12_restante,
+      p.seguro_restante,
+      p.gps_restante,
+      p.membresias,
+      ROUND(p.interes_restante::numeric * COALESCE(cube_data.cube_pct, 0), 2) AS interes_cube,
+      ROUND(p.iva_12_restante::numeric * COALESCE(cube_data.cube_pct, 0), 2) AS iva_cube
+    FROM cartera.pagos_credito p
+    INNER JOIN cartera.creditos c ON p.credito_id = c.credito_id
+    INNER JOIN cartera.usuarios u ON c.usuario_id = u.usuario_id
+    INNER JOIN cartera.cuotas_credito q ON p.cuota_id = q.cuota_id
+    ${cubeSubquery}
+    WHERE ${whereClause}
+    ORDER BY p.fecha_vencimiento
+    LIMIT ${pageSize} OFFSET ${offset}
+  `);
+
+  const pagos = pagosResult.rows;
+
+  return {
+    data: pagos,
+    pagination: {
+      page,
+      pageSize,
+      total,
+      totalPages: Math.ceil(total / pageSize),
+    },
+    totales: {
+      capital_restante: Number(totalesRow?.total_capital_restante ?? 0).toFixed(2),
+      interes_restante: Number(totalesRow?.total_interes_restante ?? 0).toFixed(2),
+      iva_12_restante: Number(totalesRow?.total_iva_12_restante ?? 0).toFixed(2),
+      seguro_restante: Number(totalesRow?.total_seguro_restante ?? 0).toFixed(2),
+      gps_restante: Number(totalesRow?.total_gps_restante ?? 0).toFixed(2),
+      membresias: Number(totalesRow?.total_membresias ?? 0).toFixed(2),
+      interes_cube: Number(totalesRow?.total_interes_cube ?? 0).toFixed(2),
+      iva_cube: Number(totalesRow?.total_iva_cube ?? 0).toFixed(2),
+    },
+  };
+}

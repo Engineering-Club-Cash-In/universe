@@ -132,6 +132,13 @@ interface CreateCreditParams {
 	numeroSifco: string;
 	userId: string;
 	isVehicleOwned?: boolean;
+	// Info del vehículo para el correo
+	vehiculo_marca?: string;
+	vehiculo_linea?: string;
+	vehiculo_modelo?: string;
+	vehiculo_placa?: string;
+	vehiculo_vin?: string;
+	monto_asegurado?: number;
 }
 
 interface CreateCreditResult {
@@ -170,6 +177,8 @@ interface QuotationDataForBilling {
 	keyCopyDiffCost: string | null; // Diferencia de copia de llave
 	extraInsuranceCost: string | null; // Seguro extra
 	extraAdminCost: string | null; // Gastos administrativos
+	insuredAmount: string | null; // Monto asegurado (para correo)
+	value: string | null; // Valor del vehículo (para correo)
 }
 
 /** Parámetros para generación de facturas en background */
@@ -391,6 +400,8 @@ async function getLatestApprovedQuotation(
 				keyCopyDiffCost: quotations.keyCopyDiffCost,
 				extraInsuranceCost: quotations.extraInsuranceCost,
 				extraAdminCost: quotations.extraAdminCost,
+				insuredAmount: quotations.insuredAmount,
+				value: quotations.vehicleValue
 			})
 			.from(quotations)
 			.where(eq(quotations.opportunityId, opportunityId))
@@ -830,6 +841,13 @@ async function createCredit(
 			codigo_postal: DEFAULT_CODIGO_POSTAL,
 			pais: renapInfoData ? renapInfoData.bornedIn : undefined,
 			is_vehiculo_propio: params.isVehicleOwned ?? false,
+			// Campos para el correo de notificación
+			vehiculo_marca: params.vehiculo_marca,
+			vehiculo_linea: params.vehiculo_linea,
+			vehiculo_modelo: params.vehiculo_modelo,
+			vehiculo_placa: params.vehiculo_placa,
+			vehiculo_vin: params.vehiculo_vin,
+			monto_asegurado: params.monto_asegurado,
 		});
 
 		if (!creditoResult.success) {
@@ -1058,6 +1076,11 @@ export async function closeOpportunity(
 					fuelType: string | null;
 					transmission: string | null;
 					companyId: string | null;
+					// Extra vehicle info for email
+					make: string | null;
+					model: string | null;
+					year: number | null;
+					montoAsegurado: string | null;
 			  }
 			| undefined;
 
@@ -1073,6 +1096,11 @@ export async function closeOpportunity(
 					fuelType: vehicles.fuelType,
 					transmission: vehicles.transmission,
 					companyId: vehicles.companyId,
+					// Extra vehicle info for email
+					make: vehicles.make,
+					model: vehicles.model,
+					year: vehicles.year,
+					montoAsegurado: vehicles.montoAsegurado,
 				})
 				.from(vehicles)
 				.where(eq(vehicles.id, opportunity.vehicleId))
@@ -1173,13 +1201,27 @@ export async function closeOpportunity(
 		const numeroSifco = generateNumeroSifco();
 		console.log(`[CloseOpportunity] Generated numero SIFCO: ${numeroSifco}`);
 
-		// 1. Create credit in cartera-back
+
+		//  Get the latest quotation for invoicing (async - doesn't block)
+		const quotation = await getLatestApprovedQuotation(opportunityId);
+		console.log(
+			`[CloseOpportunity] Latest quotation found: ${quotation ? "YES" : "NO"}`,
+		);
+
+		//  Create credit in cartera-back
 		const creditResult = await createCredit({
 			opportunity,
 			lead,
 			numeroSifco,
 			userId,
 			isVehicleOwned: vehicleData?.isOwned ?? false,
+			// Enviar info del vehículo para que llegue en el correo de cartera
+			vehiculo_marca: vehicleData?.make ?? undefined,
+			vehiculo_linea: vehicleData?.model ?? undefined, // Usamos model como línea
+			vehiculo_modelo: vehicleData?.year ? String(vehicleData.year) : undefined,
+			vehiculo_placa: vehicleData?.licensePlate ?? undefined,
+			vehiculo_vin: vehicleData?.vinNumber ?? undefined,
+			monto_asegurado: quotation?.insuredAmount ? Number(quotation.insuredAmount) : quotation?.value ? Number(quotation.value) : undefined,
 		});
 
 		if (!creditResult.success) {
@@ -1190,16 +1232,11 @@ export async function closeOpportunity(
 			};
 		}
 
-		// 2. Get the latest quotation for invoicing (async - doesn't block)
-		const quotation = await getLatestApprovedQuotation(opportunityId);
-		console.log(
-			`[CloseOpportunity] Latest quotation found: ${quotation ? "YES" : "NO"}`,
-		);
 
 		// 3. Generate invoices in background (fire-and-forget)
 		// This runs asynchronously after the credit is created
 		// Skip invoice generation if the vehicle is owned
-		const vehicleHasCompany = vehicleData?.isOwned
+		const vehicleHasCompany = vehicleData?.isOwned;
 
 		if (isCarteraBackEnabled() && !vehicleHasCompany) {
 			const royalti = opportunity.royalti

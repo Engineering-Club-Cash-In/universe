@@ -19,6 +19,12 @@ import {
 	calculateInvestment,
 } from "../lib/investment-calculator";
 import {
+	getNextInvestmentStage,
+	getPreviousInvestmentStage,
+	INVESTMENT_STAGE_FLOW,
+	INVESTMENT_STAGE_VALUES,
+} from "../lib/investment-stage-flow";
+import {
 	analystProcedure,
 	investmentManagerProcedure,
 	investmentProcedure,
@@ -26,19 +32,6 @@ import {
 import { ROLES } from "../lib/roles";
 import { getFileUrl } from "../lib/storage";
 import { createNotification } from "./notifications";
-
-const INVESTMENT_STAGE_FLOW = [
-	"data_collection",
-	"basic_profile_validation",
-	"profiling_and_qualification",
-	"model_presentation",
-	"active_follow_up",
-	"verbal_commitment_contract_sent",
-	"ticket_closure_transfer_activation",
-	"initial_onboarding_senior_handoff",
-] as const;
-
-const INVESTMENT_STAGE_VALUES = [...INVESTMENT_STAGE_FLOW, "lost"] as const;
 
 export const investmentsRouter = {
 	// ============ LEADS ============
@@ -301,19 +294,12 @@ export const investmentsRouter = {
 				});
 			}
 
-			const currentIndex = INVESTMENT_STAGE_FLOW.indexOf(
-				opp.stage as (typeof INVESTMENT_STAGE_FLOW)[number],
-			);
-			if (
-				currentIndex === -1 ||
-				currentIndex >= INVESTMENT_STAGE_FLOW.length - 1
-			) {
+			const nextStage = getNextInvestmentStage(opp.stage);
+			if (!nextStage) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: "No se puede avanzar desde esta etapa",
 				});
 			}
-
-			const nextStage = INVESTMENT_STAGE_FLOW[currentIndex + 1];
 
 			// Actualizar etapa (con condicion de stage actual para evitar race condition)
 			const [updated] = await db
@@ -354,6 +340,87 @@ export const investmentsRouter = {
 				investmentOpportunityId: opp.id,
 				action: "stage_advanced",
 				details: { from: opp.stage, to: nextStage },
+				performedBy: context.userId,
+			});
+
+			return updated;
+		}),
+
+	retreatInvestmentStage: investmentProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				expectedCurrentStage: z.enum(INVESTMENT_STAGE_FLOW),
+				reason: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const [opp] = await db
+				.select()
+				.from(investmentOpportunities)
+				.where(eq(investmentOpportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opp) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
+			}
+
+			if (opp.stage !== input.expectedCurrentStage) {
+				throw new ORPCError("CONFLICT", {
+					message:
+						"La etapa cambió antes de confirmar. Recargue la pagina.",
+				});
+			}
+
+			const previousStage = getPreviousInvestmentStage(
+				input.expectedCurrentStage,
+			);
+			if (!previousStage) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "No se puede regresar desde esta etapa",
+				});
+			}
+
+			const [updated] = await db
+				.update(investmentOpportunities)
+				.set({
+					stage: previousStage,
+					status: "open",
+					stageEnteredAt: new Date(),
+					updatedAt: new Date(),
+				})
+				.where(
+					and(
+						eq(investmentOpportunities.id, opp.id),
+						eq(
+							investmentOpportunities.stage,
+							input.expectedCurrentStage,
+						),
+					),
+				)
+				.returning();
+
+			if (!updated) {
+				throw new ORPCError("CONFLICT", {
+					message:
+						"La etapa fue modificada por otro usuario. Recargue la pagina.",
+				});
+			}
+
+			await db.insert(investmentStageHistory).values({
+				investmentOpportunityId: opp.id,
+				fromStage: input.expectedCurrentStage,
+				toStage: previousStage,
+				changedBy: context.userId,
+				reason: input.reason,
+			});
+
+			await db.insert(investmentAuditLog).values({
+				investmentOpportunityId: opp.id,
+				action: "stage_retreated",
+				details: { from: input.expectedCurrentStage, to: previousStage },
 				performedBy: context.userId,
 			});
 

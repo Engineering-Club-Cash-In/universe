@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useSearch } from "@tanstack/react-router";
-import { Input, Button } from "@/components";
+import { Input, Button, Link } from "@/components";
 import { IconCar } from "@/components/icons/IconCar";
 import { IconLockClose } from "@/components/icons/IconLockClose";
 import { useFormLeads } from "../hooks/useForm";
@@ -176,6 +176,17 @@ export const Formulario = () => {
       >
         {isSubmitting ? "Enviando..." : "Enviar Formulario"}
       </Button>
+      <p className="text-xs text-[#7A7A8A]">
+        Al enviar tus datos, confirmas que has leído y aceptas los{" "}
+        <Link
+          href="/terms&conditions"
+          className="text-primary"
+          underline
+        >
+          Términos y Condiciones
+        </Link>
+        .
+      </p>
       <p className="text-xs text-[#7A7A8A]">
         Tus datos están protegidos. No compartimos tu información con terceros.
       </p>

@@ -34,6 +34,7 @@ export interface InvestorPayload {
   moneda?: string;
   tipo_reinversion?: string | null;
   monto_reinversion?: number | null;
+  email?: string | null;
 }
 export interface InvestorResponse {
   inversionista_id: number;
@@ -47,6 +48,7 @@ export interface InvestorResponse {
   currencySymbol?: string;
   tipo_reinversion?: string | null;
   monto_reinversion?: number | null;
+  email?: string | null;
 }
 
 // Crear inversionista(s)
@@ -91,6 +93,12 @@ export interface CreditFormValues {
   categoria: string;
   nit: string;
   otros: number;
+  vehiculo_marca?: string;
+  vehiculo_linea?: string;
+  vehiculo_modelo?: string;
+  vehiculo_placa?: string;
+  monto_asegurado?: number;
+  opportunity_id?: string;
   inversionistas: {
     inversionista_id: number;
     monto_aportado: number;
@@ -99,7 +107,6 @@ export interface CreditFormValues {
   }[];
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const createCredit = async (data: CreditFormValues): Promise<any> => {
   const res = await api.post(`${API_URL}/newCredit`, data);
   return res.data;
@@ -620,6 +627,7 @@ export interface Investor {
   banco: string | null;          // 🔹 nuevo campo
   tipo_cuenta: string | null;    // 🔹 nuevo campo
   numero_cuenta: string | null;  // 🔹 nuevo campo
+  email?: string | null;
 
   // Ya existentes
   total_creditos: number;
@@ -1459,7 +1467,6 @@ export interface PlatformUser {
   is_active: boolean;
   conta_id?: number | null;
   asesor_id?: number | null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   profile?: Record<string, any>; // datos enriquecidos
 }
 
@@ -3269,6 +3276,86 @@ export async function getFallenCredits(params: {
         }),
         ...(params.fecha_desde && { fecha_desde: params.fecha_desde }),
         ...(params.fecha_hasta && { fecha_hasta: params.fecha_hasta }),
+      },
+    }
+  );
+  return res.data;
+}
+
+// ============================================
+// Pagos por Vencimiento
+// ============================================
+
+export interface PagoPorVencimientoItem {
+  pago_id: number;
+  credito_id: number;
+  numero_credito_sifco: string;
+  nombre_usuario: string;
+  cuota_id: number;
+  numero_cuota: number;
+  fecha_vencimiento: string;
+  fecha_pago: string | null;
+  pagado: boolean;
+  monto_boleta: string;
+  capital_restante: string;
+  interes_restante: string;
+  iva_12_restante: string;
+  seguro_restante: string;
+  gps_restante: string;
+  membresias: string;
+  interes_cube: string;
+  iva_cube: string;
+}
+
+export interface PagoPorVencimientoTotales {
+  capital_restante: string;
+  interes_restante: string;
+  iva_12_restante: string;
+  seguro_restante: string;
+  gps_restante: string;
+  membresias: string;
+  interes_cube: string;
+  iva_cube: string;
+}
+
+export interface PagosPorVencimientoResponse {
+  success: boolean;
+  data: PagoPorVencimientoItem[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
+  totales: PagoPorVencimientoTotales;
+}
+
+export interface PagosPorVencimientoParams {
+  mes: number;
+  anio: number;
+  page?: number;
+  pageSize?: number;
+  numero_credito_sifco?: string;
+  nombre_usuario?: string;
+}
+
+export async function getPagosPorVencimiento(
+  params: PagosPorVencimientoParams
+): Promise<PagosPorVencimientoResponse> {
+  const res = await api.get<PagosPorVencimientoResponse>(
+    `${API_URL}/pagos-por-vencimiento`,
+    {
+      params: {
+        mes: params.mes,
+        anio: params.anio,
+        page: params.page ?? 1,
+        pageSize: params.pageSize ?? 20,
+        ...(params.numero_credito_sifco && {
+          numero_credito_sifco: params.numero_credito_sifco,
+        }),
+        ...(params.nombre_usuario && {
+          nombre_usuario: params.nombre_usuario,
+        }),
       },
     }
   );

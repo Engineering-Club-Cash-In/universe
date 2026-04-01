@@ -39,6 +39,9 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
   // 🆕 Filtro vehículo propio
   const [isVehiculoPropio, setIsVehiculoPropio] = useState<boolean | undefined>(undefined);
 
+  // Filtro por inversionistas (multi-select)
+  const [inversionistaIds, setInversionistaIds] = useState<number[]>([]);
+
   // 🔥 Estado local del input (lo que escribe el usuario)
   const [nombreUsuarioInput, setNombreUsuarioInput] = useState("");
   // 🔥 Estado que realmente dispara la búsqueda
@@ -58,6 +61,7 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
       asesorId,
       nombreUsuario, // 👈 Este es el que realmente busca
       isVehiculoPropio,
+      inversionistaIds,
     ],
     queryFn: () =>
       getCreditosPaginados({
@@ -71,6 +75,7 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
         asesor_id: asesorId,
         nombre_usuario: nombreUsuario.trim() !== "" ? nombreUsuario : undefined,
         is_vehiculo_propio: isVehiculoPropio,
+        inversionista_ids: inversionistaIds.length > 0 ? inversionistaIds.join(",") : undefined,
       }),
     staleTime: 1000 * 60,
     refetchOnWindowFocus: false,
@@ -121,6 +126,7 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
     setNombreUsuario("");
     setAsesorId(options?.initialAsesorId);
     setIsVehiculoPropio(undefined);
+    setInversionistaIds([]);
     setPage(1);
   };
 
@@ -182,5 +188,8 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
     // 🆕 Filtro vehículo propio
     isVehiculoPropio,
     setIsVehiculoPropio,
+    // Filtro inversionistas
+    inversionistaIds,
+    setInversionistaIds,
   };
 }

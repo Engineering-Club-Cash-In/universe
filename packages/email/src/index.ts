@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { Resend } from "resend";
 import LiquidationEmail from "./templates/LiquidationTemplate";
 import PasswordResetEmail from "./templates/PasswordResetTemplate";
@@ -114,6 +115,13 @@ export interface SendNewCreditNotificationParams {
   interestRate: string;
   investors: string[];
   currencySymbol?: string;
+  vehiculoMarca?: string;
+  vehiculoLinea?: string;
+  vehiculoModelo?: string;
+  vehiculoPlaca?: string;
+  vehiculoVin?: string;
+  montoAsegurado?: number;
+  opportunityId?: string;
 }
 
 export const sendNewCreditNotification = async ({
@@ -126,6 +134,13 @@ export const sendNewCreditNotification = async ({
   interestRate,
   investors,
   currencySymbol,
+  vehiculoMarca,
+  vehiculoLinea,
+  vehiculoModelo,
+  vehiculoPlaca,
+  vehiculoVin,
+  montoAsegurado,
+  opportunityId,
 }: SendNewCreditNotificationParams) => {
   try {
     const validEmails = to.filter((email) => {
@@ -150,6 +165,13 @@ export const sendNewCreditNotification = async ({
         interestRate,
         investors,
         currencySymbol,
+        vehiculoMarca,
+        vehiculoLinea,
+        vehiculoModelo,
+        vehiculoPlaca,
+        vehiculoVin,
+        montoAsegurado,
+        opportunityId,
       }),
     });
 

@@ -93,6 +93,12 @@ export interface CreditFormValues {
   categoria: string;
   nit: string;
   otros: number;
+  vehiculo_marca?: string;
+  vehiculo_linea?: string;
+  vehiculo_modelo?: string;
+  vehiculo_placa?: string;
+  monto_asegurado?: number;
+  opportunity_id?: string;
   inversionistas: {
     inversionista_id: number;
     monto_aportado: number;

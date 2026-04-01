@@ -34,6 +34,7 @@ export interface InvestorPayload {
   moneda?: string;
   tipo_reinversion?: string | null;
   monto_reinversion?: number | null;
+  email?: string | null;
 }
 export interface InvestorResponse {
   inversionista_id: number;
@@ -47,6 +48,7 @@ export interface InvestorResponse {
   currencySymbol?: string;
   tipo_reinversion?: string | null;
   monto_reinversion?: number | null;
+  email?: string | null;
 }
 
 // Crear inversionista(s)
@@ -99,7 +101,6 @@ export interface CreditFormValues {
   }[];
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const createCredit = async (data: CreditFormValues): Promise<any> => {
   const res = await api.post(`${API_URL}/newCredit`, data);
   return res.data;
@@ -620,6 +621,7 @@ export interface Investor {
   banco: string | null;          // 🔹 nuevo campo
   tipo_cuenta: string | null;    // 🔹 nuevo campo
   numero_cuenta: string | null;  // 🔹 nuevo campo
+  email?: string | null;
 
   // Ya existentes
   total_creditos: number;
@@ -1459,7 +1461,6 @@ export interface PlatformUser {
   is_active: boolean;
   conta_id?: number | null;
   asesor_id?: number | null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   profile?: Record<string, any>; // datos enriquecidos
 }
 

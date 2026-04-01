@@ -3275,3 +3275,83 @@ export async function getFallenCredits(params: {
   );
   return res.data;
 }
+
+// ============================================
+// Pagos por Vencimiento
+// ============================================
+
+export interface PagoPorVencimientoItem {
+  pago_id: number;
+  credito_id: number;
+  numero_credito_sifco: string;
+  nombre_usuario: string;
+  cuota_id: number;
+  numero_cuota: number;
+  fecha_vencimiento: string;
+  fecha_pago: string | null;
+  pagado: boolean;
+  monto_boleta: string;
+  capital_restante: string;
+  interes_restante: string;
+  iva_12_restante: string;
+  seguro_restante: string;
+  gps_restante: string;
+  membresias: string;
+  interes_cube: string;
+  iva_cube: string;
+}
+
+export interface PagoPorVencimientoTotales {
+  capital_restante: string;
+  interes_restante: string;
+  iva_12_restante: string;
+  seguro_restante: string;
+  gps_restante: string;
+  membresias: string;
+  interes_cube: string;
+  iva_cube: string;
+}
+
+export interface PagosPorVencimientoResponse {
+  success: boolean;
+  data: PagoPorVencimientoItem[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
+  totales: PagoPorVencimientoTotales;
+}
+
+export interface PagosPorVencimientoParams {
+  mes: number;
+  anio: number;
+  page?: number;
+  pageSize?: number;
+  numero_credito_sifco?: string;
+  nombre_usuario?: string;
+}
+
+export async function getPagosPorVencimiento(
+  params: PagosPorVencimientoParams
+): Promise<PagosPorVencimientoResponse> {
+  const res = await api.get<PagosPorVencimientoResponse>(
+    `${API_URL}/pagos-por-vencimiento`,
+    {
+      params: {
+        mes: params.mes,
+        anio: params.anio,
+        page: params.page ?? 1,
+        pageSize: params.pageSize ?? 20,
+        ...(params.numero_credito_sifco && {
+          numero_credito_sifco: params.numero_credito_sifco,
+        }),
+        ...(params.nombre_usuario && {
+          nombre_usuario: params.nombre_usuario,
+        }),
+      },
+    }
+  );
+  return res.data;
+}

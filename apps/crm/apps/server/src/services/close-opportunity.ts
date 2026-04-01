@@ -177,6 +177,8 @@ interface QuotationDataForBilling {
 	keyCopyDiffCost: string | null; // Diferencia de copia de llave
 	extraInsuranceCost: string | null; // Seguro extra
 	extraAdminCost: string | null; // Gastos administrativos
+	insuredAmount: string | null; // Monto asegurado (para correo)
+	value: string | null; // Valor del vehículo (para correo)
 }
 
 /** Parámetros para generación de facturas en background */
@@ -398,6 +400,8 @@ async function getLatestApprovedQuotation(
 				keyCopyDiffCost: quotations.keyCopyDiffCost,
 				extraInsuranceCost: quotations.extraInsuranceCost,
 				extraAdminCost: quotations.extraAdminCost,
+				insuredAmount: quotations.insuredAmount,
+				value: quotations.vehicleValue
 			})
 			.from(quotations)
 			.where(eq(quotations.opportunityId, opportunityId))
@@ -1197,7 +1201,14 @@ export async function closeOpportunity(
 		const numeroSifco = generateNumeroSifco();
 		console.log(`[CloseOpportunity] Generated numero SIFCO: ${numeroSifco}`);
 
-		// 1. Create credit in cartera-back
+
+		//  Get the latest quotation for invoicing (async - doesn't block)
+		const quotation = await getLatestApprovedQuotation(opportunityId);
+		console.log(
+			`[CloseOpportunity] Latest quotation found: ${quotation ? "YES" : "NO"}`,
+		);
+
+		//  Create credit in cartera-back
 		const creditResult = await createCredit({
 			opportunity,
 			lead,
@@ -1210,7 +1221,7 @@ export async function closeOpportunity(
 			vehiculo_modelo: vehicleData?.year ? String(vehicleData.year) : undefined,
 			vehiculo_placa: vehicleData?.licensePlate ?? undefined,
 			vehiculo_vin: vehicleData?.vinNumber ?? undefined,
-			monto_asegurado: vehicleData?.montoAsegurado ? Number(vehicleData.montoAsegurado) : undefined,
+			monto_asegurado: quotation?.insuredAmount ? Number(quotation.insuredAmount) : quotation?.value ? Number(quotation.value) : undefined,
 		});
 
 		if (!creditResult.success) {
@@ -1221,11 +1232,6 @@ export async function closeOpportunity(
 			};
 		}
 
-		// 2. Get the latest quotation for invoicing (async - doesn't block)
-		const quotation = await getLatestApprovedQuotation(opportunityId);
-		console.log(
-			`[CloseOpportunity] Latest quotation found: ${quotation ? "YES" : "NO"}`,
-		);
 
 		// 3. Generate invoices in background (fire-and-forget)
 		// This runs asynchronously after the credit is created

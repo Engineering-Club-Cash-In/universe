@@ -2,11 +2,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useRef, useState } from "react";
 import {
+  Check,
+  ChevronsUpDown,
   Download,
   FileSpreadsheet,
   Loader2,
   Search,
   User,
+  Users,
   X,
 } from "lucide-react";
 import { useCreditosPaginadosWithFilters } from "../hooks/credits";
@@ -39,6 +42,10 @@ import { ModalMarcarCuotas } from "./ModalMarcarCuotas";
 import { ModalCambiarFechaInicio } from "./ModalCambiarFechaInicio";
 import { useReport } from "../hooks/reports";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { usePaymentAgreements,useTogglePaymentAgreementStatus } from "../hooks/paymentagreement";
 import { toast } from "sonner";
 import { ModalCaidoCredit } from "./ModalCaidoCredit";
@@ -83,6 +90,8 @@ export function ListaCreditosPagos() {
     clearNombreUsuario,
     isVehiculoPropio,
     setIsVehiculoPropio,
+    inversionistaIds,
+    setInversionistaIds,
   } = useCreditosPaginadosWithFilters({
     initialAsesorId: !isAdmin && userAsesorId ? userAsesorId : undefined,
   });
@@ -242,6 +251,7 @@ export function ListaCreditosPagos() {
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedCreditId, setSelectedCreditId] = useState<number | null>(null);
   const [caidoModalOpen, setCaidoModalOpen] = useState(false);
+  const [investorPopoverOpen, setInvestorPopoverOpen] = useState(false);
   const [selectedCreditCaido, setSelectedCreditCaido] = useState<number | null>(null);
   const activateCreditMutation = useActivateCredit();
   const toggleCancelacionMutation = useToggleCancelacionActivo();
@@ -321,15 +331,15 @@ export function ListaCreditosPagos() {
         </p>
       </div>
 
-<div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-white/80 border border-blue-100 shadow-md rounded-2xl px-4 py-4 w-full mb-6">
+<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 bg-white/80 border border-blue-100 shadow-md rounded-2xl px-4 py-4 w-full mb-6">
         {/* Filtro por # Crédito SIFCO */}
-        <label className="flex items-center gap-2 font-medium text-blue-800">
-          <Hash className="w-5 h-5" />
+        <label className="flex items-center gap-2 font-medium text-blue-800 sm:col-span-2">
+          <Hash className="w-5 h-5 shrink-0" />
           <input
             ref={inputRef}
-            className="border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400"
+            className="border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full"
             type="text"
-            placeholder="Buscar # Crédito SIFCO"
+            placeholder="# Crédito SIFCO"
             defaultValue={creditoSifco}
             onBlur={(e) => {
               if (e.target.value !== creditoSifco) {
@@ -351,7 +361,7 @@ export function ListaCreditosPagos() {
           />
           <button
             type="button"
-            className="ml-2 px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition"
+            className="px-3 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition"
             onClick={() => {
               if (inputRef.current && inputRef.current.value !== creditoSifco) {
                 handleSifco(inputRef.current.value);
@@ -364,7 +374,7 @@ export function ListaCreditosPagos() {
           {creditoSifco && (
             <button
               type="button"
-              className="ml-1 p-1 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200 transition"
+              className="p-1 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200 transition"
               onClick={clearSifco}
               title="Limpiar filtro"
             >
@@ -373,9 +383,43 @@ export function ListaCreditosPagos() {
           )}
         </label>
 
-        {/* 👤 Filtro por Asesor */}
-        <label className="flex items-center gap-2 font-medium text-blue-800">
-          <User className="w-5 h-5" />
+        {/* Filtro por Nombre de Usuario */}
+        <label className="flex items-center gap-2 font-medium text-blue-800 sm:col-span-2">
+          <Search className="w-5 h-5 shrink-0" />
+          <div className="relative w-full flex gap-2">
+            <div className="relative w-full">
+              <input
+                type="text"
+                placeholder="Buscar por nombre..."
+                value={nombreUsuarioInput}
+                onChange={(e) => setNombreUsuarioInput(e.target.value)}
+                onKeyDown={handleKeyPress}
+                className="border border-blue-200 rounded-lg px-3 py-2 pr-10 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full"
+              />
+              {nombreUsuarioInput && (
+                <button
+                  type="button"
+                  onClick={clearNombreUsuario}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200 transition"
+                  title="Limpiar filtro"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={handleSearchNombreUsuario}
+              className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition whitespace-nowrap"
+            >
+              Buscar
+            </button>
+          </div>
+        </label>
+
+        {/* Filtro por Asesor */}
+        <label className="flex items-center gap-2 font-medium text-blue-800 sm:col-span-2">
+          <User className="w-5 h-5 shrink-0" />
           <select
             id="asesor"
             name="asesor"
@@ -412,42 +456,8 @@ export function ListaCreditosPagos() {
           )}
         </label>
 
-        {/* 🔍 Filtro por Nombre de Usuario */}
-        <label className="flex items-center gap-2 font-medium text-blue-800">
-          <Search className="w-5 h-5" />
-          <div className="relative w-full flex gap-2">
-            <div className="relative w-full">
-              <input
-                type="text"
-                placeholder="Buscar por nombre..."
-                value={nombreUsuarioInput}
-                onChange={(e) => setNombreUsuarioInput(e.target.value)}
-                onKeyDown={handleKeyPress}
-                className="border border-blue-200 rounded-lg px-3 py-2 pr-10 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full"
-              />
-              {nombreUsuarioInput && (
-                <button
-                  type="button"
-                  onClick={clearNombreUsuario}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200 transition"
-                  title="Limpiar filtro"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={handleSearchNombreUsuario}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition whitespace-nowrap"
-            >
-              Buscar
-            </button>
-          </div>
-        </label>
-
         {/* Filtro por Estado */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
           <AlertCircle className="w-4 h-4 text-blue-700" />
           <span className="text-sm font-semibold text-blue-800 mr-1">Estado:</span>
           {estados.map((est) => (
@@ -469,8 +479,81 @@ export function ListaCreditosPagos() {
           ))}
         </div>
 
-        {/* Items por página + Vehículo + Excel */}
+        {/* Inversionista + Items por página + Vehículo + Excel */}
         <div className="col-span-full flex flex-wrap items-center gap-3">
+          {/* Multi-select inversionistas */}
+          <div className="flex items-center gap-2 flex-1 min-w-[250px]">
+            <Users className="w-5 h-5 text-blue-800 shrink-0" />
+            <Popover open={investorPopoverOpen} onOpenChange={setInvestorPopoverOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="w-full flex items-center justify-between border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 text-sm min-h-[40px]"
+                >
+                  <span className="flex flex-wrap gap-1 flex-1">
+                    {inversionistaIds.length === 0 ? (
+                      <span className="text-gray-400">Todos los inversionistas</span>
+                    ) : (
+                      inversionistaIds.map((id) => {
+                        const inv = investors.find((i) => i.inversionista_id === id);
+                        return (
+                          <Badge key={id} variant="secondary" className="text-xs flex items-center gap-1">
+                            {inv?.nombre ?? id}
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              className="cursor-pointer"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setInversionistaIds(inversionistaIds.filter((v) => v !== id));
+                                setPage(1);
+                              }}
+                            >
+                              <X className="w-3 h-3" />
+                            </span>
+                          </Badge>
+                        );
+                      })
+                    )}
+                  </span>
+                  <ChevronsUpDown className="w-4 h-4 shrink-0 opacity-50" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[--radix-popover-trigger-width] p-0 bg-white border border-blue-200 shadow-lg" align="start">
+                <Command className="bg-white text-gray-900">
+                  <CommandInput placeholder="Buscar inversionista..." />
+                  <CommandList className="max-h-[250px]">
+                    <CommandEmpty>No se encontró inversionista.</CommandEmpty>
+                    <CommandGroup>
+                      {investors.map((inv) => {
+                        const isSelected = inversionistaIds.includes(inv.inversionista_id);
+                        return (
+                          <CommandItem
+                            key={inv.inversionista_id}
+                            value={inv.nombre}
+                            onSelect={() => {
+                              if (isSelected) {
+                                setInversionistaIds(inversionistaIds.filter((v) => v !== inv.inversionista_id));
+                              } else {
+                                setInversionistaIds([...inversionistaIds, inv.inversionista_id]);
+                              }
+                              setPage(1);
+                            }}
+                            className="text-gray-800 hover:bg-blue-50 cursor-pointer"
+                          >
+                            <Check className={`w-4 h-4 mr-2 ${isSelected ? "opacity-100 text-blue-600" : "opacity-0"}`} />
+                            {inv.nombre}
+                          </CommandItem>
+                        );
+                      })}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </div>
+
           <label className="flex items-center gap-2 font-medium text-blue-800">
             <ListOrdered className="w-5 h-5" />
             <select
@@ -486,14 +569,12 @@ export function ListaCreditosPagos() {
             </select>
           </label>
           <label className="flex items-center gap-2 font-medium text-blue-800 cursor-pointer select-none">
-            <input
-              type="checkbox"
+            <Switch
               checked={isVehiculoPropio === true}
-              onChange={(e) => {
-                setIsVehiculoPropio(e.target.checked ? true : undefined);
+              onCheckedChange={(checked) => {
+                setIsVehiculoPropio(checked ? true : undefined);
                 setPage(1);
               }}
-              className="w-4 h-4 rounded border-blue-300 text-blue-600 focus:ring-blue-500"
             />
             <span className="text-sm">Solo Vehículo Cash-In</span>
           </label>
@@ -518,7 +599,7 @@ export function ListaCreditosPagos() {
                 handleExcel(false);
               }
             }}
-            className="flex-1 min-w-[180px] px-6 py-2 rounded-lg bg-green-600 text-white font-semibold hover:bg-green-700 transition shadow-md flex items-center justify-center gap-2"
+            className="px-4 py-2 rounded-lg bg-green-600 text-white font-semibold hover:bg-green-700 transition shadow-md flex items-center gap-2"
           >
             <FileSpreadsheet className="w-5 h-5" />
             Descargar Excel

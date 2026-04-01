@@ -14,6 +14,7 @@ export const creditSchema = z.object({
   observaciones: z.string().max(1000),
   no_poliza: z.string().max(1000),
   como_se_entero: z.string().max(100),
+  asesor: z.string().max(100),
   plazo: z.number().int().min(1).max(360),
   cuota: z.number().min(0),
   dia_pago_mensual: z.number().int().min(1).max(31),
@@ -31,6 +32,14 @@ export const creditSchema = z.object({
   departamento: z.string().max(100).optional().nullable(),
   codigo_postal: z.string().max(10).optional().nullable(),
   pais: z.string().optional().nullable(),
+
+  // Información del vehículo, monto asegurado y opportunity_id (Opcionales para el correo)
+  vehiculo_marca: z.string().optional(),
+  vehiculo_linea: z.string().optional(),
+  vehiculo_modelo: z.string().optional(),
+  vehiculo_placa: z.string().optional(),
+  monto_asegurado: z.number().min(0).optional(),
+  opportunity_id: z.string().optional(),
 
   inversionistas: z
     .array(
@@ -79,6 +88,7 @@ export function useCreditForm(initialValues?: Partial<CreditFormValues>) {
       observaciones: "",
       no_poliza: "",
       como_se_entero: "",
+      asesor: "",
       plazo: 1,
       cuota: 0,
       dia_pago_mensual: 15,
@@ -94,6 +104,12 @@ export function useCreditForm(initialValues?: Partial<CreditFormValues>) {
       departamento: "",
       codigo_postal: "",
       pais: "",
+      vehiculo_marca: "",
+      vehiculo_linea: "",
+      vehiculo_modelo: "",
+      vehiculo_placa: "",
+      monto_asegurado: 0,
+      opportunity_id: "",
       inversionistas: [],
       rubros: [],
       ...initialValues,

@@ -152,6 +152,13 @@ export interface CreateCreditoParams {
 	codigo_postal?: string | null;
 	pais?: string | null;
 	dia_pago_mensual?: 15 | 30;
+	// Campos para el correo de notificación
+	vehiculo_marca?: string;
+	vehiculo_linea?: string;
+	vehiculo_modelo?: string;
+	vehiculo_placa?: string;
+	vehiculo_vin?: string;
+	monto_asegurado?: number;
 }
 
 export interface CreateCreditoResult {
@@ -206,6 +213,14 @@ export async function createCreditoInCarteraBack(
 			departamento: params.departamento || "",
 			codigo_postal: params.codigo_postal || "",
 			pais: params.pais || "",
+			// Campos para el correo de notificación
+			vehiculo_marca: params.vehiculo_marca,
+			vehiculo_linea: params.vehiculo_linea,
+			vehiculo_modelo: params.vehiculo_modelo,
+			vehiculo_placa: params.vehiculo_placa,
+			vehiculo_vin: params.vehiculo_vin,
+			monto_asegurado: params.monto_asegurado,
+			opportunity_id: params.opportunityId,
 		};
 
 		console.log(

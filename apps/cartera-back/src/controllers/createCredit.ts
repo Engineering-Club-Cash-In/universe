@@ -176,12 +176,21 @@ const creditSchema = z.object({
   reserva: z.number().min(0),
   is_vehiculo_propio: z.boolean().optional().default(false),
   
-  // Nuevos campos opcionales para dirección del usuario
+  // Campos opcionales de dirección
   direccion: z.string().max(300).optional().nullable(),
   municipio: z.string().max(100).optional().nullable(),
   departamento: z.string().max(100).optional().nullable(),
   codigo_postal: z.string().max(10).optional().nullable(),
   pais: z.string().optional().nullable(),
+
+  // Información del vehículo, monto asegurado y opportunity_id (Opcionales para el correo)
+  vehiculo_marca: z.string().optional().nullable(),
+  vehiculo_linea: z.string().optional().nullable(),
+  vehiculo_modelo: z.string().optional().nullable(),
+  vehiculo_placa: z.string().optional().nullable(),
+  vehiculo_vin: z.string().optional().nullable(),
+  monto_asegurado: z.number().min(0).optional().nullable(),
+  opportunity_id: z.string().optional().nullable(),
   
   inversionistas: z
     .array(
@@ -897,6 +906,13 @@ export const insertCredit = async ({ body, set }: { body: unknown; set: SetConte
         cuota: creditData.cuota.toFixed(2),
         interestRate: creditData.porcentaje_interes.toString(),
         investors: investorNames,
+        vehiculoMarca: creditData.vehiculo_marca ?? undefined,
+        vehiculoLinea: creditData.vehiculo_linea ?? undefined,
+        vehiculoModelo: creditData.vehiculo_modelo ?? undefined,
+        vehiculoPlaca: creditData.vehiculo_placa ?? undefined,
+        vehiculoVin: creditData.vehiculo_vin ?? undefined,
+        montoAsegurado: creditData.monto_asegurado ?? undefined,
+        opportunityId: creditData.opportunity_id ?? undefined,
       });
       console.log("[INSERT CREDIT] Email notification sent successfully");
     } catch (emailErr) {

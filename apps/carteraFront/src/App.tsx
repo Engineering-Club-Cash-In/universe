@@ -18,6 +18,7 @@ import EfectividadAsesores from "./private/cartera/components/EfectividadAsesore
 import { HistorialLiquidaciones } from "./private/cartera/components/HistorialLiquidaciones";
 import { RecibosGenericos } from "./private/recibos-genericos/components/RecibosGenericos";
 import { FallenCredits } from "./private/cartera/components/FallenCredits";
+import { PagosPorVencimiento } from "./private/cartera/components/PagosPorVencimiento";
 
 // 🔒 Rutas privadas
 function PrivateRoute({ children }: { children: JSX.Element }) {
@@ -207,6 +208,15 @@ function App() {
           element={
             <RoleRoute allowedRoles={["ADMIN"]}>
               <FallenCredits />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="pagos-por-vencimiento"
+          element={
+            <RoleRoute allowedRoles={["ADMIN"]}>
+              <PagosPorVencimiento />
             </RoleRoute>
           }
         />

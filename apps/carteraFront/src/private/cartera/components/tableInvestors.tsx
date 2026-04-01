@@ -450,6 +450,7 @@ export function TableInvestors() {
       dpi: inv.dpi ?? "",
       tipo_reinversion: inv.re_inversion ?? inv.tipo_reinversion ?? "sin_reinversion",
       monto_reinversion: Number(inv.monto_reinversion ?? 0),
+      email: inv.email ?? "",
     });
     setModalOpen(true);
   };

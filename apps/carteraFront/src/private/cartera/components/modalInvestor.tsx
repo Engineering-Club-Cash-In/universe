@@ -36,6 +36,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
       moneda: "quetzales",
       tipo_reinversion: "sin_reinversion",
       monto_reinversion: 0,
+      email: "",
     },
   });
 
@@ -64,6 +65,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
         moneda: "quetzales",
         tipo_reinversion: "sin_reinversion",
         monto_reinversion: 0,
+        email: "",
       });
     }
   }, [initialData, mode, reset]);
@@ -93,8 +95,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
         reset();
         onClose();
       },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      onError: (error: any) => {
+      onError: (error: Error) => {
         toast.error(
           mode === "create"
             ? `Error al crear el inversionista. ${error.message || ""}`
@@ -133,6 +134,17 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
               className="bg-white text-blue-900 placeholder-gray-400 border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
               placeholder="1234567890101"
               maxLength={13}
+            />
+          </div>
+
+          {/* Email */}
+          <div>
+            <label className="block text-sm text-blue-800 mb-1">Correo Electrónico</label>
+            <input
+              {...register("email")}
+              type="email"
+              className="bg-white text-blue-900 placeholder-gray-400 border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+              placeholder="ejemplo@correo.com"
             />
           </div>
 
@@ -327,7 +339,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
                 reset();
                 onClose();
               },
-              onError: (error: any) => {
+              onError: (error: Error) => {
                 toast.error(`Error al actualizar inversionista: ${error.message || ""}`);
               },
             });

@@ -397,7 +397,7 @@ function RouteComponent() {
 				limit: pageSize,
 				offset: (page - 1) * pageSize,
 				estadoMora: filtroEtapa || undefined,
-				nombreUsuario: debouncedFilterValue || undefined,
+				searchTerm: debouncedFilterValue || undefined,
 				time: timeParam,
 				emailCobrador: !PERMISSIONS.canAssignCobros(userRole ?? "")
 					? session?.user?.email
@@ -1014,7 +1014,7 @@ function RouteComponent() {
 						data={creditosFiltrados}
 						isLoading={todosLosCreditos.isLoading}
 						setGlobalFilterParam={setFilterValue}
-						searchPlaceholder="Buscar por cliente"
+						searchPlaceholder="Buscar por cliente o placa"
 						onRowClick={(row) => {
 							const linkId = row.numeroCredito || row.contratoId;
 							const tipoLink = row.casoCobroId ? "caso" : "contrato";

@@ -25,6 +25,7 @@ import {
 } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
 import { calcularDiasMoraExactos } from "../lib/mora-utils";
+import { filterCobrosSearchResults } from "../lib/cobros-search";
 import {
 	cobrosProcedure,
 	cobrosSupervisorProcedure,
@@ -565,7 +566,7 @@ export const cobrosRouter = {
 				limit: z.number().optional(),
 				offset: z.number().optional(),
 				estadoMora: z.string().optional(),
-				nombreUsuario: z.string().optional(),
+				searchTerm: z.string().optional(),
 				time: z.enum(["WEEK", "MONTH", "DUEMONTH", "TODAY"]).optional(),
 				emailCobrador: z.string().optional(),
 			}),
@@ -581,8 +582,7 @@ export const cobrosRouter = {
 					// Mapear filtro de estadoMora a parámetros de cartera-back
 					let cuotasAtrasadas: number | undefined;
 					let estadoCartera: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | undefined;
-					const nombre_usuario: string | undefined =
-						input.nombreUsuario ?? undefined;
+					const shouldSearchLocally = !!input.searchTerm?.trim();
 
 					if (input.estadoMora) {
 						switch (input.estadoMora) {
@@ -625,21 +625,61 @@ export const cobrosRouter = {
 					}
 
 					console.log(
-						`[Cobros] Obteniendo créditos de Cartera-Back: mes=${mes} (todos), anio=${anio}, page=${Math.floor((input.offset || 0) / (input.limit || 50)) + 1}, perPage=${input.limit || 50}, cuotasAtrasadas=${cuotasAtrasadas}, estado=${estadoCartera}, time=${input.time}, emailCobrador=${input.emailCobrador}`,
+						`[Cobros] Obteniendo créditos de Cartera-Back: mes=${mes} (todos), anio=${anio}, page=${Math.floor((input.offset || 0) / (input.limit || 50)) + 1}, perPage=${input.limit || 50}, cuotasAtrasadas=${cuotasAtrasadas}, estado=${estadoCartera}, time=${input.time}, emailCobrador=${input.emailCobrador}, search=${input.searchTerm || ""}`,
 					);
 
-					// Obtener todos los créditos de Cartera-Back con los filtros
-					const creditosResponse = await obtenerTodosLosCreditosCarteraBack({
-						mes,
-						anio,
-						page: Math.floor((input.offset || 0) / (input.limit || 50)) + 1,
-						perPage: input.limit || 50,
-						cuotasAtrasadas,
-						estado: estadoCartera,
-						nombre_usuario,
-						time: input.time,
-						email_cobrador: input.emailCobrador,
-					}); // Validar que la respuesta tenga la estructura esperada
+					let creditosResponse;
+					if (shouldSearchLocally) {
+						const perPage = 200;
+						const firstPage = await obtenerTodosLosCreditosCarteraBack({
+							mes,
+							anio,
+							page: 1,
+							perPage,
+							cuotasAtrasadas,
+							estado: estadoCartera,
+							time: input.time,
+							email_cobrador: input.emailCobrador,
+						});
+
+						const allCredits = [...firstPage.data];
+
+						for (let page = 2; page <= firstPage.totalPages; page++) {
+							const nextPage = await obtenerTodosLosCreditosCarteraBack({
+								mes,
+								anio,
+								page,
+								perPage,
+								cuotasAtrasadas,
+								estado: estadoCartera,
+								time: input.time,
+								email_cobrador: input.emailCobrador,
+							});
+							allCredits.push(...nextPage.data);
+						}
+
+						creditosResponse = {
+							...firstPage,
+							data: allCredits,
+							totalCount: allCredits.length,
+							page: 1,
+							perPage: allCredits.length,
+							totalPages: 1,
+						};
+					} else {
+						creditosResponse = await obtenerTodosLosCreditosCarteraBack({
+							mes,
+							anio,
+							page: Math.floor((input.offset || 0) / (input.limit || 50)) + 1,
+							perPage: input.limit || 50,
+							cuotasAtrasadas,
+							estado: estadoCartera,
+							time: input.time,
+							email_cobrador: input.emailCobrador,
+						});
+					}
+
+					// Validar que la respuesta tenga la estructura esperada
 					if (!creditosResponse || !creditosResponse.data) {
 						console.error(
 							"[Cobros] Respuesta inválida de Cartera-Back:",
@@ -753,6 +793,25 @@ export const cobrosRouter = {
 					console.log(
 						`[Cobros] Mapeados ${contratos.length} contratos para el frontend`,
 					);
+
+					if (shouldSearchLocally) {
+						const limit = input.limit || 50;
+						const offset = input.offset || 0;
+						const filtered = filterCobrosSearchResults(
+							contratos,
+							input.searchTerm,
+							offset,
+							limit,
+						);
+
+						return {
+							data: filtered.items,
+							total: filtered.total,
+							page: Math.floor(offset / limit) + 1,
+							perPage: limit,
+							totalPages: Math.max(1, Math.ceil(filtered.total / limit)),
+						};
+					}
 
 					return {
 						data: contratos,

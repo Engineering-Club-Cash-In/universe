@@ -66,6 +66,9 @@ const STAGE_CONFIG = Object.fromEntries(
 
 const WON_STAGE_ID = "initial_onboarding_senior_handoff";
 
+type InvestmentActiveStageId =
+	(typeof INVESTMENT_ACTIVE_STAGES)[number]["id"];
+
 function formatUnknownStageLabel(stage: string | null | undefined): string {
 	if (!stage) return "Etapa desconocida";
 	return stage
@@ -447,7 +450,7 @@ function RouteComponent() {
 	const retreatMutation = useMutation({
 		mutationFn: (data: {
 			opportunityId: string;
-			expectedCurrentStage: string;
+			expectedCurrentStage: InvestmentActiveStageId;
 			reason?: string;
 		}) =>
 			client.retreatInvestmentStage(data),
@@ -482,7 +485,7 @@ function RouteComponent() {
 	function confirmRetreatStage() {
 		retreatMutation.mutate({
 			opportunityId,
-			expectedCurrentStage: currentStage as (typeof INVESTMENT_ACTIVE_STAGES)[number]["id"],
+			expectedCurrentStage: currentStage as InvestmentActiveStageId,
 			reason: "Regreso manual de etapa por corrección",
 		});
 	}

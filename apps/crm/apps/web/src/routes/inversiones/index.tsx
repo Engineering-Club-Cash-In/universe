@@ -108,6 +108,9 @@ type InvestmentOpportunityItem = Awaited<
 	ReturnType<typeof client.getInvestmentOpportunities>
 >[number];
 
+type InvestmentActiveStageId =
+	(typeof INVESTMENT_ACTIVE_STAGES)[number]["id"];
+
 // ─── Draggable Card ──────────────────────────────────────────────────────────
 
 function DraggableInvestmentCard({
@@ -435,8 +438,8 @@ function RouteComponent() {
 	const queryClient = useQueryClient();
 	const [pendingRetreat, setPendingRetreat] = useState<{
 		opportunityId: string;
-		expectedCurrentStage: string;
-		targetStage: string;
+		expectedCurrentStage: InvestmentActiveStageId;
+		targetStage: InvestmentActiveStageId;
 	} | null>(null);
 
 	const opportunitiesQuery = useQuery({
@@ -490,7 +493,7 @@ function RouteComponent() {
 	const retreatStageMutation = useMutation({
 		mutationFn: (data: {
 			opportunityId: string;
-			expectedCurrentStage: string;
+			expectedCurrentStage: InvestmentActiveStageId;
 			reason?: string;
 		}) =>
 			client.retreatInvestmentStage(data),
@@ -549,8 +552,8 @@ function RouteComponent() {
 		if (canRetreatToPreviousStage(item.opportunity.stage, newStage)) {
 			setPendingRetreat({
 				opportunityId,
-				expectedCurrentStage: item.opportunity.stage,
-				targetStage: newStage,
+				expectedCurrentStage: item.opportunity.stage as InvestmentActiveStageId,
+				targetStage: newStage as InvestmentActiveStageId,
 			});
 			return;
 		}

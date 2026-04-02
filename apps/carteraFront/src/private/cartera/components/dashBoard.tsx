@@ -191,6 +191,13 @@ const menuSections: MenuSection[] = [
         path: "/efectividad-asesores",
         roles: ["ADMIN", "ASESOR"],
       },
+      {
+        key: "pagos-por-vencimiento",
+        label: "Pagos por Vencimiento",
+        icon: <Receipt className="h-4 w-4" />,
+        path: "/pagos-por-vencimiento",
+        roles: ["ADMIN"],
+      },
     ],
   },
 ];

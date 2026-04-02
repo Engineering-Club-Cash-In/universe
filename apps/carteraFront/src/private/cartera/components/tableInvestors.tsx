@@ -450,6 +450,7 @@ export function TableInvestors() {
       dpi: inv.dpi ?? "",
       tipo_reinversion: inv.re_inversion ?? inv.tipo_reinversion ?? "sin_reinversion",
       monto_reinversion: Number(inv.monto_reinversion ?? 0),
+      email: inv.email ?? "",
     });
     setModalOpen(true);
   };
@@ -1224,7 +1225,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                           </h5>
                         </div>
 
-                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mt-3">
+                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mt-3">
                           <div>
                             <div className="text-xs text-gray-500">
                               Cliente
@@ -1257,6 +1258,19 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                               {inv.currencySymbol}
                               {Number(
                                 cred.monto_aportado
+                              ).toLocaleString("es-GT", {
+                                minimumFractionDigits: 2,
+                              })}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-xs text-gray-500">
+                              Pago Cuota
+                            </div>
+                            <div className="font-semibold text-teal-700 text-sm">
+                              {inv.currencySymbol}
+                              {Number(
+                                cred.cuota_inversionista || 0
                               ).toLocaleString("es-GT", {
                                 minimumFractionDigits: 2,
                               })}
@@ -1814,6 +1828,12 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                     <div className="text-xs text-green-700 mb-1">💰 Capital Aportado</div>
                     <div className="font-bold text-green-900 text-sm">
                       {inv.currencySymbol} {Number(cred.monto_aportado).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                  <div className="bg-gradient-to-br from-teal-50 to-cyan-50 rounded-lg p-3 shadow-sm border border-teal-200">
+                    <div className="text-xs text-teal-700 mb-1">💸 Pago Cuota</div>
+                    <div className="font-bold text-teal-900 text-sm">
+                      {inv.currencySymbol} {Number(cred.cuota_inversionista || 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                     </div>
                   </div>
                   <div className="bg-gradient-to-br from-purple-50 to-violet-50 rounded-lg p-3 shadow-sm border border-purple-200">

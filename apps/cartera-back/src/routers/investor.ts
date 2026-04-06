@@ -24,6 +24,7 @@ import {
   fixCubeInvestment,
   reconcileMirrorPercentages,
   auditMirrorPercentages,
+  getCreditosEspejoPendientes,
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
 import { generarYSubirPDFInversionista, generarYSubirExcelInversionista } from "../utils/functions/generalFunctions";
@@ -1392,6 +1393,28 @@ export const inversionistasRouter = new Elysia()
       detail: {
         summary: "Elimina pagos espejo estrictamente NO_LIQUIDADO",
         tags: ["Pagos Espejo"],
+      },
+    }
+  )
+  .get(
+    "/creditos-espejo-pendientes",
+    async ({ set }) => {
+      try {
+        const result = await getCreditosEspejoPendientes();
+        return result;
+      } catch (error: any) {
+        console.error("[GET /creditos-espejo-pendientes] Error:", error);
+        set.status = 500;
+        return { message: error.message || "Error al obtener créditos espejo pendientes" };
+      }
+    },
+    {
+      detail: {
+        summary: "Créditos espejo pendientes agrupados por inversionista",
+        description:
+          "Devuelve los créditos espejo con status pendiente_reinversion o pendiente_compra_cartera, " +
+          "agrupados por inversionista. Incluye un array otrosCreditos placeholder.",
+        tags: ["Inversionistas", "Espejos"],
       },
     }
   );

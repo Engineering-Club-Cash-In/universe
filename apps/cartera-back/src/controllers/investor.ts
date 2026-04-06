@@ -5155,3 +5155,127 @@ export async function testUploadAndEmail(investorId: number, testEmail: string) 
         message: `Prueba completada. PDF generado y enviado como adjunto a ${testEmail}. Se saltó la subida a R2 para evitar errores de autorización.`
     };
 }
+
+// ============================================
+// GET CREDITOS ESPEJO PENDIENTES AGRUPADOS POR INVERSIONISTA
+// ============================================
+
+/**
+ * Obtiene los créditos espejo en estado pendiente (pendiente_reinversion | pendiente_compra_cartera)
+ * agrupados por inversionista. Incluye un array `otrosCreditos` placeholder (5 créditos random)
+ * que será reemplazado por la consulta real cuando esté lista.
+ */
+export async function getCreditosEspejoPendientes() {
+  // 1. Créditos espejo pendientes con info del inversionista
+  const pendientes = await db
+    .select({
+      id: creditos_inversionistas_espejo.id,
+      credito_id: creditos_inversionistas_espejo.credito_id,
+      inversionista_id: creditos_inversionistas_espejo.inversionista_id,
+      cuota_inversionista: creditos_inversionistas_espejo.cuota_inversionista,
+      porcentaje_participacion_inversionista: creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
+      monto_aportado: creditos_inversionistas_espejo.monto_aportado,
+      porcentaje_cash_in: creditos_inversionistas_espejo.porcentaje_cash_in,
+      monto_inversionista: creditos_inversionistas_espejo.monto_inversionista,
+      monto_cash_in: creditos_inversionistas_espejo.monto_cash_in,
+      iva_inversionista: creditos_inversionistas_espejo.iva_inversionista,
+      iva_cash_in: creditos_inversionistas_espejo.iva_cash_in,
+      fecha_creacion: creditos_inversionistas_espejo.fecha_creacion,
+      fecha_inicio_participacion: creditos_inversionistas_espejo.fecha_inicio_participacion,
+      status: creditos_inversionistas_espejo.status,
+      tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion,
+      // Info inversionista (solo para agrupar, no se incluye en creditosPendientes)
+      _nombre_inversionista: inversionistas.nombre,
+      _dpi: inversionistas.dpi,
+      _email: inversionistas.email,
+      _moneda: inversionistas.moneda,
+      _monto_reinversion: inversionistas.monto_reinversion,
+      _saldo_reinversion: inversionistas.saldo_reinversion,
+    })
+    .from(creditos_inversionistas_espejo)
+    .innerJoin(
+      inversionistas,
+      eq(creditos_inversionistas_espejo.inversionista_id, inversionistas.inversionista_id)
+    )
+    .where(
+      sql`${creditos_inversionistas_espejo.status} IN ('pendiente_reinversion', 'pendiente_compra_cartera')`
+    );
+
+  if (pendientes.length === 0) {
+    return [];
+  }
+
+  // 2. Placeholder: traer 5 créditos random (reemplazar después por la consulta real)
+  const otrosCreditos = await getOtrosCreditosPlaceholder();
+
+  // 3. Agrupar por inversionista
+  type CreditoSinInversionista = Omit<typeof pendientes[number], '_nombre_inversionista' | '_dpi' | '_email' | '_moneda' | '_monto_reinversion' | '_saldo_reinversion'>;
+
+  const agrupado = new Map<number, {
+    inversionista_id: number;
+    nombre: string;
+    dpi: number | null;
+    email: string | null;
+    moneda: string;
+    monto_reinversion: string | null;
+    saldo_reinversion: string;
+    creditosPendientes: CreditoSinInversionista[];
+    otrosCreditos: typeof otrosCreditos;
+  }>();
+
+  for (const row of pendientes) {
+    const { _nombre_inversionista, _dpi, _email, _moneda, _monto_reinversion, _saldo_reinversion, ...creditoData } = row;
+    if (!agrupado.has(row.inversionista_id)) {
+      agrupado.set(row.inversionista_id, {
+        inversionista_id: row.inversionista_id,
+        nombre: _nombre_inversionista,
+        dpi: _dpi,
+        email: _email,
+        moneda: _moneda,
+        monto_reinversion: _monto_reinversion,
+        saldo_reinversion: _saldo_reinversion,
+        creditosPendientes: [],
+        otrosCreditos,
+      });
+    }
+    agrupado.get(row.inversionista_id)!.creditosPendientes.push(creditoData);
+  }
+
+  return Array.from(agrupado.values());
+}
+
+/**
+ * TODO: Reemplazar esta función por la consulta real cuando esté lista.
+ * Por ahora trae 5 créditos random de la tabla creditos.
+ */
+async function getOtrosCreditosPlaceholder() {
+  // TODO: Reemplazar por la consulta real cuando esté lista
+  const resultado = await db
+    .select({
+      credito_id: creditos.credito_id,
+      usuario_id: creditos.usuario_id,
+      numero_credito_sifco: creditos.numero_credito_sifco,
+      capital: creditos.capital,
+      porcentaje_interes: creditos.porcentaje_interes,
+      deudatotal: creditos.deudatotal,
+      cuota_interes: creditos.cuota_interes,
+      cuota: creditos.cuota,
+      iva_12: creditos.iva_12,
+      plazo: creditos.plazo,
+      statusCredit: creditos.statusCredit,
+      formato_credito: creditos.formato_credito,
+      tipoCredito: creditos.tipoCredito,
+      fecha_creacion: creditos.fecha_creacion,
+      monto_aportado_cash_in: creditos_inversionistas.monto_aportado,
+    })
+    .from(creditos)
+    .innerJoin(
+      creditos_inversionistas,
+      and(
+        eq(creditos.credito_id, creditos_inversionistas.credito_id),
+        eq(creditos_inversionistas.inversionista_id, 86)
+      )
+    )
+    .limit(5);
+  return resultado;
+}

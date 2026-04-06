@@ -25,6 +25,12 @@
   export const userRoleEnum = pgEnum("user_role", ["ADMIN", "ASESOR","CONTA"]);
   export const customSchema = pgSchema("cartera");
 
+  export const statusCreditoInversionistaEspejoEnum = customSchema.enum("status_credito_inversionista_espejo", [
+    "pendiente_reinversion",
+    "pendiente_compra_cartera",
+    "completado",
+  ]);
+
   export const tipoReinversionEnum = customSchema.enum("tipo_reinversion", [
     "sin_reinversion",
     "reinversion_capital",
@@ -359,6 +365,7 @@
       fecha_inicio_participacion: date("fecha_inicio_participacion").notNull().default("2025-12-01"),
       updated_at: timestamp("updated_at").defaultNow(),
       tipo_reinversion: tipoReinversionEnum("tipo_reinversion"),
+      status: statusCreditoInversionistaEspejoEnum("status").notNull().default("completado"),
     },
     (t) => ({
       uxCreditoInvEspejo: uniqueIndex("ux_credito_inversionista_espejo").on(t.credito_id, t.inversionista_id),

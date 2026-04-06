@@ -26,9 +26,18 @@ interface InversionistaResult {
 }
 
 interface ScoreBreakdown {
-  formato_bonus: number;
-  cuotas_bonus: number;
-  capital_proximity_bonus: number;
+  crm_bonus: number;
+  formato: number;
+  cuotas: number;
+  proximidad: number;
+  total: number;
+}
+
+interface FullCreditData {
+  credito: any;
+  usuario: any;
+  espejo: any[];
+  inversionistas_detalle: any[];
 }
 
 export interface CreditCandidate {
@@ -42,35 +51,46 @@ export interface CreditCandidate {
   inversionistas: InversionistaResult[];
   score: number;
   score_breakdown: ScoreBreakdown;
-  credito_completo?: any;
+  credito_completo?: FullCreditData;
 }
 
 // ============================================================
-// SCORING
+// CONSTANTES DE SCORING
+// ============================================================
+const SCORE_BASE = 1000;
+const SCORE_CRM_BONUS = 500;
+const SCORE_FORMAT_INDIVIDUAL = 400;
+const SCORE_FORMAT_POOL_CUBE_ONLY = 200;
+const SCORE_FORMAT_POOL_CUBE_PLUS_1 = 100;
+const SCORE_CUOTA_0 = 300;
+const SCORE_PENALTY_PER_CUOTA = 50;
+const SCORE_PROXIMITY_HIGH = 200;
+const SCORE_PROXIMITY_MED = 100;
+
+// ============================================================
+// FUNCIONES DE SCORING
 // ============================================================
 
 function calcFormatoBonus(
   formato: string,
   invs: InversionistaResult[]
 ): number {
-  if (formato === "Individual") return 400;
+  if (formato === "Individual") return SCORE_FORMAT_INDIVIDUAL;
 
   // Es Pool — verificar cuántos inversionistas hay además de Cube
   const hasCube = invs.some((i) => i.es_cube);
   if (!hasCube) return 0; // no debería llegar aquí (filtro hard), pero por seguridad
 
   const nonCubeCount = invs.filter((i) => !i.es_cube).length;
-  if (nonCubeCount === 0) return 200; // Cube único
-  if (nonCubeCount === 1) return 100; // Cube + 1
-  return 0;                            // Cube + 2 o más
+  if (nonCubeCount === 0) return SCORE_FORMAT_POOL_CUBE_ONLY;
+  if (nonCubeCount === 1) return SCORE_FORMAT_POOL_CUBE_PLUS_1;
+  return 0;                            
 }
 
 function calcCuotasBonus(cuotasPagadas: number): number {
-  // Ajuste por desfase: la primera cuota pagada (cuota 0) no debe restar puntos.
-  // cuotasPagadas = 1 (solo cuota 0) -> index 0 -> score 300
-  // cuotasPagadas = 2 (0 y 1) -> index 1 -> score 250
-  const indexDeResto = Math.max(0, cuotasPagadas - 1);
-  return Math.max(-500, 300 - 50 * indexDeResto);
+  // Cuota 0 (cuotasPagadas = 0) es máxima prioridad.
+  // Luego se penaliza progresivamente cada cuota subsecuente.
+  return Math.max(-500, SCORE_CUOTA_0 - SCORE_PENALTY_PER_CUOTA * cuotasPagadas);
 }
 
 function calcCapitalProximityBonus(
@@ -78,9 +98,12 @@ function calcCapitalProximityBonus(
   monto: number | undefined
 ): number {
   if (monto === undefined || monto <= 0 || capitalActivo <= 0) return 0;
-  const diff = Math.abs(capitalActivo - monto) / capitalActivo;
-  if (diff < 0.1) return 200;
-  if (diff < 0.25) return 100;
+  // Bug fix: división contra el Math.max para evitar asimetría
+  const denominator = Math.max(capitalActivo, monto);
+  const diff = Math.abs(capitalActivo - monto) / denominator;
+  
+  if (diff < 0.1) return SCORE_PROXIMITY_HIGH;
+  if (diff < 0.25) return SCORE_PROXIMITY_MED;
   return 0;
 }
 
@@ -100,22 +123,24 @@ export async function getCreditCandidates(
   const [{ totalActivos }] = await db.select({ totalActivos: sql<number>`COUNT(*)::int` })
     .from(creditos).where(eq(creditos.statusCredit, "ACTIVO"));
     
-  const [{ totalCRM }] = await db.select({ totalCRM: sql<number>`COUNT(*)::int` })
+  const [{ totalCandidatosBase }] = await db.select({ totalCandidatosBase: sql<number>`COUNT(*)::int` })
     .from(creditos)
+    .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
     .where(and(
       eq(creditos.statusCredit, "ACTIVO"),
-      sql`LOWER(${creditos.numero_credito_sifco}) LIKE 'crm%'`
+      sql`LOWER(${usuarios.categoria}) LIKE '%cv veh_culo%'`
     ));
 
   console.log(`   - Créditos ACTIVOS en total: ${totalActivos}`);
-  console.log(`   - Créditos ACTIVOS + CRM:    ${totalCRM}`);
+  console.log(`   - Créditos ACTIVOS de Vehículo: ${totalCandidatosBase}`);
 
   // ──────────────────────────────────────────────────────────
-  // 1. Créditos del CRM cuya categoría de usuario contenga 'CV Vehiculo'
-  //    - numero_credito_sifco empieza con 'crm'
+  // 1. Créditos Activos de Vehículo
+  //    - usuarios.categoria = 'CV Vehículo'
   //    - statusCredit = 'ACTIVO'
+  //    - Optimización: Sin pagos 'pending' (Subquery NOT IN)
   // ──────────────────────────────────────────────────────────
-  const crmCreditos = await db
+  const baseCredits = await db
     .select({
       credito_id: creditos.credito_id,
       numero_credito_sifco: creditos.numero_credito_sifco,
@@ -128,40 +153,26 @@ export async function getCreditCandidates(
     .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
     .where(
       and(
-        // Solo créditos del CRM (numero empieza con 'crm')
-        sql`LOWER(${creditos.numero_credito_sifco}) LIKE 'crm%'`,
-        // La categoría debe contener 'cv vehiculo' o 'cv vehículo' (ignorando mayúsculas y acentos con comodines)
+        // La categoría debe contener 'cv vehiculo' o 'cv vehículo'
         sql`LOWER(${usuarios.categoria}) LIKE '%cv veh_culo%'`,
         // Solo activos
-        eq(creditos.statusCredit, "ACTIVO")
+        eq(creditos.statusCredit, "ACTIVO"),
+        // Optimización: Solo permitir créditos donde TODOS los pagos estén validados o no requeridos
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${pagos_credito} 
+          WHERE ${pagos_credito.credito_id} = ${creditos.credito_id} 
+          AND ${pagos_credito.validationStatus} NOT IN ('validated', 'no_required')
+        )`
       )
     );
 
-  console.log(`   Créditos CRM encontrados: ${crmCreditos.length}`);
+  console.log(`   Candidatos base (Activos + Vehículo + Sin pending): ${baseCredits.length}`);
 
-  if (crmCreditos.length === 0) return [];
+  if (baseCredits.length === 0) return [];
 
-  const creditoIds = crmCreditos.map((c) => c.credito_id);
+  const creditoIds = baseCredits.map((c) => c.credito_id);
 
-  // ──────────────────────────────────────────────────────────
-  // 2. Filtrar: ningún pago con validationStatus = 'pending'
-  // ──────────────────────────────────────────────────────────
-  const creditosConPendingRaw = await db
-    .selectDistinct({ credito_id: pagos_credito.credito_id })
-    .from(pagos_credito)
-    .where(
-      and(
-        inArray(pagos_credito.credito_id, creditoIds),
-        eq(pagos_credito.validationStatus, "pending")
-      )
-    );
 
-  const idsConPending = new Set(
-    creditosConPendingRaw
-      .map((r) => r.credito_id)
-      .filter((id): id is number => id !== null)
-  );
-  console.log(`   Créditos con pagos 'pending': ${idsConPending.size}`);
 
   // ──────────────────────────────────────────────────────────
   // 3. Filtrar: espejo debe estar en 'completado'
@@ -309,17 +320,9 @@ export async function getCreditCandidates(
   // ──────────────────────────────────────────────────────────
   const candidates: CreditCandidate[] = [];
 
-  for (const credito of crmCreditos) {
+  for (const credito of baseCredits) {
     const { credito_id, numero_credito_sifco, capital, formato_credito } =
       credito;
-
-    // Filtro: pagos pending
-    if (idsConPending.has(credito_id)) {
-      console.log(
-        `   ❌ [${numero_credito_sifco}] Descartado: tiene pagos en 'pending'`
-      );
-      continue;
-    }
 
     // Filtro: espejo debe estar completo (ciclo anterior terminado)
     if (!creditosConEspejoCompleto.has(credito_id)) {
@@ -333,7 +336,10 @@ export async function getCreditCandidates(
     const invs = invsByCredito.get(credito_id) ?? [];
     const cubeInv = invs.find((i) => i.es_cube);
 
-    if (formato_credito === "Pool") {
+    // Identificar formato dinámicamente si viene null (para evitar saltarse validación de Pool)
+    const actualFormadoCredito = formato_credito ?? (invs.length > 1 ? "Pool" : "Individual");
+
+    if (actualFormadoCredito === "Pool") {
       // No tiene a Cube → descartado
       if (!cubeInv) {
         console.log(
@@ -342,11 +348,13 @@ export async function getCreditCandidates(
         continue;
       }
 
-      // Cube no es el mayor inversionista → descartado
-      const maxMonto = Math.max(...invs.map((i) => i.monto_aportado));
-      if (cubeInv.monto_aportado < maxMonto) {
+      // VALIDACIÓN: Cube debe ser el líder del Pool.
+      // Si existe algún otro inversionista con un monto estrictamente mayor, se descarta.
+      // Si Cube está empatado en el primer lugar, se permite.
+      const maxMontoOtros = Math.max(0, ...invs.filter(i => !i.es_cube).map((i) => i.monto_aportado));
+      if (cubeInv.monto_aportado < maxMontoOtros) {
         console.log(
-          `   ❌ [${numero_credito_sifco}] Descartado: Pool donde Cube (Q${cubeInv.monto_aportado}) no es el mayor inversionista (máx Q${maxMonto})`
+          `   ❌ [${numero_credito_sifco}] Descartado: Pool donde Cube (Q${cubeInv.monto_aportado}) no es el líder (hay montos de Q${maxMontoOtros})`
         );
         continue;
       }
@@ -363,29 +371,33 @@ export async function getCreditCandidates(
     const totalCuotas = totalCuotasByCredito.get(credito_id) ?? 0;
 
     // Score
-    const formatoBonus = calcFormatoBonus(formato_credito ?? "Individual", invs);
+    const crmBonus = numero_credito_sifco?.toLowerCase().startsWith("crm") ? SCORE_CRM_BONUS : 0;
+    const formatoBonus = calcFormatoBonus(actualFormadoCredito, invs);
     const cuotasBonus = calcCuotasBonus(cuotasPagadas);
-    const proximityBonus = calcCapitalProximityBonus(capitalActivoNum, monto);
-    const score = 1000 + formatoBonus + cuotasBonus + proximityBonus;
+    const proximityBonus = monto !== undefined ? calcCapitalProximityBonus(capitalActivoNum, monto) : 0;
+
+    const score = SCORE_BASE + crmBonus + formatoBonus + cuotasBonus + proximityBonus;
 
     console.log(
-      `   ✅ [${numero_credito_sifco}] score=${score} (fmt=${formatoBonus}, cuotas=${cuotasBonus}, prox=${proximityBonus})`
+      `   ✅ [${numero_credito_sifco}] score=${score} (crm=${crmBonus}, fmt=${formatoBonus}, cuotas=${cuotasBonus}, prox=${proximityBonus})`
     );
 
     candidates.push({
       credito_id,
-      numero_credito_sifco,
+      numero_credito_sifco: numero_credito_sifco ?? "",
       capital: Number(capital),
       capital_activo: capitalActivoNum,
-      formato_credito: (formato_credito ?? "Individual") as "Pool" | "Individual",
+      formato_credito: actualFormadoCredito as "Pool" | "Individual",
       cuotas_pagadas: cuotasPagadas,
       total_cuotas: totalCuotas,
       inversionistas: invs,
       score,
       score_breakdown: {
-        formato_bonus: formatoBonus,
-        cuotas_bonus: cuotasBonus,
-        capital_proximity_bonus: proximityBonus,
+        crm_bonus: crmBonus,
+        formato: formatoBonus,
+        cuotas: cuotasBonus,
+        proximidad: proximityBonus,
+        total: score,
       },
     });
   }

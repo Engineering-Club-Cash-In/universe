@@ -1342,13 +1342,25 @@ function VehiclesDashboard() {
 																			Datos de Inspección
 																		</h4>
 																		<div className="grid grid-cols-2 gap-x-6 gap-y-3 py-2 text-sm">
-																			<div className="flex flex-col gap-0.5">
+																			<div className="flex flex-col gap-1">
 																				<span className="font-bold text-[10px] text-muted-foreground uppercase tracking-tight">
 																					Escáner
 																				</span>
-																				<span className="font-medium">
-																					{inspection.scannerUsed ? "Sí" : "No"}
-																				</span>
+																				<div className="flex items-center gap-6">
+																					<span className="font-medium">
+																						{inspection.scannerUsed ? "Sí" : "No"}
+																					</span>
+																					{inspection.scannerResultUrl && (
+																						<Button
+																							variant="outline"
+																							size="sm"
+																							className="h-6 px-2.5 text-[10px]"
+																							onClick={() => window.open(inspection.scannerResultUrl, "_blank")}
+																						>
+																							<FileText className="mr-1.5 h-3 w-3" /> Ver Reporte
+																						</Button>
+																					)}
+																				</div>
 																			</div>
 																			<div className="flex flex-col gap-0.5">
 																				<span className="font-bold text-[10px] text-muted-foreground uppercase tracking-tight">
@@ -1649,22 +1661,22 @@ function VehiclesDashboard() {
 																														<Camera className="h-4 w-4" />
 																													</Button>
 																												)}
-																											<Badge
-																												variant={
-																													item.checked
-																														? "default"
-																														: !item.checked &&
-																																item.severity ===
-																																	"critical"
-																															? "destructive"
-																															: "secondary"
-																												}
-																												className="h-5 shrink-0 px-1.5 text-[10px]"
-																											>
-																												{item.checked
-																													? "Cumple"
-																													: "No cumple"}
-																											</Badge>
+																										<Badge
+																											variant={
+																												!item.checked
+																													? "default"
+																													: item.checked &&
+																															item.severity ===
+																																"critical"
+																														? "destructive"
+																														: "secondary"
+																											}
+																											className="h-5 shrink-0 px-1.5 text-[10px]"
+																										>
+																											{!item.checked
+																												? "Cumple"
+																												: "No cumple"}
+																										</Badge>
 																										</div>
 																									</div>
 																								),
@@ -1677,7 +1689,7 @@ function VehiclesDashboard() {
 																			{/* Summary of critical issues */}
 																			{inspection.checklistItems.some(
 																				(item: any) =>
-																					!item.checked &&
+																					item.checked &&
 																					item.severity === "critical",
 																			) && (
 																				<div className="mt-4 rounded-md border border-red-200 bg-red-50 p-3">
@@ -1688,7 +1700,7 @@ function VehiclesDashboard() {
 																						{inspection.checklistItems
 																							.filter(
 																								(item: any) =>
-																									!item.checked &&
+																									item.checked &&
 																									item.severity === "critical",
 																							)
 																							.map((item: any, idx: number) => (

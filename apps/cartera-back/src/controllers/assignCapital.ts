@@ -66,9 +66,11 @@ function calcFormatoBonus(
 }
 
 function calcCuotasBonus(cuotasPagadas: number): number {
-  // Cuota 0 = máxima prioridad (300)
-  // Cada cuota adicional baja 50 puntos (ej. 1=250, 2=200, 3=150...)
-  return Math.max(-500, 300 - 50 * cuotasPagadas);
+  // Ajuste por desfase: la primera cuota pagada (cuota 0) no debe restar puntos.
+  // cuotasPagadas = 1 (solo cuota 0) -> index 0 -> score 300
+  // cuotasPagadas = 2 (0 y 1) -> index 1 -> score 250
+  const indexDeResto = Math.max(0, cuotasPagadas - 1);
+  return Math.max(-500, 300 - 50 * indexDeResto);
 }
 
 function calcCapitalProximityBonus(

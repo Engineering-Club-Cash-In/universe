@@ -8,7 +8,7 @@ import {
   inversionistas,
   usuarios,
 } from "../database/db";
-import { eq, and, sql, inArray } from "drizzle-orm";
+import { eq, and, sql, inArray, notInArray } from "drizzle-orm";
 import Big from "big.js";
 
 // ============================================================
@@ -156,13 +156,7 @@ export async function getCreditCandidates(
         // La categoría debe contener 'cv vehiculo' o 'cv vehículo'
         sql`LOWER(${usuarios.categoria}) LIKE '%cv veh_culo%'`,
         // Solo activos
-        eq(creditos.statusCredit, "ACTIVO"),
-        // Optimización: Solo permitir créditos donde TODOS los pagos estén validados o no requeridos
-        sql`NOT EXISTS (
-          SELECT 1 FROM ${pagos_credito} 
-          WHERE ${pagos_credito.credito_id} = ${creditos.credito_id} 
-          AND ${pagos_credito.validationStatus} NOT IN ('validated', 'no_required')
-        )`
+        eq(creditos.statusCredit, "ACTIVO")
       )
     );
 
@@ -172,7 +166,26 @@ export async function getCreditCandidates(
 
   const creditoIds = baseCredits.map((c) => c.credito_id);
 
+  // ──────────────────────────────────────────────────────────
+  // 2. Extraer pagos inválidos a un Set en Memoria (Súper Rápido, O(1))
+  //    Cualquier estado diferente a 'validated' o 'no_required' descarta el crédito
+  // ──────────────────────────────────────────────────────────
+  const creditosConInvalidosRaw = await db
+    .selectDistinct({ credito_id: pagos_credito.credito_id })
+    .from(pagos_credito)
+    .where(
+      and(
+        inArray(pagos_credito.credito_id, creditoIds),
+        notInArray(pagos_credito.validationStatus, ["validated", "no_required"])
+      )
+    );
 
+  const invalidosSet = new Set(
+    creditosConInvalidosRaw
+      .map((r) => r.credito_id)
+      .filter((id): id is number => id !== null)
+  );
+  console.log(`   Créditos descartados por validaciones de pagos pendientes/inválidos: ${invalidosSet.size}`);
 
   // ──────────────────────────────────────────────────────────
   // 3. Filtrar: espejo debe estar en 'completado'
@@ -323,6 +336,14 @@ export async function getCreditCandidates(
   for (const credito of baseCredits) {
     const { credito_id, numero_credito_sifco, capital, formato_credito } =
       credito;
+
+    // Filtro en memoria: pagos inválidos (pendientes, rejects, resets, etc.)
+    if (invalidosSet.has(credito_id)) {
+      console.log(
+        `   ❌ [${numero_credito_sifco}] Descartado: tiene pagos sin validar (estado riesgoso)`
+      );
+      continue;
+    }
 
     // Filtro: espejo debe estar completo (ciclo anterior terminado)
     if (!creditosConEspejoCompleto.has(credito_id)) {

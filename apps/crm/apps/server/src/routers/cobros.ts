@@ -582,7 +582,10 @@ export const cobrosRouter = {
 					// Mapear filtro de estadoMora a parámetros de cartera-back
 					let cuotasAtrasadas: number | undefined;
 					let estadoCartera: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | undefined;
-					const shouldSearchLocally = !!input.searchTerm?.trim();
+					const searchTerm = input.searchTerm?.trim() || "";
+					const hasNumber = /\d/.test(searchTerm);
+					const isPlateSearch = searchTerm.length > 0 && hasNumber;
+					const isNameSearch = searchTerm.length > 0 && !hasNumber;
 
 					if (input.estadoMora) {
 						switch (input.estadoMora) {
@@ -629,7 +632,8 @@ export const cobrosRouter = {
 					);
 
 					let creditosResponse;
-					if (shouldSearchLocally) {
+					if (isPlateSearch) {
+						// Búsqueda por placa: traer todos los créditos para filtrar localmente por vehículo
 						const perPage = 200;
 						const firstPage = await obtenerTodosLosCreditosCarteraBack({
 							mes,
@@ -667,6 +671,7 @@ export const cobrosRouter = {
 							totalPages: 1,
 						};
 					} else {
+						// Búsqueda por nombre (cartera-back filtra) o sin búsqueda
 						creditosResponse = await obtenerTodosLosCreditosCarteraBack({
 							mes,
 							anio,
@@ -676,6 +681,7 @@ export const cobrosRouter = {
 							estado: estadoCartera,
 							time: input.time,
 							email_cobrador: input.emailCobrador,
+							nombre_usuario: isNameSearch ? searchTerm : undefined,
 						});
 					}
 
@@ -794,12 +800,12 @@ export const cobrosRouter = {
 						`[Cobros] Mapeados ${contratos.length} contratos para el frontend`,
 					);
 
-					if (shouldSearchLocally) {
+					if (isPlateSearch) {
 						const limit = input.limit || 50;
 						const offset = input.offset || 0;
 						const filtered = filterCobrosSearchResults(
 							contratos,
-							input.searchTerm,
+							searchTerm,
 							offset,
 							limit,
 						);

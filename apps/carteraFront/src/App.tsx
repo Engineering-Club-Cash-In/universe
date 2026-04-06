@@ -16,6 +16,7 @@ import { CreatePaymentAgreementForm } from "./private/cartera/components/payment
 import { FacturasGenericas } from "./private/cartera/components/FacturasGenericas";
 import EfectividadAsesores from "./private/cartera/components/EfectividadAsesores";
 import { HistorialLiquidaciones } from "./private/cartera/components/HistorialLiquidaciones";
+import { SesionesPendientes } from "./private/cartera/components/SesionesPendientes";
 import { RecibosGenericos } from "./private/recibos-genericos/components/RecibosGenericos";
 import { FallenCredits } from "./private/cartera/components/FallenCredits";
 import { PagosPorVencimiento } from "./private/cartera/components/PagosPorVencimiento";
@@ -118,6 +119,15 @@ function App() {
           element={
             <RoleRoute allowedRoles={["ADMIN"]}>
               <HistorialLiquidaciones />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="sesiones-pendientes"
+          element={
+            <RoleRoute allowedRoles={["ADMIN"]}>
+              <SesionesPendientes />
             </RoleRoute>
           }
         />

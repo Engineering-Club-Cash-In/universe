@@ -1,54 +1,40 @@
 import { describe, expect, test } from "bun:test";
-import {
-	filterCobrosSearchResults,
-	matchesCobrosSearch,
-	normalizeCobrosSearchValue,
-} from "./cobros-search";
+import { filterCobrosSearchResults } from "./cobros-search";
 
 describe("cobros search helpers", () => {
-	test("normalizes values for flexible plate matching", () => {
-		expect(normalizeCobrosSearchValue(" P-123 abc ")).toBe("p123abc");
-		expect(normalizeCobrosSearchValue("abc 123")).toBe("abc123");
+	test("filters by vehicle plate with normalized matching", () => {
+		const items = [
+			{ vehiculoPlaca: "P-123 ABC" },
+			{ vehiculoPlaca: "X-999" },
+			{ vehiculoPlaca: "P-456 XYZ" },
+		];
+
+		const byPlate = filterCobrosSearchResults(items, "123ab", 0, 10);
+		expect(byPlate.total).toBe(1);
+		expect(byPlate.items).toEqual([{ vehiculoPlaca: "P-123 ABC" }]);
+
+		const noMatch = filterCobrosSearchResults(items, "zzz", 0, 10);
+		expect(noMatch.total).toBe(0);
 	});
 
-	test("matches by customer name or flexible vehicle plate", () => {
-		expect(
-			matchesCobrosSearch(
-				{ clienteNombre: "Juan Perez", vehiculoPlaca: "P-123 ABC" },
-				"123ab",
-			),
-		).toBe(true);
+	test("paginates filtered results", () => {
+		const items = [
+			{ vehiculoPlaca: "P-123 ABC" },
+			{ vehiculoPlaca: "P-456 XYZ" },
+			{ vehiculoPlaca: "P-789 DEF" },
+		];
 
-		expect(
-			matchesCobrosSearch(
-				{ clienteNombre: "Maria Lopez", vehiculoPlaca: "QWE-987" },
-				"maria",
-			),
-		).toBe(true);
+		const page = filterCobrosSearchResults(items, "p", 0, 2);
+		expect(page.total).toBe(3);
+		expect(page.items.length).toBe(2);
 
-		expect(
-			matchesCobrosSearch(
-				{ clienteNombre: "Maria Lopez", vehiculoPlaca: "QWE-987" },
-				"zzz",
-			),
-		).toBe(false);
+		const page2 = filterCobrosSearchResults(items, "p", 2, 2);
+		expect(page2.items.length).toBe(1);
 	});
 
-	test("filters and paginates locally after matching", () => {
-		const results = filterCobrosSearchResults(
-			[
-				{ clienteNombre: "Juan Perez", vehiculoPlaca: "P-123 ABC" },
-				{ clienteNombre: "Ana Gomez", vehiculoPlaca: "X-999" },
-				{ clienteNombre: "Pedro Ruiz", vehiculoPlaca: "P-456 XYZ" },
-			],
-			"p",
-			0,
-			1,
-		);
-
-		expect(results.total).toBe(2);
-		expect(results.items).toEqual([
-			{ clienteNombre: "Juan Perez", vehiculoPlaca: "P-123 ABC" },
-		]);
+	test("returns all items when no search term", () => {
+		const items = [{ vehiculoPlaca: "P-123" }, { vehiculoPlaca: "X-999" }];
+		const result = filterCobrosSearchResults(items, "", 0, 10);
+		expect(result.total).toBe(2);
 	});
 });

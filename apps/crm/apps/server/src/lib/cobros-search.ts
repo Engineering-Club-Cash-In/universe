@@ -1,27 +1,9 @@
 type CobrosSearchable = {
-	clienteNombre?: string | null;
 	vehiculoPlaca?: string | null;
 };
 
-export function normalizeCobrosSearchValue(value: string | null | undefined) {
-	return (value ?? "").toLowerCase().replace(/[\s-]+/g, "").trim();
-}
-
-export function matchesCobrosSearch(
-	item: CobrosSearchable,
-	searchTerm: string | null | undefined,
-) {
-	const rawQuery = (searchTerm ?? "").trim().toLowerCase();
-	if (!rawQuery) return true;
-
-	const normalizedQuery = normalizeCobrosSearchValue(searchTerm);
-	const customerName = (item.clienteNombre ?? "").toLowerCase();
-	const vehiclePlate = normalizeCobrosSearchValue(item.vehiculoPlaca);
-
-	return (
-		customerName.includes(rawQuery) ||
-		(normalizedQuery.length > 0 && vehiclePlate.includes(normalizedQuery))
-	);
+function normalizePlate(value: string | null | undefined) {
+	return (value ?? "").toLowerCase().replace(/[\s-]+/g, "");
 }
 
 export function filterCobrosSearchResults<T extends CobrosSearchable>(
@@ -30,7 +12,10 @@ export function filterCobrosSearchResults<T extends CobrosSearchable>(
 	offset = 0,
 	limit?: number,
 ) {
-	const filtered = items.filter((item) => matchesCobrosSearch(item, searchTerm));
+	const query = normalizePlate(searchTerm);
+	if (!query) return { total: items.length, items: limit === undefined ? items : items.slice(offset, offset + limit) };
+
+	const filtered = items.filter((item) => normalizePlate(item.vehiculoPlaca).includes(query));
 
 	return {
 		total: filtered.length,

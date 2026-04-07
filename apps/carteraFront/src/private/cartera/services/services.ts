@@ -3365,3 +3365,61 @@ export async function getPagosPorVencimiento(
   );
   return res.data;
 }
+
+// ============================================================
+// Créditos espejo pendientes (sesiones pendientes)
+// ============================================================
+export interface CreditoEspejoPendiente {
+  id: number;
+  credito_id: number;
+  inversionista_id: number;
+  cuota_inversionista: string;
+  porcentaje_participacion_inversionista: string;
+  monto_aportado: string;
+  porcentaje_cash_in: string;
+  monto_inversionista: string;
+  monto_cash_in: string;
+  iva_inversionista: string;
+  iva_cash_in: string;
+  fecha_creacion: string;
+  fecha_inicio_participacion: string;
+  status: "pendiente_reinversion" | "pendiente_compra_cartera";
+  tipo_reinversion: string | null;
+}
+
+export interface OtroCreditoDisponible {
+  credito_id: number;
+  usuario_id: number;
+  numero_credito_sifco: string;
+  capital: string;
+  porcentaje_interes: string;
+  deudatotal: string;
+  cuota_interes: string;
+  cuota: string;
+  iva_12: string;
+  plazo: number;
+  statusCredit: string;
+  formato_credito: string;
+  tipoCredito: string;
+  fecha_creacion: string;
+  monto_aportado_cash_in: string;
+}
+
+export interface InversionistaSesionPendiente {
+  inversionista_id: number;
+  nombre: string;
+  dpi: number | null;
+  email: string | null;
+  moneda: string;
+  monto_reinversion: string | null;
+  saldo_reinversion: string;
+  creditosPendientes: CreditoEspejoPendiente[];
+  otrosCreditos: OtroCreditoDisponible[];
+}
+
+export async function getCreditosEspejoPendientesService(): Promise<InversionistaSesionPendiente[]> {
+  const res = await api.get<InversionistaSesionPendiente[]>(
+    `${API_URL}/creditos-espejo-pendientes`
+  );
+  return res.data;
+}

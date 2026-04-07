@@ -15,6 +15,7 @@ import {
   BarChart3,
   Briefcase,
   TrendingDown,
+  Clock,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useState, useRef, useEffect } from "react";
@@ -126,6 +127,13 @@ const menuSections: MenuSection[] = [
         label: "Liquidaciones",
         icon: <Receipt className="h-4 w-4" />,
         path: "/liquidaciones-inversionistas",
+        roles: ["ADMIN"],
+      },
+      {
+        key: "sesiones-pendientes",
+        label: "Sesiones Pendientes",
+        icon: <Clock className="h-4 w-4" />,
+        path: "/sesiones-pendientes",
         roles: ["ADMIN"],
       },
     ],

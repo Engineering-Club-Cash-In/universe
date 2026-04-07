@@ -1244,6 +1244,7 @@ interface GetPagosOptions {
   formatoCredito?: string;
   soloAplicados?: boolean;
   fechaAplicado?: string;
+  fechaBoleta?: string;
 }
 /**
  * 📊 Obtiene los pagos junto con su información detallada de créditos, usuarios, cuotas e inversionistas.
@@ -1273,6 +1274,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     formatoCredito,
     soloAplicados,
     fechaAplicado,
+    fechaBoleta,
   } = options;
 
   try {
@@ -1330,6 +1332,11 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     if (fechaAplicado) {
       whereClauses.push(
         `(p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date = '${fechaAplicado}'::date`
+      );
+    }
+    if (fechaBoleta) {
+      whereClauses.push(
+        `(p.fecha_boleta AT TIME ZONE 'America/Guatemala')::date = '${fechaBoleta}'::date`
       );
     }
 

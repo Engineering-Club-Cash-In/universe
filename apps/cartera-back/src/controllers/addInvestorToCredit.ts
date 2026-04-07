@@ -1,12 +1,12 @@
 import Big from "big.js";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "../database";
 import {
-  creditos,
   creditos_inversionistas,
   creditos_inversionistas_espejo,
 } from "../database/db";
 import z from "zod";
+import { getCreditCandidates } from "./assignCapital";
 
 const CUBE_INVESTMENT_ID = 86;
 
@@ -23,16 +23,10 @@ const addInvestorToCreditSchema = z.object({
   fecha_inicio_participacion: z.string().optional(),
 });
 
-type AddInvestorData = z.infer<typeof addInvestorToCreditSchema>;
-
 // ========================================
 // RECALCULAR INVERSIONISTAS
 // ========================================
 
-/**
- * Recalcula cuotas, intereses, IVA y participación para un array de inversionistas.
- * Misma lógica que updateInvestors en updateCredit.ts
- */
 function recalcularInversionistas(
   inversionistasArray: {
     inversionista_id: number;
@@ -61,7 +55,6 @@ function recalcularInversionistas(
   const membresias = new Big(creditoData.membresias_pago ?? 0);
   const tasaInteres = new Big(creditoData.porcentaje_interes ?? 0);
 
-  // Encontrar al inversionista con mayor monto
   const inversionistaMayor = inversionistasArray.reduce((max, current) =>
     current.monto_aportado.gt(max.monto_aportado) ? current : max,
   );
@@ -84,10 +77,8 @@ function recalcularInversionistas(
       ? cuotaBase.plus(seguro).plus(gps).plus(membresias).round(6)
       : cuotaBase;
 
-    // Interés sobre monto aportado
     const cuotaInteres = inv.monto_aportado.times(tasaInteres.div(100)).round(2);
 
-    // Distribución entre inversionista y cash-in
     const montoInversionista = cuotaInteres
       .times(inv.porcentaje_inversion)
       .div(100)
@@ -98,7 +89,6 @@ function recalcularInversionistas(
       .div(100)
       .round(2);
 
-    // IVA 12%
     const ivaInversionista = montoInversionista.gt(0)
       ? montoInversionista.times(0.12).round(2)
       : new Big(0);
@@ -152,70 +142,58 @@ export const addInvestorToCredit = async ({ body, set }: any) => {
       fecha_inicio_participacion,
     } = parseResult.data;
 
-    // 2. GET interno — traer créditos candidatos del inversionista
-    // TODO: Implementar GET que devuelve los créditos candidatos
-    // Por ahora placeholder: devuelve los credito_id donde participa
-    const creditosCandidatos: { credito_id: number }[] = [];
+    // 2. GET interno — traer créditos candidatos con toda su data
+    const candidatos = await getCreditCandidates(monto_aportado);
 
-    // === AQUÍ VA EL GET INTERNO ===
-    // creditosCandidatos = await getCreditos(inversionista_id, ...);
-    // ==============================
-
-    if (creditosCandidatos.length === 0) {
+    if (candidatos.length === 0) {
       set.status = 404;
       return {
         success: false,
-        message: "No se encontraron créditos candidatos para este inversionista",
+        message: "No se encontraron créditos candidatos",
       };
     }
 
     const resultados: any[] = [];
     const errores: any[] = [];
+    let montoRestante = new Big(monto_aportado);
 
-    // 3. Para cada crédito candidato
+    // 3. Para cada crédito candidato (ordenados por score), distribuir monto
     await db.transaction(async (tx) => {
-      for (const candidato of creditosCandidatos) {
+      for (const candidato of candidatos) {
+        // Si ya no queda monto por distribuir, salir
+        if (montoRestante.lte(0)) break;
+
         try {
-          const { credito_id } = candidato;
+          const { credito_id, numero_credito_sifco, credito_completo } = candidato;
 
-          // 3a. Traer info del crédito
-          const [creditoData] = await tx
-            .select({
-              credito_id: creditos.credito_id,
-              capital: creditos.capital,
-              cuota: creditos.cuota,
-              porcentaje_interes: creditos.porcentaje_interes,
-              seguro_10_cuotas: creditos.seguro_10_cuotas,
-              gps: creditos.gps,
-              membresias_pago: creditos.membresias_pago,
-              numero_credito_sifco: creditos.numero_credito_sifco,
-            })
-            .from(creditos)
-            .where(eq(creditos.credito_id, credito_id))
-            .limit(1);
-
-          if (!creditoData) {
-            errores.push({ credito_id, razon: "Crédito no encontrado" });
+          if (!credito_completo) {
+            errores.push({ credito_id, razon: "Sin data completa del crédito" });
             continue;
           }
 
-          // 3b. Traer inversionistas actuales (padre)
-          const inversionistasActuales = await tx
-            .select({
-              inversionista_id: creditos_inversionistas.inversionista_id,
-              monto_aportado: creditos_inversionistas.monto_aportado,
-              porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
-              porcentaje_participacion_inversionista:
-                creditos_inversionistas.porcentaje_participacion_inversionista,
-              fecha_inicio_participacion:
-                creditos_inversionistas.fecha_inicio_participacion,
-            })
-            .from(creditos_inversionistas)
-            .where(eq(creditos_inversionistas.credito_id, credito_id));
+          const { credito: creditoRaw, inversionistas_detalle } = credito_completo;
 
-          // 3c. Buscar CUBE
+          // Datos del crédito desde el GET
+          const creditoData = {
+            cuota: creditoRaw.cuota,
+            porcentaje_interes: creditoRaw.porcentaje_interes,
+            seguro_10_cuotas: creditoRaw.seguro_10_cuotas,
+            gps: creditoRaw.gps,
+            membresias_pago: creditoRaw.membresias_pago,
+          };
+
+          // Inversionistas actuales desde el GET
+          const inversionistasActuales = inversionistas_detalle.map((inv: any) => ({
+            inversionista_id: inv.inversionista_id,
+            monto_aportado: inv.monto_aportado,
+            porcentaje_cash_in: inv.porcentaje_cash_in,
+            porcentaje_participacion_inversionista: inv.porcentaje_participacion_inversionista,
+            fecha_inicio_participacion: inv.fecha_inicio_participacion,
+          }));
+
+          // 3a. Buscar CUBE
           const cubeActual = inversionistasActuales.find(
-            (inv) => inv.inversionista_id === CUBE_INVESTMENT_ID,
+            (inv: any) => inv.inversionista_id === CUBE_INVESTMENT_ID,
           );
 
           if (!cubeActual) {
@@ -227,24 +205,19 @@ export const addInvestorToCredit = async ({ body, set }: any) => {
           }
 
           const montoCubeActual = new Big(cubeActual.monto_aportado);
-          const montoNuevo = new Big(monto_aportado);
 
-          // 3d. Validar que hay suficiente monto en CUBE
-          if (montoNuevo.gt(montoCubeActual)) {
-            errores.push({
-              credito_id,
-              razon: `Monto solicitado (${montoNuevo}) excede monto de CUBE (${montoCubeActual})`,
-            });
-            continue;
-          }
+          // 3b. Determinar cuánto tomar de este crédito
+          // Si CUBE tiene menos que lo que resta, tomar todo lo de CUBE
+          const montoParaEsteCredito = montoRestante.gt(montoCubeActual)
+            ? montoCubeActual
+            : montoRestante;
 
-          // 3e. Determinar porcentajes del nuevo inversionista
+          // 3c. Determinar porcentajes del nuevo inversionista
           let porcCashIn: Big;
           let porcInversion: Big;
 
-          // Si ya existe en creditos_inversionistas, jalar sus porcentajes
           const existenteEnPadre = inversionistasActuales.find(
-            (inv) => inv.inversionista_id === inversionista_id,
+            (inv: any) => inv.inversionista_id === inversionista_id,
           );
 
           if (existenteEnPadre && porcentaje_cash_in === undefined) {
@@ -257,7 +230,7 @@ export const addInvestorToCredit = async ({ body, set }: any) => {
             porcInversion = new Big(porcentaje_inversion ?? 100);
           }
 
-          // 3f. Armar nuevo array de inversionistas
+          // 3d. Armar nuevo array de inversionistas
           const nuevoArray: {
             inversionista_id: number;
             monto_aportado: Big;
@@ -268,8 +241,7 @@ export const addInvestorToCredit = async ({ body, set }: any) => {
 
           for (const inv of inversionistasActuales) {
             if (inv.inversionista_id === CUBE_INVESTMENT_ID) {
-              // Restarle a CUBE
-              const nuevoMontoCube = montoCubeActual.minus(montoNuevo);
+              const nuevoMontoCube = montoCubeActual.minus(montoParaEsteCredito);
               if (nuevoMontoCube.gt(0)) {
                 nuevoArray.push({
                   inversionista_id: inv.inversionista_id,
@@ -281,12 +253,11 @@ export const addInvestorToCredit = async ({ body, set }: any) => {
                   fecha_inicio_participacion: inv.fecha_inicio_participacion,
                 });
               }
-              // Si queda en 0, no se incluye (se elimina)
+              // Si queda en 0, no se incluye
             } else if (inv.inversionista_id === inversionista_id) {
-              // Si el inversionista ya existe, sumar su monto
               nuevoArray.push({
                 inversionista_id: inv.inversionista_id,
-                monto_aportado: new Big(inv.monto_aportado).plus(montoNuevo),
+                monto_aportado: new Big(inv.monto_aportado).plus(montoParaEsteCredito),
                 porcentaje_cash_in: porcCashIn,
                 porcentaje_inversion: porcInversion,
                 fecha_inicio_participacion:
@@ -306,14 +277,14 @@ export const addInvestorToCredit = async ({ body, set }: any) => {
             }
           }
 
-          // Si el inversionista no existía en el padre, agregarlo
+          // Si el inversionista no existía, agregarlo
           const yaExiste = nuevoArray.some(
             (inv) => inv.inversionista_id === inversionista_id,
           );
           if (!yaExiste) {
             nuevoArray.push({
               inversionista_id,
-              monto_aportado: montoNuevo,
+              monto_aportado: montoParaEsteCredito,
               porcentaje_cash_in: porcCashIn,
               porcentaje_inversion: porcInversion,
               fecha_inicio_participacion:
@@ -322,15 +293,15 @@ export const addInvestorToCredit = async ({ body, set }: any) => {
             });
           }
 
-          // 3g. Recalcular todo para creditos_inversionistas (PADRE)
+          // 3e. Recalcular PADRE
           const dataPadre = recalcularInversionistas(
             nuevoArray,
             creditoData,
             credito_id,
-            creditoData.numero_credito_sifco,
+            numero_credito_sifco,
           );
 
-          // 3h. Borrar e insertar en creditos_inversionistas
+          // 3f. Borrar e insertar en creditos_inversionistas
           await tx
             .delete(creditos_inversionistas)
             .where(eq(creditos_inversionistas.credito_id, credito_id));
@@ -339,23 +310,19 @@ export const addInvestorToCredit = async ({ body, set }: any) => {
             await tx.insert(creditos_inversionistas).values(dataPadre);
           }
 
-          // 3i. Armar cuotas del padre para el espejo
+          // 3g. Armar cuotas del padre para el espejo
           const parentCuotas = new Map(
-            dataPadre.map((p) => [
-              p.inversionista_id,
-              p.cuota_inversionista,
-            ]),
+            dataPadre.map((p) => [p.inversionista_id, p.cuota_inversionista]),
           );
 
-          // 3j. Recalcular para creditos_inversionistas_espejo
+          // 3h. Recalcular ESPEJO
           const dataEspejo = recalcularInversionistas(
             nuevoArray,
             creditoData,
             credito_id,
-            creditoData.numero_credito_sifco,
+            numero_credito_sifco,
           );
 
-          // Espejo hereda cuota del padre + asignar status
           const statusEspejo =
             tipo_operacion === "reinversion"
               ? "pendiente_reinversion"
@@ -366,19 +333,16 @@ export const addInvestorToCredit = async ({ body, set }: any) => {
             cuota_inversionista:
               parentCuotas.get(inv.inversionista_id) ??
               inv.cuota_inversionista,
-            status:
-              inv.inversionista_id === inversionista_id
+            status: (inv.inversionista_id === inversionista_id
                 ? statusEspejo
-                : "completado",
+                : "completado") as "pendiente_reinversion" | "pendiente_compra_cartera" | "completado",
             updated_at: new Date(),
           }));
 
-          // 3k. Borrar e insertar en creditos_inversionistas_espejo
+          // 3i. Borrar e insertar en creditos_inversionistas_espejo
           await tx
             .delete(creditos_inversionistas_espejo)
-            .where(
-              eq(creditos_inversionistas_espejo.credito_id, credito_id),
-            );
+            .where(eq(creditos_inversionistas_espejo.credito_id, credito_id));
 
           if (dataEspejoConStatus.length > 0) {
             await tx
@@ -386,9 +350,13 @@ export const addInvestorToCredit = async ({ body, set }: any) => {
               .values(dataEspejoConStatus);
           }
 
+          // 3j. Restar lo asignado del monto restante
+          montoRestante = montoRestante.minus(montoParaEsteCredito);
+
           resultados.push({
             credito_id,
-            numero_credito_sifco: creditoData.numero_credito_sifco,
+            numero_credito_sifco,
+            monto_asignado: montoParaEsteCredito.toString(),
             inversionistas_padre: dataPadre.length,
             inversionistas_espejo: dataEspejoConStatus.length,
             cube_eliminado: !nuevoArray.some(
@@ -397,13 +365,12 @@ export const addInvestorToCredit = async ({ body, set }: any) => {
           });
 
           console.log(
-            `✅ Crédito ${creditoData.numero_credito_sifco} actualizado - ${dataPadre.length} inversionistas`,
+            `✅ Crédito ${numero_credito_sifco} - asignado Q${montoParaEsteCredito} - quedan Q${montoRestante}`,
           );
         } catch (err) {
           errores.push({
             credito_id: candidato.credito_id,
-            razon:
-              err instanceof Error ? err.message : String(err),
+            razon: err instanceof Error ? err.message : String(err),
           });
         }
       }
@@ -413,6 +380,9 @@ export const addInvestorToCredit = async ({ body, set }: any) => {
     return {
       success: true,
       message: `Procesados: ${resultados.length} créditos, ${errores.length} errores`,
+      monto_total: monto_aportado,
+      monto_distribuido: new Big(monto_aportado).minus(montoRestante).toString(),
+      monto_sin_asignar: montoRestante.toString(),
       resultados,
       errores,
     };

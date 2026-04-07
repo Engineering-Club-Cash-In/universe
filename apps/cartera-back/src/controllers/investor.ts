@@ -38,6 +38,7 @@ import {
   type EstadoLiquidacionResumen,
   type EstadoLiquidacionResumenFilter,
 } from "../utils/investorLiquidationSummary";
+import { getCreditCandidates, CUBE_ID } from "./assignCapital";
 
 // ============================================
 // 🆕 TIPOS Y CONFIGURACIÓN PARA CONSULTAS ORIGINALES/ESPEJO
@@ -1423,7 +1424,7 @@ const mes = fechaParaMes
                   break;
 
                 case "reinversion_variable":
-                  // Se calcula como sin_reinversion per-pago; el tope global se aplica después
+                  // Se calcula como sin_reinversion per-pago; el allCandidatese global se aplica después
                   cuota_inversor = abono_capital
                     .plus(abono_interes)
                     .plus(inv.emite_factura ? abono_iva : isr.neg());
@@ -1538,7 +1539,7 @@ const mes = fechaParaMes
         })
       );
 
-      // Aplicar reinversión variable como tope global sobre el total
+      // Aplicar reinversión variable como allCandidatese global sobre el total
       if (inv.reinversion === "reinversion_variable") {
         const montoReinv = new Big(inv.monto_reinversion ?? 0);
         const reinversion = montoReinv.gt(subtotal.total_cuota) ? subtotal.total_cuota : montoReinv;
@@ -1835,7 +1836,7 @@ export async function getInvestorTotalsGlobales(
           cuota_inversor = new Big(0);
           break;
         case "reinversion_variable":
-          // Se calcula como sin_reinversion per-pago; el tope global se aplica después
+          // Se calcula como sin_reinversion per-pago; el allCandidatese global se aplica después
           cuota_inversor = abono_capital.plus(interesTotal);
           break;
         default:
@@ -1860,7 +1861,7 @@ export async function getInvestorTotalsGlobales(
     subtotal.total_capital_actual = subtotal.total_capital_actual.plus(capital_actual);
   }
 
-  // Aplicar reinversión variable como tope global sobre el total
+  // Aplicar reinversión variable como allCandidatese global sobre el total
   if (inv.reinversion === "reinversion_variable") {
     const montoReinv = new Big(inv.monto_reinversion ?? 0);
     const reinversion = montoReinv.gt(subtotal.total_cuota) ? subtotal.total_cuota : montoReinv;
@@ -2452,7 +2453,7 @@ export async function getInvestorMirrorSummary(
           cuota_inversor = new Big(0);
           break;
         case "reinversion_variable":
-          // Se calcula como sin_reinversion per-pago; el tope global se aplica después
+          // Se calcula como sin_reinversion per-pago; el allCandidatese global se aplica después
           cuota_inversor = abono_capital.plus(interesTotal);
           break;
         default:
@@ -2477,7 +2478,7 @@ export async function getInvestorMirrorSummary(
     sg.total_capital_actual = sg.total_capital_actual.plus(capital_actual);
   }
 
-  // Aplicar reinversión variable como tope global sobre el total
+  // Aplicar reinversión variable como allCandidatese global sobre el total
   if (inv.reinversion === "reinversion_variable") {
     const montoReinv = new Big(inv.monto_reinversion ?? 0);
     const reinversion = montoReinv.gt(sg.total_cuota) ? sg.total_cuota : montoReinv;
@@ -5166,7 +5167,7 @@ export async function testUploadAndEmail(investorId: number, testEmail: string) 
  * que será reemplazado por la consulta real cuando esté lista.
  */
 export async function getCreditosEspejoPendientes() {
-  // 1. Créditos espejo pendientes con info del inversionista
+  // 1. Créditos espejo pendientes con info del inversionista + crédito + usuario
   const pendientes = await db
     .select({
       id: creditos_inversionistas_espejo.id,
@@ -5184,6 +5185,9 @@ export async function getCreditosEspejoPendientes() {
       fecha_inicio_participacion: creditos_inversionistas_espejo.fecha_inicio_participacion,
       status: creditos_inversionistas_espejo.status,
       tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion,
+      // Info del crédito
+      numero_credito_sifco: creditos.numero_credito_sifco,
+      nombre_usuario: usuarios.nombre,
       // Info inversionista (solo para agrupar, no se incluye en creditosPendientes)
       _nombre_inversionista: inversionistas.nombre,
       _dpi: inversionistas.dpi,
@@ -5197,6 +5201,14 @@ export async function getCreditosEspejoPendientes() {
       inversionistas,
       eq(creditos_inversionistas_espejo.inversionista_id, inversionistas.inversionista_id)
     )
+    .innerJoin(
+      creditos,
+      eq(creditos_inversionistas_espejo.credito_id, creditos.credito_id)
+    )
+    .innerJoin(
+      usuarios,
+      eq(creditos.usuario_id, usuarios.usuario_id)
+    )
     .where(
       sql`${creditos_inversionistas_espejo.status} IN ('pendiente_reinversion', 'pendiente_compra_cartera')`
     );
@@ -5205,10 +5217,7 @@ export async function getCreditosEspejoPendientes() {
     return [];
   }
 
-  // 2. Placeholder: traer 5 créditos random (reemplazar después por la consulta real)
-  const otrosCreditos = await getOtrosCreditosPlaceholder();
-
-  // 3. Agrupar por inversionista
+  // 2. Agrupar por inversionista
   type CreditoSinInversionista = Omit<typeof pendientes[number], '_nombre_inversionista' | '_dpi' | '_email' | '_moneda' | '_monto_reinversion' | '_saldo_reinversion'>;
 
   const agrupado = new Map<number, {
@@ -5220,7 +5229,6 @@ export async function getCreditosEspejoPendientes() {
     monto_reinversion: string | null;
     saldo_reinversion: string;
     creditosPendientes: CreditoSinInversionista[];
-    otrosCreditos: typeof otrosCreditos;
   }>();
 
   for (const row of pendientes) {
@@ -5235,7 +5243,6 @@ export async function getCreditosEspejoPendientes() {
         monto_reinversion: _monto_reinversion,
         saldo_reinversion: _saldo_reinversion,
         creditosPendientes: [],
-        otrosCreditos,
       });
     }
     agrupado.get(row.inversionista_id)!.creditosPendientes.push(creditoData);
@@ -5244,38 +5251,3 @@ export async function getCreditosEspejoPendientes() {
   return Array.from(agrupado.values());
 }
 
-/**
- * TODO: Reemplazar esta función por la consulta real cuando esté lista.
- * Por ahora trae 5 créditos random de la tabla creditos.
- */
-async function getOtrosCreditosPlaceholder() {
-  // TODO: Reemplazar por la consulta real cuando esté lista
-  const resultado = await db
-    .select({
-      credito_id: creditos.credito_id,
-      usuario_id: creditos.usuario_id,
-      numero_credito_sifco: creditos.numero_credito_sifco,
-      capital: creditos.capital,
-      porcentaje_interes: creditos.porcentaje_interes,
-      deudatotal: creditos.deudatotal,
-      cuota_interes: creditos.cuota_interes,
-      cuota: creditos.cuota,
-      iva_12: creditos.iva_12,
-      plazo: creditos.plazo,
-      statusCredit: creditos.statusCredit,
-      formato_credito: creditos.formato_credito,
-      tipoCredito: creditos.tipoCredito,
-      fecha_creacion: creditos.fecha_creacion,
-      monto_aportado_cash_in: creditos_inversionistas.monto_aportado,
-    })
-    .from(creditos)
-    .innerJoin(
-      creditos_inversionistas,
-      and(
-        eq(creditos.credito_id, creditos_inversionistas.credito_id),
-        eq(creditos_inversionistas.inversionista_id, 86)
-      )
-    )
-    .limit(5);
-  return resultado;
-}

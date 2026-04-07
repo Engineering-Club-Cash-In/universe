@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useMemo, useCallback } from "react";
-import { useSesionesPendientes } from "../hooks/useSesionesPendientes";
-import type { InversionistaSesionPendiente } from "../services/services";
+import { useSesionesPendientes, useCompletarEspejo, useReemplazarInversionistaCredito, useCreditCandidates } from "../hooks/useSesionesPendientes";
+import type { InversionistaSesionPendiente, OtroCreditoDisponible } from "../services/services";
 import {
   Loader2,
   Search,
@@ -16,7 +16,6 @@ import {
   Mail,
   CreditCard,
   X,
-  ChevronRight,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -164,7 +163,7 @@ export function SesionesPendientes() {
         ) : (
           <div className="space-y-4">
             {filtered.map((inv) => (
-              <InvestorCard key={inv.inversionista_id} investor={inv} onRefetch={refetch} />
+              <InvestorCard key={inv.inversionista_id} investor={inv} />
             ))}
           </div>
         )}
@@ -173,34 +172,30 @@ export function SesionesPendientes() {
   );
 }
 
+function getCashInMonto(oc: OtroCreditoDisponible): number {
+  const cube = oc.inversionistas.find((i) => i.es_cube);
+  return cube?.monto_aportado ?? 0;
+}
+
 // ============================================
 // Construir destinos con capacidad
 // ============================================
 function buildDestinos(
-  investor: InversionistaSesionPendiente,
-  removedCreditId: number,
+  candidates: OtroCreditoDisponible[],
   moneda: string
 ): CreditoDestino[] {
   const destinos: CreditoDestino[] = [];
 
-  for (const oc of investor.otrosCreditos) {
+  for (const oc of candidates) {
+    const cashInMonto = getCashInMonto(oc);
     destinos.push({
       id: oc.credito_id,
-      label: `${oc.numero_credito_sifco || `#${oc.credito_id}`} · Aportado: ${formatQ(oc.monto_aportado_cash_in, moneda)}`,
-      capacidad: Number(oc.monto_aportado_cash_in) || Infinity,
+      label: `${oc.numero_credito_sifco || `#${oc.credito_id}`} · ${oc.credito_completo?.usuario?.nombre ?? ""} · Aportado: ${formatQ(cashInMonto, moneda)}`,
+      capacidad: cashInMonto || oc.capital_activo,
       tipo: "existente",
     });
   }
 
-  for (const cp of investor.creditosPendientes) {
-    if (cp.id === removedCreditId) continue;
-    destinos.push({
-      id: cp.credito_id * -1,
-      label: `#${cp.credito_id} · ${statusLabel(cp.status)} · Aportado: ${formatQ(cp.monto_aportado, moneda)}`,
-      capacidad: Number(cp.monto_aportado) || Infinity,
-      tipo: "pendiente",
-    });
-  }
 
   return destinos;
 }
@@ -210,25 +205,23 @@ function buildDestinos(
 // ============================================
 function InvestorCard({
   investor,
-  onRefetch,
 }: {
   investor: InversionistaSesionPendiente;
-  onRefetch: () => void;
 }) {
   const [expanded, setExpanded] = useState(true);
-  const [showCreditos, setShowCreditos] = useState(false);
   const [editingCreditId, setEditingCreditId] = useState<number | null>(null);
   const [selectedDestinoIds, setSelectedDestinoIds] = useState<Set<number>>(new Set());
-  const [isSaving, setIsSaving] = useState(false);
-  const [isConfirming, setIsConfirming] = useState(false);
+  const reemplazar = useReemplazarInversionistaCredito();
+  const completarEspejo = useCompletarEspejo();
+  const { data: candidates = [] } = useCreditCandidates();
 
   const isEditing = editingCreditId !== null;
   const editingCredit = investor.creditosPendientes.find((c) => c.id === editingCreditId);
 
   const destinos = useMemo(() => {
     if (!editingCreditId) return [];
-    return buildDestinos(investor, editingCreditId, investor.moneda);
-  }, [editingCreditId, investor]);
+    return buildDestinos(candidates, investor.moneda);
+  }, [editingCreditId, investor, candidates]);
 
   const montoAportado = editingCredit ? Number(editingCredit.monto_aportado) : 0;
 
@@ -265,50 +258,54 @@ function InvestorCard({
     });
   }, []);
 
-  const handleSave = useCallback(async () => {
-    if (!editingCreditId || !isBalanced) return;
-    setIsSaving(true);
-    try {
-      const payload = {
+  const handleSave = useCallback(() => {
+    if (!editingCreditId || !isBalanced || !editingCredit) return;
+
+    const tipoOp = editingCredit.status === "pendiente_reinversion"
+      ? "reinversion" as const
+      : "compra_cartera" as const;
+
+    reemplazar.mutate(
+      {
         inversionista_id: investor.inversionista_id,
         credito_espejo_removido_id: editingCreditId,
+        tipo_operacion: tipoOp,
+        porcentaje_cash_in: Number(editingCredit.porcentaje_cash_in),
+        porcentaje_inversion: Number(editingCredit.porcentaje_participacion_inversionista),
         reasignaciones: Array.from(distribucion.entries()).map(([destId, monto]) => ({
           credito_destino_id: destId,
           monto,
         })),
-      };
+      },
+      {
+        onSuccess: () => {
+          toast.success("Reasignación guardada correctamente.");
+          setEditingCreditId(null);
+          setSelectedDestinoIds(new Set());
+        },
+        onError: (err) => {
+          toast.error(err?.message || "Error al guardar la reasignación");
+        },
+      }
+    );
+  }, [editingCreditId, isBalanced, editingCredit, distribucion, investor, reemplazar]);
 
-      // TODO: reemplazar con el POST real cuando el endpoint exista
-      console.log("POST /reasignar-credito-espejo", payload);
-      toast.info("Reasignación guardada (endpoint pendiente).");
-      setEditingCreditId(null);
-      setSelectedDestinoIds(new Set());
-      onRefetch();
-    } catch (err: any) {
-      toast.error(err?.message || "Error al guardar");
-    } finally {
-      setIsSaving(false);
-    }
-  }, [editingCreditId, isBalanced, distribucion, investor, onRefetch]);
-
-  const handleConfirm = useCallback(async () => {
-    setIsConfirming(true);
-    try {
-      const payload = {
+  const handleConfirm = useCallback(() => {
+    completarEspejo.mutate(
+      {
+        creditos: investor.creditosPendientes.map((c) => c.credito_id),
         inversionista_id: investor.inversionista_id,
-        creditos_ids: investor.creditosPendientes.map((c) => c.id),
-      };
-
-      // TODO: reemplazar con el POST real cuando el endpoint exista
-      console.log("POST /confirmar-sesion-inversionista", payload);
-      toast.info("Sesión confirmada (endpoint pendiente).");
-      onRefetch();
-    } catch (err: any) {
-      toast.error(err?.message || "Error al confirmar");
-    } finally {
-      setIsConfirming(false);
-    }
-  }, [investor, onRefetch]);
+      },
+      {
+        onSuccess: () => {
+          toast.success("Sesión confirmada correctamente.");
+        },
+        onError: (err) => {
+          toast.error(err?.message || "Error al confirmar la sesión");
+        },
+      }
+    );
+  }, [completarEspejo, investor]);
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
@@ -387,7 +384,8 @@ function InvestorCard({
                   <div className="flex items-center gap-3 px-3 py-2.5">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-xs font-bold text-gray-900">#{credito.credito_id}</span>
+                        <span className="text-xs font-bold text-gray-900">{credito.numero_credito_sifco}</span>
+                        <span className="text-[11px] text-gray-500">{credito.nombre_usuario}</span>
                         <Badge variant="outline" className={`text-[9px] py-0 ${statusColor(credito.status)}`}>
                           {statusLabel(credito.status)}
                         </Badge>
@@ -418,10 +416,9 @@ function InvestorCard({
                       <button
                         type="button"
                         onClick={() => handleStartEdit(credito.id)}
-                        className="text-gray-300 hover:text-red-400 transition-colors p-1 rounded hover:bg-red-50 shrink-0"
-                        title="Quitar crédito y reasignar"
+                        className="text-[11px] text-gray-400 hover:text-red-500 transition-colors flex items-center gap-1 px-1.5 py-1 rounded hover:bg-red-50 shrink-0"
                       >
-                        <X className="w-3.5 h-3.5" />
+                        <X className="w-3 h-3" />Quitar
                       </button>
                     ) : null}
                   </div>
@@ -492,12 +489,12 @@ function InvestorCard({
                           <Button
                             size="sm"
                             onClick={handleSave}
-                            disabled={isSaving || !isBalanced}
+                            disabled={reemplazar.isPending || !isBalanced}
                             className={`gap-1 text-[11px] h-7 text-white ${
                               isBalanced ? "bg-blue-600 hover:bg-blue-700" : "bg-gray-400 cursor-not-allowed"
                             }`}
                           >
-                            {isSaving
+                            {reemplazar.isPending
                               ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
                               : <Check className="w-3 h-3" aria-hidden="true" />
                             }
@@ -512,45 +509,7 @@ function InvestorCard({
             })}
           </div>
 
-          {/* Créditos disponibles (colapsado) */}
-          {investor.otrosCreditos.length > 0 && (
-            <div>
-              <button
-                type="button"
-                className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-400 uppercase tracking-wide hover:text-gray-600 transition-colors"
-                onClick={() => setShowCreditos((p) => !p)}
-              >
-                {showCreditos
-                  ? <ChevronDown className="w-3 h-3" aria-hidden="true" />
-                  : <ChevronRight className="w-3 h-3" aria-hidden="true" />
-                }
-                Créditos Disponibles ({investor.otrosCreditos.length})
-              </button>
-              {showCreditos && (
-                <div className="space-y-1.5 mt-2">
-                  {investor.otrosCreditos.map((oc) => (
-                    <div key={oc.credito_id} className="flex items-center justify-between bg-gray-50 rounded-md px-3 py-2 border border-gray-100 text-xs">
-                      <div className="min-w-0">
-                        <span className="font-medium text-gray-800">{oc.numero_credito_sifco || `#${oc.credito_id}`}</span>
-                        <span className="text-gray-400 ml-2">
-                          {oc.tipoCredito && <span className="capitalize">{oc.tipoCredito.toLowerCase()}</span>}
-                          {oc.capital && Number(oc.capital) > 0 && <span> · Capital: {formatQ(oc.capital, investor.moneda)}</span>}
-                        </span>
-                        {oc.statusCredit && (
-                          <Badge variant="outline" className="text-[9px] py-0 ml-2 border-green-200 text-green-700 bg-green-50">
-                            {oc.statusCredit}
-                          </Badge>
-                        )}
-                      </div>
-                      <span className="font-bold text-blue-700 tabular-nums shrink-0 ml-3">
-                        {formatQ(oc.monto_aportado_cash_in, investor.moneda)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+
 
           {/* Confirmar sesión - solo visible cuando NO hay reasignación activa */}
           {!isEditing && (
@@ -558,10 +517,10 @@ function InvestorCard({
               <Button
                 size="sm"
                 onClick={handleConfirm}
-                disabled={isConfirming}
+                disabled={completarEspejo.isPending}
                 className="gap-1 text-[11px] h-7 bg-blue-600 text-white hover:bg-blue-700"
               >
-                {isConfirming
+                {completarEspejo.isPending
                   ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
                   : <Check className="w-3 h-3" aria-hidden="true" />
                 }

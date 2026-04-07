@@ -245,11 +245,11 @@ export function ModalReinversionCombinada({
 
         {/* Paginación */}
         {totalPages > 1 && (
-          <div className="px-6 py-2 border-t flex items-center justify-center gap-2">
+          <div className="px-6 py-2 border-t border-gray-200 flex items-center justify-center gap-2">
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page === 1}
-              className="px-3 py-1 text-sm rounded border disabled:opacity-40 hover:bg-gray-50"
+              className="px-3 py-1 text-sm rounded border border-gray-300 bg-white text-gray-700 disabled:opacity-40 hover:bg-gray-100"
             >
               Anterior
             </button>
@@ -259,7 +259,7 @@ export function ModalReinversionCombinada({
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={page === totalPages}
-              className="px-3 py-1 text-sm rounded border disabled:opacity-40 hover:bg-gray-50"
+              className="px-3 py-1 text-sm rounded border border-gray-300 bg-white text-gray-700 disabled:opacity-40 hover:bg-gray-100"
             >
               Siguiente
             </button>

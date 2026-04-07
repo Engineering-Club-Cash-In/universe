@@ -16,7 +16,7 @@ import Big from "big.js";
 // ============================================================
 
 // ID fijo de Cube Investments S.A. en la base de datos
-const CUBE_ID = 86;
+export const CUBE_ID = 86;
 
 interface InversionistaResult {
   inversionista_id: number;
@@ -112,7 +112,8 @@ function calcCapitalProximityBonus(
 // ============================================================
 
 export async function getCreditCandidates(
-  monto?: number
+  monto?: number,
+  limit?: number
 ): Promise<CreditCandidate[]> {
   console.log("\n🔍 ========== getCreditCandidates ==========");
   console.log(`   monto: ${monto ?? "no especificado"}`);
@@ -425,6 +426,11 @@ export async function getCreditCandidates(
 
   // Ordenar DESC por score
   candidates.sort((a, b) => b.score - a.score);
+
+  // Si se especificó un límite, cortar antes de las queries de relaciones
+  if (limit !== undefined) {
+    candidates.splice(limit);
+  }
 
   // ──────────────────────────────────────────────────────────
   // 8. Opcional: Agregar todos los datos relaciones (a petición)

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import {
 	formatDate,
 	formatGuatemalaDate,
+	formatGuatemalaDateTime,
 	getStatusLabel,
 } from "@/lib/crm-formatters";
 import type { client } from "@/utils/orpc";
@@ -265,7 +266,7 @@ export const opportunitiesColumns: ColumnDef<Opportunity>[] = [
 		),
 		cell: ({ row }) => {
 			const date = row.getValue("createdAt") as Date | string;
-			return <span className="text-sm">{formatGuatemalaDate(date)}</span>;
+			return <span className="text-sm">{formatGuatemalaDateTime(date)}</span>;
 		},
 	},
 ];

@@ -1,20 +1,35 @@
 import { Elysia, t } from "elysia";
-import { replaceInvestorCredit } from "../controllers/replaceInvestorCredit";
+import { manualReassignInvestor } from "../controllers/replaceInvestorCredit";
 
 export const replaceInvestorCreditRouter = new Elysia().post(
   "/reemplazar-inversionista-credito",
-  replaceInvestorCredit,
+  manualReassignInvestor,
   {
     body: t.Object({
-      creditos: t.Union([
-        t.Number({ minimum: 1 }),
-        t.Array(t.Number({ minimum: 1 }), { minItems: 1 }),
-      ]),
+      inversionista_id: t.Number({ minimum: 1 }),
+      credito_espejo_removido_id: t.Number({ minimum: 1 }),
+      tipo_operacion: t.Optional(
+        t.Union([
+          t.Literal("reinversion"),
+          t.Literal("compra_cartera"),
+        ]),
+      ),
+      porcentaje_cash_in: t.Optional(t.Number({ minimum: 0, maximum: 100 })),
+      porcentaje_inversion: t.Optional(
+        t.Number({ minimum: 0, maximum: 100 }),
+      ),
+      reasignaciones: t.Array(
+        t.Object({
+          credito_destino_id: t.Number({ minimum: 1 }),
+          monto: t.Number({ minimum: 0.01 }),
+        }),
+        { minItems: 1 },
+      ),
     }),
     detail: {
-      summary: "Reemplazar inversionistas pendientes en créditos",
+      summary: "Reasignar inversionista manualmente entre créditos",
       description:
-        "Recibe credito_id(s), busca los inversionistas con status pendiente en espejo, los reubica en créditos nuevos (via getCreditCandidates), y luego limpia los créditos viejos devolviendo el monto a CUBE.",
+        "Saca al inversionista del crédito origen (devolviendo su monto a CUBE en padre y espejo), y lo asigna a los créditos destino especificados (restando de CUBE). Todo se recalcula en ambas tablas.",
       tags: ["Inversionistas", "Créditos", "Espejo"],
     },
   },

@@ -543,6 +543,10 @@ export async function exportPagosConInversionistasExcel(
     { header: "Fecha Aplicado", key: "fechaAplicado", width: 20 },
     { header: "Origen Pago", key: "origenPago", width: 18 },
     { header: "Boletas", key: "boletas", width: 50 },
+    { header: "Banco", key: "bancoNombre", width: 20 },
+    { header: "Cuenta Empresa", key: "cuentaEmpresaNombre", width: 20 },
+    { header: "Banco Empresa", key: "cuentaEmpresaBanco", width: 20 },
+    { header: "Número Cuenta Empresa", key: "cuentaEmpresaNumero", width: 20 },
   ];
 
   const totalCols = columns.length;
@@ -614,6 +618,10 @@ export async function exportPagosConInversionistasExcel(
       fechaAplicado: item.fechaAplicado ?? "",
       origenPago: item.origenPago ?? "",
       boletas: boletas.map((b: any) => b.urlBoleta).filter(Boolean).join("\n"),
+      bancoNombre: item.bancoNombre ?? "",
+      cuentaEmpresaNombre: item.cuentaEmpresaNombre ?? "",
+      cuentaEmpresaBanco: item.cuentaEmpresaBanco ?? "",
+      cuentaEmpresaNumero: item.cuentaEmpresaNumero ?? "",
     };
 
     if (inversionistas.length === 0) {

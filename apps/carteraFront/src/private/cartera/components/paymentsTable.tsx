@@ -263,6 +263,7 @@ export function PaymentsTable() {
   const [fechaInicio, setFechaInicio] = React.useState("");
   const [fechaFin, setFechaFin] = React.useState("");
   const [fechaAplicado, setFechaAplicado] = React.useState("");
+  const [fechaBoleta, setFechaBoleta] = React.useState("");
 
   // Filtros de crédito
   const [sifco, setSifco] = React.useState("");
@@ -462,6 +463,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
     inversionistaId,
     usuarioNombre: usuarioNombre || undefined,
     validationStatus: validationStatusFilter || undefined,
+    fechaBoleta: fechaBoleta || undefined,
   });
 
   const pagos: PagoDataInvestor[] = data?.data || [];
@@ -500,6 +502,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
         inversionistaId,
         usuarioNombre: usuarioNombre || undefined,
         validationStatus: validationStatusFilter || undefined,
+        fechaBoleta: fechaBoleta || undefined,
         excel: true,
       });
 
@@ -539,6 +542,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
         inversionistaId,
         usuarioNombre: usuarioNombre || undefined,
         validationStatus: validationStatusFilter || undefined,
+        fechaBoleta: fechaBoleta || undefined,
         reportAdvisor: true,
       });
 
@@ -592,6 +596,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                 setFechaInicio("");
                 setFechaFin("");
                 setFechaAplicado("");
+                setFechaBoleta("");
                 setCategoriaCredito("");
                 setFormatoCredito("");
                 setSoloAplicados(undefined);
@@ -702,6 +707,14 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                   />
                 </div>
               )}
+              <div className="pt-1">
+                <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Fecha de Boleta</label>
+                <DatePickerMUI
+                  value={fechaBoleta}
+                  onChange={(value) => { setFechaBoleta(value); setPage(1); }}
+                  disableFuture={false}
+                />
+              </div>
             </div>
 
             {/* Columna 2: Crédito y Usuario */}

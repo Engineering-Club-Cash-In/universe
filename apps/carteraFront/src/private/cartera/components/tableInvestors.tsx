@@ -17,6 +17,7 @@ import {
   Trash2,
   Upload,
   FileText,
+  ShoppingCart,
 } from "lucide-react";
 import {
   useGetInvestors,
@@ -59,6 +60,7 @@ import { ConfirmationModal } from "@/components/ui/confirmation-modal";
 import { CrearBoletaInversionista } from "./investorPayment";
 import { InvestorDocumentsModal } from "./investorDocuments";
 import { toast } from "sonner";
+import { useAgregarInversionistaCredito } from "../hooks/useAgregarInversionistaCredito";
 
 const PER_PAGE_OPTIONS = [5, 10, 20, 50, 100, 200, 500];
 
@@ -259,6 +261,13 @@ export function TableInvestors() {
   const [selectedInvestorData, setSelectedInvestorData] = useState<
     InvestorPayload | undefined
   >();
+  // Compra de cartera
+  const [compraCarteraOpen, setCompraCarteraOpen] = useState(false);
+  const [compraCarteraInvId, setCompraCarteraInvId] = useState<number | null>(null);
+  const [compraCarteraMonto, setCompraCarteraMonto] = useState("");
+  const [compraCarteraFecha, setCompraCarteraFecha] = useState("");
+  const agregarInvCredito = useAgregarInversionistaCredito();
+
   const [incluirLiquidados, setIncluirLiquidados] = useState(false);
   const [numeroCuota, setNumeroCuota] = useState<number | undefined>(undefined);
   // Consulta con paginación y filtro por id
@@ -1146,6 +1155,21 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 >
                   <Edit className="mr-2.5 h-4 w-4 text-amber-500" />
                   <span className="text-sm font-medium text-gray-700">Editar</span>
+                </DropdownMenuItem>
+
+                {/* Compra de Cartera */}
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCompraCarteraInvId(inv.inversionista_id);
+                    setCompraCarteraMonto("");
+                    setCompraCarteraFecha(new Date().toISOString().split("T")[0]);
+                    setCompraCarteraOpen(true);
+                  }}
+                  className="cursor-pointer rounded-lg px-3 py-2.5 focus:bg-emerald-50"
+                >
+                  <ShoppingCart className="mr-2.5 h-4 w-4 text-emerald-500" />
+                  <span className="text-sm font-medium text-gray-700">Compra de Cartera</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -2286,6 +2310,97 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
         cancelText={null}
         variant="success"
       />
+
+      {/* Modal Compra de Cartera */}
+      <Dialog
+        open={compraCarteraOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCompraCarteraOpen(false);
+            setCompraCarteraInvId(null);
+          }
+        }}
+      >
+        <DialogContent className="bg-white dark:bg-gray-900 sm:max-w-md z-[60]">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold">Compra de Cartera</DialogTitle>
+            <DialogDescription>
+              Ingresa el monto y la fecha de inicio de participación
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <label htmlFor="compra-monto" className="text-sm font-medium text-gray-700">
+                Monto aportado
+              </label>
+              <Input
+                id="compra-monto"
+                type="number"
+                min={0.01}
+                step="0.01"
+                placeholder="0.00"
+                value={compraCarteraMonto}
+                onChange={(e) => setCompraCarteraMonto(e.target.value)}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <label htmlFor="compra-fecha" className="text-sm font-medium text-gray-700">
+                Fecha inicio participación
+              </label>
+              <Input
+                id="compra-fecha"
+                type="date"
+                value={compraCarteraFecha}
+                onChange={(e) => setCompraCarteraFecha(e.target.value)}
+                className="mt-1"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={() => {
+                setCompraCarteraOpen(false);
+                setCompraCarteraInvId(null);
+              }}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              disabled={agregarInvCredito.isPending || !compraCarteraMonto || Number(compraCarteraMonto) <= 0}
+              onClick={() => {
+                if (!compraCarteraInvId || !compraCarteraMonto) return;
+                agregarInvCredito.mutate(
+                  {
+                    inversionista_id: compraCarteraInvId,
+                    monto_aportado: Number(compraCarteraMonto),
+                    tipo_operacion: "compra_cartera",
+                    fecha_inicio_participacion: compraCarteraFecha || undefined,
+                  },
+                  {
+                    onSuccess: () => {
+                      toast.success("Compra de cartera registrada correctamente");
+                      setCompraCarteraOpen(false);
+                      setCompraCarteraInvId(null);
+                      refetch();
+                      refetchTotales();
+                    },
+                    onError: (err) => {
+                      toast.error(err?.message || "Error al registrar compra de cartera");
+                    },
+                  }
+                );
+              }}
+              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+            >
+              {agregarInvCredito.isPending ? "Guardando…" : "Confirmar"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       </div>
     </div>

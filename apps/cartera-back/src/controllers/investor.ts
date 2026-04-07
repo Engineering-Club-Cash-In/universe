@@ -39,6 +39,7 @@ import {
   type EstadoLiquidacionResumenFilter,
 } from "../utils/investorLiquidationSummary";
 import { getCreditCandidates, CUBE_ID } from "./assignCapital";
+import { addInvestorToCredit } from "./addInvestorToCredit";
 
 // ============================================
 // 🆕 TIPOS Y CONFIGURACIÓN PARA CONSULTAS ORIGINALES/ESPEJO
@@ -2672,7 +2673,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
       // FASE 2: TRANSACCION (datos financieros)
       // Si algo falla, se hace rollback de TODO
       // ========================================
-      const { liquidacion, updateResult } = await db.transaction(async (tx) => {
+      const { liquidacion, updateResult, debeReinvertir, montoReinvertido } = await db.transaction(async (tx) => {
 
         // Crear registro de liquidación
         const [liquidacion] = await tx
@@ -2706,6 +2707,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
 
         // Reinversiones
         const montoReinvertido = new Big(reinvTotal);
+        let debeReinvertir = false;
         if (montoReinvertido.gt(0)) {
           await tx.update(inversionistas)
             .set({
@@ -2717,6 +2719,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
             .set({ monto_capital: "0", monto_interes: "0", monto_total: "0" })
             .where(eq(reinversiones.inversionista_id, inv_id));
 
+          debeReinvertir = true;
           console.log(`  ✅ Saldo reinversión actualizado (+${montoReinvertido.toFixed(2)})`);
         }
 
@@ -2799,7 +2802,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
           }
         }
 
-        return { liquidacion, updateResult };
+        return { liquidacion, updateResult, debeReinvertir, montoReinvertido };
       });
 
       // ========================================
@@ -2884,6 +2887,57 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
             boleta_id: boletaPendiente?.boleta_id ?? 0,
             boleta_url: boletaPendiente?.boleta_url ?? "",
           });
+        }
+
+        // ========================================
+        // FASE 4: REINVERSIÓN AUTOMÁTICA (post-reporte)
+        // Si hubo monto de reinversión, se llama addInvestorToCredit
+        // para distribuir el saldo en créditos candidatos.
+        // ========================================
+        if (debeReinvertir) {
+          try {
+            console.log(`  🔄 Ejecutando reinversión automática por Q${montoReinvertido.toFixed(2)}...`);
+
+            // Calcular mediana de porcentajes desde los créditos actuales del inversionista
+            const creditosInv = await db
+              .select({
+                porcentaje_participacion_inversionista: creditos_inversionistas.porcentaje_participacion_inversionista,
+                porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
+              })
+              .from(creditos_inversionistas)
+              .where(eq(creditos_inversionistas.inversionista_id, inv_id));
+
+            const moda = (arr: number[]) => {
+              if (arr.length === 0) return 0;
+              const freq = new Map<number, number>();
+              for (const v of arr) freq.set(v, (freq.get(v) ?? 0) + 1);
+              let maxFreq = 0, result = arr[0];
+              for (const [val, count] of freq) {
+                if (count > maxFreq) { maxFreq = count; result = val; }
+              }
+              return result;
+            };
+
+            const modaInversion = moda(creditosInv.map((c) => Number(c.porcentaje_participacion_inversionista)));
+            const modaCashIn = moda(creditosInv.map((c) => Number(c.porcentaje_cash_in)));
+
+            console.log(`  📊 Moda porcentaje inversión: ${modaInversion}%, cash in: ${modaCashIn}%`);
+
+            const reinversionResult = await addInvestorToCredit({
+              body: {
+                inversionista_id: inv_id,
+                monto_aportado: montoReinvertido.toNumber(),
+                porcentaje_inversion: modaInversion,
+                porcentaje_cash_in: modaCashIn,
+                tipo_operacion: "reinversion",
+              },
+              set: { status: 200 },
+            });
+
+            console.log(`  ✅ Reinversión automática completada:`, reinversionResult);
+          } catch (reinvError) {
+            console.error(`  ❌ Error en reinversión automática (liquidación ya guardada):`, reinvError);
+          }
         }
       } catch (excelError) {
         console.error(`  ❌ Error generando Excel (datos financieros ya guardados):`, excelError);

@@ -66,7 +66,7 @@ export const assignCapitalRouter = new Elysia()
     }
 
     try {
-      const allCandidates = await getCreditCandidates(monto);
+      const allCandidates = await getCreditCandidates(monto, minimo);
 
       let result: CreditCandidate[];
 
@@ -81,11 +81,7 @@ export const assignCapitalRouter = new Elysia()
         }
         result = insertables;
 
-      } else if (minimo !== undefined) {
-        // ── Top N por score ────────────────────────────────────
-        result = allCandidates.slice(0, minimo);
-
-      } else {
+      }  else {
         // ── Default: todos ─────────────────────────────────────
         result = allCandidates;
       }

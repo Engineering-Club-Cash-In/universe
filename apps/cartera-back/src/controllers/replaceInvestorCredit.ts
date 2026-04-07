@@ -712,3 +712,569 @@ export const replaceInvestorCredit = async ({ body, set }: any) => {
     };
   }
 };
+
+// ========================================
+// SCHEMA DE VALIDACIÓN - REASIGNACIÓN MANUAL
+// ========================================
+// Este endpoint NO usa getCreditCandidates.
+// Vos le decís exactamente:
+//   - De qué crédito sacar al inversionista (credito_espejo_removido_id)
+//   - A qué créditos moverlo y con cuánto (reasignaciones[])
+//   - Qué tipo de operación es (para el status del espejo)
+//   - Opcionalmente porcentajes (si no, se jalan del padre si ya existe)
+//
+// El monto que se saca del crédito origen se le devuelve a CUBE.
+// En los créditos destino se le resta a CUBE el monto asignado.
+// Todo se recalcula en ambas tablas (padre y espejo).
+// ========================================
+
+const manualReassignSchema = z.object({
+  inversionista_id: z.number().int().positive(),
+  credito_espejo_removido_id: z.number().int().positive(),
+  tipo_operacion: z.enum(["reinversion", "compra_cartera"]).default("reinversion"),
+  porcentaje_cash_in: z.number().min(0).max(100).optional(),
+  porcentaje_inversion: z.number().min(0).max(100).optional(),
+  reasignaciones: z
+    .array(
+      z.object({
+        credito_destino_id: z.number().int().positive(),
+        monto: z.number().positive(),
+      }),
+    )
+    .min(1),
+});
+
+// ========================================
+// CONTROLLER: manualReassignInvestor
+// ========================================
+//
+// FLUJO:
+// 1. Validar el body
+// 2. Traer la data del crédito ORIGEN y sus inversionistas
+// 3. Encontrar al inversionista en el crédito origen y obtener su monto
+// 4. PRIMERO: Procesar las REASIGNACIONES (agregar a créditos destino)
+//    Para cada crédito destino:
+//      a. Traer data del crédito e inversionistas actuales
+//      b. Restarle a CUBE el monto de la reasignación
+//      c. Agregar al inversionista (o sumarle si ya existía)
+//      d. Recalcular todo
+//      e. Nuke & rebuild en padre y espejo
+// 5. DESPUÉS: Limpiar el crédito ORIGEN
+//      a. Quitar al inversionista del array
+//      b. Devolverle su monto a CUBE
+//      c. Si CUBE no existía (fue eliminado antes), crearlo con el monto devuelto
+//      d. Recalcular todo
+//      e. Nuke & rebuild en padre y espejo (espejo queda todo "completado")
+//
+// EJEMPLO:
+//   Body:
+//   {
+//     "inversionista_id": 108,
+//     "credito_espejo_removido_id": 8784,
+//     "tipo_operacion": "reinversion",
+//     "reasignaciones": [
+//       { "credito_destino_id": 8827, "monto": 60000 },
+//       { "credito_destino_id": 8802, "monto": 40000 }
+//     ]
+//   }
+//
+//   Resultado:
+//   - Crédito 8784: Luis sale, Q100,000 devueltos a CUBE, recalculado
+//   - Crédito 8827: Luis entra con Q60,000, restado de CUBE, recalculado
+//   - Crédito 8802: Luis entra con Q40,000, restado de CUBE, recalculado
+// ========================================
+
+export const manualReassignInvestor = async ({ body, set }: any) => {
+  try {
+    // ================================================================
+    // PASO 1: VALIDAR SCHEMA
+    // ================================================================
+    const parseResult = manualReassignSchema.safeParse(body);
+    if (!parseResult.success) {
+      set.status = 400;
+      return {
+        message: "Validation failed",
+        errors: parseResult.error.flatten().fieldErrors,
+      };
+    }
+
+    const {
+      inversionista_id,
+      credito_espejo_removido_id,
+      tipo_operacion,
+      porcentaje_cash_in,
+      porcentaje_inversion,
+      reasignaciones,
+    } = parseResult.data;
+
+    const resultadosAsignacion: any[] = [];
+    const errores: any[] = [];
+    let origenInfo: { credito_id: number; numero_credito_sifco: string; monto_devuelto: string } | null = null;
+
+    await db.transaction(async (tx) => {
+      // ================================================================
+      // PASO 2: TRAER DATA DEL CRÉDITO ORIGEN
+      // Necesitamos saber cuánto tiene el inversionista ahí para
+      // devolverle ese monto a CUBE cuando lo saquemos.
+      // ================================================================
+      const [creditoOrigen] = await tx
+        .select({
+          credito_id: creditos.credito_id,
+          cuota: creditos.cuota,
+          porcentaje_interes: creditos.porcentaje_interes,
+          seguro_10_cuotas: creditos.seguro_10_cuotas,
+          gps: creditos.gps,
+          membresias_pago: creditos.membresias_pago,
+          numero_credito_sifco: creditos.numero_credito_sifco,
+        })
+        .from(creditos)
+        .where(eq(creditos.credito_id, credito_espejo_removido_id))
+        .limit(1);
+
+      if (!creditoOrigen) {
+        set.status = 404;
+        return { success: false, message: "Crédito origen no encontrado" };
+      }
+
+      // ── Traer inversionistas actuales del origen (padre) ──
+      const invOrigenActuales = await tx
+        .select({
+          inversionista_id: creditos_inversionistas.inversionista_id,
+          monto_aportado: creditos_inversionistas.monto_aportado,
+          porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
+          porcentaje_participacion_inversionista:
+            creditos_inversionistas.porcentaje_participacion_inversionista,
+          fecha_inicio_participacion:
+            creditos_inversionistas.fecha_inicio_participacion,
+        })
+        .from(creditos_inversionistas)
+        .where(eq(creditos_inversionistas.credito_id, credito_espejo_removido_id));
+
+      // ── Verificar que el inversionista esté en el crédito origen ──
+      const invEnOrigen = invOrigenActuales.find(
+        (inv) => inv.inversionista_id === inversionista_id,
+      );
+
+      if (!invEnOrigen) {
+        set.status = 404;
+        return {
+          success: false,
+          message: `Inversionista ${inversionista_id} no encontrado en crédito ${credito_espejo_removido_id}`,
+        };
+      }
+
+      const montoEnOrigen = new Big(invEnOrigen.monto_aportado);
+
+      console.log(
+        `\n🔄 Reasignación manual: inversionista ${inversionista_id}`,
+      );
+      console.log(
+        `   Origen: crédito ${creditoOrigen.numero_credito_sifco} - Q${montoEnOrigen}`,
+      );
+
+      // ================================================================
+      // PASO 3: DETERMINAR PORCENTAJES
+      // Si vienen en el body, usar esos. Si no, jalar del crédito origen.
+      // ================================================================
+      const porcCashIn = new Big(
+        porcentaje_cash_in ?? Number(invEnOrigen.porcentaje_cash_in),
+      );
+      const porcInversion = new Big(
+        porcentaje_inversion ??
+          Number(invEnOrigen.porcentaje_participacion_inversionista),
+      );
+
+      const statusEspejo =
+        tipo_operacion === "reinversion"
+          ? "pendiente_reinversion"
+          : "pendiente_compra_cartera";
+
+      // ================================================================
+      // PASO 4: PROCESAR REASIGNACIONES (AGREGAR A CRÉDITOS DESTINO)
+      // Para cada crédito destino:
+      //   - Traer data del crédito e inversionistas
+      //   - Restarle a CUBE el monto
+      //   - Agregar al inversionista
+      //   - Recalcular todo y nuke & rebuild en padre y espejo
+      // ================================================================
+      for (const reasignacion of reasignaciones) {
+        const { credito_destino_id, monto } = reasignacion;
+        const montoAsignar = new Big(monto);
+
+        console.log(
+          `\n   📌 Asignando Q${montoAsignar} a crédito ${credito_destino_id}`,
+        );
+
+        // ── Traer data del crédito destino ──
+        const [creditoDestino] = await tx
+          .select({
+            credito_id: creditos.credito_id,
+            cuota: creditos.cuota,
+            porcentaje_interes: creditos.porcentaje_interes,
+            seguro_10_cuotas: creditos.seguro_10_cuotas,
+            gps: creditos.gps,
+            membresias_pago: creditos.membresias_pago,
+            numero_credito_sifco: creditos.numero_credito_sifco,
+          })
+          .from(creditos)
+          .where(eq(creditos.credito_id, credito_destino_id))
+          .limit(1);
+
+        if (!creditoDestino) {
+          errores.push({
+            credito_destino_id,
+            razon: "Crédito destino no encontrado",
+          });
+          continue;
+        }
+
+        // ── Traer inversionistas actuales del destino ──
+        const invDestinoActuales = await tx
+          .select({
+            inversionista_id: creditos_inversionistas.inversionista_id,
+            monto_aportado: creditos_inversionistas.monto_aportado,
+            porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
+            porcentaje_participacion_inversionista:
+              creditos_inversionistas.porcentaje_participacion_inversionista,
+            fecha_inicio_participacion:
+              creditos_inversionistas.fecha_inicio_participacion,
+          })
+          .from(creditos_inversionistas)
+          .where(eq(creditos_inversionistas.credito_id, credito_destino_id));
+
+        // ── Buscar CUBE en el destino ──
+        const cubeDestino = invDestinoActuales.find(
+          (inv) => inv.inversionista_id === CUBE_INVESTMENT_ID,
+        );
+
+        if (!cubeDestino) {
+          errores.push({
+            credito_destino_id,
+            razon: "CUBE no encontrado en crédito destino",
+          });
+          continue;
+        }
+
+        const montoCubeDestino = new Big(cubeDestino.monto_aportado);
+
+        // ── Validar que CUBE tenga suficiente ──
+        if (montoAsignar.gt(montoCubeDestino)) {
+          errores.push({
+            credito_destino_id,
+            razon: `Monto Q${montoAsignar} excede CUBE Q${montoCubeDestino} en crédito destino`,
+          });
+          continue;
+        }
+
+        // ── Armar nuevo array: restar a CUBE, agregar inversionista ──
+        const nuevoArrayDestino: {
+          inversionista_id: number;
+          monto_aportado: Big;
+          porcentaje_cash_in: Big;
+          porcentaje_inversion: Big;
+          fecha_inicio_participacion: string;
+        }[] = [];
+
+        for (const inv of invDestinoActuales) {
+          if (inv.inversionista_id === CUBE_INVESTMENT_ID) {
+            // ── Restarle a CUBE ──
+            const nuevoMontoCube = montoCubeDestino.minus(montoAsignar);
+            if (nuevoMontoCube.gt(0)) {
+              nuevoArrayDestino.push({
+                inversionista_id: inv.inversionista_id,
+                monto_aportado: nuevoMontoCube,
+                porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
+                porcentaje_inversion: new Big(
+                  inv.porcentaje_participacion_inversionista,
+                ),
+                fecha_inicio_participacion: inv.fecha_inicio_participacion,
+              });
+            }
+            // Si queda en 0, CUBE se elimina
+          } else if (inv.inversionista_id === inversionista_id) {
+            // ── Inversionista ya existía: sumarle ──
+            nuevoArrayDestino.push({
+              inversionista_id: inv.inversionista_id,
+              monto_aportado: new Big(inv.monto_aportado).plus(montoAsignar),
+              porcentaje_cash_in: porcCashIn,
+              porcentaje_inversion: porcInversion,
+              fecha_inicio_participacion: inv.fecha_inicio_participacion,
+            });
+          } else {
+            // ── Otro inversionista: copiar igual ──
+            nuevoArrayDestino.push({
+              inversionista_id: inv.inversionista_id,
+              monto_aportado: new Big(inv.monto_aportado),
+              porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
+              porcentaje_inversion: new Big(
+                inv.porcentaje_participacion_inversionista,
+              ),
+              fecha_inicio_participacion: inv.fecha_inicio_participacion,
+            });
+          }
+        }
+
+        // ── Si el inversionista no existía en el destino, agregarlo ──
+        const yaExisteDestino = nuevoArrayDestino.some(
+          (inv) => inv.inversionista_id === inversionista_id,
+        );
+        if (!yaExisteDestino) {
+          nuevoArrayDestino.push({
+            inversionista_id,
+            monto_aportado: montoAsignar,
+            porcentaje_cash_in: porcCashIn,
+            porcentaje_inversion: porcInversion,
+            fecha_inicio_participacion: new Date().toISOString().split("T")[0],
+          });
+        }
+
+        // ── Recalcular y nuke & rebuild PADRE del destino ──
+        const dataPadreDestino = recalcularInversionistas(
+          nuevoArrayDestino,
+          creditoDestino,
+          credito_destino_id,
+          creditoDestino.numero_credito_sifco,
+        );
+
+        await tx
+          .delete(creditos_inversionistas)
+          .where(eq(creditos_inversionistas.credito_id, credito_destino_id));
+
+        if (dataPadreDestino.length > 0) {
+          await tx.insert(creditos_inversionistas).values(dataPadreDestino);
+        }
+
+        // ── Recalcular y nuke & rebuild ESPEJO del destino ──
+        const parentCuotasDestino = new Map(
+          dataPadreDestino.map((p) => [
+            p.inversionista_id,
+            p.cuota_inversionista,
+          ]),
+        );
+
+        const dataEspejoDestino = recalcularInversionistas(
+          nuevoArrayDestino,
+          creditoDestino,
+          credito_destino_id,
+          creditoDestino.numero_credito_sifco,
+        );
+
+        const dataEspejoDestinoFinal = dataEspejoDestino.map((inv) => ({
+          ...inv,
+          cuota_inversionista:
+            parentCuotasDestino.get(inv.inversionista_id) ??
+            inv.cuota_inversionista,
+          status: (inv.inversionista_id === inversionista_id
+            ? statusEspejo
+            : "completado") as
+            | "pendiente_reinversion"
+            | "pendiente_compra_cartera"
+            | "completado",
+          updated_at: new Date(),
+        }));
+
+        await tx
+          .delete(creditos_inversionistas_espejo)
+          .where(
+            eq(creditos_inversionistas_espejo.credito_id, credito_destino_id),
+          );
+
+        if (dataEspejoDestinoFinal.length > 0) {
+          await tx
+            .insert(creditos_inversionistas_espejo)
+            .values(dataEspejoDestinoFinal);
+        }
+
+        resultadosAsignacion.push({
+          credito_destino_id,
+          numero_credito_sifco: creditoDestino.numero_credito_sifco,
+          monto_asignado: montoAsignar.toString(),
+          inversionistas_padre: dataPadreDestino.length,
+          inversionistas_espejo: dataEspejoDestinoFinal.length,
+          cube_eliminado: !nuevoArrayDestino.some(
+            (inv) => inv.inversionista_id === CUBE_INVESTMENT_ID,
+          ),
+        });
+
+        console.log(
+          `   ✅ Crédito ${creditoDestino.numero_credito_sifco} - Q${montoAsignar} asignado`,
+        );
+      }
+
+      // ================================================================
+      // PASO 5: LIMPIAR EL CRÉDITO ORIGEN
+      // Ahora que las reasignaciones están hechas, sacamos al inversionista
+      // del crédito origen y le devolvemos su monto a CUBE.
+      //
+      // - Quitar al inversionista del array
+      // - Sumarle su monto a CUBE (devolverle lo que le quitamos)
+      // - Si CUBE no existía (fue eliminado), crearlo con el monto devuelto
+      // - Recalcular todo
+      // - Nuke & rebuild en AMBAS tablas (padre y espejo)
+      // - Espejo queda todo como "completado"
+      // ================================================================
+      console.log(
+        `\n🧹 Limpiando crédito origen ${creditoOrigen.numero_credito_sifco} - devolviendo Q${montoEnOrigen} a CUBE`,
+      );
+
+      // ── Re-traer inversionistas del origen (pueden haber cambiado si el origen
+      //    también era un destino en las reasignaciones) ──
+      const invOrigenFresh = await tx
+        .select({
+          inversionista_id: creditos_inversionistas.inversionista_id,
+          monto_aportado: creditos_inversionistas.monto_aportado,
+          porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
+          porcentaje_participacion_inversionista:
+            creditos_inversionistas.porcentaje_participacion_inversionista,
+          fecha_inicio_participacion:
+            creditos_inversionistas.fecha_inicio_participacion,
+        })
+        .from(creditos_inversionistas)
+        .where(eq(creditos_inversionistas.credito_id, credito_espejo_removido_id));
+
+      // ── Armar array SIN el inversionista y CON CUBE restaurado ──
+      const arrayOrigenLimpio: {
+        inversionista_id: number;
+        monto_aportado: Big;
+        porcentaje_cash_in: Big;
+        porcentaje_inversion: Big;
+        fecha_inicio_participacion: string;
+      }[] = [];
+
+      for (const inv of invOrigenFresh) {
+        if (inv.inversionista_id === inversionista_id) {
+          // ── Quitar al inversionista: no incluir ──
+          continue;
+        } else if (inv.inversionista_id === CUBE_INVESTMENT_ID) {
+          // ── CUBE: devolverle el monto ──
+          arrayOrigenLimpio.push({
+            inversionista_id: inv.inversionista_id,
+            monto_aportado: new Big(inv.monto_aportado).plus(montoEnOrigen),
+            porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
+            porcentaje_inversion: new Big(
+              inv.porcentaje_participacion_inversionista,
+            ),
+            fecha_inicio_participacion: inv.fecha_inicio_participacion,
+          });
+        } else {
+          // ── Otros: copiar igual ──
+          arrayOrigenLimpio.push({
+            inversionista_id: inv.inversionista_id,
+            monto_aportado: new Big(inv.monto_aportado),
+            porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
+            porcentaje_inversion: new Big(
+              inv.porcentaje_participacion_inversionista,
+            ),
+            fecha_inicio_participacion: inv.fecha_inicio_participacion,
+          });
+        }
+      }
+
+      // ── Si CUBE no existía en el origen (raro), crearlo ──
+      const cubeEnOrigen = arrayOrigenLimpio.some(
+        (inv) => inv.inversionista_id === CUBE_INVESTMENT_ID,
+      );
+      if (!cubeEnOrigen) {
+        arrayOrigenLimpio.push({
+          inversionista_id: CUBE_INVESTMENT_ID,
+          monto_aportado: montoEnOrigen,
+          porcentaje_cash_in: new Big(0),
+          porcentaje_inversion: new Big(100),
+          fecha_inicio_participacion: "2025-12-01",
+        });
+      }
+
+      // ── Recalcular y nuke & rebuild PADRE del origen ──
+      const dataPadreOrigenFinal = recalcularInversionistas(
+        arrayOrigenLimpio,
+        creditoOrigen,
+        credito_espejo_removido_id,
+        creditoOrigen.numero_credito_sifco,
+      );
+
+      await tx
+        .delete(creditos_inversionistas)
+        .where(eq(creditos_inversionistas.credito_id, credito_espejo_removido_id));
+
+      if (dataPadreOrigenFinal.length > 0) {
+        await tx.insert(creditos_inversionistas).values(dataPadreOrigenFinal);
+      }
+
+      // ── Recalcular y nuke & rebuild ESPEJO del origen ──
+      // Todo queda como "completado" porque el inversionista ya se fue
+      const parentCuotasOrigenFinal = new Map(
+        dataPadreOrigenFinal.map((p) => [
+          p.inversionista_id,
+          p.cuota_inversionista,
+        ]),
+      );
+
+      const dataEspejoOrigenFinal = recalcularInversionistas(
+        arrayOrigenLimpio,
+        creditoOrigen,
+        credito_espejo_removido_id,
+        creditoOrigen.numero_credito_sifco,
+      );
+
+      const dataEspejoOrigenConStatus = dataEspejoOrigenFinal.map((inv) => ({
+        ...inv,
+        cuota_inversionista:
+          parentCuotasOrigenFinal.get(inv.inversionista_id) ??
+          inv.cuota_inversionista,
+        status: "completado" as const,
+        updated_at: new Date(),
+      }));
+
+      await tx
+        .delete(creditos_inversionistas_espejo)
+        .where(
+          eq(
+            creditos_inversionistas_espejo.credito_id,
+            credito_espejo_removido_id,
+          ),
+        );
+
+      if (dataEspejoOrigenConStatus.length > 0) {
+        await tx
+          .insert(creditos_inversionistas_espejo)
+          .values(dataEspejoOrigenConStatus);
+      }
+
+      console.log(
+        `   🧹 Crédito origen ${creditoOrigen.numero_credito_sifco} limpio - ${dataPadreOrigenFinal.length} inversionistas restantes`,
+      );
+
+      // Guardar info del origen para la respuesta
+      origenInfo = {
+        credito_id: credito_espejo_removido_id,
+        numero_credito_sifco: creditoOrigen.numero_credito_sifco,
+        monto_devuelto: montoEnOrigen.toString(),
+      };
+    });
+
+    // ================================================================
+    // PASO 6: RESPUESTA FINAL
+    // ================================================================
+    set.status = 200;
+    return {
+      success: true,
+      message: `Reasignación manual completada: ${resultadosAsignacion.length} destinos, ${errores.length} errores`,
+      credito_origen: {
+        credito_id: origenInfo?.credito_id,
+        numero_credito_sifco: origenInfo?.numero_credito_sifco,
+        inversionista_removido: inversionista_id,
+        monto_devuelto_a_cube: origenInfo?.monto_devuelto,
+      },
+      reasignaciones: resultadosAsignacion,
+      errores,
+    };
+  } catch (error) {
+    console.error("[manualReassignInvestor] Error:", error);
+    set.status = 500;
+    return {
+      success: false,
+      message: "Error en reasignación manual",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+};

@@ -977,13 +977,16 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         );
         console.log("💵 Pago del mes TOTAL:", pago_del_mesBig.toString());
         console.log("🔍 ========== FIN ==========\n");
-        const cuota_pagada =
+        const todosRestantesEnCero =
           nuevo_interes_restante.eq(0) &&
           nuevo_iva_restante.eq(0) &&
           nuevo_seguro_restante.eq(0) &&
           nuevo_gps_restante.eq(0) &&
           nuevo_membresias_restante.eq(0) &&
           nuevo_capital_restante.eq(0);
+        // Solo marcar como pagada si los restantes están en 0 Y existía un pago previo
+        // (evita marcar como pagada cuando no hay pago existente y los restantes son 0 por default)
+        const cuota_pagada = todosRestantesEnCero && !!existingPago;
         const totalPagado = abono_capital
           .plus(abono_interes)
           .plus(abono_iva_12)

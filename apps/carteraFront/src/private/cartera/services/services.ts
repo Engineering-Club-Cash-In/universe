@@ -1790,6 +1790,7 @@ export interface GetPagosParams {
   usuarioNombre?: string;
   validationStatus?: string;
   reportAdvisor?: boolean;
+  fechaBoleta?: string;
 }
 
 /**

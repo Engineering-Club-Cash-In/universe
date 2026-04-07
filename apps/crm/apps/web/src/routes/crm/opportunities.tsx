@@ -84,6 +84,7 @@ import { authClient } from "@/lib/auth-client";
 import {
 	formatDate,
 	formatGuatemalaDate,
+	formatGuatemalaDateTime,
 	getContractTypeLabel,
 	getLoanPurposeLabel,
 	getSourceLabel,
@@ -239,7 +240,7 @@ function DraggableOpportunityCard({
 					<div className="flex items-center justify-between">
 						<span className="text-muted-foreground text-xs">Creada</span>
 						<span className="text-muted-foreground text-xs">
-							{formatGuatemalaDate(opportunity.createdAt)}
+							{formatGuatemalaDateTime(opportunity.createdAt)}
 						</span>
 					</div>
 					{opportunity.closedAt && (

@@ -28,7 +28,7 @@ export async function getSalesUserWithLeastOpportunities() {
 			role: user.role,
 		})
 		.from(user)
-		.where(and(eq(user.role, "sales"), eq(user.assignLeads, true)));
+		.where(and(eq(user.role, "sales"), eq(user.assignLeads, true), eq(user.banned, false)));
 
 	if (salesUsers.length === 0) {
 		return null;
@@ -196,7 +196,6 @@ export async function getOpenOpportunityBySource(
 					eq(opportunities.status, "open"),
 					eq(opportunities.status, "on_hold"),
 				),
-				eq(opportunities.source, source),
 			),
 		)
 		.orderBy(desc(opportunities.createdAt))

@@ -3433,6 +3433,33 @@ export async function getCreditosEspejoPendientesService(): Promise<Inversionist
   return res.data;
 }
 
+// ============================================================
+// Agregar inversionista a crédito (compra cartera / reinversión)
+// ============================================================
+export interface AgregarInversionistaCreditoPayload {
+  inversionista_id: number;
+  monto_aportado: number;
+  tipo_operacion: "reinversion" | "compra_cartera";
+  fecha_inicio_participacion?: string;
+  porcentaje_cash_in?: number;
+  porcentaje_inversion?: number;
+}
+
+export interface AgregarInversionistaCreditoResponse {
+  success: boolean;
+  message: string;
+}
+
+export async function agregarInversionistaCreditoService(
+  payload: AgregarInversionistaCreditoPayload
+): Promise<AgregarInversionistaCreditoResponse> {
+  const res = await api.post<AgregarInversionistaCreditoResponse>(
+    `${API_URL}/agregar-inversionista-credito`,
+    payload
+  );
+  return res.data;
+}
+
 export interface CompletarEspejoPayload {
   creditos: number[];
   inversionista_id: number;

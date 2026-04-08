@@ -345,29 +345,54 @@ export const addInvestorToCredit = async ({ body, set }: any) => {
 
           // ================================================================
           // PASO 3c: DETERMINAR PORCENTAJES DEL NUEVO INVERSIONISTA
-          // Si el inversionista YA EXISTE en creditos_inversionistas de
-          // este crédito Y no se pasaron porcentajes en el request:
-          //   → Jalar los porcentajes que ya tiene (porcentaje_cash_in, porcentaje_inversion)
-          // Si NO existe o sí se pasaron porcentajes:
-          //   → Usar los del request (default: cash_in=0%, inversion=100%)
+          // Prioridad:
+          //   1. Si se pasaron en el request → usar esos
+          //   2. Si el inversionista YA EXISTE en ESTE crédito → jalar de ahí
+          //   3. Si existe en CUALQUIER OTRO crédito → jalar de ahí
+          //   4. Default: cash_in=20%, inversion=80%
           // ================================================================
           let porcCashIn: Big;
           let porcInversion: Big;
 
-          const existenteEnPadre = inversionistasActuales.find(
-            (inv: any) => inv.inversionista_id === inversionista_id,
-          );
-
-          if (existenteEnPadre && porcentaje_cash_in === undefined) {
-            // Ya existe → jalar sus porcentajes actuales
-            porcCashIn = new Big(existenteEnPadre.porcentaje_cash_in);
-            porcInversion = new Big(
-              existenteEnPadre.porcentaje_participacion_inversionista,
-            );
+          if (porcentaje_cash_in !== undefined) {
+            // Porcentajes explícitos del request
+            porcCashIn = new Big(porcentaje_cash_in);
+            porcInversion = new Big(porcentaje_inversion ?? 80);
           } else {
-            // No existe o se pasaron porcentajes explícitos
-            porcCashIn = new Big(porcentaje_cash_in ?? 0);
-            porcInversion = new Big(porcentaje_inversion ?? 100);
+            // Buscar en ESTE crédito primero
+            const existenteEnPadre = inversionistasActuales.find(
+              (inv: any) => inv.inversionista_id === inversionista_id,
+            );
+
+            if (existenteEnPadre) {
+              porcCashIn = new Big(existenteEnPadre.porcentaje_cash_in);
+              porcInversion = new Big(
+                existenteEnPadre.porcentaje_participacion_inversionista,
+              );
+            } else {
+              // No existe en este crédito → buscar en CUALQUIER otro crédito
+              const [otroCredito] = await tx
+                .select({
+                  porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
+                  porcentaje_participacion_inversionista:
+                    creditos_inversionistas.porcentaje_participacion_inversionista,
+                })
+                .from(creditos_inversionistas)
+                .where(eq(creditos_inversionistas.inversionista_id, inversionista_id))
+                .limit(1);
+
+              if (otroCredito) {
+                // Encontró en otro crédito → jalar esos porcentajes
+                porcCashIn = new Big(otroCredito.porcentaje_cash_in);
+                porcInversion = new Big(
+                  otroCredito.porcentaje_participacion_inversionista,
+                );
+              } else {
+                // No existe en ningún crédito → defaults 80/20
+                porcCashIn = new Big(20);
+                porcInversion = new Big(80);
+              }
+            }
           }
 
           // ================================================================

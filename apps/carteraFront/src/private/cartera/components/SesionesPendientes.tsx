@@ -268,7 +268,7 @@ function InvestorCard({
     reemplazar.mutate(
       {
         inversionista_id: investor.inversionista_id,
-        credito_espejo_removido_id: editingCreditId,
+        credito_espejo_removido_id: editingCredit.credito_id,
         tipo_operacion: tipoOp,
         porcentaje_cash_in: Number(editingCredit.porcentaje_cash_in),
         porcentaje_inversion: Number(editingCredit.porcentaje_participacion_inversionista),

@@ -52,6 +52,7 @@ import { ModalCaidoCredit } from "./ModalCaidoCredit";
 
 export function ListaCreditosPagos() {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
+  const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
   const { user } = useAuth();
   const isAdmin = user?.role === "ADMIN";
   const userAsesorId = user?.asesor_id;
@@ -80,7 +81,7 @@ export function ListaCreditosPagos() {
     setEstado,
     estado,
     estados,
-    handleExcel,
+    downloadExcel,
     asesorId,
     handleAsesorId,
     setAsesorId,
@@ -240,6 +241,7 @@ export function ListaCreditosPagos() {
     investors: Investor[];
     advisors: any[];
     loading: boolean;
+    refetch: () => void;
   };
 
   const [openMoraModal, setOpenMoraModal] = useState(false);
@@ -580,13 +582,14 @@ export function ListaCreditosPagos() {
           </label>
           <button
             type="button"
+            disabled={isDownloadingExcel}
             onClick={async () => {
               try {
-                handleExcel(true);
-                const response = await refetch();
+                setIsDownloadingExcel(true);
+                const response = await downloadExcel();
 
-                if (response.data && "excelUrl" in response.data) {
-                  const url = (response.data as any).excelUrl;
+                if (response && "excelUrl" in response) {
+                  const url = (response as any).excelUrl;
                   window.open(url, "_blank");
                   toast.success("Excel generado correctamente");
                 } else {
@@ -596,13 +599,13 @@ export function ListaCreditosPagos() {
                 console.error("❌ Error generando Excel:", err);
                 toast.error("Error al generar el Excel");
               } finally {
-                handleExcel(false);
+                setIsDownloadingExcel(false);
               }
             }}
-            className="px-4 py-2 rounded-lg bg-green-600 text-white font-semibold hover:bg-green-700 transition shadow-md flex items-center gap-2"
+            className="px-4 py-2 rounded-lg bg-green-600 text-white font-semibold hover:bg-green-700 transition shadow-md flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
           >
-            <FileSpreadsheet className="w-5 h-5" />
-            Descargar Excel
+            {isDownloadingExcel ? <Loader2 className="w-5 h-5 animate-spin" /> : <FileSpreadsheet className="w-5 h-5" />}
+            {isDownloadingExcel ? "Generando..." : "Descargar Excel"}
           </button>
         </div>
       </div>
@@ -813,7 +816,7 @@ export function ListaCreditosPagos() {
           }}
           numeroCreditoSifco={selectedCreditFechaInicio.sifco}
           fechaActual={selectedCreditFechaInicio.fechaActual}
-          changedBy={user?.email ?? user?.name ?? "admin"}
+          changedBy={user?.email ?? "admin"}
           onSuccess={() => {
             setTimeout(() => {
               queryClient.invalidateQueries({

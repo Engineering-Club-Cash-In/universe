@@ -298,33 +298,66 @@ export function TableInvestors() {
     },
     isDraft  // solo se activa cuando isDraft = true
   );
+  // 🆕 MEMO: Selección optimizada del inversionista actual (Recommendation 1 & 3)
+  const currentInv = useMemo(() => {
+    if (!data?.inversionistas?.length) return null;
 
-  // Fuente de subtotales: mirror summary en Draft, totales normales en modo normal
-  const subtotales = isDraft && mirrorSummaryData
-    ? {
-        total_abono_capital:         mirrorSummaryData.subtotal.total_abono_capital,
-        total_abono_interes:         mirrorSummaryData.subtotal.total_abono_interes,
-        total_abono_iva:             mirrorSummaryData.subtotal.total_abono_iva,
-        total_isr:                   mirrorSummaryData.subtotal.total_isr,
-        total_cuota_sin_reinversion: mirrorSummaryData.subtotal.total_cuota_sin_reinversion,
-        total_cuota_con_reinversion: mirrorSummaryData.subtotal.total_cuota_con_reinversion,
-        total_monto_aportado:        mirrorSummaryData.subtotal.total_monto_aportado,
-        total_reinversion_capital:   mirrorSummaryData.subtotal.total_reinversion_capital,
-        total_reinversion_interes:   mirrorSummaryData.subtotal.total_reinversion_interes,
-        total_reinversion:           mirrorSummaryData.subtotal.total_reinversion,
-      }
-    : {
-        total_abono_capital:         totalesData?.totales.total_abono_capital         ?? 0,
-        total_abono_interes:         totalesData?.totales.total_abono_interes         ?? 0,
-        total_abono_iva:             totalesData?.totales.total_abono_iva             ?? 0,
-        total_isr:                   totalesData?.totales.total_isr                   ?? 0,
-        total_cuota_sin_reinversion: totalesData?.totales.total_cuota_sin_reinversion ?? 0,
-        total_cuota_con_reinversion: totalesData?.totales.total_cuota_con_reinversion ?? 0,
-        total_monto_aportado:        totalesData?.totales.total_monto_aportado        ?? 0,
-        total_reinversion_capital:   totalesData?.totales.total_reinversion_capital   ?? 0,
-        total_reinversion_interes:   totalesData?.totales.total_reinversion_interes   ?? 0,
-        total_reinversion:           totalesData?.totales.total_reinversion           ?? 0,
-      };
+    // Si hay un ID seleccionado explícitamente y válido
+    if (selectedInvestor !== "" && selectedInvestor !== undefined) {
+      return (
+        data.inversionistas.find(
+          (inv: any) => inv.inversionista_id === Number(selectedInvestor)
+        ) || data.inversionistas[0]
+      );
+    }
+
+    // Comportamiento por defecto: el primero de la lista
+    return data.inversionistas[0];
+  }, [data?.inversionistas, selectedInvestor]);
+
+  // 🆕 Lógica solicitada: Ajustar totales según emite_factura
+  // Si emite factura: Cuota = Capital + Interés + IVA
+  // Si NO emite factura: Cuota = Capital + Interés - ISR
+  const emiteFactura = isDraft && mirrorSummaryData 
+    ? mirrorSummaryData.emite_factura 
+    : (currentInv?.emite_factura ?? false);
+
+  const subtotales = useMemo(() => {
+    const raw = isDraft && mirrorSummaryData 
+      ? {
+          total_abono_capital:         mirrorSummaryData.subtotal.total_abono_capital,
+          total_abono_interes:         mirrorSummaryData.subtotal.total_abono_interes,
+          total_abono_iva:             mirrorSummaryData.subtotal.total_abono_iva,
+          total_isr:                   mirrorSummaryData.subtotal.total_isr,
+          total_cuota_sin_reinversion: mirrorSummaryData.subtotal.total_cuota_sin_reinversion,
+          total_cuota_con_reinversion: mirrorSummaryData.subtotal.total_cuota_con_reinversion,
+          total_monto_aportado:        mirrorSummaryData.subtotal.total_monto_aportado,
+          total_reinversion_capital:   mirrorSummaryData.subtotal.total_reinversion_capital,
+          total_reinversion_interes:   mirrorSummaryData.subtotal.total_reinversion_interes,
+          total_reinversion:           mirrorSummaryData.subtotal.total_reinversion,
+        }
+      : {
+          total_abono_capital:         totalesData?.totales.total_abono_capital         ?? 0,
+          total_abono_interes:         totalesData?.totales.total_abono_interes         ?? 0,
+          total_abono_iva:             totalesData?.totales.total_abono_iva             ?? 0,
+          total_isr:                   totalesData?.totales.total_isr                   ?? 0,
+          total_cuota_sin_reinversion: totalesData?.totales.total_cuota_sin_reinversion ?? 0,
+          total_cuota_con_reinversion: totalesData?.totales.total_cuota_con_reinversion ?? 0,
+          total_monto_aportado:        totalesData?.totales.total_monto_aportado        ?? 0,
+          total_reinversion_capital:   totalesData?.totales.total_reinversion_capital   ?? 0,
+          total_reinversion_interes:   totalesData?.totales.total_reinversion_interes   ?? 0,
+          total_reinversion:           totalesData?.totales.total_reinversion           ?? 0,
+        };
+
+    const totalSin = Number(raw.total_abono_capital) + Number(raw.total_abono_interes) + (emiteFactura ? Number(raw.total_abono_iva) : -Number(raw.total_isr));
+    const totalCon = totalSin - Number(raw.total_reinversion);
+
+    return {
+      ...raw,
+      total_cuota_sin_reinversion: totalSin,
+      total_cuota_con_reinversion: totalCon,
+    };
+  }, [isDraft, mirrorSummaryData, totalesData, emiteFactura]);
 
 
   const liquidateMutation = useLiquidateByInvestor();
@@ -350,22 +383,6 @@ export function TableInvestors() {
     tienePagosPendientes
   );
 
-  // 🆕 MEMO: Selección optimizada del inversionista actual (Recommendation 1 & 3)
-  const currentInv = useMemo(() => {
-    if (!data?.inversionistas?.length) return null;
-
-    // Si hay un ID seleccionado explícitamente y válido
-    if (selectedInvestor !== "" && selectedInvestor !== undefined) {
-      return (
-        data.inversionistas.find(
-          (inv: any) => inv.inversionista_id === Number(selectedInvestor)
-        ) || data.inversionistas[0]
-      );
-    }
-
-    // Comportamiento por defecto: el primero de la lista
-    return data.inversionistas[0];
-  }, [data?.inversionistas, selectedInvestor]);
 
   // 🆕 Efecto para activar Modo Borrador automático (Optimizado)
   // Se reducen las dependencias para evitar renders infinitos.
@@ -970,21 +987,35 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
               </div>
             )}
             <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4">
-              <div className={`rounded-lg p-3 shadow-sm border h-full flex flex-col justify-center ${isDraft ? "bg-yellow-50 border-yellow-300" : "bg-white border-blue-100"}`}>
-                <div className="text-xs text-gray-500 mb-1">Total Capital</div>
-                <div className={`font-bold ${isDraft ? "text-yellow-700" : "text-blue-700"}`}>
+              <div className={`rounded-lg p-3 shadow-sm border-2 h-full flex flex-col justify-center ${isDraft ? "bg-white border-yellow-300" : "bg-white border-blue-100"}`}>
+                <div className="text-xs mb-1 font-semibold text-blue-900">
+                  Total Capital
+                </div>
+                <div className="font-bold text-lg text-blue-800">
                   {inv.currencySymbol} {Number(subtotales.total_abono_capital).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                 </div>
               </div>
 
-              <div className={`rounded-lg p-3 shadow-sm border h-full flex flex-col justify-center ${isDraft ? "bg-yellow-50 border-yellow-300" : "bg-white border-indigo-100"}`}>
-                <div className="text-xs text-gray-500 mb-1">Total Interés</div>
-                <div className={`font-bold ${isDraft ? "text-yellow-700" : "text-indigo-700"}`}>
+              <div className={`rounded-lg p-3 shadow-sm border-2 h-full flex flex-col justify-center ${isDraft ? "bg-white border-yellow-300" : "bg-white border-indigo-100"}`}>
+                <div className="text-xs mb-1 font-semibold text-blue-900">
+                  Total Interés
+                </div>
+                <div className="font-bold text-lg text-indigo-700">
                   {inv.currencySymbol} {Number(subtotales.total_abono_interes).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                 </div>
               </div>
 
-              <div className={`rounded-lg p-3 shadow-sm border h-full flex flex-col justify-center ${isDraft ? "bg-yellow-50 border-yellow-300" : "bg-white border-violet-100"}`}>
+              {/* 🆕 TARJETA NUEVA: Interés Ajustado */}
+              <div className={`rounded-lg p-3 shadow-sm border-2 h-full flex flex-col justify-center ${isDraft ? "bg-gradient-to-br from-indigo-50 to-blue-50 border-indigo-300" : "bg-gradient-to-br from-indigo-50 to-blue-50 border-indigo-200"}`}>
+                <div className="text-xs mb-1 font-semibold text-indigo-900">
+                  Interés {inv.emite_factura ? "+ IVA" : "- ISR"}
+                </div>
+                <div className="font-bold text-lg text-indigo-800">
+                  {inv.currencySymbol} {(Number(subtotales.total_abono_interes) + (inv.emite_factura ? Number(subtotales.total_abono_iva) : -Number(subtotales.total_isr))).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                </div>
+              </div>
+
+              <div className={`rounded-lg p-3 shadow-sm border-2 h-full flex flex-col justify-center ${isDraft ? "bg-yellow-50 border-yellow-300" : "bg-white border-violet-100"}`}>
                 <div className="flex gap-3 mb-1">
                   <div>
                     <div className="text-xs text-gray-500">IVA</div>
@@ -1007,11 +1038,11 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 </div>
               </div>
 
-              <div className={`rounded-lg p-3 shadow-sm border-2 h-full flex flex-col justify-center ${isDraft ? "bg-gradient-to-br from-yellow-50 to-amber-50 border-yellow-400" : "bg-gradient-to-br from-green-50 to-emerald-50 border-green-300"}`}>
-                <div className={`text-xs mb-1 font-semibold ${isDraft ? "text-yellow-700" : "text-green-700"}`}>
+              <div className={`rounded-lg p-3 shadow-sm border-2 h-full flex flex-col justify-center ${isDraft ? "bg-white border-yellow-300" : "bg-white border-green-100"}`}>
+                <div className="text-xs mb-1 font-semibold text-blue-900">
                   Cuota Sin Reinversión
                 </div>
-                <div className={`font-bold text-lg ${isDraft ? "text-yellow-900" : "text-green-900"}`}>
+                <div className="font-bold text-lg text-green-700">
                   {inv.currencySymbol} {Number(subtotales.total_cuota_sin_reinversion).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                 </div>
               </div>
@@ -1619,48 +1650,67 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
 
       {/* SUBTOTALES resumen */}
       <div className="flex flex-wrap gap-x-6 gap-y-2 mb-2 text-sm">
-        <div>
-          <span className="font-bold text-blue-900">Total Capital: </span>
-          <span className="text-blue-800 font-bold">
-            {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_abono_capital ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
-          </span>
-        </div>
-        <div>
-          <span className="font-bold text-blue-900">Total Interés: </span>
-          <span className="text-indigo-700 font-bold">
-            {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_abono_interes ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
-          </span>
-        </div>
-        <div>
-          <span className="font-bold text-blue-900">IVA: </span>
-          <span className="text-violet-700 font-bold">
-            {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_abono_iva ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
-          </span>
-        </div>
-        <div>
-          <span className="font-bold text-blue-900">ISR: </span>
-          <span className="text-violet-700 font-bold">
-            {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_isr ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
-          </span>
-        </div>
-        <div>
-          <span className="font-bold text-blue-900">Total IVA + ISR: </span>
-          <span className="text-violet-700 font-bold">
-            {totalesData?.currencySymbol ?? 'Q.'} {(Number(totalesData?.totales.total_abono_iva ?? 0) + Number(totalesData?.totales.total_isr ?? 0)).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
-          </span>
-        </div>
-        <div>
-          <span className="font-bold text-blue-900">Cuota Sin Reinversión: </span>
-          <span className="text-green-700 font-bold">
-            {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_cuota_sin_reinversion ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
-          </span>
-        </div>
-        <div>
-          <span className="font-bold text-blue-900">Cuota Con Reinversión: </span>
-          <span className="text-teal-700 font-bold">
-            {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_cuota_con_reinversion ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
-          </span>
-        </div>
+        {(() => {
+          const s = isDraft ? subtotales : (inv.subtotal || subtotales);
+          const isEmite = inv.emite_factura;
+          const displayIvaIsr = isEmite ? Number(s.total_abono_iva) : -Number(s.total_isr);
+          const displayCuotaSin = Number(s.total_abono_capital) + Number(s.total_abono_interes) + displayIvaIsr;
+          const displayCuotaCon = displayCuotaSin - Number(s.total_reinversion);
+
+          return (
+            <>
+              <div>
+                <span className="font-bold text-blue-900">Total Capital: </span>
+                <span className="text-blue-800 font-bold">
+                  {inv.currencySymbol ?? 'Q.'} {Number(s.total_abono_capital ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div>
+                <span className="font-bold text-blue-900">Total Interés: </span>
+                <span className="text-indigo-700 font-bold">
+                  {inv.currencySymbol ?? 'Q.'} {Number(s.total_abono_interes ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              {/* 🆕 Mobile: Interés Ajustado */}
+              <div>
+                <span className="font-bold text-indigo-900">Interés {isEmite ? "+ IVA" : "- ISR"}: </span>
+                <span className="text-indigo-700 font-bold">
+                  {inv.currencySymbol ?? 'Q.'} {(Number(s.total_abono_interes) + displayIvaIsr).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div>
+                <span className="font-bold text-blue-900">IVA: </span>
+                <span className="text-violet-700 font-bold">
+                  {inv.currencySymbol ?? 'Q.'} {Number(s.total_abono_iva ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div>
+                <span className="font-bold text-blue-900">ISR: </span>
+                <span className="text-violet-700 font-bold">
+                  {inv.currencySymbol ?? 'Q.'} {Number(s.total_isr ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div>
+                <span className="font-bold text-blue-900">Total IVA + ISR: </span>
+                <span className="text-violet-700 font-bold">
+                  {inv.currencySymbol ?? 'Q.'} {(Number(s.total_abono_iva ?? 0) + Number(s.total_isr ?? 0)).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div>
+                <span className="font-bold text-blue-900">Cuota Sin Reinversión: </span>
+                <span className="text-green-700 font-bold">
+                   {inv.currencySymbol ?? 'Q.'} {displayCuotaSin.toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div>
+                <span className="font-bold text-blue-900">Cuota Con Reinversión: </span>
+                <span className="text-teal-700 font-bold">
+                   {inv.currencySymbol ?? 'Q.'} {displayCuotaCon.toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+            </>
+          );
+        })()}
         <div>
           <span className="font-bold text-blue-900">Total Monto Aportado: </span>
           <span className="text-purple-700 font-bold">

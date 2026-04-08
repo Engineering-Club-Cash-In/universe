@@ -1325,34 +1325,14 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                             </div>
                           </div>
                           <div>
-                            <div className="flex gap-3">
-                              <div>
-                                <div className="text-xs text-gray-500">IVA</div>
-                                <div className="font-semibold text-violet-700 text-sm">
-                                  {inv.currencySymbol}
-                                  {Number(cred.total_abono_iva).toLocaleString("es-GT", {
-                                    minimumFractionDigits: 2,
-                                  })}
-                                </div>
-                              </div>
-                              <div>
-                                <div className="text-xs text-gray-500">ISR</div>
-                                <div className="font-semibold text-violet-700 text-sm">
-                                  {inv.currencySymbol}
-                                  {Number(cred.total_isr).toLocaleString("es-GT", {
-                                    minimumFractionDigits: 2,
-                                  })}
-                                </div>
-                              </div>
+                            <div className="text-xs text-gray-500">
+                              IVA + ISR
                             </div>
-                            <div className="mt-1 border-t border-gray-200 pt-1">
-                              <div className="text-xs text-gray-500">Total IVA + ISR</div>
-                              <div className="font-semibold text-violet-700 text-sm">
-                                {inv.currencySymbol}
-                                {(Number(cred.total_abono_iva) + Number(cred.total_isr)).toLocaleString("es-GT", {
-                                  minimumFractionDigits: 2,
-                                })}
-                              </div>
+                            <div className="font-semibold text-violet-700 text-sm">
+                              {inv.currencySymbol}
+                              {(Number(cred.total_abono_iva) + Number(cred.total_isr)).toLocaleString("es-GT", {
+                                minimumFractionDigits: 2,
+                              })}
                             </div>
                           </div>
                           <div>

@@ -532,10 +532,11 @@ export async function insertPagosCreditoInversionistas(
       `   💰 cuota_inversionista original: ${inv.cuota_inversionista}`
     );
 
-    let abono_capital = isCube
-      ? new Big(inv?.cuota_inversionista ?? 0)
-      : new Big(inv.cuota_inversionista ?? 0);
-
+    let abono_capital = new Big(inv.monto_aportado || 0).eq(0)
+      ? new Big(0)
+      : (isCube
+          ? new Big(inv?.cuota_inversionista ?? 0)
+          : new Big(inv.cuota_inversionista ?? 0));
     console.log(`   💰 abono_capital inicial: ${abono_capital.toString()}`);
 
     const totalMontos = montoCashInCalc.plus(montoInversionistaCalc);

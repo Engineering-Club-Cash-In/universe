@@ -643,7 +643,7 @@ export const cobrosRouter = {
 							.innerJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
 							.where(
 								and(
-									ilike(vehicles.licensePlate, `%${searchTerm}%`),
+									sql`LOWER(REPLACE(REPLACE(${vehicles.licensePlate}, '-', ''), ' ', '')) LIKE ${"%" + searchTerm.toLowerCase().replace(/[\s-]+/g, "") + "%"}`,
 									sql`${opportunities.numeroSifco} IS NOT NULL`,
 								),
 							);

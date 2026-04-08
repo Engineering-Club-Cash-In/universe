@@ -446,6 +446,29 @@ export async function insertPagosCreditoInversionistas(
 
     console.log(`   ¿Es Cube? ${isCube ? "SÍ ✅" : "NO ❌"}`);
 
+    // --- Calcular los 4 campos desde monto_aportado (misma lógica que processAndReplaceCreditInvestors) ---
+    const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
+    const porcentajeInversion = new Big(inv.porcentaje_participacion_inversionista);
+    const cuotaCalc = new Big(inv.monto_aportado)
+      .times(currentCredit?.porcentaje_interes ?? 0)
+      .div(100)
+      .round(2);
+
+    const montoInversionistaCalc = cuotaCalc.times(porcentajeInversion).div(100).round(2);
+    const montoCashInCalc = cuotaCalc.times(porcentajeCashIn).div(100).round(2);
+    const ivaInversionistaCalc = montoInversionistaCalc.gt(0)
+      ? montoInversionistaCalc.times(0.12).round(2)
+      : new Big(0);
+    const ivaCashInCalc = montoCashInCalc.gt(0)
+      ? montoCashInCalc.times(0.12).round(2)
+      : new Big(0);
+
+    console.log(`   🔢 Valores calculados desde monto_aportado:`);
+    console.log(`      monto_inversionista: ${montoInversionistaCalc.toString()}`);
+    console.log(`      monto_cash_in: ${montoCashInCalc.toString()}`);
+    console.log(`      iva_inversionista: ${ivaInversionistaCalc.toString()}`);
+    console.log(`      iva_cash_in: ${ivaCashInCalc.toString()}`);
+
     // --- Interés proporcional si fecha_inicio_participacion es del mes anterior ---
     const fechaInicio = inv.fecha_inicio_participacion
       ? new Date(inv.fecha_inicio_participacion + "T00:00:00")
@@ -478,8 +501,8 @@ export async function insertPagosCreditoInversionistas(
       ).getDate();
       const diaInicio = fechaInicio!.getDate(); // ej: 18
 
-      // Interés proporcional = (monto_inversionista / diasDelMes) * diaInicio
-      bigInteres = new Big(inv.monto_inversionista)
+      // Interés proporcional = (montoInversionistaCalc / diasDelMes) * diaInicio
+      bigInteres = montoInversionistaCalc
         .div(diasDelMes)
         .times(diaInicio)
         .round(2);
@@ -494,13 +517,8 @@ export async function insertPagosCreditoInversionistas(
       console.log(`      interés proporcional: ${bigInteres.toString()}`);
       console.log(`      IVA proporcional: ${bigIVA.toString()}`);
     } else {
-      bigInteres = isCube
-        ? new Big(inv.monto_cash_in ?? 0)
-        : new Big(inv.monto_inversionista);
-
-      bigIVA = isCube
-        ? new Big(inv.iva_cash_in ?? 0)
-        : new Big(inv.iva_inversionista);
+      bigInteres = isCube ? montoCashInCalc : montoInversionistaCalc;
+      bigIVA = isCube ? ivaCashInCalc : ivaInversionistaCalc;
     }
 
     console.log(
@@ -520,12 +538,8 @@ export async function insertPagosCreditoInversionistas(
 
     console.log(`   💰 abono_capital inicial: ${abono_capital.toString()}`);
 
-    const totalMontos = new Big(inv.monto_cash_in ?? 0).plus(
-      new Big(inv.monto_inversionista ?? 0)
-    );
-    const totalIVA = new Big(inv.iva_cash_in ?? 0).plus(
-      new Big(inv.iva_inversionista ?? 0)
-    );
+    const totalMontos = montoCashInCalc.plus(montoInversionistaCalc);
+    const totalIVA = ivaCashInCalc.plus(ivaInversionistaCalc);
 
     console.log(
       `   📊 totalMontos (cash_in + inversionista): ${totalMontos.toString()}`

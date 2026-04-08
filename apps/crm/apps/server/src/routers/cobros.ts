@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/server";
-import { and, asc, count, desc, eq, gte, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -633,43 +633,89 @@ export const cobrosRouter = {
 
 					let creditosResponse;
 					if (isPlateSearch) {
-						// Búsqueda por placa: traer todos los créditos para filtrar localmente por vehículo
-						const perPage = 200;
-						const firstPage = await obtenerTodosLosCreditosCarteraBack({
-							mes,
-							anio,
-							page: 1,
-							perPage,
-							cuotasAtrasadas,
-							estado: estadoCartera,
-							time: input.time,
-							email_cobrador: input.emailCobrador,
-						});
+						// Buscar primero la placa en el CRM para obtener el número SIFCO
+						const matchingOpportunities = await db
+							.select({
+								numeroSifco: opportunities.numeroSifco,
+								placa: vehicles.licensePlate,
+							})
+							.from(opportunities)
+							.innerJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+							.where(
+								and(
+									sql`LOWER(REPLACE(REPLACE(${vehicles.licensePlate}, '-', ''), ' ', '')) LIKE ${"%" + searchTerm.toLowerCase().replace(/[\s-]+/g, "") + "%"}`,
+									sql`${opportunities.numeroSifco} IS NOT NULL`,
+								),
+							);
 
-						const allCredits = [...firstPage.data];
-
-						for (let page = 2; page <= firstPage.totalPages; page++) {
-							const nextPage = await obtenerTodosLosCreditosCarteraBack({
+						if (matchingOpportunities.length === 0) {
+							// No se encontró la placa en el CRM, no tiene sentido buscar en cartera
+							creditosResponse = {
+								data: [],
+								page: 1,
+								perPage: 0,
+								totalCount: 0,
+								totalPages: 0,
+							};
+						} else if (matchingOpportunities.length === 1) {
+							// Una sola coincidencia: buscar directamente por número SIFCO (más rápido)
+							const numeroSifco = matchingOpportunities[0].numeroSifco!;
+							console.log(
+								`[Cobros] Placa ${searchTerm} encontró 1 coincidencia, buscando crédito SIFCO: ${numeroSifco}`,
+							);
+							creditosResponse = await obtenerTodosLosCreditosCarteraBack({
 								mes,
 								anio,
-								page,
+								page: 1,
+								perPage: 50,
+								cuotasAtrasadas,
+								estado: estadoCartera,
+								time: input.time,
+								email_cobrador: input.emailCobrador,
+								numero_credito_sifco: numeroSifco,
+							});
+						} else {
+							// Múltiples coincidencias: traer todos los créditos y filtrar localmente
+							console.log(
+								`[Cobros] Placa ${searchTerm} encontró ${matchingOpportunities.length} coincidencias, trayendo todos los créditos`,
+							);
+							const perPage = 200;
+							const firstPage = await obtenerTodosLosCreditosCarteraBack({
+								mes,
+								anio,
+								page: 1,
 								perPage,
 								cuotasAtrasadas,
 								estado: estadoCartera,
 								time: input.time,
 								email_cobrador: input.emailCobrador,
 							});
-							allCredits.push(...nextPage.data);
-						}
 
-						creditosResponse = {
-							...firstPage,
-							data: allCredits,
-							totalCount: allCredits.length,
-							page: 1,
-							perPage: allCredits.length,
-							totalPages: 1,
-						};
+							const allCredits = [...firstPage.data];
+
+							for (let page = 2; page <= firstPage.totalPages; page++) {
+								const nextPage = await obtenerTodosLosCreditosCarteraBack({
+									mes,
+									anio,
+									page,
+									perPage,
+									cuotasAtrasadas,
+									estado: estadoCartera,
+									time: input.time,
+									email_cobrador: input.emailCobrador,
+								});
+								allCredits.push(...nextPage.data);
+							}
+
+							creditosResponse = {
+								...firstPage,
+								data: allCredits,
+								totalCount: allCredits.length,
+								page: 1,
+								perPage: allCredits.length,
+								totalPages: 1,
+							};
+						}
 					} else {
 						// Búsqueda por nombre (cartera-back filtra) o sin búsqueda
 						creditosResponse = await obtenerTodosLosCreditosCarteraBack({

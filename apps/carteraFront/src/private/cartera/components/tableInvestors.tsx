@@ -36,6 +36,7 @@ import {
 } from "../services/services";
 import { useLiquidateByInvestor } from "../hooks/liquidateAllInvestor";
 import { useDownloadInvestorPDF } from "../hooks/downloadInvestorReport";
+import { useDownloadReporteNoLiquidados } from "../hooks/downloadReporteNoLiquidados";
 import { InvestorModal } from "./modalInvestor";
 import { useFalsePayments } from "../hooks/falsePayments";
 import {
@@ -329,6 +330,7 @@ export function TableInvestors() {
   const liquidateMutation = useLiquidateByInvestor();
   const reinversionEnCero = Number(subtotales.total_cuota_con_reinversion) === 0;
   const downloadPDF = useDownloadInvestorPDF();
+  const downloadNoLiquidados = useDownloadReporteNoLiquidados();
   const [query, setQuery] = useState("");
 
   const filteredInvestors =
@@ -934,6 +936,19 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                         <RefreshCw className="w-4 h-4" />
                     )}
                     Recalcular
+                    </button>
+
+                    <button
+                        onClick={() => downloadNoLiquidados.mutate(inv.inversionista_id)}
+                        disabled={downloadNoLiquidados.isPending}
+                        className="flex-1 sm:flex-none bg-emerald-600 text-white px-4 py-2 rounded-lg font-bold shadow-md hover:bg-emerald-700 hover:shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {downloadNoLiquidados.isPending ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                            <FileSpreadsheet className="w-4 h-4" />
+                        )}
+                        No Liquidados
                     </button>
 
                     <button

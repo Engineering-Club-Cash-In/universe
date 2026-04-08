@@ -54,12 +54,7 @@ export async function getCreditosWithUserByMesAnioExcel(
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Créditos");
 
-  // 1️⃣ Buscar el máximo de inversionistas
-  const maxInversionistas = Math.max(
-    ...result.data.map((item) => item.inversionistas.length)
-  );
-
-  // 2️⃣ Definir columnas base
+  // 1️⃣ Definir columnas base y de inversionistas
   const columns: any[] = [
     { header: "Crédito ID", key: "credito_id", width: 12 },
     { header: "Número SIFCO", key: "numero_credito_sifco", width: 20 },
@@ -67,23 +62,21 @@ export async function getCreditosWithUserByMesAnioExcel(
     { header: "Capital", key: "capital", width: 15 },
     { header: "Cuota", key: "cuota", width: 15 },
     { header: "Deuda Total", key: "deuda_total", width: 15 },
-    { header: "Deuda con Mora", key: "deuda_con_mora", width: 15 }, // 🆕
+    { header: "Deuda con Mora", key: "deuda_con_mora", width: 15 },
     { header: "Plazo", key: "plazo", width: 10 },
     { header: "Usuario", key: "usuario", width: 25 },
     { header: "NIT", key: "usuario_nit", width: 20 },
     { header: "Categoría", key: "usuario_categoria", width: 15 },
     { header: "Saldo a Favor", key: "saldo_favor", width: 15 },
     { header: "Asesor", key: "asesor", width: 20 },
-    { header: "Email Asesor", key: "email_asesor", width: 30 }, // 🆕
+    { header: "Email Asesor", key: "email_asesor", width: 30 },
     { header: "Fecha Creación", key: "fecha_creacion", width: 20 },
     { header: "Observaciones", key: "observaciones", width: 50 },
     
-    // 🆕 Columnas de mora
     { header: "Tiene Mora", key: "tiene_mora", width: 12 },
     { header: "Monto Mora", key: "monto_mora", width: 15 },
     { header: "Cuotas Atrasadas", key: "cuotas_atrasadas", width: 18 },
     
-    // 🆕 Columnas de próxima cuota
     { header: "Próxima Cuota #", key: "proxima_cuota_numero", width: 18 },
     { header: "Fecha Vencimiento", key: "proxima_fecha_venc", width: 20 },
     { header: "Proximidad", key: "proximidad_pago", width: 15 },
@@ -93,48 +86,63 @@ export async function getCreditosWithUserByMesAnioExcel(
     { header: "Total CashIn IVA", key: "total_cash_in_iva", width: 20 },
     { header: "Total Inversión Monto", key: "total_inversion_monto", width: 20 },
     { header: "Total Inversión IVA", key: "total_inversion_iva", width: 20 },
-  ];
 
-  // 3️⃣ Agregar columnas dinámicas por inversionista
-  for (let i = 1; i <= maxInversionistas; i++) {
-    columns.push({ header: `Inv${i}_Nombre`, key: `inv${i}_nombre`, width: 25 });
-    columns.push({ header: `Inv${i}_Aportado`, key: `inv${i}_aportado`, width: 15 });
-    columns.push({ header: `Inv${i}_CashIn`, key: `inv${i}_cashin`, width: 15 });
-    columns.push({ header: `Inv${i}_Inversion`, key: `inv${i}_inversion`, width: 15 });
-    columns.push({ header: `Inv${i}_IVA_CashIn`, key: `inv${i}_iva_cashin`, width: 15 });
-    columns.push({ header: `Inv${i}_IVA_Inv`, key: `inv${i}_iva_inversion`, width: 15 });
-    columns.push({ header: `Inv${i}_%Inv`, key: `inv${i}_porcentaje`, width: 10 });
-    columns.push({ header: `Inv${i}_%CashIn`, key: `inv${i}_porcentaje_cashin`, width: 10 });
-  }
+    // Inversionistas (ahora estáticos)
+    { header: "Inversionista Nombre", key: "inv_nombre", width: 25 },
+    { header: "Monto Aportado", key: "inv_aportado", width: 15 },
+    { header: "Monto CashIn", key: "inv_cashin", width: 15 },
+    { header: "Monto Inversión", key: "inv_inversion", width: 15 },
+    { header: "IVA CashIn", key: "inv_iva_cashin", width: 15 },
+    { header: "IVA Inversión", key: "inv_iva_inversion", width: 15 },
+    { header: "% Inversionista", key: "inv_porcentaje", width: 15 },
+    { header: "% CashIn", key: "inv_porcentaje_cashin", width: 15 },
+  ];
 
   sheet.columns = columns;
 
-  // 4️⃣ Poblar filas
+  const headerRow = sheet.getRow(1);
+  headerRow.font = { bold: true, color: { argb: "FFFFFF" } };
+  headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "1F4E79" } };
+  headerRow.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+  headerRow.height = 30;
+
+  const thinBorder = {
+    top: { style: "thin" as const, color: { argb: "D9D9D9" } },
+    bottom: { style: "thin" as const, color: { argb: "D9D9D9" } },
+    left: { style: "thin" as const, color: { argb: "D9D9D9" } },
+    right: { style: "thin" as const, color: { argb: "D9D9D9" } },
+  };
+
+  // 2️⃣ Poblar filas con agrupación
+  let isEvenGroup = false;
+
   result.data.forEach((item) => {
-    const row: any = {
+    isEvenGroup = !isEvenGroup;
+    // F5F9FF is a very light blue. FFFFFF is white. We'll alternate between them.
+    const groupBgColor = isEvenGroup ? "FFFFFF" : "F5F9FF";
+
+    const baseCreditData: any = {
       credito_id: item.creditos.credito_id,
       numero_credito_sifco: item.creditos.numero_credito_sifco,
       estado: item.creditos.statusCredit,
       capital: item.creditos.capital,
       cuota: item.creditos.cuota,
       deuda_total: item.creditos.deudatotal,
-      deuda_con_mora: item.deuda_total_con_mora || item.creditos.deudatotal, // 🆕
+      deuda_con_mora: item.deuda_total_con_mora || item.creditos.deudatotal,
       plazo: item.creditos.plazo,
       usuario: item.usuarios.nombre,
       usuario_nit: item.usuarios.nit,
       usuario_categoria: item.usuarios.categoria,
       saldo_favor: item.usuarios.saldo_a_favor,
       asesor: item.asesores.nombre,
-      email_asesor: "", // 🆕 Lo llenaremos abajo si existe
+      email_asesor: "",
       fecha_creacion: item.creditos.fecha_creacion,
       observaciones: item.creditos.observaciones,
       
-      // 🆕 Mora
       tiene_mora: item.mora ? "Sí" : "No",
       monto_mora: item.mora?.monto_mora || 0,
       cuotas_atrasadas: item.mora?.cuotas_atrasadas || 0,
       
-      // 🆕 Próxima cuota
       proxima_cuota_numero: item.proxima_cuota?.numero_cuota || "N/A",
       proxima_fecha_venc: item.proxima_cuota?.fecha_vencimiento || "N/A",
       proximidad_pago: item.proxima_cuota?.proximidad || "N/A",
@@ -146,22 +154,83 @@ export async function getCreditosWithUserByMesAnioExcel(
       total_inversion_iva: item.resumen.total_inversion_iva,
     };
 
-    // 👉 Agregar inversionistas dinámicos
-    item.inversionistas.forEach((inv, index) => {
-      const i = index + 1;
-      row[`inv${i}_nombre`] = inv.nombre;
-      row[`inv${i}_aportado`] = inv.monto_aportado;
-      row[`inv${i}_cashin`] = inv.monto_cash_in;
-      row[`inv${i}_inversion`] = inv.monto_inversionista;
-      row[`inv${i}_iva_cashin`] = inv.iva_cash_in;
-      row[`inv${i}_iva_inversion`] = inv.iva_inversionista;
-      row[`inv${i}_porcentaje`] = inv.porcentaje_participacion_inversionista;
-      row[`inv${i}_porcentaje_cashin`] = inv.porcentaje_cash_in;
+    const inversionistas = item.inversionistas || [];
+    const firstRowIndex = sheet.rowCount + 1;
+
+    if (inversionistas.length === 0) {
+      // Sin inversionistas: 1 fila vacía en la parte de inversionistas
+      const r = sheet.addRow(baseCreditData);
+      r.eachCell({ includeEmpty: true }, (cell) => { 
+        cell.border = thinBorder; 
+        cell.alignment = { vertical: "middle" }; 
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: groupBgColor } };
+      });
+    } else {
+      // Diferentes filas por cada inversionista
+      inversionistas.forEach((inv) => {
+        const row = {
+          ...baseCreditData,
+          inv_nombre: inv.nombre,
+          inv_aportado: inv.monto_aportado,
+          inv_cashin: inv.monto_cash_in,
+          inv_inversion: inv.monto_inversionista,
+          inv_iva_cashin: inv.iva_cash_in,
+          inv_iva_inversion: inv.iva_inversionista,
+          inv_porcentaje: inv.porcentaje_participacion_inversionista,
+          inv_porcentaje_cashin: inv.porcentaje_cash_in,
+        };
+        const r = sheet.addRow(row);
+        r.eachCell({ includeEmpty: true }, (cell) => { 
+          cell.border = thinBorder; 
+          cell.alignment = { vertical: "middle" }; 
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: groupBgColor } };
+        });
+      });
+
+      // ── Fila de resumen/totales de los inversionistas ──
+      const summaryRowData: any = {};
+      summaryRowData.inv_nombre = "TOTALES INVERSIONISTAS:";
+      summaryRowData.inv_aportado = inversionistas.reduce((acc, inv) => acc + Number(inv.monto_aportado || 0), 0);
+      summaryRowData.inv_cashin = inversionistas.reduce((acc, inv) => acc + Number(inv.monto_cash_in || 0), 0);
+      summaryRowData.inv_inversion = inversionistas.reduce((acc, inv) => acc + Number(inv.monto_inversionista || 0), 0);
+      summaryRowData.inv_iva_cashin = inversionistas.reduce((acc, inv) => acc + Number(inv.iva_cash_in || 0), 0);
+      summaryRowData.inv_iva_inversion = inversionistas.reduce((acc, inv) => acc + Number(inv.iva_inversionista || 0), 0);
+      summaryRowData.inv_porcentaje = "";
+      summaryRowData.inv_porcentaje_cashin = "";
+
+      const sumRow = sheet.addRow(summaryRowData);
+      sumRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+        cell.border = thinBorder;
+        cell.alignment = { vertical: "middle" };
+        
+        // Solo coloreamos y ponemos negrita en la parte de los totales (cols > 27 que son las de inversionistas)
+        if (colNumber > 27) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: "B4D6E4" } }; // Color Teal clarito como en Pagos
+          cell.font = { bold: true };
+        } else {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: groupBgColor } };
+        }
+      });
+
+      const lastRowIndex = sheet.rowCount;
+
+      // Unir las celdas del crédito si hay más de 1 inversionista o si agregamos totales (siempre unimos hasta la fila resumen)
+      // En nuestro columns, las cols de crédito van de 1 a 27.
+      for (let col = 1; col <= 27; col++) {
+        sheet.mergeCells(firstRowIndex, col, lastRowIndex, col);
+        sheet.getCell(firstRowIndex, col).alignment = { vertical: "middle", horizontal: "left" };
+      }
+    }
+
+    // Al finalizar con el crédito, agregarle un borde inferior más grueso a toda su última fila
+    // para separar visualmente este crédito del siguiente.
+    const lastSummaryRow = sheet.getRow(sheet.rowCount);
+    lastSummaryRow.eachCell({ includeEmpty: true }, (cell) => {
+      const currentBorder: any = cell.border || { ...thinBorder };
+      currentBorder.bottom = { style: 'medium', color: { argb: "999999" } };
+      cell.border = currentBorder;
     });
-
-    sheet.addRow(row);
   });
-
   // 5️⃣ Pasar Excel a buffer
   const arrayBuffer = await workbook.xlsx.writeBuffer();
   const uint8Array = new Uint8Array(arrayBuffer);

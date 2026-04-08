@@ -2779,7 +2779,9 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
       .where(
         and(
           ...baseConditionsActive,
-          sql`COALESCE(${moras_credito.cuotas_atrasadas}, 0) = ${cuotasNum}`
+          cuotasNum === 4
+            ? sql`COALESCE(${moras_credito.cuotas_atrasadas}, 0) >= 4`
+            : sql`COALESCE(${moras_credito.cuotas_atrasadas}, 0) = ${cuotasNum}`
         )
       );
 

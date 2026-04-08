@@ -1840,7 +1840,7 @@ export const crmRouter = {
 			// Build conditions
 			const conditions = [eq(opportunities.stageId, analysisStage[0].id)];
 
-			// Search filter (name, license plate)
+			// Search filter (name, license plate, opportunity ID)
 			if (search && search.trim() !== "") {
 				const searchTerms = search.trim().split(/\s+/);
 				for (const term of searchTerms) {
@@ -1850,6 +1850,7 @@ export const crmRouter = {
 							ilike(leads.firstName, searchPattern),
 							ilike(leads.lastName, searchPattern),
 							ilike(vehicles.licensePlate, searchPattern),
+							sql`CAST(${opportunities.id} AS TEXT) ILIKE ${searchPattern}`,
 						)!,
 					);
 				}

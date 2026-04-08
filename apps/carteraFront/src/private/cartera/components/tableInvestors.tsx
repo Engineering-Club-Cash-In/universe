@@ -970,9 +970,25 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
               </div>
 
               <div className={`rounded-lg p-3 shadow-sm border h-full flex flex-col justify-center ${isDraft ? "bg-yellow-50 border-yellow-300" : "bg-white border-violet-100"}`}>
-                <div className="text-xs text-gray-500 mb-1">IVA + ISR</div>
-                <div className={`font-bold ${isDraft ? "text-yellow-700" : "text-violet-700"}`}>
-                  {inv.currencySymbol} {(Number(subtotales.total_abono_iva) + Number(subtotales.total_isr)).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                <div className="flex gap-3 mb-1">
+                  <div>
+                    <div className="text-xs text-gray-500">IVA</div>
+                    <div className={`font-semibold text-sm ${isDraft ? "text-yellow-700" : "text-violet-700"}`}>
+                      {inv.currencySymbol} {Number(subtotales.total_abono_iva).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500">ISR</div>
+                    <div className={`font-semibold text-sm ${isDraft ? "text-yellow-700" : "text-violet-700"}`}>
+                      {inv.currencySymbol} {Number(subtotales.total_isr).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                </div>
+                <div className="border-t border-gray-200 pt-1">
+                  <div className="text-xs text-gray-500">Total IVA + ISR</div>
+                  <div className={`font-bold ${isDraft ? "text-yellow-700" : "text-violet-700"}`}>
+                    {inv.currencySymbol} {(Number(subtotales.total_abono_iva) + Number(subtotales.total_isr)).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                  </div>
                 </div>
               </div>
 
@@ -1621,7 +1637,19 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
           </span>
         </div>
         <div>
-          <span className="font-bold text-blue-900">IVA + ISR: </span>
+          <span className="font-bold text-blue-900">IVA: </span>
+          <span className="text-violet-700 font-bold">
+            {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_abono_iva ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+          </span>
+        </div>
+        <div>
+          <span className="font-bold text-blue-900">ISR: </span>
+          <span className="text-violet-700 font-bold">
+            {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_isr ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+          </span>
+        </div>
+        <div>
+          <span className="font-bold text-blue-900">Total IVA + ISR: </span>
           <span className="text-violet-700 font-bold">
             {totalesData?.currencySymbol ?? 'Q.'} {(Number(totalesData?.totales.total_abono_iva ?? 0) + Number(totalesData?.totales.total_isr ?? 0)).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
           </span>

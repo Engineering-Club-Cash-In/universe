@@ -532,10 +532,11 @@ export async function insertPagosCreditoInversionistas(
       `   💰 cuota_inversionista original: ${inv.cuota_inversionista}`
     );
 
-    let abono_capital = isCube
-      ? new Big(inv?.cuota_inversionista ?? 0)
-      : new Big(inv.cuota_inversionista ?? 0);
-
+    let abono_capital = new Big(inv.monto_aportado || 0).eq(0)
+      ? new Big(0)
+      : (isCube
+          ? new Big(inv?.cuota_inversionista ?? 0)
+          : new Big(inv.cuota_inversionista ?? 0));
     console.log(`   💰 abono_capital inicial: ${abono_capital.toString()}`);
 
     const totalMontos = montoCashInCalc.plus(montoInversionistaCalc);
@@ -570,6 +571,8 @@ export async function insertPagosCreditoInversionistas(
         .minus(new Big(currentCredit?.gps ?? 0))
         .minus(new Big(currentCredit?.seguro_10_cuotas ?? 0));
 
+      if (abono_capital.lt(0)) abono_capital = new Big(0);
+
       console.log(
         `   ✅ abono_capital después de restas: ${abono_capital.toString()}`
       );
@@ -580,6 +583,8 @@ export async function insertPagosCreditoInversionistas(
       console.log(`      - totalMontos: ${totalMontos.toString()}`);
 
       abono_capital = abono_capital.minus(totalIVA).minus(totalMontos);
+
+      if (abono_capital.lt(0)) abono_capital = new Big(0);
 
       console.log(
         `   ✅ abono_capital después de restas: ${abono_capital.toString()}`

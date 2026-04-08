@@ -1158,6 +1158,19 @@ export async function downloadInvestorPDFService(
   return data;
 }
 
+export async function getReporteNoLiquidados(investorId: number): Promise<{ success: boolean; url: string; filename: string }> {
+  const { data } = await api.get<{ success: boolean; url: string; filename: string }>(
+    `/investor/reporte-no-liquidados`,
+    { params: { id: investorId } }
+  );
+
+  if (!data?.url) {
+    throw new Error("La respuesta no contiene la URL del reporte.");
+  }
+
+  return data;
+}
+
 export async function uploadFileService(file: File | Blob): Promise<{ url: string; filename: string }> {
   const BACK_URL = import.meta.env.VITE_BACK_URL || ""; // tu variable de entorno
 

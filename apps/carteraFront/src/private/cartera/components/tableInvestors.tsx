@@ -1272,9 +1272,10 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
 
           {(() => {
             const query = (creditSearchQuery[inv.inversionista_id] || "").toLowerCase();
-            const filteredCreditos = (inv.creditos ?? []).filter(cred => 
+            const filteredCreditos = (inv.creditos ?? []).filter(cred =>
               cred.nombre_usuario?.toLowerCase().includes(query) ||
-              cred.nit_usuario?.toLowerCase().includes(query)
+              cred.nit_usuario?.toLowerCase().includes(query) ||
+              cred.numero_credito_sifco?.toString().toLowerCase().includes(query)
             );
 
             return filteredCreditos.length === 0 ? (
@@ -1883,9 +1884,10 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
 
           {(() => {
             const query = (creditSearchQuery[inv.inversionista_id] || "").toLowerCase();
-            const filteredCreditos = (inv.creditos ?? []).filter(cred => 
+            const filteredCreditos = (inv.creditos ?? []).filter(cred =>
               cred.nombre_usuario?.toLowerCase().includes(query) ||
-              cred.nit_usuario?.toLowerCase().includes(query)
+              cred.nit_usuario?.toLowerCase().includes(query) ||
+              cred.numero_credito_sifco?.toString().toLowerCase().includes(query)
             );
 
             return filteredCreditos.length === 0 ? (

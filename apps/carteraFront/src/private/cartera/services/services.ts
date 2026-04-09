@@ -3355,6 +3355,7 @@ export interface PagosPorVencimientoParams {
   pageSize?: number;
   numero_credito_sifco?: string;
   nombre_usuario?: string;
+  tipo_fecha?: "vencimiento" | "creacion";
 }
 
 export async function getPagosPorVencimiento(

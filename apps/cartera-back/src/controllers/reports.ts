@@ -70,8 +70,22 @@ export async function getCreditosWithUserByMesAnioExcel(
     { header: "Saldo a Favor", key: "saldo_favor", width: 15 },
     { header: "Asesor", key: "asesor", width: 20 },
     { header: "Email Asesor", key: "email_asesor", width: 30 },
-    { header: "Fecha Creación", key: "fecha_creacion", width: 20 },
     { header: "Observaciones", key: "observaciones", width: 50 },
+    
+    { header: "% Interés", key: "porcentaje_interes", width: 12 },
+    { header: "Cuota Interés", key: "cuota_interes", width: 15 },
+    { header: "IVA 12%", key: "iva_12", width: 15 },
+    { header: "Seguro", key: "seguro", width: 15 },
+    { header: "GPS", key: "gps", width: 15 },
+    { header: "Membresías", key: "membresias", width: 15 },
+    { header: "Royalti", key: "royalti", width: 15 },
+    { header: "No. Póliza", key: "no_poliza", width: 20 },
+    { header: "Formato Crédito", key: "formato_credito", width: 20 },
+    { header: "V. Cash-In", key: "is_vehiculo_propio", width: 12 },
+    { header: "Fecha Inicio", key: "fecha_inicio", width: 15 },
+    { header: "Dirección", key: "usuario_direccion", width: 30 },
+    { header: "Municipio", key: "usuario_municipio", width: 20 },
+    { header: "Departamento", key: "usuario_departamento", width: 20 },
     
     { header: "Tiene Mora", key: "tiene_mora", width: 12 },
     { header: "Monto Mora", key: "monto_mora", width: 15 },
@@ -135,11 +149,26 @@ export async function getCreditosWithUserByMesAnioExcel(
       usuario_categoria: item.usuarios.categoria,
       saldo_favor: item.usuarios.saldo_a_favor,
       asesor: item.asesores.nombre,
-      email_asesor: "",
+      email_asesor: item.asesores.emailCashIn || "",
       fecha_creacion: item.creditos.fecha_creacion,
       observaciones: item.creditos.observaciones,
-      
-      tiene_mora: item.mora ? "Sí" : "No",
+
+      porcentaje_interes: `${item.creditos.porcentaje_interes}%`,
+      cuota_interes: item.creditos.cuota_interes,
+      iva_12: item.creditos.iva_12,
+      seguro: item.creditos.seguro_10_cuotas,
+      gps: item.creditos.gps,
+      membresias: item.creditos.membresias_pago,
+      royalti: item.creditos.royalti,
+      no_poliza: item.creditos.no_poliza,
+      formato_credito: item.creditos.formato_credito,
+      is_vehiculo_propio: item.creditos.is_vehiculo_propio ? "SI" : "NO",
+      fecha_inicio: item.fecha_inicio ? item.fecha_inicio : "--",
+      usuario_direccion: item.usuarios.direccion || "--",
+      usuario_municipio: item.usuarios.municipio || "--",
+      usuario_departamento: item.usuarios.departamento || "--",
+
+      tiene_mora: item.mora?.activa ? "SI" : "NO",
       monto_mora: item.mora?.monto_mora || 0,
       cuotas_atrasadas: item.mora?.cuotas_atrasadas || 0,
       
@@ -203,8 +232,8 @@ export async function getCreditosWithUserByMesAnioExcel(
         cell.border = thinBorder;
         cell.alignment = { vertical: "middle" };
         
-        // Solo coloreamos y ponemos negrita en la parte de los totales (cols > 27 que son las de inversionistas)
-        if (colNumber > 27) {
+        // Solo coloreamos y ponemos negrita en la parte de los totales (cols > 40 que son las de inversionistas)
+        if (colNumber > 40) {
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: "B4D6E4" } }; // Color Teal clarito como en Pagos
           cell.font = { bold: true };
         } else {
@@ -215,8 +244,8 @@ export async function getCreditosWithUserByMesAnioExcel(
       const lastRowIndex = sheet.rowCount;
 
       // Unir las celdas del crédito si hay más de 1 inversionista o si agregamos totales (siempre unimos hasta la fila resumen)
-      // En nuestro columns, las cols de crédito van de 1 a 27.
-      for (let col = 1; col <= 27; col++) {
+      // Merging credit columns (1 to 40 now with new columns)
+      for (let col = 1; col <= 40; col++) {
         sheet.mergeCells(firstRowIndex, col, lastRowIndex, col);
         sheet.getCell(firstRowIndex, col).alignment = { vertical: "middle", horizontal: "left" };
       }
@@ -1401,6 +1430,7 @@ export async function getPagosByVencimiento({
   pageSize = 20,
   numero_credito_sifco,
   nombre_usuario,
+  tipo_fecha = "vencimiento",
 }: {
   mes: number;
   anio: number;
@@ -1408,15 +1438,19 @@ export async function getPagosByVencimiento({
   pageSize?: number;
   numero_credito_sifco?: string;
   nombre_usuario?: string;
+  tipo_fecha?: "vencimiento" | "creacion";
 }) {
   const fechaInicio = `${anio}-${String(mes).padStart(2, "0")}-01`;
   const fechaFinDate = new Date(anio, mes, 0);
   const fechaFin = `${anio}-${String(mes).padStart(2, "0")}-${String(fechaFinDate.getDate()).padStart(2, "0")}`;
 
+  // Determinar columna de fecha
+  const dateColumn = tipo_fecha === "creacion" ? sql`c.fecha_creacion` : sql`p.fecha_vencimiento`;
+
   // Filtros dinámicos
   const filters: any[] = [
-    sql`p.fecha_vencimiento >= ${fechaInicio}`,
-    sql`p.fecha_vencimiento <= ${fechaFin}`,
+    sql`${dateColumn} >= ${fechaInicio}`,
+    sql`${dateColumn} <= ${fechaFin}`,
   ];
   if (numero_credito_sifco) {
     filters.push(sql`c.numero_credito_sifco ILIKE ${"%" + numero_credito_sifco + "%"}`);

@@ -469,7 +469,8 @@ export const inversionistasRouter = new Elysia()
         const { url } = await generarYSubirExcelInversionista(
           inversionista as any,
           filename,
-          logoUrl
+          logoUrl,
+          true
         );
 
         return {

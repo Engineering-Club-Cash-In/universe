@@ -615,7 +615,7 @@ export async function buildCancelationWorkbook(
 
 export async function buildInversionistaWorkbook(
   inv: InversionistaReporte,
-  opts?: { logoUrl?: string }
+  opts?: { logoUrl?: string; showCreditId?: boolean }
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   wb.creator = "Club Cashin.com";
@@ -625,10 +625,15 @@ export async function buildInversionistaWorkbook(
     properties: { defaultRowHeight: 18 },
   });
 
-  // anchos de columna (15 cols)
-  [10, 22, 14, 12, 16, 20, 16, 12, 12, 14, 20, 16, 22, 10, 14].forEach(
-    (w, i) => (ws.getColumn(i + 1).width = w)
-  );
+  const showId = opts?.showCreditId ?? false;
+  const offset = showId ? 1 : 0;
+  const totalCols = 15 + offset;
+
+  // anchos de columna (15 o 16 cols)
+  const baseWidths = [10, 22, 14, 12, 16, 20, 16, 12, 12, 14, 20, 16, 22, 10, 14];
+  if (showId) baseWidths.unshift(18); // ancho para Código Sifco
+
+  baseWidths.forEach((w, i) => (ws.getColumn(i + 1).width = w));
 
   const CINV = {
     navy:  "FF0F1B4C",
@@ -659,15 +664,15 @@ export async function buildInversionistaWorkbook(
     ws.addImage(imgId, "A1:C2");
   }
 
-  ws.mergeCells("D1:O1");
-  ws.getCell("D1").value = "REPORTE DE INVERSIONES";
-  ws.getCell("D1").font = { bold: true, size: 14, color: { argb: CINV.navy } };
-  ws.getCell("D1").alignment = { vertical: "middle" };
+  ws.mergeCells(1, 4 + offset, 1, 15 + offset);
+  ws.getCell(1, 4 + offset).value = "REPORTE DE INVERSIONES";
+  ws.getCell(1, 4 + offset).font = { bold: true, size: 14, color: { argb: CINV.navy } };
+  ws.getCell(1, 4 + offset).alignment = { vertical: "middle" };
 
-  ws.mergeCells("D2:O2");
-  ws.getCell("D2").value = inv.nombre_inversionista;
-  ws.getCell("D2").font = { bold: true, size: 12, color: { argb: CINV.blue } };
-  ws.getCell("D2").alignment = { vertical: "middle" };
+  ws.mergeCells(2, 4 + offset, 2, 15 + offset);
+  ws.getCell(2, 4 + offset).value = inv.nombre_inversionista;
+  ws.getCell(2, 4 + offset).font = { bold: true, size: 12, color: { argb: CINV.blue } };
+  ws.getCell(2, 4 + offset).alignment = { vertical: "middle" };
 
   // ── fila 3: totales resumen (4 bloques)
   const sub = inv.subtotal;
@@ -678,7 +683,7 @@ export async function buildInversionistaWorkbook(
     ["Interés recibido",     toN(sub.total_abono_general_interes)],
     ["Gran total a recibir", toN(sub.total_cuota_con_reinversion)],
   ];
-  const resumenCols = [1, 4, 8, 12];
+  const resumenCols = [1, 4 + offset, 8 + offset, 12 + offset];
   for (let i = 0; i < resumen.length; i++) {
     const col = resumenCols[i];
     const labelCell = ws.getCell(3, col);
@@ -737,6 +742,7 @@ export async function buildInversionistaWorkbook(
 
     const head = ws.getRow(headRowIdx);
     head.values = [
+      ...(showId ? ["Código Sifco"] : []),
       "Meses en crédito", "Nombre", "Capital",
       "% Interés", "% Inversionista", "Tasa interés inversor",
       "Interés Inversor", "IVA", "ISR",
@@ -744,11 +750,11 @@ export async function buildInversionistaWorkbook(
       "Cuota de mes", "Plazo", "NIT",
     ];
 
-    for (let i = 1; i <= 15; i++) {
+    for (let i = 1; i <= totalCols; i++) {
       const c = head.getCell(i);
       c.font = { bold: true, color: { argb: CINV.white } };
       c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: esCombinada ? CINV.navy : CINV.blue } };
-      c.alignment = { horizontal: i === 13 || i === 15 ? "right" : "center", wrapText: true };
+      c.alignment = { horizontal: i === (13 + offset) || i === (15 + offset) ? "right" : "center", wrapText: true };
       c.border = { bottom: { style: "thin", color: { argb: CINV.line } } };
     }
     head.height = 28;
@@ -769,6 +775,7 @@ export async function buildInversionistaWorkbook(
         const cuotaMes = `${pago.mes || "-"}${pago.cuota ? ` (Cuota #${pago.cuota})` : ""}`;
 
         rr.values = [
+          ...(showId ? [cr.numero_credito_sifco] : []),
           pago.cuota ?? cr.meses_en_credito ?? "",
           cr.nombre_usuario ?? "",
           capital,
@@ -786,17 +793,17 @@ export async function buildInversionistaWorkbook(
           cr.nit_usuario ?? "",
         ];
 
-        rr.getCell(3).numFmt  = numFmt;
-        rr.getCell(6).numFmt  = pctFmt;
-        [7, 8, 9, 10, 11, 12].forEach(i => (rr.getCell(i).numFmt = numFmt));
+        rr.getCell(3 + offset).numFmt  = numFmt;
+        rr.getCell(6 + offset).numFmt  = pctFmt;
+        [7, 8, 9, 10, 11, 12].forEach(i => (rr.getCell(i + offset).numFmt = numFmt));
 
-        rr.getCell(7).font  = { color: { argb: CINV.navy } };
-        rr.getCell(10).font = { color: { argb: CINV.navy } };
-        rr.getCell(13).alignment = { horizontal: "right" };
-        rr.getCell(15).alignment = { horizontal: "right" };
+        rr.getCell(7 + offset).font  = { color: { argb: CINV.navy } };
+        rr.getCell(10 + offset).font = { color: { argb: CINV.navy } };
+        rr.getCell(13 + offset).alignment = { horizontal: "right" };
+        rr.getCell(15 + offset).alignment = { horizontal: "right" };
 
         if (rowIdx % 2 === 0) {
-          for (let c = 1; c <= 15; c++) {
+          for (let c = 1; c <= totalCols; c++) {
             rr.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINV.zebra } };
           }
         }
@@ -808,7 +815,7 @@ export async function buildInversionistaWorkbook(
 
     if (!hasData) {
       row++;
-      ws.mergeCells(row, 1, row, 15);
+      ws.mergeCells(row, 1, row, totalCols);
       ws.getCell(row, 1).value = "Sin pagos registrados";
       ws.getCell(row, 1).alignment = { horizontal: "center" };
     }
@@ -828,19 +835,29 @@ export async function buildInversionistaWorkbook(
     }
 
     if (hasData) {
-      totalRow.getCell(3).value  = { formula: `SUM(C${r1}:C${r2})` };
-      totalRow.getCell(3).numFmt = numFmt;
-      const sumCols: [number, string][] = [
-        [7,  "G"], [8,  "H"], [9,  "I"],
-        [10, "J"], [11, "K"], [12, "L"],
+      const colC = showId ? "D" : "C";
+      totalRow.getCell(3 + offset).value  = { formula: `SUM(${colC}${r1}:${colC}${r2})` };
+      totalRow.getCell(3 + offset).numFmt = numFmt;
+
+      // Definición de las columnas que se suman y sus letras correspondientes
+      const sumCols: [number, string, string][] = [
+        [7,  "G", "H"], // Interés Inversor
+        [8,  "H", "I"], // IVA
+        [9,  "I", "J"], // ISR
+        [10, "J", "K"], // Abono capital
+        [11, "K", "L"], // % Inv. Neto
+        [12, "L", "M"], // Capital restante
       ];
-      for (const [ci, col] of sumCols) {
-        totalRow.getCell(ci).value  = { formula: `SUM(${col}${r1}:${col}${r2})` };
-        totalRow.getCell(ci).numFmt = numFmt;
+
+      for (const [ci, colLetterDefault, colLetterShifted] of sumCols) {
+        const targetCi = ci + offset;
+        const targetColLetter = showId ? colLetterShifted : colLetterDefault;
+        totalRow.getCell(targetCi).value  = { formula: `SUM(${targetColLetter}${r1}:${targetColLetter}${r2})` };
+        totalRow.getCell(targetCi).numFmt = numFmt;
       }
     }
 
-    for (let c = 1; c <= 15; c++) {
+    for (let c = 1; c <= totalCols; c++) {
       const cell = totalRow.getCell(c);
       cell.font = { bold: true, color: { argb: CINV.navy } };
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINV.total } };
@@ -873,9 +890,9 @@ export async function buildInversionistaWorkbook(
 
   // ── pie
   row += 3;
-  ws.mergeCells(`A${row}:O${row}`);
-  ws.getCell(`A${row}`).value = `Generado por Club Cashin.com · ${new Date().toLocaleDateString("es-GT")}`;
-  ws.getCell(`A${row}`).font = { color: { argb: CINV.gray }, size: 9 };
+  ws.mergeCells(row, 1, row, totalCols);
+  ws.getCell(row, 1).value = `Generado por Club Cashin.com · ${new Date().toLocaleDateString("es-GT")}`;
+  ws.getCell(row, 1).font = { color: { argb: CINV.gray }, size: 9 };
 
   ws.views = [{ state: "frozen", ySplit: firstHeaderRow }];
 
@@ -886,9 +903,10 @@ export async function buildInversionistaWorkbook(
 export async function generarYSubirExcelInversionista(
   inversionista: InversionistaReporte,
   filename: string,
-  logoUrl: string = ""
+  logoUrl: string = "",
+  showCreditId: boolean = false
 ): Promise<{ url: string; excelBuffer: Buffer }> {
-  const excelBuffer = await buildInversionistaWorkbook(inversionista, { logoUrl });
+  const excelBuffer = await buildInversionistaWorkbook(inversionista, { logoUrl, showCreditId });
 
   const s3 = new S3Client({
     endpoint: process.env.BUCKET_REPORTS_URL,

@@ -116,20 +116,27 @@ export function ModalReinversionCombinada({
   };
 
   const handleGuardar = () => {
-    // Solo enviar los que el usuario cambió
-    const cambios = Object.entries(asignaciones).map(([espejoId, tipo]) => ({
-      id_inversionista: inversionistaId,
-      id_credito_inversionista_espejo: Number(espejoId),
-      tipo_reinversion: tipo,
-    }));
+    // Enviar TODOS los créditos con su tipo actual (original o modificado)
+    // El backend marca como sin_reinversion los que no recibe
+    const todos = allCreditos
+      .filter((c) => c.credito_inversionista_espejo_id)
+      .map((cred) => {
+        const espejoId = cred.credito_inversionista_espejo_id!;
+        const tipoOriginal = cred.tipo_reinversion ?? "sin_reinversion";
+        return {
+          id_inversionista: inversionistaId,
+          id_credito_inversionista_espejo: espejoId,
+          tipo_reinversion: asignaciones[espejoId] ?? tipoOriginal,
+        };
+      });
 
-    if (cambios.length === 0) {
+    if (Object.keys(asignaciones).length === 0) {
       toast.error("No hay cambios para guardar.");
       return;
     }
 
     asignarReinversion(
-      { inversionista_id: inversionistaId, asignaciones: cambios },
+      { inversionista_id: inversionistaId, asignaciones: todos },
       {
         onSuccess: () => {
           toast.success("Reinversión combinada guardada correctamente.");

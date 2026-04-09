@@ -23,7 +23,9 @@ function formatQ(val: string | null | undefined): string {
 function formatFecha(val: string | null | undefined): string {
   if (!val) return "--";
   try {
-    return new Date(val).toLocaleDateString("es-GT", {
+    const d = new Date(val);
+    // Usamos los componentes UTC para evitar que el navegador reste horas por la zona horaria local (GTM-6)
+    return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()).toLocaleDateString("es-GT", {
       day: "2-digit",
       month: "short",
       year: "numeric",
@@ -40,6 +42,7 @@ export function PagosPorVencimiento() {
   const [anio, setAnio] = useState(currentDate.getFullYear());
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [tipoFecha, setTipoFecha] = useState<"vencimiento" | "creacion">("vencimiento");
 
   const [sifcoInput, setSifcoInput] = useState("");
   const [sifcoFilter, setSifcoFilter] = useState("");
@@ -53,6 +56,7 @@ export function PagosPorVencimiento() {
     pageSize,
     numero_credito_sifco: sifcoFilter || undefined,
     nombre_usuario: nombreFilter || undefined,
+    tipo_fecha: tipoFecha,
   });
 
   const handleSearch = () => {
@@ -83,7 +87,7 @@ export function PagosPorVencimiento() {
     <div className="w-full max-w-[1400px]">
       <div className="flex flex-col items-center mb-6">
         <h1 className="text-3xl font-extrabold text-blue-700 text-center">
-          Pagos por Vencimiento
+          {tipoFecha === "vencimiento" ? "Pagos por Vencimiento" : "Pagos por Creación de Crédito"}
         </h1>
         <p className="text-lg text-gray-600 leading-relaxed text-center mt-2">
           Detalle de pagos y cuotas por mes de vencimiento.
@@ -93,6 +97,18 @@ export function PagosPorVencimiento() {
       {/* Filtros */}
       <div className="bg-white/80 backdrop-blur rounded-2xl shadow-lg border border-blue-100 p-5 mb-6">
         <div className="flex flex-wrap items-end gap-4">
+          <div className="min-w-[170px]">
+            <label className="text-sm font-semibold text-blue-800 mb-1 block">Filtrar por</label>
+            <select
+              className="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm text-blue-800 bg-blue-50 focus:ring-blue-400"
+              value={tipoFecha}
+              onChange={(e) => { setTipoFecha(e.target.value as any); setPage(1); }}
+            >
+              <option value="vencimiento">Fecha Vencimiento</option>
+              <option value="creacion">Fecha Creación</option>
+            </select>
+          </div>
+
           <div className="min-w-[140px]">
             <label className="text-sm font-semibold text-blue-800 mb-1 block">Mes</label>
             <select

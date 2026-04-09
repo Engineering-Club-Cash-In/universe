@@ -15,6 +15,7 @@ export const usePagosPorVencimiento = (params: PagosPorVencimientoParams) => {
       params.pageSize,
       params.numero_credito_sifco,
       params.nombre_usuario,
+      params.tipo_fecha,
     ],
     queryFn: async () => {
       const response = await getPagosPorVencimiento(params);

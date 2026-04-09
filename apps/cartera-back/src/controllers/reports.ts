@@ -1449,8 +1449,8 @@ export async function getPagosByVencimiento({
 
   // Filtros dinámicos
   const filters: any[] = [
-    sql`${dateColumn} >= ${fechaInicio}`,
-    sql`${dateColumn} <= ${fechaFin}`,
+    sql`${dateColumn}::date >= ${fechaInicio}`,
+    sql`${dateColumn}::date <= ${fechaFin}`,
   ];
   if (numero_credito_sifco) {
     filters.push(sql`c.numero_credito_sifco ILIKE ${"%" + numero_credito_sifco + "%"}`);

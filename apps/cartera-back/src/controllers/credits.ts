@@ -384,7 +384,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
           .from(pagos_credito)
           .where(inArray(pagos_credito.pago_id, paymentIds));
 
-        const cuotaIds = pagos.map((p) => p.cuota_id);
+        const cuotaIds = pagos.map((p) => p.cuota_id).filter((id): id is number => id !== null);
 
         // Luego traer las cuotas
         cuotasEnConvenio = await db
@@ -2301,14 +2301,17 @@ export async function syncScheduleOnTermsChange({
 
       const extraCuotaIds = extra.map((c) => c.cuota_id);
       if (extraCuotaIds.length > 0) {
-        // delete related pagos first
-        await tx
-          .delete(pagos_credito)
-          .where(inArray(pagos_credito.cuota_id, extraCuotaIds));
-        // then delete cuotas
-        await tx
-          .delete(cuotas_credito)
-          .where(inArray(cuotas_credito.cuota_id, extraCuotaIds));
+        const safeExtraCuotaIds = extraCuotaIds.filter((id): id is number => id !== null);
+        if (safeExtraCuotaIds.length > 0) {
+          // delete related pagos first
+          await tx
+            .delete(pagos_credito)
+            .where(inArray(pagos_credito.cuota_id, safeExtraCuotaIds));
+          // then delete cuotas
+          await tx
+            .delete(cuotas_credito)
+            .where(inArray(cuotas_credito.cuota_id, safeExtraCuotaIds));
+        }
       }
     }
 

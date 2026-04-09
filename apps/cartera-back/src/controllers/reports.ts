@@ -1444,14 +1444,20 @@ export async function getPagosByVencimiento({
   const fechaFinDate = new Date(anio, mes, 0);
   const fechaFin = `${anio}-${String(mes).padStart(2, "0")}-${String(fechaFinDate.getDate()).padStart(2, "0")}`;
 
-  // Determinar columna de fecha
-  const dateColumn = tipo_fecha === "creacion" ? sql`c.fecha_creacion` : sql`p.fecha_vencimiento`;
-
   // Filtros dinámicos
+  // Siempre filtramos por el mes de vencimiento para que el reporte sea coherente con el mes seleccionado
   const filters: any[] = [
-    sql`${dateColumn}::date >= ${fechaInicio}`,
-    sql`${dateColumn}::date <= ${fechaFin}`,
+    sql`p.fecha_vencimiento::date >= ${fechaInicio}`,
+    sql`p.fecha_vencimiento::date <= ${fechaFin}`,
   ];
+
+  // Si el usuario pide filtrar por fecha de creación, agregamos esa restricción adicional
+  // sobre el crédito, pero mantenemos el filtro de vencimiento para el mes actual.
+  if (tipo_fecha === "creacion") {
+    filters.push(sql`c.fecha_creacion::date >= ${fechaInicio}`);
+    filters.push(sql`c.fecha_creacion::date <= ${fechaFin}`);
+  }
+
   if (numero_credito_sifco) {
     filters.push(sql`c.numero_credito_sifco ILIKE ${"%" + numero_credito_sifco + "%"}`);
   }
@@ -1499,7 +1505,7 @@ export async function getPagosByVencimiento({
     FROM cartera.pagos_credito p
     INNER JOIN cartera.creditos c ON p.credito_id = c.credito_id
     INNER JOIN cartera.usuarios u ON c.usuario_id = u.usuario_id
-    INNER JOIN cartera.cuotas_credito q ON p.cuota_id = q.cuota_id
+    LEFT JOIN cartera.cuotas_credito q ON p.cuota_id = q.cuota_id
     ${cubeSubquery}
     WHERE ${whereClause}
   `);
@@ -1528,12 +1534,13 @@ export async function getPagosByVencimiento({
       p.seguro_restante,
       p.gps_restante,
       p.membresias,
+      c.fecha_creacion,
       ROUND(p.interes_restante::numeric * COALESCE(cube_data.cube_pct, 0), 2) AS interes_cube,
       ROUND(p.iva_12_restante::numeric * COALESCE(cube_data.cube_pct, 0), 2) AS iva_cube
     FROM cartera.pagos_credito p
     INNER JOIN cartera.creditos c ON p.credito_id = c.credito_id
     INNER JOIN cartera.usuarios u ON c.usuario_id = u.usuario_id
-    INNER JOIN cartera.cuotas_credito q ON p.cuota_id = q.cuota_id
+    LEFT JOIN cartera.cuotas_credito q ON p.cuota_id = q.cuota_id
     ${cubeSubquery}
     WHERE ${whereClause}
     ORDER BY p.fecha_vencimiento

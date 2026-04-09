@@ -238,6 +238,46 @@ describe("Investment Calculations", () => {
       // Should be around Q50,000
       expect(capital).toBeCloseTo(50000, 100);
     });
+
+    it("should support the 45/55 investor split across monthly and final payment projections", () => {
+      const fortyFiveSplitParams = {
+        ...baseParams,
+        investorPercentage: 45,
+      };
+
+      const interestOnlySchedule =
+        generateInterestOnlySchedule(fortyFiveSplitParams);
+      const monthlyProjection = interestOnlySchedule[0].payment;
+      const finalProjection =
+        interestOnlySchedule[interestOnlySchedule.length - 1].payment;
+
+      expect(monthlyProjection).toBeCloseTo(378, 2);
+      expect(finalProjection).toBeCloseTo(50378, 2);
+
+      const requiredCapitalForMonthly = calculateRequiredCapitalForMonthly(
+        monthlyProjection,
+        fortyFiveSplitParams.interestRate,
+        fortyFiveSplitParams.investorPercentage,
+        fortyFiveSplitParams.vatRate,
+      );
+
+      const requiredCapitalForFinalPayment =
+        calculateRequiredCapitalForInterestOnly(
+          finalProjection,
+          fortyFiveSplitParams.interestRate,
+          fortyFiveSplitParams.investorPercentage,
+          fortyFiveSplitParams.vatRate,
+        );
+
+      expect(requiredCapitalForMonthly).toBeCloseTo(
+        fortyFiveSplitParams.principal,
+        2,
+      );
+      expect(requiredCapitalForFinalPayment).toBeCloseTo(
+        fortyFiveSplitParams.principal,
+        100,
+      );
+    });
   });
 
   describe("Edge Cases", () => {

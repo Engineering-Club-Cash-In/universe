@@ -21,7 +21,9 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
   const { bancos, loading: loadingBancos, loadBancos } = useBancos();
   const queryClient = useQueryClient();
   const [showCombinada, setShowCombinada] = useState(false);
-  const [prevTipoReinversion, setPrevTipoReinversion] = useState<string>("sin_reinversion");
+  const [prevTipoReinversion, setPrevTipoReinversion] = useState<string>(
+    initialData?.tipo_reinversion ?? "sin_reinversion"
+  );
 
   const { register, handleSubmit, reset, watch, setValue } = useForm<InvestorPayload>({
     defaultValues: {
@@ -52,6 +54,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
     if (mode === "update" && initialData) {
       console.log("Reseteando con initialData:", initialData);
       reset(initialData);
+      setPrevTipoReinversion(initialData.tipo_reinversion ?? "sin_reinversion");
     } else if (mode === "create") {
       reset({
         nombre: "",

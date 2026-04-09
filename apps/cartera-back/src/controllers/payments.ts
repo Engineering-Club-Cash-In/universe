@@ -499,12 +499,13 @@ export async function insertPagosCreditoInversionistas(
         fechaInicio!.getMonth() + 1,
         0
       ).getDate();
-      const diaInicio = fechaInicio!.getDate(); // ej: 18
+      const diaInicio = fechaInicio!.getDate(); // ej: 7
+      const diasProporcionales = diasDelMes - diaInicio; // ej: 31 - 7 = 24 días restantes
 
-      // Interés proporcional = (montoInversionistaCalc / diasDelMes) * diaInicio
+      // Interés proporcional = (montoInversionistaCalc / diasDelMes) * diasProporcionales
       bigInteres = montoInversionistaCalc
         .div(diasDelMes)
-        .times(diaInicio)
+        .times(diasProporcionales)
         .round(2);
 
       // IVA proporcional = interés proporcional * 12%
@@ -514,6 +515,7 @@ export async function insertPagosCreditoInversionistas(
       console.log(`      fecha_inicio: ${inv.fecha_inicio_participacion}`);
       console.log(`      días del mes: ${diasDelMes}`);
       console.log(`      día inicio: ${diaInicio}`);
+      console.log(`      días proporcionales: ${diasProporcionales}`);
       console.log(`      interés proporcional: ${bigInteres.toString()}`);
       console.log(`      IVA proporcional: ${bigIVA.toString()}`);
     } else {

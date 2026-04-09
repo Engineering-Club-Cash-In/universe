@@ -251,8 +251,7 @@
     cuota: numeric("cuota").notNull(), //esto viene del credito
     cuota_interes: numeric("cuota_interes").notNull(), //esto viene del credito
     cuota_id: integer("cuota_id")
-      .references(() => cuotas_credito.cuota_id)
-      .notNull(),
+      .references(() => cuotas_credito.cuota_id),
     fecha_pago: timestamp("fecha_pago").defaultNow(), //esto viene del credito 
     abono_capital: numeric("abono_capital", { precision: 18, scale: 2 }), //aca abonamos a capital solo si el monto de la cuota que viene del credito es igual al monto de la boleta y se van a restar todos los abonos
 

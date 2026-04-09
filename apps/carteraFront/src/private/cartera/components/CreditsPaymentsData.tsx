@@ -1230,8 +1230,8 @@ function MobileView({
             )}
           </p>
           <p className="text-sm text-gray-700">
-            <strong>Deuda Total:</strong> Q
-            {Number(item.creditos.deudatotal).toLocaleString("es-GT", {
+            <strong>Capital:</strong> Q
+            {Number(item.creditos.capital).toLocaleString("es-GT", {
               minimumFractionDigits: 2,
               maximumFractionDigits: 2,
             })}
@@ -1492,7 +1492,7 @@ function DesktopView({
               Usuario
             </TableHead>
             <TableHead className="text-gray-900 font-bold text-center">
-              Deuda Total
+              Capital
             </TableHead>
             <TableHead className="text-gray-900 font-bold text-center">
               Cuota
@@ -1529,9 +1529,9 @@ function DesktopView({
                     )}
                   </div>
                 </TableCell>
-                <TableCell className="text-green-600 font-bold text-center">
+                <TableCell className="text-blue-700 font-bold text-center">
                   Q
-                  {Number(item.creditos.deudatotal).toLocaleString("es-GT", {
+                  {Number(item.creditos.capital).toLocaleString("es-GT", {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })}
@@ -1863,9 +1863,9 @@ function DetallesCredito({
         }
       >
         {([
-          { label: "Capital", value: item.creditos.capital, isMoney: true },
-          { label: "Porcentaje Interés", value: `${item.creditos.porcentaje_interes}%` },
           { label: "Deuda Total", value: item.creditos.deudatotal, isMoney: true },
+          { label: "Porcentaje Interés", value: `${item.creditos.porcentaje_interes}%` },
+          { label: "Capital", value: item.creditos.capital, isMoney: true },
           { label: "Cuota", value: item.creditos.cuota, isMoney: true },
           { label: "Cuota Interés", value: item.creditos.cuota_interes, isMoney: true },
           { label: "IVA 12%", value: item.creditos.iva_12, isMoney: true },

@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, or } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -88,7 +88,10 @@ export async function getSalesUserWithLeastLeads() {
 		return null;
 	}
 
-	// Contar leads por usuario (solo leads activos, no convertidos)
+	// Contar leads automáticos asignados hoy por usuario
+	const startOfToday = new Date();
+	startOfToday.setHours(0, 0, 0, 0);
+
 	const leadCounts = await db
 		.select({
 			assignedTo: leads.assignedTo,
@@ -96,10 +99,9 @@ export async function getSalesUserWithLeastLeads() {
 		})
 		.from(leads)
 		.where(
-			or(
-				eq(leads.status, "new"),
-				eq(leads.status, "contacted"),
-				eq(leads.status, "qualified"),
+			and(
+				eq(leads.assignmentType, "auto"),
+				gte(leads.createdAt, startOfToday),
 			),
 		)
 		.groupBy(leads.assignedTo);
@@ -383,6 +385,7 @@ export async function createPublicLead(c: Context) {
 				source: body.source || "website",
 				campaign: body.campaign,
 				status: "new",
+				assignmentType: "auto",
 				assignedTo: salesUserForLead.id,
 				createdBy: salesUserForLead.id,
 				updatedAt: new Date(),

@@ -57,6 +57,10 @@ export const creditTypeEnum = pgEnum("credit_type", [
 	"autocompra",
 	"sobre_vehiculo",
 ]);
+export const assignmentTypeEnum = pgEnum("assignment_type", [
+	"auto",
+	"manual",
+]);
 export const creditCategoryEnum = pgEnum("credit_category", [
 	"Contraseña",
 	"CV Vehículo",
@@ -180,6 +184,9 @@ export const leads = pgTable("leads", {
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),
 	livenessValidated: boolean("liveness_validated").notNull().default(false),
+	assignmentType: assignmentTypeEnum("assignment_type")
+		.notNull()
+		.default("manual"),
 	createdBy: text("created_by")
 		.notNull()
 		.references(() => user.id),

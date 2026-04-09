@@ -88,9 +88,10 @@ export async function getSalesUserWithLeastLeads() {
 		return null;
 	}
 
-	// Contar leads automáticos asignados hoy por usuario
-	const startOfToday = new Date();
-	startOfToday.setHours(0, 0, 0, 0);
+	// Contar leads automáticos asignados hoy por usuario (hora Guatemala UTC-6)
+	const startOfToday = new Date(
+		new Date().toLocaleDateString("en-US", { timeZone: "America/Guatemala" }),
+	);
 
 	const leadCounts = await db
 		.select({

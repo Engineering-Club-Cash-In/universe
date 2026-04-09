@@ -63,9 +63,10 @@ const SCORE_FORMAT_INDIVIDUAL = 400;
 const SCORE_FORMAT_POOL_CUBE_ONLY = 200;
 const SCORE_FORMAT_POOL_CUBE_PLUS_1 = 100;
 const SCORE_CUOTA_0 = 300;
-const SCORE_PENALTY_PER_CUOTA = 50;
-const SCORE_PROXIMITY_HIGH = 200;
-const SCORE_PROXIMITY_MED = 100;
+const SCORE_PENALTY_PER_CUOTA = 30; // Reducido de 50 a 30
+const SCORE_PROXIMITY_BASE_FITS = 300; // Bono porque el capital del crédito cubre todo el monto
+const SCORE_PROXIMITY_HIGH = 200;      // Diferencia < 10%
+const SCORE_PROXIMITY_MED = 100;       // Diferencia < 25%
 
 // ============================================================
 // FUNCIONES DE SCORING
@@ -88,9 +89,13 @@ function calcFormatoBonus(
 }
 
 function calcCuotasBonus(cuotasPagadas: number): number {
-  // Cuota 0 (cuotasPagadas = 0) es máxima prioridad.
-  // Luego se penaliza progresivamente cada cuota subsecuente.
-  return Math.max(-500, SCORE_CUOTA_0 - SCORE_PENALTY_PER_CUOTA * cuotasPagadas);
+  // Según las nuevas reglas:
+  // 1. Si ya pasaron más de 5 cuotas, el bono es 0 (neutral, no resta ni suma).
+  if (cuotasPagadas > 5) return 0;
+
+  // 2. Si está entre 0 y 5, se da el bono de Cuota 0 menos la penalización ligera.
+  // Usamos Math.max(0, ...) para asegurar que no reste puntos del total base.
+  return Math.max(0, SCORE_CUOTA_0 - SCORE_PENALTY_PER_CUOTA * cuotasPagadas);
 }
 
 function calcCapitalProximityBonus(
@@ -98,13 +103,20 @@ function calcCapitalProximityBonus(
   monto: number | undefined
 ): number {
   if (monto === undefined || monto <= 0 || capitalActivo <= 0) return 0;
-  // Bug fix: división contra el Math.max para evitar asimetría
+
+  // Si el capital del crédito es MENOR al monto, se requiere partir facturación.
+  // Según las nuevas reglas, esto no suma puntos de proximidad (Score 0).
+  if (capitalActivo < monto) return 0;
+
   const denominator = Math.max(capitalActivo, monto);
-  const diff = Math.abs(capitalActivo - monto) / denominator;
-  
-  if (diff < 0.1) return SCORE_PROXIMITY_HIGH;
-  if (diff < 0.25) return SCORE_PROXIMITY_MED;
-  return 0;
+  const diffPercent = Math.abs(capitalActivo - monto) / denominator;
+
+  // Escenario: El capital del crédito cubre TODO el monto (Preferido)
+  // Se otorga un bono base por caber completo, más extras por cercanía.
+  let score = SCORE_PROXIMITY_BASE_FITS;
+  if (diffPercent < 0.1) score += SCORE_PROXIMITY_HIGH;
+  else if (diffPercent < 0.25) score += SCORE_PROXIMITY_MED;
+  return score;
 }
 
 // ============================================================

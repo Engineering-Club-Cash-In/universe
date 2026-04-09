@@ -349,13 +349,8 @@ export function TableInvestors() {
           total_reinversion:           totalesData?.totales.total_reinversion           ?? 0,
         };
 
-    const totalSin = Number(raw.total_abono_capital) + Number(raw.total_abono_interes) + (emiteFactura ? Number(raw.total_abono_iva) : -Number(raw.total_isr));
-    const totalCon = totalSin - Number(raw.total_reinversion);
-
     return {
       ...raw,
-      total_cuota_sin_reinversion: totalSin,
-      total_cuota_con_reinversion: totalCon,
     };
   }, [isDraft, mirrorSummaryData, totalesData, emiteFactura]);
 

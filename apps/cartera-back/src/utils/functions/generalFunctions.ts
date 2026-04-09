@@ -624,14 +624,23 @@ export async function buildInversionistaWorkbook(
   const ws = wb.addWorksheet("Reporte", {
     properties: { defaultRowHeight: 18 },
   });
-
   const showId = opts?.showCreditId ?? false;
   const offset = showId ? 1 : 0;
   const totalCols = 15 + offset;
 
+  // Calcular ancho dinámico para la columna Codigo si se muestra
+  let dynamicCodigoWidth = 14; 
+  if (showId) {
+    inv.creditos.forEach(cr => {
+      const len = (cr.numero_credito_sifco || "").length;
+      if (len > dynamicCodigoWidth) dynamicCodigoWidth = len;
+    });
+    dynamicCodigoWidth += 4; // Un pequeño margen extra
+  }
+
   // anchos de columna (15 o 16 cols)
   const baseWidths = [10, 22, 14, 12, 16, 20, 16, 12, 12, 14, 20, 16, 22, 10, 14];
-  if (showId) baseWidths.unshift(18); // ancho para Código Sifco
+  if (showId) baseWidths.unshift(dynamicCodigoWidth);
 
   baseWidths.forEach((w, i) => (ws.getColumn(i + 1).width = w));
 
@@ -742,7 +751,7 @@ export async function buildInversionistaWorkbook(
 
     const head = ws.getRow(headRowIdx);
     head.values = [
-      ...(showId ? ["Código Sifco"] : []),
+      ...(showId ? ["Codigo"] : []),
       "Meses en crédito", "Nombre", "Capital",
       "% Interés", "% Inversionista", "Tasa interés inversor",
       "Interés Inversor", "IVA", "ISR",

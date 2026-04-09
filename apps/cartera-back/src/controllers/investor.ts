@@ -1265,6 +1265,10 @@ export async function resumeInvestor(
         total_abono_iva: new Big(0),
         total_isr: new Big(0),
         total_cuota: new Big(0),
+        total_cuota_sin_reinversion: new Big(0),
+        total_reinversion: new Big(0),
+        total_reinversion_capital: new Big(0),
+        total_reinversion_interes: new Big(0),
         total_monto_aportado: new Big(0),
         totalAbonoGeneralInteres: new Big(0),
         total_capital_creditos: new Big(0),
@@ -1331,6 +1335,10 @@ export async function resumeInvestor(
           let total_cuota = new Big(0);
           let total_monto_aportado = new Big(c.monto_aportado ?? 0);
           let totalAbonoGeneralInteres = new Big(0);
+          let total_cuota_sin_reinversion = new Big(0);
+          let total_reinversion_capital = new Big(0);
+          let total_reinversion_interes = new Big(0);
+          let total_reinversion_neta_global = new Big(0);
 
           // 🆕 Capital del crédito y capital actual
           const capital_credito = new Big(credito?.capital ?? 0);
@@ -1382,6 +1390,8 @@ export async function resumeInvestor(
               const cuota = pago.cuota ?? 0;
               let cuota_inversor;
               let abonoGeneralInteres;
+              let reinvCapital = new Big((pago as any).reinv_capital ?? 0);
+              let reinvInteres = new Big((pago as any).reinv_interes ?? 0);
 
               // 🔥 USAR FECHA DE LA CUOTA PARA EL MES (prioridad: fecha_pago_efectivo, luego fecha_vencimiento)
         const fechaParaMes = pago.fecha_vencimiento_cuota || pago.fecha_vencimiento_cuota;
@@ -1409,18 +1419,22 @@ const mes = fechaParaMes
                   break;
 
                 case "reinversion_capital":
+                  reinvCapital = abono_capital;
                   cuota_inversor = abono_interes.plus(
                     inv.emite_factura ? abono_iva : isr.neg()
                   );
                   break;
 
                 case "reinversion_interes":
+                  reinvInteres = abono_interes;
                   cuota_inversor = abono_capital.plus(
                     inv.emite_factura ? abono_iva : isr.neg()
                   );
                   break;
 
                 case "reinversion_total":
+                  reinvCapital = abono_capital;
+                  reinvInteres = abono_interes;
                   cuota_inversor = new Big(0);
                   break;
 
@@ -1431,11 +1445,30 @@ const mes = fechaParaMes
                     .plus(inv.emite_factura ? abono_iva : isr.neg());
                   break;
 
+                case "reinversion_combinada":
+                  // 🔑 Lógica combinada: tomamos lo que NO se reinvierte y le aplicamos impuesto
+                  const capRestante = abono_capital.minus(reinvCapital);
+                  const intRestante = abono_interes.minus(reinvInteres);
+                  const isrRestante = inv.emite_factura ? new Big(0) : intRestante.times(0.07);
+                  cuota_inversor = capRestante.plus(intRestante).plus(inv.emite_factura ? abono_iva : isrRestante.neg());
+                  break;
+
                 default:
                   cuota_inversor = abono_capital
                     .plus(abono_interes)
                     .plus(inv.emite_factura ? abono_iva : isr.neg());
               }
+
+              // 🔑 Acumular Totales Netos (Fuente de Verdad)
+              const netIntGlobal = abono_interes.plus(inv.emite_factura ? abono_iva : isr.neg());
+              total_cuota_sin_reinversion = total_cuota_sin_reinversion.plus(abono_capital).plus(netIntGlobal);
+
+              const isrReinv = inv.emite_factura ? new Big(0) : reinvInteres.times(0.07);
+              const totalReinvNeta = reinvCapital.plus(reinvInteres).minus(isrReinv);
+              total_reinversion_neta_global = total_reinversion_neta_global.plus(totalReinvNeta);
+              
+              total_reinversion_capital = total_reinversion_capital.plus(reinvCapital);
+              total_reinversion_interes = total_reinversion_interes.plus(reinvInteres);
 
               // 🆕 CORRECCIÓN: Acumular totales
               totalAbonoGeneralInteres =
@@ -1494,6 +1527,10 @@ const mes = fechaParaMes
             subtotal.total_abono_iva.plus(total_abono_iva);
           subtotal.total_isr = subtotal.total_isr.plus(total_isr);
           subtotal.total_cuota = subtotal.total_cuota.plus(total_cuota);
+          subtotal.total_cuota_sin_reinversion = subtotal.total_cuota_sin_reinversion.plus(total_cuota_sin_reinversion);
+          subtotal.total_reinversion = subtotal.total_reinversion.plus(total_reinversion_neta_global);
+          subtotal.total_reinversion_capital = subtotal.total_reinversion_capital.plus(total_reinversion_capital);
+          subtotal.total_reinversion_interes = subtotal.total_reinversion_interes.plus(total_reinversion_interes);
           subtotal.totalAbonoGeneralInteres =
             subtotal.totalAbonoGeneralInteres.plus(totalAbonoGeneralInteres);
           subtotal.total_capital_creditos =
@@ -1581,7 +1618,12 @@ const mes = fechaParaMes
               : subtotal.total_abono_interes.round(2).times(0.07)
             ).round(2).toString()
           ),
-          total_cuota: formatValue(subtotal.total_cuota.round(2).toString()),
+          total_cuota_sin_reinversion: formatValue(subtotal.total_cuota_sin_reinversion.toString()),
+          total_cuota_con_reinversion: formatValue(subtotal.total_cuota_sin_reinversion.minus(subtotal.total_reinversion).toString()),
+          total_cuota: formatValue(subtotal.total_cuota_sin_reinversion.minus(subtotal.total_reinversion).toString()),
+          total_reinversion_capital: formatValue(subtotal.total_reinversion_capital.toString()),
+          total_reinversion_interes: formatValue(subtotal.total_reinversion_interes.toString()),
+          total_reinversion:         formatValue(subtotal.total_reinversion.toString()),
           total_monto_aportado: formatValue(subtotal.total_monto_aportado.toString()),
           total_abono_general_interes: formatValue(subtotal.totalAbonoGeneralInteres.toString()),
           total_capital_creditos: formatValue(subtotal.total_capital_creditos.toString()),

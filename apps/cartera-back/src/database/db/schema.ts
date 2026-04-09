@@ -502,14 +502,13 @@
     {
       id: serial("id").primaryKey(),
       pago_id: integer("pago_id")
-        .notNull()
-        .references(() => pagos_credito.pago_id),
+        .references(() => pagos_credito.pago_id, { onDelete: "set null" }),
       inversionista_id: integer("inversionista_id")
         .notNull()
-        .references(() => inversionistas.inversionista_id),
+        .references(() => inversionistas.inversionista_id, { onDelete: "restrict" }),
       credito_id: integer("credito_id")
         .notNull()
-        .references(() => creditos.credito_id),
+        .references(() => creditos.credito_id, { onDelete: "restrict" }),
 
       abono_capital: numeric("abono_capital", {
         precision: 18,

@@ -680,6 +680,8 @@ export interface CreateBoletaInput {
 export interface ResumenGlobalInversionista {
 	inversionista_id: number;
 	nombre: string;
+	moneda: "quetzales" | "dolares";
+	currencySymbol: string;
 	emite_factura: boolean;
 	reinversion: string;
 	banco: string | null;

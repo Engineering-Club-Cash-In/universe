@@ -2932,7 +2932,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
                 investorName: inversionista.nombre_inversionista,
                 amount: subtotalStr,
                 creditNumber: "Múltiples",
-                date: dayjs().format("DD/MM/YYYY"),
+                date: dayjs().format("MMMM YYYY"),
                 currencySymbol: inversionista.moneda === "dolares" ? "$" : "Q.",
                 reportUrl: url,
                 attachment: {

@@ -1459,16 +1459,19 @@ const mes = fechaParaMes
                     .plus(inv.emite_factura ? abono_iva : isr.neg());
               }
 
-              // 🔑 Acumular Totales Netos (Fuente de Verdad)
-              const netIntGlobal = abono_interes.plus(inv.emite_factura ? abono_iva : isr.neg());
-              total_cuota_sin_reinversion = total_cuota_sin_reinversion.plus(abono_capital).plus(netIntGlobal);
+              // 🔑 Acumular Sin Reinversión de forma independiente (Neto Real)
+              const netIntParaMiso = abono_interes.plus(inv.emite_factura ? abono_iva : isr.neg());
+              const pagoNetoReal = abono_capital.plus(netIntParaMiso);
+              total_cuota_sin_reinversion = total_cuota_sin_reinversion.plus(pagoNetoReal);
 
+              // 🔑 Reinversión Neta (Interés - ISR proporcional)
               const isrReinv = inv.emite_factura ? new Big(0) : reinvInteres.times(0.07);
               const totalReinvNeta = reinvCapital.plus(reinvInteres).minus(isrReinv);
-              total_reinversion_neta_global = total_reinversion_neta_global.plus(totalReinvNeta);
+              const netReinvInt = reinvInteres.minus(isrReinv);
               
+              total_reinversion_neta_global = total_reinversion_neta_global.plus(totalReinvNeta);
               total_reinversion_capital = total_reinversion_capital.plus(reinvCapital);
-              total_reinversion_interes = total_reinversion_interes.plus(reinvInteres);
+              total_reinversion_interes = total_reinversion_interes.plus(netReinvInt);
 
               // 🆕 CORRECCIÓN: Acumular totales
               totalAbonoGeneralInteres =
@@ -1612,12 +1615,7 @@ const mes = fechaParaMes
               : subtotal.total_abono_interes.round(2).times(0.12)
             ).round(2).toString()
           ),
-          total_isr: formatValue(
-            (inv.emite_factura
-              ? new Big(0)
-              : subtotal.total_abono_interes.round(2).times(0.07)
-            ).round(2).toString()
-          ),
+          total_isr: formatValue(subtotal.total_isr.round(2).toString()),
           total_cuota_sin_reinversion: formatValue(subtotal.total_cuota_sin_reinversion.toString()),
           total_cuota_con_reinversion: formatValue(subtotal.total_cuota_sin_reinversion.minus(subtotal.total_reinversion).toString()),
           total_cuota: formatValue(subtotal.total_cuota_sin_reinversion.minus(subtotal.total_reinversion).toString()),
@@ -1822,6 +1820,7 @@ export async function getInvestorTotalsGlobales(
     total_reinversion_capital: new Big(0),
     total_reinversion_interes: new Big(0),
     total_reinversion: new Big(0),
+    total_cuota_sin_reinversion: new Big(0),
   };
 
   // 7. Procesar TODOS los créditos del inversionista (sin queries adicionales)
@@ -1891,12 +1890,23 @@ export async function getInvestorTotalsGlobales(
       subtotal.total_abono_capital = subtotal.total_abono_capital.plus(abono_capital);
       subtotal.total_abono_interes = subtotal.total_abono_interes.plus(abono_interes);
       subtotal.total_abono_iva = subtotal.total_abono_iva.plus(abono_iva);
-      subtotal.total_isr = subtotal.total_isr.plus(isr);
+      if (!inv.emite_factura) {
+        subtotal.total_isr = subtotal.total_isr.plus(isr);
+      }
       subtotal.total_cuota = subtotal.total_cuota.plus(cuota_inversor);
       subtotal.totalAbonoGeneralInteres = subtotal.totalAbonoGeneralInteres.plus(abonoGeneralInteres);
+      
+      // 🔑 ACUMULADOR NETO INDEPENDIENTE
+      const pagoNetoGlobal = abono_capital.plus(interesTotal);
+      subtotal.total_cuota_sin_reinversion = subtotal.total_cuota_sin_reinversion.plus(pagoNetoGlobal);
+      // 🔑 Reinversión Neta (Fuente de Verdad)
+      const isrReinvGlobal = inv.emite_factura ? new Big(0) : reinvInteres.times(0.07);
+      const netReinvGlobal = reinvCapital.plus(reinvInteres).minus(isrReinvGlobal);
+      const netReinvIntGlobal = reinvInteres.minus(isrReinvGlobal);
+
+      subtotal.total_reinversion = subtotal.total_reinversion.plus(netReinvGlobal);
       subtotal.total_reinversion_capital = subtotal.total_reinversion_capital.plus(reinvCapital);
-      subtotal.total_reinversion_interes = subtotal.total_reinversion_interes.plus(reinvInteres);
-      subtotal.total_reinversion = subtotal.total_reinversion.plus(reinvCapital).plus(reinvInteres);
+      subtotal.total_reinversion_interes = subtotal.total_reinversion_interes.plus(netReinvIntGlobal);
     }
 
     subtotal.total_monto_aportado = subtotal.total_monto_aportado.plus(new Big(c.monto_aportado ?? 0));
@@ -1952,7 +1962,7 @@ export async function getInvestorTotalsGlobales(
         ).round(2).toString()
       ),
       total_isr: formatValue(subtotal.total_isr.round(2).toString()),
-      total_cuota_sin_reinversion: formatValue(subtotal.total_cuota.plus(subtotal.total_reinversion).round(2).toString()),
+      total_cuota_sin_reinversion: formatValue(subtotal.total_cuota_sin_reinversion.round(2).toString()),
       total_cuota_con_reinversion: formatValue(subtotal.total_cuota.round(2).toString()),
       total_monto_aportado: formatValue(subtotal.total_monto_aportado.round(2).toString()),
       total_abono_general_interes: formatValue(subtotal.totalAbonoGeneralInteres.round(2).toString()),
@@ -2437,12 +2447,13 @@ export async function getInvestorMirrorSummary(
     total_isr:                new Big(0),
     total_cuota:              new Big(0),
     total_monto_aportado:     new Big(0),
-    totalAbonoGeneralInteres: new Big(0),
+    total_abono_general_interes: new Big(0),
     total_capital_creditos:   new Big(0),
     total_capital_actual:     new Big(0),
     total_reinversion_capital: new Big(0),
     total_reinversion_interes: new Big(0),
     total_reinversion:         new Big(0),
+    total_cuota_sin_reinversion: new Big(0),
   };
 
   for (const credito of creditosEspejo) {
@@ -2509,10 +2520,19 @@ export async function getInvestorMirrorSummary(
       sg.total_abono_iva          = sg.total_abono_iva.plus(abono_iva);
       sg.total_isr                = sg.total_isr.plus(isr);
       sg.total_cuota              = sg.total_cuota.plus(cuota_inversor);
-      sg.totalAbonoGeneralInteres = sg.totalAbonoGeneralInteres.plus(abonoGeneralInteres);
+      sg.total_abono_general_interes = sg.total_abono_general_interes.plus(abonoGeneralInteres);
+      
+      // 🔑 ACUMULADOR NETO INDEPENDIENTE
+      const pagoNetoEspejo = abono_capital.plus(interesTotal);
+      sg.total_cuota_sin_reinversion = sg.total_cuota_sin_reinversion.plus(pagoNetoEspejo);
+      // 🔑 Reinversión Neta (Fuente de Verdad)
+      const isrReinvMirror = inv.emite_factura ? new Big(0) : reinvInteres.times(0.07);
+      const netReinvMirror = reinvCapital.plus(reinvInteres).minus(isrReinvMirror);
+      const netReinvIntMirror = reinvInteres.minus(isrReinvMirror);
+
+      sg.total_reinversion         = sg.total_reinversion.plus(netReinvMirror);
       sg.total_reinversion_capital = sg.total_reinversion_capital.plus(reinvCapital);
-      sg.total_reinversion_interes = sg.total_reinversion_interes.plus(reinvInteres);
-      sg.total_reinversion         = sg.total_reinversion.plus(reinvCapital).plus(reinvInteres);
+      sg.total_reinversion_interes = sg.total_reinversion_interes.plus(netReinvIntMirror);
     }
 
     // 🔑 Saldo actual = monto_aportado_base - SUM(abono_capital de pagos espejo)
@@ -2542,19 +2562,19 @@ export async function getInvestorMirrorSummary(
     moneda:           inv.moneda,
     currencySymbol:   inv.moneda === "dolares" ? "$" : "Q.",
     subtotal: {
-      total_abono_capital:      formatValue(sg.total_abono_capital.toString()),
-      total_abono_interes:      formatValue(sg.total_abono_interes.toString()),
-      total_abono_iva:          formatValue(sg.total_abono_iva.toString()),
-      total_isr:                formatValue(sg.total_isr.toString()),
-      total_cuota_sin_reinversion: formatValue(sg.total_cuota.plus(sg.total_reinversion).toString()),
-      total_cuota_con_reinversion: formatValue(sg.total_cuota.toString()),
-      total_monto_aportado:     formatValue(sg.total_monto_aportado.toString()),
-      totalAbonoGeneralInteres: formatValue(sg.totalAbonoGeneralInteres.toString()),
-      total_capital_creditos:   formatValue(sg.total_capital_creditos.toString()),
-      total_capital_actual:     formatValue(sg.total_capital_actual.toString()),
-      total_reinversion_capital: formatValue(sg.total_reinversion_capital.toString()),
-      total_reinversion_interes: formatValue(sg.total_reinversion_interes.toString()),
-      total_reinversion:         formatValue(sg.total_reinversion.toString()),
+      total_abono_capital:      formatValue(sg.total_abono_capital.round(2).toString()),
+      total_abono_interes:      formatValue(sg.total_abono_interes.round(2).toString()),
+      total_abono_iva:          formatValue(sg.total_abono_iva.round(2).toString()),
+      total_isr:                formatValue(sg.total_isr.round(2).toString()),
+      total_cuota_sin_reinversion: formatValue(sg.total_cuota_sin_reinversion.round(2).toString()),
+      total_cuota_con_reinversion: formatValue(sg.total_cuota.round(2).toString()),
+      total_monto_aportado:     formatValue(sg.total_monto_aportado.round(2).toString()),
+      total_abono_general_interes: formatValue(sg.total_abono_general_interes.round(2).toString()),
+      total_capital_creditos:   formatValue(sg.total_capital_creditos.round(2).toString()),
+      total_capital_actual:     formatValue(sg.total_capital_actual.round(2).toString()),
+      total_reinversion_capital: formatValue(sg.total_reinversion_capital.round(2).toString()),
+      total_reinversion_interes: formatValue(sg.total_reinversion_interes.round(2).toString()),
+      total_reinversion:         formatValue(sg.total_reinversion.round(2).toString()),
     },
   };
 }

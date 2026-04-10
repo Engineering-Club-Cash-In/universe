@@ -4053,6 +4053,7 @@ interface InversionistaResumen {
   total_abono_interes: number;
   total_abono_iva: number;
   total_isr: number;
+  total_abono_general_interes: number;
   total_a_recibir_sin_reinversion: number;
   total_reinversion: number;
   total_a_recibir_con_reinversion: number;
@@ -4087,6 +4088,7 @@ interface InversionistaResumenRow {
   total_abono_interes: number;
   total_abono_iva: number;
   total_isr: number;
+  total_abono_general_interes: number;
   total_a_recibir_sin_reinversion: number;
   total_reinversion: number;
   total_a_recibir_con_reinversion: number;
@@ -4279,6 +4281,14 @@ async function consultarResumenGlobalPorEstadoPago(
         ELSE ROUND(${pe.abono_interes} * 0.07, 2)
       END
     ), 0)`,
+      total_abono_general_interes: sql<number>`COALESCE(SUM(
+        ${pe.abono_interes}
+        + CASE
+            WHEN ${inversionistas.emite_factura}
+              THEN ${pe.abono_iva_12}
+            ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
+          END
+      ), 0)`,
       total_a_recibir_sin_reinversion: sql<number>`COALESCE(SUM(
         ${pe.abono_capital}
         + ${pe.abono_interes}
@@ -4291,13 +4301,21 @@ async function consultarResumenGlobalPorEstadoPago(
       total_reinversion: sql<number>`CASE ${inversionistas.tipo_reinversion}
         WHEN 'sin_reinversion' THEN 0
         WHEN 'reinversion_capital' THEN COALESCE(SUM(${pe.abono_capital}), 0)
-        WHEN 'reinversion_interes' THEN COALESCE(SUM(${pe.abono_interes}), 0)
-        WHEN 'reinversion_total' THEN COALESCE(SUM(${pe.abono_capital} + ${pe.abono_interes}), 0)
+        WHEN 'reinversion_interes' THEN COALESCE(SUM(
+          ${pe.abono_interes}
+          - CASE WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+        ), 0)
+        WHEN 'reinversion_total' THEN COALESCE(SUM(
+          ${pe.abono_capital} + ${pe.abono_interes}
+          - CASE WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+        ), 0)
         WHEN 'reinversion_combinada' THEN COALESCE(SUM(
           CASE ${ce.tipo_reinversion}
             WHEN 'reinversion_capital' THEN ${pe.abono_capital}
             WHEN 'reinversion_interes' THEN ${pe.abono_interes}
+              - CASE WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
             WHEN 'reinversion_total' THEN ${pe.abono_capital} + ${pe.abono_interes}
+              - CASE WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
             ELSE 0
           END
         ), 0)
@@ -4328,13 +4346,21 @@ async function consultarResumenGlobalPorEstadoPago(
         - CASE ${inversionistas.tipo_reinversion}
             WHEN 'sin_reinversion' THEN 0
             WHEN 'reinversion_capital' THEN COALESCE(SUM(${pe.abono_capital}), 0)
-            WHEN 'reinversion_interes' THEN COALESCE(SUM(${pe.abono_interes}), 0)
-            WHEN 'reinversion_total' THEN COALESCE(SUM(${pe.abono_capital} + ${pe.abono_interes}), 0)
+            WHEN 'reinversion_interes' THEN COALESCE(SUM(
+              ${pe.abono_interes}
+              - CASE WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+            ), 0)
+            WHEN 'reinversion_total' THEN COALESCE(SUM(
+              ${pe.abono_capital} + ${pe.abono_interes}
+              - CASE WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+            ), 0)
             WHEN 'reinversion_combinada' THEN COALESCE(SUM(
               CASE ${ce.tipo_reinversion}
                 WHEN 'reinversion_capital' THEN ${pe.abono_capital}
                 WHEN 'reinversion_interes' THEN ${pe.abono_interes}
+                  - CASE WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
                 WHEN 'reinversion_total' THEN ${pe.abono_capital} + ${pe.abono_interes}
+                  - CASE WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
                 ELSE 0
               END
             ), 0)
@@ -4501,6 +4527,7 @@ async function consultarResumenGlobalDesdeLiquidaciones(
     total_abono_interes: sql<number>`COALESCE(SUM(${liquidaciones.total_interes}), 0)`,
     total_abono_iva: sql<number>`COALESCE(SUM(${liquidaciones.total_iva}), 0)`,
     total_isr: sql<number>`COALESCE(SUM(${liquidaciones.total_isr}), 0)`,
+    total_abono_general_interes: sql<number>`COALESCE(SUM(${liquidaciones.total_interes} + ${liquidaciones.total_iva} - ${liquidaciones.total_isr}), 0)`,
     total_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.reinversion_total}), 0)`,
     total_cuota: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0)`,
     total_a_recibir_con_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0)`,
@@ -4561,6 +4588,7 @@ function mapResumenRow(
     total_abono_interes: inv.total_abono_interes,
     total_abono_iva: inv.total_abono_iva,
     total_isr: inv.total_isr,
+    total_abono_general_interes: inv.total_abono_general_interes,
     total_a_recibir_sin_reinversion: inv.total_a_recibir_sin_reinversion,
     total_reinversion: inv.total_reinversion,
     total_a_recibir_con_reinversion: inv.total_a_recibir_con_reinversion,

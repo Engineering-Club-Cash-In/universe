@@ -67,6 +67,8 @@ interface BoletaPendiente {
 interface ResumenInversionista {
 	inversionista_id: number;
 	nombre: string;
+	moneda: "quetzales" | "dolares";
+	currencySymbol: string;
 	emite_factura: boolean;
 	reinversion: string;
 	banco: string | null;
@@ -91,10 +93,11 @@ type EstadoBoletaFilter = "all" | "pending" | "liquidated";
 
 const PAGE_SIZE = 20;
 
-const formatQ = (value: string) => {
-	const num = Number.parseFloat(value);
-	if (Number.isNaN(num)) return "Q0.00";
-	return `Q${num.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const formatCurrency = (value: string | number, symbol = "Q") => {
+	const num = typeof value === "string" ? Number.parseFloat(value) : value;
+	if (Number.isNaN(num)) return `${symbol}0.00`;
+	const locale = symbol === "$" ? "en-US" : "es-GT";
+	return `${symbol}${num.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
 const invalidateResumenGlobalInversionistas = () =>
@@ -228,7 +231,7 @@ function SubirBoletaDialog({
 				<DialogHeader>
 					<DialogTitle>Subir Boleta</DialogTitle>
 					<DialogDescription>
-						{inv.nombre} — {formatQ(inv.total_a_recibir_con_reinversion)}
+						{inv.nombre} — {formatCurrency(inv.total_a_recibir_con_reinversion, inv.currencySymbol)}
 					</DialogDescription>
 				</DialogHeader>
 
@@ -372,7 +375,7 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 				{/* Monto hero */}
 				<div className="px-5 pt-1.5 pb-4">
 					<p className="font-bold text-[28px] tabular-nums leading-none tracking-tighter">
-						{formatQ(montoPrincipal)}
+						{formatCurrency(montoPrincipal, inv.currencySymbol)}
 					</p>
 				</div>
 
@@ -403,11 +406,11 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 
 				{/* Detalle financiero + tags */}
 				<div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-5 pt-3 pb-1.5">
-					<DetailItem label="Cap" value={formatQ(inv.total_abono_capital)} />
-					<DetailItem label="Int" value={formatQ(inv.total_abono_interes)} />
-					<DetailItem label="IVA" value={formatQ(inv.total_abono_iva)} />
+					<DetailItem label="Cap" value={formatCurrency(inv.total_abono_capital, inv.currencySymbol)} />
+					<DetailItem label="Int" value={formatCurrency(inv.total_abono_interes, inv.currencySymbol)} />
+					<DetailItem label="IVA" value={formatCurrency(inv.total_abono_iva, inv.currencySymbol)} />
 					{Number.parseFloat(inv.total_isr) > 0 && (
-						<DetailItem label="ISR" value={formatQ(inv.total_isr)} />
+						<DetailItem label="ISR" value={formatCurrency(inv.total_isr, inv.currencySymbol)} />
 					)}
 					{inv.emite_factura && (
 						<span className="text-[10px] text-muted-foreground/40">
@@ -716,7 +719,7 @@ function PagarInversionistas() {
 				/>
 				<StatCard
 					label="Total pendiente de liquidar"
-					value={formatQ(String(totalPendienteLiquidar))}
+					value={formatCurrency(totalPendienteLiquidar, "Q")}
 					icon={<Banknote className="h-4 w-4 text-emerald-600" />}
 					highlight
 				/>

@@ -4624,6 +4624,7 @@ async function generateResumenGlobalWorkbook(
     "Total sin Reinversión",
     "Reinversión",
     "Total con Reinversión",
+    "Cuota",
   ];
 
   const headerRow = sheet.addRow(headers);
@@ -4634,6 +4635,15 @@ async function generateResumenGlobalWorkbook(
     fgColor: { argb: "FF0070C0" },
   };
   headerRow.alignment = { horizontal: "center", vertical: "middle" };
+
+  // Header de "Cuota" resaltado en verde
+  const cuotaHeaderCell = headerRow.getCell(headers.length);
+  cuotaHeaderCell.fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FF00B050" },
+  };
+  cuotaHeaderCell.font = { bold: true, color: { argb: "FFFFFFFF" } };
 
   rows.forEach((inv) => {
     const row = sheet.addRow([
@@ -4652,11 +4662,12 @@ async function generateResumenGlobalWorkbook(
       Number(inv.total_a_recibir_sin_reinversion).toFixed(2),
       Number(inv.total_reinversion).toFixed(2),
       Number(inv.total_a_recibir_con_reinversion).toFixed(2),
+      Number(inv.total_cuota).toFixed(2),
     ]);
 
     const isrCellIndex = includeEstado ? 12 : 11;
     const firstMoneyColumn = includeEstado ? 9 : 8;
-    const lastMoneyColumn = includeEstado ? 15 : 14;
+    const lastMoneyColumn = includeEstado ? 16 : 15;
 
     if (inv.emite_factura) {
       const isrCell = row.getCell(isrCellIndex);
@@ -4671,6 +4682,15 @@ async function generateResumenGlobalWorkbook(
     for (let i = firstMoneyColumn; i <= lastMoneyColumn; i++) {
       row.getCell(i).numFmt = "Q#,##0.00";
     }
+
+    // Resaltar columna "Cuota" (última columna) en verde
+    const cuotaCell = row.getCell(lastMoneyColumn);
+    cuotaCell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FF92D050" },
+    };
+    cuotaCell.font = { bold: true };
   });
 
   sheet.columns.forEach((col) => {

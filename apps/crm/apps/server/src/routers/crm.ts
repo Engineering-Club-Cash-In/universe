@@ -67,6 +67,7 @@ import {
 	getMissingFieldsForCompletion,
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
+import { hasStaleAnalysisChecklistVehicle } from "../lib/analysis-checklist";
 import { validarDpi } from "../utils/cui-validation";
 import { scoreLead } from "../services/lead-scoring";
 import { createNotification } from "./notifications";
@@ -1667,6 +1668,9 @@ export const crmRouter = {
 			// Check if this is a stage change
 			const isStageChange =
 				input.stageId && input.stageId !== currentOpportunity[0].stageId;
+			const vehicleChanged =
+				input.vehicleId !== undefined &&
+				input.vehicleId !== currentOpportunity[0].vehicleId;
 
 			// Check if this is an override (sales moving from analysis stage)
 			let isOverride = false;
@@ -1748,6 +1752,12 @@ export const crmRouter = {
 						updatedAt: new Date(),
 					})
 					.where(eq(leads.id, currentOpportunity[0].leadId));
+			}
+
+			if (vehicleChanged) {
+				await db
+					.delete(analysisChecklists)
+					.where(eq(analysisChecklists.opportunityId, id));
 			}
 
 			// Record stage history if stage changed
@@ -3808,9 +3818,20 @@ export const crmRouter = {
 
 			console.log("[getAnalysisChecklist] opportunity:", opportunity);
 
-			// Early return if checklist already exists
+			// Early return if checklist already exists and is still aligned
 			if (existingChecklist) {
+				if (
+					hasStaleAnalysisChecklistVehicle(
+						existingChecklist.checklistData as any,
+						opportunity.vehicleId,
+					)
+				) {
+					await db
+						.delete(analysisChecklists)
+						.where(eq(analysisChecklists.id, existingChecklist.id));
+				} else {
 				return existingChecklist.checklistData;
+				}
 			}
 
 			// Phase 2: Run independent queries in parallel

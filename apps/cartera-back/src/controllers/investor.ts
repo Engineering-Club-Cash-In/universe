@@ -2922,25 +2922,40 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
 
           // Enviar correo (best-effort)
           if (inversionista.email && excelBuffer) {
+            console.log(`  📧 Preparando envío de correo para ${inversionista.email}...`);
             try {
-              await sendLiquidationEmail({
+              // Validar que subtotal existe para evitar crash
+              const subtotalStr = inversionista.subtotal?.total_cuota_con_reinversion?.toString() || "0";
+              
+              const emailResult = await sendLiquidationEmail({
                 to: inversionista.email,
                 investorName: inversionista.nombre_inversionista,
-                amount: inversionista.subtotal.total_cuota.toString(),
+                amount: subtotalStr,
                 creditNumber: "Múltiples",
-                date: dayjs().format("DD/MM/YYYY"),
+                date: dayjs().format("MMMM YYYY"),
                 currencySymbol: inversionista.moneda === "dolares" ? "$" : "Q.",
+                reportUrl: url,
                 attachment: {
                   filename: `Liquidacion_${inversionista.nombre_inversionista.replace(/\s+/g, '_')}_${dayjs().format('YYYYMMDD')}.xlsx`,
                   content: excelBuffer,
                 }
               });
-              console.log(`  📧 Correo enviado a ${inversionista.email}`);
+              
+              if (emailResult.success) {
+                console.log(`  ✅ Correo enviado exitosamente a ${inversionista.email}`);
+              } else {
+                console.error(`  ❌ Error devuelto por el servicio de correo para ${inversionista.email}:`, emailResult.error);
+              }
             } catch (emailError) {
-              console.error(`  ❌ Error al enviar correo a ${inversionista.email}:`, emailError);
+              console.error(`  ❌ Error inesperado al intentar enviar correo a ${inversionista.email}:`, emailError);
             }
           } else {
-            console.warn(`  ⚠️ Inversionista sin correo configurado`);
+            if (!inversionista.email) {
+              console.warn(`  ⚠️ El inversionista ${inversionista.nombre_inversionista} (${inv_id}) no tiene un correo electrónico configurado en su ficha. Se omitió la notificación.`);
+            }
+            if (!excelBuffer) {
+              console.error(`  ❌ No se pudo adjuntar el reporte Excel porque el generador devolvió un buffer vacío para el inversionista ${inv_id}.`);
+            }
           }
 
           reportesGenerados.push({

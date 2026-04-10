@@ -19,6 +19,7 @@ interface LiquidationEmailProps {
   creditNumber: string;
   date: string;
   currencySymbol?: string;
+  reportUrl?: string;
 }
 
 export const LiquidationEmail = ({
@@ -27,6 +28,7 @@ export const LiquidationEmail = ({
   creditNumber,
   date,
   currencySymbol = 'Q.',
+  reportUrl,
 }: LiquidationEmailProps) => (
   <Html>
     <Head />
@@ -37,21 +39,23 @@ export const LiquidationEmail = ({
           <Text style={logo}>CLUB CASH IN</Text>
         </Section>
         <Section style={content}>
-          <Heading style={h1}>Confirmación de Liquidación</Heading>
+          <Heading style={h1}>Reporte de Liquidación Disponible</Heading>
           <Text style={text}>Estimado(a) <strong>{investorName}</strong>,</Text>
           <Text style={text}>
-            Le informamos que se ha procesado con éxito la liquidación de su pago correspondiente.
+            Le informamos que se ha procesado con éxito la liquidación de sus pagos correspondientes a <strong>{date}</strong>. Los detalles completos se encuentran en el documento adjunto.
           </Text>
-          
-          <Section style={detailsContainer}>
-            <Text style={detailItem}><strong>Fecha:</strong> {date}</Text>
-            <Text style={detailItem}><strong>Crédito:</strong> {creditNumber}</Text>
-            <Text style={detailItem}><strong>Monto Liquidado:</strong> {currencySymbol}{amount}</Text>
-          </Section>
 
-          <Text style={text}>
-            Adjunto a este correo encontrará el reporte detallado con el desglose de capital, intereses e impuestos.
-          </Text>
+          {reportUrl ? (
+            <Section style={buttonContainer}>
+              <Link href={reportUrl} style={button}>
+                Descargar Reporte (Excel)
+              </Link>
+            </Section>
+          ) : (
+            <Text style={text}>
+              Adjunto a este correo encontrará el reporte detallado con el desglose de su liquidación.
+            </Text>
+          )}
 
           <Hr style={hr} />
           
@@ -138,4 +142,21 @@ const footer = {
   fontSize: '12px',
   textAlign: 'center' as const,
   margin: '8px 0',
+};
+
+const buttonContainer = {
+  textAlign: 'center' as const,
+  margin: '24px 0',
+};
+
+const button = {
+  backgroundColor: '#004aad',
+  borderRadius: '4px',
+  color: '#fff',
+  fontSize: '16px',
+  fontWeight: 'bold',
+  textDecoration: 'none',
+  textAlign: 'center' as const,
+  display: 'inline-block',
+  padding: '12px 24px',
 };

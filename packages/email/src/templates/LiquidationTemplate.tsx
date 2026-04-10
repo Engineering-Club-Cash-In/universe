@@ -19,6 +19,7 @@ interface LiquidationEmailProps {
   creditNumber: string;
   date: string;
   currencySymbol?: string;
+  reportUrl?: string;
 }
 
 export const LiquidationEmail = ({
@@ -27,6 +28,7 @@ export const LiquidationEmail = ({
   creditNumber,
   date,
   currencySymbol = 'Q.',
+  reportUrl,
 }: LiquidationEmailProps) => (
   <Html>
     <Head />
@@ -49,9 +51,17 @@ export const LiquidationEmail = ({
             <Text style={detailItem}><strong>Monto Liquidado:</strong> {currencySymbol}{amount}</Text>
           </Section>
 
-          <Text style={text}>
-            Adjunto a este correo encontrará el reporte detallado con el desglose de capital, intereses e impuestos.
-          </Text>
+          {reportUrl ? (
+            <Section style={buttonContainer}>
+              <Link href={reportUrl} style={button}>
+                Descargar Reporte Detallado (Excel)
+              </Link>
+            </Section>
+          ) : (
+            <Text style={text}>
+              Adjunto a este correo encontrará el reporte detallado con el desglose de capital, intereses e impuestos.
+            </Text>
+          )}
 
           <Hr style={hr} />
           
@@ -138,4 +148,21 @@ const footer = {
   fontSize: '12px',
   textAlign: 'center' as const,
   margin: '8px 0',
+};
+
+const buttonContainer = {
+  textAlign: 'center' as const,
+  margin: '24px 0',
+};
+
+const button = {
+  backgroundColor: '#004aad',
+  borderRadius: '4px',
+  color: '#fff',
+  fontSize: '16px',
+  fontWeight: 'bold',
+  textDecoration: 'none',
+  textAlign: 'center' as const,
+  display: 'inline-block',
+  padding: '12px 24px',
 };

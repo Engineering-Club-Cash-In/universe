@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, or } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -28,7 +28,7 @@ export async function getSalesUserWithLeastOpportunities() {
 			role: user.role,
 		})
 		.from(user)
-		.where(and(eq(user.role, "sales"), eq(user.assignLeads, true)));
+		.where(and(eq(user.role, "sales"), eq(user.assignLeads, true), eq(user.banned, false)));
 
 	if (salesUsers.length === 0) {
 		return null;
@@ -88,7 +88,11 @@ export async function getSalesUserWithLeastLeads() {
 		return null;
 	}
 
-	// Contar leads por usuario (solo leads activos, no convertidos)
+	// Contar leads automáticos asignados hoy por usuario (hora Guatemala UTC-6)
+	const startOfToday = new Date(
+		new Date().toLocaleDateString("en-US", { timeZone: "America/Guatemala" }),
+	);
+
 	const leadCounts = await db
 		.select({
 			assignedTo: leads.assignedTo,
@@ -96,10 +100,9 @@ export async function getSalesUserWithLeastLeads() {
 		})
 		.from(leads)
 		.where(
-			or(
-				eq(leads.status, "new"),
-				eq(leads.status, "contacted"),
-				eq(leads.status, "qualified"),
+			and(
+				eq(leads.assignmentType, "auto"),
+				gte(leads.createdAt, startOfToday),
 			),
 		)
 		.groupBy(leads.assignedTo);
@@ -196,7 +199,6 @@ export async function getOpenOpportunityBySource(
 					eq(opportunities.status, "open"),
 					eq(opportunities.status, "on_hold"),
 				),
-				eq(opportunities.source, source),
 			),
 		)
 		.orderBy(desc(opportunities.createdAt))
@@ -384,6 +386,7 @@ export async function createPublicLead(c: Context) {
 				source: body.source || "website",
 				campaign: body.campaign,
 				status: "new",
+				assignmentType: "auto",
 				assignedTo: salesUserForLead.id,
 				createdBy: salesUserForLead.id,
 				updatedAt: new Date(),

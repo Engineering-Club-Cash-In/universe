@@ -839,6 +839,7 @@ export interface SubtotalInversionista {
   total_reinversion_capital: number;
   total_reinversion_interes: number;
   total_reinversion: number;
+  total_abono_general_interes: number;
 }
 
 // Un inversionista con sus créditos y sus subtotales
@@ -980,7 +981,7 @@ export interface InvestorMirrorSummaryResponse {
     total_cuota_sin_reinversion: number;
     total_cuota_con_reinversion: number;
     total_monto_aportado: number;
-    totalAbonoGeneralInteres: number;
+    total_abono_general_interes: number;
     total_capital_creditos: number;
     total_capital_actual: number;
     total_reinversion_capital: number;
@@ -1153,6 +1154,19 @@ export async function downloadInvestorPDFService(
 
   if (!data?.url) {
     throw new Error("[ERROR] La respuesta no contiene url del PDF subido.");
+  }
+
+  return data;
+}
+
+export async function getReporteNoLiquidados(investorId: number): Promise<{ success: boolean; url: string; filename: string }> {
+  const { data } = await api.get<{ success: boolean; url: string; filename: string }>(
+    `/investor/reporte-no-liquidados`,
+    { params: { id: investorId } }
+  );
+
+  if (!data?.url) {
+    throw new Error("La respuesta no contiene la URL del reporte.");
   }
 
   return data;
@@ -1790,6 +1804,7 @@ export interface GetPagosParams {
   usuarioNombre?: string;
   validationStatus?: string;
   reportAdvisor?: boolean;
+  fechaBoleta?: string;
 }
 
 /**
@@ -3341,6 +3356,7 @@ export interface PagosPorVencimientoParams {
   pageSize?: number;
   numero_credito_sifco?: string;
   nombre_usuario?: string;
+  tipo_fecha?: "vencimiento" | "creacion";
 }
 
 export async function getPagosPorVencimiento(
@@ -3354,6 +3370,7 @@ export async function getPagosPorVencimiento(
         anio: params.anio,
         page: params.page ?? 1,
         pageSize: params.pageSize ?? 20,
+        tipo_fecha: params.tipo_fecha,
         ...(params.numero_credito_sifco && {
           numero_credito_sifco: params.numero_credito_sifco,
         }),
@@ -3362,6 +3379,160 @@ export async function getPagosPorVencimiento(
         }),
       },
     }
+  );
+  return res.data;
+}
+
+// ============================================================
+// Créditos espejo pendientes (sesiones pendientes)
+// ============================================================
+export interface CreditoEspejoPendiente {
+  id: number;
+  credito_id: number;
+  inversionista_id: number;
+  cuota_inversionista: string;
+  porcentaje_participacion_inversionista: string;
+  monto_aportado: string;
+  porcentaje_cash_in: string;
+  monto_inversionista: string;
+  monto_cash_in: string;
+  iva_inversionista: string;
+  iva_cash_in: string;
+  fecha_creacion: string;
+  fecha_inicio_participacion: string;
+  status: "pendiente_reinversion" | "pendiente_compra_cartera";
+  tipo_reinversion: string | null;
+  numero_credito_sifco: string;
+  nombre_usuario: string;
+}
+
+export interface CreditCandidateInversionista {
+  inversionista_id: number;
+  nombre: string;
+  monto_aportado: number;
+  es_cube: boolean;
+}
+
+export interface OtroCreditoDisponible {
+  credito_id: number;
+  numero_credito_sifco: string;
+  capital: number;
+  capital_activo: number;
+  formato_credito: string;
+  cuotas_pagadas: number;
+  total_cuotas: number;
+  inversionistas: CreditCandidateInversionista[];
+  score: number;
+  credito_completo?: {
+    credito: any;
+    usuario: { nombre: string; [key: string]: any } | null;
+    espejo: any[];
+    inversionistas_detalle: any[];
+  };
+}
+
+export interface InversionistaSesionPendiente {
+  inversionista_id: number;
+  nombre: string;
+  dpi: number | null;
+  email: string | null;
+  moneda: string;
+  monto_reinversion: string | null;
+  saldo_reinversion: string;
+  creditosPendientes: CreditoEspejoPendiente[];
+}
+
+export async function getCreditosEspejoPendientesService(): Promise<InversionistaSesionPendiente[]> {
+  const res = await api.get<InversionistaSesionPendiente[]>(
+    `${API_URL}/creditos-espejo-pendientes`
+  );
+  return res.data;
+}
+
+// ============================================================
+// Agregar inversionista a crédito (compra cartera / reinversión)
+// ============================================================
+export interface AgregarInversionistaCreditoPayload {
+  inversionista_id: number;
+  monto_aportado: number;
+  tipo_operacion: "reinversion" | "compra_cartera";
+  fecha_inicio_participacion?: string;
+  porcentaje_cash_in?: number;
+  porcentaje_inversion?: number;
+}
+
+export interface AgregarInversionistaCreditoResponse {
+  success: boolean;
+  message: string;
+}
+
+export async function agregarInversionistaCreditoService(
+  payload: AgregarInversionistaCreditoPayload
+): Promise<AgregarInversionistaCreditoResponse> {
+  const res = await api.post<AgregarInversionistaCreditoResponse>(
+    `${API_URL}/agregar-inversionista-credito`,
+    payload
+  );
+  return res.data;
+}
+
+export interface CompletarEspejoPayload {
+  creditos: number[];
+  inversionista_id: number;
+}
+
+export interface CompletarEspejoResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface CandidatesResponse {
+  ok: boolean;
+  total: number;
+  candidates: OtroCreditoDisponible[];
+}
+
+export async function getCreditCandidatesService(minimo = 10): Promise<OtroCreditoDisponible[]> {
+  const res = await api.get<CandidatesResponse>(
+    `${API_URL}/assign-capital/candidates`,
+    { params: { minimo } }
+  );
+  return res.data.candidates;
+}
+
+export interface ReemplazarInversionistaCreditoPayload {
+  inversionista_id: number;
+  credito_espejo_removido_id: number;
+  tipo_operacion?: "reinversion" | "compra_cartera";
+  porcentaje_cash_in?: number;
+  porcentaje_inversion?: number;
+  reasignaciones: {
+    credito_destino_id: number;
+    monto: number;
+  }[];
+}
+
+export interface ReemplazarInversionistaCreditoResponse {
+  success: boolean;
+  message: string;
+}
+
+export async function reemplazarInversionistaCreditoService(
+  payload: ReemplazarInversionistaCreditoPayload
+): Promise<ReemplazarInversionistaCreditoResponse> {
+  const res = await api.post<ReemplazarInversionistaCreditoResponse>(
+    `${API_URL}/reemplazar-inversionista-credito`,
+    payload
+  );
+  return res.data;
+}
+
+export async function completarEspejoService(
+  payload: CompletarEspejoPayload
+): Promise<CompletarEspejoResponse> {
+  const res = await api.post<CompletarEspejoResponse>(
+    `${API_URL}/completar-espejo`,
+    payload
   );
   return res.data;
 }

@@ -64,7 +64,7 @@ export const NavBar = () => {
       id: "/documents",
       label: "Documentos",
       icon: <IconDocument width="24" height="24" />,
-      roles: ["CLIENT"],
+      roles: ["CLIENT", "INVESTOR"],
     },
   ];
 

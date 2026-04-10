@@ -67,7 +67,7 @@ import {
 	getMissingFieldsForCompletion,
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
-import { hasStaleAnalysisChecklistVehicle } from "../lib/analysis-checklist";
+import { hasStaleAnalysisChecklistVehicleState } from "../lib/analysis-checklist";
 import { validarDpi } from "../utils/cui-validation";
 import { scoreLead } from "../services/lead-scoring";
 import { createNotification } from "./notifications";
@@ -3820,10 +3820,17 @@ export const crmRouter = {
 
 			// Early return if checklist already exists and is still aligned
 			if (existingChecklist) {
+				const inspectionResult = opportunity.vehicleId
+					? await getVehicleInspectionStatus(opportunity.vehicleId)
+					: {
+							isInspected: false,
+						};
+
 				if (
-					hasStaleAnalysisChecklistVehicle(
+					hasStaleAnalysisChecklistVehicleState(
 						existingChecklist.checklistData as any,
 						opportunity.vehicleId,
+						inspectionResult.isInspected,
 					)
 				) {
 					await db

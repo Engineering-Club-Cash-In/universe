@@ -4054,6 +4054,8 @@ interface BoletaPendiente {
 interface InversionistaResumen {
   inversionista_id: number;
   nombre: string;
+  moneda: "quetzales" | "dolares";
+  currencySymbol: string;
   emite_factura: boolean;
   reinversion:
     | "sin_reinversion"
@@ -4089,6 +4091,7 @@ interface InversionistaResumenConEstado extends InversionistaResumen {
 interface InversionistaResumenRow {
   inversionista_id: number;
   nombre: string;
+  moneda: "quetzales" | "dolares";
   emite_factura: boolean;
   reinversion:
     | "sin_reinversion"
@@ -4282,6 +4285,7 @@ async function consultarResumenGlobalPorEstadoPago(
   const selectObj: Record<string, any> = {
     inversionista_id: inversionistas.inversionista_id,
     nombre: inversionistas.nombre,
+    moneda: inversionistas.moneda,
     emite_factura: inversionistas.emite_factura,
     reinversion: inversionistas.tipo_reinversion,
     banco_nombre: bancos.nombre,
@@ -4478,6 +4482,7 @@ async function consultarResumenGlobalPorEstadoPago(
   const groupByFields = [
     inversionistas.inversionista_id,
     inversionistas.nombre,
+    inversionistas.moneda,
     inversionistas.emite_factura,
     inversionistas.tipo_reinversion,
     inversionistas.monto_reinversion,
@@ -4533,6 +4538,7 @@ async function consultarResumenGlobalDesdeLiquidaciones(
   const selectFields: Record<string, any> = {
     inversionista_id: inversionistas.inversionista_id,
     nombre: inversionistas.nombre,
+    moneda: inversionistas.moneda,
     emite_factura: inversionistas.emite_factura,
     reinversion: inversionistas.tipo_reinversion,
     banco_nombre: bancos.nombre,
@@ -4558,6 +4564,7 @@ async function consultarResumenGlobalDesdeLiquidaciones(
   const groupByFields = [
     inversionistas.inversionista_id,
     inversionistas.nombre,
+    inversionistas.moneda,
     inversionistas.emite_factura,
     inversionistas.tipo_reinversion,
     bancos.nombre,
@@ -4591,23 +4598,43 @@ function mapResumenRow(
   boleta_pendiente: BoletaPendiente | null,
   boleta_liquidacion: BoletaPendiente | null = null
 ): InversionistaResumen {
+  const isUSD = inv.moneda === "dolares";
+  const currencySymbol = isUSD ? "$" : "Q";
+
+  // Special exchange rate for investor 84, others use global constant
+  const rate = inv.inversionista_id === 84 ? 7.78 : undefined;
+
+  const convert = (val: number | string | null | undefined): number => {
+    if (!isUSD) return Number(val || 0);
+    
+    // If we have a custom rate, use it directly
+    if (rate) {
+      const num = Number(val || 0);
+      return Number((num / rate).toFixed(2));
+    }
+    
+    return formatToUSD(val);
+  };
+
   return {
     inversionista_id: inv.inversionista_id,
     nombre: inv.nombre,
+    moneda: inv.moneda,
+    currencySymbol,
     emite_factura: inv.emite_factura,
     reinversion: inv.reinversion,
     banco: inv.banco_nombre,
     tipo_cuenta: inv.tipo_cuenta,
     numero_cuenta: inv.numero_cuenta,
-    total_abono_capital: inv.total_abono_capital,
-    total_abono_interes: inv.total_abono_interes,
-    total_abono_iva: inv.total_abono_iva,
-    total_isr: inv.total_isr,
-    total_abono_general_interes: inv.total_abono_general_interes,
-    total_a_recibir_sin_reinversion: inv.total_a_recibir_sin_reinversion,
-    total_reinversion: inv.total_reinversion,
-    total_a_recibir_con_reinversion: inv.total_a_recibir_con_reinversion,
-    total_cuota: inv.total_cuota,
+    total_abono_capital: convert(inv.total_abono_capital),
+    total_abono_interes: convert(inv.total_abono_interes),
+    total_abono_iva: convert(inv.total_abono_iva),
+    total_isr: convert(inv.total_isr),
+    total_abono_general_interes: convert(inv.total_abono_general_interes),
+    total_a_recibir_sin_reinversion: convert(inv.total_a_recibir_sin_reinversion),
+    total_reinversion: convert(inv.total_reinversion),
+    total_a_recibir_con_reinversion: convert(inv.total_a_recibir_con_reinversion),
+    total_cuota: convert(inv.total_cuota),
     boleta_pendiente,
     boleta_liquidacion,
     reporte_liquidacion_url: inv.reporte_liquidacion_url ?? null,

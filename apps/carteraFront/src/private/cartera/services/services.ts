@@ -839,6 +839,7 @@ export interface SubtotalInversionista {
   total_reinversion_capital: number;
   total_reinversion_interes: number;
   total_reinversion: number;
+  total_abono_general_interes: number;
 }
 
 // Un inversionista con sus créditos y sus subtotales
@@ -980,7 +981,7 @@ export interface InvestorMirrorSummaryResponse {
     total_cuota_sin_reinversion: number;
     total_cuota_con_reinversion: number;
     total_monto_aportado: number;
-    totalAbonoGeneralInteres: number;
+    total_abono_general_interes: number;
     total_capital_creditos: number;
     total_capital_actual: number;
     total_reinversion_capital: number;

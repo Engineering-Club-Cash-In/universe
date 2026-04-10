@@ -165,7 +165,7 @@ function useUploadBoleta() {
 			await createBoletaMutation.mutateAsync({
 				inversionista_id: params.inversionista_id,
 				boleta_url: url,
-				monto_boleta: params.monto_boleta,
+				monto_boleta: String(params.monto_boleta),
 				notas: params.notas || undefined,
 			});
 		},
@@ -203,7 +203,7 @@ function SubirBoletaDialog({
 			await upload({
 				file,
 				inversionista_id: inv.inversionista_id,
-				monto_boleta: inv.total_a_recibir_con_reinversion,
+				monto_boleta: String(inv.total_a_recibir_con_reinversion),
 				notas: notas.trim() || undefined,
 			});
 			toast.success("Boleta subida correctamente");

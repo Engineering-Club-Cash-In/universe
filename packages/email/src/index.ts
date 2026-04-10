@@ -39,7 +39,9 @@ export interface SendLiquidationEmailParams {
     filename: string;
     content: Buffer;
   };
+  reportUrl?: string;
 }
+
 
 export const sendLiquidationEmail = async ({
   to,
@@ -49,6 +51,7 @@ export const sendLiquidationEmail = async ({
   date,
   currencySymbol,
   attachment,
+  reportUrl,
 }: SendLiquidationEmailParams) => {
   // Validar formato de correo antes de enviar
   emailSchema.parse(to);
@@ -64,6 +67,7 @@ export const sendLiquidationEmail = async ({
         creditNumber,
         date,
         currencySymbol,
+        reportUrl,
       }),
       attachments: attachment ? [attachment] : undefined,
     });

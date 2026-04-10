@@ -24,6 +24,7 @@ import {
   fixCubeInvestment,
   reconcileMirrorPercentages,
   auditMirrorPercentages,
+  getCreditosEspejoPendientes,
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
 import { generarYSubirPDFInversionista, generarYSubirExcelInversionista } from "../utils/functions/generalFunctions";
@@ -425,6 +426,78 @@ export const inversionistasRouter = new Elysia()
       };
     }
   })
+  .get(
+    "/investor/reporte-no-liquidados",
+    async ({ query, set }) => {
+      const { id } = query;
+
+      if (!id || isNaN(Number(id))) {
+        set.status = 400;
+        return { message: "El parámetro 'id' es obligatorio y debe ser numérico." };
+      }
+
+      try {
+        const result = await resumeInvestor(
+          Number(id),
+          1,
+          999999,
+          undefined,
+          undefined,
+          undefined,
+          false,
+          undefined,
+          "espejos"
+        );
+
+        if (!result.inversionistas.length) {
+          set.status = 404;
+          return { message: "Inversionista no encontrado." };
+        }
+
+        const inversionista = result.inversionistas[0];
+
+        const totales = await getInvestorTotalsGlobales(
+          Number(id),
+          undefined,
+          "espejos",
+          false
+        );
+        inversionista.subtotal = totales.totales as any;
+
+        const logoUrl = import.meta.env.LOGO_URL || "";
+        const filename = `reporte_no_liquidados_${id}_${Date.now()}.xlsx`;
+        const { url } = await generarYSubirExcelInversionista(
+          inversionista as any,
+          filename,
+          logoUrl,
+          true
+        );
+
+        return {
+          success: true,
+          url,
+          filename,
+        };
+      } catch (error) {
+        console.error("[GET /investor/reporte-no-liquidados] Error:", error);
+        set.status = 500;
+        return {
+          message: "Error al obtener reporte de pagos no liquidados",
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+    {
+      query: t.Object({
+        id: t.String(),
+      }),
+      detail: {
+        summary: "Genera Excel con pagos no liquidados de un inversionista",
+        description: "Genera y sube un Excel con el resumen de pagos espejo no liquidados del inversionista, y devuelve la URL del archivo.",
+        tags: ["Inversionistas"],
+      },
+    }
+  )
   .post("/investor/reporte-liquidados-masivo", async ({ body, set }) => {
     const { fecha_liquidacion } = body as { fecha_liquidacion?: string };
 
@@ -1392,6 +1465,28 @@ export const inversionistasRouter = new Elysia()
       detail: {
         summary: "Elimina pagos espejo estrictamente NO_LIQUIDADO",
         tags: ["Pagos Espejo"],
+      },
+    }
+  )
+  .get(
+    "/creditos-espejo-pendientes",
+    async ({ set }) => {
+      try {
+        const result = await getCreditosEspejoPendientes();
+        return result;
+      } catch (error: any) {
+        console.error("[GET /creditos-espejo-pendientes] Error:", error);
+        set.status = 500;
+        return { message: error.message || "Error al obtener créditos espejo pendientes" };
+      }
+    },
+    {
+      detail: {
+        summary: "Créditos espejo pendientes agrupados por inversionista",
+        description:
+          "Devuelve los créditos espejo con status pendiente_reinversion o pendiente_compra_cartera, " +
+          "agrupados por inversionista. Incluye un array otrosCreditos placeholder.",
+        tags: ["Inversionistas", "Espejos"],
       },
     }
   );

@@ -52,6 +52,7 @@ import { ModalCaidoCredit } from "./ModalCaidoCredit";
 
 export function ListaCreditosPagos() {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
+  const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
   const { user } = useAuth();
   const isAdmin = user?.role === "ADMIN";
   const userAsesorId = user?.asesor_id;
@@ -80,7 +81,7 @@ export function ListaCreditosPagos() {
     setEstado,
     estado,
     estados,
-    handleExcel,
+    downloadExcel,
     asesorId,
     handleAsesorId,
     setAsesorId,
@@ -240,6 +241,7 @@ export function ListaCreditosPagos() {
     investors: Investor[];
     advisors: any[];
     loading: boolean;
+    refetch: () => void;
   };
 
   const [openMoraModal, setOpenMoraModal] = useState(false);
@@ -580,13 +582,14 @@ export function ListaCreditosPagos() {
           </label>
           <button
             type="button"
+            disabled={isDownloadingExcel}
             onClick={async () => {
               try {
-                handleExcel(true);
-                const response = await refetch();
+                setIsDownloadingExcel(true);
+                const response = await downloadExcel();
 
-                if (response.data && "excelUrl" in response.data) {
-                  const url = (response.data as any).excelUrl;
+                if (response && "excelUrl" in response) {
+                  const url = (response as any).excelUrl;
                   window.open(url, "_blank");
                   toast.success("Excel generado correctamente");
                 } else {
@@ -596,13 +599,13 @@ export function ListaCreditosPagos() {
                 console.error("❌ Error generando Excel:", err);
                 toast.error("Error al generar el Excel");
               } finally {
-                handleExcel(false);
+                setIsDownloadingExcel(false);
               }
             }}
-            className="px-4 py-2 rounded-lg bg-green-600 text-white font-semibold hover:bg-green-700 transition shadow-md flex items-center gap-2"
+            className="px-4 py-2 rounded-lg bg-green-600 text-white font-semibold hover:bg-green-700 transition shadow-md flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
           >
-            <FileSpreadsheet className="w-5 h-5" />
-            Descargar Excel
+            {isDownloadingExcel ? <Loader2 className="w-5 h-5 animate-spin" /> : <FileSpreadsheet className="w-5 h-5" />}
+            {isDownloadingExcel ? "Generando..." : "Descargar Excel"}
           </button>
         </div>
       </div>
@@ -813,7 +816,7 @@ export function ListaCreditosPagos() {
           }}
           numeroCreditoSifco={selectedCreditFechaInicio.sifco}
           fechaActual={selectedCreditFechaInicio.fechaActual}
-          changedBy={user?.email ?? user?.name ?? "admin"}
+          changedBy={user?.email ?? "admin"}
           onSuccess={() => {
             setTimeout(() => {
               queryClient.invalidateQueries({
@@ -1227,8 +1230,8 @@ function MobileView({
             )}
           </p>
           <p className="text-sm text-gray-700">
-            <strong>Deuda Total:</strong> Q
-            {Number(item.creditos.deudatotal).toLocaleString("es-GT", {
+            <strong>Capital:</strong> Q
+            {Number(item.creditos.capital).toLocaleString("es-GT", {
               minimumFractionDigits: 2,
               maximumFractionDigits: 2,
             })}
@@ -1489,7 +1492,7 @@ function DesktopView({
               Usuario
             </TableHead>
             <TableHead className="text-gray-900 font-bold text-center">
-              Deuda Total
+              Capital
             </TableHead>
             <TableHead className="text-gray-900 font-bold text-center">
               Cuota
@@ -1526,9 +1529,9 @@ function DesktopView({
                     )}
                   </div>
                 </TableCell>
-                <TableCell className="text-green-600 font-bold text-center">
+                <TableCell className="text-blue-700 font-bold text-center">
                   Q
-                  {Number(item.creditos.deudatotal).toLocaleString("es-GT", {
+                  {Number(item.creditos.capital).toLocaleString("es-GT", {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })}
@@ -1860,9 +1863,9 @@ function DetallesCredito({
         }
       >
         {([
-          { label: "Capital", value: item.creditos.capital, isMoney: true },
-          { label: "Porcentaje Interés", value: `${item.creditos.porcentaje_interes}%` },
           { label: "Deuda Total", value: item.creditos.deudatotal, isMoney: true },
+          { label: "Porcentaje Interés", value: `${item.creditos.porcentaje_interes}%` },
+          { label: "Capital", value: item.creditos.capital, isMoney: true },
           { label: "Cuota", value: item.creditos.cuota, isMoney: true },
           { label: "Cuota Interés", value: item.creditos.cuota_interes, isMoney: true },
           { label: "IVA 12%", value: item.creditos.iva_12, isMoney: true },

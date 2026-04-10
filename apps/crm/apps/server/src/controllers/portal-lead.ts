@@ -693,6 +693,7 @@ export async function createPortalRegisterLead(c: Context) {
 				notes,
 				source: "website",
 				status: "new",
+				assignmentType: "auto",
 				clientType: "individual",
 				dependents: 0,
 				ownsHome: false,

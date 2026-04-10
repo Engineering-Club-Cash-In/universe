@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/server";
-import { and, asc, count, desc, eq, gte, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -582,7 +582,10 @@ export const cobrosRouter = {
 					// Mapear filtro de estadoMora a parámetros de cartera-back
 					let cuotasAtrasadas: number | undefined;
 					let estadoCartera: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | undefined;
-					const shouldSearchLocally = !!input.searchTerm?.trim();
+					const searchTerm = input.searchTerm?.trim() || "";
+					const hasNumber = /\d/.test(searchTerm);
+					const isPlateSearch = searchTerm.length > 0 && hasNumber;
+					const isNameSearch = searchTerm.length > 0 && !hasNumber;
 
 					if (input.estadoMora) {
 						switch (input.estadoMora) {
@@ -629,44 +632,92 @@ export const cobrosRouter = {
 					);
 
 					let creditosResponse;
-					if (shouldSearchLocally) {
-						const perPage = 200;
-						const firstPage = await obtenerTodosLosCreditosCarteraBack({
-							mes,
-							anio,
-							page: 1,
-							perPage,
-							cuotasAtrasadas,
-							estado: estadoCartera,
-							time: input.time,
-							email_cobrador: input.emailCobrador,
-						});
+					if (isPlateSearch) {
+						// Buscar primero la placa en el CRM para obtener el número SIFCO
+						const matchingOpportunities = await db
+							.select({
+								numeroSifco: opportunities.numeroSifco,
+								placa: vehicles.licensePlate,
+							})
+							.from(opportunities)
+							.innerJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+							.where(
+								and(
+									sql`LOWER(REPLACE(REPLACE(${vehicles.licensePlate}, '-', ''), ' ', '')) LIKE ${"%" + searchTerm.toLowerCase().replace(/[\s-]+/g, "") + "%"}`,
+									sql`${opportunities.numeroSifco} IS NOT NULL`,
+								),
+							);
 
-						const allCredits = [...firstPage.data];
-
-						for (let page = 2; page <= firstPage.totalPages; page++) {
-							const nextPage = await obtenerTodosLosCreditosCarteraBack({
+						if (matchingOpportunities.length === 0) {
+							// No se encontró la placa en el CRM, no tiene sentido buscar en cartera
+							creditosResponse = {
+								data: [],
+								page: 1,
+								perPage: 0,
+								totalCount: 0,
+								totalPages: 0,
+							};
+						} else if (matchingOpportunities.length === 1) {
+							// Una sola coincidencia: buscar directamente por número SIFCO (más rápido)
+							const numeroSifco = matchingOpportunities[0].numeroSifco!;
+							console.log(
+								`[Cobros] Placa ${searchTerm} encontró 1 coincidencia, buscando crédito SIFCO: ${numeroSifco}`,
+							);
+							creditosResponse = await obtenerTodosLosCreditosCarteraBack({
 								mes,
 								anio,
-								page,
+								page: 1,
+								perPage: 50,
+								cuotasAtrasadas,
+								estado: estadoCartera,
+								time: input.time,
+								email_cobrador: input.emailCobrador,
+								numero_credito_sifco: numeroSifco,
+							});
+						} else {
+							// Múltiples coincidencias: traer todos los créditos y filtrar localmente
+							console.log(
+								`[Cobros] Placa ${searchTerm} encontró ${matchingOpportunities.length} coincidencias, trayendo todos los créditos`,
+							);
+							const perPage = 200;
+							const firstPage = await obtenerTodosLosCreditosCarteraBack({
+								mes,
+								anio,
+								page: 1,
 								perPage,
 								cuotasAtrasadas,
 								estado: estadoCartera,
 								time: input.time,
 								email_cobrador: input.emailCobrador,
 							});
-							allCredits.push(...nextPage.data);
-						}
 
-						creditosResponse = {
-							...firstPage,
-							data: allCredits,
-							totalCount: allCredits.length,
-							page: 1,
-							perPage: allCredits.length,
-							totalPages: 1,
-						};
+							const allCredits = [...firstPage.data];
+
+							for (let page = 2; page <= firstPage.totalPages; page++) {
+								const nextPage = await obtenerTodosLosCreditosCarteraBack({
+									mes,
+									anio,
+									page,
+									perPage,
+									cuotasAtrasadas,
+									estado: estadoCartera,
+									time: input.time,
+									email_cobrador: input.emailCobrador,
+								});
+								allCredits.push(...nextPage.data);
+							}
+
+							creditosResponse = {
+								...firstPage,
+								data: allCredits,
+								totalCount: allCredits.length,
+								page: 1,
+								perPage: allCredits.length,
+								totalPages: 1,
+							};
+						}
 					} else {
+						// Búsqueda por nombre (cartera-back filtra) o sin búsqueda
 						creditosResponse = await obtenerTodosLosCreditosCarteraBack({
 							mes,
 							anio,
@@ -676,6 +727,7 @@ export const cobrosRouter = {
 							estado: estadoCartera,
 							time: input.time,
 							email_cobrador: input.emailCobrador,
+							nombre_usuario: isNameSearch ? searchTerm : undefined,
 						});
 					}
 
@@ -794,12 +846,12 @@ export const cobrosRouter = {
 						`[Cobros] Mapeados ${contratos.length} contratos para el frontend`,
 					);
 
-					if (shouldSearchLocally) {
+					if (isPlateSearch) {
 						const limit = input.limit || 50;
 						const offset = input.offset || 0;
 						const filtered = filterCobrosSearchResults(
 							contratos,
-							input.searchTerm,
+							searchTerm,
 							offset,
 							limit,
 						);

@@ -1276,7 +1276,7 @@ export async function resumeInvestor(
       };
 
       const formatValue = (val: string | number | null | undefined) =>
-        inv.moneda === "dolares" ? formatToUSD(val) : Number(val || 0);
+        inv.moneda === "dolares" ? formatToUSD(val, inv.inversionista_id) : Number(val || 0);
 
       // Procesar créditos del inversionista
       const creditosData = await Promise.all(
@@ -1710,7 +1710,7 @@ export async function getInvestorTotalsGlobales(
 
   let creditosIds = creditosParticipa.map((c) => c.credito_id);
 
-  const formatValue = (val: string | number) => inv.moneda === "dolares" ? formatToUSD(val) : Number(val);
+  const formatValue = (val: string | number) => inv.moneda === "dolares" ? formatToUSD(val, inv.inversionista_id) : Number(val);
 
   if (creditosIds.length === 0) {
     return {
@@ -2372,7 +2372,7 @@ export async function getInvestorMirrorSummary(
     new Big(0)
   );
 
-  const formatValue = (val: string | number) => inv.moneda === "dolares" ? formatToUSD(val) : Number(val);
+  const formatValue = (val: string | number) => inv.moneda === "dolares" ? formatToUSD(val, inv.inversionista_id) : Number(val);
 
   // Caso sin créditos espejo: devolver ceros con monto base
   if (creditosEspejo.length === 0) {
@@ -4601,19 +4601,9 @@ function mapResumenRow(
   const isUSD = inv.moneda === "dolares";
   const currencySymbol = isUSD ? "$" : "Q";
 
-  // Special exchange rate for investor 84, others use global constant
-  const rate = inv.inversionista_id === 84 ? 7.78 : undefined;
-
   const convert = (val: number | string | null | undefined): number => {
     if (!isUSD) return Number(val || 0);
-    
-    // If we have a custom rate, use it directly
-    if (rate) {
-      const num = Number(val || 0);
-      return Number((num / rate).toFixed(2));
-    }
-    
-    return formatToUSD(val);
+    return formatToUSD(val, inv.inversionista_id);
   };
 
   return {

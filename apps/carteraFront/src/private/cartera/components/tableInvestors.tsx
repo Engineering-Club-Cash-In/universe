@@ -335,6 +335,7 @@ export function TableInvestors() {
           total_reinversion_capital:   mirrorSummaryData.subtotal.total_reinversion_capital,
           total_reinversion_interes:   mirrorSummaryData.subtotal.total_reinversion_interes,
           total_reinversion:           mirrorSummaryData.subtotal.total_reinversion,
+          total_abono_general_interes: mirrorSummaryData.subtotal.total_abono_general_interes,
         }
       : {
           total_abono_capital:         totalesData?.totales.total_abono_capital         ?? 0,
@@ -347,6 +348,7 @@ export function TableInvestors() {
           total_reinversion_capital:   totalesData?.totales.total_reinversion_capital   ?? 0,
           total_reinversion_interes:   totalesData?.totales.total_reinversion_interes   ?? 0,
           total_reinversion:           totalesData?.totales.total_reinversion           ?? 0,
+          total_abono_general_interes: totalesData?.totales.total_abono_general_interes ?? 0,
         };
 
     return {
@@ -1006,7 +1008,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   Interés {inv.emite_factura ? "+ IVA" : "- ISR"}
                 </div>
                 <div className="font-bold text-lg text-indigo-800">
-                  {inv.currencySymbol} {(Number(subtotales.total_abono_interes) + (inv.emite_factura ? Number(subtotales.total_abono_iva) : -Number(subtotales.total_isr))).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                  {inv.currencySymbol} {Number(subtotales.total_abono_general_interes).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                 </div>
               </div>
 

@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { useSesionesPendientes, useCompletarEspejo, useReemplazarInversionistaCredito, useCreditCandidates } from "../hooks/useSesionesPendientes";
+import { useSesionesPendientes, useCompletarEspejo, useReemplazarInversionistaCredito, useCreditCandidates, useDevolverPendientesACube } from "../hooks/useSesionesPendientes";
 import type { InversionistaSesionPendiente, OtroCreditoDisponible } from "../services/services";
 import {
   Loader2,
@@ -18,6 +18,8 @@ import {
   Mail,
   CreditCard,
   X,
+  Ban,
+  AlertCircle,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -272,8 +274,10 @@ function InvestorCard({
   const [expanded, setExpanded] = useState(true);
   const [editingCreditId, setEditingCreditId] = useState<number | null>(null);
   const [selectedDestinoIds, setSelectedDestinoIds] = useState<Set<number>>(new Set());
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
   const reemplazar = useReemplazarInversionistaCredito();
   const completarEspejo = useCompletarEspejo();
+  const devolverPendientes = useDevolverPendientesACube();
 
   const isEditing = editingCreditId !== null;
   const editingCredit = investor.creditosPendientes.find((c) => c.id === editingCreditId);
@@ -369,6 +373,30 @@ function InvestorCard({
       }
     );
   }, [completarEspejo, investor]);
+
+  const tieneCompraCartera = investor.creditosPendientes.some(
+    (c) => c.status === "pendiente_compra_cartera"
+  );
+  const cancelLabel = tieneCompraCartera ? "Cancelar Compra Cartera" : "Cancelar Sesión";
+
+  const handleCancelSesion = useCallback(() => {
+    const creditoIds = investor.creditosPendientes.map((c) => c.credito_id);
+    if (creditoIds.length === 0) return;
+
+    devolverPendientes.mutate(
+      { creditos: creditoIds.length === 1 ? creditoIds[0] : creditoIds },
+      {
+        onSuccess: (res) => {
+          const count = res.creditos_limpiados?.length ?? creditoIds.length;
+          toast.success(res.message || `${count} crédito(s) devueltos a cube.`);
+          setConfirmingCancel(false);
+        },
+        onError: (err) => {
+          toast.error(err?.message || "Error al cancelar la sesión");
+        },
+      }
+    );
+  }, [devolverPendientes, investor]);
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
@@ -579,21 +607,73 @@ function InvestorCard({
 
 
 
-          {/* Confirmar sesión - solo visible cuando NO hay reasignación activa */}
+          {/* Acciones de sesión - solo visible cuando NO hay reasignación activa */}
           {!isEditing && (
-            <div className="flex justify-end pt-1 border-t border-gray-100">
-              <Button
-                size="sm"
-                onClick={handleConfirm}
-                disabled={completarEspejo.isPending}
-                className="gap-1 text-[11px] h-7 bg-blue-600 text-white hover:bg-blue-700"
-              >
-                {completarEspejo.isPending
-                  ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
-                  : <Check className="w-3 h-3" aria-hidden="true" />
-                }
-                Confirmar Sesión
-              </Button>
+            <div className="pt-2 border-t border-gray-100">
+              {confirmingCancel ? (
+                <div className="flex items-center justify-between gap-3 rounded-md border border-red-200 bg-red-50/70 px-3 py-2">
+                  <div className="flex items-start gap-2 min-w-0">
+                    <AlertCircle className="w-3.5 h-3.5 text-red-600 mt-0.5 shrink-0" aria-hidden="true" />
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-semibold text-red-800">
+                        ¿{cancelLabel}?
+                      </p>
+                      <p className="text-[10px] text-red-700/80 leading-tight">
+                        Se devolverán {investor.creditosPendientes.length} crédito(s) a cube y se removerán los inversionistas pendientes. Esta acción no se puede deshacer.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setConfirmingCancel(false)}
+                      disabled={devolverPendientes.isPending}
+                      className="gap-1 text-[11px] h-7 border-gray-300"
+                    >
+                      <Undo2 className="w-3 h-3" aria-hidden="true" />
+                      No
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={handleCancelSesion}
+                      disabled={devolverPendientes.isPending}
+                      className="gap-1 text-[11px] h-7 bg-red-600 text-white hover:bg-red-700"
+                    >
+                      {devolverPendientes.isPending
+                        ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                        : <Check className="w-3 h-3" aria-hidden="true" />
+                      }
+                      Sí, cancelar
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex justify-end gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setConfirmingCancel(true)}
+                    disabled={completarEspejo.isPending || devolverPendientes.isPending}
+                    className="gap-1 text-[11px] h-7 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                  >
+                    <Ban className="w-3 h-3" aria-hidden="true" />
+                    {cancelLabel}
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={handleConfirm}
+                    disabled={completarEspejo.isPending || devolverPendientes.isPending}
+                    className="gap-1 text-[11px] h-7 bg-blue-600 text-white hover:bg-blue-700"
+                  >
+                    {completarEspejo.isPending
+                      ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                      : <Check className="w-3 h-3" aria-hidden="true" />
+                    }
+                    Confirmar Sesión
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </div>

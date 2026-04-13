@@ -69,9 +69,9 @@ const MESES = [
 	{ value: 12, label: "Diciembre" },
 ] as const;
 
-function formatQ(value: number | string | null | undefined): string {
+function formatCurrency(value: number | string | null | undefined, symbol = "Q"): string {
 	const num = Number(value ?? 0);
-	return `Q${num.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+	return `${symbol}${num.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function getMesLabel(mes: number): string {
@@ -518,6 +518,7 @@ function LiquidacionCard({ item }: { item: any }) {
 	const boleta = item.boleta_liquidacion ?? null;
 	const mesLiq = item.mes_liquidacion as number | undefined;
 	const anioLiq = item.anio_liquidacion as number | undefined;
+	const sym = item.currencySymbol ?? "Q";
 
 	return (
 		<div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 pb-4 shadow-sm transition-shadow hover:shadow-md">
@@ -560,7 +561,7 @@ function LiquidacionCard({ item }: { item: any }) {
 						Capital
 					</p>
 					<p className="font-bold text-[13px] text-blue-900 dark:text-blue-100">
-						{formatQ(item.total_abono_capital)}
+						{formatCurrency(item.total_abono_capital, sym)}
 					</p>
 				</div>
 				<div className="rounded-lg bg-indigo-50 px-2.5 py-1.5 dark:bg-indigo-950/50">
@@ -568,7 +569,7 @@ function LiquidacionCard({ item }: { item: any }) {
 						Interés
 					</p>
 					<p className="font-bold text-[13px] text-indigo-900 dark:text-indigo-100">
-						{formatQ(item.total_abono_interes)}
+						{formatCurrency(item.total_abono_interes, sym)}
 					</p>
 				</div>
 				<div className="rounded-lg bg-purple-50 px-2.5 py-1.5 dark:bg-purple-950/50">
@@ -576,7 +577,7 @@ function LiquidacionCard({ item }: { item: any }) {
 						IVA
 					</p>
 					<p className="font-bold text-[13px] text-purple-900 dark:text-purple-100">
-						{formatQ(item.total_abono_iva)}
+						{formatCurrency(item.total_abono_iva, sym)}
 					</p>
 				</div>
 				<div className="rounded-lg bg-orange-50 px-2.5 py-1.5 dark:bg-orange-950/50">
@@ -584,7 +585,7 @@ function LiquidacionCard({ item }: { item: any }) {
 						ISR
 					</p>
 					<p className="font-bold text-[13px] text-orange-900 dark:text-orange-100">
-						{formatQ(item.total_isr)}
+						{formatCurrency(item.total_isr, sym)}
 					</p>
 				</div>
 				<div className="rounded-lg bg-teal-50 px-2.5 py-1.5 dark:bg-teal-950/50">
@@ -592,7 +593,7 @@ function LiquidacionCard({ item }: { item: any }) {
 						Reinversión
 					</p>
 					<p className="font-bold text-[13px] text-teal-900 dark:text-teal-100">
-						{formatQ(item.total_reinversion)}
+						{formatCurrency(item.total_reinversion, sym)}
 					</p>
 				</div>
 				<div className="rounded-lg border border-border bg-muted px-2.5 py-1.5">
@@ -600,7 +601,7 @@ function LiquidacionCard({ item }: { item: any }) {
 						Total c/Reinv.
 					</p>
 					<p className="font-extrabold text-[13px] text-foreground">
-						{formatQ(item.total_a_recibir_con_reinversion)}
+						{formatCurrency(item.total_a_recibir_con_reinversion, sym)}
 					</p>
 				</div>
 			</div>
@@ -835,7 +836,7 @@ function InvestorLiquidacionesPage() {
 												Capital aportado
 											</p>
 											<p className="truncate font-medium text-xs">
-												{formatQ(stats.capital_total_aportado)}
+												{formatCurrency(stats.capital_total_aportado, investor?.moneda === "dolares" ? "$" : "Q")}
 											</p>
 										</div>
 									</div>

@@ -39,7 +39,7 @@ import {
 import { authMiddleware } from "./midleware";
 import { getCreditosWithUserByMesAnioExcel } from "../controllers/reports";
 import { insertCredit } from "../controllers/createCredit";
-import {  updateAllInstallments, updateCredit, recalculateQuota, recalcularPagosCredito } from "../controllers/updateCredit";
+import {  updateAllInstallments, updateCredit, recalculateQuota, recalcularPagosCredito, calculateInvestorQuotas } from "../controllers/updateCredit";
 import { updateDueDates, updateSingleDueDate, fixCreditosWithoutFebruary, updateDueDatesFromJson, cambiarFechaInicio, getHistorialCambioFecha } from "../controllers/updateDueDate";
 import { creditos, cuotas_credito } from "../database/db";
 import { and, desc, eq } from "drizzle-orm";
@@ -91,6 +91,7 @@ export const creditRouter = new Elysia()
   return result;
 })
   .post("/updateCredit", updateCredit)
+  .post("/calculate-investor-quotas", calculateInvestorQuotas)
   // Obtener crédito por query param ?numero_credito_sifco=XXXX
   .get("/credito", async ({ query, set }) => {
     const { numero_credito_sifco } = query;

@@ -131,6 +131,7 @@ export function ModalEditCredit({
       porcentaje_cash_in: Number(inv.porcentaje_cash_in),
       porcentaje_inversion: Number(inv.porcentaje_inversion),
       fecha_inicio_participacion: parseParticipantDate(inv.fecha_inicio_participacion),
+      cuota_inversionista: Number(inv.cuota_inversionista || 0),
     })) || [];
 
   const parsedInvestors = parseInvestors(investorsInitial);
@@ -148,6 +149,7 @@ export function ModalEditCredit({
         porcentaje_cash_in: Number(mirrorItem.porcentaje_cash_in),
         porcentaje_inversion: Number(mirrorItem.porcentaje_inversion),
         fecha_inicio_participacion: parseParticipantDate(mirrorItem.fecha_inicio_participacion),
+        cuota_inversionista: Number(mirrorItem.cuota_inversionista || 0),
       };
     }
     // Si no hay espejo para ese inversionista, devolvemos objeto vacío
@@ -158,6 +160,7 @@ export function ModalEditCredit({
       porcentaje_cash_in: 0,
       porcentaje_inversion: 0,
       fecha_inicio_participacion: today,
+      cuota_inversionista: 0,
     };
   });
 
@@ -247,6 +250,7 @@ export function ModalEditCredit({
           porcentaje_cash_in: Number(i.porcentaje_cash_in),
           porcentaje_inversion: Number(i.porcentaje_inversion),
           fecha_inicio_participacion: i.fecha_inicio_participacion,
+          cuota_inversionista: Number(i.cuota_inversionista || 0),
         })),
 
         // Lista Espejo
@@ -256,6 +260,7 @@ export function ModalEditCredit({
           porcentaje_cash_in: Number(i.porcentaje_cash_in),
           porcentaje_inversion: Number(i.porcentaje_inversion),
           fecha_inicio_participacion: i.fecha_inicio_participacion,
+          cuota_inversionista: Number(i.cuota_inversionista || 0),
         })),
       };
       updateCredit(payload, {
@@ -331,7 +336,7 @@ export function ModalEditCredit({
                   onSuccess: (data: any) => {
                     console.log("Recalculate response:", data);
                     const raw = data?.cuota ?? data?.nueva_cuota ?? data?.newQuota ?? data?.data?.cuota ?? data?.data?.nueva_cuota ?? data?.result?.cuota;
-                    const cuotaRecalculada = Number(raw || 0);
+                    const cuotaRecalculada = Number(Number(raw || 0).toFixed(2));
                     if (cuotaRecalculada > 0) {
                       setNuevaCuota(cuotaRecalculada);
                       formik.setFieldValue("cuota", cuotaRecalculada);
@@ -481,6 +486,13 @@ export function ModalEditCredit({
                         value={formik.values[name] ?? ""}
                         onFocus={(e) => e.target.select()}
                         onChange={(e) => { formik.handleChange(e); if (name === "cuota") setNuevaCuota(null); }}
+                        onBlur={(e) => {
+                          formik.handleBlur(e);
+                          if (!["observaciones", "no_poliza", "numero_credito_sifco", "formato_credito"].includes(name)) {
+                            const val = Number(e.target.value);
+                            formik.setFieldValue(name, Number(val.toFixed(2)));
+                          }
+                        }}
                         className={`border-blue-200 text-gray-800 ${name === "cuota" && nuevaCuota !== null ? "bg-green-50 border-green-400 ring-2 ring-green-200" : "bg-blue-50"}`}
                         min={
                           [
@@ -560,6 +572,13 @@ export function ModalEditCredit({
                       value={formik.values[name] ?? ""}
                       onFocus={(e) => e.target.select()}
                       onChange={formik.handleChange}
+                      onBlur={(e) => {
+                        formik.handleBlur(e);
+                        if (name === "saldo_a_favor") {
+                          const val = Number(e.target.value);
+                          formik.setFieldValue(name, Number(val.toFixed(2)));
+                        }
+                      }}
                       className="bg-blue-50 border-blue-200 text-gray-800"
                       min={name === "saldo_a_favor" ? 0 : undefined}
                       step="any"

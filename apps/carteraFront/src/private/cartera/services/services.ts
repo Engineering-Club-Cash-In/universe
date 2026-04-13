@@ -652,6 +652,7 @@ export interface InversionistaPayload {
   porcentaje_cash_in: number;
   porcentaje_inversion: number; 
   fecha_inicio_participacion?: string;
+  cuota_inversionista?: number;
 }
 
 export interface UpdateCreditBody {
@@ -696,6 +697,18 @@ export interface UpdateCreditBody {
 }
 export async function updateCreditService(body: UpdateCreditBody) {
   const response = await api.post(`${API_URL}/updateCredit`, body);
+  return response.data;
+}
+
+export async function calculateInvestorQuotasService(body: {
+  capital: number;
+  cuota: number;
+  seguro_10_cuotas?: number;
+  gps?: number;
+  membresias_pago?: number;
+  inversionistas: { inversionista_id: number; monto_aportado: number }[];
+}) {
+  const response = await api.post(`${API_URL}/calculate-investor-quotas`, body);
   return response.data;
 }
 

@@ -24,10 +24,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 
-function formatQ(v: number | string | null | undefined, moneda?: string): string {
+function formatQ(v: number | string | null | undefined): string {
   const num = Number(v ?? 0);
-  const s = moneda === "dolares" ? "$" : "Q";
-  return `${s}${num.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `Q${num.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function statusLabel(status: string): string {
@@ -83,7 +82,7 @@ export function SesionesPendientes() {
 
   // Debounce search to avoid firing on every keystroke
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(search), 350);
+    const timer = setTimeout(() => setDebouncedSearch(search), 800);
     return () => clearTimeout(timer);
   }, [search]);
 
@@ -246,7 +245,6 @@ function getCashInMonto(oc: OtroCreditoDisponible): number {
 // ============================================
 function buildDestinos(
   candidates: OtroCreditoDisponible[],
-  moneda: string
 ): CreditoDestino[] {
   const destinos: CreditoDestino[] = [];
 
@@ -254,12 +252,11 @@ function buildDestinos(
     const cashInMonto = getCashInMonto(oc);
     destinos.push({
       id: oc.credito_id,
-      label: `${oc.numero_credito_sifco || `#${oc.credito_id}`} · ${oc.credito_completo?.usuario?.nombre ?? ""} · Aportado: ${formatQ(cashInMonto, moneda)}`,
+      label: `${oc.numero_credito_sifco || `#${oc.credito_id}`} · ${oc.credito_completo?.usuario?.nombre ?? ""} · Aportado: ${formatQ(cashInMonto)}`,
       capacidad: cashInMonto || oc.capital_activo,
       tipo: "existente",
     });
   }
-
 
   return destinos;
 }
@@ -286,8 +283,8 @@ function InvestorCard({
 
   const destinos = useMemo(() => {
     if (!editingCreditId || !candidates) return [];
-    return buildDestinos(candidates, investor.moneda);
-  }, [editingCreditId, candidates, investor.moneda]);
+    return buildDestinos(candidates);
+  }, [editingCreditId, candidates]);
 
   const montoAportado = editingCredit ? Number(editingCredit.monto_aportado) : 0;
 
@@ -410,7 +407,7 @@ function InvestorCard({
             <div className="text-right hidden sm:block">
               <p className="text-[10px] text-gray-400">Saldo</p>
               <p className="text-xs font-bold text-gray-800 tabular-nums">
-                {formatQ(investor.saldo_reinversion, investor.moneda)}
+                {formatQ(investor.saldo_reinversion)}
               </p>
             </div>
           )}
@@ -418,7 +415,7 @@ function InvestorCard({
             <div className="text-right hidden md:block">
               <p className="text-[10px] text-gray-400">Reinversión</p>
               <p className="text-xs font-bold text-gray-800 tabular-nums">
-                {formatQ(investor.monto_reinversion, investor.moneda)}
+                {formatQ(investor.monto_reinversion)}
               </p>
             </div>
           )}
@@ -462,10 +459,10 @@ function InvestorCard({
                         )}
                       </div>
                       <div className="flex items-center gap-4 mt-1 text-[11px] text-gray-500">
-                        <span><b className="text-gray-800">{formatQ(credito.monto_aportado, investor.moneda)}</b> aportado</span>
-                        <span>Cuota: {formatQ(credito.cuota_inversionista, investor.moneda)}</span>
+                        <span><b className="text-gray-800">{formatQ(credito.monto_aportado)}</b> aportado</span>
+                        <span>Cuota: {formatQ(credito.cuota_inversionista)}</span>
                         <span>{credito.porcentaje_participacion_inversionista}% part.</span>
-                        <span className="hidden sm:inline">Cash In: {formatQ(credito.monto_cash_in, investor.moneda)} ({credito.porcentaje_cash_in}%)</span>
+                        <span className="hidden sm:inline">Cash In: {formatQ(credito.monto_cash_in)} ({credito.porcentaje_cash_in}%)</span>
                       </div>
                     </div>
 
@@ -495,11 +492,11 @@ function InvestorCard({
                       <div className="flex items-center justify-between">
                         <p className="text-[11px] text-amber-800">
                           <ArrowRight className="w-3 h-3 inline mr-1" aria-hidden="true" />
-                          Reasignar <b className="tabular-nums">{formatQ(montoAportado, investor.moneda)}</b>
+                          Reasignar <b className="tabular-nums">{formatQ(montoAportado)}</b>
                         </p>
                         {restante > 0.01 && (
                           <span className="text-[11px] text-amber-600 font-semibold tabular-nums">
-                            Pendiente: {formatQ(restante, investor.moneda)}
+                            Pendiente: {formatQ(restante)}
                           </span>
                         )}
                         {isBalanced && (
@@ -545,7 +542,7 @@ function InvestorCard({
                                 </Badge>
                                 {sel && asignado > 0 && (
                                   <span className="text-[11px] font-bold text-blue-700 tabular-nums shrink-0">
-                                    +{formatQ(asignado, investor.moneda)}
+                                    +{formatQ(asignado)}
                                   </span>
                                 )}
                               </button>

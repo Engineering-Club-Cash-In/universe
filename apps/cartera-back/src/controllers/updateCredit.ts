@@ -273,6 +273,7 @@ const creditUpdateSchema = z.object({
         porcentaje_cash_in: z.number().min(0).max(100),
         porcentaje_inversion: z.number().min(0).max(100),
         fecha_inicio_participacion: z.string().optional(),
+        cuota_inversionista: z.number().min(0).optional(),
       }),
     )
     .min(0)
@@ -285,6 +286,7 @@ const creditUpdateSchema = z.object({
         porcentaje_cash_in: z.number().min(0).max(100),
         porcentaje_inversion: z.number().min(0).max(100),
         fecha_inicio_participacion: z.string().optional(),
+        cuota_inversionista: z.number().min(0).optional(),
       }),
     )
     .min(0)
@@ -616,16 +618,21 @@ const updateInvestors = async (
       `   ¿Es este inversionista el mayor? ${esMayor ? "✅ SÍ" : "❌ NO"}`,
     );
 
-    // 🔥 PASO 3: SI ES EL MAYOR, SUMARLE SEGURO + GPS + MEMBRESÍA
+    // 🔥 PASO 3: CALCULAR CUOTA FINAL
     let cuotaInversionista = cuotaBase;
 
     console.log(`\n🎯 PASO 3: CALCULAR CUOTA FINAL`);
 
-    // Si es espejo, jalar la cuota del padre
-    if (parentCuotas && parentCuotas.has(inv.inversionista_id)) {
+    // 🔥 PRIORIDAD 1: Si viene cuota_inversionista desde el frontend, usarla
+    if (inv.cuota_inversionista !== undefined && inv.cuota_inversionista !== null) {
+      cuotaInversionista = new Big(inv.cuota_inversionista);
+      console.log(`   🚀 FRONTEND: Usando cuota enviada desde el endpoint: Q${cuotaInversionista.toFixed(2)}`);
+    } else if (parentCuotas && parentCuotas.has(inv.inversionista_id)) {
+      // Prioridad 2: Si es espejo, jalar la cuota del padre
       cuotaInversionista = new Big(parentCuotas.get(inv.inversionista_id)!);
       console.log(`   🪞 ESPEJO: Usando cuota del padre: Q${cuotaInversionista.toFixed(2)}`);
     } else if (esMayor) {
+      // Prioridad 3: Cálculo automático para el inversionista mayor
       console.log(`   🏆 ESTE ES EL INVERSIONISTA MAYOR`);
       console.log(`   Cuota Base: Q${cuotaBase.toFixed(6)}`);
       console.log(`   + Seguro: Q${seguro.toFixed(2)}`);
@@ -634,14 +641,14 @@ const updateInvestors = async (
 
       cuotaInversionista = cuotaBase.plus(seguro).plus(gps).plus(membresias).round(6);
 
-      console.log(`   = Cuota Final: Q${cuotaInversionista.toFixed(6)}`);
+      console.log(`   = Cuota Final Automática: Q${cuotaInversionista.toFixed(6)}`);
       console.log(
         `   Fórmula: ${cuotaBase.toFixed(6)} + ${seguro.toFixed(2)} + ${gps.toFixed(2)} + ${membresias.toFixed(2)}`,
       );
     } else {
       console.log(`   📍 Inversionista normal (no es el mayor)`);
       console.log(
-        `   Cuota Final = Cuota Base: Q${cuotaInversionista.toFixed(6)}`,
+        `   Cuota Final Automática = Cuota Base: Q${cuotaInversionista.toFixed(6)}`,
       );
       console.log(`   (No se suman cargos)`);
     }
@@ -1350,5 +1357,94 @@ export const updateAllInstallments = async ({
   } catch (error) {
     console.error("\n❌ Error crítico en updateAllInstallments:", error);
     throw error;
+  }
+};
+
+/**
+ * Endpoint para pre-calcular las cuotas de los inversionistas sin guardar nada.
+ */
+export const calculateInvestorQuotas = async ({ body, set }: any) => {
+  try {
+    const schema = z.object({
+      capital: z.number().positive(),
+      cuota: z.number().positive(),
+      seguro_10_cuotas: z.number().min(0).optional(),
+      gps: z.number().min(0).optional(),
+      membresias_pago: z.number().min(0).optional(),
+      inversionistas: z.array(
+        z.object({
+          inversionista_id: z.number().int().positive(),
+          monto_aportado: z.number().positive(),
+        }),
+      ),
+    });
+
+    const parse = schema.safeParse(body);
+    if (!parse.success) {
+      set.status = 400;
+      return { message: "Parámetros inválidos", errors: parse.error.flatten() };
+    }
+
+    const {
+      capital: capitalTotal,
+      cuota: cuotaTotal,
+      seguro_10_cuotas = 0,
+      gps = 0,
+      membresias_pago = 0,
+      inversionistas,
+    } = parse.data;
+
+    // Calculamos el capital total real sumando todos los montos aportados
+    const capitalTotalCalculado = inversionistas.reduce(
+      (acc, inv) => acc.plus(inv.monto_aportado),
+      new Big(0)
+    );
+
+    // Buscamos al inversionista mayor
+    const inversionistaMayor = inversionistas.reduce((max, current) =>
+      current.monto_aportado > max.monto_aportado ? current : max,
+    );
+
+    const seguroBig = new Big(seguro_10_cuotas);
+    const gpsBig = new Big(gps);
+    const membresiaBig = new Big(membresias_pago);
+    const cuotaTotalBig = new Big(cuotaTotal);
+
+    const cuotaSinCargos = cuotaTotalBig
+      .minus(seguroBig)
+      .minus(gpsBig)
+      .minus(membresiaBig);
+
+    const resultados = inversionistas.map((inv) => {
+      const montoAportado = new Big(inv.monto_aportado);
+      // Usamos el capitalTotalCalculado para el % de participación exacto
+      const porcentajeParticipacion = capitalTotalCalculado.gt(0) 
+        ? montoAportado.div(capitalTotalCalculado)
+        : new Big(0);
+
+      const cuotaBase = cuotaSinCargos.times(porcentajeParticipacion).round(6);
+
+      let cuotaFinal = cuotaBase;
+      const esMayor = inv.inversionista_id === inversionistaMayor.inversionista_id;
+
+      if (esMayor) {
+        cuotaFinal = cuotaBase.plus(seguroBig).plus(gpsBig).plus(membresiaBig);
+      }
+
+      return {
+        inversionista_id: inv.inversionista_id,
+        cuota_inversionista: Number(cuotaFinal.round(6).toFixed(6)),
+        es_mayor: esMayor,
+        cuota_base: Number(cuotaBase.toFixed(6)),
+      };
+    });
+
+    return {
+      success: true,
+      data: resultados,
+    };
+  } catch (error) {
+    set.status = 500;
+    return { message: "Error calculando cuotas", error: String(error) };
   }
 };

@@ -8,6 +8,7 @@ import {
 	opportunities,
 	salesStages,
 } from "../db/schema/crm";
+import { canReceiveAutoAssignedLead } from "../lib/lead-assignment";
 import { validarDpi } from "../utils/cui-validation";
 import { getOnlyRenapInfoController } from "./bot";
 
@@ -82,7 +83,7 @@ export async function getSalesUserWithLeastLeads() {
 			role: user.role,
 		})
 		.from(user)
-		.where(and(eq(user.role, "sales"), eq(user.assignLeads, true)));
+		.where(and(eq(user.role, "sales"), eq(user.assignLeads, true), eq(user.banned, false)));
 
 	if (salesUsers.length === 0) {
 		return null;
@@ -206,6 +207,28 @@ export async function getOpenOpportunityBySource(
 	return existing;
 }
 
+async function resolveLeadAssignee(existingAssignedTo?: string | null) {
+	if (existingAssignedTo) {
+		const [currentOwner] = await db
+			.select({
+				id: user.id,
+				role: user.role,
+				assignLeads: user.assignLeads,
+				banned: user.banned,
+			})
+			.from(user)
+			.where(eq(user.id, existingAssignedTo))
+			.limit(1);
+
+		if (canReceiveAutoAssignedLead(currentOwner)) {
+			return currentOwner.id;
+		}
+	}
+
+	const fallbackSalesUser = await getSalesUserWithLeastLeads();
+	return fallbackSalesUser?.id ?? null;
+}
+
 export async function createPublicLead(c: Context) {
 	try {
 		const body = await c.req.json();
@@ -298,11 +321,34 @@ export async function createPublicLead(c: Context) {
 				);
 			}
 
+			const assignedTo = await resolveLeadAssignee(existingLead.assignedTo);
+
+			if (!assignedTo) {
+				return c.json(
+					{
+						success: false,
+						error: "No hay usuario de ventas disponible para asignar",
+					},
+					500,
+				);
+			}
+
+			if (assignedTo !== existingLead.assignedTo) {
+				[leadData] = await db
+					.update(leads)
+					.set({
+						assignedTo,
+						updatedAt: new Date(),
+					})
+					.where(eq(leads.id, existingLead.id))
+					.returning();
+			}
+
 			const opportunity = await createOpportunityForLead(
 				existingLead.id,
 				existingLead.firstName,
 				existingLead.lastName,
-				existingLead.assignedTo,
+				assignedTo,
 				body.notes ?? "",
 				source,
 				campaign,

@@ -59,6 +59,8 @@ export interface Liquidacion {
   nombre_inversionista: string;
   emite_factura: boolean;
   dpi: string;
+  moneda: string;
+  currencySymbol: string;
   boleta: LiquidacionBoleta | null;
   totales: LiquidacionTotales;
   reinversion: LiquidacionReinversion | null;

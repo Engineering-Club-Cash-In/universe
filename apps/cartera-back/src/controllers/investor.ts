@@ -4965,6 +4965,7 @@ export async function getLiquidaciones({
       emite_factura: inversionistas.emite_factura,
       dpi: inversionistas.dpi,
       email: inversionistas.email,
+      moneda: inversionistas.moneda,
     })
     .from(liquidaciones)
     .leftJoin(
@@ -5072,6 +5073,11 @@ export async function getLiquidaciones({
         )
         .orderBy(pagos_credito_inversionistas_espejo.fecha_pago);
 
+      // Formateo sensible a moneda del inversionista
+      const formatValue = (val: string | number) =>
+        liq.moneda === "dolares" ? formatToUSD(val, liq.inversionista_id) : Number(val);
+      const currencySymbol = liq.moneda === "dolares" ? "$" : "Q.";
+
       // 💰 Calcular ISR y cuota por pago
       const pagosConISR = pagos.map((pago) => {
         const abono_capital = new Big(pago.abono_capital ?? 0);
@@ -5087,11 +5093,11 @@ export async function getLiquidaciones({
           ...pago,
           porcentaje_tasa_interes: Number(new Big(pago.porcentaje_interes_credito ?? 1.5).times(new Big(pago.porcentaje_participacion ?? 80)).div(100)),
           tasa_interes: Number(new Big(pago.porcentaje_interes_credito ?? 1.5)),
-          abono_capital: Number(abono_capital),
-          abono_interes: Number(abono_interes),
-          abono_iva: Number(abono_iva),
-          isr: Number(isr),
-          cuota: Number(cuota),
+          abono_capital: formatValue(abono_capital.toString()),
+          abono_interes: formatValue(abono_interes.toString()),
+          abono_iva: formatValue(abono_iva.toString()),
+          isr: formatValue(isr.toString()),
+          cuota: formatValue(cuota.toString()),
         };
       });
 
@@ -5101,22 +5107,24 @@ export async function getLiquidaciones({
         nombre_inversionista: liq.nombre_inversionista ?? "TODOS",
         emite_factura: liq.emite_factura,
         dpi: liq.dpi,
+        moneda: liq.moneda,
+        currencySymbol,
 
         // 🔥 BOLETA ASOCIADA
         boleta: boletaData,
 
         totales: {
           total_pagos_liquidados: liq.total_pagos_liquidados,
-          total_capital: Number(liq.total_capital),
-          total_interes: Number(liq.total_interes),
-          total_iva: Number(liq.total_iva),
-          total_isr: Number(liq.total_isr),
-          total_cuota: Number(liq.total_cuota),
+          total_capital: formatValue(liq.total_capital),
+          total_interes: formatValue(liq.total_interes),
+          total_iva: formatValue(liq.total_iva),
+          total_isr: formatValue(liq.total_isr),
+          total_cuota: formatValue(liq.total_cuota),
         },
         reinversion: {
-          reinversion_capital: Number(liq.reinversion_capital),
-          reinversion_interes: Number(liq.reinversion_interes),
-          reinversion_total: Number(liq.reinversion_total),
+          reinversion_capital: formatValue(liq.reinversion_capital),
+          reinversion_interes: formatValue(liq.reinversion_interes),
+          reinversion_total: formatValue(liq.reinversion_total),
         },
         reporte_liquidacion: liq.reporte_liquidacion,
         fecha_liquidacion: liq.fecha_liquidacion,
@@ -5365,7 +5373,7 @@ export async function testUploadAndEmail(investorId: number, testEmail: string) 
  * agrupados por inversionista. Incluye un array `otrosCreditos` placeholder (5 créditos random)
  * que será reemplazado por la consulta real cuando esté lista.
  */
-export async function getCreditosEspejoPendientes() {
+export async function getCreditosEspejoPendientes(page: number = 1, pageSize: number = 10, search?: string) {
   // 1. Créditos espejo pendientes con info del inversionista + crédito + usuario
   const pendientes = await db
     .select({
@@ -5392,8 +5400,6 @@ export async function getCreditosEspejoPendientes() {
       _dpi: inversionistas.dpi,
       _email: inversionistas.email,
       _moneda: inversionistas.moneda,
-      _monto_reinversion: inversionistas.monto_reinversion,
-      _saldo_reinversion: inversionistas.saldo_reinversion,
     })
     .from(creditos_inversionistas_espejo)
     .innerJoin(
@@ -5413,11 +5419,11 @@ export async function getCreditosEspejoPendientes() {
     );
 
   if (pendientes.length === 0) {
-    return [];
+    return { data: [], total: 0, page, pageSize };
   }
 
   // 2. Agrupar por inversionista
-  type CreditoSinInversionista = Omit<typeof pendientes[number], '_nombre_inversionista' | '_dpi' | '_email' | '_moneda' | '_monto_reinversion' | '_saldo_reinversion'>;
+  type CreditoSinInversionista = Omit<typeof pendientes[number], '_nombre_inversionista' | '_dpi' | '_email' | '_moneda'>;
 
   const agrupado = new Map<number, {
     inversionista_id: number;
@@ -5425,13 +5431,12 @@ export async function getCreditosEspejoPendientes() {
     dpi: number | null;
     email: string | null;
     moneda: string;
-    monto_reinversion: string | null;
-    saldo_reinversion: string;
+    monto_reinversion: number;
     creditosPendientes: CreditoSinInversionista[];
   }>();
 
   for (const row of pendientes) {
-    const { _nombre_inversionista, _dpi, _email, _moneda, _monto_reinversion, _saldo_reinversion, ...creditoData } = row;
+    const { _nombre_inversionista, _dpi, _email, _moneda, ...creditoData } = row;
     if (!agrupado.has(row.inversionista_id)) {
       agrupado.set(row.inversionista_id, {
         inversionista_id: row.inversionista_id,
@@ -5439,14 +5444,36 @@ export async function getCreditosEspejoPendientes() {
         dpi: _dpi,
         email: _email,
         moneda: _moneda,
-        monto_reinversion: _monto_reinversion,
-        saldo_reinversion: _saldo_reinversion,
+        monto_reinversion: 0,
         creditosPendientes: [],
       });
     }
-    agrupado.get(row.inversionista_id)!.creditosPendientes.push(creditoData);
+    const grupo = agrupado.get(row.inversionista_id)!;
+    grupo.monto_reinversion += parseFloat(creditoData.monto_aportado);
+    grupo.creditosPendientes.push(creditoData);
   }
 
-  return Array.from(agrupado.values());
+  let todos = Array.from(agrupado.values());
+
+  if (search) {
+    const term = search.toLowerCase();
+    todos = todos.filter((inv) => inv.nombre.toLowerCase().includes(term));
+  }
+
+  const total = todos.length;
+
+  // 3. Paginar
+  const start = (page - 1) * pageSize;
+  const paginados = todos.slice(start, start + pageSize);
+
+  // 4. Obtener opciones de crédito para cada inversionista
+  const data = await Promise.all(
+    paginados.map(async (inv) => {
+      const opciones_de_credito = await getCreditCandidates(inv.monto_reinversion, 10);
+      return { ...inv, opciones_de_credito };
+    })
+  );
+
+  return { data, total, page, pageSize };
 }
 

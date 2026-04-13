@@ -1,4 +1,5 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
+import { ORPCError } from "@orpc/server";
 // Load test environment variables
 import dotenv from "dotenv";
 dotenv.config({ path: ".env.test" });
@@ -331,6 +332,51 @@ describe("Monthly Goals Procedures", () => {
 			expect(result.achievedValue).toBe("85.00");
 			expect(result.status).toBe("completed");
 			expect(result.description).toBe("Goal completed successfully");
+		});
+
+		test("department manager should be able to update target value for goals in their department", async () => {
+			const [goal] = await db.insert(monthlyGoals).values({
+				teamMemberId: testTeamMemberId,
+				goalTemplateId: testGoalTemplateId,
+				month: 8,
+				year: 2025,
+				targetValue: "100",
+				achievedValue: "50",
+				status: "in_progress",
+			}).returning();
+
+			const callable = updateMonthlyGoal.callable({ context: mockUsers.departmentManager });
+			const result = await callable({
+				id: goal.id,
+				data: {
+					targetValue: "120",
+				}
+			});
+
+			expect(result.targetValue).toBe("120.00");
+		});
+
+		test("employee should not be able to update target value", async () => {
+			const [goal] = await db.insert(monthlyGoals).values({
+				teamMemberId: testTeamMemberId,
+				goalTemplateId: testGoalTemplateId,
+				month: 8,
+				year: 2025,
+				targetValue: "100",
+				achievedValue: "50",
+				status: "in_progress",
+			}).returning();
+
+			const callable = updateMonthlyGoal.callable({ context: mockUsers.employee });
+
+			await expect(callable({
+				id: goal.id,
+				data: {
+					targetValue: "120",
+				}
+			})).rejects.toMatchObject({
+				code: "FORBIDDEN",
+			} satisfies Partial<ORPCError>);
 		});
 	});
 });

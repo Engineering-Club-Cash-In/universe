@@ -50,6 +50,7 @@ import {
 	MANUAL_VALUATION_RESULT,
 	MANUAL_VALUATION_TECHNICIAN_NAME,
 } from "../lib/manual-valuation";
+import { canAccessSalesTeamActions } from "../lib/sales-permissions";
 
 // Configuration Constants for Evidence Uploads
 const MAX_EVIDENCE_FILES_PER_ITEM = 10;
@@ -772,10 +773,7 @@ export const vehiclesRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			const userRole = context.userRole || "";
-			const canManageManualValuation =
-				userRole === ROLES.ADMIN ||
-				userRole === ROLES.SALES_SUPERVISOR ||
-				userRole === ROLES.SALES;
+			const canManageManualValuation = canAccessSalesTeamActions(userRole);
 
 			if (!canManageManualValuation) {
 				throw new ORPCError("FORBIDDEN", {

@@ -64,6 +64,7 @@ export function InvestorsList({
   // Track saldo_reinversion overrides por inversionista_id (para mostrar el saldo actualizado en UI)
   const [saldoOverrides, setSaldoOverrides] = useState<Record<number, number>>({});
   const [isCalculating, setIsCalculating] = useState(false);
+  const [showRecalculated, setShowRecalculated] = useState(false);
   // Ref para guardar el monto_aportado ORIGINAL por index (el valor al abrir el modal)
   const initialMontoRef = useRef<Record<number, number>>({});
 
@@ -134,6 +135,7 @@ export function InvestorsList({
     setTipoInversionMap((prev) => ({ ...prev, [newIndex]: tipoDefault }));
     // Auto-expandir espejo para que vea que se mete en ambas
     setExpandedMirrors((prev) => new Set(prev).add(newIndex));
+    setShowRecalculated(false);
   };
 
   const removeInvestor = (indexToRemove: number) => {
@@ -159,6 +161,7 @@ export function InvestorsList({
     setExpandedMirrors(newExpandedSet);
     setNewInvestorIndices(newNewIndices);
     setTipoInversionMap(newTipoMap);
+    setShowRecalculated(false);
 
     // 2. Borrar del array principal
     const updated = [...investors];
@@ -254,6 +257,7 @@ export function InvestorsList({
         });
         formik.setFieldValue("investorsMirror", updatedMirror);
 
+        setShowRecalculated(true);
         toast.success("Cuotas calculadas correctamente.");
       }
     } catch (error) {
@@ -286,6 +290,17 @@ export function InvestorsList({
           )}
         </button>
       </div>
+
+      {showRecalculated && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex items-center gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
+          <div className="bg-emerald-100 p-1.5 rounded-full">
+            <Calculator className="w-4 h-4 text-emerald-600" />
+          </div>
+          <p className="text-sm text-emerald-800 font-medium">
+            Las cuotas han sido prorrateadas automáticamente según la participación de capital de cada inversionista.
+          </p>
+        </div>
+      )}
       {listToRender.length === 0 && (
         <div className="text-sm text-gray-500 mb-2">
           No hay inversionistas agregados.
@@ -414,7 +429,9 @@ export function InvestorsList({
                 </Combobox>
               </div>
               <div className="w-32">
-                <Label className="text-blue-900">Monto</Label>
+                <div className="h-5 flex items-center">
+                  <Label className="text-blue-900">Monto</Label>
+                </div>
                 <Input
                   className="mt-1"
                   type="number"
@@ -429,9 +446,11 @@ export function InvestorsList({
                 />
               </div>
               <div className="w-32">
-                <Label className="text-blue-900">Cuota</Label>
+                <div className="flex items-center justify-between h-5">
+                  <Label className="text-blue-900">Cuota</Label>
+                </div>
                 <Input
-                  className="mt-1"
+                  className={`mt-1 transition-all duration-300 ${showRecalculated ? "bg-emerald-50 border-emerald-400 ring-2 ring-emerald-100" : ""}`}
                   type="number"
                   name={`${fieldName}.${index}.cuota_inversionista`}
                   value={inv.cuota_inversionista ?? 0}
@@ -440,11 +459,14 @@ export function InvestorsList({
                   onBlur={(e) => {
                     const val = Number(e.target.value);
                     formik.setFieldValue(`${fieldName}.${index}.cuota_inversionista`, Number(val.toFixed(2)));
+                    setShowRecalculated(false);
                   }}
                 />
               </div>
               <div className="w-24">
-                <Label className="text-blue-900">Cash In %</Label>
+                <div className="h-5 flex items-center">
+                  <Label className="text-blue-900">Cash In %</Label>
+                </div>
                 <Input
                   className="mt-1"
                   type="number"
@@ -465,7 +487,9 @@ export function InvestorsList({
                 />
               </div>
               <div className="w-24">
-                <Label className="text-blue-900">Inv %</Label>
+                <div className="h-5 flex items-center">
+                  <Label className="text-blue-900">Inv %</Label>
+                </div>
                 <Input
                   className="mt-1"
                   type="number"
@@ -486,7 +510,9 @@ export function InvestorsList({
                 />
               </div>
               <div className="w-40 flex flex-col justify-end">
-                <Label className="text-blue-900 mb-1">Inicio Participación</Label>
+                <div className="h-5 flex items-center mb-1">
+                  <Label className="text-blue-900 m-0">Inicio Participación</Label>
+                </div>
                 {isNew && tipoInversion === "reinversion" ? (
                   <div className="h-10 mt-1 flex items-center px-3 bg-gray-100 border border-gray-200 rounded-md text-sm text-gray-600 cursor-not-allowed">
                     {inv.fecha_inicio_participacion || "—"}
@@ -660,7 +686,9 @@ export function InvestorsList({
                         </Combobox>
                     </div>
                     <div className="w-32">
-                        <Label className="text-purple-900 text-xs">Monto Espejo</Label>
+                        <div className="h-5 flex items-center">
+                          <Label className="text-purple-900 text-xs">Monto Espejo</Label>
+                        </div>
                         <Input
                         className={`mt-1 h-9 text-sm border-purple-200 ${isNew ? "bg-gray-100 cursor-not-allowed" : ""}`}
                         type="number"
@@ -676,9 +704,11 @@ export function InvestorsList({
                         />
                     </div>
                     <div className="w-32">
-                        <Label className="text-purple-900 text-xs">Cuota Espejo</Label>
+                        <div className="flex items-center justify-between h-5">
+                          <Label className="text-purple-900 text-xs">Cuota Espejo</Label>
+                        </div>
                         <Input
-                        className={`mt-1 h-9 text-sm border-purple-200 ${isNew ? "bg-gray-100 cursor-not-allowed" : ""}`}
+                        className={`mt-1 h-9 text-sm border-purple-200 transition-all duration-300 ${isNew ? "bg-gray-100 cursor-not-allowed" : showRecalculated ? "bg-emerald-50 border-emerald-400 ring-2 ring-emerald-100" : ""}`}
                         type="number"
                         name={`investorsMirror.${index}.cuota_inversionista`}
                         value={invMirror.cuota_inversionista ?? 0}
@@ -687,12 +717,15 @@ export function InvestorsList({
                         onBlur={(e) => {
                           const val = Number(e.target.value);
                           formik.setFieldValue(`investorsMirror.${index}.cuota_inversionista`, Number(val.toFixed(2)));
+                          setShowRecalculated(false);
                         }}
                         disabled={isNew}
                         />
                     </div>
                     <div className="w-24">
-                        <Label className="text-purple-900 text-xs">Cash In %</Label>
+                        <div className="h-5 flex items-center">
+                          <Label className="text-purple-900 text-xs">Cash In %</Label>
+                        </div>
                         <Input
                         className={`mt-1 h-9 text-sm border-purple-200 ${isNew ? "bg-gray-100 cursor-not-allowed" : ""}`}
                         type="number"
@@ -708,7 +741,9 @@ export function InvestorsList({
                         />
                     </div>
                     <div className="w-24">
-                        <Label className="text-purple-900 text-xs">Inv %</Label>
+                        <div className="h-5 flex items-center">
+                          <Label className="text-purple-900 text-xs">Inv %</Label>
+                        </div>
                         <Input
                         className={`mt-1 h-9 text-sm border-purple-200 ${isNew ? "bg-gray-100 cursor-not-allowed" : ""}`}
                         type="number"
@@ -724,7 +759,9 @@ export function InvestorsList({
                         />
                     </div>
                     <div className="w-40 flex flex-col justify-end">
-                        <Label className="text-purple-900 text-xs mb-1">Inicio Participación</Label>
+                        <div className="h-5 flex items-center mb-1">
+                          <Label className="text-purple-900 text-xs m-0">Inicio Participación</Label>
+                        </div>
                         {isNew ? (
                           <div className="h-9 mt-1 flex items-center px-3 bg-gray-100 border border-purple-200 rounded-md text-sm text-gray-500 cursor-not-allowed">
                             {invMirror.fecha_inicio_participacion || "—"}

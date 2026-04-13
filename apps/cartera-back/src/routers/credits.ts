@@ -1153,6 +1153,35 @@ export const creditRouter = new Elysia()
     },
   })
   // ========================================
+  // ENDPOINT: REPARAR total_restante DE LOS PAGOS
+  // ========================================
+  .post("/reparar-total-restante", async ({ body, set }: any) => {
+    try {
+      const { numero_credito_sifco, capital_inicial } = body;
+      const result = await repararTotalRestante({
+        numero_credito_sifco,
+        capital_inicial,
+      });
+      set.status = 200;
+      return { success: true, ...result };
+    } catch (error: any) {
+      console.error("❌ Error en /reparar-total-restante:", error);
+      set.status = 500;
+      return { success: false, error: error.message };
+    }
+  }, {
+    body: t.Object({
+      numero_credito_sifco: t.String({ minLength: 1 }),
+      capital_inicial: t.Optional(t.Union([t.Number(), t.String()])),
+    }),
+    detail: {
+      summary: "Reparar total_restante de los pagos de un crédito",
+      description:
+        "Recalcula y reescribe SOLO el campo total_restante de los pagos desde la cuota 0 hasta la última cuota pagada, amortizando teóricamente. Si no se pasa capital_inicial, se usa el total_restante del pago de la cuota 0 (desembolso) como ancla. No toca abonos, capital_restante, pagado ni ningún otro campo.",
+      tags: ["Créditos", "Cuotas"],
+    },
+  })
+  // ========================================
   // ENDPOINT: ARREGLAR CRÉDITOS SIN FEBRERO
   // ========================================
   .post("/fix-february", async ({ query, set }) => {

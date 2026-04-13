@@ -1652,7 +1652,8 @@ export async function getInvestorTotalsGlobales(
   numeroCuota?: number,
   soloLiquidados = false,
   liquidacionId?: number,
-  fechaLiquidacion?: string
+  fechaLiquidacion?: string,
+  rawValues = false
 ) {
   console.log(
     "getInvestorTotalsGlobales for",
@@ -1710,7 +1711,8 @@ export async function getInvestorTotalsGlobales(
 
   let creditosIds = creditosParticipa.map((c) => c.credito_id);
 
-  const formatValue = (val: string | number) => inv.moneda === "dolares" ? formatToUSD(val, inv.inversionista_id) : Number(val);
+  const formatValue = (val: string | number) =>
+    rawValues ? Number(val) : (inv.moneda === "dolares" ? formatToUSD(val, inv.inversionista_id) : Number(val));
 
   if (creditosIds.length === 0) {
     return {
@@ -2721,7 +2723,8 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
       }
 
       // Totales pre-liquidación (espejos, no liquidados)
-      const totalesResult = await getInvestorTotalsGlobales(inv_id, undefined, "espejos", false);
+      // rawValues=true para que los totales vengan siempre en Q (sin convertir a USD)
+      const totalesResult = await getInvestorTotalsGlobales(inv_id, undefined, "espejos", false, undefined, false, undefined, undefined, true);
       const totales = totalesResult.totales;
       const cantidadPagos = pagosNoLiquidados.length;
 

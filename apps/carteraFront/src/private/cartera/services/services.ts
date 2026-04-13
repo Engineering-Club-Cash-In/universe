@@ -3564,3 +3564,31 @@ export async function completarEspejoService(
   );
   return res.data;
 }
+
+export interface DevolverPendientesACubePayload {
+  creditos: number | number[];
+}
+
+export interface DevolverPendientesACubeCreditoLimpiado {
+  credito_id: number;
+  numero_credito_sifco: string;
+  inversionistas_removidos: number[];
+  monto_devuelto_a_cube: string;
+  inversionistas_restantes: number;
+}
+
+export interface DevolverPendientesACubeResponse {
+  success: boolean;
+  message: string;
+  creditos_limpiados?: DevolverPendientesACubeCreditoLimpiado[];
+}
+
+export async function devolverPendientesACubeService(
+  payload: DevolverPendientesACubePayload
+): Promise<DevolverPendientesACubeResponse> {
+  const res = await api.post<DevolverPendientesACubeResponse>(
+    `${API_URL}/reemplazar-inversionista-credito/devolver-pendientes-a-cube`,
+    payload
+  );
+  return res.data;
+}

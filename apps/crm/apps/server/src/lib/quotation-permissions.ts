@@ -1,13 +1,12 @@
-import { ROLES } from "./roles";
+import {
+	canAccessSalesTeamActions,
+	canManageAnySalesOwnedRecord,
+} from "./sales-permissions";
 
 export function canManageQuotations(role: string | null | undefined): boolean {
-	return (
-		role === ROLES.SALES ||
-		role === ROLES.SALES_SUPERVISOR ||
-		role === ROLES.ADMIN
-	);
+	return canAccessSalesTeamActions(role);
 }
 
 export function canManageAnyQuotation(role: string | null | undefined): boolean {
-	return role === ROLES.SALES_SUPERVISOR || role === ROLES.ADMIN;
+	return canManageAnySalesOwnedRecord(role);
 }

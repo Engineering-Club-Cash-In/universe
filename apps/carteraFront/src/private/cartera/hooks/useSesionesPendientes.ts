@@ -17,6 +17,10 @@ export const sesionesPendientesKeys = {
   list: (page: number, pageSize: number, search: string) => [...sesionesPendientesKeys.all, "list", page, pageSize, search] as const,
 };
 
+export const creditCandidatesKeys = {
+  all: ["credit-candidates"] as const,
+};
+
 export function useSesionesPendientes(page: number, pageSize: number, search: string) {
   return useQuery<SesionesPendientesPaginatedResponse>({
     queryKey: sesionesPendientesKeys.list(page, pageSize, search),
@@ -52,13 +56,14 @@ export function useReemplazarInversionistaCredito() {
     mutationFn: (payload) => reemplazarInversionistaCreditoService(payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: sesionesPendientesKeys.all });
+      queryClient.invalidateQueries({ queryKey: creditCandidatesKeys.all });
     },
   });
 }
 
 export function useCreditCandidates(monto: number | null) {
   return useQuery<OtroCreditoDisponible[]>({
-    queryKey: ["credit-candidates", monto] as const,
+    queryKey: [...creditCandidatesKeys.all, monto] as const,
     queryFn: () => getCreditCandidatesService({ monto: monto! }),
     enabled: monto !== null && monto > 0,
     staleTime: 1000 * 60 * 2,

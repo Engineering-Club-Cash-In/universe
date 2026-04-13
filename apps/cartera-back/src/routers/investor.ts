@@ -1470,9 +1470,12 @@ export const inversionistasRouter = new Elysia()
   )
   .get(
     "/creditos-espejo-pendientes",
-    async ({ set }) => {
+    async ({ set, query }) => {
       try {
-        const result = await getCreditosEspejoPendientes();
+        const page = Number(query.page) || 1;
+        const pageSize = Number(query.pageSize) || 10;
+        const search = query.search || undefined;
+        const result = await getCreditosEspejoPendientes(page, pageSize, search);
         return result;
       } catch (error: any) {
         console.error("[GET /creditos-espejo-pendientes] Error:", error);
@@ -1481,11 +1484,17 @@ export const inversionistasRouter = new Elysia()
       }
     },
     {
+      query: t.Object({
+        page: t.Optional(t.String()),
+        pageSize: t.Optional(t.String()),
+        search: t.Optional(t.String()),
+      }),
       detail: {
-        summary: "Créditos espejo pendientes agrupados por inversionista",
+        summary: "Créditos espejo pendientes agrupados por inversionista (paginado)",
         description:
           "Devuelve los créditos espejo con status pendiente_reinversion o pendiente_compra_cartera, " +
-          "agrupados por inversionista. Incluye un array otrosCreditos placeholder.",
+          "agrupados por inversionista. Cada inversionista incluye opciones_de_credito (10 candidatos). " +
+          "Soporta paginación con query params page y pageSize.",
         tags: ["Inversionistas", "Espejos"],
       },
     }

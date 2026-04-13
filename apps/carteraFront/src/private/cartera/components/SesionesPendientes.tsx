@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState, useMemo, useCallback } from "react";
-import { useSesionesPendientes, useCompletarEspejo, useReemplazarInversionistaCredito, useCreditCandidates } from "../hooks/useSesionesPendientes";
+import { useState, useMemo, useCallback, useEffect } from "react";
+import { useSesionesPendientes, useCompletarEspejo, useReemplazarInversionistaCredito } from "../hooks/useSesionesPendientes";
 import type { InversionistaSesionPendiente, OtroCreditoDisponible } from "../services/services";
 import {
   Loader2,
@@ -11,6 +11,8 @@ import {
   RefreshCw,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   Undo2,
   User,
   Mail,
@@ -71,24 +73,35 @@ function distribuirMonto(
 // ============================================
 // Componente principal
 // ============================================
-export function SesionesPendientes() {
-  const { data, isLoading, isError, error, refetch, isFetching } = useSesionesPendientes();
-  const [search, setSearch] = useState("");
+const PAGE_SIZE = 10;
 
-  const filtered = useMemo(() => {
-    if (!data) return [];
-    if (!search.trim()) return data;
-    const q = search.toLowerCase();
-    return data.filter((inv) =>
-      inv.nombre.toLowerCase().includes(q) ||
-      String(inv.dpi ?? "").includes(q) ||
-      (inv.email ?? "").toLowerCase().includes(q)
-    );
-  }, [data, search]);
+export function SesionesPendientes() {
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const { data: response, isLoading, isError, error, refetch, isFetching } = useSesionesPendientes(page, PAGE_SIZE, debouncedSearch);
+
+  // Debounce search to avoid firing on every keystroke
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 350);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const investors = useMemo(() => response?.data ?? [], [response]);
+  const total = response?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const totalCreditos = useMemo(
-    () => data?.reduce((a, inv) => a + inv.creditosPendientes.length, 0) ?? 0,
-    [data]
+    () => investors.reduce((a, inv) => a + inv.creditosPendientes.length, 0),
+    [investors]
+  );
+
+  const handleSearchChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      setSearch(e.target.value);
+      setPage(1);
+    },
+    [],
   );
 
   if (isLoading) {
@@ -116,7 +129,7 @@ export function SesionesPendientes() {
   }
 
   return (
-    <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-4 sm:px-6 lg:px-8 overflow-auto pt-6 pb-8">
+    <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-4 sm:px-6 lg:px-8 overflow-auto pt-6 pb-20">
       <div className="w-full max-w-[1400px] space-y-4">
         {/* Header */}
         <div className="flex items-center justify-between gap-4">
@@ -137,23 +150,26 @@ export function SesionesPendientes() {
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" aria-hidden="true" />
             <Input
-              placeholder="Buscar por nombre, DPI o email&hellip;"
+              placeholder="Buscar por nombre"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9 h-8 text-xs"
+              onChange={handleSearchChange}
+              className="pl-9 h-8 text-xs text-gray-900"
               aria-label="Buscar inversionistas"
             />
           </div>
           <Badge variant="outline" className="text-[11px] border-blue-200 text-blue-700 bg-blue-50 tabular-nums">
-            {data?.length ?? 0} inversionistas
+            {total} inversionistas
           </Badge>
           <Badge variant="outline" className="text-[11px] border-purple-200 text-purple-700 bg-purple-50 tabular-nums">
             {totalCreditos} créditos
           </Badge>
+          <span className="text-xs text-gray-500">
+            Página {page} de {totalPages}
+          </span>
         </div>
 
         {/* Cards */}
-        {filtered.length === 0 ? (
+        {investors.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-gray-400 gap-2">
             <CreditCard className="w-8 h-8 text-gray-300" aria-hidden="true" />
             <p className="text-xs">
@@ -162,12 +178,60 @@ export function SesionesPendientes() {
           </div>
         ) : (
           <div className="space-y-4">
-            {filtered.map((inv) => (
+            {investors.map((inv) => (
               <InvestorCard key={inv.inversionista_id} investor={inv} />
             ))}
           </div>
         )}
       </div>
+
+      {/* Pagination - fixed bottom */}
+      {totalPages > 1 && (
+        <div className="border-t border-gray-200 bg-white px-6 py-3 flex items-center justify-center gap-1.5 fixed bottom-0 inset-x-0 z-10 shadow-[0_-2px_10px_rgba(0,0,0,0.06)]">
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page === 1}
+            className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+            let pageNum: number;
+            if (totalPages <= 5) {
+              pageNum = i + 1;
+            } else if (page <= 3) {
+              pageNum = i + 1;
+            } else if (page >= totalPages - 2) {
+              pageNum = totalPages - 4 + i;
+            } else {
+              pageNum = page - 2 + i;
+            }
+            return (
+              <button
+                key={pageNum}
+                type="button"
+                onClick={() => setPage(pageNum)}
+                className={`h-8 w-9 inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors ${
+                  pageNum === page
+                    ? "bg-blue-600 text-white border border-blue-600"
+                    : "border border-gray-300 bg-white text-gray-700 hover:bg-gray-100"
+                }`}
+              >
+                {pageNum}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page === totalPages}
+            className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -213,15 +277,14 @@ function InvestorCard({
   const [selectedDestinoIds, setSelectedDestinoIds] = useState<Set<number>>(new Set());
   const reemplazar = useReemplazarInversionistaCredito();
   const completarEspejo = useCompletarEspejo();
-  const { data: candidates = [] } = useCreditCandidates();
 
   const isEditing = editingCreditId !== null;
   const editingCredit = investor.creditosPendientes.find((c) => c.id === editingCreditId);
 
   const destinos = useMemo(() => {
     if (!editingCreditId) return [];
-    return buildDestinos(candidates, investor.moneda);
-  }, [editingCreditId, investor, candidates]);
+    return buildDestinos(investor.opciones_de_credito ?? [], investor.moneda);
+  }, [editingCreditId, investor]);
 
   const montoAportado = editingCredit ? Number(editingCredit.monto_aportado) : 0;
 

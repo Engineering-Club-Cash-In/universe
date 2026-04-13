@@ -3,40 +3,28 @@ import {
   getCreditosEspejoPendientesService,
   completarEspejoService,
   reemplazarInversionistaCreditoService,
-  getCreditCandidatesService,
   type CompletarEspejoPayload,
   type CompletarEspejoResponse,
   type ReemplazarInversionistaCreditoPayload,
   type ReemplazarInversionistaCreditoResponse,
+  type SesionesPendientesPaginatedResponse,
 } from "../services/services";
 
 export const sesionesPendientesKeys = {
   all: ["sesiones-pendientes"] as const,
-  list: () => [...sesionesPendientesKeys.all, "list"] as const,
-  candidates: () => [...sesionesPendientesKeys.all, "candidates"] as const,
+  list: (page: number, pageSize: number, search: string) => [...sesionesPendientesKeys.all, "list", page, pageSize, search] as const,
 };
 
-export function useSesionesPendientes() {
-  return useQuery({
-    queryKey: sesionesPendientesKeys.list(),
-    queryFn: getCreditosEspejoPendientesService,
+export function useSesionesPendientes(page: number, pageSize: number, search: string) {
+  return useQuery<SesionesPendientesPaginatedResponse>({
+    queryKey: sesionesPendientesKeys.list(page, pageSize, search),
+    queryFn: () => getCreditosEspejoPendientesService({ page, pageSize, search }),
     staleTime: 1000 * 60 * 2,
     gcTime: 1000 * 60 * 5,
     refetchOnWindowFocus: false,
     refetchOnReconnect: true,
     retry: 2,
     retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
-  });
-}
-
-export function useCreditCandidates() {
-  return useQuery({
-    queryKey: sesionesPendientesKeys.candidates(),
-    queryFn: () => getCreditCandidatesService(10),
-    staleTime: 0, // siempre fresco
-    gcTime: 1000 * 60 * 5,
-    refetchOnWindowFocus: false,
-    retry: 2,
   });
 }
 

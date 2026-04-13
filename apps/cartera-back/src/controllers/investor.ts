@@ -38,7 +38,6 @@ import {
   type EstadoLiquidacionResumen,
   type EstadoLiquidacionResumenFilter,
 } from "../utils/investorLiquidationSummary";
-import { getCreditCandidates, CUBE_ID } from "./assignCapital";
 import { addInvestorToCredit } from "./addInvestorToCredit";
 
 // ============================================
@@ -5466,14 +5465,6 @@ export async function getCreditosEspejoPendientes(page: number = 1, pageSize: nu
   const start = (page - 1) * pageSize;
   const paginados = todos.slice(start, start + pageSize);
 
-  // 4. Obtener opciones de crédito para cada inversionista
-  const data = await Promise.all(
-    paginados.map(async (inv) => {
-      const opciones_de_credito = await getCreditCandidates(inv.monto_reinversion, 10);
-      return { ...inv, opciones_de_credito };
-    })
-  );
-
-  return { data, total, page, pageSize };
+  return { data: paginados, total, page, pageSize };
 }
 

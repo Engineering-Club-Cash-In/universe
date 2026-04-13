@@ -3442,7 +3442,7 @@ export interface InversionistaSesionPendiente {
   monto_reinversion: string | null;
   saldo_reinversion: string;
   creditosPendientes: CreditoEspejoPendiente[];
-  opciones_de_credito: OtroCreditoDisponible[];
+  opciones_de_credito?: OtroCreditoDisponible[];
 }
 
 export interface SesionesPendientesPaginatedResponse {
@@ -3507,10 +3507,10 @@ export interface CandidatesResponse {
   candidates: OtroCreditoDisponible[];
 }
 
-export async function getCreditCandidatesService(minimo = 10): Promise<OtroCreditoDisponible[]> {
+export async function getCreditCandidatesService(params?: { monto?: number; minimo?: number }): Promise<OtroCreditoDisponible[]> {
   const res = await api.get<CandidatesResponse>(
     `${API_URL}/assign-capital/candidates`,
-    { params: { minimo } }
+    { params: { monto: params?.monto, minimo: params?.minimo ?? 10 } }
   );
   return res.data.candidates;
 }

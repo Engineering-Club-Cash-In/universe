@@ -4,12 +4,15 @@ import {
   completarEspejoService,
   reemplazarInversionistaCreditoService,
   getCreditCandidatesService,
+  devolverPendientesACubeService,
   type CompletarEspejoPayload,
   type CompletarEspejoResponse,
   type ReemplazarInversionistaCreditoPayload,
   type ReemplazarInversionistaCreditoResponse,
   type SesionesPendientesPaginatedResponse,
   type OtroCreditoDisponible,
+  type DevolverPendientesACubePayload,
+  type DevolverPendientesACubeResponse,
 } from "../services/services";
 
 export const sesionesPendientesKeys = {
@@ -68,5 +71,20 @@ export function useCreditCandidates(monto: number | null) {
     enabled: monto !== null && monto > 0,
     staleTime: 1000 * 60 * 2,
     gcTime: 1000 * 60 * 5,
+  });
+}
+
+export function useDevolverPendientesACube() {
+  const queryClient = useQueryClient();
+
+  return useMutation<
+    DevolverPendientesACubeResponse,
+    Error,
+    DevolverPendientesACubePayload
+  >({
+    mutationFn: (payload) => devolverPendientesACubeService(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: sesionesPendientesKeys.all });
+    },
   });
 }

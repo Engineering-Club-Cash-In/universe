@@ -346,7 +346,6 @@ export async function exportPagosToExcel(credito_sifco: string) {
       <td class="money">${formatQ(Number(pago.abono_seguro || 0) + Number(pago.abono_gps || 0) + Number(pago.membresias_pago || 0))}</td>
       <td class="money">${formatQ(Number(pago.mora || 0))}</td>
       <td class="money total">${formatQ(montoAplicado)}</td>
-      <td class="money">${formatQ(Number(pago.capital_restante || 0))}</td>
       <td class="money">${formatQ(Number(pago.total_restante || 0))}</td>
       <td>${fechaPago}</td>
     </tr>`;
@@ -468,7 +467,6 @@ export async function exportPagosToExcel(credito_sifco: string) {
           <th>Mora</th>
           <th>Monto Aplicado</th>
           <th>Capital Rest.</th>
-          <th>Total Rest.</th>
           <th>Fecha Pago</th>
         </tr>
       </thead>
@@ -480,7 +478,7 @@ export async function exportPagosToExcel(credito_sifco: string) {
           <td class="money">${formatQ(totalInteres)}</td>
           <td colspan="3"></td>
           <td class="money">${formatQ(totalMontoAplicado)}</td>
-          <td colspan="3"></td>
+          <td colspan="2"></td>
         </tr>
       </tbody>
     </table>

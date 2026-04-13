@@ -201,6 +201,7 @@ const creditSchema = z.object({
         porcentaje_inversion: z.number().min(0).max(100),
         tipo_inversion: z.enum(["compra_cartera", "reinversion"]).optional(),
         fecha_inicio_participacion: z.string().optional(),
+        cuota_inversionista: z.number().min(0).optional(),
       })
     )
     .min(0),
@@ -379,21 +380,23 @@ const creditosInversionistasData: InversionistaData[] = creditData.inversionista
   console.log(`   Fórmula: (${montoAportado.toFixed(2)} / ${capitalTotal.toFixed(2)}) * 100`);
   console.log(`   Resultado: ${porcentajeParticipacion.toFixed(4)}%`);
   
-  // 🔥 PASO 1: RESTAR CARGOS DE LA CUOTA TOTAL
   const seguro = new Big(creditDataForInsert.seguro_10_cuotas || 0);
   const membresias = new Big(creditDataForInsert.membresias_pago || 0);
-  
+  const gps = new Big(creditDataForInsert.gps || 0);
+
   console.log(`\n💳 CUOTA TOTAL Y CARGOS:`);
   console.log(`   Cuota Total: Q${cuotaTotal.toFixed(2)}`);
   console.log(`   - Seguro: Q${seguro.toFixed(2)}`);
+  console.log(`   - GPS: Q${gps.toFixed(2)}`);
   console.log(`   - Membresía: Q${membresias.toFixed(2)}`);
-  
+
   const cuotaSinCargos = cuotaTotal
     .minus(membresias)
-    .minus(seguro);
-  
+    .minus(seguro)
+    .minus(gps);
+
   console.log(`   = Cuota sin cargos: Q${cuotaSinCargos.toFixed(2)}`);
-  console.log(`   Fórmula: ${cuotaTotal.toFixed(2)} - ${membresias.toFixed(2)} - ${seguro.toFixed(2)}`);
+  console.log(`   Fórmula: ${cuotaTotal.toFixed(2)} - ${membresias.toFixed(2)} - ${seguro.toFixed(2)} - ${gps.toFixed(2)}`);
   
   // 🔥 PASO 2: MULTIPLICAR POR EL PORCENTAJE
   console.log(`\n🔢 PASO 2: MULTIPLICAR POR PORCENTAJE`);
@@ -401,7 +404,7 @@ const creditosInversionistasData: InversionistaData[] = creditData.inversionista
   
   const cuotaBase = cuotaSinCargos
     .times(porcentajeParticipacion.div(100))
-    .round(2);
+    .round(6);
   
   console.log(`   Cuota Base Calculada: Q${cuotaBase.toFixed(2)}`);
   
@@ -423,12 +426,11 @@ const creditosInversionistasData: InversionistaData[] = creditData.inversionista
   
   console.log(`   ¿Es este inversionista el mayor? ${esMayor ? '✅ SÍ' : '❌ NO'}`);
   
-  // 🔥 PASO 3: SI ES EL MAYOR, SUMARLE SEGURO + MEMBRESÍA
-  let cuotaInversionista = cuotaBase;
-  
-  console.log(`\n🎯 PASO 3: CALCULAR CUOTA FINAL`);
-  
-  if (esMayor) {
+  // 🔥 PRIORIDAD 1: Si viene cuota_inversionista desde el frontend, usarla
+  if (inv.cuota_inversionista !== undefined && inv.cuota_inversionista !== null) {
+    cuotaInversionista = new Big(inv.cuota_inversionista);
+    console.log(`   🚀 FRONTEND: Usando cuota enviada desde el front: Q${cuotaInversionista.toFixed(2)}`);
+  } else if (esMayor) {
     console.log(`   🏆 ESTE ES EL INVERSIONISTA MAYOR`);
     console.log(`   Cuota Base: Q${cuotaBase.toFixed(2)}`);
     console.log(`   + Seguro: Q${seguro.toFixed(2)}`);
@@ -437,7 +439,7 @@ const creditosInversionistasData: InversionistaData[] = creditData.inversionista
     cuotaInversionista = cuotaBase
       .plus(seguro)
       .plus(membresias)
-      .round(2);
+      .round(6);
     
     console.log(`   = Cuota Final: Q${cuotaInversionista.toFixed(2)}`);
     console.log(`   Fórmula: ${cuotaBase.toFixed(2)} + ${seguro.toFixed(2)} + ${membresias.toFixed(2)}`);
@@ -453,7 +455,7 @@ const creditosInversionistasData: InversionistaData[] = creditData.inversionista
   console.log(`   Tasa de Interés: ${interes.toFixed(2)}%`);
   console.log(`   Monto Aportado: Q${montoAportado.toFixed(2)}`);
   
-  const newCuotaInteres = montoAportado.times(interes.div(100)).round(2);
+  const newCuotaInteres = montoAportado.times(interes.div(100)).round(6);
   console.log(`   Interés Calculado: Q${newCuotaInteres.toFixed(2)}`);
   console.log(`   Fórmula: ${montoAportado.toFixed(2)} * (${interes.toFixed(2)}% / 100)`);
 
@@ -474,10 +476,10 @@ const creditosInversionistasData: InversionistaData[] = creditData.inversionista
   console.log(`\n🧾 CÁLCULO DE IVA (12%):`);
   
   const ivaInversionista = Number(montoInversionista) > 0 
-    ? montoInversionista.times(0.12).round(2)
+    ? montoInversionista.times(0.12).round(6)
     : new Big(0);
   const ivaCashIn = Number(montoCashIn) > 0 
-    ? montoCashIn.times(0.12).round(2)
+    ? montoCashIn.times(0.12).round(6)
     : new Big(0);
   
   if (Number(montoInversionista) > 0) {

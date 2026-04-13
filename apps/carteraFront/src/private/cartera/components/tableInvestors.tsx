@@ -914,13 +914,13 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
 
               {Number(inv.monto_reinversion ?? 0) > 0 && (
                 <span className="px-3 py-1 rounded-full text-sm font-semibold bg-orange-100 text-orange-700">
-                  Monto Reinversión: {inv.currencySymbol} {Number(inv.monto_reinversion).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                  Monto Reinversión: {inv.currencySymbol} {Number(inv.monto_reinversion).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               )}
 
               {Number(inv.saldo_reinversion ?? 0) > 0 && (
                 <span className="px-3 py-1 rounded-full text-sm font-semibold bg-amber-100 text-amber-700">
-                  Saldo Reinversión: {inv.currencySymbol} {Number(inv.saldo_reinversion).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                  Saldo Reinversión: {inv.currencySymbol} {Number(inv.saldo_reinversion).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               )}
             </div>
@@ -991,7 +991,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   Total Capital
                 </div>
                 <div className="font-bold text-lg text-blue-800">
-                  {inv.currencySymbol} {Number(subtotales.total_abono_capital).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                  {inv.currencySymbol} {Number(subtotales.total_abono_capital).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
               </div>
 
@@ -1000,7 +1000,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   Total Interés
                 </div>
                 <div className="font-bold text-lg text-indigo-700">
-                  {inv.currencySymbol} {Number(subtotales.total_abono_interes).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                  {inv.currencySymbol} {Number(subtotales.total_abono_interes).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
               </div>
 
@@ -1010,7 +1010,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   Interés {inv.emite_factura ? "+ IVA" : "- ISR"}
                 </div>
                 <div className="font-bold text-lg text-indigo-800">
-                  {inv.currencySymbol} {Number(subtotales.total_abono_general_interes).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                  {inv.currencySymbol} {Number(subtotales.total_abono_general_interes).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
               </div>
 
@@ -1019,20 +1019,20 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   <div>
                     <div className="text-xs text-gray-500">IVA</div>
                     <div className={`font-semibold text-sm ${isDraft ? "text-yellow-700" : "text-violet-700"}`}>
-                      {inv.currencySymbol} {Number(subtotales.total_abono_iva).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      {inv.currencySymbol} {Number(subtotales.total_abono_iva).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                   </div>
                   <div>
                     <div className="text-xs text-gray-500">ISR</div>
                     <div className={`font-semibold text-sm ${isDraft ? "text-yellow-700" : "text-violet-700"}`}>
-                      {inv.currencySymbol} {Number(subtotales.total_isr).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      {inv.currencySymbol} {Number(subtotales.total_isr).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                   </div>
                 </div>
                 <div className="border-t border-gray-200 pt-1">
                   <div className="text-xs text-gray-500">Total IVA + ISR</div>
                   <div className={`font-bold ${isDraft ? "text-yellow-700" : "text-violet-700"}`}>
-                    {inv.currencySymbol} {(Number(subtotales.total_abono_iva) + Number(subtotales.total_isr)).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                    {inv.currencySymbol} {(Number(subtotales.total_abono_iva) + Number(subtotales.total_isr)).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
                 </div>
               </div>
@@ -1042,7 +1042,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   Cuota Sin Reinversión
                 </div>
                 <div className="font-bold text-lg text-green-700">
-                  {inv.currencySymbol} {Number(subtotales.total_cuota_sin_reinversion).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                  {inv.currencySymbol} {Number(subtotales.total_cuota_sin_reinversion).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
               </div>
 
@@ -1051,7 +1051,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   Cuota Con Reinversión
                 </div>
                 <div className={`font-bold text-lg ${isDraft ? "text-yellow-900" : "text-teal-900"}`}>
-                  {inv.currencySymbol} {Number(subtotales.total_cuota_con_reinversion).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                  {inv.currencySymbol} {Number(subtotales.total_cuota_con_reinversion).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
               </div>
 
@@ -1060,7 +1060,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   Total Monto Aportado
                 </div>
                 <div className={`font-bold text-lg ${isDraft ? "text-yellow-900" : "text-purple-900"}`}>
-                  {inv.currencySymbol} {Number(subtotales.total_monto_aportado).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                  {inv.currencySymbol} {Number(subtotales.total_monto_aportado).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
               </div>
 
@@ -1068,7 +1068,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 <div className="rounded-lg p-3 shadow-sm border-2 h-full flex flex-col justify-center bg-gradient-to-br from-orange-50 to-amber-50 border-orange-300">
                   <div className="text-xs mb-1 font-semibold text-orange-700">Reinversión Capital</div>
                   <div className="font-bold text-lg text-orange-900">
-                    {inv.currencySymbol} {Number(subtotales.total_reinversion_capital).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                    {inv.currencySymbol} {Number(subtotales.total_reinversion_capital).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
                 </div>
               )}
@@ -1077,7 +1077,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 <div className="rounded-lg p-3 shadow-sm border-2 h-full flex flex-col justify-center bg-gradient-to-br from-orange-50 to-amber-50 border-orange-300">
                   <div className="text-xs mb-1 font-semibold text-orange-700">Reinversión Interés</div>
                   <div className="font-bold text-lg text-orange-900">
-                    {inv.currencySymbol} {Number(subtotales.total_reinversion_interes).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                    {inv.currencySymbol} {Number(subtotales.total_reinversion_interes).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
                 </div>
               )}
@@ -1086,7 +1086,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 <div className="rounded-lg p-3 shadow-sm border-2 h-full flex flex-col justify-center bg-gradient-to-br from-orange-50 to-amber-50 border-orange-300">
                   <div className="text-xs mb-1 font-semibold text-orange-700">Total Reinversión</div>
                   <div className="font-bold text-lg text-orange-900">
-                    {inv.currencySymbol} {Number(subtotales.total_reinversion).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                    {inv.currencySymbol} {Number(subtotales.total_reinversion).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
                 </div>
               )}
@@ -1474,7 +1474,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                             {pago.abono_capital_detalle.tipo}
                                           </span>
                                           <span className="inline-flex items-center px-1 py-0 rounded text-[10px] font-semibold bg-blue-100 text-blue-800 border border-blue-300">
-                                            +{inv.currencySymbol} {Number(pago.abono_capital_detalle.monto).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                            +{inv.currencySymbol} {Number(pago.abono_capital_detalle.monto).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                           </span>
                                         </div>
                                       )}
@@ -1491,7 +1491,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                       </div>
                                     ) : (
                                       <div className="font-bold text-blue-900 text-sm">
-                                        {inv.currencySymbol} {Number(pago.abono_capital).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                        {inv.currencySymbol} {Number(pago.abono_capital).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                       </div>
                                     )}
                                   </div>
@@ -1511,7 +1511,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                       </div>
                                     ) : (
                                       <div className="font-bold text-violet-900 text-sm">
-                                        {inv.currencySymbol} {Number(pago.abono_interes).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                        {inv.currencySymbol} {Number(pago.abono_interes).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                       </div>
                                     )}
                                   </div>
@@ -1527,7 +1527,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                       </div>
                                     ) : (
                                       <div className="font-bold text-green-900 text-sm">
-                                        {inv.currencySymbol} {Number(pago.abono_iva).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                        {inv.currencySymbol} {Number(pago.abono_iva).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                       </div>
                                     )}
                                   </div>
@@ -1543,7 +1543,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                       </div>
                                     ) : (
                                       <div className="font-bold text-yellow-900 text-sm">
-                                        {inv.currencySymbol} {Number(pago.isr).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                        {inv.currencySymbol} {Number(pago.isr).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                       </div>
                                     )}
                                   </div>
@@ -1656,12 +1656,12 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
         <div className="flex flex-wrap gap-2 mb-2">
           {Number(inv.monto_reinversion ?? 0) > 0 && (
             <span className="px-3 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-700">
-              Monto Reinversión: {inv.currencySymbol} {Number(inv.monto_reinversion).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+              Monto Reinversión: {inv.currencySymbol} {Number(inv.monto_reinversion).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
           )}
           {Number(inv.saldo_reinversion ?? 0) > 0 && (
             <span className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">
-              Saldo Reinversión: {inv.currencySymbol} {Number(inv.saldo_reinversion).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+              Saldo Reinversión: {inv.currencySymbol} {Number(inv.saldo_reinversion).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
           )}
         </div>
@@ -1681,50 +1681,50 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
               <div>
                 <span className="font-bold text-blue-900">Total Capital: </span>
                 <span className="text-blue-800 font-bold">
-                  {inv.currencySymbol ?? 'Q.'} {Number(s.total_abono_capital ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                  {inv.currencySymbol ?? 'Q.'} {Number(s.total_abono_capital ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
               <div>
                 <span className="font-bold text-blue-900">Total Interés: </span>
                 <span className="text-indigo-700 font-bold">
-                  {inv.currencySymbol ?? 'Q.'} {Number(s.total_abono_interes ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                  {inv.currencySymbol ?? 'Q.'} {Number(s.total_abono_interes ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
               {/* 🆕 Mobile: Interés Ajustado */}
               <div>
                 <span className="font-bold text-indigo-900">Interés {isEmite ? "+ IVA" : "- ISR"}: </span>
                 <span className="text-indigo-700 font-bold">
-                  {inv.currencySymbol ?? 'Q.'} {(Number(s.total_abono_interes) + displayIvaIsr).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                  {inv.currencySymbol ?? 'Q.'} {(Number(s.total_abono_interes) + displayIvaIsr).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
               <div>
                 <span className="font-bold text-blue-900">IVA: </span>
                 <span className="text-violet-700 font-bold">
-                  {inv.currencySymbol ?? 'Q.'} {Number(s.total_abono_iva ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                  {inv.currencySymbol ?? 'Q.'} {Number(s.total_abono_iva ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
               <div>
                 <span className="font-bold text-blue-900">ISR: </span>
                 <span className="text-violet-700 font-bold">
-                  {inv.currencySymbol ?? 'Q.'} {Number(s.total_isr ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                  {inv.currencySymbol ?? 'Q.'} {Number(s.total_isr ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
               <div>
                 <span className="font-bold text-blue-900">Total IVA + ISR: </span>
                 <span className="text-violet-700 font-bold">
-                  {inv.currencySymbol ?? 'Q.'} {(Number(s.total_abono_iva ?? 0) + Number(s.total_isr ?? 0)).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                  {inv.currencySymbol ?? 'Q.'} {(Number(s.total_abono_iva ?? 0) + Number(s.total_isr ?? 0)).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
               <div>
                 <span className="font-bold text-blue-900">Cuota Sin Reinversión: </span>
                 <span className="text-green-700 font-bold">
-                   {inv.currencySymbol ?? 'Q.'} {displayCuotaSin.toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                   {inv.currencySymbol ?? 'Q.'} {displayCuotaSin.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
               <div>
                 <span className="font-bold text-blue-900">Cuota Con Reinversión: </span>
                 <span className="text-teal-700 font-bold">
-                   {inv.currencySymbol ?? 'Q.'} {displayCuotaCon.toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                   {inv.currencySymbol ?? 'Q.'} {displayCuotaCon.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
             </>
@@ -1733,14 +1733,14 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
         <div>
           <span className="font-bold text-blue-900">Total Monto Aportado: </span>
           <span className="text-purple-700 font-bold">
-            {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_monto_aportado ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+            {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_monto_aportado ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
         </div>
         {Number(totalesData?.totales.total_reinversion_capital ?? 0) > 0 && (
           <div>
             <span className="font-bold text-blue-900">Reinversión Capital: </span>
             <span className="text-orange-700 font-bold">
-              {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_reinversion_capital ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+              {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_reinversion_capital ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
           </div>
         )}
@@ -1748,7 +1748,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
           <div>
             <span className="font-bold text-blue-900">Reinversión Interés: </span>
             <span className="text-orange-700 font-bold">
-              {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_reinversion_interes ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+              {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_reinversion_interes ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
           </div>
         )}
@@ -1756,7 +1756,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
           <div>
             <span className="font-bold text-blue-900">Total Reinversión: </span>
             <span className="text-orange-700 font-bold">
-              {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_reinversion ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+              {totalesData?.currencySymbol ?? 'Q.'} {Number(totalesData?.totales.total_reinversion ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
           </div>
         )}
@@ -1964,13 +1964,13 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-3 shadow-sm border border-green-200">
                     <div className="text-xs text-green-700 mb-1">💰 Capital Aportado</div>
                     <div className="font-bold text-green-900 text-sm">
-                      {inv.currencySymbol} {Number(cred.monto_aportado).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      {inv.currencySymbol} {Number(cred.monto_aportado).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                   </div>
                   <div className="bg-gradient-to-br from-teal-50 to-cyan-50 rounded-lg p-3 shadow-sm border border-teal-200">
                     <div className="text-xs text-teal-700 mb-1">💸 Pago Cuota</div>
                     <div className="font-bold text-teal-900 text-sm">
-                      {inv.currencySymbol} {Number(cred.cuota_inversionista || 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      {inv.currencySymbol} {Number(cred.cuota_inversionista || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                   </div>
                   <div className="bg-gradient-to-br from-purple-50 to-violet-50 rounded-lg p-3 shadow-sm border border-purple-200">
@@ -1982,13 +1982,13 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   <div className="bg-gradient-to-br from-blue-50 to-cyan-50 rounded-lg p-3 shadow-sm border border-blue-200">
                     <div className="text-xs text-blue-700 mb-1">🏦 Capital Crédito</div>
                     <div className="font-bold text-blue-900 text-sm">
-                      {inv.currencySymbol} {Number(cred.capital).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      {inv.currencySymbol} {Number(cred.capital).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                   </div>
                   <div className="bg-gradient-to-br from-yellow-50 to-amber-50 rounded-lg p-3 shadow-sm border border-yellow-300">
                     <div className="text-xs text-yellow-700 mb-1">✨ Total a Recibir</div>
                     <div className="font-bold text-yellow-900 text-sm">
-                      {inv.currencySymbol} {Number(cred.total_cuota).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      {inv.currencySymbol} {Number(cred.total_cuota).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                   </div>
                 </div>
@@ -1998,25 +1998,25 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   <div className="bg-white rounded-lg p-2 shadow-sm border border-gray-200">
                     <div className="text-xs text-gray-600">Abono Capital</div>
                     <div className="font-semibold text-blue-900 text-xs">
-                      {inv.currencySymbol} {Number(cred.total_abono_capital).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      {inv.currencySymbol} {Number(cred.total_abono_capital).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                   </div>
                   <div className="bg-white rounded-lg p-2 shadow-sm border border-gray-200">
                     <div className="text-xs text-gray-600">Abono Interés</div>
                     <div className="font-semibold text-blue-900 text-xs">
-                      {inv.currencySymbol} {Number(cred.total_abono_interes).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      {inv.currencySymbol} {Number(cred.total_abono_interes).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                   </div>
                   <div className="bg-white rounded-lg p-2 shadow-sm border border-gray-200">
                     <div className="text-xs text-gray-600">IVA</div>
                     <div className="font-semibold text-blue-900 text-xs">
-                      {inv.currencySymbol} {Number(cred.total_abono_iva).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      {inv.currencySymbol} {Number(cred.total_abono_iva).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                   </div>
                   <div className="bg-white rounded-lg p-2 shadow-sm border border-gray-200">
                     <div className="text-xs text-gray-600">ISR</div>
                     <div className="font-semibold text-blue-900 text-xs">
-                      {inv.currencySymbol} {Number(cred.total_isr).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                      {inv.currencySymbol} {Number(cred.total_isr).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                   </div>
                 </div>
@@ -2068,7 +2068,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                         {pago.abono_capital_detalle.tipo}
                                       </span>
                                       <span className="inline-flex items-center px-1 py-0 rounded text-[9px] font-semibold bg-blue-100 text-blue-800 border border-blue-300">
-                                        +{inv.currencySymbol} {Number(pago.abono_capital_detalle.monto).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                        +{inv.currencySymbol} {Number(pago.abono_capital_detalle.monto).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                       </span>
                                     </div>
                                   )}
@@ -2085,7 +2085,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                   </div>
                                 ) : (
                                   <div className="font-bold text-blue-900 text-sm">
-                                    {inv.currencySymbol} {Number(pago.abono_capital).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                    {inv.currencySymbol} {Number(pago.abono_capital).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </div>
                                 )}
                               </div>
@@ -2105,7 +2105,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                   </div>
                                 ) : (
                                   <div className="font-bold text-violet-900 text-sm">
-                                    {inv.currencySymbol} {Number(pago.abono_interes).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                    {inv.currencySymbol} {Number(pago.abono_interes).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </div>
                                 )}
                               </div>
@@ -2125,7 +2125,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                                   </div>
                                 ) : (
                                   <div className="font-bold text-green-900 text-sm">
-                                    {inv.currencySymbol} {Number(pago.abono_iva).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                    {inv.currencySymbol} {Number(pago.abono_iva).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </div>
                                 )}
                               </div>
@@ -2134,14 +2134,14 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                               <div className="bg-gradient-to-br from-yellow-50 to-yellow-100 rounded-lg p-2 border border-yellow-200">
                                 <div className="text-xs text-yellow-700">📉 ISR (Calc)</div>
                                 <div className="font-bold text-yellow-900 text-sm">
-                                  {inv.currencySymbol} {Number(pago.isr).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                  {inv.currencySymbol} {Number(pago.isr).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </div>
                               </div>
 
                               <div className="col-span-2 bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-lg p-2 border border-indigo-300">
                                 <div className="text-xs text-indigo-700">💎 Total Inversor</div>
                                 <div className="font-bold text-indigo-900 text-base">
-                                  {inv.currencySymbol} {Number(pago.abonoGeneralInteres).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                  {inv.currencySymbol} {Number(pago.abonoGeneralInteres).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </div>
                               </div>
                             </div>

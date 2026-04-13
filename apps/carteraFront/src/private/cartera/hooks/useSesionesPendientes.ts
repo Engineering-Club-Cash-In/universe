@@ -3,11 +3,13 @@ import {
   getCreditosEspejoPendientesService,
   completarEspejoService,
   reemplazarInversionistaCreditoService,
+  getCreditCandidatesService,
   type CompletarEspejoPayload,
   type CompletarEspejoResponse,
   type ReemplazarInversionistaCreditoPayload,
   type ReemplazarInversionistaCreditoResponse,
   type SesionesPendientesPaginatedResponse,
+  type OtroCreditoDisponible,
 } from "../services/services";
 
 export const sesionesPendientesKeys = {
@@ -51,5 +53,15 @@ export function useReemplazarInversionistaCredito() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: sesionesPendientesKeys.all });
     },
+  });
+}
+
+export function useCreditCandidates(monto: number | null) {
+  return useQuery<OtroCreditoDisponible[]>({
+    queryKey: ["credit-candidates", monto] as const,
+    queryFn: () => getCreditCandidatesService({ monto: monto! }),
+    enabled: monto !== null && monto > 0,
+    staleTime: 1000 * 60 * 2,
+    gcTime: 1000 * 60 * 5,
   });
 }

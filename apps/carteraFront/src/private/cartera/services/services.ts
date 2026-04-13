@@ -2030,6 +2030,8 @@ export interface BoletaLiquidacion {
 export interface LiquidacionResumen {
   inversionista_id: number;
   nombre: string;
+  moneda: string;
+  currencySymbol: string;
   emite_factura: boolean;
   reinversion: string;
   banco: string | null;
@@ -3440,11 +3442,24 @@ export interface InversionistaSesionPendiente {
   monto_reinversion: string | null;
   saldo_reinversion: string;
   creditosPendientes: CreditoEspejoPendiente[];
+  opciones_de_credito: OtroCreditoDisponible[];
 }
 
-export async function getCreditosEspejoPendientesService(): Promise<InversionistaSesionPendiente[]> {
-  const res = await api.get<InversionistaSesionPendiente[]>(
-    `${API_URL}/creditos-espejo-pendientes`
+export interface SesionesPendientesPaginatedResponse {
+  data: InversionistaSesionPendiente[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export async function getCreditosEspejoPendientesService(params: {
+  page: number;
+  pageSize: number;
+  search?: string;
+}): Promise<SesionesPendientesPaginatedResponse> {
+  const res = await api.get<SesionesPendientesPaginatedResponse>(
+    `${API_URL}/creditos-espejo-pendientes`,
+    { params: { page: params.page, pageSize: params.pageSize, search: params.search || undefined } }
   );
   return res.data;
 }

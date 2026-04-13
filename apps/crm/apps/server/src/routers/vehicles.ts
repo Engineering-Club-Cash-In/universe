@@ -45,6 +45,11 @@ import {
 	prepareValuationContext,
 	vehicleValuationSchema,
 } from "../lib/valuation-schema";
+import {
+	buildManualValuationData,
+	MANUAL_VALUATION_RESULT,
+	MANUAL_VALUATION_TECHNICIAN_NAME,
+} from "../lib/manual-valuation";
 
 // Configuration Constants for Evidence Uploads
 const MAX_EVIDENCE_FILES_PER_ITEM = 10;
@@ -56,10 +61,6 @@ const ALLOWED_MIME_TYPES = [
 	"video/mp4",
 	"video/quicktime",
 ];
-const MANUAL_VALUATION_TECHNICIAN_NAME = "Actualizacion manual CRM";
-const MANUAL_VALUATION_RESULT =
-	"Actualización manual de valores comerciales del vehículo";
-
 const MANUAL_VALUATION_COMMA_DECIMAL_PATTERN = /^\d+,\d+$/;
 const MANUAL_VALUATION_THOUSANDS_PATTERN = /^\d{1,3}(,\d{3})+(\.\d+)?$/;
 const MANUAL_VALUATION_PLAIN_NUMBER_PATTERN = /^\d+(\.\d+)?$/;
@@ -827,26 +828,13 @@ export const vehiclesRouter = {
 				latestInspection.technicianName === MANUAL_VALUATION_TECHNICIAN_NAME &&
 				latestInspection.inspectionResult === MANUAL_VALUATION_RESULT;
 
-			const manualValuationData = {
+			const manualValuationData = buildManualValuationData({
 				vehicleRating: input.vehicleRating,
 				marketValue: normalizedMarketValue,
 				suggestedCommercialValue: normalizedSuggestedCommercialValue,
 				bankValue: normalizedBankValue,
 				currentConditionValue: normalizedCurrentConditionValue,
-				technicianName: MANUAL_VALUATION_TECHNICIAN_NAME,
-				inspectionDate: new Date(),
-				inspectionResult: MANUAL_VALUATION_RESULT,
-				vehicleEquipment: "Pendiente de inspección completa",
-				status: "pending" as const,
-				alerts: [] as string[],
-				sectionTimes: {},
-				scannerUsed: false,
-				airbagWarning: false,
-				testDrive: false,
-				hasSpareTire: false,
-				hasAgencyHistory: false,
-				updatedAt: new Date(),
-			};
+			});
 
 			if (isManualValuation) {
 				const [updatedInspection] = await db

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "../db";
 import { creditChecks } from "../db/schema";
 import { crmProcedure } from "../lib/orpc";
-import { ROLES } from "../lib/roles";
+import { canAccessSalesTeamActions, canManageAnySalesOwnedRecord } from "../lib/sales-permissions";
 
 export const checksRouter = {
 	// Crear nuevo cheque/transferencia
@@ -27,11 +27,12 @@ export const checksRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			// Validar que el usuario sea sales o admin
+			// Validar acceso del equipo de ventas
 			const userRole = context.userRole;
-			if (userRole !== ROLES.SALES && userRole !== ROLES.ADMIN) {
+			if (!canAccessSalesTeamActions(userRole)) {
 				throw new ORPCError("FORBIDDEN", {
-					message: "Solo usuarios de ventas pueden registrar cheques",
+					message:
+						"Solo ventas, supervisión de ventas y administración pueden registrar cheques",
 				});
 			}
 
@@ -127,7 +128,10 @@ export const checksRouter = {
 
 			// Validar permisos
 			const userRole = context.userRole;
-			if (userRole !== ROLES.ADMIN && existing.createdBy !== context.userId) {
+			if (
+				!canManageAnySalesOwnedRecord(userRole) &&
+				existing.createdBy !== context.userId
+			) {
 				throw new ORPCError("FORBIDDEN", {
 					message: "No tienes permiso para editar este cheque",
 				});
@@ -177,7 +181,10 @@ export const checksRouter = {
 
 			// Validar permisos
 			const userRole = context.userRole;
-			if (userRole !== ROLES.ADMIN && existing.createdBy !== context.userId) {
+			if (
+				!canManageAnySalesOwnedRecord(userRole) &&
+				existing.createdBy !== context.userId
+			) {
 				throw new ORPCError("FORBIDDEN", {
 					message: "No tienes permiso para eliminar este cheque",
 				});

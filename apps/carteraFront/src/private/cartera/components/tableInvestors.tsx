@@ -267,6 +267,8 @@ export function TableInvestors() {
   const [compraCarteraInvId, setCompraCarteraInvId] = useState<number | null>(null);
   const [compraCarteraMonto, setCompraCarteraMonto] = useState("");
   const [compraCarteraFecha, setCompraCarteraFecha] = useState("");
+  const [compraCarteraPctInv, setCompraCarteraPctInv] = useState("70");
+  const [compraCarteraPctCashIn, setCompraCarteraPctCashIn] = useState("30");
   const agregarInvCredito = useAgregarInversionistaCredito();
 
   const [incluirLiquidados, setIncluirLiquidados] = useState(false);
@@ -1223,6 +1225,25 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                     setCompraCarteraInvId(inv.inversionista_id);
                     setCompraCarteraMonto("");
                     setCompraCarteraFecha(new Date().toISOString().split("T")[0]);
+                    // Calcular moda del porcentaje de participación desde créditos existentes
+                    const creditos = inv.creditos ?? [];
+                    if (creditos.length > 0) {
+                      const freq = new Map<string, number>();
+                      for (const c of creditos) {
+                        const pct = String(Math.round(Number(c.porcentaje_inversionista ?? 0)));
+                        freq.set(pct, (freq.get(pct) ?? 0) + 1);
+                      }
+                      let modaPct = "70";
+                      let maxCount = 0;
+                      for (const [pct, count] of freq) {
+                        if (count > maxCount) { modaPct = pct; maxCount = count; }
+                      }
+                      setCompraCarteraPctInv(modaPct);
+                      setCompraCarteraPctCashIn(String(100 - Number(modaPct)));
+                    } else {
+                      setCompraCarteraPctInv("70");
+                      setCompraCarteraPctCashIn("30");
+                    }
                     setCompraCarteraOpen(true);
                   }}
                   className="cursor-pointer rounded-lg px-3 py-2.5 focus:bg-emerald-50"
@@ -2413,16 +2434,16 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
           }
         }}
       >
-        <DialogContent className="bg-white dark:bg-gray-900 sm:max-w-md z-[60]">
+        <DialogContent className="!bg-[#1e293b] sm:max-w-md z-[60] border border-slate-600/40 shadow-2xl rounded-2xl">
           <DialogHeader>
-            <DialogTitle className="text-lg font-bold">Compra de Cartera</DialogTitle>
-            <DialogDescription>
-              Ingresa el monto y la fecha de inicio de participación
+            <DialogTitle className="text-lg font-bold text-white">Compra de Cartera</DialogTitle>
+            <DialogDescription className="text-slate-400 text-sm">
+              Ingresa el monto, porcentajes y la fecha de inicio de participación
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div>
-              <label htmlFor="compra-monto" className="text-sm font-medium text-gray-700">
+              <label htmlFor="compra-monto" className="text-sm font-medium text-slate-300">
                 Monto aportado
               </label>
               <Input
@@ -2433,11 +2454,57 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 placeholder="0.00"
                 value={compraCarteraMonto}
                 onChange={(e) => setCompraCarteraMonto(e.target.value)}
-                className="mt-1"
+                className="mt-1 !bg-slate-700/50 !border-slate-500/50 !text-white placeholder:text-slate-500 focus:!border-emerald-400 focus:!ring-emerald-400/30"
               />
             </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="compra-pct-inv" className="text-sm font-medium text-slate-300">
+                  % Inversionista
+                </label>
+                <Input
+                  id="compra-pct-inv"
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="1"
+                  value={compraCarteraPctInv}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setCompraCarteraPctInv(val);
+                    const num = Number(val);
+                    if (!isNaN(num) && num >= 0 && num <= 100) {
+                      setCompraCarteraPctCashIn(String(100 - num));
+                    }
+                  }}
+                  className="mt-1 !bg-slate-700/50 !border-slate-500/50 !text-white placeholder:text-slate-500 focus:!border-emerald-400 focus:!ring-emerald-400/30"
+                />
+              </div>
+              <div>
+                <label htmlFor="compra-pct-cashin" className="text-sm font-medium text-slate-300">
+                  % Cash In
+                </label>
+                <Input
+                  id="compra-pct-cashin"
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="1"
+                  value={compraCarteraPctCashIn}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setCompraCarteraPctCashIn(val);
+                    const num = Number(val);
+                    if (!isNaN(num) && num >= 0 && num <= 100) {
+                      setCompraCarteraPctInv(String(100 - num));
+                    }
+                  }}
+                  className="mt-1 !bg-slate-700/50 !border-slate-500/50 !text-white placeholder:text-slate-500 focus:!border-emerald-400 focus:!ring-emerald-400/30"
+                />
+              </div>
+            </div>
             <div>
-              <label htmlFor="compra-fecha" className="text-sm font-medium text-gray-700">
+              <label htmlFor="compra-fecha" className="text-sm font-medium text-slate-300">
                 Fecha inicio participación
               </label>
               <Input
@@ -2445,7 +2512,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 type="date"
                 value={compraCarteraFecha}
                 onChange={(e) => setCompraCarteraFecha(e.target.value)}
-                className="mt-1"
+                className="mt-1 !bg-slate-700/50 !border-slate-500/50 !text-white focus:!border-emerald-400 focus:!ring-emerald-400/30 [color-scheme:dark]"
               />
             </div>
           </div>
@@ -2456,7 +2523,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 setCompraCarteraOpen(false);
                 setCompraCarteraInvId(null);
               }}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+              className="px-4 py-2 text-sm font-medium text-slate-300 bg-slate-700/60 border border-slate-500/40 rounded-lg hover:bg-slate-600/60 transition-colors"
             >
               Cancelar
             </button>
@@ -2470,6 +2537,8 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                     inversionista_id: compraCarteraInvId,
                     monto_aportado: Number(compraCarteraMonto),
                     tipo_operacion: "compra_cartera",
+                    porcentaje_inversion: Number(compraCarteraPctInv),
+                    porcentaje_cash_in: Number(compraCarteraPctCashIn),
                     fecha_inicio_participacion: compraCarteraFecha || undefined,
                   },
                   {
@@ -2486,7 +2555,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                   }
                 );
               }}
-              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+              className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-500 disabled:bg-slate-600 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors"
             >
               {agregarInvCredito.isPending ? "Guardando…" : "Confirmar"}
             </button>

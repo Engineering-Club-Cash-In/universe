@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { useSesionesPendientes, useCompletarEspejo, useReemplazarInversionistaCredito } from "../hooks/useSesionesPendientes";
+import { useSesionesPendientes, useCompletarEspejo, useReemplazarInversionistaCredito, useCreditCandidates } from "../hooks/useSesionesPendientes";
 import type { InversionistaSesionPendiente, OtroCreditoDisponible } from "../services/services";
 import {
   Loader2,
@@ -281,10 +281,13 @@ function InvestorCard({
   const isEditing = editingCreditId !== null;
   const editingCredit = investor.creditosPendientes.find((c) => c.id === editingCreditId);
 
+  const montoParaCandidatos = editingCredit ? Number(editingCredit.monto_aportado) : null;
+  const { data: candidates, isLoading: isLoadingCandidates } = useCreditCandidates(montoParaCandidatos);
+
   const destinos = useMemo(() => {
-    if (!editingCreditId) return [];
-    return buildDestinos(investor.opciones_de_credito ?? [], investor.moneda);
-  }, [editingCreditId, investor]);
+    if (!editingCreditId || !candidates) return [];
+    return buildDestinos(candidates, investor.moneda);
+  }, [editingCreditId, candidates, investor.moneda]);
 
   const montoAportado = editingCredit ? Number(editingCredit.monto_aportado) : 0;
 
@@ -507,7 +510,12 @@ function InvestorCard({
                       </div>
 
                       <div className="space-y-1.5">
-                        {destinos.length === 0 ? (
+                        {isLoadingCandidates ? (
+                          <div className="flex items-center gap-2 py-2">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600" aria-hidden="true" />
+                            <p className="text-[11px] text-gray-500">Cargando créditos disponibles&hellip;</p>
+                          </div>
+                        ) : destinos.length === 0 ? (
                           <p className="text-[11px] text-gray-500 italic">Sin créditos disponibles</p>
                         ) : (
                           destinos.map((d) => {

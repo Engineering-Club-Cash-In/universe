@@ -3,16 +3,22 @@ import {
   getCreditosEspejoPendientesService,
   completarEspejoService,
   reemplazarInversionistaCreditoService,
+  getCreditCandidatesService,
   type CompletarEspejoPayload,
   type CompletarEspejoResponse,
   type ReemplazarInversionistaCreditoPayload,
   type ReemplazarInversionistaCreditoResponse,
   type SesionesPendientesPaginatedResponse,
+  type OtroCreditoDisponible,
 } from "../services/services";
 
 export const sesionesPendientesKeys = {
   all: ["sesiones-pendientes"] as const,
   list: (page: number, pageSize: number, search: string) => [...sesionesPendientesKeys.all, "list", page, pageSize, search] as const,
+};
+
+export const creditCandidatesKeys = {
+  all: ["credit-candidates"] as const,
 };
 
 export function useSesionesPendientes(page: number, pageSize: number, search: string) {
@@ -50,6 +56,17 @@ export function useReemplazarInversionistaCredito() {
     mutationFn: (payload) => reemplazarInversionistaCreditoService(payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: sesionesPendientesKeys.all });
+      queryClient.invalidateQueries({ queryKey: creditCandidatesKeys.all });
     },
+  });
+}
+
+export function useCreditCandidates(monto: number | null) {
+  return useQuery<OtroCreditoDisponible[]>({
+    queryKey: [...creditCandidatesKeys.all, monto] as const,
+    queryFn: () => getCreditCandidatesService({ monto: monto! }),
+    enabled: monto !== null && monto > 0,
+    staleTime: 1000 * 60 * 2,
+    gcTime: 1000 * 60 * 5,
   });
 }

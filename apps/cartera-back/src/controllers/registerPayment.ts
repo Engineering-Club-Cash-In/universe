@@ -1802,14 +1802,54 @@ export async function aplicarPagoAlCredito(pago_id: number) {
     const membresias_restante = new Big(pago.membresias ?? 0);
     const capital_restante_pago = new Big(pago.capital_restante ?? 0);
 
-    // ✅ Si CUALQUIER restante > 0 → NO está completo
+    // 🔎 Buscar TODOS los pagos de la misma cuota para validar si hay restantes
+    // en cualquier otro pago (ej: pagos "otros" que dejan restantes en el pago
+    // original de la cuota sin tocarlos). Excluye paymentFalse.
+    const pagosDeLaCuota = pago.cuota_id !== null
+      ? await db
+          .select({
+            pago_id: pagos_credito.pago_id,
+            interes_restante: pagos_credito.interes_restante,
+            iva_12_restante: pagos_credito.iva_12_restante,
+            seguro_restante: pagos_credito.seguro_restante,
+            gps_restante: pagos_credito.gps_restante,
+            membresias: pagos_credito.membresias,
+            capital_restante: pagos_credito.capital_restante,
+          })
+          .from(pagos_credito)
+          .where(
+            and(
+              eq(pagos_credito.cuota_id, pago.cuota_id),
+              eq(pagos_credito.paymentFalse, false)
+            )
+          )
+      : [];
+
+    const algunPagoDeLaCuotaTieneRestantes = pagosDeLaCuota.some(
+      (p) =>
+        new Big(p.interes_restante ?? 0).gt(0) ||
+        new Big(p.iva_12_restante ?? 0).gt(0) ||
+        new Big(p.seguro_restante ?? 0).gt(0) ||
+        new Big(p.gps_restante ?? 0).gt(0) ||
+        new Big(p.membresias ?? 0).gt(0) ||
+        new Big(p.capital_restante ?? 0).gt(0)
+    );
+
+    // ✅ Si CUALQUIER restante > 0 (en este pago o en otro pago de la misma cuota) → NO está completo
     const tieneRestantes =
       interes_restante.gt(0) ||
       iva_restante.gt(0) ||
       seguro_restante.gt(0) ||
       gps_restante.gt(0) ||
       membresias_restante.gt(0) ||
-      capital_restante_pago.gt(0);
+      capital_restante_pago.gt(0) ||
+      algunPagoDeLaCuotaTieneRestantes;
+
+    if (algunPagoDeLaCuotaTieneRestantes) {
+      console.log(
+        `⚠️ Otro pago de la cuota ${pago.cuota_id} tiene restantes pendientes → no se marcará la cuota como pagada`
+      );
+    }
 
     if (tieneRestantes) {
       console.log("⚠️ El pago tiene restantes pendientes:");

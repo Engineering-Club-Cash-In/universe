@@ -121,8 +121,7 @@ export function ListaCreditosPagos() {
     | "CAIDO";
 
   // Helpers de permisos
-  const canEdit = (s: CreditStatus) =>
-    ["ACTIVO", "MOROSO", "PENDIENTE_CANCELACION", "EN_CONVENIO"].includes(s);
+  const canEdit = (_s: CreditStatus) => true;
   const canCancel = (s: CreditStatus) => ["ACTIVO", "MOROSO"].includes(s);
   const canActivate = (s: CreditStatus) => s === "PENDIENTE_CANCELACION";
   const canViewPayments = (_s: CreditStatus) => true;

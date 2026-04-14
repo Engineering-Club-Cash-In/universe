@@ -985,33 +985,43 @@ export const updateCredit = async ({ body, set }: any) => {
       );
     }
 
-    // 10. Actualizar inversionistas (Espejo) - jala cuota del padre
+    // 10. Actualizar inversionistas (Espejo)
+    console.log(`🪞 [ESPEJO] inversionistas_espejo recibidos: ${JSON.stringify(inversionistas_espejo?.length ?? 'undefined')}`);
     if (inversionistas_espejo && inversionistas_espejo.length > 0) {
-      const parentInvestors = await db
-        .select({
-          inversionista_id: creditos_inversionistas.inversionista_id,
-          cuota_inversionista: creditos_inversionistas.cuota_inversionista,
-        })
-        .from(creditos_inversionistas)
-        .where(eq(creditos_inversionistas.credito_id, credito_id));
-
-      const parentCuotas = new Map(
-        parentInvestors.map((p) => [p.inversionista_id, p.cuota_inversionista])
+      // 🔒 Sincronización forzada: el espejo siempre usa el monto_aportado del padre.
+      // Esto es la fuente de verdad, independiente de lo que envíe el frontend.
+      const principalMontos = new Map(
+        (inversionistas || []).map((inv) => [inv.inversionista_id, inv.monto_aportado])
       );
 
-      await updateInvestors(
-        credito_id,
-        inversionistas_espejo,
-        updateFields,
-        current,
-        numero_credito_sifco ?? current.numero_credito_sifco,
-        Number(updateFields.seguro_10_cuotas ?? current.seguro_10_cuotas),
-        Number(updateFields.membresias_pago ?? current.membresias_pago),
-        Number(updateFields.gps ?? current.gps),
-        creditos_inversionistas_espejo, // Mirror target
-        parentCuotas, // Cuotas del padre
-      );
+      const espejoSincronizado = inversionistas_espejo.map((inv) => ({
+        ...inv,
+        monto_aportado: principalMontos.get(inv.inversionista_id) ?? inv.monto_aportado,
+      }));
+
+      console.log(`🪞 [ESPEJO] Iniciando updateInvestors para credito_id=${credito_id} con ${espejoSincronizado.length} inversionistas`);
+      try {
+        await updateInvestors(
+          credito_id,
+          espejoSincronizado,
+          updateFields,
+          current,
+          numero_credito_sifco ?? current.numero_credito_sifco,
+          Number(updateFields.seguro_10_cuotas ?? current.seguro_10_cuotas),
+          Number(updateFields.membresias_pago ?? current.membresias_pago),
+          Number(updateFields.gps ?? current.gps),
+          creditos_inversionistas_espejo,
+        );
+        console.log(`🪞 [ESPEJO] ✅ updateInvestors completado para espejo`);
+      } catch (espejoError) {
+        console.error(`🪞 [ESPEJO] ❌ Error en updateInvestors espejo:`, espejoError);
+        throw espejoError;
+      }
+    } else {
+      console.log(`🪞 [ESPEJO] ⚠️ Bloque saltado: inversionistas_espejo está vacío o undefined`);
     }
+
+
 
     set.status = 200;
     return updatedCredit;

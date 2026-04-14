@@ -5316,7 +5316,7 @@ export async function testUploadAndEmail(investorId: number, testEmail: string) 
         investorName: inversionista.nombre_inversionista,
         amount: inversionista.subtotal.total_cuota.toString(),
         creditNumber: "DIAGNOSTIC-TEST",
-        date: dayjs().format("DD/MM/YYYY"),
+        date: dayjs().format("MMMM YYYY"),
         currencySymbol: inversionista.moneda === "dolares" ? "$" : "Q.",
         attachment: {
             filename: `Test_Liquidacion_${inversionista.nombre_inversionista.replace(/\s+/g, '_')}.pdf`,

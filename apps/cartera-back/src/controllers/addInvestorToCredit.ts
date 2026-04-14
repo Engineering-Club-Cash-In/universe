@@ -359,39 +359,34 @@ export const addInvestorToCredit = async ({ body, set }: any) => {
             porcCashIn = new Big(porcentaje_cash_in);
             porcInversion = new Big(porcentaje_inversion ?? 80);
           } else {
-            // Buscar en ESTE crédito primero
-            const existenteEnPadre = inversionistasActuales.find(
-              (inv: any) => inv.inversionista_id === inversionista_id,
-            );
+            // Sin porcentajes explícitos → calcular la MODA desde TODOS los créditos del inversionista
+            const todosCreditos = await tx
+              .select({
+                porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
+                porcentaje_participacion_inversionista:
+                  creditos_inversionistas.porcentaje_participacion_inversionista,
+              })
+              .from(creditos_inversionistas)
+              .where(eq(creditos_inversionistas.inversionista_id, inversionista_id));
 
-            if (existenteEnPadre) {
-              porcCashIn = new Big(existenteEnPadre.porcentaje_cash_in);
-              porcInversion = new Big(
-                existenteEnPadre.porcentaje_participacion_inversionista,
-              );
-            } else {
-              // No existe en este crédito → buscar en CUALQUIER otro crédito
-              const [otroCredito] = await tx
-                .select({
-                  porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
-                  porcentaje_participacion_inversionista:
-                    creditos_inversionistas.porcentaje_participacion_inversionista,
-                })
-                .from(creditos_inversionistas)
-                .where(eq(creditos_inversionistas.inversionista_id, inversionista_id))
-                .limit(1);
-
-              if (otroCredito) {
-                // Encontró en otro crédito → jalar esos porcentajes
-                porcCashIn = new Big(otroCredito.porcentaje_cash_in);
-                porcInversion = new Big(
-                  otroCredito.porcentaje_participacion_inversionista,
-                );
-              } else {
-                // No existe en ningún crédito → defaults 80/20
-                porcCashIn = new Big(20);
-                porcInversion = new Big(80);
+            if (todosCreditos.length > 0) {
+              // Calcular la moda del porcentaje de inversión
+              const freq = new Map<string, number>();
+              for (const c of todosCreditos) {
+                const pct = String(Math.round(Number(c.porcentaje_participacion_inversionista ?? 0)));
+                freq.set(pct, (freq.get(pct) ?? 0) + 1);
               }
+              let modaInversion = "80";
+              let maxCount = 0;
+              for (const [pct, count] of freq) {
+                if (count > maxCount) { modaInversion = pct; maxCount = count; }
+              }
+              porcInversion = new Big(modaInversion);
+              porcCashIn = new Big(100).minus(porcInversion);
+            } else {
+              // No existe en ningún crédito → defaults 80/20
+              porcCashIn = new Big(20);
+              porcInversion = new Big(80);
             }
           }
 

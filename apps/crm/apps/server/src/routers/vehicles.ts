@@ -1524,12 +1524,13 @@ INFORMACIÓN DEL VEHÍCULO:
 - Modelo/Año (año del vehículo, ej: 2020, 2023)
 - Color (descripción del color)
 - Tipo de vehículo (ej: AUTOMOVIL, CAMIONETA)
+- Uso (ej: PARTICULAR, COMERCIAL)
 
 ESPECIFICACIONES TÉCNICAS:
 - VIN/Chasis/Serie (números de identificación únicos)
-- Motor/CC (cilindrada)
+- Motor/CC (Cilindrada, buscar etiqueta "Cilindrada" o "CC")
 - Cilindros (número)
-- Asientos (número)
+- Asientos (Número de pasajeros, buscar etiqueta "Asientos" o "No. Asientos")
 
 REGLAS IMPORTANTES:
 - Si encuentras al menos 3 campos correctos: extractionSuccess = true
@@ -1537,7 +1538,7 @@ REGLAS IMPORTANTES:
 - Siempre retorna un objeto JSON válido con extractionSuccess como boolean y extractionErrors como array
 - Deja campos vacíos ("") si no los encuentras claramente
 - NO uses estructura "properties", retorna el objeto directamente
-- Ejemplo correcto: {"licensePlate": "P0-123ABC", "make": "TOYOTA", "line": "COROLLA", "model": "2020", "extractionSuccess": true, "extractionErrors": []}`,
+- Ejemplo correcto: {"licensePlate": "P0-123ABC", "make": "TOYOTA", "line": "COROLLA", "model": "2020", "use": "PARTICULAR", "seats": "5", "cc": "2000", "extractionSuccess": true, "extractionErrors": []}`,
 						},
 						{
 							role: "user",

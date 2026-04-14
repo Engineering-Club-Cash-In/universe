@@ -61,6 +61,8 @@ const formSchema = z.object({
   origin: z.enum(["Nacional", "Importado"], { message: "La procedencia es requerida" }),
   vehicleType: z.string({ message: "El tipo de vehículo es requerido" }).min(1, { message: "El tipo de vehículo es requerido" }),
   color: z.string({ message: "El color es requerido" }).min(1, { message: "El color es requerido" }),
+  vehicleUse: z.string().optional(),
+  seats: z.string().optional(),
   cylinders: z.string({ message: "Los cilindros son requeridos" })
     .min(1, { message: "Los cilindros son requeridos" })
     .refine((val) => {
@@ -129,6 +131,8 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       origin: undefined,
       vehicleType: "",
       color: "",
+      vehicleUse: "",
+      seats: "",
       cylinders: "",
       engineCC: "",
       fuelType: undefined,
@@ -203,10 +207,11 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
 
       setDuplicateVehicle(vehicle);
       
-      // Auto-cargar datos y comparar
-      selectVehicle(vehicle);
+      const ocrSource = ocrToMatch || rawOcrData || undefined;
       
-      const ocrSource = ocrToMatch || rawOcrData;
+      // Auto-cargar datos y comparar
+      selectVehicle(vehicle, ocrSource);
+      
       if (ocrSource) {
         recalculateMismatches(vehicle, ocrSource);
       } else {
@@ -227,36 +232,46 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
     const mismatches: string[] = [];
     const fieldsToCompare: Array<keyof FormValues> = [
       'vehicleMake', 'vehicleModel', 'vehicleYear', 'licensePlate', 
-      'vinNumber', 'motorNumber', 'color', 'vehicleType', 'cylinders', 'engineCC'
+      'vinNumber', 'motorNumber', 'color', 'vehicleType', 'cylinders', 'engineCC',
+      'vehicleUse', 'seats'
     ];
+
+    // Helper to normalize values for comparison
+    const normalize = (val: any) => {
+      if (val === null || val === undefined) return "";
+      return val.toString().trim().toUpperCase().replace(/^0+/, ''); // Remove leading zeros and normalize case
+    };
 
     fieldsToCompare.forEach(field => {
       // Map form field names to database vehicle property names
       const dbProp = field === 'vehicleMake' ? 'make' : 
                     field === 'vehicleModel' ? 'model' : 
-                    field === 'vehicleYear' ? 'year' : 
+                    field === 'vehicleYear' ? 'year' :
+                    field === 'vehicleUse' ? 'vehicleUse' : // Fix potential naming diff
                     field;
       
-      const dbValue = (dbVehicle[dbProp] || "").toString().trim().toUpperCase();
-      const ocrValue = (ocr[field] || "").toString().trim().toUpperCase();
+      const dbValue = normalize(dbVehicle[dbProp]);
+      const ocrValue = normalize(ocr[field]);
 
-      // Habilitamos para edición si:
-      // 1. El OCR leyó algo pero es DISTINTO a la DB.
-      // 2. El OCR NO pudo leer nada (está vacío).
-      if (!ocrValue || dbValue !== ocrValue) {
+      // Solo marcamos como "discrepancia" (alerta azul) si los valores normalizados son distintos
+      // y si el OCR realmente pudo leer algo
+      if (ocrValue && dbValue !== ocrValue) {
         mismatches.push(field);
       }
     });
 
     setComparisonMismatches(mismatches);
 
-    // Campos que siempre requieren revisión fresca del técnico
+    // Campos que siempre requieren revisión fresca del técnico (SIEMPRE EDITABLES)
     const alwaysEditable: Array<keyof FormValues> = [
       'technicianName', 'inspectionDate', 'kmMileage', 'milesMileage', 
       'fuelType', 'transmission', 'traction', 'testDrive', 'noTestDriveReason',
       'vinVerification', 'trim', 'origin'
     ];
     
+    // El técnico puede editar:
+    // 1. Las discrepancias reales detectadas (incluyendo Uso y Asientos si son lógicamente distintos)
+    // 2. Los campos que siempre deben ser editables
     setMismatchedFields([...mismatches, ...alwaysEditable]);
   };
 
@@ -280,35 +295,40 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
     }
   };
 
-  const selectVehicle = (vehicle: any) => {
+  const selectVehicle = (vehicle: any, ocrData?: Partial<FormValues>) => {
+    // Current OCR data if available to fill gaps in DB
+    const ocr = ocrData || rawOcrData || {};
+
     form.reset({
       ...form.getValues(),
-      vehicleMake: vehicle.make || "",
-      vehicleModel: vehicle.model || "",
-      trim: vehicle.trim || "",
-      vehicleYear: vehicle.year?.toString() || "",
-      licensePlate: vehicle.licensePlate || "",
-      vinNumber: vehicle.vinNumber || "",
-      motorNumber: vehicle.motorNumber || "",
-      vehicleType: vehicle.vehicleType || "",
-      color: vehicle.color || "",
-      cylinders: vehicle.cylinders || "",
-      engineCC: vehicle.engineCC || "",
-      fuelType: vehicle.fuelType as any,
-      transmission: vehicle.transmission as any,
-      traction: vehicle.traction as any,
-      origin: vehicle.origin as any,
-      kmMileage: vehicle.kmMileage?.toString() || "",
-      milesMileage: vehicle.milesMileage?.toString() || "",
-      vinVerification: false, // Default to unchecked as requested
-      vehicleId: vehicle.id, // Store the ID for the backend logic
+      vehicleId: vehicle.id,
+      vehicleMake: vehicle.make || ocr.vehicleMake || "",
+      vehicleModel: vehicle.model || ocr.vehicleModel || "",
+      trim: vehicle.trim || ocr.trim || "",
+      vehicleYear: vehicle.year?.toString() || ocr.vehicleYear || "",
+      licensePlate: vehicle.licensePlate || ocr.licensePlate || "",
+      vinNumber: vehicle.vinNumber || ocr.vinNumber || "",
+      motorNumber: vehicle.motorNumber || ocr.motorNumber || "",
+      vehicleType: vehicle.vehicleType || ocr.vehicleType || "",
+      color: vehicle.color || ocr.color || "",
+      vehicleUse: vehicle.vehicleUse || ocr.vehicleUse || "",
+      seats: vehicle.seats?.toString() || ocr.seats || "",
+      cylinders: vehicle.cylinders || ocr.cylinders || "",
+      engineCC: vehicle.engineCC || ocr.engineCC || "",
+      fuelType: (vehicle.fuelType || ocr.fuelType) as any,
+      transmission: (vehicle.transmission || ocr.transmission) as any,
+      traction: (vehicle.traction || ocr.traction) as any,
+      origin: (vehicle.origin || ocr.origin) as any,
+      kmMileage: vehicle.kmMileage?.toString() || ocr.kmMileage || "",
+      milesMileage: vehicle.milesMileage?.toString() || ocr.milesMileage || "",
+      vinVerification: false,
     });
     
     // Clear search results
     setSearchResults([]);
     setSearchTerm("");
     setSelectedVehicle(vehicle);
-    toast.success("Información del vehículo cargada correctamente");
+    toast.success("Información del vehículo cargada (Sincronizada con escaneo)");
   };
 
   useEffect(() => {
@@ -367,6 +387,8 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       origin: undefined,
       vehicleType: "",
       color: "",
+      vehicleUse: "",
+      seats: "",
       cylinders: "",
       engineCC: "",
       fuelType: undefined,
@@ -644,7 +666,9 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                               color: "Color",
                               vehicleType: "Tipo",
                               cylinders: "Cilindros",
-                              engineCC: "CC"
+                              engineCC: "CC",
+                              vehicleUse: "Uso",
+                              seats: "Asientos"
                             };
                             return labels[field] || field;
                           }).join(", ")}
@@ -944,6 +968,54 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                           placeholder="Ej. 4" 
                           {...field} 
                           disabled={!!selectedVehicle && !mismatchedFields.includes("cylinders")}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
+                <FormField
+                  control={form.control}
+                  name="vehicleUse"
+                  render={({ field, fieldState }) => (
+                    <FormItem>
+                      <FormLabel>Uso del vehículo</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        value={field.value}
+                        disabled={!!selectedVehicle && !mismatchedFields.includes("vehicleUse")}
+                      >
+                        <FormControl>
+                          <SelectTrigger className={cn("w-full", fieldState.error && "border-red-500")}>
+                            <SelectValue placeholder="Seleccione el uso" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="Particular">Particular</SelectItem>
+                          <SelectItem value="Comercial">Comercial</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="seats"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Asientos</FormLabel>
+                      <FormControl>
+                        <Input 
+                          placeholder="Ej. 5" 
+                          type="number"
+                          {...field} 
+                          value={field.value || ""}
+                          disabled={!!selectedVehicle && !mismatchedFields.includes("seats")}
                         />
                       </FormControl>
                       <FormMessage />

@@ -724,9 +724,13 @@ function getProgressPercentage(target: string, achieved: string, isInverse?: boo
 	const targetNum = parseFloat(target);
 	const achievedNum = parseFloat(achieved);
 
-	if (targetNum <= 0) return 0;
-
 	if (isInverse) {
+		if (targetNum === 0 && achievedNum === 0) {
+			return 100;
+		}
+
+		if (targetNum <= 0) return 0;
+
 		// Para metas inversas (reducción): menor valor logrado = mejor progreso
 		// Si logrado <= objetivo = 100%, si logrado > objetivo = porcentaje reducido
 		if (achievedNum <= targetNum) {
@@ -735,10 +739,12 @@ function getProgressPercentage(target: string, achieved: string, isInverse?: boo
 			// Si excede el objetivo, calcular qué porcentaje representa
 			return Math.max((targetNum / achievedNum) * 100, 0);
 		}
-	} else {
-		// Para metas normales: mayor valor logrado = mejor progreso
-		return (achievedNum / targetNum) * 100;
 	}
+
+	if (targetNum <= 0) return 0;
+
+	// Para metas normales: mayor valor logrado = mejor progreso
+	return (achievedNum / targetNum) * 100;
 }
 
 function chunkGoals<T>(goals: T[], maxPerSlide = 4) {

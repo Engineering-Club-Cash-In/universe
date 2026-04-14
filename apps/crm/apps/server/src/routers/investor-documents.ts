@@ -143,6 +143,137 @@ export const investorDocumentsRouter = {
 			return result;
 		}),
 
+	// Bancos — catálogo desde cartera-back
+	getBancosCartera: crmCobrosOrInvestmentsProcedure
+		.handler(async () => {
+			return carteraBackClient.getBancos();
+		}),
+
+	// Crear inversionista — opcionalmente con compra de cartera
+	crearInversionista: investmentManagerProcedure
+		.input(
+			z.object({
+				nombre: z.string().min(1),
+				dpi: z.string().optional(),
+				email: z.string().email().optional(),
+				banco: z.number().nullable().optional(),
+				tipoCuenta: z.string().optional(),
+				numeroCuenta: z.string().optional(),
+				tipoReinversion: z.string().optional(),
+				montoReinversion: z.number().optional(),
+				moneda: z.enum(["quetzales", "dolares"]).optional(),
+				emiteFactura: z.boolean().optional(),
+				// Compra de cartera opcional
+				hacerCompraCartera: z.boolean().optional(),
+				montoCompraCartera: z.number().positive().optional(),
+				porcentajeInversion: z.number().min(0).max(100).optional(),
+				porcentajeCashIn: z.number().min(0).max(100).optional(),
+				fechaInicioParticipacion: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// 1. Crear inversionista en cartera-back
+			const createResult = await carteraBackClient.createInvestor({
+				nombre: input.nombre,
+				dpi: input.dpi ? Number(input.dpi) : null,
+				email: input.email ?? null,
+				banco: input.banco ?? null,
+				tipo_cuenta: input.tipoCuenta ?? null,
+				numero_cuenta: input.numeroCuenta ?? null,
+				tipo_reinversion: input.tipoReinversion ?? "sin_reinversion",
+				monto_reinversion: input.montoReinversion ?? null,
+				moneda: input.moneda ?? "quetzales",
+				emite_factura: input.emiteFactura ?? false,
+			});
+
+			const created = createResult.data?.[0];
+			if (!created?.inversionista_id) {
+				throw new Error("No se pudo crear el inversionista en cartera");
+			}
+
+			// 2. Log de creación
+			await db.insert(investorActivityLog).values({
+				inversionistaId: created.inversionista_id,
+				action: "investor_created",
+				details: {
+					nombre: input.nombre,
+					dpi: input.dpi,
+					email: input.email,
+					moneda: input.moneda,
+				},
+				performedBy: context.session.user.id,
+				performedByName:
+					context.session.user.name ?? context.session.user.email,
+			});
+
+			// 3. Si pidió compra de cartera, ejecutarla con el ID del nuevo inversionista
+			let compraResult = null;
+			if (input.hacerCompraCartera && input.montoCompraCartera) {
+				compraResult = await carteraBackClient.compraCartera({
+					inversionista_id: created.inversionista_id,
+					monto_aportado: input.montoCompraCartera,
+					tipo_operacion: "compra_cartera",
+					porcentaje_inversion: input.porcentajeInversion,
+					porcentaje_cash_in: input.porcentajeCashIn,
+					fecha_inicio_participacion:
+						input.fechaInicioParticipacion || undefined,
+				});
+
+				// Log de compra de cartera
+				await db.insert(investorActivityLog).values({
+					inversionistaId: created.inversionista_id,
+					action: "compra_cartera",
+					details: {
+						monto_aportado: input.montoCompraCartera,
+						fecha_inicio_participacion: input.fechaInicioParticipacion,
+					},
+					performedBy: context.session.user.id,
+					performedByName:
+						context.session.user.name ?? context.session.user.email,
+				});
+			}
+
+			return {
+				success: true,
+				inversionista: created,
+				compraCartera: compraResult,
+			};
+		}),
+
+	// Compra de cartera — registra log y llama a cartera-back
+	compraCartera: investmentManagerProcedure
+		.input(
+			z.object({
+				inversionistaId: z.number().int().positive(),
+				montoAportado: z.number().positive(),
+				fechaInicioParticipacion: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// 1. Llamar a cartera-back para registrar la compra
+			const result = await carteraBackClient.compraCartera({
+				inversionista_id: input.inversionistaId,
+				monto_aportado: input.montoAportado,
+				tipo_operacion: "compra_cartera",
+				fecha_inicio_participacion: input.fechaInicioParticipacion || undefined,
+			});
+
+			// 2. Registrar en investor_activity_log
+			await db.insert(investorActivityLog).values({
+				inversionistaId: input.inversionistaId,
+				action: "compra_cartera",
+				details: {
+					monto_aportado: input.montoAportado,
+					fecha_inicio_participacion: input.fechaInicioParticipacion,
+				},
+				performedBy: context.session.user.id,
+				performedByName:
+					context.session.user.name ?? context.session.user.email,
+			});
+
+			return result;
+		}),
+
 	// Solo manager/admin pueden ver el historial de actividad
 	getInvestorActivityLog: investmentManagerProcedure
 		.input(

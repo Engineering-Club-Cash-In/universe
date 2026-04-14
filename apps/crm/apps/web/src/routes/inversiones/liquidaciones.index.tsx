@@ -1,20 +1,41 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
 	ArrowRight,
 	Banknote,
 	CreditCard,
 	Landmark,
+	Loader2,
 	Mail,
+	Plus,
 	Search,
 	Shield,
 	Users,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import { authClient } from "@/lib/auth-client";
+import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/inversiones/liquidaciones/")({
@@ -23,7 +44,71 @@ export const Route = createFileRoute("/inversiones/liquidaciones/")({
 
 function LiquidacionesInversionistas() {
 	const { data: session } = authClient.useSession();
+	const userRole = (session?.user as any)?.role ?? "";
+	const isManager = PERMISSIONS.canValidateInvestmentFunds(userRole);
 	const [search, setSearch] = useState("");
+
+	// Modal crear inversionista
+	const [crearOpen, setCrearOpen] = useState(false);
+	const [formNombre, setFormNombre] = useState("");
+	const [formDpi, setFormDpi] = useState("");
+	const [formEmail, setFormEmail] = useState("");
+	const [formBanco, setFormBanco] = useState("");
+	const [formTipoCuenta, setFormTipoCuenta] = useState("");
+	const [formNumeroCuenta, setFormNumeroCuenta] = useState("");
+	const [formMoneda, setFormMoneda] = useState("quetzales");
+	const [formEmiteFactura, setFormEmiteFactura] = useState(false);
+	const [formTipoReinversion, setFormTipoReinversion] = useState("sin_reinversion");
+	const [formMontoReinversion, setFormMontoReinversion] = useState("");
+	// Compra de cartera opcional
+	const [hacerCompra, setHacerCompra] = useState(false);
+	const [formMontoCompra, setFormMontoCompra] = useState("");
+	const [formPctInversion, setFormPctInversion] = useState("70");
+	const [formPctCashIn, setFormPctCashIn] = useState("30");
+	const [formFechaCompra, setFormFechaCompra] = useState(
+		new Date().toISOString().split("T")[0],
+	);
+
+	const queryClient = useQueryClient();
+
+	const resetForm = () => {
+		setFormNombre("");
+		setFormDpi("");
+		setFormEmail("");
+		setFormBanco("");
+		setFormTipoCuenta("");
+		setFormNumeroCuenta("");
+		setFormMoneda("quetzales");
+		setFormEmiteFactura(false);
+		setFormTipoReinversion("sin_reinversion");
+		setFormMontoReinversion("");
+		setHacerCompra(false);
+		setFormMontoCompra("");
+		setFormPctInversion("70");
+		setFormPctCashIn("30");
+		setFormFechaCompra(new Date().toISOString().split("T")[0]);
+	};
+
+	const crearMutation = useMutation({
+		...orpc.crearInversionista.mutationOptions(),
+		onSuccess: (data: any) => {
+			const msg = data.compraCartera
+				? "Inversionista creado y compra de cartera registrada"
+				: "Inversionista creado correctamente";
+			toast.success(msg);
+			setCrearOpen(false);
+			resetForm();
+			queryClient.invalidateQueries({
+				queryKey: orpc.getInversionistas.queryOptions({
+					input: { page: 1, perPage: 100 },
+				}).queryKey,
+				refetchType: "all",
+			});
+		},
+		onError: (err: any) => {
+			toast.error(err?.message ?? "Error al crear inversionista");
+		},
+	});
 
 	const investorsQuery = useQuery({
 		...orpc.getInversionistas.queryOptions({
@@ -31,6 +116,12 @@ function LiquidacionesInversionistas() {
 		}),
 		enabled: !!session,
 	})
+
+	const bancosQuery = useQuery({
+		...orpc.getBancosCartera.queryOptions({ input: undefined as never }),
+		enabled: crearOpen,
+	});
+	const bancos = (bancosQuery.data as any) ?? [];
 
 	const investors = investorsQuery.data?.inversionistas ?? [];
 
@@ -68,12 +159,23 @@ function LiquidacionesInversionistas() {
 							className="pl-9"
 						/>
 					</div>
-					<div className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2">
-						<Users className="h-4 w-4 text-muted-foreground" />
-						<div>
-							<p className="font-semibold text-sm">{investors.length}</p>
-							<p className="text-muted-foreground text-xs">Inversionistas</p>
+					<div className="ml-auto flex items-center gap-3">
+						<div className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2">
+							<Users className="h-4 w-4 text-muted-foreground" />
+							<span className="font-semibold text-sm">
+								{investors.length} Inversionistas
+							</span>
 						</div>
+						{isManager && (
+							<Button
+								size="sm"
+								className="gap-2"
+								onClick={() => setCrearOpen(true)}
+							>
+								<Plus className="h-4 w-4" />
+								Crear Inversionista
+							</Button>
+						)}
 					</div>
 				</div>
 			</div>
@@ -206,6 +308,326 @@ function LiquidacionesInversionistas() {
 						</div>
 					)}
 			</div>
+
+			{/* Modal Crear Inversionista */}
+			<Dialog
+				open={crearOpen}
+				onOpenChange={(open) => {
+					setCrearOpen(open);
+					if (!open) resetForm();
+				}}
+			>
+				<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+					<DialogHeader>
+						<DialogTitle>Crear Inversionista</DialogTitle>
+						<DialogDescription>
+							Completa los datos del nuevo inversionista
+						</DialogDescription>
+					</DialogHeader>
+
+					<div className="space-y-4 py-2">
+						{/* Nombre */}
+						<div className="space-y-1.5">
+							<Label htmlFor="inv-nombre">Nombre *</Label>
+							<Input
+								id="inv-nombre"
+								value={formNombre}
+								onChange={(e) => setFormNombre(e.target.value)}
+								placeholder="Nombre completo"
+							/>
+						</div>
+
+						{/* DPI + Email */}
+						<div className="grid grid-cols-2 gap-3">
+							<div className="space-y-1.5">
+								<Label htmlFor="inv-dpi">DPI</Label>
+								<Input
+									id="inv-dpi"
+									value={formDpi}
+									onChange={(e) => setFormDpi(e.target.value)}
+									placeholder="Número de DPI"
+								/>
+							</div>
+							<div className="space-y-1.5">
+								<Label htmlFor="inv-email">Email</Label>
+								<Input
+									id="inv-email"
+									type="email"
+									value={formEmail}
+									onChange={(e) => setFormEmail(e.target.value)}
+									placeholder="correo@ejemplo.com"
+								/>
+							</div>
+						</div>
+
+						{/* Banco + Tipo cuenta */}
+						<div className="grid grid-cols-2 gap-3">
+							<div className="space-y-1.5">
+								<Label htmlFor="inv-banco">Banco</Label>
+								<Select
+									value={formBanco}
+									onValueChange={setFormBanco}
+								>
+									<SelectTrigger id="inv-banco">
+										<SelectValue placeholder="Seleccionar banco..." />
+									</SelectTrigger>
+									<SelectContent>
+										{bancos.map((b: any) => (
+											<SelectItem
+												key={b.banco_id}
+												value={String(b.banco_id)}
+											>
+												{b.nombre}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							</div>
+							<div className="space-y-1.5">
+								<Label htmlFor="inv-tipo-cuenta">Tipo de cuenta</Label>
+								<Select
+									value={formTipoCuenta}
+									onValueChange={setFormTipoCuenta}
+								>
+									<SelectTrigger id="inv-tipo-cuenta">
+										<SelectValue placeholder="Seleccionar..." />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="AHORRO Q">Ahorro Q</SelectItem>
+										<SelectItem value="AHORRO $">Ahorro $</SelectItem>
+										<SelectItem value="MONETARIA Q">Monetaria Q</SelectItem>
+										<SelectItem value="MONETARIA $">Monetaria $</SelectItem>
+									</SelectContent>
+								</Select>
+							</div>
+						</div>
+
+						{/* Número cuenta */}
+						<div className="space-y-1.5">
+							<Label htmlFor="inv-numero-cuenta">Número de cuenta</Label>
+							<Input
+								id="inv-numero-cuenta"
+								value={formNumeroCuenta}
+								onChange={(e) => setFormNumeroCuenta(e.target.value)}
+								placeholder="Número de cuenta bancaria"
+							/>
+						</div>
+
+						{/* Moneda + Factura */}
+						<div className="grid grid-cols-2 gap-3">
+							<div className="space-y-1.5">
+								<Label htmlFor="inv-moneda">Moneda</Label>
+								<Select value={formMoneda} onValueChange={setFormMoneda}>
+									<SelectTrigger id="inv-moneda">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="quetzales">Quetzales (GTQ)</SelectItem>
+										<SelectItem value="dolares">Dólares (USD)</SelectItem>
+									</SelectContent>
+								</Select>
+							</div>
+							<div className="flex items-end pb-2">
+								<div className="flex items-center gap-2">
+									<Checkbox
+										id="inv-factura"
+										checked={formEmiteFactura}
+										onCheckedChange={(v) => setFormEmiteFactura(v === true)}
+									/>
+									<Label htmlFor="inv-factura">Emite factura</Label>
+								</div>
+							</div>
+						</div>
+
+						{/* Reinversión */}
+						<div className="grid grid-cols-2 gap-3">
+							<div className="space-y-1.5">
+								<Label htmlFor="inv-reinversion">Tipo reinversión</Label>
+								<Select
+									value={formTipoReinversion}
+									onValueChange={setFormTipoReinversion}
+								>
+									<SelectTrigger id="inv-reinversion">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="sin_reinversion">
+											Sin reinversión
+										</SelectItem>
+										<SelectItem value="reinversion_capital">Capital</SelectItem>
+										<SelectItem value="reinversion_interes">Interés</SelectItem>
+										<SelectItem value="reinversion_total">Total</SelectItem>
+										<SelectItem value="reinversion_variable">
+											Variable
+										</SelectItem>
+										<SelectItem value="reinversion_combinada">
+											Combinada
+										</SelectItem>
+									</SelectContent>
+								</Select>
+							</div>
+							{formTipoReinversion === "reinversion_variable" && (
+								<div className="space-y-1.5">
+									<Label htmlFor="inv-monto-reinversion">
+										Monto reinversión
+									</Label>
+									<Input
+										id="inv-monto-reinversion"
+										type="number"
+										min="0"
+										step="0.01"
+										value={formMontoReinversion}
+										onChange={(e) => setFormMontoReinversion(e.target.value)}
+										placeholder="0.00"
+									/>
+								</div>
+							)}
+						</div>
+
+						{/* Separador — Compra de cartera */}
+						<div className="rounded-lg border bg-muted/50 p-4 space-y-3">
+							<div className="flex items-center gap-2">
+								<Checkbox
+									id="inv-compra"
+									checked={hacerCompra}
+									onCheckedChange={(v) => setHacerCompra(v === true)}
+								/>
+								<Label htmlFor="inv-compra" className="font-semibold">
+									Hacer compra de cartera de una vez
+								</Label>
+							</div>
+
+							{hacerCompra && (
+								<div className="space-y-3">
+									<div className="grid grid-cols-2 gap-3">
+										<div className="space-y-1.5">
+											<Label htmlFor="inv-monto-compra">Monto aportado *</Label>
+											<Input
+												id="inv-monto-compra"
+												type="number"
+												min="0"
+												step="0.01"
+												placeholder="0.00"
+												value={formMontoCompra}
+												onChange={(e) => setFormMontoCompra(e.target.value)}
+											/>
+										</div>
+										<div className="space-y-1.5">
+											<Label htmlFor="inv-fecha-compra">
+												Fecha participación
+											</Label>
+											<Input
+												id="inv-fecha-compra"
+												type="date"
+												value={formFechaCompra}
+												onChange={(e) => setFormFechaCompra(e.target.value)}
+											/>
+										</div>
+									</div>
+									<div className="grid grid-cols-2 gap-3">
+										<div className="space-y-1.5">
+											<Label htmlFor="inv-pct-inv">% Inversión</Label>
+											<Input
+												id="inv-pct-inv"
+												type="number"
+												min="0"
+												max="100"
+												value={formPctInversion}
+												onChange={(e) => {
+													const val = e.target.value;
+													setFormPctInversion(val);
+													const num = Number(val);
+													if (!Number.isNaN(num)) {
+														setFormPctCashIn(String(100 - num));
+													}
+												}}
+											/>
+										</div>
+										<div className="space-y-1.5">
+											<Label htmlFor="inv-pct-cci">% CCI</Label>
+											<Input
+												id="inv-pct-cci"
+												type="number"
+												min="0"
+												max="100"
+												value={formPctCashIn}
+												onChange={(e) => {
+													const val = e.target.value;
+													setFormPctCashIn(val);
+													const num = Number(val);
+													if (!Number.isNaN(num)) {
+														setFormPctInversion(String(100 - num));
+													}
+												}}
+											/>
+										</div>
+									</div>
+								</div>
+							)}
+						</div>
+					</div>
+
+					<DialogFooter className="gap-2 sm:justify-between">
+						<Button
+							variant="outline"
+							onClick={() => {
+								setCrearOpen(false);
+								resetForm();
+							}}
+						>
+							Cancelar
+						</Button>
+						<Button
+							disabled={
+								crearMutation.isPending ||
+								!formNombre.trim() ||
+								(hacerCompra &&
+									(!formMontoCompra || Number(formMontoCompra) <= 0))
+							}
+							onClick={() => {
+								crearMutation.mutate({
+									nombre: formNombre.trim(),
+									dpi: formDpi.trim() || undefined,
+									email: formEmail.trim() || undefined,
+									banco: formBanco ? Number(formBanco) : null,
+									tipoCuenta: formTipoCuenta || undefined,
+									numeroCuenta: formNumeroCuenta.trim() || undefined,
+									moneda: formMoneda as "quetzales" | "dolares",
+									emiteFactura: formEmiteFactura,
+									tipoReinversion: formTipoReinversion,
+									montoReinversion: formMontoReinversion
+										? Number(formMontoReinversion)
+										: undefined,
+									hacerCompraCartera: hacerCompra,
+									montoCompraCartera: hacerCompra
+										? Number(formMontoCompra)
+										: undefined,
+									porcentajeInversion: hacerCompra
+										? Number(formPctInversion)
+										: undefined,
+									porcentajeCashIn: hacerCompra
+										? Number(formPctCashIn)
+										: undefined,
+									fechaInicioParticipacion: hacerCompra
+										? formFechaCompra || undefined
+										: undefined,
+								});
+							}}
+						>
+							{crearMutation.isPending ? (
+								<>
+									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+									Creando...
+								</>
+							) : hacerCompra ? (
+								"Crear y Comprar Cartera"
+							) : (
+								"Crear Inversionista"
+							)}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 		</div>
 	)
 }

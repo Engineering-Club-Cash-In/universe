@@ -23,6 +23,7 @@ import {
 	Plus,
 	RefreshCw,
 	Shield,
+	ShoppingCart,
 	Trash2,
 	TrendingUp,
 	Upload,
@@ -42,6 +43,14 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { authClient } from "@/lib/auth-client";
 import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
@@ -404,6 +413,7 @@ const ACTION_LABELS: Record<string, string> = {
 	document_created: "Documento creado",
 	document_deleted: "Documento eliminado",
 	document_visibility_toggled: "Visibilidad cambiada",
+	compra_cartera: "Compra de cartera",
 };
 
 const ACTION_COLORS: Record<string, string> = {
@@ -413,6 +423,8 @@ const ACTION_COLORS: Record<string, string> = {
 		"border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-950 dark:text-red-300",
 	document_visibility_toggled:
 		"border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300",
+	compra_cartera:
+		"border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
 };
 
 function InvestorActivityLogSection({
@@ -656,6 +668,33 @@ function InvestorLiquidacionesPage() {
 	const [page, setPage] = useState(1);
 	const PER_PAGE = 25;
 
+	// Compra de cartera
+	const [compraCarteraOpen, setCompraCarteraOpen] = useState(false);
+	const [compraCarteraMonto, setCompraCarteraMonto] = useState("");
+	const [compraCarteraFecha, setCompraCarteraFecha] = useState(
+		new Date().toISOString().split("T")[0],
+	);
+
+	const queryClient = useQueryClient();
+	const compraCarteraMutation = useMutation({
+		...orpc.compraCartera.mutationOptions(),
+		onSuccess: () => {
+			toast.success("Compra de cartera registrada correctamente");
+			setCompraCarteraOpen(false);
+			setCompraCarteraMonto("");
+			queryClient.invalidateQueries({
+				queryKey: orpc.getInvestorActivityLog.queryOptions({
+					input: { inversionistaId: investorIdNum },
+				}).queryKey,
+				refetchType: "all",
+			});
+			refetch();
+		},
+		onError: (err: any) => {
+			toast.error(err?.message ?? "Error al registrar compra de cartera");
+		},
+	});
+
 	// Fetch investor info by ID from cartera
 	const investorsQuery = useQuery({
 		...orpc.getInversionistas.queryOptions({
@@ -730,21 +769,34 @@ function InvestorLiquidacionesPage() {
 							<ArrowLeft className="h-5 w-5" />
 						</Link>
 					</Button>
-					<div className="flex items-center gap-3">
-						<div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-							<Users className="h-5 w-5" />
+					<div className="flex flex-1 items-center justify-between">
+						<div className="flex items-center gap-3">
+							<div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+								<Users className="h-5 w-5" />
+							</div>
+							<div>
+								<h1 className="font-bold text-lg leading-tight">
+									{investor?.nombre ?? "Inversionista"}
+								</h1>
+								{investor?.dpi && (
+									<p className="flex items-center gap-1 text-muted-foreground text-xs">
+										<Shield className="h-3 w-3" />
+										{investor.dpi}
+									</p>
+								)}
+							</div>
 						</div>
-						<div>
-							<h1 className="font-bold text-lg leading-tight">
-								{investor?.nombre ?? "Inversionista"}
-							</h1>
-							{investor?.dpi && (
-								<p className="flex items-center gap-1 text-muted-foreground text-xs">
-									<Shield className="h-3 w-3" />
-									{investor.dpi}
-								</p>
-							)}
-						</div>
+						{isManager && (
+							<Button
+								variant="outline"
+								size="sm"
+								className="gap-2"
+								onClick={() => setCompraCarteraOpen(true)}
+							>
+								<ShoppingCart className="h-4 w-4" />
+								Compra de Cartera
+							</Button>
+						)}
 					</div>
 				</div>
 			</div>
@@ -1103,6 +1155,88 @@ function InvestorLiquidacionesPage() {
 					</Button>
 				</div>
 			)}
+
+			{/* Modal Compra de Cartera */}
+			<Dialog
+				open={compraCarteraOpen}
+				onOpenChange={(open) => {
+					setCompraCarteraOpen(open);
+					if (!open) setCompraCarteraMonto("");
+				}}
+			>
+				<DialogContent className="sm:max-w-md">
+					<DialogHeader>
+						<DialogTitle>Compra de Cartera</DialogTitle>
+						<DialogDescription>
+							Registrar una compra de cartera para{" "}
+							<span className="font-semibold">
+								{investor?.nombre ?? "este inversionista"}
+							</span>
+						</DialogDescription>
+					</DialogHeader>
+
+					<div className="space-y-4 py-2">
+						<div className="space-y-1.5">
+							<Label htmlFor="compra-monto">Monto aportado</Label>
+							<Input
+								id="compra-monto"
+								type="number"
+								min="0"
+								step="0.01"
+								placeholder="0.00"
+								value={compraCarteraMonto}
+								onChange={(e) => setCompraCarteraMonto(e.target.value)}
+							/>
+						</div>
+						<div className="space-y-1.5">
+							<Label htmlFor="compra-fecha">
+								Fecha inicio participación
+							</Label>
+							<Input
+								id="compra-fecha"
+								type="date"
+								value={compraCarteraFecha}
+								onChange={(e) => setCompraCarteraFecha(e.target.value)}
+							/>
+						</div>
+					</div>
+
+					<DialogFooter className="gap-2 sm:gap-0">
+						<Button
+							variant="outline"
+							onClick={() => {
+								setCompraCarteraOpen(false);
+								setCompraCarteraMonto("");
+							}}
+						>
+							Cancelar
+						</Button>
+						<Button
+							disabled={
+								compraCarteraMutation.isPending ||
+								!compraCarteraMonto ||
+								Number(compraCarteraMonto) <= 0
+							}
+							onClick={() => {
+								compraCarteraMutation.mutate({
+									inversionistaId: investorIdNum,
+									montoAportado: Number(compraCarteraMonto),
+									fechaInicioParticipacion: compraCarteraFecha || undefined,
+								});
+							}}
+						>
+							{compraCarteraMutation.isPending ? (
+								<>
+									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+									Guardando...
+								</>
+							) : (
+								"Confirmar"
+							)}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 		</div>
 	);
 }

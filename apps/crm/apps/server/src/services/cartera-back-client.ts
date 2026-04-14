@@ -947,6 +947,65 @@ export class CarteraBackClient {
 	}
 
 	// ========================================================================
+	// CREAR INVERSIONISTA
+	// ========================================================================
+
+	async createInvestor(input: {
+		nombre: string;
+		dpi?: number | null;
+		email?: string | null;
+		emite_factura?: boolean;
+		banco?: number | null;
+		tipo_cuenta?: string | null;
+		numero_cuenta?: string | null;
+		tipo_reinversion?: string | null;
+		monto_reinversion?: number | null;
+		moneda?: string;
+	}): Promise<{ message: string; data: { inversionista_id: number; nombre: string; [key: string]: any }[] }> {
+		const response = await this.request<{
+			message: string;
+			data: { inversionista_id: number; nombre: string; [key: string]: any }[];
+		}>("/investor", {
+			method: "POST",
+			body: JSON.stringify({
+				nombre: input.nombre,
+				dpi: input.dpi ?? null,
+				email: input.email ?? null,
+				emite_factura: input.emite_factura ?? false,
+				banco: input.banco ?? null,
+				tipo_cuenta: input.tipo_cuenta ?? null,
+				numero_cuenta: input.numero_cuenta ?? null,
+				tipo_reinversion: input.tipo_reinversion ?? "sin_reinversion",
+				monto_reinversion: input.monto_reinversion ?? null,
+				moneda: input.moneda ?? "quetzales",
+			}),
+		});
+		return response;
+	}
+
+	// ========================================================================
+	// COMPRA DE CARTERA
+	// ========================================================================
+
+	async compraCartera(input: {
+		inversionista_id: number;
+		monto_aportado: number;
+		tipo_operacion: "compra_cartera";
+		porcentaje_inversion?: number;
+		porcentaje_cash_in?: number;
+		fecha_inicio_participacion?: string;
+	}): Promise<{ success: boolean; message: string }> {
+		const response = await this.request<{
+			success: boolean;
+			message: string;
+		}>("/agregar-inversionista-credito", {
+			method: "POST",
+			body: JSON.stringify(input),
+		});
+		return response;
+	}
+
+	// ========================================================================
 	// CACHE MANAGEMENT
 	// ========================================================================
 

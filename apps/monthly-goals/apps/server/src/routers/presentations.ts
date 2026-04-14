@@ -12,32 +12,391 @@ import { eq, and, or } from "drizzle-orm";
 import * as z from "zod";
 import puppeteer from "puppeteer";
 
-const PresentationSchema = z.object({
-	id: z.string().uuid(),
-	name: z.string().min(1, "Name is required"),
-	month: z.number().int().min(1).max(12),
-	year: z.number().int().min(2020),
-	status: z.enum(["draft", "ready", "presented"]),
-	createdBy: z.string(),
-	presentedAt: z.date().optional(),
-	createdAt: z.date(),
-	updatedAt: z.date(),
+const PresentationPeriodSchema = z.object({
+	startMonth: z.number().int().min(1).max(12),
+	startYear: z.number().int().min(2020),
+	endMonth: z.number().int().min(1).max(12),
+	endYear: z.number().int().min(2020),
 });
 
-const CreatePresentationSchema = PresentationSchema.omit({
-	id: true,
-	createdBy: true,
-	presentedAt: true,
-	createdAt: true,
-	updatedAt: true,
-	status: true,
+const CreatePresentationSchema = z.object({
+	name: z.string().min(1, "Name is required"),
+	...PresentationPeriodSchema.shape,
 });
 
 const UpdatePresentationSchema = z.object({
 	name: z.string().min(1).optional(),
 	status: z.enum(["draft", "ready", "presented"]).optional(),
 	presentedAt: z.date().optional(),
+	startMonth: z.number().int().min(1).max(12).optional(),
+	startYear: z.number().int().min(2020).optional(),
+	endMonth: z.number().int().min(1).max(12).optional(),
+	endYear: z.number().int().min(2020).optional(),
 });
+
+type PresentationPeriod = z.infer<typeof PresentationPeriodSchema>;
+
+const INVALID_RANGE_MESSAGE = "End period must be greater than or equal to start period";
+const MONTH_NAMES = [
+	"", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+	"Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+];
+
+function isPresentationRangeValid(period: PresentationPeriod) {
+	return period.startYear < period.endYear
+		|| (period.startYear === period.endYear && period.startMonth <= period.endMonth);
+}
+
+function assertPresentationRangeValid(period: PresentationPeriod) {
+	if (!isPresentationRangeValid(period)) {
+		throw new ORPCError("BAD_REQUEST", { message: INVALID_RANGE_MESSAGE });
+	}
+}
+
+function expandPresentationRange(period: PresentationPeriod) {
+	const periods = [];
+	let currentMonth = period.startMonth;
+	let currentYear = period.startYear;
+
+	while (currentYear < period.endYear || (currentYear === period.endYear && currentMonth <= period.endMonth)) {
+		periods.push({ month: currentMonth, year: currentYear });
+
+		if (currentMonth === 12) {
+			currentMonth = 1;
+			currentYear += 1;
+		} else {
+			currentMonth += 1;
+		}
+	}
+
+	return periods;
+}
+
+function buildPresentationPeriodCondition(periods: Array<{ month: number; year: number }>) {
+	const periodConditions = periods.map(period =>
+		and(eq(monthlyGoals.month, period.month), eq(monthlyGoals.year, period.year))
+	);
+
+	if (periodConditions.length === 1) {
+		return periodConditions[0];
+	}
+
+	return or(...periodConditions);
+}
+
+type CurrentUser = { id: string; role: string };
+
+type PresentationGoalScope = {
+	presentationId: string;
+	currentUser: CurrentUser;
+};
+
+function canReadPresentation(currentUser: CurrentUser, presentationCreatedBy: string) {
+	switch (currentUser.role) {
+		case "super_admin":
+		case "viewer":
+			return true;
+		case "department_manager":
+		case "area_lead":
+		case "employee":
+			return presentationCreatedBy === currentUser.id;
+		default:
+			return false;
+	}
+}
+
+function canWritePresentation(currentUser: CurrentUser, presentationCreatedBy: string) {
+	switch (currentUser.role) {
+		case "super_admin":
+			return true;
+		case "department_manager":
+		case "area_lead":
+		case "employee":
+			return presentationCreatedBy === currentUser.id;
+		case "viewer":
+		default:
+			return false;
+	}
+}
+
+async function assertPresentationAccess(
+	presentationId: string,
+	currentUser: CurrentUser,
+) {
+	const presentation = await db
+		.select({
+			id: presentations.id,
+			name: presentations.name,
+			startMonth: presentations.startMonth,
+			startYear: presentations.startYear,
+			endMonth: presentations.endMonth,
+			endYear: presentations.endYear,
+			status: presentations.status,
+			createdBy: presentations.createdBy,
+		})
+		.from(presentations)
+		.where(eq(presentations.id, presentationId))
+		.limit(1);
+
+	if (!presentation[0] || !canReadPresentation(currentUser, presentation[0].createdBy)) {
+		throw new ORPCError("NOT_FOUND", { message: "Presentation not found" });
+	}
+
+	return presentation[0];
+}
+
+async function assertPresentationWriteAccess(
+	presentationId: string,
+	currentUser: CurrentUser,
+) {
+	const presentation = await db
+		.select({
+			id: presentations.id,
+			createdBy: presentations.createdBy,
+		})
+		.from(presentations)
+		.where(eq(presentations.id, presentationId))
+		.limit(1);
+
+	if (!presentation[0] || !canWritePresentation(currentUser, presentation[0].createdBy)) {
+		throw new ORPCError("NOT_FOUND", { message: "Presentation not found" });
+	}
+
+	return presentation[0];
+}
+
+async function getPresentationGoalScope({ presentationId, currentUser }: PresentationGoalScope) {
+	const presentation = await assertPresentationAccess(presentationId, currentUser);
+	const periodCondition = buildPresentationPeriodCondition(
+		expandPresentationRange({
+			startMonth: presentation.startMonth,
+			startYear: presentation.startYear,
+			endMonth: presentation.endMonth,
+			endYear: presentation.endYear,
+		}),
+	);
+
+	const whereConditions = [periodCondition];
+
+	if (currentUser.role === "department_manager") {
+		whereConditions.push(eq(departments.managerId, currentUser.id));
+	} else if (currentUser.role === "area_lead") {
+		whereConditions.push(eq(areas.leadId, currentUser.id));
+	} else if (currentUser.role === "employee") {
+		whereConditions.push(eq(teamMembers.userId, currentUser.id));
+	}
+
+	return await db
+		.select({
+			id: monthlyGoals.id,
+			monthlyGoalId: monthlyGoals.id,
+			goalTemplateId: monthlyGoals.goalTemplateId,
+			userId: teamMembers.userId,
+			month: monthlyGoals.month,
+			year: monthlyGoals.year,
+			targetValue: monthlyGoals.targetValue,
+			achievedValue: monthlyGoals.achievedValue,
+			description: monthlyGoals.description,
+			status: monthlyGoals.status,
+			goalTemplateName: goalTemplates.name,
+			goalTemplateUnit: goalTemplates.unit,
+			isInverse: goalTemplates.isInverse,
+			userName: user.name,
+			userEmail: user.email,
+			areaId: areas.id,
+			areaName: areas.name,
+			departmentId: departments.id,
+			departmentName: departments.name,
+		})
+		.from(monthlyGoals)
+		.leftJoin(goalTemplates, eq(monthlyGoals.goalTemplateId, goalTemplates.id))
+		.leftJoin(teamMembers, eq(monthlyGoals.teamMemberId, teamMembers.id))
+		.leftJoin(user, eq(teamMembers.userId, user.id))
+		.leftJoin(areas, eq(teamMembers.areaId, areas.id))
+		.leftJoin(departments, eq(areas.departmentId, departments.id))
+		.where(and(...whereConditions));
+}
+
+type PresentationGoalScopeRow = {
+	id: string;
+	monthlyGoalId: string;
+	goalTemplateId: string;
+	userId: string | null;
+	month: number;
+	year: number;
+	targetValue: string;
+	achievedValue: string;
+	description: string | null;
+	status: "pending" | "in_progress" | "completed";
+	goalTemplateName: string | null;
+	goalTemplateUnit: string | null;
+	isInverse: boolean | null;
+	userName: string | null;
+	userEmail: string | null;
+	areaId: string | null;
+	areaName: string | null;
+	departmentId: string | null;
+	departmentName: string | null;
+};
+
+type PresentationDetailRow = PresentationGoalScopeRow & {
+	periodLabel: string;
+	progressPercentage: number;
+};
+
+type PresentationConsolidatedRow = {
+	departmentId: string;
+	departmentName: string;
+	areaId: string;
+	areaName: string;
+	userId: string;
+	goalTemplateId: string;
+	userName: string | null;
+	userEmail: string | null;
+	goalTemplateName: string | null;
+	goalTemplateUnit: string | null;
+	isInverse: boolean | null;
+	includedMonths: Array<{ month: number; year: number }>;
+	monthlyRows: PresentationDetailRow[];
+	consolidatedTargetValue: string;
+	consolidatedAchievedValue: string;
+	consolidatedProgressPercentage: number;
+};
+
+type PresentationConsolidatedAccumulator = PresentationConsolidatedRow & {
+	targetTotal: number;
+	achievedTotal: number;
+};
+
+type PresentationPayload = {
+	presentation: Awaited<ReturnType<typeof assertPresentationAccess>>;
+	periods: Array<{ month: number; year: number; label: string }>;
+	detailRows: PresentationDetailRow[];
+	consolidatedRows: PresentationConsolidatedRow[];
+};
+
+function formatMonthPeriodLabel(month: number, year: number) {
+	return `${MONTH_NAMES[month]} ${year}`;
+}
+
+function formatAverageValue(total: number, count: number) {
+	return count > 0 ? (total / count).toFixed(2) : "0.00";
+}
+
+function buildPresentationDetailRow(row: PresentationGoalScopeRow): PresentationDetailRow {
+	return {
+		...row,
+		periodLabel: formatMonthPeriodLabel(row.month, row.year),
+		progressPercentage: getProgressPercentage(row.targetValue, row.achievedValue, row.isInverse ?? undefined),
+	};
+}
+
+function groupPresentationRows(rows: PresentationDetailRow[]) {
+	const groupedRows = new Map<string, PresentationConsolidatedAccumulator>();
+
+	for (const row of rows) {
+		const departmentId = row.departmentId ?? "Sin Departamento";
+		const departmentName = row.departmentName ?? "Sin Departamento";
+		const areaId = row.areaId ?? "Sin Área";
+		const areaName = row.areaName ?? "Sin Área";
+		const userId = row.userId ?? "Sin Usuario";
+		const goalTemplateId = row.goalTemplateId ?? "Sin Meta";
+		const key = [departmentId, areaId, userId, goalTemplateId].join("::");
+
+		const existingGroup = groupedRows.get(key);
+		if (!existingGroup) {
+			groupedRows.set(key, {
+				departmentId,
+				departmentName,
+				areaId,
+				areaName,
+				userId,
+				goalTemplateId,
+				userName: row.userName,
+				userEmail: row.userEmail,
+				goalTemplateName: row.goalTemplateName,
+				goalTemplateUnit: row.goalTemplateUnit,
+				isInverse: row.isInverse,
+				includedMonths: [{ month: row.month, year: row.year }],
+				monthlyRows: [row],
+				consolidatedTargetValue: row.targetValue,
+				consolidatedAchievedValue: row.achievedValue,
+				consolidatedProgressPercentage: row.progressPercentage,
+				targetTotal: parseFloat(row.targetValue),
+				achievedTotal: parseFloat(row.achievedValue),
+			});
+			continue;
+		}
+
+		existingGroup.includedMonths.push({ month: row.month, year: row.year });
+		existingGroup.monthlyRows.push(row);
+
+		existingGroup.targetTotal += parseFloat(row.targetValue);
+		existingGroup.achievedTotal += parseFloat(row.achievedValue);
+		const rowCount = existingGroup.monthlyRows.length;
+
+		existingGroup.consolidatedTargetValue = formatAverageValue(existingGroup.targetTotal, rowCount);
+		existingGroup.consolidatedAchievedValue = formatAverageValue(existingGroup.achievedTotal, rowCount);
+		existingGroup.consolidatedProgressPercentage = getProgressPercentage(
+			existingGroup.consolidatedTargetValue,
+			existingGroup.consolidatedAchievedValue,
+			existingGroup.isInverse ?? undefined,
+		);
+	}
+
+	return [...groupedRows.values()].map(group => ({
+		...group,
+		includedMonths: group.includedMonths.sort((left, right) =>
+			left.year === right.year ? left.month - right.month : left.year - right.year
+		),
+		monthlyRows: group.monthlyRows.sort((left, right) =>
+			left.year === right.year ? left.month - right.month : left.year - right.year
+		),
+	}));
+}
+
+async function getPresentationPayloadData(
+	presentationId: string,
+	currentUser: CurrentUser,
+): Promise<PresentationPayload> {
+	const presentation = await assertPresentationAccess(presentationId, currentUser);
+	const periods = expandPresentationRange({
+		startMonth: presentation.startMonth,
+		startYear: presentation.startYear,
+		endMonth: presentation.endMonth,
+		endYear: presentation.endYear,
+	}).map(period => ({
+		...period,
+		label: formatMonthPeriodLabel(period.month, period.year),
+	}));
+
+	const rows = await getPresentationGoalScope({ presentationId, currentUser }) as PresentationGoalScopeRow[];
+	const detailRows = rows
+		.map(buildPresentationDetailRow)
+		.sort((left, right) => (
+			left.departmentName ?? ""
+		).localeCompare(right.departmentName ?? "")
+			|| (left.areaName ?? "").localeCompare(right.areaName ?? "")
+			|| (left.userName ?? "").localeCompare(right.userName ?? "")
+			|| (left.goalTemplateName ?? "").localeCompare(right.goalTemplateName ?? "")
+			|| left.year - right.year
+			|| left.month - right.month
+		);
+
+	return {
+		presentation,
+		periods,
+		detailRows,
+		consolidatedRows: groupPresentationRows(detailRows),
+	};
+}
+
+export function formatPresentationPeriodLabel(period: PresentationPeriod) {
+	const startLabel = `${MONTH_NAMES[period.startMonth]} ${period.startYear}`;
+	const endLabel = `${MONTH_NAMES[period.endMonth]} ${period.endYear}`;
+
+	return startLabel === endLabel ? startLabel : `${startLabel} - ${endLabel}`;
+}
 
 const GoalSubmissionSchema = z.object({
 	monthlyGoalId: z.string().uuid(),
@@ -57,12 +416,14 @@ export const listPresentations = protectedProcedure.handler(async ({ context }) 
 
 	const currentUser = context.session.user;
 	
-	let query = db
+		let query = db
 		.select({
 			id: presentations.id,
 			name: presentations.name,
-			month: presentations.month,
-			year: presentations.year,
+			startMonth: presentations.startMonth,
+			startYear: presentations.startYear,
+			endMonth: presentations.endMonth,
+			endYear: presentations.endYear,
 			status: presentations.status,
 			createdBy: presentations.createdBy,
 			presentedAt: presentations.presentedAt,
@@ -75,24 +436,40 @@ export const listPresentations = protectedProcedure.handler(async ({ context }) 
 		.leftJoin(user, eq(presentations.createdBy, user.id));
 
 	// Apply role-based filtering
-	if (currentUser.role === "department_manager" || currentUser.role === "area_lead") {
-		// Only see presentations they created or are relevant to their area/dept
-		query = query.where(eq(presentations.createdBy, currentUser.id)) as typeof query;
+	switch (currentUser.role) {
+		case "super_admin":
+		case "viewer":
+			break;
+		case "department_manager":
+		case "area_lead":
+		case "employee":
+			query = query.where(eq(presentations.createdBy, currentUser.id)) as typeof query;
+			break;
+		default:
+			query = query.where(eq(presentations.createdBy, currentUser.id)) as typeof query;
+			break;
 	}
-	// Super admin and viewer see all presentations
 
 	return await query;
 });
 
 export const getPresentation = protectedProcedure
 	.input(z.object({ id: z.string().uuid() }))
-	.handler(async ({ input }) => {
+	.handler(async ({ input, context }) => {
+		if (!context.session?.user) {
+			throw new Error("Unauthorized");
+		}
+
+		await assertPresentationAccess(input.id, context.session.user);
+
 		const presentation = await db
 			.select({
 				id: presentations.id,
 				name: presentations.name,
-				month: presentations.month,
-				year: presentations.year,
+				startMonth: presentations.startMonth,
+				startYear: presentations.startYear,
+				endMonth: presentations.endMonth,
+				endYear: presentations.endYear,
 				status: presentations.status,
 				createdBy: presentations.createdBy,
 				presentedAt: presentations.presentedAt,
@@ -120,6 +497,12 @@ export const createPresentation = protectedProcedure
 			throw new Error("Unauthorized");
 		}
 
+		if (context.session.user.role === "viewer") {
+			throw new ORPCError("NOT_FOUND", { message: "Presentation not found" });
+		}
+
+		assertPresentationRangeValid(input);
+
 		const [newPresentation] = await db
 			.insert(presentations)
 			.values({
@@ -139,7 +522,42 @@ export const updatePresentation = protectedProcedure
 			data: UpdatePresentationSchema,
 		})
 	)
-	.handler(async ({ input }) => {
+	.handler(async ({ input, context }) => {
+		if (!context.session?.user) {
+			throw new Error("Unauthorized");
+		}
+
+		const currentUser = context.session.user;
+
+		const currentPresentation = await db
+			.select({
+				createdBy: presentations.createdBy,
+				startMonth: presentations.startMonth,
+				startYear: presentations.startYear,
+				endMonth: presentations.endMonth,
+				endYear: presentations.endYear,
+			})
+			.from(presentations)
+			.where(eq(presentations.id, input.id))
+			.limit(1);
+
+		if (!currentPresentation[0]) {
+			throw new Error("Presentation not found");
+		}
+
+		if (!canWritePresentation(currentUser, currentPresentation[0].createdBy)) {
+			throw new ORPCError("NOT_FOUND", { message: "Presentation not found" });
+		}
+
+		const mergedPeriod = {
+			startMonth: input.data.startMonth ?? currentPresentation[0].startMonth,
+			startYear: input.data.startYear ?? currentPresentation[0].startYear,
+			endMonth: input.data.endMonth ?? currentPresentation[0].endMonth,
+			endYear: input.data.endYear ?? currentPresentation[0].endYear,
+		};
+
+		assertPresentationRangeValid(mergedPeriod);
+
 		const [updatedPresentation] = await db
 			.update(presentations)
 			.set(input.data)
@@ -155,7 +573,13 @@ export const updatePresentation = protectedProcedure
 
 export const deletePresentation = protectedProcedure
 	.input(z.object({ id: z.string().uuid() }))
-	.handler(async ({ input }) => {
+	.handler(async ({ input, context }) => {
+		if (!context.session?.user) {
+			throw new Error("Unauthorized");
+		}
+
+		await assertPresentationWriteAccess(input.id, context.session.user);
+
 		// First delete related goal submissions
 		await db.delete(goalSubmissions).where(eq(goalSubmissions.presentationId, input.id));
 		
@@ -174,57 +598,18 @@ export const deletePresentation = protectedProcedure
 
 // Get monthly goals available for a presentation (filtered by user role)
 export const getAvailableGoalsForPresentation = protectedProcedure
-	.input(z.object({ 
-		month: z.number().int().min(1).max(12),
-		year: z.number().int().min(2020),
+	.input(z.object({
+		presentationId: z.string().uuid(),
 	}))
 	.handler(async ({ input, context }) => {
 		if (!context.session?.user) {
 			throw new Error("Unauthorized");
 		}
 
-		const currentUser = context.session.user;
-		
-		// Build where conditions with role-based filtering
-		let whereConditions = [
-			eq(monthlyGoals.month, input.month),
-			eq(monthlyGoals.year, input.year)
-		];
-
-		// Apply role-based filtering
-		if (currentUser.role === "department_manager") {
-			whereConditions.push(eq(departments.managerId, currentUser.id));
-		} else if (currentUser.role === "area_lead") {
-			whereConditions.push(eq(areas.leadId, currentUser.id));
-		}
-
-		// Execute query with combined conditions
-		return await db
-			.select({
-				id: monthlyGoals.id,
-				month: monthlyGoals.month,
-				year: monthlyGoals.year,
-				targetValue: monthlyGoals.targetValue,
-				achievedValue: monthlyGoals.achievedValue,
-				description: monthlyGoals.description,
-				status: monthlyGoals.status,
-				// Goal template info
-				goalTemplateName: goalTemplates.name,
-				goalTemplateUnit: goalTemplates.unit,
-				isInverse: goalTemplates.isInverse,
-				// User and organizational info
-				userName: user.name,
-				userEmail: user.email,
-				areaName: areas.name,
-				departmentName: departments.name,
-			})
-			.from(monthlyGoals)
-			.leftJoin(goalTemplates, eq(monthlyGoals.goalTemplateId, goalTemplates.id))
-			.leftJoin(teamMembers, eq(monthlyGoals.teamMemberId, teamMembers.id))
-			.leftJoin(user, eq(teamMembers.userId, user.id))
-			.leftJoin(areas, eq(teamMembers.areaId, areas.id))
-			.leftJoin(departments, eq(areas.departmentId, departments.id))
-			.where(and(...whereConditions));
+		return await getPresentationGoalScope({
+			presentationId: input.presentationId,
+			currentUser: context.session.user,
+		});
 	});
 
 // Submit goals for a presentation
@@ -233,6 +618,23 @@ export const submitGoalsForPresentation = protectedProcedure
 	.handler(async ({ input, context }) => {
 		if (!context.session?.user) {
 			throw new Error("Unauthorized");
+		}
+
+		await assertPresentationWriteAccess(input.presentationId, context.session.user);
+
+		const accessibleGoals = await getPresentationGoalScope({
+			presentationId: input.presentationId,
+			currentUser: context.session.user,
+		});
+		const accessibleGoalIds = new Set(accessibleGoals.map(goal => goal.id));
+		const invalidGoalIds = input.submissions
+			.map(submission => submission.monthlyGoalId)
+			.filter(monthlyGoalId => !accessibleGoalIds.has(monthlyGoalId));
+
+		if (invalidGoalIds.length > 0) {
+			throw new ORPCError("BAD_REQUEST", {
+				message: `Invalid or out-of-scope monthlyGoalId(s): ${[...new Set(invalidGoalIds)].join(", ")}`,
+			});
 		}
 
 		const goalSubmissionValues = input.submissions.map(submission => ({
@@ -263,8 +665,18 @@ export const submitGoalsForPresentation = protectedProcedure
 // Get goal submissions for a presentation
 export const getPresentationSubmissions = protectedProcedure
 	.input(z.object({ presentationId: z.string().uuid() }))
-	.handler(async ({ input }) => {
-		return await db
+	.handler(async ({ input, context }) => {
+		if (!context.session?.user) {
+			throw new Error("Unauthorized");
+		}
+
+		const accessibleGoals = await getPresentationGoalScope({
+			presentationId: input.presentationId,
+			currentUser: context.session.user,
+		});
+		const accessibleGoalIds = new Set(accessibleGoals.map(goal => goal.id));
+
+		const submissions = await db
 			.select({
 				id: goalSubmissions.id,
 				submittedValue: goalSubmissions.submittedValue,
@@ -293,57 +705,19 @@ export const getPresentationSubmissions = protectedProcedure
 			.leftJoin(areas, eq(teamMembers.areaId, areas.id))
 			.leftJoin(departments, eq(areas.departmentId, departments.id))
 			.where(eq(goalSubmissions.presentationId, input.presentationId));
+
+		return submissions.filter(submission => submission.goalId !== null && accessibleGoalIds.has(submission.goalId));
 	});
 
-// Helper function to get presentation data
-async function getPresentationData(presentationId: string) {
-	// Get presentation info
-	const presentation = await db
-		.select({
-			id: presentations.id,
-			name: presentations.name,
-			month: presentations.month,
-			year: presentations.year,
-			status: presentations.status,
-		})
-		.from(presentations)
-		.where(eq(presentations.id, presentationId))
-		.limit(1);
-	
-	if (!presentation[0]) {
-		throw new ORPCError("NOT_FOUND", { message: "Presentation not found" });
-	}
+export const getPresentationPayload = protectedProcedure
+	.input(z.object({ presentationId: z.string().uuid() }))
+	.handler(async ({ input, context }) => {
+		if (!context.session?.user) {
+			throw new Error("Unauthorized");
+		}
 
-	// Get submissions for this presentation
-	const submissions = await db
-		.select({
-			id: goalSubmissions.id,
-			submittedValue: goalSubmissions.submittedValue,
-			submittedBy: goalSubmissions.submittedBy,
-			submittedAt: goalSubmissions.submittedAt,
-			notes: goalSubmissions.notes,
-			goalId: monthlyGoals.id,
-			targetValue: monthlyGoals.targetValue,
-			goalDescription: monthlyGoals.description,
-			goalTemplateName: goalTemplates.name,
-			goalTemplateUnit: goalTemplates.unit,
-			isInverse: goalTemplates.isInverse,
-			userName: user.name,
-			userEmail: user.email,
-			areaName: areas.name,
-			departmentName: departments.name,
-		})
-		.from(goalSubmissions)
-		.leftJoin(monthlyGoals, eq(goalSubmissions.monthlyGoalId, monthlyGoals.id))
-		.leftJoin(goalTemplates, eq(monthlyGoals.goalTemplateId, goalTemplates.id))
-		.leftJoin(teamMembers, eq(monthlyGoals.teamMemberId, teamMembers.id))
-		.leftJoin(user, eq(teamMembers.userId, user.id))
-		.leftJoin(areas, eq(teamMembers.areaId, areas.id))
-		.leftJoin(departments, eq(areas.departmentId, departments.id))
-		.where(eq(goalSubmissions.presentationId, presentationId));
-
-	return { presentation: presentation[0], submissions };
-}
+		return await getPresentationPayloadData(input.presentationId, context.session.user);
+	});
 
 // Helper function to calculate progress percentage
 function getProgressPercentage(target: string, achieved: string, isInverse?: boolean) {
@@ -367,259 +741,318 @@ function getProgressPercentage(target: string, achieved: string, isInverse?: boo
 	}
 }
 
-// Helper function to organize submissions by department, area, and person
-function organizeSubmissions(submissions: any[]) {
-	return submissions.reduce((acc: any, submission: any) => {
-		const dept = submission.departmentName || 'Sin Departamento';
-		const area = submission.areaName || 'Sin Área';
-		const person = submission.userName || 'Sin Usuario';
-		
-		if (!acc[dept]) {
-			acc[dept] = {};
-		}
-		if (!acc[dept][area]) {
-			acc[dept][area] = {};
-		}
-		if (!acc[dept][area][person]) {
-			acc[dept][area][person] = {
-				userName: person,
-				departmentName: dept,
-				areaName: area,
-				goals: []
-			};
-		}
-		acc[dept][area][person].goals.push(submission);
-		
-		return acc;
-	}, {});
-}
-
-// Helper function to chunk goals into slides (max 4 per slide)
-function chunkGoals(goals: any[], maxPerSlide: number = 4) {
-	const chunks = [];
+function chunkGoals<T>(goals: T[], maxPerSlide = 4) {
+	const chunks: T[][] = [];
 	for (let i = 0; i < goals.length; i += maxPerSlide) {
 		chunks.push(goals.slice(i, i + maxPerSlide));
 	}
 	return chunks;
 }
 
-// Helper function to generate HTML for the presentation
-function generatePresentationHTML(presentation: any, submissions: any[]) {
-	const months = [
-		"", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-		"Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
-	];
+function escapeHtml(value: string | number | null | undefined) {
+	return String(value ?? "")
+		.replaceAll("&", "&amp;")
+		.replaceAll("<", "&lt;")
+		.replaceAll(">", "&gt;")
+		.replaceAll('"', "&quot;")
+		.replaceAll("'", "&#39;");
+}
 
-	const organized = organizeSubmissions(submissions);
-	const allSlides = [];
+function formatPdfNumber(value: string | number | null | undefined) {
+	const numericValue = typeof value === "number" ? value : Number.parseFloat(value ?? "0");
+	if (Number.isNaN(numericValue)) {
+		return "0";
+	}
 
-	// Title slide
-	allSlides.push({
-		type: 'title',
-		content: `
-			<div class="slide-page">
-				<div class="text-center space-y-8">
-					<div class="space-y-4">
-						<h1 class="text-6xl font-bold gradient-blue">${presentation.name}</h1>
-						<h2 class="text-3xl text-gray-600">${months[presentation.month]} ${presentation.year}</h2>
+	return numericValue.toLocaleString(undefined, {
+		maximumFractionDigits: 2,
+	});
+}
+
+function getProgressStatus(percentage: number) {
+	if (percentage >= 80) {
+		return { label: "Exitoso", badgeClass: "badge-green", textClass: "text-green-600" };
+	}
+
+	if (percentage >= 50) {
+		return { label: "En Progreso", badgeClass: "badge-yellow", textClass: "text-yellow-600" };
+	}
+
+	return { label: "Necesita Atención", badgeClass: "badge-red", textClass: "text-red-600" };
+}
+
+function organizeDetailRowsForPDF(rows: PresentationDetailRow[]) {
+	return rows.reduce<Record<string, Record<string, Record<string, PresentationDetailRow[]>>>>((accumulator, row) => {
+		const departmentName = row.departmentName ?? "Sin Departamento";
+		const areaName = row.areaName ?? "Sin Área";
+		const userName = row.userName ?? "Sin Usuario";
+
+		accumulator[departmentName] ??= {};
+		accumulator[departmentName][areaName] ??= {};
+		accumulator[departmentName][areaName][userName] ??= [];
+		accumulator[departmentName][areaName][userName].push(row);
+
+		return accumulator;
+	}, {});
+}
+
+function organizeConsolidatedRowsForPDF(rows: PresentationConsolidatedRow[]) {
+	return rows.reduce<Record<string, Record<string, PresentationConsolidatedRow[]>>>((accumulator, row) => {
+		const departmentName = row.departmentName || "Sin Departamento";
+		const areaName = row.areaName || "Sin Área";
+
+		accumulator[departmentName] ??= {};
+		accumulator[departmentName][areaName] ??= [];
+		accumulator[departmentName][areaName].push(row);
+
+		return accumulator;
+	}, {});
+}
+
+function generatePresentationHTML(payload: PresentationPayload) {
+	const { presentation, periods, detailRows, consolidatedRows } = payload;
+	const periodLabel = formatPresentationPeriodLabel(presentation);
+	const successfulGoals = detailRows.filter((row) => row.progressPercentage >= 80).length;
+	const inProgressGoals = detailRows.filter((row) => row.progressPercentage >= 50 && row.progressPercentage < 80).length;
+	const needsAttentionGoals = detailRows.filter((row) => row.progressPercentage < 50).length;
+	const organizedConsolidated = organizeConsolidatedRowsForPDF(consolidatedRows);
+	const organizedDetail = periods.map((period) => ({
+		...period,
+		rows: detailRows.filter((row) => row.month === period.month && row.year === period.year),
+	}));
+
+	const coverPage = `
+		<section class="page cover-page">
+			<div class="hero-card">
+				<div class="eyebrow">CCI Sync</div>
+				<h1 class="hero-title">${escapeHtml(presentation.name)}</h1>
+				<p class="hero-subtitle">${escapeHtml(periodLabel)}</p>
+				<div class="stats-grid">
+					<div class="stat-card">
+						<div class="stat-value text-blue-600">${detailRows.length}</div>
+						<div class="stat-label">Metas en el rango</div>
 					</div>
-					<div class="grid grid-cols-3 gap-8 mt-12">
-						<div class="p-6 bg-gray-50 rounded-lg text-center">
-							<div class="text-3xl font-bold text-blue-600">${submissions.length}</div>
-							<div class="text-lg text-gray-600">Metas Presentadas</div>
-						</div>
-						<div class="p-6 bg-gray-50 rounded-lg text-center">
-							<div class="text-3xl font-bold text-green-600">
-								${submissions.filter(s => getProgressPercentage(s.targetValue || "0", s.submittedValue || "0", s.isInverse) >= 80).length}
-							</div>
-							<div class="text-lg text-gray-600">Metas Exitosas</div>
-						</div>
-						<div class="p-6 bg-gray-50 rounded-lg text-center">
-							<div class="text-3xl font-bold text-yellow-600">
-								${submissions.filter(s => {
-									const pct = getProgressPercentage(s.targetValue || "0", s.submittedValue || "0", s.isInverse);
-									return pct >= 50 && pct < 80;
-								}).length}
-							</div>
-							<div class="text-lg text-gray-600">En Progreso</div>
-						</div>
+					<div class="stat-card">
+						<div class="stat-value text-green-600">${consolidatedRows.length}</div>
+						<div class="stat-label">Grupos consolidados</div>
+					</div>
+					<div class="stat-card">
+						<div class="stat-value text-purple-600">${periods.length}</div>
+						<div class="stat-label">Meses incluidos</div>
 					</div>
 				</div>
 			</div>
-		`
-	});
+		</section>
+	`;
 
-	// Department, area, and person slides
-	Object.keys(organized).forEach(dept => {
-		allSlides.push({
-			type: 'department',
-			content: `
-				<div class="slide-page">
-					<div class="text-center space-y-8">
-						<div class="space-y-4">
-							<h1 class="text-5xl font-bold gradient-green">${dept}</h1>
-							<h2 class="text-2xl text-gray-600">Departamento</h2>
-						</div>
-					</div>
+	const summaryPage = `
+		<section class="page">
+			<div class="section-header">
+				<div>
+					<div class="eyebrow">Resumen Ejecutivo</div>
+					<h2 class="section-title">Consolidado y detalle mensual</h2>
+					<p class="section-subtitle">${escapeHtml(periodLabel)}</p>
 				</div>
-			`
-		});
+				<div class="pill-row">
+					<span class="pill">${periods.length} meses</span>
+					<span class="pill">${consolidatedRows.length} grupos</span>
+					<span class="pill">${detailRows.length} filas detalle</span>
+				</div>
+			</div>
 
-		Object.keys(organized[dept]).forEach(area => {
-			allSlides.push({
-				type: 'area',
-				content: `
-					<div class="slide-page">
-						<div class="text-center space-y-8">
-							<div class="space-y-4">
-								<h1 class="text-4xl font-bold gradient-purple">${area}</h1>
-								<h2 class="text-xl text-gray-600">Área - ${dept}</h2>
-							</div>
-						</div>
-					</div>
-				`
-			});
+			<div class="stats-grid">
+				<div class="stat-card">
+					<div class="stat-value text-green-600">${successfulGoals}</div>
+					<div class="stat-label">Metas exitosas</div>
+					<div class="stat-caption">Cumplimiento de 80% o más</div>
+				</div>
+				<div class="stat-card">
+					<div class="stat-value text-yellow-600">${inProgressGoals}</div>
+					<div class="stat-label">En progreso</div>
+					<div class="stat-caption">Cumplimiento entre 50% y 79%</div>
+				</div>
+				<div class="stat-card">
+					<div class="stat-value text-red-600">${needsAttentionGoals}</div>
+					<div class="stat-label">Necesitan atención</div>
+					<div class="stat-caption">Cumplimiento menor a 50%</div>
+				</div>
+			</div>
 
-			Object.keys(organized[dept][area]).forEach(person => {
-				const personData = organized[dept][area][person];
-				const goalChunks = chunkGoals(personData.goals, 4); // Max 4 goals per slide
-				
-				goalChunks.forEach((goalChunk: any[], chunkIndex: number) => {
-					const isFirstSlide = chunkIndex === 0;
-					const slideNumber = chunkIndex + 1;
-					const totalSlides = goalChunks.length;
-					
-					// Generate HTML for goals in this chunk
-					const goalsHTML = goalChunk.map(goal => {
-						const percentage = getProgressPercentage(goal.targetValue || "0", goal.submittedValue || "0", goal.isInverse);
-						const statusClass = percentage >= 80 ? 'text-green-600' :
-										   percentage >= 50 ? 'text-yellow-600' : 'text-red-600';
-						const statusText = percentage >= 80 ? 'Exitoso' :
-										  percentage >= 50 ? 'En Progreso' : 'Necesita Atención';
+			<div class="callout">
+				<p>
+					El consolidado promedia objetivo y logro usando únicamente los meses existentes para cada meta.
+					Luego se incluye el detalle mensual completo del mismo rango.
+				</p>
+			</div>
+		</section>
+	`;
 
-						// Para metas normales: submittedValue es lo logrado, targetValue es el objetivo
-						// Para metas inversas: TAMBIÉN submittedValue es lo logrado, targetValue es la meta
-						const logradoValue = goal.submittedValue;
-						const metaValue = goal.targetValue;
-						const metaLabel = goal.isInverse ? 'Meta (máx)' : 'Objetivo';
+	const consolidatedPages = Object.entries(organizedConsolidated)
+		.flatMap(([departmentName, areasByDepartment]) =>
+			Object.entries(areasByDepartment).map(([areaName, rows]) => {
+				const tableRows = rows
+					.sort((left, right) =>
+						(left.userName ?? "").localeCompare(right.userName ?? "")
+						|| (left.goalTemplateName ?? "").localeCompare(right.goalTemplateName ?? "")
+					)
+					.map((row) => {
+						const status = getProgressStatus(row.consolidatedProgressPercentage);
+						const includedMonths = row.includedMonths
+							.map((period) => formatMonthPeriodLabel(period.month, period.year))
+							.join(", ");
 
 						return `
-							<div class="card p-6 min-h-[280px] flex flex-col justify-between">
-								<div>
-									<h4 class="text-lg font-bold mb-4 leading-tight">${goal.goalTemplateName}</h4>
-									<div class="grid grid-cols-2 gap-4 text-center mb-6">
-										<div>
-											<div class="text-xl font-bold text-blue-600 break-words">${parseFloat(logradoValue).toLocaleString()}</div>
-											<div class="text-sm text-gray-600">Logrado</div>
+							<tr>
+								<td>
+									<div class="table-primary">${escapeHtml(row.userName ?? "Sin Usuario")}</div>
+									<div class="table-secondary">${escapeHtml(row.userEmail ?? "")}</div>
+								</td>
+								<td>
+									<div class="table-primary">${escapeHtml(row.goalTemplateName ?? "Sin Meta")}</div>
+									<div class="table-secondary">${escapeHtml(row.goalTemplateUnit ?? "")}</div>
+								</td>
+								<td class="wrap-cell">${escapeHtml(includedMonths)}</td>
+								<td class="text-right">${formatPdfNumber(row.consolidatedTargetValue)}</td>
+								<td class="text-right">${formatPdfNumber(row.consolidatedAchievedValue)}</td>
+								<td class="text-right">
+									<div class="progress-cell">
+										<div class="table-primary ${status.textClass}">${Math.round(row.consolidatedProgressPercentage)}%</div>
+										<div class="progress-bar compact">
+											<div class="progress-fill" style="width: ${Math.min(Math.max(row.consolidatedProgressPercentage, 0), 100)}%"></div>
 										</div>
-										<div>
-											<div class="text-xl font-bold text-gray-600 break-words">${parseFloat(metaValue).toLocaleString()}</div>
-											<div class="text-sm text-gray-600">${metaLabel}</div>
-										</div>
+										<span class="badge ${status.badgeClass}">${status.label}</span>
 									</div>
-								</div>
-								<div class="space-y-2">
-									<div class="flex justify-between text-sm">
-										<span>Progreso</span>
-										<span class="font-bold">${Math.round(percentage)}%</span>
-									</div>
-									<div class="progress-bar">
-										<div class="progress-fill" style="width: ${percentage}%"></div>
-									</div>
-									<div class="text-center">
-										<span class="badge badge-${percentage >= 80 ? 'green' : percentage >= 50 ? 'yellow' : 'red'}">${statusText}</span>
-									</div>
-									${goal.notes ? `
-										<div class="bg-gray-50 p-2 rounded text-xs mt-2">
-											<p class="text-gray-600">${goal.notes}</p>
-										</div>
-									` : ''}
-								</div>
-							</div>
+								</td>
+							</tr>
 						`;
-					}).join('');
-					
-					allSlides.push({
-						type: 'person',
-						content: `
-							<div class="slide-page">
-								<div class="text-center mb-6">
-									<h2 class="text-3xl font-bold">${personData.userName}</h2>
-									<h3 class="text-lg text-gray-600">${personData.areaName} - ${personData.departmentName}</h3>
-									${totalSlides > 1 ? `<p class="text-sm text-gray-500 mt-2">Slide ${slideNumber} de ${totalSlides}</p>` : ''}
-								</div>
-								<div class="flex justify-center">
-									<div class="grid gap-6 w-full max-w-5xl ${goalChunk.length === 1 ? 'grid-cols-1' : goalChunk.length === 2 ? 'grid-cols-2' : goalChunk.length === 3 ? 'grid-cols-3' : 'grid-cols-4'}">
-										${goalsHTML}
-									</div>
-								</div>
-							</div>
-						`
-					});
-				});
-			});
-		});
-	});
+					})
+					.join("");
 
-	// Summary slide
-	allSlides.push({
-		type: 'summary',
-		content: `
-			<div class="slide-page">
-				<div class="text-center space-y-8">
-					<div class="space-y-4 mb-8">
-						<h2 class="text-5xl font-bold">Resumen Final</h2>
-						<h3 class="text-2xl text-gray-600">${months[presentation.month]} ${presentation.year}</h3>
-					</div>
-					<div class="grid grid-cols-3 gap-8 max-w-4xl mx-auto mb-8">
-						<div class="card text-center">
-							<div class="pt-6 p-6">
-								<div class="text-4xl font-bold text-green-600 mb-2">
-									${submissions.filter(s => getProgressPercentage(s.targetValue, s.submittedValue, s.isInverse) >= 80).length}
-								</div>
-								<div class="text-lg font-bold">Metas Exitosas</div>
-								<div class="text-gray-600">≥80% cumplimiento</div>
+				return `
+					<section class="page">
+						<div class="section-header">
+							<div>
+								<div class="eyebrow">Vista Consolidada</div>
+								<h2 class="section-title">${escapeHtml(departmentName)}</h2>
+								<p class="section-subtitle">${escapeHtml(areaName)} · ${escapeHtml(periodLabel)}</p>
+							</div>
+							<div class="pill-row">
+								<span class="pill">${rows.length} metas consolidadas</span>
 							</div>
 						</div>
-						<div class="card text-center">
-							<div class="pt-6 p-6">
-								<div class="text-4xl font-bold text-yellow-600 mb-2">
-									${submissions.filter(s => {
-										const pct = getProgressPercentage(s.targetValue, s.submittedValue, s.isInverse);
-										return pct >= 50 && pct < 80;
-									}).length}
-								</div>
-								<div class="text-lg font-bold">En Progreso</div>
-								<div class="text-gray-600">50-79% cumplimiento</div>
-							</div>
-						</div>
-						<div class="card text-center">
-							<div class="pt-6 p-6">
-								<div class="text-4xl font-bold text-red-600 mb-2">
-									${submissions.filter(s => getProgressPercentage(s.targetValue, s.submittedValue, s.isInverse) < 50).length}
-								</div>
-								<div class="text-lg font-bold">Necesitan Atención</div>
-								<div class="text-gray-600">&lt;50% cumplimiento</div>
-							</div>
-						</div>
-					</div>
-					<div class="text-center space-y-4">
-						<h3 class="text-2xl font-bold">¡Gracias por su atención!</h3>
-						<p class="text-lg text-gray-600">Presentación generada con CCI Sync</p>
-					</div>
-				</div>
-			</div>
-		`
-	});
 
-	const slidesHTML = allSlides.map(slide => slide.content.trim()).join('');
+						<table class="report-table">
+							<thead>
+								<tr>
+									<th>Persona</th>
+									<th>Meta</th>
+									<th>Meses incluidos</th>
+									<th class="text-right">Promedio objetivo</th>
+									<th class="text-right">Promedio logrado</th>
+									<th class="text-right">Promedio progreso</th>
+								</tr>
+							</thead>
+							<tbody>
+								${tableRows}
+							</tbody>
+						</table>
+					</section>
+				`;
+			})
+		)
+		.join("");
+
+	const detailPages = organizedDetail
+		.map((period) => {
+			const detailContent = organizeDetailRowsForPDF(period.rows);
+			const sectionPages = Object.entries(detailContent)
+				.flatMap(([departmentName, areasByDepartment]) =>
+					Object.entries(areasByDepartment).flatMap(([areaName, people]) =>
+						Object.entries(people).flatMap(([userName, goals]) => {
+							const goalChunks = chunkGoals(
+								goals.sort((left, right) => (left.goalTemplateName ?? "").localeCompare(right.goalTemplateName ?? "")),
+								4,
+							);
+
+							return goalChunks.map((goalChunk, chunkIndex) => {
+								const goalsHtml = goalChunk
+									.map((goal) => {
+										const status = getProgressStatus(goal.progressPercentage);
+										return `
+											<div class="goal-card">
+												<div>
+													<div class="goal-title">${escapeHtml(goal.goalTemplateName ?? "Sin Meta")}</div>
+													<div class="goal-unit">${escapeHtml(goal.goalTemplateUnit ?? "")}</div>
+												</div>
+												<div class="goal-metrics">
+													<div>
+														<div class="metric-value text-blue-600">${formatPdfNumber(goal.achievedValue)}</div>
+														<div class="metric-label">Logrado</div>
+													</div>
+													<div>
+														<div class="metric-value text-gray-700">${formatPdfNumber(goal.targetValue)}</div>
+														<div class="metric-label">${goal.isInverse ? "Meta (máx)" : "Objetivo"}</div>
+													</div>
+												</div>
+												<div class="space-y-2">
+													<div class="progress-meta">
+														<span>Progreso</span>
+														<span class="table-primary">${Math.round(goal.progressPercentage)}%</span>
+													</div>
+													<div class="progress-bar">
+														<div class="progress-fill" style="width: ${Math.min(Math.max(goal.progressPercentage, 0), 100)}%"></div>
+													</div>
+													<span class="badge ${status.badgeClass}">${status.label}</span>
+												</div>
+												${goal.description ? `<div class="goal-note">${escapeHtml(goal.description)}</div>` : ""}
+											</div>
+										`;
+									})
+									.join("");
+
+								return `
+									<section class="page">
+										<div class="section-header">
+											<div>
+												<div class="eyebrow">Detalle Mensual</div>
+												<h2 class="section-title">${escapeHtml(period.label)}</h2>
+												<p class="section-subtitle">${escapeHtml(departmentName)} · ${escapeHtml(areaName)} · ${escapeHtml(userName)}</p>
+											</div>
+											<div class="pill-row">
+												<span class="pill">Slide ${chunkIndex + 1} de ${goalChunks.length}</span>
+												<span class="pill">${goals.length} metas del mes</span>
+											</div>
+										</div>
+										<div class="goal-grid goal-grid-${Math.min(goalChunk.length, 4)}">
+											${goalsHtml}
+										</div>
+									</section>
+								`;
+							});
+						})
+					)
+				)
+				.join("");
+
+			return `
+				<section class="page month-cover">
+					<div class="hero-card">
+						<div class="eyebrow">Detalle Mensual</div>
+						<h2 class="hero-title">${escapeHtml(period.label)}</h2>
+						<p class="hero-subtitle">${period.rows.length} metas registradas en este mes</p>
+					</div>
+				</section>
+				${sectionPages}
+			`;
+		})
+		.join("");
 
 	return `
 		<!DOCTYPE html>
 		<html>
 		<head>
 			<meta charset="utf-8">
-			<title>${presentation.name} - ${months[presentation.month]} ${presentation.year}</title>
+			<title>${presentation.name} - ${periodLabel}</title>
 			<style>
 				@page {
 					margin: 1cm;
@@ -635,22 +1068,23 @@ function generatePresentationHTML(presentation: any, submissions: any[]) {
 					line-height: 1.6;
 					background: white;
 				}
-				.slide-page {
+				.page {
 					page-break-after: always;
 					page-break-inside: avoid;
-					height: 100vh;
-					display: flex;
-					flex-direction: column;
-					justify-content: center;
-					align-items: center;
-					padding: 2rem;
-					margin: 0;
+					min-height: 100vh;
+					padding: 2.25rem;
 					background: white;
 				}
-				.slide-page:last-child {
+				.page:last-child {
 					page-break-after: avoid;
 				}
+				.cover-page, .month-cover {
+					display: flex;
+					align-items: center;
+					justify-content: center;
+				}
 				.text-center { text-align: center; }
+				.text-right { text-align: right; }
 				.font-bold { font-weight: bold; }
 				.text-6xl { font-size: 3.75rem; line-height: 1; }
 				.text-5xl { font-size: 3rem; line-height: 1; }
@@ -667,6 +1101,7 @@ function generatePresentationHTML(presentation: any, submissions: any[]) {
 				.text-green-600 { color: #059669; }
 				.text-yellow-600 { color: #d97706; }
 				.text-red-600 { color: #dc2626; }
+				.text-purple-600 { color: #7c3aed; }
 				.grid { display: grid; }
 				.grid-cols-1 { grid-template-columns: repeat(1, 1fr); }
 				.grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
@@ -728,33 +1163,229 @@ function generatePresentationHTML(presentation: any, submissions: any[]) {
 				.text-sm { font-size: 0.875rem; line-height: 1.25rem; }
 				.mt-2 { margin-top: 0.5rem; }
 				.mb-3 { margin-bottom: 0.75rem; }
+				.hero-card {
+					width: 100%;
+					max-width: 72rem;
+					padding: 3rem;
+					border: 1px solid #e5e7eb;
+					border-radius: 1rem;
+					background: linear-gradient(135deg, #eff6ff 0%, #ffffff 55%, #f5f3ff 100%);
+					text-align: center;
+				}
+				.eyebrow {
+					font-size: 0.75rem;
+					font-weight: 700;
+					letter-spacing: 0.12em;
+					text-transform: uppercase;
+					color: #6366f1;
+					margin-bottom: 0.75rem;
+				}
+				.hero-title, .section-title {
+					font-size: 2.5rem;
+					line-height: 1.1;
+					margin: 0;
+					color: #111827;
+				}
+				.hero-subtitle, .section-subtitle {
+					font-size: 1.1rem;
+					color: #4b5563;
+					margin-top: 0.5rem;
+				}
+				.section-header {
+					display: flex;
+					justify-content: space-between;
+					align-items: flex-start;
+					gap: 1rem;
+					margin-bottom: 1.5rem;
+				}
+				.pill-row {
+					display: flex;
+					flex-wrap: wrap;
+					gap: 0.5rem;
+					justify-content: flex-end;
+				}
+				.pill {
+					display: inline-flex;
+					align-items: center;
+					padding: 0.35rem 0.75rem;
+					border-radius: 9999px;
+					background: #f3f4f6;
+					color: #374151;
+					font-size: 0.8rem;
+					font-weight: 600;
+				}
+				.stats-grid {
+					display: grid;
+					grid-template-columns: repeat(3, minmax(0, 1fr));
+					gap: 1rem;
+					margin-top: 2rem;
+				}
+				.stat-card {
+					padding: 1.25rem;
+					border-radius: 0.75rem;
+					border: 1px solid #e5e7eb;
+					background: rgba(255, 255, 255, 0.88);
+				}
+				.stat-value {
+					font-size: 2rem;
+					font-weight: 800;
+				}
+				.stat-label {
+					font-size: 0.95rem;
+					font-weight: 700;
+					color: #111827;
+					margin-top: 0.35rem;
+				}
+				.stat-caption {
+					font-size: 0.8rem;
+					color: #6b7280;
+					margin-top: 0.25rem;
+				}
+				.callout {
+					margin-top: 1.5rem;
+					padding: 1rem 1.25rem;
+					border-left: 4px solid #2563eb;
+					background: #eff6ff;
+					color: #1e3a8a;
+					border-radius: 0.5rem;
+				}
+				.report-table {
+					width: 100%;
+					border-collapse: collapse;
+					border: 1px solid #e5e7eb;
+					border-radius: 0.75rem;
+					overflow: hidden;
+				}
+				.report-table thead th {
+					background: #f9fafb;
+					color: #4b5563;
+					font-size: 0.8rem;
+					font-weight: 700;
+					text-transform: uppercase;
+					letter-spacing: 0.04em;
+					padding: 0.85rem 0.9rem;
+					border-bottom: 1px solid #e5e7eb;
+				}
+				.report-table tbody td {
+					padding: 0.9rem;
+					border-bottom: 1px solid #f3f4f6;
+					vertical-align: top;
+				}
+				.report-table tbody tr:last-child td {
+					border-bottom: none;
+				}
+				.table-primary {
+					font-size: 0.92rem;
+					font-weight: 700;
+					color: #111827;
+				}
+				.table-secondary {
+					font-size: 0.74rem;
+					color: #6b7280;
+					margin-top: 0.15rem;
+				}
+				.wrap-cell {
+					font-size: 0.82rem;
+					color: #374151;
+					max-width: 13rem;
+					line-height: 1.45;
+				}
+				.progress-cell {
+					display: flex;
+					flex-direction: column;
+					align-items: flex-end;
+					gap: 0.35rem;
+				}
+				.progress-bar.compact {
+					height: 0.5rem;
+					width: 7rem;
+				}
+				.goal-grid {
+					display: grid;
+					gap: 1rem;
+				}
+				.goal-grid-1 { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+				.goal-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+				.goal-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+				.goal-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+				.goal-card {
+					display: flex;
+					flex-direction: column;
+					justify-content: space-between;
+					min-height: 18rem;
+					padding: 1.25rem;
+					border: 1px solid #e5e7eb;
+					border-radius: 0.9rem;
+					background: white;
+				}
+				.goal-title {
+					font-size: 1rem;
+					font-weight: 700;
+					color: #111827;
+					line-height: 1.35;
+				}
+				.goal-unit {
+					font-size: 0.8rem;
+					color: #6b7280;
+					margin-top: 0.25rem;
+				}
+				.goal-metrics {
+					display: grid;
+					grid-template-columns: repeat(2, minmax(0, 1fr));
+					gap: 0.75rem;
+					text-align: center;
+					margin: 1rem 0;
+				}
+				.metric-value {
+					font-size: 1.2rem;
+					font-weight: 800;
+				}
+				.metric-label {
+					font-size: 0.75rem;
+					color: #6b7280;
+					margin-top: 0.15rem;
+				}
+				.progress-meta {
+					display: flex;
+					justify-content: space-between;
+					font-size: 0.82rem;
+					color: #374151;
+				}
+				.goal-note {
+					margin-top: 0.8rem;
+					padding: 0.75rem;
+					border-radius: 0.65rem;
+					background: #f9fafb;
+					font-size: 0.78rem;
+					color: #4b5563;
+				}
 			</style>
 		</head>
 		<body>
-			${slidesHTML}
+			${coverPage}
+			${summaryPage}
+			${consolidatedPages}
+			${detailPages}
 		</body>
 		</html>
 	`;
 }
 
 // Utility function for PDF generation
-export async function generatePDF(presentationId: string, baseUrl: string = "http://localhost:3001") {
+export async function generatePDF(
+	presentationId: string,
+	baseUrl: string = "http://localhost:3001",
+	currentUser: { id: string; role: string },
+) {
 	let browser;
 	
 	try {
 		console.log(`Starting PDF generation for presentation ${presentationId}`);
 		
-		// Get presentation data from database
-		const { presentation, submissions } = await getPresentationData(presentationId);
-		console.log(`Found presentation: ${presentation.name} with ${submissions.length} submissions`);
+		const payload = await getPresentationPayloadData(presentationId, currentUser);
+		console.log(`Found presentation: ${payload.presentation.name} with ${payload.detailRows.length} detail rows`);
 		
-		// Generate HTML content
-		const htmlContent = generatePresentationHTML(presentation, submissions);
-		
-		// Debug: save HTML to file for inspection
-		const fs = await import('fs');
-		await fs.promises.writeFile('/tmp/presentation-debug.html', htmlContent);
-		console.log('HTML saved to /tmp/presentation-debug.html for debugging');
+		const htmlContent = generatePresentationHTML(payload);
 		
 		browser = await puppeteer.launch({
 			headless: true,
@@ -780,10 +1411,6 @@ export async function generatePDF(presentationId: string, baseUrl: string = "htt
 		await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
 		console.log('HTML content set successfully');
 		
-		// Debug: take screenshot to see what's rendered
-		await page.screenshot({ path: '/tmp/presentation-render.png', fullPage: true });
-		console.log('Screenshot saved to /tmp/presentation-render.png');
-		
 		// Generate PDF
 		console.log('Generating PDF...');
 		const pdfBuffer = await page.pdf({
@@ -805,14 +1432,9 @@ export async function generatePDF(presentationId: string, baseUrl: string = "htt
 		const base64PDF = Buffer.from(pdfBuffer).toString('base64');
 		console.log(`PDF converted to base64. Size: ${base64PDF.length} characters`);
 		
-		const months = [
-			"", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-			"Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
-		];
-		
 		return {
 			pdf: base64PDF,
-			filename: `${presentation.name} - ${months[presentation.month]} ${presentation.year}.pdf`
+			filename: `${payload.presentation.name} - ${formatPresentationPeriodLabel(payload.presentation)} - Consolidado y Detalle.pdf`
 		};
 		
 	} catch (error) {
@@ -839,6 +1461,10 @@ export const generatePresentationPDF = protectedProcedure
 		presentationId: z.string().uuid(),
 		baseUrl: z.string().url().optional().default("http://localhost:3001")
 	}))
-	.handler(async ({ input }) => {
-		return await generatePDF(input.presentationId, input.baseUrl);
+	.handler(async ({ input, context }) => {
+		if (!context.session?.user) {
+			throw new Error("Unauthorized");
+		}
+
+		return await generatePDF(input.presentationId, input.baseUrl, context.session.user);
 	});

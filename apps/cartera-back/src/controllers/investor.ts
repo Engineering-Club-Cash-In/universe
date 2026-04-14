@@ -5149,10 +5149,10 @@ export async function getInvestorPerformance(dpi?: string, email?: string) {
     throw new Error("Se requiere al menos 'dpi' o 'email'");
   }
 
-  // 1️⃣ Buscar inversionista
-  const whereClause = dpi
-    ? eq(inversionistas.dpi, parseInt(dpi))
-    : eq(inversionistas.email, email!);
+  // 1️⃣ Buscar inversionista (Prioridad: Email > DPI)
+  const whereClause = email
+    ? eq(inversionistas.email, email)
+    : eq(inversionistas.dpi, parseInt(dpi!));
 
   const [inversionista] = await db
     .select({

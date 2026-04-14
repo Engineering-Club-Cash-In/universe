@@ -38,7 +38,6 @@ import {
   type EstadoLiquidacionResumen,
   type EstadoLiquidacionResumenFilter,
 } from "../utils/investorLiquidationSummary";
-import { getCreditCandidates, CUBE_ID } from "./assignCapital";
 import { addInvestorToCredit } from "./addInvestorToCredit";
 
 // ============================================
@@ -5146,23 +5145,20 @@ export async function getLiquidaciones({
  * @param dpi - DPI del inversionista
  */
 export async function getInvestorPerformance(dpi?: string, email?: string) {
-  console.log("[getInvestorPerformance] DPI:", dpi, "Email:", email);
-
   if (!dpi && !email) {
     throw new Error("Se requiere al menos 'dpi' o 'email'");
   }
 
-  // 1️⃣ Buscar inversionista por DPI o email
-  const whereClause = dpi
-    ? eq(inversionistas.dpi, parseInt(dpi))
-    : eq(inversionistas.email, email!);
+  // 1️⃣ Buscar inversionista (Prioridad: Email > DPI)
+  const whereClause = email
+    ? eq(inversionistas.email, email)
+    : eq(inversionistas.dpi, parseInt(dpi!));
 
   const [inversionista] = await db
     .select({
       inversionista_id: inversionistas.inversionista_id,
       nombre: inversionistas.nombre,
       dpi: inversionistas.dpi,
-      saldo_reinversion: inversionistas.saldo_reinversion,
     })
     .from(inversionistas)
     .where(whereClause)
@@ -5172,68 +5168,38 @@ export async function getInvestorPerformance(dpi?: string, email?: string) {
     throw new Error(`No se encontró inversionista con ${dpi ? 'DPI: ' + dpi : 'email: ' + email}`);
   }
 
-  // 2️⃣ Obtener todas las inversiones del inversionista
-  const inversiones = await db
+  // 2️⃣ Obtener totales de inversiones de forma agregada
+  const [totalesInversion] = await db
     .select({
-      credito_id: creditos_inversionistas_espejo.credito_id,
-      monto_aportado: creditos_inversionistas_espejo.monto_aportado,
-      cuota_inversionista: creditos_inversionistas_espejo.cuota_inversionista,
+      capital_total: sql<string>`coalesce(sum(${creditos_inversionistas_espejo.monto_aportado}), 0)`,
+      cantidad: count(),
     })
     .from(creditos_inversionistas_espejo)
+    .where(eq(creditos_inversionistas_espejo.inversionista_id, inversionista.inversionista_id));
+
+  // 3️⃣ Obtener total de rendimiento (intereses liquidados * 1.2) de forma agregada
+  const [totalesRendimiento] = await db
+    .select({
+      interes_total: sql<string>`coalesce(sum(${pagos_credito_inversionistas_espejo.abono_interes}), 0)`,
+    })
+    .from(pagos_credito_inversionistas_espejo)
     .where(
-      eq(
-        creditos_inversionistas_espejo.inversionista_id,
-        inversionista.inversionista_id
+      and(
+        eq(pagos_credito_inversionistas_espejo.inversionista_id, inversionista.inversionista_id),
+        eq(pagos_credito_inversionistas_espejo.estado_liquidacion, "LIQUIDADO")
       )
     );
 
-  // 3️⃣ Calcular totales
-  let capital_total_aportado = new Big(0);
-  let rendimiento_total = new Big(0);
-
-  for (const inv of inversiones) {
-    // Sumar capital aportado
-    capital_total_aportado = capital_total_aportado.plus(
-      inv.monto_aportado ?? 0
-    );
-
-    // Buscar cuotas LIQUIDADAS de este crédito para este inversionista
-    const pagosLiquidados = await db
-      .select({
-        cuota: pagos_credito_inversionistas_espejo.abono_interes,
-      })
-      .from(pagos_credito_inversionistas_espejo)
-      .where(
-        and(
-          eq(
-            pagos_credito_inversionistas_espejo.inversionista_id,
-            inversionista.inversionista_id
-          ),
-          eq(pagos_credito_inversionistas_espejo.credito_id, inv.credito_id),
-          eq(pagos_credito_inversionistas_espejo.estado_liquidacion, "LIQUIDADO")
-        )
-      );
-
-    // Sumar todas las cuotas liquidadas de este crédito
-    const suma_cuotas_liquidadas = pagosLiquidados.reduce(
-      (sum, pago) => sum.plus(pago.cuota ?? 0),
-      new Big(0)
-    );
-
-    // Calcular rendimiento de este crédito
-    const rendimiento_credito = suma_cuotas_liquidadas.times(1.2);
-
-    // Acumular rendimiento total
-    rendimiento_total = rendimiento_total.plus(rendimiento_credito);
-  }
+  const capitalOpt = new Big(totalesInversion.capital_total || 0);
+  const rendimientoOpt = new Big(totalesRendimiento.interes_total || 0).times(1.2);
 
   return {
     inversionista_id: inversionista.inversionista_id,
     nombre: inversionista.nombre,
     dpi: inversionista.dpi?.toString(),
-    capital_total_aportado: Number(capital_total_aportado.toString()),
-    cantidad_inversiones: inversiones.length,
-    rendimiento_estimado: Number(rendimiento_total.toString()),
+    capital_total_aportado: Number(capitalOpt.toFixed(2)),
+    cantidad_inversiones: totalesInversion.cantidad,
+    rendimiento_estimado: Number(rendimientoOpt.toFixed(2)),
   };
 }
 
@@ -5350,7 +5316,7 @@ export async function testUploadAndEmail(investorId: number, testEmail: string) 
         investorName: inversionista.nombre_inversionista,
         amount: inversionista.subtotal.total_cuota.toString(),
         creditNumber: "DIAGNOSTIC-TEST",
-        date: dayjs().format("DD/MM/YYYY"),
+        date: dayjs().format("MMMM YYYY"),
         currencySymbol: inversionista.moneda === "dolares" ? "$" : "Q.",
         attachment: {
             filename: `Test_Liquidacion_${inversionista.nombre_inversionista.replace(/\s+/g, '_')}.pdf`,
@@ -5466,14 +5432,6 @@ export async function getCreditosEspejoPendientes(page: number = 1, pageSize: nu
   const start = (page - 1) * pageSize;
   const paginados = todos.slice(start, start + pageSize);
 
-  // 4. Obtener opciones de crédito para cada inversionista
-  const data = await Promise.all(
-    paginados.map(async (inv) => {
-      const opciones_de_credito = await getCreditCandidates(inv.monto_reinversion, 10);
-      return { ...inv, opciones_de_credito };
-    })
-  );
-
-  return { data, total, page, pageSize };
+  return { data: paginados, total, page, pageSize };
 }
 

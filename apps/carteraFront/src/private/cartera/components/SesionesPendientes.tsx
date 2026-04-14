@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { useSesionesPendientes, useCompletarEspejo, useReemplazarInversionistaCredito } from "../hooks/useSesionesPendientes";
+import { useSesionesPendientes, useCompletarEspejo, useReemplazarInversionistaCredito, useCreditCandidates, useDevolverPendientesACube } from "../hooks/useSesionesPendientes";
 import type { InversionistaSesionPendiente, OtroCreditoDisponible } from "../services/services";
 import {
   Loader2,
@@ -18,16 +18,17 @@ import {
   Mail,
   CreditCard,
   X,
+  Ban,
+  AlertCircle,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 
-function formatQ(v: number | string | null | undefined, moneda?: string): string {
+function formatQ(v: number | string | null | undefined): string {
   const num = Number(v ?? 0);
-  const s = moneda === "dolares" ? "$" : "Q";
-  return `${s}${num.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `Q${num.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function statusLabel(status: string): string {
@@ -83,7 +84,7 @@ export function SesionesPendientes() {
 
   // Debounce search to avoid firing on every keystroke
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(search), 350);
+    const timer = setTimeout(() => setDebouncedSearch(search), 800);
     return () => clearTimeout(timer);
   }, [search]);
 
@@ -246,7 +247,6 @@ function getCashInMonto(oc: OtroCreditoDisponible): number {
 // ============================================
 function buildDestinos(
   candidates: OtroCreditoDisponible[],
-  moneda: string
 ): CreditoDestino[] {
   const destinos: CreditoDestino[] = [];
 
@@ -254,12 +254,11 @@ function buildDestinos(
     const cashInMonto = getCashInMonto(oc);
     destinos.push({
       id: oc.credito_id,
-      label: `${oc.numero_credito_sifco || `#${oc.credito_id}`} · ${oc.credito_completo?.usuario?.nombre ?? ""} · Aportado: ${formatQ(cashInMonto, moneda)}`,
+      label: `${oc.numero_credito_sifco || `#${oc.credito_id}`} · ${oc.credito_completo?.usuario?.nombre ?? ""} · Aportado: ${formatQ(cashInMonto)}`,
       capacidad: cashInMonto || oc.capital_activo,
       tipo: "existente",
     });
   }
-
 
   return destinos;
 }
@@ -275,16 +274,21 @@ function InvestorCard({
   const [expanded, setExpanded] = useState(true);
   const [editingCreditId, setEditingCreditId] = useState<number | null>(null);
   const [selectedDestinoIds, setSelectedDestinoIds] = useState<Set<number>>(new Set());
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
   const reemplazar = useReemplazarInversionistaCredito();
   const completarEspejo = useCompletarEspejo();
+  const devolverPendientes = useDevolverPendientesACube();
 
   const isEditing = editingCreditId !== null;
   const editingCredit = investor.creditosPendientes.find((c) => c.id === editingCreditId);
 
+  const montoParaCandidatos = editingCredit ? Number(editingCredit.monto_aportado) : null;
+  const { data: candidates, isLoading: isLoadingCandidates } = useCreditCandidates(montoParaCandidatos);
+
   const destinos = useMemo(() => {
-    if (!editingCreditId) return [];
-    return buildDestinos(investor.opciones_de_credito ?? [], investor.moneda);
-  }, [editingCreditId, investor]);
+    if (!editingCreditId || !candidates) return [];
+    return buildDestinos(candidates);
+  }, [editingCreditId, candidates]);
 
   const montoAportado = editingCredit ? Number(editingCredit.monto_aportado) : 0;
 
@@ -370,6 +374,30 @@ function InvestorCard({
     );
   }, [completarEspejo, investor]);
 
+  const tieneCompraCartera = investor.creditosPendientes.some(
+    (c) => c.status === "pendiente_compra_cartera"
+  );
+  const cancelLabel = tieneCompraCartera ? "Cancelar Compra Cartera" : "Cancelar Sesión";
+
+  const handleCancelSesion = useCallback(() => {
+    const creditoIds = investor.creditosPendientes.map((c) => c.credito_id);
+    if (creditoIds.length === 0) return;
+
+    devolverPendientes.mutate(
+      { creditos: creditoIds.length === 1 ? creditoIds[0] : creditoIds },
+      {
+        onSuccess: (res) => {
+          const count = res.creditos_limpiados?.length ?? creditoIds.length;
+          toast.success(res.message || `${count} crédito(s) devueltos a cube.`);
+          setConfirmingCancel(false);
+        },
+        onError: (err) => {
+          toast.error(err?.message || "Error al cancelar la sesión");
+        },
+      }
+    );
+  }, [devolverPendientes, investor]);
+
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
       {/* Header compacto */}
@@ -407,7 +435,7 @@ function InvestorCard({
             <div className="text-right hidden sm:block">
               <p className="text-[10px] text-gray-400">Saldo</p>
               <p className="text-xs font-bold text-gray-800 tabular-nums">
-                {formatQ(investor.saldo_reinversion, investor.moneda)}
+                {formatQ(investor.saldo_reinversion)}
               </p>
             </div>
           )}
@@ -415,7 +443,7 @@ function InvestorCard({
             <div className="text-right hidden md:block">
               <p className="text-[10px] text-gray-400">Reinversión</p>
               <p className="text-xs font-bold text-gray-800 tabular-nums">
-                {formatQ(investor.monto_reinversion, investor.moneda)}
+                {formatQ(investor.monto_reinversion)}
               </p>
             </div>
           )}
@@ -459,10 +487,10 @@ function InvestorCard({
                         )}
                       </div>
                       <div className="flex items-center gap-4 mt-1 text-[11px] text-gray-500">
-                        <span><b className="text-gray-800">{formatQ(credito.monto_aportado, investor.moneda)}</b> aportado</span>
-                        <span>Cuota: {formatQ(credito.cuota_inversionista, investor.moneda)}</span>
+                        <span><b className="text-gray-800">{formatQ(credito.monto_aportado)}</b> aportado</span>
+                        <span>Cuota: {formatQ(credito.cuota_inversionista)}</span>
                         <span>{credito.porcentaje_participacion_inversionista}% part.</span>
-                        <span className="hidden sm:inline">Cash In: {formatQ(credito.monto_cash_in, investor.moneda)} ({credito.porcentaje_cash_in}%)</span>
+                        <span className="hidden sm:inline">Cash In: {formatQ(credito.monto_cash_in)} ({credito.porcentaje_cash_in}%)</span>
                       </div>
                     </div>
 
@@ -492,11 +520,11 @@ function InvestorCard({
                       <div className="flex items-center justify-between">
                         <p className="text-[11px] text-amber-800">
                           <ArrowRight className="w-3 h-3 inline mr-1" aria-hidden="true" />
-                          Reasignar <b className="tabular-nums">{formatQ(montoAportado, investor.moneda)}</b>
+                          Reasignar <b className="tabular-nums">{formatQ(montoAportado)}</b>
                         </p>
                         {restante > 0.01 && (
                           <span className="text-[11px] text-amber-600 font-semibold tabular-nums">
-                            Pendiente: {formatQ(restante, investor.moneda)}
+                            Pendiente: {formatQ(restante)}
                           </span>
                         )}
                         {isBalanced && (
@@ -507,7 +535,12 @@ function InvestorCard({
                       </div>
 
                       <div className="space-y-1.5">
-                        {destinos.length === 0 ? (
+                        {isLoadingCandidates ? (
+                          <div className="flex items-center gap-2 py-2">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600" aria-hidden="true" />
+                            <p className="text-[11px] text-gray-500">Cargando créditos disponibles&hellip;</p>
+                          </div>
+                        ) : destinos.length === 0 ? (
                           <p className="text-[11px] text-gray-500 italic">Sin créditos disponibles</p>
                         ) : (
                           destinos.map((d) => {
@@ -537,7 +570,7 @@ function InvestorCard({
                                 </Badge>
                                 {sel && asignado > 0 && (
                                   <span className="text-[11px] font-bold text-blue-700 tabular-nums shrink-0">
-                                    +{formatQ(asignado, investor.moneda)}
+                                    +{formatQ(asignado)}
                                   </span>
                                 )}
                               </button>
@@ -574,21 +607,73 @@ function InvestorCard({
 
 
 
-          {/* Confirmar sesión - solo visible cuando NO hay reasignación activa */}
+          {/* Acciones de sesión - solo visible cuando NO hay reasignación activa */}
           {!isEditing && (
-            <div className="flex justify-end pt-1 border-t border-gray-100">
-              <Button
-                size="sm"
-                onClick={handleConfirm}
-                disabled={completarEspejo.isPending}
-                className="gap-1 text-[11px] h-7 bg-blue-600 text-white hover:bg-blue-700"
-              >
-                {completarEspejo.isPending
-                  ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
-                  : <Check className="w-3 h-3" aria-hidden="true" />
-                }
-                Confirmar Sesión
-              </Button>
+            <div className="pt-2 border-t border-gray-100">
+              {confirmingCancel ? (
+                <div className="flex items-center justify-between gap-3 rounded-md border border-red-200 bg-red-50/70 px-3 py-2">
+                  <div className="flex items-start gap-2 min-w-0">
+                    <AlertCircle className="w-3.5 h-3.5 text-red-600 mt-0.5 shrink-0" aria-hidden="true" />
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-semibold text-red-800">
+                        ¿{cancelLabel}?
+                      </p>
+                      <p className="text-[10px] text-red-700/80 leading-tight">
+                        Se devolverán {investor.creditosPendientes.length} crédito(s) a cube y se removerán los inversionistas pendientes. Esta acción no se puede deshacer.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setConfirmingCancel(false)}
+                      disabled={devolverPendientes.isPending}
+                      className="gap-1 text-[11px] h-7 border-gray-300"
+                    >
+                      <Undo2 className="w-3 h-3" aria-hidden="true" />
+                      No
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={handleCancelSesion}
+                      disabled={devolverPendientes.isPending}
+                      className="gap-1 text-[11px] h-7 bg-red-600 text-white hover:bg-red-700"
+                    >
+                      {devolverPendientes.isPending
+                        ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                        : <Check className="w-3 h-3" aria-hidden="true" />
+                      }
+                      Sí, cancelar
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex justify-end gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setConfirmingCancel(true)}
+                    disabled={completarEspejo.isPending || devolverPendientes.isPending}
+                    className="gap-1 text-[11px] h-7 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                  >
+                    <Ban className="w-3 h-3" aria-hidden="true" />
+                    {cancelLabel}
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={handleConfirm}
+                    disabled={completarEspejo.isPending || devolverPendientes.isPending}
+                    className="gap-1 text-[11px] h-7 bg-blue-600 text-white hover:bg-blue-700"
+                  >
+                    {completarEspejo.isPending
+                      ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                      : <Check className="w-3 h-3" aria-hidden="true" />
+                    }
+                    Confirmar Sesión
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </div>

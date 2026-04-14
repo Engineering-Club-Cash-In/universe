@@ -18,6 +18,7 @@ export function usePermissions() {
 		// Goals permissions
 		canConfigureGoals: role === "super_admin" || role === "department_manager" || role === "area_lead",
 		canEditGoals: role !== "viewer",
+		canEditGoalTarget: role === "super_admin" || role === "department_manager" || role === "area_lead",
 		
 		// User management
 		canManageUsers: role === "super_admin" || role === "department_manager" || role === "area_lead",

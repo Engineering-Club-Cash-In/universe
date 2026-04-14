@@ -7,7 +7,6 @@ import {
   creditos_inversionistas_espejo,
 } from "../database/db";
 import z from "zod";
-import { getCreditCandidates } from "./assignCapital";
 
 // ========================================
 // ID fijo de CUBE INVESTMENTS S.A.
@@ -25,7 +24,7 @@ const CUBE_INVESTMENT_ID = 86;
 //     los inversionistas pendientes y reubicarlos en créditos nuevos.
 // ========================================
 
-const replaceInvestorCreditSchema = z.object({
+const returnPendingToCubeSchema = z.object({
   creditos: z.union([
     z.number().int().positive(),
     z.array(z.number().int().positive()).min(1),
@@ -135,55 +134,31 @@ function recalcularInversionistas(
 }
 
 // ========================================
-// CONTROLLER PRINCIPAL: replaceInvestorCredit
+// CONTROLLER: returnPendingInvestorsToCube
 // ========================================
 //
-// FLUJO GENERAL:
-// Este método REVIERTE inversionistas pendientes de créditos viejos
-// y los REUBICA en créditos nuevos.
+// FLUJO:
+// Limpia créditos sacando a todos los inversionistas con status
+// pendiente (!= "completado") y devolviendo su monto a CUBE.
 //
-// 1. Recibir credito_id(s) — los créditos ORIGINALES donde hay inversionistas pendientes
-// 2. Buscar en esos créditos los registros espejo con status != "completado"
-//    (pendiente_reinversion o pendiente_compra_cartera)
-// 3. Agrupar por inversionista: juntar el monto total y tipo de operación
-// 4. Para cada inversionista pendiente:
-//    a. Llamar getCreditCandidates() → busca NUEVOS créditos (los viejos NO aparecen
-//       porque todavía tienen pendings — por eso NO los borramos primero)
-//    b. Distribuir el monto en los nuevos créditos (misma lógica de addInvestorToCredit:
-//       restarle a CUBE, recalcular cuotas, nuke & rebuild en padre y espejo)
-// 5. DESPUÉS de asignar los nuevos créditos, limpiar los VIEJOS:
-//    a. Quitar al inversionista pendiente del crédito viejo (padre y espejo)
-//    b. Devolverle el monto a CUBE
-//    c. Recalcular cuotas de los inversionistas que quedan
-//    d. Nuke & rebuild en ambas tablas
-//
-// ¿POR QUÉ BORRAR DESPUÉS Y NO ANTES?
-// Porque getCreditCandidates() filtra créditos con espejo en status pendiente.
-// Si borramos los pendings ANTES del GET, esos mismos créditos aparecerían
-// como candidatos y el inversionista podría terminar en el mismo crédito
-// del que lo estamos sacando. Borrando DESPUÉS, nos aseguramos de que
-// los nuevos créditos sean realmente NUEVOS.
-//
-// EJEMPLO:
-//   Crédito 101 tiene a inversionista 42 con Q20,000 en status "pendiente_reinversion"
-//   1. Buscamos nuevos candidatos → el crédito 101 NO aparece (tiene pending)
-//   2. Encontramos crédito 205 y 310 como candidatos
-//   3. Distribuimos Q20,000 entre crédito 205 y 310 (restando a CUBE en cada uno)
-//   4. AHORA sí limpiamos crédito 101:
-//      - Sacamos a inversionista 42
-//      - Le devolvemos Q20,000 a CUBE
-//      - Recalculamos cuotas de los que quedan
+// 1. Recibir credito_id(s)
+// 2. Buscar en el espejo los registros con status != "completado"
+// 3. Agrupar por crédito: qué inversionistas sacar y monto total a devolver a CUBE
+// 4. Para cada crédito:
+//    a. Traer inversionistas actuales del padre
+//    b. Sacar a los pendientes del array
+//    c. Devolver el monto total a CUBE (crear CUBE si no existía)
+//    d. Recalcular cuotas
+//    e. Nuke & rebuild en padre y espejo (todos "completado")
 // ========================================
 
-export const replaceInvestorCredit = async ({ body, set }: any) => {
+export const returnPendingInvestorsToCube = async ({ body, set }: any) => {
   try {
     // ================================================================
     // PASO 1: VALIDAR SCHEMA
     // Acepta un solo credito_id o un arreglo de credito_ids.
-    // Estos son los créditos de donde se van a SACAR los inversionistas
-    // pendientes para reubicarlos.
     // ================================================================
-    const parseResult = replaceInvestorCreditSchema.safeParse(body);
+    const parseResult = returnPendingToCubeSchema.safeParse(body);
     if (!parseResult.success) {
       set.status = 400;
       return {
@@ -200,27 +175,15 @@ export const replaceInvestorCredit = async ({ body, set }: any) => {
       : [creditosInput];
 
     // ================================================================
-    // PASO 2: BUSCAR INVERSIONISTAS PENDIENTES EN LOS CRÉDITOS INDICADOS
-    // Traemos todos los registros de creditos_inversionistas_espejo que
-    // NO tienen status "completado". Estos son los que vamos a revertir.
-    //
-    // De cada registro necesitamos:
-    //   - inversionista_id: quién es
-    //   - credito_id: de qué crédito lo vamos a sacar
-    //   - monto_aportado: cuánto tiene (para redistribuir)
-    //   - status: para saber el tipo_operacion (reinversion o compra_cartera)
-    //   - porcentaje_cash_in / porcentaje_participacion: para reusar
+    // PASO 2: BUSCAR INVERSIONISTAS PENDIENTES
+    // Todos los registros del espejo con status != "completado"
+    // en los créditos indicados.
     // ================================================================
     const pendientes = await db
       .select({
-        id: creditos_inversionistas_espejo.id,
         credito_id: creditos_inversionistas_espejo.credito_id,
         inversionista_id: creditos_inversionistas_espejo.inversionista_id,
         monto_aportado: creditos_inversionistas_espejo.monto_aportado,
-        porcentaje_cash_in: creditos_inversionistas_espejo.porcentaje_cash_in,
-        porcentaje_participacion_inversionista:
-          creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
-        status: creditos_inversionistas_espejo.status,
       })
       .from(creditos_inversionistas_espejo)
       .where(
@@ -239,475 +202,187 @@ export const replaceInvestorCredit = async ({ body, set }: any) => {
     }
 
     // ================================================================
-    // PASO 3: AGRUPAR POR INVERSIONISTA
-    // Un mismo inversionista puede estar pendiente en varios créditos.
-    // Agrupamos para saber:
-    //   - Monto total a redistribuir (suma de todos sus montos pendientes)
-    //   - Tipo de operación (reinversion o compra_cartera)
-    //   - Porcentajes (tomamos los del primer registro encontrado)
-    //   - De qué créditos hay que sacarlo (para la limpieza posterior)
-    //
-    // Ejemplo:
-    //   Inversionista 42 pendiente en crédito 101 (Q15,000) y crédito 102 (Q10,000)
-    //   → montoTotal = Q25,000
-    //   → creditosOrigen = [101, 102]
+    // PASO 3: AGRUPAR POR CRÉDITO
+    // Por cada crédito: qué inversionistas hay que sacar y cuánto
+    // monto total se devuelve a CUBE.
     // ================================================================
-    const porInversionista = new Map<
+    const porCredito = new Map<
       number,
       {
-        inversionista_id: number;
-        montoTotal: Big;
-        tipo_operacion: "reinversion" | "compra_cartera";
-        porcentaje_cash_in: string;
-        porcentaje_inversion: string;
-        creditosOrigen: { credito_id: number; monto: string }[];
+        monto_total_a_cube: Big;
+        inversionistas_a_sacar: Set<number>;
       }
     >();
 
     for (const p of pendientes) {
-      if (!porInversionista.has(p.inversionista_id)) {
-        porInversionista.set(p.inversionista_id, {
-          inversionista_id: p.inversionista_id,
-          montoTotal: new Big(0),
-          tipo_operacion:
-            p.status === "pendiente_reinversion"
-              ? "reinversion"
-              : "compra_cartera",
-          porcentaje_cash_in: p.porcentaje_cash_in,
-          porcentaje_inversion: p.porcentaje_participacion_inversionista,
-          creditosOrigen: [],
+      if (!porCredito.has(p.credito_id)) {
+        porCredito.set(p.credito_id, {
+          monto_total_a_cube: new Big(0),
+          inversionistas_a_sacar: new Set(),
         });
       }
-      const entry = porInversionista.get(p.inversionista_id)!;
-      entry.montoTotal = entry.montoTotal.plus(p.monto_aportado);
-      entry.creditosOrigen.push({
-        credito_id: p.credito_id,
-        monto: p.monto_aportado,
-      });
+      const entry = porCredito.get(p.credito_id)!;
+      entry.monto_total_a_cube = entry.monto_total_a_cube.plus(p.monto_aportado);
+      entry.inversionistas_a_sacar.add(p.inversionista_id);
     }
 
     console.log(
-      `🔄 ${porInversionista.size} inversionista(s) pendiente(s) a reubicar`,
+      `🧹 ${porCredito.size} crédito(s) a limpiar`,
     );
 
-    const resultadosNuevos: any[] = [];
-    const resultadosLimpieza: any[] = [];
-    const errores: any[] = [];
+    const resultados: any[] = [];
 
     // ================================================================
-    // PASO 4: PARA CADA INVERSIONISTA PENDIENTE, BUSCAR NUEVOS CRÉDITOS
-    // Y DISTRIBUIR SU MONTO
-    //
-    // IMPORTANTE: Hacemos esto ANTES de limpiar los créditos viejos.
-    // ¿Por qué? Porque getCreditCandidates() filtra créditos con espejo
-    // en status pendiente. Si borramos los pendings primero, esos mismos
-    // créditos aparecerían como candidatos y el inversionista podría
-    // terminar en el mismo crédito del que lo sacamos.
-    //
-    // Al hacer el GET primero, garantizamos que los candidatos sean
-    // créditos DIFERENTES a los que ya tienen pendings.
+    // PASO 4: LIMPIAR CADA CRÉDITO
+    // - Sacar a los inversionistas pendientes
+    // - Devolver el monto total a CUBE (crear CUBE si no existía)
+    // - Recalcular cuotas y nuke & rebuild en padre y espejo
     // ================================================================
     await db.transaction(async (tx) => {
-      for (const [, invData] of porInversionista) {
-        const {
-          inversionista_id,
-          montoTotal,
-          tipo_operacion,
-          porcentaje_cash_in,
-          porcentaje_inversion,
-          creditosOrigen,
-        } = invData;
+      for (const [creditoId, info] of porCredito) {
+        const { monto_total_a_cube, inversionistas_a_sacar } = info;
 
-        console.log(
-          `\n📊 Procesando inversionista ${inversionista_id} - Q${montoTotal} desde ${creditosOrigen.length} crédito(s)`,
+        // ── Traer data fresca del crédito ──
+        const [creditoData] = await tx
+          .select({
+            credito_id: creditos.credito_id,
+            cuota: creditos.cuota,
+            porcentaje_interes: creditos.porcentaje_interes,
+            seguro_10_cuotas: creditos.seguro_10_cuotas,
+            gps: creditos.gps,
+            membresias_pago: creditos.membresias_pago,
+            numero_credito_sifco: creditos.numero_credito_sifco,
+          })
+          .from(creditos)
+          .where(eq(creditos.credito_id, creditoId))
+          .limit(1);
+
+        if (!creditoData) continue;
+
+        // ── Traer inversionistas actuales del padre ──
+        const invActuales = await tx
+          .select({
+            inversionista_id: creditos_inversionistas.inversionista_id,
+            monto_aportado: creditos_inversionistas.monto_aportado,
+            porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
+            porcentaje_participacion_inversionista:
+              creditos_inversionistas.porcentaje_participacion_inversionista,
+            fecha_inicio_participacion:
+              creditos_inversionistas.fecha_inicio_participacion,
+          })
+          .from(creditos_inversionistas)
+          .where(eq(creditos_inversionistas.credito_id, creditoId));
+
+        // ── Armar array SIN los pendientes y CON CUBE restaurado ──
+        const arrayLimpio: {
+          inversionista_id: number;
+          monto_aportado: Big;
+          porcentaje_cash_in: Big;
+          porcentaje_inversion: Big;
+          fecha_inicio_participacion: string;
+        }[] = [];
+
+        for (const inv of invActuales) {
+          if (inversionistas_a_sacar.has(inv.inversionista_id)) {
+            continue;
+          }
+          if (inv.inversionista_id === CUBE_INVESTMENT_ID) {
+            arrayLimpio.push({
+              inversionista_id: inv.inversionista_id,
+              monto_aportado: new Big(inv.monto_aportado).plus(monto_total_a_cube),
+              porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
+              porcentaje_inversion: new Big(
+                inv.porcentaje_participacion_inversionista,
+              ),
+              fecha_inicio_participacion: inv.fecha_inicio_participacion,
+            });
+          } else {
+            arrayLimpio.push({
+              inversionista_id: inv.inversionista_id,
+              monto_aportado: new Big(inv.monto_aportado),
+              porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
+              porcentaje_inversion: new Big(
+                inv.porcentaje_participacion_inversionista,
+              ),
+              fecha_inicio_participacion: inv.fecha_inicio_participacion,
+            });
+          }
+        }
+
+        // ── Si CUBE no existía, crearlo con el monto devuelto ──
+        const cubeEnArray = arrayLimpio.some(
+          (inv) => inv.inversionista_id === CUBE_INVESTMENT_ID,
+        );
+        if (!cubeEnArray) {
+          arrayLimpio.push({
+            inversionista_id: CUBE_INVESTMENT_ID,
+            monto_aportado: monto_total_a_cube,
+            porcentaje_cash_in: new Big(0),
+            porcentaje_inversion: new Big(100),
+            fecha_inicio_participacion: new Date().toISOString().split("T")[0],
+          });
+        }
+
+        // ── Recalcular y nuke & rebuild PADRE ──
+        const dataPadre = recalcularInversionistas(
+          arrayLimpio,
+          creditoData,
+          creditoId,
+          creditoData.numero_credito_sifco,
         );
 
-        // ── 4a. Buscar NUEVOS créditos candidatos ──
-        // El GET no traerá los créditos viejos porque tienen pendings
-        const candidatos = await getCreditCandidates(montoTotal.toNumber());
+        await tx
+          .delete(creditos_inversionistas)
+          .where(eq(creditos_inversionistas.credito_id, creditoId));
 
-        if (candidatos.length === 0) {
-          errores.push({
-            inversionista_id,
-            razon: "No se encontraron créditos candidatos nuevos",
-          });
-          continue;
+        if (dataPadre.length > 0) {
+          await tx.insert(creditos_inversionistas).values(dataPadre);
         }
 
-        // ── 4b. Distribuir el monto entre los nuevos créditos ──
-        // Misma lógica que addInvestorToCredit: ir crédito por crédito,
-        // tomar lo que CUBE tenga disponible, pasar al siguiente si no alcanza.
-        let montoRestante = new Big(montoTotal);
-        const porcCashIn = new Big(porcentaje_cash_in);
-        const porcInversion = new Big(porcentaje_inversion);
+        // ── Nuke & rebuild ESPEJO (todo "completado") ──
+        const dataEspejo = dataPadre.map((inv) => ({
+          ...inv,
+          status: "completado" as const,
+          updated_at: new Date(),
+        }));
 
-        const statusEspejo =
-          tipo_operacion === "reinversion"
-            ? "pendiente_reinversion"
-            : "pendiente_compra_cartera";
+        await tx
+          .delete(creditos_inversionistas_espejo)
+          .where(eq(creditos_inversionistas_espejo.credito_id, creditoId));
 
-        for (const candidato of candidatos) {
-          if (montoRestante.lte(0)) break;
-
-          const { credito_id, numero_credito_sifco, credito_completo } = candidato;
-
-          if (!credito_completo) continue;
-
-          const { credito: creditoRaw, inversionistas_detalle } = credito_completo;
-
-          const creditoData = {
-            cuota: creditoRaw.cuota,
-            porcentaje_interes: creditoRaw.porcentaje_interes,
-            seguro_10_cuotas: creditoRaw.seguro_10_cuotas,
-            gps: creditoRaw.gps,
-            membresias_pago: creditoRaw.membresias_pago,
-          };
-
-          const inversionistasActuales = inversionistas_detalle.map((inv: any) => ({
-            inversionista_id: inv.inversionista_id,
-            monto_aportado: inv.monto_aportado,
-            porcentaje_cash_in: inv.porcentaje_cash_in,
-            porcentaje_participacion_inversionista:
-              inv.porcentaje_participacion_inversionista,
-            fecha_inicio_participacion: inv.fecha_inicio_participacion,
-          }));
-
-          // ── Buscar CUBE en el nuevo crédito ──
-          const cubeActual = inversionistasActuales.find(
-            (inv: any) => inv.inversionista_id === CUBE_INVESTMENT_ID,
-          );
-
-          if (!cubeActual) continue;
-
-          const montoCubeActual = new Big(cubeActual.monto_aportado);
-
-          // ── Cuánto tomar: lo que CUBE tenga o lo que falta, lo que sea menor ──
-          const montoParaEsteCredito = montoRestante.gt(montoCubeActual)
-            ? montoCubeActual
-            : montoRestante;
-
-          // ── Armar nuevo array de inversionistas para el nuevo crédito ──
-          const nuevoArray: {
-            inversionista_id: number;
-            monto_aportado: Big;
-            porcentaje_cash_in: Big;
-            porcentaje_inversion: Big;
-            fecha_inicio_participacion: string;
-          }[] = [];
-
-          for (const inv of inversionistasActuales) {
-            if (inv.inversionista_id === CUBE_INVESTMENT_ID) {
-              const nuevoMontoCube = montoCubeActual.minus(montoParaEsteCredito);
-              if (nuevoMontoCube.gt(0)) {
-                nuevoArray.push({
-                  inversionista_id: inv.inversionista_id,
-                  monto_aportado: nuevoMontoCube,
-                  porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
-                  porcentaje_inversion: new Big(
-                    inv.porcentaje_participacion_inversionista,
-                  ),
-                  fecha_inicio_participacion: inv.fecha_inicio_participacion,
-                });
-              }
-            } else if (inv.inversionista_id === inversionista_id) {
-              nuevoArray.push({
-                inversionista_id: inv.inversionista_id,
-                monto_aportado: new Big(inv.monto_aportado).plus(montoParaEsteCredito),
-                porcentaje_cash_in: porcCashIn,
-                porcentaje_inversion: porcInversion,
-                fecha_inicio_participacion: inv.fecha_inicio_participacion,
-              });
-            } else {
-              nuevoArray.push({
-                inversionista_id: inv.inversionista_id,
-                monto_aportado: new Big(inv.monto_aportado),
-                porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
-                porcentaje_inversion: new Big(
-                  inv.porcentaje_participacion_inversionista,
-                ),
-                fecha_inicio_participacion: inv.fecha_inicio_participacion,
-              });
-            }
-          }
-
-          // Si el inversionista no existía en este crédito, agregarlo
-          const yaExiste = nuevoArray.some(
-            (inv) => inv.inversionista_id === inversionista_id,
-          );
-          if (!yaExiste) {
-            nuevoArray.push({
-              inversionista_id,
-              monto_aportado: montoParaEsteCredito,
-              porcentaje_cash_in: porcCashIn,
-              porcentaje_inversion: porcInversion,
-              fecha_inicio_participacion: new Date().toISOString().split("T")[0],
-            });
-          }
-
-          // ── Recalcular y nuke & rebuild en PADRE ──
-          const dataPadre = recalcularInversionistas(
-            nuevoArray,
-            creditoData,
-            credito_id,
-            numero_credito_sifco,
-          );
-
-          await tx
-            .delete(creditos_inversionistas)
-            .where(eq(creditos_inversionistas.credito_id, credito_id));
-
-          if (dataPadre.length > 0) {
-            await tx.insert(creditos_inversionistas).values(dataPadre);
-          }
-
-          // ── Recalcular y nuke & rebuild en ESPEJO ──
-          const parentCuotas = new Map(
-            dataPadre.map((p) => [p.inversionista_id, p.cuota_inversionista]),
-          );
-
-          const dataEspejo = recalcularInversionistas(
-            nuevoArray,
-            creditoData,
-            credito_id,
-            numero_credito_sifco,
-          );
-
-          const dataEspejoConStatus = dataEspejo.map((inv) => ({
-            ...inv,
-            cuota_inversionista:
-              parentCuotas.get(inv.inversionista_id) ??
-              inv.cuota_inversionista,
-            status: (inv.inversionista_id === inversionista_id
-              ? statusEspejo
-              : "completado") as
-              | "pendiente_reinversion"
-              | "pendiente_compra_cartera"
-              | "completado",
-            updated_at: new Date(),
-          }));
-
-          await tx
-            .delete(creditos_inversionistas_espejo)
-            .where(eq(creditos_inversionistas_espejo.credito_id, credito_id));
-
-          if (dataEspejoConStatus.length > 0) {
-            await tx
-              .insert(creditos_inversionistas_espejo)
-              .values(dataEspejoConStatus);
-          }
-
-          montoRestante = montoRestante.minus(montoParaEsteCredito);
-
-          resultadosNuevos.push({
-            credito_id,
-            numero_credito_sifco,
-            inversionista_id,
-            monto_asignado: montoParaEsteCredito.toString(),
-            cube_eliminado: !nuevoArray.some(
-              (inv) => inv.inversionista_id === CUBE_INVESTMENT_ID,
-            ),
-          });
-
-          console.log(
-            `   ✅ Nuevo crédito ${numero_credito_sifco} - asignado Q${montoParaEsteCredito} - quedan Q${montoRestante}`,
-          );
+        if (dataEspejo.length > 0) {
+          await tx.insert(creditos_inversionistas_espejo).values(dataEspejo);
         }
 
-        // ================================================================
-        // PASO 5: LIMPIAR LOS CRÉDITOS VIEJOS
-        // AHORA que ya asignamos los nuevos créditos, volvemos a los viejos
-        // y limpiamos:
-        //   - Sacamos al inversionista pendiente del padre y espejo
-        //   - Le devolvemos el monto a CUBE
-        //   - Recalculamos las cuotas de los que quedan
-        //
-        // Para cada crédito origen:
-        //   a. Traer inversionistas actuales del padre
-        //   b. Quitar al inversionista pendiente del array
-        //   c. Sumarle su monto a CUBE (devolverle lo que le quitamos)
-        //   d. Recalcular todo
-        //   e. Nuke & rebuild en padre y espejo
-        // ================================================================
-        for (const origen of creditosOrigen) {
-          const { credito_id: origenCreditoId, monto: montoOrigen } = origen;
+        resultados.push({
+          credito_id: creditoId,
+          numero_credito_sifco: creditoData.numero_credito_sifco,
+          inversionistas_removidos: Array.from(inversionistas_a_sacar),
+          monto_devuelto_a_cube: monto_total_a_cube.toString(),
+          inversionistas_restantes: dataPadre.length,
+        });
 
-          console.log(
-            `   🧹 Limpiando crédito origen ${origenCreditoId} - devolviendo Q${montoOrigen} a CUBE`,
-          );
-
-          // ── Traer data fresca del crédito origen ──
-          const [creditoOrigenData] = await tx
-            .select({
-              credito_id: creditos.credito_id,
-              cuota: creditos.cuota,
-              porcentaje_interes: creditos.porcentaje_interes,
-              seguro_10_cuotas: creditos.seguro_10_cuotas,
-              gps: creditos.gps,
-              membresias_pago: creditos.membresias_pago,
-              numero_credito_sifco: creditos.numero_credito_sifco,
-            })
-            .from(creditos)
-            .where(eq(creditos.credito_id, origenCreditoId))
-            .limit(1);
-
-          if (!creditoOrigenData) continue;
-
-          // ── Traer inversionistas actuales del padre ──
-          const invActualesOrigen = await tx
-            .select({
-              inversionista_id: creditos_inversionistas.inversionista_id,
-              monto_aportado: creditos_inversionistas.monto_aportado,
-              porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
-              porcentaje_participacion_inversionista:
-                creditos_inversionistas.porcentaje_participacion_inversionista,
-              fecha_inicio_participacion:
-                creditos_inversionistas.fecha_inicio_participacion,
-            })
-            .from(creditos_inversionistas)
-            .where(eq(creditos_inversionistas.credito_id, origenCreditoId));
-
-          // ── Armar array SIN el inversionista pendiente y CON CUBE restaurado ──
-          const arrayLimpio: {
-            inversionista_id: number;
-            monto_aportado: Big;
-            porcentaje_cash_in: Big;
-            porcentaje_inversion: Big;
-            fecha_inicio_participacion: string;
-          }[] = [];
-
-          for (const inv of invActualesOrigen) {
-            if (inv.inversionista_id === inversionista_id) {
-              // ── Quitar al inversionista pendiente ──
-              // No lo incluimos en el array, se va del crédito
-              continue;
-            } else if (inv.inversionista_id === CUBE_INVESTMENT_ID) {
-              // ── CUBE: devolverle el monto del inversionista que sale ──
-              arrayLimpio.push({
-                inversionista_id: inv.inversionista_id,
-                monto_aportado: new Big(inv.monto_aportado).plus(montoOrigen),
-                porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
-                porcentaje_inversion: new Big(
-                  inv.porcentaje_participacion_inversionista,
-                ),
-                fecha_inicio_participacion: inv.fecha_inicio_participacion,
-              });
-            } else {
-              // ── Los demás: se quedan igual ──
-              arrayLimpio.push({
-                inversionista_id: inv.inversionista_id,
-                monto_aportado: new Big(inv.monto_aportado),
-                porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
-                porcentaje_inversion: new Big(
-                  inv.porcentaje_participacion_inversionista,
-                ),
-                fecha_inicio_participacion: inv.fecha_inicio_participacion,
-              });
-            }
-          }
-
-          // ── Si CUBE no existía (raro pero por seguridad), crearlo con el monto devuelto ──
-          const cubeEnArray = arrayLimpio.some(
-            (inv) => inv.inversionista_id === CUBE_INVESTMENT_ID,
-          );
-          if (!cubeEnArray) {
-            arrayLimpio.push({
-              inversionista_id: CUBE_INVESTMENT_ID,
-              monto_aportado: new Big(montoOrigen),
-              porcentaje_cash_in: new Big(0),
-              porcentaje_inversion: new Big(100),
-              fecha_inicio_participacion: "2025-12-01",
-            });
-          }
-
-          // ── Recalcular y nuke & rebuild PADRE del crédito origen ──
-          const dataPadreOrigen = recalcularInversionistas(
-            arrayLimpio,
-            creditoOrigenData,
-            origenCreditoId,
-            creditoOrigenData.numero_credito_sifco,
-          );
-
-          await tx
-            .delete(creditos_inversionistas)
-            .where(eq(creditos_inversionistas.credito_id, origenCreditoId));
-
-          if (dataPadreOrigen.length > 0) {
-            await tx.insert(creditos_inversionistas).values(dataPadreOrigen);
-          }
-
-          // ── Recalcular y nuke & rebuild ESPEJO del crédito origen ──
-          // Solo los inversionistas que quedan (sin el pendiente), todos con status "completado"
-          const parentCuotasOrigen = new Map(
-            dataPadreOrigen.map((p) => [
-              p.inversionista_id,
-              p.cuota_inversionista,
-            ]),
-          );
-
-          const dataEspejoOrigen = recalcularInversionistas(
-            arrayLimpio,
-            creditoOrigenData,
-            origenCreditoId,
-            creditoOrigenData.numero_credito_sifco,
-          );
-
-          const dataEspejoOrigenFinal = dataEspejoOrigen.map((inv) => ({
-            ...inv,
-            cuota_inversionista:
-              parentCuotasOrigen.get(inv.inversionista_id) ??
-              inv.cuota_inversionista,
-            status: "completado" as const,
-            updated_at: new Date(),
-          }));
-
-          await tx
-            .delete(creditos_inversionistas_espejo)
-            .where(
-              eq(creditos_inversionistas_espejo.credito_id, origenCreditoId),
-            );
-
-          if (dataEspejoOrigenFinal.length > 0) {
-            await tx
-              .insert(creditos_inversionistas_espejo)
-              .values(dataEspejoOrigenFinal);
-          }
-
-          resultadosLimpieza.push({
-            credito_id: origenCreditoId,
-            numero_credito_sifco: creditoOrigenData.numero_credito_sifco,
-            inversionista_removido: inversionista_id,
-            monto_devuelto_a_cube: montoOrigen,
-            inversionistas_restantes: dataPadreOrigen.length,
-          });
-
-          console.log(
-            `   🧹 Crédito ${creditoOrigenData.numero_credito_sifco} limpio - ${dataPadreOrigen.length} inversionistas restantes`,
-          );
-        }
+        console.log(
+          `   🧹 Crédito ${creditoData.numero_credito_sifco} limpio - ${inversionistas_a_sacar.size} removido(s), Q${monto_total_a_cube} a CUBE, ${dataPadre.length} restantes`,
+        );
       }
     });
 
     // ================================================================
-    // PASO 6: RESPUESTA FINAL
-    // Devuelve el detalle de:
-    //   - nuevos_creditos: a dónde fueron los inversionistas
-    //   - creditos_limpiados: de dónde se sacaron y cómo quedaron
-    //   - errores: si algo falló
+    // PASO 5: RESPUESTA
     // ================================================================
     set.status = 200;
     return {
       success: true,
-      message: `Reubicados: ${resultadosNuevos.length} nuevos, ${resultadosLimpieza.length} limpiados, ${errores.length} errores`,
-      nuevos_creditos: resultadosNuevos,
-      creditos_limpiados: resultadosLimpieza,
-      errores,
+      message: `${resultados.length} crédito(s) limpiado(s)`,
+      creditos_limpiados: resultados,
     };
   } catch (error) {
-    console.error("[replaceInvestorCredit] Error:", error);
+    console.error("[returnPendingInvestorsToCube] Error:", error);
     set.status = 500;
     return {
       success: false,
-      message: "Error al reubicar inversionistas",
+      message: "Error al limpiar pendientes",
       error: error instanceof Error ? error.message : String(error),
     };
   }

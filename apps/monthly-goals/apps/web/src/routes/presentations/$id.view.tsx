@@ -143,15 +143,21 @@ function getProgressPercentage(target: string, achieved: string, isInverse?: boo
 	const targetNum = Number.parseFloat(target);
 	const achievedNum = Number.parseFloat(achieved);
 
-	if (targetNum <= 0) return 0;
-
 	if (isInverse) {
+		if (targetNum === 0 && achievedNum === 0) {
+			return 100;
+		}
+
+		if (targetNum <= 0) return 0;
+
 		if (achievedNum <= targetNum) {
 			return 100;
 		}
 
 		return Math.max((targetNum / achievedNum) * 100, 0);
 	}
+
+	if (targetNum <= 0) return 0;
 
 	return (achievedNum / targetNum) * 100;
 }

@@ -26,6 +26,8 @@ interface Inversionista {
   porcentaje_inversion: number;
   monto_aportado: number;
   fecha_inicio_participacion?: string;
+  cuota_inversionista?: number;
+  tipo_inversion?: "compra_cartera" | "reinversion";
 }
 
 interface Rubro {
@@ -427,6 +429,7 @@ const creditosInversionistasData: InversionistaData[] = creditData.inversionista
   console.log(`   ¿Es este inversionista el mayor? ${esMayor ? '✅ SÍ' : '❌ NO'}`);
   
   // 🔥 PRIORIDAD 1: Si viene cuota_inversionista desde el frontend, usarla
+  let cuotaInversionista: Big;
   if (inv.cuota_inversionista !== undefined && inv.cuota_inversionista !== null) {
     cuotaInversionista = new Big(inv.cuota_inversionista);
     console.log(`   🚀 FRONTEND: Usando cuota enviada desde el front: Q${cuotaInversionista.toFixed(2)}`);
@@ -445,6 +448,7 @@ const creditosInversionistasData: InversionistaData[] = creditData.inversionista
     console.log(`   Fórmula: ${cuotaBase.toFixed(2)} + ${seguro.toFixed(2)} + ${membresias.toFixed(2)}`);
   } else {
     console.log(`   📍 Inversionista normal (no es el mayor)`);
+    cuotaInversionista = cuotaBase;
     console.log(`   Cuota Final = Cuota Base: Q${cuotaInversionista.toFixed(2)}`);
     console.log(`   (No se suman cargos)`);
   }

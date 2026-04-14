@@ -524,8 +524,8 @@ const updateInvestors = async (
   gps: number,
   targetTable: any = creditos_inversionistas,
   parentCuotas?: Map<number, string>,
-): Promise<void> => {
-  if (!inversionistas || inversionistas.length === 0) return;
+): Promise<Map<number, string>> => {
+  if (!inversionistas || inversionistas.length === 0) return new Map();
 
   // Eliminar inversionistas existentes
   await db
@@ -748,6 +748,15 @@ const updateInvestors = async (
   if (creditosInversionistasData.length > 0) {
     await db.insert(targetTable).values(creditosInversionistasData);
   }
+
+  // 🔥 CAPTURAR Y DEVOLVER MAP DE CUOTAS PARA SINCRONIZACIÓN CON ESPEJO
+  const cuotasMap = new Map<number, string>(
+    creditosInversionistasData.map((inv) => [
+      inv.inversionista_id,
+      String(inv.cuota_inversionista),
+    ])
+  );
+  return cuotasMap;
 };
 
 // ========================================
@@ -971,8 +980,9 @@ export const updateCredit = async ({ body, set }: any) => {
         
 
     // 9. Actualizar inversionistas (Principal)
+    let parentCuotas: Map<number, string> = new Map();
     if (inversionistas && inversionistas.length > 0) {
-      await updateInvestors(
+      parentCuotas = await updateInvestors(
         credito_id,
         inversionistas,
         updateFields,
@@ -988,15 +998,21 @@ export const updateCredit = async ({ body, set }: any) => {
     // 10. Actualizar inversionistas (Espejo)
     console.log(`🪞 [ESPEJO] inversionistas_espejo recibidos: ${JSON.stringify(inversionistas_espejo?.length ?? 'undefined')}`);
     if (inversionistas_espejo && inversionistas_espejo.length > 0) {
-      // 🔒 Sincronización forzada: el espejo siempre usa el monto_aportado del padre.
+      // 🔒 Sincronización forzada: el espejo siempre usa el monto_aportado Y cuota_inversionista del padre.
       // Esto es la fuente de verdad, independiente de lo que envíe el frontend.
       const principalMontos = new Map(
         (inversionistas || []).map((inv) => [inv.inversionista_id, inv.monto_aportado])
+      );
+      
+      // 🔥 NUEVO: Sincronizar cuotas capturadas del padre
+      const principalCuotas = new Map(
+        (inversionistas || []).map((inv) => [inv.inversionista_id, inv.cuota_inversionista ?? 0])
       );
 
       const espejoSincronizado = inversionistas_espejo.map((inv) => ({
         ...inv,
         monto_aportado: principalMontos.get(inv.inversionista_id) ?? inv.monto_aportado,
+        cuota_inversionista: principalCuotas.get(inv.inversionista_id) ?? inv.cuota_inversionista, // 🔥 NUEVO
       }));
 
       console.log(`🪞 [ESPEJO] Iniciando updateInvestors para credito_id=${credito_id} con ${espejoSincronizado.length} inversionistas`);
@@ -1011,6 +1027,7 @@ export const updateCredit = async ({ body, set }: any) => {
           Number(updateFields.membresias_pago ?? current.membresias_pago),
           Number(updateFields.gps ?? current.gps),
           creditos_inversionistas_espejo,
+          parentCuotas, // 🔥 NUEVO: Pasar las cuotas capturadas del padre
         );
         console.log(`🪞 [ESPEJO] ✅ updateInvestors completado para espejo`);
       } catch (espejoError) {

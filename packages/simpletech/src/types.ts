@@ -1,9 +1,17 @@
 /**
  * Credenciales de autenticacion para la API de SimpleTech
+ * Podes usar un token ya obtenido, o username+password (el cliente obtiene el token automaticamente)
  */
-export interface SimpleTechCredentials {
-  /** Token de autorizacion (header token) */
-  token: string;
+export type SimpleTechCredentials =
+  | { token: string }
+  | { username: string; password: string };
+
+/**
+ * Respuesta del endpoint /auth.php/token
+ */
+export interface TokenResponse {
+  status: 'success' | 'error';
+  data: string;
 }
 
 /**
@@ -143,24 +151,39 @@ export interface SendRequest {
 }
 
 /**
- * Resultado individual por mensaje en la respuesta
+ * Resultado individual por mensaje en la respuesta (formato raw de la API)
+ */
+export interface SendResultItemRaw {
+  /** Numero destino */
+  number: string;
+  /** ID del mensaje asignado (objeto con convId) */
+  messageId: { convId: string } | string | null;
+  /** Descripcion del error (vacio si fue exitoso) */
+  error: string;
+}
+
+/**
+ * Resultado individual normalizado (messageId como string)
  */
 export interface SendResultItem {
   /** Numero destino */
   number: string;
-  /** Canal utilizado */
-  channel: string;
-  /** ID del mensaje asignado (vacio si hubo error) */
+  /** Canal utilizado (se completa desde el request, no viene en response) */
+  channel?: string;
+  /** ID de conversacion normalizado (antes convId) */
   messageId: string;
   /** Descripcion del error (vacio si fue exitoso) */
   error: string;
 }
 
 /**
- * Respuesta de la API de SimpleTech
+ * Respuesta raw de la API de SimpleTech
  */
 export interface SendResponse {
-  results: SendResultItem[];
+  status: 'success' | 'error';
+  data: {
+    results: SendResultItemRaw[];
+  };
 }
 
 /**
@@ -173,4 +196,221 @@ export interface SimpleTechResult {
   results: SendResultItem[];
   /** Mensajes que fallaron (con error no vacio) */
   failed: SendResultItem[];
+}
+
+// =============================================================================
+// getMessageInfo
+// =============================================================================
+
+/**
+ * Estado de entrega del mensaje
+ * - 0: No recibido
+ * - 1: Entregado
+ * - 2: Visto
+ * - 99: Error
+ */
+export type MessageStatus = 0 | 1 | 2 | 99;
+
+/**
+ * Request para consultar informacion de mensajes
+ */
+export interface GetMessageInfoRequest {
+  /** IDs de mensaje a consultar (obtenidos de la respuesta de send) */
+  messageIds: string[];
+}
+
+/**
+ * Informacion de un mensaje consultado
+ * (formato real devuelto por la API de WittySuite)
+ */
+export interface MessageInfo {
+  /** ID del mensaje (numero en la respuesta real) */
+  messageId: number;
+  /** Canal utilizado */
+  channel: Channel;
+  /** Identificacion del bot origen (alias: fromNumber en doc) */
+  serviceIdentifier: string;
+  /** Identificacion del cliente destino (alias: toNumber en doc) */
+  contactIdentifier: string;
+  /** Tipo de mensaje */
+  type: MessageType;
+  /** Datos enviados (texto del mensaje o payload segun tipo) */
+  data: string;
+  /** Estado de entrega: 0=no recibido, 1=entregado, 2=visto, 99=error */
+  status: MessageStatus;
+  /** Timestamp en que fue recibido por Wittybots */
+  arrived?: string;
+  /** Timestamp del ultimo cambio de estado */
+  statusTimeStamp?: string;
+  /** Tipo de origen (ej: "E") */
+  fromType?: string;
+  /** Agente destino */
+  toAgent?: number;
+  /** Agente externo destino */
+  toExternalAgent?: number;
+  /** ID del servicio */
+  idService?: number;
+  /** ID del contacto en el chat */
+  idChatUserContact?: number;
+  /** Costo del envio */
+  cost?: number;
+  /** Indica si el destino es otro bot */
+  toBot?: boolean;
+}
+
+/**
+ * Respuesta de getMessageInfo envuelta en formato estandar de la API
+ */
+export interface GetMessageInfoResponse {
+  status: 'success' | 'error';
+  data: {
+    messages: MessageInfo[];
+  };
+}
+
+// =============================================================================
+// sendTemplate
+// =============================================================================
+
+/**
+ * Tipos de header soportados por WhatsApp templates
+ */
+export type TemplateHeaderType = 'text' | 'image' | 'video' | 'document';
+
+/**
+ * Header del template (opcional, segun el template creado en admin.wittybots.uy)
+ */
+export interface TemplateHeader {
+  /** Tipo de header */
+  type: TemplateHeaderType;
+  /** URL del recurso (para image/video/document) o texto (para text) */
+  url: string;
+  /** Nombre del archivo (opcional, solo para document) */
+  filename?: string;
+}
+
+/**
+ * Configuracion de campana programada
+ */
+export interface TemplateSchedule {
+  /** Fecha de inicio (YYYY-MM-DD) */
+  startDate: string;
+  /** Hora de inicio (HH:mm) */
+  startTime: string;
+  /** Hora de fin (HH:mm) */
+  endTime: string;
+  /** Timezone (ej: "-06:00" para Guatemala) */
+  timezone: string;
+}
+
+/**
+ * Mensaje individual de un envio de template
+ */
+export interface TemplateMessage {
+  /** Numero destino */
+  number: string;
+  /** Parametros del body del template (reemplazan {{1}}, {{2}}, ...) */
+  body?: string[];
+  /** Header opcional (si el template lo usa) */
+  header?: TemplateHeader;
+  /** Parametros de botones (si el template tiene botones CTA dinamicos) */
+  buttons?: string[];
+}
+
+/**
+ * Request de alto nivel para sendTemplate
+ */
+export interface SendTemplateRequest {
+  /** Nombre del template creado en admin.wittybots.uy */
+  templateName: string;
+  /** Lista de destinatarios con sus parametros */
+  messages: TemplateMessage[];
+  /** Canal (default: WHATSAPP) */
+  channel?: Channel;
+  /** Numero origen (default: primer bot registrado) */
+  serviceIdentifier?: string;
+  /** Campana programada (opcional, si no se manda inmediatamente) */
+  schedule?: TemplateSchedule;
+}
+
+/**
+ * Formato raw de un parametro individual (formato WittySuite)
+ */
+export type RawTemplateParameter =
+  | { message1: string }
+  | { message2: string }
+  | { message3: string }
+  | { message4: string }
+  | { message5: string }
+  | { message6: string }
+  | { message7: string }
+  | { message8: string }
+  | { message9: string }
+  | { message10: string }
+  | { headerType: string }
+  | { header: string }
+  | { filename: string; header: string }
+  | { button1: string }
+  | { button2: string }
+  | { button3: string };
+
+/**
+ * Mensaje raw del body de sendTemplate (formato que espera WittySuite)
+ */
+export interface RawTemplateMessage {
+  number: string;
+  parameters: RawTemplateParameter[];
+}
+
+/**
+ * Body raw enviado a /v2.php/sendTemplate
+ */
+export interface SendTemplateRawBody {
+  startDate: string;
+  startTime: string;
+  endTime: string;
+  timezone: string;
+  templateName: string;
+  channel?: string;
+  serviceIdentifier?: string;
+  messages: RawTemplateMessage[];
+}
+
+/**
+ * Resultado individual por destinatario (formato raw API)
+ */
+export interface SendTemplateResultItemRaw {
+  number: string;
+  templateMessageId: string;
+  error: string;
+}
+
+/**
+ * Respuesta raw de /v2.php/sendTemplate
+ * Puede venir como {results: [...]} o {status, data: {results: [...]}}
+ */
+export interface SendTemplateResponse {
+  status?: 'success' | 'error';
+  results?: SendTemplateResultItemRaw[];
+  data?: {
+    results?: SendTemplateResultItemRaw[];
+  };
+}
+
+/**
+ * Resultado individual normalizado
+ */
+export interface SendTemplateResultItem {
+  number: string;
+  templateMessageId: string;
+  error: string;
+}
+
+/**
+ * Resultado normalizado de sendTemplate
+ */
+export interface SendTemplateResult {
+  success: boolean;
+  results: SendTemplateResultItem[];
+  failed: SendTemplateResultItem[];
 }

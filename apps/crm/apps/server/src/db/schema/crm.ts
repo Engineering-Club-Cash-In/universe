@@ -32,6 +32,7 @@ export const leadSourceEnum = pgEnum("lead_source", [
 	"instagram",
 	"google",
 	"meta",
+	"linkedin",
 	"Whatsapp",
 	"agency",
 	"property",

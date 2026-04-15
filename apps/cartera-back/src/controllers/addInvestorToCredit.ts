@@ -1,12 +1,15 @@
 import Big from "big.js";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../database";
 import {
   creditos_inversionistas,
   creditos_inversionistas_espejo,
+  inversionistas,
+  platform_users,
 } from "../database/db";
 import z from "zod";
 import { getCreditCandidates } from "./assignCapital";
+import { sendInvestorAddedToCreditsNotification } from "@cci/email";
 
 // ========================================
 // ID fijo de CUBE INVESTMENTS S.A. en la tabla inversionistas.
@@ -592,7 +595,57 @@ export const addInvestorToCredit = async ({ body, set }: any) => {
     });
 
     // ================================================================
-    // PASO 4: RESPUESTA FINAL
+    // PASO 4: NOTIFICAR A LOS ADMINS POR CORREO
+    // Solo se notifica en COMPRA DE CARTERA (no en reinversión).
+    // Si hubo créditos procesados, mandamos un mail a todos los admins
+    // activos con el detalle de la operación. Va envuelto en try/catch
+    // para que un fallo de Resend NO rompa la respuesta del endpoint.
+    // ================================================================
+    if (tipo_operacion === "compra_cartera" && resultados.length > 0) {
+      try {
+        const adminUsers = await db
+          .select({ email: platform_users.email })
+          .from(platform_users)
+          .where(
+            and(
+              eq(platform_users.role, "ADMIN"),
+              eq(platform_users.is_active, true),
+            ),
+          );
+        const adminEmails = adminUsers.map((u) => u.email);
+
+        const [inv] = await db
+          .select({ nombre: inversionistas.nombre })
+          .from(inversionistas)
+          .where(eq(inversionistas.inversionista_id, inversionista_id));
+
+        const montoDistribuido = new Big(monto_aportado)
+          .minus(montoRestante)
+          .toString();
+
+        await sendInvestorAddedToCreditsNotification({
+          to: adminEmails,
+          inversionistaNombre: inv?.nombre ?? `Inversionista ${inversionista_id}`,
+          tipoOperacion: tipo_operacion,
+          montoTotal: new Big(monto_aportado).toString(),
+          montoDistribuido,
+          montoSinAsignar: montoRestante.toString(),
+          creditos: resultados.map((r) => ({
+            numero_credito_sifco: r.numero_credito_sifco,
+            monto_asignado: r.monto_asignado,
+            cube_eliminado: r.cube_eliminado,
+          })),
+        });
+      } catch (mailErr) {
+        console.error(
+          "[addInvestorToCredit] Error enviando notificación por correo:",
+          mailErr,
+        );
+      }
+    }
+
+    // ================================================================
+    // PASO 5: RESPUESTA FINAL
     // Devuelve un resumen completo de la distribución:
     //   - monto_total: lo que pidió el inversionista
     //   - monto_distribuido: lo que efectivamente se asignó a créditos

@@ -8,7 +8,7 @@ import {
   inversionistas,
   usuarios,
 } from "../database/db";
-import { eq, and, sql, inArray, notInArray } from "drizzle-orm";
+import { eq, and, sql, inArray, notInArray, gt } from "drizzle-orm";
 import Big from "big.js";
 
 // ============================================================
@@ -51,6 +51,7 @@ export interface CreditCandidate {
   inversionistas: InversionistaResult[];
   score: number;
   score_breakdown: ScoreBreakdown;
+  capital_evaluado: number;
   credito_completo?: FullCreditData;
 }
 
@@ -169,7 +170,9 @@ export async function getCreditCandidates(
         // La categoría debe contener 'cv vehiculo' o 'cv vehículo'
         sql`LOWER(${usuarios.categoria}) LIKE '%cv veh_culo%'`,
         // Solo activos
-        eq(creditos.statusCredit, "ACTIVO")
+        eq(creditos.statusCredit, "ACTIVO"),
+        // Descartar créditos sin interés (0%)
+        gt(creditos.porcentaje_interes, "0")
       )
     );
 
@@ -408,7 +411,10 @@ export async function getCreditCandidates(
     const crmBonus = numero_credito_sifco?.toLowerCase().startsWith("crm") ? SCORE_CRM_BONUS : 0;
     const formatoBonus = calcFormatoBonus(actualFormadoCredito, invs);
     const cuotasBonus = calcCuotasBonus(cuotasPagadas);
-    const proximityBonus = monto !== undefined ? calcCapitalProximityBonus(capitalActivoNum, monto) : 0;
+    
+    // Evaluar la proximidad utilizando específicamente el monto original aportado por Cube en lugar del capital total del crédito
+    const capitalParaEvaluar = cubeInv ? cubeInv.monto_aportado : capitalActivoNum;
+    const proximityBonus = monto !== undefined ? calcCapitalProximityBonus(capitalParaEvaluar, monto) : 0;
 
     const score = SCORE_BASE + crmBonus + formatoBonus + cuotasBonus + proximityBonus;
 
@@ -433,11 +439,22 @@ export async function getCreditCandidates(
         proximidad: proximityBonus,
         total: score,
       },
+      capital_evaluado: capitalParaEvaluar,
     });
   }
 
-  // Ordenar DESC por score
-  candidates.sort((a, b) => b.score - a.score);
+  // Ordenar DESC por score. En caso de empate, gana el capital más cercano al monto
+  candidates.sort((a, b) => {
+    if (b.score !== a.score) {
+      return b.score - a.score;
+    }
+    if (monto !== undefined) {
+      const diffA = Math.abs(a.capital_evaluado - monto);
+      const diffB = Math.abs(b.capital_evaluado - monto);
+      return diffA - diffB;
+    }
+    return 0;
+  });
 
   // Si se especificó un límite, cortar antes de las queries de relaciones
   if (limit !== undefined) {

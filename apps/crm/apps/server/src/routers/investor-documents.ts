@@ -150,7 +150,7 @@ export const investorDocumentsRouter = {
 		}),
 
 	// Editar inversionista — upsert en cartera-back + log
-	editarInversionista: investmentManagerProcedure
+	editarInversionista: crmCobrosOrInvestmentsProcedure
 		.input(
 			z.object({
 				inversionistaId: z.number().int().positive(),
@@ -168,6 +168,7 @@ export const investorDocumentsRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			const result = await carteraBackClient.createInvestor({
+				inversionista_id: input.inversionistaId,
 				nombre: input.nombre,
 				dpi: input.dpi ? Number(input.dpi) : null,
 				email: input.email ?? null,

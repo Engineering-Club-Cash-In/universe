@@ -91,18 +91,16 @@ function LiquidacionesInversionistas() {
 
 	const crearMutation = useMutation({
 		...orpc.crearInversionista.mutationOptions(),
-		onSuccess: (data: any) => {
+		onSuccess: async (data: any) => {
 			const msg = data.compraCartera
 				? "Inversionista creado y compra de cartera registrada"
 				: "Inversionista creado correctamente";
 			toast.success(msg);
 			setCrearOpen(false);
 			resetForm();
-			queryClient.invalidateQueries({
-				queryKey: orpc.getInversionistas.queryOptions({
-					input: { page: 1, perPage: 100 },
-				}).queryKey,
-				refetchType: "all",
+			await queryClient.invalidateQueries({
+				predicate: (query) =>
+					JSON.stringify(query.queryKey).includes("getInversionistas"),
 			});
 		},
 		onError: (err: any) => {
@@ -166,16 +164,14 @@ function LiquidacionesInversionistas() {
 								{investors.length} Inversionistas
 							</span>
 						</div>
-						{isManager && (
-							<Button
-								size="sm"
-								className="gap-2"
-								onClick={() => setCrearOpen(true)}
-							>
-								<Plus className="h-4 w-4" />
-								Crear Inversionista
-							</Button>
-						)}
+						<Button
+							size="sm"
+							className="gap-2"
+							onClick={() => setCrearOpen(true)}
+						>
+							<Plus className="h-4 w-4" />
+							Crear Inversionista
+						</Button>
 					</div>
 				</div>
 			</div>
@@ -294,12 +290,18 @@ function LiquidacionesInversionistas() {
 												Factura
 											</Badge>
 										)}
-										{inv.reinversion && (
+										{inv.tipoReinversion && inv.tipoReinversion !== "sin_reinversion" && (
 											<Badge
 												variant="outline"
 												className="border-purple-300 bg-purple-50 text-[10px] text-purple-700 dark:border-purple-700 dark:bg-purple-950 dark:text-purple-300"
 											>
-												Reinversión
+												{{
+													reinversion_capital: "Reinversión Capital",
+													reinversion_interes: "Reinversión Interés",
+													reinversion_total: "Reinversión Total",
+													reinversion_variable: "Reinversión Variable",
+													reinversion_combinada: "Reinversión Combinada",
+												}[inv.tipoReinversion as string] ?? "Reinversión"}
 											</Badge>
 										)}
 									</div>

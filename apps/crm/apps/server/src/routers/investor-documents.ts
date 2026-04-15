@@ -149,8 +149,60 @@ export const investorDocumentsRouter = {
 			return carteraBackClient.getBancos();
 		}),
 
+	// Editar inversionista — upsert en cartera-back + log
+	editarInversionista: investmentManagerProcedure
+		.input(
+			z.object({
+				inversionistaId: z.number().int().positive(),
+				nombre: z.string().min(1),
+				dpi: z.string().optional(),
+				email: z.string().email().optional(),
+				banco: z.number().nullable().optional(),
+				tipoCuenta: z.string().optional(),
+				numeroCuenta: z.string().optional(),
+				tipoReinversion: z.string().optional(),
+				montoReinversion: z.number().optional(),
+				moneda: z.enum(["quetzales", "dolares"]).optional(),
+				emiteFactura: z.boolean().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const result = await carteraBackClient.createInvestor({
+				nombre: input.nombre,
+				dpi: input.dpi ? Number(input.dpi) : null,
+				email: input.email ?? null,
+				banco: input.banco ?? null,
+				tipo_cuenta: input.tipoCuenta ?? null,
+				numero_cuenta: input.numeroCuenta ?? null,
+				tipo_reinversion: input.tipoReinversion ?? "sin_reinversion",
+				monto_reinversion: input.montoReinversion ?? null,
+				moneda: input.moneda ?? "quetzales",
+				emite_factura: input.emiteFactura ?? false,
+			});
+
+			try {
+				await db.insert(investorActivityLog).values({
+					inversionistaId: input.inversionistaId,
+					action: "investor_updated",
+					details: {
+						nombre: input.nombre,
+						dpi: input.dpi,
+						email: input.email,
+						moneda: input.moneda,
+					},
+					performedBy: context.session.user.id,
+					performedByName:
+						context.session.user.name ?? context.session.user.email,
+				});
+			} catch (logError) {
+				console.error("Error al registrar log de edición:", logError);
+			}
+
+			return { success: true, data: result.data };
+		}),
+
 	// Crear inversionista — opcionalmente con compra de cartera
-	crearInversionista: investmentManagerProcedure
+	crearInversionista: crmCobrosOrInvestmentsProcedure
 		.input(
 			z.object({
 				nombre: z.string().min(1),
@@ -241,11 +293,13 @@ export const investorDocumentsRouter = {
 		}),
 
 	// Compra de cartera — registra log y llama a cartera-back
-	compraCartera: investmentManagerProcedure
+	compraCartera: crmCobrosOrInvestmentsProcedure
 		.input(
 			z.object({
 				inversionistaId: z.number().int().positive(),
 				montoAportado: z.number().positive(),
+				porcentajeInversion: z.number().min(0).max(100).optional(),
+				porcentajeCashIn: z.number().min(0).max(100).optional(),
 				fechaInicioParticipacion: z.string().optional(),
 			}),
 		)
@@ -255,6 +309,8 @@ export const investorDocumentsRouter = {
 				inversionista_id: input.inversionistaId,
 				monto_aportado: input.montoAportado,
 				tipo_operacion: "compra_cartera",
+				porcentaje_inversion: input.porcentajeInversion,
+				porcentaje_cash_in: input.porcentajeCashIn,
 				fecha_inicio_participacion: input.fechaInicioParticipacion || undefined,
 			});
 
@@ -264,6 +320,8 @@ export const investorDocumentsRouter = {
 				action: "compra_cartera",
 				details: {
 					monto_aportado: input.montoAportado,
+					porcentaje_inversion: input.porcentajeInversion,
+					porcentaje_cash_in: input.porcentajeCashIn,
 					fecha_inicio_participacion: input.fechaInicioParticipacion,
 				},
 				performedBy: context.session.user.id,

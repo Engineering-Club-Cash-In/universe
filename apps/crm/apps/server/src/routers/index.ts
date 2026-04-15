@@ -335,6 +335,7 @@ export const reportsAppRouter = {
 	getBancosCartera: investorDocumentsRouter.getBancosCartera,
 	compraCartera: investorDocumentsRouter.compraCartera,
 	crearInversionista: investorDocumentsRouter.crearInversionista,
+	editarInversionista: investorDocumentsRouter.editarInversionista,
 
 	// Accounting routes (Contabilidad)
 	getResumenGlobalInversionistas:

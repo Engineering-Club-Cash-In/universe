@@ -488,10 +488,18 @@ function InvestorCard({
                       </div>
                       <div className="flex items-center gap-4 mt-1 text-[11px] text-gray-500">
                         <span><b className="text-gray-800">{formatQ(credito.monto_aportado)}</b> aportado</span>
-                        <span>Cuota: {formatQ(credito.cuota_inversionista)}</span>
                         <span>{credito.porcentaje_participacion_inversionista}% part.</span>
-                        <span className="hidden sm:inline">Cash In: {formatQ(credito.monto_cash_in)} ({credito.porcentaje_cash_in}%)</span>
+                        <span>Cash In: {credito.porcentaje_cash_in}%</span>
                       </div>
+                      {credito.otrosInversionistas && credito.otrosInversionistas.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-3 mt-1 text-[10px] text-gray-400">
+                          {credito.otrosInversionistas.map((otro, idx) => (
+                            <span key={idx}>
+                              {otro.nombre}: <b className="text-gray-600">{formatQ(otro.monto_aportado)}</b>
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     {/* Botón quitar / cancelar */}

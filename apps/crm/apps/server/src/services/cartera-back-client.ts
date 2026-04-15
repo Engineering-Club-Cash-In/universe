@@ -980,6 +980,7 @@ export class CarteraBackClient {
 				moneda: input.moneda ?? "quetzales",
 			}),
 		});
+		this.cache.invalidate("investor");
 		return response;
 	}
 

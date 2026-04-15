@@ -2257,6 +2257,7 @@ export const cobrosRouter = {
 
 				return {
 					inversionistas: inversionistasList.map((inv: any) => ({
+						...inv,
 						inversionistaId: inv.inversionista_id,
 						nombre: inv.nombre,
 						dpi: inv.dpi ?? null,
@@ -2264,6 +2265,7 @@ export const cobrosRouter = {
 						emiteFactura: inv.emite_factura,
 						reinversion:
 							inv.reinversion ?? inv.tipo_reinversion !== "sin_reinversion",
+						tipoReinversion: inv.tipo_reinversion ?? "sin_reinversion",
 						banco: inv.banco_id
 							? (bancosMap.get(inv.banco_id) ?? null)
 							: (inv.banco ?? null),

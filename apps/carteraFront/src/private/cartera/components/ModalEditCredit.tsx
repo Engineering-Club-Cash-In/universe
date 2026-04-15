@@ -147,11 +147,11 @@ export function ModalEditCredit({
       // para monto_aportado, cuota y porcentajes. Solo confirmamos que el espejo existe.
       return {
         inversionista_id: Number(mirrorItem.inversionista_id),
-        monto_aportado: inv.monto_aportado,           // ← Siempre del padre actual
-        porcentaje_cash_in: inv.porcentaje_cash_in,   // ← Siempre del padre actual
-        porcentaje_inversion: inv.porcentaje_inversion, // ← Siempre del padre actual
+        monto_aportado: Number(mirrorItem.monto_aportado),
+        porcentaje_cash_in: Number(mirrorItem.porcentaje_cash_in),
+        porcentaje_inversion: Number(mirrorItem.porcentaje_inversion),
         fecha_inicio_participacion: parseParticipantDate(mirrorItem.fecha_inicio_participacion),
-        cuota_inversionista: inv.cuota_inversionista, // ← Siempre del padre actual
+        cuota_inversionista: Number(mirrorItem.cuota_inversionista || 0),
       };
     }
     // Si no hay espejo para ese inversionista en DB, sincronizar desde el principal

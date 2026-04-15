@@ -527,6 +527,21 @@ const updateInvestors = async (
 ): Promise<Map<number, string>> => {
   if (!inversionistas || inversionistas.length === 0) return new Map();
 
+  // 🔥 NUEVO: Obtener los datos existentes ANTES de borrar para preservar el estado
+  const existingRecords = await db
+    .select()
+    .from(targetTable)
+    .where(eq(targetTable.credito_id, credito_id));
+    
+  const statePrevioMap = new Map();
+  existingRecords.forEach((record: any) => {
+      // Guardamos status y tipo_reinversion si existen en la tabla (aplica para tabla espejo)
+      statePrevioMap.set(record.inversionista_id, {
+          status: record.status,
+          tipo_reinversion: record.tipo_reinversion
+      });
+  });
+
   // Eliminar inversionistas existentes
   await db
     .delete(targetTable)
@@ -725,7 +740,9 @@ const updateInvestors = async (
     console.log(`   - IVA Cash-In: Q${ivaCashIn.toFixed(2)}`);
     console.log(`${"=".repeat(60)}\n`);
 
-    return {
+    const prevData = statePrevioMap.get(inv.inversionista_id);
+
+    const baseReturn: any = {
       credito_id: credito_id,
       inversionista_id: inv.inversionista_id,
       monto_aportado: montoAportado.toString(),
@@ -742,6 +759,12 @@ const updateInvestors = async (
       cuota_inversionista: cuotaInversionista.toString(), // 🔥 CON LÓGICA CORRECTA
       numero_credito_sifco: numero_credito_sifco ?? undefined,
     };
+
+    // 🔥 REINCORPORAR ESTADOS PREVIOS SI APLICA
+    if (prevData?.status !== undefined) baseReturn.status = prevData.status;
+    if (prevData?.tipo_reinversion !== undefined) baseReturn.tipo_reinversion = prevData.tipo_reinversion;
+
+    return baseReturn;
   });
 
   // Insertar nuevos inversionistas

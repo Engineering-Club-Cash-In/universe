@@ -3419,6 +3419,10 @@ export interface CreditoEspejoPendiente {
   tipo_reinversion: string | null;
   numero_credito_sifco: string;
   nombre_usuario: string;
+  otrosInversionistas?: {
+    nombre: string;
+    monto_aportado: string;
+  }[];
 }
 
 export interface CreditCandidateInversionista {

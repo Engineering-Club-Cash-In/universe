@@ -5389,7 +5389,9 @@ export async function getCreditosEspejoPendientes(page: number = 1, pageSize: nu
   }
 
   // 2. Agrupar por inversionista
-  type CreditoSinInversionista = Omit<typeof pendientes[number], '_nombre_inversionista' | '_dpi' | '_email' | '_moneda'>;
+  type CreditoSinInversionista = Omit<typeof pendientes[number], '_nombre_inversionista' | '_dpi' | '_email' | '_moneda'> & {
+    otrosInversionistas: { nombre: string; monto_aportado: string }[];
+  };
 
   const agrupado = new Map<number, {
     inversionista_id: number;
@@ -5400,6 +5402,38 @@ export async function getCreditosEspejoPendientes(page: number = 1, pageSize: nu
     monto_reinversion: number;
     creditosPendientes: CreditoSinInversionista[];
   }>();
+
+  // 2.1 Obtener todos los inversionistas de los mismos créditos (sin importar status)
+  const creditoIds = [...new Set(pendientes.map((r) => r.credito_id))];
+
+  const otrosInversionistasRaw = creditoIds.length > 0
+    ? await db
+        .select({
+          credito_id: creditos_inversionistas_espejo.credito_id,
+          inversionista_id: creditos_inversionistas_espejo.inversionista_id,
+          nombre: inversionistas.nombre,
+          monto_aportado: creditos_inversionistas_espejo.monto_aportado,
+        })
+        .from(creditos_inversionistas_espejo)
+        .innerJoin(
+          inversionistas,
+          eq(creditos_inversionistas_espejo.inversionista_id, inversionistas.inversionista_id)
+        )
+        .where(inArray(creditos_inversionistas_espejo.credito_id, creditoIds))
+    : [];
+
+  // Agrupar otros inversionistas por credito_id para lookup rápido
+  const otrosPorCredito = new Map<number, { inversionista_id: number; nombre: string; monto_aportado: string }[]>();
+  for (const otro of otrosInversionistasRaw) {
+    if (!otrosPorCredito.has(otro.credito_id)) {
+      otrosPorCredito.set(otro.credito_id, []);
+    }
+    otrosPorCredito.get(otro.credito_id)!.push({
+      inversionista_id: otro.inversionista_id,
+      nombre: otro.nombre,
+      monto_aportado: otro.monto_aportado,
+    });
+  }
 
   for (const row of pendientes) {
     const { _nombre_inversionista, _dpi, _email, _moneda, ...creditoData } = row;
@@ -5416,7 +5450,18 @@ export async function getCreditosEspejoPendientes(page: number = 1, pageSize: nu
     }
     const grupo = agrupado.get(row.inversionista_id)!;
     grupo.monto_reinversion += parseFloat(creditoData.monto_aportado);
-    grupo.creditosPendientes.push(creditoData);
+
+    // Filtrar al inversionista actual y adjuntar los demás
+    const otrosEnEsteCredito = (otrosPorCredito.get(row.credito_id) || [])
+      .filter((o) => o.inversionista_id !== row.inversionista_id);
+
+    grupo.creditosPendientes.push({
+      ...creditoData,
+      otrosInversionistas: otrosEnEsteCredito.map((o) => ({
+        nombre: o.nombre,
+        monto_aportado: o.monto_aportado,
+      })),
+    });
   }
 
   let todos = Array.from(agrupado.values());

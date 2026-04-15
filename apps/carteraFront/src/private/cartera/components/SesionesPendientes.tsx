@@ -488,6 +488,7 @@ function InvestorCard({
                       </div>
                       <div className="flex items-center gap-4 mt-1 text-[11px] text-gray-500">
                         <span><b className="text-gray-800">{formatQ(credito.monto_aportado)}</b> aportado</span>
+                        <span>Cuota: {formatQ(credito.cuota_inversionista)}</span>
                         <span>{credito.porcentaje_participacion_inversionista}% part.</span>
                         <span>Cash In: {credito.porcentaje_cash_in}%</span>
                       </div>

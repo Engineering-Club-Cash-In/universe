@@ -133,6 +133,9 @@ dist
 # Playwright MCP temporary files
 .playwright-mcp/
 
+# Codex local state
+.codex
+
 # Git worktrees
 .worktrees/
 

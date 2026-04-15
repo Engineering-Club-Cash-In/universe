@@ -951,6 +951,7 @@ export class CarteraBackClient {
 	// ========================================================================
 
 	async createInvestor(input: {
+		inversionista_id?: number;
 		nombre: string;
 		dpi?: number | null;
 		email?: string | null;
@@ -968,6 +969,7 @@ export class CarteraBackClient {
 		}>("/investor", {
 			method: "POST",
 			body: JSON.stringify({
+				...(input.inversionista_id && { inversionista_id: input.inversionista_id }),
 				nombre: input.nombre,
 				dpi: input.dpi ?? null,
 				email: input.email ?? null,
@@ -980,6 +982,7 @@ export class CarteraBackClient {
 				moneda: input.moneda ?? "quetzales",
 			}),
 		});
+		this.cache.invalidate("investor");
 		return response;
 	}
 

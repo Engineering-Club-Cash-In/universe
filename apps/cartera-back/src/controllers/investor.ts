@@ -404,7 +404,17 @@ export const insertInvestor = async ({ body, set }: any) => {
       // 🔥 Verificar si ya existe
       let existente = null;
 
-      if (inv.dpi) {
+      // Buscar por inversionista_id primero (para ediciones directas)
+      if (inv.inversionista_id) {
+        const result = await db
+          .select()
+          .from(inversionistas)
+          .where(eq(inversionistas.inversionista_id, Number(inv.inversionista_id)))
+          .limit(1);
+        existente = result[0] || null;
+      }
+
+      if (!existente && inv.dpi) {
         // Buscar por DPI primero
         const result = await db
           .select()

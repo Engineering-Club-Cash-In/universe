@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { DataTable } from "@/components/ui/data-table";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -18,6 +17,38 @@ export const Route = createFileRoute("/presentations/$id/submit")({
 	component: SubmitPresentationPage,
 });
 
+const MONTH_NAMES = [
+	"",
+	"Enero",
+	"Febrero",
+	"Marzo",
+	"Abril",
+	"Mayo",
+	"Junio",
+	"Julio",
+	"Agosto",
+	"Septiembre",
+	"Octubre",
+	"Noviembre",
+	"Diciembre",
+];
+
+function formatMonthLabel(month: number, year: number) {
+	return `${MONTH_NAMES[month]} ${year}`;
+}
+
+function formatPresentationPeriodSummary(presentation: {
+	startMonth: number;
+	startYear: number;
+	endMonth: number;
+	endYear: number;
+}) {
+	const startLabel = formatMonthLabel(presentation.startMonth, presentation.startYear);
+	const endLabel = formatMonthLabel(presentation.endMonth, presentation.endYear);
+
+	return startLabel === endLabel ? startLabel : `${startLabel} - ${endLabel}`;
+}
+
 function SubmitPresentationPage() {
 	const { id } = Route.useParams();
 	const navigate = Route.useNavigate();
@@ -30,13 +61,18 @@ function SubmitPresentationPage() {
 			input: { id }
 		})
 	);
+	const presentationPeriod = presentation.data as
+		| {
+			startMonth: number;
+			startYear: number;
+			endMonth: number;
+			endYear: number;
+		}
+		| undefined;
 
 	const availableGoals = useQuery(
 		orpc.presentations.availableGoals.queryOptions({
-			input: {
-				month: presentation.data?.month || new Date().getMonth() + 1,
-				year: presentation.data?.year || new Date().getFullYear(),
-			}
+			input: { presentationId: id } as any,
 		}),
 	);
 
@@ -46,18 +82,6 @@ function SubmitPresentationPage() {
 			onSuccess: () => {
 				queryClient.invalidateQueries({
 					queryKey: orpc.presentations.get.key(),
-				});
-				// Mark presentation as ready
-				updatePresentationMutation.mutate({
-					id,
-					data: { status: "ready" }
-				});
-				toast.success("Datos cargados exitosamente");
-
-				// Navigate to view presentation
-				navigate({
-					to: "/presentations/$id/view",
-					params: { id },
 				});
 			},
 			onError: (error) => {
@@ -115,20 +139,37 @@ function SubmitPresentationPage() {
 			};
 		});
 
+		const isValidSubmissionValue = (value: string) => {
+			const numericValue = Number(value.trim());
+			return Number.isFinite(numericValue) && numericValue > 0;
+		};
+
 		// Filtrar solo las que tienen un valor válido
-		const validSubmissions = allSubmissions.filter(s => 
-			s.submittedValue && s.submittedValue.trim() !== '' && s.submittedValue !== '0'
-		);
+		const validSubmissions = allSubmissions.filter(s => isValidSubmissionValue(s.submittedValue));
 
 		if (validSubmissions.length === 0) {
 			toast.error("No hay valores válidos para enviar. Asegúrate de que las metas tengan valores mayores a 0.");
 			return;
 		}
 
-		submitGoalsMutation.mutate({
+		submitGoalsMutation.mutateAsync({
 			presentationId: id,
 			submissions: validSubmissions,
-		});
+		})
+			.then(() => updatePresentationMutation.mutateAsync({
+				id,
+				data: { status: "ready" },
+			}))
+			.then(() => {
+				toast.success("Datos cargados exitosamente");
+				navigate({
+					to: "/presentations/$id/view",
+					params: { id },
+				});
+			})
+			.catch(() => {
+				// Errors are surfaced by the mutations' own onError handlers.
+			});
 	};
 
 	const getSubmissionValue = (goalId: string, field: string) => {
@@ -136,26 +177,36 @@ function SubmitPresentationPage() {
 		return submission ? submission[field] || '' : '';
 	};
 
-const getProgressPercentage = (target: string, achieved: string, isInverse?: boolean) => {
-  const targetNum = parseFloat(target);
-  const achievedNum = parseFloat(achieved);
+	const getProgressPercentage = (target: string, achieved: string, isInverse?: boolean) => {
+		const targetNum = parseFloat(target);
+		const achievedNum = parseFloat(achieved);
 
-  if (isNaN(targetNum) || isNaN(achievedNum) || targetNum <= 0) {
-    return 0; // valores inválidos
-  }
+		if (isNaN(targetNum) || isNaN(achievedNum)) {
+			return 0;
+		}
 
-  if (isInverse) {
-    // Para metas inversas: menor o igual = 100%
-    if (achievedNum <= targetNum) {
-      return 100;
-    } else {
-      return Math.max((targetNum / achievedNum) * 100, 0);
-    }
-  } else {
-    // Para metas normales: mayor es mejor
-    return Math.min((achievedNum / targetNum) * 100, 100);
-  }
-};
+		if (isInverse) {
+			if (targetNum === 0 && achievedNum === 0) {
+				return 100;
+			}
+
+			if (targetNum <= 0) {
+				return 0;
+			}
+
+			if (achievedNum <= targetNum) {
+				return 100;
+			}
+
+			return Math.max((targetNum / achievedNum) * 100, 0);
+		}
+
+		if (targetNum <= 0) {
+			return 0;
+		}
+
+		return Math.min((achievedNum / targetNum) * 100, 100);
+	};
 	const getStatusBadge = (percentage: number) => {
 		if (percentage >= 80) {
 			return <Badge className="bg-green-100 text-green-800">Exitoso</Badge>;
@@ -171,6 +222,15 @@ const getProgressPercentage = (target: string, achieved: string, isInverse?: boo
 
 	// Definir columnas para TanStack Table
 	const columns = useMemo<ColumnDef<GoalData>[]>(() => [
+		{
+			accessorKey: "month",
+			header: "Mes",
+			cell: ({ row }) => (
+				<div className="font-medium">
+					{formatMonthLabel(row.original.month, row.original.year)}
+				</div>
+			),
+		},
 		{
 			accessorKey: "userName",
 			header: "Empleado",
@@ -263,10 +323,9 @@ const getProgressPercentage = (target: string, achieved: string, isInverse?: boo
 		return <div>Presentación no encontrada</div>;
 	}
 
-	const months = [
-		"", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-		"Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
-	];
+	if (!presentationPeriod) {
+		return <div>Cargando presentación...</div>;
+	}
 
 	return (
 		<div className="space-y-6">
@@ -274,16 +333,25 @@ const getProgressPercentage = (target: string, achieved: string, isInverse?: boo
 				<div>
 					<h1 className="text-2xl font-semibold">Cargar Datos de Presentación</h1>
 					<p className="text-gray-600">
-						{presentation.data.name} - {months[presentation.data.month]} {presentation.data.year}
+						{presentation.data.name}
+					</p>
+					<p className="text-sm text-gray-500">
+						Período: {formatPresentationPeriodSummary(presentationPeriod)}
 					</p>
 				</div>
 				
 				<div className="flex items-center gap-2">
 					<Button
 						onClick={handleSubmitAll}
-						disabled={submitGoalsMutation.isPending || (availableGoals.data?.length === 0)}
+						disabled={
+							submitGoalsMutation.isPending ||
+							updatePresentationMutation.isPending ||
+							availableGoals.data?.length === 0
+						}
 					>
-						{submitGoalsMutation.isPending ? "Enviando..." : "Enviar Todos los Datos"}
+						{submitGoalsMutation.isPending || updatePresentationMutation.isPending
+							? "Enviando..."
+							: "Enviar Todos los Datos"}
 					</Button>
 				</div>
 			</div>
@@ -291,6 +359,9 @@ const getProgressPercentage = (target: string, achieved: string, isInverse?: boo
 			<Card>
 				<CardHeader>
 					<CardTitle>Metas Disponibles para Cargar</CardTitle>
+					<p className="text-sm text-gray-500">
+						{availableGoals.data?.length ?? 0} metas mensuales en el período seleccionado
+					</p>
 				</CardHeader>
 				<CardContent>
 					<DataTable

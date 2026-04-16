@@ -126,6 +126,14 @@ export interface CreateCreditoInput {
 	departamento?: string;
 	codigo_postal?: string;
 	pais?: string;
+	// Nuevos campos para el correo de notificación
+	vehiculo_marca?: string;
+	vehiculo_linea?: string;
+	vehiculo_modelo?: string;
+	vehiculo_placa?: string;
+	vehiculo_vin?: string;
+	monto_asegurado?: number;
+	opportunity_id?: string;
 	inversionistas?: Array<{
 		inversionista_id: number;
 		porcentaje_participacion: number;
@@ -672,6 +680,8 @@ export interface CreateBoletaInput {
 export interface ResumenGlobalInversionista {
 	inversionista_id: number;
 	nombre: string;
+	moneda: "quetzales" | "dolares";
+	currencySymbol: string;
 	emite_factura: boolean;
 	reinversion: string;
 	banco: string | null;

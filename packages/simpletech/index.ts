@@ -49,6 +49,7 @@ export type {
   SimpleTechCredentials,
   SimpleTechConfig,
   RetryConfig,
+  TokenResponse,
   // Canales y tipos
   Channel,
   MessageType,
@@ -67,7 +68,22 @@ export type {
   SendRequest,
   SendResponse,
   SendResultItem,
+  SendResultItemRaw,
   SimpleTechResult,
+  // getMessageInfo
+  GetMessageInfoRequest,
+  GetMessageInfoResponse,
+  MessageInfo,
+  MessageStatus,
+  // sendTemplate
+  SendTemplateRequest,
+  SendTemplateResponse,
+  SendTemplateResult,
+  SendTemplateResultItem,
+  TemplateMessage,
+  TemplateHeader,
+  TemplateHeaderType,
+  TemplateSchedule,
 } from './src/types';
 
 // =============================================================================

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Search, X, Save, Loader2 } from "lucide-react";
 import { useGetInvestors } from "../hooks/getInvestor";
@@ -21,7 +21,8 @@ const TIPOS_REINVERSION: { value: TipoReinversionEspejo; label: string; color: s
   { value: "reinversion_total", label: "Total", color: "bg-purple-100 text-purple-700" },
 ];
 
-const PER_PAGE = 25;
+const ALL_CREDITS_PER_PAGE = 500;
+const DISPLAY_PER_PAGE = 25;
 
 export function ModalReinversionCombinada({
   open,
@@ -35,24 +36,51 @@ export function ModalReinversionCombinada({
   // Map: credito_inversionista_espejo_id -> tipo_reinversion seleccionado (solo los que cambiaron)
   const [asignaciones, setAsignaciones] = useState<Record<number, TipoReinversionEspejo>>({});
 
-  const { data, isLoading } = useGetInvestors({
+  // Traer todos los créditos de una vez (500) para totales correctos
+  const { data, isLoading, refetch } = useGetInvestors({
     id: inversionistaId,
-    page,
-    perPage: PER_PAGE,
+    page: 1,
+    perPage: ALL_CREDITS_PER_PAGE,
     tipo: "espejos",
-    nombreUsuario: search || undefined,
   });
+
+  // Refrescar datos y resetear estados cada vez que se abre el modal
+  useEffect(() => {
+    if (open) {
+      setPage(1);
+      setSearch("");
+      setAsignaciones({});
+      refetch();
+    }
+  }, [open, refetch]);
 
   const { mutate: asignarReinversion, isPending: isSaving } = useAsignarReinversion();
 
   // Todos los créditos del inversionista actual
-  const creditos: CreditoInversionistaData[] = useMemo(() => {
+  const allCreditos: CreditoInversionistaData[] = useMemo(() => {
     if (!data?.inversionistas?.length) return [];
     const inv = data.inversionistas.find((i) => i.inversionista_id === inversionistaId);
     return inv?.creditos ?? [];
   }, [data, inversionistaId]);
 
-  // Resumen: contar por tipo y sumar montos
+  // Filtro visual por búsqueda (no afecta totales)
+  const creditosFiltrados = useMemo(() => {
+    if (!search.trim()) return allCreditos;
+    const term = search.toLowerCase();
+    return allCreditos.filter((c) =>
+      c.nombre_usuario?.toLowerCase().includes(term) ||
+      c.numero_credito_sifco?.toLowerCase().includes(term)
+    );
+  }, [allCreditos, search]);
+
+  // Paginación en el cliente sobre los filtrados
+  const totalPages = Math.max(1, Math.ceil(creditosFiltrados.length / DISPLAY_PER_PAGE));
+  const creditosPagina = useMemo(() => {
+    const start = (page - 1) * DISPLAY_PER_PAGE;
+    return creditosFiltrados.slice(start, start + DISPLAY_PER_PAGE);
+  }, [creditosFiltrados, page]);
+
+  // Resumen: contar por tipo y sumar montos — siempre sobre TODOS los créditos
   const resumen = useMemo(() => {
     const counts: Record<string, { cantidad: number; monto: number }> = {
       reinversion_capital: { cantidad: 0, monto: 0 },
@@ -61,7 +89,7 @@ export function ModalReinversionCombinada({
       sin_reinversion: { cantidad: 0, monto: 0 },
     };
 
-    creditos.forEach((cred) => {
+    allCreditos.forEach((cred) => {
       const espejoId = cred.credito_inversionista_espejo_id;
       const tipoOriginal = cred.tipo_reinversion ?? "sin_reinversion";
       const tipo = (espejoId && asignaciones[espejoId]) ? asignaciones[espejoId] : tipoOriginal;
@@ -72,7 +100,7 @@ export function ModalReinversionCombinada({
     });
 
     return counts;
-  }, [creditos, asignaciones]);
+  }, [allCreditos, asignaciones]);
 
   const handleTipoChange = (espejoId: number, tipo: TipoReinversionEspejo, tipoOriginal: string) => {
     setAsignaciones((prev) => {
@@ -88,20 +116,27 @@ export function ModalReinversionCombinada({
   };
 
   const handleGuardar = () => {
-    // Solo enviar los que el usuario cambió
-    const cambios = Object.entries(asignaciones).map(([espejoId, tipo]) => ({
-      id_inversionista: inversionistaId,
-      id_credito_inversionista_espejo: Number(espejoId),
-      tipo_reinversion: tipo,
-    }));
+    // Enviar TODOS los créditos con su tipo actual (original o modificado)
+    // El backend marca como sin_reinversion los que no recibe
+    const todos = allCreditos
+      .filter((c) => c.credito_inversionista_espejo_id)
+      .map((cred) => {
+        const espejoId = cred.credito_inversionista_espejo_id!;
+        const tipoOriginal = cred.tipo_reinversion ?? "sin_reinversion";
+        return {
+          id_inversionista: inversionistaId,
+          id_credito_inversionista_espejo: espejoId,
+          tipo_reinversion: asignaciones[espejoId] ?? tipoOriginal,
+        };
+      });
 
-    if (cambios.length === 0) {
+    if (Object.keys(asignaciones).length === 0) {
       toast.error("No hay cambios para guardar.");
       return;
     }
 
     asignarReinversion(
-      { inversionista_id: inversionistaId, asignaciones: cambios },
+      { inversionista_id: inversionistaId, asignaciones: todos },
       {
         onSuccess: () => {
           toast.success("Reinversión combinada guardada correctamente.");
@@ -114,8 +149,6 @@ export function ModalReinversionCombinada({
       }
     );
   };
-
-  const totalPages = data?.totalPages ?? 1;
 
   if (!open) return null;
 
@@ -177,13 +210,13 @@ export function ModalReinversionCombinada({
               <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
               <span className="ml-2 text-gray-500">Cargando créditos...</span>
             </div>
-          ) : creditos.length === 0 ? (
+          ) : creditosPagina.length === 0 ? (
             <div className="text-center py-12 text-gray-400">
               No se encontraron créditos.
             </div>
           ) : (
             <div className="space-y-2">
-              {creditos.filter((c) => c.credito_inversionista_espejo_id).map((cred) => {
+              {creditosPagina.filter((c) => c.credito_inversionista_espejo_id).map((cred) => {
                 const espejoId = cred.credito_inversionista_espejo_id!;
                 const tipoOriginal = cred.tipo_reinversion ?? "sin_reinversion";
                 const tipoActual = asignaciones[espejoId] ?? tipoOriginal;
@@ -245,11 +278,11 @@ export function ModalReinversionCombinada({
 
         {/* Paginación */}
         {totalPages > 1 && (
-          <div className="px-6 py-2 border-t flex items-center justify-center gap-2">
+          <div className="px-6 py-2 border-t border-gray-200 flex items-center justify-center gap-2">
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page === 1}
-              className="px-3 py-1 text-sm rounded border disabled:opacity-40 hover:bg-gray-50"
+              className="px-3 py-1 text-sm rounded border border-gray-300 bg-white text-gray-700 disabled:opacity-40 hover:bg-gray-100"
             >
               Anterior
             </button>
@@ -259,7 +292,7 @@ export function ModalReinversionCombinada({
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={page === totalPages}
-              className="px-3 py-1 text-sm rounded border disabled:opacity-40 hover:bg-gray-50"
+              className="px-3 py-1 text-sm rounded border border-gray-300 bg-white text-gray-700 disabled:opacity-40 hover:bg-gray-100"
             >
               Siguiente
             </button>

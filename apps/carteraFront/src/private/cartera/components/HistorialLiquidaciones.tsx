@@ -36,9 +36,9 @@ const MESES = [
   { value: 12, label: "Diciembre" },
 ];
 
-function formatQ(value: number | string | null | undefined): string {
+function formatCurrency(value: number | string | null | undefined, symbol: string): string {
   const num = Number(value ?? 0);
-  return `Q${num.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `${symbol}${num.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function getMesLabel(mes: number): string {
@@ -46,6 +46,7 @@ function getMesLabel(mes: number): string {
 }
 
 function LiquidacionCard({ item }: { item: LiquidacionResumen }) {
+  const s = item.currencySymbol;
   const boleta = item.boleta_liquidacion;
 
   return (
@@ -81,27 +82,27 @@ function LiquidacionCard({ item }: { item: LiquidacionResumen }) {
       <div className="grid grid-cols-3 gap-1.5">
         <div className="bg-blue-50 rounded-lg px-2.5 py-1.5">
           <p className="text-[10px] text-blue-600 font-medium uppercase tracking-wide">Capital</p>
-          <p className="text-[13px] font-bold text-blue-900">{formatQ(item.total_abono_capital)}</p>
+          <p className="text-[13px] font-bold text-blue-900">{formatCurrency(item.total_abono_capital, s)}</p>
         </div>
         <div className="bg-indigo-50 rounded-lg px-2.5 py-1.5">
           <p className="text-[10px] text-indigo-600 font-medium uppercase tracking-wide">Interés</p>
-          <p className="text-[13px] font-bold text-indigo-900">{formatQ(item.total_abono_interes)}</p>
+          <p className="text-[13px] font-bold text-indigo-900">{formatCurrency(item.total_abono_interes, s)}</p>
         </div>
         <div className="bg-purple-50 rounded-lg px-2.5 py-1.5">
           <p className="text-[10px] text-purple-600 font-medium uppercase tracking-wide">IVA</p>
-          <p className="text-[13px] font-bold text-purple-900">{formatQ(item.total_abono_iva)}</p>
+          <p className="text-[13px] font-bold text-purple-900">{formatCurrency(item.total_abono_iva, s)}</p>
         </div>
         <div className="bg-orange-50 rounded-lg px-2.5 py-1.5">
           <p className="text-[10px] text-orange-600 font-medium uppercase tracking-wide">ISR</p>
-          <p className="text-[13px] font-bold text-orange-900">{formatQ(item.total_isr)}</p>
+          <p className="text-[13px] font-bold text-orange-900">{formatCurrency(item.total_isr, s)}</p>
         </div>
         <div className="bg-teal-50 rounded-lg px-2.5 py-1.5">
           <p className="text-[10px] text-teal-600 font-medium uppercase tracking-wide">Reinversión</p>
-          <p className="text-[13px] font-bold text-teal-900">{formatQ(item.total_reinversion)}</p>
+          <p className="text-[13px] font-bold text-teal-900">{formatCurrency(item.total_reinversion, s)}</p>
         </div>
         <div className="bg-slate-100 rounded-lg px-2.5 py-1.5 border border-slate-300">
           <p className="text-[10px] text-slate-600 font-medium uppercase tracking-wide">Total c/Reinv.</p>
-          <p className="text-[13px] font-extrabold text-slate-900">{formatQ(item.total_a_recibir_con_reinversion)}</p>
+          <p className="text-[13px] font-extrabold text-slate-900">{formatCurrency(item.total_a_recibir_con_reinversion, s)}</p>
         </div>
       </div>
 
@@ -209,7 +210,7 @@ export function HistorialLiquidaciones() {
                 placeholder="Nombre..."
                 value={search}
                 onChange={handleSearchChange}
-                className="pl-9 h-10"
+                className="pl-9 h-10 text-gray-900"
               />
             </div>
           </div>

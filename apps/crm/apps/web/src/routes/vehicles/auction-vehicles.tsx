@@ -494,6 +494,22 @@ function AuctionsDashboard() {
 																		{inspection.tireConditionRearLeft || 0}% /{" "}
 																		{inspection.tireConditionRearRight || 0}%
 																	</span>
+																	<span className="text-muted-foreground">
+																		Reporte Escáner:
+																	</span>
+																	<span className="flex items-center gap-6">
+																		{inspection.scannerUsed ? "Sí" : "No"}
+																		{inspection.scannerResultUrl && (
+																			<Button
+																				variant="outline"
+																				size="sm"
+																				className="h-6 px-2.5 text-[10px]"
+																				onClick={() => window.open(inspection.scannerResultUrl, "_blank")}
+																			>
+																				<FileText className="mr-1.5 h-3 w-3" /> Abrir PDF
+																			</Button>
+																		)}
+																	</span>
 																</div>
 															</div>
 														</div>
@@ -616,9 +632,9 @@ function AuctionsDashboard() {
 																								)}
 																							<Badge
 																								variant={
-																									item.checked
+																									!item.checked
 																										? "default"
-																										: !item.checked &&
+																										: item.checked &&
 																												item.severity ===
 																													"critical"
 																											? "destructive"
@@ -626,7 +642,7 @@ function AuctionsDashboard() {
 																								}
 																								className="h-4.5 shrink-0 px-1 text-[9px]"
 																							>
-																								{item.checked
+																								{!item.checked
 																									? "Cumple"
 																									: "No cumple"}
 																							</Badge>

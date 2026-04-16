@@ -8,6 +8,7 @@ import {
 	opportunities,
 	salesStages,
 } from "../db/schema/crm";
+import { canReceiveAutoAssignedLead } from "../lib/lead-assignment";
 import { validarDpi } from "../utils/cui-validation";
 import { getOnlyRenapInfoController } from "./bot";
 
@@ -28,7 +29,7 @@ export async function getSalesUserWithLeastOpportunities() {
 			role: user.role,
 		})
 		.from(user)
-		.where(and(eq(user.role, "sales"), eq(user.assignLeads, true)));
+		.where(and(eq(user.role, "sales"), eq(user.assignLeads, true), eq(user.banned, false)));
 
 	if (salesUsers.length === 0) {
 		return null;
@@ -82,13 +83,17 @@ export async function getSalesUserWithLeastLeads() {
 			role: user.role,
 		})
 		.from(user)
-		.where(and(eq(user.role, "sales"), eq(user.assignLeads, true)));
+		.where(and(eq(user.role, "sales"), eq(user.assignLeads, true), eq(user.banned, false)));
 
 	if (salesUsers.length === 0) {
 		return null;
 	}
 
-	// Contar leads por usuario (solo leads activos, no convertidos)
+	// Contar leads automáticos asignados hoy por usuario (hora Guatemala UTC-6)
+	const startOfToday = new Date(
+		new Date().toLocaleDateString("en-US", { timeZone: "America/Guatemala" }),
+	);
+
 	const leadCounts = await db
 		.select({
 			assignedTo: leads.assignedTo,
@@ -96,10 +101,9 @@ export async function getSalesUserWithLeastLeads() {
 		})
 		.from(leads)
 		.where(
-			or(
-				eq(leads.status, "new"),
-				eq(leads.status, "contacted"),
-				eq(leads.status, "qualified"),
+			and(
+				eq(leads.assignmentType, "auto"),
+				gte(leads.createdAt, startOfToday),
 			),
 		)
 		.groupBy(leads.assignedTo);
@@ -176,11 +180,13 @@ export async function createOpportunityForLead(
 }
 
 /**
- * Verifica si un lead ya tiene una oportunidad creada en las últimas 24 horas.
+ * Verifica si un lead ya tiene una oportunidad abierta con el mismo source.
  */
-export async function getRecentOpportunity(leadId: string) {
-	const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-	const [recent] = await db
+export async function getOpenOpportunityBySource(
+	leadId: string,
+	source: LeadSource,
+) {
+	const [existing] = await db
 		.select({
 			id: opportunities.id,
 			source: opportunities.source,
@@ -194,12 +200,33 @@ export async function getRecentOpportunity(leadId: string) {
 					eq(opportunities.status, "open"),
 					eq(opportunities.status, "on_hold"),
 				),
-				gte(opportunities.createdAt, twentyFourHoursAgo),
 			),
 		)
 		.orderBy(desc(opportunities.createdAt))
 		.limit(1);
-	return recent;
+	return existing;
+}
+
+async function resolveLeadAssignee(existingAssignedTo?: string | null) {
+	if (existingAssignedTo) {
+		const [currentOwner] = await db
+			.select({
+				id: user.id,
+				role: user.role,
+				assignLeads: user.assignLeads,
+				banned: user.banned,
+			})
+			.from(user)
+			.where(eq(user.id, existingAssignedTo))
+			.limit(1);
+
+		if (canReceiveAutoAssignedLead(currentOwner)) {
+			return currentOwner.id;
+		}
+	}
+
+	const fallbackSalesUser = await getSalesUserWithLeastLeads();
+	return fallbackSalesUser?.id ?? null;
 }
 
 export async function createPublicLead(c: Context) {
@@ -267,18 +294,20 @@ export async function createPublicLead(c: Context) {
 					.returning();
 			}
 
-			// Verificar oportunidad reciente antes de crear una nueva
-			const recentOpportunity = await getRecentOpportunity(existingLead.id);
-			if (recentOpportunity) {
-				if (body.source || body.campaign) {
+			// Verificar si ya tiene una oportunidad abierta con el mismo source
+			const existingOpportunity = await getOpenOpportunityBySource(
+				existingLead.id,
+				source,
+			);
+			if (existingOpportunity) {
+				if (body.campaign) {
 					await db
 						.update(opportunities)
 						.set({
-							source,
 							campaign,
 							updatedAt: new Date(),
 						})
-						.where(eq(opportunities.id, recentOpportunity.id));
+						.where(eq(opportunities.id, existingOpportunity.id));
 				}
 
 				return c.json(
@@ -286,17 +315,40 @@ export async function createPublicLead(c: Context) {
 						success: true,
 						data: leadData,
 						message:
-							"Lead ya tiene una oportunidad reciente (últimas 24 horas)",
+							"Lead ya tiene una oportunidad abierta con el mismo source",
 					},
 					200,
 				);
+			}
+
+			const assignedTo = await resolveLeadAssignee(existingLead.assignedTo);
+
+			if (!assignedTo) {
+				return c.json(
+					{
+						success: false,
+						error: "No hay usuario de ventas disponible para asignar",
+					},
+					500,
+				);
+			}
+
+			if (assignedTo !== existingLead.assignedTo) {
+				[leadData] = await db
+					.update(leads)
+					.set({
+						assignedTo,
+						updatedAt: new Date(),
+					})
+					.where(eq(leads.id, existingLead.id))
+					.returning();
 			}
 
 			const opportunity = await createOpportunityForLead(
 				existingLead.id,
 				existingLead.firstName,
 				existingLead.lastName,
-				existingLead.assignedTo,
+				assignedTo,
 				body.notes ?? "",
 				source,
 				campaign,
@@ -380,6 +432,7 @@ export async function createPublicLead(c: Context) {
 				source: body.source || "website",
 				campaign: body.campaign,
 				status: "new",
+				assignmentType: "auto",
 				assignedTo: salesUserForLead.id,
 				createdBy: salesUserForLead.id,
 				updatedAt: new Date(),

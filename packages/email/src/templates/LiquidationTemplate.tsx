@@ -10,7 +10,8 @@ import {
   Text,
   Hr,
   Link,
-  Img,
+  Row,
+  Column,
 } from '@react-email/components';
 
 interface LiquidationEmailProps {
@@ -19,6 +20,7 @@ interface LiquidationEmailProps {
   creditNumber: string;
   date: string;
   currencySymbol?: string;
+  reportUrl?: string;
 }
 
 export const LiquidationEmail = ({
@@ -27,6 +29,7 @@ export const LiquidationEmail = ({
   creditNumber,
   date,
   currencySymbol = 'Q.',
+  reportUrl,
 }: LiquidationEmailProps) => (
   <Html>
     <Head />
@@ -34,33 +37,53 @@ export const LiquidationEmail = ({
     <Body style={main}>
       <Container style={container}>
         <Section style={header}>
-          <Text style={logo}>CLUB CASH IN</Text>
+          <Text style={logoText}>CLUB CASH IN</Text>
         </Section>
+        
         <Section style={content}>
           <Heading style={h1}>Confirmación de Liquidación</Heading>
-          <Text style={text}>Estimado(a) <strong>{investorName}</strong>,</Text>
-          <Text style={text}>
-            Le informamos que se ha procesado con éxito la liquidación de su pago correspondiente.
+          
+          <Text style={greeting}>
+            Estimado(a) <strong>{investorName}</strong>,
           </Text>
           
-          <Section style={detailsContainer}>
-            <Text style={detailItem}><strong>Fecha:</strong> {date}</Text>
-            <Text style={detailItem}><strong>Crédito:</strong> {creditNumber}</Text>
-            <Text style={detailItem}><strong>Monto Liquidado:</strong> {currencySymbol}{amount}</Text>
-          </Section>
-
-          <Text style={text}>
-            Adjunto a este correo encontrará el reporte detallado con el desglose de capital, intereses e impuestos.
+          <Text style={message}>
+            Le informamos que se ha procesado con éxito la liquidación de sus rendimientos correspondientes al período de <strong>{date}</strong>.
           </Text>
+
+
+
+          <Section style={buttonGroup}>
+            {reportUrl && (
+              <Section style={primaryAction}>
+                <Link href={reportUrl} style={primaryButton}>
+                  Descargar Reporte (Excel)
+                </Link>
+              </Section>
+            )}
+            
+            <Section style={secondaryAction}>
+              <Text style={secondaryText}>¿Deseas ver más información sobre tus inversiones?</Text>
+              <Link href="https://www.clubcashin.com/login" style={secondaryButton}>
+                Visitar mi Portal de Inversionista
+              </Link>
+            </Section>
+          </Section>
 
           <Hr style={hr} />
           
-          <Text style={footer}>
-            Si tiene alguna duda sobre esta transacción, por favor contáctenos.
+          <Text style={footerNote}>
+            Si tiene alguna duda o consulta sobre esta transacción, nuestro equipo de soporte está a su disposición.
           </Text>
-          <Text style={footer}>
-            © {new Date().getFullYear()} Club Cash In. Todos los derechos reservados.
-          </Text>
+          
+          <Section style={footer}>
+            <Text style={footerText}>
+              © {new Date().getFullYear()} Club Cash In. Todos los derechos reservados.
+            </Text>
+            <Text style={footerText}>
+              Este es un correo automático, por favor no responda a este mensaje.
+            </Text>
+          </Section>
         </Section>
       </Container>
     </Body>
@@ -70,72 +93,126 @@ export const LiquidationEmail = ({
 export default LiquidationEmail;
 
 const main = {
-  backgroundColor: '#f6f9fc',
+  backgroundColor: '#f4f7f9',
   fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Ubuntu,sans-serif',
 };
 
 const container = {
   backgroundColor: '#ffffff',
-  margin: '0 auto',
-  padding: '20px 0 48px',
-  marginBottom: '64px',
-  borderRadius: '8px',
-  boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+  margin: '40px auto',
+  maxWidth: '600px',
+  borderRadius: '12px',
+  overflow: 'hidden',
+  boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
 };
 
 const header = {
-  padding: '30px',
+  backgroundColor: '#1a202c',
+  padding: '40px 20px',
   textAlign: 'center' as const,
 };
 
-const logo = {
-  fontSize: '24px',
+const logoText = {
+  fontSize: '28px',
   fontWeight: 'bold',
-  color: '#004aad',
-  letterSpacing: '2px',
+  color: '#ffffff',
+  letterSpacing: '3px',
+  margin: '0',
 };
 
 const content = {
-  padding: '0 48px',
+  padding: '40px 50px',
 };
 
 const h1 = {
-  color: '#333',
-  fontSize: '24px',
+  color: '#1a202c',
+  fontSize: '26px',
   fontWeight: 'bold',
-  padding: '0',
-  margin: '30px 0',
   textAlign: 'center' as const,
+  margin: '0 0 30px',
 };
 
-const text = {
-  color: '#555',
+const greeting = {
+  color: '#2d3748',
+  fontSize: '18px',
+  lineHeight: '1.5',
+  margin: '0 0 16px',
+};
+
+const message = {
+  color: '#4a5568',
   fontSize: '16px',
-  lineHeight: '26px',
+  lineHeight: '1.6',
   margin: '16px 0',
 };
 
-const detailsContainer = {
-  backgroundColor: '#f9f9f9',
-  padding: '20px',
-  borderRadius: '8px',
-  margin: '20px 0',
+
+const buttonGroup = {
+  textAlign: 'center' as const,
+  margin: '40px 0 20px',
 };
 
-const detailItem = {
-  color: '#444',
+const primaryAction = {
+  marginBottom: '24px',
+};
+
+const primaryButton = {
+  backgroundColor: '#004aad',
+  borderRadius: '6px',
+  color: '#ffffff',
+  fontSize: '16px',
+  fontWeight: 'bold',
+  textDecoration: 'none',
+  textAlign: 'center' as const,
+  display: 'inline-block',
+  padding: '14px 32px',
+  boxShadow: '0 4px 6px rgba(0, 74, 173, 0.2)',
+};
+
+const secondaryAction = {
+  marginTop: '32px',
+  paddingTop: '32px',
+  borderTop: '1px solid #edf2f7',
+};
+
+const secondaryText = {
+  color: '#718096',
   fontSize: '15px',
-  margin: '8px 0',
+  marginBottom: '16px',
+};
+
+const secondaryButton = {
+  backgroundColor: 'transparent',
+  border: '2px solid #004aad',
+  borderRadius: '6px',
+  color: '#004aad',
+  fontSize: '15px',
+  fontWeight: 'bold',
+  textDecoration: 'none',
+  textAlign: 'center' as const,
+  display: 'inline-block',
+  padding: '12px 28px',
 };
 
 const hr = {
-  borderColor: '#e6ebf1',
-  margin: '20px 0',
+  borderColor: '#edf2f7',
+  margin: '40px 0 20px',
+};
+
+const footerNote = {
+  color: '#718096',
+  fontSize: '14px',
+  textAlign: 'center' as const,
+  fontStyle: 'italic',
+  marginBottom: '30px',
 };
 
 const footer = {
-  color: '#8898aa',
-  fontSize: '12px',
   textAlign: 'center' as const,
-  margin: '8px 0',
+};
+
+const footerText = {
+  color: '#a0aec0',
+  fontSize: '12px',
+  margin: '4px 0',
 };

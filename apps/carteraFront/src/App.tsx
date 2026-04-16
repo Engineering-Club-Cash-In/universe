@@ -16,7 +16,10 @@ import { CreatePaymentAgreementForm } from "./private/cartera/components/payment
 import { FacturasGenericas } from "./private/cartera/components/FacturasGenericas";
 import EfectividadAsesores from "./private/cartera/components/EfectividadAsesores";
 import { HistorialLiquidaciones } from "./private/cartera/components/HistorialLiquidaciones";
+import { SesionesPendientes } from "./private/cartera/components/SesionesPendientes";
 import { RecibosGenericos } from "./private/recibos-genericos/components/RecibosGenericos";
+import { FallenCredits } from "./private/cartera/components/FallenCredits";
+import { PagosPorVencimiento } from "./private/cartera/components/PagosPorVencimiento";
 
 // 🔒 Rutas privadas
 function PrivateRoute({ children }: { children: JSX.Element }) {
@@ -121,6 +124,15 @@ function App() {
         />
 
         <Route
+          path="sesiones-pendientes"
+          element={
+            <RoleRoute allowedRoles={["ADMIN"]}>
+              <SesionesPendientes />
+            </RoleRoute>
+          }
+        />
+
+        <Route
           path="bancos"
           element={
             <RoleRoute allowedRoles={["ADMIN"]}>
@@ -197,6 +209,24 @@ function App() {
           element={
             <RoleRoute allowedRoles={["ADMIN"]}>
               <RecibosGenericos />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="creditos-caidos"
+          element={
+            <RoleRoute allowedRoles={["ADMIN"]}>
+              <FallenCredits />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="pagos-por-vencimiento"
+          element={
+            <RoleRoute allowedRoles={["ADMIN"]}>
+              <PagosPorVencimiento />
             </RoleRoute>
           }
         />

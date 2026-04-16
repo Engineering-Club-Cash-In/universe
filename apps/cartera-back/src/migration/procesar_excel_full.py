@@ -19,15 +19,12 @@ CARPETA_EXCELS = r"C:\Users\Kelvin Palacios\Documents\analis de datos"
 ARCHIVO_EXCEL  = "Cartera Préstamos (Cash-In) NUEVA 3.0.xlsx"
 
 HOJAS_A_PROCESAR = [
-    "Enero 2026"
+    "Febrero 2026"
 ]
 
 # Créditos específicos a procesar (déjalos vacíos [] para procesar TODOS los de la hoja)
 CREDITOS_A_PROCESAR = [
-    "01010214121670",
-    "01010214121670_2",
-    "01010214121680",
-    "01010214121680_2",
+    "01010214124170",
 ]
 
 API_BASE = "http://localhost:7000"

@@ -39,7 +39,7 @@ import {
 import { authMiddleware } from "./midleware";
 import { getCreditosWithUserByMesAnioExcel } from "../controllers/reports";
 import { insertCredit } from "../controllers/createCredit";
-import {  updateAllInstallments, updateCredit, recalculateQuota, recalcularPagosCredito } from "../controllers/updateCredit";
+import {  updateAllInstallments, updateCredit, recalculateQuota, recalcularPagosCredito, calculateInvestorQuotas, repararTotalRestante } from "../controllers/updateCredit";
 import { updateDueDates, updateSingleDueDate, fixCreditosWithoutFebruary, updateDueDatesFromJson, cambiarFechaInicio, getHistorialCambioFecha } from "../controllers/updateDueDate";
 import { creditos, cuotas_credito } from "../database/db";
 import { and, desc, eq } from "drizzle-orm";
@@ -91,6 +91,7 @@ export const creditRouter = new Elysia()
   return result;
 })
   .post("/updateCredit", updateCredit)
+  .post("/calculate-investor-quotas", calculateInvestorQuotas)
   // Obtener crédito por query param ?numero_credito_sifco=XXXX
   .get("/credito", async ({ query, set }) => {
     const { numero_credito_sifco } = query;
@@ -131,6 +132,7 @@ export const creditRouter = new Elysia()
     cuotas_atrasadas,    // 🆕 NUEVO
     proximidad_pago,     // 🆕 NUEVO
     is_vehiculo_propio,
+    inversionista_ids,
   } = query as Record<string, string>;
 
   // Validar parámetros requeridos
@@ -153,7 +155,8 @@ export const creditRouter = new Elysia()
     | "INCOBRABLE"
     | "PENDIENTE_CANCELACION"
     | "EN_CONVENIO"
-    | "MOROSO";
+    | "MOROSO"
+    | "CAIDO";
   
   // Convertir asesor_id a número si existe
   const asesorIdNum = asesor_id ? Number(asesor_id) : undefined;
@@ -174,6 +177,11 @@ export const creditRouter = new Elysia()
 
   // Filtro vehiculo propio
   const isVehiculoPropioParam = is_vehiculo_propio === "true" ? true : undefined;
+
+  // Array de inversionistas (viene como "1,2,3")
+  const inversionistaIdsArray = inversionista_ids
+    ? inversionista_ids.split(",").map(Number).filter((n) => !isNaN(n))
+    : undefined;
 
   // Validaciones
   if (
@@ -224,6 +232,7 @@ export const creditRouter = new Elysia()
         cuotas_atrasadas: cuotasAtrasadasNum,
         proximidad_pago: proximidadPagoParam,
         is_vehiculo_propio: isVehiculoPropioParam,
+        inversionista_ids: inversionistaIdsArray,
         excel: true,
       });
       set.status = 200;
@@ -242,7 +251,8 @@ export const creditRouter = new Elysia()
         emailAsesorParam,
         cuotasAtrasadasNum,
         proximidadPagoParam,
-        isVehiculoPropioParam
+        isVehiculoPropioParam,
+        inversionistaIdsArray
       );
       set.status = 200;
       return result;
@@ -1139,6 +1149,35 @@ export const creditRouter = new Elysia()
     detail: {
       summary: "Recalcular pagos desde una cuota",
       description: "Recalcula abonos y restantes de los pagos. Si se pasa numero_cuota, procesa desde esa cuota (pagadas y no pagadas). Si no, solo procesa las no pagadas.",
+      tags: ["Créditos", "Cuotas"],
+    },
+  })
+  // ========================================
+  // ENDPOINT: REPARAR total_restante DE LOS PAGOS
+  // ========================================
+  .post("/reparar-total-restante", async ({ body, set }: any) => {
+    try {
+      const { numero_credito_sifco, capital_inicial } = body;
+      const result = await repararTotalRestante({
+        numero_credito_sifco,
+        capital_inicial,
+      });
+      set.status = 200;
+      return { success: true, ...result };
+    } catch (error: any) {
+      console.error("❌ Error en /reparar-total-restante:", error);
+      set.status = 500;
+      return { success: false, error: error.message };
+    }
+  }, {
+    body: t.Object({
+      numero_credito_sifco: t.String({ minLength: 1 }),
+      capital_inicial: t.Optional(t.Union([t.Number(), t.String()])),
+    }),
+    detail: {
+      summary: "Reparar total_restante de los pagos de un crédito",
+      description:
+        "Recalcula y reescribe SOLO el campo total_restante de los pagos desde la cuota 0 hasta la última cuota pagada, amortizando teóricamente. Si no se pasa capital_inicial, se usa el total_restante del pago de la cuota 0 (desembolso) como ancla. No toca abonos, capital_restante, pagado ni ningún otro campo.",
       tags: ["Créditos", "Cuotas"],
     },
   })

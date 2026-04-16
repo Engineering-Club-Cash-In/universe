@@ -12,7 +12,7 @@ import { z } from "zod";
 import { promises as fs } from "fs";
 import { mapPagosPorCreditos, mapPagosDesdeJson } from "../migration/migration";
 import { authMiddleware } from "./midleware";
-import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagosToExcel, generateReciboPagoPDF } from "../controllers/reports";
+import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagosToExcel, generateReciboPagoPDF, getPagosByVencimiento } from "../controllers/reports";
 import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment, aplicarMontoAPago, editarPago } from "../controllers/registerPayment";
 import { eq } from "drizzle-orm";
 import { db } from "../database";
@@ -238,6 +238,7 @@ export const paymentRouter = new Elysia()
           formatoCredito,
           soloAplicados,
           fechaAplicado,
+          fechaBoleta,
         } = query;
 
         // ✅ Si viene reportAdvisor=true, generamos el reporte Excel de asesores (sin inversionistas)
@@ -259,6 +260,7 @@ export const paymentRouter = new Elysia()
             formatoCredito,
             soloAplicados,
             fechaAplicado,
+            fechaBoleta,
           });
           set.status = 200;
           return {
@@ -286,6 +288,7 @@ export const paymentRouter = new Elysia()
             formatoCredito,
             soloAplicados,
             fechaAplicado,
+            fechaBoleta,
           });
           set.status = 200;
           return {
@@ -312,6 +315,7 @@ export const paymentRouter = new Elysia()
           formatoCredito,
           soloAplicados,
           fechaAplicado,
+          fechaBoleta,
         });
 
         set.status = 200;
@@ -351,6 +355,7 @@ export const paymentRouter = new Elysia()
         formatoCredito: t.Optional(t.String()),
         soloAplicados: t.Optional(t.Boolean()),
         fechaAplicado: t.Optional(t.String({ format: "date" })),
+        fechaBoleta: t.Optional(t.String({ format: "date" })),
       }),
       response: {
         200: t.Object({
@@ -370,6 +375,44 @@ export const paymentRouter = new Elysia()
       },
     }
   )
+.get(
+  "/pagos-por-vencimiento",
+  async ({ query, set }) => {
+    try {
+      const result = await getPagosByVencimiento({
+        mes: query.mes,
+        anio: query.anio,
+        page: query.page,
+        pageSize: query.pageSize,
+        numero_credito_sifco: query.numero_credito_sifco,
+        nombre_usuario: query.nombre_usuario,
+        tipo_fecha: query.tipo_fecha as "vencimiento" | "creacion",
+      });
+      set.status = 200;
+      return { success: true, ...result };
+    } catch (error: any) {
+      console.error("Error en /pagos-por-vencimiento:", error);
+      set.status = 500;
+      return { success: false, error: error.message || "Error obteniendo pagos por vencimiento" };
+    }
+  },
+  {
+    detail: {
+      summary: "Obtiene pagos filtrados por mes/año de vencimiento",
+      description: "Lista paginada de pagos filtrados por fecha de vencimiento con totales globales (capital, interés, IVA, seguro, membresías) y desglose de Cube.",
+      tags: ["Pagos", "Reportes"],
+    },
+    query: t.Object({
+      mes: t.Integer({ minimum: 1, maximum: 12 }),
+      anio: t.Integer({ minimum: 2020 }),
+      page: t.Optional(t.Integer({ minimum: 1, default: 1 })),
+      pageSize: t.Optional(t.Integer({ minimum: 1, default: 20 })),
+      numero_credito_sifco: t.Optional(t.String()),
+      nombre_usuario: t.Optional(t.String()),
+      tipo_fecha: t.Optional(t.String({ default: "vencimiento" })),
+    }),
+  }
+)
 .post(
   "/aplicar-pago",
   async ({ query, set }) => {

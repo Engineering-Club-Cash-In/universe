@@ -26,6 +26,8 @@ interface Inversionista {
   porcentaje_inversion: number;
   monto_aportado: number;
   fecha_inicio_participacion?: string;
+  cuota_inversionista?: number;
+  tipo_inversion?: "compra_cartera" | "reinversion";
 }
 
 interface Rubro {
@@ -147,6 +149,7 @@ interface PagoData {
   observaciones: string;
   paymentFalse: boolean;
   pagoConvenio: string;
+  monto_aplicado: string;
 }
 
 // ========================================
@@ -175,22 +178,32 @@ const creditSchema = z.object({
   reserva: z.number().min(0),
   is_vehiculo_propio: z.boolean().optional().default(false),
   
-  // Nuevos campos opcionales para dirección del usuario
+  // Campos opcionales de dirección
   direccion: z.string().max(300).optional().nullable(),
   municipio: z.string().max(100).optional().nullable(),
   departamento: z.string().max(100).optional().nullable(),
   codigo_postal: z.string().max(10).optional().nullable(),
   pais: z.string().optional().nullable(),
+
+  // Información del vehículo, monto asegurado y opportunity_id (Opcionales para el correo)
+  vehiculo_marca: z.string().optional().nullable(),
+  vehiculo_linea: z.string().optional().nullable(),
+  vehiculo_modelo: z.string().optional().nullable(),
+  vehiculo_placa: z.string().optional().nullable(),
+  vehiculo_vin: z.string().optional().nullable(),
+  monto_asegurado: z.number().min(0).optional().nullable(),
+  opportunity_id: z.string().optional().nullable(),
   
   inversionistas: z
     .array(
       z.object({
         inversionista_id: z.number().int().positive(),
-        monto_aportado: z.number().positive(),
+        monto_aportado: z.number().nonnegative(),
         porcentaje_cash_in: z.number().min(0).max(100),
         porcentaje_inversion: z.number().min(0).max(100),
         tipo_inversion: z.enum(["compra_cartera", "reinversion"]).optional(),
         fecha_inicio_participacion: z.string().optional(),
+        cuota_inversionista: z.number().min(0).optional(),
       })
     )
     .min(0),
@@ -361,27 +374,31 @@ const creditosInversionistasData: InversionistaData[] = creditData.inversionista
   console.log(`💵 Capital Total del Crédito: Q${capitalTotal.toFixed(2)}`);
   
   // 🔥 CALCULAR PORCENTAJE DE PARTICIPACIÓN
-  const porcentajeParticipacion = montoAportado.div(capitalTotal).times(100);
+  const porcentajeParticipacion = capitalTotal.eq(0)
+    ? new Big(0)
+    : montoAportado.div(capitalTotal).times(100);
   
   console.log(`\n📐 CÁLCULO DE PARTICIPACIÓN:`);
   console.log(`   Fórmula: (${montoAportado.toFixed(2)} / ${capitalTotal.toFixed(2)}) * 100`);
   console.log(`   Resultado: ${porcentajeParticipacion.toFixed(4)}%`);
   
-  // 🔥 PASO 1: RESTAR CARGOS DE LA CUOTA TOTAL
   const seguro = new Big(creditDataForInsert.seguro_10_cuotas || 0);
   const membresias = new Big(creditDataForInsert.membresias_pago || 0);
-  
+  const gps = new Big(creditDataForInsert.gps || 0);
+
   console.log(`\n💳 CUOTA TOTAL Y CARGOS:`);
   console.log(`   Cuota Total: Q${cuotaTotal.toFixed(2)}`);
   console.log(`   - Seguro: Q${seguro.toFixed(2)}`);
+  console.log(`   - GPS: Q${gps.toFixed(2)}`);
   console.log(`   - Membresía: Q${membresias.toFixed(2)}`);
-  
+
   const cuotaSinCargos = cuotaTotal
     .minus(membresias)
-    .minus(seguro);
-  
+    .minus(seguro)
+    .minus(gps);
+
   console.log(`   = Cuota sin cargos: Q${cuotaSinCargos.toFixed(2)}`);
-  console.log(`   Fórmula: ${cuotaTotal.toFixed(2)} - ${membresias.toFixed(2)} - ${seguro.toFixed(2)}`);
+  console.log(`   Fórmula: ${cuotaTotal.toFixed(2)} - ${membresias.toFixed(2)} - ${seguro.toFixed(2)} - ${gps.toFixed(2)}`);
   
   // 🔥 PASO 2: MULTIPLICAR POR EL PORCENTAJE
   console.log(`\n🔢 PASO 2: MULTIPLICAR POR PORCENTAJE`);
@@ -389,7 +406,7 @@ const creditosInversionistasData: InversionistaData[] = creditData.inversionista
   
   const cuotaBase = cuotaSinCargos
     .times(porcentajeParticipacion.div(100))
-    .round(2);
+    .round(6);
   
   console.log(`   Cuota Base Calculada: Q${cuotaBase.toFixed(2)}`);
   
@@ -411,12 +428,12 @@ const creditosInversionistasData: InversionistaData[] = creditData.inversionista
   
   console.log(`   ¿Es este inversionista el mayor? ${esMayor ? '✅ SÍ' : '❌ NO'}`);
   
-  // 🔥 PASO 3: SI ES EL MAYOR, SUMARLE SEGURO + MEMBRESÍA
-  let cuotaInversionista = cuotaBase;
-  
-  console.log(`\n🎯 PASO 3: CALCULAR CUOTA FINAL`);
-  
-  if (esMayor) {
+  // 🔥 PRIORIDAD 1: Si viene cuota_inversionista desde el frontend, usarla
+  let cuotaInversionista: Big;
+  if (inv.cuota_inversionista !== undefined && inv.cuota_inversionista !== null) {
+    cuotaInversionista = new Big(inv.cuota_inversionista);
+    console.log(`   🚀 FRONTEND: Usando cuota enviada desde el front: Q${cuotaInversionista.toFixed(2)}`);
+  } else if (esMayor) {
     console.log(`   🏆 ESTE ES EL INVERSIONISTA MAYOR`);
     console.log(`   Cuota Base: Q${cuotaBase.toFixed(2)}`);
     console.log(`   + Seguro: Q${seguro.toFixed(2)}`);
@@ -425,12 +442,13 @@ const creditosInversionistasData: InversionistaData[] = creditData.inversionista
     cuotaInversionista = cuotaBase
       .plus(seguro)
       .plus(membresias)
-      .round(2);
+      .round(6);
     
     console.log(`   = Cuota Final: Q${cuotaInversionista.toFixed(2)}`);
     console.log(`   Fórmula: ${cuotaBase.toFixed(2)} + ${seguro.toFixed(2)} + ${membresias.toFixed(2)}`);
   } else {
     console.log(`   📍 Inversionista normal (no es el mayor)`);
+    cuotaInversionista = cuotaBase;
     console.log(`   Cuota Final = Cuota Base: Q${cuotaInversionista.toFixed(2)}`);
     console.log(`   (No se suman cargos)`);
   }
@@ -441,7 +459,7 @@ const creditosInversionistasData: InversionistaData[] = creditData.inversionista
   console.log(`   Tasa de Interés: ${interes.toFixed(2)}%`);
   console.log(`   Monto Aportado: Q${montoAportado.toFixed(2)}`);
   
-  const newCuotaInteres = montoAportado.times(interes.div(100)).round(2);
+  const newCuotaInteres = montoAportado.times(interes.div(100)).round(6);
   console.log(`   Interés Calculado: Q${newCuotaInteres.toFixed(2)}`);
   console.log(`   Fórmula: ${montoAportado.toFixed(2)} * (${interes.toFixed(2)}% / 100)`);
 
@@ -462,10 +480,10 @@ const creditosInversionistasData: InversionistaData[] = creditData.inversionista
   console.log(`\n🧾 CÁLCULO DE IVA (12%):`);
   
   const ivaInversionista = Number(montoInversionista) > 0 
-    ? montoInversionista.times(0.12).round(2)
+    ? montoInversionista.times(0.12).round(6)
     : new Big(0);
   const ivaCashIn = Number(montoCashIn) > 0 
-    ? montoCashIn.times(0.12).round(2)
+    ? montoCashIn.times(0.12).round(6)
     : new Big(0);
   
   if (Number(montoInversionista) > 0) {
@@ -517,8 +535,8 @@ console.log(`   - Cuota total del crédito: Q${cuotaTotal.toFixed(2)}`);
 console.log(`   - Suma de cuotas inversionistas: Q${sumaCuotasCalculadas.toFixed(2)}`);
 console.log(`   - Diferencia: Q${cuotaTotal.minus(sumaCuotasCalculadas).abs().toFixed(2)}`);
 
-// Validar con tolerancia de 0.01 por redondeo
-if (cuotaTotal.minus(sumaCuotasCalculadas).abs().gt(0.01)) {
+// Validar con tolerancia de 0.01 por redondeo (skip si cuota es 0)
+if (cuotaTotal.gt(0) && cuotaTotal.minus(sumaCuotasCalculadas).abs().gt(0.01)) {
   throw new Error(
     `Error en cálculo de cuotas: La suma de cuotas inversionistas (${sumaCuotasCalculadas.toFixed(2)}) no coincide con la cuota total (${cuotaTotal.toFixed(2)})`
   );
@@ -691,6 +709,7 @@ const insertPayments = async (
     observaciones: "",
     paymentFalse: false,
     pagoConvenio: "0",
+    monto_aplicado: "0",
   });
 
   // Cuota mensual
@@ -749,8 +768,8 @@ const insertPayments = async (
       gps_restante: gpsRestanteMes.toString(),
       total_restante: capitalEnMemoria.round(2).toString(),  // El capital que falta en total
       membresias: membresiasFijoPorMes.toString(),
-      membresias_pago: membresiasFijoPorMes.toString(),
-      membresias_mes: membresiasFijoPorMes.toString(),
+      membresias_pago: "0",
+      membresias_mes: "0",
       otros: "",
       mora: "0",
       monto_boleta_cuota: "0",
@@ -864,7 +883,6 @@ export const insertCredit = async ({ body, set }: { body: unknown; set: SetConte
       const adminEmails = adminUsers.map((u) => u.email);
       console.log("[INSERT CREDIT] Admin emails found:", adminEmails);
 
-      // Agregar el email del asesor asignado al crédito
       const [asesorUser] = await db
         .select({ email: platform_users.email })
         .from(platform_users)
@@ -894,6 +912,13 @@ export const insertCredit = async ({ body, set }: { body: unknown; set: SetConte
         cuota: creditData.cuota.toFixed(2),
         interestRate: creditData.porcentaje_interes.toString(),
         investors: investorNames,
+        vehiculoMarca: creditData.vehiculo_marca ?? undefined,
+        vehiculoLinea: creditData.vehiculo_linea ?? undefined,
+        vehiculoModelo: creditData.vehiculo_modelo ?? undefined,
+        vehiculoPlaca: creditData.vehiculo_placa ?? undefined,
+        vehiculoVin: creditData.vehiculo_vin ?? undefined,
+        montoAsegurado: creditData.monto_asegurado ?? undefined,
+        opportunityId: creditData.opportunity_id ?? undefined,
       });
       console.log("[INSERT CREDIT] Email notification sent successfully");
     } catch (emailErr) {

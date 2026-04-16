@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Page } from "@/components";
 import { FormLeads } from "@/features/FormLeads";
+import { useSEO } from "@/lib/seo";
 
 interface LeadsSearch {
   type?: string;
@@ -25,6 +26,16 @@ export const Route = createFileRoute("/leads")({
 });
 
 function RouteComponent() {
+  const { type } = Route.useSearch();
+
+  useSEO({
+    title: "Aplicá a tu Crédito",
+    description:
+      "Aplica hoy a tu crédito vehicular con Club CashIn. Completa el formulario y obtén financiamiento rápido, simple y seguro con nuestra asesoría personalizada.",
+    canonical: "https://clubcashin.com/leads",
+    noindex: type === "buy",
+  });
+
   return (
     <Page footerNotShowRedirects>
       <FormLeads />

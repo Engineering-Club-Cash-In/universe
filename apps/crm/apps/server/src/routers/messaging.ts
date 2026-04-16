@@ -179,25 +179,32 @@ export async function sendContractLinksToLead(params: {
 		leadReason = "El lead no tiene teléfono registrado";
 	} else {
 		// Todo OK — intentar enviar
+		const phoneNormalized = normalizePhone(lead.phone);
+		const templateRequest = {
+			templateName: TEMPLATE_NAME,
+			serviceIdentifier: BOT_NUMBER,
+			messages: [
+				{
+					number: phoneNormalized,
+					body: [leadMessage!],
+				},
+			],
+		};
+		console.log("[SimpleTech][auto] Enviando template a:", phoneNormalized);
+		console.log("[SimpleTech][auto] Request:", JSON.stringify(templateRequest, null, 2));
 		try {
-			const sendResult = await stClient.sendTemplate({
-				templateName: TEMPLATE_NAME,
-				serviceIdentifier: BOT_NUMBER,
-				messages: [
-					{
-						number: normalizePhone(lead.phone),
-						body: [leadMessage!],
-					},
-				],
-			});
+			const sendResult = await stClient.sendTemplate(templateRequest);
+			console.log("[SimpleTech][auto] Response:", JSON.stringify(sendResult, null, 2));
 			if (sendResult.success) {
 				leadStatus = "sent";
+				console.log("[SimpleTech][auto] Envío exitoso. templateMessageId:", sendResult.results[0]?.templateMessageId);
 			} else {
 				leadStatus = "failed";
 				leadReason = sendResult.failed[0]?.error ?? "Error desconocido";
+				console.log("[SimpleTech][auto] Envío fallido. Error:", leadReason);
 			}
 		} catch (err) {
-			console.error("[SimpleTech] Error envío auto:", err);
+			console.error("[SimpleTech][auto] Exception:", err);
 			leadStatus = "failed";
 			leadReason =
 				err instanceof Error ? err.message : "Error desconocido";
@@ -277,16 +284,22 @@ export const messagingRouter = {
 				});
 			}
 
-			const result = await stClientGeneric.sendTemplate({
+			const phoneNormalized = normalizePhone(lead.phone);
+			const templateRequest = {
 				templateName: TEMPLATE_NAME,
 				serviceIdentifier: BOT_NUMBER,
 				messages: [
 					{
-						number: normalizePhone(lead.phone),
+						number: phoneNormalized,
 						body: [input.message],
 					},
 				],
-			});
+			};
+			console.log("[SimpleTech][msg] Enviando template a:", phoneNormalized);
+			console.log("[SimpleTech][msg] Request:", JSON.stringify(templateRequest, null, 2));
+
+			const result = await stClientGeneric.sendTemplate(templateRequest);
+			console.log("[SimpleTech][msg] Response:", JSON.stringify(result, null, 2));
 
 			return result;
 		}),
@@ -475,24 +488,31 @@ export const messagingRouter = {
 			if (!stClientUpdate) {
 				reason = "Servicio de mensajería no configurado";
 			} else {
+				const phoneNormalized = normalizePhone(input.phone);
+				const templateRequest = {
+					templateName: TEMPLATE_NAME,
+					serviceIdentifier: BOT_NUMBER,
+					messages: [
+						{
+							number: phoneNormalized,
+							body: [message],
+						},
+					],
+				};
+				console.log("[SimpleTech][manual] Enviando template a:", phoneNormalized);
+				console.log("[SimpleTech][manual] Request:", JSON.stringify(templateRequest, null, 2));
 				try {
-					const sendResult = await stClientUpdate.sendTemplate({
-						templateName: TEMPLATE_NAME,
-						serviceIdentifier: BOT_NUMBER,
-						messages: [
-							{
-								number: normalizePhone(input.phone),
-								body: [message],
-							},
-						],
-					});
+					const sendResult = await stClientUpdate.sendTemplate(templateRequest);
+					console.log("[SimpleTech][manual] Response:", JSON.stringify(sendResult, null, 2));
 					if (sendResult.success) {
 						status = "sent";
+						console.log("[SimpleTech][manual] Envío exitoso. templateMessageId:", sendResult.results[0]?.templateMessageId);
 					} else {
 						reason = sendResult.failed[0]?.error ?? "Error desconocido al enviar";
+						console.log("[SimpleTech][manual] Envío fallido. Error:", reason);
 					}
 				} catch (err) {
-					console.error("[SimpleTech] Error envío manual:", err);
+					console.error("[SimpleTech][manual] Exception:", err);
 					reason =
 						err instanceof Error
 							? err.message

@@ -11,6 +11,7 @@ import {
   inversionistas,
   platform_users,
   usuarios,
+  pagos_credito,
 } from "../database/db";
 import z from "zod";
 import { sendCompraCarteraAcceptedNotification } from "@cci/email";
@@ -182,22 +183,6 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
       );
     }
 
-    // ── 4.5. Marcar el espejo como aceptado ──
-    // Pasamos a "completado" todos los rows de los créditos que estén
-    // actualmente en "pendiente_revision". Los demás status no se tocan.
-    const updateRes = await db
-      .update(creditos_inversionistas_espejo)
-      .set({ status: "completado", updated_at: new Date() })
-      .where(
-        and(
-          inArray(creditos_inversionistas_espejo.credito_id, creditoIds),
-          eq(creditos_inversionistas_espejo.status, "pendiente_revision"),
-        ),
-      )
-      .returning({
-        credito_id: creditos_inversionistas_espejo.credito_id,
-        inversionista_id: creditos_inversionistas_espejo.inversionista_id,
-      });
 
     // ── 5. Mandar el correo (destinatarios fijos por negocio) ──
     const mailRes = await sendCompraCarteraAcceptedNotification({
@@ -214,6 +199,23 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
       usuarioNombre,
       usuarioEmail,
     });
+
+    // ── 6. Marcar el espejo como aceptado ──
+    // Pasamos a "pendiente_revision" todos los rows de los créditos que estén
+    // actualmente en "pendiente_compra_cartera".
+    const updateRes = await db
+      .update(creditos_inversionistas_espejo)
+      .set({ status: "pendiente_revision", updated_at: new Date() })
+      .where(
+        and(
+          inArray(creditos_inversionistas_espejo.credito_id, creditoIds),
+          eq(creditos_inversionistas_espejo.status, "pendiente_compra_cartera"),
+        ),
+      )
+      .returning({
+        credito_id: creditos_inversionistas_espejo.credito_id,
+        inversionista_id: creditos_inversionistas_espejo.inversionista_id,
+      });
 
     set.status = 200;
     return {

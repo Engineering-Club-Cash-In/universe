@@ -1,8 +1,13 @@
+import { useEffect } from "react";
 import { IconCashIn } from "../FormLeads";
 import { SOCIAL_CONTACTS } from "@/features/footer";
 import { Link } from "@tanstack/react-router";
 
 export const Thanks = () => {
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+
   return (
     <div className="min-h-screen flex flex-col items-center  relative w-full ">
       {/* Background con gradiente */}

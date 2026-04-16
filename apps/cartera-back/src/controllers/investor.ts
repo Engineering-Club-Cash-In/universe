@@ -1,7 +1,12 @@
 // app.ts (o donde declares tus rutas Elysia)
 import { z } from "zod";
 import { formatToUSD } from "../utils/functions/currencyConverter";
-import { generarYSubirPDFInversionista, generarPDFBuffer } from "../utils/functions/generalFunctions";
+import { USD_EXCHANGE_RATE } from "../utils/functions/const";
+import { 
+  generarYSubirPDFInversionista, 
+  generarPDFBuffer, 
+  generarYSubirExcelInversionista 
+} from "../utils/functions/generalFunctions";
 import { db } from "../database/index";
 import {
   bancos,
@@ -14,15 +19,26 @@ import {
   liquidaciones,
   pagos_credito,
   pagos_credito_inversionistas,
-  pagos_credito_inversionistas_espejo, // 🆕 NUEVO: Tabla espejo de pagos
+  pagos_credito_inversionistas_espejo,
   platform_users,
   reinversiones,
   usuarios,
+  liquidacion_locks,
+  documentos_inversionista,
+  abonos_capital,
 } from "../database/db/schema";
+import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
 import { eq, and, sql, inArray, ilike, like, desc, count, SQL } from "drizzle-orm";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import Big from "big.js";
 import { sendLiquidationEmail, sendSimpleEmail } from "@cci/email";
+import {
+  boletaEstaEnPeriodo,
+  resolveEstadoLiquidacionResumen,
+  type EstadoLiquidacionResumen,
+  type EstadoLiquidacionResumenFilter,
+} from "../utils/investorLiquidationSummary";
+import { addInvestorToCredit } from "./addInvestorToCredit";
 
 // ============================================
 // 🆕 TIPOS Y CONFIGURACIÓN PARA CONSULTAS ORIGINALES/ESPEJO
@@ -86,6 +102,8 @@ async function consultarCreditosInversionista(
       porcentaje_inversionista: tabla.porcentaje_participacion_inversionista,
       cuota_inversionista: tabla.cuota_inversionista,
       origen: sql<OrigenDatos>`${config.origen}`.as('origen'),
+      tipo_reinversion: config.origen === "espejo" ? (tabla as any).tipo_reinversion : sql<string | null>`NULL`.as("tipo_reinversion"),
+      credito_inversionista_espejo_id: config.origen === "espejo" ? (tabla as unknown as typeof creditos_inversionistas_espejo).id : sql<number | null>`NULL`.as("credito_inversionista_espejo_id"),
     })
     .from(tabla)
     .where(inArray(tabla.inversionista_id, inversionistaIds));
@@ -97,18 +115,37 @@ async function consultarPagosInversionista(
   creditoId: number,
   incluirLiquidados: boolean,
   numeroCuota: number | undefined,
-  config: TablaConfig
+  config: TablaConfig,
+  soloLiquidados = false,
+  liquidacionId?: number,
+  fechaLiquidacion?: string
 ) {
   // 🔥 Type assertion segura: sabemos que ambas tablas tienen la misma estructura
   const tabla = config.pagosCreditoInversionistas as typeof pagos_credito_inversionistas;
-  
+
   // 🔥 TIPADO: SQL[] es el tipo correcto para condiciones en Drizzle
   const pagosConditions: SQL[] = [
     eq(tabla.inversionista_id, inversionistaId),
     eq(tabla.credito_id, creditoId),
   ];
 
-  if (!incluirLiquidados) {
+  if (fechaLiquidacion) {
+    pagosConditions.push(eq(tabla.estado_liquidacion, "LIQUIDADO"));
+    pagosConditions.push(
+      sql`${tabla.liquidacion_id} IN (
+        SELECT ${liquidaciones.liquidacion_id} FROM ${liquidaciones}
+        WHERE ${liquidaciones.inversionista_id} = ${inversionistaId}
+          AND ${liquidaciones.fecha_liquidacion}::date = ${fechaLiquidacion}
+      )`
+    );
+  } else if (liquidacionId) {
+    pagosConditions.push(eq(tabla.liquidacion_id, liquidacionId));
+    pagosConditions.push(eq(tabla.estado_liquidacion, "LIQUIDADO"));
+  } else if (soloLiquidados) {
+    pagosConditions.push(
+      eq(tabla.estado_liquidacion, "LIQUIDADO")
+    );
+  } else if (!incluirLiquidados) {
     pagosConditions.push(
       eq(tabla.estado_liquidacion, "NO_LIQUIDADO")
     );
@@ -131,6 +168,9 @@ async function consultarPagosInversionista(
       estado_liquidacion: tabla.estado_liquidacion,
       fecha_vencimiento_cuota: cuotas_credito.fecha_vencimiento,
       fecha_pago_efectivo_cuota: cuotas_credito.fecha_liquidacion_inversionistas,
+      abono_capital_id: config.origen === "espejo"
+        ? (tabla as any).abono_capital_id
+        : sql<number | null>`null`,
       origen: sql<OrigenDatos>`${config.origen}`.as('origen'),
     })
     .from(tabla)
@@ -163,14 +203,17 @@ async function consultarPagosAmbos(
   inversionistaId: number,
   creditoId: number,
   incluirLiquidados: boolean,
-  numeroCuota: number | undefined
+  numeroCuota: number | undefined,
+  soloLiquidados = false,
+  liquidacionId?: number,
+  fechaLiquidacion?: string
 ) {
   const configOriginal = getTablaConfig("original");
   const configEspejo = getTablaConfig("espejo");
 
   const [pagosOriginales, pagosEspejos] = await Promise.all([
-    consultarPagosInversionista(inversionistaId, creditoId, incluirLiquidados, numeroCuota, configOriginal),
-    consultarPagosInversionista(inversionistaId, creditoId, incluirLiquidados, numeroCuota, configEspejo),
+    consultarPagosInversionista(inversionistaId, creditoId, incluirLiquidados, numeroCuota, configOriginal, soloLiquidados, liquidacionId, fechaLiquidacion),
+    consultarPagosInversionista(inversionistaId, creditoId, incluirLiquidados, numeroCuota, configEspejo, soloLiquidados, liquidacionId, fechaLiquidacion),
   ]);
 
   return [...pagosOriginales, ...pagosEspejos];
@@ -182,7 +225,10 @@ async function consultarPagosBulk(
   creditosIds: number[],
   incluirLiquidados: boolean,
   numeroCuota: number | undefined,
-  config: TablaConfig
+  config: TablaConfig,
+  soloLiquidados = false,
+  liquidacionId?: number,
+  fechaLiquidacion?: string
 ) {
   const tabla = config.pagosCreditoInversionistas as typeof pagos_credito_inversionistas;
 
@@ -191,7 +237,21 @@ async function consultarPagosBulk(
     inArray(tabla.credito_id, creditosIds),
   ];
 
-  if (!incluirLiquidados) {
+  if (fechaLiquidacion) {
+    pagosConditions.push(eq(tabla.estado_liquidacion, "LIQUIDADO"));
+    pagosConditions.push(
+      sql`${tabla.liquidacion_id} IN (
+        SELECT ${liquidaciones.liquidacion_id} FROM ${liquidaciones}
+        WHERE ${liquidaciones.inversionista_id} = ${inversionistaId}
+          AND ${liquidaciones.fecha_liquidacion}::date = ${fechaLiquidacion}
+      )`
+    );
+  } else if (liquidacionId) {
+    pagosConditions.push(eq(tabla.liquidacion_id, liquidacionId));
+    pagosConditions.push(eq(tabla.estado_liquidacion, "LIQUIDADO"));
+  } else if (soloLiquidados) {
+    pagosConditions.push(eq(tabla.estado_liquidacion, "LIQUIDADO"));
+  } else if (!incluirLiquidados) {
     pagosConditions.push(eq(tabla.estado_liquidacion, "NO_LIQUIDADO"));
   }
 
@@ -217,11 +277,14 @@ async function consultarPagosBulkAmbos(
   inversionistaId: number,
   creditosIds: number[],
   incluirLiquidados: boolean,
-  numeroCuota: number | undefined
+  numeroCuota: number | undefined,
+  soloLiquidados = false,
+  liquidacionId?: number,
+  fechaLiquidacion?: string
 ) {
   const [pagosOriginales, pagosEspejos] = await Promise.all([
-    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("original")),
-    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("espejo")),
+    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("original"), soloLiquidados, liquidacionId, fechaLiquidacion),
+    consultarPagosBulk(inversionistaId, creditosIds, incluirLiquidados, numeroCuota, getTablaConfig("espejo"), soloLiquidados, liquidacionId, fechaLiquidacion),
   ]);
   return [...pagosOriginales, ...pagosEspejos];
 }
@@ -259,18 +322,26 @@ export const insertInvestor = async ({ body, set }: any) => {
       if (inv.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inv.email)) {
         errores.push(`Inversionista #${index + 1}: email inválido`);
       }
-      // 🔥 Validar emite_factura si viene
-      if (
-        inv.emite_factura !== undefined &&
-        typeof inv.emite_factura !== "boolean"
-      ) {
-        errores.push(
-          `Inversionista #${index + 1}: emite_factura debe ser boolean`
-        );
+
+      // Si viene banco_id directamente, validar que exista
+      if (inv.banco_id) {
+        const bancoExiste = await db
+          .select()
+          .from(bancos)
+          .where(eq(bancos.banco_id, Number(inv.banco_id)))
+          .limit(1);
+
+        if (bancoExiste.length === 0) {
+          errores.push(
+            `Inversionista #${index + 1}: banco con ID ${inv.banco_id} no existe`
+          );
+        } else {
+          inv._banco_id = Number(inv.banco_id);
+        }
       }
 
-      // 🔥 Si viene banco (nombre o id), resolverlo
-      if (inv.banco) {
+      // Si viene banco (nombre o id), resolverlo
+      if (!inv._banco_id && inv.banco) {
         let banco_id = null;
 
         if (typeof inv.banco === "number") {
@@ -333,7 +404,17 @@ export const insertInvestor = async ({ body, set }: any) => {
       // 🔥 Verificar si ya existe
       let existente = null;
 
-      if (inv.dpi) {
+      // Buscar por inversionista_id primero (para ediciones directas)
+      if (inv.inversionista_id) {
+        const result = await db
+          .select()
+          .from(inversionistas)
+          .where(eq(inversionistas.inversionista_id, Number(inv.inversionista_id)))
+          .limit(1);
+        existente = result[0] || null;
+      }
+
+      if (!existente && inv.dpi) {
         // Buscar por DPI primero
         const result = await db
           .select()
@@ -343,7 +424,17 @@ export const insertInvestor = async ({ body, set }: any) => {
         existente = result[0] || null;
       }
 
-      // Si no lo encontro por DPI, buscar por nombre
+      // Si no lo encontro por DPI, buscar por email
+      if (!existente && inv.email?.trim()) {
+        const result = await db
+          .select()
+          .from(inversionistas)
+          .where(eq(inversionistas.email, inv.email.trim().toLowerCase()))
+          .limit(1);
+        existente = result[0] || null;
+      }
+
+      // Si no lo encontro por email, buscar por nombre
       if (!existente && inv.nombre?.trim()) {
         const result = await db
           .select()
@@ -448,19 +539,60 @@ export const insertInvestor = async ({ body, set }: any) => {
     };
   }
 };
+// Helper: agrupa rows de left join inversionista + documentos en un solo objeto con array de documentos
+async function agruparInversionistasConDocumentos(
+  rows: { inversionista: typeof inversionistas.$inferSelect; documento: typeof documentos_inversionista.$inferSelect | null }[]
+) {
+  const map = new Map<number, any>();
+
+  for (const row of rows) {
+    const id = row.inversionista.inversionista_id;
+    if (!map.has(id)) {
+      map.set(id, { ...row.inversionista, documentos: [] });
+    }
+    if (row.documento) {
+      const url = await getSignedDocumentUrl(row.documento.key);
+      map.get(id)!.documentos.push({ ...row.documento, url });
+    }
+  }
+
+  return Array.from(map.values());
+}
+
 // GET: Obtener inversionistas (uno o todos)
 export const getInvestors = async ({ query, set }: any) => {
   try {
     // Buscar por ID
     if (query.id) {
-      const result = await db
-        .select()
+      const rows = await db
+        .select({ inversionista: inversionistas, documento: documentos_inversionista })
         .from(inversionistas)
+        .leftJoin(documentos_inversionista, eq(inversionistas.inversionista_id, documentos_inversionista.inversionista_id))
         .where(eq(inversionistas.inversionista_id, query.id));
+
+      const result = await agruparInversionistasConDocumentos(rows);
       set.status = result.length ? 200 : 404;
       return result.length
         ? result[0]
         : { message: "Inversionista no encontrado" };
+    }
+    if(query.email){
+      const rows = await db
+        .select({ inversionista: inversionistas, documento: documentos_inversionista })
+        .from(inversionistas)
+        .leftJoin(documentos_inversionista, eq(inversionistas.inversionista_id, documentos_inversionista.inversionista_id))
+        .where(eq(inversionistas.email, query.email));
+
+      const result = await agruparInversionistasConDocumentos(rows);
+      set.status = result.length ? 200 : 404;
+      if (!result.length) {
+        return { message: "Inversionista no encontrado con ese email" };
+      }
+      const investor = result[0];
+      if (investor.dpi_rep_legal) {
+        return { ...investor, dpi: investor.dpi_rep_legal };
+      }
+      return investor;
     }
 
     // Buscar por DPI
@@ -471,10 +603,13 @@ export const getInvestors = async ({ query, set }: any) => {
         return { message: "DPI debe ser un número válido" };
       }
 
-      const result = await db
-        .select()
+      const rows = await db
+        .select({ inversionista: inversionistas, documento: documentos_inversionista })
         .from(inversionistas)
+        .leftJoin(documentos_inversionista, eq(inversionistas.inversionista_id, documentos_inversionista.inversionista_id))
         .where(eq(inversionistas.dpi, dpiNumber));
+
+      const result = await agruparInversionistasConDocumentos(rows);
       set.status = result.length ? 200 : 404;
       return result.length
         ? result[0]
@@ -483,10 +618,13 @@ export const getInvestors = async ({ query, set }: any) => {
 
     // Buscar por nombre
     if (query.nombre) {
-      const result = await db
-        .select()
+      const rows = await db
+        .select({ inversionista: inversionistas, documento: documentos_inversionista })
         .from(inversionistas)
+        .leftJoin(documentos_inversionista, eq(inversionistas.inversionista_id, documentos_inversionista.inversionista_id))
         .where(eq(inversionistas.nombre, query.nombre));
+
+      const result = await agruparInversionistasConDocumentos(rows);
       set.status = result.length ? 200 : 404;
       return result.length
         ? result
@@ -494,7 +632,12 @@ export const getInvestors = async ({ query, set }: any) => {
     }
 
     // Si no hay query, trae todos
-    const all = await db.select().from(inversionistas);
+    const rows = await db
+      .select({ inversionista: inversionistas, documento: documentos_inversionista })
+      .from(inversionistas)
+      .leftJoin(documentos_inversionista, eq(inversionistas.inversionista_id, documentos_inversionista.inversionista_id));
+
+    const all = await agruparInversionistasConDocumentos(rows);
     set.status = 200;
     return all;
   } catch (error) {
@@ -630,12 +773,13 @@ export async function processAndReplaceCreditInvestors(
   abono_capital: number,
   addition: boolean,
   inversionista_id: number,
-  updateMirror: boolean = false
+  updateMirror: boolean = false,
+  txOrDb: Pick<typeof db, 'query' | 'update'> = db
 ) {
 
 
   // 1. Fetch credit details
-  const credit = await db.query.creditos.findFirst({
+  const credit = await txOrDb.query.creditos.findFirst({
     where: (c, { eq }) => eq(c.credito_id, credito_id),
   });
 
@@ -644,7 +788,7 @@ export async function processAndReplaceCreditInvestors(
   }
 
   // 1.5 Verificar si el inversionista tiene permite_distribucion
-  const inversionista = await db.query.inversionistas.findFirst({
+  const inversionista = await txOrDb.query.inversionistas.findFirst({
     where: (i, { eq }) => eq(i.inversionista_id, inversionista_id),
   });
 
@@ -655,7 +799,7 @@ export async function processAndReplaceCreditInvestors(
   let investors;
 
   if (updateMirror) {
-    investors = await db.query.creditos_inversionistas_espejo.findMany({
+    investors = await txOrDb.query.creditos_inversionistas_espejo.findMany({
       where: (ci, { eq, and }) =>
         and(
           eq(ci.inversionista_id, inversionista_id),
@@ -663,7 +807,7 @@ export async function processAndReplaceCreditInvestors(
         ),
     });
   } else {
-    investors = await db.query.creditos_inversionistas.findMany({
+    investors = await txOrDb.query.creditos_inversionistas.findMany({
       where: (ci, { eq, and }) =>
         and(
           eq(ci.inversionista_id, inversionista_id),
@@ -735,17 +879,18 @@ export async function processAndReplaceCreditInvestors(
     };
 
     if (updateMirror) {
-      await db.update(creditos_inversionistas_espejo).set(setData)
+      await txOrDb.update(creditos_inversionistas_espejo).set({ ...setData, updated_at: new Date() })
         .where(eq(creditos_inversionistas_espejo.id, inv.id));
     } else {
-      await db.update(creditos_inversionistas).set(setData)
+      await txOrDb.update(creditos_inversionistas).set(setData)
         .where(eq(creditos_inversionistas.id, inv.id));
     }
 
     // Si permite_distribucion = true, también actualizar la OTRA tabla con los mismos valores
     if (permiteDistribucion) {
       const otraTabla = updateMirror ? creditos_inversionistas : creditos_inversionistas_espejo;
-      await db.update(otraTabla).set(setData)
+      const otraSetData = otraTabla === creditos_inversionistas_espejo ? { ...setData, updated_at: new Date() } : setData;
+      await txOrDb.update(otraTabla).set(otraSetData)
         .where(and(
           eq(otraTabla.inversionista_id, inversionista_id),
           eq(otraTabla.credito_id, credito_id)
@@ -850,6 +995,8 @@ export async function processAndReplaceCreditInvestorsReverse(
       .where(eq(creditos_inversionistas.id, inv.id));
   }
 }
+
+// !ESTA FUNCION NO DEBERIA DE USARSE:
 
 export async function reversePagosEspejoPorInversionista(
   inversionista_id: number
@@ -983,7 +1130,10 @@ export async function resumeInvestor(
   dpi?: string,
   incluirLiquidados = false,
   numeroCuota?: number,
-  tipo: TipoConsulta = "originales" // 🆕 NUEVO: Permite consultar originales, espejos o ambas
+  tipo: TipoConsulta = "originales",
+  soloLiquidados = false,
+  liquidacionId?: number,
+  fechaLiquidacion?: string
 ) {
   console.log(
     "resumeInvestor for",
@@ -1124,6 +1274,10 @@ export async function resumeInvestor(
         total_abono_iva: new Big(0),
         total_isr: new Big(0),
         total_cuota: new Big(0),
+        total_cuota_sin_reinversion: new Big(0),
+        total_reinversion: new Big(0),
+        total_reinversion_capital: new Big(0),
+        total_reinversion_interes: new Big(0),
         total_monto_aportado: new Big(0),
         totalAbonoGeneralInteres: new Big(0),
         total_capital_creditos: new Big(0),
@@ -1131,7 +1285,7 @@ export async function resumeInvestor(
       };
 
       const formatValue = (val: string | number | null | undefined) =>
-        inv.moneda === "dolares" ? formatToUSD(val) : Number(val || 0);
+        inv.moneda === "dolares" ? formatToUSD(val, inv.inversionista_id) : Number(val || 0);
 
       // Procesar créditos del inversionista
       const creditosData = await Promise.all(
@@ -1163,7 +1317,10 @@ export async function resumeInvestor(
               inv.inversionista_id,
               c.credito_id,
               incluirLiquidados,
-              numeroCuota
+              numeroCuota,
+              soloLiquidados,
+              liquidacionId,
+              fechaLiquidacion
             );
           } else {
             const config = getTablaConfig(tipo === "espejos" ? "espejo" : "original");
@@ -1172,7 +1329,10 @@ export async function resumeInvestor(
               c.credito_id,
               incluirLiquidados,
               numeroCuota,
-              config
+              config,
+              soloLiquidados,
+              liquidacionId,
+              fechaLiquidacion
             );
           }
 
@@ -1184,6 +1344,10 @@ export async function resumeInvestor(
           let total_cuota = new Big(0);
           let total_monto_aportado = new Big(c.monto_aportado ?? 0);
           let totalAbonoGeneralInteres = new Big(0);
+          let total_cuota_sin_reinversion = new Big(0);
+          let total_reinversion_capital = new Big(0);
+          let total_reinversion_interes = new Big(0);
+          let total_reinversion_neta_global = new Big(0);
 
           // 🆕 Capital del crédito y capital actual
           const capital_credito = new Big(credito?.capital ?? 0);
@@ -1197,6 +1361,27 @@ export async function resumeInvestor(
           }
 
           // 🧮 Detalle de pagos
+          // Pre-cargar abonos a capital referenciados por los pagos
+          const abonoIds = pagos
+            .map((p) => (p as any).abono_capital_id)
+            .filter((id): id is number => id != null);
+
+          let abonosMap = new Map<number, { monto: string; tipo: string }>();
+          if (abonoIds.length > 0) {
+            const abonos = await db
+              .select({
+                abono_id: abonos_capital.abono_id,
+                monto: abonos_capital.monto,
+                tipo: abonos_capital.tipo,
+              })
+              .from(abonos_capital)
+              .where(inArray(abonos_capital.abono_id, abonoIds));
+
+            for (const a of abonos) {
+              abonosMap.set(a.abono_id, { monto: a.monto, tipo: a.tipo });
+            }
+          }
+
           const pagos_detalle = pagos
             .sort((a, b) => {
               // 🔥 ORDENAR POR FECHA DE VENCIMIENTO DE LA CUOTA
@@ -1210,17 +1395,19 @@ export async function resumeInvestor(
               const abono_capital = new Big(pago.abono_capital ?? 0);
               const abono_interes = new Big(pago.abono_interes ?? 0);
               const abono_iva = new Big(pago.abono_iva_12 ?? 0);
-              const isr = abono_interes.times(0.07).round(2);
+              const isr = abono_interes.times(0.07);
               const cuota = pago.cuota ?? 0;
               let cuota_inversor;
               let abonoGeneralInteres;
+              let reinvCapital = new Big((pago as any).reinv_capital ?? 0);
+              let reinvInteres = new Big((pago as any).reinv_interes ?? 0);
 
               // 🔥 USAR FECHA DE LA CUOTA PARA EL MES (prioridad: fecha_pago_efectivo, luego fecha_vencimiento)
         const fechaParaMes = pago.fecha_vencimiento_cuota || pago.fecha_vencimiento_cuota;
-const mes = fechaParaMes
-  ? dayjs(fechaParaMes).format('MMMM') // 🔥 Esto da el mes correcto
-  : null;
-  console.log("Fecha para mes:", fechaParaMes, "→ Mes:", mes);
+          const mes = fechaParaMes
+            ? dayjs(fechaParaMes).format('MMMM') // 🔥 Esto da el mes correcto
+            : null;
+            console.log("Fecha para mes:", fechaParaMes, "→ Mes:", mes);
        // 🆕 CORRECCIÓN: Cálculo según emite_factura
               if (inv.emite_factura) {
                 abonoGeneralInteres = abono_interes.plus(abono_iva);
@@ -1228,7 +1415,12 @@ const mes = fechaParaMes
                 abonoGeneralInteres = abono_interes.minus(isr);
               }
 
-              switch (inv.reinversion) {
+              let reinversionActual = inv.reinversion;
+              if (inv.reinversion === "reinversion_combinada") {
+                reinversionActual = c.tipo_reinversion || "sin_reinversion";
+              }
+
+              switch (reinversionActual) {
                 case "sin_reinversion":
                   cuota_inversor = abono_capital
                     .plus(abono_interes)
@@ -1236,26 +1428,34 @@ const mes = fechaParaMes
                   break;
 
                 case "reinversion_capital":
-                  cuota_inversor = abono_interes.plus(
-                    inv.emite_factura ? abono_iva : isr.neg()
-                  );
+                  reinvCapital = abono_capital;
+                  cuota_inversor = abonoGeneralInteres;
                   break;
 
                 case "reinversion_interes":
-                  cuota_inversor = abono_capital.plus(
-                    inv.emite_factura ? abono_iva : isr.neg()
-                  );
+                  reinvInteres = abonoGeneralInteres;
+                  cuota_inversor = abono_capital;
                   break;
 
                 case "reinversion_total":
+                  reinvCapital = abono_capital;
+                  reinvInteres = abonoGeneralInteres;
                   cuota_inversor = new Big(0);
                   break;
 
                 case "reinversion_variable":
-                  // Se calcula como sin_reinversion per-pago; el tope global se aplica después
+                  // Se calcula como sin_reinversion per-pago; el allCandidatese global se aplica después
                   cuota_inversor = abono_capital
                     .plus(abono_interes)
                     .plus(inv.emite_factura ? abono_iva : isr.neg());
+                  break;
+
+                case "reinversion_combinada":
+                  // 🔑 Lógica combinada: tomamos lo que NO se reinvierte y le aplicamos impuesto
+                  const capRestante = abono_capital.minus(reinvCapital);
+                  const intRestante = abono_interes.minus(reinvInteres);
+                  const isrRestante = inv.emite_factura ? new Big(0) : intRestante.times(0.07);
+                  cuota_inversor = capRestante.plus(intRestante).plus(inv.emite_factura ? abono_iva : isrRestante.neg());
                   break;
 
                 default:
@@ -1263,6 +1463,20 @@ const mes = fechaParaMes
                     .plus(abono_interes)
                     .plus(inv.emite_factura ? abono_iva : isr.neg());
               }
+
+              // 🔑 Acumular Sin Reinversión de forma independiente (Neto Real)
+              const netIntParaMiso = abono_interes.plus(inv.emite_factura ? abono_iva : isr.neg());
+              const pagoNetoReal = abono_capital.plus(netIntParaMiso);
+              total_cuota_sin_reinversion = total_cuota_sin_reinversion.plus(pagoNetoReal);
+
+              // 🔑 Reinversión Neta (Interés - ISR proporcional)
+              const isrReinv = inv.emite_factura ? new Big(0) : reinvInteres.times(0.07);
+              const totalReinvNeta = reinvCapital.plus(reinvInteres).minus(isrReinv);
+              const netReinvInt = reinvInteres.minus(isrReinv);
+              
+              total_reinversion_neta_global = total_reinversion_neta_global.plus(totalReinvNeta);
+              total_reinversion_capital = total_reinversion_capital.plus(reinvCapital);
+              total_reinversion_interes = total_reinversion_interes.plus(netReinvInt);
 
               // 🆕 CORRECCIÓN: Acumular totales
               totalAbonoGeneralInteres =
@@ -1285,7 +1499,7 @@ const mes = fechaParaMes
                 abono_capital: formatValue(abono_capital.toString()),
                 abono_interes: formatValue(abono_interes.toString()),
                 abono_iva: formatValue(abono_iva.toString()),
-                isr: inv.emite_factura ? 0 : formatValue(isr.toString()),
+                isr: inv.emite_factura ? 0 : formatValue(isr.round(2).toString()),
                 porcentaje_inversor: pago.porcentaje_participacion,
                 cuota_inversor: formatValue(cuota_inversor.toString()),
                 cuota: formatValue(cuota),
@@ -1300,6 +1514,10 @@ const mes = fechaParaMes
                   )
                 ),
                 estado_liquidacion: pago.estado_liquidacion,
+                abono_capital_id: (pago as any).abono_capital_id ?? null,
+                abono_capital_detalle: (pago as any).abono_capital_id
+                  ? abonosMap.get((pago as any).abono_capital_id) ?? null
+                  : null,
               };
             });
 
@@ -1317,6 +1535,10 @@ const mes = fechaParaMes
             subtotal.total_abono_iva.plus(total_abono_iva);
           subtotal.total_isr = subtotal.total_isr.plus(total_isr);
           subtotal.total_cuota = subtotal.total_cuota.plus(total_cuota);
+          subtotal.total_cuota_sin_reinversion = subtotal.total_cuota_sin_reinversion.plus(total_cuota_sin_reinversion);
+          subtotal.total_reinversion = subtotal.total_reinversion.plus(total_reinversion_neta_global);
+          subtotal.total_reinversion_capital = subtotal.total_reinversion_capital.plus(total_reinversion_capital);
+          subtotal.total_reinversion_interes = subtotal.total_reinversion_interes.plus(total_reinversion_interes);
           subtotal.totalAbonoGeneralInteres =
             subtotal.totalAbonoGeneralInteres.plus(totalAbonoGeneralInteres);
           subtotal.total_capital_creditos =
@@ -1338,20 +1560,32 @@ const mes = fechaParaMes
             monto_aportado: formatValue(c.monto_aportado),
             porcentaje_inversionista: c.porcentaje_inversionista,
             cuota_inversionista: formatValue(c.cuota_inversionista),
+            credito_inversionista_espejo_id: (c as any).credito_inversionista_espejo_id ?? null,
             plazo: credito.plazo,
             pagos: pagos_detalle,
             total_abono_capital: formatValue(total_abono_capital.toString()),
             total_abono_interes: formatValue(total_abono_interes.toString()),
-            total_abono_iva: formatValue(total_abono_iva.toString()),
-            total_isr: formatValue(total_isr.toString()),
-            total_cuota: formatValue(total_cuota.toString()),
+            total_abono_iva: formatValue(
+              (inv.emite_factura
+                ? total_abono_iva
+                : total_abono_interes.round(2).times(0.12)
+              ).round(2).toString()
+            ),
+            total_isr: formatValue(
+              (inv.emite_factura
+                ? new Big(0)
+                : total_abono_interes.round(2).times(0.07)
+              ).round(2).toString()
+            ),
+            total_cuota: formatValue(total_cuota.round(2).toString()),
             meses_en_credito,
             origen: c.origen, // 🆕 NUEVO: Indica si viene de tabla original o espejo
+            tipo_reinversion: inv.reinversion === "reinversion_combinada" ? c.tipo_reinversion : null,
           };
         })
       );
 
-      // Aplicar reinversión variable como tope global sobre el total
+      // Aplicar reinversión variable como allCandidatese global sobre el total
       if (inv.reinversion === "reinversion_variable") {
         const montoReinv = new Big(inv.monto_reinversion ?? 0);
         const reinversion = montoReinv.gt(subtotal.total_cuota) ? subtotal.total_cuota : montoReinv;
@@ -1368,6 +1602,7 @@ const mes = fechaParaMes
         tipo_cuenta: inv.tipo_cuenta,
         numero_cuenta: inv.numero_cuenta,
         re_inversion: inv.reinversion,
+        reinversion: inv.reinversion,
         monto_reinversion: inv.monto_reinversion,
         saldo_reinversion: inv.saldo_reinversion,
         tieneBoletaPendiente: inv.tiene_boleta_pendiente,
@@ -1379,11 +1614,21 @@ const mes = fechaParaMes
         subtotal: {
           total_abono_capital: formatValue(subtotal.total_abono_capital.toString()),
           total_abono_interes: formatValue(subtotal.total_abono_interes.toString()),
-          total_abono_iva: formatValue(subtotal.total_abono_iva.toString()),
-          total_isr: formatValue(subtotal.total_isr.toString()),
-          total_cuota: formatValue(subtotal.total_cuota.toString()),
+          total_abono_iva: formatValue(
+            (inv.emite_factura
+              ? subtotal.total_abono_iva
+              : subtotal.total_abono_interes.round(2).times(0.12)
+            ).round(2).toString()
+          ),
+          total_isr: formatValue(subtotal.total_isr.round(2).toString()),
+          total_cuota_sin_reinversion: formatValue(subtotal.total_cuota_sin_reinversion.toString()),
+          total_cuota_con_reinversion: formatValue(subtotal.total_cuota_sin_reinversion.minus(subtotal.total_reinversion).toString()),
+          total_cuota: formatValue(subtotal.total_cuota_sin_reinversion.minus(subtotal.total_reinversion).toString()),
+          total_reinversion_capital: formatValue(subtotal.total_reinversion_capital.toString()),
+          total_reinversion_interes: formatValue(subtotal.total_reinversion_interes.toString()),
+          total_reinversion:         formatValue(subtotal.total_reinversion.toString()),
           total_monto_aportado: formatValue(subtotal.total_monto_aportado.toString()),
-          totalAbonoGeneralInteres: formatValue(subtotal.totalAbonoGeneralInteres.toString()),
+          total_abono_general_interes: formatValue(subtotal.totalAbonoGeneralInteres.toString()),
           total_capital_creditos: formatValue(subtotal.total_capital_creditos.toString()),
           total_capital_actual: formatValue(subtotal.total_capital_actual.toString()),
         },
@@ -1409,7 +1654,11 @@ export async function getInvestorTotalsGlobales(
   dpi?: string,
   tipo: TipoConsulta = "originales",
   incluirLiquidados = false,
-  numeroCuota?: number
+  numeroCuota?: number,
+  soloLiquidados = false,
+  liquidacionId?: number,
+  fechaLiquidacion?: string,
+  rawValues = false
 ) {
   console.log(
     "getInvestorTotalsGlobales for",
@@ -1467,7 +1716,8 @@ export async function getInvestorTotalsGlobales(
 
   let creditosIds = creditosParticipa.map((c) => c.credito_id);
 
-  const formatValue = (val: string | number) => inv.moneda === "dolares" ? formatToUSD(val) : Number(val);
+  const formatValue = (val: string | number) =>
+    rawValues ? Number(val) : (inv.moneda === "dolares" ? formatToUSD(val, inv.inversionista_id) : Number(val));
 
   if (creditosIds.length === 0) {
     return {
@@ -1536,7 +1786,10 @@ export async function getInvestorTotalsGlobales(
       inv.inversionista_id,
       creditosIds,
       incluirLiquidados,
-      numeroCuota
+      numeroCuota,
+      soloLiquidados,
+      liquidacionId,
+      fechaLiquidacion
     );
   } else {
     const config = getTablaConfig(tipo === "espejos" ? "espejo" : "original");
@@ -1545,7 +1798,10 @@ export async function getInvestorTotalsGlobales(
       creditosIds,
       incluirLiquidados,
       numeroCuota,
-      config
+      config,
+      soloLiquidados,
+      liquidacionId,
+      fechaLiquidacion
     );
   }
 
@@ -1571,6 +1827,7 @@ export async function getInvestorTotalsGlobales(
     total_reinversion_capital: new Big(0),
     total_reinversion_interes: new Big(0),
     total_reinversion: new Big(0),
+    total_cuota_sin_reinversion: new Big(0),
   };
 
   // 7. Procesar TODOS los créditos del inversionista (sin queries adicionales)
@@ -1580,6 +1837,9 @@ export async function getInvestorTotalsGlobales(
 
     const pagos = pagosPorCredito.get(c.credito_id) ?? [];
 
+    // Saltar créditos sin pagos cuando se filtra por estado
+    if (pagos.length === 0) continue;
+
     // Sumar totales
     const capital_credito = new Big(credito?.capital ?? 0);
     let capital_actual = capital_credito;
@@ -1587,8 +1847,8 @@ export async function getInvestorTotalsGlobales(
     for (const pago of pagos) {
       const abono_capital = new Big(pago.abono_capital ?? 0);
       const abono_interes = new Big(pago.abono_interes ?? 0);
-      const abono_iva = new Big(pago.abono_iva_12 ?? 0);
-      const isr = abono_interes.times(0.07).round(2);
+      const abono_iva = new Big(pago.abono_iva_12 ?? 0).round(2);
+      const isr = abono_interes.times(0.07);
 
       let abonoGeneralInteres;
       if (inv.emite_factura) {
@@ -1602,7 +1862,12 @@ export async function getInvestorTotalsGlobales(
       let reinvInteres = new Big(0);
       const interesTotal = abono_interes.plus(inv.emite_factura ? abono_iva : isr.neg());
 
-      switch (inv.reinversion) {
+      let reinversionActual = inv.reinversion;
+      if (inv.reinversion === "reinversion_combinada") {
+        reinversionActual = c.tipo_reinversion || "sin_reinversion";
+      }
+
+      switch (reinversionActual) {
         case "sin_reinversion":
           cuota_inversor = abono_capital.plus(interesTotal);
           break;
@@ -1612,7 +1877,7 @@ export async function getInvestorTotalsGlobales(
           break;
         case "reinversion_interes":
           reinvInteres = abono_interes;
-          cuota_inversor = abono_capital.plus(inv.emite_factura ? abono_iva : isr.neg());
+          cuota_inversor = abono_capital;
           break;
         case "reinversion_total":
           reinvCapital = abono_capital;
@@ -1620,7 +1885,7 @@ export async function getInvestorTotalsGlobales(
           cuota_inversor = new Big(0);
           break;
         case "reinversion_variable":
-          // Se calcula como sin_reinversion per-pago; el tope global se aplica después
+          // Se calcula como sin_reinversion per-pago; el allCandidatese global se aplica después
           cuota_inversor = abono_capital.plus(interesTotal);
           break;
         default:
@@ -1632,12 +1897,23 @@ export async function getInvestorTotalsGlobales(
       subtotal.total_abono_capital = subtotal.total_abono_capital.plus(abono_capital);
       subtotal.total_abono_interes = subtotal.total_abono_interes.plus(abono_interes);
       subtotal.total_abono_iva = subtotal.total_abono_iva.plus(abono_iva);
-      subtotal.total_isr = subtotal.total_isr.plus(isr);
+      if (!inv.emite_factura) {
+        subtotal.total_isr = subtotal.total_isr.plus(isr);
+      }
       subtotal.total_cuota = subtotal.total_cuota.plus(cuota_inversor);
       subtotal.totalAbonoGeneralInteres = subtotal.totalAbonoGeneralInteres.plus(abonoGeneralInteres);
+      
+      // 🔑 ACUMULADOR NETO INDEPENDIENTE
+      const pagoNetoGlobal = abono_capital.plus(interesTotal);
+      subtotal.total_cuota_sin_reinversion = subtotal.total_cuota_sin_reinversion.plus(pagoNetoGlobal);
+      // 🔑 Reinversión Neta (Fuente de Verdad)
+      const isrReinvGlobal = inv.emite_factura ? new Big(0) : reinvInteres.times(0.07);
+      const netReinvGlobal = reinvCapital.plus(reinvInteres).minus(isrReinvGlobal);
+      const netReinvIntGlobal = reinvInteres.minus(isrReinvGlobal);
+
+      subtotal.total_reinversion = subtotal.total_reinversion.plus(netReinvGlobal);
       subtotal.total_reinversion_capital = subtotal.total_reinversion_capital.plus(reinvCapital);
-      subtotal.total_reinversion_interes = subtotal.total_reinversion_interes.plus(reinvInteres);
-      subtotal.total_reinversion = subtotal.total_reinversion.plus(reinvCapital).plus(reinvInteres);
+      subtotal.total_reinversion_interes = subtotal.total_reinversion_interes.plus(netReinvIntGlobal);
     }
 
     subtotal.total_monto_aportado = subtotal.total_monto_aportado.plus(new Big(c.monto_aportado ?? 0));
@@ -1645,7 +1921,7 @@ export async function getInvestorTotalsGlobales(
     subtotal.total_capital_actual = subtotal.total_capital_actual.plus(capital_actual);
   }
 
-  // Aplicar reinversión variable como tope global sobre el total
+  // Aplicar reinversión variable como allCandidatese global sobre el total
   if (inv.reinversion === "reinversion_variable") {
     const montoReinv = new Big(inv.monto_reinversion ?? 0);
     const reinversion = montoReinv.gt(subtotal.total_cuota) ? subtotal.total_cuota : montoReinv;
@@ -1684,21 +1960,245 @@ export async function getInvestorTotalsGlobales(
     moneda: inv.moneda,
     currencySymbol: inv.moneda === "dolares" ? "$" : "Q.",
     totales: {
-      total_abono_capital: formatValue(subtotal.total_abono_capital.toString()),
-      total_abono_interes: formatValue(subtotal.total_abono_interes.toString()),
-      total_abono_iva: formatValue(subtotal.total_abono_iva.toString()),
-      total_isr: formatValue(subtotal.total_isr.toString()),
-      total_cuota_sin_reinversion: formatValue(subtotal.total_cuota.plus(subtotal.total_reinversion).toString()),
-      total_cuota_con_reinversion: formatValue(subtotal.total_cuota.toString()),
-      total_monto_aportado: formatValue(subtotal.total_monto_aportado.toString()),
-      totalAbonoGeneralInteres: formatValue(subtotal.totalAbonoGeneralInteres.toString()),
-      total_capital_creditos: formatValue(subtotal.total_capital_creditos.toString()),
-      total_capital_actual: formatValue(subtotal.total_capital_actual.toString()),
-      total_reinversion_capital: formatValue(subtotal.total_reinversion_capital.toString()),
-      total_reinversion_interes: formatValue(subtotal.total_reinversion_interes.toString()),
-      total_reinversion: formatValue(subtotal.total_reinversion.toString()),
+      total_abono_capital: formatValue(subtotal.total_abono_capital.round(2).toString()),
+      total_abono_interes: formatValue(subtotal.total_abono_interes.round(2).toString()),
+      total_abono_iva: formatValue(
+        (inv.emite_factura
+          ? subtotal.total_abono_iva
+          : subtotal.total_abono_interes.round(2).times(0.12)
+        ).round(2).toString()
+      ),
+      total_isr: formatValue(subtotal.total_isr.round(2).toString()),
+      total_cuota_sin_reinversion: formatValue(subtotal.total_cuota_sin_reinversion.round(2).toString()),
+      total_cuota_con_reinversion: formatValue(subtotal.total_cuota.round(2).toString()),
+      total_monto_aportado: formatValue(subtotal.total_monto_aportado.round(2).toString()),
+      total_abono_general_interes: formatValue(subtotal.totalAbonoGeneralInteres.round(2).toString()),
+      total_capital_creditos: formatValue(subtotal.total_capital_creditos.round(2).toString()),
+      total_capital_actual: formatValue(subtotal.total_capital_actual.round(2).toString()),
+      total_reinversion_capital: formatValue(subtotal.total_reinversion_capital.round(2).toString()),
+      total_reinversion_interes: formatValue(subtotal.total_reinversion_interes.round(2).toString()),
+      total_reinversion: formatValue(subtotal.total_reinversion.round(2).toString()),
     },
   };
+}
+
+export async function updateLiquidacionReporteUrl(liquidacion_id: number, url: string) {
+  const [liquidacion] = await db
+    .select({
+      liquidacion_id: liquidaciones.liquidacion_id,
+      fecha_liquidacion: liquidaciones.fecha_liquidacion,
+      reporte_liquidacion_url: liquidaciones.reporte_liquidacion_url,
+    })
+    .from(liquidaciones)
+    .where(eq(liquidaciones.liquidacion_id, liquidacion_id))
+    .orderBy(desc(liquidaciones.fecha_liquidacion))
+    .limit(1);
+
+  if (liquidacion) {
+    await db
+      .update(liquidaciones)
+      .set({ reporte_liquidacion_url: url })
+      .where(eq(liquidaciones.liquidacion_id, liquidacion.liquidacion_id));
+
+    return {
+      liquidacion_id: liquidacion.liquidacion_id,
+      fecha_liquidacion: liquidacion.fecha_liquidacion,
+      url_anterior: liquidacion.reporte_liquidacion_url,
+      url_nueva: url,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Obtiene las liquidaciones (con inversionista_id y liquidacion_id) de una fecha dada.
+ */
+export async function getLiquidacionesPorFecha(fecha: string) {
+  return await db
+    .select({
+      liquidacion_id: liquidaciones.liquidacion_id,
+      inversionista_id: liquidaciones.inversionista_id,
+    })
+    .from(liquidaciones)
+    .where(sql`${liquidaciones.fecha_liquidacion}::date = ${fecha}`);
+}
+
+// ============================================
+// Revertir liquidación por liquidacion_id
+// ============================================
+
+/**
+ * Revierte completamente una liquidación dado su liquidacion_id.
+ * Deshace todos los efectos de liquidateByInvestorId en orden inverso,
+ * dentro de una transacción para garantizar atomicidad.
+ */
+export async function revertirLiquidacion(liquidacion_id: number) {
+  return await db.transaction(async (tx) => {
+    // ──────────────────────────────────────────────
+    // PASO 1: Obtener la liquidación y validar que existe
+    // ──────────────────────────────────────────────
+    const [liquidacion] = await tx
+      .select()
+      .from(liquidaciones)
+      .where(eq(liquidaciones.liquidacion_id, liquidacion_id));
+
+    if (!liquidacion) {
+      throw new Error(`No se encontró la liquidación con id: ${liquidacion_id}`);
+    }
+
+    const inv_id = liquidacion.inversionista_id;
+    console.log(`\n🔄 Revirtiendo liquidación ${liquidacion_id} del inversionista ${inv_id}`);
+
+    // ──────────────────────────────────────────────
+    // PASO 2: Obtener todos los pagos espejo asociados a esta liquidación
+    // ──────────────────────────────────────────────
+    const pagosLiquidados = await tx
+      .select()
+      .from(pagos_credito_inversionistas_espejo)
+      .where(eq(pagos_credito_inversionistas_espejo.liquidacion_id, liquidacion_id));
+
+    console.log(`  📊 Pagos asociados a esta liquidación: ${pagosLiquidados.length}`);
+
+    // ──────────────────────────────────────────────
+    // PASO 3: Restaurar monto_aportado en creditos_inversionistas_espejo
+    //   Agrupamos pagos por credito_id, sumamos abono_capital y llamamos
+    //   processAndReplaceCreditInvestors con addition=true para sumar de vuelta
+    // ──────────────────────────────────────────────
+    const pagosPorCredito = new Map<number, typeof pagosLiquidados>();
+    for (const pago of pagosLiquidados) {
+      if (!pagosPorCredito.has(pago.credito_id)) {
+        pagosPorCredito.set(pago.credito_id, []);
+      }
+      pagosPorCredito.get(pago.credito_id)!.push(pago);
+    }
+
+    for (const [creditoId, pagos] of pagosPorCredito) {
+      const totalAbonoCapital = pagos.reduce(
+        (acc, p) => acc.plus(new Big(p.abono_capital ?? 0)),
+        new Big(0)
+      );
+
+      if (totalAbonoCapital.gt(0)) {
+        // addition=true → suma de vuelta el capital al monto_aportado
+        await processAndReplaceCreditInvestors(
+          creditoId,
+          totalAbonoCapital.toNumber(),
+          true,       // addition: sumar de vuelta
+          inv_id,
+          true        // updateMirror: tabla espejo
+        );
+        console.log(`  ✅ Crédito ${creditoId}: monto_aportado restaurado (+${totalAbonoCapital.toFixed(2)})`);
+      }
+    }
+
+    // ──────────────────────────────────────────────
+    // PASO 4: Revertir pagos espejo a NO_LIQUIDADO
+    //   Quitamos la referencia a la liquidación y cambiamos el estado
+    // ──────────────────────────────────────────────
+    const pagosIds = pagosLiquidados.map((p) => p.id);
+    if (pagosIds.length > 0) {
+      await tx
+        .update(pagos_credito_inversionistas_espejo)
+        .set({
+          estado_liquidacion: "NO_LIQUIDADO",
+          liquidacion_id: null,
+          updated_at: new Date(),
+        })
+        .where(inArray(pagos_credito_inversionistas_espejo.id, pagosIds));
+
+      console.log(`  ✅ ${pagosIds.length} pagos revertidos a NO_LIQUIDADO`);
+    }
+
+    // ──────────────────────────────────────────────
+    // PASO 5: Revertir cuotas del crédito
+    //   Marcamos liquidado_inversionistas = false y limpiamos fecha
+    // ──────────────────────────────────────────────
+    const allPagoIds = [...new Set(pagosLiquidados.map((p) => p.pago_id))];
+    if (allPagoIds.length > 0) {
+      const cuotasDeLosPagos = await tx
+        .select({ cuota_id: pagos_credito.cuota_id })
+        .from(pagos_credito)
+        .where(inArray(pagos_credito.pago_id, allPagoIds));
+
+      const uniqueCuotaIds = [
+        ...new Set(
+          cuotasDeLosPagos
+            .map((c) => c.cuota_id)
+            .filter((id): id is number => id !== null)
+        ),
+      ];
+
+      if (uniqueCuotaIds.length > 0) {
+        await tx
+          .update(cuotas_credito)
+          .set({
+            liquidado_inversionistas: false,
+            fecha_liquidacion_inversionistas: null,
+          })
+          .where(inArray(cuotas_credito.cuota_id, uniqueCuotaIds));
+
+        console.log(`  ✅ ${uniqueCuotaIds.length} cuotas revertidas`);
+      }
+    }
+
+    // ──────────────────────────────────────────────
+    // PASO 6: Eliminar boleta asociada (si existe)
+    // ──────────────────────────────────────────────
+    if (liquidacion.boleta_id) {
+      await tx
+        .delete(boletasPagoInversionista)
+        .where(eq(boletasPagoInversionista.boleta_id, liquidacion.boleta_id));
+
+      console.log(`  ✅ Boleta ${liquidacion.boleta_id} eliminada`);
+    }
+
+    // ──────────────────────────────────────────────
+    // PASO 7: Revertir reinversión
+    //   Restamos el monto reinvertido del saldo_reinversion del inversionista
+    //   y restauramos los montos en la tabla reinversiones
+    // ──────────────────────────────────────────────
+    const reinvTotal = new Big(liquidacion.reinversion_total ?? 0);
+    if (reinvTotal.gt(0)) {
+      // Restar del saldo_reinversion
+      await tx
+        .update(inversionistas)
+        .set({
+          saldo_reinversion: sql`${inversionistas.saldo_reinversion} - ${reinvTotal.toFixed(2)}::numeric`,
+        })
+        .where(eq(inversionistas.inversionista_id, inv_id));
+
+      // Restaurar montos en reinversiones
+      await tx
+        .update(reinversiones)
+        .set({
+          monto_capital: liquidacion.reinversion_capital ?? "0",
+          monto_interes: liquidacion.reinversion_interes ?? "0",
+          monto_total: liquidacion.reinversion_total ?? "0",
+        })
+        .where(eq(reinversiones.inversionista_id, inv_id));
+
+      console.log(`  ✅ Reinversión revertida (-${reinvTotal.toFixed(2)} del saldo)`);
+    }
+
+    // ──────────────────────────────────────────────
+    // PASO 8: Eliminar la liquidación
+    // ──────────────────────────────────────────────
+    await tx
+      .delete(liquidaciones)
+      .where(eq(liquidaciones.liquidacion_id, liquidacion_id));
+
+    console.log(`  ✅ Liquidación ${liquidacion_id} eliminada`);
+    console.log(`🔄 Reversión completada exitosamente\n`);
+
+    return {
+      success: true,
+      liquidacion_id,
+      inversionista_id: inv_id,
+      pagos_revertidos: pagosLiquidados.length,
+      creditos_afectados: pagosPorCredito.size,
+    };
+  });
 }
 
 // ============================================
@@ -1734,9 +2234,22 @@ export async function upsertPagosEspejo(
   const ids = pagos.map((p) => p.id);
 
   const encontrados = await db
-    .select({ id: pagos_credito_inversionistas_espejo.id })
+    .select({
+      id: pagos_credito_inversionistas_espejo.id,
+      moneda: inversionistas.moneda,
+    })
     .from(pagos_credito_inversionistas_espejo)
+    .innerJoin(
+      inversionistas,
+      eq(
+        pagos_credito_inversionistas_espejo.inversionista_id,
+        inversionistas.inversionista_id
+      )
+    )
     .where(inArray(pagos_credito_inversionistas_espejo.id, ids));
+
+  // Crear un mapa de { id: moneda } para buscar fácilmente
+  const monedaPorId = new Map(encontrados.map((r) => [r.id, r.moneda]));
 
   const idsEncontrados = new Set(encontrados.map((r) => r.id));
   const idsNoEncontrados = ids.filter((id) => !idsEncontrados.has(id));
@@ -1750,19 +2263,34 @@ export async function upsertPagosEspejo(
   // ── PASO 2: UPDATE por id para cada pago ────────────────────────────────────
   await Promise.all(
     pagos.map((p) => {
-      // 🆕 Recalcular IVA basado en el interés (Siempre 12%)
-      const numericInteres = Number(p.abono_interes) || 0;
+      let finalAbonoCapital = p.abono_capital;
+      let finalAbonoInteres = p.abono_interes;
+      let finalCuota = p.cuota;
+
+      const moneda = monedaPorId.get(p.id);
+
+      // Si la moneda es dólares, convertimos los valores del request a Quetzales
+      if (moneda === "dolares") {
+        const tcambio = USD_EXCHANGE_RATE || 7.9;
+        finalAbonoCapital = (Number(p.abono_capital) * tcambio).toFixed(2);
+        finalAbonoInteres = (Number(p.abono_interes) * tcambio).toFixed(2);
+        finalCuota = (Number(p.cuota) * tcambio).toFixed(2);
+      }
+
+      // 🆕 Recalcular IVA basado en el interés convertido (Siempre 12%)
+      const numericInteres = Number(finalAbonoInteres) || 0;
       const calculadoIva = (numericInteres * 0.12).toFixed(2);
 
       return db
         .update(pagos_credito_inversionistas_espejo)
         .set({
-          abono_capital:            p.abono_capital,
-          abono_interes:            p.abono_interes,
+          abono_capital:            finalAbonoCapital,
+          abono_interes:            finalAbonoInteres,
           abono_iva_12:             calculadoIva,
           porcentaje_participacion: p.porcentaje_participacion,
-          cuota:                    p.cuota,
+          cuota:                    finalCuota,
           ...(p.estado_liquidacion && { estado_liquidacion: p.estado_liquidacion }),
+          updated_at: new Date(),
         })
         .where(eq(pagos_credito_inversionistas_espejo.id, p.id));
     })
@@ -1841,6 +2369,7 @@ export async function getInvestorMirrorSummary(
     .select({
       credito_id:          creditos_inversionistas_espejo.credito_id,
       monto_aportado_base: creditos_inversionistas_espejo.monto_aportado,
+      tipo_reinversion:    creditos_inversionistas_espejo.tipo_reinversion,
     })
     .from(creditos_inversionistas_espejo)
     .where(eq(creditos_inversionistas_espejo.inversionista_id, inv.inversionista_id));
@@ -1850,7 +2379,7 @@ export async function getInvestorMirrorSummary(
     new Big(0)
   );
 
-  const formatValue = (val: string | number) => inv.moneda === "dolares" ? formatToUSD(val) : Number(val);
+  const formatValue = (val: string | number) => inv.moneda === "dolares" ? formatToUSD(val, inv.inversionista_id) : Number(val);
 
   // Caso sin créditos espejo: devolver ceros con monto base
   if (creditosEspejo.length === 0) {
@@ -1925,12 +2454,13 @@ export async function getInvestorMirrorSummary(
     total_isr:                new Big(0),
     total_cuota:              new Big(0),
     total_monto_aportado:     new Big(0),
-    totalAbonoGeneralInteres: new Big(0),
+    total_abono_general_interes: new Big(0),
     total_capital_creditos:   new Big(0),
     total_capital_actual:     new Big(0),
     total_reinversion_capital: new Big(0),
     total_reinversion_interes: new Big(0),
     total_reinversion:         new Big(0),
+    total_cuota_sin_reinversion: new Big(0),
   };
 
   for (const credito of creditosEspejo) {
@@ -1960,7 +2490,13 @@ export async function getInvestorMirrorSummary(
       let reinvInteres = new Big(0);
       const interesTotal = abono_interes.plus(inv.emite_factura ? abono_iva : isr.neg());
 
-      switch (inv.reinversion) {
+      // Para reinversión combinada, aplicar la regla específica del crédito
+      let reinversionActual = inv.reinversion;
+      if (inv.reinversion === "reinversion_combinada") {
+        reinversionActual = credito.tipo_reinversion || "sin_reinversion";
+      }
+
+      switch (reinversionActual) {
         case "sin_reinversion":
           cuota_inversor = abono_capital.plus(interesTotal);
           break;
@@ -1969,16 +2505,16 @@ export async function getInvestorMirrorSummary(
           cuota_inversor = interesTotal;
           break;
         case "reinversion_interes":
-          reinvInteres = abono_interes;
-          cuota_inversor = abono_capital.plus(inv.emite_factura ? abono_iva : isr.neg());
+          reinvInteres = interesTotal;
+          cuota_inversor = abono_capital;
           break;
         case "reinversion_total":
           reinvCapital = abono_capital;
-          reinvInteres = abono_interes;
+          reinvInteres = interesTotal;
           cuota_inversor = new Big(0);
           break;
         case "reinversion_variable":
-          // Se calcula como sin_reinversion per-pago; el tope global se aplica después
+          // Se calcula como sin_reinversion per-pago; el allCandidatese global se aplica después
           cuota_inversor = abono_capital.plus(interesTotal);
           break;
         default:
@@ -1991,10 +2527,19 @@ export async function getInvestorMirrorSummary(
       sg.total_abono_iva          = sg.total_abono_iva.plus(abono_iva);
       sg.total_isr                = sg.total_isr.plus(isr);
       sg.total_cuota              = sg.total_cuota.plus(cuota_inversor);
-      sg.totalAbonoGeneralInteres = sg.totalAbonoGeneralInteres.plus(abonoGeneralInteres);
+      sg.total_abono_general_interes = sg.total_abono_general_interes.plus(abonoGeneralInteres);
+      
+      // 🔑 ACUMULADOR NETO INDEPENDIENTE
+      const pagoNetoEspejo = abono_capital.plus(interesTotal);
+      sg.total_cuota_sin_reinversion = sg.total_cuota_sin_reinversion.plus(pagoNetoEspejo);
+      // 🔑 Reinversión Neta (Fuente de Verdad)
+      const isrReinvMirror = inv.emite_factura ? new Big(0) : reinvInteres.times(0.07);
+      const netReinvMirror = reinvCapital.plus(reinvInteres).minus(isrReinvMirror);
+      const netReinvIntMirror = reinvInteres.minus(isrReinvMirror);
+
+      sg.total_reinversion         = sg.total_reinversion.plus(netReinvMirror);
       sg.total_reinversion_capital = sg.total_reinversion_capital.plus(reinvCapital);
-      sg.total_reinversion_interes = sg.total_reinversion_interes.plus(reinvInteres);
-      sg.total_reinversion         = sg.total_reinversion.plus(reinvCapital).plus(reinvInteres);
+      sg.total_reinversion_interes = sg.total_reinversion_interes.plus(netReinvIntMirror);
     }
 
     // 🔑 Saldo actual = monto_aportado_base - SUM(abono_capital de pagos espejo)
@@ -2003,7 +2548,7 @@ export async function getInvestorMirrorSummary(
     sg.total_capital_actual = sg.total_capital_actual.plus(capital_actual);
   }
 
-  // Aplicar reinversión variable como tope global sobre el total
+  // Aplicar reinversión variable como allCandidatese global sobre el total
   if (inv.reinversion === "reinversion_variable") {
     const montoReinv = new Big(inv.monto_reinversion ?? 0);
     const reinversion = montoReinv.gt(sg.total_cuota) ? sg.total_cuota : montoReinv;
@@ -2024,19 +2569,19 @@ export async function getInvestorMirrorSummary(
     moneda:           inv.moneda,
     currencySymbol:   inv.moneda === "dolares" ? "$" : "Q.",
     subtotal: {
-      total_abono_capital:      formatValue(sg.total_abono_capital.toString()),
-      total_abono_interes:      formatValue(sg.total_abono_interes.toString()),
-      total_abono_iva:          formatValue(sg.total_abono_iva.toString()),
-      total_isr:                formatValue(sg.total_isr.toString()),
-      total_cuota_sin_reinversion: formatValue(sg.total_cuota.plus(sg.total_reinversion).toString()),
-      total_cuota_con_reinversion: formatValue(sg.total_cuota.toString()),
-      total_monto_aportado:     formatValue(sg.total_monto_aportado.toString()),
-      totalAbonoGeneralInteres: formatValue(sg.totalAbonoGeneralInteres.toString()),
-      total_capital_creditos:   formatValue(sg.total_capital_creditos.toString()),
-      total_capital_actual:     formatValue(sg.total_capital_actual.toString()),
-      total_reinversion_capital: formatValue(sg.total_reinversion_capital.toString()),
-      total_reinversion_interes: formatValue(sg.total_reinversion_interes.toString()),
-      total_reinversion:         formatValue(sg.total_reinversion.toString()),
+      total_abono_capital:      formatValue(sg.total_abono_capital.round(2).toString()),
+      total_abono_interes:      formatValue(sg.total_abono_interes.round(2).toString()),
+      total_abono_iva:          formatValue(sg.total_abono_iva.round(2).toString()),
+      total_isr:                formatValue(sg.total_isr.round(2).toString()),
+      total_cuota_sin_reinversion: formatValue(sg.total_cuota_sin_reinversion.round(2).toString()),
+      total_cuota_con_reinversion: formatValue(sg.total_cuota.round(2).toString()),
+      total_monto_aportado:     formatValue(sg.total_monto_aportado.round(2).toString()),
+      total_abono_general_interes: formatValue(sg.total_abono_general_interes.round(2).toString()),
+      total_capital_creditos:   formatValue(sg.total_capital_creditos.round(2).toString()),
+      total_capital_actual:     formatValue(sg.total_capital_actual.round(2).toString()),
+      total_reinversion_capital: formatValue(sg.total_reinversion_capital.round(2).toString()),
+      total_reinversion_interes: formatValue(sg.total_reinversion_interes.round(2).toString()),
+      total_reinversion:         formatValue(sg.total_reinversion.round(2).toString()),
     },
   };
 }
@@ -2045,6 +2590,39 @@ export const liquidateByInvestorSchema = z.object({
   inversionista_id: z.number().optional(), // 🆕 Ahora es opcional
 });
 export async function liquidateByInvestorId(inversionista_id?: number) {
+  // Verificar si ya hay una liquidación en proceso para este inversionista (o masiva)
+  const lockExistente = await db
+    .select({ id: liquidacion_locks.id, started_at: liquidacion_locks.started_at })
+    .from(liquidacion_locks)
+    .where(
+      and(
+        inversionista_id
+          ? eq(liquidacion_locks.inversionista_id, inversionista_id)
+          : sql`${liquidacion_locks.inversionista_id} IS NULL`,
+        eq(liquidacion_locks.estado, "EN_PROCESO")
+      )
+    )
+    .limit(1);
+
+  if (lockExistente.length > 0) {
+    console.warn(`⚠️ Liquidación ya en proceso para: ${inversionista_id ?? "TODOS"}`);
+    return {
+      message: `Ya hay una liquidación en proceso para ${inversionista_id ? `inversionista ${inversionista_id}` : "todos los inversionistas"}. Iniciada: ${lockExistente[0].started_at}. Intente más tarde.`,
+      success: false,
+      error: "LIQUIDACION_EN_PROCESO",
+    };
+  }
+
+  // Crear lock en BD
+  const [lock] = await db
+    .insert(liquidacion_locks)
+    .values({
+      inversionista_id: inversionista_id ?? null,
+      estado: "EN_PROCESO",
+    })
+    .returning({ id: liquidacion_locks.id });
+
+  try {
   if (inversionista_id) {
     console.log(`Liquidando inversionista_id: ${inversionista_id}`);
   } else {
@@ -2101,7 +2679,11 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
     try {
       console.log(`\n💰 Procesando inversionista ${inv_id}...`);
 
-      // 🔍 PASO 2.1: Buscar boleta PENDIENTE del inversionista
+      // ========================================
+      // FASE 1: VALIDACIONES PRE-TRANSACCION
+      // ========================================
+
+      // Buscar boleta PENDIENTE del inversionista
       console.log(`  🔍 Buscando boleta PENDIENTE...`);
       const [boletaPendiente] = await db
         .select()
@@ -2112,309 +2694,340 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
             eq(boletasPagoInversionista.estado, "PENDIENTE")
           )
         )
-        .orderBy(desc(boletasPagoInversionista.fecha_subida)) // La más reciente
+        .orderBy(desc(boletasPagoInversionista.fecha_subida))
         .limit(1);
 
       if (boletaPendiente) {
         console.log(`  ✅ Boleta encontrada: ID ${boletaPendiente.boleta_id}`);
-        console.log(`     URL: ${boletaPendiente.boleta_url}`);
-        console.log(`     Monto: Q${boletaPendiente.monto_boleta ?? "N/A"}`);
-        console.log(`     Fecha subida: ${boletaPendiente.fecha_subida}`);
       } else {
         console.log(`  ⚠️ Sin boleta PENDIENTE, se liquida sin boleta`);
       }
 
-      // 🆕 Obtener datos del inversionista desde las tablas espejo
-      const resumen = await resumeInvestor(
-        inv_id,
-        1,
-        999999,
-        undefined,
-        undefined,
-        undefined,
-        false,
-        undefined,
-        "espejos"
-      );
+      // Verificar que hay pagos NO_LIQUIDADO para este inversionista
+      const pagosNoLiquidados = await db
+        .select({
+          id: pagos_credito_inversionistas_espejo.id,
+          pago_id: pagos_credito_inversionistas_espejo.pago_id,
+          credito_id: pagos_credito_inversionistas_espejo.credito_id,
+          abono_capital: pagos_credito_inversionistas_espejo.abono_capital,
+          abono_capital_id: pagos_credito_inversionistas_espejo.abono_capital_id,
+        })
+        .from(pagos_credito_inversionistas_espejo)
+        .where(
+          and(
+            eq(pagos_credito_inversionistas_espejo.inversionista_id, inv_id),
+            eq(pagos_credito_inversionistas_espejo.estado_liquidacion, "NO_LIQUIDADO")
+          )
+        );
 
-      if (!resumen.inversionistas || resumen.inversionistas.length === 0) {
-        console.log(`  ⚠️ Inversionista ${inv_id} sin pagos pendientes`);
-        errores.push({
-          inversionista_id: inv_id,
-          razon: "Sin pagos pendientes",
-        });
-        inversionistasSaltados++;
-        continue;
-      }
-
-      const inversionista = resumen.inversionistas[0];
-
-      if (
-        !inversionista.creditos.some((c) => c.pagos.length > 0)
-      ) {
+      if (pagosNoLiquidados.length === 0) {
         console.log(`  ⚠️ Inversionista ${inv_id} sin pagos para liquidar`);
-        errores.push({
-          inversionista_id: inv_id,
-          razon: "Sin pagos para liquidar",
-        });
+        errores.push({ inversionista_id: inv_id, razon: "Sin pagos para liquidar" });
         inversionistasSaltados++;
         continue;
       }
 
-      // Totales desde getInvestorTotalsGlobales (espejos, no liquidados)
-      const totalesResult = await getInvestorTotalsGlobales(
-        inv_id,
-        undefined,
-        "espejos",
-        false
-      );
+      // Totales pre-liquidación (espejos, no liquidados)
+      // rawValues=true para que los totales vengan siempre en Q (sin convertir a USD)
+      const totalesResult = await getInvestorTotalsGlobales(inv_id, undefined, "espejos", false, undefined, false, undefined, undefined, true);
       const totales = totalesResult.totales;
-      inversionista.subtotal = totales as any;
-
-      const cantidadPagos = inversionista.creditos.reduce(
-        (sum, cred) => sum + (cred.pagos?.length ?? 0),
-        0
-      );
-
-      if (Number(totales.total_cuota_con_reinversion) === 0 && cantidadPagos === 0) {
-        console.log(`  ⚠️ Inversionista ${inv_id} sin pagos para liquidar`);
-        errores.push({
-          inversionista_id: inv_id,
-          razon: "Sin pagos para liquidar",
-        });
-        inversionistasSaltados++;
-        continue;
-      }
+      const cantidadPagos = pagosNoLiquidados.length;
 
       console.log(`  📊 Total pagos a liquidar: ${cantidadPagos}`);
 
-      // Reinversión desde los totales globales
       const reinvCapital = totales.total_reinversion_capital ?? 0;
       const reinvInteres = totales.total_reinversion_interes ?? 0;
       const reinvTotal = totales.total_reinversion ?? 0;
 
-      // 🆕 PASO 3: Crear registro de liquidación (con o sin boleta)
-      const [liquidacion] = await db
-        .insert(liquidaciones)
-        .values({
-          inversionista_id: inv_id,
-          boleta_id: boletaPendiente?.boleta_id ?? null,
-          total_pagos_liquidados: cantidadPagos,
-          total_capital: totales.total_abono_capital.toString(),
-          total_interes: totales.total_abono_interes.toString(),
-          total_iva: totales.total_abono_iva.toString(),
-          total_isr: totales.total_isr.toString(),
-          total_cuota: (totales.total_cuota_con_reinversion ?? 0).toString(),
-          reinversion_capital: reinvCapital.toString(),
-          reinversion_interes: reinvInteres.toString(),
-          reinversion_total: reinvTotal.toString(),
-          fecha_liquidacion: new Date(),
-        })
-        .returning();
+      // ========================================
+      // FASE 2: TRANSACCION (datos financieros)
+      // Si algo falla, se hace rollback de TODO
+      // ========================================
+      const { liquidacion, updateResult, debeReinvertir, montoReinvertido } = await db.transaction(async (tx) => {
 
-      console.log(
-        `  ✅ Liquidación creada: liquidacion_id=${liquidacion.liquidacion_id}`
-      );
-
-      // 🔥 PASO 3.1: Marcar boleta como PROCESADO (solo si existe)
-      if (boletaPendiente) {
-        await db
-          .update(boletasPagoInversionista)
-          .set({
-            estado: "PROCESADO",
-            fecha_procesado: new Date(),
+        // Crear registro de liquidación
+        const [liquidacion] = await tx
+          .insert(liquidaciones)
+          .values({
+            inversionista_id: inv_id,
+            boleta_id: boletaPendiente?.boleta_id ?? null,
+            total_pagos_liquidados: cantidadPagos,
+            total_capital: totales.total_abono_capital.toString(),
+            total_interes: totales.total_abono_interes.toString(),
+            total_iva: totales.total_abono_iva.toString(),
+            total_isr: totales.total_isr.toString(),
+            total_cuota: (totales.total_cuota_con_reinversion ?? 0).toString(),
+            reinversion_capital: reinvCapital.toString(),
+            reinversion_interes: reinvInteres.toString(),
+            reinversion_total: reinvTotal.toString(),
+            fecha_liquidacion: new Date(),
           })
-          .where(eq(boletasPagoInversionista.boleta_id, boletaPendiente.boleta_id));
+          .returning();
 
-        console.log(`  ✅ Boleta ${boletaPendiente.boleta_id} marcada como PROCESADO`);
-      }
+        console.log(`  ✅ Liquidación creada: liquidacion_id=${liquidacion.liquidacion_id}`);
 
-      // Reiniciar reinversiones y actualizar saldo_reinversion del inversionista
-      const montoReinvertido = new Big(reinvTotal);
-      if (montoReinvertido.gt(0)) {
-        // Sumar lo reinvertido al saldo disponible del inversionista
-        await db.update(inversionistas)
-          .set({
-            saldo_reinversion: sql`${inversionistas.saldo_reinversion} + ${montoReinvertido.toFixed(2)}::numeric`,
-          })
-          .where(eq(inversionistas.inversionista_id, inv_id));
+        // Marcar boleta como PROCESADO (solo si existe)
+        if (boletaPendiente) {
+          await tx
+            .update(boletasPagoInversionista)
+            .set({ estado: "PROCESADO", fecha_procesado: new Date() })
+            .where(eq(boletasPagoInversionista.boleta_id, boletaPendiente.boleta_id));
+          console.log(`  ✅ Boleta ${boletaPendiente.boleta_id} marcada como PROCESADO`);
+        }
 
-        // Reiniciar acumulado
-        await db.update(reinversiones)
-          .set({
-            monto_capital: "0",
-            monto_interes: "0",
-            monto_total: "0",
-          })
-          .where(eq(reinversiones.inversionista_id, inv_id));
-
-        console.log(`  ✅ Saldo reinversión actualizado (+${montoReinvertido.toFixed(2)}) y reinversiones reiniciadas para inversionista ${inv_id}`);
-      }
-
-      // 🆕 PASO 4: Obtener IDs de pagos y actualizar en base a ESPEJO
-      const pagosIds: number[] = [];
-      for (const credito of inversionista.creditos) {
-        if (credito.pagos && credito.pagos.length > 0) {
-          const pagosBD = await db
-            .select({
-              id: pagos_credito_inversionistas_espejo.id,
-              pago_id: pagos_credito_inversionistas_espejo.pago_id,
-              abono_capital: pagos_credito_inversionistas_espejo.abono_capital,
+        // Reinversiones
+        const montoReinvertido = new Big(reinvTotal);
+        let debeReinvertir = false;
+        if (montoReinvertido.gt(0)) {
+          await tx.update(inversionistas)
+            .set({
+              saldo_reinversion: sql`${inversionistas.saldo_reinversion} + ${montoReinvertido.toFixed(2)}::numeric`,
             })
-            .from(pagos_credito_inversionistas_espejo)
-            .where(
-              and(
-                eq(pagos_credito_inversionistas_espejo.inversionista_id, inv_id),
-                eq(pagos_credito_inversionistas_espejo.credito_id, credito.credito_id),
-                eq(
-                  pagos_credito_inversionistas_espejo.estado_liquidacion,
-                  "NO_LIQUIDADO"
-                )
-              )
-            );
-          
-          const idsActuales = pagosBD.map((p) => p.id);
-          pagosIds.push(...idsActuales);
+            .where(eq(inversionistas.inversionista_id, inv_id));
 
-          if (idsActuales.length > 0) {
-            // Calcular capital total a descontar
-            const sumaCapital = pagosBD.reduce(
-              (sum, p) => sum + Number(p.abono_capital || 0),
-              0
-            );
+          await tx.update(reinversiones)
+            .set({ monto_capital: "0", monto_interes: "0", monto_total: "0" })
+            .where(eq(reinversiones.inversionista_id, inv_id));
 
-            if (sumaCapital > 0) {
-              const sumaSegura = new Big(sumaCapital) || 0;
-              
-              // Descontar capital de la tabla espejo SOLAMENTE
-              await processAndReplaceCreditInvestors(
-                credito.credito_id,
-                sumaSegura.toNumber(),
-                false,
-                inv_id,
-               true
-              );
-            }
+          debeReinvertir = true;
+          console.log(`  ✅ Saldo reinversión actualizado (+${montoReinvertido.toFixed(2)})`);
+        }
+
+        // Descontar capital por crédito y marcar pagos como LIQUIDADO
+        const creditosConPagos = new Map<number, typeof pagosNoLiquidados>();
+        for (const pago of pagosNoLiquidados) {
+          if (!creditosConPagos.has(pago.credito_id)) {
+            creditosConPagos.set(pago.credito_id, []);
+          }
+          creditosConPagos.get(pago.credito_id)!.push(pago);
+        }
+
+        const pagosIds = pagosNoLiquidados.map((p) => p.id);
+
+        for (const [creditoId, pagosCred] of creditosConPagos) {
+          const sumaCapital = pagosCred.reduce((sum, p) => sum + Number(p.abono_capital || 0), 0);
+          if (sumaCapital > 0) {
+            await processAndReplaceCreditInvestors(
+              creditoId,
+              new Big(sumaCapital).toNumber(),
+              false,
+              inv_id,
+              true,
+              tx
+            );
           }
         }
-      }
 
-      let updateResult: any = { rowCount: 0 };
-      if (pagosIds.length > 0) {
-        // NOTA: Por requerimiento del negocio, solo se liquida la tabla espejo, la original debe permanecer intacta en su estado.
-        updateResult = await db
-          .update(pagos_credito_inversionistas_espejo)
-          .set({
-            estado_liquidacion: "LIQUIDADO",
-            liquidacion_id: liquidacion.liquidacion_id,
-          })
-          .where(inArray(pagos_credito_inversionistas_espejo.id, pagosIds));
-      }
-
-      console.log(`  ✅ ${updateResult.rowCount ?? 0} pagos espejo actualizados`);
-
-      // 🆕 PASO 4.1: Marcar cuotas como liquidado_inversionistas = false con fecha Guatemala
-      const allPagoIds: number[] = [];
-      for (const credito of inversionista.creditos) {
-        if (credito.pagos && credito.pagos.length > 0) {
-          const pagosBDCuota = await db
-            .select({ pago_id: pagos_credito_inversionistas_espejo.pago_id })
-            .from(pagos_credito_inversionistas_espejo)
-            .where(
-              and(
-                eq(pagos_credito_inversionistas_espejo.inversionista_id, inv_id),
-                eq(pagos_credito_inversionistas_espejo.credito_id, credito.credito_id),
-                eq(pagos_credito_inversionistas_espejo.liquidacion_id, liquidacion.liquidacion_id)
-              )
-            );
-          allPagoIds.push(...pagosBDCuota.map((p) => p.pago_id));
-        }
-      }
-
-      if (allPagoIds.length > 0) {
-        const uniquePagoIds = [...new Set(allPagoIds)];
-
-        // Buscar cuota_ids de esos pagos
-        const cuotasDeLosPagos = await db
-          .select({ cuota_id: pagos_credito.cuota_id })
-          .from(pagos_credito)
-          .where(inArray(pagos_credito.pago_id, uniquePagoIds));
-
-        const uniqueCuotaIds = [...new Set(cuotasDeLosPagos.map((c) => c.cuota_id))];
-
-        if (uniqueCuotaIds.length > 0) {
-          const fechaGuatemala = new Date(
-            new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" })
-          );
-
-          await db
-            .update(cuotas_credito)
+        let updateResult: any = { rowCount: 0 };
+        if (pagosIds.length > 0) {
+          updateResult = await tx
+            .update(pagos_credito_inversionistas_espejo)
             .set({
-              liquidado_inversionistas: false,
-              fecha_liquidacion_inversionistas: fechaGuatemala,
+              estado_liquidacion: "LIQUIDADO",
+              liquidacion_id: liquidacion.liquidacion_id,
+              updated_at: new Date(),
             })
-            .where(inArray(cuotas_credito.cuota_id, uniqueCuotaIds));
-
-          console.log(`  ✅ ${uniqueCuotaIds.length} cuotas actualizadas (liquidado_inversionistas=false)`);
+            .where(inArray(pagos_credito_inversionistas_espejo.id, pagosIds));
         }
-      }
 
-      // 🆕 PASO 5: Generar PDF y subir a R2
-      console.log(`  📄 Generando PDF...`);
+        console.log(`  ✅ ${updateResult.rowCount ?? 0} pagos espejo actualizados`);
 
-      const logoUrl = process.env.LOGO_URL || "";
-      const filename = `liquidacion_${liquidacion.liquidacion_id}_${Date.now()}.pdf`;
-      const { url, pdfBuffer } = await generarYSubirPDFInversionista(
-        inversionista as any,
-        filename,
-        logoUrl
-      );
-
-      console.log(`  ✅ PDF generado y guardado: ${filename}`);
-
-      // 🆕 PASO 6: Actualizar liquidación con URL del reporte
-      await db
-        .update(liquidaciones)
-        .set({ reporte_liquidacion_url: url })
-        .where(eq(liquidaciones.liquidacion_id, liquidacion.liquidacion_id));
-
-      console.log(
-        `  ✅ Reporte actualizado en liquidación ${liquidacion.liquidacion_id}`
-      );
-
-      // 📧 ENVIAR CORREO AL INVERSIONISTA
-      if (inversionista.email) {
-        try {
-          const totalCuota = inversionista.subtotal.total_cuota.toString();
-          
-          await sendLiquidationEmail({
-            to: inversionista.email,
-            investorName: inversionista.nombre_inversionista,
-            amount: totalCuota,
-            creditNumber: "Múltiples", // O podrías concatenar los IDs
-            date: dayjs().format("DD/MM/YYYY"),
-            currencySymbol: inversionista.moneda === "dolares" ? "$" : "Q.",
-            attachment: {
-              filename: `Liquidacion_${inversionista.nombre_inversionista.replace(/\s+/g, '_')}_${dayjs().format('YYYYMMDD')}.pdf`,
-              content: Buffer.from(pdfBuffer),
-            }
-          });
-          console.log(`  📧 Correo enviado a ${inversionista.email}`);
-        } catch (emailError) {
-          console.error(`  ❌ Error al enviar correo a ${inversionista.email}:`, emailError);
-          // No lanzamos error para no detener la liquidación
+        // Marcar abonos a capital como liquidados
+        const abonoIdsALiquidar = [
+          ...new Set(
+            pagosNoLiquidados
+              .map((p) => p.abono_capital_id)
+              .filter((id): id is number => id != null)
+          ),
+        ];
+        if (abonoIdsALiquidar.length > 0) {
+          await tx
+            .update(abonos_capital)
+            .set({ liquidado: true, updated_at: new Date() })
+            .where(inArray(abonos_capital.abono_id, abonoIdsALiquidar));
+          console.log(`  ✅ ${abonoIdsALiquidar.length} abono(s) a capital marcados como liquidados`);
         }
-      } else {
-        console.warn(`  ⚠️ El inversionista ${inversionista.nombre_inversionista} no tiene correo configurado.`);
-      }
-      
-      reportesGenerados.push({
-        inversionista_id: inv_id,
-        url,
-        boleta_id: boletaPendiente?.boleta_id ?? 0,
-        boleta_url: boletaPendiente?.boleta_url ?? "",
+
+        // Marcar cuotas como liquidado_inversionistas
+        const allPagoIds = [...new Set(pagosNoLiquidados.map((p) => p.pago_id))];
+        if (allPagoIds.length > 0) {
+          const cuotasDeLosPagos = await tx
+            .select({ cuota_id: pagos_credito.cuota_id })
+            .from(pagos_credito)
+            .where(inArray(pagos_credito.pago_id, allPagoIds));
+
+          const uniqueCuotaIds = [...new Set(cuotasDeLosPagos.map((c) => c.cuota_id))];
+          if (uniqueCuotaIds.length > 0) {
+            const fechaGuatemala = new Date(
+              new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" })
+            );
+            await tx
+              .update(cuotas_credito)
+              .set({
+                liquidado_inversionistas: true,
+                fecha_liquidacion_inversionistas: fechaGuatemala,
+              })
+              .where(inArray(cuotas_credito.cuota_id, uniqueCuotaIds));
+            console.log(`  ✅ ${uniqueCuotaIds.length} cuotas actualizadas`);
+          }
+        }
+
+        return { liquidacion, updateResult, debeReinvertir, montoReinvertido };
       });
-      
+
+      // ========================================
+      // FASE 3: POST-TRANSACCION (PDF + email, best-effort)
+      // Los datos financieros ya están committed
+      // ========================================
+      try {
+        const resumen = await resumeInvestor(
+          inv_id,
+          1,
+          999999,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          undefined,
+          "espejos",
+          true,
+          liquidacion.liquidacion_id
+        );
+
+        const inversionista = resumen.inversionistas?.[0];
+
+        if (inversionista) {
+          // Recalcular totales específicamente para esta liquidación (ya persistida)
+          const postTotales = await getInvestorTotalsGlobales(
+            inv_id,
+            undefined,
+            "espejos",
+            false,
+            undefined,
+            true, // soloLiquidados
+            liquidacion.liquidacion_id
+          );
+          inversionista.subtotal = postTotales.totales as any;
+
+          console.log(`  📄 Generando Excel...`);
+          const logoUrl = process.env.LOGO_URL || "";
+          const filename = `liquidacion_${liquidacion.liquidacion_id}_${Date.now()}.xlsx`;
+          const excelResult = await generarYSubirExcelInversionista(
+            inversionista as any,
+            filename,
+            logoUrl
+          );
+          const url = excelResult.url;
+          const excelBuffer = Buffer.from(excelResult.excelBuffer);
+
+          console.log(`  ✅ Excel generado: ${filename}`);
+
+          // Actualizar liquidación con URL del reporte
+          await db
+            .update(liquidaciones)
+            .set({ reporte_liquidacion_url: url })
+            .where(eq(liquidaciones.liquidacion_id, liquidacion.liquidacion_id));
+
+          // Enviar correo (best-effort)
+          if (inversionista.email && excelBuffer) {
+            console.log(`  📧 Preparando envío de correo para ${inversionista.email}...`);
+            try {
+              // Validar que subtotal existe para evitar crash
+              const subtotalStr = inversionista.subtotal?.total_cuota_con_reinversion?.toString() || "0";
+              
+              const emailResult = await sendLiquidationEmail({
+                to: inversionista.email,
+                investorName: inversionista.nombre_inversionista,
+                amount: subtotalStr,
+                creditNumber: "Múltiples",
+                date: dayjs().format("MMMM YYYY"),
+                currencySymbol: inversionista.moneda === "dolares" ? "$" : "Q.",
+                reportUrl: url,
+                attachment: {
+                  filename: `Liquidacion_${inversionista.nombre_inversionista.replace(/\s+/g, '_')}_${dayjs().format('YYYYMMDD')}.xlsx`,
+                  content: excelBuffer,
+                }
+              });
+              
+              if (emailResult.success) {
+                console.log(`  ✅ Correo enviado exitosamente a ${inversionista.email}`);
+              } else {
+                console.error(`  ❌ Error devuelto por el servicio de correo para ${inversionista.email}:`, emailResult.error);
+              }
+            } catch (emailError) {
+              console.error(`  ❌ Error inesperado al intentar enviar correo a ${inversionista.email}:`, emailError);
+            }
+          } else {
+            if (!inversionista.email) {
+              console.warn(`  ⚠️ El inversionista ${inversionista.nombre_inversionista} (${inv_id}) no tiene un correo electrónico configurado en su ficha. Se omitió la notificación.`);
+            }
+            if (!excelBuffer) {
+              console.error(`  ❌ No se pudo adjuntar el reporte Excel porque el generador devolvió un buffer vacío para el inversionista ${inv_id}.`);
+            }
+          }
+
+          reportesGenerados.push({
+            inversionista_id: inv_id,
+            url,
+            boleta_id: boletaPendiente?.boleta_id ?? 0,
+            boleta_url: boletaPendiente?.boleta_url ?? "",
+          });
+        }
+
+        // ========================================
+        // FASE 4: REINVERSIÓN AUTOMÁTICA (post-reporte)
+        // Si hubo monto de reinversión, se llama addInvestorToCredit
+        // para distribuir el saldo en créditos candidatos.
+        // ========================================
+        if (debeReinvertir) {
+          try {
+            console.log(`  🔄 Ejecutando reinversión automática por Q${montoReinvertido.toFixed(2)}...`);
+
+            // Calcular mediana de porcentajes desde los créditos actuales del inversionista
+            const creditosInv = await db
+              .select({
+                porcentaje_participacion_inversionista: creditos_inversionistas.porcentaje_participacion_inversionista,
+                porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
+              })
+              .from(creditos_inversionistas)
+              .where(eq(creditos_inversionistas.inversionista_id, inv_id));
+
+            const moda = (arr: number[]) => {
+              if (arr.length === 0) return 0;
+              const freq = new Map<number, number>();
+              for (const v of arr) freq.set(v, (freq.get(v) ?? 0) + 1);
+              let maxFreq = 0, result = arr[0];
+              for (const [val, count] of freq) {
+                if (count > maxFreq) { maxFreq = count; result = val; }
+              }
+              return result;
+            };
+
+            const modaInversion = moda(creditosInv.map((c) => Number(c.porcentaje_participacion_inversionista)));
+            const modaCashIn = moda(creditosInv.map((c) => Number(c.porcentaje_cash_in)));
+
+            console.log(`  📊 Moda porcentaje inversión: ${modaInversion}%, cash in: ${modaCashIn}%`);
+
+            const reinversionResult = await addInvestorToCredit({
+              body: {
+                inversionista_id: inv_id,
+                monto_aportado: montoReinvertido.toNumber(),
+                porcentaje_inversion: modaInversion,
+                porcentaje_cash_in: modaCashIn,
+                tipo_operacion: "reinversion",
+              },
+              set: { status: 200 },
+            });
+
+            console.log(`  ✅ Reinversión automática completada:`, reinversionResult);
+          } catch (reinvError) {
+            console.error(`  ❌ Error en reinversión automática (liquidación ya guardada):`, reinvError);
+          }
+        }
+      } catch (excelError) {
+        console.error(`  ❌ Error generando Excel (datos financieros ya guardados):`, excelError);
+      }
+
       totalPagosLiquidados += updateResult.rowCount ?? 0;
       totalLiquidaciones++;
     } catch (error) {
@@ -2424,7 +3037,6 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
         razon: error instanceof Error ? error.message : "Error desconocido",
       });
       inversionistasSaltados++;
-      // 🔥 NO hacemos throw, solo seguimos con el siguiente
     }
   }
 
@@ -2438,7 +3050,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
   console.log(`\n✅ RESUMEN FINAL:`);
   console.log(`   - Liquidaciones creadas: ${totalLiquidaciones}`);
   console.log(`   - Pagos liquidados: ${totalPagosLiquidados}`);
-  console.log(`   - PDFs generados: ${reportesGenerados.length}`);
+  console.log(`   - Excels generados: ${reportesGenerados.length}`);
   console.log(`   - Boletas procesadas: ${reportesGenerados.length}`);
   console.log(`   - Inversionistas saltados: ${inversionistasSaltados}`);
   
@@ -2458,6 +3070,23 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
     reportes: reportesGenerados,
     errores: errores.length > 0 ? errores : undefined,
   };
+  } catch (err) {
+    // Marcar lock como FALLIDO con el error
+    await db.update(liquidacion_locks)
+      .set({ estado: "FALLIDO", finished_at: new Date(), error: err instanceof Error ? err.message : String(err) })
+      .where(eq(liquidacion_locks.id, lock.id));
+    throw err;
+  } finally {
+    // Marcar lock como COMPLETADO (si no falló)
+    await db.update(liquidacion_locks)
+      .set({ estado: "COMPLETADO", finished_at: new Date() })
+      .where(
+        and(
+          eq(liquidacion_locks.id, lock.id),
+          eq(liquidacion_locks.estado, "EN_PROCESO")
+        )
+      );
+  }
 }
 import dayjs from "dayjs";
 import "dayjs/locale/es";
@@ -2479,29 +3108,31 @@ export function generarHTMLReporte(
   } = inversionista;
   const fechaHoy = dayjs().format("DD [de] MMMM YYYY");
 
+  // Moneda dinámica
+  const esDolares = inversionista.moneda === "dolares";
+  const sym = esDolares ? "$" : "Q";
+  const currCode = esDolares ? "USD" : "GTQ";
+  const locale = esDolares ? "en-US" : "es-GT";
+
+  const fmt = (val: number | string | null | undefined) => {
+    const n = Number(val || 0);
+    return `${sym}${n.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+
   // Totales formateados
-  const capitalActivo = creditosData
-    .reduce((s, c) => s + parseFloat(c.monto_aportado || "0"), 0)
-    .toLocaleString("es-GT", { style: "currency", currency: "GTQ" });
+  const capitalActivo = fmt(
+    creditosData.reduce((s, c) => s + parseFloat(c.monto_aportado || "0"), 0)
+  );
   const abonoCapital = subtotal.total_abono_capital
-    ? subtotal.total_abono_capital.toLocaleString("es-GT", {
-        style: "currency",
-        currency: "GTQ",
-      })
+    ? fmt(subtotal.total_abono_capital)
     : "";
 
   const abonoInteres = subtotal.total_abono_interes
-    ? subtotal.total_abono_interes.toLocaleString("es-GT", {
-        style: "currency",
-        currency: "GTQ",
-      })
+    ? fmt(subtotal.total_abono_interes)
     : "";
 
   const granTotal = subtotal.total_cuota_con_reinversion
-    ? subtotal.total_cuota_con_reinversion.toLocaleString("es-GT", {
-        style: "currency",
-        currency: "GTQ",
-      })
+    ? fmt(subtotal.total_cuota_con_reinversion)
     : "";
 
   return `
@@ -2536,6 +3167,7 @@ export function generarHTMLReporte(
       width: 210px;
       height: auto;
       margin-right: 32px;
+      margin-top: -50px;
     }
     .header-totals-row {
       flex: 1;
@@ -2671,6 +3303,92 @@ export function generarHTMLReporte(
         } emite factura</span>
       </div>
     </div>
+    ${inversionista.reinversion === 'reinversion_combinada' ? (() => {
+      // Agrupar créditos por tipo_reinversion
+      const labelMap: Record<string, string> = {
+        reinversion_capital: 'Reinversión Capital',
+        reinversion_interes: 'Reinversión Interés',
+        reinversion_total:   'Reinversión Total',
+        sin_reinversion:     'Sin Reinversión',
+      };
+
+      // Orden fijo de grupos
+      const grupos = ['reinversion_capital', 'reinversion_interes', 'reinversion_total', 'sin_reinversion', null];
+      const tableHead = `
+        <thead><tr>
+          <th>Meses en crédito</th><th>Nombre</th><th>Capital</th>
+          <th>% Interés</th><th>% Inversionista</th><th>Tasa interés inversor</th>
+          <th>Interés Inversor</th><th>IVA</th><th>ISR</th>
+          <th>Abono capital</th><th>% Inv. Neto</th><th>Capital restante</th>
+          <th>Cuota de mes</th><th>Plazo</th><th>NIT</th>
+        </tr></thead>`;
+
+      return grupos.map(grupo => {
+        const credGrupo = creditosData.filter(c => (c.tipo_reinversion ?? null) === grupo);
+        if (credGrupo.length === 0) return '';
+
+        const label = labelMap[grupo ?? ''] ?? 'Sin tipo definido';
+        const colorBadge: Record<string, string> = {
+          reinversion_capital: '#0485c2',
+          reinversion_interes: '#16a34a',
+          reinversion_total:   '#7c3aed',
+          sin_reinversion:     '#64748b',
+        };
+        const badge = colorBadge[grupo ?? ''] ?? '#64748b';
+
+        // Calcular subtotales del grupo
+        let grpCapital = 0, grpInteres = 0, grpMontaAportado = 0;
+        const rows = credGrupo.map(c => {
+          // Sumar monto_aportado UNA SOLA VEZ por crédito, no por pago
+          grpMontaAportado += Number(c.monto_aportado || 0);
+          return (c.pagos && c.pagos.length > 0 ? c.pagos.map(pago => {
+            grpCapital += Number(pago.abono_capital || 0);
+            grpInteres += Number(pago.abonoGeneralInteres || 0);
+            return `<tr>
+              <td>${pago.cuota ?? c.meses_en_credito ?? ''}</td>
+              <td>${c.nombre_usuario ?? ''}</td>
+              <td>${fmt(Big(c.monto_aportado || 0).add(Big(pago.abono_capital || 0)).toFixed(2))}</td>
+              <td>${c.porcentaje_interes ?? ''} %</td>
+              <td>${pago.porcentaje_inversor ?? ''} %</td>
+              <td>${Big(pago.tasaInteresInvesor || 0).div(100).toFixed(2)} %</td>
+              <td>${fmt(pago.abono_interes)}</td>
+              <td>${fmt(pago.abono_iva)}</td>
+              <td>${fmt(pago.isr)}</td>
+              <td>${fmt(pago.abono_capital)}</td>
+              <td>${fmt(pago.abonoGeneralInteres)}</td>
+              <td>${fmt(c.monto_aportado)}</td>
+              <td>${pago.mes || '-'}${pago.cuota ? ` (Cuota #${pago.cuota})` : ''}</td>
+              <td>${c.plazo ?? ''}</td>
+              <td>${c.nit_usuario ?? ''}</td>
+            </tr>`;
+          }).join('') : '');
+        }).join('');
+
+        return `
+          <div style="margin-top:20px;margin-bottom:10px;">
+            <div style="display:inline-block;background:${badge};color:#fff;font-weight:700;font-size:1.1rem;padding:5px 18px;border-radius:20px;margin-bottom:10px;margin-left:50px;">
+              ${label}
+            </div>
+            <div class="table-wrapper" style="margin-top:0;">
+              <table>
+                ${tableHead}
+                <tbody>
+                  ${rows}
+                  <tr class="total">
+                    <td>Total ${label}</td><td></td>
+                    <td>${fmt(grpMontaAportado + grpCapital)}</td>
+                    <td></td><td></td><td></td><td></td><td></td><td></td>
+                    <td>${fmt(grpCapital)}</td>
+                    <td>${fmt(grpInteres)}</td>
+                    <td>${fmt(grpMontaAportado)}</td>
+                    <td></td><td></td><td></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>`;
+      }).join('');
+    })() : `
     <div class="table-wrapper">
       <table>
         <thead>
@@ -2678,17 +3396,17 @@ export function generarHTMLReporte(
             <th>Meses en crédito</th>
             <th>Nombre</th>
             <th>Capital</th>
-            <th>%</th>
+            <th>% Interés</th>
             <th>% Inversionista</th>
-            <th>TASA DE INTERÉS INVERSOR</th>
-            <th>Cuota Inversionista</th>
-            <th>IVA Inversionista</th>
+            <th>Tasa interés inversor</th>
+            <th>Interés Inversor</th>
+            <th>IVA</th>
             <th>ISR</th>
             <th>Abono capital</th>
-            <th>% INVERSOR</th>
+            <th>% Inversionista Neto</th>
             <th>Capital restante</th>
-            <th>CUOTA DE MES</th>
-             <th>Plazo</th>
+            <th>Cuota de mes</th>
+            <th>Plazo</th>
             <th>NIT</th>
           </tr>
         </thead>
@@ -2703,33 +3421,18 @@ export function generarHTMLReporte(
                                   <td>${pago.cuota ?? c.meses_en_credito ?? ""}</td>
                                   <td>${c.nombre_usuario ?? ""}</td>
                           <td>
-                  Q${Big(c.monto_aportado || 0)
-                    .add(Big(pago.abono_capital || 0))
-                    .toFixed(2)
-                    .replace(/\B(?=(\d{3})+(?!\d))/g, ",")}
+                  ${fmt(Big(c.monto_aportado || 0).add(Big(pago.abono_capital || 0)).toFixed(2))}
                 </td>
                                   <td>${c.porcentaje_interes ?? ""} %</td>
                                   <td>${pago.porcentaje_inversor ?? ""} %</td>
-                  <td>${pago.tasaInteresInvesor} %</td>
-                  <td>Q${Number(pago.abono_interes ?? 0).toLocaleString(
-                    "es-GT",
-                    { minimumFractionDigits: 2 }
-                  )}</td>
-                  <td>Q${Number(pago.abono_iva ?? 0).toLocaleString("es-GT", {
-                    minimumFractionDigits: 2,
-                  })}</td>
-                  <td>Q${Number(pago.isr ?? 0).toLocaleString("es-GT", {
-                    minimumFractionDigits: 2,
-                  })}</td>
-                  <td>Q${Number(pago.abono_capital ?? 0).toLocaleString(
-                    "es-GT",
-                    { minimumFractionDigits: 2 }
-                  )}</td>
-                  <td>Q${Number(pago.abonoGeneralInteres ?? 0).toLocaleString(
-                    "es-GT"
-                  )}</td>
+                  <td>${Big(pago.tasaInteresInvesor || 0).div(100).toFixed(2)} %</td>
+                  <td>${fmt(pago.abono_interes)}</td>
+                  <td>${fmt(pago.abono_iva)}</td>
+                  <td>${fmt(pago.isr)}</td>
+                  <td>${fmt(pago.abono_capital)}</td>
+                  <td>${fmt(pago.abonoGeneralInteres)}</td>
                               <td>
-                  Q${Big(c.monto_aportado || 0)}
+                  ${fmt(c.monto_aportado)}
                 </td>
         <td>${pago.mes || "-"}${pago.cuota ? ` (Cuota #${pago.cuota})` : ""}</td>
                   <td>${c.plazo ?? ""}</td>
@@ -2744,84 +3447,44 @@ export function generarHTMLReporte(
           <tr class="total">
             <td>Total</td>
             <td></td>
-            <td> </td>
+            <td>${fmt(Number(subtotal.total_monto_aportado || 0) + Number(subtotal.total_abono_capital || 0))}</td>
             <td></td>
             <td></td>
-            <td> </td>
-          <td>${
-            subtotal.total_abono_interes
-              ? subtotal.total_abono_interes.toLocaleString("es-GT", {
-                  style: "currency",
-                  currency: "GTQ",
-                })
-              : ""
-          }</td>
-<td>${
-    subtotal.total_abono_iva
-      ? subtotal.total_abono_iva.toLocaleString("es-GT", {
-          style: "currency",
-          currency: "GTQ",
-        })
-      : ""
-  }</td>
-<td>${
-    subtotal.total_isr
-      ? subtotal.total_isr.toLocaleString("es-GT", {
-          style: "currency",
-          currency: "GTQ",
-        })
-      : ""
-  }</td>
-<td>${
-    subtotal.total_abono_capital
-      ? subtotal.total_abono_capital.toLocaleString("es-GT", {
-          style: "currency",
-          currency: "GTQ",
-        })
-      : ""
-  }</td>
-<td>${
-    subtotal.total_abono_general_interes
-      ? subtotal.total_abono_general_interes.toLocaleString("es-GT", {
-          style: "currency",
-          currency: "GTQ",
-        })
-      : ""
-  }</td>
-<td>${
-    subtotal.total_monto_aportado
-      ? subtotal.total_monto_aportado.toLocaleString("es-GT", {
-          style: "currency",
-          currency: "GTQ",
-        })
-      : ""
-  }</td>
-
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td>${subtotal.total_abono_capital ? fmt(subtotal.total_abono_capital) : ""}</td>
+            <td>${subtotal.total_abono_general_interes ? fmt(subtotal.total_abono_general_interes) : ""}</td>
+            <td>${subtotal.total_monto_aportado ? fmt(subtotal.total_monto_aportado) : ""}</td>
+            <td></td>
             <td></td>
             <td></td>
           </tr>
         </tbody>
       </table>
     </div>
+    `}
     <div style="display:flex;gap:80px;margin:28px 50px 0 50px;">
       <div style="text-align:center;min-width:220px;">
         <div style="font-size:2.2rem;font-weight:bold;color:#1d293b;">
-          ${Number(subtotal.total_reinversion_capital ?? 0).toLocaleString("es-GT", { style: "currency", currency: "GTQ" })}
+          ${fmt(subtotal.total_reinversion_capital)}
         </div>
         <div style="color:#8c98b5;font-size:1.15rem;margin-top:4px;">Reinversión Capital</div>
       </div>
       <div style="text-align:center;min-width:220px;">
         <div style="font-size:2.2rem;font-weight:bold;color:#1d293b;">
-          ${Number(subtotal.total_reinversion_interes ?? 0).toLocaleString("es-GT", { style: "currency", currency: "GTQ" })}
+          ${fmt(subtotal.total_reinversion_interes)}
         </div>
         <div style="color:#8c98b5;font-size:1.15rem;margin-top:4px;">Reinversión Interés</div>
       </div>
       <div style="text-align:center;min-width:220px;">
         <div style="font-size:2.2rem;font-weight:bold;color:#215da8;">
-          ${Number(subtotal.total_reinversion ?? 0).toLocaleString("es-GT", { style: "currency", currency: "GTQ" })}
+          ${fmt(subtotal.total_reinversion)}
         </div>
         <div style="color:#8c98b5;font-size:1.15rem;margin-top:4px;">Total Reinversión</div>
       </div>
+    </div>
     </div>
     <div class="footer">
       Generado por Club Cashin.com · ${fechaHoy}
@@ -3060,6 +3723,333 @@ export const updateInvestor = async ({ body, set }: any) => {
     return { message: "Error updating investors", error: String(error) };
   }
 };
+
+export const fixCubeInvestment = async ({ set }: any) => {
+  try {
+    const CUBE_INVESTMENT_ID = 86;
+
+    console.log(`🚀 Iniciando corrección para Cube Investment (ID: ${CUBE_INVESTMENT_ID})`);
+
+    // 1. Obtener todos los créditos del inversionista en la tabla original
+    const originalCredits = await db
+      .select()
+      .from(creditos_inversionistas)
+      .where(eq(creditos_inversionistas.inversionista_id, CUBE_INVESTMENT_ID));
+
+    // 2. Obtener todos los créditos del inversionista en la tabla espejo
+    const mirrorCredits = await db
+      .select()
+      .from(creditos_inversionistas_espejo)
+      .where(eq(creditos_inversionistas_espejo.inversionista_id, CUBE_INVESTMENT_ID));
+
+    const mirrorCreditsMap = new Map(mirrorCredits.map((c) => [c.credito_id, c]));
+
+    const results = {
+      updatedOriginal: 0,
+      updatedMirror: 0,
+      createdMirror: 0,
+    };
+
+    // 3. Procesar originales
+    for (const oc of originalCredits) {
+      // Verificar si ya tiene los porcentajes correctos para evitar updates innecesarios
+      const isCorrect = Number(oc.porcentaje_participacion_inversionista) === 0 && 
+                        Number(oc.porcentaje_cash_in) === 100;
+
+      if (!isCorrect) {
+        // Actualizar porcentajes en original
+        console.log(`📝 Corrigiendo porcentajes para crédito ${oc.credito_id} en tabla original`);
+        await db
+          .update(creditos_inversionistas)
+          .set({
+            porcentaje_participacion_inversionista: "0",
+            porcentaje_cash_in: "100",
+          })
+          .where(eq(creditos_inversionistas.id, oc.id));
+        results.updatedOriginal++;
+      }
+
+      // Verificar si existe en espejo
+      if (!mirrorCreditsMap.has(oc.credito_id)) {
+        // Crear en espejo si no existe
+        console.log(`➕ Creando registro espejo faltante para crédito ${oc.credito_id}`);
+        await db.insert(creditos_inversionistas_espejo).values({
+          credito_id: oc.credito_id,
+          inversionista_id: oc.inversionista_id,
+          cuota_inversionista: oc.cuota_inversionista,
+          porcentaje_participacion_inversionista: "0",
+          monto_aportado: oc.monto_aportado,
+          porcentaje_cash_in: "100",
+          monto_inversionista: oc.monto_inversionista,
+          monto_cash_in: oc.monto_cash_in,
+          iva_inversionista: oc.iva_inversionista,
+          iva_cash_in: oc.iva_cash_in,
+          fecha_creacion: oc.fecha_creacion,
+          fecha_inicio_participacion: oc.fecha_inicio_participacion,
+        });
+        results.createdMirror++;
+      }
+    }
+
+    // 4. Procesar espejos existentes (para asegurar que todos tengan 0/100)
+    for (const mc of mirrorCredits) {
+      const isCorrect = Number(mc.porcentaje_participacion_inversionista) === 0 && 
+                        Number(mc.porcentaje_cash_in) === 100;
+
+      if (!isCorrect) {
+        console.log(`📝 Corrigiendo porcentajes para crédito ${mc.credito_id} en tabla espejo`);
+        await db
+          .update(creditos_inversionistas_espejo)
+          .set({
+            porcentaje_participacion_inversionista: "0",
+            porcentaje_cash_in: "100",
+          })
+          .where(eq(creditos_inversionistas_espejo.id, mc.id));
+        results.updatedMirror++;
+      }
+    }
+
+    console.log(`✅ Proceso finalizado. Originales: ${results.updatedOriginal}, Espejos actualizados: ${results.updatedMirror}, Espejos creados: ${results.createdMirror}`);
+
+    set.status = 200;
+    return {
+      message: "Proceso completado para Cube Investment (ID: 86)",
+      results,
+    };
+  } catch (error) {
+    console.error("❌ Error en fixCubeInvestment:", error);
+    set.status = 500;
+    return { message: "Error fixing Cube Investment", error: String(error) };
+  }
+};
+
+export const reconcileMirrorPercentages = async ({ set }: any) => {
+  try {
+    console.log("🚀 Iniciando RECONCILIACIÓN SELECTIVA de porcentajes espejo...");
+
+    // 1. Obtener todos los registros originales con info completa
+    const allOriginals = await db
+      .select({
+        id: creditos_inversionistas.id,
+        inversionista_id: creditos_inversionistas.inversionista_id,
+        inversionista_nombre: inversionistas.nombre,
+        credito_id: creditos_inversionistas.credito_id,
+        p_inversor: creditos_inversionistas.porcentaje_participacion_inversionista,
+        p_cashin: creditos_inversionistas.porcentaje_cash_in,
+        sifco: creditos.numero_credito_sifco,
+        cliente: usuarios.nombre,
+      })
+      .from(creditos_inversionistas)
+      .innerJoin(creditos, eq(creditos_inversionistas.credito_id, creditos.credito_id))
+      .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+      .innerJoin(inversionistas, eq(creditos_inversionistas.inversionista_id, inversionistas.inversionista_id));
+
+    const allMirrors = await db.select().from(creditos_inversionistas_espejo);
+
+    // 2. Mapear espejos
+    const mirrorMap = new Map();
+    allMirrors.forEach((m) => {
+      const key = `${m.inversionista_id}_${m.credito_id}`;
+      mirrorMap.set(key, m);
+    });
+
+    const results = {
+      totalOriginals: allOriginals.length,
+      updatedSwappedCount: 0,
+      updatedSwapped: [] as any[],      // ✅ Corregidos (Invertidos)
+      discrepanciesOtherCount: 0,
+      discrepanciesOther: [] as any[],    // 📉 Reportados pero NO actualizados
+      missingMirrorsCount: 0,
+      missingMirrors: [] as any[],       // ➕ Sin espejo (Solo reporte)
+      unchangedMirrors: 0,
+    };
+
+    // 3. Procesar cada registro
+    for (const oc of allOriginals) {
+      const key = `${oc.inversionista_id}_${oc.credito_id}`;
+      const mc = mirrorMap.get(key);
+
+      if (mc) {
+        const pInvOriginal = Number(oc.p_inversor);
+        const pCashOriginal = Number(oc.p_cashin);
+        
+        const pInvMirror = Number(mc.porcentaje_participacion_inversionista);
+        const pCashMirror = Number(mc.porcentaje_cash_in);
+
+        if (pInvOriginal !== pInvMirror || pCashOriginal !== pCashMirror) {
+          
+          const isSwapped = pInvOriginal === pCashMirror && pCashOriginal === pInvMirror;
+
+          const data = {
+            inversionista_id: oc.inversionista_id,
+            inversionista_nombre: oc.inversionista_nombre,
+            credito_id: oc.credito_id,
+            sifco: oc.sifco,
+            cliente: oc.cliente,
+            mirror_id: mc.id,
+            original: { inversor: pInvOriginal, cashin: pCashOriginal },
+            mirror: { inversor: pInvMirror, cashin: pCashMirror }
+          };
+
+          if (isSwapped) {
+            // ✅ SOLO actualizamos si están invertidos
+            console.log(`✅ Corrigiendo valores invertidos en espejo para ID ${mc.id}`);
+            await db
+              .update(creditos_inversionistas_espejo)
+              .set({
+                porcentaje_participacion_inversionista: oc.p_inversor,
+                porcentaje_cash_in: oc.p_cashin,
+              })
+              .where(eq(creditos_inversionistas_espejo.id, mc.id));
+            
+            results.updatedSwappedCount++;
+            results.updatedSwapped.push(data);
+          } else {
+            // 📈 Otros descuadres: SOLO reportamos según instrucción
+            results.discrepanciesOtherCount++;
+            results.discrepanciesOther.push(data);
+          }
+        } else {
+          results.unchangedMirrors++;
+        }
+      } else {
+        results.missingMirrorsCount++;
+        results.missingMirrors.push({
+          inversionista_id: oc.inversionista_id,
+          inversionista_nombre: oc.inversionista_nombre,
+          credito_id: oc.credito_id,
+          sifco: oc.sifco,
+          cliente: oc.cliente
+        });
+      }
+    }
+
+    console.log(`✅ Reconciliación finalizada. Actualizados (Swapped): ${results.updatedSwappedCount}, Otros descuadres: ${results.discrepanciesOtherCount}`);
+
+    set.status = 200;
+    return {
+      success: true,
+      message: "Proceso de corrección selectiva finalizado. Solo los valores invertidos fueron actualizados.",
+      data: results
+    };
+  } catch (error) {
+    console.error("❌ Error en reconcileMirrorPercentages:", error);
+    set.status = 500;
+    return { success: false, message: "Error en la reconciliación", error: String(error) };
+  }
+};
+
+export const auditMirrorPercentages = async ({ set }: any) => {
+  try {
+    console.log("🔍 Iniciando AUDITORÍA de porcentajes espejo (Solo lectura)...");
+
+    // 1. Obtener todos los registros originales con info de cliente, SIFCO e Inversionista
+    const allOriginals = await db
+      .select({
+        id: creditos_inversionistas.id,
+        inversionista_id: creditos_inversionistas.inversionista_id,
+        inversionista_nombre: inversionistas.nombre,
+        credito_id: creditos_inversionistas.credito_id,
+        p_inversor: creditos_inversionistas.porcentaje_participacion_inversionista,
+        p_cashin: creditos_inversionistas.porcentaje_cash_in,
+        sifco: creditos.numero_credito_sifco,
+        cliente: usuarios.nombre,
+      })
+      .from(creditos_inversionistas)
+      .innerJoin(creditos, eq(creditos_inversionistas.credito_id, creditos.credito_id))
+      .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+      .innerJoin(inversionistas, eq(creditos_inversionistas.inversionista_id, inversionistas.inversionista_id));
+
+    const allMirrors = await db.select().from(creditos_inversionistas_espejo);
+
+    // 2. Mapear espejos
+    const mirrorMap = new Map();
+    allMirrors.forEach((m) => {
+      const key = `${m.inversionista_id}_${m.credito_id}`;
+      mirrorMap.set(key, m);
+    });
+
+    const results = {
+      totalOriginals: allOriginals.length,
+      discrepanciesCount: 0,
+      discrepanciesSwapped: [] as any[], // 🔄 Valores invertidos (80/20 vs 20/80)
+      discrepanciesOther: [] as any[],   // 📉 Otros descuadres (ej. decimales)
+      missingMirrorsCount: 0,
+      missingMirrors: [] as any[],
+      correctMirrorsCount: 0,
+    };
+
+    // 3. Auditar
+    for (const oc of allOriginals) {
+      const key = `${oc.inversionista_id}_${oc.credito_id}`;
+      const mc = mirrorMap.get(key);
+
+      if (mc) {
+        const pInvOriginal = Number(oc.p_inversor);
+        const pCashOriginal = Number(oc.p_cashin);
+        
+        const pInvMirror = Number(mc.porcentaje_participacion_inversionista);
+        const pCashMirror = Number(mc.porcentaje_cash_in);
+
+        if (pInvOriginal !== pInvMirror || pCashOriginal !== pCashMirror) {
+          results.discrepanciesCount++;
+
+          const isSwapped = pInvOriginal === pCashMirror && pCashOriginal === pInvMirror;
+          
+          const discrepancyData = {
+            inversionista_id: oc.inversionista_id,
+            inversionista_nombre: oc.inversionista_nombre,
+            credito_id: oc.credito_id,
+            sifco: oc.sifco,
+            cliente: oc.cliente,
+            mirror_id: mc.id,
+            original: {
+              inversor: pInvOriginal,
+              cashin: pCashOriginal
+            },
+            mirror: {
+              inversor: pInvMirror,
+              cashin: pCashMirror
+            }
+          };
+
+          if (isSwapped) {
+            results.discrepanciesSwapped.push(discrepancyData);
+          } else {
+            results.discrepanciesOther.push(discrepancyData);
+          }
+        } else {
+          results.correctMirrorsCount++;
+        }
+      } else {
+        results.missingMirrorsCount++;
+        results.missingMirrors.push({
+          inversionista_id: oc.inversionista_id,
+          inversionista_nombre: oc.inversionista_nombre,
+          credito_id: oc.credito_id,
+          sifco: oc.sifco,
+          cliente: oc.cliente
+        });
+      }
+    }
+
+    console.log(`✅ Auditoría finalizada. Discrepancias: ${results.discrepanciesCount}, Faltantes: ${results.missingMirrorsCount}`);
+
+    set.status = 200;
+    return {
+      success: true,
+      message: "Auditoría de porcentajes espejo completada con información de clientes",
+      data: results
+    };
+  } catch (error) {
+    console.error("❌ Error en auditMirrorPercentages:", error);
+    set.status = 500;
+    return { success: false, message: "Error en la auditoría", error: String(error) };
+  }
+};
+
+
+
 interface BoletaPendiente {
   boleta_id: number;
   boleta_url: string;
@@ -3072,6 +4062,8 @@ interface BoletaPendiente {
 interface InversionistaResumen {
   inversionista_id: number;
   nombre: string;
+  moneda: "quetzales" | "dolares";
+  currencySymbol: string;
   emite_factura: boolean;
   reinversion:
     | "sin_reinversion"
@@ -3086,263 +4078,95 @@ interface InversionistaResumen {
   total_abono_interes: number;
   total_abono_iva: number;
   total_isr: number;
+  total_abono_general_interes: number;
   total_a_recibir_sin_reinversion: number;
   total_reinversion: number;
   total_a_recibir_con_reinversion: number;
+  total_cuota: number;
   boleta_pendiente: BoletaPendiente | null;
+  boleta_liquidacion: BoletaPendiente | null;
+  reporte_liquidacion_url: string | null;
+  mes_liquidacion?: number | null;
+  anio_liquidacion?: number | null;
 }
 
-export async function resumenGlobalInversionistas(
-  inversionistaId?: number,
-  mes?: number,
-  anio?: number,
-  excel: boolean = false
-): Promise<
-  InversionistaResumen[] | { success: boolean; url: string; filename: string }
-> {
-  // 🔎 Condiciones dinámicas — ahora sobre tablas ESPEJO
-  const condiciones: any[] = [
-    eq(pagos_credito_inversionistas_espejo.estado_liquidacion, "NO_LIQUIDADO"),
-    eq(inversionistas.permite_distribucion, false) // Solo inversionistas que NO permiten distribución (es decir, que se les paga directamente)
-  ];
+type EstadoPagoResumen = "NO_LIQUIDADO" | "LIQUIDADO";
 
-  if (inversionistaId) {
-    condiciones.push(
-      eq(pagos_credito_inversionistas_espejo.inversionista_id, inversionistaId)
-    );
-  }
+interface InversionistaResumenConEstado extends InversionistaResumen {
+  estado_liquidacion_resumen: EstadoLiquidacionResumen;
+}
 
-  if (mes) {
-    condiciones.push(
-      sql`EXTRACT(MONTH FROM ${pagos_credito_inversionistas_espejo.fecha_pago}) = ${mes}`
-    );
-  }
+interface InversionistaResumenRow {
+  inversionista_id: number;
+  nombre: string;
+  moneda: "quetzales" | "dolares";
+  emite_factura: boolean;
+  reinversion:
+    | "sin_reinversion"
+    | "reinversion_capital"
+    | "reinversion_interes"
+    | "reinversion_total"
+    | "reinversion_variable";
+  banco_nombre: string | null;
+  tipo_cuenta: string | null;
+  numero_cuenta: string | null;
+  total_abono_capital: number;
+  total_abono_interes: number;
+  total_abono_iva: number;
+  total_isr: number;
+  total_abono_general_interes: number;
+  total_a_recibir_sin_reinversion: number;
+  total_reinversion: number;
+  total_a_recibir_con_reinversion: number;
+  total_cuota: number;
+  reporte_liquidacion_url?: string | null;
+  mes_liquidacion?: number | null;
+  anio_liquidacion?: number | null;
+}
 
-  if (anio) {
-    condiciones.push(
-      sql`EXTRACT(YEAR FROM ${pagos_credito_inversionistas_espejo.fecha_pago}) = ${anio}`
-    );
-  }
+function mapBoletasPendientes(
+  boletasPendientes: Array<{
+    boleta_id: number;
+    inversionista_id: number;
+    boleta_url: string;
+    estado: string;
+    notas: string | null;
+    monto_boleta: string | null;
+    fecha_subida: Date;
+  }>
+) {
+  const boletaMap = new Map<number, BoletaPendiente>();
 
-  // 📊 Query agregada usando tablas ESPEJO (misma lógica que getInvestorMirrorSummary)
-  const pe = pagos_credito_inversionistas_espejo; // alias corto
-
-  const result = await db
-    .select({
-      inversionista_id: inversionistas.inversionista_id,
-      nombre: inversionistas.nombre,
-      emite_factura: inversionistas.emite_factura,
-      reinversion: inversionistas.tipo_reinversion,
-      banco_id: inversionistas.banco_id,
-      banco_nombre: bancos.nombre,
-      tipo_cuenta: inversionistas.tipo_cuenta,
-      numero_cuenta: inversionistas.numero_cuenta,
-
-      // Sumas directas de pagos espejo
-      total_abono_capital: sql<number>`COALESCE(SUM(${pe.abono_capital}), 0)`,
-      total_abono_interes: sql<number>`COALESCE(SUM(${pe.abono_interes}), 0)`,
-      total_abono_iva: sql<number>`COALESCE(SUM(${pe.abono_iva_12}), 0)`,
-
-      // ISR: 7% sobre interés si NO emite factura
-      total_isr: sql<number>`COALESCE(SUM(
-        CASE 
-          WHEN ${inversionistas.emite_factura} THEN 0 
-          ELSE ${pe.abono_interes} * 0.07
-        END
-      ), 0)`,
-
-      // Total a recibir sin reinversión = abono_capital + interesTotal
-      // interesTotal = abono_interes + (emite_factura ? iva : -(interes*0.07))
-      total_a_recibir_sin_reinversion: sql<number>`COALESCE(SUM(
-        ${pe.abono_capital}
-        + ${pe.abono_interes}
-        + CASE
-            WHEN ${inversionistas.emite_factura}
-              THEN ${pe.abono_iva_12}
-            ELSE -(${pe.abono_interes} * 0.07)
-          END
-      ), 0)`,
-
-      // Reinversión por tipo — CASE fuera de SUM para que reinversion_variable sea tope global
-      total_reinversion: sql<number>`CASE ${inversionistas.tipo_reinversion}
-        WHEN 'sin_reinversion' THEN 0
-        WHEN 'reinversion_capital' THEN COALESCE(SUM(${pe.abono_capital}), 0)
-        WHEN 'reinversion_interes' THEN COALESCE(SUM(${pe.abono_interes}), 0)
-        WHEN 'reinversion_total' THEN COALESCE(SUM(${pe.abono_capital} + ${pe.abono_interes}), 0)
-        WHEN 'reinversion_variable' THEN LEAST(
-          COALESCE(${inversionistas.monto_reinversion}, 0)::numeric,
-          COALESCE(SUM(${pe.abono_capital} + ${pe.abono_interes}), 0)
-        )
-        ELSE 0
-      END`,
-
-      // Total a recibir con reinversión = sin_reinversion - reinversion
-      total_a_recibir_con_reinversion: sql<number>`
-        COALESCE(SUM(
-          ${pe.abono_capital}
-          + ${pe.abono_interes}
-          + CASE
-              WHEN ${inversionistas.emite_factura}
-                THEN ${pe.abono_iva_12}
-              ELSE -(${pe.abono_interes} * 0.07)
-            END
-        ), 0)
-        - CASE ${inversionistas.tipo_reinversion}
-            WHEN 'sin_reinversion' THEN 0
-            WHEN 'reinversion_capital' THEN COALESCE(SUM(${pe.abono_capital}), 0)
-            WHEN 'reinversion_interes' THEN COALESCE(SUM(${pe.abono_interes}), 0)
-            WHEN 'reinversion_total' THEN COALESCE(SUM(${pe.abono_capital} + ${pe.abono_interes}), 0)
-            WHEN 'reinversion_variable' THEN LEAST(
-              COALESCE(${inversionistas.monto_reinversion}, 0)::numeric,
-              COALESCE(SUM(${pe.abono_capital} + ${pe.abono_interes}), 0)
-            )
-            ELSE 0
-          END`,
-    })
-    .from(inversionistas)
-    .leftJoin(
-      bancos,
-      eq(inversionistas.banco_id, bancos.banco_id)
-    )
-    .leftJoin(
-      pe,
-      eq(inversionistas.inversionista_id, pe.inversionista_id)
-    )
-    .where(and(...condiciones))
-    .groupBy(
-      inversionistas.inversionista_id,
-      inversionistas.nombre,
-      inversionistas.emite_factura,
-      inversionistas.tipo_reinversion,
-      inversionistas.monto_reinversion,
-      inversionistas.banco_id,
-      bancos.nombre,
-      inversionistas.tipo_cuenta,
-      inversionistas.numero_cuenta
-    )
-    // Solo mostrar inversionistas que tengan al menos 1 pago espejo NO_LIQUIDADO (cuando no es excel)
-    .having(
-      excel
-        ? undefined
-        : sql`COUNT(${pe.id}) > 0`
-    );
-
-  // 📂 Si excel = true → generar archivo, subir a R2 y devolver URL
-  if (excel) {
-    const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet("Resumen Inversionistas");
-
-    // 🎨 Estilo del encabezado
-    const headerRow = sheet.addRow([
-      "ID",
-      "Nombre",
-      "Factura",
-      "Reinversión",
-      "Banco",
-      "Tipo Cuenta",
-      "Número Cuenta",
-      "Capital",
-      "Interés",
-      "IVA",
-      "ISR",
-      "Total sin Reinversión",
-      "Reinversión",
-      "Total con Reinversión",
-    ]);
-
-    // Estilizar encabezados
-    headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
-    headerRow.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "FF0070C0" },
-    };
-    headerRow.alignment = { horizontal: "center", vertical: "middle" };
-
-    // Filas de datos
-    result.forEach((inv) => {
-      const row = sheet.addRow([
-        inv.inversionista_id,
-        inv.nombre,
-        inv.emite_factura ? "Sí" : "No",
-        inv.reinversion || "sin_reinversion",
-        inv.banco_nombre ?? "", // 🔥 Ahora usamos banco_nombre
-        inv.tipo_cuenta ?? "",
-        inv.numero_cuenta ?? "",
-        Number(inv.total_abono_capital).toFixed(2),
-        Number(inv.total_abono_interes).toFixed(2),
-        Number(inv.total_abono_iva).toFixed(2),
-        Number(inv.total_isr).toFixed(2),
-        Number(inv.total_a_recibir_sin_reinversion).toFixed(2),
-        Number(inv.total_reinversion).toFixed(2),
-        Number(inv.total_a_recibir_con_reinversion).toFixed(2),
-      ]);
-
-      // 🆕 Resaltar ISR = 0 cuando emite factura
-      if (inv.emite_factura) {
-        const isrCell = row.getCell(11); // Columna ISR
-        isrCell.fill = {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: "FFE0E0E0" }, // Gris claro
-        };
-        isrCell.font = { color: { argb: "FF808080" } }; // Texto gris
-      }
-
-      // 🆕 Formato de moneda para columnas numéricas
-      for (let i = 8; i <= 14; i++) {
-        row.getCell(i).numFmt = "Q#,##0.00";
-      }
-    });
-
-    // Ajustar ancho automático
-    sheet.columns.forEach((col, index) => {
-      let maxLength = 10;
-      col.eachCell?.({ includeEmpty: true }, (cell) => {
-        const len = cell.value ? cell.value.toString().length : 0;
-        if (len > maxLength) maxLength = len;
+  for (const b of boletasPendientes) {
+    if (!boletaMap.has(b.inversionista_id)) {
+      boletaMap.set(b.inversionista_id, {
+        boleta_id: b.boleta_id,
+        boleta_url: b.boleta_url,
+        estado: b.estado,
+        notas: b.notas,
+        monto_boleta: b.monto_boleta,
+        fecha_subida: b.fecha_subida,
       });
-      col.width = maxLength + 2;
-    });
-
-    // Congelar primera fila (encabezados)
-    sheet.views = [{ state: "frozen", ySplit: 1 }];
-
-    const buffer = await workbook.xlsx.writeBuffer();
-
-    // 🚀 Subir directo a R2
-    const filename = `resumen_inversionistas_${Date.now()}.xlsx`;
-    const s3 = new S3Client({
-      endpoint: process.env.BUCKET_REPORTS_URL,
-      region: "auto",
-      credentials: {
-        accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
-        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
-      },
-    });
-
-    await s3.send(
-      new PutObjectCommand({
-        Bucket: process.env.BUCKET_REPORTS,
-        Key: filename,
-        Body: new Uint8Array(buffer),
-        ContentType:
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      })
-    );
-
-    const url = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
-
-    return {
-      success: true,
-      url,
-      filename,
-    };
+    }
   }
 
-  // 🔎 Obtener boletas pendientes por inversionista (solo para consulta JSON)
-  const inversionistaIds = result.map((inv) => inv.inversionista_id);
+  return boletaMap;
+}
 
+async function getBoletasPendientesMap(
+  inversionistaIds: number[],
+  mes?: number,
+  anio?: number
+) {
+  return getBoletasMap(inversionistaIds, ["PENDIENTE"], mes, anio);
+}
+
+async function getBoletasMap(
+  inversionistaIds: number[],
+  estados: Array<"PENDIENTE" | "PROCESADO">,
+  mes?: number,
+  anio?: number
+) {
   const boletasPendientes = inversionistaIds.length > 0
     ? await db
         .select({
@@ -3358,46 +4182,722 @@ export async function resumenGlobalInversionistas(
         .where(
           and(
             inArray(boletasPagoInversionista.inversionista_id, inversionistaIds),
-            eq(boletasPagoInversionista.estado, "PENDIENTE")
+            inArray(boletasPagoInversionista.estado, estados),
+            ...(mes
+              ? [sql`EXTRACT(MONTH FROM ${boletasPagoInversionista.fecha_subida}) = ${mes}`]
+              : []),
+            ...(anio
+              ? [sql`EXTRACT(YEAR FROM ${boletasPagoInversionista.fecha_subida}) = ${anio}`]
+              : [])
           )
         )
         .orderBy(desc(boletasPagoInversionista.fecha_subida))
     : [];
 
-  // Mapear boleta pendiente por inversionista (solo la más reciente)
+  const boletasFiltradas = boletasPendientes.filter((boleta) =>
+    boletaEstaEnPeriodo(boleta.fecha_subida, mes, anio)
+  );
+
+  return mapBoletasPendientes(boletasFiltradas);
+}
+
+async function getBoletasLiquidacionMap(
+  inversionistaIds: number[],
+  mes?: number,
+  anio?: number
+) {
+  if (inversionistaIds.length === 0) {
+    return new Map<number, BoletaPendiente>();
+  }
+
+  const liquidacionesConBoleta = await db
+    .select({
+      inversionista_id: liquidaciones.inversionista_id,
+      boleta_id: boletasPagoInversionista.boleta_id,
+      boleta_url: boletasPagoInversionista.boleta_url,
+      estado: boletasPagoInversionista.estado,
+      notas: boletasPagoInversionista.notas,
+      monto_boleta: boletasPagoInversionista.monto_boleta,
+      fecha_subida: boletasPagoInversionista.fecha_subida,
+      fecha_liquidacion: liquidaciones.fecha_liquidacion,
+    })
+    .from(liquidaciones)
+    .innerJoin(
+      boletasPagoInversionista,
+      eq(liquidaciones.boleta_id, boletasPagoInversionista.boleta_id)
+    )
+    .where(
+      and(
+        inArray(liquidaciones.inversionista_id, inversionistaIds),
+        ...(mes
+          ? [sql`EXTRACT(MONTH FROM ${liquidaciones.fecha_liquidacion}) = ${mes}`]
+          : []),
+        ...(anio
+          ? [sql`EXTRACT(YEAR FROM ${liquidaciones.fecha_liquidacion}) = ${anio}`]
+          : [])
+      )
+    )
+    .orderBy(
+      desc(liquidaciones.fecha_liquidacion),
+      desc(boletasPagoInversionista.fecha_subida)
+    );
+
   const boletaMap = new Map<number, BoletaPendiente>();
-  for (const b of boletasPendientes) {
-    if (!boletaMap.has(b.inversionista_id)) {
-      boletaMap.set(b.inversionista_id, {
-        boleta_id: b.boleta_id,
-        boleta_url: b.boleta_url,
-        estado: b.estado,
-        notas: b.notas,
-        monto_boleta: b.monto_boleta,
-        fecha_subida: b.fecha_subida,
+
+  for (const row of liquidacionesConBoleta) {
+    if (!boletaMap.has(row.inversionista_id)) {
+      boletaMap.set(row.inversionista_id, {
+        boleta_id: row.boleta_id,
+        boleta_url: row.boleta_url,
+        estado: row.estado,
+        notas: row.notas,
+        monto_boleta: row.monto_boleta,
+        fecha_subida: row.fecha_subida,
       });
     }
   }
 
-  // Map result to match InversionistaResumen interface
-  return result.map((inv) => ({
+  return boletaMap;
+}
+
+async function consultarResumenGlobalPorEstadoPago(
+  estadoPago: EstadoPagoResumen,
+  inversionistaId?: number,
+  mes?: number,
+  anio?: number,
+  excel: boolean = false
+): Promise<InversionistaResumenRow[]> {
+  const condicionesWhere: any[] = [
+    eq(inversionistas.permite_distribucion, false),
+  ];
+
+  if (inversionistaId) {
+    condicionesWhere.push(eq(inversionistas.inversionista_id, inversionistaId));
+  }
+
+  const pe = pagos_credito_inversionistas_espejo;
+  const ce = creditos_inversionistas_espejo;
+  const condicionesJoinPagos: any[] = [
+    eq(inversionistas.inversionista_id, pe.inversionista_id),
+    eq(pe.estado_liquidacion, estadoPago),
+  ];
+
+  if (mes) {
+    condicionesJoinPagos.push(sql`EXTRACT(MONTH FROM ${pe.fecha_pago}) = ${mes}`);
+  }
+
+  if (anio) {
+    condicionesJoinPagos.push(sql`EXTRACT(YEAR FROM ${pe.fecha_pago}) = ${anio}`);
+  }
+
+  const selectObj: Record<string, any> = {
+    inversionista_id: inversionistas.inversionista_id,
+    nombre: inversionistas.nombre,
+    moneda: inversionistas.moneda,
+    emite_factura: inversionistas.emite_factura,
+    reinversion: inversionistas.tipo_reinversion,
+    banco_nombre: bancos.nombre,
+    tipo_cuenta: inversionistas.tipo_cuenta,
+    numero_cuenta: inversionistas.numero_cuenta,
+    total_abono_capital: sql<number>`COALESCE(SUM(${pe.abono_capital}), 0)`,
+    total_abono_interes: sql<number>`COALESCE(SUM(${pe.abono_interes}), 0)`,
+    total_abono_iva: sql<number>`COALESCE(SUM(${pe.abono_iva_12}), 0)`,
+    total_isr: sql<number>`COALESCE(SUM(
+      CASE
+        WHEN ${inversionistas.emite_factura} THEN 0
+        ELSE ROUND(${pe.abono_interes} * 0.07, 2)
+      END
+    ), 0)`,
+      total_abono_general_interes: sql<number>`COALESCE(SUM(
+        ${pe.abono_interes}
+        + CASE
+            WHEN ${inversionistas.emite_factura}
+              THEN ${pe.abono_iva_12}
+            ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
+          END
+      ), 0)`,
+      total_a_recibir_sin_reinversion: sql<number>`COALESCE(SUM(
+        ${pe.abono_capital}
+        + ${pe.abono_interes}
+        + CASE
+            WHEN ${inversionistas.emite_factura}
+              THEN ${pe.abono_iva_12}
+            ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
+          END
+      ), 0)`,
+      total_reinversion: sql<number>`CASE ${inversionistas.tipo_reinversion}
+        WHEN 'sin_reinversion' THEN 0
+        WHEN 'reinversion_capital' THEN COALESCE(SUM(${pe.abono_capital}), 0)
+        WHEN 'reinversion_interes' THEN COALESCE(SUM(
+          ${pe.abono_interes}
+          - CASE WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+        ), 0)
+        WHEN 'reinversion_total' THEN COALESCE(SUM(
+          ${pe.abono_capital} + ${pe.abono_interes}
+          - CASE WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+        ), 0)
+        WHEN 'reinversion_combinada' THEN COALESCE(SUM(
+          CASE ${ce.tipo_reinversion}
+            WHEN 'reinversion_capital' THEN ${pe.abono_capital}
+            WHEN 'reinversion_interes' THEN ${pe.abono_interes}
+              - CASE WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+            WHEN 'reinversion_total' THEN ${pe.abono_capital} + ${pe.abono_interes}
+              - CASE WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+            ELSE 0
+          END
+        ), 0)
+        WHEN 'reinversion_variable' THEN LEAST(
+          COALESCE(${inversionistas.monto_reinversion}, 0)::numeric,
+          COALESCE(SUM(
+            ${pe.abono_capital}
+            + ${pe.abono_interes}
+            + CASE
+                WHEN ${inversionistas.emite_factura}
+                  THEN ${pe.abono_iva_12}
+                ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
+              END
+          ), 0)
+        )
+        ELSE 0
+      END`,
+      total_a_recibir_con_reinversion: sql<number>`
+        COALESCE(SUM(
+          ${pe.abono_capital}
+          + ${pe.abono_interes}
+          + CASE
+              WHEN ${inversionistas.emite_factura}
+                THEN ${pe.abono_iva_12}
+              ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
+            END
+        ), 0)
+        - CASE ${inversionistas.tipo_reinversion}
+            WHEN 'sin_reinversion' THEN 0
+            WHEN 'reinversion_capital' THEN COALESCE(SUM(${pe.abono_capital}), 0)
+            WHEN 'reinversion_interes' THEN COALESCE(SUM(
+              ${pe.abono_interes}
+              - CASE WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+            ), 0)
+            WHEN 'reinversion_total' THEN COALESCE(SUM(
+              ${pe.abono_capital} + ${pe.abono_interes}
+              - CASE WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+            ), 0)
+            WHEN 'reinversion_combinada' THEN COALESCE(SUM(
+              CASE ${ce.tipo_reinversion}
+                WHEN 'reinversion_capital' THEN ${pe.abono_capital}
+                WHEN 'reinversion_interes' THEN ${pe.abono_interes}
+                  - CASE WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+                WHEN 'reinversion_total' THEN ${pe.abono_capital} + ${pe.abono_interes}
+                  - CASE WHEN NOT ${inversionistas.emite_factura} THEN ROUND(${pe.abono_interes} * 0.07, 2) ELSE 0 END
+                ELSE 0
+              END
+            ), 0)
+            WHEN 'reinversion_variable' THEN LEAST(
+              COALESCE(${inversionistas.monto_reinversion}, 0)::numeric,
+              COALESCE(SUM(
+                ${pe.abono_capital}
+                + ${pe.abono_interes}
+                + CASE
+                    WHEN ${inversionistas.emite_factura}
+                      THEN ${pe.abono_iva_12}
+                    ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
+                  END
+              ), 0)
+            )
+            ELSE 0
+          END`,
+      total_cuota: sql<number>`CASE ${inversionistas.tipo_reinversion}
+        WHEN 'sin_reinversion' THEN COALESCE(SUM(
+          ${pe.abono_capital}
+          + ${pe.abono_interes}
+          + CASE
+              WHEN ${inversionistas.emite_factura}
+                THEN ${pe.abono_iva_12}
+              ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
+            END
+        ), 0)
+        WHEN 'reinversion_capital' THEN COALESCE(SUM(
+          ${pe.abono_interes}
+          + CASE
+              WHEN ${inversionistas.emite_factura}
+                THEN ${pe.abono_iva_12}
+              ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
+            END
+        ), 0)
+        WHEN 'reinversion_interes' THEN COALESCE(SUM(
+          ${pe.abono_capital}
+          + CASE
+              WHEN ${inversionistas.emite_factura}
+                THEN ${pe.abono_iva_12}
+              ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
+            END
+        ), 0)
+        WHEN 'reinversion_total' THEN 0
+        WHEN 'reinversion_combinada' THEN COALESCE(SUM(
+          CASE ${ce.tipo_reinversion}
+            WHEN 'reinversion_total' THEN 0
+            WHEN 'reinversion_capital' THEN (
+              ${pe.abono_interes} + CASE WHEN ${inversionistas.emite_factura} THEN ${pe.abono_iva_12} ELSE -ROUND(${pe.abono_interes} * 0.07, 2) END
+            )
+            WHEN 'reinversion_interes' THEN (
+              ${pe.abono_capital} + CASE WHEN ${inversionistas.emite_factura} THEN ${pe.abono_iva_12} ELSE -ROUND(${pe.abono_interes} * 0.07, 2) END
+            )
+            ELSE (
+               ${pe.abono_capital} + ${pe.abono_interes} + CASE WHEN ${inversionistas.emite_factura} THEN ${pe.abono_iva_12} ELSE -ROUND(${pe.abono_interes} * 0.07, 2) END
+            )
+          END
+        ), 0)
+        WHEN 'reinversion_variable' THEN
+          COALESCE(SUM(
+            ${pe.abono_capital}
+            + ${pe.abono_interes}
+            + CASE
+                WHEN ${inversionistas.emite_factura}
+                  THEN ${pe.abono_iva_12}
+                ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
+              END
+          ), 0)
+          - LEAST(
+              COALESCE(${inversionistas.monto_reinversion}, 0)::numeric,
+              COALESCE(SUM(
+                ${pe.abono_capital}
+                + ${pe.abono_interes}
+                + CASE
+                    WHEN ${inversionistas.emite_factura}
+                      THEN ${pe.abono_iva_12}
+                    ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
+                  END
+              ), 0)
+            )
+        ELSE COALESCE(SUM(
+          ${pe.abono_capital}
+          + ${pe.abono_interes}
+          + CASE
+              WHEN ${inversionistas.emite_factura}
+                THEN ${pe.abono_iva_12}
+              ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
+            END
+        ), 0)
+      END`,
+  };
+
+  // Si no hay filtro de mes/anio, agrupar por mes para obtener un registro por período
+  const agruparPorMes = !mes && !anio;
+  if (agruparPorMes) {
+    selectObj.mes_liquidacion = sql<number>`EXTRACT(MONTH FROM ${pe.fecha_pago})::int`;
+    selectObj.anio_liquidacion = sql<number>`EXTRACT(YEAR FROM ${pe.fecha_pago})::int`;
+  }
+
+  const groupByFields = [
+    inversionistas.inversionista_id,
+    inversionistas.nombre,
+    inversionistas.moneda,
+    inversionistas.emite_factura,
+    inversionistas.tipo_reinversion,
+    inversionistas.monto_reinversion,
+    bancos.nombre,
+    inversionistas.tipo_cuenta,
+    inversionistas.numero_cuenta,
+  ];
+
+  if (agruparPorMes) {
+    groupByFields.push(
+      sql`EXTRACT(MONTH FROM ${pe.fecha_pago})` as any,
+      sql`EXTRACT(YEAR FROM ${pe.fecha_pago})` as any,
+    );
+  }
+
+  const result = await db
+    .select(selectObj as any)
+    .from(inversionistas)
+    .leftJoin(bancos, eq(inversionistas.banco_id, bancos.banco_id))
+    .leftJoin(pe, and(...condicionesJoinPagos))
+    .leftJoin(ce, and(eq(pe.credito_id, ce.credito_id), eq(pe.inversionista_id, ce.inversionista_id)))
+    .where(and(...condicionesWhere))
+    .groupBy(...groupByFields)
+    .having(excel ? undefined : sql`COUNT(${pe.id}) > 0`);
+
+  return result as unknown as InversionistaResumenRow[];
+}
+
+async function consultarResumenGlobalDesdeLiquidaciones(
+  inversionistaId?: number,
+  mes?: number,
+  anio?: number
+): Promise<InversionistaResumenRow[]> {
+  const condicionesWhere: any[] = [
+    eq(inversionistas.permite_distribucion, false),
+  ];
+
+  if (inversionistaId) {
+    condicionesWhere.push(eq(inversionistas.inversionista_id, inversionistaId));
+  }
+
+  if (mes) {
+    condicionesWhere.push(sql`EXTRACT(MONTH FROM ${liquidaciones.fecha_liquidacion}) = ${mes}`);
+  }
+
+  if (anio) {
+    condicionesWhere.push(sql`EXTRACT(YEAR FROM ${liquidaciones.fecha_liquidacion}) = ${anio}`);
+  }
+
+  // Si no hay filtro de mes/anio, agrupar por mes para obtener un registro por período
+  const agruparPorMes = !mes && !anio;
+
+  const selectFields: Record<string, any> = {
+    inversionista_id: inversionistas.inversionista_id,
+    nombre: inversionistas.nombre,
+    moneda: inversionistas.moneda,
+    emite_factura: inversionistas.emite_factura,
+    reinversion: inversionistas.tipo_reinversion,
+    banco_nombre: bancos.nombre,
+    tipo_cuenta: inversionistas.tipo_cuenta,
+    numero_cuenta: inversionistas.numero_cuenta,
+    total_abono_capital: sql<number>`COALESCE(SUM(${liquidaciones.total_capital}), 0)`,
+    total_abono_interes: sql<number>`COALESCE(SUM(${liquidaciones.total_interes}), 0)`,
+    total_abono_iva: sql<number>`COALESCE(SUM(${liquidaciones.total_iva}), 0)`,
+    total_isr: sql<number>`COALESCE(SUM(${liquidaciones.total_isr}), 0)`,
+    total_abono_general_interes: sql<number>`COALESCE(SUM(${liquidaciones.total_interes} + ${liquidaciones.total_iva} - ${liquidaciones.total_isr}), 0)`,
+    total_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.reinversion_total}), 0)`,
+    total_cuota: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0)`,
+    total_a_recibir_con_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0)`,
+    total_a_recibir_sin_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0) + COALESCE(SUM(${liquidaciones.reinversion_total}), 0)`,
+    reporte_liquidacion_url: sql<string | null>`MAX(${liquidaciones.reporte_liquidacion_url})`,
+  };
+
+  if (agruparPorMes) {
+    selectFields.mes_liquidacion = sql<number>`EXTRACT(MONTH FROM ${liquidaciones.fecha_liquidacion})::int`;
+    selectFields.anio_liquidacion = sql<number>`EXTRACT(YEAR FROM ${liquidaciones.fecha_liquidacion})::int`;
+  }
+
+  const groupByFields = [
+    inversionistas.inversionista_id,
+    inversionistas.nombre,
+    inversionistas.moneda,
+    inversionistas.emite_factura,
+    inversionistas.tipo_reinversion,
+    bancos.nombre,
+    inversionistas.tipo_cuenta,
+    inversionistas.numero_cuenta,
+  ];
+
+  if (agruparPorMes) {
+    groupByFields.push(
+      sql`EXTRACT(MONTH FROM ${liquidaciones.fecha_liquidacion})` as any,
+      sql`EXTRACT(YEAR FROM ${liquidaciones.fecha_liquidacion})` as any,
+    );
+  }
+
+  const result = await db
+    .select(selectFields as any)
+    .from(liquidaciones)
+    .innerJoin(
+      inversionistas,
+      eq(liquidaciones.inversionista_id, inversionistas.inversionista_id)
+    )
+    .leftJoin(bancos, eq(inversionistas.banco_id, bancos.banco_id))
+    .where(and(...condicionesWhere))
+    .groupBy(...groupByFields);
+
+  return result as unknown as InversionistaResumenRow[];
+}
+
+function mapResumenRow(
+  inv: InversionistaResumenRow,
+  boleta_pendiente: BoletaPendiente | null,
+  boleta_liquidacion: BoletaPendiente | null = null
+): InversionistaResumen {
+  const isUSD = inv.moneda === "dolares";
+  const currencySymbol = isUSD ? "$" : "Q";
+
+  const convert = (val: number | string | null | undefined): number => {
+    if (!isUSD) return Number(val || 0);
+    return formatToUSD(val, inv.inversionista_id);
+  };
+
+  return {
     inversionista_id: inv.inversionista_id,
     nombre: inv.nombre,
+    moneda: inv.moneda,
+    currencySymbol,
     emite_factura: inv.emite_factura,
     reinversion: inv.reinversion,
     banco: inv.banco_nombre,
     tipo_cuenta: inv.tipo_cuenta,
     numero_cuenta: inv.numero_cuenta,
-    total_abono_capital: inv.total_abono_capital,
-    total_abono_interes: inv.total_abono_interes,
-    total_abono_iva: inv.total_abono_iva,
-    total_isr: inv.total_isr,
-    total_a_recibir_sin_reinversion: inv.total_a_recibir_sin_reinversion,
-    total_reinversion: inv.total_reinversion,
-    total_a_recibir_con_reinversion: inv.total_a_recibir_con_reinversion,
-    boleta_pendiente: boletaMap.get(inv.inversionista_id) ?? null,
-  }));
+    total_abono_capital: convert(inv.total_abono_capital),
+    total_abono_interes: convert(inv.total_abono_interes),
+    total_abono_iva: convert(inv.total_abono_iva),
+    total_isr: convert(inv.total_isr),
+    total_abono_general_interes: convert(inv.total_abono_general_interes),
+    total_a_recibir_sin_reinversion: convert(inv.total_a_recibir_sin_reinversion),
+    total_reinversion: convert(inv.total_reinversion),
+    total_a_recibir_con_reinversion: convert(inv.total_a_recibir_con_reinversion),
+    total_cuota: convert(inv.total_cuota),
+    boleta_pendiente,
+    boleta_liquidacion,
+    reporte_liquidacion_url: inv.reporte_liquidacion_url ?? null,
+    ...(inv.mes_liquidacion != null ? { mes_liquidacion: inv.mes_liquidacion } : {}),
+    ...(inv.anio_liquidacion != null ? { anio_liquidacion: inv.anio_liquidacion } : {}),
+  };
 }
+
+async function generateResumenGlobalWorkbook(
+  rows: Array<InversionistaResumen | InversionistaResumenConEstado>,
+  includeEstado: boolean
+) {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Resumen Inversionistas");
+
+  const headers = [
+    "ID",
+    "Nombre",
+    ...(includeEstado ? ["Estado"] : []),
+    "Factura",
+    "Reinversión",
+    "Banco",
+    "Tipo Cuenta",
+    "Número Cuenta",
+    "Capital",
+    "Interés",
+    "IVA",
+    "ISR",
+    "Total sin Reinversión",
+    "Reinversión",
+    "Total con Reinversión",
+    "Cuota",
+  ];
+
+  const headerRow = sheet.addRow(headers);
+  headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  headerRow.fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FF0070C0" },
+  };
+  headerRow.alignment = { horizontal: "center", vertical: "middle" };
+
+  // Header de "Cuota" resaltado en verde
+  const cuotaHeaderCell = headerRow.getCell(headers.length);
+  cuotaHeaderCell.fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FF00B050" },
+  };
+  cuotaHeaderCell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+
+  rows.forEach((inv) => {
+    const row = sheet.addRow([
+      inv.inversionista_id,
+      inv.nombre,
+      ...("estado_liquidacion_resumen" in inv ? [inv.estado_liquidacion_resumen] : includeEstado ? [""] : []),
+      inv.emite_factura ? "Sí" : "No",
+      inv.reinversion || "sin_reinversion",
+      inv.banco ?? "",
+      inv.tipo_cuenta ?? "",
+      inv.numero_cuenta ?? "",
+      Number(inv.total_abono_capital).toFixed(2),
+      Number(inv.total_abono_interes).toFixed(2),
+      Number(inv.total_abono_iva).toFixed(2),
+      Number(inv.total_isr).toFixed(2),
+      Number(inv.total_a_recibir_sin_reinversion).toFixed(2),
+      Number(inv.total_reinversion).toFixed(2),
+      Number(inv.total_a_recibir_con_reinversion).toFixed(2),
+      Number(inv.total_cuota).toFixed(2),
+    ]);
+
+    const isrCellIndex = includeEstado ? 12 : 11;
+    const firstMoneyColumn = includeEstado ? 9 : 8;
+    const lastMoneyColumn = includeEstado ? 16 : 15;
+
+    if (inv.emite_factura) {
+      const isrCell = row.getCell(isrCellIndex);
+      isrCell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE0E0E0" },
+      };
+      isrCell.font = { color: { argb: "FF808080" } };
+    }
+
+    for (let i = firstMoneyColumn; i <= lastMoneyColumn; i++) {
+      row.getCell(i).numFmt = "Q#,##0.00";
+    }
+
+    // Resaltar columna "Cuota" (última columna) en verde
+    const cuotaCell = row.getCell(lastMoneyColumn);
+    cuotaCell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FF92D050" },
+    };
+    cuotaCell.font = { bold: true };
+  });
+
+  sheet.columns.forEach((col) => {
+    let maxLength = 10;
+    col.eachCell?.({ includeEmpty: true }, (cell) => {
+      const len = cell.value ? cell.value.toString().length : 0;
+      if (len > maxLength) maxLength = len;
+    });
+    col.width = maxLength + 2;
+  });
+
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const filename = `resumen_inversionistas_${Date.now()}.xlsx`;
+  const s3 = new S3Client({
+    endpoint: process.env.BUCKET_REPORTS_URL,
+    region: "auto",
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
+    },
+  });
+
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: process.env.BUCKET_REPORTS,
+      Key: filename,
+      Body: new Uint8Array(buffer),
+      ContentType:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    })
+  );
+
+  return {
+    success: true,
+    url: `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`,
+    filename,
+  };
+}
+
+export async function resumenGlobalInversionistas(
+  inversionistaId?: number,
+  mes?: number,
+  anio?: number,
+  excel: boolean = false
+): Promise<
+  InversionistaResumen[] | { success: boolean; url: string; filename: string }
+> {
+  const result = await consultarResumenGlobalPorEstadoPago(
+    "NO_LIQUIDADO",
+    inversionistaId,
+    mes,
+    anio,
+    excel
+  );
+
+  console.log("resumen-global result IDs:", result.map(r => r.inversionista_id));
+  console.log("resumen-global total:", result.length, "inversionistas");
+
+  if (excel) {
+    const excelRows = result.map((inv) => mapResumenRow(inv, null, null));
+    return generateResumenGlobalWorkbook(excelRows, false);
+  }
+
+  const inversionistaIds = result.map((inv) => inv.inversionista_id);
+  const boletaMap = await getBoletasPendientesMap(inversionistaIds);
+
+  return result.map((inv) =>
+    mapResumenRow(inv, boletaMap.get(inv.inversionista_id) ?? null, null)
+  );
+}
+
+export async function resumenGlobalLiquidaciones(
+  inversionistaId?: number,
+  mes?: number,
+  anio?: number,
+  estado: EstadoLiquidacionResumenFilter = "pending",
+  excel: boolean = false
+): Promise<
+  InversionistaResumenConEstado[] | { success: boolean; url: string; filename: string }
+> {
+  // Para este endpoint el período se recibe validado desde la ruta.
+  // Cuando estado=all, el mes/anio aplican a todo el corte consultado.
+  const [noLiquidados, liquidados] = await Promise.all([
+    consultarResumenGlobalPorEstadoPago("NO_LIQUIDADO", inversionistaId, mes, anio, false),
+    consultarResumenGlobalDesdeLiquidaciones(inversionistaId, mes, anio),
+  ]);
+
+  const inversionistaIds = Array.from(
+    new Set([
+      ...noLiquidados.map((inv) => inv.inversionista_id),
+      ...liquidados.map((inv) => inv.inversionista_id),
+    ])
+  );
+  const [boletaPendienteMap, boletaSubidaMap, boletaLiquidacionMap] = await Promise.all([
+    getBoletasPendientesMap(inversionistaIds, mes, anio),
+    getBoletasMap(inversionistaIds, ["PENDIENTE", "PROCESADO"], mes, anio),
+    getBoletasLiquidacionMap(inversionistaIds, mes, anio),
+  ]);
+
+  const result: InversionistaResumenConEstado[] = [];
+
+  for (const inv of noLiquidados) {
+    const hasBoletaSubida = boletaSubidaMap.has(inv.inversionista_id);
+    const estadoResumen = resolveEstadoLiquidacionResumen({
+      requestedEstado: estado,
+      hasNoLiquidado: true,
+      hasLiquidado: false, // 🆕 Forzamos false para que el primer loop solo genere estados pendientes/subidos
+      hasBoletaPendiente: hasBoletaSubida,
+    });
+
+    if (!estadoResumen) {
+      continue;
+    }
+
+    result.push({
+      ...mapResumenRow(
+        inv,
+        boletaPendienteMap.get(inv.inversionista_id) ?? null,
+        boletaLiquidacionMap.get(inv.inversionista_id) ?? null
+      ),
+      estado_liquidacion_resumen: estadoResumen,
+    });
+  }
+
+  for (const inv of liquidados) {
+    const estadoResumen = resolveEstadoLiquidacionResumen({
+      requestedEstado: estado,
+      hasNoLiquidado: false,
+      hasLiquidado: true,
+      hasBoletaPendiente: false,
+    });
+
+    if (!estadoResumen) {
+      continue;
+    }
+
+    result.push({
+      ...mapResumenRow(
+        inv,
+        null,
+        boletaLiquidacionMap.get(inv.inversionista_id) ?? null
+      ),
+      estado_liquidacion_resumen: estadoResumen,
+    });
+  }
+
+  console.log("resumen-global-liquidaciones estado:", estado);
+  console.log(
+    "resumen-global-liquidaciones total:",
+    result.length,
+    "inversionistas"
+  );
+
+  if (excel) {
+    return generateResumenGlobalWorkbook(result, true);
+  }
+
+  return result;
+}
+
+export const isNullorEmpty = (value: string | number | null | undefined): value is null | undefined | "" => {
+  return value === null || value === undefined || value === "";
+}
+
+
 /**
  * Obtiene liquidaciones con sus pagos
  * @param inversionista_id - Filtrar por inversionista (opcional)
@@ -3410,12 +4910,14 @@ export async function getLiquidaciones({
   inversionista_id,
   liquidacion_id,
   dpi,
+  email,
   page = 1,
   perPage = 10,
 }: {
   inversionista_id?: number;
   liquidacion_id?: number;
   dpi?: string;
+  email?: string;
   page?: number;
   perPage?: number;
 }) {
@@ -3438,10 +4940,12 @@ export async function getLiquidaciones({
     conditions.push(eq(liquidaciones.liquidacion_id, liquidacion_id));
   }
 
-  // 🆕 Filtro por DPI
-  if (dpi) {
+   if (!isNullorEmpty(email)) {
+    conditions.push(eq(inversionistas.email, email));
+  } else if (!isNullorEmpty(dpi)) {
     conditions.push(eq(inversionistas.dpi, parseInt(dpi)));
   }
+ 
 
   // 📊 Query principal con joins
   const query = db
@@ -3465,6 +4969,8 @@ export async function getLiquidaciones({
       nombre_inversionista: inversionistas.nombre,
       emite_factura: inversionistas.emite_factura,
       dpi: inversionistas.dpi,
+      email: inversionistas.email,
+      moneda: inversionistas.moneda,
     })
     .from(liquidaciones)
     .leftJoin(
@@ -3559,6 +5065,7 @@ export async function getLiquidaciones({
           numero_credito_sifco: creditos.numero_credito_sifco,
           nombre_cliente: usuarios.nombre,
           nit_cliente: usuarios.nit,
+          porcentaje_interes_credito: creditos.porcentaje_interes,
         })
         .from(pagos_credito_inversionistas_espejo)
         .leftJoin(
@@ -3571,18 +5078,31 @@ export async function getLiquidaciones({
         )
         .orderBy(pagos_credito_inversionistas_espejo.fecha_pago);
 
-      // 💰 Calcular ISR por pago
+      // Formateo sensible a moneda del inversionista
+      const formatValue = (val: string | number) =>
+        liq.moneda === "dolares" ? formatToUSD(val, liq.inversionista_id) : Number(val);
+      const currencySymbol = liq.moneda === "dolares" ? "$" : "Q.";
+
+      // 💰 Calcular ISR y cuota por pago
       const pagosConISR = pagos.map((pago) => {
+        const abono_capital = new Big(pago.abono_capital ?? 0);
         const abono_interes = new Big(pago.abono_interes ?? 0);
+        const abono_iva = new Big(pago.abono_iva ?? 0);
         const isr = liq.emite_factura ? new Big(0) : abono_interes.times(0.07);
+
+        const cuota = abono_capital
+          .plus(abono_interes)
+          .plus(liq.emite_factura ? abono_iva : isr.neg());
 
         return {
           ...pago,
-          abono_capital: Number(pago.abono_capital),
-          abono_interes: Number(pago.abono_interes),
-          abono_iva: Number(pago.abono_iva),
-          isr: Number(isr.toString()),
-          cuota: Number(pago.cuota),
+          porcentaje_tasa_interes: Number(new Big(pago.porcentaje_interes_credito ?? 1.5).times(new Big(pago.porcentaje_participacion ?? 80)).div(100)),
+          tasa_interes: Number(new Big(pago.porcentaje_interes_credito ?? 1.5)),
+          abono_capital: formatValue(abono_capital.toString()),
+          abono_interes: formatValue(abono_interes.toString()),
+          abono_iva: formatValue(abono_iva.toString()),
+          isr: formatValue(isr.toString()),
+          cuota: formatValue(cuota.toString()),
         };
       });
 
@@ -3592,22 +5112,24 @@ export async function getLiquidaciones({
         nombre_inversionista: liq.nombre_inversionista ?? "TODOS",
         emite_factura: liq.emite_factura,
         dpi: liq.dpi,
+        moneda: liq.moneda,
+        currencySymbol,
 
         // 🔥 BOLETA ASOCIADA
         boleta: boletaData,
 
         totales: {
           total_pagos_liquidados: liq.total_pagos_liquidados,
-          total_capital: Number(liq.total_capital),
-          total_interes: Number(liq.total_interes),
-          total_iva: Number(liq.total_iva),
-          total_isr: Number(liq.total_isr),
-          total_cuota: Number(liq.total_cuota),
+          total_capital: formatValue(liq.total_capital),
+          total_interes: formatValue(liq.total_interes),
+          total_iva: formatValue(liq.total_iva),
+          total_isr: formatValue(liq.total_isr),
+          total_cuota: formatValue(liq.total_cuota),
         },
         reinversion: {
-          reinversion_capital: Number(liq.reinversion_capital),
-          reinversion_interes: Number(liq.reinversion_interes),
-          reinversion_total: Number(liq.reinversion_total),
+          reinversion_capital: formatValue(liq.reinversion_capital),
+          reinversion_interes: formatValue(liq.reinversion_interes),
+          reinversion_total: formatValue(liq.reinversion_total),
         },
         reporte_liquidacion: liq.reporte_liquidacion,
         fecha_liquidacion: liq.fecha_liquidacion,
@@ -3628,10 +5150,16 @@ export async function getLiquidaciones({
  * Obtiene el rendimiento de un inversionista por DPI
  * @param dpi - DPI del inversionista
  */
-export async function getInvestorPerformance(dpi: string) {
-  console.log("[getInvestorPerformance] DPI:", dpi);
+export async function getInvestorPerformance(dpi?: string, email?: string) {
+  if (!dpi && !email) {
+    throw new Error("Se requiere al menos 'dpi' o 'email'");
+  }
 
-  // 1️⃣ Buscar inversionista por DPI
+  // 1️⃣ Buscar inversionista (Prioridad: Email > DPI)
+  const whereClause = email
+    ? eq(inversionistas.email, email)
+    : eq(inversionistas.dpi, parseInt(dpi!));
+
   const [inversionista] = await db
     .select({
       inversionista_id: inversionistas.inversionista_id,
@@ -3639,75 +5167,45 @@ export async function getInvestorPerformance(dpi: string) {
       dpi: inversionistas.dpi,
     })
     .from(inversionistas)
-    .where(eq(inversionistas.dpi, parseInt(dpi)))
+    .where(whereClause)
     .limit(1);
 
   if (!inversionista) {
-    throw new Error(`No se encontró inversionista con DPI: ${dpi}`);
+    throw new Error(`No se encontró inversionista con ${dpi ? 'DPI: ' + dpi : 'email: ' + email}`);
   }
 
-  // 2️⃣ Obtener todas las inversiones del inversionista
-  const inversiones = await db
+  // 2️⃣ Obtener totales de inversiones de forma agregada
+  const [totalesInversion] = await db
     .select({
-      credito_id: creditos_inversionistas_espejo.credito_id,
-      monto_aportado: creditos_inversionistas_espejo.monto_aportado,
-      cuota_inversionista: creditos_inversionistas_espejo.cuota_inversionista,
+      capital_total: sql<string>`coalesce(sum(${creditos_inversionistas_espejo.monto_aportado}), 0)`,
+      cantidad: count(),
     })
     .from(creditos_inversionistas_espejo)
+    .where(eq(creditos_inversionistas_espejo.inversionista_id, inversionista.inversionista_id));
+
+  // 3️⃣ Obtener total de rendimiento (intereses liquidados * 1.2) de forma agregada
+  const [totalesRendimiento] = await db
+    .select({
+      interes_total: sql<string>`coalesce(sum(${pagos_credito_inversionistas_espejo.abono_interes}), 0)`,
+    })
+    .from(pagos_credito_inversionistas_espejo)
     .where(
-      eq(
-        creditos_inversionistas_espejo.inversionista_id,
-        inversionista.inversionista_id
+      and(
+        eq(pagos_credito_inversionistas_espejo.inversionista_id, inversionista.inversionista_id),
+        eq(pagos_credito_inversionistas_espejo.estado_liquidacion, "LIQUIDADO")
       )
     );
 
-  // 3️⃣ Calcular totales
-  let capital_total_aportado = new Big(0);
-  let rendimiento_total = new Big(0);
-
-  for (const inv of inversiones) {
-    // Sumar capital aportado
-    capital_total_aportado = capital_total_aportado.plus(
-      inv.monto_aportado ?? 0
-    );
-
-    // Buscar cuotas LIQUIDADAS de este crédito para este inversionista
-    const pagosLiquidados = await db
-      .select({
-        cuota: pagos_credito_inversionistas_espejo.cuota,
-      })
-      .from(pagos_credito_inversionistas_espejo)
-      .where(
-        and(
-          eq(
-            pagos_credito_inversionistas_espejo.inversionista_id,
-            inversionista.inversionista_id
-          ),
-          eq(pagos_credito_inversionistas_espejo.credito_id, inv.credito_id),
-          eq(pagos_credito_inversionistas_espejo.estado_liquidacion, "LIQUIDADO")
-        )
-      );
-
-    // Sumar todas las cuotas liquidadas de este crédito
-    const suma_cuotas_liquidadas = pagosLiquidados.reduce(
-      (sum, pago) => sum.plus(pago.cuota ?? 0),
-      new Big(0)
-    );
-
-    // Calcular rendimiento de este crédito
-    const rendimiento_credito = suma_cuotas_liquidadas.times(1.2);
-
-    // Acumular rendimiento total
-    rendimiento_total = rendimiento_total.plus(rendimiento_credito);
-  }
+  const capitalOpt = new Big(totalesInversion.capital_total || 0);
+  const rendimientoOpt = new Big(totalesRendimiento.interes_total || 0).times(1.2);
 
   return {
     inversionista_id: inversionista.inversionista_id,
     nombre: inversionista.nombre,
     dpi: inversionista.dpi?.toString(),
-    capital_total_aportado: Number(capital_total_aportado.toString()),
-    cantidad_inversiones: inversiones.length,
-    rendimiento_estimado: Number(rendimiento_total.toString()),
+    capital_total_aportado: Number(capitalOpt.toFixed(2)),
+    cantidad_inversiones: totalesInversion.cantidad,
+    rendimiento_estimado: Number(rendimientoOpt.toFixed(2)),
   };
 }
 
@@ -3751,6 +5249,7 @@ export async function aplicarPagosEspejo(inversionistaId: number) {
         .update(creditos_inversionistas_espejo)
         .set({
           monto_aportado: nuevoMontoAportado,
+          updated_at: new Date(),
         })
         .where(
           and(
@@ -3823,7 +5322,7 @@ export async function testUploadAndEmail(investorId: number, testEmail: string) 
         investorName: inversionista.nombre_inversionista,
         amount: inversionista.subtotal.total_cuota.toString(),
         creditNumber: "DIAGNOSTIC-TEST",
-        date: dayjs().format("DD/MM/YYYY"),
+        date: dayjs().format("MMMM YYYY"),
         currencySymbol: inversionista.moneda === "dolares" ? "$" : "Q.",
         attachment: {
             filename: `Test_Liquidacion_${inversionista.nombre_inversionista.replace(/\s+/g, '_')}.pdf`,
@@ -3836,3 +5335,154 @@ export async function testUploadAndEmail(investorId: number, testEmail: string) 
         message: `Prueba completada. PDF generado y enviado como adjunto a ${testEmail}. Se saltó la subida a R2 para evitar errores de autorización.`
     };
 }
+
+// ============================================
+// GET CREDITOS ESPEJO PENDIENTES AGRUPADOS POR INVERSIONISTA
+// ============================================
+
+/**
+ * Obtiene los créditos espejo en estado pendiente (pendiente_reinversion | pendiente_compra_cartera)
+ * agrupados por inversionista. Incluye un array `otrosCreditos` placeholder (5 créditos random)
+ * que será reemplazado por la consulta real cuando esté lista.
+ */
+export async function getCreditosEspejoPendientes(page: number = 1, pageSize: number = 10, search?: string) {
+  // 1. Créditos espejo pendientes con info del inversionista + crédito + usuario
+  const pendientes = await db
+    .select({
+      id: creditos_inversionistas_espejo.id,
+      credito_id: creditos_inversionistas_espejo.credito_id,
+      inversionista_id: creditos_inversionistas_espejo.inversionista_id,
+      cuota_inversionista: creditos_inversionistas_espejo.cuota_inversionista,
+      porcentaje_participacion_inversionista: creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
+      monto_aportado: creditos_inversionistas_espejo.monto_aportado,
+      porcentaje_cash_in: creditos_inversionistas_espejo.porcentaje_cash_in,
+      monto_inversionista: creditos_inversionistas_espejo.monto_inversionista,
+      monto_cash_in: creditos_inversionistas_espejo.monto_cash_in,
+      iva_inversionista: creditos_inversionistas_espejo.iva_inversionista,
+      iva_cash_in: creditos_inversionistas_espejo.iva_cash_in,
+      fecha_creacion: creditos_inversionistas_espejo.fecha_creacion,
+      fecha_inicio_participacion: creditos_inversionistas_espejo.fecha_inicio_participacion,
+      status: creditos_inversionistas_espejo.status,
+      tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion,
+      // Info del crédito
+      numero_credito_sifco: creditos.numero_credito_sifco,
+      nombre_usuario: usuarios.nombre,
+      // Info inversionista (solo para agrupar, no se incluye en creditosPendientes)
+      _nombre_inversionista: inversionistas.nombre,
+      _dpi: inversionistas.dpi,
+      _email: inversionistas.email,
+      _moneda: inversionistas.moneda,
+    })
+    .from(creditos_inversionistas_espejo)
+    .innerJoin(
+      inversionistas,
+      eq(creditos_inversionistas_espejo.inversionista_id, inversionistas.inversionista_id)
+    )
+    .innerJoin(
+      creditos,
+      eq(creditos_inversionistas_espejo.credito_id, creditos.credito_id)
+    )
+    .innerJoin(
+      usuarios,
+      eq(creditos.usuario_id, usuarios.usuario_id)
+    )
+    .where(
+      sql`${creditos_inversionistas_espejo.status} IN ('pendiente_reinversion', 'pendiente_compra_cartera')`
+    );
+
+  if (pendientes.length === 0) {
+    return { data: [], total: 0, page, pageSize };
+  }
+
+  // 2. Agrupar por inversionista
+  type CreditoSinInversionista = Omit<typeof pendientes[number], '_nombre_inversionista' | '_dpi' | '_email' | '_moneda'> & {
+    otrosInversionistas: { nombre: string; monto_aportado: string }[];
+  };
+
+  const agrupado = new Map<number, {
+    inversionista_id: number;
+    nombre: string;
+    dpi: number | null;
+    email: string | null;
+    moneda: string;
+    monto_reinversion: number;
+    creditosPendientes: CreditoSinInversionista[];
+  }>();
+
+  // 2.1 Obtener todos los inversionistas de los mismos créditos (sin importar status)
+  const creditoIds = [...new Set(pendientes.map((r) => r.credito_id))];
+
+  const otrosInversionistasRaw = creditoIds.length > 0
+    ? await db
+        .select({
+          credito_id: creditos_inversionistas_espejo.credito_id,
+          inversionista_id: creditos_inversionistas_espejo.inversionista_id,
+          nombre: inversionistas.nombre,
+          monto_aportado: creditos_inversionistas_espejo.monto_aportado,
+        })
+        .from(creditos_inversionistas_espejo)
+        .innerJoin(
+          inversionistas,
+          eq(creditos_inversionistas_espejo.inversionista_id, inversionistas.inversionista_id)
+        )
+        .where(inArray(creditos_inversionistas_espejo.credito_id, creditoIds))
+    : [];
+
+  // Agrupar otros inversionistas por credito_id para lookup rápido
+  const otrosPorCredito = new Map<number, { inversionista_id: number; nombre: string; monto_aportado: string }[]>();
+  for (const otro of otrosInversionistasRaw) {
+    if (!otrosPorCredito.has(otro.credito_id)) {
+      otrosPorCredito.set(otro.credito_id, []);
+    }
+    otrosPorCredito.get(otro.credito_id)!.push({
+      inversionista_id: otro.inversionista_id,
+      nombre: otro.nombre,
+      monto_aportado: otro.monto_aportado,
+    });
+  }
+
+  for (const row of pendientes) {
+    const { _nombre_inversionista, _dpi, _email, _moneda, ...creditoData } = row;
+    if (!agrupado.has(row.inversionista_id)) {
+      agrupado.set(row.inversionista_id, {
+        inversionista_id: row.inversionista_id,
+        nombre: _nombre_inversionista,
+        dpi: _dpi,
+        email: _email,
+        moneda: _moneda,
+        monto_reinversion: 0,
+        creditosPendientes: [],
+      });
+    }
+    const grupo = agrupado.get(row.inversionista_id)!;
+    grupo.monto_reinversion += parseFloat(creditoData.monto_aportado);
+
+    // Filtrar al inversionista actual y adjuntar los demás
+    const otrosEnEsteCredito = (otrosPorCredito.get(row.credito_id) || [])
+      .filter((o) => o.inversionista_id !== row.inversionista_id);
+
+    grupo.creditosPendientes.push({
+      ...creditoData,
+      otrosInversionistas: otrosEnEsteCredito.map((o) => ({
+        nombre: o.nombre,
+        monto_aportado: o.monto_aportado,
+      })),
+    });
+  }
+
+  let todos = Array.from(agrupado.values());
+
+  if (search) {
+    const term = search.toLowerCase();
+    todos = todos.filter((inv) => inv.nombre.toLowerCase().includes(term));
+  }
+
+  const total = todos.length;
+
+  // 3. Paginar
+  const start = (page - 1) * pageSize;
+  const paginados = todos.slice(start, start + pageSize);
+
+  return { data: paginados, total, page, pageSize };
+}
+

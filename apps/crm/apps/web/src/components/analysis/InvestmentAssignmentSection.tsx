@@ -68,6 +68,8 @@ type CreditCategory =
 	| "Hipotecario"
 	| "Vehículo";
 
+type PaymentDay = 15 | 30;
+
 // Type for existing investor from DB
 type ExistingInvestor = {
 	inversionista_id: number;
@@ -105,13 +107,13 @@ export function InvestmentAssignmentSection({
 	const [editDireccion, setEditDireccion] = useState<string>("");
 	const [editNit, setEditNit] = useState<string>("");
 	// Default: si estamos del 1-20 del mes es 15, si es 21-31 es último día (31)
-	const getDefaultDiaPago = () => {
+	const getDefaultDiaPago = (): PaymentDay => {
 		const today = new Date();
 		const dayOfMonth = today.getDate();
-		return dayOfMonth <= 20 ? 15 : 31;
+		return dayOfMonth <= 20 ? 15 : 30;
 	};
 	const [editDiaPagoMensual, setEditDiaPagoMensual] =
-		useState<number>(getDefaultDiaPago);
+		useState<PaymentDay>(getDefaultDiaPago);
 
 	// Función para calcular la categoría automáticamente basándose en creditType y vehicle.isNew
 	const getAutomaticCategoria = (
@@ -199,7 +201,8 @@ export function InvestmentAssignmentSection({
 			setEditNit(selectedOpportunity.nit || "");
 			// Día de pago: usar el de la oportunidad o calcular default según fecha actual
 			setEditDiaPagoMensual(
-				selectedOpportunity.diaPagoMensual || getDefaultDiaPago(),
+				(selectedOpportunity.diaPagoMensual as PaymentDay) ||
+					getDefaultDiaPago(),
 			);
 			// Limpiar inversionistas seleccionados
 			setSelectedInversionistas([]);
@@ -221,7 +224,7 @@ export function InvestmentAssignmentSection({
 			inversionistas?: string;
 			categoria: CreditCategory;
 			nit: string;
-			diaPagoMensual: number;
+			diaPagoMensual: PaymentDay;
 		}) => {
 			return client.assignInvestorAndAdvance({
 				opportunityId,
@@ -407,6 +410,16 @@ export function InvestmentAssignmentSection({
 			);
 			return;
 		}
+		const totalPart = editedExistingInvestors.reduce(
+			(sum, inv) => sum + (inv.porcentaje_participacion || 0),
+			0,
+		);
+		if (Math.abs(totalPart - 100) >= 0.01) {
+			toast.error(
+				`La suma de porcentajes de participación debe ser 100% (actual: ${totalPart}%)`,
+			);
+			return;
+		}
 		updateInvestorsMutation.mutate({
 			opportunityId: selectedOpportunityId,
 			inversionistas: JSON.stringify(editedExistingInvestors),
@@ -463,6 +476,17 @@ export function InvestmentAssignmentSection({
 	// Validar que los montos sean exactamente iguales (siempre, con existentes + nuevos)
 	const montosCoinciden = Math.abs(totalMontoGeneral - creditAmount) < 0.01;
 	const hasValidNit = editNit.trim().length > 0;
+	// Validate total participation equals 100%
+	const totalParticipacion =
+		selectedInversionistas.reduce(
+			(sum, inv) => sum + (inv.porcentaje_participacion || 0),
+			0,
+		) +
+		(selectedOpportunity?.existingInvestors?.reduce(
+			(sum, inv) => sum + (inv.porcentaje_participacion || 0),
+			0,
+		) || 0);
+	const participacionCoincide = Math.abs(totalParticipacion - 100) < 0.01;
 	const canAssign =
 		selectedOpportunity &&
 		(hasExistingInvestors || hasNewInvestors) &&
@@ -470,6 +494,7 @@ export function InvestmentAssignmentSection({
 		selectedOpportunity.vehicle?.hasRequiredData &&
 		selectedOpportunity.hasCreditData &&
 		montosCoinciden &&
+		participacionCoincide &&
 		hasValidNit;
 
 	// Get disabled reason for tooltip
@@ -515,6 +540,12 @@ export function InvestmentAssignmentSection({
 			);
 		}
 
+		if (Math.abs(totalParticipacion - 100) >= 0.01) {
+			reasons.push(
+				`La suma de porcentajes de participación debe ser exactamente 100% (actual: ${totalParticipacion}%)`,
+			);
+		}
+
 		if (!editNit.trim()) {
 			reasons.push("El NIT es obligatorio");
 		}
@@ -527,6 +558,8 @@ export function InvestmentAssignmentSection({
 		return new Intl.NumberFormat("es-GT", {
 			style: "currency",
 			currency: "GTQ",
+			minimumFractionDigits: 2,
+			maximumFractionDigits: 2,
 		}).format(Number(value));
 	};
 
@@ -917,7 +950,7 @@ export function InvestmentAssignmentSection({
 										<Select
 											value={editDiaPagoMensual.toString()}
 											onValueChange={(value) =>
-												setEditDiaPagoMensual(Number(value))
+												setEditDiaPagoMensual(Number(value) as PaymentDay)
 											}
 										>
 											<SelectTrigger>
@@ -925,7 +958,7 @@ export function InvestmentAssignmentSection({
 											</SelectTrigger>
 											<SelectContent>
 												<SelectItem value="15">15</SelectItem>
-												<SelectItem value="31">Último día del mes</SelectItem>
+												<SelectItem value="30">Fin de mes</SelectItem>
 											</SelectContent>
 										</Select>
 									</div>

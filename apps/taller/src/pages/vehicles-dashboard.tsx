@@ -28,6 +28,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { getVehicleStatistics, getVehicleById } from "../services/vehicles";
+import { generateInspectionPdf } from "../lib/generate-inspection-pdf";
 import { vehiclesApi, client } from "../utils/orpc";
 import { toast } from "sonner";
 import { INSPECTION_AREAS } from "../lib/inspection-data";
@@ -69,6 +70,11 @@ interface DashboardVehicle {
   vehicleType: string;
   color: string;
   fuelType: string;
+  motorNumber?: string;
+  milesMileage?: string | number;
+  cylinders?: string;
+  engineCC?: string;
+  transmission?: string;
   vehicleRating: string;
   marketValue: string;
   suggestedCommercialValue: string;
@@ -78,6 +84,7 @@ interface DashboardVehicle {
   testDrive: string;
   status: string;
   photos: number;
+  allPhotos?: VehiclePhoto[];
   hasScanner: boolean;
   alerts: string[];
   trim: string;
@@ -91,8 +98,10 @@ interface DashboardVehicle {
   tireConditionSpare?: number;
   paintCondition: number | null;
   hasAgencyHistory: boolean | null;
-  failedChecks: { area: string; checkpoint: string; status?: string; comment?: string | null }[];
-  checklistIssues?: { id?: string; item: string; severity: string; notes?: string | null; evidence?: any[] }[];
+  failedChecks: { area: string; checkpoint: string; status?: string; comment?: string | null; metadata?: any }[];
+  all360Items?: VehicleInspection360Item[];
+  checklistIssues?: { id?: string; item: string; severity: string; notes?: string | null; evidence?: ChecklistItemEvidence[] }[];
+  allChecklistItems?: InspectionChecklistItem[];
   rejectionEvidenceUrl?: string | null;
   aiValuation?: {
     aiSuggestedValue?: number | null;
@@ -103,6 +112,7 @@ interface DashboardVehicle {
     aiReasoning?: string | null;
     aiCommercialClassificationReasoning?: string | null;
   } | null;
+  allInspections?: VehicleWithRelations['inspections'];
 }
 
 import { Button } from "@/components/ui/button";
@@ -332,21 +342,33 @@ const VehiclePhoto = ({ photo, index }: { photo: any; index: number }) => {
     );
   }
 
+  const comment = photo.valuatorComment?.trim();
+
   return (
     <div
       key={photo.id || index}
-      className="relative aspect-square bg-muted rounded-md overflow-hidden border"
+      className="relative aspect-square bg-muted rounded-md overflow-hidden border group"
     >
       <img
         src={photo.url}
         alt={photo.title || `Foto ${index + 1}`}
-        className="w-full h-full object-cover"
+        className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
         onError={() => setHasError(true)}
       />
-      <div className="absolute bottom-0 left-0 right-0 bg-black/60 p-1">
-        <p className="text-xs text-white truncate text-center">
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent p-2 pt-6 flex flex-col justify-end">
+        <p className="text-[11px] font-semibold text-white truncate text-center">
           {photo.title || `${photo.category} - ${photo.photoType}`}
         </p>
+        {comment && (
+          <p className="text-[10px] text-slate-300 line-clamp-3 mt-1 text-center leading-snug break-words">
+            {comment}
+          </p>
+        )}
+        {photo.noCommentsChecked && !comment && (
+          <p className="text-[10px] text-slate-400/80 italic mt-0.5 text-center px-1">
+            Sin comentarios
+          </p>
+        )}
       </div>
     </div>
   );
@@ -363,6 +385,7 @@ export default function VehiclesDashboard() {
   const [selectedVehicle, setSelectedVehicle] = useState<DashboardVehicle | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("details");
+  const [selectedInspectionIndex, setSelectedInspectionIndex] = useState(0);
   const [photoGalleryFilter, setPhotoGalleryFilter] = useState("all");
 
   // Pagination state
@@ -384,26 +407,28 @@ export default function VehiclesDashboard() {
     inspectionResult: "",
   });
 
-  const transformVehicleData = useCallback((vehicle: VehicleWithRelations): DashboardVehicle => {
-    // Get the latest inspection if available - sorted by date/createdAt descending
-    const latestInspection = vehicle.inspections && vehicle.inspections.length > 0
+  const transformVehicleData = useCallback((vehicle: VehicleWithRelations, inspectionIndex: number = 0): DashboardVehicle => {
+    // Get all inspections sorted by date descending
+    const allSortedInspections = vehicle.inspections && vehicle.inspections.length > 0
       ? [...vehicle.inspections].sort((a, b) => {
           const dateA = a.inspectionDate ? new Date(a.inspectionDate).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
           const dateB = b.inspectionDate ? new Date(b.inspectionDate).getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
           return dateB - dateA;
-        })[0]
-      : null;
+        })
+      : [];
 
-    const aiVal = latestInspection ? (
-      (latestInspection as any).aiSuggestedValue ?? 
-      (latestInspection as any).ai_suggested_value ?? 
-      latestInspection.aiValuation?.suggestedValue
+    const targetInspection = allSortedInspections.length > 0 ? allSortedInspections[inspectionIndex] : null;
+
+    const aiVal = targetInspection ? (
+      (targetInspection as any).aiSuggestedValue ?? 
+      (targetInspection as any).ai_suggested_value ?? 
+      targetInspection.aiValuation?.suggestedValue
     ) : null;
 
     return {
       id: vehicle.id,
-      technicianName: latestInspection?.technicianName || 'N/A',
-      inspectionDate: latestInspection?.inspectionDate || vehicle.createdAt,
+      technicianName: targetInspection?.technicianName || 'N/A',
+      inspectionDate: targetInspection?.inspectionDate || vehicle.createdAt,
       vehicleMake: vehicle.make || '',
       vehicleModel: vehicle.model || '',
       vehicleYear: vehicle.year?.toString() || '',
@@ -414,51 +439,58 @@ export default function VehiclesDashboard() {
       vehicleType: vehicle.vehicleType || '',
       color: vehicle.color || '',
       fuelType: vehicle.fuelType || '',
-      vehicleRating: latestInspection?.vehicleRating || 'Pendiente',
-      marketValue: latestInspection?.marketValue || '0',
-      suggestedCommercialValue: latestInspection?.suggestedCommercialValue || '0',
-      currentConditionValue: latestInspection?.currentConditionValue || '0',
-      inspectionResult: latestInspection?.inspectionResult || 'Inspección pendiente',
-      airbagWarning: latestInspection?.airbagWarning ? 'Sí' : 'No',
-      testDrive: latestInspection?.testDrive ? 'Sí' : 'No',
-      status: latestInspection?.status || vehicle.status || 'pending',
-      photos: vehicle.photos?.length || 0,
-      hasScanner: latestInspection?.scannerUsed || false,
-      alerts: (latestInspection?.alerts as string[]) || [],
+      motorNumber: vehicle.motorNumber || '',
+      milesMileage: vehicle.milesMileage?.toString() || '',
+      cylinders: vehicle.cylinders || '',
+      engineCC: vehicle.engineCC || '',
+      transmission: vehicle.transmission || '',
+      vehicleRating: targetInspection?.vehicleRating || 'Pendiente',
+      marketValue: targetInspection?.marketValue || '0',
+      suggestedCommercialValue: targetInspection?.suggestedCommercialValue || '0',
+      currentConditionValue: targetInspection?.currentConditionValue || '0',
+      inspectionResult: targetInspection?.inspectionResult || 'Inspección pendiente',
+      airbagWarning: targetInspection?.airbagWarning ? 'Sí' : 'No',
+      testDrive: targetInspection?.testDrive ? 'Sí' : 'No',
+      status: targetInspection?.status || vehicle.status || 'pending',
+      photos: (targetInspection && vehicle.photos ? vehicle.photos.filter((p: any) => p.inspectionId === targetInspection.id || !p.inspectionId) : vehicle.photos || []).length,
+      allPhotos: targetInspection && vehicle.photos ? vehicle.photos.filter((p: any) => p.inspectionId === targetInspection.id || !p.inspectionId) : vehicle.photos || [],
+      hasScanner: targetInspection?.scannerUsed || false,
+      alerts: (targetInspection?.alerts as string[]) || [],
       trim: vehicle.trim || '',
       traction: vehicle.traction || '',
-      tiresCondition: latestInspection?.tiresCondition ?? null,
-      tireConditionFrontLeft: latestInspection?.tireConditionFrontLeft ?? undefined,
-      tireConditionFrontRight: latestInspection?.tireConditionFrontRight ?? undefined,
-      tireConditionRearLeft: latestInspection?.tireConditionRearLeft ?? undefined,
-      tireConditionRearRight: latestInspection?.tireConditionRearRight ?? undefined,
-      hasSpareTire: latestInspection?.hasSpareTire ?? undefined,
-      tireConditionSpare: latestInspection?.tireConditionSpare ?? undefined,
-      paintCondition: latestInspection?.paintCondition ?? null,
-      hasAgencyHistory: latestInspection?.hasAgencyHistory ?? null,
-      aiValuation: latestInspection && aiVal != null
+      tiresCondition: targetInspection?.tiresCondition ?? null,
+      tireConditionFrontLeft: targetInspection?.tireConditionFrontLeft ?? undefined,
+      tireConditionFrontRight: targetInspection?.tireConditionFrontRight ?? undefined,
+      tireConditionRearLeft: targetInspection?.tireConditionRearLeft ?? undefined,
+      tireConditionRearRight: targetInspection?.tireConditionRearRight ?? undefined,
+      hasSpareTire: targetInspection?.hasSpareTire ?? undefined,
+      tireConditionSpare: targetInspection?.tireConditionSpare ?? undefined,
+      paintCondition: targetInspection?.paintCondition ?? null,
+      hasAgencyHistory: targetInspection?.hasAgencyHistory ?? null,
+      aiValuation: targetInspection && aiVal != null
         ? {
             aiSuggestedValue: aiVal != null ? Number(aiVal) : null,
-            aiMarketAnalysis: (latestInspection as any).aiMarketAnalysis ?? (latestInspection as any).ai_market_analysis ?? latestInspection.aiValuation?.marketAnalysis ?? null,
-            aiDepreciationFactors: (latestInspection as any).aiDepreciationFactors ?? (latestInspection as any).ai_depreciation_factors ?? latestInspection.aiValuation?.depreciationFactors ?? null,
-            aiConfidence: (latestInspection as any).aiConfidence ?? (latestInspection as any).ai_confidence ?? latestInspection.aiValuation?.confidence ?? null,
-            aiCommercialClassification: (latestInspection as any).aiCommercialClassification ?? (latestInspection as any).ai_commercial_classification ?? latestInspection.aiValuation?.commercialClassification ?? null,
-            aiReasoning: (latestInspection as any).aiReasoning ?? (latestInspection as any).ai_reasoning ?? latestInspection.aiValuation?.reasoning ?? null,
-            aiCommercialClassificationReasoning: (latestInspection as any).aiCommercialClassificationReasoning ?? (latestInspection as any).ai_commercial_classification_reasoning ?? latestInspection.aiValuation?.commercialClassificationReasoning ?? null,
+            aiMarketAnalysis: (targetInspection as any).aiMarketAnalysis ?? (targetInspection as any).ai_market_analysis ?? targetInspection.aiValuation?.marketAnalysis ?? null,
+            aiDepreciationFactors: (targetInspection as any).aiDepreciationFactors ?? (targetInspection as any).ai_depreciation_factors ?? targetInspection.aiValuation?.depreciationFactors ?? null,
+            aiConfidence: (targetInspection as any).aiConfidence ?? (targetInspection as any).ai_confidence ?? targetInspection.aiValuation?.confidence ?? null,
+            aiCommercialClassification: (targetInspection as any).aiCommercialClassification ?? (targetInspection as any).ai_commercial_classification ?? targetInspection.aiValuation?.commercialClassification ?? null,
+            aiReasoning: (targetInspection as any).aiReasoning ?? (targetInspection as any).ai_reasoning ?? targetInspection.aiValuation?.reasoning ?? null,
+            aiCommercialClassificationReasoning: (targetInspection as any).aiCommercialClassificationReasoning ?? (targetInspection as any).ai_commercial_classification_reasoning ?? targetInspection.aiValuation?.commercialClassificationReasoning ?? null,
           }
         : null,
-      failedChecks: latestInspection?.inspection360Items
-        ? latestInspection.inspection360Items
+      failedChecks: targetInspection?.inspection360Items
+        ? targetInspection.inspection360Items
           .filter(item => item.status !== 'OK' && item.status !== 'GOOD')
           .map(item => ({
             area: item.area,
             checkpoint: item.checkpoint,
             status: item.status,
-            comment: item.comment
+            comment: item.comment,
+            metadata: item.metadata,
           }))
         : [],
-      checklistIssues: latestInspection?.checklistItems
-        ? latestInspection.checklistItems
+      checklistIssues: targetInspection?.checklistItems
+        ? targetInspection.checklistItems
           .filter(item => item.checked)
           .map(item => ({
             id: item.id,
@@ -468,7 +500,10 @@ export default function VehiclesDashboard() {
             evidence: item.evidence || [],
           }))
         : [],
-      rejectionEvidenceUrl: latestInspection?.rejectionEvidenceUrl,
+      all360Items: targetInspection?.inspection360Items || [],
+      allChecklistItems: targetInspection?.checklistItems || [],
+      rejectionEvidenceUrl: targetInspection?.rejectionEvidenceUrl,
+      allInspections: allSortedInspections,
     };
   }, []);
 
@@ -486,7 +521,7 @@ export default function VehiclesDashboard() {
 
       if (result) {
         setRawVehiclesData(result.data || []);
-        const transformedVehicles = (result.data || []).map(transformVehicleData);
+        const transformedVehicles = (result.data || []).map(v => transformVehicleData(v, 0));
         setVehicles(transformedVehicles);
         setTotalVehicles(result.total || 0);
       } else {
@@ -548,6 +583,7 @@ export default function VehiclesDashboard() {
     setIsModalLoading(true);
     setActiveTab("details");
     setPhotoGalleryFilter("all");
+    setSelectedInspectionIndex(0);
 
     // Initialize edit form with current values
     setEditForm({
@@ -1328,17 +1364,83 @@ export default function VehiclesDashboard() {
           setIsDetailsOpen(open);
           if (!open) {
             setActiveTab("details"); // Reset to default tab when closing
+            setSelectedInspectionIndex(0);
           }
         }}
       >
         <DialogContent className="min-w-[90vw] max-w-7xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {selectedVehicle?.vehicleMake} {selectedVehicle?.vehicleModel}
-            </DialogTitle>
-            <DialogDescription>
-              {selectedVehicle?.licensePlate} - {selectedVehicle?.vinNumber}
-            </DialogDescription>
+          <DialogHeader className="flex flex-row items-start justify-between pr-8">
+            <div>
+              <DialogTitle>
+                {selectedVehicle?.vehicleMake} {selectedVehicle?.vehicleModel}
+              </DialogTitle>
+              <DialogDescription>
+                {selectedVehicle?.licensePlate} - {selectedVehicle?.vinNumber}
+              </DialogDescription>
+            </div>
+            {selectedVehicle && (
+              <div className="flex items-center gap-3">
+                {/* Inspection selector */}
+                {(selectedVehicle?.allInspections?.length || 0) > 1 && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-muted-foreground uppercase">Inspección:</span>
+                    <Select
+                      value={selectedInspectionIndex.toString()}
+                      onValueChange={(val) => {
+                        const newIndex = parseInt(val);
+                        setSelectedInspectionIndex(newIndex);
+                        const rawVehicle = rawVehiclesData.find(v => v.id === selectedVehicle.id);
+                        if (rawVehicle) {
+                          const transformed = transformVehicleData(rawVehicle, newIndex);
+                          setSelectedVehicle(transformed);
+                          // Also refresh edit form with the newly selected inspection data
+                          setEditForm({
+                            vehicleRating: transformed.vehicleRating,
+                            status: transformed.status,
+                            marketValue: transformed.marketValue,
+                            suggestedCommercialValue: transformed.suggestedCommercialValue,
+                            currentConditionValue: transformed.currentConditionValue,
+                            testDrive: transformed.testDrive,
+                            inspectionResult: transformed.inspectionResult,
+                          });
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="w-[200px] h-9 text-xs">
+                        <SelectValue placeholder="Seleccionar fecha" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {selectedVehicle.allInspections?.map((inspection, idx) => (
+                          <SelectItem key={inspection.id} value={idx.toString()}>
+                            {inspection.inspectionDate
+                              ? format(new Date(inspection.inspectionDate), "dd/MM/yyyy", { locale: es })
+                              : "Sin fecha"}
+                            {idx === 0 && " (Última)"}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-0!"
+                  disabled={isModalLoading}
+                  onClick={async () => {
+                    try {
+                      await generateInspectionPdf(selectedVehicle);
+                    } catch (e) {
+                      console.error("Error al generar el informe de inspección en PDF:", e);
+                      toast.error("No se pudo generar el informe PDF. Inténtalo de nuevo más tarde.");
+                    }
+                  }}
+                >
+                  <FileText className="h-4 w-4 mr-2" />
+                  Descargar Informe PDF
+                </Button>
+              </div>
+            )}
           </DialogHeader>
 
           {isModalLoading ? (
@@ -1405,32 +1507,49 @@ export default function VehiclesDashboard() {
                             <div className="text-muted-foreground">Marca</div>
                             <div className="font-medium">{selectedVehicle.vehicleMake}</div>
 
-                            <div className="text-muted-foreground">Modelo</div>
+                            <div className="text-muted-foreground">Línea del vehículo</div>
                             <div className="font-medium">{selectedVehicle.vehicleModel}</div>
 
-                            <div className="text-muted-foreground">Versión/Trim</div>
+                            <div className="text-muted-foreground">Versión/Equipamiento</div>
                             <div className="font-medium">{selectedVehicle.trim || "N/A"}</div>
 
                             <div className="text-muted-foreground">Año</div>
                             <div className="font-medium">{selectedVehicle.vehicleYear}</div>
 
-                            <div className="text-muted-foreground">Tipo</div>
+                            <div className="text-muted-foreground">Procedencia</div>
+                            <div className="font-medium">{selectedVehicle.origin || "N/A"}</div>
+
+                            <div className="text-muted-foreground">Tipo de vehículo</div>
                             <div className="font-medium">{selectedVehicle.vehicleType}</div>
+                            
+                            <div className="text-muted-foreground">Transmisión</div>
+                            <div className="font-medium">{selectedVehicle.transmission || "N/A"}</div>
 
                             <div className="text-muted-foreground">Tracción</div>
                             <div className="font-medium">{selectedVehicle.traction || "N/A"}</div>
+                            
+                            <div className="text-muted-foreground">Cilindros</div>
+                            <div className="font-medium">{selectedVehicle.cylinders || "N/A"}</div>
+                            
+                            <div className="text-muted-foreground">Motor (CC)</div>
+                            <div className="font-medium">{selectedVehicle.engineCC || "N/A"}</div>
                           </div>
 
                           <div className="pt-2 border-t space-y-2">
                             <div className="flex items-center gap-2 text-sm">
                               <Hash className="h-3.5 w-3.5 text-muted-foreground" />
-                              <span className="text-muted-foreground">Placa:</span>
+                              <span className="text-muted-foreground">No. de placa:</span>
                               <span className="font-mono font-medium">{selectedVehicle.licensePlate}</span>
                             </div>
                             <div className="flex items-start gap-2 text-sm">
                               <Hash className="h-3.5 w-3.5 text-muted-foreground mt-0.5" />
-                              <span className="text-muted-foreground">VIN:</span>
+                              <span className="text-muted-foreground">No. VIN/Chasis:</span>
                               <span className="font-mono text-xs break-all">{selectedVehicle.vinNumber}</span>
+                            </div>
+                            <div className="flex items-start gap-2 text-sm">
+                              <Hash className="h-3.5 w-3.5 text-muted-foreground mt-0.5" />
+                              <span className="text-muted-foreground">No. de Motor:</span>
+                              <span className="font-mono text-xs break-all">{selectedVehicle.motorNumber || "N/A"}</span>
                             </div>
                             <div className="flex items-center gap-2 text-sm">
                               <Palette className="h-3.5 w-3.5 text-muted-foreground" />
@@ -1439,7 +1558,12 @@ export default function VehiclesDashboard() {
                             </div>
                             <div className="flex items-center gap-2 text-sm">
                               <Gauge className="h-3.5 w-3.5 text-muted-foreground" />
-                              <span className="text-muted-foreground">Kilometraje:</span>
+                              <span className="text-muted-foreground">Millas recorridas:</span>
+                              <span className="font-medium">{selectedVehicle.milesMileage ? `${Number(selectedVehicle.milesMileage).toLocaleString()} mi` : "N/A"}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-sm">
+                              <Gauge className="h-3.5 w-3.5 text-muted-foreground" />
+                              <span className="text-muted-foreground">Kilómetros recorridos:</span>
                               <span className="font-medium">{Number(selectedVehicle.kmMileage).toLocaleString()} km</span>
                             </div>
                             <div className="flex items-center gap-2 text-sm">
@@ -1652,44 +1776,7 @@ export default function VehiclesDashboard() {
                             </div>
                           </div>
 
-                          {/* IA Valuation Section */}
-                          <div>
-                            {selectedVehicle.aiValuation ? (
-                              <div className="pt-3 border-t border-dashed border-slate-200">
-                                <>
-                                  <div className="mb-2 flex items-center gap-1.5">
-                                    <Sparkles className="h-4 w-4 text-slate-950" />
-                                    <span className="font-bold text-xs uppercase tracking-tight text-slate-950">Valoración IA</span>
-                                  </div>
-                                  <div className="grid grid-cols-2 gap-4">
-                                    <div className="flex flex-col gap-1">
-                                      <span className="text-[10px] font-bold text-slate-600 uppercase tracking-tight">Valor de Mercado</span>
-                                      <span className="font-bold text-lg text-slate-950">
-                                        {selectedVehicle.aiValuation.aiSuggestedValue && !isNaN(Number(selectedVehicle.aiValuation.aiSuggestedValue))
-                                          ? Number(selectedVehicle.aiValuation.aiSuggestedValue).toLocaleString("es-GT", {
-                                              style: "currency",
-                                              currency: "GTQ",
-                                              minimumFractionDigits: 0,
-                                              maximumFractionDigits: 0,
-                                            })
-                                          : "N/A"}
-                                      </span>
-                                    </div>
-                                    <div className="flex flex-col gap-1 items-end">
-                                      <span className="text-[10px] font-bold text-slate-600 uppercase tracking-tight mb-1">Clasificación</span>
-                                      <Badge variant="outline" className="font-bold uppercase text-[10px] border-slate-300 text-slate-900 bg-slate-50">
-                                        {selectedVehicle.aiValuation.aiCommercialClassification || "N/A"}
-                                      </Badge>
-                                    </div>
-                                  </div>
-                                </>
-                              </div>
-                            ) : (
-                              <div className="p-4 rounded-lg border border-slate-100 bg-slate-50 text-slate-700 text-sm text-center">
-                                Sin información de IA disponible
-                              </div>
-                            )}
-                          </div>
+
                         </CardContent>
                       </Card>
                     </div>
@@ -1738,6 +1825,40 @@ export default function VehiclesDashboard() {
                                         {check.comment}
                                       </p>
                                     )}
+                                    {check.metadata && check.checkpoint.toLowerCase().includes("compresiones") && (() => {
+                                      try {
+                                        const mData = typeof check.metadata === 'string' ? JSON.parse(check.metadata) : check.metadata;
+                                        let cylCount = 8;
+                                        if (selectedVehicle.cylinders) {
+                                           const parsed = parseInt(selectedVehicle.cylinders.toString().replace(/\D/g, ''), 10);
+                                           if (!isNaN(parsed) && parsed > 0 && parsed <= 16) cylCount = parsed;
+                                        }
+
+                                        const validPts = [];
+                                        for (let i = 1; i <= cylCount; i++) {
+                                          const val = mData[`c${i}`];
+                                          if (val !== undefined && val !== null && val !== 0 && val !== "0" && val !== "") {
+                                             validPts.push({ c: i, val });
+                                          }
+                                        }
+
+                                        if (validPts.length === 0) return null;
+
+                                        return (
+                                          <div className="mt-2 text-xs">
+                                            <div className="font-semibold text-slate-700 mb-1">Presiones Registradas:</div>
+                                            <div className="grid grid-cols-4 sm:grid-cols-8 gap-2 border-t border-slate-100 pt-2">
+                                              {validPts.map((pt) => (
+                                                <div key={pt.c} className="text-center bg-slate-50 rounded flex flex-col items-center border border-slate-200 shadow-sm py-1.5 transition-colors hover:border-blue-200 hover:bg-blue-50/50">
+                                                  <p className="text-[10px] text-blue-600 font-semibold mb-0.5">C{pt.c}</p>
+                                                  <p className="font-mono text-xs font-bold text-slate-700">{String(pt.val)} <span className="text-[9px] font-normal text-slate-500">PSI</span></p>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        );
+                                      } catch(e) { return null; }
+                                    })()}
                                   </div>
                                 </div>
                               );
@@ -1829,6 +1950,169 @@ export default function VehiclesDashboard() {
                 )}
               </TabsContent>
 
+              {/* ─── Historial de Inspecciones ─── */}
+              <TabsContent value="history" className="mt-4">
+                {(() => {
+                  const rawVehicle = rawVehiclesData.find(v => v.id === selectedVehicle?.id);
+                  const allInspections = selectedVehicle?.allInspections || [];
+
+                  if (allInspections.length === 0) {
+                    return (
+                      <div className="flex flex-col items-center justify-center py-16 text-center border border-dashed rounded-lg bg-muted/20">
+                        <History className="h-12 w-12 text-muted-foreground opacity-30 mb-3" />
+                        <p className="text-muted-foreground font-medium">No hay inspecciones registradas</p>
+                      </div>
+                    );
+                  }
+
+                  const insp = allInspections[selectedInspectionIndex];
+
+                  return (
+                    <div className="flex gap-4 min-h-[400px]">
+                      {/* Left: inspection list */}
+                      <div className="w-52 shrink-0 flex flex-col gap-2 border-r pr-4">
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">Inspecciones</p>
+                        {allInspections.map((inspection, idx) => {
+                          const date = inspection.inspectionDate
+                            ? format(new Date(inspection.inspectionDate), "dd MMM yyyy", { locale: es })
+                            : "Sin fecha";
+                          const isSelected = idx === selectedInspectionIndex;
+                          const statusColor =
+                            inspection.status === "approved"
+                              ? "text-green-600 bg-green-50 border-green-200"
+                              : inspection.status === "rejected"
+                              ? "text-red-600 bg-red-50 border-red-200"
+                              : "text-yellow-600 bg-yellow-50 border-yellow-200";
+                          const statusLabel =
+                            inspection.status === "approved" ? "Aprobado"
+                            : inspection.status === "rejected" ? "Rechazado"
+                            : "Pendiente";
+
+                          return (
+                            <button
+                              key={inspection.id}
+                              onClick={() => setSelectedInspectionIndex(idx)}
+                              className={cn(
+                                "w-full text-left rounded-lg border p-3 transition-all",
+                                isSelected
+                                  ? "border-primary bg-primary/5 ring-1 ring-primary/30"
+                                  : "border-muted hover:border-primary/40 hover:bg-muted/30"
+                              )}
+                            >
+                              <p className="font-semibold text-sm leading-tight">{date}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5 truncate">{inspection.technicianName}</p>
+                              <span className={cn("inline-block mt-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded border", statusColor)}>
+                                {statusLabel}
+                              </span>
+                              {idx === 0 && (
+                                <span className="inline-block mt-1 ml-1 text-[10px] font-medium text-primary">· Última</span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Right: selected inspection detail */}
+                      {insp && (
+                        <div className="flex-1 overflow-y-auto space-y-4">
+                          <div className="flex flex-wrap items-center gap-2 pb-3 border-b">
+                            <Calendar className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-sm font-medium">
+                              {insp.inspectionDate
+                                ? format(new Date(insp.inspectionDate), "PPP", { locale: es })
+                                : "Sin fecha"}
+                            </span>
+                            <span className="text-xs text-muted-foreground">· {insp.technicianName}</span>
+                            {renderStatusBadge(insp.status)}
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "ml-auto",
+                                insp.vehicleRating === "Comercial"
+                                  ? "bg-green-100 text-green-800 border-green-300"
+                                  : "bg-red-100 text-red-800 border-red-300"
+                              )}
+                            >
+                              {insp.vehicleRating}
+                            </Badge>
+                          </div>
+
+                          {/* Values */}
+                          <div className="grid grid-cols-3 gap-3">
+                            {[
+                              { label: "Valor de Mercado", value: insp.marketValue },
+                              { label: "Valor Comercial Sugerido", value: insp.suggestedCommercialValue },
+                              { label: "Valor Condición Actual", value: insp.currentConditionValue },
+                            ].map(({ label, value }) => (
+                              <div key={label} className="rounded-lg border bg-muted/20 p-3">
+                                <p className="text-[10px] font-semibold uppercase text-muted-foreground tracking-wide">{label}</p>
+                                <p className="text-lg font-bold mt-1">
+                                  Q {Number(value || 0).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* Inspection result */}
+                          <div className="rounded-lg border p-4 bg-muted/10">
+                            <p className="text-xs font-semibold uppercase text-muted-foreground tracking-wide mb-2">Resultado</p>
+                            <p className="text-sm leading-relaxed">{insp.inspectionResult}</p>
+                          </div>
+
+                          {/* Alerts */}
+                          {insp.alerts && (insp.alerts as string[]).length > 0 && (
+                            <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+                              <p className="text-xs font-semibold uppercase text-red-700 tracking-wide mb-2">Alertas</p>
+                              <div className="flex flex-wrap gap-2">
+                                {(insp.alerts as string[]).map((alert: string, i: number) => (
+                                  <Badge key={i} variant="destructive" className="text-[10px]">{alert}</Badge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Tires & Paint */}
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
+                              <p className="text-[10px] font-semibold uppercase text-muted-foreground tracking-wide">Llantas (Promedio)</p>
+                              <div className="flex items-center gap-2">
+                                <Progress value={insp.tiresCondition || 0} className="h-2 flex-1" />
+                                <span className="text-xs font-bold">{insp.tiresCondition || 0}%</span>
+                              </div>
+                            </div>
+                            <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
+                              <p className="text-[10px] font-semibold uppercase text-muted-foreground tracking-wide">Pintura</p>
+                              <div className="flex items-center gap-2">
+                                <Progress value={insp.paintCondition || 0} className="h-2 flex-1" />
+                                <span className="text-xs font-bold">{insp.paintCondition || 0}%</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Photos of this inspection */}
+                          {(() => {
+                            const inspPhotos = rawVehicle?.photos?.filter(
+                              (p: any) => p.inspectionId === insp.id
+                            ) || [];
+                            if (inspPhotos.length === 0) return null;
+                            return (
+                              <div className="space-y-2">
+                                <p className="text-[10px] font-semibold uppercase text-muted-foreground tracking-wide">Fotos de esta inspección ({inspPhotos.length})</p>
+                                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                                  {inspPhotos.slice(0, 10).map((photo: any, i: number) => (
+                                    <VehiclePhoto key={photo.id || i} photo={photo} index={i} />
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </TabsContent>
+
               <TabsContent value="photos" className="mt-4">
                 <div className="py-2">
                   <div className="flex flex-wrap gap-2 mb-6 border-b pb-4">
@@ -1857,8 +2141,7 @@ export default function VehiclesDashboard() {
 
                   <div className="space-y-8">
                     {(() => {
-                      const rawVehicle = rawVehiclesData.find(v => v.id === selectedVehicle?.id);
-                      const vehiclePhotos = rawVehicle?.photos || [];
+                      const vehiclePhotos = selectedVehicle?.allPhotos || [];
 
                       if (vehiclePhotos.length === 0) {
                         return (
@@ -1921,9 +2204,8 @@ export default function VehiclesDashboard() {
               <TabsContent value="scanner" className="mt-4">
                 <div className="py-4">
                   {(() => {
-                    const rawVehicle = rawVehiclesData.find(v => v.id === selectedVehicle?.id);
-                    const latestInspection = rawVehicle?.inspections?.[0];
-                    const scannerUrl = latestInspection?.scannerResultUrl;
+                    const currentInspection = selectedVehicle?.allInspections?.[selectedInspectionIndex];
+                    const scannerUrl = currentInspection?.scannerResultUrl;
 
                     if (!scannerUrl) {
                       return (
@@ -2012,6 +2294,8 @@ export default function VehiclesDashboard() {
                           value={editForm.marketValue}
                           onChange={(e) => setEditForm(prev => ({ ...prev, marketValue: e.target.value }))}
                           type="number"
+                          readOnly
+                          className="bg-slate-50 cursor-not-allowed border-green-200"
                         />
                       </div>
 

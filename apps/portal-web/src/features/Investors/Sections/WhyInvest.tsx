@@ -1,5 +1,6 @@
 import { IconShield, IconArrow, IconUserCheck, IconClock } from "@/components";
 import { useIsMobile } from "@/hooks";
+import { InvestorIsotipo } from "../components/InvestorIsotipo";
 
 export const WhyInvest = () => {
   interface Item {
@@ -51,7 +52,7 @@ export const WhyInvest = () => {
       <div
         className="w-screen h-[10px] md:hidden mb-8"
         style={{
-          background: "linear-gradient(90deg, #171717 0%, #D1E400 50%, #171717 100%)",
+          background: "linear-gradient(90deg, #171717 0%, #27A6ED 50%, #171717 100%)",
         }}
       />
 
@@ -73,7 +74,7 @@ export const WhyInvest = () => {
           className="absolute left-0 right-0 top-1/2 -translate-y-1/2 w-full hidden md:block"
           style={{
             background:
-              "linear-gradient(90deg, #171717 0%, #D1E400 50%, #171717 100%)",
+              "linear-gradient(90deg, #171717 0%, #27A6ED 50%, #171717 100%)",
             height: "80px",
           }}
         />
@@ -83,19 +84,22 @@ export const WhyInvest = () => {
           {items.map((item, index) => (
             <div
               key={index}
-              className="flex flex-col p-6 gap-4 lg:gap-6 border border-white/20"
+              className="flex flex-col p-4 lg:p-6 xl:p-8 gap-4 lg:gap-6 border border-white/20 overflow-hidden relative"
               style={{
                 borderRadius: "24px",
                 background: "linear-gradient(180deg, #0A0A0A 0%, #000 100%)",
               }}
             >
-              <div className="w-full">
-                <div className="p-4 text-primary rounded-xl border border-primary w-max">
+              <div className="absolute bottom-0 left-1/2 -translate-x-1/2 opacity-20 pointer-events-none">
+                <InvestorIsotipo width={isMobile ? "100" : "160"} height={isMobile ? "100" : "160"} />
+              </div>
+              <div className="w-full flex justify-center relative z-10">
+                <div className="p-4 text-secondary rounded-xl border border-secondary w-max">
                   {item.icon}
                 </div>
               </div>
-              <h3 className="lg:text-xl font-semibold">{item.title}</h3>
-              <p className="text-sm lg:text-base text-gray leading-6">{item.description}</p>
+              <h3 className="text-sm lg:text-xl font-semibold relative z-10">{item.title}</h3>
+              <p className="text-sm lg:text-base text-gray leading-6 relative z-10">{item.description}</p>
             </div>
           ))}
         </div>
@@ -105,7 +109,7 @@ export const WhyInvest = () => {
       <div
         className="w-screen h-[10px] md:hidden mt-8"
         style={{
-          background: "linear-gradient(90deg, #171717 0%, #D1E400 50%, #171717 100%)",
+          background: "linear-gradient(90deg, #171717 0%, #27A6ED 50%, #171717 100%)",
         }}
       />
     </div>

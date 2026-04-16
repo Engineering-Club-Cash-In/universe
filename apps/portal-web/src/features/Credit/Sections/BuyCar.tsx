@@ -15,17 +15,17 @@ export const BuyCar = () => {
   const items = [
     {
       icon: <IconCheckDoc width={isMobile ? 20 : 34} />,
-      title: "Aplica",
+      title: "Tú aplicas",
       description: "Completa tu solicitud en minutos",
     },
     {
       icon: <IconSearch width={isMobile ? 20 : 34} />,
-      title: "Evaluamos",
+      title: "Nosotros evaluamos",
       description: "Analizamos tu perfil y el vehículo que deseas",
     },
     {
       icon: <IconKey width={isMobile ? 20 : 34} />,
-      title: "Estrenas tu auto",
+      title: "Y estrenas tu auto",
       description: "Recibe tu préstamo y disfruta",
     },
   ];
@@ -83,7 +83,7 @@ export const BuyCar = () => {
         <p className="text-gray lg:text-xl mb-8">
           Te ayudamos a hacer realidad tu sueño de tener un vehículo nuevo.
           Realizamos un análisis completo de tu perfil y del vehículo que
-          deseas. Si cumples con nuestros requisitos, ¡el auto es tuyo!
+          deseas. Si cumples con los requisitos, ¡el auto es tuyo!
         </p>
 
         {/* Items */}
@@ -109,7 +109,7 @@ export const BuyCar = () => {
         {/* Botón */}
         <div className="mt-12 lg:mt-6">
           <Button
-            size={isMobile ? "sm" : "lg"}
+            size={isMobile ? "sm" : "md"}
             onClick={() => setIsModalOpen(true)}
           >
             Solicita tu crédito

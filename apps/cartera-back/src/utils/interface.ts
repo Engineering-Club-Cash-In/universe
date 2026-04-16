@@ -38,6 +38,7 @@ export interface CreditoData {
   total_abono_iva: number;       // 👈 number
   total_isr: number;             // 👈 number
   total_cuota: number;           // 👈 number
+  tipo_reinversion?: string | null; // Solo aplica cuando el inversionista tiene reinversion_combinada
 }
 
 
@@ -54,6 +55,8 @@ export interface Subtotal {
   total_reinversion_capital: number;
   total_reinversion_interes: number;
   total_reinversion: number;
+  total_capital_creditos: number;
+  total_capital_actual: number;
 }
 
 export interface InversionistaReporte {
@@ -62,10 +65,12 @@ export interface InversionistaReporte {
   emite_factura: boolean;
   nombre_inversionista: string;
   email: string | null;
-  reinversion: boolean;
+  reinversion: string;
   banco: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;
+  moneda: string;
+  currencySymbol: string;
   creditos: CreditoData[];
   subtotal: Subtotal;
 }

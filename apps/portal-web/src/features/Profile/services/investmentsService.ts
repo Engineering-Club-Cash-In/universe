@@ -19,6 +19,8 @@ export interface LiquidacionPago {
   abono_interes: number;
   abono_iva: number;
   isr: number;
+  tasa_interes: number;
+  porcentaje_tasa_interes: number;
   porcentaje_participacion: number;
   fecha_pago: string;
   cuota: number;
@@ -57,6 +59,8 @@ export interface Liquidacion {
   nombre_inversionista: string;
   emite_factura: boolean;
   dpi: string;
+  moneda: string;
+  currencySymbol: string;
   boleta: LiquidacionBoleta | null;
   totales: LiquidacionTotales;
   reinversion: LiquidacionReinversion | null;
@@ -77,7 +81,8 @@ export interface LiquidacionesResponse {
  * Obtener liquidaciones del inversionista por DPI con paginación
  */
 export const getLiquidaciones = async (
-  dpi: string,
+  dpi: string = "",
+  email: string = "",
   page: number = 1,
   perPage: number = 10
 ): Promise<LiquidacionesResponse> => {
@@ -90,7 +95,7 @@ export const getLiquidaciones = async (
       totalItems: number;
       totalPages: number;
     }>(
-      `/api/cartera/liquidaciones?dpi=${encodeURIComponent(dpi)}&page=${page}&perPage=${perPage}`
+      `/api/cartera/liquidaciones?dpi=${encodeURIComponent(dpi)}&email=${encodeURIComponent(email)}&page=${page}&perPage=${perPage}`
     );
 
     const result = response.data;
@@ -155,14 +160,43 @@ export interface InvestmentsStatsResponse {
 /**
  * Obtener estadísticas de inversiones desde la API de Cartera
  */
-export const getInvestmentsStats = async (dpi: string): Promise<InvestmentsStats> => {
+export const getInvestmentsStats = async (dpi: string = "", email: string = ""): Promise<InvestmentsStats> => {
   try {
     const response = await apiAuth.get<InvestmentsStatsResponse>(
-      `/api/cartera/investments/stats?dpi=${encodeURIComponent(dpi)}`
+      `/api/cartera/investments/stats?dpi=${encodeURIComponent(dpi)}&email=${encodeURIComponent(email)}`
     );
     return response.data.data;
   } catch (error) {
     console.error("Error al obtener estadísticas de inversión:", error);
+    throw error;
+  }
+};
+
+// ============================================
+// HISTORIAL DE REPORTE DE LIQUIDACIONES
+// ============================================
+
+export interface HistorialReporte {
+  reporte_url: string;
+  fecha_generacion: string;
+}
+
+export interface HistorialReporteResponse {
+  success: boolean;
+  data: HistorialReporte;
+}
+
+/**
+ * Obtener el link del historial de reporte de liquidaciones por email
+ */
+export const getHistorialReporte = async (email: string): Promise<HistorialReporte> => {
+  try {
+    const response = await apiAuth.get<HistorialReporteResponse>(
+      `/api/cartera/liquidaciones/reporte?email=${encodeURIComponent(email)}`
+    );
+    return response.data.data;
+  } catch (error) {
+    console.error("Error al obtener historial de reporte:", error);
     throw error;
   }
 };

@@ -22,6 +22,10 @@ export const getSourceLabel = (source: string) => {
 			return "Instagram";
 		case "google":
 			return "Google";
+		case "agency":
+			return "Agencia";
+		case "property":
+			return "Predio";
 		default:
 			return source;
 	}
@@ -63,6 +67,18 @@ export const formatGuatemalaDate = (date: string | Date) => {
 		day: "2-digit",
 		month: "2-digit",
 		year: "numeric",
+	});
+};
+
+export const formatGuatemalaDateTime = (date: string | Date) => {
+	return new Date(date).toLocaleString("es-GT", {
+		timeZone: "America/Guatemala",
+		day: "2-digit",
+		month: "2-digit",
+		year: "numeric",
+		hour: "2-digit",
+		minute: "2-digit",
+		hour12: true,
 	});
 };
 
@@ -154,6 +170,8 @@ export const formatCurrency = (amount: number | string) => {
 	return new Intl.NumberFormat("es-GT", {
 		style: "currency",
 		currency: "GTQ",
+		minimumFractionDigits: 2,
+		maximumFractionDigits: 2,
 	}).format(Number(amount));
 };
 

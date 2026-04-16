@@ -60,13 +60,27 @@ interface AmortizationRow {
   finalBalance: number;
 }
 
+const INVESTOR_SPLIT_OPTIONS = [
+  { investorPercentage: 70, label: "70 inversionista / 30 cube" },
+  { investorPercentage: 45, label: "45 inversionista / 55 cube" },
+] as const;
+
+const DEFAULT_INVESTOR_PERCENTAGE = INVESTOR_SPLIT_OPTIONS[0].investorPercentage;
+
+const normalizeInvestorPercentage = (value: number) =>
+  INVESTOR_SPLIT_OPTIONS.some((option) => option.investorPercentage === value)
+    ? value
+    : DEFAULT_INVESTOR_PERCENTAGE;
+
 // Main investment calculator component
 export default function InvestmentCalculator() {
   const [mainTab, setMainTab] = useState("calculator"); // 'calculator' or 'goal'
   const [capital, setCapital] = useState<string>("7591.11");
   const [interestRate, setInterestRate] = useState<number>(1.5);
   const [term, setTerm] = useState<number>(1);
-  const [investorPercentage, setInvestorPercentage] = useState<number>(70);
+  const [investorPercentage, setInvestorPercentage] = useState<number>(
+    DEFAULT_INVESTOR_PERCENTAGE
+  );
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
   // New state for term unit
@@ -83,7 +97,7 @@ export default function InvestmentCalculator() {
   const [password, setPassword] = useState("");
   const [adminInterestRate, setAdminInterestRate] = useState<number>(1.5);
   const [adminInvestorPercentage, setAdminInvestorPercentage] =
-    useState<number>(70);
+    useState<number>(DEFAULT_INVESTOR_PERCENTAGE);
 
   // Admin small taxpayer state
   const [adminIsSmallTaxpayer, setAdminIsSmallTaxpayer] =
@@ -697,10 +711,7 @@ export default function InvestmentCalculator() {
   const handleSaveAdminSettings = () => {
     // Apply the admin settings to the actual calculator with validation
     setInterestRate(adminInterestRate);
-
-    // Ensure investor percentage is within range before saving
-    const validPercentage = Math.min(Math.max(adminInvestorPercentage, 70), 90);
-    setInvestorPercentage(validPercentage);
+    setInvestorPercentage(normalizeInvestorPercentage(adminInvestorPercentage));
 
     setIsSmallTaxpayer(adminIsSmallTaxpayer);
 
@@ -806,10 +817,10 @@ export default function InvestmentCalculator() {
           <Tabs value={mainTab} onValueChange={setMainTab}>
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="calculator">Calcular Rendimiento</TabsTrigger>
-              <TabsTrigger value="goal">Calcular Objetivo</TabsTrigger>
+            <TabsTrigger value="goal">Calcular Objetivo</TabsTrigger>
             </TabsList>
             <TabsContent value="calculator">
-              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4 pt-4">
+              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-5 pt-4">
                 <div className="space-y-2">
                   <Label htmlFor="capital">Monto a Invertir (Q)</Label>
                   <Input
@@ -857,6 +868,31 @@ export default function InvestmentCalculator() {
                   </div>
                 </div>
                 <div className="space-y-2">
+                  <Label htmlFor="investorSplit">
+                    Repartición de intereses
+                  </Label>
+                  <Select
+                    value={String(investorPercentage)}
+                    onValueChange={(value) =>
+                      setInvestorPercentage(Number(value))
+                    }
+                  >
+                    <SelectTrigger id="investorSplit">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {INVESTOR_SPLIT_OPTIONS.map((option) => (
+                        <SelectItem
+                          key={option.investorPercentage}
+                          value={String(option.investorPercentage)}
+                        >
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
                   <div className="flex items-center space-x-2">
                     <input
                       type="checkbox"
@@ -873,7 +909,7 @@ export default function InvestmentCalculator() {
               </div>
             </TabsContent>
             <TabsContent value="goal">
-              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4 pt-4">
+              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-5 pt-4">
                 <div className="space-y-2">
                   <Label htmlFor="desiredAmount">Monto Deseado (Q)</Label>
                   <Input
@@ -951,6 +987,31 @@ export default function InvestmentCalculator() {
                       </SelectContent>
                     </Select>
                   </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="investorSplitGoal">
+                    Repartición de intereses
+                  </Label>
+                  <Select
+                    value={String(investorPercentage)}
+                    onValueChange={(value) =>
+                      setInvestorPercentage(Number(value))
+                    }
+                  >
+                    <SelectTrigger id="investorSplitGoal">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {INVESTOR_SPLIT_OPTIONS.map((option) => (
+                        <SelectItem
+                          key={option.investorPercentage}
+                          value={String(option.investorPercentage)}
+                        >
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
               <div className="space-y-2">
@@ -1514,29 +1575,31 @@ export default function InvestmentCalculator() {
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="adminInvestorPercentage" className="text-right">
-                Porcentaje del inversionista (%)
+                Repartición de intereses
               </Label>
-              <Input
-                id="adminInvestorPercentage"
-                type="number"
-                value={adminInvestorPercentage}
-                onChange={(e) => {
-                  // Allow typing any value temporarily
-                  setAdminInvestorPercentage(Number(e.target.value));
-                }}
-                onBlur={(e) => {
-                  // Enforce the range when the input loses focus
-                  const value = Number(e.target.value);
-                  if (value < 70) {
-                    setAdminInvestorPercentage(70);
-                  } else if (value > 90) {
-                    setAdminInvestorPercentage(90);
-                  }
-                }}
-                min="70"
-                max="90"
-                className="col-span-3"
-              />
+              <Select
+                value={String(adminInvestorPercentage)}
+                onValueChange={(value) =>
+                  setAdminInvestorPercentage(Number(value))
+                }
+              >
+                <SelectTrigger
+                  id="adminInvestorPercentage"
+                  className="col-span-3"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {INVESTOR_SPLIT_OPTIONS.map((option) => (
+                    <SelectItem
+                      key={option.investorPercentage}
+                      value={String(option.investorPercentage)}
+                    >
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="adminSmallTaxpayer" className="text-right">

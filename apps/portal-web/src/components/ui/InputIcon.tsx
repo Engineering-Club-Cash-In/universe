@@ -4,9 +4,11 @@ interface InputIconProps {
   icon: React.ReactNode;
   placeholder?: string;
   value: string;
-  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   type?: string;
   name?: string;
+  disabled?: boolean;
+  maxLength?: number;
 }
 
 export const InputIcon: React.FC<InputIconProps> = ({
@@ -16,6 +18,8 @@ export const InputIcon: React.FC<InputIconProps> = ({
   onChange,
   type = 'text',
   name,
+  disabled,
+  maxLength,
 }) => {
   return (
     <div
@@ -25,6 +29,8 @@ export const InputIcon: React.FC<InputIconProps> = ({
         background: '#F9FAFB',
         height: '58px',
         padding: '16px',
+        opacity: disabled ? 0.6 : 1,
+        cursor: disabled ? 'not-allowed' : undefined,
       }}
     >
       <div className="flex items-center mr-3">
@@ -36,7 +42,9 @@ export const InputIcon: React.FC<InputIconProps> = ({
         placeholder={placeholder}
         value={value}
         onChange={onChange}
-        className="flex-1 bg-transparent border-0 outline-none"
+        disabled={disabled}
+        maxLength={maxLength}
+        className="flex-1 bg-transparent border-0 outline-none disabled:cursor-not-allowed disabled:opacity-60"
         style={{
           background: 'transparent',
           border: 'none',

@@ -19,10 +19,10 @@ COPY . .
 # Build arguments for environment variables
 ARG VITE_IMAGE_URL=https://pub-6db6052b52cf40f7bb41443a6b24ef95.r2.dev
 ARG VITE_FRONTEND_URL=https://clubcashin.com
-ARG VITE_WHATSAPP_PHONE_NUMBER=+59899683075
+ARG VITE_WHATSAPP_PHONE_NUMBER=+50234849518
 ARG VITE_PHONE_NUMBER=+50222341368
 ARG VITE_URL_INSPECTION=https://taller.s3.devteamatcci.site/vehicle-inspection
-ARG VITE_BETTER_AUTH_URL=https://auth-portal.servicioscashin.com/
+ARG VITE_BETTER_AUTH_URL=https://auth-portal.clubcashin.com/
 ARG VITE_CRM_API_URL=https://crmapi.s3.devteamatcci.site
 ARG VITE_CARTERA_API_URL=https://qk4sw4kc4c088c8csos400wc.s3.devteamatcci.site
 

@@ -4,7 +4,11 @@ import { z } from "zod";
 export const vehicleValuationSchema = z.object({
 	suggestedValue: z
 		.number()
-		.describe("Valor sugerido del vehículo en Quetzales"),
+		.describe("Valor sugerido del vehículo en Quetzales. Este es el valor EN CONDICIONES ACTUALES (ya descontados los daños físicos, llantas, etc.)"),
+	baseMarketValue: z
+		.number()
+		.optional()
+		.describe("Valor de mercado base en Quetzales (sin tomar en cuenta estado físico ni daños actuales, solo basado en marca, modelo y año del vehículo en el mercado)"),
 	reasoning: z.string().describe("Razón detallada de la valoración"),
 	marketAnalysis: z
 		.string()
@@ -247,14 +251,19 @@ export function prepareValuationContext(
 		tireConditionRearRight: vehicleData.tireConditionRearRight
 			? `${vehicleData.tireConditionRearRight}%`
 			: "No especificado",
-		hasSpareTire: vehicleData.hasSpareTire === "Sí" || vehicleData.hasSpareTire === true,
+		hasSpareTire:
+			vehicleData.hasSpareTire === "Sí" || vehicleData.hasSpareTire === true,
 		tireConditionSpare: vehicleData.tireConditionSpare
 			? `${vehicleData.tireConditionSpare}%`
 			: "No especificado",
 		paintCondition: vehicleData.paintCondition
 			? `${vehicleData.paintCondition}%`
 			: "No especificado",
-		hasAgencyHistory: vehicleData.hasAgencyHistory === "Sí" || vehicleData.hasAgencyHistory === true ? "Sí" : "No",
+		hasAgencyHistory:
+			vehicleData.hasAgencyHistory === "Sí" ||
+			vehicleData.hasAgencyHistory === true
+				? "Sí"
+				: "No",
 
 		// Issues and condition
 		criticalIssues: criticalIssues.map((item) => item.item),

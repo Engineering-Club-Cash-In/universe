@@ -70,7 +70,7 @@ export interface UpdateLeadPayload {
  */
 export const getProfile = async (
   email: string,
-  dpi: string
+  dpi: string = ""
 ): Promise<ProfileData> => {
   try {
     const response = await apiAuth.get<{ data: ProfileData }>(
@@ -112,7 +112,7 @@ export const updateLead = async (
 
 export const getNumbersSifco = async (
   email: string,
-  dpi: string
+  dpi: string = ""
 ): Promise<Opportunity[]> => {
   try {
     const response = await apiAuth.get<{ data: Opportunity[] }>(

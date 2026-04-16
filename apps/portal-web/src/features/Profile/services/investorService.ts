@@ -7,7 +7,7 @@ import apiAuth from "@/lib/api/apiAuth";
 // Interfaces
 export interface CreateInvestorPayload {
   nombre?: string;
-  dpi: number;
+  dpi?: number;
   email?: string;
   emite_factura?: boolean;
   tipo_reinversion: string;
@@ -32,6 +32,18 @@ export interface InvestorProfile {
   banco_id: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;
+}
+
+export interface InvestorDocument {
+  documento_id: number;
+  inversionista_id: number;
+  key: string;
+  nombre: string;
+  descripcion: string | null;
+  visible: boolean;
+  created_at: string;
+  created_by: string | null;
+  url: string;
 }
 
 export interface Banco {
@@ -62,15 +74,33 @@ export const createInvestor = async (
  * Obtener perfil de inversionista por DPI
  */
 export const getInvestorProfile = async (
-  dpi: string
+  dpi: string = "",
+  email: string = ""
 ): Promise<InvestorProfile> => {
   try {
     const response = await apiAuth.get<{ data: InvestorProfile }>(
-      `/api/cartera/investor?dpi=${encodeURIComponent(dpi)}`
+      `/api/cartera/investor?dpi=${encodeURIComponent(dpi)}&email=${encodeURIComponent(email)}`
     );
     return response.data.data;
   } catch (error) {
     console.error("Error al obtener perfil del inversionista:", error);
+    throw error;
+  }
+};
+
+/**
+ * Obtener documentos del inversionista por email
+ */
+export const getInvestorDocuments = async (
+  email: string
+): Promise<InvestorDocument[]> => {
+  try {
+    const response = await apiAuth.get<{ data: InvestorDocument[] }>(
+      `/api/cartera/investor-documents/client/${encodeURIComponent(email)}`
+    );
+    return response.data.data;
+  } catch (error) {
+    console.error("Error al obtener documentos del inversionista:", error);
     throw error;
   }
 };

@@ -1,10 +1,8 @@
 import React from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Link } from "./Link";
-import { InvestorsLogo } from "@/features/footer/icons";
 import { useMatchRoute } from "@tanstack/react-router";
 import {
-  IconUser,
   IconMenu,
   IconX,
   IconPerson,
@@ -16,15 +14,16 @@ import {
 import { useIsMobile } from "@/hooks";
 import { useAuth } from "@/lib/useAuth";
 import { authClient } from "@/lib/auth";
+import { useQueryClient } from "@tanstack/react-query";
 import { IconCCI } from "../IconCCI";
+import { Button } from "./Button";
 
 export const NavBar = () => {
-  const [isUserMenuOpen, setIsUserMenuOpen] = React.useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
 
   const matchRoute = useMatchRoute();
-  const isInvestorPage = !!matchRoute({ to: "/invest" });
   const { isAuthenticated, user } = useAuth();
+  const queryClient = useQueryClient();
 
   const defaultNavItems = [
     { label: "Solicita tu crédito", href: "/credit" },
@@ -32,8 +31,7 @@ export const NavBar = () => {
     { label: "Vendemos tu auto", href: "/sell", disabled: true },
     {
       label: "Invierte con nosotros",
-      href: "/invest",
-      className: "text-secondary",
+      href: "/invest"
     },
   ];
 
@@ -66,7 +64,7 @@ export const NavBar = () => {
       id: "/documents",
       label: "Documentos",
       icon: <IconDocument width="24" height="24" />,
-      roles: ["CLIENT"],
+      roles: ["CLIENT", "INVESTOR"],
     },
   ];
 
@@ -76,17 +74,17 @@ export const NavBar = () => {
   );
 
   // Si no tiene DPI, solo mostrar "Mi Perfil"
-  const profileMenuItems = !user?.dpi
-    ? filteredProfileItems.filter((item) => item.id === "/profile")
-    : filteredProfileItems;
+  const profileMenuItems =  filteredProfileItems;
 
   const handleLogout = async () => {
     try {
       await authClient.signOut();
-      setIsMobileMenuOpen(false);
-      globalThis.location.href = "/login";
     } catch (error) {
       console.error("Error during logout:", error);
+    } finally {
+      queryClient.setQueryData(["auth", "session"], null);
+      queryClient.removeQueries({ queryKey: ["auth", "session"] });
+      setIsMobileMenuOpen(false);
       globalThis.location.href = "/login";
     }
   };
@@ -96,8 +94,16 @@ export const NavBar = () => {
 
   return (
     <>
+      {/* Desktop: fondo gradiente full-width detrás de la navbar */}
+      <div
+        className="fixed top-0 left-0 w-full h-[80px] lg:h-[175px] z-40 pointer-events-none"
+        style={{
+          background:
+            "linear-gradient(180deg, #171717 46.15%, rgba(23, 23, 23, 0.00) 100%)",
+        }}
+      />
       <nav
-        className="sticky top-4 md:top-8 left-4 lg:left-8 right-16 lg:right-8 flex items-center justify-between  z-50 gap-4 mx-4 md:mx-20  lg:bg-transparent"
+        className="sticky top-4 md:top-8 flex items-center justify-between lg:justify-center z-50 gap-4 mx-4 md:mx-20"
         aria-label="Main navigation"
         style={
           isMobile
@@ -118,11 +124,9 @@ export const NavBar = () => {
           CashIn
         </Link>
 
-        <div className="hidden lg:block shrink-0"></div>
-
         {/* Desktop navbar */}
         <div
-          className={`hidden lg:flex items-center justify-between w-full max-w-[1250px] h-[61px] rounded-[56px] px-4 md:px-6 py-3 ${isInvestorPage ? "border border-secondary" : "border-[0.8px] border-transparent"} `}
+          className={`hidden lg:flex items-center justify-between w-full max-w-[1250px] h-[61px] rounded-[56px] px-4 md:px-6 py-3 `}
           style={{
             background:
               "linear-gradient(181.54deg, #0F0F0F 1.31%, #262626 98.69%)",
@@ -136,8 +140,11 @@ export const NavBar = () => {
         >
           <Link
             href={"/"}
-            className="text-light font-plus-jakarta font-bold text-lg md:text-xl"
+            className="text-light flex gap-2 font-plus-jakarta font-bold text-lg md:text-xl"
           >
+             <div className="w-6 h-6">
+            <IconCCI />
+          </div>
             CashIn
           </Link>
 
@@ -173,7 +180,7 @@ export const NavBar = () => {
                       {item.label}
                     </motion.span>
                     <motion.span
-                      className="text-primary text-xs absolute"
+                      className="text-secondary text-xs absolute"
                       variants={{
                         rest: { opacity: 0, y: 10 },
                         hover: { opacity: 1, y: 12 },
@@ -184,7 +191,12 @@ export const NavBar = () => {
                     </motion.span>
                   </motion.div>
                 ) : (
-                  <Link href={item.href} className={item.className}>
+                  <Link
+                    href={item.href}
+                    className={`hover:text-secondary transition-colors ${
+                      matchRoute({ to: item.href }) ? "text-secondary" : ""
+                    }`}
+                  >
                     {item.label}
                   </Link>
                 )}
@@ -192,19 +204,15 @@ export const NavBar = () => {
             ))}
           </div>
 
-          <div
-            className={`flex items-center justify-center shrink-0 
-              ${isInvestorPage ? "w-24 lg:w-20 h-10 " : "w-10 md:w-8 h-8 "}
-            `}
-          >
-            {isInvestorPage ? (
-              <InvestorsLogo />
-            ) : (
-              <div className="w-full h-full">
-                <IconCCI />
-              </div>
-            )}
-          </div>
+          {isAuthenticated ? (
+            <Link href="/profile" className="shrink-0">
+              <Button size="sm">Mi Perfil</Button>
+            </Link>
+          ) : (
+            <Link href="/login" className="shrink-0">
+              <Button size="sm">Iniciar sesión</Button>
+            </Link>
+          )}
         </div>
 
         {/* Mobile: Icono de menú hamburguesa */}
@@ -217,61 +225,6 @@ export const NavBar = () => {
         >
           <IconMenu />
         </motion.div>
-
-        {/* Desktop: Icono de usuario con menú desplegable */}
-        <div className="relative ml-4 hidden lg:block">
-          <motion.div
-            className={`flex items-center justify-center cursor-pointer hover:text-primary transition-colors ${isInvestorPage ? "text-secondary" : ""}`}
-            onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.95 }}
-            transition={{ type: "spring", stiffness: 400, damping: 17 }}
-          >
-            <IconUser />
-          </motion.div>
-
-          {/* Menú desplegable desktop */}
-          <AnimatePresence>
-            {isUserMenuOpen && (
-              <div className="absolute left-1/2 -translate-x-1/2 mt-4">
-                <motion.div
-                  initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                  transition={{
-                    type: "spring",
-                    stiffness: 500,
-                    damping: 30,
-                  }}
-                  className="w-48 rounded-lg overflow-hidden shadow-lg"
-                  style={{
-                    fill: "#0F0F0F",
-                    strokeWidth: "1px",
-                    stroke: "#FFF",
-                    border: "1px solid #FFF",
-                    backgroundColor: "#0F0F0F",
-                  }}
-                >
-                  {userMenuItems.map((item) => (
-                    <motion.div
-                      key={item.href}
-                      whileHover={{ backgroundColor: "#1a1a1a" }}
-                      transition={{ duration: 0.2 }}
-                    >
-                      <Link
-                        href={item.href}
-                        className="block px-4 py-3 text-white hover:text-primary transition-colors"
-                        onClick={() => setIsUserMenuOpen(false)}
-                      >
-                        {item.label}
-                      </Link>
-                    </motion.div>
-                  ))}
-                </motion.div>
-              </div>
-            )}
-          </AnimatePresence>
-        </div>
       </nav>
 
       {/* Mobile: Menú fullscreen */}
@@ -306,7 +259,7 @@ export const NavBar = () => {
 
             {/* Links del menú */}
             <div className="flex-1 flex flex-col justify-center items-center gap-6 px-8 overflow-y-auto">
-              {defaultNavItems.map((item, index) => (
+              {defaultNavItems.filter((item) => !item.disabled).map((item, index) => (
                 <motion.div
                   key={item.href}
                   initial={{ opacity: 0, y: 20 }}
@@ -314,43 +267,13 @@ export const NavBar = () => {
                   transition={{ delay: index * 0.1 }}
                   className="flex flex-col items-center"
                 >
-                  {item.disabled ? (
-                    <motion.div
-                      className="flex flex-col items-center cursor-not-allowed relative"
-                      initial="rest"
-                      whileHover="hover"
-                      animate="rest"
-                    >
-                      <motion.span
-                        className="text-2xl font-medium text-light"
-                        variants={{
-                          rest: { y: 0 },
-                          hover: { y: -12 },
-                        }}
-                        transition={{ duration: 0.3 }}
-                      >
-                        {item.label}
-                      </motion.span>
-                      <motion.span
-                        className="text-base text-primary absolute"
-                        variants={{
-                          rest: { opacity: 0, y: 20 },
-                          hover: { opacity: 1, y: 32 },
-                        }}
-                        transition={{ duration: 0.3 }}
-                      >
-                        (Próximamente)
-                      </motion.span>
-                    </motion.div>
-                  ) : (
-                    <Link
-                      href={item.href}
-                      className={`text-2xl font-medium text-light hover:text-primary transition-colors ${item.className || ""}`}
-                      onClick={closeMobileMenu}
-                    >
-                      {item.label}
-                    </Link>
-                  )}
+                  <Link
+                    href={item.href}
+                    className={`text-2xl font-medium text-light hover:text-primary transition-colors`}
+                    onClick={closeMobileMenu}
+                  >
+                    {item.label}
+                  </Link>
                 </motion.div>
               ))}
 

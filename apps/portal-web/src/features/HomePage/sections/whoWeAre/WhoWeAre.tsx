@@ -79,8 +79,8 @@ const FeatureCard = ({
       </div>
     ) : (
       <>
-        <div className="flex items-center gap-2">
-          <span className="w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0" />
+        <div className={`flex gap-2 ${isMobile ? "items-center" : "items-start min-h-[52px]"}`}>
+          <span className={`w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0 ${isMobile ? "" : "mt-[9px]"}`} />
           <motion.span
             animate={{ color: isActive ? "#3A86FF" : "#FFFFFF" }}
             transition={{ duration: 0.15 }}
@@ -172,7 +172,7 @@ export const WhoWeAre = () => {
             >
               {" "}de forma simple y confiable.
             </span>
-            <p className="text-white/80 text-base mt-4">
+            <p className="text-white/80 text-lg mt-4">
               Tecnología, asesoría humana y procesos claros, trabajando juntos.
             </p>
           </p>

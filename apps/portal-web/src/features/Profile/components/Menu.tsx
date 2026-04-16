@@ -42,7 +42,7 @@ export const Menu = () => {
       roles: ["INVESTOR"], // Solo para inversionistas
     },
     {
-      id: "/loans",
+      id: "/loans", 
       label: "Mis Préstamos",
       icon: <IconCar2 width="24" height="24" />,
       roles: ["CLIENT"], // Solo para clientes
@@ -51,7 +51,7 @@ export const Menu = () => {
       id: "/documents",
       label: "Documentos",
       icon: <IconDocument />,
-      roles: ["CLIENT"], // Solo para clientes
+      roles: ["CLIENT", "INVESTOR"],
     },
   ];
 
@@ -61,9 +61,7 @@ export const Menu = () => {
   );
 
   // Si no tiene DPI, solo mostrar "Mi Perfil"
-  const displayItems = !user?.dpi
-    ? menuItems.filter((item) => item.id === "/profile")
-    : menuItems;
+  const displayItems = menuItems;
 
   return (
     <div

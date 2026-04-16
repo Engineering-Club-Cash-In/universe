@@ -76,6 +76,7 @@ import { authClient } from "@/lib/auth-client";
 import {
 	formatCurrency,
 	formatGuatemalaDate,
+	formatGuatemalaDateTime,
 	getMaritalStatusLabel,
 	getOccupationLabel,
 	getSourceLabel,
@@ -84,6 +85,17 @@ import {
 } from "@/lib/crm-formatters";
 import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
+
+function formatLeadFullName(lead: {
+	firstName?: string | null;
+	middleName?: string | null;
+	lastName?: string | null;
+	secondLastName?: string | null;
+}) {
+	return [lead.firstName, lead.middleName, lead.lastName, lead.secondLastName]
+		.filter((part): part is string => Boolean(part && part.trim()))
+		.join(" ");
+}
 
 export const Route = createFileRoute("/crm/leads")({
 	component: RouteComponent,
@@ -789,6 +801,10 @@ function RouteComponent() {
 				return "bg-pink-100 text-pink-800";
 			case "event":
 				return "bg-purple-100 text-purple-800";
+			case "agency":
+				return "bg-teal-100 text-teal-800";
+			case "property":
+				return "bg-amber-100 text-amber-800";
 			default:
 				return "bg-gray-100 text-gray-800";
 		}
@@ -1233,6 +1249,8 @@ function RouteComponent() {
 																	| "email"
 																	| "social_media"
 																	| "event"
+																	| "agency"
+																	| "property"
 																	| "other",
 															)
 														}
@@ -1261,6 +1279,8 @@ function RouteComponent() {
 																Redes Sociales
 															</SelectItem>
 															<SelectItem value="event">Evento</SelectItem>
+															<SelectItem value="agency">Agencia</SelectItem>
+															<SelectItem value="property">Predio</SelectItem>
 															<SelectItem value="other">Otro</SelectItem>
 														</SelectContent>
 													</Select>
@@ -1314,11 +1334,24 @@ function RouteComponent() {
 																name={field.name}
 																value={field.state.value}
 																onBlur={field.handleBlur}
-																onChange={(e) =>
-																	field.handleChange(e.target.value)
-																}
-																placeholder="0000 00000 0000"
+																onChange={(e) => {
+																	const val = e.target.value
+																		.replace(/\D/g, "")
+																		.slice(0, 13);
+																	field.handleChange(val);
+																}}
+																placeholder="1234567890101"
+																maxLength={13}
+																inputMode="numeric"
 															/>
+															{field.state.value &&
+																field.state.value.length > 0 &&
+																field.state.value.length !== 13 && (
+																	<p className="text-destructive text-xs">
+																		El DPI debe tener 13 dígitos (
+																		{field.state.value.length}/13)
+																	</p>
+																)}
 														</div>
 													)}
 												</createLeadForm.Field>
@@ -2093,7 +2126,9 @@ function RouteComponent() {
 												<span className="text-muted-foreground">-</span>
 											)}
 										</TableCell>
-										<TableCell>{formatGuatemalaDate(lead.createdAt)}</TableCell>
+										<TableCell>
+											{formatGuatemalaDateTime(lead.createdAt)}
+										</TableCell>
 										<TableCell className="text-right">
 											<DropdownMenu>
 												<DropdownMenuTrigger asChild>
@@ -2216,7 +2251,7 @@ function RouteComponent() {
 							<div className="flex items-start justify-between">
 								<div>
 									<h3 className="font-semibold text-lg">
-										{selectedLead.firstName} {selectedLead.lastName}
+										{formatLeadFullName(selectedLead)}
 									</h3>
 									{selectedLead.email && (
 										<p className="text-muted-foreground text-sm">
@@ -3113,7 +3148,7 @@ function RouteComponent() {
 															</Badge>
 														)}
 														{opp.value && (
-															<span>Q{Number(opp.value).toLocaleString()}</span>
+															<span>Q{Number(opp.value).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
 														)}
 													</div>
 												</div>

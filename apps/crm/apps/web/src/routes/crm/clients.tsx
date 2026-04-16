@@ -75,12 +75,24 @@ export const Route = createFileRoute("/crm/clients")({
 	component: RouteComponent,
 	validateSearch: z.object({
 		opportunityId: z.string().optional(),
+		initialTab: z.string().optional(),
 		idLead: z.string().optional(),
 		edit: z.boolean().optional(),
 	}).parse,
 });
 
 // Helper functions
+function formatLeadFullName(lead: {
+	firstName?: string | null;
+	middleName?: string | null;
+	lastName?: string | null;
+	secondLastName?: string | null;
+}) {
+	return [lead.firstName, lead.middleName, lead.lastName, lead.secondLastName]
+		.filter((part): part is string => Boolean(part && part.trim()))
+		.join(" ");
+}
+
 const getClientTypeLabel = (type: string) => {
 	switch (type) {
 		case "individual":
@@ -537,7 +549,7 @@ function RouteComponent() {
 					</CardHeader>
 					<CardContent>
 						<div className="font-bold text-2xl">
-							Q{(statsQuery.data?.totalValue ?? 0).toLocaleString()}
+							Q{(statsQuery.data?.totalValue ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 						</div>
 						<p className="text-muted-foreground text-xs">
 							En créditos cerrados
@@ -621,7 +633,7 @@ function RouteComponent() {
 													<User className="h-4 w-4 text-muted-foreground" />
 													<div>
 														<div className="font-medium">
-															{clientData.firstName} {clientData.lastName}
+															{formatLeadFullName(clientData)}
 														</div>
 														{clientData.dpi && (
 															<div className="text-muted-foreground text-xs">
@@ -791,7 +803,7 @@ function RouteComponent() {
 								<div className="min-w-0 flex-1">
 									<div className="flex items-center gap-2">
 										<h3 className="truncate font-semibold text-xl">
-											{selectedClient.firstName} {selectedClient.lastName}
+											{formatLeadFullName(selectedClient)}
 										</h3>
 										<Badge variant="outline" className="shrink-0 text-xs">
 											{getClientTypeLabel(selectedClient.clientType)}
@@ -1000,7 +1012,7 @@ function RouteComponent() {
 													Nombre Completo
 												</p>
 												<p className="font-medium text-sm">
-													{selectedClient.firstName} {selectedClient.lastName}
+													{formatLeadFullName(selectedClient)}
 												</p>
 											</div>
 											<div>
@@ -1445,6 +1457,7 @@ function RouteComponent() {
 				opportunity={selectedOpportunityForModal}
 				userRole={userProfile.data?.role}
 				readOnly
+				initialTab={search.initialTab}
 				onNavigateToLead={(id: string) => {
 					//borrar los search params de oportunidad y agregar el id del lead a la pagina actual de clients
 					navigate({

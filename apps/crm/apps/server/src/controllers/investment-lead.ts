@@ -4,6 +4,7 @@ import { db } from "../db";
 import { user } from "../db/schema/auth";
 import {
 	investmentAuditLog,
+	type investmentLeadSourceEnum,
 	investmentLeads,
 	investmentOpportunities,
 	investmentStageHistory,
@@ -15,6 +16,9 @@ const INVESTMENT_ROLES = [
 	"investment_manager",
 	"admin",
 ] as const;
+
+type InvestmentLeadSource =
+	(typeof investmentLeadSourceEnum.enumValues)[number];
 
 /**
  * Obtiene el usuario con menos leads de inversión asignados
@@ -48,14 +52,8 @@ interface CreateInvestmentLeadInput {
 	name: string;
 	email?: string;
 	phones?: string[];
-	source?:
-		| "website"
-		| "referral"
-		| "cold_call"
-		| "email"
-		| "social_media"
-		| "event"
-		| "whatsapp";
+	source?: InvestmentLeadSource;
+	campaign?: string;
 	proposedAmount?: number;
 	assignedTo?: string;
 	userId?: string;
@@ -78,17 +76,18 @@ export async function createInvestmentLeadWithOpportunity(
 			...rest,
 			assignedTo,
 			source: input.source ?? "website",
+			campaign: input.campaign,
 			proposedAmount: proposedAmount?.toString(),
 		})
 		.returning();
 
-	// Crear oportunidad automaticamente en etapa Prospeccion
+	// Crear oportunidad automaticamente en etapa de recoleccion de datos
 	const [opportunity] = await db
 		.insert(investmentOpportunities)
 		.values({
 			investmentLeadId: lead.id,
 			assignedAdvisorId: assignedTo,
-			stage: "prospecting",
+			stage: "data_collection",
 			status: "open",
 		})
 		.returning();
@@ -97,14 +96,18 @@ export async function createInvestmentLeadWithOpportunity(
 	await db.insert(investmentAuditLog).values({
 		investmentOpportunityId: opportunity.id,
 		action: "lead_created",
-		details: { leadId: lead.id, source: input.source },
+		details: {
+			leadId: lead.id,
+			source: input.source,
+			campaign: input.campaign,
+		},
 		performedBy,
 	});
 
 	// Registrar stage history
 	await db.insert(investmentStageHistory).values({
 		investmentOpportunityId: opportunity.id,
-		toStage: "prospecting",
+		toStage: "data_collection",
 		changedBy: performedBy,
 	});
 
@@ -130,11 +133,12 @@ export async function createInvestmentLeadController(c: Context) {
 				name: body.name,
 				email: body.email,
 				phones: body.phones
-				? Array.isArray(body.phones)
-					? body.phones
-					: [body.phones]
-				: undefined,
+					? Array.isArray(body.phones)
+						? body.phones
+						: [body.phones]
+					: undefined,
 				source: body.source,
+				campaign: body.campaign,
 				proposedAmount: body.proposedAmount,
 				assignedTo: assignedAdvisorId,
 				userId: body.userId,

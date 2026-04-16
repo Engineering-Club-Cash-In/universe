@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   InputIcon,
   IconAddress,
@@ -51,9 +51,9 @@ export const InfoPerson = () => {
     isLoading: isLoadingInvestor,
     refetch: refetchInvestor,
   } = useQuery({
-    queryKey: ["investor-profile", user?.dpi],
-    queryFn: () => getInvestorProfile(user?.dpi || ""),
-    enabled: !!user?.dpi && isInvestor,
+    queryKey: ["investor-profile", user?.id],
+    queryFn: () => getInvestorProfile(user?.dpi || "", user?.email || ""),
+    enabled: !!user?.id && isInvestor,
   });
 
   // Obtener catálogo de bancos - solo si es INVESTOR
@@ -73,7 +73,7 @@ export const InfoPerson = () => {
       if (isInvestor) {
         // Datos de inversionista
         setDpi(profileData.dpi?.toString() || "");
-        setBanco(profileData.banco_id || "");
+        setBanco(profileData.banco_id?.toString() || "");
         setTipoCuenta(profileData.tipo_cuenta || "");
         setNumeroCuenta(profileData.numero_cuenta || "");
       } else {
@@ -131,14 +131,17 @@ export const InfoPerson = () => {
     </svg>
   );
 
-  const isProfileComplete = isInvestor
-    ? !!(
-        profileData?.dpi &&
-        profileData?.banco &&
-        profileData?.tipo_cuenta &&
-        profileData?.numero_cuenta
-      )
-    : !!(profileData?.dpi && profileData?.phone);
+  const isProfileComplete = useMemo(() => {
+    if (!profileData) return false;
+    return isInvestor
+      ? !!(
+          profileData.dpi &&
+          profileData.banco_id &&
+          profileData.tipo_cuenta &&
+          profileData.numero_cuenta
+        )
+      : !!(profileData.dpi && profileData.phone);
+  }, [profileData, isInvestor]);
 
   if (isLoading) {
     return <Loading />;
@@ -204,27 +207,20 @@ export const InfoPerson = () => {
           Información Personal
         </h2>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-end">
-          {/* DPI - Siempre visible */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
+          {/* DPI - Solo informativo */}
           <div className="text-[#6B7280]">
             <label className="text-sm text-white/65 mb-2 block">
               DPI (Documento Personal de Identificación)
             </label>
             <InputIcon
               icon={<IconPerson />}
-              placeholder="Ingresa tu DPI"
+              placeholder="DPI no disponible"
               value={dpi}
-              onChange={(e) => setDpi(e.target.value)}
               type="text"
               name="dpi"
+              disabled
             />
-            <button
-              onClick={() => handleOpenModal("dpi")}
-              className="text-primary text-sm mt-2 hover:underline flex items-center gap-1"
-            >
-              <IconEdit />
-              Editar DPI
-            </button>
           </div>
 
           {/* Campos para CLIENTE */}
@@ -239,9 +235,9 @@ export const InfoPerson = () => {
                   icon={<IconPhone className="w-6 h-6" />}
                   placeholder="Ingresa tu teléfono"
                   value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
                   type="tel"
                   name="phone"
+                  disabled
                 />
                 <button
                   onClick={() => handleOpenModal("phone")}
@@ -261,9 +257,9 @@ export const InfoPerson = () => {
                   icon={<IconAddress className="w-6 h-6" />}
                   placeholder="Ingresa tu dirección completa"
                   value={address}
-                  onChange={(e) => setAddress(e.target.value)}
                   type="text"
                   name="address"
+                  disabled
                 />
                 <button
                   onClick={() => handleOpenModal("address")}
@@ -287,12 +283,13 @@ export const InfoPerson = () => {
                 <Select
                   variant="light"
                   value={banco}
-                  onChange={(value) => setBanco(value)}
+                  onChange={() => {}}
+                  disabled
                   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
                   //@ts-ignore
                   options={
                     bancos?.map((b) => ({
-                      value: b.banco_id,
+                      value: b.banco_id.toString(),
                       label: b.nombre,
                     })) || []
                   }
@@ -315,9 +312,12 @@ export const InfoPerson = () => {
                 <Select
                   variant="light"
                   value={tipoCuenta}
-                  onChange={(value) => setTipoCuenta(value)}
+                  onChange={() => {}}
+                  disabled
                   options={[
                     { value: "MONETARIA", label: "Monetaria" },
+                    { value: "MONETARIA Q", label: "Monetaria Q" },
+                    { value: "MONETARIA $", label: "Monetaria $" },
                     { value: "AHORRO", label: "Ahorro" },
                   ]}
                   placeholder="Selecciona tipo de cuenta"
@@ -340,9 +340,9 @@ export const InfoPerson = () => {
                   icon={<IconPerson />}
                   placeholder="Ingresa tu número de cuenta"
                   value={numeroCuenta}
-                  onChange={(e) => setNumeroCuenta(e.target.value)}
                   type="text"
                   name="numero_cuenta"
+                  disabled
                 />
                 <button
                   onClick={() => handleOpenModal("numero_cuenta")}

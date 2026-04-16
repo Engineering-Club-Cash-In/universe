@@ -7,10 +7,20 @@ import {
   Landmark,
   ChevronDown,
   Receipt,
+  Users,
+  TrendingUp,
+  FolderOpen,
+  FileText,
+  Settings,
+  BarChart3,
+  Briefcase,
+  TrendingDown,
+  Clock,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Menu, X } from "lucide-react";
+import { CASHIN_LOGO_URL } from "@/lib/constants";
 import { useAuth } from "@/Provider/authProvider";
 import {
   DropdownMenu,
@@ -20,92 +30,260 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 
-const menuOptions = [
+// --- Secciones del menú ---
+interface MenuItem {
+  key: string;
+  label: string;
+  icon: React.ReactNode;
+  path: string;
+  roles: string[];
+}
+
+interface MenuSection {
+  key: string;
+  label: string;
+  icon: React.ReactNode;
+  items: MenuItem[];
+}
+
+const menuSections: MenuSection[] = [
   {
-    key: "registro-prestamo",
-    label: "Registro Crédito",
-    icon: <Banknote className="h-5 w-5" />,
-    path: "/realizarCredito",
-    roles: ["ADMIN"],
+    key: "operaciones",
+    label: "Operaciones",
+    icon: <Banknote className="h-4 w-4" />,
+    items: [
+      {
+        key: "registro-prestamo",
+        label: "Registro Crédito",
+        icon: <Banknote className="h-4 w-4" />,
+        path: "/realizarCredito",
+        roles: ["ADMIN"],
+      },
+      {
+        key: "registro-pago",
+        label: "Registro Pago",
+        icon: <CreditCard className="h-4 w-4" />,
+        path: "/realizarPago",
+        roles: ["ADMIN", "ASESOR"],
+      },
+    ],
   },
   {
-    key: "registro-pago",
-    label: "Registro Pago",
-    icon: <CreditCard className="h-5 w-5" />,
-    path: "/realizarPago",
-    roles: ["ADMIN", "ASESOR"],
+    key: "cartera",
+    label: "Cartera",
+    icon: <Briefcase className="h-4 w-4" />,
+    items: [
+      {
+        key: "total-prestamos",
+        label: "Créditos",
+        icon: <ListOrdered className="h-4 w-4" />,
+        path: "/creditos",
+        roles: ["ADMIN", "CONTA", "ASESOR"],
+      },
+      {
+        key: "total-pagos",
+        label: "Pagos",
+        icon: <ListOrdered className="h-4 w-4" />,
+        path: "/pagos",
+        roles: ["ADMIN", "CONTA", "ASESOR"],
+      },
+      {
+        key: "late-fee",
+        label: "Moras",
+        icon: <ListOrdered className="h-4 w-4" />,
+        path: "/mora",
+        roles: ["ADMIN"],
+      },
+      {
+        key: "payment-agreements",
+        label: "Convenios",
+        icon: <ListOrdered className="h-4 w-4" />,
+        path: "/convenios",
+        roles: ["ADMIN", "ASESOR"],
+      },
+      {
+        key: "creditos-caidos",
+        label: "Créditos Caídos",
+        icon: <TrendingDown className="h-4 w-4" />,
+        path: "/creditos-caidos",
+        roles: ["ADMIN"],
+      },
+    ],
   },
   {
-    key: "total-prestamos",
-    label: "Créditos",
-    icon: <ListOrdered className="h-5 w-5" />,
-    path: "/creditos",
-    roles: ["ADMIN", "CONTA", "ASESOR"],
-  },
-  {
-    key: "total-pagos",
-    label: "Pagos",
-    icon: <ListOrdered className="h-5 w-5" />,
-    path: "/pagos",
-    roles: ["ADMIN", "CONTA", "ASESOR"],
-  },
-  {
-    key: "investors",
+    key: "inversionistas",
     label: "Inversionistas",
-    icon: <ListOrdered className="h-5 w-5" />,
-    path: "/inversionistas",
-    roles: ["ADMIN"],
+    icon: <TrendingUp className="h-4 w-4" />,
+    items: [
+      {
+        key: "investors",
+        label: "Inversionistas",
+        icon: <Users className="h-4 w-4" />,
+        path: "/inversionistas",
+        roles: ["ADMIN"],
+      },
+      {
+        key: "liquidaciones-inversionistas",
+        label: "Liquidaciones",
+        icon: <Receipt className="h-4 w-4" />,
+        path: "/liquidaciones-inversionistas",
+        roles: ["ADMIN"],
+      },
+      {
+        key: "sesiones-pendientes",
+        label: "Sesiones Pendientes",
+        icon: <Clock className="h-4 w-4" />,
+        path: "/sesiones-pendientes",
+        roles: ["ADMIN"],
+      },
+    ],
   },
   {
-    key: "advisors",
-    label: "Usuarios",
-    icon: <ListOrdered className="h-5 w-5" />,
-    path: "/usuarios",
-    roles: ["ADMIN"],
+    key: "documentos",
+    label: "Documentos",
+    icon: <FolderOpen className="h-4 w-4" />,
+    items: [
+      {
+        key: "facturas-genericas",
+        label: "Facturas Genéricas",
+        icon: <FileText className="h-4 w-4" />,
+        path: "/facturas-genericas",
+        roles: ["ADMIN"],
+      },
+      {
+        key: "recibos-genericos",
+        label: "Recibos Genéricos",
+        icon: <Receipt className="h-4 w-4" />,
+        path: "/recibos-genericos",
+        roles: ["ADMIN"],
+      },
+    ],
   },
   {
-    key: "late-fee",
-    label: "Moras",
-    icon: <ListOrdered className="h-5 w-5" />,
-    path: "/mora",
-    roles: ["ADMIN"],
+    key: "administracion",
+    label: "Administración",
+    icon: <Settings className="h-4 w-4" />,
+    items: [
+      {
+        key: "advisors",
+        label: "Usuarios",
+        icon: <Users className="h-4 w-4" />,
+        path: "/usuarios",
+        roles: ["ADMIN"],
+      },
+      {
+        key: "banks-fee",
+        label: "Bancos",
+        icon: <Landmark className="h-4 w-4" />,
+        path: "/bancos",
+        roles: ["ADMIN"],
+      },
+    ],
   },
   {
-    key: "banks-fee",
-    label: "Bancos",
-    icon: <Landmark className="h-5 w-5" />,
-    path: "/bancos",
-    roles: ["ADMIN"],
-  },
-  {
-    key: "summary-advisors",
-    label: "Resumen de Asesores",
-    icon: <ListOrdered className="h-5 w-5" />,
-    path: "/resumenAsesores",
-    roles: ["ADMIN", "ASESOR"],
-  },
-  {
-    key: "payment-agreements",
-    label: "Convenios",
-    icon: <ListOrdered className="h-5 w-5" />,
-    path: "/convenios",
-    roles: ["ADMIN", "ASESOR"],
-  },
-  {
-    key: "facturas-genericas",
-    label: "Facturas Genéricas",
-    icon: <Receipt className="h-5 w-5" />,
-    path: "/facturas-genericas",
-    roles: ["ADMIN"],
-  },
-  {
-    key: "efectividad-asesores",
-    label: "Efectividad",
-    icon: <ListOrdered className="h-5 w-5" />,
-    path: "/efectividad-asesores",
-    roles: ["ADMIN", "ASESOR"],
+    key: "reportes",
+    label: "Reportes",
+    icon: <BarChart3 className="h-4 w-4" />,
+    items: [
+      {
+        key: "summary-advisors",
+        label: "Resumen de Asesores",
+        icon: <ListOrdered className="h-4 w-4" />,
+        path: "/resumenAsesores",
+        roles: ["ADMIN", "ASESOR"],
+      },
+      {
+        key: "efectividad-asesores",
+        label: "Efectividad",
+        icon: <BarChart3 className="h-4 w-4" />,
+        path: "/efectividad-asesores",
+        roles: ["ADMIN", "ASESOR"],
+      },
+      {
+        key: "pagos-por-vencimiento",
+        label: "Pagos por Vencimiento",
+        icon: <Receipt className="h-4 w-4" />,
+        path: "/pagos-por-vencimiento",
+        roles: ["ADMIN"],
+      },
+    ],
   },
 ];
+
+// --- Dropdown para desktop ---
+function NavDropdown({
+  section,
+  userRole,
+  navigate,
+  currentPath,
+}: {
+  section: MenuSection;
+  userRole: string;
+  navigate: (path: string) => void;
+  currentPath: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  const filteredItems = section.items.filter((item) =>
+    item.roles.includes(userRole)
+  );
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  if (filteredItems.length === 0) return null;
+
+  const isActive = filteredItems.some((item) => item.path === currentPath);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className={`flex items-center gap-1.5 px-3 py-2 rounded-lg font-medium transition-all duration-200 whitespace-nowrap text-sm ${
+          isActive
+            ? "bg-blue-600 text-white shadow-md"
+            : "text-gray-700 hover:bg-blue-100"
+        }`}
+      >
+        {section.icon}
+        <span>{section.label}</span>
+        <ChevronDown
+          className={`h-3.5 w-3.5 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      {open && (
+        <div className="absolute top-full left-0 mt-1.5 bg-white rounded-xl shadow-xl border border-blue-100 py-1.5 min-w-[200px] z-50 animate-in fade-in slide-in-from-top-1 duration-150">
+          {filteredItems.map((item) => (
+            <button
+              key={item.key}
+              onClick={() => {
+                navigate(item.path);
+                setOpen(false);
+              }}
+              className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium transition-colors ${
+                currentPath === item.path
+                  ? "bg-blue-50 text-blue-700"
+                  : "text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              {item.icon}
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function DashBoardCartera() {
   const navigate = useNavigate();
@@ -118,41 +296,43 @@ export function DashBoardCartera() {
     navigate("/login", { replace: true });
   };
 
-  const filteredOptions = menuOptions.filter((opt) =>
-    user ? opt.roles.includes(user.role) : false
-  );
+  // Flat list for mobile drawer
+  const allFilteredItems = menuSections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) =>
+        user ? item.roles.includes(user.role) : false
+      ),
+    }))
+    .filter((section) => section.items.length > 0);
 
   return (
     <>
-      {/* 🔥 NAVBAR DESKTOP (1280px+) - 100% ANCHO, CENTRADO */}
+      {/* NAVBAR DESKTOP (1280px+) */}
       <nav className="hidden xl:flex fixed top-0 left-0 right-0 z-40 bg-gradient-to-r from-white via-blue-50 to-white border-b-4 border-blue-600 shadow-lg">
-        <div className="w-full px-6 flex items-center justify-center gap-4 py-3 min-h-[64px]">
+        <div className="w-full px-6 flex items-center justify-center gap-3 py-3 min-h-[64px]">
           {/* Logo */}
           <div className="flex items-center flex-shrink-0">
             <img
-              src="/logo-cashin.png"
+              src={CASHIN_LOGO_URL}
               alt="Club Cashin Logo"
-              className="h-10 drop-shadow-md"
+              className="h-14 drop-shadow-md"
               style={{ objectFit: "contain" }}
             />
           </div>
 
-          {/* Menu Items - Centrado con wrap */}
-          <div className="flex items-center justify-center gap-2 flex-wrap flex-1">
-            {filteredOptions.map((opt) => (
-              <button
-                key={opt.key}
-                onClick={() => navigate(opt.path)}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg font-medium transition-all duration-200 whitespace-nowrap text-sm ${
-                  location.pathname === opt.path
-                    ? "bg-blue-600 text-white shadow-md scale-105"
-                    : "text-gray-700 hover:bg-blue-100 hover:scale-105"
-                }`}
-              >
-                {opt.icon}
-                <span>{opt.label}</span>
-              </button>
-            ))}
+          {/* Menu Sections - Dropdowns */}
+          <div className="flex items-center justify-center gap-1 flex-wrap flex-1">
+            {user &&
+              menuSections.map((section) => (
+                <NavDropdown
+                  key={section.key}
+                  section={section}
+                  userRole={user.role}
+                  navigate={navigate}
+                  currentPath={location.pathname}
+                />
+              ))}
           </div>
 
           {/* User Info + Logout */}
@@ -177,7 +357,7 @@ export function DashBoardCartera() {
         </div>
       </nav>
 
-      {/* 🔥 NAVBAR MOBILE/TABLET (hasta 1280px) - 100% ANCHO, CENTRADO */}
+      {/* NAVBAR MOBILE/TABLET (hasta 1280px) */}
       <nav className="xl:hidden fixed top-0 left-0 right-0 z-40 bg-gradient-to-r from-white via-blue-50 to-white border-b-4 border-blue-600 shadow-lg h-16">
         <div className="w-full h-full px-4 flex items-center justify-between">
           {/* Hamburguesa */}
@@ -192,9 +372,9 @@ export function DashBoardCartera() {
           {/* Logo centrado */}
           <div className="absolute left-1/2 -translate-x-1/2">
             <img
-              src="/logo-cashin.png"
+              src={CASHIN_LOGO_URL}
               alt="Club Cashin Logo"
-              className="h-8 drop-shadow-md"
+              className="h-11 drop-shadow-md"
               style={{ objectFit: "contain" }}
             />
           </div>
@@ -234,7 +414,7 @@ export function DashBoardCartera() {
         </div>
       </nav>
 
-      {/* 🔥 DRAWER MOBILE/TABLET */}
+      {/* DRAWER MOBILE/TABLET */}
       {menuOpen && (
         <div className="fixed inset-0 z-50 flex xl:hidden">
           {/* Overlay */}
@@ -257,9 +437,9 @@ export function DashBoardCartera() {
             {/* Header */}
             <div className="flex-shrink-0 flex flex-col items-center justify-center py-6 px-6 border-b border-blue-100">
               <img
-                src="/logo-cashin.png"
+                src={CASHIN_LOGO_URL}
                 alt="Club Cashin Logo"
-                className="h-12 mb-3"
+                className="h-16 mb-3"
                 style={{ objectFit: "contain" }}
               />
               {user && (
@@ -274,28 +454,37 @@ export function DashBoardCartera() {
               )}
             </div>
 
-            {/* Menu Items */}
+            {/* Menu Items por sección */}
             <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4">
-              <div className="flex flex-col gap-2">
-                {filteredOptions.map((opt) => (
-                  <button
-                    key={opt.key}
-                    onClick={() => {
-                      navigate(opt.path);
-                      setMenuOpen(false);
-                    }}
-                    className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all duration-200 text-left ${
-                      location.pathname === opt.path
-                        ? "bg-blue-600 text-white shadow-md"
-                        : "text-gray-700 hover:bg-blue-100"
-                    }`}
-                  >
-                    {opt.icon}
-                    <span>{opt.label}</span>
-                  </button>
+              <div className="flex flex-col gap-1">
+                {allFilteredItems.map((section, idx) => (
+                  <div key={section.key}>
+                    {idx > 0 && <div className="my-2 border-t border-blue-100" />}
+                    <p className="px-4 py-2 text-xs font-bold text-blue-500 uppercase tracking-wider flex items-center gap-2">
+                      {section.icon}
+                      {section.label}
+                    </p>
+                    {section.items.map((item) => (
+                      <button
+                        key={item.key}
+                        onClick={() => {
+                          navigate(item.path);
+                          setMenuOpen(false);
+                        }}
+                        className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg font-medium transition-all duration-200 text-left text-sm ${
+                          location.pathname === item.path
+                            ? "bg-blue-600 text-white shadow-md"
+                            : "text-gray-700 hover:bg-blue-100"
+                        }`}
+                      >
+                        {item.icon}
+                        <span>{item.label}</span>
+                      </button>
+                    ))}
+                  </div>
                 ))}
 
-                {/* Logout en el drawer */}
+                {/* Logout */}
                 <div className="mt-4 pt-4 border-t border-blue-200">
                   <button
                     onClick={() => {

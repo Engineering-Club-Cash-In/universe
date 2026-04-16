@@ -5,15 +5,15 @@ import {
   IconClock,
   Button,
 } from "@/components";
-import { useModalOptionsCall, useIsMobile } from "@/hooks";
-import { ModalChatBot } from "@/components";
+import { useIsMobile } from "@/hooks";
+import { useNavigate } from "@tanstack/react-router";
 
 const imageUrl = import.meta.env.VITE_IMAGE_URL;
 
 export const GetMoney = () => {
   const imageSrc = `${imageUrl}/credit_car2.jpg`;
-  const { isModalOpen, setIsModalOpen, optionsCredit } = useModalOptionsCall();
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
 
   const items = [
     {
@@ -39,7 +39,7 @@ export const GetMoney = () => {
   ];
 
   return (
-    <section className="text-center lg:text-start flex flex-col px-8 gap-10 lg:flex-row lg:gap-16 xl:gap-40 lg:mt-56 lg:mb-20 lg:px-20 items-center">
+    <section className="text-center lg:text-start flex flex-col px-8 gap-10 lg:flex-row lg:gap-16 xl:gap-30 lg:mt-56 lg:mb-20 lg:px-20 items-center">
       {isMobile && (
         <div
           className="w-full"
@@ -55,7 +55,7 @@ export const GetMoney = () => {
       {/* Lado izquierdo - Contenido */}
       <div className="flex flex-col justify-center">
         <h2 className="text-xl lg:text-header-2 font-bold mb-4">
-          Obtén dinero sin dejar tu auto
+          Obtén liquidez hoy y sigue manejando tu auto
         </h2>
 
         {/* Lado derecho - Imagen */}
@@ -75,7 +75,7 @@ export const GetMoney = () => {
             )}
             <img
               src={imageSrc}
-              alt="Auto"
+              alt="Vehículo disponible para préstamo con garantía"
               className="w-full h-full object-cover rounded-2xl relative"
             />
             {/* Badge en esquina superior derecha */}
@@ -88,10 +88,7 @@ export const GetMoney = () => {
         </div>
 
         <p className="  text-gray lg:text-xl mb-12 mt-6 lg:mt-0">
-          Tu auto tiene valor y nosotros te lo reconocemos. Obtén un préstamo
-          equivalente al valor de tu vehículo o un poco menos, mientras sigues
-          disfrutando de él. Tú conservas las llaves, nosotros te damos el
-          efectivo.
+          Obtén un préstamo por tu vehículo mientras sigues disfrutando de él
         </p>
 
         {/* Grid de items - 2 columnas responsive */}
@@ -99,10 +96,10 @@ export const GetMoney = () => {
           {items.map((item, index) => (
             <div
               key={index}
-              className="flex flex-col   p-6 rounded-xl border border-secondary/20 bg-secondary/5"
+              className="flex flex-col  w-full p-6 rounded-xl border border-secondary/20 bg-secondary/5"
             >
               {/* Icono */}
-              <div className="mb-4 w-8 text-secondary">{item.icon}</div>
+              <div className="mb-4  flex w-full justify-center text-secondary">{item.icon}</div>
 
               {/* Título */}
               <h3 className="text-sm lg:text-base mb-2 font-bold">{item.title}</h3>
@@ -116,8 +113,8 @@ export const GetMoney = () => {
         {/* Botón */}
         <div>
           <Button
-            size={isMobile ? "sm" : "lg"}
-            onClick={() => setIsModalOpen(true)}
+            size={isMobile ? "sm" : "md"}
+            onClick={() => navigate({ to: "/leads", search: { type: "sell" } })}
           >
             Solicitar préstamo
           </Button>
@@ -129,7 +126,7 @@ export const GetMoney = () => {
         <div className="relative  lg:w-[40vw]">
           <img
             src={imageSrc}
-            alt="Auto"
+            alt="Vehículo disponible para préstamo con garantía"
             className="w-full h-full object-cover rounded-2xl"
           />
           {/* Badge en esquina superior derecha */}
@@ -140,11 +137,6 @@ export const GetMoney = () => {
           </div>
         </div>
       </div>
-      <ModalChatBot
-        open={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        options={optionsCredit.sell}
-      />
     </section>
   );
 };

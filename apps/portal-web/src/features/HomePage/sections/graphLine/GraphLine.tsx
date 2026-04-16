@@ -36,7 +36,7 @@ export const GraphLine = () => {
   }
 
   return (
-    <section className="text-center w-full lg:mt-52 lg:px-12 mt-26 px-4">
+    <section className="text-center w-full lg:mt-72 lg:px-12 mt-26 px-4">
       {/* Línea decorativa superior - solo mobile */}
       {isMobile && (
         <div
@@ -49,7 +49,7 @@ export const GraphLine = () => {
         />
       )}
       <div>
-        <h2 className="text-2xl lg:text-header-2">¿Listo para invertir?</h2>
+        <h2 className="text-xl lg:text-3xl font-bold">¿Listo para invertir?</h2>
       </div>
       <div
         className={`w-full borderv mt-2 border-primary lg:border-0  bg-dark rounded-lg ${isMobile ? "h-[550px] p-2" : "h-[500px] p-6"}`}
@@ -286,15 +286,15 @@ export const GraphLine = () => {
         />
       </div>
       <div className="w-full mx-auto flex items-center justify-center mt-6">
-        <h2 className="text-xl lg:text-4xl px-6 lg:px-20">
+        <h2 className="text-lg lg:text-xl px-6 lg:px-20">
           {isMobile
             ? "Queremos darte soluciones pensadas para cada etapa de tu camino financiero."
-            : "Compara y descubre por qué nuestras oportunidades superan otras opciones del mercado. Usa la calculadora de rendimiento y comprueba cuánto podrías generar con nosotros."}
+            : "Compara y descubre porqué nuestras oportunidades superan otras opciones del mercado. Usa la calculadora de rendimiento y comprueba cuánto podrías generar con nosotros."}
         </h2>
       </div>
       <div className="mt-6 flex justify-center">
         <Link to="/invest" hash="how-it-works">
-          <Button size={isMobile ? "sm" : "lg"}>Calcula tu inversión</Button>
+          <Button size={isMobile ? "sm" : "md"}>Calcula tu inversión</Button>
         </Link>
       </div>
       {/* Línea decorativa inferior - solo mobile */}

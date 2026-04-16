@@ -1,44 +1,36 @@
 import { useState } from "react";
-import { IconCalculator, Select, IconArrow } from "@/components";
+import { IconCalculator, Select, Input, IconArrow } from "@/components";
 import { motion } from "framer-motion";
+import { useNavigate } from "@tanstack/react-router";
+import { useIsMobile } from "@/hooks";
 import {
   calculateCompoundInvestment,
   calculateTraditionalInvestment,
   calculateInterestOnlyInvestment,
 } from "../functions/investmentCalculations";
+import { InvestorIsotipo } from "../components/InvestorIsotipo";
 
 // Constantes de configuración
 const INTEREST_RATE = 1.5; // 1.5% mensual
 const INVESTOR_PERCENTAGE = 70; // 70% para el inversionista
 
 export const Calculator: React.FC = () => {
+  const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const [amount, setAmount] = useState("");
   const [term, setTerm] = useState("");
   const [investmentType, setInvestmentType] = useState("tradicional");
 
-  // Generar opciones de monto (Q25,000 a Q1,000,000)
-  const amountOptions = [
-    { value: "25000", label: "Q25,000" },
-    { value: "50000", label: "Q50,000" },
-    { value: "100000", label: "Q100,000" },
-    { value: "250000", label: "Q250,000" },
-    { value: "500000", label: "Q500,000" },
-    { value: "1000000", label: "Q1,000,000" },
-  ];
-
-  // Generar opciones de plazo (12m a 60m)
+  // Opciones de plazo
   const termOptions = [
-    { value: "12", label: "12 meses" },
-    { value: "24", label: "24 meses" },
     { value: "36", label: "36 meses" },
-    { value: "48", label: "48 meses" },
     { value: "60", label: "60 meses" },
   ];
 
   // Tipos de inversión
   const investmentTypeOptions = [
     { value: "tradicional", label: "Tradicional" },
-    { value: "vencimiento", label: "Al Vencimiento" },
+    { value: "vencimiento", label: "Reinversión de Capital" },
     { value: "compuesto", label: "Interés Compuesto" },
   ];
 
@@ -74,8 +66,8 @@ export const Calculator: React.FC = () => {
 
     return {
       principal: capital,
-      profit: result.totalInterests || 0,
-      totalReturn: result.totalToReceive,
+      profit: result.grossProfit || 0,
+      totalReturn: capital + (result.grossProfit || 0),
       months: termMonths,
     };
   };
@@ -84,9 +76,8 @@ export const Calculator: React.FC = () => {
 
   return (
     <div
-      className="p-6 lg:p-8 xl:p-16 rounded-3xl"
+      className="p-6 lg:p-8 xl:p-16 rounded-3xl border border-[#D0D0D0]"
       style={{
-        border: "0.86px solid rgba(212, 175, 55, 0.20)",
         background: "linear-gradient(180deg, #0A0A0A 0%, #000 100%)",
       }}
     >
@@ -105,11 +96,13 @@ export const Calculator: React.FC = () => {
             <label className="block text-white mb-2 text-sm">
               Monto a Invertir
             </label>
-            <Select
-              options={amountOptions}
+            <Input
+              variant="primary"
+              name="amount"
               value={amount}
               onChange={setAmount}
-              placeholder="Selecciona el monto"
+              placeholder="Ej: 100000"
+              type="number"
             />
           </div>
 
@@ -147,19 +140,36 @@ export const Calculator: React.FC = () => {
           </div>
 
           <p className="text-sm lg:text-base">
-            <span className="text-secondary font-semibold">
-              Inversión Tradicional:{" "}
-            </span>
-            <span className="font-normal">
-              Recibes intereses periódicos y el capital al final del plazo. El
-              rendimiento es estable y predecible.
-            </span>
+            {investmentType === "tradicional" && (
+              <>
+                <span className="text-secondary font-semibold">Inversión Tradicional: </span>
+                <span className="font-normal">
+                  Recibes tu capital e intereses de forma mensual.
+                </span>
+              </>
+            )}
+            {investmentType === "vencimiento" && (
+              <>
+                <span className="text-secondary font-semibold">Reinversión de Capital: </span>
+                <span className="font-normal">
+                  Cada mes recibes tus intereses y el capital se reinvierte automáticamente para el siguiente período.
+                </span>
+              </>
+            )}
+            {investmentType === "compuesto" && (
+              <>
+                <span className="text-secondary font-semibold">Interés Compuesto: </span>
+                <span className="font-normal">
+                  Tus intereses se reinvierten automáticamente, generando rendimientos sobre rendimientos.
+                </span>
+              </>
+            )}
           </p>
         </div>
 
         {/* Segundo Grid - Visualización */}
         <div
-          className="flex flex-col gap-4 justify-center p-4 lg:p-8"
+          className="flex flex-col gap-4 justify-center p-4 lg:p-8 mt-6 lg:mt-0 relative overflow-hidden"
           style={{
             borderRadius: "13.765px",
             border: "1.721px solid rgba(78, 87, 234, 0.30)",
@@ -167,6 +177,9 @@ export const Calculator: React.FC = () => {
               "linear-gradient(135deg, rgba(78, 87, 234, 0.15) 25%, rgba(0, 0, 0, 0.02) 95.71%)",
           }}
         >
+          <div className="absolute top-0 right-0 opacity-20 pointer-events-none">
+            <InvestorIsotipo width={isMobile ? "70" : "120"} height={isMobile ? "70" : "120"} />
+          </div>
           <div className="flex gap-2 text-sm text-secondary">
             <div className=" ">
               <IconArrow width={"24px"} height={"24px"} />
@@ -192,7 +205,7 @@ export const Calculator: React.FC = () => {
                 <p className=" text-xs lg:text-sm  text-gray-400 mb-1">
                   Ganancia Estimada
                 </p>
-                <p className="lg:text-2xl font-bold text-secondary">
+                <p className="lg:text-2xl font-bold text-primary">
                   + Q{" "}
                   {results.profit.toLocaleString("es-GT", {
                     minimumFractionDigits: 2,
@@ -215,12 +228,12 @@ export const Calculator: React.FC = () => {
               </div>
 
               <motion.button
-                className="mt-4 w-full py-3 px-6 rounded-lg  text-sm border border-secondary text-secondary bg-transparent"
+                className="mt-4 w-full py-3 px-6 rounded-lg  text-sm border border-primary text-primary bg-transparent"
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 transition={{ duration: 0.2 }}
                 onClick={() => {
-                     globalThis.location.href = "/leadInvestor?amount=" + amount + "&term=" + term + "&type=" + investmentType;
+                     navigate({ to: "/leadInvestor", search: { amount, term, type: investmentType } });
                 }}
               >
                 Contáctanos para Invertir

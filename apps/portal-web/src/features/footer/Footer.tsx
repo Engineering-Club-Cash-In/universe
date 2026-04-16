@@ -1,8 +1,5 @@
 import Map from "./assets/Map.png";
 import {
-  InvestorsLogo as Investors,
-  Tranki,
-  Listo,
   Facebook,
   Instagram,
   Linkedin,
@@ -11,20 +8,19 @@ import {
 } from "./icons";
 import { Link } from "@components/ui";
 import { useIsMobile } from "@/hooks";
+import { IconCCI } from "@/components/IconCCI";
 
 // Navigation sections configuration
 const FOOTER_SECTIONS = [
   {
     title: "Autos",
     links: [
-      { label: "Encuentra tu auto", href: "/credit" }, // TODO: devolver a "/marketplace" cuando esté habilitado
-      { label: "Obtén tu financiamiento", href: "/credit" },
-      { label: "Compramos tu auto", href: "/sell" },
+      { label: "Obtén tu financiamiento", href: "/credit", disabled: false },
     ],
   },
   {
     title: "Investors",
-    links: [{ label: "Quiero invertir", href: "/invest" }],
+    links: [{ label: "Quiero invertir", href: "/invest", disabled: false }],
   },
 ];
 
@@ -39,25 +35,25 @@ export const SOCIAL_CONTACTS = [
   {
     icon: Whatsapp,
     lead: false,
-    label: "+502 2234-1368",
-    href: "https://wa.me/50222341368",
+    label: "+502 3484-9518",
+    href: "https://wa.me/50234849518",
   },
   {
     icon: Facebook,
-    label: "Clubcashin",
+    label: "ClubCashIn",
     href: "https://facebook.com/clubcashin",
   },
   {
     icon: Linkedin,
-    label: "clubcashin-com",
-    href: "https://linkedin.com/company/clubcashin-com",
+    label: "Clubcashin.com",
+    href: "https://linkedin.com/company/clubcashin",
   },
   {
     icon: Location,
     lead: false,
-    label: '3a avenida "A" 13-78, Colonia Lomas de Pamplona zona 13',
-    className: "max-w-[280px] text-center",
-    href: "https://www.google.com/maps/place/Club+Cash+In/@14.5992026,-90.5374228,873m/data=!3m2!1e3!4b1!4m6!3m5!1s0x8589a1a13ede014d:0xcc9c190a50d9f749!8m2!3d14.5992026!4d-90.5348479!16s%2Fg%2F11k0wwn0rc!5m1!1e1?entry=ttu&g_ep=EgoyMDI1MTExNi4wIKXMDSoASAFQAw%3D%3D",
+    label: "Km 6.8 Antigua carretera a Muxbal, Complejo Pradera, Ofibodegas, Bodega 2",
+    className: "max-w-[420px] text-center",
+    href: "https://www.google.com/maps/search/Km+6.8+Antigua+carretera+a+Muxbal+Complejo+Pradera+Ofibodegas",
   },
 ];
 
@@ -95,33 +91,44 @@ export const Footer: React.FC<FooterProps> = ({ notShowRedirects = false }) => {
       <div className="flex justify-end flex-col gap-6 h-full p-8 lg:px-40 lg:py-20 z-10 relative">
         {/* Logo section */}
         <div className="flex flex-col lg:flex-row gap-6 lg:gap-10 lg:items-center">
-          <h1 className="text-3xl lg:text-header-3">Cashin</h1>
-          <div className="flex gap-6 lg:gap-10">
-            <Investors />
-            <Tranki />
-            <Listo />
-          </div>
+          <Link href="/" className="flex items-center gap-2">
+            <div className="w-8 h-8">
+              <IconCCI />
+            </div>
+            <h1 className="text-3xl lg:text-header-3">CashIn</h1>
+          </Link>
         </div>
 
         <div className="border-t border-white border-2"></div>
 
         {/* Main content grid */}
-        <div className="grid grid-cols-1  lg:grid-cols-5 gap-6 lg:gap-0 w-full ">
+        <div className="grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-5 gap-6 w-full">
           {/* Navigation links */}
           {!notShowRedirects && (
-            <div className="order-2 lg:order-1  w-full col-span-3 lg:col-span-2 flex flex-col lg:flex-row gap-10 lg:gap-14">
+            <div className="order-2 lg:order-1  w-full col-span-3 lg:col-span-1 xl:col-span-2 flex flex-col xl:flex-row gap-10 xl:gap-14">
               {FOOTER_SECTIONS.map((section) => (
                 <div key={section.title} className="flex flex-col gap-6">
                   <div className="text-[20px] font-bold">{section.title}</div>
-                  {section.links.map((link) => (
-                    <Link
-                      key={link.label}
-                      href={link.href}
-                      className="transition-colors hover:text-gray-300"
-                    >
-                      {link.label}
-                    </Link>
-                  ))}
+                  {section.links.map((link) =>
+                    link.disabled ? (
+                      <span
+                        key={link.label}
+                        className="text-gray-600 cursor-not-allowed"
+                        aria-disabled="true"
+                        role="link"
+                      >
+                        {link.label}
+                      </span>
+                    ) : (
+                      <Link
+                        key={link.label}
+                        href={link.href}
+                        className="transition-colors hover:text-gray-300"
+                      >
+                        {link.label}
+                      </Link>
+                    )
+                  )}
                 </div>
               ))}
             </div>
@@ -129,7 +136,7 @@ export const Footer: React.FC<FooterProps> = ({ notShowRedirects = false }) => {
 
           {/* Social media and contact */}
           <div
-            className={`order-1 lg:order-2 w-full col-span-2 lg:col-span-3 flex  ${notShowRedirects ? "" : "lg:justify-end lg:pr-14"} gap-4 lg:gap-8 `}
+            className={`order-1 lg:order-2 w-full col-span-2 lg:col-span-2 xl:col-span-3 flex ${notShowRedirects ? "" : "lg:justify-end xl:pr-14"} gap-4 lg:gap-8 `}
           >
             {SOCIAL_CONTACTS.filter(contact => notShowRedirects ? contact.lead !== false : true).map((contact) => {
               const IconComponent = contact.icon;
@@ -142,7 +149,7 @@ export const Footer: React.FC<FooterProps> = ({ notShowRedirects = false }) => {
                   className={`flex flex-col items-center gap-1 text-[14px] font-normal transition-all hover:scale-110 hover:text-gray-300 cursor-pointer ${contact.className || ""}`}
                 >
                   <IconComponent />
-                  <div className="hidden lg:block">{contact.label}</div>
+                  <div className={`hidden lg:block text-[14px] ${contact.className ? "" : "whitespace-nowrap"}`}>{contact.label}</div>
                 </a>
               );
             })}

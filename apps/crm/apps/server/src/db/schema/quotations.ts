@@ -168,6 +168,10 @@ export const quotations = pgTable("quotations", {
 		precision: 16,
 		scale: 8,
 	}).default("0"), // Intereses anticipados calculados
+	rcdpCost: decimal("rcdp_cost", {
+		precision: 14,
+		scale: 2,
+	}).default("0"), // RCDP 1er Trimestre (microbuses)
 	vehicleTransferCost: decimal("vehicle_transfer_cost", {
 		precision: 14,
 		scale: 2,

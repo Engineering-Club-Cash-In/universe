@@ -349,7 +349,7 @@ export async function procesarMoras() {
     
     // 🔥 RESETEAR STATUS DE TODOS LOS CRÉDITOS MOROSOS → ACTIVO
     console.log("[CLEANUP] 🔄 Reseteando status de créditos morosos a ACTIVO...");
-    
+
     await db
       .update(creditos)
       .set({ statusCredit: "ACTIVO" })
@@ -377,7 +377,8 @@ export async function procesarMoras() {
       
       const isOverdue = fechaVenc < hoy;
       const isUnpaid = c.pagado === false;
-      const isNotInAgreement = c.statusCredit !== "EN_CONVENIO";
+      const statusExcluidos = ["EN_CONVENIO", "INCOBRABLE", "CANCELADO", "PENDIENTE_CANCELACION","CAIDO"];
+      const isEligible = !statusExcluidos.includes(c.statusCredit ?? "");
 
       if (isOverdue && isUnpaid) {
         console.log(`[DEBUG] Cuota vencida encontrada:`, {
@@ -386,11 +387,11 @@ export async function procesarMoras() {
           hoy: hoy.toISOString(),
           pagado: c.pagado,
           statusCredit: c.statusCredit,
-          cumple_filtros: isNotInAgreement
+          cumple_filtros: isEligible
         });
       }
 
-      return isOverdue && isUnpaid && isNotInAgreement;
+      return isOverdue && isUnpaid && isEligible;
     });
 
     console.log(`[DEBUG] Overdue installments found: ${cuotasVencidas.length}`);

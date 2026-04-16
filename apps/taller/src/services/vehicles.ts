@@ -20,6 +20,9 @@ export interface VehicleData {
   companyId?: string | null;
   trim?: string;
   traction?: string;
+  id?: string;
+  seats?: number | null;
+  vehicleUse?: string | null;
 }
 
 export interface InspectionData {
@@ -27,6 +30,7 @@ export interface InspectionData {
   inspectionDate: Date;
   inspectionResult: string;
   vehicleRating: 'Comercial' | 'No comercial';
+  marketValue?: string;
   currentConditionValue: string;
   vehicleEquipment: string;
   importantConsiderations?: string;
@@ -38,6 +42,7 @@ export interface InspectionData {
   noTestDriveReason?: string;
   sectionTimes?: Record<string, number>;
   rejectionEvidenceUrl?: string;
+  status?: 'pending' | 'approved' | 'rejected' | 'auction';
   tiresCondition?: number;
   tireConditionFrontLeft?: number;
   tireConditionFrontRight?: number;
@@ -49,6 +54,7 @@ export interface InspectionData {
   hasAgencyHistory?: boolean;
   aiValuation?: {
     suggestedValue: number;
+    baseMarketValue?: number;
     reasoning: string;
     marketAnalysis: string;
     depreciationFactors: string[];
@@ -146,6 +152,9 @@ export const prepareInspectionData = (formData: any, sectionTimes?: Record<strin
     transmission: formData.transmission,
     trim: formData.trim,
     traction: formData.traction,
+    id: formData.vehicleId,
+    seats: formData.seats ? parseInt(formData.seats) : null,
+    vehicleUse: formData.vehicleUse || null,
   };
 
   const inspectionData: InspectionData = {
@@ -153,6 +162,7 @@ export const prepareInspectionData = (formData: any, sectionTimes?: Record<strin
     inspectionDate: formData.inspectionDate,
     inspectionResult: formData.inspectionResult,
     vehicleRating: formData.vehicleRating,
+    marketValue: formData.marketValue || undefined,
     currentConditionValue: formData.currentConditionValue,
     vehicleEquipment: formData.vehicleEquipment,
     importantConsiderations: formData.importantConsiderations,
@@ -182,6 +192,7 @@ export const prepareInspectionData = (formData: any, sectionTimes?: Record<strin
     paintCondition: formData.paintCondition ? parseInt(formData.paintCondition) : undefined,
     hasAgencyHistory: formData.hasAgencyHistory === 'Sí' ? true : (formData.hasAgencyHistory === 'No' ? false : undefined),
     aiValuation: aiValuation,
+    status: formData.status,
   };
 
   return { vehicleData, inspectionData };
@@ -221,10 +232,10 @@ export const getVehicleById = async (id: string) => {
   }
 };
 
-// Search vehicles
-export const searchVehicles = async (query?: string, status?: "pending" | "available" | "sold" | "maintenance" | "auction", vehicleType?: string, fuelType?: string) => {
+// Search only vehicles with previous inspections
+export const searchInspectedVehicles = async (query?: string, status?: "pending" | "available" | "sold" | "maintenance" | "auction", vehicleType?: string, fuelType?: string) => {
   try {
-    const vehicles = await client.searchVehicles({
+    const vehicles = await client.searchInspectedVehicles({
       query,
       status,
       vehicleType,
@@ -235,7 +246,7 @@ export const searchVehicles = async (query?: string, status?: "pending" | "avail
       data: vehicles
     };
   } catch (error) {
-    console.error('Error searching vehicles:', error);
+    console.error('Error searching inspected vehicles:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Error desconocido'
@@ -253,6 +264,26 @@ export const getVehicleStatistics = async () => {
     };
   } catch (error) {
     console.error('Error fetching statistics:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Error desconocido'
+    };
+  }
+};
+// Validate vehicle plate uniqueness
+export const validateVehiclePlate = async (licensePlate: string, vinNumber?: string, id?: string) => {
+  try {
+    const result = await client.validateLicensePlate({
+      licensePlate,
+      vinNumber,
+      id
+    });
+    return {
+      success: true,
+      data: result
+    };
+  } catch (error) {
+    console.error('Error validating license plate:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Error desconocido'

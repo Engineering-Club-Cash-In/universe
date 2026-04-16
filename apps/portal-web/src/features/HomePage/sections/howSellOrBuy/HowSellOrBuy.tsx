@@ -19,11 +19,12 @@ export const HowSellOrBuy = () => {
   // URL de la imagen de fondo - puedes cambiarla aquí
   const backgroundImageUrl = urlImage + "/fondoHow.png";
   const isMobile = useIsMobile();
+  const iconSize = isMobile ? 24 : 30;
 
   const buys: items[] = [
     {
       icon: (
-        <IconSearch width={isMobile ? 24 : 48} height={isMobile ? 24 : 48} />
+        <IconSearch width={iconSize} height={iconSize} />
       ),
       title: "Encuentra tu auto",
       description:
@@ -31,14 +32,14 @@ export const HowSellOrBuy = () => {
     },
     {
       icon: (
-        <IconSettings width={isMobile ? 24 : 48} height={isMobile ? 24 : 48} />
+        <IconSettings width={iconSize} height={iconSize} />
       ),
-      title: "Configura tu compra",
+      title: "Te acompañamos en toda tu gestión",
       description:
-        "Puedes realizar todo tu proceso en línea o contactar a un asesor para que te acompañe en todo el proceso.",
+        "Puedes realizar todo tu proceso en línea o contactar a un asesor para que te acompañe en toda tu gestión.",
     },
     {
-      icon: <IconCar width={isMobile ? 24 : 48} height={isMobile ? 24 : 48} />,
+      icon: <IconCar width={iconSize} height={iconSize} />,
       title: "Llévatelo",
       description: "¡Todo listo! Puedes disfrutar de tu auto.",
     },
@@ -46,14 +47,14 @@ export const HowSellOrBuy = () => {
 
   const sales: items[] = [
     {
-      icon: <IconCar width={isMobile ? 24 : 48} height={isMobile ? 24 : 48} />,
+      icon: <IconCar width={iconSize} height={iconSize} />,
       title: "Cuéntanos sobre tu auto",
       description:
-        "Realiza unos pocos pasos y déjanos saber toda la información importante sobre tu auto.",
+        "A través de un proceso simple comparte toda la información importante sobre tu auto",
     },
     {
       icon: (
-        <IconCalendar width={isMobile ? 24 : 48} height={isMobile ? 24 : 48} />
+        <IconCalendar width={iconSize} height={iconSize} />
       ),
       title: "Agenda tu cita",
       description:
@@ -61,16 +62,16 @@ export const HowSellOrBuy = () => {
     },
     {
       icon: (
-        <IconDollar width={isMobile ? 24 : 48} height={isMobile ? 24 : 48} />
+        <IconDollar width={iconSize} height={iconSize} />
       ),
-      title: "Cerramos la venta y realizamos el pago",
+      title: "Confirmación de venta",
       description:
         "Una vez todo esté listo, cerramos la venta y realizamos el pago de manera segura.",
     },
   ];
 
   return (
-    <section className="relative grid grid-cols-1 lg:grid-cols-2 gap-40 mt-24 lg:mt-80 p-10 lg:p-20">
+    <section className="relative grid grid-cols-1 lg:grid-cols-2 gap-40 mt-24 lg:mt-72 p-10 lg:p-20">
       {/* Imagen de fondo con overlay opaco */}
       <div
         className="absolute inset-0 bg-cover bg-center bg-no-repeat z-0"
@@ -95,8 +96,14 @@ export const HowSellOrBuy = () => {
       />
 
       {/* Línea central difuminada - vertical en desktop, horizontal en mobile */}
-      <div className="hidden lg:block absolute left-1/2 top-0 bottom-0 w-2 -translate-x-1/2 bg-linear-to-b from-transparent via-primary to-transparent z-10"></div>
-      <div className="lg:hidden absolute top-1/2 left-0 right-0 h-2 -translate-y-1/2 bg-linear-to-r from-transparent via-primary to-transparent z-10"></div>
+      <div
+        className="hidden lg:block absolute left-1/2 top-[15%] bottom-[15%] w-1 -translate-x-1/2 z-10"
+        style={{ background: "linear-gradient(180deg, rgba(15, 15, 15, 0.00) 0%, #27A6ED 50%, rgba(15, 15, 15, 0.00) 100%)" }}
+      />
+      <div
+        className="lg:hidden absolute top-1/2 left-0 right-0 h-1 -translate-y-1/2 z-10"
+        style={{ background: "linear-gradient(90deg, rgba(15, 15, 15, 0.00) 0%, #27A6ED 50%, rgba(15, 15, 15, 0.00) 100%)" }}
+      />
 
       {/* Sección de Compras */}
       <div className="relative z-10">
@@ -107,7 +114,7 @@ export const HowSellOrBuy = () => {
           {buys.map((item, index) => (
             <div key={index} className="flex items-center gap-8 w-[88%]">
               {/* Círculo con icono */}
-              <div className="shrink-0 w-12 h-12 lg:w-20 lg:h-20 rounded-full border-2 border-primary flex items-center justify-center text-primary">
+              <div className="shrink-0 w-12 h-12 lg:w-20 lg:h-20 rounded-2xl border-2 border-secondary flex items-center justify-center text-secondary">
                 {item.icon}
               </div>
               {/* Contenido */}
@@ -134,7 +141,7 @@ export const HowSellOrBuy = () => {
           {sales.map((item, index) => (
             <div key={index} className="flex items-center gap-8 w-[98%]">
               {/* Círculo con icono */}
-              <div className="shrink-0 w-12 h-12  lg:w-20 lg:h-20 rounded-full border-2 border-primary flex items-center justify-center text-primary">
+              <div className="shrink-0 w-12 h-12  lg:w-20 lg:h-20 rounded-2xl border-2 border-secondary flex items-center justify-center text-secondary">
                 {item.icon}
               </div>
               {/* Contenido */}

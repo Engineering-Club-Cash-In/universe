@@ -31,7 +31,10 @@ export const leadSourceEnum = pgEnum("lead_source", [
 	"facebook",
 	"instagram",
 	"google",
-	"Whatsapp"
+	"meta",
+	"Whatsapp",
+	"agency",
+	"property",
 ]);
 export const maritalStatusEnum = pgEnum("marital_status", [
 	"single",
@@ -53,6 +56,10 @@ export const loanPurposeEnum = pgEnum("loan_purpose", ["personal", "business"]);
 export const creditTypeEnum = pgEnum("credit_type", [
 	"autocompra",
 	"sobre_vehiculo",
+]);
+export const assignmentTypeEnum = pgEnum("assignment_type", [
+	"auto",
+	"manual",
 ]);
 export const creditCategoryEnum = pgEnum("credit_category", [
 	"Contraseña",
@@ -164,6 +171,7 @@ export const leads = pgTable("leads", {
 	jobTitle: text("job_title"),
 	companyId: uuid("company_id").references(() => companies.id),
 	source: leadSourceEnum("source").notNull().default("other"),
+	campaign: text("campaign"),
 	status: leadStatusEnum("status").notNull().default("new"),
 	assignedTo: text("assigned_to")
 		.notNull()
@@ -176,6 +184,9 @@ export const leads = pgTable("leads", {
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),
 	livenessValidated: boolean("liveness_validated").notNull().default(false),
+	assignmentType: assignmentTypeEnum("assignment_type")
+		.notNull()
+		.default("manual"),
 	createdBy: text("created_by")
 		.notNull()
 		.references(() => user.id),
@@ -283,6 +294,7 @@ export const opportunities = pgTable("opportunities", {
 	vehicleId: uuid("vehicle_id").references(() => vehicles.id), // Relación con vehículo (opcional)
 	creditType: creditTypeEnum("credit_type").notNull().default("autocompra"),
 	source: leadSourceEnum("source"), // Source of the opportunity (from lead or input)
+	campaign: text("campaign"),
 	loanPurpose: loanPurposeEnum("loan_purpose"), // Purpose of the loan (migrated from leads)
 	value: decimal("value", { precision: 12, scale: 2 }),
 	stageId: uuid("stage_id")

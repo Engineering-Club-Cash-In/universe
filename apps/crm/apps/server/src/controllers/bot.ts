@@ -13,9 +13,11 @@ import {
 import type { documentTypeEnum } from "@/db/schema/documents";
 import { getRenapData } from "@/functions/getRenapInfo";
 import { generateUniqueFilename, uploadFileFromUrlToR2 } from "@/lib/storage";
-import { db } from "../db";
-import { otpController } from "./otp";
 import { salesUser } from "@/utils/constants";
+import { db } from "../db";
+import { validarDpi } from "../utils/cui-validation";
+import { otpController } from "./otp";
+import { getOpenOpportunityBySource } from "./public-lead";
 
 // Type for document type enum
 type DocumentType = (typeof documentTypeEnum.enumValues)[number];
@@ -305,6 +307,15 @@ function normalizeDate(dateStr: string | null | undefined): string | null {
 export const getRenapInfoController = async (dpi: string, phone: string) => {
 	console.log(`[DEBUG] Starting RENAP process for DPI: ${dpi}`);
 
+	// Validar DPI
+	const resultadoDpi = validarDpi(dpi);
+	if (!resultadoDpi.valid) {
+		return {
+			success: false,
+			message: resultadoDpi.error,
+		};
+	}
+
 	// 1. Fetch data from RENAP API
 	const renapResponse = await getRenapData(dpi);
 
@@ -412,12 +423,11 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 				phone: phone,
 				createdBy: salesUser,
 				status: "new",
-
 			})
 			.returning({ id: leads.id });
 		leadId = newLead[0].id;
-		assignedUserId = salesUser
-		createdByUserId = salesUser
+		assignedUserId = salesUser;
+		createdByUserId = salesUser;
 	} else {
 		console.log("[DEBUG] DPI found in leads. Updating existing lead.");
 		await db
@@ -430,7 +440,7 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 				status: "new",
 				age: age ?? existingLead[0].age,
 				updatedAt: new Date(),
-				livenessValidated:false
+				livenessValidated: false,
 			})
 			.where(eq(leads.dpi, dpi));
 		leadId = existingLead[0].id;
@@ -470,35 +480,51 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 	}
 
 	// ========================
-	// 5. 🔥 SIEMPRE crear nueva oportunidad
+	// 5. Crear oportunidad solo si no existe una abierta con mismo source
 	// ========================
-	const [firstStage] = await db
-		.select()
-		.from(salesStages)
-		.orderBy(asc(salesStages.order))
-		.limit(1);
+	const existingOpportunity = await getOpenOpportunityBySource(
+		leadId,
+		"Whatsapp",
+	);
 
-	if (!firstStage) {
-		throw new Error("[ERROR] No sales stage found");
+	let opportunityId: string;
+
+	if (existingOpportunity) {
+		console.log(
+			`[DEBUG] Lead ${leadId} already has open opportunity from Whatsapp: ${existingOpportunity.id}`,
+		);
+		opportunityId = existingOpportunity.id;
+	} else {
+		const [firstStage] = await db
+			.select()
+			.from(salesStages)
+			.orderBy(asc(salesStages.order))
+			.limit(1);
+
+		if (!firstStage) {
+			throw new Error("[ERROR] No sales stage found");
+		}
+
+		console.log(`[DEBUG] Creating NEW opportunity for lead ${leadId}`);
+
+		const [newOpportunity] = await db
+			.insert(opportunities)
+			.values({
+				leadId: leadId,
+				status: "open",
+				probability: 0,
+				createdAt: new Date(),
+				updatedAt: new Date(),
+				assignedTo: assignedUserId,
+				createdBy: createdByUserId,
+				title: `Oportunidad de crédito para ${renapData.firstName} ${renapData.firstLastName}`,
+				stageId: firstStage.id,
+				source: "Whatsapp",
+			})
+			.returning();
+
+		opportunityId = newOpportunity.id;
 	}
-
-	console.log(`[DEBUG] Creating NEW opportunity for lead ${leadId}`);
-
-	const [newOpportunity] = await db
-		.insert(opportunities)
-		.values({
-			leadId: leadId,
-			status: "open",
-			probability: 0,
-			createdAt: new Date(),
-			updatedAt: new Date(),
-			assignedTo: assignedUserId,
-			createdBy: createdByUserId,
-			title: `Oportunidad de crédito para ${renapData.firstName} ${renapData.firstLastName}`,
-			stageId: firstStage.id,
-			source: "Whatsapp", // Bot source
-		})
-		.returning();
 
 	// ========================
 	// 6. Response
@@ -507,11 +533,12 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 
 	return {
 		success: true,
-		message:
-			"RENAP data processed, lead synced, and opportunity created successfully",
+		message: existingOpportunity
+			? "RENAP data processed, lead synced, existing opportunity reused"
+			: "RENAP data processed, lead synced, and opportunity created successfully",
 		data: renapData,
 		leadId,
-		opportunityId: newOpportunity.id,
+		opportunityId,
 		magicUrl: magicUrlValue,
 	};
 };

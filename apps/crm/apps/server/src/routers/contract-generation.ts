@@ -634,7 +634,23 @@ export const contractGenerationRouter = {
 				generationData: z.array(
 					z.object({
 						contractType: z.string(),
-						data: z.record(z.string(), z.string()),
+						data: z.record(z.string(), z.unknown()).and(
+							z.object({
+								deudoresAdicionales: z
+									.array(
+										z.object({
+											nombreCompleto: z.string(),
+											dpi: z.string(),
+											dpiTexto: z.string(),
+											edadTexto: z.string().optional(),
+											estadoCivil: z.string().optional(),
+											profesion: z.string().optional(),
+											nacionalidad: z.string().optional(),
+										}),
+									)
+									.optional(),
+							}),
+						),
 						emails: z.array(z.string()).optional(),
 						options: z.object({
 							gender: z.enum(["male", "female"]),
@@ -675,7 +691,7 @@ export const contractGenerationRouter = {
 
 				// 2. Actualizar la fecha en los datos de cada contrato
 				const contractsWithNewDate = contractsToRegenerate.map((contract) => {
-					const newData = { ...contract.data };
+					const newData: Record<string, any> = { ...contract.data };
 
 					// Datos de la nueva fecha
 					const day = input.newDate.getDate();

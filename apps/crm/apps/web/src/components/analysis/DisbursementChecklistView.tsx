@@ -122,6 +122,12 @@ export function DisbursementChecklistView({
 	// Approve disbursement mutation
 	const approveMutation = useMutation({
 		mutationFn: async () => {
+			if (notes !== (checklist?.notes ?? "")) {
+				await client.updateDisbursementChecklistNotes({
+					opportunityId,
+					notes,
+				});
+			}
 			return client.approveDisbursement({ opportunityId });
 		},
 		onSuccess: () => {
@@ -166,6 +172,8 @@ export function DisbursementChecklistView({
 		return new Intl.NumberFormat("es-GT", {
 			style: "currency",
 			currency: "GTQ",
+			minimumFractionDigits: 2,
+			maximumFractionDigits: 2,
 		}).format(Number(value));
 	};
 
@@ -239,7 +247,7 @@ export function DisbursementChecklistView({
 				</div>
 
 				{/* Notes */}
-				<div className="space-y-2">
+				<div className="flex flex-col gap-2">
 					<label className="font-medium text-sm">
 						Notas
 						<Textarea

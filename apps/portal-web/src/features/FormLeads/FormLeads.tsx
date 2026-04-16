@@ -1,25 +1,23 @@
 import { Button } from "@/components";
-import { Formulario, InfoLead, Thanks } from "./components";
+import { Formulario, InfoLead } from "./components";
 import { useIsMobile } from "@/hooks";
-import { useLead } from "./store/useLead";
+import { Link } from "@/components/ui";
+import { IconCCI } from "@/components/IconCCI";
 
 const urlImage = import.meta.env.VITE_IMAGE_URL;
 
 export const IconCashIn = () => (
-  <div className="flex items-center gap-2 lg:gap-6 lg:px-12 z-50">
-    <h1 className="text-4xl font-bold lg:text-header-3">Cash In</h1>
-    <img
-      src="/logo1.png"
-      alt="CashIn company logo"
-      className="w-8 h-8 object-contain"
-    />
-  </div>
+  <Link href="/" className="flex items-center gap-2 lg:gap-6 lg:px-12 z-50">
+    <div className="w-8 h-8">
+      <IconCCI />
+    </div>
+    <h1 className="text-4xl font-bold lg:text-header-3">CashIn</h1>
+  </Link>
 );
 
 export const FormLeads = () => {
   const imageUrl = urlImage + "/landingForm.png";
   const isMobile = useIsMobile();
-  const isSubmitted = useLead((state) => state.isSubmitted);
 
   const handleRedirectInfo = () => {
     const infoSection = document.getElementById("info-lead");
@@ -27,11 +25,6 @@ export const FormLeads = () => {
       infoSection.scrollIntoView({ behavior: "smooth" });
     }
   };
-
-  // Si ya se envió el formulario, mostrar pantalla de agradecimiento
-  if (isSubmitted) {
-    return <Thanks />;
-  }
 
   return (
     <div className="flex flex-col gap-2 pt-4 lg:pt-6 mb-20">

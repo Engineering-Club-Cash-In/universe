@@ -1,6 +1,6 @@
 import { eq, and, asc, desc } from "drizzle-orm";
 import { db } from "../database";
-import { creditos, cuotas_credito, pagos_credito } from "../database/db";
+import { creditos, cuotas_credito, pagos_credito, historial_cambio_fecha } from "../database/db";
 import z from "zod";
 
 // ============================================
@@ -394,6 +394,222 @@ export const fixCreditosWithoutFebruary = async ({
     return {
       message: "Error interno del servidor",
       errors: error instanceof Error ? error.message : String(error),
+    };
+  }
+};
+
+// ============================================
+// ENDPOINT PARA UN SOLO CREDITO
+// ============================================
+
+// ============================================
+// CAMBIAR FECHA DE INICIO DE UN CRÉDITO
+// ============================================
+
+const cambiarFechaInicioSchema = z.object({
+  numero_credito_sifco: z.string().min(1),
+  nueva_fecha_inicio: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato debe ser YYYY-MM-DD"),
+  changed_by: z.string().min(1),
+  razon: z.string().min(1),
+});
+
+/**
+ * Cambia la fecha de inicio (cuota 0) de un crédito y recalcula
+ * fecha_vencimiento de TODAS las cuotas (pagadas y no pagadas).
+ * No toca montos, abonos, ni fecha_pago.
+ */
+export const cambiarFechaInicio = async ({
+  body,
+  set,
+}: {
+  body: unknown;
+  set: { status: number };
+}) => {
+  try {
+    const parseResult = cambiarFechaInicioSchema.safeParse(body);
+    if (!parseResult.success) {
+      set.status = 400;
+      return {
+        success: false,
+        message: "Validation failed",
+        errors: parseResult.error.flatten().fieldErrors,
+      };
+    }
+
+    const { numero_credito_sifco, nueva_fecha_inicio, changed_by, razon } = parseResult.data;
+
+    // Cuota mínima a partir de la cual, si está pagada, se bloquea el cambio de fecha.
+    // Ej: 2 = permite cambio si solo cuotas 0 y/o 1 están pagadas.
+    //     1 = solo permite si únicamente cuota 0 está pagada.
+    const CUOTA_MINIMA_BLOQUEO = 2;
+
+    console.log(`\n${"=".repeat(60)}`);
+    console.log(`CAMBIAR FECHA DE INICIO: ${numero_credito_sifco}`);
+    console.log(`Nueva fecha inicio: ${nueva_fecha_inicio}`);
+    console.log(`Cambiado por: ${changed_by} | Razón: ${razon}`);
+    console.log(`${"=".repeat(60)}`);
+
+    // 1. Buscar el crédito
+    const [creditoDb] = await db
+      .select({ credito_id: creditos.credito_id })
+      .from(creditos)
+      .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
+      .limit(1);
+
+    if (!creditoDb) {
+      set.status = 404;
+      return { success: false, message: "Crédito no encontrado" };
+    }
+
+    // 2. Obtener todas las cuotas
+    const todasLasCuotas = await db
+      .select({
+        cuota_id: cuotas_credito.cuota_id,
+        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+        numero_cuota: cuotas_credito.numero_cuota,
+        pagado: cuotas_credito.pagado,
+      })
+      .from(cuotas_credito)
+      .where(eq(cuotas_credito.credito_id, creditoDb.credito_id))
+      .orderBy(asc(cuotas_credito.numero_cuota));
+
+    if (todasLasCuotas.length === 0) {
+      set.status = 400;
+      return { success: false, message: "El crédito no tiene cuotas" };
+    }
+
+    // 2.5 Validar que no haya cuotas >= CUOTA_MINIMA_BLOQUEO pagadas
+    const cuotaPagadaMayor = todasLasCuotas.find(
+      (c) => c.numero_cuota >= CUOTA_MINIMA_BLOQUEO && c.pagado
+    );
+    if (cuotaPagadaMayor) {
+      set.status = 400;
+      return {
+        success: false,
+        message: `No se puede cambiar la fecha de inicio porque la cuota ${cuotaPagadaMayor.numero_cuota} ya está pagada. Solo se permite el cambio si únicamente las cuotas menores a ${CUOTA_MINIMA_BLOQUEO} están pagadas.`,
+      };
+    }
+
+    // 3. Guardar historial del cambio (fecha anterior de cuota 1)
+    const cuotaUno = todasLasCuotas.find((c) => c.numero_cuota === 1);
+    if (!cuotaUno) {
+      set.status = 400;
+      return { success: false, message: "El crédito no tiene cuota 1" };
+    }
+
+    const fechaAnterior = typeof cuotaUno.fecha_vencimiento === "string"
+      ? cuotaUno.fecha_vencimiento
+      : `${cuotaUno.fecha_vencimiento.getFullYear()}-${(cuotaUno.fecha_vencimiento.getMonth() + 1).toString().padStart(2, "0")}-${cuotaUno.fecha_vencimiento.getDate().toString().padStart(2, "0")}`;
+
+    await db.insert(historial_cambio_fecha).values({
+      credito_id: creditoDb.credito_id,
+      fecha_inicio_anterior: fechaAnterior,
+      fecha_inicio_nueva: nueva_fecha_inicio,
+      razon,
+      changed_by,
+    });
+
+    // 4. Extraer día de pago de la nueva fecha inicio
+    const partesFecha = nueva_fecha_inicio.split("-");
+    const anioInicio = parseInt(partesFecha[0], 10);
+    const mesInicio = parseInt(partesFecha[1], 10);
+    const diaInicio = parseInt(partesFecha[2], 10);
+
+    // 5. Recalcular fechas solo para cuotas >= 1 (cuota 0 es desembolso, no se mueve)
+    const cuotasAMover = todasLasCuotas.filter((c) => c.numero_cuota >= 1);
+    let cuotasActualizadas = 0;
+
+    for (const cuota of cuotasAMover) {
+      // Cuota 1 = nueva_fecha_inicio, cuota N = (N-1) meses después
+      const nuevaFecha = calcularFechaPorNumeroCuota(
+        { anio: anioInicio, mes: mesInicio },
+        1, // referencia es cuota 1
+        cuota.numero_cuota,
+        diaInicio
+      );
+
+      const fechaOriginalStr = typeof cuota.fecha_vencimiento === "string"
+        ? cuota.fecha_vencimiento
+        : `${cuota.fecha_vencimiento.getFullYear()}-${(cuota.fecha_vencimiento.getMonth() + 1).toString().padStart(2, "0")}-${cuota.fecha_vencimiento.getDate().toString().padStart(2, "0")}`;
+
+      if (nuevaFecha !== fechaOriginalStr) {
+        // Actualizar cuotas_credito
+        await db
+          .update(cuotas_credito)
+          .set({ fecha_vencimiento: nuevaFecha })
+          .where(eq(cuotas_credito.cuota_id, cuota.cuota_id));
+
+        // Actualizar fecha_vencimiento en pagos_credito
+        await db
+          .update(pagos_credito)
+          .set({ fecha_vencimiento: nuevaFecha })
+          .where(eq(pagos_credito.cuota_id, cuota.cuota_id));
+
+        console.log(`   Cuota #${cuota.numero_cuota}: ${fechaOriginalStr} -> ${nuevaFecha}`);
+        cuotasActualizadas++;
+      }
+    }
+
+    console.log(`\nTotal cuotas actualizadas: ${cuotasActualizadas}`);
+
+    set.status = 200;
+    return {
+      success: true,
+      message: `Fecha de inicio cambiada a ${nueva_fecha_inicio}`,
+      cuotas_actualizadas: cuotasActualizadas,
+      total_cuotas: todasLasCuotas.length,
+    };
+  } catch (error) {
+    console.error("Error en cambiarFechaInicio:", error);
+    set.status = 500;
+    return {
+      success: false,
+      message: "Error interno del servidor",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+};
+
+// ============================================
+// OBTENER HISTORIAL DE CAMBIOS DE FECHA
+// ============================================
+
+export const getHistorialCambioFecha = async ({
+  numero_credito_sifco,
+  set,
+}: {
+  numero_credito_sifco: string;
+  set: { status: number };
+}) => {
+  try {
+    const [creditoDb] = await db
+      .select({ credito_id: creditos.credito_id })
+      .from(creditos)
+      .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
+      .limit(1);
+
+    if (!creditoDb) {
+      set.status = 404;
+      return { success: false, message: "Crédito no encontrado" };
+    }
+
+    const historial = await db
+      .select()
+      .from(historial_cambio_fecha)
+      .where(eq(historial_cambio_fecha.credito_id, creditoDb.credito_id))
+      .orderBy(desc(historial_cambio_fecha.created_at));
+
+    return {
+      success: true,
+      historial,
+    };
+  } catch (error) {
+    console.error("Error en getHistorialCambioFecha:", error);
+    set.status = 500;
+    return {
+      success: false,
+      message: "Error interno del servidor",
+      error: error instanceof Error ? error.message : String(error),
     };
   }
 };

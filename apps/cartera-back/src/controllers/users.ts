@@ -122,7 +122,7 @@ export async function getUsersWithSifco(user?: any): Promise<UsuarioConCreditosS
 
     // 📌 Construir condiciones dinámicas
     const conditions: any[] = [
-      inArray(creditos.statusCredit, ["ACTIVO", "PENDIENTE_CANCELACION", "MOROSO","EN_CONVENIO"]), // Solo créditos SIFCO vigentes
+      inArray(creditos.statusCredit, ["ACTIVO", "PENDIENTE_CANCELACION", "MOROSO", "EN_CONVENIO", "INCOBRABLE"]), // Solo créditos SIFCO vigentes
     ];
     console.log(asesorId)
     // 🔒 Si NO es admin y tiene asesor_id, filtrar solo sus créditos

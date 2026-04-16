@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Sparkles, Loader2, TrendingUp } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -32,7 +32,7 @@ import { client } from '../utils/orpc';
 import { useInspection } from '../contexts/InspectionContext';
 
 const QuetzalIcon = ({ className }: { className?: string }) => (
-  <div className={`flex items-center justify-center font-bold text-xs border-2 border-current rounded-full w-5 h-5 ${className}`}>
+  <div className={`flex items-center justify-center font-bold text-[10px] sm:text-xs border-2 border-current rounded-full w-4 h-4 sm:w-5 sm:h-5 ${className}`}>
     Q
   </div>
 );
@@ -65,6 +65,8 @@ const valuationSchema = z.object({
   tireConditionSpare: z.string().optional(),
   paintCondition: z.string().optional(),
   hasAgencyHistory: z.string().optional(),
+  marketValue: z.string().optional(),
+  inspectionResult: z.string({ message: "Las observaciones generales son requeridas" }).min(1, { message: "Las observaciones generales son requeridas" }),
 });
 
 type ValuationFormValues = z.infer<typeof valuationSchema>;
@@ -78,6 +80,7 @@ interface VehicleValuationProps {
 
 interface AIValuationResult {
   suggestedValue: number;
+  baseMarketValue?: number;
   reasoning: string;
   marketAnalysis: string;
   depreciationFactors: string[];
@@ -86,18 +89,44 @@ interface AIValuationResult {
   commercialClassificationReasoning?: string;
 }
 
+const MAX_AI_ATTEMPTS = 2;
+
+function isRetryableAIError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    error.name === "TimeoutError" ||
+    message.includes("timeout") ||
+    message.includes("timed out") ||
+    message.includes("network") ||
+    message.includes("fetch") ||
+    message.includes("conexi") ||
+    message.includes("abort")
+  );
+}
+
 export default function VehicleValuation({
   vehicleData,
   onComplete,
   isWizardMode = false,
   isSubmitting = false
 }: VehicleValuationProps) {
-  const { checklistItems, photos } = useInspection();
+  const { checklistItems, photos, setFormData } = useInspection();
   const [aiValuation, setAiValuation] = useState<AIValuationResult | null>(null);
   const [loadingAI, setLoadingAI] = useState(false);
   const [aiAttemptCount, setAiAttemptCount] = useState(0);
   const [aiFailed, setAiFailed] = useState(false);
+  const [aiLoadingMessage, setAiLoadingMessage] = useState("Analizando vehículo...");
   const [scannerFile, setScannerFile] = useState<File | null>(null);
+  const [uploadingScanner, setUploadingScanner] = useState(false);
+  const [scannerUploadUrl, setScannerUploadUrl] = useState<string | null>(null);
+  const [tempUploadId] = useState(() => {
+    const stableId = vehicleData?.vinNumber || vehicleData?.licensePlate || Date.now().toString();
+    return `scanner-${String(stableId).replace(/[^a-zA-Z0-9-_]/g, "_")}`;
+  });
 
 
 
@@ -108,6 +137,7 @@ export default function VehicleValuation({
       currentConditionValue: "",
       vehicleEquipment: "",
       importantConsiderations: "",
+      marketValue: "",
       scannerUsed: "No",
       airbagWarning: "No",
       tiresCondition: "",
@@ -121,6 +151,7 @@ export default function VehicleValuation({
       hasAgencyHistory: "",
       scannerResult: undefined,
       missingAirbag: "",
+      inspectionResult: "",
     },
   });
 
@@ -129,6 +160,7 @@ export default function VehicleValuation({
       const file = e.target.files[0];
       if (file.type === "application/pdf") {
         setScannerFile(file);
+        setScannerUploadUrl(null);
         form.setValue("scannerResult", file);
       } else {
         alert("Por favor suba un archivo PDF");
@@ -136,10 +168,68 @@ export default function VehicleValuation({
     }
   };
 
+  const uploadScannerToServer = async (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("vehicleId", tempUploadId);
+    formData.append("category", "scanner");
+    formData.append("photoType", "scanner-report");
+    formData.append("title", "Reporte de scanner");
+    formData.append("description", "Reporte PDF del scanner");
+
+    const response = await fetch(`${import.meta.env.VITE_SERVER_URL || 'http://localhost:3000'}/api/upload-vehicle-photo`, {
+      method: "POST",
+      credentials: "include",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      let errorMessage = `Upload failed: ${response.statusText}`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        // Keep generic error if response is not JSON
+      }
+      throw new Error(errorMessage);
+    }
+
+    const result = await response.json();
+    return result.data.url as string;
+  };
+
+  useEffect(() => {
+    if (!loadingAI) {
+      setAiLoadingMessage("Analizando vehículo...");
+      return;
+    }
+
+    setAiLoadingMessage("Analizando vehículo...");
+
+    const timers = [
+      setTimeout(() => {
+        setAiLoadingMessage("Buscando referencias en internet...");
+      }, 8000),
+      setTimeout(() => {
+        setAiLoadingMessage("Comparando mercado y condición del vehículo...");
+      }, 18000),
+      setTimeout(() => {
+        setAiLoadingMessage("La valoración sigue procesándose. Puede tardar un poco más.");
+      }, 30000),
+    ];
+
+    return () => {
+      timers.forEach(clearTimeout);
+    };
+  }, [loadingAI]);
+
   // AI valuation logic
   const getAIValuation = async () => {
+    if (loadingAI || aiAttemptCount >= MAX_AI_ATTEMPTS) {
+      return;
+    }
+
     setLoadingAI(true);
-    setAiAttemptCount(prev => prev + 1);
     setAiFailed(false);
 
     const values = form.getValues();
@@ -178,6 +268,7 @@ export default function VehicleValuation({
 
       const aiResult: AIValuationResult = {
         suggestedValue: result.valuation.suggestedValue,
+        baseMarketValue: result.valuation.baseMarketValue,
         reasoning: result.valuation.reasoning,
         marketAnalysis: result.valuation.marketAnalysis,
         depreciationFactors: result.valuation.depreciationFactors,
@@ -190,6 +281,9 @@ export default function VehicleValuation({
 
       // Auto-fill suggested value
       form.setValue("currentConditionValue", aiResult.suggestedValue.toString());
+      if (aiResult.baseMarketValue != null) {
+        form.setValue("marketValue", aiResult.baseMarketValue.toString());
+      }
 
       // Auto-fill commercial classification if available
       if (aiResult.commercialClassification) {
@@ -199,15 +293,51 @@ export default function VehicleValuation({
       toast.success("Valoración por IA completada");
     } catch (error) {
       setAiFailed(true);
-      toast.error("Error al obtener valoración por IA. Complete manualmente.");
+      if (isRetryableAIError(error)) {
+        toast.error("La valoración tardó demasiado o falló la conexión. Puede reintentar sin consumir intento.");
+      } else {
+        setAiAttemptCount(prev => Math.min(prev + 1, MAX_AI_ATTEMPTS));
+        toast.error("Error al obtener valoración por IA. Complete manualmente.");
+      }
       console.error(error);
     } finally {
       setLoadingAI(false);
     }
   };
 
-  const onSubmit = (values: ValuationFormValues) => {
-    onComplete(values, aiValuation || undefined);
+  const onSubmit = async (values: ValuationFormValues) => {
+    let scannerResultUrl: string | undefined;
+
+    if (values.scannerUsed === "Sí") {
+      const scannerDocument = values.scannerResult as File | undefined;
+
+      if (scannerDocument) {
+        try {
+          setUploadingScanner(true);
+          scannerResultUrl = scannerUploadUrl || await uploadScannerToServer(scannerDocument);
+          setScannerUploadUrl(scannerResultUrl);
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : "Error subiendo el PDF del scanner");
+          return;
+        } finally {
+          setUploadingScanner(false);
+        }
+      } else {
+        scannerResultUrl = scannerUploadUrl || undefined;
+      }
+    }
+
+    const submissionData = {
+      ...values,
+      scannerResultUrl,
+    };
+
+    setFormData((prev: any) => ({
+      ...prev,
+      ...submissionData,
+    }));
+
+    onComplete(submissionData, aiValuation || undefined);
   };
 
   return (
@@ -216,11 +346,11 @@ export default function VehicleValuation({
       {/* AI Valuation Section */}
       <Card className="bg-linear-to-r from-blue-50 to-indigo-50 border-blue-200">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-blue-600" />
+          <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+            <Sparkles className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600" />
             Valoración Inteligente
           </CardTitle>
-          <CardDescription>
+          <CardDescription className="text-xs sm:text-sm">
             Obtenga una valoración estimada del vehículo basada en IA
           </CardDescription>
         </CardHeader>
@@ -445,13 +575,13 @@ export default function VehicleValuation({
               <Button
                 type="button"
                 onClick={getAIValuation}
-                disabled={loadingAI || aiAttemptCount >= 2}
+                disabled={loadingAI || aiAttemptCount >= MAX_AI_ATTEMPTS}
                 className="w-full"
               >
                 {loadingAI ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Analizando vehículo...
+                    {aiLoadingMessage}
                   </>
                 ) : (
                   <>
@@ -460,7 +590,12 @@ export default function VehicleValuation({
                   </>
                 )}
               </Button>
-              {aiAttemptCount >= 2 && aiFailed && (
+              {loadingAI && (
+                <p className="text-xs text-muted-foreground text-center mt-2">
+                  La valoración con búsqueda en internet puede tardar varios segundos. No cierre esta pantalla mientras termina.
+                </p>
+              )}
+              {aiAttemptCount >= MAX_AI_ATTEMPTS && aiFailed && (
                 <p className="text-xs text-muted-foreground text-center mt-2">
                   Se alcanzó el límite de intentos. Complete la valoración manualmente.
                 </p>
@@ -468,21 +603,21 @@ export default function VehicleValuation({
             </>
           ) : (
             <div className="space-y-4">
-              <Alert className="border-green-200 bg-green-50">
-                <QuetzalIcon className="text-green-600 mr-2" />
-                <AlertDescription className="text-green-800">
+              <Alert className="border-green-200 bg-green-50 grid-cols-[auto_1fr]! gap-x-2 items-center py-2 sm:py-3">
+                <QuetzalIcon className="text-green-600" />
+                <AlertDescription className="text-green-800 text-xs sm:text-sm col-start-auto!">
                   <strong>Valoración Sugerida: Q{aiValuation.suggestedValue.toLocaleString()}</strong>
                 </AlertDescription>
               </Alert>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs sm:text-sm">
                 <div>
-                  <h4 className="font-medium mb-2">Análisis de Mercado:</h4>
-                  <p className="text-muted-foreground">{aiValuation.marketAnalysis}</p>
+                  <h4 className="font-medium mb-1 sm:mb-2">Análisis de Mercado:</h4>
+                  <p className="text-muted-foreground leading-relaxed">{aiValuation.marketAnalysis}</p>
                 </div>
                 <div>
-                  <h4 className="font-medium mb-2">Factores de Depreciación:</h4>
-                  <ul className="text-muted-foreground space-y-1">
+                  <h4 className="font-medium mb-1 sm:mb-2">Factores de Depreciación:</h4>
+                  <ul className="text-muted-foreground space-y-0.5 sm:space-y-1">
                     {aiValuation.depreciationFactors.map((factor, idx) => (
                       <li key={idx}>• {factor}</li>
                     ))}
@@ -555,35 +690,74 @@ export default function VehicleValuation({
                 )}
               />
 
-              <FormField
-                control={form.control}
-                name="currentConditionValue"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="flex items-center gap-2">
-                      Valor vehículo condiciones actuales
-                      {aiValuation && (
-                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">
-                          IA: Q{aiValuation.suggestedValue.toLocaleString()}
-                        </span>
-                      )}
-                    </FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="Valor en moneda local"
-                        value={formatCurrency(field.value)}
-                        onChange={(e) => {
-                          const result = handleCurrencyInput(e.target.value);
-                          field.onChange(result.raw);
-                        }}
-                        onBlur={field.onBlur}
-                        name={field.name}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="marketValue"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="flex items-center gap-2">
+                        Valor de mercado
+                        {aiValuation?.baseMarketValue && (
+                          <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
+                            IA: Sugerido
+                          </span>
+                        )}
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="Valor de mercado referencial"
+                          value={formatCurrency(field.value || "")}
+                          onChange={(e) => {
+                            const result = handleCurrencyInput(e.target.value);
+                            field.onChange(result.raw);
+                          }}
+                          onBlur={field.onBlur}
+                          name={field.name}
+                          readOnly={aiValuation?.baseMarketValue != null}
+                          className={
+                            aiValuation?.baseMarketValue != null
+                              ? "bg-slate-50 cursor-not-allowed border-green-200"
+                              : "border-green-200"
+                          }
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="currentConditionValue"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="flex items-center gap-2">
+                        Valor en condiciones actuales
+                        {aiValuation && (
+                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">
+                            IA: Q{aiValuation.suggestedValue.toLocaleString()}
+                          </span>
+                        )}
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="Valor en moneda local"
+                          value={formatCurrency(field.value || "")}
+                          onChange={(e) => {
+                            const result = handleCurrencyInput(e.target.value);
+                            field.onChange(result.raw);
+                          }}
+                          onBlur={field.onBlur}
+                          name={field.name}
+                          className="border-green-400"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
 
               <FormField
                 control={form.control}
@@ -613,6 +787,25 @@ export default function VehicleValuation({
                     <FormControl>
                       <Textarea
                         placeholder="Observaciones sobre estado físico, legal o técnico del vehículo"
+                        className="min-h-[100px]"
+                        {...field}
+                        value={field.value || ""}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="inspectionResult"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Observaciones generales de la inspección</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder="Describa el estado general del vehículo y observaciones relevantes"
                         className="min-h-[100px]"
                         {...field}
                         value={field.value || ""}
@@ -736,11 +929,11 @@ export default function VehicleValuation({
           </Card>
 
           {isWizardMode && (
-            <Button type="submit" className="w-full" disabled={isSubmitting}>
-              {isSubmitting ? (
+            <Button type="submit" className="w-full" disabled={isSubmitting || uploadingScanner}>
+              {(isSubmitting || uploadingScanner) ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Enviando inspección...
+                  {uploadingScanner ? "Subiendo scanner..." : "Enviando inspección..."}
                 </>
               ) : (
                 "Finalizar Inspección"

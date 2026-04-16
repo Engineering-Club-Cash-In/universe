@@ -2868,7 +2868,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
             await tx
               .update(cuotas_credito)
               .set({
-                liquidado_inversionistas: false,
+                liquidado_inversionistas: true,
                 fecha_liquidacion_inversionistas: fechaGuatemala,
               })
               .where(inArray(cuotas_credito.cuota_id, uniqueCuotaIds));

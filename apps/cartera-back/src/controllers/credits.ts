@@ -59,6 +59,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         )
       )
       .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+      .innerJoin(asesores, eq(creditos.asesor_id, asesores.asesor_id))
       .limit(1);
 
     if (creditoData.length === 0) {
@@ -90,6 +91,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         return {
           credito: currentCredit.creditos,
           usuario: currentCredit.usuarios,
+          asesor: currentCredit.asesores,
           cancelacion: cancelacion[0],
           flujo: "CANCELADO",
         };
@@ -442,6 +444,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       flujo: "ACTIVO",
       credito: currentCredit.creditos,
       usuario: currentCredit.usuarios,
+      asesor: currentCredit.asesores,
       cuotaActual,
       cuotaActualPagada,
       cuotaActualStatus,

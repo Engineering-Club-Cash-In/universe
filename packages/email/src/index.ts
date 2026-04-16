@@ -319,9 +319,21 @@ export interface SendCompraCarteraAcceptedNotificationParams {
     observaciones?: string;
   }>;
   pool: Array<{
-    inversionista_nombre: string;
-    capital: string;
+    numero_credito_sifco: string;
+    cliente_nombre: string;
+    rows: Array<{
+      inversionista_nombre: string;
+      capital: string;
+    }>;
   }>;
+  operacionInfo?: {
+    inversionistaNombre: string;
+    monto: string;
+    modalidad: string;
+    factura: string;
+    porcentajeInversionista: string;
+    porcentajeCube: string;
+  };
   currencySymbol?: string;
   usuarioNombre?: string;
   usuarioEmail?: string;
@@ -333,6 +345,7 @@ export const sendCompraCarteraAcceptedNotification = async ({
   cc,
   creditos,
   pool,
+  operacionInfo,
   currencySymbol = "Q",
   usuarioNombre,
   usuarioEmail,
@@ -353,14 +366,29 @@ export const sendCompraCarteraAcceptedNotification = async ({
         ? `Buen día, comparto información solicitada, el crédito de <strong>${creditos[0].cliente_nombre}</strong> se convertirá en pool quedando de la siguiente manera:`
         : `Buen día, comparto información solicitada, los siguientes créditos se convertirán en pool quedando de la siguiente manera:`;
 
-    const filasPool = pool
-      .map(
-        (p) => `
-          <tr>
-            <td style="padding:8px 12px;border:1px solid #f59e0b;background:#ffffff;">${p.inversionista_nombre}</td>
-            <td style="padding:8px 12px;border:1px solid #f59e0b;background:#ffffff;text-align:right;">${currencySymbol} ${p.capital}</td>
-          </tr>`
-      )
+    // Una tabla por crédito: encabezado con cliente/SIFCO y filas de inversionistas.
+    const poolsPorCredito = pool
+      .map((grupo) => {
+        const filas = grupo.rows
+          .map(
+            (p) => `
+              <tr>
+                <td style="padding:8px 12px;border:1px solid #f59e0b;background:#ffffff;">${p.inversionista_nombre}</td>
+                <td style="padding:8px 12px;border:1px solid #f59e0b;background:#ffffff;text-align:right;">${currencySymbol} ${p.capital}</td>
+              </tr>`
+          )
+          .join("");
+
+        return `
+          <p style="margin:12px 0 4px 0;font-size:13px;color:#374151;">
+            <strong>${grupo.cliente_nombre}</strong>
+            <span style="color:#6b7280;"> — ${grupo.numero_credito_sifco}</span>
+          </p>
+          <table style="border-collapse:collapse;width:100%;font-size:14px;margin-top:0;margin-bottom:12px;">
+            <tbody>${filas}</tbody>
+          </table>
+        `;
+      })
       .join("");
 
     const filasCreditos = creditos
@@ -374,22 +402,48 @@ export const sendCompraCarteraAcceptedNotification = async ({
       )
       .join("");
 
-    const observacionesUnicas = Array.from(
-      new Set(
-        creditos
-          .map((c) => (c.observaciones ?? "").trim())
-          .filter((o) => o.length > 0)
-      )
+    // Observaciones por crédito (solo incluimos créditos que tengan obs)
+    const creditosConObs = creditos.filter(
+      (c) => (c.observaciones ?? "").trim().length > 0,
     );
 
-    const filasObservaciones = observacionesUnicas
+    const filasObservaciones = creditosConObs
       .map(
-        (o) => `
+        (c) => `
           <tr>
-            <td style="padding:8px 12px;border:1px solid #f59e0b;background:#ffffff;">${o}</td>
+            <td style="padding:8px 12px;border:1px solid #f59e0b;background:#ffffff;vertical-align:top;">
+              <strong>${c.cliente_nombre}</strong><br/>
+              <span style="color:#6b7280;font-size:12px;">${c.numero_credito_sifco}</span>
+            </td>
+            <td style="padding:8px 12px;border:1px solid #f59e0b;background:#ffffff;">${(c.observaciones ?? "").trim()}</td>
           </tr>`
       )
       .join("");
+
+    const headerBlock = operacionInfo
+      ? `
+        <h2 style="margin:8px 0 16px 0;color:#111827;">VENTA DE CARTERA ${operacionInfo.inversionistaNombre}</h2>
+        <table style="border-collapse:collapse;font-size:14px;margin-bottom:16px;">
+          <tr>
+            <td style="padding:4px 12px 4px 0;"><strong>Monto:</strong></td>
+            <td style="padding:4px 0;">${currencySymbol} ${operacionInfo.monto}</td>
+          </tr>
+          <tr>
+            <td style="padding:4px 12px 4px 0;"><strong>Modalidad:</strong></td>
+            <td style="padding:4px 0;">${operacionInfo.modalidad}</td>
+          </tr>
+          <tr>
+            <td style="padding:4px 12px 4px 0;"><strong>Factura:</strong></td>
+            <td style="padding:4px 0;">${operacionInfo.factura}</td>
+          </tr>
+        </table>
+
+        <p style="margin:16px 0 4px 0;">Datos de Negociación son los siguientes.</p>
+        <p style="margin:4px 0;"><strong>Repartición</strong></p>
+        <p style="margin:2px 0;">* Inversionista&nbsp;&nbsp;${operacionInfo.porcentajeInversionista}%</p>
+        <p style="margin:2px 0 16px 0;">* Cube&nbsp;&nbsp;${operacionInfo.porcentajeCube}%</p>
+      `
+      : "";
 
     const html = `
       <div style="font-family:Arial,sans-serif;color:#111827;max-width:720px;margin:0 auto;">
@@ -397,12 +451,12 @@ export const sendCompraCarteraAcceptedNotification = async ({
           <strong style="color:#166534;">✓ Compra de Cartera aceptada</strong>
         </div>
 
+        ${headerBlock}
+
         <p>${intro}</p>
 
-        <h3 style="margin-top:20px;background:#f59e0b;color:#ffffff;padding:8px 12px;border:1px solid #f59e0b;display:inline-block;margin-bottom:0;">Pool resultante</h3>
-        <table style="border-collapse:collapse;width:100%;font-size:14px;margin-top:0;">
-          <tbody>${filasPool}</tbody>
-        </table>
+        <h3 style="margin-top:20px;background:#f59e0b;color:#ffffff;padding:8px 12px;border:1px solid #f59e0b;display:inline-block;margin-bottom:0;">Pool resultante por crédito</h3>
+        ${poolsPorCredito}
 
         <h3 style="margin-top:24px;background:#f59e0b;color:#ffffff;padding:8px 12px;border:1px solid #f59e0b;display:inline-block;margin-bottom:0;">Créditos</h3>
         <table style="border-collapse:collapse;width:100%;font-size:14px;margin-top:0;">
@@ -417,10 +471,16 @@ export const sendCompraCarteraAcceptedNotification = async ({
         </table>
 
         ${
-          observacionesUnicas.length > 0
+          creditosConObs.length > 0
             ? `
           <h3 style="margin-top:24px;background:#f59e0b;color:#ffffff;padding:8px 12px;border:1px solid #f59e0b;display:inline-block;margin-bottom:0;">Observaciones</h3>
           <table style="border-collapse:collapse;width:100%;font-size:14px;margin-top:0;">
+            <thead>
+              <tr>
+                <th style="padding:8px 12px;border:1px solid #f59e0b;background:#f59e0b;color:#ffffff;text-align:left;">Crédito</th>
+                <th style="padding:8px 12px;border:1px solid #f59e0b;background:#f59e0b;color:#ffffff;text-align:left;">Observación</th>
+              </tr>
+            </thead>
             <tbody>${filasObservaciones}</tbody>
           </table>
         `
@@ -444,10 +504,13 @@ export const sendCompraCarteraAcceptedNotification = async ({
       </div>
     `;
 
-    const subjectCliente =
-      creditos.length === 1
+    // El subject prioriza el nombre del inversionista (si viene).
+    // Si no hay operacionInfo, cae al nombre del cliente o la cantidad.
+    const subjectLabel =
+      operacionInfo?.inversionistaNombre ??
+      (creditos.length === 1
         ? creditos[0].cliente_nombre
-        : `${creditos.length} créditos`;
+        : `${creditos.length} créditos`);
 
     const validCc = (cc ?? []).filter((email) => {
       try { emailSchema.parse(email); return true; } catch { return false; }
@@ -457,7 +520,7 @@ export const sendCompraCarteraAcceptedNotification = async ({
       from: `Club Cash In <no-reply@${domain}>`,
       to: validEmails,
       cc: validCc.length > 0 ? validCc : undefined,
-      subject: `Compra de Cartera aceptada - ${subjectCliente}`,
+      subject: `Compra de Cartera aceptada - ${subjectLabel}`,
       html,
     });
 

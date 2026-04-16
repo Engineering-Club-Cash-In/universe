@@ -1,4 +1,6 @@
+import { sendPlainEmail } from "@cci/email";
 import { ORPCError } from "@orpc/server";
+import { SMSClient } from "@repo/sms";
 import { and, asc, count, desc, eq, gte, ilike, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
@@ -15,6 +17,7 @@ import {
 	metodoContactoEnum,
 	recuperacionesVehiculo,
 } from "../db/schema/cobros";
+import { cobrosSendLogs } from "../db/schema/cobros-send-logs";
 import {
 	clients,
 	leads,
@@ -33,6 +36,7 @@ import {
 	crmOrCobrosProcedure,
 } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
+import { sendWhatsappTemplate } from "../lib/simpletech";
 import { carteraBackClient } from "../services/cartera-back-client";
 import {
 	createPagoInCarteraBack,
@@ -2811,4 +2815,249 @@ export const cobrosRouter = {
 
 			return updated;
 		}),
+
+	// ========================================================================
+	// ENVÍO DE MENSAJES (SMS / WhatsApp / Email)
+	// ========================================================================
+
+	enviarWhatsappCobros: cobrosProcedure
+		.input(
+			z.object({
+				telefono: z.string().min(8, "Teléfono inválido"),
+				mensaje: z.string().min(1, "Mensaje requerido"),
+				casoCobroId: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const numeroSifco = await resolveSifcoFromCaso(input.casoCobroId);
+			const result = await sendWhatsappTemplate({
+				phone: input.telefono,
+				message: input.mensaje,
+				logPrefix: "[SimpleTech][cobros]",
+			});
+
+			await persistCobrosSendLog({
+				numeroCreditoSifco: numeroSifco,
+				canal: "whatsapp",
+				telefono: input.telefono,
+				mensaje: input.mensaje,
+				result: result.success
+					? {
+							success: true,
+							providerResponse: {
+								templateMessageId: result.templateMessageId,
+							},
+						}
+					: { success: false, errorMessage: result.error },
+				createdBy: context.userId,
+			});
+
+			if (!result.success) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Error enviando WhatsApp: ${result.error ?? "desconocido"}`,
+				});
+			}
+
+			return {
+				success: true,
+				templateMessageId: result.templateMessageId,
+				casoCobroId: input.casoCobroId,
+			};
+		}),
+
+	enviarEmailCobros: cobrosProcedure
+		.input(
+			z.object({
+				destinatario: z.string().email("Email inválido"),
+				asunto: z.string().min(1, "Asunto requerido").max(200),
+				mensaje: z.string().min(1, "Mensaje requerido"),
+				casoCobroId: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const escapeHtml = (s: string) =>
+				s
+					.replace(/&/g, "&amp;")
+					.replace(/</g, "&lt;")
+					.replace(/>/g, "&gt;")
+					.replace(/"/g, "&quot;")
+					.replace(/'/g, "&#039;");
+
+			const html = `<div style="font-family:Arial,sans-serif;color:#111827;font-size:14px;line-height:1.5;white-space:pre-wrap;">${escapeHtml(
+				input.mensaje,
+			)}</div>`;
+
+			const numeroSifco = await resolveSifcoFromCaso(input.casoCobroId);
+
+			let sendError: string | null = null;
+			let emailId: string | undefined;
+			try {
+				const result = await sendPlainEmail(
+					input.destinatario,
+					input.asunto,
+					html,
+				);
+
+				if (!result.success) {
+					sendError =
+						result.error && typeof result.error === "object"
+							? JSON.stringify(result.error)
+							: String(result.error ?? "desconocido");
+				} else {
+					emailId = result.data?.id;
+				}
+			} catch (error) {
+				sendError =
+					error instanceof Error ? error.message : String(error);
+			}
+
+			await persistCobrosSendLog({
+				numeroCreditoSifco: numeroSifco,
+				canal: "email",
+				email: input.destinatario,
+				asunto: input.asunto,
+				mensaje: input.mensaje,
+				result: sendError
+					? { success: false, errorMessage: sendError }
+					: { success: true, providerResponse: { emailId } },
+				createdBy: context.userId,
+			});
+
+			if (sendError) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Error enviando email: ${sendError}`,
+				});
+			}
+
+			return {
+				success: true,
+				emailId,
+				casoCobroId: input.casoCobroId,
+			};
+		}),
+
+	enviarSmsCobros: cobrosProcedure
+		.input(
+			z.object({
+				telefono: z
+					.string()
+					.min(8, "Teléfono inválido")
+					.transform((v) => v.replace(/[^0-9]/g, "")),
+				mensaje: z.string().min(1, "Mensaje requerido").max(480),
+				casoCobroId: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const token = process.env.SMS_TOKEN;
+			const apiKeyRaw = process.env.SMS_API_KEY;
+			if (!token || !apiKeyRaw) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Credenciales SMS no configuradas",
+				});
+			}
+
+			const smsClient = new SMSClient({
+				token,
+				apiKey: Number.parseInt(apiKeyRaw, 10),
+			});
+
+			const numeroSifco = await resolveSifcoFromCaso(input.casoCobroId);
+
+			let sendError: string | null = null;
+			let mailingId: number | undefined;
+			try {
+				const result = await smsClient.send({
+					msisdns: [input.telefono],
+					message: input.mensaje,
+					country: "GT",
+					tag: "cobros-contacto",
+					dial: 50237633199,
+				});
+
+				if (!result.success) {
+					sendError =
+						result.error?.hint ||
+						result.error?.message ||
+						"desconocido";
+				} else {
+					mailingId = result.mailingId;
+				}
+			} catch (error) {
+				sendError =
+					error instanceof Error ? error.message : String(error);
+			}
+
+			await persistCobrosSendLog({
+				numeroCreditoSifco: numeroSifco,
+				canal: "sms",
+				telefono: input.telefono,
+				mensaje: input.mensaje,
+				result: sendError
+					? { success: false, errorMessage: sendError }
+					: { success: true, providerResponse: { mailingId } },
+				createdBy: context.userId,
+			});
+
+			if (sendError) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Error enviando SMS: ${sendError}`,
+				});
+			}
+
+			return {
+				success: true,
+				mailingId,
+				casoCobroId: input.casoCobroId,
+			};
+		}),
 };
+
+/**
+ * Resuelve el número SIFCO del caso de cobros (si existe).
+ */
+async function resolveSifcoFromCaso(
+	casoCobroId: string | undefined,
+): Promise<string | null> {
+	if (!casoCobroId) return null;
+	const [caso] = await db
+		.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
+		.from(casosCobros)
+		.where(eq(casosCobros.id, casoCobroId))
+		.limit(1);
+	return caso?.numeroCreditoSifco ?? null;
+}
+
+/**
+ * Inserta una fila en cobros_send_logs. Nunca propaga errores: si el log falla
+ * (por un problema transitorio de DB) no queremos romper el flujo del envío.
+ */
+async function persistCobrosSendLog(params: {
+	numeroCreditoSifco: string | null;
+	canal: "sms" | "email" | "whatsapp";
+	telefono?: string;
+	email?: string;
+	asunto?: string;
+	mensaje: string;
+	createdBy: string;
+	result:
+		| { success: true; providerResponse?: Record<string, unknown> }
+		| { success: false; errorMessage?: string; providerResponse?: Record<string, unknown> };
+}) {
+	try {
+		await db.insert(cobrosSendLogs).values({
+			numeroCreditoSifco: params.numeroCreditoSifco,
+			canal: params.canal,
+			telefono: params.telefono,
+			email: params.email,
+			asunto: params.asunto,
+			mensaje: params.mensaje,
+			status: params.result.success ? "sent" : "failed",
+			errorMessage: params.result.success ? null : params.result.errorMessage,
+			providerResponse: params.result.providerResponse,
+			createdBy: params.createdBy,
+			sentAt: params.result.success ? new Date() : null,
+		});
+	} catch (err) {
+		console.error("[cobros_send_logs] Error guardando log:", err);
+	}
+}

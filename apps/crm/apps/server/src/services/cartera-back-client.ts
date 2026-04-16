@@ -555,6 +555,19 @@ export class CarteraBackClient {
 	}
 
 	// ========================================================================
+	// NIT VALIDATION
+	// ========================================================================
+
+	async consultarNit(
+		nit: string,
+	): Promise<{ success: boolean; data?: { nit: string; nombre: string | null }; mensaje: string }> {
+		return this.request("/api/dte/consultarNit", {
+			method: "POST",
+			body: JSON.stringify({ nit }),
+		});
+	}
+
+	// ========================================================================
 	// BANCOS (BANKS)
 	// ========================================================================
 
@@ -930,6 +943,68 @@ export class CarteraBackClient {
 			method: "PATCH",
 		});
 		this.cache.invalidate("investor-documents");
+		return response;
+	}
+
+	// ========================================================================
+	// CREAR INVERSIONISTA
+	// ========================================================================
+
+	async createInvestor(input: {
+		inversionista_id?: number;
+		nombre: string;
+		dpi?: number | null;
+		email?: string | null;
+		emite_factura?: boolean;
+		banco?: number | null;
+		tipo_cuenta?: string | null;
+		numero_cuenta?: string | null;
+		tipo_reinversion?: string | null;
+		monto_reinversion?: number | null;
+		moneda?: string;
+	}): Promise<{ message: string; data: { inversionista_id: number; nombre: string; [key: string]: any }[] }> {
+		const response = await this.request<{
+			message: string;
+			data: { inversionista_id: number; nombre: string; [key: string]: any }[];
+		}>("/investor", {
+			method: "POST",
+			body: JSON.stringify({
+				...(input.inversionista_id && { inversionista_id: input.inversionista_id }),
+				nombre: input.nombre,
+				dpi: input.dpi ?? null,
+				email: input.email ?? null,
+				emite_factura: input.emite_factura ?? false,
+				banco: input.banco ?? null,
+				tipo_cuenta: input.tipo_cuenta ?? null,
+				numero_cuenta: input.numero_cuenta ?? null,
+				tipo_reinversion: input.tipo_reinversion ?? "sin_reinversion",
+				monto_reinversion: input.monto_reinversion ?? null,
+				moneda: input.moneda ?? "quetzales",
+			}),
+		});
+		this.cache.invalidate("investor");
+		return response;
+	}
+
+	// ========================================================================
+	// COMPRA DE CARTERA
+	// ========================================================================
+
+	async compraCartera(input: {
+		inversionista_id: number;
+		monto_aportado: number;
+		tipo_operacion: "compra_cartera";
+		porcentaje_inversion?: number;
+		porcentaje_cash_in?: number;
+		fecha_inicio_participacion?: string;
+	}): Promise<{ success: boolean; message: string }> {
+		const response = await this.request<{
+			success: boolean;
+			message: string;
+		}>("/agregar-inversionista-credito", {
+			method: "POST",
+			body: JSON.stringify(input),
+		});
 		return response;
 	}
 

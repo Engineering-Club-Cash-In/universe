@@ -7,8 +7,10 @@ import { teamMembers } from "../db/schema/team-members";
 import { user } from "../db/schema/auth";
 import { areas } from "../db/schema/areas";
 import { departments } from "../db/schema/departments";
-import { eq, and, or } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import * as z from "zod";
+
+type UserRole = "super_admin" | "department_manager" | "area_lead" | "employee" | "viewer";
 
 const MonthlyGoalSchema = z.object({
 	id: z.string().uuid(),
@@ -33,6 +35,7 @@ const CreateMonthlyGoalSchema = MonthlyGoalSchema.omit({
 });
 
 const UpdateMonthlyGoalSchema = z.object({
+	targetValue: z.string().optional(),
 	achievedValue: z.string().optional(),
 	description: z.string().optional(),
 	status: z.enum(["pending", "in_progress", "completed"]).optional(),
@@ -206,7 +209,50 @@ export const updateMonthlyGoal = protectedProcedure
 			data: UpdateMonthlyGoalSchema,
 		})
 	)
-	.handler(async ({ input }) => {
+	.handler(async ({ input, context }) => {
+		const currentUser = context.session!.user;
+		const goalScope = await db
+			.select({
+				goalId: monthlyGoals.id,
+				userId: user.id,
+				departmentManagerId: departments.managerId,
+				areaLeadId: areas.leadId,
+			})
+			.from(monthlyGoals)
+			.leftJoin(teamMembers, eq(monthlyGoals.teamMemberId, teamMembers.id))
+			.leftJoin(user, eq(teamMembers.userId, user.id))
+			.leftJoin(areas, eq(teamMembers.areaId, areas.id))
+			.leftJoin(departments, eq(areas.departmentId, departments.id))
+			.where(eq(monthlyGoals.id, input.id))
+			.limit(1);
+
+		if (!goalScope[0]) {
+			throw new Error("Monthly goal not found");
+		}
+
+		const canAccessGoal = (() => {
+			switch (currentUser.role as UserRole) {
+				case "super_admin":
+					return true;
+				case "department_manager":
+					return goalScope[0].departmentManagerId === currentUser.id;
+				case "area_lead":
+					return goalScope[0].areaLeadId === currentUser.id;
+				case "employee":
+					return goalScope[0].userId === currentUser.id;
+				default:
+					return false;
+			}
+		})();
+
+		if (!canAccessGoal) {
+			throw new ORPCError("FORBIDDEN", { message: "No tienes permisos para editar esta meta" });
+		}
+
+		if (input.data.targetValue !== undefined && !["super_admin", "department_manager", "area_lead"].includes(currentUser.role)) {
+			throw new ORPCError("FORBIDDEN", { message: "No tienes permisos para editar el objetivo de esta meta" });
+		}
+
 		const [updatedGoal] = await db
 			.update(monthlyGoals)
 			.set(input.data)
@@ -243,6 +289,7 @@ export const calculateGoalProgress = protectedProcedure
 			.select({
 				targetValue: monthlyGoals.targetValue,
 				achievedValue: monthlyGoals.achievedValue,
+				isInverse: goalTemplates.isInverse,
 				successThreshold: goalTemplates.successThreshold,
 				warningThreshold: goalTemplates.warningThreshold,
 			})
@@ -257,7 +304,20 @@ export const calculateGoalProgress = protectedProcedure
 
 		const target = parseFloat(goal[0].targetValue);
 		const achieved = parseFloat(goal[0].achievedValue);
-		const percentage = target > 0 ? (achieved / target) * 100 : 0;
+		const isInverse = goal[0].isInverse;
+		let percentage = 0;
+
+		if (isInverse) {
+			if (target === 0 && achieved === 0) {
+				percentage = 100;
+			} else if (target > 0 && achieved <= target) {
+				percentage = 100;
+			} else if (target > 0 && achieved > target) {
+				percentage = Math.max((target / achieved) * 100, 0);
+			}
+		} else if (target > 0) {
+			percentage = (achieved / target) * 100;
+		}
 
 		const successThreshold = parseFloat(goal[0].successThreshold || "80");
 		const warningThreshold = parseFloat(goal[0].warningThreshold || "50");

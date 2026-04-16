@@ -192,7 +192,7 @@ function AnalysisPage() {
 		const timer = setTimeout(() => {
 			setDebouncedSearch(searchTerm);
 			setPage(0); // Reset to first page on search
-		}, 300);
+		}, 600);
 		return () => clearTimeout(timer);
 	}, [searchTerm]);
 
@@ -238,6 +238,7 @@ function AnalysisPage() {
 	const {
 		data: opportunitiesData,
 		isLoading,
+		isFetching,
 		refetch: loadOpportunities,
 	} = useQuery({
 		queryKey: ["getOpportunitiesForAnalysis", page, pageSize, debouncedSearch],
@@ -247,6 +248,7 @@ function AnalysisPage() {
 				offset: page * pageSize,
 				search: debouncedSearch || undefined,
 			}),
+		placeholderData: (prev) => prev,
 	});
 
 	const opportunities = opportunitiesData?.data ?? [];
@@ -365,7 +367,7 @@ function AnalysisPage() {
 		}
 	};
 
-	if (isLoading) {
+	if (isLoading && !opportunitiesData) {
 		return (
 			<div className="container mx-auto py-8">
 				<Card>
@@ -422,7 +424,7 @@ function AnalysisPage() {
 								<div className="relative max-w-sm flex-1">
 									<Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
 									<Input
-										placeholder="Buscar por nombre, placa..."
+										placeholder="Buscar por nombre, placa o ID..."
 										value={searchTerm}
 										onChange={(e) => {
 											const value = e.target.value;
@@ -433,6 +435,12 @@ function AnalysisPage() {
 								</div>
 							</div>
 
+							{isFetching && (
+								<div className="mb-4 flex items-center gap-2 text-muted-foreground text-sm">
+									<RefreshCw className="h-3 w-3 animate-spin" />
+									Buscando...
+								</div>
+							)}
 							{opportunities.length === 0 ? (
 								<Alert>
 									<AlertCircle className="h-4 w-4" />

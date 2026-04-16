@@ -4,12 +4,17 @@ import { useIsMobile } from "@/hooks";
 import { motion, AnimatePresence } from "framer-motion";
 
 const TERMS_CONTENT = `
-Autorizo voluntariamente que la información recopilada y/o proporcionada por entidades públicas o
-privadas y la generada de relaciones contractuales, crediticias o comerciales, sea reportada a entidades
-que prestan servicios de información, centrales de riesgo o burós de crédito para ser tratada, almacenada
-o transferida; y autorizo expresamente a las entidades que prestan servicios de información,
-centrales de riesgo y burós de crédito a recopilar, difundir o comercializar reportes
- o estudios que contengan información sobre mi persona.
+CLAUSULA DE CONSENTIMIENTO DEL CIUDADANO
+
+1. Autorizo expresamente a CREACION E IMAGEN, SOCIEDAD ANONIMA para que solicite, recopile, almacene, intercambie y utilice toda la informacion relacionada con mi historial crediticio, referencias personales, laborales, comerciales, financieras y patrimoniales, ante cualquier entidad publica o privada, buros de credito, centrales de riesgo, u otras fuentes de informacion, con el proposito de evaluar mi solicitud de credito y durante la vigencia del mismo.
+
+2. Autorizo a CREACION E IMAGEN, SOCIEDAD ANONIMA para que comparta mi informacion crediticia y financiera con terceros que tengan un interes legitimo, incluyendo pero no limitado a: entidades financieras, aseguradoras, empresas de cobro, y cualquier otra entidad que participe en la evaluacion, otorgamiento, administracion o recuperacion del credito solicitado.
+
+3. Declaro que toda la informacion proporcionada en esta solicitud es veridica y completa. Reconozco que cualquier falsedad u omision en la informacion proporcionada puede ser causa de rechazo de mi solicitud o de rescision del contrato de credito, sin perjuicio de las acciones legales que pudieran corresponder.
+
+4. Me comprometo a notificar a CREACION E IMAGEN, SOCIEDAD ANONIMA de cualquier cambio en mi informacion personal, laboral, financiera o patrimonial que pueda afectar las condiciones bajo las cuales se otorgo el credito.
+
+Al aceptar este documento y continuar con el proceso, confirmo que he leido, entendido y aceptado todos los terminos anteriores de forma libre y voluntaria.
 `;
 
 interface ModalTermsProps {

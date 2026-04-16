@@ -9,6 +9,7 @@ import {
   Section,
   Text,
   Hr,
+  Button,
 } from '@react-email/components';
 
 interface NewCreditEmailProps {
@@ -20,62 +21,14 @@ interface NewCreditEmailProps {
   interestRate: string;
   investors: string[];
   currencySymbol?: string;
+  vehiculoMarca?: string;
+  vehiculoLinea?: string;
+  vehiculoModelo?: string;
+  vehiculoPlaca?: string;
+  vehiculoVin?: string;
+  montoAsegurado?: number;
+  opportunityId?: string;
 }
-
-export const NewCreditEmail = ({
-  clientName,
-  creditNumber,
-  capital,
-  plazo,
-  cuota,
-  interestRate,
-  investors,
-  currencySymbol = 'Q.',
-}: NewCreditEmailProps) => (
-  <Html>
-    <Head />
-    <Preview>Nuevo Crédito Creado - {creditNumber}</Preview>
-    <Body style={main}>
-      <Container style={container}>
-        <Section style={header}>
-          <Text style={logo}>CLUB CASH IN</Text>
-        </Section>
-        <Section style={content}>
-          <Heading style={h1}>Nuevo Crédito Creado</Heading>
-          <Text style={text}>
-            Se ha registrado un nuevo crédito en el sistema.
-          </Text>
-
-          <Section style={detailsContainer}>
-            <Text style={detailItem}><strong>Cliente:</strong> {clientName}</Text>
-            <Text style={detailItem}><strong>No. Crédito:</strong> {creditNumber}</Text>
-            <Text style={detailItem}><strong>Capital:</strong> {currencySymbol}{capital}</Text>
-            <Text style={detailItem}><strong>Plazo:</strong> {plazo} meses</Text>
-            <Text style={detailItem}><strong>Cuota:</strong> {currencySymbol}{cuota}</Text>
-            <Text style={detailItem}><strong>Tasa de Interés:</strong> {interestRate}%</Text>
-          </Section>
-
-          {investors.length > 0 && (
-            <Section style={detailsContainer}>
-              <Text style={detailItem}><strong>Inversionistas:</strong></Text>
-              {investors.map((inv, i) => (
-                <Text key={i} style={investorItem}>• {inv}</Text>
-              ))}
-            </Section>
-          )}
-
-          <Hr style={hr} />
-
-          <Text style={footer}>
-            © {new Date().getFullYear()} Club Cash In. Todos los derechos reservados.
-          </Text>
-        </Section>
-      </Container>
-    </Body>
-  </Html>
-);
-
-export default NewCreditEmail;
 
 const main = {
   backgroundColor: '#f6f9fc',
@@ -148,9 +101,128 @@ const hr = {
   margin: '20px 0',
 };
 
+const innerHr = {
+  borderColor: '#e6ebf1',
+  margin: '10px 0',
+};
+
+const buttonContainer = {
+  textAlign: 'center' as const,
+  margin: '30px 0',
+};
+
+const button = {
+  backgroundColor: '#004aad',
+  borderRadius: '5px',
+  color: '#fff',
+  fontSize: '16px',
+  fontWeight: 'bold',
+  textDecoration: 'none',
+  textAlign: 'center' as const,
+  display: 'inline-block',
+  padding: '12px 24px',
+};
+
 const footer = {
   color: '#8898aa',
   fontSize: '12px',
   textAlign: 'center' as const,
   margin: '8px 0',
 };
+
+export const NewCreditEmail = ({
+  clientName,
+  creditNumber,
+  capital,
+  plazo,
+  cuota,
+  interestRate,
+  investors,
+  currencySymbol = 'Q.',
+  vehiculoMarca,
+  vehiculoLinea,
+  vehiculoModelo,
+  vehiculoPlaca,
+  vehiculoVin,
+  montoAsegurado,
+  opportunityId,
+}: NewCreditEmailProps) => {
+  const hasVehicleInfo = vehiculoMarca || vehiculoLinea || vehiculoModelo || vehiculoPlaca || vehiculoVin;
+  const oportunidadUrl = `https://crm.s3.devteamatcci.site/crm/opportunities?opportunityId=${opportunityId}&tab=create`;
+  
+  return (
+  <Html>
+    <Head />
+    <Preview>Nuevo Crédito Creado - {creditNumber}</Preview>
+    <Body style={main}>
+      <Container style={container}>
+        <Section style={header}>
+          <Text style={logo}>CLUB CASH IN</Text>
+        </Section>
+        <Section style={content}>
+          <Heading style={h1}>Nuevo Crédito Creado</Heading>
+          <Text style={text}>
+            Se ha registrado un nuevo crédito en el sistema.
+          </Text>
+
+          <Section style={detailsContainer}>
+            <Text style={detailItem}><strong>Cliente:</strong> {clientName}</Text>
+            <Text style={detailItem}><strong>No. Crédito:</strong> {creditNumber}</Text>
+            <Text style={detailItem}><strong>Capital:</strong> {currencySymbol}{capital}</Text>
+            <Text style={detailItem}><strong>Plazo:</strong> {plazo} meses</Text>
+            <Text style={detailItem}><strong>Cuota:</strong> {currencySymbol}{cuota}</Text>
+            <Text style={detailItem}><strong>Tasa de Interés:</strong> {interestRate}%</Text>
+          </Section>
+
+          {investors.length > 0 && (
+            <Section style={detailsContainer}>
+              <Text style={detailItem}><strong>Inversionistas:</strong></Text>
+              {investors.map((inv, i) => (
+                <Text key={i} style={investorItem}>• {inv}</Text>
+              ))}
+            </Section>
+          )}
+
+          {(hasVehicleInfo || montoAsegurado !== undefined) && (
+            <Section style={detailsContainer}>
+              <Text style={detailItem}><strong>Información del Vehículo y Seguro</strong></Text>
+              <Hr style={innerHr} />
+              {vehiculoMarca && <Text style={detailItem}><strong>Marca:</strong> {vehiculoMarca}</Text>}
+              {vehiculoLinea && <Text style={detailItem}><strong>Línea:</strong> {vehiculoLinea}</Text>}
+              {vehiculoModelo && <Text style={detailItem}><strong>Modelo:</strong> {vehiculoModelo}</Text>}
+              {vehiculoPlaca && <Text style={detailItem}><strong>Placa:</strong> {vehiculoPlaca}</Text>}
+              {vehiculoVin && <Text style={detailItem}><strong>VIN:</strong> {vehiculoVin}</Text>}
+              {montoAsegurado !== undefined && (
+                <Text style={detailItem}>
+                  <strong>Monto Asegurado:</strong> {currencySymbol}{montoAsegurado.toLocaleString('es-GT', { minimumFractionDigits: 2 })}
+                </Text>
+              )}
+            </Section>
+          )}
+
+          {opportunityId && (
+            <Section style={buttonContainer}>
+              <Button 
+                href={oportunidadUrl}
+                style={button}
+              >
+                Ver Oportunidad en CRM
+              </Button>
+            </Section>
+          )}
+
+          <Hr style={hr} />
+
+          <Text style={footer}>
+            © {new Date().getFullYear()} Club Cash In. Todos los derechos reservados.
+          </Text>
+        </Section>
+      </Container>
+    </Body>
+  </Html>
+  );
+};
+
+export default NewCreditEmail;
+
+

@@ -1,11 +1,13 @@
 import { useState, useRef, useEffect, forwardRef, useImperativeHandle } from "react";
 import { useInspection } from "../contexts/InspectionContext";
 import { validateVehiclePlate } from "../services/vehicles";
-import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { toast, Toaster } from "sonner";
-import { Sparkles } from "lucide-react";
+import { Sparkles, Search, Check, FileSearch, History, Car, Loader2, ShieldAlert, HelpCircle } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { searchInspectedVehicles } from "../services/vehicles";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,6 +37,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
 import VehicleRegistrationOCR from "../components/vehicle-registration-ocr";
 const formSchema = z.object({
   // Section 1: Technician Info
@@ -54,6 +61,8 @@ const formSchema = z.object({
   origin: z.enum(["Nacional", "Importado"], { message: "La procedencia es requerida" }),
   vehicleType: z.string({ message: "El tipo de vehículo es requerido" }).min(1, { message: "El tipo de vehículo es requerido" }),
   color: z.string({ message: "El color es requerido" }).min(1, { message: "El color es requerido" }),
+  vehicleUse: z.string().optional(),
+  seats: z.string().optional(),
   cylinders: z.string({ message: "Los cilindros son requeridos" })
     .min(1, { message: "Los cilindros son requeridos" })
     .refine((val) => {
@@ -67,8 +76,13 @@ const formSchema = z.object({
 
   // Section 3: Test Drive
   testDrive: z.enum(["Sí", "No"], { message: "Esta información es requerida" }),
-  noTestDriveReason: z.string().optional(),
+  noTestDriveReason: z.string(),
+
+  vinVerification: z.boolean(),
+  vehicleId: z.string().optional(),
 });
+
+type FormValues = z.infer<typeof formSchema>;
 
 interface VehicleInspectionFormProps {
   onComplete?: () => void;
@@ -89,9 +103,19 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
 
   // Check if dev mode is enabled
   const isDevMode = import.meta.env.VITE_DEV_MODE === 'TRUE';
+  
+  const [inspectionType, setInspectionType] = useState<"new" | "existing">("new");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [duplicateVehicle, setDuplicateVehicle] = useState<any | null>(null);
+  const [selectedVehicle, setSelectedVehicle] = useState<any | null>(null);
+  const [mismatchedFields, setMismatchedFields] = useState<string[]>([]);
+  const [comparisonMismatches, setComparisonMismatches] = useState<string[]>([]);
+  const [rawOcrData, setRawOcrData] = useState<Partial<FormValues> | null>(null);
 
-  const form = useForm<z.infer<typeof formSchema>>({
-    resolver: standardSchemaResolver(formSchema),
+  const form = useForm<FormValues>({
+    resolver: zodResolver(formSchema),
     defaultValues: {
       technicianName: "",
       inspectionDate: undefined,
@@ -107,6 +131,8 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       origin: undefined,
       vehicleType: "",
       color: "",
+      vehicleUse: "",
+      seats: "",
       cylinders: "",
       engineCC: "",
       fuelType: undefined,
@@ -114,6 +140,8 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       traction: undefined,
       testDrive: undefined,
       noTestDriveReason: "",
+      vinVerification: false,
+      vehicleId: "",
       ...formData,
     },
   });
@@ -121,6 +149,22 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
   // Exponer método de validación para el wizard
   useImperativeHandle(ref, () => ({
     triggerValidation: async () => {
+      const values = form.getValues();
+      console.log("=== triggerValidation debug ===");
+      console.log("vinVerification:", values.vinVerification);
+      
+      // Validación manual de seguridad
+      if (!values.vinVerification) {
+        form.setError("vinVerification", {
+          type: "manual",
+          message: "Debe confirmar la revisión de la información"
+        });
+        toast.error("Confirmación requerida: Marque la casilla de revisión de información");
+        const element = document.getElementById("vin-verification-container");
+        element?.scrollIntoView({ behavior: "smooth", block: "center" });
+        return false;
+      }
+
       const result = await form.trigger();
       if (!result) {
         toast.error("Por favor complete los campos marcados en rojo");
@@ -134,8 +178,8 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       }
 
       // Validar también la placa contra duplicados antes de avanzar
-      const values = form.getValues();
-      const validationResult = await validateVehiclePlate(values.licensePlate, values.vinNumber);
+      // Pasamos el vehicleId para que el servidor ignore este mismo registro si es una actualización
+      const validationResult = await validateVehiclePlate(values.licensePlate, values.vinNumber, values.vehicleId);
       if (!validationResult.success || !validationResult.data?.valid) {
         toast.error(validationResult.data?.message || "La placa ya está en uso con otro chasis.");
         return false;
@@ -145,7 +189,147 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       setFormData(values);
       return true;
     }
-  }));
+  }), [form, setFormData]);
+
+  const handleCheckDuplicate = async (overridePlate?: string, overrideVin?: string, ocrToMatch?: Partial<FormValues>) => {
+    const plate = overridePlate || form.getValues("licensePlate");
+    const vin = overrideVin || form.getValues("vinNumber");
+
+    if (!plate && !vin) {
+      setDuplicateVehicle(null);
+      return;
+    }
+
+    const result = await validateVehiclePlate(plate, vin, form.getValues("vehicleId"));
+    if (result.success && result.data?.alreadyExists) {
+      const vehicle = result.data.vehicle;
+      if (!vehicle) return;
+
+      setDuplicateVehicle(vehicle);
+      
+      const ocrSource = ocrToMatch || rawOcrData || undefined;
+      
+      // Auto-cargar datos y comparar
+      selectVehicle(vehicle, ocrSource);
+      
+      if (ocrSource) {
+        recalculateMismatches(vehicle, ocrSource);
+      } else {
+        // Marcamos todo como editable si no hay OCR (entrada manual)
+        setMismatchedFields(Object.keys(form.getValues()));
+      }
+      
+      toast.info(`Sincronización automática: Datos cargados para ${vehicle.licensePlate}`);
+    } else {
+      setDuplicateVehicle(null);
+      setSelectedVehicle(null);
+      setMismatchedFields([]);
+      setComparisonMismatches([]);
+    }
+  };
+
+  const recalculateMismatches = (dbVehicle: any, ocr: Partial<FormValues>) => {
+    const mismatches: string[] = [];
+    const fieldsToCompare: Array<keyof FormValues> = [
+      'vehicleMake', 'vehicleModel', 'vehicleYear', 'licensePlate', 
+      'vinNumber', 'motorNumber', 'color', 'vehicleType', 'cylinders', 'engineCC',
+      'vehicleUse', 'seats'
+    ];
+
+    // Helper to normalize values for comparison
+    const normalize = (val: any) => {
+      if (val === null || val === undefined) return "";
+      return val.toString().trim().toUpperCase().replace(/^0+/, ''); // Remove leading zeros and normalize case
+    };
+
+    fieldsToCompare.forEach(field => {
+      // Map form field names to database vehicle property names
+      const dbProp = field === 'vehicleMake' ? 'make' : 
+                    field === 'vehicleModel' ? 'model' : 
+                    field === 'vehicleYear' ? 'year' :
+                    field === 'vehicleUse' ? 'vehicleUse' : // Fix potential naming diff
+                    field;
+      
+      const dbValue = normalize(dbVehicle[dbProp]);
+      const ocrValue = normalize(ocr[field]);
+
+      // Solo marcamos como "discrepancia" (alerta azul) si los valores normalizados son distintos
+      // y si el OCR realmente pudo leer algo
+      if (ocrValue && dbValue !== ocrValue) {
+        mismatches.push(field);
+      }
+    });
+
+    setComparisonMismatches(mismatches);
+
+    // Campos que siempre requieren revisión fresca del técnico (SIEMPRE EDITABLES)
+    const alwaysEditable: Array<keyof FormValues> = [
+      'technicianName', 'inspectionDate', 'kmMileage', 'milesMileage', 
+      'fuelType', 'transmission', 'traction', 'testDrive', 'noTestDriveReason',
+      'vinVerification', 'trim', 'origin'
+    ];
+    
+    // El técnico puede editar:
+    // 1. Las discrepancias reales detectadas (incluyendo Uso y Asientos si son lógicamente distintos)
+    // 2. Los campos que siempre deben ser editables
+    setMismatchedFields([...mismatches, ...alwaysEditable]);
+  };
+
+  const handleSearch = async (query: string) => {
+    setSearchTerm(query);
+    if (query.length < 3) {
+      setSearchResults([]);
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      const result = await searchInspectedVehicles(query);
+      if (result.success) {
+        setSearchResults(result.data || []);
+      }
+    } catch (error) {
+      console.error("Error searching vehicles:", error);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const selectVehicle = (vehicle: any, ocrData?: Partial<FormValues>) => {
+    // Current OCR data if available to fill gaps in DB
+    const ocr = ocrData || rawOcrData || {};
+
+    form.reset({
+      ...form.getValues(),
+      vehicleId: vehicle.id,
+      vehicleMake: vehicle.make || ocr.vehicleMake || "",
+      vehicleModel: vehicle.model || ocr.vehicleModel || "",
+      trim: vehicle.trim || ocr.trim || "",
+      vehicleYear: vehicle.year?.toString() || ocr.vehicleYear || "",
+      licensePlate: vehicle.licensePlate || ocr.licensePlate || "",
+      vinNumber: vehicle.vinNumber || ocr.vinNumber || "",
+      motorNumber: vehicle.motorNumber || ocr.motorNumber || "",
+      vehicleType: vehicle.vehicleType || ocr.vehicleType || "",
+      color: vehicle.color || ocr.color || "",
+      vehicleUse: vehicle.vehicleUse || ocr.vehicleUse || "",
+      seats: vehicle.seats?.toString() || ocr.seats || "",
+      cylinders: vehicle.cylinders || ocr.cylinders || "",
+      engineCC: vehicle.engineCC || ocr.engineCC || "",
+      fuelType: (vehicle.fuelType || ocr.fuelType) as any,
+      transmission: (vehicle.transmission || ocr.transmission) as any,
+      traction: (vehicle.traction || ocr.traction) as any,
+      origin: (vehicle.origin || ocr.origin) as any,
+      kmMileage: vehicle.kmMileage?.toString() || ocr.kmMileage || "",
+      milesMileage: vehicle.milesMileage?.toString() || ocr.milesMileage || "",
+      vinVerification: false,
+    });
+    
+    // Clear search results
+    setSearchResults([]);
+    setSearchTerm("");
+    setSelectedVehicle(vehicle);
+    toast.success("Información del vehículo cargada (Sincronizada con escaneo)");
+  };
 
   useEffect(() => {
     if (formSubmitted) {
@@ -154,11 +338,22 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
     }
   }, [formSubmitted]);
 
-  async function onSubmit(values: z.infer<typeof formSchema>) {
-    console.log(values);
+  async function onSubmit(values: FormValues) {
+    // Validación manual de seguridad al hacer SUBMIT
+    if (!values.vinVerification) {
+      form.setError("vinVerification", {
+        type: "manual",
+        message: "Debe confirmar la revisión de la información"
+      });
+      toast.error("Confirmación requerida: Marque la casilla de revisión de información");
+      const element = document.getElementById("vin-verification-container");
+      element?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
 
     // Validate license plate
-    const validationResult = await validateVehiclePlate(values.licensePlate, values.vinNumber);
+    const validationResult = await validateVehiclePlate(values.licensePlate, values.vinNumber, values.vehicleId);
+    
     if (!validationResult.success || !validationResult.data?.valid) {
       toast.error(validationResult.data?.message || "La placa ya está en uso con otro chasis.");
       return;
@@ -192,6 +387,8 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       origin: undefined,
       vehicleType: "",
       color: "",
+      vehicleUse: "",
+      seats: "",
       cylinders: "",
       engineCC: "",
       fuelType: undefined,
@@ -199,19 +396,24 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       traction: undefined,
       testDrive: undefined,
       noTestDriveReason: "",
+      vinVerification: false,
+      vehicleId: "",
     });
 
     setFormSubmitted(true);
   }
 
   const handleOCRData = (mappedData: Partial<Record<string, unknown>>) => {
+    const ocrValues = mappedData as Partial<FormValues>;
+    setRawOcrData(ocrValues);
+
     // Update form with OCR data and trigger validation only for filled fields
-    for (const key of Object.keys(mappedData)) {
-      const value = mappedData[key as string];
+    for (const key of Object.keys(ocrValues)) {
+      const value = ocrValues[key as keyof FormValues];
       if (value != null && value !== "") {
         form.setValue(
-          key as keyof z.infer<typeof formSchema>,
-          value as z.infer<typeof formSchema>[keyof z.infer<typeof formSchema>],
+          key as keyof FormValues,
+          value as any,
           {
             shouldValidate: true,
             shouldDirty: true,
@@ -222,7 +424,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
     }
 
     // Clear validation errors for fields that OCR cannot fill
-    const nonOCRFields: Array<keyof z.infer<typeof formSchema>> = [
+    const nonOCRFields: Array<keyof FormValues> = [
       'technicianName', 'inspectionDate', 'milesMileage', 'kmMileage',
       'fuelType', 'transmission', 'traction', 'testDrive', 'noTestDriveReason'
     ];
@@ -233,15 +435,22 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
 
     // Save to context
     const currentData = form.getValues();
-    const updatedData = { ...currentData, ...mappedData };
+    const updatedData = { ...currentData, ...ocrValues };
     setFormData(updatedData);
+
+    // After updating form, check for duplicates immediately
+    handleCheckDuplicate(
+      ocrValues.licensePlate, 
+      ocrValues.vinNumber,
+      ocrValues
+    );
 
     toast.success('Información de la tarjeta aplicada al formulario');
   };
 
   // Function to fill form with dummy data
   const fillWithDummyData = () => {
-    const dummyData = {
+    const dummyData: FormValues = {
       technicianName: "Juan Pérez García",
       inspectionDate: new Date(),
       vehicleMake: "Toyota",
@@ -253,15 +462,20 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       motorNumber: "2ZR-FE-1234567",
       milesMileage: "15000",
       kmMileage: "24140",
-      origin: "Importado" as const,
+      origin: "Importado",
       vehicleType: "SUV",
       color: "Blanco Perlado",
       cylinders: "4",
       engineCC: "2000",
-      fuelType: "Gasolina" as const,
-      transmission: "Automático" as const,
-      traction: "FWD (Delantera)" as const,
-      testDrive: "Sí" as const,
+      fuelType: "Gasolina",
+      transmission: "Automático",
+      traction: "FWD (Delantera)",
+      testDrive: "Sí",
+      noTestDriveReason: "",
+      vinVerification: false,
+      vehicleId: isDevMode 
+        ? "27484f6e-811d-467f-bdae-c2e3054769f3" 
+        : "f710e3cc-deae-4320-97d4-6aaff963c410",
     };
 
     // Use form.reset() to properly update all fields including selects
@@ -342,17 +556,129 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
             </CardContent>
           </Card>
 
-          <VehicleRegistrationOCR
-            onDataExtracted={handleOCRData}
-            isProcessing={form.formState.isSubmitting}
-          />
+          <Card className="border-primary/20 bg-primary/5 shadow-inner">
+            <CardHeader className="px-3 py-3 sm:px-6">
+              <CardTitle className="text-xl font-bold flex items-center gap-2">
+                <Car className="h-6 w-6 text-primary" />
+                Identificación del Vehículo
+              </CardTitle>
+              <CardDescription>
+                Escanee la tarjeta de circulación o busque en el sistema para iniciar
+                Escanee la tarjeta de circulación para iniciar
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="px-3 pb-4 sm:px-6 space-y-6">
+              <VehicleRegistrationOCR
+                onDataExtracted={handleOCRData}
+                isProcessing={form.formState.isSubmitting}
+              />
+
+              {selectedVehicle && (
+                <div className="animate-in zoom-in-95 fade-in duration-300">
+                  <div className="p-4 rounded-xl border-2 border-primary bg-white flex items-center justify-between shadow-md">
+                    <div className="flex items-center gap-4">
+                      <div className="h-12 w-12 bg-primary rounded-full flex items-center justify-center text-white shadow-md">
+                        <Car className="h-7 w-7" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <div className="font-black text-2xl text-primary tracking-tight">
+                            {selectedVehicle.licensePlate}
+                          </div>
+                          <span className="bg-primary/10 text-primary text-[10px] font-bold px-2 py-0.5 rounded-full border border-primary/20 uppercase">
+                            Base de Datos
+                          </span>
+                        </div>
+                        <div className="text-base text-muted-foreground font-medium">
+                          {selectedVehicle.make} {selectedVehicle.model} — {selectedVehicle.year}
+                        </div>
+                      </div>
+                    </div>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      type="button"
+                      onClick={() => {
+                        setSelectedVehicle(null);
+                        setDuplicateVehicle(null);
+                        setMismatchedFields([]);
+                        setComparisonMismatches([]);
+                        form.setValue("licensePlate", "");
+                        form.setValue("vinNumber", "");
+                      }}
+                      className="text-red-600 hover:bg-red-50 hover:text-red-700 font-bold"
+                    >
+                      Remover
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader className="px-3 py-0.5 sm:px-6 sm:py-1">
               <CardTitle className="text-xl sm:text-2xl">Información del Vehículo</CardTitle>
               <CardDescription className="text-sm sm:text-base">Datos técnicos del vehículo</CardDescription>
             </CardHeader>
-            <CardContent className="px-3 py-2 sm:px-6 sm:py-3 space-y-4 sm:space-y-5">
+            <CardContent className="px-3 pb-4 sm:px-6 space-y-4 sm:space-y-6">
+              {duplicateVehicle && (
+                <div className="animate-in fade-in slide-in-from-top-4 duration-300">
+                  <Alert className="border-amber-200 bg-amber-50 text-amber-900 shadow-sm flex flex-col sm:flex-row items-start gap-4">
+                    <div className="bg-amber-100 p-2 rounded-full text-amber-600 shrink-0 hidden sm:block">
+                      <ShieldAlert className="h-5 w-5" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <AlertTitle className="font-bold text-amber-800 flex items-center gap-2 mb-1 text-base">
+                        <ShieldAlert className="h-4 w-4 sm:hidden shrink-0" />
+                        Registro Encontrado (Datos Sincronizados)
+                      </AlertTitle>
+                      <AlertDescription className="text-amber-700 text-sm leading-relaxed">
+                        Este vehículo ya existe en nuestra base de datos ({duplicateVehicle.licensePlate}). 
+                        Se han cargado automáticamente los datos técnicos almacenados para garantizar la integridad de la información.
+                      </AlertDescription>
+                    </div>
+                  </Alert>
+                </div>
+              )}
+
+              {duplicateVehicle && comparisonMismatches.length > 0 && (
+                <div className="animate-in fade-in slide-in-from-top-2 duration-400">
+                  <div className="flex border-l-4 border-blue-500 bg-blue-50/50 p-3 rounded-r-lg shadow-sm">
+                    <div className="flex-shrink-0">
+                      <HelpCircle className="h-5 w-5 text-blue-500 mt-0.5" />
+                    </div>
+                    <div className="ml-3">
+                      <p className="text-sm font-bold text-blue-800">
+                        Atención: Discrepancias detectadas
+                      </p>
+                      <p className="text-sm text-blue-700 mt-1">
+                        Los siguientes campos difieren del escaneo y deben revisarse manualmente:{" "}
+                        <span className="font-black underline decoration-blue-300">
+                          {comparisonMismatches.map(field => {
+                            const labels: Record<string, string> = {
+                              vehicleMake: "Marca",
+                              vehicleModel: "Línea",
+                              vehicleYear: "Año",
+                              licensePlate: "Placa",
+                              vinNumber: "VIN",
+                              motorNumber: "Motor",
+                              color: "Color",
+                              vehicleType: "Tipo",
+                              cylinders: "Cilindros",
+                              engineCC: "CC",
+                              vehicleUse: "Uso",
+                              seats: "Asientos"
+                            };
+                            return labels[field] || field;
+                          }).join(", ")}
+                        </span>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
                 <FormField
                   control={form.control}
@@ -361,7 +687,11 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                     <FormItem>
                       <FormLabel>Marca del vehículo</FormLabel>
                       <FormControl>
-                        <Input placeholder="Ej. Toyota" {...field} />
+                        <Input 
+                          placeholder="Ej. Toyota" 
+                          {...field} 
+                          disabled={!!selectedVehicle && !mismatchedFields.includes("vehicleMake")}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -375,7 +705,11 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                     <FormItem>
                       <FormLabel>Línea del vehículo</FormLabel>
                       <FormControl>
-                        <Input placeholder="Ej. Corolla" {...field} />
+                        <Input 
+                          placeholder="Ej. Corolla" 
+                          {...field} 
+                          disabled={!!selectedVehicle && !mismatchedFields.includes("vehicleModel")}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -391,7 +725,11 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                     <FormItem>
                       <FormLabel>Versión / Equipamiento</FormLabel>
                       <FormControl>
-                        <Input placeholder="Ej. LE, XSE, Limited" {...field} />
+                        <Input 
+                          placeholder="Ej. LE, XSE, Limited" 
+                          {...field} 
+                          disabled={!!selectedVehicle && !mismatchedFields.includes("trim")}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -405,7 +743,11 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                     <FormItem>
                       <FormLabel>Año del vehículo</FormLabel>
                       <FormControl>
-                        <Input placeholder="Ej. 2022" {...field} />
+                        <Input 
+                          placeholder="Ej. 2022" 
+                          {...field} 
+                          disabled={!!selectedVehicle && !mismatchedFields.includes("vehicleYear")}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -421,7 +763,17 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                     <FormItem>
                       <FormLabel>Número de placa</FormLabel>
                       <FormControl>
-                        <Input placeholder="Ej. P-345JKL" {...field} />
+                        <Input 
+                          placeholder="Ej. P-345JKL" 
+                          {...field} 
+                          disabled={!!selectedVehicle && !mismatchedFields.includes("licensePlate")}
+                          onBlur={() => {
+                            field.onBlur();
+                            if (!duplicateVehicle) {
+                              handleCheckDuplicate();
+                            }
+                          }}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -438,6 +790,13 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                         <Input
                           placeholder="Número de identificación del vehículo"
                           {...field}
+                          disabled={!!selectedVehicle && !mismatchedFields.includes("vinNumber")}
+                          onBlur={() => {
+                            field.onBlur();
+                            if (!duplicateVehicle) {
+                              handleCheckDuplicate();
+                            }
+                          }}
                         />
                       </FormControl>
                       <FormMessage />
@@ -457,6 +816,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                         <Input
                           placeholder="Número de motor del vehículo"
                           {...field}
+                          disabled={!!selectedVehicle && !mismatchedFields.includes("motorNumber")}
                         />
                       </FormControl>
                       <FormMessage />
@@ -471,7 +831,11 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                     <FormItem>
                       <FormLabel>Color</FormLabel>
                       <FormControl>
-                        <Input placeholder="Ej. Blanco" {...field} />
+                        <Input 
+                          placeholder="Ej. Blanco" 
+                          {...field} 
+                          disabled={!!selectedVehicle && !mismatchedFields.includes("color")}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -491,6 +855,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                           placeholder="Millas"
                           type="number"
                           {...field}
+                          disabled={!!selectedVehicle && !mismatchedFields.includes("milesMileage")}
                           onChange={(e) => {
                             field.onChange(e);
                             const miles = Number.parseFloat(e.target.value);
@@ -517,6 +882,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                           placeholder="Kilómetros"
                           type="number"
                           {...field}
+                          disabled={!!selectedVehicle && !mismatchedFields.includes("kmMileage")}
                           onChange={(e) => {
                             field.onChange(e);
                             const km = Number.parseFloat(e.target.value);
@@ -542,6 +908,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                     <Select
                       onValueChange={field.onChange}
                       value={field.value}
+                      disabled={!!selectedVehicle && !mismatchedFields.includes("origin")}
                     >
                       <FormControl>
                         <SelectTrigger className={cn("w-full", fieldState.error && "border-red-500")}>
@@ -568,6 +935,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                       <Select
                         onValueChange={field.onChange}
                         value={field.value}
+                        disabled={!!selectedVehicle && !mismatchedFields.includes("vehicleType")}
                       >
                         <FormControl>
                           <SelectTrigger className={cn("w-full", fieldState.error && "border-red-500")}>
@@ -596,7 +964,59 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                     <FormItem>
                       <FormLabel>Cilindros</FormLabel>
                       <FormControl>
-                        <Input placeholder="Ej. 4" {...field} />
+                        <Input 
+                          placeholder="Ej. 4" 
+                          {...field} 
+                          disabled={!!selectedVehicle && !mismatchedFields.includes("cylinders")}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
+                <FormField
+                  control={form.control}
+                  name="vehicleUse"
+                  render={({ field, fieldState }) => (
+                    <FormItem>
+                      <FormLabel>Uso del vehículo</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        value={field.value}
+                        disabled={!!selectedVehicle && !mismatchedFields.includes("vehicleUse")}
+                      >
+                        <FormControl>
+                          <SelectTrigger className={cn("w-full", fieldState.error && "border-red-500")}>
+                            <SelectValue placeholder="Seleccione el uso" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="Particular">Particular</SelectItem>
+                          <SelectItem value="Comercial">Comercial</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="seats"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Asientos</FormLabel>
+                      <FormControl>
+                        <Input 
+                          placeholder="Ej. 5" 
+                          type="number"
+                          {...field} 
+                          value={field.value || ""}
+                          disabled={!!selectedVehicle && !mismatchedFields.includes("seats")}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -612,7 +1032,11 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                     <FormItem>
                       <FormLabel>Motor (CC)</FormLabel>
                       <FormControl>
-                        <Input placeholder="Ej. 2000" {...field} />
+                        <Input 
+                          placeholder="Ej. 2000" 
+                          {...field} 
+                          disabled={!!selectedVehicle && !mismatchedFields.includes("engineCC")}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -628,6 +1052,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                       <Select
                         onValueChange={field.onChange}
                         value={field.value}
+                        disabled={!!selectedVehicle && !mismatchedFields.includes("fuelType")}
                       >
                         <FormControl>
                           <SelectTrigger className={cn("w-full", fieldState.error && "border-red-500")}>
@@ -657,6 +1082,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                       <Select
                         onValueChange={field.onChange}
                         value={field.value}
+                        disabled={!!selectedVehicle && !mismatchedFields.includes("transmission")}
                       >
                         <FormControl>
                           <SelectTrigger className={cn("w-full", fieldState.error && "border-red-500")}>
@@ -682,6 +1108,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                       <Select
                         onValueChange={field.onChange}
                         value={field.value}
+                        disabled={!!selectedVehicle && !mismatchedFields.includes("traction")}
                       >
                         <FormControl>
                           <SelectTrigger className={cn("w-full", fieldState.error && "border-red-500")}>
@@ -766,6 +1193,57 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
               )}
             </CardContent>
           </Card>
+
+          {inspectionType === "new" && (
+            <Card
+              id="vin-verification-container"
+              className={cn(
+                "mb-4 animate-in fade-in slide-in-from-bottom-4 duration-300 transition-all border-2",
+                form.formState.errors.vinVerification
+                  ? "border-red-500 bg-red-50 ring-4 ring-red-500/10 shadow-lg"
+                  : "border-gray-200 bg-gray-50/50 shadow-sm"
+              )}
+            >
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2 text-gray-600 font-bold text-sm uppercase tracking-wider">
+                    <ShieldAlert className="h-4 w-4" />
+                    Validación de Seguridad
+                  </div>
+                  <span className="bg-gray-200 text-gray-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-gray-300 uppercase">
+                    Requerido
+                  </span>
+                </div>
+                <FormField
+                  control={form.control}
+                  name="vinVerification"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-row items-start space-x-3 space-y-0">
+                      <FormControl>
+                        <Checkbox
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                          className="mt-1 h-5 w-5 border-gray-400"
+                        />
+                      </FormControl>
+                      <div className="space-y-1 leading-none">
+                        <FormLabel className="text-base font-semibold text-gray-800 cursor-pointer">
+                          He revisado toda la información ingresada con la Tarjeta de Circulación
+                        </FormLabel>
+                        <p className={cn(
+                          "text-sm",
+                          form.formState.errors.vinVerification ? "text-red-700 font-medium" : "text-gray-600"
+                        )}>
+                          Confirmación obligatoria para garantizar que los datos del vehículo son correctos.
+                        </p>
+                      </div>
+                    </FormItem>
+                  )}
+                />
+                <FormMessage className="mt-2 text-red-600 font-bold" />
+              </CardContent>
+            </Card>
+          )}
 
           {!isWizardMode && (
             <Button type="submit" className="w-full md:w-auto">

@@ -14,10 +14,13 @@ import {
   Settings,
   BarChart3,
   Briefcase,
+  TrendingDown,
+  Clock,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useState, useRef, useEffect } from "react";
 import { Menu, X } from "lucide-react";
+import { CASHIN_LOGO_URL } from "@/lib/constants";
 import { useAuth } from "@/Provider/authProvider";
 import {
   DropdownMenu,
@@ -98,6 +101,13 @@ const menuSections: MenuSection[] = [
         path: "/convenios",
         roles: ["ADMIN", "ASESOR"],
       },
+      {
+        key: "creditos-caidos",
+        label: "Créditos Caídos",
+        icon: <TrendingDown className="h-4 w-4" />,
+        path: "/creditos-caidos",
+        roles: ["ADMIN"],
+      },
     ],
   },
   {
@@ -117,6 +127,13 @@ const menuSections: MenuSection[] = [
         label: "Liquidaciones",
         icon: <Receipt className="h-4 w-4" />,
         path: "/liquidaciones-inversionistas",
+        roles: ["ADMIN"],
+      },
+      {
+        key: "sesiones-pendientes",
+        label: "Sesiones Pendientes",
+        icon: <Clock className="h-4 w-4" />,
+        path: "/sesiones-pendientes",
         roles: ["ADMIN"],
       },
     ],
@@ -181,6 +198,13 @@ const menuSections: MenuSection[] = [
         icon: <BarChart3 className="h-4 w-4" />,
         path: "/efectividad-asesores",
         roles: ["ADMIN", "ASESOR"],
+      },
+      {
+        key: "pagos-por-vencimiento",
+        label: "Pagos por Vencimiento",
+        icon: <Receipt className="h-4 w-4" />,
+        path: "/pagos-por-vencimiento",
+        roles: ["ADMIN"],
       },
     ],
   },
@@ -290,9 +314,9 @@ export function DashBoardCartera() {
           {/* Logo */}
           <div className="flex items-center flex-shrink-0">
             <img
-              src="/logo-cashin.png"
+              src={CASHIN_LOGO_URL}
               alt="Club Cashin Logo"
-              className="h-10 drop-shadow-md"
+              className="h-14 drop-shadow-md"
               style={{ objectFit: "contain" }}
             />
           </div>
@@ -348,9 +372,9 @@ export function DashBoardCartera() {
           {/* Logo centrado */}
           <div className="absolute left-1/2 -translate-x-1/2">
             <img
-              src="/logo-cashin.png"
+              src={CASHIN_LOGO_URL}
               alt="Club Cashin Logo"
-              className="h-8 drop-shadow-md"
+              className="h-11 drop-shadow-md"
               style={{ objectFit: "contain" }}
             />
           </div>
@@ -413,9 +437,9 @@ export function DashBoardCartera() {
             {/* Header */}
             <div className="flex-shrink-0 flex flex-col items-center justify-center py-6 px-6 border-b border-blue-100">
               <img
-                src="/logo-cashin.png"
+                src={CASHIN_LOGO_URL}
                 alt="Club Cashin Logo"
-                className="h-12 mb-3"
+                className="h-16 mb-3"
                 style={{ objectFit: "contain" }}
               />
               {user && (

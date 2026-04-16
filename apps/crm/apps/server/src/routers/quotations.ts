@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "../db";
 import { quotations, vehicles } from "../db/schema";
 import { crmProcedure } from "../lib/orpc";
+import { canManageAnyQuotation, canManageQuotations } from "../lib/quotation-permissions";
 import { ROLES } from "../lib/roles";
 
 /**
@@ -160,11 +161,12 @@ export const quotationsRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			// Validar que el usuario sea sales o admin
+			// Validar acceso a cotizaciones
 			const userRole = context.userRole;
-			if (userRole !== ROLES.SALES && userRole !== ROLES.ADMIN) {
+			if (!canManageQuotations(userRole)) {
 				throw new ORPCError("FORBIDDEN", {
-					message: "Solo usuarios de ventas pueden crear cotizaciones",
+					message:
+						"Solo ventas, supervisión de ventas y administración pueden crear cotizaciones",
 				});
 			}
 
@@ -289,8 +291,8 @@ export const quotationsRouter = {
 	getQuotations: crmProcedure.handler(async ({ context }) => {
 		const userRole = context.userRole;
 
-		// Admin ve todas, sales solo las suyas
-		if (userRole === ROLES.ADMIN) {
+		// Admin y supervisión ven todas; ventas solo las suyas
+		if (canManageAnyQuotation(userRole)) {
 			const result = await db
 				.select()
 				.from(quotations)
@@ -325,10 +327,7 @@ export const quotationsRouter = {
 
 			// Validar acceso
 			const userRole = context.userRole;
-			if (
-				userRole !== ROLES.ADMIN &&
-				quotation.salesUserId !== context.userId
-			) {
+			if (!canManageAnyQuotation(userRole) && quotation.salesUserId !== context.userId) {
 				throw new ORPCError("FORBIDDEN", {
 					message: "No tienes permiso para ver esta cotización",
 				});
@@ -373,7 +372,10 @@ export const quotationsRouter = {
 			}
 
 			const userRole = context.userRole;
-			if (userRole !== ROLES.ADMIN && existing.salesUserId !== context.userId) {
+			if (
+				!canManageAnyQuotation(userRole) &&
+				existing.salesUserId !== context.userId
+			) {
 				throw new ORPCError("FORBIDDEN", {
 					message: "No tienes permiso para editar esta cotización",
 				});
@@ -424,7 +426,10 @@ export const quotationsRouter = {
 			}
 
 			const userRole = context.userRole;
-			if (userRole !== ROLES.ADMIN && existing.salesUserId !== context.userId) {
+			if (
+				!canManageAnyQuotation(userRole) &&
+				existing.salesUserId !== context.userId
+			) {
 				throw new ORPCError("FORBIDDEN", {
 					message: "No tienes permiso para eliminar esta cotización",
 				});

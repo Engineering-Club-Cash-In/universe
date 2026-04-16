@@ -10,6 +10,7 @@ import {
   usuarios,
 } from "../database/db";
 import z from "zod";
+import type { WSCrEstadoCuentaResponse } from "../services/sifco.interface";
 import { consultarEstadoCuentaPrestamo } from "../services/sifcoIntegrations";
 
 interface UpdateInstallmentsParams {
@@ -273,6 +274,7 @@ const creditUpdateSchema = z.object({
         porcentaje_cash_in: z.number().min(0).max(100),
         porcentaje_inversion: z.number().min(0).max(100),
         fecha_inicio_participacion: z.string().optional(),
+        cuota_inversionista: z.number().min(0).optional(),
       }),
     )
     .min(0)
@@ -285,6 +287,7 @@ const creditUpdateSchema = z.object({
         porcentaje_cash_in: z.number().min(0).max(100),
         porcentaje_inversion: z.number().min(0).max(100),
         fecha_inicio_participacion: z.string().optional(),
+        cuota_inversionista: z.number().min(0).optional(),
       }),
     )
     .min(0)
@@ -521,8 +524,23 @@ const updateInvestors = async (
   gps: number,
   targetTable: any = creditos_inversionistas,
   parentCuotas?: Map<number, string>,
-): Promise<void> => {
-  if (!inversionistas || inversionistas.length === 0) return;
+): Promise<Map<number, string>> => {
+  if (!inversionistas || inversionistas.length === 0) return new Map();
+
+  // 🔥 NUEVO: Obtener los datos existentes ANTES de borrar para preservar el estado
+  const existingRecords = await db
+    .select()
+    .from(targetTable)
+    .where(eq(targetTable.credito_id, credito_id));
+    
+  const statePrevioMap = new Map();
+  existingRecords.forEach((record: any) => {
+      // Guardamos status y tipo_reinversion si existen en la tabla (aplica para tabla espejo)
+      statePrevioMap.set(record.inversionista_id, {
+          status: record.status,
+          tipo_reinversion: record.tipo_reinversion
+      });
+  });
 
   // Eliminar inversionistas existentes
   await db
@@ -616,16 +634,21 @@ const updateInvestors = async (
       `   ¿Es este inversionista el mayor? ${esMayor ? "✅ SÍ" : "❌ NO"}`,
     );
 
-    // 🔥 PASO 3: SI ES EL MAYOR, SUMARLE SEGURO + GPS + MEMBRESÍA
+    // 🔥 PASO 3: CALCULAR CUOTA FINAL
     let cuotaInversionista = cuotaBase;
 
     console.log(`\n🎯 PASO 3: CALCULAR CUOTA FINAL`);
 
-    // Si es espejo, jalar la cuota del padre
-    if (parentCuotas && parentCuotas.has(inv.inversionista_id)) {
+    // 🔥 PRIORIDAD 1: Si viene cuota_inversionista desde el frontend, usarla
+    if (inv.cuota_inversionista !== undefined && inv.cuota_inversionista !== null) {
+      cuotaInversionista = new Big(inv.cuota_inversionista);
+      console.log(`   🚀 FRONTEND: Usando cuota enviada desde el endpoint: Q${cuotaInversionista.toFixed(2)}`);
+    } else if (parentCuotas && parentCuotas.has(inv.inversionista_id)) {
+      // Prioridad 2: Si es espejo, jalar la cuota del padre
       cuotaInversionista = new Big(parentCuotas.get(inv.inversionista_id)!);
       console.log(`   🪞 ESPEJO: Usando cuota del padre: Q${cuotaInversionista.toFixed(2)}`);
     } else if (esMayor) {
+      // Prioridad 3: Cálculo automático para el inversionista mayor
       console.log(`   🏆 ESTE ES EL INVERSIONISTA MAYOR`);
       console.log(`   Cuota Base: Q${cuotaBase.toFixed(6)}`);
       console.log(`   + Seguro: Q${seguro.toFixed(2)}`);
@@ -634,14 +657,14 @@ const updateInvestors = async (
 
       cuotaInversionista = cuotaBase.plus(seguro).plus(gps).plus(membresias).round(6);
 
-      console.log(`   = Cuota Final: Q${cuotaInversionista.toFixed(6)}`);
+      console.log(`   = Cuota Final Automática: Q${cuotaInversionista.toFixed(6)}`);
       console.log(
         `   Fórmula: ${cuotaBase.toFixed(6)} + ${seguro.toFixed(2)} + ${gps.toFixed(2)} + ${membresias.toFixed(2)}`,
       );
     } else {
       console.log(`   📍 Inversionista normal (no es el mayor)`);
       console.log(
-        `   Cuota Final = Cuota Base: Q${cuotaInversionista.toFixed(6)}`,
+        `   Cuota Final Automática = Cuota Base: Q${cuotaInversionista.toFixed(6)}`,
       );
       console.log(`   (No se suman cargos)`);
     }
@@ -717,7 +740,9 @@ const updateInvestors = async (
     console.log(`   - IVA Cash-In: Q${ivaCashIn.toFixed(2)}`);
     console.log(`${"=".repeat(60)}\n`);
 
-    return {
+    const prevData = statePrevioMap.get(inv.inversionista_id);
+
+    const baseReturn: any = {
       credito_id: credito_id,
       inversionista_id: inv.inversionista_id,
       monto_aportado: montoAportado.toString(),
@@ -734,12 +759,27 @@ const updateInvestors = async (
       cuota_inversionista: cuotaInversionista.toString(), // 🔥 CON LÓGICA CORRECTA
       numero_credito_sifco: numero_credito_sifco ?? undefined,
     };
+
+    // 🔥 REINCORPORAR ESTADOS PREVIOS SI APLICA
+    if (prevData?.status !== undefined) baseReturn.status = prevData.status;
+    if (prevData?.tipo_reinversion !== undefined) baseReturn.tipo_reinversion = prevData.tipo_reinversion;
+
+    return baseReturn;
   });
 
   // Insertar nuevos inversionistas
   if (creditosInversionistasData.length > 0) {
     await db.insert(targetTable).values(creditosInversionistasData);
   }
+
+  // 🔥 CAPTURAR Y DEVOLVER MAP DE CUOTAS PARA SINCRONIZACIÓN CON ESPEJO
+  const cuotasMap = new Map<number, string>(
+    creditosInversionistasData.map((inv) => [
+      inv.inversionista_id,
+      String(inv.cuota_inversionista),
+    ])
+  );
+  return cuotasMap;
 };
 
 // ========================================
@@ -963,8 +1003,9 @@ export const updateCredit = async ({ body, set }: any) => {
         
 
     // 9. Actualizar inversionistas (Principal)
+    let parentCuotas: Map<number, string> = new Map();
     if (inversionistas && inversionistas.length > 0) {
-      await updateInvestors(
+      parentCuotas = await updateInvestors(
         credito_id,
         inversionistas,
         updateFields,
@@ -977,33 +1018,50 @@ export const updateCredit = async ({ body, set }: any) => {
       );
     }
 
-    // 10. Actualizar inversionistas (Espejo) - jala cuota del padre
+    // 10. Actualizar inversionistas (Espejo)
+    console.log(`🪞 [ESPEJO] inversionistas_espejo recibidos: ${JSON.stringify(inversionistas_espejo?.length ?? 'undefined')}`);
     if (inversionistas_espejo && inversionistas_espejo.length > 0) {
-      const parentInvestors = await db
-        .select({
-          inversionista_id: creditos_inversionistas.inversionista_id,
-          cuota_inversionista: creditos_inversionistas.cuota_inversionista,
-        })
-        .from(creditos_inversionistas)
-        .where(eq(creditos_inversionistas.credito_id, credito_id));
-
-      const parentCuotas = new Map(
-        parentInvestors.map((p) => [p.inversionista_id, p.cuota_inversionista])
+      // 🔒 Sincronización forzada: el espejo siempre usa el monto_aportado Y cuota_inversionista del padre.
+      // Esto es la fuente de verdad, independiente de lo que envíe el frontend.
+      const principalMontos = new Map(
+        (inversionistas || []).map((inv) => [inv.inversionista_id, inv.monto_aportado])
+      );
+      
+      // 🔥 NUEVO: Sincronizar cuotas capturadas del padre
+      const principalCuotas = new Map(
+        (inversionistas || []).map((inv) => [inv.inversionista_id, inv.cuota_inversionista ?? 0])
       );
 
-      await updateInvestors(
-        credito_id,
-        inversionistas_espejo,
-        updateFields,
-        current,
-        numero_credito_sifco ?? current.numero_credito_sifco,
-        Number(updateFields.seguro_10_cuotas ?? current.seguro_10_cuotas),
-        Number(updateFields.membresias_pago ?? current.membresias_pago),
-        Number(updateFields.gps ?? current.gps),
-        creditos_inversionistas_espejo, // Mirror target
-        parentCuotas, // Cuotas del padre
-      );
+      const espejoSincronizado = inversionistas_espejo.map((inv) => ({
+        ...inv,
+        monto_aportado: principalMontos.get(inv.inversionista_id) ?? inv.monto_aportado,
+        cuota_inversionista: principalCuotas.get(inv.inversionista_id) ?? inv.cuota_inversionista, // 🔥 NUEVO
+      }));
+
+      console.log(`🪞 [ESPEJO] Iniciando updateInvestors para credito_id=${credito_id} con ${espejoSincronizado.length} inversionistas`);
+      try {
+        await updateInvestors(
+          credito_id,
+          espejoSincronizado,
+          updateFields,
+          current,
+          numero_credito_sifco ?? current.numero_credito_sifco,
+          Number(updateFields.seguro_10_cuotas ?? current.seguro_10_cuotas),
+          Number(updateFields.membresias_pago ?? current.membresias_pago),
+          Number(updateFields.gps ?? current.gps),
+          creditos_inversionistas_espejo,
+          parentCuotas, // 🔥 NUEVO: Pasar las cuotas capturadas del padre
+        );
+        console.log(`🪞 [ESPEJO] ✅ updateInvestors completado para espejo`);
+      } catch (espejoError) {
+        console.error(`🪞 [ESPEJO] ❌ Error en updateInvestors espejo:`, espejoError);
+        throw espejoError;
+      }
+    } else {
+      console.log(`🪞 [ESPEJO] ⚠️ Bloque saltado: inversionistas_espejo está vacío o undefined`);
     }
+
+
 
     set.status = 200;
     return updatedCredit;
@@ -1013,6 +1071,266 @@ export const updateCredit = async ({ body, set }: any) => {
     return { message: "Error al actualizar el crédito" };
   }
 };
+// ========================================
+// REPARAR total_restante DE LOS PAGOS
+// ========================================
+
+interface RepararTotalRestanteParams {
+  numero_credito_sifco: string;
+  capital_inicial?: number | string; // Opcional: si se pasa, se usa como base de arranque; si no, usa credito.capital
+}
+
+export const repararTotalRestante = async ({
+  numero_credito_sifco,
+  capital_inicial,
+}: RepararTotalRestanteParams): Promise<{
+  credito_id: number;
+  capital_arranque: string;
+  ultima_cuota_pagada: number | null;
+  pagos_actualizados: number;
+}> => {
+  console.log("\n🔧 ========== REPARAR total_restante ==========");
+  console.log(`📋 Crédito SIFCO: ${numero_credito_sifco}`);
+  console.log(
+    `💰 capital_inicial recibido: ${capital_inicial ?? "(no se pasó, se consultará SIFCO)"}`,
+  );
+
+  // 1️⃣ Obtener crédito
+  const [credito] = await db
+    .select({
+      credito_id: creditos.credito_id,
+      capital: creditos.capital,
+      porcentaje_interes: creditos.porcentaje_interes,
+      seguro_10_cuotas: creditos.seguro_10_cuotas,
+      gps: creditos.gps,
+      membresias_pago: creditos.membresias_pago,
+      cuota: creditos.cuota,
+    })
+    .from(creditos)
+    .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
+    .limit(1);
+
+  if (!credito) {
+    throw new Error(`No se encontró el crédito: ${numero_credito_sifco}`);
+  }
+  console.log(
+    `✅ Crédito encontrado: id=${credito.credito_id}, capital_actual=Q${credito.capital}, cuota=Q${credito.cuota}, %interes=${credito.porcentaje_interes}`,
+  );
+
+  // 2️⃣ Traer todos los pagos con su cuota (ordenados por numero_cuota)
+  const rows = await db
+    .select()
+    .from(pagos_credito)
+    .innerJoin(
+      cuotas_credito,
+      eq(pagos_credito.cuota_id, cuotas_credito.cuota_id),
+    )
+    .where(eq(pagos_credito.credito_id, credito.credito_id))
+    .orderBy(asc(cuotas_credito.numero_cuota), asc(pagos_credito.pago_id));
+  console.log(`📦 Pagos encontrados: ${rows.length}`);
+
+  if (rows.length === 0) {
+    console.log(
+      `⚠️ No hay pagos para reparar en crédito ${numero_credito_sifco}`,
+    );
+    return {
+      credito_id: credito.credito_id,
+      capital_arranque: "0",
+      ultima_cuota_pagada: null,
+      pagos_actualizados: 0,
+    };
+  }
+
+  // 3️⃣ Determinar la última cuota pagada (tope del recálculo)
+  const cuotasPagadas = rows
+    .filter((r) => r.cuotas_credito.pagado === true)
+    .map((r) => r.cuotas_credito.numero_cuota);
+
+  if (cuotasPagadas.length === 0) {
+    console.log(
+      `⚠️ El crédito ${numero_credito_sifco} no tiene cuotas pagadas, no hay nada que reparar`,
+    );
+    return {
+      credito_id: credito.credito_id,
+      capital_arranque: new Big(capital_inicial ?? credito.capital).toString(),
+      ultima_cuota_pagada: null,
+      pagos_actualizados: 0,
+    };
+  }
+  const ultimaCuotaPagada = Math.max(...cuotasPagadas);
+  console.log(
+    `🎯 Última cuota pagada: ${ultimaCuotaPagada} (total cuotas pagadas: ${cuotasPagadas.length})`,
+  );
+
+  // 4️⃣ Agrupar pagos por numero_cuota (una cuota puede tener varios pagos)
+  const pagosPorNumeroCuota = new Map<
+    number,
+    (typeof rows)[0]["pagos_credito"][]
+  >();
+  for (const row of rows) {
+    const nc = row.cuotas_credito.numero_cuota;
+    if (!pagosPorNumeroCuota.has(nc)) pagosPorNumeroCuota.set(nc, []);
+    pagosPorNumeroCuota.get(nc)!.push(row.pagos_credito);
+  }
+
+  // 5️⃣ Determinar capital_inicial
+  // Prioridad: param > SIFCO desembolso (siempre cae a SIFCO si no hay param)
+  let capitalArranque: Big;
+  if (capital_inicial !== undefined) {
+    capitalArranque = new Big(capital_inicial);
+    console.log(`🏁 capital_arranque (param): Q${capitalArranque.toString()}`);
+  } else {
+    console.log("🌐 Consultando desembolso en SIFCO...");
+    const estadoCuenta = (await consultarEstadoCuentaPrestamo(
+      numero_credito_sifco,
+    )) as WSCrEstadoCuentaResponse;
+    const transacciones =
+      estadoCuenta?.ConsultaResultado?.EstadoCuenta_Transacciones ?? [];
+    const desembolso = transacciones.find((t) => t.CrMoTrxCod === 2001);
+    if (!desembolso?.CapitalDesembolsado) {
+      throw new Error(
+        `No se pudo obtener el desembolso de SIFCO para ${numero_credito_sifco}`,
+      );
+    }
+    capitalArranque = new Big(desembolso.CapitalDesembolsado);
+    console.log(
+      `🏁 capital_arranque (SIFCO desembolso trx 2001): Q${capitalArranque.toString()}`,
+    );
+  }
+
+  const porcentajeInteres = new Big(credito.porcentaje_interes ?? 0).div(100);
+  const seguroFijo = new Big(credito.seguro_10_cuotas ?? 0);
+  const gpsFijo = new Big(credito.gps ?? 0);
+  const membresiasFijo = new Big(credito.membresias_pago ?? 0);
+  const cuotaMensual = new Big(credito.cuota);
+  const capitalActual = new Big(credito.capital);
+
+  // 6️⃣ PRIMERA PASADA: calcular abonos teóricos de cada cuota pagada
+  // para luego escalarlos y que la última cuota pagada termine exactamente en credito.capital
+  const numerosCuotaOrdenados = [...pagosPorNumeroCuota.keys()]
+    .filter((nc) => nc <= ultimaCuotaPagada)
+    .sort((a, b) => a - b);
+
+  let capitalSim = capitalArranque;
+  const abonosTeoricos: { numCuota: number; abono: Big }[] = [];
+  for (const numCuota of numerosCuotaOrdenados) {
+    if (numCuota === 0) continue;
+    const interesMes = capitalSim.times(porcentajeInteres).round(2);
+    const ivaMes = interesMes.times(0.12).round(2);
+    const abono = cuotaMensual
+      .minus(interesMes)
+      .minus(ivaMes)
+      .minus(seguroFijo)
+      .minus(gpsFijo)
+      .minus(membresiasFijo);
+    abonosTeoricos.push({ numCuota, abono });
+    capitalSim = capitalSim.minus(abono);
+    if (capitalSim.lt(0)) capitalSim = new Big(0);
+  }
+
+  const sumaAbonosTeoricos = abonosTeoricos.reduce(
+    (acc, { abono }) => acc.plus(abono),
+    new Big(0),
+  );
+  const reduccionReal = capitalArranque.minus(capitalActual);
+
+  console.log(
+    `📐 Σ abonos teóricos: Q${sumaAbonosTeoricos.round(2).toString()} | reducción real (capital_inicial − credito.capital): Q${reduccionReal.round(2).toString()}`,
+  );
+
+  if (reduccionReal.lt(0)) {
+    throw new Error(
+      `capital_inicial (${capitalArranque.toString()}) < credito.capital (${capitalActual.toString()}): inconsistente, no se puede reparar.`,
+    );
+  }
+
+  // Factor de escala: ajusta los abonos teóricos para que la reducción total coincida con la real
+  const factor = sumaAbonosTeoricos.gt(0)
+    ? reduccionReal.div(sumaAbonosTeoricos)
+    : new Big(1);
+  console.log(`🧮 Factor de escala aplicado a los abonos: ${factor.toFixed(8)}`);
+
+  // 7️⃣ SEGUNDA PASADA: escribir total_restante usando abonos escalados
+  let capitalEnMemoria = capitalArranque;
+  const actualizaciones: { pago_id: number; total_restante: string }[] = [];
+
+  console.log(
+    `🔁 Recorriendo cuotas 0 → ${ultimaCuotaPagada} (${numerosCuotaOrdenados.length} cuotas a procesar)\n`,
+  );
+
+  for (const numCuota of numerosCuotaOrdenados) {
+    const pagosDeCuota = pagosPorNumeroCuota.get(numCuota)!;
+
+    if (numCuota === 0) {
+      // Cuota 0 (desembolso): total_restante = capital de arranque (sin amortizar)
+      for (const p of pagosDeCuota) {
+        actualizaciones.push({
+          pago_id: p.pago_id,
+          total_restante: capitalArranque.round(2).toString(),
+        });
+      }
+      console.log(
+        `📌 Cuota 0 (desembolso) → total_restante=Q${capitalArranque.round(2).toString()} | pagos afectados=${pagosDeCuota.length}`,
+      );
+      continue;
+    }
+
+    // Abono teórico × factor de escala
+    const teorico = abonosTeoricos.find((a) => a.numCuota === numCuota)!;
+    const abonoEscalado = teorico.abono.times(factor);
+
+    const capitalAntes = capitalEnMemoria;
+
+    // Si es la última cuota pagada, forzamos el ancla exacta a credito.capital
+    // para eliminar drift por redondeos acumulados
+    if (numCuota === ultimaCuotaPagada) {
+      capitalEnMemoria = capitalActual;
+    } else {
+      capitalEnMemoria = capitalEnMemoria.minus(abonoEscalado);
+      if (capitalEnMemoria.lt(0)) capitalEnMemoria = new Big(0);
+    }
+
+    // Actualizar total_restante en TODOS los pagos de esta cuota
+    for (const p of pagosDeCuota) {
+      actualizaciones.push({
+        pago_id: p.pago_id,
+        total_restante: capitalEnMemoria.round(2).toString(),
+      });
+    }
+
+    console.log(
+      `📌 Cuota ${numCuota.toString().padStart(3, " ")} | capital_antes=Q${capitalAntes.round(2).toString()} | abono_teorico=Q${teorico.abono.round(2).toString()} | abono_escalado=Q${abonoEscalado.round(2).toString()} | capital_despues=Q${capitalEnMemoria.round(2).toString()} | pagos=${pagosDeCuota.length}`,
+    );
+  }
+
+  // 7️⃣ Ejecutar updates en una sola transacción (solo toca total_restante)
+  console.log(
+    `\n💾 Ejecutando ${actualizaciones.length} updates en transacción...`,
+  );
+  await db.transaction(async (tx) => {
+    await Promise.all(
+      actualizaciones.map(({ pago_id, total_restante }) =>
+        tx
+          .update(pagos_credito)
+          .set({ total_restante })
+          .where(eq(pagos_credito.pago_id, pago_id)),
+      ),
+    );
+  });
+
+  console.log(
+    `✅ ${actualizaciones.length} pagos reparados (total_restante) en crédito ${numero_credito_sifco} hasta cuota ${ultimaCuotaPagada}`,
+  );
+  console.log("🔧 ========== FIN REPARAR total_restante ==========\n");
+
+  return {
+    credito_id: credito.credito_id,
+    capital_arranque: capitalArranque.toString(),
+    ultima_cuota_pagada: ultimaCuotaPagada,
+    pagos_actualizados: actualizaciones.length,
+  };
+};
+
 // ========================================
 // RECALCULAR PAGOS DESDE UNA CUOTA
 // ========================================
@@ -1350,5 +1668,94 @@ export const updateAllInstallments = async ({
   } catch (error) {
     console.error("\n❌ Error crítico en updateAllInstallments:", error);
     throw error;
+  }
+};
+
+/**
+ * Endpoint para pre-calcular las cuotas de los inversionistas sin guardar nada.
+ */
+export const calculateInvestorQuotas = async ({ body, set }: any) => {
+  try {
+    const schema = z.object({
+      capital: z.number().positive(),
+      cuota: z.number().positive(),
+      seguro_10_cuotas: z.number().min(0).optional(),
+      gps: z.number().min(0).optional(),
+      membresias_pago: z.number().min(0).optional(),
+      inversionistas: z.array(
+        z.object({
+          inversionista_id: z.number().int().positive(),
+          monto_aportado: z.number().positive(),
+        }),
+      ),
+    });
+
+    const parse = schema.safeParse(body);
+    if (!parse.success) {
+      set.status = 400;
+      return { message: "Parámetros inválidos", errors: parse.error.flatten() };
+    }
+
+    const {
+      capital: capitalTotal,
+      cuota: cuotaTotal,
+      seguro_10_cuotas = 0,
+      gps = 0,
+      membresias_pago = 0,
+      inversionistas,
+    } = parse.data;
+
+    // Calculamos el capital total real sumando todos los montos aportados
+    const capitalTotalCalculado = inversionistas.reduce(
+      (acc, inv) => acc.plus(inv.monto_aportado),
+      new Big(0)
+    );
+
+    // Buscamos al inversionista mayor
+    const inversionistaMayor = inversionistas.reduce((max, current) =>
+      current.monto_aportado > max.monto_aportado ? current : max,
+    );
+
+    const seguroBig = new Big(seguro_10_cuotas);
+    const gpsBig = new Big(gps);
+    const membresiaBig = new Big(membresias_pago);
+    const cuotaTotalBig = new Big(cuotaTotal);
+
+    const cuotaSinCargos = cuotaTotalBig
+      .minus(seguroBig)
+      .minus(gpsBig)
+      .minus(membresiaBig);
+
+    const resultados = inversionistas.map((inv) => {
+      const montoAportado = new Big(inv.monto_aportado);
+      // Usamos el capitalTotalCalculado para el % de participación exacto
+      const porcentajeParticipacion = capitalTotalCalculado.gt(0) 
+        ? montoAportado.div(capitalTotalCalculado)
+        : new Big(0);
+
+      const cuotaBase = cuotaSinCargos.times(porcentajeParticipacion).round(6);
+
+      let cuotaFinal = cuotaBase;
+      const esMayor = inv.inversionista_id === inversionistaMayor.inversionista_id;
+
+      if (esMayor) {
+        cuotaFinal = cuotaBase.plus(seguroBig).plus(gpsBig).plus(membresiaBig);
+      }
+
+      return {
+        inversionista_id: inv.inversionista_id,
+        cuota_inversionista: Number(cuotaFinal.round(6).toFixed(6)),
+        es_mayor: esMayor,
+        cuota_base: Number(cuotaBase.toFixed(6)),
+      };
+    });
+
+    return {
+      success: true,
+      data: resultados,
+    };
+  } catch (error) {
+    set.status = 500;
+    return { message: "Error calculando cuotas", error: String(error) };
   }
 };

@@ -25,6 +25,13 @@
   export const userRoleEnum = pgEnum("user_role", ["ADMIN", "ASESOR","CONTA"]);
   export const customSchema = pgSchema("cartera");
 
+  export const statusCreditoInversionistaEspejoEnum = customSchema.enum("status_credito_inversionista_espejo", [
+    "pendiente_reinversion",
+    "pendiente_compra_cartera",
+    "completado",
+    "pendiente_revision"
+  ]);
+
   export const tipoReinversionEnum = customSchema.enum("tipo_reinversion", [
     "sin_reinversion",
     "reinversion_capital",
@@ -98,6 +105,7 @@
     PENDIENTE_CANCELACION = "PENDIENTE_CANCELACION",
     MOROSO = "MOROSO",
     EN_CONVENIO = "EN_CONVENIO",
+    CAIDO = "CAIDO",
   }
   // 2. Créditos
 
@@ -156,7 +164,7 @@
     }).notNull(),
   
     statusCredit: text("statusCredit", {
-      enum: ["ACTIVO", "CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION","MOROSO", "EN_CONVENIO"],
+      enum: ["ACTIVO", "CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION","MOROSO", "EN_CONVENIO", "CAIDO"],
     })
       .notNull()
       .default(StatusCredit.ACTIVO),
@@ -244,8 +252,7 @@
     cuota: numeric("cuota").notNull(), //esto viene del credito
     cuota_interes: numeric("cuota_interes").notNull(), //esto viene del credito
     cuota_id: integer("cuota_id")
-      .references(() => cuotas_credito.cuota_id)
-      .notNull(),
+      .references(() => cuotas_credito.cuota_id),
     fecha_pago: timestamp("fecha_pago").defaultNow(), //esto viene del credito 
     abono_capital: numeric("abono_capital", { precision: 18, scale: 2 }), //aca abonamos a capital solo si el monto de la cuota que viene del credito es igual al monto de la boleta y se van a restar todos los abonos
 
@@ -358,6 +365,7 @@
       fecha_inicio_participacion: date("fecha_inicio_participacion").notNull().default("2025-12-01"),
       updated_at: timestamp("updated_at").defaultNow(),
       tipo_reinversion: tipoReinversionEnum("tipo_reinversion"),
+      status: statusCreditoInversionistaEspejoEnum("status").notNull().default("completado"),
     },
     (t) => ({
       uxCreditoInvEspejo: uniqueIndex("ux_credito_inversionista_espejo").on(t.credito_id, t.inversionista_id),
@@ -405,6 +413,17 @@
       precision: 18,
       scale: 2,
     }).notNull(),
+  });
+
+  export const creditos_caidos = customSchema.table("creditos_caidos", {
+    id: serial("id").primaryKey(),
+    credit_id: integer("credit_id")
+      .notNull()
+      .references(() => creditos.credito_id, { onDelete: "cascade" }),
+    motivo: text("motivo").notNull(),
+    observaciones: text("observaciones"),
+    fecha_caida: timestamp("fecha_caida", { withTimezone: true }).default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
+    created_at: timestamp("created_at", { withTimezone: true }).default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
   });
 
   export const montos_adicionales = customSchema.table("montos_adicionales", {
@@ -483,14 +502,13 @@
     {
       id: serial("id").primaryKey(),
       pago_id: integer("pago_id")
-        .notNull()
-        .references(() => pagos_credito.pago_id),
+        .references(() => pagos_credito.pago_id, { onDelete: "set null" }),
       inversionista_id: integer("inversionista_id")
         .notNull()
-        .references(() => inversionistas.inversionista_id),
+        .references(() => inversionistas.inversionista_id, { onDelete: "restrict" }),
       credito_id: integer("credito_id")
         .notNull()
-        .references(() => creditos.credito_id),
+        .references(() => creditos.credito_id, { onDelete: "restrict" }),
 
       abono_capital: numeric("abono_capital", {
         precision: 18,
@@ -990,4 +1008,18 @@
       .references(() => recibos_genericos.id, { onDelete: "cascade" }),
     concepto: varchar("concepto", { length: 300 }).notNull(),
     monto: numeric("monto", { precision: 18, scale: 2 }).notNull(),
+  });
+
+  // ── Audit logs ──
+  export const audit_logs = customSchema.table("audit_logs", {
+    id: serial("id").primaryKey(),
+    user_id: integer("user_id"),
+    user_email: varchar("user_email", { length: 200 }),
+    method: varchar("method", { length: 10 }).notNull(),
+    path: varchar("path", { length: 500 }).notNull(),
+    status_code: integer("status_code"),
+    body: text("body"),
+    created_at: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
   });

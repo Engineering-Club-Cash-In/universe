@@ -384,7 +384,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
           .from(pagos_credito)
           .where(inArray(pagos_credito.pago_id, paymentIds));
 
-        const cuotaIds = pagos.map((p) => p.cuota_id);
+        const cuotaIds = pagos.map((p) => p.cuota_id).filter((id): id is number => id !== null);
 
         // Luego traer las cuotas
         cuotasEnConvenio = await db
@@ -581,13 +581,15 @@ export async function getCreditosWithUserByMesAnio(
     | "INCOBRABLE"
     | "PENDIENTE_CANCELACION"
     | "MOROSO"
-    | "EN_CONVENIO",
+    | "EN_CONVENIO"
+    | "CAIDO",
   asesor_id?: number,
   nombre_usuario?: string,
   email_asesor?: string,
   cuotas_atrasadas?: number,
   proximidad_pago?: ProximidadPago,
-  is_vehiculo_propio?: boolean
+  is_vehiculo_propio?: boolean,
+  inversionista_ids?: number[]
 ): Promise<{
   data: CreditoConInfo[];
   page: number;
@@ -662,6 +664,13 @@ export async function getCreditosWithUserByMesAnio(
     if (is_vehiculo_propio) {
       console.log(`🔎 Filtrando solo vehículos propios`);
       conditions.push(eq(creditos.is_vehiculo_propio, true));
+    }
+
+    if (inversionista_ids && inversionista_ids.length > 0) {
+      console.log(`🔎 Filtrando por inversionistas: ${inversionista_ids}`);
+      conditions.push(
+        inArray(creditos_inversionistas.inversionista_id, inversionista_ids)
+      );
     }
   } catch (err) {
     console.error("❌ Error construyendo filtros:", err);
@@ -743,6 +752,14 @@ export async function getCreditosWithUserByMesAnio(
       query = query.innerJoin(
         cuotas_credito,
         eq(creditos.credito_id, cuotas_credito.credito_id)
+      ) as any;
+    }
+
+    // 🔥 JOIN con creditos_inversionistas si filtramos por inversionistas
+    if (inversionista_ids && inversionista_ids.length > 0) {
+      query = query.innerJoin(
+        creditos_inversionistas,
+        eq(creditos.credito_id, creditos_inversionistas.credito_id)
       ) as any;
     }
 
@@ -1143,6 +1160,14 @@ export async function getCreditosWithUserByMesAnio(
       ) as any;
     }
 
+    // 🔥 JOIN con creditos_inversionistas si filtramos por inversionistas
+    if (inversionista_ids && inversionista_ids.length > 0) {
+      countQuery = countQuery.innerJoin(
+        creditos_inversionistas,
+        eq(creditos.credito_id, creditos_inversionistas.credito_id)
+      ) as any;
+    }
+
     const [{ count: total }] = await countQuery.where(whereCondition);
 
     count = Number(total);
@@ -1456,7 +1481,7 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
       await tx.insert(cuotas_credito).values({
         credito_id: creditId,
         numero_cuota: 1,
-        fecha_vencimiento: new Date().toISOString().split("T")[0],
+        fecha_vencimiento: new Date().toLocaleDateString("sv-SE", { timeZone: "America/Guatemala" }),
         pagado: false,
       });
 
@@ -1718,7 +1743,10 @@ export async function resetCredit({
     );
 
     // 6. Calcular abonos reales
-    const abonoCapital = new Big(credito.capital ?? "0");
+    const capitalOriginal = new Big(credito.capital ?? "0");
+    const abonoCapital = statusCredit === "INCOBRABLE"
+      ? capitalOriginal.minus(new Big(montoIncobrable!))
+      : capitalOriginal;
     const abonoInteres = new Big(credito.cuota_interes ?? "0").times(n);
     const abonoIva = new Big(credito.iva_12 ?? "0").times(n);
     const abonoSeguro = new Big(credito.seguro_10_cuotas ?? "0").times(n);
@@ -1836,7 +1864,7 @@ export async function resetCredit({
       .values({
         credito_id: credito.credito_id,
         numero_cuota: 1,
-        fecha_vencimiento: new Date().toISOString(),
+        fecha_vencimiento: new Date().toLocaleDateString("sv-SE", { timeZone: "America/Guatemala" }),
         liquidado_inversionistas: false,
         pagado: true,
       })
@@ -1894,31 +1922,114 @@ export async function resetCredit({
     }
 
     // 16. Al final: zerear el crédito y ponerle el status
-    await db
-      .update(creditos)
-      .set({
-        capital: "0",
-        porcentaje_interes: "0",
-        deudatotal:
-          montoIncobrable !== undefined ? String(montoIncobrable) : "0",
+    const fechaHoyGT = new Date().toLocaleDateString("sv-SE", { timeZone: "America/Guatemala" });
+
+    if (statusCredit === "INCOBRABLE") {
+      const capitalIncobrable = new Big(montoIncobrable!);
+
+      // 16a. Actualizar crédito: capital = incobrable, lo demás en 0
+      await db
+        .update(creditos)
+        .set({
+          capital: capitalIncobrable.toString(),
+          porcentaje_interes: "0",
+          deudatotal: capitalIncobrable.toString(),
+          cuota_interes: "0",
+          cuota: capitalIncobrable.toString(),
+          iva_12: "0",
+          seguro_10_cuotas: "0",
+          gps: "0",
+          membresias_pago: "0",
+          membresias: "0",
+          porcentaje_royalti: "0",
+          royalti: "0",
+          otros: "0",
+          plazo: 1,
+          statusCredit: "INCOBRABLE",
+        })
+        .where(eq(creditos.credito_id, creditId));
+
+      // 16b. Crear cuota pendiente para el monto incobrable
+      const [cuotaPendiente] = await db
+        .insert(cuotas_credito)
+        .values({
+          credito_id: credito.credito_id,
+          numero_cuota: 1,
+          fecha_vencimiento: fechaHoyGT,
+          pagado: false,
+        })
+        .returning();
+
+      // 16c. Crear pago placeholder (no pagado) con capital_restante = incobrable
+      await db.insert(pagos_credito).values({
+        credito_id: credito.credito_id,
+        cuota_id: cuotaPendiente.cuota_id,
+        cuota: capitalIncobrable.toString(),
         cuota_interes: "0",
-        cuota: "0",
-        iva_12: "0",
-        seguro_10_cuotas: "0",
-        gps: "0",
-        membresias_pago: "0",
+        abono_capital: "0",
+        abono_interes: "0",
+        abono_iva_12: "0",
+        abono_interes_ci: "0",
+        abono_iva_ci: "0",
+        abono_seguro: "0",
+        abono_gps: "0",
+        pago_del_mes: "0",
+        monto_boleta: "0",
+        capital_restante: capitalIncobrable.toString(),
+        interes_restante: "0",
+        iva_12_restante: "0",
+        seguro_restante: "0",
+        gps_restante: "0",
+        total_restante: capitalIncobrable.toString(),
         membresias: "0",
-        porcentaje_royalti: "0",
-        royalti: "0",
-        otros: "0",
-        statusCredit: statusCredit,
-      })
-      .where(eq(creditos.credito_id, creditId));
+        membresias_pago: "0",
+        membresias_mes: "0",
+        mora: "0",
+        monto_boleta_cuota: "0",
+        seguro_total: "0",
+        pagado: false,
+        registerBy: "SISTEMA-INCOBRABLE",
+        pagoConvenio: "0",
+        monto_aplicado: "0",
+        observaciones: `Pago base - Crédito marcado como incobrable (reset)`,
+      });
+
+      // 16d. Registrar en bad_debts
+      await db.insert(bad_debts).values({
+        credit_id: creditId,
+        motivo: cancelacion?.motivo ?? "Incobrable",
+        observaciones: cancelacion?.observaciones ?? "",
+        monto_incobrable: capitalIncobrable.toString(),
+      });
+    } else {
+      // CANCELADO: zerear todo
+      await db
+        .update(creditos)
+        .set({
+          capital: "0",
+          porcentaje_interes: "0",
+          deudatotal: "0",
+          cuota_interes: "0",
+          cuota: "0",
+          iva_12: "0",
+          seguro_10_cuotas: "0",
+          gps: "0",
+          membresias_pago: "0",
+          membresias: "0",
+          porcentaje_royalti: "0",
+          royalti: "0",
+          otros: "0",
+          statusCredit: "CANCELADO",
+        })
+        .where(eq(creditos.credito_id, creditId));
+    }
 
     // 17. Retorno OK
     return {
       ok: true,
-      message: "Crédito reiniciado y pago creado exitosamente.",
+      message: statusCredit === "INCOBRABLE"
+        ? `Crédito reiniciado como incobrable. Deuda pendiente: ${montoIncobrable}`
+        : "Crédito reiniciado y pago creado exitosamente.",
     };
   } catch (error) {
     console.error("[ERROR] resetCredit:", error);
@@ -2190,14 +2301,17 @@ export async function syncScheduleOnTermsChange({
 
       const extraCuotaIds = extra.map((c) => c.cuota_id);
       if (extraCuotaIds.length > 0) {
-        // delete related pagos first
-        await tx
-          .delete(pagos_credito)
-          .where(inArray(pagos_credito.cuota_id, extraCuotaIds));
-        // then delete cuotas
-        await tx
-          .delete(cuotas_credito)
-          .where(inArray(cuotas_credito.cuota_id, extraCuotaIds));
+        const safeExtraCuotaIds = extraCuotaIds.filter((id): id is number => id !== null);
+        if (safeExtraCuotaIds.length > 0) {
+          // delete related pagos first
+          await tx
+            .delete(pagos_credito)
+            .where(inArray(pagos_credito.cuota_id, safeExtraCuotaIds));
+          // then delete cuotas
+          await tx
+            .delete(cuotas_credito)
+            .where(inArray(cuotas_credito.cuota_id, safeExtraCuotaIds));
+        }
       }
     }
 
@@ -2668,7 +2782,9 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
       .where(
         and(
           ...baseConditionsActive,
-          sql`COALESCE(${moras_credito.cuotas_atrasadas}, 0) = ${cuotasNum}`
+          cuotasNum === 4
+            ? sql`COALESCE(${moras_credito.cuotas_atrasadas}, 0) >= 4`
+            : sql`COALESCE(${moras_credito.cuotas_atrasadas}, 0) = ${cuotasNum}`
         )
       );
 

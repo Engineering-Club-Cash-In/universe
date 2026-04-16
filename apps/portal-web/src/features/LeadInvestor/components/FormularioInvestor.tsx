@@ -1,4 +1,4 @@
-import { Input, Button, Select } from "@/components";
+import { Input, Button, Link, Select } from "@/components";
 import { IconPersonIndividual } from "@/components/icons/IconPersonIndividual";
 import { IconPersonJuridica } from "@/components/icons/IconPersonJuridica";
 import { useFormInvestor } from "../hooks/useFormInvestor";
@@ -271,6 +271,17 @@ export const FormularioInvestor = ({
           >
             {isSubmitting ? "Enviando..." : "Enviar formulario"}
           </Button>
+          <p className="text-xs text-[#7A7A8A]">
+            Al enviar tus datos, confirmas que has leído y aceptas los{" "}
+            <Link
+              href="/terms&conditions"
+              className="text-primary"
+              underline
+            >
+              Términos y Condiciones
+            </Link>
+            .
+          </p>
           <p className="text-xs text-[#7A7A8A]">
             Tus datos están protegidos. No compartimos tu información con terceros.
           </p>

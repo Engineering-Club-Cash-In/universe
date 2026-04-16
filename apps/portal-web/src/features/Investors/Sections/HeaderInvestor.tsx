@@ -13,11 +13,11 @@ export const HeaderInvestor = () => {
   return (
     <section className="px-8 lg:px-20 mt-10 lg:mt-32">
       <div className="flex gap-20">
-        <div className="flex flex-col items-center lg:items-start gap-6 lg:gap-12 w-full lg:w-3/5">
-          <div>
+        <div className="flex flex-col items-center lg:items-start gap-6 lg:gap-8 xl:gap-12 w-full lg:w-3/5">
+          <div className="lg:-ml-8">
             <InvestorsLogoTemp
-              width={isMobile ? "60px" : "120px"}
-              height={isMobile ? "60px" : "120px"}
+              width={isMobile ? "220px" : "420px"}
+              height={isMobile ? "120px" : "200px"}
             />
           </div>
           <p className="text-xl text-center lg:text-start lg:text-header-3 lg:pr-30">

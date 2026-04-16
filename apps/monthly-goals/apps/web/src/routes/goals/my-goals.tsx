@@ -41,7 +41,7 @@ export const Route = createFileRoute("/goals/my-goals")({
 
 function MyGoalsPage() {
   const { data: session } = authClient.useSession();
-  const { canEditGoals } = usePermissions();
+  const { canEditGoals, canEditGoalTarget } = usePermissions();
   const queryClient = useQueryClient();
   const areas = useQuery(orpc.areas.list.queryOptions());
   
@@ -87,6 +87,9 @@ function MyGoalsPage() {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     const data = {
+      ...(canEditGoalTarget
+        ? { targetValue: formData.get("targetValue") as string }
+        : {}),
       achievedValue: formData.get("achievedValue") as string,
       description: formData.get("description") as string,
       status: formData.get("status") as "pending" | "in_progress" | "completed",
@@ -134,6 +137,34 @@ function MyGoalsPage() {
     if (percentage >= success) return "exitoso";
     else if (percentage >= warning) return "en_progreso";
     else return "necesita_atencion";
+  };
+
+  const calculateProgressPercentage = (
+    target: number,
+    achieved: number,
+    isInverse: boolean | null | undefined
+  ) => {
+    if (Number.isNaN(target) || Number.isNaN(achieved)) {
+      return 0;
+    }
+
+    if (isInverse) {
+      if (target === 0 && achieved === 0) {
+        return 100;
+      }
+
+      if (achieved <= target) {
+        return 100;
+      }
+
+      return target === 0 ? 0 : Math.max((target / achieved) * 100, 0);
+    }
+
+    if (target <= 0) {
+      return 0;
+    }
+
+    return (achieved / target) * 100;
   };
 
   // Generar opciones de área dinámicamente desde los datos
@@ -207,23 +238,11 @@ function MyGoalsPage() {
   cell: ({ row }) => {
     const target = parseFloat(row.original.targetValue);
     const achieved = parseFloat(row.original.achievedValue);
-    const isInverse = row.original.isInverse;
-
-    let percentage = 0;
-
-    if (!isNaN(target)) {
-      if (isInverse) {
-        // Para metas inversas: menor o igual al target = 100%
-        if (achieved <= target) {
-          percentage = 100;
-        } else {
-          percentage = target === 0 ? 0 : Math.max((target / achieved) * 100, 0);
-        }
-      } else if (target > 0) {
-        // Para metas normales: mayor es mejor
-        percentage = (achieved / target) * 100;
-      }
-    }
+    const percentage = calculateProgressPercentage(
+      target,
+      achieved,
+      row.original.isInverse
+    );
 
     const clamped = Math.min(percentage, 100);
 
@@ -245,18 +264,11 @@ function MyGoalsPage() {
         cell: ({ row }) => {
           const target = parseFloat(row.original.targetValue);
           const achieved = parseFloat(row.original.achievedValue);
-          const isInverse = row.original.isInverse;
-
-          let percentage = 0;
-          if (isInverse) {
-            if (achieved <= target) {
-              percentage = 100;
-            } else {
-              percentage = target === 0 ? 0 : Math.max((target / achieved) * 100, 0);
-            }
-          } else if (target > 0) {
-            percentage = (achieved / target) * 100;
-          }
+          const percentage = calculateProgressPercentage(
+            target,
+            achieved,
+            row.original.isInverse
+          );
 
           return getStatusBadge(
             percentage,
@@ -269,18 +281,11 @@ function MyGoalsPage() {
 
           const target = parseFloat(row.original.targetValue);
           const achieved = parseFloat(row.original.achievedValue);
-          const isInverse = row.original.isInverse;
-
-          let percentage = 0;
-          if (isInverse) {
-            if (achieved <= target) {
-              percentage = 100;
-            } else {
-              percentage = target === 0 ? 0 : Math.max((target / achieved) * 100, 0);
-            }
-          } else if (target > 0) {
-            percentage = (achieved / target) * 100;
-          }
+          const percentage = calculateProgressPercentage(
+            target,
+            achieved,
+            row.original.isInverse
+          );
 
           const status = getStatusText(
             percentage,
@@ -453,15 +458,30 @@ function MyGoalsPage() {
               <div className="grid grid-cols-2 gap-4">
                 <Card>
                   <CardContent className="pt-6">
-                    <p className="text-xs text-gray-500 dark:text-gray-400 font-medium uppercase mb-1">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 font-medium uppercase mb-3">
                       {updatingGoal.isInverse ? "Meta (máx)" : "Objetivo"}
                     </p>
-                    <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                      {parseFloat(updatingGoal.targetValue).toLocaleString()}
-                      <span className="text-sm font-normal text-gray-500 dark:text-gray-400 ml-2">
-                        {updatingGoal.goalTemplateUnit || "unidades"}
-                      </span>
-                    </p>
+                    {canEditGoalTarget ? (
+                      <div className="space-y-2">
+                        <Input
+                          name="targetValue"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          defaultValue={updatingGoal.targetValue}
+                        />
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          Unidad: {updatingGoal.goalTemplateUnit || "unidades"}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                        {parseFloat(updatingGoal.targetValue).toLocaleString()}
+                        <span className="text-sm font-normal text-gray-500 dark:text-gray-400 ml-2">
+                          {updatingGoal.goalTemplateUnit || "unidades"}
+                        </span>
+                      </p>
+                    )}
                     {updatingGoal.isInverse && (
                       <p className="text-xs text-purple-600 dark:text-purple-400 mt-1">
                         Meta de reducción: menor es mejor
@@ -491,19 +511,13 @@ function MyGoalsPage() {
                     {(() => {
                       const target = parseFloat(updatingGoal.targetValue);
                       const achieved = parseFloat(updatingGoal.achievedValue);
-                      const isInverse = updatingGoal.isInverse;
-
-                      let percentage = 0;
-                      if (isInverse) {
-                        if (achieved <= target) {
-                          percentage = 100;
-                        } else {
-                          percentage = target === 0 ? 0 : Math.max((target / achieved) * 100, 0);
-                        }
-                      } else if (target > 0) {
-                        percentage = (achieved / target) * 100;
-                      }
-                      return Math.round(percentage);
+                      return Math.round(
+                        calculateProgressPercentage(
+                          target,
+                          achieved,
+                          updatingGoal.isInverse
+                        )
+                      );
                     })()}%
                   </span>
                 </div>
@@ -511,19 +525,14 @@ function MyGoalsPage() {
                   value={(() => {
                     const target = parseFloat(updatingGoal.targetValue);
                     const achieved = parseFloat(updatingGoal.achievedValue);
-                    const isInverse = updatingGoal.isInverse;
-
-                    let percentage = 0;
-                    if (isInverse) {
-                      if (achieved <= target) {
-                        percentage = 100;
-                      } else {
-                        percentage = target === 0 ? 0 : Math.max((target / achieved) * 100, 0);
-                      }
-                    } else if (target > 0) {
-                      percentage = (achieved / target) * 100;
-                    }
-                    return Math.min(percentage, 100);
+                    return Math.min(
+                      calculateProgressPercentage(
+                        target,
+                        achieved,
+                        updatingGoal.isInverse
+                      ),
+                      100
+                    );
                   })()}
                   className="h-3"
                 />
@@ -531,6 +540,11 @@ function MyGoalsPage() {
 
               {/* Form Fields */}
               <div className="space-y-4 pt-4 border-t dark:border-gray-700">
+                {canEditGoalTarget && (
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Puedes ajustar el objetivo y el avance desde esta vista.
+                  </p>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor="achievedValue">Nuevo Valor Logrado</Label>
                   <Input

@@ -2,11 +2,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useRef, useState } from "react";
 import {
+  Check,
+  ChevronsUpDown,
   Download,
   FileSpreadsheet,
   Loader2,
   Search,
   User,
+  Users,
   X,
 } from "lucide-react";
 import { useCreditosPaginadosWithFilters } from "../hooks/credits";
@@ -39,11 +42,17 @@ import { ModalMarcarCuotas } from "./ModalMarcarCuotas";
 import { ModalCambiarFechaInicio } from "./ModalCambiarFechaInicio";
 import { useReport } from "../hooks/reports";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { usePaymentAgreements,useTogglePaymentAgreementStatus } from "../hooks/paymentagreement";
 import { toast } from "sonner";
+import { ModalCaidoCredit } from "./ModalCaidoCredit";
 
 export function ListaCreditosPagos() {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
+  const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
   const { user } = useAuth();
   const isAdmin = user?.role === "ADMIN";
   const userAsesorId = user?.asesor_id;
@@ -72,7 +81,7 @@ export function ListaCreditosPagos() {
     setEstado,
     estado,
     estados,
-    handleExcel,
+    downloadExcel,
     asesorId,
     handleAsesorId,
     setAsesorId,
@@ -82,6 +91,8 @@ export function ListaCreditosPagos() {
     clearNombreUsuario,
     isVehiculoPropio,
     setIsVehiculoPropio,
+    inversionistaIds,
+    setInversionistaIds,
   } = useCreditosPaginadosWithFilters({
     initialAsesorId: !isAdmin && userAsesorId ? userAsesorId : undefined,
   });
@@ -106,15 +117,17 @@ export function ListaCreditosPagos() {
     | "CANCELADO"
     | "INCOBRABLE"
     | "MOROSO"
-    | "EN_CONVENIO";
+    | "EN_CONVENIO"
+    | "CAIDO";
 
   // Helpers de permisos
-  const canEdit = (s: CreditStatus) =>
-    ["ACTIVO", "MOROSO", "PENDIENTE_CANCELACION", "EN_CONVENIO"].includes(s);
+  const canEdit = (_s: CreditStatus) => true;
   const canCancel = (s: CreditStatus) => ["ACTIVO", "MOROSO"].includes(s);
   const canActivate = (s: CreditStatus) => s === "PENDIENTE_CANCELACION";
   const canViewPayments = (_s: CreditStatus) => true;
   const canCreateConvenio = (s: CreditStatus) =>
+    ["ACTIVO", "MOROSO"].includes(s);
+  const canMarkCaido = (s: CreditStatus) =>
     ["ACTIVO", "MOROSO"].includes(s);
 
   // Dentro del componente, después de los otros hooks:
@@ -227,6 +240,7 @@ export function ListaCreditosPagos() {
     investors: Investor[];
     advisors: any[];
     loading: boolean;
+    refetch: () => void;
   };
 
   const [openMoraModal, setOpenMoraModal] = useState(false);
@@ -237,6 +251,9 @@ export function ListaCreditosPagos() {
   const [selectedCreditMarcarCuotas, setSelectedCreditMarcarCuotas] = useState<string>("");
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedCreditId, setSelectedCreditId] = useState<number | null>(null);
+  const [caidoModalOpen, setCaidoModalOpen] = useState(false);
+  const [investorPopoverOpen, setInvestorPopoverOpen] = useState(false);
+  const [selectedCreditCaido, setSelectedCreditCaido] = useState<number | null>(null);
   const activateCreditMutation = useActivateCredit();
   const toggleCancelacionMutation = useToggleCancelacionActivo();
 
@@ -315,15 +332,15 @@ export function ListaCreditosPagos() {
         </p>
       </div>
 
-<div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-white/80 border border-blue-100 shadow-md rounded-2xl px-4 py-4 w-full mb-6">
+<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 bg-white/80 border border-blue-100 shadow-md rounded-2xl px-4 py-4 w-full mb-6">
         {/* Filtro por # Crédito SIFCO */}
-        <label className="flex items-center gap-2 font-medium text-blue-800">
-          <Hash className="w-5 h-5" />
+        <label className="flex items-center gap-2 font-medium text-blue-800 sm:col-span-2">
+          <Hash className="w-5 h-5 shrink-0" />
           <input
             ref={inputRef}
-            className="border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400"
+            className="border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full"
             type="text"
-            placeholder="Buscar # Crédito SIFCO"
+            placeholder="# Crédito SIFCO"
             defaultValue={creditoSifco}
             onBlur={(e) => {
               if (e.target.value !== creditoSifco) {
@@ -345,7 +362,7 @@ export function ListaCreditosPagos() {
           />
           <button
             type="button"
-            className="ml-2 px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition"
+            className="px-3 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition"
             onClick={() => {
               if (inputRef.current && inputRef.current.value !== creditoSifco) {
                 handleSifco(inputRef.current.value);
@@ -358,7 +375,7 @@ export function ListaCreditosPagos() {
           {creditoSifco && (
             <button
               type="button"
-              className="ml-1 p-1 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200 transition"
+              className="p-1 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200 transition"
               onClick={clearSifco}
               title="Limpiar filtro"
             >
@@ -367,9 +384,43 @@ export function ListaCreditosPagos() {
           )}
         </label>
 
-        {/* 👤 Filtro por Asesor */}
-        <label className="flex items-center gap-2 font-medium text-blue-800">
-          <User className="w-5 h-5" />
+        {/* Filtro por Nombre de Usuario */}
+        <label className="flex items-center gap-2 font-medium text-blue-800 sm:col-span-2">
+          <Search className="w-5 h-5 shrink-0" />
+          <div className="relative w-full flex gap-2">
+            <div className="relative w-full">
+              <input
+                type="text"
+                placeholder="Buscar por nombre..."
+                value={nombreUsuarioInput}
+                onChange={(e) => setNombreUsuarioInput(e.target.value)}
+                onKeyDown={handleKeyPress}
+                className="border border-blue-200 rounded-lg px-3 py-2 pr-10 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full"
+              />
+              {nombreUsuarioInput && (
+                <button
+                  type="button"
+                  onClick={clearNombreUsuario}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200 transition"
+                  title="Limpiar filtro"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={handleSearchNombreUsuario}
+              className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition whitespace-nowrap"
+            >
+              Buscar
+            </button>
+          </div>
+        </label>
+
+        {/* Filtro por Asesor */}
+        <label className="flex items-center gap-2 font-medium text-blue-800 sm:col-span-2">
+          <User className="w-5 h-5 shrink-0" />
           <select
             id="asesor"
             name="asesor"
@@ -406,167 +457,156 @@ export function ListaCreditosPagos() {
           )}
         </label>
 
-        {/* 🔍 Filtro por Nombre de Usuario */}
-        <label className="flex items-center gap-2 font-medium text-blue-800">
-          <Search className="w-5 h-5" />
-          <div className="relative w-full flex gap-2">
-            <div className="relative w-full">
-              <input
-                type="text"
-                placeholder="Buscar por nombre..."
-                value={nombreUsuarioInput}
-                onChange={(e) => setNombreUsuarioInput(e.target.value)}
-                onKeyDown={handleKeyPress}
-                className="border border-blue-200 rounded-lg px-3 py-2 pr-10 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full"
-              />
-              {nombreUsuarioInput && (
-                <button
-                  type="button"
-                  onClick={clearNombreUsuario}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200 transition"
-                  title="Limpiar filtro"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={handleSearchNombreUsuario}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition whitespace-nowrap"
-            >
-              Buscar
-            </button>
-          </div>
-        </label>
-
         {/* Filtro por Estado */}
-        <label className="flex items-center gap-2 font-medium text-blue-800">
-          <AlertCircle className="w-5 h-5" />
-          <div className="relative w-full">
-            <select
-              className="border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full appearance-none pr-8"
-              value={estado}
-              onChange={(e) => {
-                setEstado(
-                  e.target.value as
-                    | "ACTIVO"
-                    | "CANCELADO"
-                    | "INCOBRABLE"
-                    | "PENDIENTE_CANCELACION"
-                    | "MOROSO"
-                    | "EN_CONVENIO"
-                );
+        <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+          <AlertCircle className="w-4 h-4 text-blue-700" />
+          <span className="text-sm font-semibold text-blue-800 mr-1">Estado:</span>
+          {estados.map((est) => (
+            <button
+              key={est.value}
+              type="button"
+              onClick={() => {
+                setEstado(est.value as typeof estado);
                 setPage(1);
               }}
+              className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
+                estado === est.value
+                  ? `${est.color} border-current shadow-md ring-2 ring-offset-1 ring-blue-300 scale-105`
+                  : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
+              }`}
             >
-              <option value="">Seleccionar estado</option>
-              {estados.map((est) => (
-                <option
-                  key={est.value}
-                  value={est.value}
-                  style={{
-                    backgroundColor: est.color.includes("bg-green")
-                      ? "#bbf7d0"
-                      : est.color.includes("bg-red")
-                        ? "#fecaca"
-                        : est.color.includes("bg-yellow")
-                          ? "#fef9c3"
-                          : est.color.includes("bg-blue")
-                            ? "#dbeafe"
-                            : est.color.includes("bg-purple")
-                              ? "#e9d5ff"
-                              : est.color.includes("bg-orange")
-                                ? "#fed7aa"
-                                : undefined,
-                    color: est.color.includes("text-green")
-                      ? "#166534"
-                      : est.color.includes("text-red")
-                        ? "#991b1b"
-                        : est.color.includes("text-yellow")
-                          ? "#a16207"
-                          : est.color.includes("text-blue")
-                            ? "#1e40af"
-                            : est.color.includes("text-purple")
-                              ? "#6b21a8"
-                              : est.color.includes("text-orange")
-                                ? "#c2410c"
-                                : undefined,
-                  }}
+              {est.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Inversionista + Items por página + Vehículo + Excel */}
+        <div className="col-span-full flex flex-wrap items-center gap-3">
+          {/* Multi-select inversionistas */}
+          <div className="flex items-center gap-2 flex-1 min-w-[250px]">
+            <Users className="w-5 h-5 text-blue-800 shrink-0" />
+            <Popover open={investorPopoverOpen} onOpenChange={setInvestorPopoverOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="w-full flex items-center justify-between border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 text-sm min-h-[40px]"
                 >
-                  {est.label}
+                  <span className="flex flex-wrap gap-1 flex-1">
+                    {inversionistaIds.length === 0 ? (
+                      <span className="text-gray-400">Todos los inversionistas</span>
+                    ) : (
+                      inversionistaIds.map((id) => {
+                        const inv = investors.find((i) => i.inversionista_id === id);
+                        return (
+                          <Badge key={id} variant="secondary" className="text-xs flex items-center gap-1">
+                            {inv?.nombre ?? id}
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              className="cursor-pointer"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setInversionistaIds(inversionistaIds.filter((v) => v !== id));
+                                setPage(1);
+                              }}
+                            >
+                              <X className="w-3 h-3" />
+                            </span>
+                          </Badge>
+                        );
+                      })
+                    )}
+                  </span>
+                  <ChevronsUpDown className="w-4 h-4 shrink-0 opacity-50" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[--radix-popover-trigger-width] p-0 bg-white border border-blue-200 shadow-lg" align="start">
+                <Command className="bg-white text-gray-900">
+                  <CommandInput placeholder="Buscar inversionista..." />
+                  <CommandList className="max-h-[250px]">
+                    <CommandEmpty>No se encontró inversionista.</CommandEmpty>
+                    <CommandGroup>
+                      {investors.map((inv) => {
+                        const isSelected = inversionistaIds.includes(inv.inversionista_id);
+                        return (
+                          <CommandItem
+                            key={inv.inversionista_id}
+                            value={inv.nombre}
+                            onSelect={() => {
+                              if (isSelected) {
+                                setInversionistaIds(inversionistaIds.filter((v) => v !== inv.inversionista_id));
+                              } else {
+                                setInversionistaIds([...inversionistaIds, inv.inversionista_id]);
+                              }
+                              setPage(1);
+                            }}
+                            className="text-gray-800 hover:bg-blue-50 cursor-pointer"
+                          >
+                            <Check className={`w-4 h-4 mr-2 ${isSelected ? "opacity-100 text-blue-600" : "opacity-0"}`} />
+                            {inv.nombre}
+                          </CommandItem>
+                        );
+                      })}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          <label className="flex items-center gap-2 font-medium text-blue-800">
+            <ListOrdered className="w-5 h-5" />
+            <select
+              className="border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400"
+              value={perPage}
+              onChange={handlePerPage}
+            >
+              {[5, 10, 20, 50, 100, 200].map((n) => (
+                <option key={n} value={n}>
+                  {n} por página
                 </option>
               ))}
             </select>
-            {estado && (
-              <span
-                className={`absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-1 text-xs font-bold pointer-events-none ${
-                  estadoSeleccionado?.color || ""
-                }`}
-              >
-                {estadoSeleccionado?.label}
-              </span>
-            )}
-          </div>
-        </label>
+          </label>
+          <label className="flex items-center gap-2 font-medium text-blue-800 cursor-pointer select-none">
+            <Switch
+              checked={isVehiculoPropio === true}
+              onCheckedChange={(checked) => {
+                setIsVehiculoPropio(checked ? true : undefined);
+                setPage(1);
+              }}
+            />
+            <span className="text-sm">Solo Vehículo Cash-In</span>
+          </label>
+          <button
+            type="button"
+            disabled={isDownloadingExcel}
+            onClick={async () => {
+              try {
+                setIsDownloadingExcel(true);
+                const response = await downloadExcel();
 
-        {/* Items por página */}
-        <label className="flex items-center gap-2 font-medium text-blue-800">
-          <ListOrdered className="w-5 h-5" />
-          <select
-            className="border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full"
-            value={perPage}
-            onChange={handlePerPage}
-          >
-            {[5, 10, 20, 50, 100, 200].map((n) => (
-              <option key={n} value={n}>
-                {n} por página
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {/* Botón Descargar Excel */}
-        <button
-          type="button"
-          onClick={async () => {
-            try {
-              handleExcel(true);
-              const response = await refetch();
-
-              if (response.data && "excelUrl" in response.data) {
-                const url = (response.data as any).excelUrl;
-                window.open(url, "_blank");
-                toast.success("Excel generado correctamente");
-              } else {
-                toast.error("No se pudo generar el Excel");
+                if (response && "excelUrl" in response) {
+                  const url = (response as any).excelUrl;
+                  window.open(url, "_blank");
+                  toast.success("Excel generado correctamente");
+                } else {
+                  toast.error("No se pudo generar el Excel");
+                }
+              } catch (err) {
+                console.error("❌ Error generando Excel:", err);
+                toast.error("Error al generar el Excel");
+              } finally {
+                setIsDownloadingExcel(false);
               }
-            } catch (err) {
-              console.error("❌ Error generando Excel:", err);
-              toast.error("Error al generar el Excel");
-            } finally {
-              handleExcel(false);
-            }
-          }}
-          className="px-6 py-2 rounded-lg bg-green-600 text-white font-semibold hover:bg-green-700 transition shadow-md flex items-center justify-center gap-2"
-        >
-          <FileSpreadsheet className="w-5 h-5" />
-          Descargar Excel
-        </button>
-
-        {/* Filtro Vehículo Cash-In */}
-        <label className="flex items-center gap-2 font-medium text-blue-800 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={isVehiculoPropio === true}
-            onChange={(e) => {
-              setIsVehiculoPropio(e.target.checked ? true : undefined);
-              setPage(1);
             }}
-            className="w-4 h-4 rounded border-blue-300 text-blue-600 focus:ring-blue-500"
-          />
-          <span className="text-sm">Solo Vehículo Cash-In</span>
-        </label>
+            className="px-4 py-2 rounded-lg bg-green-600 text-white font-semibold hover:bg-green-700 transition shadow-md flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+          >
+            {isDownloadingExcel ? <Loader2 className="w-5 h-5 animate-spin" /> : <FileSpreadsheet className="w-5 h-5" />}
+            {isDownloadingExcel ? "Generando..." : "Descargar Excel"}
+          </button>
+        </div>
       </div>
 
       {isFetching && !isLoading && (
@@ -637,6 +677,9 @@ export function ListaCreditosPagos() {
               refetch={refetch}
               setSelectedCreditFechaInicio={setSelectedCreditFechaInicio}
               setFechaInicioModalOpen={setFechaInicioModalOpen}
+              canMarkCaido={canMarkCaido}
+              setSelectedCreditCaido={setSelectedCreditCaido}
+              setCaidoModalOpen={setCaidoModalOpen}
             />
           ) : (
             <DesktopView
@@ -665,6 +708,9 @@ export function ListaCreditosPagos() {
               refetch={refetch}
               setSelectedCreditFechaInicio={setSelectedCreditFechaInicio}
               setFechaInicioModalOpen={setFechaInicioModalOpen}
+              canMarkCaido={canMarkCaido}
+              setSelectedCreditCaido={setSelectedCreditCaido}
+              setCaidoModalOpen={setCaidoModalOpen}
             />
           )}
 
@@ -769,13 +815,28 @@ export function ListaCreditosPagos() {
           }}
           numeroCreditoSifco={selectedCreditFechaInicio.sifco}
           fechaActual={selectedCreditFechaInicio.fechaActual}
-          changedBy={user?.email ?? user?.name ?? "admin"}
+          changedBy={user?.email ?? "admin"}
           onSuccess={() => {
             setTimeout(() => {
               queryClient.invalidateQueries({
                 queryKey: ["creditos-paginados", mes, anio, page, perPage],
               });
             }, 50);
+          }}
+        />
+      )}
+
+      {/* Modal de Crédito Caído */}
+      {caidoModalOpen && selectedCreditCaido && (
+        <ModalCaidoCredit
+          open={caidoModalOpen}
+          onClose={() => {
+            setCaidoModalOpen(false);
+            setSelectedCreditCaido(null);
+          }}
+          creditId={selectedCreditCaido}
+          onSuccess={() => {
+            refetch();
           }}
         />
       )}
@@ -1133,6 +1194,9 @@ function MobileView({
   refetch,
   setSelectedCreditFechaInicio,
   setFechaInicioModalOpen,
+  canMarkCaido,
+  setSelectedCreditCaido,
+  setCaidoModalOpen,
 }: any) {
   return (
     <div className="space-y-4">
@@ -1165,8 +1229,8 @@ function MobileView({
             )}
           </p>
           <p className="text-sm text-gray-700">
-            <strong>Deuda Total:</strong> Q
-            {Number(item.creditos.deudatotal).toLocaleString("es-GT", {
+            <strong>Capital:</strong> Q
+            {Number(item.creditos.capital).toLocaleString("es-GT", {
               minimumFractionDigits: 2,
               maximumFractionDigits: 2,
             })}
@@ -1192,7 +1256,9 @@ function MobileView({
                         ? "text-yellow-500"
                         : item.creditos.statusCredit === "EN_CONVENIO"
                           ? "text-orange-600"
-                          : "text-gray-500"
+                          : item.creditos.statusCredit === "CAIDO"
+                            ? "text-gray-700"
+                            : "text-gray-500"
               }`}
             >
               {item.creditos.statusCredit === "PENDIENTE_CANCELACION"
@@ -1201,7 +1267,9 @@ function MobileView({
                   ? "Incobrable"
                   : item.creditos.statusCredit === "EN_CONVENIO"
                     ? "En Convenio"
-                    : item.creditos.statusCredit}
+                    : item.creditos.statusCredit === "CAIDO"
+                      ? "Caído"
+                      : item.creditos.statusCredit}
             </span>
           </p>
 
@@ -1304,6 +1372,21 @@ function MobileView({
 
               </>
             )}
+            {canMarkCaido(item.creditos.statusCredit) &&
+              user?.role === "ADMIN" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex items-center gap-1 text-gray-700 border-gray-400 hover:bg-gray-100"
+                  onClick={() => {
+                    setSelectedCreditCaido(item.creditos.credito_id);
+                    setCaidoModalOpen(true);
+                  }}
+                >
+                  <XCircle className="w-4 h-4" />
+                  Marcar Caído
+                </Button>
+              )}
             {canViewReports(item.creditos.statusCredit) &&
               user?.role === "ADMIN" && (
                 <Button
@@ -1338,6 +1421,11 @@ function MobileView({
               {/* Incobrable */}
               {item.incobrable && (
                 <IncobrableInfo incobrable={item.incobrable} />
+              )}
+
+              {/* Caído */}
+              {item.caido && (
+                <CaidoInfo caido={item.caido} />
               )}
 
               {/* Cancelación */}
@@ -1387,10 +1475,13 @@ function DesktopView({
   refetch,
   setSelectedCreditFechaInicio,
   setFechaInicioModalOpen,
+  canMarkCaido,
+  setSelectedCreditCaido,
+  setCaidoModalOpen,
 }: any) {
   return (
-<div className="w-full max-w-7xl mx-auto">
-  <Table className="w-full min-w-[1200px] border-separate border-spacing-y-1">
+<div className="w-full">
+  <Table className="w-full border-separate border-spacing-y-1">
         <TableHeader>
           <TableRow className="bg-blue-50 border-b-2 border-blue-200 rounded-t-xl">
             <TableHead className="text-gray-900 font-bold text-center">
@@ -1400,7 +1491,7 @@ function DesktopView({
               Usuario
             </TableHead>
             <TableHead className="text-gray-900 font-bold text-center">
-              Deuda Total
+              Capital
             </TableHead>
             <TableHead className="text-gray-900 font-bold text-center">
               Cuota
@@ -1437,9 +1528,9 @@ function DesktopView({
                     )}
                   </div>
                 </TableCell>
-                <TableCell className="text-green-600 font-bold text-center">
+                <TableCell className="text-blue-700 font-bold text-center">
                   Q
-                  {Number(item.creditos.deudatotal).toLocaleString("es-GT", {
+                  {Number(item.creditos.capital).toLocaleString("es-GT", {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })}
@@ -1466,22 +1557,27 @@ function DesktopView({
 
                 {/* Acciones */}
                 <TableCell className="text-center">
-                  <div className="flex flex-col items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="text-gray-700 border-gray-300"
-                      onClick={() =>
-                        setExpandedRow(expandedRow === idx ? null : idx)
-                      }
-                    >
-                      {expandedRow === idx
-                        ? "Ocultar acciones"
-                        : "Ver acciones"}
-                    </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-gray-700 border-gray-300 whitespace-nowrap"
+                    onClick={() =>
+                      setExpandedRow(expandedRow === idx ? null : idx)
+                    }
+                  >
+                    {expandedRow === idx
+                      ? "Ocultar"
+                      : "Ver acciones"}
+                  </Button>
+                </TableCell>
+              </TableRow>
 
-                    {expandedRow === idx && (
-                      <div className="flex flex-wrap justify-center gap-2 p-2 border rounded-md bg-gray-50 shadow-sm w-full md:w-auto">
+              {/* Row expandida con acciones + detalles */}
+              {expandedRow === idx && (
+                <TableRow>
+                  <TableCell colSpan={6} className="p-0 bg-blue-50 rounded-b-2xl">
+                    {/* Botones de acción */}
+                    <div className="flex flex-wrap justify-center gap-2 px-6 py-4 border-b border-blue-100">
                         {canViewPayments(item.creditos.statusCredit) && (
                           <Button
                             variant="outline"
@@ -1580,6 +1676,22 @@ function DesktopView({
                             </Button>
                           )}
 
+                        {canMarkCaido(item.creditos.statusCredit) &&
+                          user?.role === "ADMIN" && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex items-center gap-1 text-gray-700 border-gray-400 hover:bg-gray-100"
+                              onClick={() => {
+                                setSelectedCreditCaido(item.creditos.credito_id);
+                                setCaidoModalOpen(true);
+                              }}
+                            >
+                              <XCircle className="w-4 h-4" />
+                              Marcar Caído
+                            </Button>
+                          )}
+
                         {canViewReports(item.creditos.statusCredit) &&
                           user?.role === "ADMIN" && (
                             <Button
@@ -1656,19 +1768,9 @@ function DesktopView({
                               Sin permisos
                             </span>
                           )}
-                      </div>
-                    )}
-                  </div>
-                </TableCell>
-              </TableRow>
+                    </div>
 
-              {/* Row expandida */}
-              {expandedRow === idx && (
-                <TableRow>
-                  <TableCell
-                    colSpan={6}
-                    className="p-0 bg-blue-50 rounded-b-2xl"
-                  >
+                    {/* Detalles del crédito */}
                     <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6 text-gray-900">
                       <DetallesCredito item={item} fullWidth />
 
@@ -1688,6 +1790,12 @@ function DesktopView({
                       {item.incobrable && (
                         <div className="col-span-full mt-6">
                           <IncobrableInfo incobrable={item.incobrable} />
+                        </div>
+                      )}
+
+                      {item.caido && (
+                        <div className="col-span-full mt-6">
+                          <CaidoInfo caido={item.caido} />
                         </div>
                       )}
 
@@ -1754,9 +1862,9 @@ function DetallesCredito({
         }
       >
         {([
-          { label: "Capital", value: item.creditos.capital, isMoney: true },
-          { label: "Porcentaje Interés", value: `${item.creditos.porcentaje_interes}%` },
           { label: "Deuda Total", value: item.creditos.deudatotal, isMoney: true },
+          { label: "Porcentaje Interés", value: `${item.creditos.porcentaje_interes}%` },
+          { label: "Capital", value: item.creditos.capital, isMoney: true },
           { label: "Cuota", value: item.creditos.cuota, isMoney: true },
           { label: "Cuota Interés", value: item.creditos.cuota_interes, isMoney: true },
           { label: "IVA 12%", value: item.creditos.iva_12, isMoney: true },
@@ -1884,6 +1992,40 @@ function IncobrableInfo({ incobrable }: { incobrable: any }) {
             {incobrable.observaciones || "--"}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function CaidoInfo({ caido }: { caido: any }) {
+  return (
+    <div>
+      <h4 className="text-xl font-bold text-gray-800 border-b pb-2 mb-4">
+        Información de Crédito Caído
+      </h4>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="p-3 rounded-lg bg-white border shadow-sm">
+          <span className="font-bold text-gray-700">Motivo:</span>
+          <p className="text-gray-800">{caido.motivo}</p>
+        </div>
+        <div className="p-3 rounded-lg bg-white border shadow-sm">
+          <span className="font-bold text-gray-700">Fecha de Caída:</span>
+          <p className="text-gray-800">
+            {new Date(caido.fecha_caida).toLocaleDateString("es-ES", {
+              day: "2-digit",
+              month: "short",
+              year: "numeric",
+            })}
+          </p>
+        </div>
+        {caido.observaciones && (
+          <div className="p-3 rounded-lg bg-white border shadow-sm col-span-full">
+            <span className="font-bold text-gray-700">Observaciones:</span>
+            <div className="max-h-24 overflow-y-auto text-sm text-gray-800 p-2 border rounded-md bg-gray-50 break-words">
+              {caido.observaciones}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

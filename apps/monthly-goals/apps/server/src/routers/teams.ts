@@ -253,7 +253,6 @@ export const createUserAndAssignToTeam = protectedProcedure
 					email: input.email,
 					password: input.password,
 					name: input.name,
-					role: input.role,
 				}
 			});
 
@@ -286,6 +285,10 @@ export const createUserAndAssignToTeam = protectedProcedure
 				teamMember: newTeamMember 
 			};
 		} catch (error) {
+			if (error instanceof ORPCError) {
+				throw error;
+			}
+
 			// Detectar errores específicos y dar mensajes claros
 			if (error instanceof Error) {
 				if (error.message.includes("unique")) {

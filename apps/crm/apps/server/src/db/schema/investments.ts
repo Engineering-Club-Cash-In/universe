@@ -30,12 +30,14 @@ export const investmentLeadSourceEnum = pgEnum("investment_lead_source", [
 ]);
 
 export const investmentStageEnum = pgEnum("investment_stage", [
-	"prospecting",
-	"contacted",
-	"negotiation",
-	"acceptance_signatures",
-	"welcome",
-	"closed",
+	"data_collection",
+	"basic_profile_validation",
+	"profiling_and_qualification",
+	"model_presentation",
+	"active_follow_up",
+	"verbal_commitment_contract_sent",
+	"ticket_closure_transfer_activation",
+	"initial_onboarding_senior_handoff",
 	"lost",
 ]);
 
@@ -150,7 +152,7 @@ export const investmentOpportunities = pgTable("investment_opportunities", {
 	investorId: uuid("investor_id").references(() => investors.id, {
 		onDelete: "set null",
 	}),
-	stage: investmentStageEnum("stage").notNull().default("prospecting"),
+	stage: investmentStageEnum("stage").notNull().default("data_collection"),
 	assignedAdvisorId: text("assigned_advisor_id")
 		.notNull()
 		.references(() => user.id),
@@ -278,7 +280,7 @@ export const investmentAuditLog = pgTable("investment_audit_log", {
 // --- Investor Activity Log (acciones sobre inversionistas) ---
 export const investorActivityLogActionEnum = pgEnum(
 	"investor_activity_log_action",
-	["document_created", "document_deleted", "document_visibility_toggled"],
+	["document_created", "document_deleted", "document_visibility_toggled", "compra_cartera", "investor_created", "investor_updated"],
 );
 
 export const investorActivityLog = pgTable("investor_activity_log", {

@@ -1876,12 +1876,12 @@ export async function getInvestorTotalsGlobales(
           cuota_inversor = interesTotal;
           break;
         case "reinversion_interes":
-          reinvInteres = abono_interes;
+          reinvInteres = interesTotal;
           cuota_inversor = abono_capital;
           break;
         case "reinversion_total":
           reinvCapital = abono_capital;
-          reinvInteres = abono_interes;
+          reinvInteres = interesTotal;
           cuota_inversor = new Big(0);
           break;
         case "reinversion_variable":
@@ -1906,14 +1906,10 @@ export async function getInvestorTotalsGlobales(
       // 🔑 ACUMULADOR NETO INDEPENDIENTE
       const pagoNetoGlobal = abono_capital.plus(interesTotal);
       subtotal.total_cuota_sin_reinversion = subtotal.total_cuota_sin_reinversion.plus(pagoNetoGlobal);
-      // 🔑 Reinversión Neta (Fuente de Verdad)
-      const isrReinvGlobal = inv.emite_factura ? new Big(0) : reinvInteres.times(0.07);
-      const netReinvGlobal = reinvCapital.plus(reinvInteres).minus(isrReinvGlobal);
-      const netReinvIntGlobal = reinvInteres.minus(isrReinvGlobal);
-
-      subtotal.total_reinversion = subtotal.total_reinversion.plus(netReinvGlobal);
+      // 🔑 Reinversión Neta (reinvInteres ya viene neto: con IVA sumado o ISR restado)
+      subtotal.total_reinversion = subtotal.total_reinversion.plus(reinvCapital.plus(reinvInteres));
       subtotal.total_reinversion_capital = subtotal.total_reinversion_capital.plus(reinvCapital);
-      subtotal.total_reinversion_interes = subtotal.total_reinversion_interes.plus(netReinvIntGlobal);
+      subtotal.total_reinversion_interes = subtotal.total_reinversion_interes.plus(reinvInteres);
     }
 
     subtotal.total_monto_aportado = subtotal.total_monto_aportado.plus(new Big(c.monto_aportado ?? 0));

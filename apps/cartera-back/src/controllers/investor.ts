@@ -5383,7 +5383,7 @@ export async function getCreditosEspejoPendientes(page: number = 1, pageSize: nu
       eq(creditos.usuario_id, usuarios.usuario_id)
     )
     .where(
-      sql`${creditos_inversionistas_espejo.status} IN ('pendiente_reinversion', 'pendiente_compra_cartera')`
+      sql`${creditos_inversionistas_espejo.status} IN ('pendiente_reinversion', 'pendiente_compra_cartera', 'pendiente_revision')`
     );
 
   if (pendientes.length === 0) {

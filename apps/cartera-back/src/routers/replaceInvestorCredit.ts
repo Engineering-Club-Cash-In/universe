@@ -39,7 +39,7 @@ export const replaceInvestorCreditRouter = new Elysia()
     },
   )
   .post(
-    "/devolver-pendientes-a-cube",
+    "/reemplazar-inversionista-credito/devolver-pendientes-a-cube",
     returnPendingInvestorsToCube,
     {
       body: t.Object({

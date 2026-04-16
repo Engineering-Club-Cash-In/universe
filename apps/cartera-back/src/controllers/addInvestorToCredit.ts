@@ -1,12 +1,34 @@
 import Big from "big.js";
 import { eq } from "drizzle-orm";
+import jwt from "jsonwebtoken";
 import { db } from "../database";
 import {
+  admins,
+  asesores,
   creditos_inversionistas,
   creditos_inversionistas_espejo,
+  inversionistas,
+  platform_users,
 } from "../database/db";
 import z from "zod";
 import { getCreditCandidates } from "./assignCapital";
+import { sendInvestorAddedToCreditsNotification } from "@cci/email";
+
+const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
+
+// ================================================================
+// DESTINATARIOS DEL CORREO "COMPRA DE CARTERA POR VALIDAR"
+// Solo se usa en el correo que dispara addInvestorToCredit cuando
+// tipo_operacion === "compra_cartera". Va al equipo interno chico.
+// ================================================================
+const COMPRA_CARTERA_PENDIENTE_RECIPIENTS = {
+  to: [
+    "diego.l@clubcashin.com",
+    "jalvaradp@clubcashin.com",
+    "daniel.r@clubcashin.com",
+      "diego.a@sepresta.com",
+  ],
+};
 
 // ========================================
 // ID fijo de CUBE INVESTMENTS S.A. en la tabla inversionistas.
@@ -209,7 +231,7 @@ function recalcularInversionistas(
 //   FIN - Se procesaron 2 créditos, monto_distribuido = Q50,000, monto_sin_asignar = Q0
 // ========================================
 
-export const addInvestorToCredit = async ({ body, set }: any) => {
+export const addInvestorToCredit = async ({ body, set, request }: any) => {
   try {
     // ================================================================
     // PASO 1: VALIDAR SCHEMA DEL REQUEST
@@ -519,13 +541,13 @@ export const addInvestorToCredit = async ({ body, set }: any) => {
 
           // ── Determinar el status del espejo según tipo_operacion ──
           // "reinversion" → "pendiente_reinversion"
-          // "compra_cartera" → "pendiente_compra_cartera"
+          // "compra_cartera" → "pendiente_revision" (queda esperando aprobación)
           // Solo el inversionista nuevo recibe este status.
           // Los demás inversionistas quedan como "completado".
           const statusEspejo =
             tipo_operacion === "reinversion"
               ? "pendiente_reinversion"
-              : "pendiente_compra_cartera";
+              : "pendiente_revision";
 
           const dataEspejoConStatus = dataEspejo.map((inv) => ({
             ...inv,
@@ -537,7 +559,7 @@ export const addInvestorToCredit = async ({ body, set }: any) => {
             // Los demás se mantienen como "completado"
             status: (inv.inversionista_id === inversionista_id
                 ? statusEspejo
-                : "completado") as "pendiente_reinversion" | "pendiente_compra_cartera" | "completado",
+                : "completado") as "pendiente_reinversion" | "pendiente_revision" | "completado",
             updated_at: new Date(),
           }));
 
@@ -587,7 +609,93 @@ export const addInvestorToCredit = async ({ body, set }: any) => {
     });
 
     // ================================================================
-    // PASO 4: RESPUESTA FINAL
+    // PASO 4: NOTIFICAR A LOS ADMINS POR CORREO
+    // Solo se notifica en COMPRA DE CARTERA (no en reinversión).
+    // Si hubo créditos procesados, mandamos un mail a todos los admins
+    // activos con el detalle de la operación. Va envuelto en try/catch
+    // para que un fallo de Resend NO rompa la respuesta del endpoint.
+    // ================================================================
+    if (tipo_operacion === "compra_cartera" && resultados.length > 0) {
+      try {
+        // ── Resolver quién disparó la operación a partir del JWT ──
+        let usuarioEmail: string | undefined;
+        let usuarioNombre: string | undefined;
+
+        try {
+          const authHeader = request?.headers?.get?.("Authorization");
+          if (authHeader?.startsWith("Bearer ")) {
+            const token = authHeader.replace("Bearer ", "").trim();
+            const decoded = jwt.verify(token, JWT_SECRET) as any;
+            usuarioEmail = decoded.email ?? decoded.correo ?? undefined;
+
+            if (usuarioEmail) {
+              const [pu] = await db
+                .select({
+                  admin_id: platform_users.admin_id,
+                  asesor_id: platform_users.asesor_id,
+                })
+                .from(platform_users)
+                .where(eq(platform_users.email, usuarioEmail));
+
+              if (pu?.admin_id) {
+                const [a] = await db
+                  .select({
+                    nombre: admins.nombre,
+                    apellido: admins.apellido,
+                  })
+                  .from(admins)
+                  .where(eq(admins.admin_id, pu.admin_id));
+                if (a) usuarioNombre = `${a.nombre} ${a.apellido}`.trim();
+              } else if (pu?.asesor_id) {
+                const [s] = await db
+                  .select({ nombre: asesores.nombre })
+                  .from(asesores)
+                  .where(eq(asesores.asesor_id, pu.asesor_id));
+                if (s) usuarioNombre = s.nombre;
+              }
+            }
+          }
+        } catch (jwtErr) {
+          console.warn(
+            "[addInvestorToCredit] No se pudo resolver el usuario desde el JWT:",
+            jwtErr,
+          );
+        }
+
+        const [inv] = await db
+          .select({ nombre: inversionistas.nombre })
+          .from(inversionistas)
+          .where(eq(inversionistas.inversionista_id, inversionista_id));
+
+        const montoDistribuido = new Big(monto_aportado)
+          .minus(montoRestante)
+          .toString();
+
+        await sendInvestorAddedToCreditsNotification({
+          to: COMPRA_CARTERA_PENDIENTE_RECIPIENTS.to,
+          inversionistaNombre: inv?.nombre ?? `Inversionista ${inversionista_id}`,
+          tipoOperacion: tipo_operacion,
+          montoTotal: new Big(monto_aportado).toString(),
+          montoDistribuido,
+          montoSinAsignar: montoRestante.toString(),
+          creditos: resultados.map((r) => ({
+            numero_credito_sifco: r.numero_credito_sifco,
+            monto_asignado: r.monto_asignado,
+            cube_eliminado: r.cube_eliminado,
+          })),
+          usuarioNombre,
+          usuarioEmail,
+        });
+      } catch (mailErr) {
+        console.error(
+          "[addInvestorToCredit] Error enviando notificación por correo:",
+          mailErr,
+        );
+      }
+    }
+
+    // ================================================================
+    // PASO 5: RESPUESTA FINAL
     // Devuelve un resumen completo de la distribución:
     //   - monto_total: lo que pidió el inversionista
     //   - monto_distribuido: lo que efectivamente se asignó a créditos
@@ -615,3 +723,4 @@ export const addInvestorToCredit = async ({ body, set }: any) => {
     };
   }
 };
+

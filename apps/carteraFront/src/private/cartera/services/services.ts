@@ -3596,3 +3596,29 @@ export async function devolverPendientesACubeService(
   );
   return res.data;
 }
+
+// ============================================================
+// Compra de Cartera Aceptada (Notificación y Status)
+// ============================================================
+export interface CompraCarteraAceptadaPayload {
+  creditos: number[];
+  notas_adicionales?: string;
+}
+
+export interface CompraCarteraAceptadaResponse {
+  success: boolean;
+  message: string;
+  creditos_notificados: number;
+  pool_size: number;
+  espejo_actualizados: number;
+}
+
+export async function compraCarteraAceptadaService(
+  payload: CompraCarteraAceptadaPayload
+): Promise<CompraCarteraAceptadaResponse> {
+  const res = await api.post<CompraCarteraAceptadaResponse>(
+    `${API_URL}/compra-cartera-aceptada`,
+    payload
+  );
+  return res.data;
+}

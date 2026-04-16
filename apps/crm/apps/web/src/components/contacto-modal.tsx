@@ -2,7 +2,14 @@ import { useForm } from "@tanstack/react-form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { CalendarIcon, Mail, MessageCircle, Phone } from "lucide-react";
+import {
+	CalendarIcon,
+	ChevronDown,
+	Mail,
+	MessageCircle,
+	MessageSquare,
+	Phone,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -26,6 +33,12 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
 	Select,
 	SelectContent,
@@ -214,21 +227,61 @@ export function ContactoModal({
 		}
 	};
 
-	const ejecutarAccion = (metodo: "llamada" | "whatsapp" | "email") => {
+	type AccionContacto =
+		| "llamada"
+		| "whatsapp-link"
+		| "whatsapp-api"
+		| "email-link"
+		| "email-api"
+		| "sms-api";
+
+	// TODO: conectar al endpoint ORPC cuando esté listo el backend
+	const enviarWhatsappApi = async (telefono: string, mensaje: string) => {
+		console.log("[WhatsApp API] pendiente de implementación", {
+			telefono,
+			mensaje,
+		});
+		toast.info("Envío por API de WhatsApp aún no implementado");
+	};
+
+	// TODO: conectar al endpoint ORPC cuando esté listo el backend
+	const enviarEmailApi = async (
+		destinatario: string,
+		asunto: string,
+		cuerpo: string,
+	) => {
+		console.log("[Email API] pendiente de implementación", {
+			destinatario,
+			asunto,
+			cuerpo,
+		});
+		toast.info("Envío por API de Email aún no implementado");
+	};
+
+	// TODO: conectar al endpoint ORPC cuando esté listo el backend
+	const enviarSmsApi = async (telefono: string, mensaje: string) => {
+		console.log("[SMS API] pendiente de implementación", { telefono, mensaje });
+		toast.info("Envío por API de SMS aún no implementado");
+	};
+
+	const ejecutarAccion = (metodo: AccionContacto) => {
 		const tel = telefonoSeleccionado || telefonoPrincipal;
+		const telLimpio = tel.replace(/[^0-9]/g, "");
 		switch (metodo) {
 			case "llamada":
 				window.open(`tel:${tel}`);
 				break;
-			case "whatsapp": {
-				const telLimpio = tel.replace(/[^0-9]/g, "");
+			case "whatsapp-link": {
 				const url = mensajeEditado
 					? `https://wa.me/${telLimpio}?text=${encodeURIComponent(mensajeEditado)}`
 					: `https://wa.me/${telLimpio}`;
 				window.open(url);
 				break;
 			}
-			case "email": {
+			case "whatsapp-api":
+				enviarWhatsappApi(telLimpio, mensajeEditado);
+				break;
+			case "email-link": {
 				const params = new URLSearchParams();
 				if (asuntoEditado) params.set("subject", asuntoEditado);
 				if (mensajeEditado) params.set("body", mensajeEditado);
@@ -236,6 +289,12 @@ export function ContactoModal({
 				window.open(`mailto:${emailCliente || ""}${query ? `?${query}` : ""}`);
 				break;
 			}
+			case "email-api":
+				enviarEmailApi(emailCliente || "", asuntoEditado, mensajeEditado);
+				break;
+			case "sms-api":
+				enviarSmsApi(telLimpio, mensajeEditado);
+				break;
 		}
 	};
 
@@ -412,7 +471,7 @@ export function ContactoModal({
 						)}
 
 						{/* Botones para ejecutar acción */}
-						<div className="flex gap-2">
+						<div className="flex flex-wrap gap-2">
 							<Button
 								type="button"
 								variant="outline"
@@ -423,25 +482,66 @@ export function ContactoModal({
 								<Phone className="h-4 w-4" />
 								Llamar {telefonos.length <= 1 ? telefonos[0] || "" : ""}
 							</Button>
+
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										className="flex items-center gap-2"
+									>
+										<MessageCircle className="h-4 w-4" />
+										WhatsApp
+										<ChevronDown className="h-3 w-3" />
+									</Button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="start">
+									<DropdownMenuItem
+										onClick={() => ejecutarAccion("whatsapp-api")}
+									>
+										Enviar por API
+									</DropdownMenuItem>
+									<DropdownMenuItem
+										onClick={() => ejecutarAccion("whatsapp-link")}
+									>
+										Abrir WhatsApp Web
+									</DropdownMenuItem>
+								</DropdownMenuContent>
+							</DropdownMenu>
+
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										className="flex items-center gap-2"
+									>
+										<Mail className="h-4 w-4" />
+										Email
+										<ChevronDown className="h-3 w-3" />
+									</Button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="start">
+									<DropdownMenuItem onClick={() => ejecutarAccion("email-api")}>
+										Enviar por API
+									</DropdownMenuItem>
+									<DropdownMenuItem onClick={() => ejecutarAccion("email-link")}>
+										Abrir cliente de correo
+									</DropdownMenuItem>
+								</DropdownMenuContent>
+							</DropdownMenu>
+
 							<Button
 								type="button"
 								variant="outline"
 								size="sm"
-								onClick={() => ejecutarAccion("whatsapp")}
+								onClick={() => ejecutarAccion("sms-api")}
 								className="flex items-center gap-2"
 							>
-								<MessageCircle className="h-4 w-4" />
-								WhatsApp
-							</Button>
-							<Button
-								type="button"
-								variant="outline"
-								size="sm"
-								onClick={() => ejecutarAccion("email")}
-								className="flex items-center gap-2"
-							>
-								<Mail className="h-4 w-4" />
-								Email
+								<MessageSquare className="h-4 w-4" />
+								SMS
 							</Button>
 						</div>
 

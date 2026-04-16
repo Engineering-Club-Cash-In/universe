@@ -211,12 +211,25 @@ export interface CreditoConInversionistas extends CarteraCredito {
 }
 
 /**
+ * Asesor tal como lo devuelve el endpoint /credito (campos crudos de la tabla `asesores`).
+ * Difiere de CarteraAsesor (que se enriquece con datos de platform_users en /advisor).
+ */
+export interface CarteraAsesorCredito {
+	asesor_id: number;
+	nombre: string;
+	telefono: string | null;
+	activo: boolean | null;
+	emailCashIn: string | null;
+}
+
+/**
  * Estructura real devuelta por el endpoint /credito?numero_credito_sifco=XXX
  * Retorna los datos del crédito con las cuotas separadas por estado
  */
 export interface CreditoDirectoResponse {
 	credito: CarteraCredito;
 	usuario: CarteraUsuario;
+	asesor: CarteraAsesorCredito | null;
 	cuotasPagadas: CarteraCuotaCredito[];
 	cuotasPendientes: CarteraCuotaCredito[];
 	cuotasAtrasadas: CarteraCuotaCredito[];

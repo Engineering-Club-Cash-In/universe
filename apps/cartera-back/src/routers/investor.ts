@@ -516,6 +516,7 @@ export const inversionistasRouter = new Elysia()
 
       for (const liq of liquidacionesDelDia) {
         const { inversionista_id: id, liquidacion_id: liqId } = liq;
+        if (id === 38) continue;
         try {
           const result = await resumeInvestor(
             id,
@@ -557,7 +558,7 @@ export const inversionistasRouter = new Elysia()
             logoUrl
           );
 
-          const liquidacionActualizada = await updateLiquidacionReporteUrl(id, url);
+          const liquidacionActualizada = await updateLiquidacionReporteUrl(liqId, url);
 
           resultados.push({
             inversionista_id: id,
@@ -594,25 +595,18 @@ export const inversionistasRouter = new Elysia()
     }
   })
   .post("/investor/reporte-liquidados", async ({ body, set }) => {
-    const { id } = body as { id?: number };
+    const { investor_id, liquidacion_id } = body as { investor_id?: number, liquidacion_id?: number };
 
-    if (!id || isNaN(Number(id))) {
+    if (!investor_id || isNaN(Number(investor_id))) {
       set.status = 400;
-      return { message: "El parámetro 'id' es obligatorio y debe ser numérico." };
+      return { message: "El parámetro 'investor_id' es obligatorio y debe ser numérico." };
     }
 
     try {
-      const todasLiquidaciones = await getLiquidaciones({ inversionista_id: Number(id), perPage: 1 });
-      const liquidacionReciente = todasLiquidaciones.liquidaciones?.[0];
-
-      if (!liquidacionReciente) {
-        set.status = 404;
-        return { message: "Inversionista no encontrado o sin liquidaciones." };
-      }
-      const liquidacionId = liquidacionReciente.liquidacion_id;
+      const liquidacionId = liquidacion_id
 
       const result = await resumeInvestor(
-        Number(id),
+        Number(investor_id),
         1,
         999999,
         undefined,
@@ -634,7 +628,7 @@ export const inversionistasRouter = new Elysia()
       const inversionista = result.inversionistas[0];
 
       const totales = await getInvestorTotalsGlobales(
-        Number(id),
+        Number(investor_id),
         undefined,
         "espejos",
         false,
@@ -646,16 +640,16 @@ export const inversionistasRouter = new Elysia()
       inversionista.subtotal = totales.totales as any;
 
       const logoUrl = import.meta.env.LOGO_URL || "";
-      const filename = `reporte_liquidados_${id}_${Date.now()}.xlsx`;
+      const filename = `reporte_liquidados_${liquidacionId}_${Date.now()}.xlsx`;
       const { url } = await generarYSubirExcelInversionista(inversionista as any, filename, logoUrl);
 
-      const liquidacionActualizada = await updateLiquidacionReporteUrl(Number(id), url);
+      // const liquidacionActualizada = await updateLiquidacionReporteUrl(Number(liquidacionId), url);
 
       return {
         success: true,
         url,
         filename,
-        liquidacion: liquidacionActualizada || null,
+        liquidacion:  null,
       };
     } catch (error) {
       console.error("[investor/pdf-liquidados] Error:", error);

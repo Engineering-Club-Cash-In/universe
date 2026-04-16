@@ -2,6 +2,7 @@ import { createFileRoute, redirect } from '@tanstack/react-router'
 import { Login } from '@features/Login/Login'
 import { Page } from '@components/Page'
 import { authClient } from '@/lib/auth'
+import { useSEO } from '@/lib/seo'
 
 // Verificar si ya tiene sesión activa
 const checkIfLoggedIn = async () => {
@@ -24,6 +25,12 @@ export const Route = createFileRoute('/login')({
 })
 
 function RouteComponent() {
+  useSEO({
+    title: "Iniciar Sesión",
+    description: "Inicia sesión en Club CashIn para gestionar tus créditos e inversiones.",
+    noindex: true,
+  });
+
   return (
     <Page>
       <Login />

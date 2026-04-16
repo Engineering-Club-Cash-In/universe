@@ -2,7 +2,7 @@ import { useFormik } from "formik";
 import * as Yup from "yup";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
-import { useLeadInvestor } from "../store/useLeadInvestor";
+import { useNavigate } from "@tanstack/react-router";
 import { sendLeadInvestor } from "../service/serviceLeadInvestor";
 
 export type ProfileType = "individual" | "juridica";
@@ -75,7 +75,7 @@ const validationSchema = Yup.object({
 
 const VALID_AMOUNTS = ["25000", "50000", "100000", "250000", "500000", "1000000"];
 
-const buildInitialValues = (amount?: string): FormInvestorValues => ({
+const buildInitialValues = (amount?: string, defaultMessage?: string): FormInvestorValues => ({
   profileType: "individual",
   nombreCompleto: "",
   nombreSociedad: "",
@@ -85,19 +85,25 @@ const buildInitialValues = (amount?: string): FormInvestorValues => ({
   telefono: "",
   experiencia: "",
   proposedAmount: amount && VALID_AMOUNTS.includes(amount) ? amount : "",
-  mensaje: "",
+  mensaje: defaultMessage || "",
 });
 
-export const useFormInvestor = (initialAmount?: string) => {
-  const setSubmitted = useLeadInvestor((state) => state.setSubmitted);
+export const useFormInvestor = (
+  initialAmount?: string,
+  defaultMessage?: string,
+  source?: string,
+  campaign?: string
+) => {
+  const navigate = useNavigate();
   const [serverError, setServerError] = useState<string>("");
 
   const mutation = useMutation({
-    mutationFn: sendLeadInvestor,
-    onSuccess: (data, variables) => {
+    mutationFn: (values: FormInvestorValues) =>
+      sendLeadInvestor(values, source, campaign),
+    onSuccess: (data) => {
       console.log("Lead investor enviado exitosamente:", data);
       setServerError("");
-      setSubmitted(variables);
+      navigate({ to: "/thanks", search: { type: "investor" } });
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (error: any) => {
@@ -108,7 +114,7 @@ export const useFormInvestor = (initialAmount?: string) => {
   });
 
   const formik = useFormik<FormInvestorValues>({
-    initialValues: buildInitialValues(initialAmount),
+    initialValues: buildInitialValues(initialAmount, defaultMessage),
     validationSchema,
     onSubmit: async (values) => {
       mutation.mutate(values);

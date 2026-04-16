@@ -16,9 +16,9 @@ import {
 import { eq, and, lte, asc, desc, sql, gt, gte, or, ne, inArray } from "drizzle-orm";
 import { updateMora } from "./latefee";
 import { insertPagosCreditoInversionistas, insertPagosCreditoInversionistasV2 } from "./payments";
-import { processAndReplaceCreditInvestors } from "./investor";
-import { formatInTimeZone } from "date-fns-tz/dist/cjs/formatInTimeZone";
+import { processAndReplaceCreditInvestors } from "./investor"; 
 import { processConvenioPayment } from "./paymentAgreement";
+import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import { convertirAHoraGuatemala } from "../utils/functions/generalFunctions";
 
 // ========================================
@@ -41,6 +41,7 @@ const pagoSchema = z.object({
   numeroAutorizacion: z.string().optional(),
   registerBy: z.string().min(1),
   fecha_boleta: z.string(),
+  origen_pago: z.enum(["transferencia", "cheque", "boleta"]).optional().default("transferencia"),
 });
 
 type PagoData = z.infer<typeof pagoSchema>;
@@ -500,7 +501,8 @@ export const insertPayment = async ({ body, set }: any) => {
       banco_id,
       numeroAutorizacion,
       registerBy,
-      fecha_boleta
+      fecha_boleta,
+      origen_pago,
     } = parseResult.data;
 
     // 2. Preparar datos
@@ -744,8 +746,8 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         `💰 Disponible antes de cuota: $${disponible_restante.toString()}`
       );
       if (disponible_restante.gt(0)) {
-        // Verificar si existe pago previo
-        const [existingPago] = await db
+        // Verificar si existe pago previo - priorizar el original (no_required)
+        const allExistingPagos = await db
           .select({ pago: pagos_credito })
           .from(pagos_credito)
           .innerJoin(
@@ -762,7 +764,12 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
               eq(pagos_credito.credito_id, credito.credito_id)
             )
           )
-          .limit(1);
+          .orderBy(asc(pagos_credito.pago_id));
+
+        // Priorizar el pago original (no_required) sobre cualquier otro
+        const existingPago = allExistingPagos.find(
+          (p) => p.pago.validationStatus === "no_required"
+        ) ?? allExistingPagos[0];
         // Inicializar variables de abono
         // 2. OBTENER LOS RESTANTES DEL PAGO EXISTENTE (no de la cuota)
         const interes_restante = new Big(
@@ -970,13 +977,16 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         );
         console.log("💵 Pago del mes TOTAL:", pago_del_mesBig.toString());
         console.log("🔍 ========== FIN ==========\n");
-        const cuota_pagada =
+        const todosRestantesEnCero =
           nuevo_interes_restante.eq(0) &&
           nuevo_iva_restante.eq(0) &&
           nuevo_seguro_restante.eq(0) &&
           nuevo_gps_restante.eq(0) &&
           nuevo_membresias_restante.eq(0) &&
           nuevo_capital_restante.eq(0);
+        // Solo marcar como pagada si los restantes están en 0 Y existía un pago previo
+        // (evita marcar como pagada cuando no hay pago existente y los restantes son 0 por default)
+        const cuota_pagada = todosRestantesEnCero && !!existingPago;
         const totalPagado = abono_capital
           .plus(abono_interes)
           .plus(abono_iva_12)
@@ -1067,8 +1077,9 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           numeroAutorizacion: numeroAutorizacion,
           banco_id: banco_id,
           registerBy: registerBy,
-          fecha_boleta: convertirAHoraGuatemala(fecha_boleta)?.toISOString(),
+          fecha_boleta: fecha_boleta,
           monto_aplicado: totalPagado.toString(),
+          origen_pago: origen_pago,
         };
 
         // Insertar o actualizar pago
@@ -1241,7 +1252,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
                   numeroAutorizacion: pagoData.numeroAutorizacion || null,
                   registerBy: pagoData.registerBy,
                   pagoConvenio: montoConvenio.toString() || "0",
-                  fecha_boleta:convertirAHoraGuatemala(pagoData.fecha_boleta)?.toISOString(),
+                  fecha_boleta:pagoData.fecha_boleta,
                   monto_aplicado: pagoData.monto_aplicado,
                 })
                 .returning();
@@ -1310,11 +1321,12 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
       .limit(1);
 
     const abonoCapital = new Big(abono_directo_capital ?? 0);
-    // Si la última cuota pagada tiene vencimiento >= hoy → está al día → capital
+    // Si el crédito permite abono a capital, se salta la validación de estar al día
+    const permiteAbonoCapital = credito.permite_abono_capital === true;
     const fechaVenc = ultimaCuotaPagada?.fecha_vencimiento ?? null;
     const estaAlDia = ultimaCuotaPagada && fechaVenc && fechaVenc >= hoy;
 
-    if (estaAlDia && abonoCapital.gt(0)) {
+    if ((estaAlDia || permiteAbonoCapital) && abonoCapital.gt(0)) {
       console.log("\n💰 ========== ABONO DIRECTO A CAPITAL ==========");
       console.log(`💵 Monto: Q${abonoCapital.toString()}`);
 
@@ -1355,8 +1367,8 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         .insert(cuotas_credito)
         .values({
           credito_id: credito_id,
-          numero_cuota: ultimaCuotaPagada.numero_cuota,
-          fecha_vencimiento: ultimaCuotaPagada.fecha_vencimiento,
+          numero_cuota: ultimaCuotaPagada?.numero_cuota ?? cuotasPendientes[0]?.cuotas_credito?.numero_cuota ?? 0,
+          fecha_vencimiento: ultimaCuotaPagada?.fecha_vencimiento ?? cuotasPendientes[0]?.cuotas_credito?.fecha_vencimiento ?? new Date().toISOString().slice(0, 10),
           pagado: true,
         })
         .returning();
@@ -1432,8 +1444,9 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         paymentFalse: false,
         registerBy: registerBy,
         pagoConvenio: montoConvenio.toString() || "0",
-        fecha_boleta: convertirAHoraGuatemala(fecha_boleta)?.toISOString(),
+        fecha_boleta: fecha_boleta,
         monto_aplicado: abonoCapital.toString(),
+        origen_pago: origen_pago,
       };
 
       console.log("\n📝 ========== REGISTRANDO PAGO ==========");
@@ -1708,7 +1721,7 @@ export async function insertarPago({
       reserva: "0",
       observaciones: "",
       validationStatus: "pending",
-      fecha_boleta: convertirAHoraGuatemala(fecha_boleta)?.toISOString(),
+      fecha_boleta: fecha_boleta,
       banco_id: banco_id ?? undefined,
       numeroAutorizacion: numeroAutorizacion ?? "",
       registerBy: registerBy,
@@ -1789,14 +1802,54 @@ export async function aplicarPagoAlCredito(pago_id: number) {
     const membresias_restante = new Big(pago.membresias ?? 0);
     const capital_restante_pago = new Big(pago.capital_restante ?? 0);
 
-    // ✅ Si CUALQUIER restante > 0 → NO está completo
+    // 🔎 Buscar TODOS los pagos de la misma cuota para validar si hay restantes
+    // en cualquier otro pago (ej: pagos "otros" que dejan restantes en el pago
+    // original de la cuota sin tocarlos). Excluye paymentFalse.
+    const pagosDeLaCuota = pago.cuota_id !== null
+      ? await db
+          .select({
+            pago_id: pagos_credito.pago_id,
+            interes_restante: pagos_credito.interes_restante,
+            iva_12_restante: pagos_credito.iva_12_restante,
+            seguro_restante: pagos_credito.seguro_restante,
+            gps_restante: pagos_credito.gps_restante,
+            membresias: pagos_credito.membresias,
+            capital_restante: pagos_credito.capital_restante,
+          })
+          .from(pagos_credito)
+          .where(
+            and(
+              eq(pagos_credito.cuota_id, pago.cuota_id),
+              eq(pagos_credito.paymentFalse, false)
+            )
+          )
+      : [];
+
+    const algunPagoDeLaCuotaTieneRestantes = pagosDeLaCuota.some(
+      (p) =>
+        new Big(p.interes_restante ?? 0).gt(0) ||
+        new Big(p.iva_12_restante ?? 0).gt(0) ||
+        new Big(p.seguro_restante ?? 0).gt(0) ||
+        new Big(p.gps_restante ?? 0).gt(0) ||
+        new Big(p.membresias ?? 0).gt(0) ||
+        new Big(p.capital_restante ?? 0).gt(0)
+    );
+
+    // ✅ Si CUALQUIER restante > 0 (en este pago o en otro pago de la misma cuota) → NO está completo
     const tieneRestantes =
       interes_restante.gt(0) ||
       iva_restante.gt(0) ||
       seguro_restante.gt(0) ||
       gps_restante.gt(0) ||
       membresias_restante.gt(0) ||
-      capital_restante_pago.gt(0);
+      capital_restante_pago.gt(0) ||
+      algunPagoDeLaCuotaTieneRestantes;
+
+    if (algunPagoDeLaCuotaTieneRestantes) {
+      console.log(
+        `⚠️ Otro pago de la cuota ${pago.cuota_id} tiene restantes pendientes → no se marcará la cuota como pagada`
+      );
+    }
 
     if (tieneRestantes) {
       console.log("⚠️ El pago tiene restantes pendientes:");
@@ -1811,17 +1864,67 @@ export async function aplicarPagoAlCredito(pago_id: number) {
         `   💵 Membresías restante: ${membresias_restante.toString()}`
       );
 
-      // Solo actualizar el pago para validarlo (NO aplica al crédito)
+      // Validar el pago
       await db
         .update(pagos_credito)
         .set({ validationStatus: "validated", fecha_aplicado: new Date() })
         .where(eq(pagos_credito.pago_id, pago_id));
 
+      // Aunque tenga restantes, si hay abono a capital, aplicarlo al crédito
+      const abonoCapitalPago = new Big(pago.abono_capital ?? 0);
+      if (abonoCapitalPago.gt(0) && pago.credito_id !== null) {
+        console.log("💰 Aplicando abono a capital aunque tenga restantes:", abonoCapitalPago.toString());
+
+        const [creditoParc] = await db
+          .select()
+          .from(creditos)
+          .where(eq(creditos.credito_id, pago.credito_id))
+          .limit(1);
+
+        if (creditoParc) {
+          const capitalAct = new Big(creditoParc.capital ?? 0);
+
+          console.log("💰 Capital actual:", capitalAct.toString());
+          console.log("💰 Abono capital del pago:", abonoCapitalPago.toString());
+
+          const nuevoCapitalParc = capitalAct.minus(abonoCapitalPago);
+          const cuotaInteresParc = nuevoCapitalParc
+            .times(new Big(creditoParc.porcentaje_interes).div(100))
+            .round(2);
+          const iva12Parc = cuotaInteresParc.times(0.12).round(2);
+          const seguroParc = new Big(creditoParc.seguro_10_cuotas ?? 0);
+          const gpsParc = new Big(creditoParc.gps ?? 0);
+          const membresiasParc = new Big(creditoParc.membresias_pago ?? 0);
+
+          const nuevaDeudaParc = nuevoCapitalParc
+            .plus(cuotaInteresParc)
+            .plus(iva12Parc)
+            .plus(seguroParc)
+            .plus(gpsParc)
+            .plus(membresiasParc)
+            .round(2);
+
+          await db
+            .update(creditos)
+            .set({
+              capital: nuevoCapitalParc.toString(),
+              deudatotal: nuevaDeudaParc.toString(),
+              iva_12: iva12Parc.toString(),
+              cuota_interes: cuotaInteresParc.toString(),
+            })
+            .where(eq(creditos.credito_id, pago.credito_id));
+
+          console.log("💰 Nuevo capital:", nuevoCapitalParc.toString());
+          console.log("✅ Capital aplicado al crédito (con restantes pendientes)");
+        }
+      }
+
       return {
         success: true,
-        applied: false,
-        message:
-          "Pago validado, pero no aplicado al crédito (tiene restantes pendientes)",
+        applied: abonoCapitalPago.gt(0),
+        message: abonoCapitalPago.gt(0)
+          ? "Pago validado con restantes pendientes, abono a capital aplicado"
+          : "Pago validado, pero no aplicado al crédito (tiene restantes pendientes)",
         restantes: {
           capital: capital_restante_pago.toString(),
           interes: interes_restante.toString(),
@@ -2200,6 +2303,14 @@ export async function aplicarAbonoCapitalInversionistas(
 ) {
   console.log("\n💵 ========== APLICANDO ABONO A CAPITAL ==========");
 
+  // Distribuir abono a capital en tabla espejo
+  try {
+    await distribuirAbonoCapitalEspejo(credito_id, abono_capital);
+    console.log("✅ Abono distribuido en tabla abonos_capital (espejo)");
+  } catch (err) {
+    console.error("⚠️ Error al distribuir abono en espejo:", err);
+  }
+
   const abonoCapitalBig = new Big(abono_capital);
   console.log(`💵 Abono Total: ${abonoCapitalBig.toString()}`);
   console.log(`🧾 Pago ID: ${pago_id}`);
@@ -2434,6 +2545,353 @@ export async function actualizarCuentaPago(
       message: "❌ Error al actualizar la cuenta del pago",
       error: error.message,
       data: null,
+    };
+  }
+}
+
+/**
+ * Aplica un monto adicional a los restantes de un pago existente.
+ * Recibe pago_id y monto, distribuye en orden: interés → IVA → seguro → GPS → membresías → capital.
+ * Actualiza solo ese pago y llama a inversionistas.
+ */
+export async function aplicarMontoAPago(pago_id: number, monto: number, fecha_pago?: string, validationStatus?: string) {
+  try {
+    // 1. Obtener el pago
+    const [pago] = await db
+      .select()
+      .from(pagos_credito)
+      .where(eq(pagos_credito.pago_id, pago_id))
+      .limit(1);
+
+    if (!pago) {
+      return { success: false, message: `Pago ${pago_id} no encontrado` };
+    }
+
+    // 2. Obtener restantes del pago
+    const interes_restante = new Big(pago.interes_restante ?? 0);
+    const iva_restante = new Big(pago.iva_12_restante ?? 0);
+    const seguro_restante = new Big(pago.seguro_restante ?? 0);
+    const gps_restante = new Big(pago.gps_restante ?? 0);
+    const membresias_restante = new Big(pago.membresias ?? 0);
+    const capital_restante = new Big(pago.capital_restante ?? 0);
+
+    let disponible = new Big(monto);
+
+    // 3. Distribuir en orden de prioridad
+    // 3.1 Interés
+    let abono_interes = new Big(0);
+    if (disponible.gt(0) && interes_restante.gt(0)) {
+      abono_interes = disponible.lt(interes_restante) ? disponible : interes_restante;
+      disponible = disponible.minus(abono_interes);
+    }
+
+    // 3.2 IVA
+    let abono_iva = new Big(0);
+    if (disponible.gt(0) && iva_restante.gt(0)) {
+      abono_iva = disponible.lt(iva_restante) ? disponible : iva_restante;
+      disponible = disponible.minus(abono_iva);
+    }
+
+    // 3.3 Seguro
+    let abono_seguro = new Big(0);
+    if (disponible.gt(0) && seguro_restante.gt(0)) {
+      abono_seguro = disponible.lt(seguro_restante) ? disponible : seguro_restante;
+      disponible = disponible.minus(abono_seguro);
+    }
+
+    // 3.4 GPS
+    let abono_gps = new Big(0);
+    if (disponible.gt(0) && gps_restante.gt(0)) {
+      abono_gps = disponible.lt(gps_restante) ? disponible : gps_restante;
+      disponible = disponible.minus(abono_gps);
+    }
+
+    // 3.5 Membresías
+    let abono_membresias = new Big(0);
+    if (disponible.gt(0) && membresias_restante.gt(0)) {
+      abono_membresias = disponible.lt(membresias_restante) ? disponible : membresias_restante;
+      disponible = disponible.minus(abono_membresias);
+    }
+
+    // 3.6 Capital
+    let abono_capital = new Big(0);
+    if (disponible.gt(0) && capital_restante.gt(0)) {
+      abono_capital = disponible.lt(capital_restante) ? disponible : capital_restante;
+      disponible = disponible.minus(abono_capital);
+    }
+
+    // 4. Calcular nuevos restantes
+    const nuevo_interes_restante = interes_restante.minus(abono_interes);
+    const nuevo_iva_restante = iva_restante.minus(abono_iva);
+    const nuevo_seguro_restante = seguro_restante.minus(abono_seguro);
+    const nuevo_gps_restante = gps_restante.minus(abono_gps);
+    const nuevo_membresias_restante = membresias_restante.minus(abono_membresias);
+    const nuevo_capital_restante = capital_restante.minus(abono_capital);
+
+    const cuota_pagada =
+      nuevo_interes_restante.eq(0) &&
+      nuevo_iva_restante.eq(0) &&
+      nuevo_seguro_restante.eq(0) &&
+      nuevo_gps_restante.eq(0) &&
+      nuevo_membresias_restante.eq(0) &&
+      nuevo_capital_restante.eq(0);
+
+    // Resetear abonos: solo quedan los de este monto
+    const nuevo_abono_interes = abono_interes;
+    const nuevo_abono_iva = abono_iva;
+    const nuevo_abono_seguro = abono_seguro;
+    const nuevo_abono_gps = abono_gps;
+    const nuevo_abono_membresias = abono_membresias;
+    const nuevo_abono_capital = abono_capital;
+
+    const totalPagado = abono_capital
+      .plus(abono_interes)
+      .plus(abono_iva)
+      .plus(abono_seguro)
+      .plus(abono_gps)
+      .plus(abono_membresias);
+
+    const nuevo_monto_aplicado = totalPagado;
+    const nuevo_monto_boleta = new Big(monto);
+
+    // Fecha de pago: si viene, usarla; sino, fecha actual en hora Guatemala
+    let fechaPago: Date;
+    if (fecha_pago) {
+      fechaPago = new Date(fecha_pago);
+    } else {
+      const guatemalaTimeString = new Date().toLocaleString("en-US", {
+        timeZone: "America/Guatemala",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+      const [datePart, timePart] = guatemalaTimeString.split(", ");
+      const [month, day, year] = datePart.split("/");
+      fechaPago = new Date(`${year}-${month}-${day}T${timePart}`);
+    }
+
+    // 5. Actualizar el pago
+    const [pagoActualizado] = await db
+      .update(pagos_credito)
+      .set({
+        abono_interes: nuevo_abono_interes.toString(),
+        abono_iva_12: nuevo_abono_iva.toString(),
+        abono_seguro: nuevo_abono_seguro.toString(),
+        abono_gps: nuevo_abono_gps.toString(),
+        abono_capital: nuevo_abono_capital.toString(),
+        membresias_pago: nuevo_abono_membresias.toString(),
+        membresias: nuevo_membresias_restante.toString(),
+        capital_restante: nuevo_capital_restante.toString(),
+        interes_restante: nuevo_interes_restante.toString(),
+        iva_12_restante: nuevo_iva_restante.toString(),
+        seguro_restante: nuevo_seguro_restante.toString(),
+        gps_restante: nuevo_gps_restante.toString(),
+        monto_boleta: nuevo_monto_boleta.toString(),
+        monto_aplicado: nuevo_monto_aplicado.toString(),
+        pagado: cuota_pagada,
+        fecha_pago: fechaPago,
+        ...(validationStatus ? { validationStatus: validationStatus as any } : {}),
+      })
+      .where(eq(pagos_credito.pago_id, pago_id))
+      .returning();
+
+    // 6. Si quedó pagada, marcar la cuota también
+    if (cuota_pagada && pago.cuota_id) {
+      await db
+        .update(cuotas_credito)
+        .set({ pagado: true })
+        .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
+    }
+
+    // 7. Distribuir entre inversionistas
+    if (pago.credito_id) {
+      await insertPagosCreditoInversionistasV2(pago_id, pago.credito_id);
+    }
+
+    return {
+      success: true,
+      message: cuota_pagada
+        ? "Pago completado y aplicado"
+        : "Monto aplicado a restantes (pago aún parcial)",
+      data: {
+        pago_id,
+        monto_aplicado: monto,
+        sobrante: disponible.toString(),
+        pagado: cuota_pagada,
+        abonos: {
+          interes: abono_interes.toString(),
+          iva: abono_iva.toString(),
+          seguro: abono_seguro.toString(),
+          gps: abono_gps.toString(),
+          membresias: abono_membresias.toString(),
+          capital: abono_capital.toString(),
+        },
+        nuevos_restantes: {
+          interes: nuevo_interes_restante.toString(),
+          iva: nuevo_iva_restante.toString(),
+          seguro: nuevo_seguro_restante.toString(),
+          gps: nuevo_gps_restante.toString(),
+          membresias: nuevo_membresias_restante.toString(),
+          capital: nuevo_capital_restante.toString(),
+        },
+      },
+    };
+  } catch (error: any) {
+    console.error("❌ Error en aplicarMontoAPago:", error);
+    return {
+      success: false,
+      message: "Error al aplicar monto al pago",
+      error: error.message,
+    };
+  }
+}
+
+/**
+ * Edita campos de un pago existente (abonos, restantes, mora, otros, etc.)
+ * Solo actualiza los campos que se envíen. Recalcula monto_aplicado y pagado automáticamente.
+ */
+export async function editarPago(pago_id: number, campos: {
+  abono_capital?: string;
+  abono_interes?: string;
+  abono_iva_12?: string;
+  abono_seguro?: string;
+  abono_gps?: string;
+  capital_restante?: string;
+  interes_restante?: string;
+  iva_12_restante?: string;
+  seguro_restante?: string;
+  gps_restante?: string;
+  membresias?: string;
+  membresias_pago?: string;
+  otros?: string;
+  mora?: string;
+  monto_boleta?: string;
+  monto_aplicado?: string;
+  observaciones?: string;
+  pagado?: boolean;
+  fecha_pago?: string;
+  origen_pago?: "transferencia" | "cheque" | "boleta";
+}) {
+  try {
+    // 1. Verificar que el pago existe
+    const [pago] = await db
+      .select()
+      .from(pagos_credito)
+      .where(eq(pagos_credito.pago_id, pago_id))
+      .limit(1);
+
+    if (!pago) {
+      return { success: false, message: `Pago ${pago_id} no encontrado` };
+    }
+
+    // 2. Construir objeto de update solo con los campos enviados
+    const updateData: Record<string, any> = {};
+
+    // Abonos
+    if (campos.abono_capital !== undefined) updateData.abono_capital = campos.abono_capital;
+    if (campos.abono_interes !== undefined) updateData.abono_interes = campos.abono_interes;
+    if (campos.abono_iva_12 !== undefined) updateData.abono_iva_12 = campos.abono_iva_12;
+    if (campos.abono_seguro !== undefined) updateData.abono_seguro = campos.abono_seguro;
+    if (campos.abono_gps !== undefined) updateData.abono_gps = campos.abono_gps;
+
+    // Restantes
+    if (campos.capital_restante !== undefined) updateData.capital_restante = campos.capital_restante;
+    if (campos.interes_restante !== undefined) updateData.interes_restante = campos.interes_restante;
+    if (campos.iva_12_restante !== undefined) updateData.iva_12_restante = campos.iva_12_restante;
+    if (campos.seguro_restante !== undefined) updateData.seguro_restante = campos.seguro_restante;
+    if (campos.gps_restante !== undefined) updateData.gps_restante = campos.gps_restante;
+
+    // Membresías
+    if (campos.membresias !== undefined) updateData.membresias = campos.membresias;
+    if (campos.membresias_pago !== undefined) updateData.membresias_pago = campos.membresias_pago;
+
+    // Otros campos
+    if (campos.otros !== undefined) updateData.otros = campos.otros;
+    if (campos.mora !== undefined) updateData.mora = campos.mora;
+    if (campos.monto_boleta !== undefined) updateData.monto_boleta = campos.monto_boleta;
+    if (campos.observaciones !== undefined) updateData.observaciones = campos.observaciones;
+    if (campos.fecha_pago !== undefined) updateData.fecha_pago = new Date(campos.fecha_pago);
+    if (campos.origen_pago !== undefined) updateData.origen_pago = campos.origen_pago;
+
+    // 3. Recalcular monto_aplicado si se enviaron abonos
+    const abonoCapital = new Big(campos.abono_capital ?? pago.abono_capital ?? 0);
+    const abonoInteres = new Big(campos.abono_interes ?? pago.abono_interes ?? 0);
+    const abonoIva = new Big(campos.abono_iva_12 ?? pago.abono_iva_12 ?? 0);
+    const abonoSeguro = new Big(campos.abono_seguro ?? pago.abono_seguro ?? 0);
+    const abonoGps = new Big(campos.abono_gps ?? pago.abono_gps ?? 0);
+    const abonoMembresias = new Big(campos.membresias_pago ?? pago.membresias_pago ?? 0);
+
+    if (campos.monto_aplicado !== undefined) {
+      updateData.monto_aplicado = campos.monto_aplicado;
+    } else if (
+      campos.abono_capital !== undefined ||
+      campos.abono_interes !== undefined ||
+      campos.abono_iva_12 !== undefined ||
+      campos.abono_seguro !== undefined ||
+      campos.abono_gps !== undefined ||
+      campos.membresias_pago !== undefined
+    ) {
+      const nuevoMontoAplicado = abonoCapital
+        .plus(abonoInteres)
+        .plus(abonoIva)
+        .plus(abonoSeguro)
+        .plus(abonoGps)
+        .plus(abonoMembresias);
+      updateData.monto_aplicado = nuevoMontoAplicado.toString();
+    }
+
+    // 4. Recalcular pagado si se enviaron restantes
+    if (campos.pagado !== undefined) {
+      updateData.pagado = campos.pagado;
+    } else if (
+      campos.capital_restante !== undefined ||
+      campos.interes_restante !== undefined ||
+      campos.iva_12_restante !== undefined ||
+      campos.seguro_restante !== undefined ||
+      campos.gps_restante !== undefined ||
+      campos.membresias !== undefined
+    ) {
+      const capRest = new Big(campos.capital_restante ?? pago.capital_restante ?? 0);
+      const intRest = new Big(campos.interes_restante ?? pago.interes_restante ?? 0);
+      const ivaRest = new Big(campos.iva_12_restante ?? pago.iva_12_restante ?? 0);
+      const segRest = new Big(campos.seguro_restante ?? pago.seguro_restante ?? 0);
+      const gpsRest = new Big(campos.gps_restante ?? pago.gps_restante ?? 0);
+      const memRest = new Big(campos.membresias ?? pago.membresias ?? 0);
+
+      const todosEnCero = capRest.eq(0) && intRest.eq(0) && ivaRest.eq(0) &&
+        segRest.eq(0) && gpsRest.eq(0) && memRest.eq(0);
+
+      updateData.pagado = todosEnCero;
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return { success: false, message: "No se enviaron campos para actualizar" };
+    }
+
+    // 5. Ejecutar update
+    const [pagoActualizado] = await db
+      .update(pagos_credito)
+      .set(updateData)
+      .where(eq(pagos_credito.pago_id, pago_id))
+      .returning();
+
+    console.log(`✅ Pago ${pago_id} editado. Campos: ${Object.keys(updateData).join(", ")}`);
+
+    return {
+      success: true,
+      message: "Pago actualizado correctamente",
+      data: pagoActualizado,
+    };
+  } catch (error: any) {
+    console.error("❌ Error en editarPago:", error);
+    return {
+      success: false,
+      message: "Error al editar el pago",
+      error: error.message,
     };
   }
 }

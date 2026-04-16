@@ -69,9 +69,9 @@ export const HowItWorks: React.FC = () => {
   }, []);
 
   return (
-    <section className="text-center w-full mt-24 lg:mt-60 px-6 lg:px-20">
+    <section className="text-center w-full mt-24 lg:mt-50 px-6 lg:px-20">
       <div>
-        <h2 className="text-2xl lg:text-header-2 mb-6">¿Cómo funciona?</h2>
+        <h2 className="text-2xl lg:text-3xl font-bold mb-6">¿Cómo funciona?</h2>
       </div>
 
       <div
@@ -110,7 +110,7 @@ export const HowItWorks: React.FC = () => {
                 transition={{ duration: 0.3 }}
               >
                 <span
-                  className="text-white  text-xl font-bold lg:font-normal lg:text-[30px] transition-all duration-500 ease-out"
+                  className="text-white  text-xl font-bold  lg:text-[30px] transition-all duration-500 ease-out"
                   style={isInactive ? { fontSize: 16 } : undefined}
                 >
                   {item.label}
@@ -129,10 +129,12 @@ export const HowItWorks: React.FC = () => {
                   >
                     <button
                       className="absolute top-4 right-4 text-white/70 hover:text-white text-xl z-10"
-                      onPointerDown={(e) => {
+                      onClick={(e) => {
                         e.stopPropagation();
                         setActiveIndex(null);
                       }}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onTouchStart={(e) => e.stopPropagation()}
                     >
                       ✕
                     </button>

@@ -28,6 +28,20 @@ export const INSPECTION_AREAS: InspectionCategory[] = [
         ]
     },
     {
+        id: "aros_y_llantas",
+        title: "Aros y Llantas",
+        points: [
+            { id: "desgaste_llantas", label: "Verificar desgaste de llantas (Desgaste irregular)" },
+            { id: "profundidad_rodadura", label: "Profundidad de la banda de rodadura adecuada (Vida útil de las llantas)" },
+            { id: "presion_aire", label: "Presión de aire correcta en todos los neumáticos (incluida la rueda de repuesto)" },
+            { id: "abultamientos", label: "Verificar abultamientos o cortes laterales" },
+            { id: "sensores_tpms", label: "Verificar funcionamiento de sensores TPMS" },
+            { id: "estado_aros", label: "Verificar estado de aros (Golpes, raspones, etc.)" },
+            { id: "tapones_aros", label: "Tapones de aros (Indicar si están incompletos o dañados)" },
+            { id: "llanta_repuesto", label: "Llanta de repuesto" },
+        ]
+    },
+    {
         id: "interior",
         title: "Interior",
         points: [
@@ -72,17 +86,18 @@ export const INSPECTION_AREAS: InspectionCategory[] = [
         ]
     },
     {
-        id: "aros_y_llantas",
-        title: "Aros y Llantas",
+        id: "sistema_electrico",
+        title: "Sistema Eléctrico, Electrónico y Otros",
         points: [
-            { id: "desgaste_llantas", label: "Verificar desgaste de llantas (Desgaste irregular)" },
-            { id: "profundidad_rodadura", label: "Profundidad de la banda de rodadura adecuada (Vida útil de las llantas)" },
-            { id: "presion_aire", label: "Presión de aire correcta en todos los neumáticos (incluida la rueda de repuesto)" },
-            { id: "abultamientos", label: "Verificar abultamientos o cortes laterales" },
-            { id: "sensores_tpms", label: "Verificar funcionamiento de sensores TPMS" },
-            { id: "estado_aros", label: "Verificar estado de aros (Golpes, raspones, etc.)" },
-            { id: "tapones_aros", label: "Tapones de aros (Indicar si están incompletos o dañados)" },
-            { id: "llanta_repuesto", label: "Llanta de repuesto" },
+            { id: "prueba_obd2", label: "Prueba de escaner OBD2" },
+            { id: "cables_bujias", label: "Cables de bujías y bobinas" },
+            { id: "arneses_electricos", label: "Arneses eléctricos" },
+            { id: "estado_bateria", label: "Estado de la batería (terminales limpios, sin corrosión)" },
+            { id: "ac_calefaccion_accesorios", label: "Funcionamiento del aire acondicionado, calefacción, radio y otros accesorios" },
+            { id: "limpiaparabrisas_liquido", label: "Limpiaparabrisas y líquido lavaparabrisas operativos" },
+            { id: "vidrios_sunroof", label: "Vidrios eléctricos y sunroof funcionales" },
+            { id: "bocina", label: "Bocina funcional" },
+            { id: "testigos_tablero", label: "Testigos presentes en tablero" },
         ]
     },
     {
@@ -97,6 +112,15 @@ export const INSPECTION_AREAS: InspectionCategory[] = [
             { id: "mangueras_correas", label: "Mangueras y correas en buen estado, sin grietas ni desgaste" },
             { id: "filtro_aire", label: "Filtro de aire" },
             { id: "compresiones", label: "Compresiones" }, // Este necesita metadata
+        ]
+    },
+    {
+        id: "identificacion_vehiculo",
+        title: "Números de identificación del vehículo",
+        points: [
+            { id: "numero_motor", label: "Número de motor (Verificar que coincida físicamente con la tarjeta de circulación)." },
+            { id: "numero_chasis", label: "Número de chasis (Verificar que coincida físicamente con la tarjeta de circulación)." },
+            { id: "numero_vin", label: "VIN (Verificar que coincida físicamente con la tarjeta de circulación)." },
         ]
     },
     {
@@ -124,21 +148,6 @@ export const INSPECTION_AREAS: InspectionCategory[] = [
         ]
     },
     {
-        id: "sistema_electrico",
-        title: "Sistema Eléctrico, Electrónico y Otros",
-        points: [
-            { id: "prueba_obd2", label: "Prueba de escaner OBD2" },
-            { id: "cables_bujias", label: "Cables de bujías y bobinas" },
-            { id: "arneses_electricos", label: "Arnéses eléctricos" },
-            { id: "estado_bateria", label: "Estado de la batería (terminales limpios, sin corrosión)" },
-            { id: "ac_calefaccion_accesorios", label: "Funcionamiento del aire acondicionado, calefacción, radio y otros accesorios" },
-            { id: "limpiaparabrisas_liquido", label: "Limpiaparabrisas y líquido lavaparabrisas operativos" },
-            { id: "vidrios_sunroof", label: "Vidrios eléctricos y sunroof funcionales" },
-            { id: "bocina", label: "Bocina funcional" },
-            { id: "testigos_tablero", label: "Testigos presentes en tablero" },
-        ]
-    },
-    {
         id: "chasis",
         title: "Chasis",
         points: [
@@ -147,15 +156,6 @@ export const INSPECTION_AREAS: InspectionCategory[] = [
             { id: "puntos_soldadura", label: "Puntos de unión y soldadura" },
             { id: "puntas_chasis", label: "Puntas de chasis frontales (verificar deformaciones o reparaciones mayores)" },
             { id: "alineacion_chasis", label: "Alineación general del chasis" },
-        ]
-    },
-    {
-        id: "identificacion_vehiculo",
-        title: "Números de identificación del vehículo",
-        points: [
-            { id: "numero_motor", label: "Número de motor (Verificar que coincida físicamente con la tarjeta de circulación)." },
-            { id: "numero_chasis", label: "Número de chasis (Verificar que coincida físicamente con la tarjeta de circulación)." },
-            { id: "numero_vin", label: "VIN (Verificar que coincida físicamente con la tarjeta de circulación)." },
         ]
     }
 ];

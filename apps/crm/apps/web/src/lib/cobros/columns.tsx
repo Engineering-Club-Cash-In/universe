@@ -238,6 +238,8 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 			const formatted = new Intl.NumberFormat("es-GT", {
 				style: "currency",
 				currency: "GTQ",
+				minimumFractionDigits: 2,
+				maximumFractionDigits: 2,
 			}).format(monto);
 
 			return (

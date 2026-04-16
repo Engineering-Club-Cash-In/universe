@@ -752,6 +752,7 @@ export const marcarCuotasPagadasHastaNumero = async ({
       numero_cuota: cuotas_credito.numero_cuota,
       pago_id: pagos_credito.pago_id,
       fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+      pago_pagado: pagos_credito.pagado,
     })
     .from(cuotas_credito)
     .leftJoin(pagos_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
@@ -887,6 +888,9 @@ export const marcarCuotasPagadasHastaNumero = async ({
           },
         });
       } else {
+        // Si el pago ya está marcado como pagado, no tocarlo
+        if (row.pago_pagado) continue;
+
         // 📋 CUOTA PENDIENTE → CAPITAL BD
         const { interes, iva } = calcularInteresIva(capitalActualBD);
 

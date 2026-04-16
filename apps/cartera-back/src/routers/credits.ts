@@ -39,8 +39,8 @@ import {
 import { authMiddleware } from "./midleware";
 import { getCreditosWithUserByMesAnioExcel } from "../controllers/reports";
 import { insertCredit } from "../controllers/createCredit";
-import {  updateAllInstallments, updateCredit, recalculateQuota } from "../controllers/updateCredit";
-import { updateDueDates, updateSingleDueDate, fixCreditosWithoutFebruary, updateDueDatesFromJson } from "../controllers/updateDueDate";
+import {  updateAllInstallments, updateCredit, recalculateQuota, recalcularPagosCredito, calculateInvestorQuotas } from "../controllers/updateCredit";
+import { updateDueDates, updateSingleDueDate, fixCreditosWithoutFebruary, updateDueDatesFromJson, cambiarFechaInicio, getHistorialCambioFecha } from "../controllers/updateDueDate";
 import { creditos, cuotas_credito } from "../database/db";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../database"; 
@@ -91,6 +91,7 @@ export const creditRouter = new Elysia()
   return result;
 })
   .post("/updateCredit", updateCredit)
+  .post("/calculate-investor-quotas", calculateInvestorQuotas)
   // Obtener crédito por query param ?numero_credito_sifco=XXXX
   .get("/credito", async ({ query, set }) => {
     const { numero_credito_sifco } = query;
@@ -130,6 +131,8 @@ export const creditRouter = new Elysia()
     email_asesor,        // 🆕 NUEVO
     cuotas_atrasadas,    // 🆕 NUEVO
     proximidad_pago,     // 🆕 NUEVO
+    is_vehiculo_propio,
+    inversionista_ids,
   } = query as Record<string, string>;
 
   // Validar parámetros requeridos
@@ -152,7 +155,8 @@ export const creditRouter = new Elysia()
     | "INCOBRABLE"
     | "PENDIENTE_CANCELACION"
     | "EN_CONVENIO"
-    | "MOROSO";
+    | "MOROSO"
+    | "CAIDO";
   
   // Convertir asesor_id a número si existe
   const asesorIdNum = asesor_id ? Number(asesor_id) : undefined;
@@ -169,6 +173,14 @@ export const creditRouter = new Elysia()
   // 🆕 Proximidad de pago (enum)
   const proximidadPagoParam = proximidad_pago
     ? (String(proximidad_pago) as "TODAY" | "WEEK" | "TWO_WEEKS" | "MONTH" | "DUEMONTH")
+    : undefined;
+
+  // Filtro vehiculo propio
+  const isVehiculoPropioParam = is_vehiculo_propio === "true" ? true : undefined;
+
+  // Array de inversionistas (viene como "1,2,3")
+  const inversionistaIdsArray = inversionista_ids
+    ? inversionista_ids.split(",").map(Number).filter((n) => !isNaN(n))
     : undefined;
 
   // Validaciones
@@ -216,9 +228,11 @@ export const creditRouter = new Elysia()
         estado: estadoParam,
         asesor_id: asesorIdNum,
         nombre_usuario: nombreUsuarioParam,
-        email_asesor: emailAsesorParam,           // 🆕 NUEVO
-        cuotas_atrasadas: cuotasAtrasadasNum,     // 🆕 NUEVO
-        proximidad_pago: proximidadPagoParam,     // 🆕 NUEVO
+        email_asesor: emailAsesorParam,
+        cuotas_atrasadas: cuotasAtrasadasNum,
+        proximidad_pago: proximidadPagoParam,
+        is_vehiculo_propio: isVehiculoPropioParam,
+        inversionista_ids: inversionistaIdsArray,
         excel: true,
       });
       set.status = 200;
@@ -234,9 +248,11 @@ export const creditRouter = new Elysia()
         estadoParam,
         asesorIdNum,
         nombreUsuarioParam,
-        emailAsesorParam,           // 🆕 NUEVO
-        cuotasAtrasadasNum,         // 🆕 NUEVO
-        proximidadPagoParam         // 🆕 NUEVO
+        emailAsesorParam,
+        cuotasAtrasadasNum,
+        proximidadPagoParam,
+        isVehiculoPropioParam,
+        inversionistaIdsArray
       );
       set.status = 200;
       return result;
@@ -1113,6 +1129,59 @@ export const creditRouter = new Elysia()
     },
   })
   // ========================================
+  // ENDPOINT: RECALCULAR PAGOS DESDE CUOTA
+  // ========================================
+  .post("/recalcular-pagos", async ({ body, set }: any) => {
+    try {
+      const { numero_credito_sifco, numero_cuota } = body;
+      await recalcularPagosCredito({ numero_credito_sifco, numero_cuota });
+      set.status = 200;
+      return { success: true, message: `Pagos recalculados para ${numero_credito_sifco}` };
+    } catch (error: any) {
+      set.status = 500;
+      return { success: false, error: error.message };
+    }
+  }, {
+    body: t.Object({
+      numero_credito_sifco: t.String({ minLength: 1 }),
+      numero_cuota: t.Optional(t.Number()),
+    }),
+    detail: {
+      summary: "Recalcular pagos desde una cuota",
+      description: "Recalcula abonos y restantes de los pagos. Si se pasa numero_cuota, procesa desde esa cuota (pagadas y no pagadas). Si no, solo procesa las no pagadas.",
+      tags: ["Créditos", "Cuotas"],
+    },
+  })
+  // ========================================
+  // ENDPOINT: REPARAR total_restante DE LOS PAGOS
+  // ========================================
+  .post("/reparar-total-restante", async ({ body, set }: any) => {
+    try {
+      const { numero_credito_sifco, capital_inicial } = body;
+      const result = await repararTotalRestante({
+        numero_credito_sifco,
+        capital_inicial,
+      });
+      set.status = 200;
+      return { success: true, ...result };
+    } catch (error: any) {
+      console.error("❌ Error en /reparar-total-restante:", error);
+      set.status = 500;
+      return { success: false, error: error.message };
+    }
+  }, {
+    body: t.Object({
+      numero_credito_sifco: t.String({ minLength: 1 }),
+      capital_inicial: t.Optional(t.Union([t.Number(), t.String()])),
+    }),
+    detail: {
+      summary: "Reparar total_restante de los pagos de un crédito",
+      description:
+        "Recalcula y reescribe SOLO el campo total_restante de los pagos desde la cuota 0 hasta la última cuota pagada, amortizando teóricamente. Si no se pasa capital_inicial, se usa el total_restante del pago de la cuota 0 (desembolso) como ancla. No toca abonos, capital_restante, pagado ni ningún otro campo.",
+      tags: ["Créditos", "Cuotas"],
+    },
+  })
+  // ========================================
   // ENDPOINT: ARREGLAR CRÉDITOS SIN FEBRERO
   // ========================================
   .post("/fix-february", async ({ query, set }) => {
@@ -1283,6 +1352,47 @@ export const creditRouter = new Elysia()
       detail: {
         tags: ["Créditos"],
         summary: "Actualizar NIT del usuario de un crédito",
+      },
+    }
+  )
+  // ========================================
+  // ENDPOINT: CAMBIAR FECHA DE INICIO
+  // ========================================
+  .post(
+    "/cambiar-fecha-inicio",
+    async ({ body, set }) => {
+      return cambiarFechaInicio({ body, set });
+    },
+    {
+      body: t.Object({
+        numero_credito_sifco: t.String(),
+        nueva_fecha_inicio: t.String(),
+        changed_by: t.String(),
+        razon: t.String(),
+      }),
+      detail: {
+        tags: ["Créditos"],
+        summary: "Cambiar fecha de inicio de un crédito",
+        description:
+          "Cambia la fecha de inicio (cuota 0) y recalcula fecha_vencimiento de todas las cuotas. No modifica montos ni abonos. Guarda historial del cambio.",
+      },
+    }
+  )
+  // ========================================
+  // ENDPOINT: HISTORIAL CAMBIO FECHA
+  // ========================================
+  .get(
+    "/historial-cambio-fecha/:numero_credito_sifco",
+    async ({ params, set }) => {
+      return getHistorialCambioFecha({
+        numero_credito_sifco: params.numero_credito_sifco,
+        set,
+      });
+    },
+    {
+      detail: {
+        tags: ["Créditos"],
+        summary: "Obtener historial de cambios de fecha de inicio",
       },
     }
   )

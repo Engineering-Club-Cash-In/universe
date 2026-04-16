@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/server";
-import { and, asc, count, desc, eq, gte, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -25,9 +25,11 @@ import {
 } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
 import { calcularDiasMoraExactos } from "../lib/mora-utils";
+import { filterCobrosSearchResults } from "../lib/cobros-search";
 import {
 	cobrosProcedure,
 	cobrosSupervisorProcedure,
+	crmCobrosOrInvestmentsProcedure,
 	crmOrCobrosProcedure,
 } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
@@ -564,7 +566,7 @@ export const cobrosRouter = {
 				limit: z.number().optional(),
 				offset: z.number().optional(),
 				estadoMora: z.string().optional(),
-				nombreUsuario: z.string().optional(),
+				searchTerm: z.string().optional(),
 				time: z.enum(["WEEK", "MONTH", "DUEMONTH", "TODAY"]).optional(),
 				emailCobrador: z.string().optional(),
 			}),
@@ -580,8 +582,10 @@ export const cobrosRouter = {
 					// Mapear filtro de estadoMora a parámetros de cartera-back
 					let cuotasAtrasadas: number | undefined;
 					let estadoCartera: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | undefined;
-					const nombre_usuario: string | undefined =
-						input.nombreUsuario ?? undefined;
+					const searchTerm = input.searchTerm?.trim() || "";
+					const hasNumber = /\d/.test(searchTerm);
+					const isPlateSearch = searchTerm.length > 0 && hasNumber;
+					const isNameSearch = searchTerm.length > 0 && !hasNumber;
 
 					if (input.estadoMora) {
 						switch (input.estadoMora) {
@@ -624,21 +628,110 @@ export const cobrosRouter = {
 					}
 
 					console.log(
-						`[Cobros] Obteniendo créditos de Cartera-Back: mes=${mes} (todos), anio=${anio}, page=${Math.floor((input.offset || 0) / (input.limit || 50)) + 1}, perPage=${input.limit || 50}, cuotasAtrasadas=${cuotasAtrasadas}, estado=${estadoCartera}, time=${input.time}, emailCobrador=${input.emailCobrador}`,
+						`[Cobros] Obteniendo créditos de Cartera-Back: mes=${mes} (todos), anio=${anio}, page=${Math.floor((input.offset || 0) / (input.limit || 50)) + 1}, perPage=${input.limit || 50}, cuotasAtrasadas=${cuotasAtrasadas}, estado=${estadoCartera}, time=${input.time}, emailCobrador=${input.emailCobrador}, search=${input.searchTerm || ""}`,
 					);
 
-					// Obtener todos los créditos de Cartera-Back con los filtros
-					const creditosResponse = await obtenerTodosLosCreditosCarteraBack({
-						mes,
-						anio,
-						page: Math.floor((input.offset || 0) / (input.limit || 50)) + 1,
-						perPage: input.limit || 50,
-						cuotasAtrasadas,
-						estado: estadoCartera,
-						nombre_usuario,
-						time: input.time,
-						email_cobrador: input.emailCobrador,
-					}); // Validar que la respuesta tenga la estructura esperada
+					let creditosResponse;
+					if (isPlateSearch) {
+						// Buscar primero la placa en el CRM para obtener el número SIFCO
+						const matchingOpportunities = await db
+							.select({
+								numeroSifco: opportunities.numeroSifco,
+								placa: vehicles.licensePlate,
+							})
+							.from(opportunities)
+							.innerJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+							.where(
+								and(
+									sql`LOWER(REPLACE(REPLACE(${vehicles.licensePlate}, '-', ''), ' ', '')) LIKE ${"%" + searchTerm.toLowerCase().replace(/[\s-]+/g, "") + "%"}`,
+									sql`${opportunities.numeroSifco} IS NOT NULL`,
+								),
+							);
+
+						if (matchingOpportunities.length === 0) {
+							// No se encontró la placa en el CRM, no tiene sentido buscar en cartera
+							creditosResponse = {
+								data: [],
+								page: 1,
+								perPage: 0,
+								totalCount: 0,
+								totalPages: 0,
+							};
+						} else if (matchingOpportunities.length === 1) {
+							// Una sola coincidencia: buscar directamente por número SIFCO (más rápido)
+							const numeroSifco = matchingOpportunities[0].numeroSifco!;
+							console.log(
+								`[Cobros] Placa ${searchTerm} encontró 1 coincidencia, buscando crédito SIFCO: ${numeroSifco}`,
+							);
+							creditosResponse = await obtenerTodosLosCreditosCarteraBack({
+								mes,
+								anio,
+								page: 1,
+								perPage: 50,
+								cuotasAtrasadas,
+								estado: estadoCartera,
+								time: input.time,
+								email_cobrador: input.emailCobrador,
+								numero_credito_sifco: numeroSifco,
+							});
+						} else {
+							// Múltiples coincidencias: traer todos los créditos y filtrar localmente
+							console.log(
+								`[Cobros] Placa ${searchTerm} encontró ${matchingOpportunities.length} coincidencias, trayendo todos los créditos`,
+							);
+							const perPage = 200;
+							const firstPage = await obtenerTodosLosCreditosCarteraBack({
+								mes,
+								anio,
+								page: 1,
+								perPage,
+								cuotasAtrasadas,
+								estado: estadoCartera,
+								time: input.time,
+								email_cobrador: input.emailCobrador,
+							});
+
+							const allCredits = [...firstPage.data];
+
+							for (let page = 2; page <= firstPage.totalPages; page++) {
+								const nextPage = await obtenerTodosLosCreditosCarteraBack({
+									mes,
+									anio,
+									page,
+									perPage,
+									cuotasAtrasadas,
+									estado: estadoCartera,
+									time: input.time,
+									email_cobrador: input.emailCobrador,
+								});
+								allCredits.push(...nextPage.data);
+							}
+
+							creditosResponse = {
+								...firstPage,
+								data: allCredits,
+								totalCount: allCredits.length,
+								page: 1,
+								perPage: allCredits.length,
+								totalPages: 1,
+							};
+						}
+					} else {
+						// Búsqueda por nombre (cartera-back filtra) o sin búsqueda
+						creditosResponse = await obtenerTodosLosCreditosCarteraBack({
+							mes,
+							anio,
+							page: Math.floor((input.offset || 0) / (input.limit || 50)) + 1,
+							perPage: input.limit || 50,
+							cuotasAtrasadas,
+							estado: estadoCartera,
+							time: input.time,
+							email_cobrador: input.emailCobrador,
+							nombre_usuario: isNameSearch ? searchTerm : undefined,
+						});
+					}
+
+					// Validar que la respuesta tenga la estructura esperada
 					if (!creditosResponse || !creditosResponse.data) {
 						console.error(
 							"[Cobros] Respuesta inválida de Cartera-Back:",
@@ -752,6 +845,25 @@ export const cobrosRouter = {
 					console.log(
 						`[Cobros] Mapeados ${contratos.length} contratos para el frontend`,
 					);
+
+					if (isPlateSearch) {
+						const limit = input.limit || 50;
+						const offset = input.offset || 0;
+						const filtered = filterCobrosSearchResults(
+							contratos,
+							searchTerm,
+							offset,
+							limit,
+						);
+
+						return {
+							data: filtered.items,
+							total: filtered.total,
+							page: Math.floor(offset / limit) + 1,
+							perPage: limit,
+							totalPages: Math.max(1, Math.ceil(filtered.total / limit)),
+						};
+					}
 
 					return {
 						data: contratos,
@@ -920,26 +1032,6 @@ export const cobrosRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			// Verificar que el usuario tenga acceso al caso
-			if (!PERMISSIONS.canViewAllCasosCobros(context.userRole)) {
-				const caso = await db
-					.select()
-					.from(casosCobros)
-					.where(
-						and(
-							eq(casosCobros.id, input.casoCobroId),
-							eq(casosCobros.responsableCobros, context.userId),
-						),
-					)
-					.limit(1);
-
-				if (!caso.length) {
-					throw new ORPCError("FORBIDDEN", {
-						message: "No tienes permiso para acceder a este caso",
-					});
-				}
-			}
-
 			const nuevoContacto = await db
 				.insert(contactosCobros)
 				.values({
@@ -972,25 +1064,6 @@ export const cobrosRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			// Verificar acceso al caso
-			if (!PERMISSIONS.canViewAllCasosCobros(context.userRole)) {
-				const caso = await db
-					.select()
-					.from(casosCobros)
-					.where(
-						and(
-							eq(casosCobros.id, input.casoCobroId),
-							eq(casosCobros.responsableCobros, context.userId),
-						),
-					)
-					.limit(1);
-
-				if (!caso.length) {
-					throw new ORPCError("FORBIDDEN", {
-						message: "No tienes permiso para acceder a este caso",
-					});
-				}
-			}
 			console.log(
 				"Obteniendo historial de contactos para el caso:",
 				input.casoCobroId,
@@ -1852,7 +1925,7 @@ export const cobrosRouter = {
 					etiquetas: casoCobro?.etiquetas || [],
 
 					// Datos del contrato (cartera primero, fallback a nuestra BD)
-					montoFinanciado: creditoCompleto.credito.deudatotal,
+					montoFinanciado: creditoCompleto.credito.capital ?? creditoCompleto.credito.deudatotal ?? "0.00",
 					cuotaMensual:
 						creditoCompleto.credito.cuota || oportunidadData?.cuotaMensual,
 					numeroCuotas: creditoCompleto.credito.plazo,
@@ -2148,9 +2221,10 @@ export const cobrosRouter = {
 	// ========================================================================
 
 	// Listar todos los inversionistas
-	getInversionistas: crmOrCobrosProcedure
+	getInversionistas: crmCobrosOrInvestmentsProcedure
 		.input(
 			z.object({
+				id: z.number().int().positive().optional(),
 				page: z.number().min(1).optional().default(1),
 				perPage: z.number().min(1).max(100).optional().default(20),
 			}),
@@ -2167,19 +2241,38 @@ export const cobrosRouter = {
 
 			try {
 				const result = await carteraBackClient.getInvestors({
+					id: input.id,
 					page: input.page,
 					perPage: input.perPage,
 				});
 
+				// Obtener bancos para mapear banco_id → nombre
+				const bancos = await carteraBackClient.getBancos();
+				const bancosMap = new Map(bancos.map((b) => [b.banco_id, b.nombre]));
+
+				// Con id cartera devuelve objeto directo, sin id devuelve array
+				const inversionistasList = Array.isArray(result.data)
+					? result.data
+					: [result.data];
+
 				return {
-					inversionistas: result.data.map((inv) => ({
+					inversionistas: inversionistasList.map((inv: any) => ({
+						...inv,
 						inversionistaId: inv.inversionista_id,
 						nombre: inv.nombre,
+						dpi: inv.dpi ?? null,
+						email: inv.email ?? null,
 						emiteFactura: inv.emite_factura,
-						reinversion: inv.reinversion,
-						banco: inv.banco,
-						tipoCuenta: inv.tipo_cuenta,
-						numeroCuenta: inv.numero_cuenta,
+						reinversion:
+							inv.reinversion ?? inv.tipo_reinversion !== "sin_reinversion",
+						tipoReinversion: inv.tipo_reinversion ?? "sin_reinversion",
+						banco: inv.banco_id
+							? (bancosMap.get(inv.banco_id) ?? null)
+							: (inv.banco ?? null),
+						tipoCuenta: inv.tipo_cuenta ?? null,
+						numeroCuenta: inv.numero_cuenta ?? null,
+						moneda: inv.moneda ?? "quetzales",
+						celular: inv.celular ?? null,
 					})),
 					pagination: {
 						page: result.page,

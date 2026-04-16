@@ -25,6 +25,10 @@ import {
 	CartesianGrid,
 	Cell,
 	Legend,
+	Line,
+	LineChart,
+	Pie,
+	PieChart,
 	ResponsiveContainer,
 	Tooltip,
 	XAxis,
@@ -113,7 +117,7 @@ function RouteComponent() {
 
 	// Cobros Dashboard Stats
 	const cobrosStats = useQuery({
-		...orpc.getCobrosDashboardStats.queryOptions({}),
+		...orpc.getCobrosDashboardStats.queryOptions({ input: {} }),
 		enabled:
 			!!userProfile.data?.role &&
 			PERMISSIONS.canAccessCobros(userProfile.data.role),
@@ -122,7 +126,7 @@ function RouteComponent() {
 
 	// Juridico Dashboard Stats - Oportunidades pendientes de contrato
 	const juridicoStats = useQuery({
-		...orpc.getOpportunitiesForContracts.queryOptions({}),
+		...orpc.getOpportunitiesForContracts.queryOptions({ input: {} }),
 		enabled:
 			!!userProfile.data?.role &&
 			PERMISSIONS.canAccessJuridico(userProfile.data.role),
@@ -131,7 +135,7 @@ function RouteComponent() {
 
 	// Analyst Dashboard Stats - Oportunidades para análisis
 	const analysisStats = useQuery({
-		...orpc.getOpportunitiesForAnalysis.queryOptions(),
+		...orpc.getOpportunitiesForAnalysis.queryOptions({ input: {} }),
 		enabled:
 			!!userProfile.data?.role &&
 			PERMISSIONS.canAccessAnalysis(userProfile.data.role),
@@ -254,7 +258,7 @@ function RouteComponent() {
 							</CardHeader>
 							<CardContent>
 								<div className="font-bold text-2xl text-green-700">
-									Q{(crmStats.data.placedAmount || 0).toLocaleString()}
+									Q{(crmStats.data.placedAmount || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 								</div>
 							</CardContent>
 						</Card>
@@ -336,7 +340,7 @@ function RouteComponent() {
 							</CardHeader>
 							<CardContent>
 								<div className="font-bold text-2xl text-green-700">
-									Q{(crmStats.data.placedAmount || 0).toLocaleString()}
+									Q{(crmStats.data.placedAmount || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 								</div>
 							</CardContent>
 						</Card>
@@ -421,7 +425,7 @@ function RouteComponent() {
 							</CardHeader>
 							<CardContent>
 								<div className="font-bold text-2xl text-green-700">
-									Q{(crmStats.data.placedAmount || 0).toLocaleString()}
+									Q{(crmStats.data.placedAmount || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 								</div>
 							</CardContent>
 						</Card>
@@ -724,19 +728,30 @@ function RouteComponent() {
 								</CardDescription>
 							</CardHeader>
 							<CardContent>
-								<ResponsiveContainer width="100%" height={300}>
+								<ResponsiveContainer width="100%" height={400}>
 									<BarChart data={chartData.data.pipeline}>
 										<CartesianGrid strokeDasharray="3 3" />
 										<XAxis
 											dataKey="name"
-											angle={-45}
-											textAnchor="end"
-											height={100}
-											fontSize={11}
 											interval={0}
-											tickFormatter={(name: string) =>
-												name.length > 20 ? `${name.slice(0, 18)}…` : name
-											}
+											height={120}
+											tick={({ x, y, payload }) => (
+												<g transform={`translate(${x},${y})`}>
+													<text
+														x={0}
+														y={0}
+														dy={16}
+														textAnchor="end"
+														fill="#666"
+														fontSize={11}
+														transform="rotate(-45)"
+													>
+														{payload.value.length > 20
+															? `${payload.value.slice(0, 18)}…`
+															: payload.value}
+													</text>
+												</g>
+											)}
 										/>
 										<YAxis
 											tickFormatter={(v: number) =>
@@ -828,6 +843,179 @@ function RouteComponent() {
 					)}
 				</div>
 			)}
+
+			{/* BI Charts - Análisis de Colocación */}
+			{chartData.data &&
+				(chartData.data.byTipoCredito.length > 0 ||
+					chartData.data.byMarca.length > 0 ||
+					chartData.data.byMedio.length > 0) && (
+					<div className="space-y-4">
+						<h2 className="font-semibold text-2xl">Análisis de Colocación</h2>
+						<div className="grid gap-4 md:grid-cols-2">
+							{/* Pie: Monto por Tipo de Crédito */}
+							{chartData.data.byTipoCredito.length > 0 && (
+								<Card>
+									<CardHeader>
+										<CardTitle>Monto por Tipo de Crédito</CardTitle>
+										<CardDescription>
+											Distribución de monto colocado
+										</CardDescription>
+									</CardHeader>
+									<CardContent>
+										<ResponsiveContainer width="100%" height={300}>
+											<PieChart>
+												<Pie
+													data={chartData.data.byTipoCredito}
+													dataKey="monto"
+													nameKey="name"
+													cx="50%"
+													cy="50%"
+													outerRadius={100}
+													label={({ name, percent }) =>
+														`${name}: ${((percent ?? 0) * 100).toFixed(0)}%`
+													}
+												>
+													<Cell fill="#3b82f6" />
+													<Cell fill="#f59e0b" />
+												</Pie>
+												<Tooltip
+													formatter={(value) =>
+														`Q${Number(value).toLocaleString()}`
+													}
+												/>
+												<Legend />
+											</PieChart>
+										</ResponsiveContainer>
+									</CardContent>
+								</Card>
+							)}
+
+							{/* Bar: Monto por Medio/Fuente */}
+							{chartData.data.byMedio.length > 0 && (
+								<Card>
+									<CardHeader>
+										<CardTitle>Monto por Medio</CardTitle>
+										<CardDescription>
+											Monto colocado por canal de adquisición
+										</CardDescription>
+									</CardHeader>
+									<CardContent>
+										<ResponsiveContainer width="100%" height={400}>
+											<BarChart data={chartData.data.byMedio}>
+												<CartesianGrid strokeDasharray="3 3" />
+												<XAxis
+													dataKey="name"
+													interval={0}
+													height={120}
+													tick={({ x, y, payload }) => (
+														<g transform={`translate(${x},${y})`}>
+															<text
+																x={0}
+																y={0}
+																dy={16}
+																textAnchor="end"
+																fill="#666"
+																fontSize={11}
+																transform="rotate(-45)"
+															>
+																{payload.value}
+															</text>
+														</g>
+													)}
+												/>
+												<YAxis
+													tickFormatter={(v: number) =>
+														`Q${(v / 1000).toFixed(0)}k`
+													}
+												/>
+												<Tooltip
+													formatter={(value) =>
+														`Q${Number(value).toLocaleString()}`
+													}
+												/>
+												<Bar dataKey="monto" name="Monto" fill="#8b5cf6" />
+											</BarChart>
+										</ResponsiveContainer>
+									</CardContent>
+								</Card>
+							)}
+
+							{/* Line (dual axis): Monto y Cantidad por Marca */}
+							{chartData.data.byMarca.length > 0 && (
+								<Card className="md:col-span-2">
+									<CardHeader>
+										<CardTitle>Colocación por Marca de Vehículo</CardTitle>
+										<CardDescription>
+											Monto colocado y cantidad de créditos por marca
+										</CardDescription>
+									</CardHeader>
+									<CardContent>
+										<ResponsiveContainer width="100%" height={400}>
+											<LineChart data={chartData.data.byMarca}>
+												<CartesianGrid strokeDasharray="3 3" />
+												<XAxis
+													dataKey="name"
+													interval={0}
+													height={120}
+													tick={({ x, y, payload }) => (
+														<g transform={`translate(${x},${y})`}>
+															<text
+																x={0}
+																y={0}
+																dy={16}
+																textAnchor="end"
+																fill="#666"
+																fontSize={11}
+																transform="rotate(-45)"
+															>
+																{payload.value}
+															</text>
+														</g>
+													)}
+												/>
+												<YAxis
+													yAxisId="left"
+													tickFormatter={(v: number) =>
+														`Q${(v / 1000).toFixed(0)}k`
+													}
+												/>
+												<YAxis
+													yAxisId="right"
+													orientation="right"
+													allowDecimals={false}
+												/>
+												<Tooltip
+													formatter={(value, name) =>
+														name === "Monto"
+															? `Q${Number(value).toLocaleString()}`
+															: value
+													}
+												/>
+												<Legend />
+												<Line
+													yAxisId="left"
+													type="monotone"
+													dataKey="monto"
+													stroke="#10b981"
+													name="Monto"
+													strokeWidth={2}
+												/>
+												<Line
+													yAxisId="right"
+													type="monotone"
+													dataKey="cantidad"
+													stroke="#3b82f6"
+													name="Cantidad"
+													strokeWidth={2}
+												/>
+											</LineChart>
+										</ResponsiveContainer>
+									</CardContent>
+								</Card>
+							)}
+						</div>
+					</div>
+				)}
 		</div>
 	);
 }

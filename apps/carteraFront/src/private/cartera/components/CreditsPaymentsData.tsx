@@ -2,16 +2,19 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useRef, useState } from "react";
 import {
+  Check,
+  ChevronsUpDown,
   Download,
   FileSpreadsheet,
   Loader2,
   Search,
   User,
+  Users,
   X,
 } from "lucide-react";
 import { useCreditosPaginadosWithFilters } from "../hooks/credits";
 import { Button } from "@/components/ui/button";
-import { Eye, Pencil, XCircle, FileCheck } from "lucide-react";
+import { Eye, Pencil, XCircle, FileCheck, CheckCircle2 } from "lucide-react";
 
 import {
   Table,
@@ -22,7 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import React from "react";
-import { Hash, Info, ListOrdered, RefreshCw } from "lucide-react";
+import { Hash, Info, ListOrdered, RefreshCw, CalendarClock } from "lucide-react";
 import { useMemo } from "react";
 import { AlertCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -35,13 +38,21 @@ import { openReportInNewTab, useActivateCredit, useToggleCancelacionActivo } fro
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useAuth } from "@/Provider/authProvider";
 import { ModalCreateMora } from "./createMoraModal";
+import { ModalMarcarCuotas } from "./ModalMarcarCuotas";
+import { ModalCambiarFechaInicio } from "./ModalCambiarFechaInicio";
 import { useReport } from "../hooks/reports";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { usePaymentAgreements,useTogglePaymentAgreementStatus } from "../hooks/paymentagreement";
 import { toast } from "sonner";
+import { ModalCaidoCredit } from "./ModalCaidoCredit";
 
 export function ListaCreditosPagos() {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
+  const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
   const { user } = useAuth();
   const isAdmin = user?.role === "ADMIN";
   const userAsesorId = user?.asesor_id;
@@ -70,7 +81,7 @@ export function ListaCreditosPagos() {
     setEstado,
     estado,
     estados,
-    handleExcel,
+    downloadExcel,
     asesorId,
     handleAsesorId,
     setAsesorId,
@@ -78,6 +89,10 @@ export function ListaCreditosPagos() {
     setNombreUsuarioInput,
     handleSearchNombreUsuario,
     clearNombreUsuario,
+    isVehiculoPropio,
+    setIsVehiculoPropio,
+    inversionistaIds,
+    setInversionistaIds,
   } = useCreditosPaginadosWithFilters({
     initialAsesorId: !isAdmin && userAsesorId ? userAsesorId : undefined,
   });
@@ -86,6 +101,8 @@ export function ListaCreditosPagos() {
   const [creditToEdit, setCreditToEdit] = useState<any | null>(null);
   const [investorsToEdit, setInvestorsToEdit] = useState<any[]>([]);
   const [investorsMirrorToEdit, setInvestorsMirrorToEdit] = useState<any[]>([]);
+  const [fechaInicioModalOpen, setFechaInicioModalOpen] = useState(false);
+  const [selectedCreditFechaInicio, setSelectedCreditFechaInicio] = useState<{ sifco: string; fechaActual: string | null } | null>(null);
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
 
@@ -100,7 +117,8 @@ export function ListaCreditosPagos() {
     | "CANCELADO"
     | "INCOBRABLE"
     | "MOROSO"
-    | "EN_CONVENIO";
+    | "EN_CONVENIO"
+    | "CAIDO";
 
   // Helpers de permisos
   const canEdit = (s: CreditStatus) =>
@@ -109,6 +127,8 @@ export function ListaCreditosPagos() {
   const canActivate = (s: CreditStatus) => s === "PENDIENTE_CANCELACION";
   const canViewPayments = (_s: CreditStatus) => true;
   const canCreateConvenio = (s: CreditStatus) =>
+    ["ACTIVO", "MOROSO"].includes(s);
+  const canMarkCaido = (s: CreditStatus) =>
     ["ACTIVO", "MOROSO"].includes(s);
 
   // Dentro del componente, después de los otros hooks:
@@ -221,14 +241,20 @@ export function ListaCreditosPagos() {
     investors: Investor[];
     advisors: any[];
     loading: boolean;
+    refetch: () => void;
   };
 
   const [openMoraModal, setOpenMoraModal] = useState(false);
   const [selectedCreditMora, setSelectedCreditMora] = useState<any | null>(
     null
   );
+  const [openMarcarCuotasModal, setOpenMarcarCuotasModal] = useState(false);
+  const [selectedCreditMarcarCuotas, setSelectedCreditMarcarCuotas] = useState<string>("");
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedCreditId, setSelectedCreditId] = useState<number | null>(null);
+  const [caidoModalOpen, setCaidoModalOpen] = useState(false);
+  const [investorPopoverOpen, setInvestorPopoverOpen] = useState(false);
+  const [selectedCreditCaido, setSelectedCreditCaido] = useState<number | null>(null);
   const activateCreditMutation = useActivateCredit();
   const toggleCancelacionMutation = useToggleCancelacionActivo();
 
@@ -289,48 +315,8 @@ export function ListaCreditosPagos() {
   }, [data]);
 
 
-  if (isLoading) {
-    return (
-      <div className="fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
-        <div className="text-center space-y-6">
-          <div className="relative">
-            <div className="w-24 h-24 border-8 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto"></div>
-          </div>
-          <div className="space-y-2">
-            <h2 className="text-2xl font-bold text-gray-800">
-              Cargando créditos
-            </h2>
-            <p className="text-gray-600">Por favor espera un momento...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (isError)
-    return <div className="text-red-500">{(error as any)?.message}</div>;
-
-  if (!data || data.data.length === 0) {
-    return (
-      <div className="fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
-        <span className="bg-blue-100 p-5 rounded-full mb-4 flex items-center justify-center shadow">
-          <Info className="text-blue-500 w-12 h-12" />
-        </span>
-        <p className="text-blue-700 text-xl font-bold text-center">
-          No se encontraron resultados.
-        </p>
-        <p className="text-gray-500 text-base mt-2 text-center">
-          Prueba cambiando los filtros o verifica tu búsqueda.
-        </p>
-        <button
-          onClick={() => window.location.reload()}
-          className="mt-8 flex items-center gap-2 px-6 py-2 rounded-xl bg-blue-600 text-white font-bold shadow hover:bg-blue-700 transition-all"
-        >
-          <RefreshCw className="w-5 h-5" /> Reintentar
-        </button>
-      </div>
-    );
-  }
+  const showTable = !isLoading && !isError && data && data.data.length > 0;
+  const showEmpty = !isLoading && !isError && (!data || data.data.length === 0);
 
   return (
 
@@ -347,15 +333,15 @@ export function ListaCreditosPagos() {
         </p>
       </div>
 
-<div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-white/80 border border-blue-100 shadow-md rounded-2xl px-4 py-4 w-full mb-6">
+<div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 bg-white/80 border border-blue-100 shadow-md rounded-2xl px-4 py-4 w-full mb-6">
         {/* Filtro por # Crédito SIFCO */}
-        <label className="flex items-center gap-2 font-medium text-blue-800">
-          <Hash className="w-5 h-5" />
+        <label className="flex items-center gap-2 font-medium text-blue-800 sm:col-span-2">
+          <Hash className="w-5 h-5 shrink-0" />
           <input
             ref={inputRef}
-            className="border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400"
+            className="border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full"
             type="text"
-            placeholder="Buscar # Crédito SIFCO"
+            placeholder="# Crédito SIFCO"
             defaultValue={creditoSifco}
             onBlur={(e) => {
               if (e.target.value !== creditoSifco) {
@@ -377,7 +363,7 @@ export function ListaCreditosPagos() {
           />
           <button
             type="button"
-            className="ml-2 px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition"
+            className="px-3 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition"
             onClick={() => {
               if (inputRef.current && inputRef.current.value !== creditoSifco) {
                 handleSifco(inputRef.current.value);
@@ -390,7 +376,7 @@ export function ListaCreditosPagos() {
           {creditoSifco && (
             <button
               type="button"
-              className="ml-1 p-1 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200 transition"
+              className="p-1 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200 transition"
               onClick={clearSifco}
               title="Limpiar filtro"
             >
@@ -399,9 +385,43 @@ export function ListaCreditosPagos() {
           )}
         </label>
 
-        {/* 👤 Filtro por Asesor */}
-        <label className="flex items-center gap-2 font-medium text-blue-800">
-          <User className="w-5 h-5" />
+        {/* Filtro por Nombre de Usuario */}
+        <label className="flex items-center gap-2 font-medium text-blue-800 sm:col-span-2">
+          <Search className="w-5 h-5 shrink-0" />
+          <div className="relative w-full flex gap-2">
+            <div className="relative w-full">
+              <input
+                type="text"
+                placeholder="Buscar por nombre..."
+                value={nombreUsuarioInput}
+                onChange={(e) => setNombreUsuarioInput(e.target.value)}
+                onKeyDown={handleKeyPress}
+                className="border border-blue-200 rounded-lg px-3 py-2 pr-10 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full"
+              />
+              {nombreUsuarioInput && (
+                <button
+                  type="button"
+                  onClick={clearNombreUsuario}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200 transition"
+                  title="Limpiar filtro"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={handleSearchNombreUsuario}
+              className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition whitespace-nowrap"
+            >
+              Buscar
+            </button>
+          </div>
+        </label>
+
+        {/* Filtro por Asesor */}
+        <label className="flex items-center gap-2 font-medium text-blue-800 sm:col-span-2">
+          <User className="w-5 h-5 shrink-0" />
           <select
             id="asesor"
             name="asesor"
@@ -438,153 +458,156 @@ export function ListaCreditosPagos() {
           )}
         </label>
 
-        {/* 🔍 Filtro por Nombre de Usuario */}
-        <label className="flex items-center gap-2 font-medium text-blue-800">
-          <Search className="w-5 h-5" />
-          <div className="relative w-full flex gap-2">
-            <div className="relative w-full">
-              <input
-                type="text"
-                placeholder="Buscar por nombre..."
-                value={nombreUsuarioInput}
-                onChange={(e) => setNombreUsuarioInput(e.target.value)}
-                onKeyDown={handleKeyPress}
-                className="border border-blue-200 rounded-lg px-3 py-2 pr-10 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full"
-              />
-              {nombreUsuarioInput && (
-                <button
-                  type="button"
-                  onClick={clearNombreUsuario}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200 transition"
-                  title="Limpiar filtro"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={handleSearchNombreUsuario}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition whitespace-nowrap"
-            >
-              Buscar
-            </button>
-          </div>
-        </label>
-
         {/* Filtro por Estado */}
-        <label className="flex items-center gap-2 font-medium text-blue-800">
-          <AlertCircle className="w-5 h-5" />
-          <div className="relative w-full">
-            <select
-              className="border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full appearance-none pr-8"
-              value={estado}
-              onChange={(e) => {
-                setEstado(
-                  e.target.value as
-                    | "ACTIVO"
-                    | "CANCELADO"
-                    | "INCOBRABLE"
-                    | "PENDIENTE_CANCELACION"
-                    | "MOROSO"
-                    | "EN_CONVENIO"
-                );
+        <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+          <AlertCircle className="w-4 h-4 text-blue-700" />
+          <span className="text-sm font-semibold text-blue-800 mr-1">Estado:</span>
+          {estados.map((est) => (
+            <button
+              key={est.value}
+              type="button"
+              onClick={() => {
+                setEstado(est.value as typeof estado);
                 setPage(1);
               }}
+              className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
+                estado === est.value
+                  ? `${est.color} border-current shadow-md ring-2 ring-offset-1 ring-blue-300 scale-105`
+                  : "bg-white text-gray-500 border-gray-200 hover:bg-gray-50"
+              }`}
             >
-              <option value="">Seleccionar estado</option>
-              {estados.map((est) => (
-                <option
-                  key={est.value}
-                  value={est.value}
-                  style={{
-                    backgroundColor: est.color.includes("bg-green")
-                      ? "#bbf7d0"
-                      : est.color.includes("bg-red")
-                        ? "#fecaca"
-                        : est.color.includes("bg-yellow")
-                          ? "#fef9c3"
-                          : est.color.includes("bg-blue")
-                            ? "#dbeafe"
-                            : est.color.includes("bg-purple")
-                              ? "#e9d5ff"
-                              : est.color.includes("bg-orange")
-                                ? "#fed7aa"
-                                : undefined,
-                    color: est.color.includes("text-green")
-                      ? "#166534"
-                      : est.color.includes("text-red")
-                        ? "#991b1b"
-                        : est.color.includes("text-yellow")
-                          ? "#a16207"
-                          : est.color.includes("text-blue")
-                            ? "#1e40af"
-                            : est.color.includes("text-purple")
-                              ? "#6b21a8"
-                              : est.color.includes("text-orange")
-                                ? "#c2410c"
-                                : undefined,
-                  }}
+              {est.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Inversionista + Items por página + Vehículo + Excel */}
+        <div className="col-span-full flex flex-wrap items-center gap-3">
+          {/* Multi-select inversionistas */}
+          <div className="flex items-center gap-2 flex-1 min-w-[250px]">
+            <Users className="w-5 h-5 text-blue-800 shrink-0" />
+            <Popover open={investorPopoverOpen} onOpenChange={setInvestorPopoverOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="w-full flex items-center justify-between border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 text-sm min-h-[40px]"
                 >
-                  {est.label}
+                  <span className="flex flex-wrap gap-1 flex-1">
+                    {inversionistaIds.length === 0 ? (
+                      <span className="text-gray-400">Todos los inversionistas</span>
+                    ) : (
+                      inversionistaIds.map((id) => {
+                        const inv = investors.find((i) => i.inversionista_id === id);
+                        return (
+                          <Badge key={id} variant="secondary" className="text-xs flex items-center gap-1">
+                            {inv?.nombre ?? id}
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              className="cursor-pointer"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setInversionistaIds(inversionistaIds.filter((v) => v !== id));
+                                setPage(1);
+                              }}
+                            >
+                              <X className="w-3 h-3" />
+                            </span>
+                          </Badge>
+                        );
+                      })
+                    )}
+                  </span>
+                  <ChevronsUpDown className="w-4 h-4 shrink-0 opacity-50" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[--radix-popover-trigger-width] p-0 bg-white border border-blue-200 shadow-lg" align="start">
+                <Command className="bg-white text-gray-900">
+                  <CommandInput placeholder="Buscar inversionista..." />
+                  <CommandList className="max-h-[250px]">
+                    <CommandEmpty>No se encontró inversionista.</CommandEmpty>
+                    <CommandGroup>
+                      {investors.map((inv) => {
+                        const isSelected = inversionistaIds.includes(inv.inversionista_id);
+                        return (
+                          <CommandItem
+                            key={inv.inversionista_id}
+                            value={inv.nombre}
+                            onSelect={() => {
+                              if (isSelected) {
+                                setInversionistaIds(inversionistaIds.filter((v) => v !== inv.inversionista_id));
+                              } else {
+                                setInversionistaIds([...inversionistaIds, inv.inversionista_id]);
+                              }
+                              setPage(1);
+                            }}
+                            className="text-gray-800 hover:bg-blue-50 cursor-pointer"
+                          >
+                            <Check className={`w-4 h-4 mr-2 ${isSelected ? "opacity-100 text-blue-600" : "opacity-0"}`} />
+                            {inv.nombre}
+                          </CommandItem>
+                        );
+                      })}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          <label className="flex items-center gap-2 font-medium text-blue-800">
+            <ListOrdered className="w-5 h-5" />
+            <select
+              className="border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400"
+              value={perPage}
+              onChange={handlePerPage}
+            >
+              {[5, 10, 20, 50, 100, 200].map((n) => (
+                <option key={n} value={n}>
+                  {n} por página
                 </option>
               ))}
             </select>
-            {estado && (
-              <span
-                className={`absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-1 text-xs font-bold pointer-events-none ${
-                  estadoSeleccionado?.color || ""
-                }`}
-              >
-                {estadoSeleccionado?.label}
-              </span>
-            )}
-          </div>
-        </label>
+          </label>
+          <label className="flex items-center gap-2 font-medium text-blue-800 cursor-pointer select-none">
+            <Switch
+              checked={isVehiculoPropio === true}
+              onCheckedChange={(checked) => {
+                setIsVehiculoPropio(checked ? true : undefined);
+                setPage(1);
+              }}
+            />
+            <span className="text-sm">Solo Vehículo Cash-In</span>
+          </label>
+          <button
+            type="button"
+            disabled={isDownloadingExcel}
+            onClick={async () => {
+              try {
+                setIsDownloadingExcel(true);
+                const response = await downloadExcel();
 
-        {/* Items por página */}
-        <label className="flex items-center gap-2 font-medium text-blue-800">
-          <ListOrdered className="w-5 h-5" />
-          <select
-            className="border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full"
-            value={perPage}
-            onChange={handlePerPage}
-          >
-            {[5, 10, 20, 50, 100, 200].map((n) => (
-              <option key={n} value={n}>
-                {n} por página
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {/* Botón Descargar Excel */}
-        <button
-          type="button"
-          onClick={async () => {
-            try {
-              handleExcel(true);
-              const response = await refetch();
-
-              if (response.data && "excelUrl" in response.data) {
-                const url = (response.data as any).excelUrl;
-                window.open(url, "_blank");
-                toast.success("Excel generado correctamente");
-              } else {
-                toast.error("No se pudo generar el Excel");
+                if (response && "excelUrl" in response) {
+                  const url = (response as any).excelUrl;
+                  window.open(url, "_blank");
+                  toast.success("Excel generado correctamente");
+                } else {
+                  toast.error("No se pudo generar el Excel");
+                }
+              } catch (err) {
+                console.error("❌ Error generando Excel:", err);
+                toast.error("Error al generar el Excel");
+              } finally {
+                setIsDownloadingExcel(false);
               }
-            } catch (err) {
-              console.error("❌ Error generando Excel:", err);
-              toast.error("Error al generar el Excel");
-            } finally {
-              handleExcel(false);
-            }
-          }}
-          className="px-6 py-2 rounded-lg bg-green-600 text-white font-semibold hover:bg-green-700 transition shadow-md flex items-center justify-center gap-2"
-        >
-          <FileSpreadsheet className="w-5 h-5" />
-          Descargar Excel
-        </button>
+            }}
+            className="px-4 py-2 rounded-lg bg-green-600 text-white font-semibold hover:bg-green-700 transition shadow-md flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+          >
+            {isDownloadingExcel ? <Loader2 className="w-5 h-5 animate-spin" /> : <FileSpreadsheet className="w-5 h-5" />}
+            {isDownloadingExcel ? "Generando..." : "Descargar Excel"}
+          </button>
+        </div>
       </div>
 
       {isFetching && !isLoading && (
@@ -596,78 +619,128 @@ export function ListaCreditosPagos() {
         </div>
       )}
 
-      {/* Tabla responsive */}
-      {isMobile ? (
-        <MobileView
-          data={data}
-          expandedRow={expandedRow}
-          setExpandedRow={setExpandedRow}
-          navigate={navigate}
-          handleOpenModal={handleOpenModal}
-          handleOpenEdit={handleOpenEdit}
-          setSelectedCreditMora={setSelectedCreditMora}
-          setOpenMoraModal={setOpenMoraModal}
-          setSelectedCreditForReport={setSelectedCreditForReport}
-          setReportModalOpen={setReportModalOpen}
-          handleActivarConvenio={handleActivarConvenio}
-          user={user}
-          canViewReports={canViewReports}
-          canCreateConvenio={canCreateConvenio}
-          canCancel={canCancel}
-          canActivate={canActivate}
-          toggleCancelacionMutation={toggleCancelacionMutation}
-          refetch={refetch}
-        />
-      ) : (
-        <DesktopView
-          data={data}
-          expandedRow={expandedRow}
-          setExpandedRow={setExpandedRow}
-          navigate={navigate}
-          handleOpenModal={handleOpenModal}
-          handleOpenEdit={handleOpenEdit}
-          setSelectedCreditMora={setSelectedCreditMora}
-          setOpenMoraModal={setOpenMoraModal}
-          setSelectedCreditForReport={setSelectedCreditForReport}
-          setReportModalOpen={setReportModalOpen}
-          handleActivarConvenio={handleActivarConvenio}
-          activateCreditMutation={activateCreditMutation}
-          toggleCancelacionMutation={toggleCancelacionMutation}
-          user={user}
-          canViewReports={canViewReports}
-          canEdit={canEdit}
-          canCancel={canCancel}
-          canActivate={canActivate}
-          canViewPayments={canViewPayments}
-          canCreateConvenio={canCreateConvenio}
-          refetch={refetch}
-        />
+      {/* Estado: cargando */}
+      {isLoading && (
+        <div className="flex flex-col items-center justify-center py-20">
+          <div className="w-16 h-16 border-[6px] border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
+          <p className="text-lg font-semibold text-gray-700">Cargando créditos...</p>
+        </div>
       )}
 
-      {/* Paginación */}
-      <div className="flex justify-between items-center mt-6 px-1">
-        <button
-          className="px-5 py-2 rounded-xl bg-gray-100 text-gray-700 font-bold disabled:opacity-50 transition"
-          onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
-          disabled={page <= 1 || isFetching}
-        >
-          Anterior
-        </button>
-        <span className="text-gray-800 font-bold text-lg">
-          Página {data.page} de {data.totalPages}
-        </span>
-        <button
-          className="px-5 py-2 rounded-xl bg-gray-100 text-gray-700 font-bold disabled:opacity-50 transition"
-          onClick={() =>
-            setPage((prev) => Math.min(prev + 1, data.totalPages ?? 1))
-          }
-          disabled={page >= (data.totalPages ?? 1) || isFetching}
-        >
-          Siguiente
-        </button>
-      </div>
-      {isFetching && (
-        <div className="text-blue-500 mt-2">Cargando página...</div>
+      {/* Estado: error */}
+      {isError && (
+        <div className="flex flex-col items-center justify-center py-20">
+          <Info className="text-red-400 w-12 h-12 mb-3" />
+          <p className="text-red-600 font-semibold">Error al cargar los créditos</p>
+          <p className="text-gray-500 text-sm mt-1">{(error as any)?.message}</p>
+          <button
+            onClick={() => refetch()}
+            className="mt-4 flex items-center gap-2 px-5 py-2 rounded-xl bg-blue-600 text-white font-bold shadow hover:bg-blue-700 transition"
+          >
+            <RefreshCw className="w-4 h-4" /> Reintentar
+          </button>
+        </div>
+      )}
+
+      {/* Estado: sin resultados */}
+      {showEmpty && (
+        <div className="flex flex-col items-center justify-center py-20">
+          <Info className="text-blue-400 w-12 h-12 mb-3" />
+          <p className="text-blue-700 text-lg font-bold">No se encontraron resultados</p>
+          <p className="text-gray-500 text-sm mt-1">Prueba cambiando los filtros o verifica tu búsqueda.</p>
+        </div>
+      )}
+
+      {/* Tabla responsive */}
+      {showTable && (
+        <>
+          {isMobile ? (
+            <MobileView
+              data={data}
+              expandedRow={expandedRow}
+              setExpandedRow={setExpandedRow}
+              navigate={navigate}
+              handleOpenModal={handleOpenModal}
+              handleOpenEdit={handleOpenEdit}
+              setSelectedCreditMora={setSelectedCreditMora}
+              setOpenMoraModal={setOpenMoraModal}
+              setSelectedCreditMarcarCuotas={setSelectedCreditMarcarCuotas}
+              setOpenMarcarCuotasModal={setOpenMarcarCuotasModal}
+              setSelectedCreditForReport={setSelectedCreditForReport}
+              setReportModalOpen={setReportModalOpen}
+              handleActivarConvenio={handleActivarConvenio}
+              user={user}
+              canViewReports={canViewReports}
+              canCreateConvenio={canCreateConvenio}
+              canCancel={canCancel}
+              canActivate={canActivate}
+              toggleCancelacionMutation={toggleCancelacionMutation}
+              refetch={refetch}
+              setSelectedCreditFechaInicio={setSelectedCreditFechaInicio}
+              setFechaInicioModalOpen={setFechaInicioModalOpen}
+              canMarkCaido={canMarkCaido}
+              setSelectedCreditCaido={setSelectedCreditCaido}
+              setCaidoModalOpen={setCaidoModalOpen}
+            />
+          ) : (
+            <DesktopView
+              data={data}
+              expandedRow={expandedRow}
+              setExpandedRow={setExpandedRow}
+              navigate={navigate}
+              handleOpenModal={handleOpenModal}
+              handleOpenEdit={handleOpenEdit}
+              setSelectedCreditMora={setSelectedCreditMora}
+              setOpenMoraModal={setOpenMoraModal}
+              setSelectedCreditMarcarCuotas={setSelectedCreditMarcarCuotas}
+              setOpenMarcarCuotasModal={setOpenMarcarCuotasModal}
+              setSelectedCreditForReport={setSelectedCreditForReport}
+              setReportModalOpen={setReportModalOpen}
+              handleActivarConvenio={handleActivarConvenio}
+              activateCreditMutation={activateCreditMutation}
+              toggleCancelacionMutation={toggleCancelacionMutation}
+              user={user}
+              canViewReports={canViewReports}
+              canEdit={canEdit}
+              canCancel={canCancel}
+              canActivate={canActivate}
+              canViewPayments={canViewPayments}
+              canCreateConvenio={canCreateConvenio}
+              refetch={refetch}
+              setSelectedCreditFechaInicio={setSelectedCreditFechaInicio}
+              setFechaInicioModalOpen={setFechaInicioModalOpen}
+              canMarkCaido={canMarkCaido}
+              setSelectedCreditCaido={setSelectedCreditCaido}
+              setCaidoModalOpen={setCaidoModalOpen}
+            />
+          )}
+
+          {/* Paginación */}
+          <div className="flex justify-between items-center mt-6 px-1">
+            <button
+              className="px-5 py-2 rounded-xl bg-gray-100 text-gray-700 font-bold disabled:opacity-50 transition"
+              onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
+              disabled={page <= 1 || isFetching}
+            >
+              Anterior
+            </button>
+            <span className="text-gray-800 font-bold text-lg">
+              Página {data.page} de {data.totalPages}
+            </span>
+            <button
+              className="px-5 py-2 rounded-xl bg-gray-100 text-gray-700 font-bold disabled:opacity-50 transition"
+              onClick={() =>
+                setPage((prev) => Math.min(prev + 1, data.totalPages ?? 1))
+              }
+              disabled={page >= (data.totalPages ?? 1) || isFetching}
+            >
+              Siguiente
+            </button>
+          </div>
+          {isFetching && (
+            <div className="text-blue-500 mt-2">Cargando página...</div>
+          )}
+        </>
       )}
 
       <ModalEditCredit
@@ -715,6 +788,59 @@ export function ListaCreditosPagos() {
     }, 50); // 👈 Otro delay pequeño acá
   }}
 />
+
+      {/* Modal de Marcar Cuotas */}
+      <ModalMarcarCuotas
+        open={openMarcarCuotasModal}
+        onClose={() => {
+          setOpenMarcarCuotasModal(false);
+          setSelectedCreditMarcarCuotas("");
+        }}
+        numeroCreditoSifco={selectedCreditMarcarCuotas}
+        onSuccess={() => {
+          setTimeout(() => {
+            queryClient.invalidateQueries({
+              queryKey: ["creditos-paginados", mes, anio, page, perPage],
+            });
+          }, 50);
+        }}
+      />
+
+      {/* Modal de Cambiar Fecha Inicio */}
+      {selectedCreditFechaInicio && (
+        <ModalCambiarFechaInicio
+          open={fechaInicioModalOpen}
+          onClose={() => {
+            setFechaInicioModalOpen(false);
+            setSelectedCreditFechaInicio(null);
+          }}
+          numeroCreditoSifco={selectedCreditFechaInicio.sifco}
+          fechaActual={selectedCreditFechaInicio.fechaActual}
+          changedBy={user?.email ?? "admin"}
+          onSuccess={() => {
+            setTimeout(() => {
+              queryClient.invalidateQueries({
+                queryKey: ["creditos-paginados", mes, anio, page, perPage],
+              });
+            }, 50);
+          }}
+        />
+      )}
+
+      {/* Modal de Crédito Caído */}
+      {caidoModalOpen && selectedCreditCaido && (
+        <ModalCaidoCredit
+          open={caidoModalOpen}
+          onClose={() => {
+            setCaidoModalOpen(false);
+            setSelectedCreditCaido(null);
+          }}
+          creditId={selectedCreditCaido}
+          onSuccess={() => {
+            refetch();
+          }}
+        />
+      )}
 
       {/* Modal de Reportes */}
       {reportModalOpen && selectedCreditForReport && (
@@ -1055,6 +1181,8 @@ function MobileView({
   handleOpenEdit,
   setSelectedCreditMora,
   setOpenMoraModal,
+  setSelectedCreditMarcarCuotas,
+  setOpenMarcarCuotasModal,
   setSelectedCreditForReport,
   setReportModalOpen,
   handleActivarConvenio,
@@ -1065,6 +1193,11 @@ function MobileView({
   canActivate,
   toggleCancelacionMutation,
   refetch,
+  setSelectedCreditFechaInicio,
+  setFechaInicioModalOpen,
+  canMarkCaido,
+  setSelectedCreditCaido,
+  setCaidoModalOpen,
 }: any) {
   return (
     <div className="space-y-4">
@@ -1088,12 +1221,17 @@ function MobileView({
           </div>
 
           {/* Estado */}
-          <p className="text-sm text-gray-700">
-            <strong>Usuario:</strong> {item.usuarios.nombre}
+          <p className="text-sm text-gray-700 flex items-center gap-2 flex-wrap">
+            <span><strong>Usuario:</strong> {item.usuarios.nombre}</span>
+            {item.creditos.is_vehiculo_propio && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ backgroundColor: 'rgba(78,87,234,0.1)', color: '#4E57EA', border: '1px solid rgba(78,87,234,0.25)' }}>
+                🚗 V. Cash-In
+              </span>
+            )}
           </p>
           <p className="text-sm text-gray-700">
-            <strong>Deuda Total:</strong> Q
-            {Number(item.creditos.deudatotal).toLocaleString("es-GT", {
+            <strong>Capital:</strong> Q
+            {Number(item.creditos.capital).toLocaleString("es-GT", {
               minimumFractionDigits: 2,
               maximumFractionDigits: 2,
             })}
@@ -1119,7 +1257,9 @@ function MobileView({
                         ? "text-yellow-500"
                         : item.creditos.statusCredit === "EN_CONVENIO"
                           ? "text-orange-600"
-                          : "text-gray-500"
+                          : item.creditos.statusCredit === "CAIDO"
+                            ? "text-gray-700"
+                            : "text-gray-500"
               }`}
             >
               {item.creditos.statusCredit === "PENDIENTE_CANCELACION"
@@ -1128,7 +1268,9 @@ function MobileView({
                   ? "Incobrable"
                   : item.creditos.statusCredit === "EN_CONVENIO"
                     ? "En Convenio"
-                    : item.creditos.statusCredit}
+                    : item.creditos.statusCredit === "CAIDO"
+                      ? "Caído"
+                      : item.creditos.statusCredit}
             </span>
           </p>
 
@@ -1205,9 +1347,47 @@ function MobileView({
                 >
                   ➕ Mora
                 </Button>
-                 
+                <Button
+                  variant="outline"
+                  className="text-emerald-700 border-emerald-300 hover:bg-emerald-50"
+                  onClick={() => {
+                    setSelectedCreditMarcarCuotas(item.creditos.numero_credito_sifco);
+                    setOpenMarcarCuotasModal(true);
+                  }}
+                >
+                  <CheckCircle2 className="w-4 h-4 mr-1" /> Marcar Cuotas
+                </Button>
+                <Button
+                  variant="outline"
+                  className="text-blue-700 border-blue-300 hover:bg-blue-50"
+                  onClick={() => {
+                    setSelectedCreditFechaInicio({
+                      sifco: item.creditos.numero_credito_sifco,
+                      fechaActual: item.fecha_inicio ?? null,
+                    });
+                    setFechaInicioModalOpen(true);
+                  }}
+                >
+                  <CalendarClock className="w-4 h-4 mr-1" /> Cambiar fecha inicio
+                </Button>
+
               </>
             )}
+            {canMarkCaido(item.creditos.statusCredit) &&
+              user?.role === "ADMIN" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex items-center gap-1 text-gray-700 border-gray-400 hover:bg-gray-100"
+                  onClick={() => {
+                    setSelectedCreditCaido(item.creditos.credito_id);
+                    setCaidoModalOpen(true);
+                  }}
+                >
+                  <XCircle className="w-4 h-4" />
+                  Marcar Caído
+                </Button>
+              )}
             {canViewReports(item.creditos.statusCredit) &&
               user?.role === "ADMIN" && (
                 <Button
@@ -1244,6 +1424,11 @@ function MobileView({
                 <IncobrableInfo incobrable={item.incobrable} />
               )}
 
+              {/* Caído */}
+              {item.caido && (
+                <CaidoInfo caido={item.caido} />
+              )}
+
               {/* Cancelación */}
               {item.cancelacion && (
                 <CancelacionInfo cancelacion={item.cancelacion} />
@@ -1274,6 +1459,8 @@ function DesktopView({
   handleOpenEdit,
   setSelectedCreditMora,
   setOpenMoraModal,
+  setSelectedCreditMarcarCuotas,
+  setOpenMarcarCuotasModal,
   setSelectedCreditForReport,
   setReportModalOpen,
   handleActivarConvenio,
@@ -1287,10 +1474,15 @@ function DesktopView({
   canViewPayments,
   canCreateConvenio,
   refetch,
+  setSelectedCreditFechaInicio,
+  setFechaInicioModalOpen,
+  canMarkCaido,
+  setSelectedCreditCaido,
+  setCaidoModalOpen,
 }: any) {
   return (
-<div className="w-full max-w-7xl mx-auto">
-  <Table className="w-full min-w-[1200px] border-separate border-spacing-y-1">
+<div className="w-full">
+  <Table className="w-full border-separate border-spacing-y-1">
         <TableHeader>
           <TableRow className="bg-blue-50 border-b-2 border-blue-200 rounded-t-xl">
             <TableHead className="text-gray-900 font-bold text-center">
@@ -1300,7 +1492,7 @@ function DesktopView({
               Usuario
             </TableHead>
             <TableHead className="text-gray-900 font-bold text-center">
-              Deuda Total
+              Capital
             </TableHead>
             <TableHead className="text-gray-900 font-bold text-center">
               Cuota
@@ -1328,11 +1520,18 @@ function DesktopView({
                   {item.creditos.numero_credito_sifco}
                 </TableCell>
                 <TableCell className="text-indigo-700 font-bold text-center">
-                  {item.usuarios.nombre}
+                  <div className="flex items-center justify-center gap-2">
+                    {item.usuarios.nombre}
+                    {item.creditos.is_vehiculo_propio && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ backgroundColor: 'rgba(78,87,234,0.1)', color: '#4E57EA', border: '1px solid rgba(78,87,234,0.25)' }}>
+                        🚗 V. Cash-In
+                      </span>
+                    )}
+                  </div>
                 </TableCell>
-                <TableCell className="text-green-600 font-bold text-center">
+                <TableCell className="text-blue-700 font-bold text-center">
                   Q
-                  {Number(item.creditos.deudatotal).toLocaleString("es-GT", {
+                  {Number(item.creditos.capital).toLocaleString("es-GT", {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })}
@@ -1359,22 +1558,27 @@ function DesktopView({
 
                 {/* Acciones */}
                 <TableCell className="text-center">
-                  <div className="flex flex-col items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="text-gray-700 border-gray-300"
-                      onClick={() =>
-                        setExpandedRow(expandedRow === idx ? null : idx)
-                      }
-                    >
-                      {expandedRow === idx
-                        ? "Ocultar acciones"
-                        : "Ver acciones"}
-                    </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-gray-700 border-gray-300 whitespace-nowrap"
+                    onClick={() =>
+                      setExpandedRow(expandedRow === idx ? null : idx)
+                    }
+                  >
+                    {expandedRow === idx
+                      ? "Ocultar"
+                      : "Ver acciones"}
+                  </Button>
+                </TableCell>
+              </TableRow>
 
-                    {expandedRow === idx && (
-                      <div className="flex flex-wrap justify-center gap-2 p-2 border rounded-md bg-gray-50 shadow-sm w-full md:w-auto">
+              {/* Row expandida con acciones + detalles */}
+              {expandedRow === idx && (
+                <TableRow>
+                  <TableCell colSpan={6} className="p-0 bg-blue-50 rounded-b-2xl">
+                    {/* Botones de acción */}
+                    <div className="flex flex-wrap justify-center gap-2 px-6 py-4 border-b border-blue-100">
                         {canViewPayments(item.creditos.statusCredit) && (
                           <Button
                             variant="outline"
@@ -1442,7 +1646,52 @@ function DesktopView({
                               ➕ Mora
                             </Button>
                           )}
- 
+                          {user?.role === "ADMIN" && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex items-center gap-1 text-emerald-700 border-emerald-300 hover:bg-emerald-50"
+                              onClick={() => {
+                                setSelectedCreditMarcarCuotas(item.creditos.numero_credito_sifco);
+                                setOpenMarcarCuotasModal(true);
+                              }}
+                            >
+                              <CheckCircle2 className="w-4 h-4" /> Marcar Cuotas
+                            </Button>
+                          )}
+
+                          {user?.role === "ADMIN" && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex items-center gap-1 text-blue-700 border-blue-300 hover:bg-blue-50"
+                              onClick={() => {
+                                setSelectedCreditFechaInicio({
+                                  sifco: item.creditos.numero_credito_sifco,
+                                  fechaActual: item.fecha_inicio ?? null,
+                                });
+                                setFechaInicioModalOpen(true);
+                              }}
+                            >
+                              <CalendarClock className="w-4 h-4" /> Cambiar fecha inicio
+                            </Button>
+                          )}
+
+                        {canMarkCaido(item.creditos.statusCredit) &&
+                          user?.role === "ADMIN" && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex items-center gap-1 text-gray-700 border-gray-400 hover:bg-gray-100"
+                              onClick={() => {
+                                setSelectedCreditCaido(item.creditos.credito_id);
+                                setCaidoModalOpen(true);
+                              }}
+                            >
+                              <XCircle className="w-4 h-4" />
+                              Marcar Caído
+                            </Button>
+                          )}
 
                         {canViewReports(item.creditos.statusCredit) &&
                           user?.role === "ADMIN" && (
@@ -1520,19 +1769,9 @@ function DesktopView({
                               Sin permisos
                             </span>
                           )}
-                      </div>
-                    )}
-                  </div>
-                </TableCell>
-              </TableRow>
+                    </div>
 
-              {/* Row expandida */}
-              {expandedRow === idx && (
-                <TableRow>
-                  <TableCell
-                    colSpan={6}
-                    className="p-0 bg-blue-50 rounded-b-2xl"
-                  >
+                    {/* Detalles del crédito */}
                     <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6 text-gray-900">
                       <DetallesCredito item={item} fullWidth />
 
@@ -1552,6 +1791,12 @@ function DesktopView({
                       {item.incobrable && (
                         <div className="col-span-full mt-6">
                           <IncobrableInfo incobrable={item.incobrable} />
+                        </div>
+                      )}
+
+                      {item.caido && (
+                        <div className="col-span-full mt-6">
+                          <CaidoInfo caido={item.caido} />
                         </div>
                       )}
 
@@ -1617,36 +1862,37 @@ function DetallesCredito({
             : "grid grid-cols-2 gap-3 text-center"
         }
       >
-        {[
-          ["Capital", item.creditos.capital],
-          ["Porcentaje Interés", `${item.creditos.porcentaje_interes}%`],
-          ["Deuda Total", item.creditos.deudatotal],
-          ["Cuota", item.creditos.cuota],
-          ["Cuota Interés", item.creditos.cuota_interes],
-          ["IVA 12%", item.creditos.iva_12],
-          ["Seguro 10 Cuotas", item.creditos.seguro_10_cuotas],
-          ["GPS", item.creditos.gps],
-          ["Membresías", item.creditos.membresias],
-          ["Royalti", item.creditos.royalti],
-          ["Plazo", item.creditos.plazo],
-          ["Formato Crédito", item.creditos.formato_credito],
-        ].map(([label, value]) => (
+        {([
+          { label: "Deuda Total", value: item.creditos.deudatotal, isMoney: true },
+          { label: "Porcentaje Interés", value: `${item.creditos.porcentaje_interes}%` },
+          { label: "Capital", value: item.creditos.capital, isMoney: true },
+          { label: "Cuota", value: item.creditos.cuota, isMoney: true },
+          { label: "Cuota Interés", value: item.creditos.cuota_interes, isMoney: true },
+          { label: "IVA 12%", value: item.creditos.iva_12, isMoney: true },
+          { label: "Seguro 10 Cuotas", value: item.creditos.seguro_10_cuotas, isMoney: true },
+          { label: "GPS", value: item.creditos.gps, isMoney: true },
+          { label: "Membresías", value: item.creditos.membresias, isMoney: true },
+          { label: "Royalti", value: item.creditos.royalti, isMoney: true },
+          { label: "Plazo", value: `${item.creditos.plazo} meses` },
+          { label: "Formato Crédito", value: item.creditos.formato_credito },
+          ...(item.fecha_inicio ? [{ label: "Fecha Primera Cuota", value: new Date(item.fecha_inicio + "T12:00:00").toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" }), isDate: true }] : []),
+        ] as { label: string; value: any; isMoney?: boolean; isDate?: boolean }[]).map((field) => (
           <div
-            key={label}
+            key={field.label}
             className={`p-3 rounded-lg bg-white border shadow-sm ${
               fullWidth
                 ? "hover:shadow-md transition"
                 : "flex flex-col items-center"
             }`}
           >
-            <span className="font-bold text-blue-700">{label}:</span>
+            <span className="font-bold text-blue-700">{field.label}:</span>
             <p className="text-gray-800">
-              {typeof value === "number"
-                ? `Q${Number(value).toLocaleString("es-GT", {
+              {field.isMoney
+                ? `Q${Number(field.value).toLocaleString("es-GT", {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })}`
-                : value}
+                : field.value ?? "--"}
             </p>
           </div>
         ))}
@@ -1747,6 +1993,40 @@ function IncobrableInfo({ incobrable }: { incobrable: any }) {
             {incobrable.observaciones || "--"}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function CaidoInfo({ caido }: { caido: any }) {
+  return (
+    <div>
+      <h4 className="text-xl font-bold text-gray-800 border-b pb-2 mb-4">
+        Información de Crédito Caído
+      </h4>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="p-3 rounded-lg bg-white border shadow-sm">
+          <span className="font-bold text-gray-700">Motivo:</span>
+          <p className="text-gray-800">{caido.motivo}</p>
+        </div>
+        <div className="p-3 rounded-lg bg-white border shadow-sm">
+          <span className="font-bold text-gray-700">Fecha de Caída:</span>
+          <p className="text-gray-800">
+            {new Date(caido.fecha_caida).toLocaleDateString("es-ES", {
+              day: "2-digit",
+              month: "short",
+              year: "numeric",
+            })}
+          </p>
+        </div>
+        {caido.observaciones && (
+          <div className="p-3 rounded-lg bg-white border shadow-sm col-span-full">
+            <span className="font-bold text-gray-700">Observaciones:</span>
+            <div className="max-h-24 overflow-y-auto text-sm text-gray-800 p-2 border rounded-md bg-gray-50 break-words">
+              {caido.observaciones}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

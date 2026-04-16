@@ -111,6 +111,7 @@ export interface CreateCreditoInput {
 	observaciones?: string;
 	no_poliza?: string;
 	como_se_entero?: string;
+	dia_pago_mensual?: 15 | 30;
 	membresias_pago?: number;
 	categoria?: string;
 	nit?: string;
@@ -118,12 +119,21 @@ export interface CreateCreditoInput {
 	porcentaje_royalti?: number;
 	otros?: number;
 	reserva?: number;
+	is_vehiculo_propio?: boolean;
 	// campos para la facturacion
 	direccion?: string;
 	municipio?: string;
 	departamento?: string;
 	codigo_postal?: string;
 	pais?: string;
+	// Nuevos campos para el correo de notificación
+	vehiculo_marca?: string;
+	vehiculo_linea?: string;
+	vehiculo_modelo?: string;
+	vehiculo_placa?: string;
+	vehiculo_vin?: string;
+	monto_asegurado?: number;
+	opportunity_id?: string;
 	inversionistas?: Array<{
 		inversionista_id: number;
 		porcentaje_participacion: number;
@@ -345,11 +355,17 @@ export interface CarteraBoleta {
 export interface CarteraInversionista {
 	inversionista_id: number;
 	nombre: string;
+	dpi: number | null;
+	email: string | null;
 	emite_factura: boolean;
 	reinversion: boolean;
+	tipo_reinversion: string;
 	banco: BancoEnum | null;
+	banco_id: number | null;
 	tipo_cuenta: TipoCuentaEnum | null;
 	numero_cuenta: string | null;
+	moneda: "quetzales" | "dolares";
+	celular: string | null;
 }
 
 export interface CreateInversionistaInput {
@@ -528,6 +544,7 @@ export interface GetPaymentsParams {
 }
 
 export interface GetInvestorsParams {
+	id?: number;
 	page?: number;
 	perPage?: number;
 }
@@ -663,6 +680,8 @@ export interface CreateBoletaInput {
 export interface ResumenGlobalInversionista {
 	inversionista_id: number;
 	nombre: string;
+	moneda: "quetzales" | "dolares";
+	currencySymbol: string;
 	emite_factura: boolean;
 	reinversion: string;
 	banco: string | null;
@@ -672,10 +691,13 @@ export interface ResumenGlobalInversionista {
 	total_abono_interes: string;
 	total_abono_iva: string;
 	total_isr: string;
+	total_cuota?: string;
 	total_a_recibir_sin_reinversion: string;
 	total_reinversion: string;
 	total_a_recibir_con_reinversion: string;
 	boleta_pendiente: BoletaPagoInversionista | null;
+	boleta_liquidacion?: BoletaPagoInversionista | null;
+	estado_liquidacion_resumen?: "pending" | "uploaded" | "liquidated";
 }
 
 // ============================================================================

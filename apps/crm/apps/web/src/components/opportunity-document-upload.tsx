@@ -16,13 +16,18 @@ import { Combobox } from "@/components/ui/combobox";
 import { Label } from "@/components/ui/label";
 import { getDocumentTypeLabel } from "@/lib/crm-formatters";
 import { VEHICLE_DOCUMENT_TYPES } from "@/lib/document-constants";
+import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import { client } from "@/utils/orpc";
+
+type OpportunityDocument = Awaited<
+	ReturnType<typeof client.getOpportunityDocuments>
+>[number];
+type OpportunityDocumentType = OpportunityDocument["documentType"];
 
 interface OpportunityDocumentUploadProps {
 	opportunityId: string;
-	documents: any[];
+	documents: OpportunityDocument[];
 	isLoading: boolean;
-	onRefresh: () => void;
 	hasVehicle?: boolean;
 }
 
@@ -96,11 +101,12 @@ export function OpportunityDocumentUpload({
 	opportunityId,
 	documents,
 	isLoading,
-	onRefresh,
 	hasVehicle = false,
 }: OpportunityDocumentUploadProps) {
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
-	const [documentType, setDocumentType] = useState<string>("");
+	const [documentType, setDocumentType] = useState<
+		OpportunityDocumentType | ""
+	>("");
 	const [includeAll3Months, setIncludeAll3Months] = useState(false);
 
 	// Verificar si el documento seleccionado es de vehículo y no hay vehículo asignado
@@ -111,19 +117,28 @@ export function OpportunityDocumentUpload({
 
 	const queryClient = useQueryClient();
 
-	const uploadedTypes = new Set(
-		documents?.map((d: any) => d.documentType) || [],
+	const formatUploadedDate = (value: unknown) => {
+		if (!value) return "Fecha desconocida";
+		const date = new Date(value as string | number | Date);
+		return Number.isNaN(date.getTime())
+			? "Fecha desconocida"
+			: date.toLocaleDateString();
+	};
+
+	const uploadedTypes = new Set<OpportunityDocumentType>(
+		documents?.map((d) => d.documentType) || [],
 	);
 
 	// Crear opciones para el combobox
 	const documentOptions = useMemo(() => {
-		const options: { value: string; label: string }[] = [];
+		const options: { value: OpportunityDocumentType; label: string }[] = [];
 		for (const [_category, types] of Object.entries(documentCategories)) {
 			for (const type of types) {
-				const label = getDocumentTypeLabel(type);
+				const typedType = type as OpportunityDocumentType;
+				const label = getDocumentTypeLabel(typedType);
 				options.push({
-					value: type,
-					label: uploadedTypes.has(type) ? `${label} ✓` : label,
+					value: typedType,
+					label: uploadedTypes.has(typedType) ? `${label} ✓` : label,
 				});
 			}
 		}
@@ -131,26 +146,23 @@ export function OpportunityDocumentUpload({
 	}, [uploadedTypes]);
 
 	const uploadMutation = useMutation({
-		mutationFn: async (data: { file: File; documentType: string }) => {
-			const base64 = await new Promise<string>((resolve, reject) => {
-				const reader = new FileReader();
-				reader.onloadend = () => {
-					const result = reader.result as string;
-					const base64Data = result.split(",")[1];
-					resolve(base64Data);
-				};
-				reader.onerror = reject;
-				reader.readAsDataURL(data.file);
+		mutationFn: async (data: {
+			file: File;
+			documentType: OpportunityDocumentType;
+		}) => {
+			const { key } = await uploadFileToR2WithRetry(data.file, {
+				resourceType: "opportunity_document",
+				resourceId: opportunityId,
 			});
 
 			return await client.uploadOpportunityDocument({
 				opportunityId,
-				documentType: data.documentType as any,
+				documentType: data.documentType,
 				file: {
 					name: data.file.name,
 					type: data.file.type,
 					size: data.file.size,
-					data: base64,
+					key,
 				},
 			});
 		},
@@ -159,7 +171,6 @@ export function OpportunityDocumentUpload({
 			queryClient.invalidateQueries({
 				queryKey: ["getOpportunityDocuments", opportunityId],
 			});
-			onRefresh();
 			setSelectedFile(null);
 			setDocumentType("");
 			const fileInput = document.getElementById(
@@ -181,7 +192,6 @@ export function OpportunityDocumentUpload({
 			queryClient.invalidateQueries({
 				queryKey: ["getOpportunityDocuments", opportunityId],
 			});
-			onRefresh();
 		},
 		onError: (error: Error) => {
 			toast.error(`Error al eliminar documento: ${error.message}`);
@@ -216,23 +226,24 @@ export function OpportunityDocumentUpload({
 				"estados_cuenta_1",
 				"estados_cuenta_2",
 				"estados_cuenta_3",
-			];
-			Promise.allSettled(
-				types.map((type) =>
-					uploadMutation.mutateAsync({
-						file: selectedFile,
-						documentType: type,
-					}),
-				),
-			).then((results) => {
-				const failed = results.filter((r) => r.status === "rejected");
-				if (failed.length > 0) {
-					toast.error(
-						`${failed.length} de 3 estados de cuenta fallaron al subir`,
-					);
+			] as const;
+			let failed = 0;
+			(async () => {
+				for (const type of types) {
+					try {
+						await uploadMutation.mutateAsync({
+							file: selectedFile,
+							documentType: type,
+						});
+					} catch {
+						failed++;
+					}
+				}
+				if (failed > 0) {
+					toast.error(`${failed} de 3 estados de cuenta fallaron al subir`);
 				}
 				setIncludeAll3Months(false);
-			});
+			})();
 		} else {
 			uploadMutation.mutate({ file: selectedFile, documentType });
 		}
@@ -254,7 +265,9 @@ export function OpportunityDocumentUpload({
 							<Combobox
 								options={documentOptions}
 								value={documentType}
-								onChange={setDocumentType}
+								onChange={(value) =>
+									setDocumentType((value as OpportunityDocumentType | "") ?? "")
+								}
 								placeholder="Buscar tipo de documento..."
 								width="full"
 								popOverWidth="full"
@@ -355,18 +368,18 @@ export function OpportunityDocumentUpload({
 					</div>
 				) : documents && documents.length > 0 ? (
 					<div className="space-y-2">
-						{documents.map((doc: any) => (
+						{documents.map((doc) => (
 							<div
 								key={doc.id}
-								className="flex items-center justify-between rounded-lg border p-3"
+								className="flex flex-col gap-3 sm:flex-row sm:items-center justify-between rounded-lg border p-3"
 							>
-								<div className="flex-1">
-									<p className="font-medium text-sm">
+								<div className="flex-1 min-w-0">
+									<p className="font-medium text-sm break-all whitespace-normal">
 										{getDocumentTypeLabel(doc.documentType)}
 									</p>
-									<p className="text-muted-foreground text-xs">
-										{doc.originalName || doc.filename} •{" "}
-										{new Date(doc.uploadedAt).toLocaleDateString()}
+									<p className="text-muted-foreground text-xs break-all whitespace-normal">
+										{doc.originalName || doc.filename || "Documento sin nombre"}{" "}
+										• {formatUploadedDate(doc.uploadedAt)}
 									</p>
 								</div>
 								<div className="flex items-center gap-2">

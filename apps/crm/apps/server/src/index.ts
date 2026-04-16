@@ -34,7 +34,7 @@ import {
 } from "./jobs/cobros-notifications";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
-import { appRouter } from "./routers/index";
+import { appRouter, disbursementRouter, manualVehicleRouter } from "./routers/index";
 import { investmentsRouter } from "./routers/investments";
 import externalContractsRouter from "./routes/external-contracts";
 
@@ -53,10 +53,10 @@ app.use(
 				return origin;
 			}
 
-			// Permitir subdominios de devteamatcci.site y servicioscashin.com (wildcard)
+			// Permitir subdominios de devteamatcci.site, servicioscashin.com y clubcashin.com (wildcard)
 			if (
 				origin?.match(
-					/^https?:\/\/.*\.(devteamatcci\.site|servicioscashin\.com)$/,
+					/^https?:\/\/(.*\.)?(devteamatcci\.site|servicioscashin\.com|clubcashin\.com)$/,
 				)
 			) {
 				return origin;
@@ -82,7 +82,15 @@ app.on(["POST", "GET"], "/api/auth/**", (c) => auth.handler(c.req.raw));
 // External contracts endpoint (requires service account authentication)
 app.route("/api/contracts/external", externalContractsRouter);
 
-const handler = new RPCHandler({ ...appRouter, ...investmentsRouter });
+const handler = new RPCHandler(
+	Object.assign(
+		{},
+		appRouter,
+		manualVehicleRouter,
+		investmentsRouter,
+		disbursementRouter,
+	),
+);
 app.use("/rpc/*", async (c, next) => {
 	const context = await createContext({ context: c });
 	const { matched, response } = await handler.handle(c.req.raw, {
@@ -701,6 +709,41 @@ app.post("/info/check-liveness", async (c) => {
 });
 // 🔥 ENDPOINT - Validar OTP con control de intentos
 
+// Obtener URL del Excel del resumen global de inversionistas
+app.get("/api/accounting/resumen-global-excel", async (c) => {
+	try {
+		const context = await createContext({ context: c });
+		if (!context.session?.user?.id) {
+			return c.json({ error: "No autorizado" }, 401);
+		}
+
+		const estado = c.req.query("estado");
+		const mes = c.req.query("mes");
+		const anio = c.req.query("anio");
+		const inversionistaId = c.req.query("inversionistaId");
+
+		const { carteraBackClient } = await import(
+			"./services/cartera-back-client"
+		);
+		const result = await carteraBackClient.getResumenGlobalExcel({
+			estado:
+				estado === "pending" ||
+				estado === "uploaded" ||
+				estado === "liquidated" ||
+				estado === "all"
+					? estado
+					: "pending",
+			mes: mes ? Number(mes) : undefined,
+			anio: anio ? Number(anio) : undefined,
+			inversionistaId: inversionistaId || undefined,
+		});
+		return c.json(result);
+	} catch (err: any) {
+		console.error("[ResumenGlobalExcel] Error:", err);
+		return c.json({ error: err.message || "Error al descargar Excel" }, 500);
+	}
+});
+
 // Upload boleta de inversionista a cartera-back
 app.post("/api/accounting/upload-boleta", async (c) => {
 	try {
@@ -779,8 +822,6 @@ app.post("/api/notifications/pay-investors", async (c) => {
 // REST endpoint for public lead creation (for external web forms)
 app.post("/api/public/lead", createPublicLead);
 
-
-
 // REST endpoint for investment lead creation (for external APIs)
 app.post("/api/public/investment-lead", async (c) => {
 	const { createInvestmentLeadController } = await import(
@@ -841,6 +882,21 @@ app.get("/upload-csv", async (c) => {
 
 // Endpoint REST directo para migración masiva de créditos (más fácil de usar desde Postman)
 // SIEMPRE usa transacción - si algo falla, se hace rollback de todo
+// Reprocesar oportunidades ganadas sin numero SIFCO
+// DESCONECTADO: ya se procesaron las 7 oportunidades pendientes (2026-03-05)
+// Para reconectar, descomentar el bloque de abajo
+// app.post("/api/reprocess-won-opportunities", async (c) => {
+// 	try {
+// 		const { reprocessWonOpportunities } = await import(
+// 			"./controllers/reprocess-opportunities"
+// 		);
+// 		return await reprocessWonOpportunities(c);
+// 	} catch (err: any) {
+// 		console.error("[ReprocessWon] Error:", err);
+// 		return c.json({ error: err.message }, 500);
+// 	}
+// });
+
 app.post("/api/migrate/creditos", async (c) => {
 	try {
 		const { migrarCreditos } = await import("./controllers/migrate-creditos");

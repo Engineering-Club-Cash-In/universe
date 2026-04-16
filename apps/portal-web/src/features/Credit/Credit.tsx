@@ -1,5 +1,6 @@
 import { NavBar } from "@/components";
 import { Header, BuyCar, GetMoney, Choose, StartToday } from "./Sections";
+import { CalculatorCredit } from "@/features/Marketplace/Sections/CalculatorCredit";
 
 export const Credit = () => {
   return (
@@ -7,6 +8,7 @@ export const Credit = () => {
       <NavBar />
       <Header />
       <BuyCar />
+      <CalculatorCredit />
       <GetMoney key="getmoney" />
       <Choose key="choose" />
       <StartToday />

@@ -121,12 +121,43 @@ const requireCrmOrCobros = o.middleware(async ({ context, next }) => {
 		.limit(1);
 	const userRole = userData[0]?.role;
 
-	if (
-		!PERMISSIONS.canAccessCRM(userRole) &&
-		!PERMISSIONS.canAccessCobros(userRole)
-	) {
+	if (!PERMISSIONS.canAccessCRM(userRole) && !PERMISSIONS.canAccessCobros(userRole)) {
 		throw new ORPCError("FORBIDDEN", {
 			message: "CRM or Cobros access required",
+		});
+	}
+
+	return next({
+		context: {
+			session: context.session,
+			user: userData[0],
+			userId,
+			userRole,
+		},
+	});
+});
+
+const requireCrmCobrosOrInvestments = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (
+		!PERMISSIONS.canAccessCRM(userRole) &&
+		!PERMISSIONS.canAccessCobros(userRole) &&
+		!PERMISSIONS.canAccessInvestments(userRole) &&
+		!PERMISSIONS.canAccessAccounting(userRole)
+	) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "CRM, Cobros, Investments or Accounting access required",
 		});
 	}
 
@@ -405,6 +436,9 @@ export const adminProcedure = publicProcedure.use(requireAdmin);
 export const crmProcedure = publicProcedure.use(requireCrmAccess);
 export const analystProcedure = publicProcedure.use(requireAnalyst);
 export const crmOrCobrosProcedure = publicProcedure.use(requireCrmOrCobros);
+export const crmCobrosOrInvestmentsProcedure = publicProcedure.use(
+	requireCrmCobrosOrInvestments,
+);
 export const cobrosProcedure = publicProcedure.use(requireCobros);
 export const cobrosSupervisorProcedure = publicProcedure.use(
 	requireCobrosSupervisor,

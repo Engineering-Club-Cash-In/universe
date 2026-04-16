@@ -41,6 +41,13 @@ export const DEFAULT_CODIGO_POSTAL = "01001";
 /** Credit number prefix for CRM-generated credits */
 export const CREDIT_NUMBER_PREFIX = "CRM";
 
+function normalizePaymentDay(day: number | null | undefined): 15 | 30 | null {
+	if (day == null) return null;
+	if (day === 15 || day === 30) return day;
+	if (day === 31) return 30;
+	return null;
+}
+
 // ============================================================================
 // FACTURACIÓN CONSTANTS (valores fijos para facturas)
 // ============================================================================
@@ -124,6 +131,14 @@ interface CreateCreditParams {
 	lead: LeadData;
 	numeroSifco: string;
 	userId: string;
+	isVehicleOwned?: boolean;
+	// Info del vehículo para el correo
+	vehiculo_marca?: string;
+	vehiculo_linea?: string;
+	vehiculo_modelo?: string;
+	vehiculo_placa?: string;
+	vehiculo_vin?: string;
+	monto_asegurado?: number;
 }
 
 interface CreateCreditResult {
@@ -162,6 +177,8 @@ interface QuotationDataForBilling {
 	keyCopyDiffCost: string | null; // Diferencia de copia de llave
 	extraInsuranceCost: string | null; // Seguro extra
 	extraAdminCost: string | null; // Gastos administrativos
+	insuredAmount: string | null; // Monto asegurado (para correo)
+	value: string | null; // Valor del vehículo (para correo)
 }
 
 /** Parámetros para generación de facturas en background */
@@ -222,15 +239,30 @@ interface InversionistaCartera {
  * CRM: { inversionista_id, nombre, porcentaje_participacion, monto_aportado, porcentaje_cash_in }
  * Cartera: { inversionista_id, monto_aportado, porcentaje_cash_in, porcentaje_inversion }
  */
+/** ID del inversionista Cash In cuyo porcentaje es fijo */
+const CASH_IN_INVERSIONISTA_ID = 86;
+const CASH_IN_PORCENTAJE_CASH_IN = 100;
+const CASH_IN_PORCENTAJE_INVERSION = 0;
+
 function transformInversionistasForCartera(
 	inversionistas: InversionistaCRM[],
 ): InversionistaCartera[] {
-	return inversionistas.map((inv) => ({
-		inversionista_id: inv.inversionista_id,
-		monto_aportado: inv.monto_aportado,
-		porcentaje_cash_in: inv.porcentaje_cash_in,
-		porcentaje_inversion: inv.porcentaje_participacion,
-	}));
+	return inversionistas.map((inv) => {
+		if (inv.inversionista_id === CASH_IN_INVERSIONISTA_ID) {
+			return {
+				inversionista_id: inv.inversionista_id,
+				monto_aportado: inv.monto_aportado,
+				porcentaje_cash_in: CASH_IN_PORCENTAJE_CASH_IN,
+				porcentaje_inversion: CASH_IN_PORCENTAJE_INVERSION,
+			};
+		}
+		return {
+			inversionista_id: inv.inversionista_id,
+			monto_aportado: inv.monto_aportado,
+			porcentaje_cash_in: inv.porcentaje_cash_in,
+			porcentaje_inversion: inv.porcentaje_participacion,
+		};
+	});
 }
 
 /**
@@ -368,6 +400,8 @@ async function getLatestApprovedQuotation(
 				keyCopyDiffCost: quotations.keyCopyDiffCost,
 				extraInsuranceCost: quotations.extraInsuranceCost,
 				extraAdminCost: quotations.extraAdminCost,
+				insuredAmount: quotations.insuredAmount,
+				value: quotations.vehicleValue
 			})
 			.from(quotations)
 			.where(eq(quotations.opportunityId, opportunityId))
@@ -605,10 +639,11 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 
 					// Construir el payload exacto que se envía al endpoint
 					const requestBody = {
-						nit: nit || "CF", // CF = Consumidor Final si no hay NIT
+						nit: nit,
 						items: invoice.items,
 						emisor: "CUBE",
 						created_by: FACTURACION_CREATED_BY,
+						credito_nuevo: true, // Indicamos que es un crédito nuevo para que cartera-back lo maneje como tal
 					};
 
 					// Llamar al endpoint de facturación genérica
@@ -759,6 +794,15 @@ async function createCredit(
 		const gastosAdministrativos = opportunity.gastosAdministrativos
 			? Number(opportunity.gastosAdministrativos)
 			: 0;
+		const diaPagoMensual = normalizePaymentDay(opportunity.diaPagoMensual);
+
+		if (diaPagoMensual == null) {
+			return {
+				success: false,
+				error:
+					"La oportunidad debe tener día de pago 15 o 30 para crear el crédito en cartera-back",
+			};
+		}
 
 		const creditoResult = await createCreditoInCarteraBack({
 			opportunityId: opportunity.id,
@@ -771,6 +815,7 @@ async function createCredit(
 			porcentaje_interes: Number.parseFloat(opportunity.tasaInteres as string),
 			plazo: opportunity.numeroCuotas as number,
 			cuota: Number.parseFloat(opportunity.cuotaMensual as string),
+			dia_pago_mensual: diaPagoMensual,
 			tipoCredito: opportunity.creditType || "autocompra",
 			observaciones: `Crédito generado desde CRM - Oportunidad: ${opportunity.title}`,
 			seguro_10_cuotas: seguro,
@@ -795,6 +840,14 @@ async function createCredit(
 			otros: gastosAdministrativos,
 			codigo_postal: DEFAULT_CODIGO_POSTAL,
 			pais: renapInfoData ? renapInfoData.bornedIn : undefined,
+			is_vehiculo_propio: params.isVehicleOwned ?? false,
+			// Campos para el correo de notificación
+			vehiculo_marca: params.vehiculo_marca,
+			vehiculo_linea: params.vehiculo_linea,
+			vehiculo_modelo: params.vehiculo_modelo,
+			vehiculo_placa: params.vehiculo_placa,
+			vehiculo_vin: params.vehiculo_vin,
+			monto_asegurado: params.monto_asegurado,
 		});
 
 		if (!creditoResult.success) {
@@ -1016,12 +1069,18 @@ export async function closeOpportunity(
 		let vehicleData:
 			| {
 					isNew: boolean;
+					isOwned: boolean;
 					vinNumber: string | null;
 					licensePlate: string | null;
 					origin: string | null;
 					fuelType: string | null;
 					transmission: string | null;
 					companyId: string | null;
+					// Extra vehicle info for email
+					make: string | null;
+					model: string | null;
+					year: number | null;
+					montoAsegurado: string | null;
 			  }
 			| undefined;
 
@@ -1030,12 +1089,18 @@ export async function closeOpportunity(
 			const [vehicleTemp] = await db
 				.select({
 					isNew: vehicles.isNew,
+					isOwned: vehicles.isOwned,
 					vinNumber: vehicles.vinNumber,
 					licensePlate: vehicles.licensePlate,
 					origin: vehicles.origin,
 					fuelType: vehicles.fuelType,
 					transmission: vehicles.transmission,
 					companyId: vehicles.companyId,
+					// Extra vehicle info for email
+					make: vehicles.make,
+					model: vehicles.model,
+					year: vehicles.year,
+					montoAsegurado: vehicles.montoAsegurado,
 				})
 				.from(vehicles)
 				.where(eq(vehicles.id, opportunity.vehicleId))
@@ -1089,16 +1154,74 @@ export async function closeOpportunity(
 
 		console.log("[CloseOpportunity] Lead data found:", lead.id);
 
+		// Validate NIT against cartera-back before proceeding
+		if (opportunity.nit) {
+			const nitLimpio = opportunity.nit.replace(/[-\s]/g, "").toUpperCase();
+			console.log(
+				`[CloseOpportunity] Validating NIT: ${nitLimpio}`,
+			);
+
+			if (nitLimpio.length < 5 && nitLimpio !== "CF") {
+				return {
+					success: false,
+					error: `El NIT "${opportunity.nit}" es inválido. Debe tener al menos 5 caracteres o ser "CF".`,
+				};
+			}
+
+			try {
+				const nitResult = await carteraBackClient.consultarNit(nitLimpio);
+
+				if (!nitResult.success) {
+					return {
+						success: false,
+						error: `NIT inválido: ${nitResult.mensaje}. Corrige el NIT antes de cerrar la oportunidad.`,
+					};
+				}
+
+				if (nitResult.data?.nombre === null) {
+					return {
+						success: false,
+						error: `El NIT "${opportunity.nit}" no fue encontrado en el registro de SAT. Verifica que sea correcto antes de cerrar.`,
+					};
+				}
+
+				console.log(
+					`[CloseOpportunity] NIT validated: ${nitResult.data?.nombre}`,
+				);
+			} catch (error) {
+				console.error("[CloseOpportunity] Error validating NIT:", error);
+				return {
+					success: false,
+					error: `No se pudo validar el NIT contra SAT. Intenta de nuevo o verifica la conexión con cartera.`,
+				};
+			}
+		}
+
 		// Generate unique SIFCO credit number using UUID
 		const numeroSifco = generateNumeroSifco();
 		console.log(`[CloseOpportunity] Generated numero SIFCO: ${numeroSifco}`);
 
-		// 1. Create credit in cartera-back
+
+		//  Get the latest quotation for invoicing (async - doesn't block)
+		const quotation = await getLatestApprovedQuotation(opportunityId);
+		console.log(
+			`[CloseOpportunity] Latest quotation found: ${quotation ? "YES" : "NO"}`,
+		);
+
+		//  Create credit in cartera-back
 		const creditResult = await createCredit({
 			opportunity,
 			lead,
 			numeroSifco,
 			userId,
+			isVehicleOwned: vehicleData?.isOwned ?? false,
+			// Enviar info del vehículo para que llegue en el correo de cartera
+			vehiculo_marca: vehicleData?.make ?? undefined,
+			vehiculo_linea: vehicleData?.model ?? undefined, // Usamos model como línea
+			vehiculo_modelo: vehicleData?.year ? String(vehicleData.year) : undefined,
+			vehiculo_placa: vehicleData?.licensePlate ?? undefined,
+			vehiculo_vin: vehicleData?.vinNumber ?? undefined,
+			monto_asegurado: quotation?.insuredAmount ? Number(quotation.insuredAmount) : quotation?.value ? Number(quotation.value) : undefined,
 		});
 
 		if (!creditResult.success) {
@@ -1109,16 +1232,11 @@ export async function closeOpportunity(
 			};
 		}
 
-		// 2. Get the latest quotation for invoicing (async - doesn't block)
-		const quotation = await getLatestApprovedQuotation(opportunityId);
-		console.log(
-			`[CloseOpportunity] Latest quotation found: ${quotation ? "YES" : "NO"}`,
-		);
 
 		// 3. Generate invoices in background (fire-and-forget)
 		// This runs asynchronously after the credit is created
-		// Skip invoice generation if the vehicle belongs to a company (has companyId)
-		const vehicleHasCompany = opportunity.vehicleId && vehicleData?.companyId;
+		// Skip invoice generation if the vehicle is owned
+		const vehicleHasCompany = vehicleData?.isOwned;
 
 		if (isCarteraBackEnabled() && !vehicleHasCompany) {
 			const royalti = opportunity.royalti

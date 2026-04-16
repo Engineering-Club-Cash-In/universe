@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/select";
 import { authClient } from "@/lib/auth-client";
 import { getRoleLabel, ROLES } from "@/lib/roles";
+import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
 import { client, orpc, queryClient } from "@/utils/orpc";
 
 export const Route = createFileRoute("/notifications")({
@@ -115,6 +116,13 @@ const REDIRECT_CONFIG: Record<
 	client_details: {
 		label: "Ver cliente",
 		getRoute: (id) => ({ to: "/crm/clients", search: { opportunityId: id } }),
+	},
+	client_details_disbursement: {
+		label: "Ver desembolso",
+		getRoute: (id) => ({
+			to: "/crm/clients",
+			search: { opportunityId: id, initialTab: "disbursement" },
+		}),
 	},
 	contract_details: {
 		label: "Generar contratos",
@@ -991,14 +999,9 @@ function UploadDocumentsDialog({
 
 	const uploadMutation = useMutation({
 		mutationFn: async (file: File) => {
-			const data = await new Promise<string>((resolve, reject) => {
-				const reader = new FileReader();
-				reader.onload = () => {
-					const base64 = (reader.result as string).split(",")[1];
-					resolve(base64);
-				};
-				reader.onerror = reject;
-				reader.readAsDataURL(file);
+			const { key } = await uploadFileToR2WithRetry(file, {
+				resourceType: "notification_document",
+				resourceId: notificationId,
 			});
 
 			return await client.addDocumentToNotification({
@@ -1007,7 +1010,7 @@ function UploadDocumentsDialog({
 					name: file.name,
 					type: file.type,
 					size: file.size,
-					data,
+					key,
 				},
 			});
 		},

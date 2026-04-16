@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -15,13 +15,16 @@ import {
 	FileText,
 	History,
 	Mail,
+	StickyNote,
 	Target,
 	UserPlus,
 	Users,
 } from "lucide-react";
 import { useState } from "react";
+import { ClientFormsSection } from "@/components/client-forms/ClientFormsSection";
 import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
+import { DisbursementView } from "@/components/disbursement/DisbursementView";
 import { OpportunityDocumentUpload } from "@/components/opportunity-document-upload";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -44,6 +47,7 @@ import {
 } from "@/lib/crm-formatters";
 import { getRoleLabel, PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
+
 
 // Type for the opportunity data
 export type OpportunityForModal = {
@@ -98,6 +102,18 @@ export type OpportunityForModal = {
 	} | null;
 };
 
+
+function formatLeadFullName(lead: {
+	firstName?: string | null;
+	middleName?: string | null;
+	lastName?: string | null;
+	secondLastName?: string | null;
+}) {
+	return [lead.firstName, lead.middleName, lead.lastName, lead.secondLastName]
+		.filter((part): part is string => Boolean(part && part.trim()))
+		.join(" ");
+}
+
 type OpportunityDetailModalProps = {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
@@ -109,6 +125,7 @@ type OpportunityDetailModalProps = {
 	onNavigateToLead?: (leadId: string) => void;
 	onNavigateToVehicle?: (vehicleId: string) => void;
 	onNavigateToQuoter?: (opportunityId: string) => void;
+	initialTab?: string;
 };
 
 export function OpportunityDetailModal({
@@ -122,9 +139,18 @@ export function OpportunityDetailModal({
 	onNavigateToLead,
 	onNavigateToVehicle,
 	onNavigateToQuoter,
+	initialTab,
 }: OpportunityDetailModalProps) {
 	const [opportunityHistory, setOpportunityHistory] = useState<any[]>([]);
 	const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+	const leadQuery = useQuery({
+		...orpc.getLeads.queryOptions({
+			input: { id: opportunity?.lead?.id ?? "", limit: 1 },
+		}),
+		enabled: open && !!opportunity?.lead?.id,
+		queryKey: ["getLeads", opportunity?.lead?.id, "opportunity-modal"],
+	});
 
 	// Query for contracts associated with the opportunity
 	const opportunityContractsQuery = useQuery({
@@ -135,7 +161,7 @@ export function OpportunityDetailModal({
 			open &&
 			!!opportunity?.id &&
 			!!userRole &&
-			PERMISSIONS.canViewOpportunityContracts(userRole),
+			PERMISSIONS.canAccessClients(userRole),
 		queryKey: ["listLegalContractsByOpportunity", opportunity?.id, userRole],
 	});
 
@@ -148,7 +174,7 @@ export function OpportunityDetailModal({
 			open &&
 			!!opportunity?.id &&
 			!!userRole &&
-			PERMISSIONS.canAccessCRM(userRole),
+			PERMISSIONS.canAccessClients(userRole),
 		queryKey: ["listQuotationsByOpportunity", opportunity?.id, userRole],
 	});
 
@@ -159,6 +185,14 @@ export function OpportunityDetailModal({
 		}),
 		enabled: open && !!opportunity?.id,
 		queryKey: ["getOpportunityDocuments", opportunity?.id],
+	});
+
+	// Query for disbursement notes (only for won opportunities)
+	const disbursementNotesQuery = useQuery({
+		...orpc.getDisbursementNotes.queryOptions({
+			input: { opportunityId: opportunity?.id ?? "" },
+		}),
+		enabled: open && !!opportunity?.id && opportunity?.status === "won",
 	});
 
 	// Load history when history tab is opened
@@ -185,16 +219,36 @@ export function OpportunityDetailModal({
 
 	const canViewContracts =
 		userRole && PERMISSIONS.canViewOpportunityContracts(userRole);
+	const fullLead = leadQuery.data?.data?.[0];
+	const displayLead: OpportunityForModal["lead"] = fullLead
+		? {
+				id: opportunity.lead?.id ?? fullLead.id,
+				firstName: fullLead.firstName,
+				middleName: fullLead.middleName,
+				lastName: fullLead.lastName,
+				secondLastName: fullLead.secondLastName,
+				dpi: fullLead.dpi,
+				email: fullLead.email,
+				phone: fullLead.phone,
+				age: fullLead.age,
+				direccion: fullLead.direccion,
+				departamento: fullLead.departamento,
+				municipio: fullLead.municipio,
+				zona: fullLead.zona,
+			}
+		: opportunity.lead;
 	const canAccessCRM = userRole && PERMISSIONS.canAccessCRM(userRole);
+	const isAccounting = userRole && PERMISSIONS.canAccessAccounting(userRole);
+	const isWon = opportunity?.status === "won";
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="max-h-[90vh] w-[90vw] min-w-[800px] max-w-5xl overflow-y-auto">
+			<DialogContent className="max-h-[90vh] w-fit min-w-[320px] md:min-w-[850px] max-w-[95vw] overflow-y-auto overflow-x-hidden">
 				<DialogHeader>
 					<DialogTitle>Detalles de la Oportunidad</DialogTitle>
 				</DialogHeader>
 				<Tabs
-					defaultValue="details"
+					defaultValue={initialTab || "details"}
 					className="w-full"
 					onValueChange={(value) => {
 						if (value === "history") {
@@ -202,13 +256,15 @@ export function OpportunityDetailModal({
 						}
 					}}
 				>
-					<TabsList
-						className={`grid w-full ${readOnly ? "grid-cols-4" : "grid-cols-5"}`}
-					>
+					<TabsList className="flex w-full overflow-x-auto gap-2 p-1 mb-4">
 						<TabsTrigger value="details">Detalles</TabsTrigger>
 						<TabsTrigger value="documents">Documentos</TabsTrigger>
 						<TabsTrigger value="coDebtors">Co-firmantes</TabsTrigger>
 						<TabsTrigger value="credit">Crédito</TabsTrigger>
+						{isWon && (
+							<TabsTrigger value="disbursement">Desembolso</TabsTrigger>
+						)}
+						<TabsTrigger value="forms">Formularios</TabsTrigger>
 						{!readOnly && <TabsTrigger value="history">Historial</TabsTrigger>}
 					</TabsList>
 
@@ -260,53 +316,52 @@ export function OpportunityDetailModal({
 						{/* Details Grid */}
 						<div className="grid grid-cols-2 gap-6">
 							{/* Lead Information */}
-							{opportunity.lead && (
+							{displayLead && (
 								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
 									<Label className="font-semibold text-muted-foreground text-sm">
 										Lead
 									</Label>
 									<div className="flex items-center gap-3">
 										<Users className="h-5 w-5 text-muted-foreground" />
-										{onNavigateToLead ? (
+										{onNavigateToLead && displayLead.id ? (
 											<span
 												className="cursor-pointer font-medium text-primary hover:underline"
 												role="button"
 												tabIndex={0}
-												onClick={() => onNavigateToLead(opportunity.lead!.id)}
+												onClick={() => onNavigateToLead(displayLead.id)}
 												onKeyDown={(e) => {
 													if (e.key === "Enter" || e.key === " ") {
 														e.preventDefault();
-														onNavigateToLead(opportunity.lead!.id);
+														onNavigateToLead(displayLead.id);
 													}
 												}}
 											>
-												{opportunity.lead.firstName} {opportunity.lead.lastName}
+												{formatLeadFullName(displayLead)}
 											</span>
 										) : (
 											<Link
 												to="/crm/leads"
 												search={{
-													leadId: opportunity.lead.id,
+													leadId: displayLead.id,
 												}}
 												className="font-medium text-primary hover:underline"
 												onClick={() => onOpenChange(false)}
 											>
 												<span className="font-medium">
-													{opportunity.lead.firstName}{" "}
-													{opportunity.lead.lastName}
+													{formatLeadFullName(displayLead)}
 												</span>
 											</Link>
 										)}
 									</div>
-									{opportunity.lead.dpi && (
+									{displayLead.dpi && (
 										<div className="flex items-center gap-3 text-muted-foreground text-sm">
-											<span className="font-mono">{opportunity.lead.dpi}</span>
+											<span className="font-mono">{displayLead.dpi}</span>
 										</div>
 									)}
-									{opportunity.lead.email && (
+									{displayLead.email && (
 										<div className="flex items-center gap-3 text-muted-foreground text-sm">
 											<Mail className="h-4 w-4" />
-											<span>{opportunity.lead.email}</span>
+											<span>{displayLead.email}</span>
 										</div>
 									)}
 								</div>
@@ -555,7 +610,7 @@ export function OpportunityDetailModal({
 														</span>
 													)}
 													<span className="text-muted-foreground text-xs">
-														Q{Number(quotation.vehicleValue).toLocaleString()} •{" "}
+														Q{Number(quotation.vehicleValue).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} •{" "}
 														{quotation.termMonths} meses •{" "}
 														{quotation.status === "draft"
 															? "Borrador"
@@ -568,7 +623,7 @@ export function OpportunityDetailModal({
 												</div>
 												<div className="text-right">
 													<p className="font-bold text-green-600">
-														Q{Number(quotation.monthlyPayment).toLocaleString()}
+														Q{Number(quotation.monthlyPayment).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 													</p>
 													<p className="text-muted-foreground text-xs">
 														cuota mensual
@@ -584,6 +639,20 @@ export function OpportunityDetailModal({
 								)}
 							</div>
 						)}
+
+						{/* Disbursement Notes */}
+						{opportunity.status === "won" &&
+							disbursementNotesQuery.data?.notes && (
+								<div className="rounded-lg border bg-muted/20 px-4 py-3">
+									<div className="flex items-center gap-2 text-muted-foreground text-xs">
+										<StickyNote className="h-3.5 w-3.5" />
+										Notas de desembolso
+									</div>
+									<p className="mt-1 whitespace-pre-wrap text-sm">
+										{disbursementNotesQuery.data.notes}
+									</p>
+								</div>
+							)}
 
 						{/* Opportunity ID */}
 						<div className="rounded-lg border bg-muted/20 px-4 py-3">
@@ -654,7 +723,6 @@ export function OpportunityDetailModal({
 							opportunityId={opportunity.id}
 							documents={opportunityDocumentsQuery.data || []}
 							isLoading={opportunityDocumentsQuery.isLoading}
-							onRefresh={() => opportunityDocumentsQuery.refetch()}
 							hasVehicle={!!opportunity.vehicle}
 						/>
 					</TabsContent>
@@ -722,6 +790,35 @@ export function OpportunityDetailModal({
 								/>
 							);
 						})()}
+					</TabsContent>
+
+					{isWon && (
+						<TabsContent value="disbursement" className="mt-6 space-y-6">
+							<DisbursementView
+								opportunityId={opportunity.id}
+								opportunityTitle={opportunity.title}
+								assignedUserId={opportunity.assignedUser?.id}
+								userRole={userRole}
+								quotation={
+									opportunityQuotationsQuery.data?.[0]
+										? {
+												amountToFinance: (
+													opportunityQuotationsQuery.data[0] as any
+												).amountToFinance,
+												totalFinanced: (
+													opportunityQuotationsQuery.data[0] as any
+												).totalFinanced,
+											}
+										: null
+								}
+							/>
+						</TabsContent>
+					)}
+
+					<TabsContent value="forms" className="mt-6 space-y-4">
+						{opportunity && (
+							<ClientFormsSection opportunityId={opportunity.id} />
+						)}
 					</TabsContent>
 
 					{!readOnly && (

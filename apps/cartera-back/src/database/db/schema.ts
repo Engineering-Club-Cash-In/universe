@@ -24,6 +24,21 @@
   }
   export const userRoleEnum = pgEnum("user_role", ["ADMIN", "ASESOR","CONTA"]);
   export const customSchema = pgSchema("cartera");
+
+  export const statusCreditoInversionistaEspejoEnum = customSchema.enum("status_credito_inversionista_espejo", [
+    "pendiente_reinversion",
+    "pendiente_compra_cartera",
+    "completado",
+  ]);
+
+  export const tipoReinversionEnum = customSchema.enum("tipo_reinversion", [
+    "sin_reinversion",
+    "reinversion_capital",
+    "reinversion_interes",
+    "reinversion_total",
+    "reinversion_variable",
+    "reinversion_combinada"
+  ]);
   export const admins = customSchema.table("admins", {
     admin_id: serial("admin_id").primaryKey(),
     nombre: varchar("nombre", { length: 150 }).notNull(),
@@ -89,6 +104,7 @@
     PENDIENTE_CANCELACION = "PENDIENTE_CANCELACION",
     MOROSO = "MOROSO",
     EN_CONVENIO = "EN_CONVENIO",
+    CAIDO = "CAIDO",
   }
   // 2. Créditos
 
@@ -147,11 +163,13 @@
     }).notNull(),
   
     statusCredit: text("statusCredit", {
-      enum: ["ACTIVO", "CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION","MOROSO", "EN_CONVENIO"],
+      enum: ["ACTIVO", "CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION","MOROSO", "EN_CONVENIO", "CAIDO"],
     })
       .notNull()
       .default(StatusCredit.ACTIVO),
     otros: numeric("otros", { precision: 18, scale: 2 }).notNull().default("0"), // Otros cargos o pagos adicionales
+    permite_abono_capital: boolean("permite_abono_capital").notNull().default(false),
+    is_vehiculo_propio: boolean("is_vehiculo_propio").notNull().default(false), // true si el vehículo es propiedad de Cash In
   });
   export const cuotas_credito = customSchema.table("cuotas_credito", {
     cuota_id: serial("cuota_id").primaryKey(),
@@ -213,6 +231,12 @@
   });
 
   // 3. Pagos de crédito
+  export const origenPagoEnum = pgEnum('origen_pago', [
+    'transferencia',
+    'cheque',
+    'boleta',
+  ]);
+
   export const paymentValidationStatus = pgEnum('payment_validation_status', [
     'no_required',    // No necesita validación (pagos normales/automáticos)
     'pending',        // Pendiente de validación
@@ -227,8 +251,7 @@
     cuota: numeric("cuota").notNull(), //esto viene del credito
     cuota_interes: numeric("cuota_interes").notNull(), //esto viene del credito
     cuota_id: integer("cuota_id")
-      .references(() => cuotas_credito.cuota_id)
-      .notNull(),
+      .references(() => cuotas_credito.cuota_id),
     fecha_pago: timestamp("fecha_pago").defaultNow(), //esto viene del credito 
     abono_capital: numeric("abono_capital", { precision: 18, scale: 2 }), //aca abonamos a capital solo si el monto de la cuota que viene del credito es igual al monto de la boleta y se van a restar todos los abonos
 
@@ -291,6 +314,7 @@
     fecha_boleta: date("fecha_boleta"), // Fecha del pago en la boleta
     monto_aplicado: numeric("monto_aplicado", { precision: 18, scale: 2 }).notNull(),
     fecha_aplicado: timestamp("fecha_aplicado"), // Fecha en que se aplicó el pago al crédito
+    origen_pago: origenPagoEnum("origen_pago"),
   });
   export const boletas = customSchema.table("boletas", {
     id: serial("id").primaryKey(),
@@ -309,7 +333,7 @@
       credito_id: integer("credito_id").notNull().references(() => creditos.credito_id),
       inversionista_id: integer("inversionista_id").notNull().references(() => inversionistas.inversionista_id),
       porcentaje_participacion_inversionista: numeric("porcentaje_participacion_inversionista").notNull(),
-      monto_aportado: numeric("monto_aportado", { precision: 18, scale: 2 }).notNull(),
+      monto_aportado: numeric("monto_aportado", { precision: 18, scale: 8 }).notNull(),
       porcentaje_cash_in: numeric("porcentaje_cash_in").notNull().default("0"),
       iva_inversionista: numeric("iva_inversionista", { precision: 18, scale: 2 }).notNull().default("0"),
       iva_cash_in: numeric("iva_cash_in", { precision: 18 }).notNull().default("0"),
@@ -330,7 +354,7 @@
       inversionista_id: integer("inversionista_id").notNull().references(() => inversionistas.inversionista_id),
       cuota_inversionista: numeric("cuota_inversionista", { precision: 18, scale: 2 }).notNull(),
       porcentaje_participacion_inversionista: numeric("porcentaje_participacion_inversionista").notNull(),
-      monto_aportado: numeric("monto_aportado", { precision: 18, scale: 2 }).notNull(),
+      monto_aportado: numeric("monto_aportado", { precision: 18, scale: 8 }).notNull(),
       porcentaje_cash_in: numeric("porcentaje_cash_in").notNull().default("0"),
       monto_inversionista: numeric("monto_inversionista", { precision: 18, scale: 2 }).notNull().default("0"),
       monto_cash_in: numeric("monto_cash_in", { precision: 18, scale: 2 }).notNull().default("0"),
@@ -338,11 +362,23 @@
       iva_cash_in: numeric("iva_cash_in", { precision: 18, scale: 2 }).notNull().default("0"),
       fecha_creacion: timestamp("fecha_creacion", { withTimezone: true }).notNull().$default(() => new Date()),
       fecha_inicio_participacion: date("fecha_inicio_participacion").notNull().default("2025-12-01"),
+      updated_at: timestamp("updated_at").defaultNow(),
+      tipo_reinversion: tipoReinversionEnum("tipo_reinversion"),
+      status: statusCreditoInversionistaEspejoEnum("status").notNull().default("completado"),
     },
     (t) => ({
       uxCreditoInvEspejo: uniqueIndex("ux_credito_inversionista_espejo").on(t.credito_id, t.inversionista_id),
     })
   );
+
+  export const liquidacion_locks = customSchema.table("liquidacion_locks", {
+    id: serial("id").primaryKey(),
+    inversionista_id: integer("inversionista_id"),
+    estado: varchar("estado", { length: 20 }).notNull().default("EN_PROCESO"),
+    started_at: timestamp("started_at").defaultNow(),
+    finished_at: timestamp("finished_at"),
+    error: text("error"),
+  });
 
   export const credit_cancelations = customSchema.table("credit_cancelations", {
     id: serial("id").primaryKey(),
@@ -376,6 +412,17 @@
       precision: 18,
       scale: 2,
     }).notNull(),
+  });
+
+  export const creditos_caidos = customSchema.table("creditos_caidos", {
+    id: serial("id").primaryKey(),
+    credit_id: integer("credit_id")
+      .notNull()
+      .references(() => creditos.credito_id, { onDelete: "cascade" }),
+    motivo: text("motivo").notNull(),
+    observaciones: text("observaciones"),
+    fecha_caida: timestamp("fecha_caida", { withTimezone: true }).default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
+    created_at: timestamp("created_at", { withTimezone: true }).default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
   });
 
   export const montos_adicionales = customSchema.table("montos_adicionales", {
@@ -454,22 +501,21 @@
     {
       id: serial("id").primaryKey(),
       pago_id: integer("pago_id")
-        .notNull()
-        .references(() => pagos_credito.pago_id),
+        .references(() => pagos_credito.pago_id, { onDelete: "set null" }),
       inversionista_id: integer("inversionista_id")
         .notNull()
-        .references(() => inversionistas.inversionista_id),
+        .references(() => inversionistas.inversionista_id, { onDelete: "restrict" }),
       credito_id: integer("credito_id")
         .notNull()
-        .references(() => creditos.credito_id),
+        .references(() => creditos.credito_id, { onDelete: "restrict" }),
 
       abono_capital: numeric("abono_capital", {
         precision: 18,
-        scale: 2,
+        scale: 10,
       }).notNull(),
       abono_interes: numeric("abono_interes", {
         precision: 18,
-        scale: 2,
+        scale: 10,
       }).notNull(),
       abono_iva_12: numeric("abono_iva_12", {
         precision: 18,
@@ -489,17 +535,21 @@
         .default("NO_LIQUIDADO"),
       cuota: numeric("cuota", { precision: 18, scale: 2 }).notNull(),
 
+      // FK al abono a capital asociado (nullable)
+      abono_capital_id: integer("abono_capital_id").references(
+        () => abonos_capital.abono_id,
+        { onDelete: "set null" }
+      ),
+ 
       // 🆕 ENLACE A LIQUIDACIÓN
       liquidacion_id: integer("liquidacion_id").references(
         () => liquidaciones.liquidacion_id,
         { onDelete: "set null" } // Si se borra la liquidación, el campo queda en null
       ),
+
+      updated_at: timestamp("updated_at").defaultNow(),
     },
     (table) => ({
-      uniquePagoInversionistaEspejo: unique("unique_pago_inversionista_espejo").on(
-        table.pago_id,
-        table.inversionista_id
-      ),
       // 🆕 Índice para búsquedas por liquidación
       liquidacionIdxEspejo: index("idx_pagos_liquidacion_espejo").on(
         table.liquidacion_id
@@ -539,13 +589,7 @@
     "Capital"
   ]);
 
-    export const tipoReinversionEnum = customSchema.enum("tipo_reinversion", [
-      "sin_reinversion",
-      "reinversion_capital",
-      "reinversion_interes",
-      "reinversion_total",
-      "reinversion_variable"
-    ]);
+
 
   export const tipoMonedaEnum = customSchema.enum("tipo_moneda", ["quetzales", "dolares"]);
 
@@ -567,6 +611,8 @@
     permite_distribucion: boolean("permite_distribucion").notNull().default(false),
     monto_reinversion: numeric("monto_reinversion", { precision: 18, scale: 2 }),
     saldo_reinversion: numeric("saldo_reinversion", { precision: 18, scale: 2 }).notNull().default("0"),
+    dpi_rep_legal: varchar("dpi_rep_legal", { length: 20 }),
+    celular: varchar("celular", { length: 100 }),
   });
 
   export const reinversiones = customSchema.table("reinversiones", {
@@ -715,6 +761,10 @@
     pdf_url: varchar("pdf_url", { length: 500 }).notNull(),
     xml_url: varchar("xml_url", { length: 500 }),
     
+    // Emisor
+    emisor_nit: varchar("emisor_nit", { length: 30 }),
+    emisor_nombre: varchar("emisor_nombre", { length: 200 }),
+
     // Receptor
     receptor_nit: varchar("receptor_nit", { length: 30 }).notNull(),
     receptor_nombre: varchar("receptor_nombre", { length: 200 }).notNull(),
@@ -881,4 +931,94 @@
     efectividad: numeric("efectividad", { precision: 5, scale: 2 }).notNull().default("0"),
 
     created_at: timestamp("created_at").defaultNow(),
+  });
+
+  // Historial de cambios de fecha de inicio de crédito
+  export const historial_cambio_fecha = customSchema.table("historial_cambio_fecha", {
+    id: serial("id").primaryKey(),
+    credito_id: integer("credito_id")
+      .notNull()
+      .references(() => creditos.credito_id),
+    fecha_inicio_anterior: date("fecha_inicio_anterior").notNull(),
+    fecha_inicio_nueva: date("fecha_inicio_nueva").notNull(),
+    razon: text("razon").notNull(),
+    changed_by: varchar("changed_by", { length: 150 }).notNull(),
+    created_at: timestamp("created_at").defaultNow(),
+  });
+
+  // ========================================
+  // DOCUMENTOS / CONTRATOS DE INVERSIONISTAS
+  // ========================================
+  export const documentos_inversionista = customSchema.table("documentos_inversionista", {
+    documento_id: serial("documento_id").primaryKey(),
+    inversionista_id: integer("inversionista_id")
+      .notNull()
+      .references(() => inversionistas.inversionista_id, { onDelete: "cascade" }),
+    key: varchar("key", { length: 500 }).notNull(),
+    nombre: varchar("nombre", { length: 300 }).notNull(),
+    descripcion: varchar("descripcion", { length: 500 }),
+    visible: boolean("visible").notNull().default(false),
+    created_at: timestamp("created_at").defaultNow().notNull(),
+    created_by: varchar("created_by", { length: 250 }),
+  }, (table) => ({
+    inversionistaIdx: index("idx_docs_inversionista").on(table.inversionista_id),
+  }));
+
+  // ========================================
+  // ABONOS A CAPITAL
+  // ========================================
+  export const tipoAbonoEnum = customSchema.enum("tipo_abono", [
+    "CANCELACION",
+    "CAPITAL",
+  ]);
+
+  export const abonos_capital = customSchema.table("abonos_capital", {
+    abono_id: serial("abono_id").primaryKey(),
+    credito_id: integer("credito_id")
+      .notNull()
+      .references(() => creditos.credito_id),
+    inversionista_id: integer("inversionista_id")
+      .notNull()
+      .references(() => inversionistas.inversionista_id),
+    monto: numeric("monto", { precision: 18, scale: 6 }).notNull(),
+    tipo: tipoAbonoEnum("tipo").notNull(),
+    liquidado: boolean("liquidado").notNull().default(false),
+    created_at: timestamp("created_at").defaultNow(),
+    updated_at: timestamp("updated_at").defaultNow(),
+  });
+
+  // ── Recibos genéricos (sin FK a créditos) ──
+  export const recibos_genericos = customSchema.table("recibos_genericos", {
+    id: serial("id").primaryKey(),
+    nombre: varchar("nombre", { length: 200 }).notNull(),
+    observaciones: text("observaciones"),
+    moneda: varchar("moneda", { length: 10 }).notNull().default("GTQ"),
+    fecha: timestamp("fecha", { withTimezone: true })
+      .notNull()
+      .default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
+    created_at: timestamp("created_at", { withTimezone: true })
+      .default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
+  });
+
+  export const recibo_generico_montos = customSchema.table("recibo_generico_montos", {
+    id: serial("id").primaryKey(),
+    recibo_id: integer("recibo_id")
+      .notNull()
+      .references(() => recibos_genericos.id, { onDelete: "cascade" }),
+    concepto: varchar("concepto", { length: 300 }).notNull(),
+    monto: numeric("monto", { precision: 18, scale: 2 }).notNull(),
+  });
+
+  // ── Audit logs ──
+  export const audit_logs = customSchema.table("audit_logs", {
+    id: serial("id").primaryKey(),
+    user_id: integer("user_id"),
+    user_email: varchar("user_email", { length: 200 }),
+    method: varchar("method", { length: 10 }).notNull(),
+    path: varchar("path", { length: 500 }).notNull(),
+    status_code: integer("status_code"),
+    body: text("body"),
+    created_at: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
   });

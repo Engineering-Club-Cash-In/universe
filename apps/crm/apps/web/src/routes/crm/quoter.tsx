@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import {
 	Calculator,
+	ChevronDown,
 	Eye,
 	FileText,
 	Loader2,
@@ -11,6 +12,7 @@ import {
 	Send,
 	Target,
 	Trash2,
+	UserCheck,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -33,6 +35,12 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -227,6 +235,15 @@ const EXTRA_COST_FIELDS: ExtraCostFieldConfig[] = [
 		label: "Intereses",
 		type: "fixed",
 		valueField: "interestCost",
+		creditType: "all",
+		section: "comision",
+		computed: true,
+	},
+	{
+		name: "rcdp",
+		label: "RCDP 1er Trimestre",
+		type: "fixed",
+		valueField: "rcdpCost",
 		creditType: "all",
 		section: "comision",
 		computed: true,
@@ -887,6 +904,7 @@ function QuoterPage() {
 				extraMembershipCost: Number(value.extraMembershipCost),
 				extraAdminCost: Number(value.extraAdminCost),
 				interestCost: Number(value.interestCost),
+				rcdpCost: Number(value.rcdpCost),
 				vehicleTransferCost: Number(value.vehicleTransferCost),
 				isInterno,
 			});
@@ -995,6 +1013,7 @@ function QuoterPage() {
 
 		quoterForm.setFieldValue("royalty", result.calculatedRoyalty);
 		quoterForm.setFieldValue("interestCost", result.calculatedInterest);
+		quoterForm.setFieldValue("rcdpCost", result.rcdpCost);
 		quoterForm.setFieldValue("adminCost", result.adminCost);
 
 		// Nota: extraInsuranceCost y extraMembershipCost se calculan en updateInsuranceCost()
@@ -1220,6 +1239,7 @@ function QuoterPage() {
 					Number(q.extraAdminCost) || 600,
 				);
 				quoterForm.setFieldValue("interestCost", Number(q.interestCost) || 0);
+				quoterForm.setFieldValue("rcdpCost", Number(q.rcdpCost) || 0);
 				quoterForm.setFieldValue(
 					"vehicleTransferCost",
 					Number(q.vehicleTransferCost) || 0,
@@ -1243,20 +1263,19 @@ function QuoterPage() {
 		setIsViewDialogOpen(true);
 	};
 
-	const handleGeneratePdf = () => {
+	const getQuotationPdfData = () => {
 		if (calculatedValues.monthlyPayment <= 0) {
 			toast.error("Completa todos los campos para generar el PDF");
-			return;
+			return null;
 		}
 
 		const values = quoterForm.state.values;
-		// Calculate down payment percentage
 		const downPaymentPercentage =
 			values.vehicleValue > 0
 				? (values.downPayment / values.vehicleValue) * 100
 				: 0;
 
-		const quotationData = {
+		return {
 			vehicleBrand: values.vehicleBrand,
 			vehicleLine: values.vehicleLine,
 			vehicleModel: values.vehicleModel,
@@ -1275,8 +1294,11 @@ function QuoterPage() {
 			membershipCost: values.membershipCost,
 			amortizationTable: amortizationTable,
 		};
+	};
 
-		generateQuotationPdf(quotationData);
+	const handleGeneratePdf = (clientVersion = false) => {
+		const data = getQuotationPdfData();
+		if (data) generateQuotationPdf(data, { clientVersion });
 	};
 
 	const statusLabels = {
@@ -2020,15 +2042,27 @@ function QuoterPage() {
 											? "Guardando..."
 											: "Guardar Cotización"}
 									</Button>
-									<Button
-										type="button"
-										variant="outline"
-										className="gap-2"
-										onClick={handleGeneratePdf}
-									>
-										<FileText className="h-4 w-4" />
-										Generar PDF
-									</Button>
+									<DropdownMenu>
+										<DropdownMenuTrigger asChild>
+											<Button type="button" variant="outline" className="gap-2">
+												<FileText className="h-4 w-4" />
+												Generar PDF
+												<ChevronDown className="h-3 w-3" />
+											</Button>
+										</DropdownMenuTrigger>
+										<DropdownMenuContent>
+											<DropdownMenuItem
+												onClick={() => handleGeneratePdf(false)}
+											>
+												<FileText className="mr-2 h-4 w-4" />
+												PDF Interno
+											</DropdownMenuItem>
+											<DropdownMenuItem onClick={() => handleGeneratePdf(true)}>
+												<UserCheck className="mr-2 h-4 w-4" />
+												PDF Cliente
+											</DropdownMenuItem>
+										</DropdownMenuContent>
+									</DropdownMenu>
 								</div>
 							</CardContent>
 						</Card>
@@ -2070,16 +2104,16 @@ function QuoterPage() {
 																{row.period}
 															</TableCell>
 															<TableCell className="text-right">
-																Q{row.initialBalance.toFixed(2)}
+																Q{row.initialBalance.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 															</TableCell>
 															<TableCell className="text-right">
-																Q{row.interestPlusVAT.toFixed(2)}
+																Q{row.interestPlusVAT.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 															</TableCell>
 															<TableCell className="text-right">
-																Q{row.principal.toFixed(2)}
+																Q{row.principal.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 															</TableCell>
 															<TableCell className="text-right">
-																Q{row.finalBalance.toFixed(2)}
+																Q{row.finalBalance.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 															</TableCell>
 														</TableRow>
 													))}
@@ -2232,7 +2266,7 @@ function QuotationDetailDialog({
 		enabled: isOpen && !!quotationId,
 	});
 
-	const handleGeneratePdf = () => {
+	const handleGeneratePdf = (clientVersion = false) => {
 		if (!quotationQuery.data) return;
 
 		const quotation = quotationQuery.data;
@@ -2262,7 +2296,7 @@ function QuotationDetailDialog({
 			})),
 		};
 
-		generateQuotationPdf(quotationData);
+		generateQuotationPdf(quotationData, { clientVersion });
 	};
 
 	if (!quotationQuery.data) {
@@ -2292,14 +2326,25 @@ function QuotationDetailDialog({
 								{quotation.vehicleModel}
 							</DialogDescription>
 						</div>
-						<Button
-							variant="outline"
-							className="gap-2"
-							onClick={handleGeneratePdf}
-						>
-							<FileText className="h-4 w-4" />
-							Generar PDF
-						</Button>
+						<DropdownMenu>
+							<DropdownMenuTrigger asChild>
+								<Button variant="outline" className="gap-2">
+									<FileText className="h-4 w-4" />
+									Generar PDF
+									<ChevronDown className="h-3 w-3" />
+								</Button>
+							</DropdownMenuTrigger>
+							<DropdownMenuContent>
+								<DropdownMenuItem onClick={() => handleGeneratePdf(false)}>
+									<FileText className="mr-2 h-4 w-4" />
+									PDF Interno
+								</DropdownMenuItem>
+								<DropdownMenuItem onClick={() => handleGeneratePdf(true)}>
+									<UserCheck className="mr-2 h-4 w-4" />
+									PDF Cliente
+								</DropdownMenuItem>
+							</DropdownMenuContent>
+						</DropdownMenu>
 					</div>
 				</DialogHeader>
 
@@ -2377,10 +2422,10 @@ function QuotationDetailDialog({
 										.map((row: any) => (
 											<TableRow key={row.period}>
 												<TableCell>{row.period}</TableCell>
-												<TableCell>Q{row.initialBalance.toFixed(2)}</TableCell>
-												<TableCell>Q{row.interestPlusVAT.toFixed(2)}</TableCell>
-												<TableCell>Q{row.principal.toFixed(2)}</TableCell>
-												<TableCell>Q{row.finalBalance.toFixed(2)}</TableCell>
+												<TableCell>Q{row.initialBalance.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+												<TableCell>Q{row.interestPlusVAT.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+												<TableCell>Q{row.principal.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+												<TableCell>Q{row.finalBalance.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
 											</TableRow>
 										))}
 								</TableBody>

@@ -1,7 +1,7 @@
 import Big from "big.js";
 import { db } from "../database";
-import { creditos, creditos_inversionistas, inversionistas } from "../database/db";
-import { eq, or, ilike } from "drizzle-orm";
+import { creditos, creditos_inversionistas, inversionistas, usuarios } from "../database/db";
+import { eq, or, ilike, and } from "drizzle-orm";
 import fs from "fs/promises";
 import path from "path";
 
@@ -305,7 +305,7 @@ const calcularSimilitudTokens = (str1: string, str2: string): number => {
     }
   }
   
-  const totalTokens = Math.max(tokens1.length, tokens2.length);
+  const totalTokens = Math.min(tokens1.length, tokens2.length);
   let similitud = (matches / totalTokens) * 100;
   
   if (tokens1.length > 0 && tokens2.length > 0) {
@@ -562,23 +562,22 @@ const buscarInversionistaInteligente = async (
   if (nombreEnParentesis) {
     console.log(`   👤 Nombre en paréntesis detectado: "${nombreEnParentesis}"`);
     console.log(`   🏢 Nombre sin paréntesis: "${nombreSinParentesis}"`);
-    console.log(`   🎯 Buscando primero por: "${nombreEnParentesis}"`);
-    
-    // 🔥 Buscar primero por el nombre en paréntesis (más específico)
+
+    // Buscar por AMBOS y devolver el mejor match
     const matchPersona = await buscarPorNombreSimple(nombreEnParentesis, todosInversionistas, umbralSimilitud);
-    
+    const matchEmpresa = await buscarPorNombreSimple(nombreSinParentesis, todosInversionistas, umbralSimilitud);
+
+    if (matchPersona && matchEmpresa) {
+      const mejor = matchEmpresa.similitud > matchPersona.similitud ? matchEmpresa : matchPersona;
+      console.log(`   ✅ Mejor match (comparando persona vs empresa): "${mejor.nombre}" (${mejor.similitud.toFixed(1)}%)`);
+      return mejor;
+    }
     if (matchPersona) {
-      console.log(`   ✅ Match encontrado por nombre en paréntesis!`);
+      console.log(`   ✅ Match encontrado por nombre en paréntesis: "${matchPersona.nombre}"`);
       return matchPersona;
     }
-    
-    console.log(`   ⚠️  No se encontró por nombre en paréntesis, buscando por nombre completo (sin paréntesis)...`);
-    
-    // Si no funciona, buscar por el nombre sin paréntesis (empresa)
-    const matchEmpresa = await buscarPorNombreSimple(nombreSinParentesis, todosInversionistas, umbralSimilitud);
-    
     if (matchEmpresa) {
-      console.log(`   ✅ Match encontrado por nombre de empresa!`);
+      console.log(`   ✅ Match encontrado por nombre de empresa: "${matchEmpresa.nombre}"`);
       return matchEmpresa;
     }
   }
@@ -800,7 +799,9 @@ export async function procesarInversionistasSoloExcel(
     // ===============================
     // PASO 1: Buscar crédito
     // ===============================
-    const [creditoDB] = await db
+    let creditoDB: { credito_id: number; numero_credito_sifco: string; porcentaje_interes: string | null; capital: string | null; nombre_usuario?: string | null } | undefined;
+
+    const [creditoPorSifco] = await db
       .select({
         credito_id: creditos.credito_id,
         numero_credito_sifco: creditos.numero_credito_sifco,
@@ -811,6 +812,65 @@ export async function procesarInversionistasSoloExcel(
       .where(eq(creditos.numero_credito_sifco, creditoAgrupado.creditoBase))
       .limit(1);
 
+    creditoDB = creditoPorSifco;
+
+    if (!creditoDB && creditoAgrupado.cliente) {
+      // Fallback: buscar por nombre del cliente (fuzzy permisivo)
+      const nombreCliente = creditoAgrupado.cliente.split("/")[0].trim();
+      console.log(`   ⚠️ SIFCO no encontrado, buscando por nombre: "${nombreCliente}"`);
+
+      // Extraer palabras clave del nombre (>= 3 chars, sin preposiciones)
+      const palabrasCliente = nombreCliente
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .split(/\s+/)
+        .filter((p: string) => p.length >= 3 && !["del", "de", "la", "los", "las"].includes(p));
+
+      // Buscar con ILIKE por cada palabra clave (AND)
+      const likeConditions = palabrasCliente.map((p: string) => ilike(usuarios.nombre, `%${p}%`));
+
+      if (likeConditions.length > 0) {
+        const creditosPorNombre = await db
+          .select({
+            credito_id: creditos.credito_id,
+            numero_credito_sifco: creditos.numero_credito_sifco,
+            porcentaje_interes: creditos.porcentaje_interes,
+            capital: creditos.capital,
+            nombre_usuario: usuarios.nombre,
+          })
+          .from(creditos)
+          .innerJoin(usuarios, eq(usuarios.usuario_id, creditos.usuario_id))
+          .where(and(...likeConditions));
+
+        console.log(`   📋 Encontrados ${creditosPorNombre.length} creditos por nombre`);
+
+        if (creditosPorNombre.length === 1) {
+          creditoDB = creditosPorNombre[0];
+          console.log(`   ✅ Encontrado por nombre: ${creditoDB.numero_credito_sifco} (${creditoDB.nombre_usuario})`);
+        } else if (creditosPorNombre.length > 1) {
+          // Tomar el que tenga nombre mas similar
+          const mejorMatch = creditosPorNombre
+            .map(c => ({
+              ...c,
+              sim: calcularSimilitudTokens(nombreCliente, c.nombre_usuario || "")
+            }))
+            .sort((a, b) => b.sim - a.sim)[0];
+
+          if (mejorMatch && mejorMatch.sim >= 50) {
+            creditoDB = mejorMatch;
+            console.log(`   ✅ Mejor match por nombre (${mejorMatch.sim.toFixed(1)}%): ${creditoDB.numero_credito_sifco} (${creditoDB.nombre_usuario})`);
+          } else {
+            console.log(`   ⚠️ Multiples creditos, ninguno suficientemente similar`);
+            return {
+              success: false,
+              error: `Multiples creditos para "${nombreCliente}": ${creditosPorNombre.map(c => `${c.numero_credito_sifco}(${c.nombre_usuario})`).join(", ")}`,
+              inversionistas_fallidos: inversionistasFallidos,
+            };
+          }
+        }
+      }
+    }
+
     if (!creditoDB) {
       return {
         success: false,
@@ -820,10 +880,15 @@ export async function procesarInversionistasSoloExcel(
     }
 
     // ===============================
-    // PASO 2: Limpiar relaciones
+    // PASO 2: Cargar relaciones existentes (NO se eliminan)
     // ===============================
-    const deletedCount = await db
-      .delete(creditos_inversionistas)
+    const relacionesExistentes = await db
+      .select({
+        id: creditos_inversionistas.id,
+        inversionista_id: creditos_inversionistas.inversionista_id,
+        monto_aportado: creditos_inversionistas.monto_aportado,
+      })
+      .from(creditos_inversionistas)
       .where(eq(creditos_inversionistas.credito_id, creditoDB.credito_id));
 
     // ===============================
@@ -886,33 +951,49 @@ export async function procesarInversionistasSoloExcel(
       inversionistasYaProcesados.add(inversionistaId);
 
       // Montos
-      const montoAportado = toBigExcel(fila.Capital, "0");
+      const montoAportado = toBigExcel(fila.CapitalRestante || fila.Capital, "0");
       const porcentajeCashIn = toBigExcel(fila.PorcentajeCashIn || 0, "0");
       const porcentajeInv = toBigExcel(fila.PorcentajeInversionista || 0, "0");
       const interes = new Big(creditoDB.porcentaje_interes || 0).div(100);
 
       const cuotaInteres = montoAportado.times(interes);
 
-      inversionistasData.push({
-        credito_id: creditoDB.credito_id,
-        inversionista_id: inversionistaId,
-        monto_aportado: montoAportado.toFixed(2),
-        porcentaje_cash_in: porcentajeCashIn.times(100).toString(),
-        porcentaje_participacion_inversionista: porcentajeInv.times(100).toString(),
-        monto_inversionista: cuotaInteres.times(porcentajeInv).toFixed(2),
-        monto_cash_in: cuotaInteres.times(porcentajeCashIn).toFixed(2),
-        iva_inversionista: cuotaInteres.times(porcentajeInv).times(0.12).toFixed(2),
-        iva_cash_in: cuotaInteres.times(porcentajeCashIn).times(0.12).toFixed(2),
-        fecha_creacion: new Date(),
-        cuota_inversionista: toBigExcel(fila.Cuota || 0, "0").toFixed(2),
-      });
+      // Solo actualizar monto_aportado si la relación ya existe
+      const relacionExistente = relacionesExistentes.find(
+        r => r.inversionista_id === inversionistaId
+      );
+
+      if (relacionExistente) {
+        inversionistasData.push({
+          id: relacionExistente.id,
+          inversionista_id: inversionistaId,
+          monto_aportado: montoAportado.toFixed(8),
+          monto_anterior: relacionExistente.monto_aportado,
+        });
+      } else {
+        inversionistasFallidos.push({
+          nombre,
+          razon: `No existe relación en creditos_inversionistas (inv_id: ${inversionistaId})`,
+        });
+      }
     }
 
     // ===============================
-    // PASO FINAL: INSERTAR
+    // PASO FINAL: ACTUALIZAR monto_aportado
     // ===============================
-    if (inversionistasData.length > 0) {
-      await db.insert(creditos_inversionistas).values(inversionistasData);
+    let actualizados = 0;
+    for (const inv of inversionistasData) {
+      await db
+        .update(creditos_inversionistas)
+        .set({ monto_aportado: inv.monto_aportado })
+        .where(
+          and(
+            eq(creditos_inversionistas.credito_id, creditoDB.credito_id),
+            eq(creditos_inversionistas.inversionista_id, inv.inversionista_id)
+          )
+        );
+      console.log(`   ✅ Actualizado inv_id ${inv.inversionista_id}: ${inv.monto_anterior} → ${inv.monto_aportado}`);
+      actualizados++;
     }
 
     // ===============================
@@ -930,8 +1011,7 @@ export async function procesarInversionistasSoloExcel(
       success: true,
       creditoBase: creditoAgrupado.creditoBase,
       credito_id: creditoDB.credito_id,
-      inversionistas_insertados: inversionistasData.length,
-      inversionistas_eliminados: deletedCount.rowCount ?? 0,
+      inversionistas_actualizados: actualizados,
       inversionistas_fallidos: inversionistasFallidos,
       duplicados_removidos: duplicadosEncontrados,
     };

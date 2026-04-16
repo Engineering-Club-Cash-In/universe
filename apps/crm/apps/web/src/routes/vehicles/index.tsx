@@ -22,6 +22,7 @@ import {
 	FileText,
 	FolderOpen,
 	Info,
+	MessageCircle,
 	Pencil,
 	Plus,
 	Search,
@@ -33,6 +34,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Card,
 	CardContent,
@@ -58,6 +60,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
 import {
 	Select,
 	SelectContent,
@@ -65,7 +68,6 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
 	Table,
@@ -77,12 +79,13 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { Inspection360View } from "@/components/vehicles/inspection-360-view";
 import { VehicleDocumentUpload } from "@/components/vehicles/VehicleDocumentUpload";
+import { ROLES } from "@/lib/roles";
 import {
 	renderInspectionStatusBadge,
 	renderNewVehicleBadges,
 } from "@/lib/vehicle-utils";
-import { Inspection360View } from "@/components/vehicles/inspection-360-view";
 import { client, orpc } from "@/utils/orpc";
 
 // Helper para renderizar el badge del estado del vehículo
@@ -138,6 +141,7 @@ function VehiclesDashboard() {
 	const [searchTerm, setSearchTerm] = useState("");
 	const [debouncedSearch, setDebouncedSearch] = useState("");
 	const [filterStatus, setFilterStatus] = useState("all");
+	const [filterOwnership, setFilterOwnership] = useState("all");
 	const [selectedVehicle, setSelectedVehicle] = useState<any>(null);
 	const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 	const [activeTab, setActiveTab] = useState("general");
@@ -171,14 +175,16 @@ function VehiclesDashboard() {
 				offset: page * pageSize,
 				query: debouncedSearch || undefined,
 				status: filterStatus !== "all" ? filterStatus : undefined,
+				ownership: filterOwnership !== "all" ? (filterOwnership as "owned" | "not_owned") : undefined,
 			},
 		}),
-		queryKey: ["getVehicles", page, pageSize, debouncedSearch, filterStatus],
+		queryKey: ["getVehicles", page, pageSize, debouncedSearch, filterStatus, filterOwnership],
 		placeholderData: keepPreviousData,
 	});
 	const { data: statistics } = useQuery(
 		orpc.getVehicleStatistics.queryOptions(),
 	);
+	const { data: userProfile } = useQuery(orpc.getUserProfile.queryOptions());
 
 	// Get vehicles data from paginated response
 	const vehiclesList = vehicles?.data || [];
@@ -298,6 +304,7 @@ function VehiclesDashboard() {
 		fuelType: "",
 		transmission: "",
 		kmMileage: 0,
+		isOwned: false,
 		// Datos técnicos para contratos
 		seats: null as number | null,
 		doors: null as number | null,
@@ -312,6 +319,14 @@ function VehiclesDashboard() {
 	const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
 	const [evidenceItemName, setEvidenceItemName] = useState("");
 	const [photoCategoryFilter, setPhotoCategoryFilter] = useState("all");
+	const [selectedPhoto, setSelectedPhoto] = useState<{
+		id: string;
+		url: string;
+		title: string;
+		category: string;
+		valuatorComment?: string | null;
+		noCommentsChecked?: boolean;
+	} | null>(null);
 
 	const createNewVehicleMutation = useMutation({
 		mutationFn: (data: typeof newVehicleForm) =>
@@ -328,6 +343,7 @@ function VehiclesDashboard() {
 				fuelType: data.fuelType || undefined,
 				transmission: data.transmission || undefined,
 				kmMileage: data.kmMileage ?? undefined,
+				isOwned: data.isOwned,
 				seats: data.seats ?? undefined,
 				doors: data.doors ?? undefined,
 				axles: data.axles ?? undefined,
@@ -353,6 +369,7 @@ function VehiclesDashboard() {
 				fuelType: "",
 				transmission: "",
 				kmMileage: 0,
+				isOwned: false,
 				seats: null,
 				doors: null,
 				axles: 2,
@@ -383,6 +400,7 @@ function VehiclesDashboard() {
 		transmission: "",
 		kmMileage: 0,
 		isNew: false,
+		isOwned: false,
 		status: "pending" as
 			| "pending"
 			| "available"
@@ -415,6 +433,7 @@ function VehiclesDashboard() {
 					fuelType: data.fuelType || null,
 					transmission: data.transmission || null,
 					kmMileage: data.kmMileage,
+					isOwned: data.isOwned,
 					status: data.status,
 					// Campos para contratos legales
 					seats: data.seats,
@@ -572,6 +591,36 @@ function VehiclesDashboard() {
 											<SelectItem value="auction">Remate</SelectItem>
 										</SelectContent>
 									</Select>
+									<div className="flex items-center rounded-md border">
+										<Button
+											type="button"
+											variant="ghost"
+											size="sm"
+											className={`rounded-none rounded-l-md px-3 text-xs ${filterOwnership === "all" ? "bg-muted font-semibold" : ""}`}
+											onClick={() => { setFilterOwnership("all"); setPage(0); }}
+										>
+											Todos
+										</Button>
+										<Button
+											type="button"
+											variant="ghost"
+											size="sm"
+											className={`rounded-none border-x px-3 text-xs ${filterOwnership === "owned" ? "font-semibold" : ""}`}
+											style={filterOwnership === "owned" ? { backgroundColor: "#4E57EA15", color: "#4E57EA" } : {}}
+											onClick={() => { setFilterOwnership("owned"); setPage(0); }}
+										>
+											Cash In
+										</Button>
+										<Button
+											type="button"
+											variant="ghost"
+											size="sm"
+											className={`rounded-none rounded-r-md px-3 text-xs ${filterOwnership === "not_owned" ? "bg-muted font-semibold" : ""}`}
+											onClick={() => { setFilterOwnership("not_owned"); setPage(0); }}
+										>
+											Externos
+										</Button>
+									</div>
 								</div>
 							</div>
 
@@ -603,8 +652,13 @@ function VehiclesDashboard() {
 												return (
 													<TableRow key={vehicle.id}>
 														<TableCell>
-															<div className="font-medium">
+															<div className="flex items-center gap-2 font-medium">
 																{vehicle.make} {vehicle.model}
+																{vehicle.isOwned && (
+																	<Badge variant="outline" className="text-xs" style={{ borderColor: "#4E57EA50", backgroundColor: "#4E57EA15", color: "#4E57EA" }}>
+																		CashIn
+																	</Badge>
+																)}
 															</div>
 															<div className="text-muted-foreground text-sm">
 																{vehicle.year} - {vehicle.color}
@@ -624,7 +678,7 @@ function VehiclesDashboard() {
 																		Q
 																		{Number(
 																			latestInspection.suggestedCommercialValue,
-																		).toLocaleString("es-GT")}
+																		).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 																	</div>
 																	<div
 																		className={
@@ -749,6 +803,7 @@ function VehiclesDashboard() {
 																					vehicle.transmission || "",
 																				kmMileage: vehicle.kmMileage || 0,
 																				isNew: vehicle.isNew || false,
+																				isOwned: vehicle.isOwned || false,
 																				status: vehicle.status || "pending",
 																				// Campos para contratos legales
 																				seats: vehicle.seats ?? null,
@@ -908,7 +963,7 @@ function VehiclesDashboard() {
 												<span className="font-medium">Valor Comercial: </span>Q
 												{Number(
 													auctionInspection.suggestedCommercialValue,
-												).toLocaleString("es-GT")}
+												).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 											</p>
 											{auctionPrice !== null && auctionPrice > 0 && (
 												<p
@@ -925,7 +980,7 @@ function VehiclesDashboard() {
 														Number(auctionInspection.suggestedCommercialValue) -
 															auctionPrice,
 														0,
-													).toLocaleString("es-GT")}
+													).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 												</p>
 											)}
 										</div>
@@ -1038,6 +1093,7 @@ function VehiclesDashboard() {
 											transmission: selectedVehicle.transmission || "",
 											kmMileage: selectedVehicle.kmMileage || 0,
 											isNew: selectedVehicle.isNew || false,
+											isOwned: selectedVehicle.isOwned || false,
 											status: selectedVehicle.status || "pending",
 											seats: selectedVehicle.seats ?? null,
 											doors: selectedVehicle.doors ?? null,
@@ -1221,7 +1277,7 @@ function VehiclesDashboard() {
 																				Q
 																				{Number(
 																					inspection.marketValue,
-																				).toLocaleString("es-GT")}
+																				).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 																			</div>
 																			<div className="font-medium text-muted-foreground">
 																				Valor comercial sugerido:
@@ -1230,120 +1286,229 @@ function VehiclesDashboard() {
 																				Q
 																				{Number(
 																					inspection.suggestedCommercialValue,
-																				).toLocaleString("es-GT")}
+																				).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 																			</div>
-																			<div className="font-medium text-muted-foreground text-pretty">
+																			<div className="text-pretty font-medium text-muted-foreground">
 																				Valor actual condición:
 																			</div>
 																			<div className="font-bold text-lg">
 																				Q
 																				{Number(
 																					inspection.currentConditionValue,
-																				).toLocaleString("es-GT")}
+																				).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 																			</div>
 																		</div>
 
-																				{/* AI Valuation History Area */}
-																				{inspection.aiSuggestedValue && (
-																					<div className="mt-4 pt-4 border-t border-muted">
-																						<div className="flex items-center gap-1.5 mb-3">
-																							<Sparkles className="h-4 w-4 text-blue-500" />
-																							<h4 className="font-bold text-xs uppercase tracking-tight text-blue-700">Valoración IA</h4>
-																						</div>
-																						<div className="grid grid-cols-2 gap-4 text-sm">
-																							<div>
-																								<p className="text-[10px] font-bold text-blue-600/80 uppercase tracking-tight">Valor de Mercado</p>
-																								<p className="font-bold text-lg text-blue-700">Q{Number(inspection.aiSuggestedValue).toLocaleString("es-GT")}</p>
-																							</div>
-																							<div className="flex flex-col items-end">
-																								<p className="text-[10px] font-bold text-blue-600/80 uppercase tracking-tight mb-1">Clasificación</p>
-																								<Badge variant="outline" className="font-bold uppercase text-[10px] border-blue-200 text-blue-700 bg-blue-50/50">
-																									{inspection.aiCommercialClassification || "N/A"}
-																								</Badge>
-																							</div>
-																						</div>
+																		{/* AI Valuation History Area */}
+																		{inspection.aiSuggestedValue && (
+																			<div className="mt-4 border-muted border-t pt-4">
+																				<div className="mb-3 flex items-center gap-1.5">
+																					<Sparkles className="h-4 w-4 text-blue-500" />
+																					<h4 className="font-bold text-blue-700 text-xs uppercase tracking-tight">
+																						Valoración IA
+																					</h4>
+																				</div>
+																				<div className="grid grid-cols-2 gap-4 text-sm">
+																					<div>
+																						<p className="font-bold text-[10px] text-blue-600/80 uppercase tracking-tight">
+																							Valor de Mercado
+																						</p>
+																						<p className="font-bold text-blue-700 text-lg">
+																							Q
+																							{Number(
+																								inspection.aiSuggestedValue,
+																							).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																						</p>
 																					</div>
-																				)}
+																					<div className="flex flex-col items-end">
+																						<p className="mb-1 font-bold text-[10px] text-blue-600/80 uppercase tracking-tight">
+																							Clasificación
+																						</p>
+																						<Badge
+																							variant="outline"
+																							className="border-blue-200 bg-blue-50/50 font-bold text-[10px] text-blue-700 uppercase"
+																						>
+																							{inspection.aiCommercialClassification ||
+																								"N/A"}
+																						</Badge>
+																					</div>
+																				</div>
+																			</div>
+																		)}
 																	</div>
 
 																	<div>
-																		<h4 className="mb-2 font-semibold text-lg border-b pb-1">
+																		<h4 className="mb-2 border-b pb-1 font-semibold text-lg">
 																			Datos de Inspección
 																		</h4>
 																		<div className="grid grid-cols-2 gap-x-6 gap-y-3 py-2 text-sm">
-																			<div className="flex flex-col gap-0.5">
-																				<span className="text-[10px] font-bold text-muted-foreground uppercase tracking-tight">Escáner</span>
-																				<span className="font-medium">{inspection.scannerUsed ? "Sí" : "No"}</span>
+																			<div className="flex flex-col gap-1">
+																				<span className="font-bold text-[10px] text-muted-foreground uppercase tracking-tight">
+																					Escáner
+																				</span>
+																				<div className="flex items-center gap-6">
+																					<span className="font-medium">
+																						{inspection.scannerUsed ? "Sí" : "No"}
+																					</span>
+																					{inspection.scannerResultUrl && (
+																						<Button
+																							variant="outline"
+																							size="sm"
+																							className="h-6 px-2.5 text-[10px]"
+																							onClick={() => window.open(inspection.scannerResultUrl, "_blank")}
+																						>
+																							<FileText className="mr-1.5 h-3 w-3" /> Ver Reporte
+																						</Button>
+																					)}
+																				</div>
 																			</div>
 																			<div className="flex flex-col gap-0.5">
-																				<span className="text-[10px] font-bold text-muted-foreground uppercase tracking-tight">Testigo Airbag</span>
-																				<span className="font-medium">{inspection.airbagWarning ? "Sí" : "No"}</span>
+																				<span className="font-bold text-[10px] text-muted-foreground uppercase tracking-tight">
+																					Testigo Airbag
+																				</span>
+																				<span className="font-medium">
+																					{inspection.airbagWarning
+																						? "Sí"
+																						: "No"}
+																				</span>
 																			</div>
-																			
+
 																			<div className="col-span-2 space-y-4 pt-1">
 																				{/* Painting Condition Bar */}
 																				<div className="space-y-1.5">
-																					<div className="flex justify-between items-end">
-																						<span className="text-[10px] font-bold text-muted-foreground uppercase tracking-tight">Pintura</span>
-																						<span className="text-xs font-bold">{inspection.paintCondition || 0}%</span>
+																					<div className="flex items-end justify-between">
+																						<span className="font-bold text-[10px] text-muted-foreground uppercase tracking-tight">
+																							Pintura
+																						</span>
+																						<span className="font-bold text-xs">
+																							{inspection.paintCondition || 0}%
+																						</span>
 																					</div>
-																					<Progress value={inspection.paintCondition || 0} className="h-2 bg-muted transition-all" />
+																					<Progress
+																						value={
+																							inspection.paintCondition || 0
+																						}
+																						className="h-2 bg-muted transition-all"
+																					/>
 																				</div>
 
 																				{/* Tires Detailed View */}
 																				<div className="space-y-2">
-																					<div className="flex justify-between items-end border-b border-muted pb-0.5">
-																						<span className="text-[10px] font-bold text-muted-foreground uppercase tracking-tight">Estado de 4 Llantas</span>
-																						<span className="text-[10px] font-bold bg-muted px-1.5 rounded">{inspection.tiresCondition || 0}% Promedio</span>
+																					<div className="flex items-end justify-between border-muted border-b pb-0.5">
+																						<span className="font-bold text-[10px] text-muted-foreground uppercase tracking-tight">
+																							Estado de 4 Llantas
+																						</span>
+																						<span className="rounded bg-muted px-1.5 font-bold text-[10px]">
+																							{inspection.tiresCondition || 0}%
+																							Promedio
+																						</span>
 																					</div>
-																					
+
 																					<div className="grid grid-cols-2 gap-x-4 gap-y-3 pt-1">
 																						<div className="space-y-1">
-																							<div className="flex justify-between text-[9px] font-medium px-0.5">
+																							<div className="flex justify-between px-0.5 font-medium text-[9px]">
 																								<span>Front. Izq.</span>
-																								<span>{inspection.tireConditionFrontLeft || 0}%</span>
+																								<span>
+																									{inspection.tireConditionFrontLeft ||
+																										0}
+																									%
+																								</span>
 																							</div>
-																							<Progress value={inspection.tireConditionFrontLeft || 0} className="h-1.5" />
+																							<Progress
+																								value={
+																									inspection.tireConditionFrontLeft ||
+																									0
+																								}
+																								className="h-1.5"
+																							/>
 																						</div>
 																						<div className="space-y-1">
-																							<div className="flex justify-between text-[9px] font-medium px-0.5">
+																							<div className="flex justify-between px-0.5 font-medium text-[9px]">
 																								<span>Front. Der.</span>
-																								<span>{inspection.tireConditionFrontRight || 0}%</span>
+																								<span>
+																									{inspection.tireConditionFrontRight ||
+																										0}
+																									%
+																								</span>
 																							</div>
-																							<Progress value={inspection.tireConditionFrontRight || 0} className="h-1.5" />
+																							<Progress
+																								value={
+																									inspection.tireConditionFrontRight ||
+																									0
+																								}
+																								className="h-1.5"
+																							/>
 																						</div>
 																						<div className="space-y-1">
-																							<div className="flex justify-between text-[9px] font-medium px-0.5">
+																							<div className="flex justify-between px-0.5 font-medium text-[9px]">
 																								<span>Tras. Izq.</span>
-																								<span>{inspection.tireConditionRearLeft || 0}%</span>
+																								<span>
+																									{inspection.tireConditionRearLeft ||
+																										0}
+																									%
+																								</span>
 																							</div>
-																							<Progress value={inspection.tireConditionRearLeft || 0} className="h-1.5" />
+																							<Progress
+																								value={
+																									inspection.tireConditionRearLeft ||
+																									0
+																								}
+																								className="h-1.5"
+																							/>
 																						</div>
 																						<div className="space-y-1">
-																							<div className="flex justify-between text-[9px] font-medium px-0.5">
+																							<div className="flex justify-between px-0.5 font-medium text-[9px]">
 																								<span>Tras. Der.</span>
-																								<span>{inspection.tireConditionRearRight || 0}%</span>
+																								<span>
+																									{inspection.tireConditionRearRight ||
+																										0}
+																									%
+																								</span>
 																							</div>
-																							<Progress value={inspection.tireConditionRearRight || 0} className="h-1.5" />
+																							<Progress
+																								value={
+																									inspection.tireConditionRearRight ||
+																									0
+																								}
+																								className="h-1.5"
+																							/>
 																						</div>
 																					</div>
 
 																					{inspection.hasSpareTire && (
-																						<div className="mt-2 p-2 bg-muted/30 rounded border border-muted/50">
-																							<div className="flex justify-between items-center">
-																								<span className="text-[9px] font-bold uppercase">Llanta de Repuesto</span>
-																								<Badge variant="secondary" className="text-[9px] h-4 leading-none">
-																									{inspection.tireConditionSpare || 0}%
+																						<div className="mt-2 rounded border border-muted/50 bg-muted/30 p-2">
+																							<div className="flex items-center justify-between">
+																								<span className="font-bold text-[9px] uppercase">
+																									Llanta de Repuesto
+																								</span>
+																								<Badge
+																									variant="secondary"
+																									className="h-4 text-[9px] leading-none"
+																								>
+																									{inspection.tireConditionSpare ||
+																										0}
+																									%
 																								</Badge>
 																							</div>
 																						</div>
 																					)}
 																				</div>
 
-																				<div className="flex items-center justify-between p-2 rounded-lg bg-muted/20 border border-dashed">
-																					<span className="text-[10px] font-bold text-muted-foreground uppercase">Historial Agencia</span>
-																					<Badge variant={inspection.hasAgencyHistory ? "default" : "secondary"} className="h-5 text-[10px]">
-																						{inspection.hasAgencyHistory ? "Sí posee" : "No posee"}
+																				<div className="flex items-center justify-between rounded-lg border border-dashed bg-muted/20 p-2">
+																					<span className="font-bold text-[10px] text-muted-foreground uppercase">
+																						Historial Agencia
+																					</span>
+																					<Badge
+																						variant={
+																							inspection.hasAgencyHistory
+																								? "default"
+																								: "secondary"
+																						}
+																						className="h-5 text-[10px]"
+																					>
+																						{inspection.hasAgencyHistory
+																							? "Sí posee"
+																							: "No posee"}
 																					</Badge>
 																				</div>
 																			</div>
@@ -1353,7 +1518,7 @@ function VehiclesDashboard() {
 
 																<div className="space-y-4">
 																	<div>
-																		<h4 className="mb-2 font-semibold flex items-center gap-2">
+																		<h4 className="mb-2 flex items-center gap-2 font-semibold">
 																			<FileText className="h-4 w-4 text-muted-foreground" />
 																			Equipamiento
 																		</h4>
@@ -1364,7 +1529,7 @@ function VehiclesDashboard() {
 																	</div>
 
 																	<div>
-																		<h4 className="mb-2 font-semibold flex items-center gap-2">
+																		<h4 className="mb-2 flex items-center gap-2 font-semibold">
 																			<Info className="h-4 w-4 text-muted-foreground" />
 																			Consideraciones
 																		</h4>
@@ -1378,7 +1543,7 @@ function VehiclesDashboard() {
 																		<h4 className="mb-2 font-semibold">
 																			Resultado de Inspección
 																		</h4>
-																		<p className="rounded-md bg-muted/50 p-3 text-sm leading-relaxed border italic">
+																		<p className="rounded-md border bg-muted/50 p-3 text-sm italic leading-relaxed">
 																			"{inspection.inspectionResult}"
 																		</p>
 																	</div>
@@ -1386,7 +1551,7 @@ function VehiclesDashboard() {
 																	{inspection.alerts &&
 																		inspection.alerts.length > 0 && (
 																			<div>
-																				<h4 className="mb-2 font-semibold text-red-600 flex items-center gap-2">
+																				<h4 className="mb-2 flex items-center gap-2 font-semibold text-red-600">
 																					<AlertTriangle className="h-4 w-4" />
 																					Alertas Detectadas
 																				</h4>
@@ -1409,23 +1574,30 @@ function VehiclesDashboard() {
 															</div>
 
 															{/* Inspection 360 Section */}
-															{inspection.inspection360Items && inspection.inspection360Items.length > 0 && (
-																<div className="mt-8 border-t pt-8">
-																	<div className="flex items-center gap-2 mb-4">
-																		<Wrench className="h-5 w-5 text-primary" />
-																		<h4 className="font-bold text-lg">Inspección Técnica 360°</h4>
+															{inspection.inspection360Items &&
+																inspection.inspection360Items.length > 0 && (
+																	<div className="mt-8 border-t pt-8">
+																		<div className="mb-4 flex items-center gap-2">
+																			<Wrench className="h-5 w-5 text-primary" />
+																			<h4 className="font-bold text-lg">
+																				Inspección Técnica 360°
+																			</h4>
+																		</div>
+																		<Inspection360View
+																			items={inspection.inspection360Items}
+																		/>
 																	</div>
-																	<Inspection360View items={inspection.inspection360Items} />
-																</div>
-															)}
+																)}
 
 															{/* Checklist Section */}
 															{inspection.checklistItems &&
 																inspection.checklistItems.length > 0 && (
 																	<div className="mt-10 border-t pt-8">
-																		<div className="flex items-center gap-2 mb-4">
+																		<div className="mb-4 flex items-center gap-2">
 																			<CheckCircle className="h-5 w-5 text-green-600" />
-																			<h4 className="font-bold text-lg">Evaluación de Criterios (Checklist)</h4>
+																			<h4 className="font-bold text-lg">
+																				Evaluación de Criterios (Checklist)
+																			</h4>
 																		</div>
 																		<div className="grid grid-cols-1 gap-6 md:grid-cols-2">
 																			{/* Group checklist items by category */}
@@ -1444,7 +1616,7 @@ function VehiclesDashboard() {
 																				([category, items]: [string, any]) => (
 																					<div
 																						key={category}
-																						className="space-y-3 rounded-lg border border-muted p-4 bg-muted/5"
+																						className="space-y-3 rounded-lg border border-muted bg-muted/5 p-4"
 																					>
 																						<h5 className="font-bold text-primary text-xs uppercase tracking-wider">
 																							{category.replace(/_/g, " ")}
@@ -1454,49 +1626,57 @@ function VehiclesDashboard() {
 																								(item: any, idx: number) => (
 																									<div
 																										key={idx}
-																										className="flex items-start justify-between gap-4 py-1 border-b border-muted last:border-0"
+																										className="flex items-start justify-between gap-4 border-muted border-b py-1 last:border-0"
 																									>
 																										<div className="space-y-0.5">
-																											<p className="text-sm font-medium leading-none">
+																											<p className="font-medium text-sm leading-none">
 																												{item.item}
 																											</p>
 																											{item.notes && (
-																												<p className="text-xs text-muted-foreground italic">
+																												<p className="text-muted-foreground text-xs italic">
 																													{item.notes}
 																												</p>
 																											)}
 																										</div>
 																										<div className="flex items-center gap-2">
-																											{item.evidence && item.evidence.length > 0 && (
-																												<Button
-																													variant="outline"
-																													size="icon"
-																													className="h-7 w-7 text-blue-600 border-blue-200 hover:bg-blue-50"
-																													onClick={() => {
-																														setSelectedEvidence(item.evidence);
-																														setEvidenceItemName(item.item);
-																														setIsEvidenceOpen(true);
-																													}}
-																												>
-																													<Camera className="h-4 w-4" />
-																												</Button>
-																											)}
-																											<Badge
-																												variant={
-																													item.checked
-																														? "default"
-																														: !item.checked &&
-																																item.severity ===
-																																	"critical"
-																															? "destructive"
-																															: "secondary"
-																												}
-																												className="text-[10px] h-5 px-1.5 shrink-0"
-																											>
-																												{item.checked
-																													? "Cumple"
-																													: "No cumple"}
-																											</Badge>
+																											{item.evidence &&
+																												item.evidence.length >
+																													0 && (
+																													<Button
+																														variant="outline"
+																														size="icon"
+																														className="h-7 w-7 border-blue-200 text-blue-600 hover:bg-blue-50"
+																														onClick={() => {
+																															setSelectedEvidence(
+																																item.evidence,
+																															);
+																															setEvidenceItemName(
+																																item.item,
+																															);
+																															setIsEvidenceOpen(
+																																true,
+																															);
+																														}}
+																													>
+																														<Camera className="h-4 w-4" />
+																													</Button>
+																												)}
+																										<Badge
+																											variant={
+																												!item.checked
+																													? "default"
+																													: item.checked &&
+																															item.severity ===
+																																"critical"
+																														? "destructive"
+																														: "secondary"
+																											}
+																											className="h-5 shrink-0 px-1.5 text-[10px]"
+																										>
+																											{!item.checked
+																												? "Cumple"
+																												: "No cumple"}
+																										</Badge>
 																										</div>
 																									</div>
 																								),
@@ -1509,7 +1689,7 @@ function VehiclesDashboard() {
 																			{/* Summary of critical issues */}
 																			{inspection.checklistItems.some(
 																				(item: any) =>
-																					!item.checked &&
+																					item.checked &&
 																					item.severity === "critical",
 																			) && (
 																				<div className="mt-4 rounded-md border border-red-200 bg-red-50 p-3">
@@ -1520,7 +1700,7 @@ function VehiclesDashboard() {
 																						{inspection.checklistItems
 																							.filter(
 																								(item: any) =>
-																									!item.checked &&
+																									item.checked &&
 																									item.severity === "critical",
 																							)
 																							.map((item: any, idx: number) => (
@@ -1562,12 +1742,20 @@ function VehiclesDashboard() {
 									<div className="space-y-6">
 										<div className="flex items-center justify-between">
 											<div className="flex items-center gap-2">
-												<Label htmlFor="photo-category" className="text-sm font-medium">Categoría:</Label>
-												<Select 
-													value={photoCategoryFilter} 
+												<Label
+													htmlFor="photo-category"
+													className="font-medium text-sm"
+												>
+													Categoría:
+												</Label>
+												<Select
+													value={photoCategoryFilter}
 													onValueChange={setPhotoCategoryFilter}
 												>
-													<SelectTrigger id="photo-category" className="w-[180px]">
+													<SelectTrigger
+														id="photo-category"
+														className="w-[180px]"
+													>
 														<SelectValue placeholder="Todas" />
 													</SelectTrigger>
 													<SelectContent>
@@ -1597,15 +1785,22 @@ function VehiclesDashboard() {
 												{ id: "others", label: "Otros" },
 											];
 
-											const filteredPhotos = photoCategoryFilter === "all" 
-												? selectedVehicle.photos 
-												: selectedVehicle.photos.filter((p: any) => p.category === photoCategoryFilter);
+											const filteredPhotos =
+												photoCategoryFilter === "all"
+													? selectedVehicle.photos
+													: selectedVehicle.photos.filter(
+															(p: any) => p.category === photoCategoryFilter,
+														);
 
 											if (photoCategoryFilter !== "all") {
 												return (
 													<div className="grid grid-cols-2 gap-4 md:grid-cols-4">
 														{filteredPhotos.map((photo: any, index: number) => (
-															<Card key={photo.id || index} className="overflow-hidden">
+															<Card
+																key={photo.id || index}
+																className="cursor-pointer overflow-hidden"
+																onClick={() => setSelectedPhoto(photo)}
+															>
 																<CardContent className="p-0">
 																	<div className="relative aspect-square">
 																		<img
@@ -1613,6 +1808,12 @@ function VehiclesDashboard() {
 																			alt={photo.title || `Foto ${index + 1}`}
 																			className="h-full w-full object-cover transition-transform hover:scale-105"
 																		/>
+																		{photo.valuatorComment &&
+																			!photo.noCommentsChecked && (
+																				<div className="absolute top-1.5 right-1.5 rounded-full bg-amber-500 p-1">
+																					<MessageCircle className="h-3 w-3 text-white" />
+																				</div>
+																			)}
 																	</div>
 																	<div className="p-2">
 																		<p className="line-clamp-1 font-medium text-xs">
@@ -1630,36 +1831,60 @@ function VehiclesDashboard() {
 											return (
 												<div className="space-y-8">
 													{categories.map((cat) => {
-														const catPhotos = selectedVehicle.photos.filter((p: any) => p.category === cat.id);
+														const catPhotos = selectedVehicle.photos.filter(
+															(p: any) => p.category === cat.id,
+														);
 														if (catPhotos.length === 0) return null;
 
 														return (
 															<div key={cat.id} className="space-y-3">
 																<div className="flex items-center gap-2 border-b pb-1">
-																	<h4 className="font-semibold text-sm">{cat.label}</h4>
-																	<Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
+																	<h4 className="font-semibold text-sm">
+																		{cat.label}
+																	</h4>
+																	<Badge
+																		variant="secondary"
+																		className="px-1.5 py-0 text-[10px]"
+																	>
 																		{catPhotos.length}
 																	</Badge>
 																</div>
 																<div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-																	{catPhotos.map((photo: any, index: number) => (
-																		<Card key={photo.id || index} className="overflow-hidden">
-																			<CardContent className="p-0">
-																				<div className="relative aspect-square">
-																					<img
-																						src={photo.url || "/placeholder.svg"}
-																						alt={photo.title || `Foto ${index + 1}`}
-																						className="h-full w-full object-cover transition-transform hover:scale-105"
-																					/>
-																				</div>
-																				<div className="p-2">
-																					<p className="line-clamp-1 font-medium text-xs">
-																						{photo.title}
-																					</p>
-																				</div>
-																			</CardContent>
-																		</Card>
-																	))}
+																	{catPhotos.map(
+																		(photo: any, index: number) => (
+																			<Card
+																				key={photo.id || index}
+																				className="cursor-pointer overflow-hidden"
+																				onClick={() => setSelectedPhoto(photo)}
+																			>
+																				<CardContent className="p-0">
+																					<div className="relative aspect-square">
+																						<img
+																							src={
+																								photo.url || "/placeholder.svg"
+																							}
+																							alt={
+																								photo.title ||
+																								`Foto ${index + 1}`
+																							}
+																							className="h-full w-full object-cover transition-transform hover:scale-105"
+																						/>
+																						{photo.valuatorComment &&
+																							!photo.noCommentsChecked && (
+																								<div className="absolute top-1.5 right-1.5 rounded-full bg-amber-500 p-1">
+																									<MessageCircle className="h-3 w-3 text-white" />
+																								</div>
+																							)}
+																					</div>
+																					<div className="p-2">
+																						<p className="line-clamp-1 font-medium text-xs">
+																							{photo.title}
+																						</p>
+																					</div>
+																				</CardContent>
+																			</Card>
+																		),
+																	)}
 																</div>
 															</div>
 														);
@@ -1678,6 +1903,39 @@ function VehiclesDashboard() {
 										</CardContent>
 									</Card>
 								)}
+								{/* Photo detail dialog */}
+								<Dialog
+									open={!!selectedPhoto}
+									onOpenChange={(open) => !open && setSelectedPhoto(null)}
+								>
+									<DialogContent className="max-w-lg gap-0 overflow-hidden p-0">
+										{selectedPhoto && (
+											<>
+												<img
+													src={selectedPhoto.url}
+													alt={selectedPhoto.title}
+													className="max-h-[60vh] w-full bg-black object-contain"
+												/>
+												<div className="space-y-2 p-4">
+													<DialogHeader>
+														<DialogTitle className="text-sm">
+															{selectedPhoto.title}
+														</DialogTitle>
+													</DialogHeader>
+													{selectedPhoto.valuatorComment &&
+														!selectedPhoto.noCommentsChecked && (
+															<div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3">
+																<MessageCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-600" />
+																<p className="text-amber-900 text-sm">
+																	{selectedPhoto.valuatorComment}
+																</p>
+															</div>
+														)}
+												</div>
+											</>
+										)}
+									</DialogContent>
+								</Dialog>
 							</TabsContent>
 
 							<TabsContent value="documents" className="mt-4 space-y-4">
@@ -1711,16 +1969,14 @@ function VehiclesDashboard() {
 
 			{/* Dialog para crear vehículo nuevo */}
 			<Dialog open={isNewVehicleOpen} onOpenChange={setIsNewVehicleOpen}>
-				<DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+				<DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle className="flex items-center gap-2">
 							<Sparkles className="h-5 w-5 text-blue-500" />
 							Registrar Vehículo Nuevo
 						</DialogTitle>
 						<DialogDescription>
-							Ingresa los datos básicos del vehículo nuevo. Los datos
-							adicionales (VIN, placa, etc.) pueden completarse después cuando
-							lleguen del dealer.
+							Los campos con * son requeridos. El resto puede completarse después.
 						</DialogDescription>
 					</DialogHeader>
 
@@ -1738,14 +1994,12 @@ function VehiclesDashboard() {
 							}
 							createNewVehicleMutation.mutate(newVehicleForm);
 						}}
-						className="space-y-6"
+						className="space-y-5"
 					>
-						{/* Campos Requeridos */}
-						<div className="space-y-4">
-							<h4 className="font-medium text-sm">
-								Información Básica (Requerida)
-							</h4>
-							<div className="grid grid-cols-2 gap-4">
+						{/* Información Básica */}
+						<div className="space-y-3">
+							<h4 className="font-medium text-sm">Información Básica</h4>
+							<div className="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-3">
 								<div className="space-y-2">
 									<Label htmlFor="make">Marca *</Label>
 									<Input
@@ -1810,7 +2064,7 @@ function VehiclesDashboard() {
 										required
 									/>
 								</div>
-								<div className="col-span-2 space-y-2">
+								<div className="space-y-2">
 									<Label htmlFor="vehicleType">Tipo de Vehículo *</Label>
 									<Select
 										value={newVehicleForm.vehicleType}
@@ -1845,15 +2099,30 @@ function VehiclesDashboard() {
 										</SelectContent>
 									</Select>
 								</div>
+								<div className="space-y-2">
+									<Label htmlFor="origin">Origen</Label>
+									<Select
+										value={newVehicleForm.origin}
+										onValueChange={(value) =>
+											setNewVehicleForm({ ...newVehicleForm, origin: value })
+										}
+									>
+										<SelectTrigger>
+											<SelectValue placeholder="Seleccionar origen" />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="Nacional">Nacional</SelectItem>
+											<SelectItem value="Importado">Importado</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
 							</div>
 						</div>
 
-						{/* Campos Opcionales */}
-						<div className="space-y-4">
-							<h4 className="font-medium text-muted-foreground text-sm">
-								Información Adicional (Opcional - puede completarse después)
-							</h4>
-							<div className="grid grid-cols-2 gap-4">
+						{/* Identificación y Mecánica */}
+						<div className="space-y-3">
+							<h4 className="font-medium text-muted-foreground text-sm">Identificación y Mecánica</h4>
+							<div className="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-3">
 								<div className="space-y-2">
 									<Label htmlFor="licensePlate">Placa</Label>
 									<Input
@@ -1883,24 +2152,21 @@ function VehiclesDashboard() {
 									/>
 								</div>
 								<div className="space-y-2">
-									<Label htmlFor="origin">Origen</Label>
-									<Select
-										value={newVehicleForm.origin}
-										onValueChange={(value) =>
-											setNewVehicleForm({ ...newVehicleForm, origin: value })
+									<Label htmlFor="motorNumber">No. Motor</Label>
+									<Input
+										id="motorNumber"
+										value={newVehicleForm.motorNumber}
+										onChange={(e) =>
+											setNewVehicleForm({
+												...newVehicleForm,
+												motorNumber: e.target.value,
+											})
 										}
-									>
-										<SelectTrigger>
-											<SelectValue placeholder="Seleccionar origen" />
-										</SelectTrigger>
-										<SelectContent>
-											<SelectItem value="Nacional">Nacional</SelectItem>
-											<SelectItem value="Importado">Importado</SelectItem>
-										</SelectContent>
-									</Select>
+										placeholder="Número de motor"
+									/>
 								</div>
 								<div className="space-y-2">
-									<Label htmlFor="fuelType">Tipo de Combustible</Label>
+									<Label htmlFor="fuelType">Combustible</Label>
 									<Select
 										value={newVehicleForm.fuelType}
 										onValueChange={(value) =>
@@ -1918,7 +2184,7 @@ function VehiclesDashboard() {
 										</SelectContent>
 									</Select>
 								</div>
-								<div className="col-span-2 space-y-2">
+								<div className="space-y-2">
 									<Label htmlFor="transmission">Transmisión</Label>
 									<Select
 										value={newVehicleForm.transmission}
@@ -1937,29 +2203,6 @@ function VehiclesDashboard() {
 											<SelectItem value="Manual">Manual</SelectItem>
 										</SelectContent>
 									</Select>
-								</div>
-							</div>
-						</div>
-
-						{/* Identificación adicional */}
-						<div className="space-y-4">
-							<h4 className="font-medium text-muted-foreground text-sm">
-								Identificación y Kilometraje
-							</h4>
-							<div className="grid grid-cols-2 gap-4">
-								<div className="space-y-2">
-									<Label htmlFor="motorNumber">Número de Motor</Label>
-									<Input
-										id="motorNumber"
-										value={newVehicleForm.motorNumber}
-										onChange={(e) =>
-											setNewVehicleForm({
-												...newVehicleForm,
-												motorNumber: e.target.value,
-											})
-										}
-										placeholder="Número de motor"
-									/>
 								</div>
 								<div className="space-y-2">
 									<Label htmlFor="kmMileage">Kilometraje</Label>
@@ -1980,12 +2223,10 @@ function VehiclesDashboard() {
 							</div>
 						</div>
 
-						{/* Datos técnicos para contratos */}
-						<div className="space-y-4">
-							<h4 className="font-medium text-muted-foreground text-sm">
-								Datos Técnicos para Contratos
-							</h4>
-							<div className="grid grid-cols-3 gap-4">
+						{/* Datos para Contratos */}
+						<div className="space-y-3">
+							<h4 className="font-medium text-muted-foreground text-sm">Datos para Contratos</h4>
+							<div className="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-3">
 								<div className="space-y-2">
 									<Label htmlFor="seats">Asientos</Label>
 									<Input
@@ -2002,7 +2243,7 @@ function VehiclesDashboard() {
 										}
 										min={1}
 										max={50}
-										placeholder="Ej: 5"
+										placeholder="5"
 									/>
 								</div>
 								<div className="space-y-2">
@@ -2021,7 +2262,7 @@ function VehiclesDashboard() {
 										}
 										min={2}
 										max={6}
-										placeholder="Ej: 4"
+										placeholder="4"
 									/>
 								</div>
 								<div className="space-y-2">
@@ -2040,11 +2281,11 @@ function VehiclesDashboard() {
 										}
 										min={2}
 										max={10}
-										placeholder="Ej: 2"
+										placeholder="2"
 									/>
 								</div>
 								<div className="space-y-2">
-									<Label htmlFor="vehicleUse">Uso del Vehículo</Label>
+									<Label htmlFor="vehicleUse">Uso</Label>
 									<Select
 										value={newVehicleForm.vehicleUse}
 										onValueChange={(value) =>
@@ -2055,7 +2296,7 @@ function VehiclesDashboard() {
 										}
 									>
 										<SelectTrigger>
-											<SelectValue placeholder="Seleccionar uso" />
+											<SelectValue placeholder="Seleccionar" />
 										</SelectTrigger>
 										<SelectContent>
 											<SelectItem value="Particular">Particular</SelectItem>
@@ -2074,7 +2315,7 @@ function VehiclesDashboard() {
 												series: e.target.value,
 											})
 										}
-										placeholder="Serie del vehículo"
+										placeholder="Serie"
 									/>
 								</div>
 								<div className="space-y-2">
@@ -2088,10 +2329,26 @@ function VehiclesDashboard() {
 												iscvCode: e.target.value,
 											})
 										}
-										placeholder="Código ISCV"
+										placeholder="ISCV"
 									/>
 								</div>
 							</div>
+						</div>
+
+						<div className="flex items-center space-x-2">
+							<Checkbox
+								id="isOwned"
+								checked={newVehicleForm.isOwned}
+								onCheckedChange={(checked) =>
+									setNewVehicleForm({
+										...newVehicleForm,
+										isOwned: checked === true,
+									})
+								}
+							/>
+							<Label htmlFor="isOwned" className="cursor-pointer text-sm">
+								Vehículo propiedad de Cash In
+							</Label>
 						</div>
 
 						<DialogFooter>
@@ -2117,7 +2374,7 @@ function VehiclesDashboard() {
 
 			{/* Dialog para editar vehículo */}
 			<Dialog open={isEditVehicleOpen} onOpenChange={setIsEditVehicleOpen}>
-				<DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+				<DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle className="flex items-center gap-2">
 							<Pencil className="h-5 w-5 text-blue-500" />
@@ -2153,12 +2410,98 @@ function VehiclesDashboard() {
 							}
 							updateVehicleMutation.mutate(editVehicleForm);
 						}}
-						className="space-y-6"
+						className="space-y-5"
 					>
-						{/* Campos Principales */}
-						<div className="space-y-4">
+						{/* Estado del Vehículo - fila completa */}
+						<div className="space-y-2">
+							<h4 className="font-medium text-sm">Estado del Vehículo</h4>
+							{editVehicleForm.status === "sold" &&
+							userProfile?.role &&
+							userProfile.role !== ROLES.ADMIN &&
+							userProfile.role !== ROLES.SALES_SUPERVISOR ? (
+								<div className="space-y-1">
+									<div className="flex h-10 w-full items-center rounded-md border bg-muted px-3 py-2 text-sm opacity-60">
+										<span className="font-medium">Vendido</span>
+									</div>
+									<p className="text-muted-foreground text-xs">
+										Solo un administrador o supervisor de ventas puede cambiar
+										el estado de un vehículo vendido.
+									</p>
+								</div>
+							) : (
+								<Select
+									value={editVehicleForm.status}
+									onValueChange={(
+										value:
+											| "pending"
+											| "available"
+											| "sold"
+											| "maintenance"
+											| "auction",
+									) => {
+										const wasVendido = editVehicleForm.status === "sold";
+										setEditVehicleForm({
+											...editVehicleForm,
+											status: value,
+											...(wasVendido && value !== "sold"
+												? { isOwned: true }
+												: {}),
+										});
+									}}
+								>
+									<SelectTrigger>
+										<SelectValue placeholder="Seleccionar estado" />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="pending">
+											<div className="flex flex-col">
+												<span className="font-medium">Pendiente</span>
+												<span className="text-muted-foreground text-xs">
+													En espera o Próximo a la venta
+												</span>
+											</div>
+										</SelectItem>
+										<SelectItem value="available">
+											<div className="flex flex-col">
+												<span className="font-medium">Disponible</span>
+												<span className="text-muted-foreground text-xs">
+													Listo para venta o financiamiento
+												</span>
+											</div>
+										</SelectItem>
+										<SelectItem value="sold">
+											<div className="flex flex-col">
+												<span className="font-medium">Vendido</span>
+												<span className="text-muted-foreground text-xs">
+													Vehículo ya fue vendido/financiado
+												</span>
+											</div>
+										</SelectItem>
+										<SelectItem value="maintenance">
+											<div className="flex flex-col">
+												<span className="font-medium">En Mantenimiento</span>
+												<span className="text-muted-foreground text-xs">
+													En reparación o servicio técnico
+												</span>
+											</div>
+										</SelectItem>
+										<SelectItem value="auction">
+											<div className="flex flex-col">
+												<span className="font-medium">En Remate</span>
+												<span className="text-muted-foreground text-xs">
+													Disponible para subasta/remate
+												</span>
+											</div>
+										</SelectItem>
+									</SelectContent>
+								</Select>
+							)}
+						</div>
+
+						{/* Información Básica */}
+						<div className="space-y-3">
 							<h4 className="font-medium text-sm">Información Básica</h4>
-							<div className="grid grid-cols-2 gap-4">
+							<div className="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-3">
 								<div className="space-y-2">
 									<Label htmlFor="edit-make">Marca *</Label>
 									<Input
@@ -2259,105 +2602,36 @@ function VehiclesDashboard() {
 									</Select>
 								</div>
 								<div className="space-y-2">
-									<Label htmlFor="edit-kmMileage">Kilometraje</Label>
-									<Input
-										id="edit-kmMileage"
-										type="number"
-										value={editVehicleForm.kmMileage}
-										onChange={(e) =>
-											setEditVehicleForm({
-												...editVehicleForm,
-												kmMileage: Number.parseInt(e.target.value) || 0,
-											})
+									<Label htmlFor="edit-origin">Origen</Label>
+									<Select
+										value={editVehicleForm.origin}
+										onValueChange={(value) =>
+											setEditVehicleForm({ ...editVehicleForm, origin: value })
 										}
-										min={0}
-										placeholder="0"
-									/>
+									>
+										<SelectTrigger>
+											<SelectValue placeholder="Seleccionar origen" />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="Nacional">Nacional</SelectItem>
+											<SelectItem value="Importado">Importado</SelectItem>
+										</SelectContent>
+									</Select>
 								</div>
 							</div>
 						</div>
 
-						{/* Estado del Vehículo */}
-						<div className="space-y-4">
-							<h4 className="font-medium text-sm">Estado del Vehículo</h4>
-							<div className="space-y-2">
-								<Label htmlFor="edit-status">Estado *</Label>
-								<Select
-									value={editVehicleForm.status}
-									onValueChange={(
-										value:
-											| "pending"
-											| "available"
-											| "sold"
-											| "maintenance"
-											| "auction",
-									) =>
-										setEditVehicleForm({
-											...editVehicleForm,
-											status: value,
-										})
-									}
-								>
-									<SelectTrigger>
-										<SelectValue placeholder="Seleccionar estado" />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="pending">
-											<div className="flex flex-col">
-												<span className="font-medium">Pendiente</span>
-												<span className="text-muted-foreground text-xs">
-													En espera o Próximo a la venta
-												</span>
-											</div>
-										</SelectItem>
-										<SelectItem value="available">
-											<div className="flex flex-col">
-												<span className="font-medium">Disponible</span>
-												<span className="text-muted-foreground text-xs">
-													Listo para venta o financiamiento
-												</span>
-											</div>
-										</SelectItem>
-										<SelectItem value="sold">
-											<div className="flex flex-col">
-												<span className="font-medium">Vendido</span>
-												<span className="text-muted-foreground text-xs">
-													Vehículo ya fue vendido/financiado
-												</span>
-											</div>
-										</SelectItem>
-										<SelectItem value="maintenance">
-											<div className="flex flex-col">
-												<span className="font-medium">En Mantenimiento</span>
-												<span className="text-muted-foreground text-xs">
-													En reparación o servicio técnico
-												</span>
-											</div>
-										</SelectItem>
-										<SelectItem value="auction">
-											<div className="flex flex-col">
-												<span className="font-medium">En Remate</span>
-												<span className="text-muted-foreground text-xs">
-													Disponible para subasta/remate
-												</span>
-											</div>
-										</SelectItem>
-									</SelectContent>
-								</Select>
-							</div>
-						</div>
-
-						{/* Campos de Identificación */}
-						<div className="space-y-4">
-							<h4 className="font-medium text-sm">
-								Identificación del Vehículo
+						{/* Identificación y Mecánica */}
+						<div className="space-y-3">
+							<h4 className="font-medium text-muted-foreground text-sm">
+								Identificación y Mecánica
 								{editVehicleForm.isNew && (
 									<span className="ml-2 font-normal text-amber-600 text-xs">
 										(requeridos para completar la oportunidad)
 									</span>
 								)}
 							</h4>
-							<div className="grid grid-cols-2 gap-4">
+							<div className="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-3">
 								<div className="space-y-2">
 									<Label htmlFor="edit-licensePlate">Placa</Label>
 									<Input
@@ -2387,7 +2661,7 @@ function VehiclesDashboard() {
 									/>
 								</div>
 								<div className="space-y-2">
-									<Label htmlFor="edit-motorNumber">Número de Motor</Label>
+									<Label htmlFor="edit-motorNumber">No. Motor</Label>
 									<Input
 										id="edit-motorNumber"
 										value={editVehicleForm.motorNumber}
@@ -2401,24 +2675,7 @@ function VehiclesDashboard() {
 									/>
 								</div>
 								<div className="space-y-2">
-									<Label htmlFor="edit-origin">Origen</Label>
-									<Select
-										value={editVehicleForm.origin}
-										onValueChange={(value) =>
-											setEditVehicleForm({ ...editVehicleForm, origin: value })
-										}
-									>
-										<SelectTrigger>
-											<SelectValue placeholder="Seleccionar origen" />
-										</SelectTrigger>
-										<SelectContent>
-											<SelectItem value="Nacional">Nacional</SelectItem>
-											<SelectItem value="Importado">Importado</SelectItem>
-										</SelectContent>
-									</Select>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="edit-fuelType">Tipo de Combustible</Label>
+									<Label htmlFor="edit-fuelType">Combustible</Label>
 									<Select
 										value={editVehicleForm.fuelType}
 										onValueChange={(value) =>
@@ -2439,7 +2696,7 @@ function VehiclesDashboard() {
 										</SelectContent>
 									</Select>
 								</div>
-								<div className="col-span-2 space-y-2">
+								<div className="space-y-2">
 									<Label htmlFor="edit-transmission">Transmisión</Label>
 									<Select
 										value={editVehicleForm.transmission}
@@ -2459,18 +2716,34 @@ function VehiclesDashboard() {
 										</SelectContent>
 									</Select>
 								</div>
+								<div className="space-y-2">
+									<Label htmlFor="edit-kmMileage">Kilometraje</Label>
+									<Input
+										id="edit-kmMileage"
+										type="number"
+										value={editVehicleForm.kmMileage}
+										onChange={(e) =>
+											setEditVehicleForm({
+												...editVehicleForm,
+												kmMileage: Number.parseInt(e.target.value) || 0,
+											})
+										}
+										min={0}
+										placeholder="0"
+									/>
+								</div>
 							</div>
 						</div>
 
-						{/* Campos para Contratos Legales */}
-						<div className="space-y-4">
-							<h4 className="font-medium text-sm">
-								Datos Técnicos para Contratos
+						{/* Datos para Contratos */}
+						<div className="space-y-3">
+							<h4 className="font-medium text-muted-foreground text-sm">
+								Datos para Contratos
 								<span className="ml-2 font-normal text-muted-foreground text-xs">
 									(requeridos para generar contratos legales)
 								</span>
 							</h4>
-							<div className="grid grid-cols-3 gap-4">
+							<div className="grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-3">
 								<div className="space-y-2">
 									<Label htmlFor="edit-seats">Asientos</Label>
 									<Input
@@ -2579,6 +2852,22 @@ function VehiclesDashboard() {
 							</div>
 						</div>
 
+						<div className="flex items-center space-x-2">
+							<Checkbox
+								id="edit-isOwned"
+								checked={editVehicleForm.isOwned}
+								onCheckedChange={(checked) =>
+									setEditVehicleForm({
+										...editVehicleForm,
+										isOwned: checked === true,
+									})
+								}
+							/>
+							<Label htmlFor="edit-isOwned" className="cursor-pointer text-sm">
+								Vehículo propiedad de Cash In
+							</Label>
+						</div>
+
 						<DialogFooter>
 							<Button
 								type="button"
@@ -2599,9 +2888,9 @@ function VehiclesDashboard() {
 
 			{/* Evidence Photos Modal */}
 			<Dialog open={isEvidenceOpen} onOpenChange={setIsEvidenceOpen}>
-				<DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
+				<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
 					<DialogHeader>
-						<DialogTitle className="flex items-center gap-2 text-xl font-bold">
+						<DialogTitle className="flex items-center gap-2 font-bold text-xl">
 							<Camera className="h-5 w-5 text-blue-600" />
 							Evidencia: {evidenceItemName}
 						</DialogTitle>
@@ -2609,9 +2898,9 @@ function VehiclesDashboard() {
 							Fotografías adjuntas a este punto de inspección
 						</DialogDescription>
 					</DialogHeader>
-					<div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+					<div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
 						{selectedEvidence.map((ev, idx) => (
-							<div key={idx} className="space-y-2 group">
+							<div key={idx} className="group space-y-2">
 								<div className="relative aspect-video overflow-hidden rounded-lg border bg-muted">
 									<img
 										src={ev.url}
@@ -2622,16 +2911,18 @@ function VehiclesDashboard() {
 										href={ev.url}
 										target="_blank"
 										rel="noreferrer"
-										className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity"
+										className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100"
 									>
 										<Button variant="secondary" size="sm">
-											<Eye className="h-4 w-4 mr-2" />
+											<Eye className="mr-2 h-4 w-4" />
 											Ver original
 										</Button>
 									</a>
 								</div>
-								<div className="flex items-center justify-between text-[10px] text-muted-foreground bg-muted/30 px-2 py-1 rounded">
-									<span className="truncate max-w-[150px]">{ev.originalName}</span>
+								<div className="flex items-center justify-between rounded bg-muted/30 px-2 py-1 text-[10px] text-muted-foreground">
+									<span className="max-w-[150px] truncate">
+										{ev.originalName}
+									</span>
 									<span className="uppercase">{ev.mimeType.split("/")[1]}</span>
 								</div>
 							</div>

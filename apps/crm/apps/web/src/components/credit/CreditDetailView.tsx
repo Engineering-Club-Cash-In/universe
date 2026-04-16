@@ -16,7 +16,7 @@ import {
 	User,
 	X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import type { vehicleTypeEnum } from "server/src/db/schema/quotations";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -72,6 +72,8 @@ type CreditCategory =
 	| "Fiduciario"
 	| "Hipotecario"
 	| "Vehículo";
+
+type PaymentDay = 15 | 30;
 
 // Tipo para inversionista seleccionado
 interface SelectedInversionista {
@@ -150,6 +152,7 @@ interface CreditDetailViewProps {
 		extraMembershipCost?: string | null;
 		extraAdminCost?: string | null;
 		interestCost?: string | null;
+		rcdpCost?: string | null;
 		vehicleTransferCost?: string | null;
 		isInterno?: boolean;
 		amountToFinance: string;
@@ -220,7 +223,7 @@ export function CreditDetailView({
 	const [editInversionistas, setEditInversionistas] = useState<
 		SelectedInversionista[]
 	>([]);
-	const [editDiaPagoMensual, setEditDiaPagoMensual] = useState<number>(15);
+	const [editDiaPagoMensual, setEditDiaPagoMensual] = useState<PaymentDay>(15);
 
 	// Inicializar valores desde opportunity
 	useEffect(() => {
@@ -237,7 +240,7 @@ export function CreditDetailView({
 		setEditDireccion(lead?.direccion || leadDireccion || "");
 		setEditNit(opportunity.nit || "");
 		setEditCategoria((opportunity.categoria as CreditCategory) || "");
-		setEditDiaPagoMensual(opportunity.diaPagoMensual || 15);
+		setEditDiaPagoMensual((opportunity.diaPagoMensual as PaymentDay) || 15);
 
 		// Parsear inversionistas existentes
 		if (opportunity.inversionistas) {
@@ -656,6 +659,7 @@ export function CreditDetailView({
 	const membresia = Number.parseFloat(quotation?.extraMembershipCost || "0");
 	const gastosAdminBase = Number.parseFloat(quotation?.extraAdminCost || "600");
 	const interesAnticipado = Number.parseFloat(quotation?.interestCost || "0");
+	const rcdpTrimestre = Number.parseFloat(quotation?.rcdpCost || "0");
 
 	// ========================================
 	// Sección "Otros Descuentos"
@@ -700,7 +704,8 @@ export function CreditDetailView({
 		seguro +
 		membresia +
 		gastosAdminBase +
-		interesAnticipado;
+		interesAnticipado +
+		rcdpTrimestre;
 
 	// Subtotal: Otros Descuentos
 	const subtotalOtrosDescuentos =
@@ -1039,7 +1044,7 @@ export function CreditDetailView({
 											<Select
 												value={String(editDiaPagoMensual)}
 												onValueChange={(value) =>
-													setEditDiaPagoMensual(Number(value))
+													setEditDiaPagoMensual(Number(value) as PaymentDay)
 												}
 											>
 												<SelectTrigger className="mt-1">
@@ -1667,6 +1672,23 @@ export function CreditDetailView({
 														: "Q -"}
 												</TableCell>
 											</TableRow>
+											<TableRow>
+												<TableCell>RCDP 1er Trimestre</TableCell>
+												<TableCell className="text-center">
+													<Badge
+														variant={rcdpTrimestre > 0 ? "default" : "outline"}
+														className="text-xs"
+													>
+														{rcdpTrimestre > 0 ? "SI" : "NO"}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">-</TableCell>
+												<TableCell className="text-right">
+													{rcdpTrimestre > 0
+														? formatCurrency(rcdpTrimestre)
+														: "Q -"}
+												</TableCell>
+											</TableRow>
 										</TableBody>
 									</Table>
 									<div className="mt-3 flex justify-end">
@@ -1968,6 +1990,13 @@ export function CreditDetailView({
 													{vehiculo?.origin || "N/A"}
 												</TableCell>
 											</TableRow>
+											<TableRow>
+												<TableCell>Clasificación</TableCell>
+												<TableCell className="text-right font-medium">
+													{vehicleInspection?.vehicleRating ||
+														(vehiculo?.isNew ? "Comercial" : "N/A")}
+												</TableCell>
+											</TableRow>
 											{/* Sección: Capacidad de Pago */}
 											<TableRow>
 												<TableCell className="pt-4 font-bold text-primary">
@@ -2202,6 +2231,15 @@ export function CreditDetailView({
 											<TableCell />
 										</TableRow>
 										<TableRow>
+											<TableCell className="py-2">RCDP 1er Trimestre</TableCell>
+											<TableCell className="py-2 text-right">
+												{rcdpTrimestre > 0
+													? formatCurrency(rcdpTrimestre)
+													: "Q -"}
+											</TableCell>
+											<TableCell />
+										</TableRow>
+										<TableRow>
 											<TableCell className="py-2">Gastos legales</TableCell>
 											<TableCell className="py-2 text-right">
 												{subtotalGastosAbogado > 0
@@ -2211,6 +2249,7 @@ export function CreditDetailView({
 											<TableCell className="py-2 text-right font-semibold">
 												{formatCurrency(
 													interesAnticipado +
+														rcdpTrimestre +
 														royalty +
 														gastosCombinados +
 														seguro +
@@ -2230,6 +2269,7 @@ export function CreditDetailView({
 									{formatCurrency(
 										montoTotalFinanciar -
 											(interesAnticipado +
+												rcdpTrimestre +
 												royalty +
 												gastosCombinados +
 												seguro +
@@ -2516,6 +2556,22 @@ export function CreditDetailView({
 								</Dialog>
 							</div>
 						</CardHeader>
+						{vehiculo && (
+							<div className="mx-6 mb-2 flex items-center gap-2 rounded-md border bg-muted/50 px-3 py-2">
+								<Car className="h-4 w-4 shrink-0 text-muted-foreground" />
+								<span className="text-muted-foreground text-sm">
+									{vehicleString}
+								</span>
+								{(vehiculo as any).isOwned && (
+									<Badge
+										variant="outline"
+										className="border-sky-300 bg-sky-50 text-[10px] text-sky-700 dark:border-sky-700 dark:bg-sky-950 dark:text-sky-300"
+									>
+										Cash In
+									</Badge>
+								)}
+							</div>
+						)}
 						<CardContent>
 							{checksQuery.isLoading ? (
 								<p className="text-center text-muted-foreground">
@@ -2531,68 +2587,94 @@ export function CreditDetailView({
 								</div>
 							) : (
 								<div className="space-y-4">
-									<div className="overflow-x-auto">
-										<Table>
-											<TableHeader>
-												<TableRow>
-													<TableHead>Fecha</TableHead>
-													<TableHead>Emisor</TableHead>
-													<TableHead>Banco</TableHead>
-													<TableHead>Beneficiario</TableHead>
-													<TableHead>No. Cuenta</TableHead>
-													<TableHead>Tipo</TableHead>
-													<TableHead>Tipo Cuenta</TableHead>
-													<TableHead>Banco Benef.</TableHead>
-													<TableHead>Concepto</TableHead>
-													<TableHead className="text-right">Monto</TableHead>
-													<TableHead className="w-10" />
-												</TableRow>
-											</TableHeader>
-											<TableBody>
-												{checks.map((check) => (
-													<TableRow key={check.id}>
-														<TableCell className="whitespace-nowrap">
-															{formatDate(check.checkDate)}
-														</TableCell>
-														<TableCell>{check.issuer}</TableCell>
-														<TableCell>{check.issuerBank || "-"}</TableCell>
-														<TableCell>{check.beneficiary}</TableCell>
-														<TableCell>{check.accountNumber || "-"}</TableCell>
-														<TableCell>{check.transferType}</TableCell>
-														<TableCell>{check.accountType || "-"}</TableCell>
-														<TableCell>
-															{check.beneficiaryBank || "-"}
-														</TableCell>
-														<TableCell>{check.concept}</TableCell>
-														<TableCell className="whitespace-nowrap text-right font-medium">
+									<div className="grid gap-3 sm:grid-cols-2">
+										{checks.map((check) => (
+											<div
+												key={check.id}
+												className="space-y-3 rounded-lg border bg-card p-4"
+											>
+												<div className="flex items-start justify-between">
+													<div>
+														<p className="font-semibold text-lg">
 															{check.currency}{" "}
 															{Number.parseFloat(check.amount).toLocaleString(
 																"es-GT",
 																{ minimumFractionDigits: 2 },
 															)}
-														</TableCell>
-														<TableCell>
-															<Button
-																variant="ghost"
-																size="icon"
-																className="h-8 w-8 text-destructive"
-																onClick={() => {
-																	if (
-																		confirm(
-																			"¿Estás seguro de eliminar este cheque?",
-																		)
-																	) {
-																		deleteCheckMutation.mutate(check.id);
-																	}
-																}}
-															>
-																<Trash2 className="h-4 w-4" />
-															</Button>
-														</TableCell>
-													</TableRow>
-												))}
-											</TableBody>
-										</Table>
+														</p>
+														<p className="text-muted-foreground text-sm">
+															{formatDate(check.checkDate)}
+														</p>
+													</div>
+													<Button
+														variant="ghost"
+														size="icon"
+														className="h-8 w-8 text-destructive"
+														onClick={() => {
+															if (
+																confirm(
+																	"¿Estás seguro de eliminar este cheque?",
+																)
+															) {
+																deleteCheckMutation.mutate(check.id);
+															}
+														}}
+													>
+														<Trash2 className="h-4 w-4" />
+													</Button>
+												</div>
+												<div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+													<div>
+														<span className="text-muted-foreground">
+															Emisor:{" "}
+														</span>
+														<span>{check.issuer}</span>
+													</div>
+													<div>
+														<span className="text-muted-foreground">
+															Banco:{" "}
+														</span>
+														<span>{check.issuerBank || "-"}</span>
+													</div>
+													<div>
+														<span className="text-muted-foreground">
+															Beneficiario:{" "}
+														</span>
+														<span>{check.beneficiary}</span>
+													</div>
+													<div>
+														<span className="text-muted-foreground">
+															Banco Benef.:{" "}
+														</span>
+														<span>{check.beneficiaryBank || "-"}</span>
+													</div>
+													<div>
+														<span className="text-muted-foreground">
+															No. Cuenta:{" "}
+														</span>
+														<span>{check.accountNumber || "-"}</span>
+													</div>
+													<div>
+														<span className="text-muted-foreground">
+															Tipo:{" "}
+														</span>
+														<span>{check.transferType}</span>
+													</div>
+													<div>
+														<span className="text-muted-foreground">
+															Tipo Cuenta:{" "}
+														</span>
+														<span>{check.accountType || "-"}</span>
+													</div>
+													<div>
+														<span className="text-muted-foreground">
+															Concepto:{" "}
+														</span>
+														<span>{check.concept}</span>
+													</div>
+												</div>
+											</div>
+										))}
 									</div>
 
 									<Separator />
@@ -2607,17 +2689,18 @@ export function CreditDetailView({
 									</div>
 
 									{/* Validación */}
-									{Math.abs(totalCheques - liquidoARecibir) > 0.01 && (
+									{Math.abs(totalCheques - montoTotalFinanciar) > 0.01 && (
 										<div className="rounded-lg border border-yellow-500 bg-yellow-50 p-4 dark:bg-yellow-950/20">
 											<p className="font-medium text-yellow-800 dark:text-yellow-200">
 												Advertencia: El total de cheques (
-												{formatCurrency(totalCheques)}) no coincide con el
-												líquido a recibir ({formatCurrency(liquidoARecibir)})
+												{formatCurrency(totalCheques)}) no coincide con el monto
+												total a financiar ({formatCurrency(montoTotalFinanciar)}
+												)
 											</p>
 											<p className="text-sm text-yellow-700 dark:text-yellow-300">
 												Diferencia:{" "}
 												{formatCurrency(
-													Math.abs(totalCheques - liquidoARecibir),
+													Math.abs(totalCheques - montoTotalFinanciar),
 												)}
 											</p>
 										</div>

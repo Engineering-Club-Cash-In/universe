@@ -21,16 +21,23 @@ export const investmentLeadSourceEnum = pgEnum("investment_lead_source", [
 	"email",
 	"social_media",
 	"event",
+	"other",
+	"facebook",
+	"instagram",
+	"google",
+	"meta",
 	"whatsapp",
 ]);
 
 export const investmentStageEnum = pgEnum("investment_stage", [
-	"prospecting",
-	"contacted",
-	"negotiation",
-	"acceptance_signatures",
-	"welcome",
-	"closed",
+	"data_collection",
+	"basic_profile_validation",
+	"profiling_and_qualification",
+	"model_presentation",
+	"active_follow_up",
+	"verbal_commitment_contract_sent",
+	"ticket_closure_transfer_activation",
+	"initial_onboarding_senior_handoff",
 	"lost",
 ]);
 
@@ -65,6 +72,7 @@ export const investmentDocumentTypeEnum = pgEnum("investment_document_type", [
 	"bank_statement",
 	"investment_receipt",
 	"other",
+	"contract",
 ]);
 
 export const investmentDocumentStatusEnum = pgEnum(
@@ -91,6 +99,7 @@ export const investmentLeads = pgTable("investment_leads", {
 	email: text("email"),
 	phones: text("phones").array(),
 	source: investmentLeadSourceEnum("source"),
+	campaign: text("campaign"),
 	proposedAmount: decimal("proposed_amount", { precision: 16, scale: 2 }),
 	assignedTo: text("assigned_to").references(() => user.id),
 	userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
@@ -143,7 +152,7 @@ export const investmentOpportunities = pgTable("investment_opportunities", {
 	investorId: uuid("investor_id").references(() => investors.id, {
 		onDelete: "set null",
 	}),
-	stage: investmentStageEnum("stage").notNull().default("prospecting"),
+	stage: investmentStageEnum("stage").notNull().default("data_collection"),
 	assignedAdvisorId: text("assigned_advisor_id")
 		.notNull()
 		.references(() => user.id),
@@ -265,6 +274,24 @@ export const investmentAuditLog = pgTable("investment_audit_log", {
 	performedBy: text("performed_by")
 		.notNull()
 		.references(() => user.id),
+	createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// --- Investor Activity Log (acciones sobre inversionistas) ---
+export const investorActivityLogActionEnum = pgEnum(
+	"investor_activity_log_action",
+	["document_created", "document_deleted", "document_visibility_toggled", "compra_cartera", "investor_created", "investor_updated"],
+);
+
+export const investorActivityLog = pgTable("investor_activity_log", {
+	id: uuid("id").primaryKey().defaultRandom(),
+	inversionistaId: integer("inversionista_id").notNull(),
+	action: investorActivityLogActionEnum("action").notNull(),
+	details: jsonb("details"),
+	performedBy: text("performed_by")
+		.notNull()
+		.references(() => user.id),
+	performedByName: text("performed_by_name"),
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

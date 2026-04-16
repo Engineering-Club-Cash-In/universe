@@ -52,6 +52,9 @@ function RootComponent() {
 		select: (s) => s.isLoading,
 	});
 
+	const location = useRouterState({ select: (s) => s.location });
+	const isPublicForm = location.pathname.startsWith("/formulario");
+
 	const [client] = useState<RouterClient<typeof appRouter>>(() =>
 		createORPCClient(link),
 	);
@@ -61,8 +64,8 @@ function RootComponent() {
 		<>
 			<HeadContent />
 			<ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
-				<div className="grid h-svh grid-rows-[auto_1fr]">
-					<Header />
+				<div className={isPublicForm ? "" : "grid h-svh grid-rows-[auto_1fr]"}>
+					{!isPublicForm && <Header />}
 					{isFetching ? <Loader /> : <Outlet />}
 				</div>
 				<Toaster richColors />

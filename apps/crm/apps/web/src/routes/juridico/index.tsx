@@ -111,7 +111,7 @@ function RouteComponent() {
 	// Obtener oportunidades listas para contratos (80%+)
 	const { data: opportunitiesForContracts, isLoading: isLoadingOpportunities } =
 		useQuery({
-			...orpc.getOpportunitiesForContracts.queryOptions(),
+			...orpc.getOpportunitiesForContracts.queryOptions({ input: {} }),
 			enabled: canViewLegal,
 		});
 
@@ -253,6 +253,14 @@ function RouteComponent() {
 							Gestión de contratos y documentos legales
 						</p>
 					</div>
+				</div>
+				<div className="flex gap-2">
+					<Button variant="outline" asChild>
+						<Link to="/juridico/dashboard">Dashboard</Link>
+					</Button>
+					<Button asChild>
+						<Link to="/juridico/dashboard-data">Carga de datos</Link>
+					</Button>
 				</div>
 			</div>
 

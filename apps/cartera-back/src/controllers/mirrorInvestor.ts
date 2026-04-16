@@ -378,7 +378,7 @@ export const llenarTablaEspejo = async ({ body, query, set }: any) => {
         if (existente) {
           await tx
             .update(creditos_inversionistas_espejo)
-            .set(dataEspejo)
+            .set({ ...dataEspejo, updated_at: new Date() })
             .where(eq(creditos_inversionistas_espejo.id, existente.id));
         } else {
           await tx
@@ -648,6 +648,89 @@ export const getCreditsByInvestor = async ({ query, set }: any) => {
       success: false,
       message: "Error al obtener créditos por inversionista",
       error: String(error),
+    };
+  }
+};
+
+/**
+ * Controller: asignarReinversionEspejo
+ *
+ * Body:
+ * {
+ *   asignaciones: [{
+ *     id_credito_inversionista_espejo: number,
+ *     tipo_reinversion: string
+ *   }]
+ * }
+ */
+export const asignarReinversionEspejo = async ({ body, set }: any) => {
+  try {
+    const { asignaciones, inversionista_id } = body;
+
+    if (!inversionista_id) {
+      set.status = 400;
+      return { success: false, message: "Falta el inversionista_id" };
+    }
+
+    const resultados: any[] = [];
+    const omitidos: any[] = [];
+    let idsActuales: number[] = [];
+    let desaparecidos: number[] = [];
+
+    await db.transaction(async (tx) => {
+      // 1) Obtener todos los IDs de créditos espejo actuales para este inversionista
+      const actuales = await tx
+        .select({ id: creditos_inversionistas_espejo.id })
+        .from(creditos_inversionistas_espejo)
+        .where(eq(creditos_inversionistas_espejo.inversionista_id, inversionista_id));
+
+      idsActuales = actuales.map((a) => a.id);
+      const idsEnviados = asignaciones.map((a: any) => a.id_credito_inversionista_espejo);
+
+      // 2) Identificar IDs desaparecidos (están en la base pero no en el body)
+      desaparecidos = idsActuales.filter((id) => !idsEnviados.includes(id));
+
+      // 3) Actualizar los que SÍ vienen en el arreglo
+      for (const req of asignaciones) {
+        const { id_credito_inversionista_espejo, tipo_reinversion } = req;
+        
+        // Verificar que el ID enviado realmente pertenezca a este inversionista
+        if (!idsActuales.includes(id_credito_inversionista_espejo)) {
+          omitidos.push({ id_credito_inversionista_espejo, razon: "El ID no pertenece a este inversionista o no existe" });
+          continue;
+        }
+
+        await tx
+          .update(creditos_inversionistas_espejo)
+          .set({ tipo_reinversion, updated_at: new Date() })
+          .where(eq(creditos_inversionistas_espejo.id, id_credito_inversionista_espejo));
+
+        resultados.push({ id_credito_inversionista_espejo, tipo_reinversion });
+      }
+
+      // 4) Marcar como 'sin_reinversion' los desaparecidos
+      if (desaparecidos.length > 0) {
+        await tx
+          .update(creditos_inversionistas_espejo)
+          .set({ tipo_reinversion: "sin_reinversion", updated_at: new Date() })
+          .where(inArray(creditos_inversionistas_espejo.id, desaparecidos));
+      }
+    });
+
+    set.status = 200;
+    return {
+      success: true,
+      message: `Sincronización completada. Actualizados: ${resultados.length}, Marcados sin reinversión: ${desaparecidos.length}, Omitidos: ${omitidos.length}.`,
+      resultados,
+      omitidos
+    };
+  } catch (error) {
+    console.error("[asignarReinversionEspejo] Error:", error);
+    set.status = 500;
+    return {
+      success: false,
+      message: "Error al asignar tipos de reinversión",
+      error: String(error)
     };
   }
 };

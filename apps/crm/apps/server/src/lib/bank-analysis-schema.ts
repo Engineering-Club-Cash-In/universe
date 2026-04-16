@@ -39,8 +39,8 @@ Eres un analista de capacidad de pago para una financiera que otorga créditos p
 
 1. **datos_generales**: Un objeto que contenga:
    - nombre_cuentahabiente: Nombre completo del cuentahabiente.
-   - numero_cuenta: Número de cuenta bancaria.
-   - tipo_cuenta: Tipo de cuenta (monetaria, ahorros, etc.).
+   - numero_cuenta: Número de cuenta bancaria (si hay múltiples cuentas, sepáralas con " / ").
+   - tipo_cuenta: Tipo de cuenta (monetaria, ahorros, etc.). Si hay múltiples, sepáralas con " / ".
 
 2. **resumen_mensual**: Un arreglo de objetos, donde cada objeto representa un mes y contiene:
    - mes: Nombre del mes (ej. "Febrero 2024").
@@ -64,6 +64,20 @@ Eres un analista de capacidad de pago para una financiera que otorga créditos p
    - promedio_gastos_variables: Promedio mensual de gastos variables.
    - disponibilidad_economica: Promedio de la diferencia entre créditos y débitos totales. Se calcula como: (promedio_creditos - promedio_debitos).
    **Nota**: El promedio de créditos es la suma de 'total_creditos' a lo largo de los meses analizados dividido por la cantidad de meses. El promedio de débitos es la suma de 'total_debitos' a lo largo de los meses analizados dividido por la cantidad de meses.
+
+## IMPORTANTE: Múltiples cuentas bancarias del mismo titular
+
+Si los estados de cuenta provienen de MÚLTIPLES bancos o cuentas del mismo titular, debes:
+
+1. **Detectar transferencias entre cuentas propias**: Las transferencias entre cuentas del mismo titular (ej. ACH entre BAC y G&T del mismo nombre) NO son ingresos ni gastos reales. Son simplemente movimiento de dinero entre cuentas propias.
+   - Ejemplos comunes: "DEBITO ACH IFT" en una cuenta que corresponde a "CREDITO ACH [NOMBRE_TITULAR]" en otra cuenta.
+   - Transferencias electrónicas entre cuentas propias (TEF, ACH) donde el remitente y destinatario son el mismo titular.
+
+2. **Excluir transferencias inter-cuenta**: NO incluyas estas transferencias en total_creditos ni total_debitos. Solo cuenta el dinero que ENTRA o SALE del sistema de cuentas del titular (depósitos de terceros, sueldos, pagos a comercios, retiros, etc.).
+
+3. **Consolidar por mes**: Si hay estados de cuenta de múltiples bancos para el mismo mes, genera UN SOLO objeto por mes con los totales consolidados (ya sin transferencias inter-cuenta). Los saldos iniciales y finales deben ser la suma de ambas cuentas.
+
+4. **Siempre generar un máximo de 3 meses** en el resumen_mensual, correspondientes a los 3 meses calendario que aparecen en los estados de cuenta.
 
 Analiza los siguientes estados de cuenta bancarios y responde en formato JSON. Asegúrate de que los datos cuadren correctamente.
 `.trim();

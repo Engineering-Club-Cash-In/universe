@@ -1,6 +1,6 @@
 import { openai } from "@ai-sdk/openai";
 import { ORPCError } from "@orpc/server";
-import { generateObject } from "ai";
+import { generateObject, generateText } from "ai";
 import { and, desc, eq, ilike, inArray, not, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
@@ -34,18 +34,23 @@ import {
 	publicProcedure,
 	tallerOrCrmProcedure,
 } from "../lib/orpc";
+import { ROLES } from "../lib/roles";
 import {
+	buildUploadPrefix,
 	deleteFileFromR2,
-	generateUniqueFilename,
 	getFileUrl,
-	resolveMimeType,
-	uploadFileToR2,
-	validateFile,
+	verifyUploadedDocumentInR2,
 } from "../lib/storage";
 import {
 	prepareValuationContext,
 	vehicleValuationSchema,
 } from "../lib/valuation-schema";
+import {
+	buildManualValuationData,
+	MANUAL_VALUATION_RESULT,
+	MANUAL_VALUATION_TECHNICIAN_NAME,
+} from "../lib/manual-valuation";
+import { canAccessSalesTeamActions } from "../lib/sales-permissions";
 
 // Configuration Constants for Evidence Uploads
 const MAX_EVIDENCE_FILES_PER_ITEM = 10;
@@ -57,6 +62,40 @@ const ALLOWED_MIME_TYPES = [
 	"video/mp4",
 	"video/quicktime",
 ];
+const MANUAL_VALUATION_COMMA_DECIMAL_PATTERN = /^\d+,\d+$/;
+const MANUAL_VALUATION_THOUSANDS_PATTERN = /^\d{1,3}(,\d{3})+(\.\d+)?$/;
+const MANUAL_VALUATION_PLAIN_NUMBER_PATTERN = /^\d+(\.\d+)?$/;
+
+const normalizeManualValuationAmount = (
+	value: string,
+	fieldLabel: string,
+): string => {
+	const sanitized = value.replace(/[Qq\s]/g, "");
+
+	if (!sanitized) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: `${fieldLabel} debe ser un número válido`,
+		});
+	}
+
+	if (MANUAL_VALUATION_THOUSANDS_PATTERN.test(sanitized)) {
+		return sanitized.replace(/,/g, "");
+	}
+
+	if (MANUAL_VALUATION_COMMA_DECIMAL_PATTERN.test(sanitized)) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: `${fieldLabel} debe usar punto para decimales`,
+		});
+	}
+
+	if (!MANUAL_VALUATION_PLAIN_NUMBER_PATTERN.test(sanitized)) {
+		throw new ORPCError("BAD_REQUEST", {
+			message: `${fieldLabel} debe ser un número válido`,
+		});
+	}
+
+	return sanitized;
+};
 
 export const vehiclesRouter = {
 	// Get all vehicles with their latest inspection and photos
@@ -73,6 +112,8 @@ export const vehiclesRouter = {
 					excludeStatus: z
 						.enum(["pending", "available", "sold", "maintenance", "auction"])
 						.optional(),
+					// Filtro de propiedad: "owned" = solo Cash In, "not_owned" = solo externos, undefined = todos
+					ownership: z.enum(["owned", "not_owned"]).optional(),
 				})
 				.optional(),
 		)
@@ -83,6 +124,7 @@ export const vehiclesRouter = {
 			const status = input?.status;
 			const category = input?.category;
 			const excludeStatus = input?.excludeStatus;
+			const ownership = input?.ownership;
 
 			// Build conditions
 			const conditions = [];
@@ -111,6 +153,13 @@ export const vehiclesRouter = {
 			// Excluir vehículos con cierto status
 			if (excludeStatus) {
 				conditions.push(not(eq(vehicles.status, excludeStatus as any)));
+			}
+
+			// Filtro de propiedad
+			if (ownership === "owned") {
+				conditions.push(eq(vehicles.isOwned, true));
+			} else if (ownership === "not_owned") {
+				conditions.push(eq(vehicles.isOwned, false));
 			}
 
 			// Category filters
@@ -272,12 +321,12 @@ export const vehiclesRouter = {
 					),
 				}));
 
-				return {
-					data: vehiclesWithConvenios,
-					total,
-					limit,
-					offset,
-				};
+			return {
+				data: vehiclesWithConvenios,
+				total,
+				limit,
+				offset,
+			};
 		}),
 
 	// Get vehicle by ID with all related data
@@ -376,6 +425,7 @@ export const vehiclesRouter = {
 				companyId: z.string().nullable().optional(),
 				status: z.string().optional().default("pending"),
 				isNew: z.boolean().optional().default(false),
+				isOwned: z.boolean().optional().default(false),
 				// Campos para contratos legales
 				seats: z.number().nullable().optional(),
 				doors: z.number().nullable().optional(),
@@ -397,6 +447,11 @@ export const vehiclesRouter = {
 				if (isUniqueViolation(error, "vehicles_license_plate_unique")) {
 					throw new ORPCError("BAD_REQUEST", {
 						message: `Ya existe un vehículo con la placa "${input.licensePlate}"`,
+					});
+				}
+				if (isUniqueViolation(error, "vehicles_vin_number_unique")) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `Ya existe un vehículo con el número de chasis/VIN "${input.vinNumber}"`,
 					});
 				}
 				throw error;
@@ -426,6 +481,7 @@ export const vehiclesRouter = {
 				transmission: z.string().optional(),
 				companyId: z.string().nullable().optional(),
 				status: z.string().optional().default("pending"),
+				isOwned: z.boolean().optional().default(false),
 				// Campos para contratos legales
 				seats: z.number().nullable().optional(),
 				doors: z.number().nullable().optional(),
@@ -480,6 +536,7 @@ export const vehiclesRouter = {
 					transmission: z.string().nullable().optional(),
 					companyId: z.string().nullable().optional(),
 					isNew: z.boolean().optional(),
+					isOwned: z.boolean().optional(),
 					status: z
 						.enum(["pending", "available", "sold", "maintenance", "auction"])
 						.optional(),
@@ -585,6 +642,79 @@ export const vehiclesRouter = {
 			return result;
 		}),
 
+	// Search ONLY vehicles with recorded inspections
+	searchWithInspections: tallerOrCrmProcedure
+		.input(
+			z.object({
+				query: z.string().optional(),
+				status: z
+					.enum(["pending", "available", "sold", "maintenance", "auction"])
+					.optional(),
+				vehicleType: z.string().optional(),
+				fuelType: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const conditions = [];
+
+			if (input.query) {
+				conditions.push(
+					or(
+						ilike(vehicles.make, `%${input.query}%`),
+						ilike(vehicles.model, `%${input.query}%`),
+						ilike(vehicles.licensePlate, `%${input.query}%`),
+						ilike(vehicles.vinNumber, `%${input.query}%`),
+					),
+				);
+			}
+
+			if (input.status) {
+				conditions.push(eq(vehicles.status, input.status));
+			}
+
+			if (input.vehicleType) {
+				conditions.push(eq(vehicles.vehicleType, input.vehicleType));
+			}
+
+			if (input.fuelType) {
+				conditions.push(eq(vehicles.fuelType, input.fuelType));
+			}
+
+			// Use innerJoin to ensure the vehicle has at least one inspection
+			const result = await db
+				.selectDistinct({
+					id: vehicles.id,
+					make: vehicles.make,
+					model: vehicles.model,
+					year: vehicles.year,
+					licensePlate: vehicles.licensePlate,
+					vinNumber: vehicles.vinNumber,
+					motorNumber: vehicles.motorNumber,
+					color: vehicles.color,
+					vehicleType: vehicles.vehicleType,
+					milesMileage: vehicles.milesMileage,
+					kmMileage: vehicles.kmMileage,
+					origin: vehicles.origin,
+					cylinders: vehicles.cylinders,
+					engineCC: vehicles.engineCC,
+					fuelType: vehicles.fuelType,
+					transmission: vehicles.transmission,
+					trim: vehicles.trim,
+					traction: vehicles.traction,
+					status: vehicles.status,
+					createdAt: vehicles.createdAt,
+				})
+				.from(vehicles)
+				.innerJoin(
+					vehicleInspections,
+					eq(vehicles.id, vehicleInspections.vehicleId),
+				)
+				.where(conditions.length > 0 ? and(...conditions) : undefined)
+				.orderBy(desc(vehicles.createdAt));
+
+			return result;
+		}),
+
 	// Create vehicle inspection
 	createInspection: protectedProcedure
 		.input(
@@ -628,6 +758,107 @@ export const vehiclesRouter = {
 			}
 
 			return newInspection;
+		}),
+
+	upsertManualValuation: crmProcedure
+		.input(
+			z.object({
+				vehicleId: z.string().uuid(),
+				vehicleRating: z.enum(["Comercial", "No comercial"]),
+				marketValue: z.string().trim(),
+				suggestedCommercialValue: z.string().trim(),
+				bankValue: z.string().trim(),
+				currentConditionValue: z.string().trim(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const userRole = context.userRole || "";
+			const canManageManualValuation = canAccessSalesTeamActions(userRole);
+
+			if (!canManageManualValuation) {
+				throw new ORPCError("FORBIDDEN", {
+					message:
+						"Solo administradores y supervisores de ventas pueden cargar valores manuales",
+				});
+			}
+
+			const [vehicle] = await db
+				.select({ id: vehicles.id })
+				.from(vehicles)
+				.where(eq(vehicles.id, input.vehicleId))
+				.limit(1);
+
+			if (!vehicle) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Vehículo no encontrado",
+				});
+			}
+
+			const normalizedMarketValue = normalizeManualValuationAmount(
+				input.marketValue,
+				"Valor mercado",
+			);
+			const normalizedSuggestedCommercialValue = normalizeManualValuationAmount(
+				input.suggestedCommercialValue,
+				"Valor comercial sugerido",
+			);
+			const normalizedBankValue = normalizeManualValuationAmount(
+				input.bankValue,
+				"Valor bancario",
+			);
+			const normalizedCurrentConditionValue = normalizeManualValuationAmount(
+				input.currentConditionValue,
+				"Valor condiciones actuales",
+			);
+
+			const [latestInspection] = await db
+				.select()
+				.from(vehicleInspections)
+				.where(eq(vehicleInspections.vehicleId, input.vehicleId))
+				.orderBy(
+					desc(vehicleInspections.inspectionDate),
+					desc(vehicleInspections.createdAt),
+				)
+				.limit(1);
+
+			const isManualValuation =
+				latestInspection &&
+				latestInspection.technicianName === MANUAL_VALUATION_TECHNICIAN_NAME &&
+				latestInspection.inspectionResult === MANUAL_VALUATION_RESULT;
+
+			const manualValuationData = buildManualValuationData({
+				vehicleRating: input.vehicleRating,
+				marketValue: normalizedMarketValue,
+				suggestedCommercialValue: normalizedSuggestedCommercialValue,
+				bankValue: normalizedBankValue,
+				currentConditionValue: normalizedCurrentConditionValue,
+			});
+
+			if (isManualValuation) {
+				const [updatedInspection] = await db
+					.update(vehicleInspections)
+					.set(manualValuationData)
+					.where(eq(vehicleInspections.id, latestInspection.id))
+					.returning();
+
+				return {
+					action: "updated" as const,
+					inspection: updatedInspection,
+				};
+			}
+
+			const [newInspection] = await db
+				.insert(vehicleInspections)
+				.values({
+					vehicleId: input.vehicleId,
+					...manualValuationData,
+				})
+				.returning();
+
+			return {
+				action: "created" as const,
+				inspection: newInspection,
+			};
 		}),
 
 	// Update inspection
@@ -772,6 +1003,73 @@ export const vehiclesRouter = {
 			return inspection || null;
 		}),
 
+	// Validate if license plate or VIN is already used
+	validateLicensePlate: publicProcedure
+		.input(
+			z.object({
+				licensePlate: z.string().optional(),
+				vinNumber: z.string().optional(),
+				id: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			if (!input.licensePlate && !input.vinNumber) return { valid: true };
+
+			let foundVehicle = null;
+
+			// 1. Priority: Find by Plate exactly
+			if (input.licensePlate) {
+				const cleanInputPlate = input.licensePlate
+					.replace(/[^a-zA-Z0-9]/g, "")
+					.toUpperCase();
+
+				const existingWithPlate = await db
+					.select()
+					.from(vehicles)
+					.where(
+						and(
+							sql`REPLACE(REPLACE(UPPER(${vehicles.licensePlate}), ' ', ''), '-', '') = ${cleanInputPlate}`,
+							input.id ? not(eq(vehicles.id, input.id)) : undefined,
+						),
+					)
+					.limit(1);
+				
+				foundVehicle = existingWithPlate[0] || null;
+			}
+
+			// 2. Fallback: Find by VIN exactly (only if not found by plate)
+			if (!foundVehicle && input.vinNumber) {
+				const cleanInputVin = input.vinNumber
+					.replace(/[^a-zA-Z0-9]/g, "")
+					.toUpperCase();
+
+				const existingWithVin = await db
+					.select()
+					.from(vehicles)
+					.where(
+						and(
+							sql`REPLACE(REPLACE(UPPER(${vehicles.vinNumber}), ' ', ''), '-', '') = ${cleanInputVin}`,
+							input.id ? not(eq(vehicles.id, input.id)) : undefined,
+						),
+					)
+					.limit(1);
+				
+				foundVehicle = existingWithVin[0] || null;
+			}
+
+			// 3. Result
+			if (foundVehicle) {
+				return {
+					valid: false,
+					alreadyExists: true,
+					vehicle: foundVehicle,
+					message: `Vehículo registrado encontrado.`,
+				};
+			}
+
+			return { valid: true, message: "", alreadyExists: false };
+		}),
+
 	// Get statistics
 	getStatistics: publicProcedure.handler(async () => {
 		const allVehicles = await db.select().from(vehicles);
@@ -810,6 +1108,7 @@ export const vehiclesRouter = {
 			z.object({
 				// Vehicle data
 				vehicle: z.object({
+					id: z.string().optional(),
 					make: z.string(),
 					model: z.string(),
 					year: z.number(),
@@ -865,6 +1164,10 @@ export const vehiclesRouter = {
 					paintCondition: z.number().optional(),
 					hasAgencyHistory: z.boolean().optional(),
 					rejectionEvidenceUrl: z.string().optional(),
+					status: z
+						.enum(["pending", "approved", "rejected", "auction"])
+						.optional()
+						.default("pending"),
 				}),
 				// Checklist items
 				checklistItems: z.array(
@@ -914,6 +1217,8 @@ export const vehiclesRouter = {
 							title: z.string(),
 							description: z.string().optional(),
 							url: z.string(),
+							valuatorComment: z.string().optional(),
+							noCommentsChecked: z.boolean().optional(),
 						}),
 					)
 					.optional(),
@@ -921,6 +1226,7 @@ export const vehiclesRouter = {
 				aiValuation: z
 					.object({
 						suggestedValue: z.number(),
+						baseMarketValue: z.number().optional(),
 						reasoning: z.string(),
 						marketAnalysis: z.string(),
 						depreciationFactors: z.array(z.string()),
@@ -945,31 +1251,42 @@ export const vehiclesRouter = {
 			// Start a transaction
 			try {
 				return await db.transaction(async (tx) => {
-					// 1. Check if vehicle exists by VIN or create new
+					// 1. Identify or create vehicle by ID - Sanitize blank IDs
 					let vehicleId: string;
-					const existingVehicle = await tx
-						.select()
-						.from(vehicles)
-						.where(eq(vehicles.vinNumber, input.vehicle.vinNumber))
-						.limit(1);
+					const { id: rawId, ...vehicleData } = input.vehicle;
+					const vehicleInputId = rawId && rawId.trim() !== "" ? rawId : undefined;
 
-					if (existingVehicle.length > 0) {
-						// Update existing vehicle
+					if (vehicleInputId) {
+						// Try to update existing vehicle by ID
 						const [updated] = await tx
 							.update(vehicles)
 							.set({
-								...input.vehicle,
+								...vehicleData,
 								updatedAt: new Date(),
 							})
-							.where(eq(vehicles.vinNumber, input.vehicle.vinNumber))
+							.where(eq(vehicles.id, vehicleInputId))
 							.returning();
-						vehicleId = updated.id;
+						
+						if (updated) {
+							vehicleId = updated.id;
+						} else {
+							// Fallback: If ID not found, create new vehicle with that ID
+							const [newVehicle] = await tx
+								.insert(vehicles)
+								.values({
+									id: vehicleInputId,
+									...vehicleData,
+									status: "pending",
+								} as NewVehicle)
+								.returning();
+							vehicleId = newVehicle.id;
+						}
 					} else {
-						// Create new vehicle
+						// Create new vehicle (no ID provided or ID was blank)
 						const [newVehicle] = await tx
 							.insert(vehicles)
 							.values({
-								...input.vehicle,
+								...vehicleData,
 								status: "pending",
 							} as NewVehicle)
 							.returning();
@@ -977,9 +1294,20 @@ export const vehiclesRouter = {
 					}
 
 					// 2. Create inspection - Clean numeric values
-					const cleanValue = (value: string): string => {
-						// Remove formatting but keep as string for the database
-						return Number.parseFloat(value.replace(/[,_\s]/g, "")).toString();
+					const cleanValue = (value: string | undefined): string | null => {
+						// Treat empty/whitespace-only values as unknown (NULL in DB)
+						if (!value || value.trim() === "") {
+							return null;
+						}
+						const normalized = value.replace(/[,_\s]/g, "");
+						const parsed = Number.parseFloat(normalized);
+						if (Number.isNaN(parsed)) {
+							// Non-empty but invalid numeric string: fail validation rather than coercing to "0"
+							throw new ORPCError("BAD_REQUEST", {
+								message: "Invalid monetary value provided",
+							});
+						}
+						return parsed.toString();
 					};
 
 					const [newInspection] = await tx
@@ -997,11 +1325,13 @@ export const vehiclesRouter = {
 							),
 							// Save AI recommendations if provided
 							aiSuggestedValue: input.aiValuation?.suggestedValue?.toString(),
+							// TODO: baseMarketValue may also be mapped if there's a specific column for it, but the client maps it to marketValue above
 							aiReasoning: input.aiValuation?.reasoning,
 							aiMarketAnalysis: input.aiValuation?.marketAnalysis,
 							aiDepreciationFactors: input.aiValuation?.depreciationFactors,
 							aiConfidence: input.aiValuation?.confidence,
-							aiCommercialClassification: input.aiValuation?.commercialClassification,
+							aiCommercialClassification:
+								input.aiValuation?.commercialClassification,
 							status: "pending",
 							alerts: [],
 						} as NewVehicleInspection)
@@ -1089,12 +1419,20 @@ export const vehiclesRouter = {
 						);
 					}
 
-					// 5. Update vehicle status based on checklist
+					// 5. Update vehicle and inspection status
 					const criticalIssues = input.checklistItems.filter(
 						(item) => item.checked && item.severity === "critical",
 					);
 
-					if (criticalIssues.length > 0) {
+					// Prioritize rejection if there are critical issues
+					const finalStatus =
+						criticalIssues.length > 0 || input.inspection.status === "rejected"
+							? "rejected"
+							: input.inspection.status === "approved"
+								? "approved"
+								: "pending";
+
+					if (finalStatus === "rejected") {
 						await tx
 							.update(vehicles)
 							.set({
@@ -1103,7 +1441,6 @@ export const vehiclesRouter = {
 							})
 							.where(eq(vehicles.id, vehicleId));
 
-						// Safely handle alerts array - ensure proper JSON serialization
 						const alertsArray = criticalIssues.map((item) => item.item);
 
 						await tx
@@ -1111,6 +1448,22 @@ export const vehiclesRouter = {
 							.set({
 								status: "rejected",
 								alerts: alertsArray,
+								updatedAt: new Date(),
+							})
+							.where(eq(vehicleInspections.id, newInspection.id));
+					} else if (finalStatus === "approved") {
+						await tx
+							.update(vehicles)
+							.set({
+								status: "available",
+								updatedAt: new Date(),
+							})
+							.where(eq(vehicles.id, vehicleId));
+
+						await tx
+							.update(vehicleInspections)
+							.set({
+								status: "approved",
 								updatedAt: new Date(),
 							})
 							.where(eq(vehicleInspections.id, newInspection.id));
@@ -1171,12 +1524,13 @@ INFORMACIÓN DEL VEHÍCULO:
 - Modelo/Año (año del vehículo, ej: 2020, 2023)
 - Color (descripción del color)
 - Tipo de vehículo (ej: AUTOMOVIL, CAMIONETA)
+- Uso (ej: PARTICULAR, COMERCIAL)
 
 ESPECIFICACIONES TÉCNICAS:
 - VIN/Chasis/Serie (números de identificación únicos)
-- Motor/CC (cilindrada)
+- Motor/CC (Cilindrada, buscar etiqueta "Cilindrada" o "CC")
 - Cilindros (número)
-- Asientos (número)
+- Asientos (Número de pasajeros, buscar etiqueta "Asientos" o "No. Asientos")
 
 REGLAS IMPORTANTES:
 - Si encuentras al menos 3 campos correctos: extractionSuccess = true
@@ -1184,7 +1538,7 @@ REGLAS IMPORTANTES:
 - Siempre retorna un objeto JSON válido con extractionSuccess como boolean y extractionErrors como array
 - Deja campos vacíos ("") si no los encuentras claramente
 - NO uses estructura "properties", retorna el objeto directamente
-- Ejemplo correcto: {"licensePlate": "P0-123ABC", "make": "TOYOTA", "line": "COROLLA", "model": "2020", "extractionSuccess": true, "extractionErrors": []}`,
+- Ejemplo correcto: {"licensePlate": "P0-123ABC", "make": "TOYOTA", "line": "COROLLA", "model": "2020", "use": "PARTICULAR", "seats": "5", "cc": "2000", "extractionSuccess": true, "extractionErrors": []}`,
 						},
 						{
 							role: "user",
@@ -1280,13 +1634,44 @@ REGLAS IMPORTANTES:
 					input.photos,
 				);
 
-				const { object } = await generateObject({
+				// Step 1: Web search for current market prices
+				console.log("Searching web for current market prices...");
+				const {
+					text: marketResearch,
+					sources,
+					usage: searchUsage,
+				} = await generateText({
+					model: openai("gpt-5-mini"),
+					prompt: `Busca precios actuales de mercado para: ${context.make} ${context.model} ${context.year} usado en Guatemala.
+Incluye precios de venta en portales como OLX, Encuentra24, Facebook Marketplace Guatemala, y cualquier referencia relevante.
+Responde con un resumen conciso de los precios encontrados en Quetzales (GTQ).`,
+					tools: {
+						web_search: openai.tools.webSearch({
+							searchContextSize: "medium",
+							userLocation: {
+								type: "approximate",
+								city: "Guatemala City",
+								country: "GT",
+							},
+						}),
+					},
+				});
+				console.log("Market research results:", marketResearch);
+				console.log("Sources:", sources);
+
+				// Step 2: Generate structured valuation with market data
+				const { object, usage: valuationUsage } = await generateObject({
 					model: openai("gpt-5-mini"),
 					schema: vehicleValuationSchema,
 					messages: [
 						{
 							role: "system",
 							content: `Eres un experto valuador de vehículos en Guatemala con más de 20 años de experiencia en el mercado automotriz guatemalteco.
+
+DATOS DE MERCADO ACTUALES (obtenidos de búsqueda web en tiempo real):
+${marketResearch}
+
+${sources?.length ? `Fuentes consultadas:\n${sources.map((s) => `- ${"url" in s ? s.url : s.id}`).join("\n")}` : ""}
 
 Tu tarea es realizar una valoración precisa de vehículos basada en:
 
@@ -1311,9 +1696,14 @@ RANGOS DE VALORES TÍPICOS (Referencia):
 - Premium: Q200,000 - Q500,000+
 
 CLASIFICACIÓN COMERCIAL:
-Debes clasificar el vehículo como "Comercial" o "No comercial" basándote en qué tan fácil es venderlo:
-- Comercial: Vehículos con alta demanda en Guatemala, marcas populares (Toyota, Mazda, Honda, Nissan, Kia, Hyundai, etc.), modelos comunes, pickups, sedanes y SUVs que se venden rápidamente.
-- No comercial: Vehículos de nicho, marcas poco conocidas en el mercado local, modelos muy específicos, deportivos de lujo, o vehículos que por sus características tardan más en encontrar comprador.
+Debes clasificar el vehículo como "Comercial" o "No comercial" basándote ÚNICA Y EXCLUSIVAMENTE en qué tan fácil es vender la MARCA Y MODELO en el mercado, IGNORANDO POR COMPLETO EL ESTADO FÍSICO O LOS DAÑOS DEL VEHÍCULO:
+- Comercial: Vehículos con alta demanda en Guatemala, marcas populares y modelos comunes. ¡IMPORTANTE! Incluso si un vehículo "Comercial" está destruido o en pésimo estado, SIGUE SIENDO COMERCIAL porque pertenece a un modelo de alta demanda. (Ejemplo: Un Toyota Corolla o Mazda CX-5 siempre es Comercial, aunque tenga daños graves).
+- No comercial: Vehículos de nicho, marcas poco conocidas, modelos con poco movimiento en el mercado guatemalteco. Estrictamente por su baja demanda de modelo, no por daños. (Ejemplo: Un Hyundai Veloster o Volkswagen Passat siempre será No Comercial, aunque esté nítido físicamente).
+
+VALOR DE MERCADO BASE Y VALOR SUGERIDO:
+Recuerda que debes proveer dos valores:
+1. baseMarketValue: Valor del vehículo funcionando y sin choques de acuerdo al mercado.
+2. suggestedValue: Valor final ya castigado por los daños físicos y mecánicos (condición actual).
 
 Proporciona una valoración conservadora pero realista para el mercado guatemalteco.`,
 						},
@@ -1389,10 +1779,56 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 
 				console.log("AI valuation result:", object);
 
+				// Token usage tracking
+				const totalInputTokens =
+					(searchUsage.inputTokens ?? 0) + (valuationUsage.inputTokens ?? 0);
+				const totalOutputTokens =
+					(searchUsage.outputTokens ?? 0) + (valuationUsage.outputTokens ?? 0);
+				const totalTokens = totalInputTokens + totalOutputTokens;
+
+				// gpt-5-mini pricing per 1M tokens
+				const GPT5_MINI_INPUT_COST_PER_M = 0.25;
+				const GPT5_MINI_OUTPUT_COST_PER_M = 2.0;
+				const TOKENS_PER_M = 1_000_000;
+				const estimatedCostUSD =
+					(totalInputTokens * GPT5_MINI_INPUT_COST_PER_M) / TOKENS_PER_M +
+					(totalOutputTokens * GPT5_MINI_OUTPUT_COST_PER_M) / TOKENS_PER_M;
+
+				console.log("=== AI VALUATION TOKEN USAGE ===");
+				console.log(
+					`Web Search - Input: ${searchUsage.inputTokens}, Output: ${searchUsage.outputTokens}, Total: ${searchUsage.totalTokens}`,
+				);
+				console.log(
+					`Valuation  - Input: ${valuationUsage.inputTokens}, Output: ${valuationUsage.outputTokens}, Total: ${valuationUsage.totalTokens}`,
+				);
+				console.log(
+					`Combined   - Input: ${totalInputTokens}, Output: ${totalOutputTokens}, Total: ${totalTokens}`,
+				);
+				console.log(`Estimated Cost: $${estimatedCostUSD.toFixed(6)} USD`);
+				console.log("================================");
+
 				return {
 					success: true,
 					valuation: object,
 					message: "Valoración por IA generada exitosamente",
+					usage: {
+						webSearch: {
+							inputTokens: searchUsage.inputTokens,
+							outputTokens: searchUsage.outputTokens,
+							totalTokens: searchUsage.totalTokens,
+						},
+						valuation: {
+							inputTokens: valuationUsage.inputTokens,
+							outputTokens: valuationUsage.outputTokens,
+							totalTokens: valuationUsage.totalTokens,
+						},
+						total: {
+							inputTokens: totalInputTokens,
+							outputTokens: totalOutputTokens,
+							totalTokens,
+						},
+						estimatedCostUSD: Number(estimatedCostUSD.toFixed(6)),
+					},
 				};
 			} catch (error) {
 				console.error("AI valuation error:", error);
@@ -1462,7 +1898,7 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 					name: z.string(),
 					type: z.string(),
 					size: z.number(),
-					data: z.string(), // Base64
+					key: z.string(), // R2 key from presigned upload
 				}),
 			}),
 		)
@@ -1489,36 +1925,13 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 				});
 			}
 
-			// Resolver MIME type (fallback por extensión)
-			const resolvedMimeType = resolveMimeType({
-				type: input.file.type,
-				name: input.file.name,
-			} as File);
-
-			// Create File/Blob from data
-			const fileBuffer = Buffer.from(input.file.data, "base64");
-			const fileBlob = new Blob([fileBuffer], { type: resolvedMimeType });
-
-			// Validate file
-			const validation = validateFile({
-				type: resolvedMimeType,
-				size: input.file.size,
-				name: input.file.name,
-			} as File);
-
-			if (!validation.valid) {
-				throw new ORPCError("BAD_REQUEST", { message: validation.error });
-			}
-
-			// Generate unique filename
-			const uniqueFilename = generateUniqueFilename(input.file.name);
-
-			// Upload to R2
-			const { key } = await uploadFileToR2(
-				fileBlob,
-				uniqueFilename,
-				input.vehicleId,
-			);
+			const uploadedFile = await verifyUploadedDocumentInR2({
+				key: input.file.key,
+				expectedPrefix: buildUploadPrefix("vehicle_document", input.vehicleId),
+				filename: input.file.name,
+				mimeType: input.file.type,
+			});
+			const uniqueFilename = uploadedFile.key.split("/").pop()!;
 			// Save to database
 			const [newDocument] = await db
 				.insert(vehicleDocuments)
@@ -1526,12 +1939,12 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 					vehicleId: input.vehicleId,
 					filename: uniqueFilename,
 					originalName: input.file.name,
-					mimeType: resolvedMimeType,
-					size: input.file.size,
+					mimeType: uploadedFile.mimeType,
+					size: uploadedFile.size,
 					documentType: input.documentType,
 					description: input.description || undefined,
 					uploadedBy: context.userId,
-					filePath: key,
+					filePath: uploadedFile.key,
 				})
 				.returning();
 

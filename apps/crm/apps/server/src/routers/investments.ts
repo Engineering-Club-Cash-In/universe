@@ -1,6 +1,7 @@
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
+import { createInvestmentLeadWithOpportunity } from "../controllers/investment-lead";
 import { db } from "../db";
 import {
 	investmentAuditLog,
@@ -17,13 +18,19 @@ import {
 	calculateGoal,
 	calculateInvestment,
 } from "../lib/investment-calculator";
-import { createInvestmentLeadWithOpportunity } from "../controllers/investment-lead";
+import {
+	getNextInvestmentStage,
+	getPreviousInvestmentStage,
+	INVESTMENT_STAGE_FLOW,
+	INVESTMENT_STAGE_VALUES,
+} from "../lib/investment-stage-flow";
 import {
 	analystProcedure,
 	investmentManagerProcedure,
 	investmentProcedure,
 } from "../lib/orpc";
 import { ROLES } from "../lib/roles";
+import { getFileUrl } from "../lib/storage";
 import { createNotification } from "./notifications";
 
 export const investmentsRouter = {
@@ -70,9 +77,15 @@ export const investmentsRouter = {
 						"email",
 						"social_media",
 						"event",
+						"other",
+						"facebook",
+						"instagram",
+						"google",
+						"meta",
 						"whatsapp",
 					])
 					.optional(),
+				campaign: z.string().min(1).optional(),
 				proposedAmount: z.number().positive().optional(),
 				assignedTo: z.string().optional(),
 				userId: z.string().optional(),
@@ -93,6 +106,23 @@ export const investmentsRouter = {
 				name: z.string().min(1).optional(),
 				email: z.string().email().optional(),
 				phones: z.array(z.string()).optional(),
+				source: z
+					.enum([
+						"website",
+						"referral",
+						"cold_call",
+						"email",
+						"social_media",
+						"event",
+						"other",
+						"facebook",
+						"instagram",
+						"google",
+						"meta",
+						"whatsapp",
+					])
+					.optional(),
+				campaign: z.string().min(1).optional(),
 				proposedAmount: z.number().positive().optional(),
 				assignedTo: z.string().optional(),
 				notes: z.string().optional(),
@@ -125,22 +155,14 @@ export const investmentsRouter = {
 		.input(
 			z
 				.object({
-					stage: z
-						.enum([
-							"prospecting",
-							"contacted",
-							"negotiation",
-							"acceptance_signatures",
-							"welcome",
-							"closed",
-							"lost",
-						])
-						.optional(),
+					stage: z.enum(INVESTMENT_STAGE_VALUES).optional(),
 				})
 				.optional(),
 		)
 		.handler(async ({ input, context }) => {
-			const conditions = [eq(investmentOpportunities.status, "open")];
+			const conditions = [
+				inArray(investmentOpportunities.status, ["open", "won"]),
+			];
 
 			if (input?.stage) {
 				conditions.push(eq(investmentOpportunities.stage, input.stage));
@@ -226,10 +248,25 @@ export const investmentsRouter = {
 						.orderBy(desc(investmentStageHistory.createdAt)),
 				]);
 
+			// Generar signed URLs para documentos que tienen key de R2
+			const documentsWithUrls = await Promise.all(
+				documents.map(async (doc) => {
+					if (doc.fileUrl && !doc.fileUrl.startsWith("http")) {
+						try {
+							const signedUrl = await getFileUrl(doc.fileUrl);
+							return { ...doc, fileUrl: signedUrl, fileKey: doc.fileUrl };
+						} catch {
+							return { ...doc, fileKey: doc.fileUrl };
+						}
+					}
+					return { ...doc, fileKey: null };
+				}),
+			);
+
 			return {
 				...result,
 				scenarios,
-				documents,
+				documents: documentsWithUrls,
 				interactions,
 				stageHistory,
 			};
@@ -257,127 +294,11 @@ export const investmentsRouter = {
 				});
 			}
 
-			// Definir orden de etapas y gates
-			const stageOrder = [
-				"prospecting",
-				"contacted",
-				"negotiation",
-				"acceptance_signatures",
-				"welcome",
-				"closed",
-			] as const;
-
-			const currentIndex = stageOrder.indexOf(
-				opp.stage as (typeof stageOrder)[number],
-			);
-			if (currentIndex === -1 || currentIndex >= stageOrder.length - 1) {
+			const nextStage = getNextInvestmentStage(opp.stage);
+			if (!nextStage) {
 				throw new ORPCError("BAD_REQUEST", {
 					message: "No se puede avanzar desde esta etapa",
 				});
-			}
-
-			const nextStage = stageOrder[currentIndex + 1];
-
-			// Validar gates segun etapa actual
-			switch (opp.stage) {
-				case "prospecting": {
-					// Gate: al menos una interaccion registrada
-					const [interaction] = await db
-						.select()
-						.from(investmentInteractions)
-						.where(eq(investmentInteractions.investmentOpportunityId, opp.id))
-						.limit(1);
-					if (!interaction) {
-						throw new ORPCError("BAD_REQUEST", {
-							message:
-								"Debe registrar al menos una interaccion antes de avanzar",
-						});
-					}
-					break;
-				}
-				case "contacted": {
-					// Gate: al menos una interaccion
-					const [interaction] = await db
-						.select()
-						.from(investmentInteractions)
-						.where(eq(investmentInteractions.investmentOpportunityId, opp.id))
-						.limit(1);
-					if (!interaction) {
-						throw new ORPCError("BAD_REQUEST", {
-							message:
-								"Debe registrar al menos una interaccion antes de avanzar",
-						});
-					}
-					break;
-				}
-				case "negotiation": {
-					// Gate: todos los checklist completados
-					if (
-						!opp.scenariosCompleted ||
-						!opp.documentsApproved ||
-						!opp.kycCompleted ||
-						!opp.profileCompleted ||
-						!opp.webappProfileCreated
-					) {
-						const missing = [];
-						if (!opp.scenariosCompleted)
-							missing.push("escenarios de inversion");
-						if (!opp.documentsApproved) missing.push("documentacion aprobada");
-						if (!opp.kycCompleted) missing.push("KYC completado");
-						if (!opp.profileCompleted) missing.push("perfil del inversionista");
-						if (!opp.webappProfileCreated) missing.push("perfil en webapp CCI");
-						throw new ORPCError("BAD_REQUEST", {
-							message: `Faltan requisitos: ${missing.join(", ")}`,
-						});
-					}
-					// Notificar a juridico, contabilidad, gerencia
-					const [lead] = await db
-						.select()
-						.from(investmentLeads)
-						.where(eq(investmentLeads.id, opp.investmentLeadId))
-						.limit(1);
-
-					await createNotification({
-						titulo: `Nueva inversion en etapa de firmas - ${lead?.name}`,
-						descripcion: `La inversion de ${lead?.name} esta lista para generacion de contratos`,
-						type: "action_required",
-						createdBy: context.userId,
-						createdByRole: context.userRole,
-						assignedToRole: "juridico",
-						relatedEntityType: "opportunity",
-						relatedEntityId: opp.id,
-					});
-					await createNotification({
-						titulo: `Nueva inversion aprobada - ${lead?.name}`,
-						descripcion: `La inversion de ${lead?.name} paso a etapa de firmas`,
-						type: "aviso",
-						createdBy: context.userId,
-						createdByRole: context.userRole,
-						assignedToRole: "accounting",
-						relatedEntityType: "opportunity",
-						relatedEntityId: opp.id,
-					});
-					break;
-				}
-				case "acceptance_signatures": {
-					// Gate: todas las firmas completadas
-					if (opp.signaturesCompleted < opp.signaturesTotal) {
-						throw new ORPCError("BAD_REQUEST", {
-							message: `Faltan firmas: ${opp.signaturesCompleted}/${opp.signaturesTotal}`,
-						});
-					}
-					break;
-				}
-				case "welcome": {
-					// Gate: fondos validados por gerente
-					if (!opp.fundsValidated) {
-						throw new ORPCError("BAD_REQUEST", {
-							message:
-								"Los fondos deben ser validados por el gerente de inversiones",
-						});
-					}
-					break;
-				}
 			}
 
 			// Actualizar etapa (con condicion de stage actual para evitar race condition)
@@ -385,7 +306,8 @@ export const investmentsRouter = {
 				.update(investmentOpportunities)
 				.set({
 					stage: nextStage,
-					status: nextStage === "closed" ? "won" : "open",
+					status:
+						nextStage === "initial_onboarding_senior_handoff" ? "won" : "open",
 					stageEnteredAt: new Date(),
 					updatedAt: new Date(),
 				})
@@ -418,6 +340,87 @@ export const investmentsRouter = {
 				investmentOpportunityId: opp.id,
 				action: "stage_advanced",
 				details: { from: opp.stage, to: nextStage },
+				performedBy: context.userId,
+			});
+
+			return updated;
+		}),
+
+	retreatInvestmentStage: investmentProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				expectedCurrentStage: z.enum(INVESTMENT_STAGE_FLOW),
+				reason: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const [opp] = await db
+				.select()
+				.from(investmentOpportunities)
+				.where(eq(investmentOpportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opp) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
+			}
+
+			if (opp.stage !== input.expectedCurrentStage) {
+				throw new ORPCError("CONFLICT", {
+					message:
+						"La etapa cambió antes de confirmar. Recargue la pagina.",
+				});
+			}
+
+			const previousStage = getPreviousInvestmentStage(
+				input.expectedCurrentStage,
+			);
+			if (!previousStage) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "No se puede regresar desde esta etapa",
+				});
+			}
+
+			const [updated] = await db
+				.update(investmentOpportunities)
+				.set({
+					stage: previousStage,
+					status: "open",
+					stageEnteredAt: new Date(),
+					updatedAt: new Date(),
+				})
+				.where(
+					and(
+						eq(investmentOpportunities.id, opp.id),
+						eq(
+							investmentOpportunities.stage,
+							input.expectedCurrentStage,
+						),
+					),
+				)
+				.returning();
+
+			if (!updated) {
+				throw new ORPCError("CONFLICT", {
+					message:
+						"La etapa fue modificada por otro usuario. Recargue la pagina.",
+				});
+			}
+
+			await db.insert(investmentStageHistory).values({
+				investmentOpportunityId: opp.id,
+				fromStage: input.expectedCurrentStage,
+				toStage: previousStage,
+				changedBy: context.userId,
+				reason: input.reason,
+			});
+
+			await db.insert(investmentAuditLog).values({
+				investmentOpportunityId: opp.id,
+				action: "stage_retreated",
+				details: { from: input.expectedCurrentStage, to: previousStage },
 				performedBy: context.userId,
 			});
 
@@ -475,6 +478,57 @@ export const investmentsRouter = {
 			});
 
 			return updated;
+		}),
+
+	resetToFirstStage: investmentProcedure
+		.input(
+			z.object({
+				opportunityIds: z.array(z.string().uuid()).min(1),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const firstStage = INVESTMENT_STAGE_FLOW[0];
+			const results = [];
+
+			for (const oppId of input.opportunityIds) {
+				const [opp] = await db
+					.select()
+					.from(investmentOpportunities)
+					.where(eq(investmentOpportunities.id, oppId))
+					.limit(1);
+
+				if (!opp) continue;
+
+				const [updated] = await db
+					.update(investmentOpportunities)
+					.set({
+						stage: firstStage,
+						status: "open",
+						stageEnteredAt: new Date(),
+						updatedAt: new Date(),
+					})
+					.where(eq(investmentOpportunities.id, oppId))
+					.returning();
+
+				await db.insert(investmentStageHistory).values({
+					investmentOpportunityId: oppId,
+					fromStage: opp.stage,
+					toStage: firstStage,
+					changedBy: context.userId,
+					reason: "Reasignada a primera etapa desde etapa no reconocida",
+				});
+
+				await db.insert(investmentAuditLog).values({
+					investmentOpportunityId: oppId,
+					action: "stage_reset",
+					details: { from: opp.stage, to: firstStage },
+					performedBy: context.userId,
+				});
+
+				results.push(updated);
+			}
+
+			return results;
 		}),
 
 	// ============ SCENARIOS (Calculadora) ============
@@ -620,6 +674,7 @@ export const investmentsRouter = {
 	createInvestor: investmentProcedure
 		.input(
 			z.object({
+				opportunityId: z.string().uuid().optional(),
 				investmentLeadId: z.string().uuid().optional(),
 				clientType: z
 					.enum(["individual", "empresa_individual", "sociedad_anonima"])
@@ -639,7 +694,22 @@ export const investmentsRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			const [investor] = await db.insert(investors).values(input).returning();
+			const { opportunityId, ...investorData } = input;
+			const [investor] = await db
+				.insert(investors)
+				.values(investorData)
+				.returning();
+
+			// Enlazar el investor con la oportunidad
+			if (opportunityId) {
+				await db
+					.update(investmentOpportunities)
+					.set({
+						investorId: investor.id,
+						updatedAt: new Date(),
+					})
+					.where(eq(investmentOpportunities.id, opportunityId));
+			}
 
 			return investor;
 		}),
@@ -716,8 +786,9 @@ export const investmentsRouter = {
 					"bank_statement",
 					"investment_receipt",
 					"other",
+					"contract",
 				]),
-				fileUrl: z.string().url(),
+				fileUrl: z.string().min(1),
 				fileName: z.string().optional(),
 				mimeType: z.string().optional(),
 			}),

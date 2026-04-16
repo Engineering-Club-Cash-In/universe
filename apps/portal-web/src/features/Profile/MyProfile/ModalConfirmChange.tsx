@@ -48,14 +48,15 @@ export const ModalConfirmChange = ({
   const updateMutation = useMutation({
     mutationFn: async ({ field, value }: { field: FieldType; value: string }) => {
       const email = user?.email;
-      const dpi = user?.dpi;
+      const dpi = user?.dpi ?? profileData?.dpi;
 
       // Si es campo de inversionista, actualizar en Cartera
-      if (isInvestorField) {
-        if (!dpi) throw new Error("DPI no disponible");
+      if (isInvestorField || user?.role === "INVESTOR") {
+       // if (!dpi) throw new Error("DPI no disponible");
 
         const payload: any = {
-          dpi: parseInt(dpi),
+          dpi: dpi ? parseInt(dpi) : undefined,
+          email,
         };
 
         // Solo enviar el campo que se está actualizando
@@ -63,7 +64,7 @@ export const ModalConfirmChange = ({
         if (field === 'tipo_cuenta') payload.tipo_cuenta = value;
         if (field === 'numero_cuenta') payload.numero_cuenta = value;
 
-        return createInvestor({...profileData, ...payload });
+        return createInvestor({ ...payload });
       }
 
       // Si es campo de cliente, actualizar en CRM
@@ -244,7 +245,7 @@ export const ModalConfirmChange = ({
             onClick={handleConfirmChange}
             isLoading={isSaving}
             size="sm"
-            className={!tempValue?.trim() ? "opacity-50 cursor-not-allowed" : ""}
+            className={!String(tempValue ?? "").trim() ? "opacity-50 cursor-not-allowed" : ""}
           >
             {isSaving ? "Guardando..." : "Confirmar"}
           </Button>

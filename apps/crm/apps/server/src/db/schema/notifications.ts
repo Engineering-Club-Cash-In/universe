@@ -49,6 +49,7 @@ export const notificationRedirectPageEnum = pgEnum(
 		"analysis_90_details",
 		"pay_investors",
 		"cobros_detail",
+		"client_details_disbursement",
 	],
 );
 

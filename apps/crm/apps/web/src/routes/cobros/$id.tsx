@@ -247,6 +247,12 @@ function RouteComponent() {
 	// Función para abrir el modal de detalle de oportunidad
 	const handleOpenOpportunityDetail = () => {
 		if (matchingOpportunity) {
+			const leadDpi =
+				matchingOpportunity.lead &&
+				"dpi" in matchingOpportunity.lead &&
+				typeof matchingOpportunity.lead.dpi === "string"
+					? matchingOpportunity.lead.dpi
+					: null;
 			const opportunityForModal: OpportunityForModal = {
 				id: matchingOpportunity.id,
 				title: matchingOpportunity.title,
@@ -259,10 +265,12 @@ function RouteComponent() {
 					? {
 							id: matchingOpportunity.lead.id,
 							firstName: matchingOpportunity.lead.firstName,
+							middleName: matchingOpportunity.lead.middleName,
 							lastName: matchingOpportunity.lead.lastName,
+							secondLastName: matchingOpportunity.lead.secondLastName,
 							email: matchingOpportunity.lead.email,
-							phone: null,
-							dpi: null,
+							phone: matchingOpportunity.lead.phone,
+							dpi: leadDpi,
 						}
 					: null,
 				stage: matchingOpportunity.stage
@@ -523,7 +531,7 @@ function RouteComponent() {
 										<span className="font-medium">Monto en Mora:</span>
 									</div>
 									<p className="font-bold text-lg text-red-600">
-										Q{Number(caso.montoEnMora).toLocaleString()}
+										Q{Number(caso.montoEnMora).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 									</p>
 								</div>
 								<div className="space-y-2">
@@ -532,7 +540,7 @@ function RouteComponent() {
 										<span className="font-medium">Cuota Mensual:</span>
 									</div>
 									<p className="font-bold text-blue-600 text-lg uppercase tracking-tight">
-										Q{Number(caso.cuotaMensual || 0).toLocaleString()}
+										Q{Number(caso.cuotaMensual || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 									</p>
 								</div>
 								<div className="space-y-2">
@@ -644,14 +652,14 @@ function RouteComponent() {
 												<span>
 													Mora:{" "}
 													<strong>
-														Q{Number(caso.montoEnMora).toLocaleString()}
+														Q{Number(caso.montoEnMora).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 													</strong>
 												</span>
 												<span>+</span>
 												<span>
 													Cuota:{" "}
 													<strong>
-														Q{Number(caso.cuotaMensual || 0).toLocaleString()}
+														Q{Number(caso.cuotaMensual || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 													</strong>
 												</span>
 											</div>
@@ -1217,11 +1225,11 @@ function RouteComponent() {
 															</div>
 															<div className="text-right">
 																<p className="font-medium text-sm">
-																	Q{Number(cuota.montoCuota).toLocaleString()}
+																	Q{Number(cuota.montoCuota).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 																</p>
 																{tieneMora && (
 																	<p className="text-red-600 text-xs">
-																		+Q{Number(cuota.montoMora).toLocaleString()}{" "}
+																		+Q{Number(cuota.montoMora).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
 																		mora
 																	</p>
 																)}
@@ -1476,13 +1484,13 @@ function RouteComponent() {
 							<div>
 								<p className="text-muted-foreground text-sm">Capital Activo</p>
 								<p className="font-medium">
-									Q{Number(caso.montoFinanciado || 0).toLocaleString()}
+									Q{Number(caso.montoFinanciado || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 								</p>
 							</div>
 							<div>
 								<p className="text-muted-foreground text-sm">Cuota Mensual</p>
 								<p className="font-medium">
-									Q{Number(caso.cuotaMensual || 0).toLocaleString()}
+									Q{Number(caso.cuotaMensual || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 								</p>
 							</div>
 							<div>

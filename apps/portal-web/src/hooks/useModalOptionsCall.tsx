@@ -1,21 +1,28 @@
 import type { ModalOption } from "@/components";
 import { useState } from "react";
 
+const WAphoneNumber = import.meta.env.VITE_WHATSAPP_PHONE_NUMBER;
+
+export const openWhatsApp = (
+  defaultMessage: string,
+  setIsModalOpen?: (isOpen: boolean) => void,
+) => {
+  globalThis.open(
+    `https://api.whatsapp.com/send/?phone=${WAphoneNumber}&text=${encodeURIComponent(defaultMessage)}&type=phone_number&app_absent=0`,
+    "_blank",
+  );
+  if (setIsModalOpen) {
+    setIsModalOpen(false);
+  }
+};
+
 export const useModalOptionsCall = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  const WAphoneNumber = import.meta.env.VITE_WHATSAPP_PHONE_NUMBER;
   const phoneNumber = import.meta.env.VITE_PHONE_NUMBER;
   const urlInspection = import.meta.env.VITE_URL_INSPECTION;
 
   // Funciones unificadas para acciones
-  const openWhatsApp = (defaultMessage: string) => {
-    globalThis.open(
-      `https://api.whatsapp.com/send/?phone=${WAphoneNumber}&text=${encodeURIComponent(defaultMessage)}&type=phone_number&app_absent=0`,
-      "_blank",
-    );
-    setIsModalOpen(false);
-  };
 
   const makeCall = () => {
     globalThis.open(`tel:${phoneNumber}`, "_blank");
@@ -37,6 +44,7 @@ export const useModalOptionsCall = () => {
       buttonAction: () =>
         openWhatsApp(
           "Hola, estoy interesado en obtener más información sobre las oportunidades de inversión.",
+          setIsModalOpen,
         ),
     },
     {
@@ -62,6 +70,7 @@ export const useModalOptionsCall = () => {
       buttonAction: () =>
         openWhatsApp(
           "Hola, estoy interesado en obtener más información sobre el crédito vehicular.",
+          setIsModalOpen,
         ),
     },
     {
@@ -100,6 +109,7 @@ export const useModalOptionsCall = () => {
     buttonAction: () =>
       openWhatsApp(
         "Hola, tengo algunas preguntas sobre los créditos que ofrecen.",
+        setIsModalOpen,
       ),
   };
 
@@ -121,6 +131,7 @@ export const useModalOptionsCall = () => {
     buttonAction: () =>
       openWhatsApp(
         "Hola, me gustaría agendar una cita para inspeccionar mi vehículo y obtener más información sobre sus créditos.",
+        setIsModalOpen,
       ),
   };
 
@@ -134,6 +145,7 @@ export const useModalOptionsCall = () => {
       buttonAction: () =>
         openWhatsApp(
           "Hola, tengo algunas preguntas sobre la venta de mi auto.",
+          setIsModalOpen,
         ),
     },
     {
@@ -153,7 +165,10 @@ export const useModalOptionsCall = () => {
     description: "",
     buttonText: "WhatsApp",
     buttonAction: () =>
-      openWhatsApp("Hola, quiero realizar el pago de mi crédito vehicular."),
+      openWhatsApp(
+        "Hola, quiero realizar el pago de mi crédito vehicular.",
+        setIsModalOpen,
+      ),
   };
 
   const optionCreditVehicle: ModalOption = {
@@ -165,6 +180,7 @@ export const useModalOptionsCall = () => {
     buttonAction: () =>
       openWhatsApp(
         "Hola, estoy interesado en obtener más información sobre el crédito vehicular.",
+        setIsModalOpen,
       ),
   };
 

@@ -18,7 +18,7 @@ export const FAQ = () => {
       question: "¿Cómo invertir?",
       answer: `
         <ol>
-          <li>Regístrate con tu correo electrónico y llena tu perfil</li>
+          <li>Regístrate y llena tu perfil, o contáctanos para que tu asesor te acompañe durante el proceso</li>
           <li>Completa tus requisitos</li>
           <li>Elige en qué préstamo deseas invertir</li>
           <li>Haz tu inversión</li>
@@ -35,6 +35,9 @@ export const FAQ = () => {
             <li>DPI vigente</li>
             <li>Recibo de agua, luz o teléfono fijo</li>
             <li>Fondos a invertirse deben estar bancarizados</li>
+            <li>3 estados de cuenta</li>
+            <li>Formulario de Solicitud de Ingreso como Inversionista</li>
+            <li>Declaración Jurada de Fondos</li>
         </ul>
         </p>
         <p>Si es persona jurídica:
@@ -43,7 +46,10 @@ export const FAQ = () => {
             <li>DPI del representante legal</li>
             <li>Copia escritura constitución sociedad</li>
             <li>Copia de patentes de comercio y sociedad</li>
-            <li>Copia de RTU de la empresa </li>
+            <li>Copia de RTU de la empresa</li>
+            <li>3 estados de cuenta</li>
+            <li>Formulario de Solicitud de Ingreso como Inversionista</li>
+            <li>Declaración Jurada de Fondos</li>
         </ul>
         </p>
         `,
@@ -60,21 +66,20 @@ export const FAQ = () => {
     },
     {
       question: "¿Cuándo puedo retirar mi dinero?",
-      answer: `Dependiendo del modelo elegido, puedes retirar tu inversión al finalizar el plazo acordado. También ofrecemos opciones de liquidez anticipada con condiciones especiales. Tu asesor te explicará todas las opciones disponibles.`,
+      answer: `Depende de la modalidad de tu inversión. Si necesitas retirarlo de manera anticipada, puedes realizarlo tomando en cuenta las condiciones que te explicará tu asesor.`,
     },
     {
       question: "¿Cómo puedo monitorear mi inversión?",
-      answer: `Tendrás acceso 24/7 a nuestra plataforma digital donde podrás ver en tiempo real el estado de tu inversión, rendimientos acumulados y proyecciones. También recibirás reportes mensuales detallados.`,
+      answer: `Recibirás el detalle del rendimiento de tus inversiones mensualmente por medio de la página web o puedes comunicarte con tu asesor quién te resolverá cualquier inquietud.`,
     },
     {
-      question: "¿Por qué es mi mejor opción?",
+      question: "¿Por qué invertir con nosotros?",
       answer: `
         <ol>
-            <li>Buenos rendimientos: es muy rentable, puedes obtener retornos de hasta 14.11% anual.</li>
-            <li>Accesible: hay inversiones para todos.</li>
-            <li>Transparente: sabes exactamente el destino, plazo, retorno y riesgo de tu inversión.</li>
-            <li>Sencillo: todo es online, tú inviertes y clubcashin.com se encarga del resto.</li>
-            <li>Seguro: tu inversión siempre estará garantizada por un activo real que vale al menos el doble del monto invertido.</li>
+            <li><strong>Rendimientos competitivos:</strong> Ofrecemos oportunidades con retornos de más del 12% anual, según el modelo seleccionado.</li>
+            <li><strong>Accesibilidad:</strong> Contamos con opciones de inversión diseñadas para distintos perfiles y montos.</li>
+            <li><strong>Transparencia total:</strong> Desde el inicio conoces el destino de tu inversión, el plazo y el retorno estimado.</li>
+            <li><strong>Respaldo real:</strong> Cada inversión está respaldada por un activo o activos reales.</li>
         </ol>
         `,
     },

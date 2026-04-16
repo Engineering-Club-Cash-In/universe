@@ -9,21 +9,29 @@ import {
   liquidateByInvestorSchema,
   updateInvestor,
   resumenGlobalInversionistas,
+  resumenGlobalLiquidaciones,
   getLiquidaciones,
   getInvestorPerformance,
-  reversePagosEspejoPorInversionista,
   getInvestorTotalsGlobales,
   getInvestorMirrorSummary,
   upsertPagosEspejo,             // 🆕 Recalcular pagos espejo desde el front
   aplicarPagosEspejo,
   deletePagosEspejoNoLiquidados,
   updateSaldoReinversion,
+  updateLiquidacionReporteUrl,
+  getLiquidacionesPorFecha,
+  revertirLiquidacion,
+  fixCubeInvestment,
+  reconcileMirrorPercentages,
+  auditMirrorPercentages,
+  getCreditosEspejoPendientes,
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
-import { generarYSubirPDFInversionista } from "../utils/functions/generalFunctions";
+import { generarYSubirPDFInversionista, generarYSubirExcelInversionista } from "../utils/functions/generalFunctions";
 import { authMiddleware } from "./midleware";
 import { obtenerCreditosConPagosPendientes, calcularYRegistrarPagosEspejo } from "../controllers/payments";
 import { createBoleta, getBoletaById, getAllBoletas, getBoletasPendientes, updateBoleta, marcarBoletaComoProcesada, marcarBoletaComoPendiente, deleteBoleta, getBoletasStats } from "../controllers/liquidateInvestor";
+import { requierePeriodoLiquidacion } from "../utils/investorLiquidationSummary";
 // 🔥 IMPORTAR SERVICIO DE BOLETAS
  
 
@@ -32,6 +40,9 @@ export const inversionistasRouter = new Elysia()
   .get("/investor", getInvestors)
   .post("/investor/update", updateInvestor)
   .post("/investor/saldo-reinversion", updateSaldoReinversion)
+  .post("/investor/fix-cube", fixCubeInvestment)
+  .post("/investor/reconcile-mirror-percentages", reconcileMirrorPercentages)
+  .post("/investor/audit-mirror-percentages", auditMirrorPercentages)
   .get("/getInvestorsWithFullCredits", getInvestorsWithCredits)
   .get(
     "/getInvestors",
@@ -245,7 +256,7 @@ export const inversionistasRouter = new Elysia()
         console.log("[liquidate-inversionista-pagos] Request body:", body);
         const bodyData = body && typeof body === 'object' ? body : {};
         const parseResult = liquidateByInvestorSchema.safeParse(bodyData);
-        
+
         if (!parseResult.success) {
           set.status = 400;
           return {
@@ -260,9 +271,21 @@ export const inversionistasRouter = new Elysia()
           console.warn("⚠️ ¡ALERTA! Se va a liquidar TODOS los pagos del sistema");
         }
 
-        const result = await liquidateByInvestorId(inversionista_id);
-        set.status = 200;
-        return result;
+        // Lanzar liquidación en background y responder inmediatamente
+        // Si algo falla, los pagos quedan como NO_LIQUIDADO (pendientes)
+        liquidateByInvestorId(inversionista_id).then((result) => {
+          console.log(`[liquidate-inversionista-pagos] Background OK para inversionista ${inversionista_id}:`, result.message);
+        }).catch((err) => {
+          console.error(`[liquidate-inversionista-pagos] Background ERROR para inversionista ${inversionista_id}:`, err);
+        });
+
+        set.status = 202;
+        return {
+          message: inversionista_id
+            ? `Liquidación iniciada para inversionista ${inversionista_id}. Se procesará en segundo plano.`
+            : "Liquidación masiva iniciada. Se procesará en segundo plano.",
+          inversionista_id: inversionista_id ?? "TODOS",
+        };
       } catch (error) {
         console.error("[liquidate-inversionista-pagos] Error:", error);
         set.status = 500;
@@ -277,7 +300,7 @@ export const inversionistasRouter = new Elysia()
         inversionista_id: t.Optional(t.Number()),
       })),
       detail: {
-        summary: "Liquida todos los pagos de un inversionista",
+        summary: "Liquida todos los pagos de un inversionista (async, responde inmediato)",
         tags: ["Pagos/Inversionistas"],
       },
     }
@@ -345,6 +368,322 @@ export const inversionistasRouter = new Elysia()
       filename,
     };
   })
+  .post("/investor/excel", async ({ body, set }) => {
+    const { id } = body as { id?: number };
+
+    if (!id || isNaN(Number(id))) {
+      set.status = 400;
+      return { message: "El parámetro 'id' es obligatorio y debe ser numérico." };
+    }
+
+    try {
+      const result = await resumeInvestor(
+        Number(id),
+        1,
+        999999,
+        undefined,
+        undefined,
+        undefined,
+        false,
+        undefined,
+        "espejos"
+      );
+
+      if (!result.inversionistas.length) {
+        set.status = 404;
+        return { message: "Inversionista no encontrado." };
+      }
+
+      const inversionista = result.inversionistas[0];
+
+      const totales = await getInvestorTotalsGlobales(
+        Number(id),
+        undefined,
+        "espejos",
+        false
+      );
+      inversionista.subtotal = totales.totales as any;
+
+      const logoUrl = import.meta.env.LOGO_URL || "";
+      const filename = `reporte_inversionista_${id}_${Date.now()}.xlsx`;
+      const { url } = await generarYSubirExcelInversionista(
+        inversionista as any,
+        filename,
+        logoUrl
+      );
+
+      return {
+        success: true,
+        url,
+        filename,
+      };
+    } catch (error) {
+      console.error("[POST /investor/excel] Error:", error);
+      set.status = 500;
+      return {
+        message: "Error al generar el Excel",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  })
+  .get(
+    "/investor/reporte-no-liquidados",
+    async ({ query, set }) => {
+      const { id } = query;
+
+      if (!id || isNaN(Number(id))) {
+        set.status = 400;
+        return { message: "El parámetro 'id' es obligatorio y debe ser numérico." };
+      }
+
+      try {
+        const result = await resumeInvestor(
+          Number(id),
+          1,
+          999999,
+          undefined,
+          undefined,
+          undefined,
+          false,
+          undefined,
+          "espejos"
+        );
+
+        if (!result.inversionistas.length) {
+          set.status = 404;
+          return { message: "Inversionista no encontrado." };
+        }
+
+        const inversionista = result.inversionistas[0];
+
+        const totales = await getInvestorTotalsGlobales(
+          Number(id),
+          undefined,
+          "espejos",
+          false
+        );
+        inversionista.subtotal = totales.totales as any;
+
+        const logoUrl = import.meta.env.LOGO_URL || "";
+        const filename = `reporte_no_liquidados_${id}_${Date.now()}.xlsx`;
+        const { url } = await generarYSubirExcelInversionista(
+          inversionista as any,
+          filename,
+          logoUrl,
+          true
+        );
+
+        return {
+          success: true,
+          url,
+          filename,
+        };
+      } catch (error) {
+        console.error("[GET /investor/reporte-no-liquidados] Error:", error);
+        set.status = 500;
+        return {
+          message: "Error al obtener reporte de pagos no liquidados",
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+    {
+      query: t.Object({
+        id: t.String(),
+      }),
+      detail: {
+        summary: "Genera Excel con pagos no liquidados de un inversionista",
+        description: "Genera y sube un Excel con el resumen de pagos espejo no liquidados del inversionista, y devuelve la URL del archivo.",
+        tags: ["Inversionistas"],
+      },
+    }
+  )
+  .post("/investor/reporte-liquidados-masivo", async ({ body, set }) => {
+    const { fecha_liquidacion } = body as { fecha_liquidacion?: string };
+
+    const fecha = fecha_liquidacion || new Date().toISOString().slice(0, 10);
+
+    try {
+      const liquidacionesDelDia = await getLiquidacionesPorFecha(fecha);
+
+      if (!liquidacionesDelDia.length) {
+        set.status = 404;
+        return { message: `No se encontraron liquidaciones para la fecha ${fecha}.` };
+      }
+
+      const resultados: any[] = [];
+      const errores: any[] = [];
+
+      for (const liq of liquidacionesDelDia) {
+        const { inversionista_id: id, liquidacion_id: liqId } = liq;
+        try {
+          const result = await resumeInvestor(
+            id,
+            1,
+            999999,
+            undefined,
+            undefined,
+            undefined,
+            false,
+            undefined,
+            "espejos",
+            true,
+            liqId
+          );
+
+          if (!result.inversionistas.length) {
+            errores.push({ id, liquidacion_id: liqId, error: "Sin pagos liquidados" });
+            continue;
+          }
+
+          const inversionista = result.inversionistas[0];
+
+          const totales = await getInvestorTotalsGlobales(
+            id,
+            undefined,
+            "espejos",
+            false,
+            undefined,
+            true,
+            liqId
+          );
+          inversionista.subtotal = totales.totales as any;
+
+          const logoUrl = import.meta.env.LOGO_URL || "";
+          const filename = `reporte_liquidados_${id}_${Date.now()}.xlsx`;
+          const { url } = await generarYSubirExcelInversionista(
+            inversionista as any,
+            filename,
+            logoUrl
+          );
+
+          const liquidacionActualizada = await updateLiquidacionReporteUrl(id, url);
+
+          resultados.push({
+            inversionista_id: id,
+            liquidacion_id: liqId,
+            nombre: inversionista.nombre_inversionista,
+            url,
+            filename,
+            liquidacion: liquidacionActualizada || null,
+          });
+        } catch (err) {
+          errores.push({
+            id,
+            liquidacion_id: liqId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
+      return {
+        success: true,
+        fecha,
+        total_procesados: resultados.length,
+        total_errores: errores.length,
+        resultados,
+        errores,
+      };
+    } catch (error) {
+      console.error("[investor/reporte-liquidados-masivo] Error:", error);
+      set.status = 500;
+      return {
+        message: "Error al generar reportes masivos",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  })
+  .post("/investor/reporte-liquidados", async ({ body, set }) => {
+    const { investor_id, liquidacion_id } = body as { investor_id?: number, liquidacion_id?: number };
+
+    if (!investor_id || isNaN(Number(investor_id))) {
+      set.status = 400;
+      return { message: "El parámetro 'investor_id' es obligatorio y debe ser numérico." };
+    }
+
+    try {
+      const liquidacionId = liquidacion_id
+
+      const result = await resumeInvestor(
+        Number(investor_id),
+        1,
+        999999,
+        undefined,
+        undefined,
+        undefined,
+        false,
+        undefined,
+        "espejos",
+        true, // soloLiquidados
+        liquidacionId,
+        undefined
+      );
+
+      if (!result.inversionistas.length) {
+        set.status = 404;
+        return { message: "Inversionista no encontrado o sin pagos liquidados." };
+      }
+
+      const inversionista = result.inversionistas[0];
+
+      const totales = await getInvestorTotalsGlobales(
+        Number(investor_id),
+        undefined,
+        "espejos",
+        false,
+        undefined,
+        true, // soloLiquidados
+        liquidacionId,
+        undefined
+      );
+      inversionista.subtotal = totales.totales as any;
+
+      const logoUrl = import.meta.env.LOGO_URL || "";
+      const filename = `reporte_liquidados_${liquidacionId}_${Date.now()}.xlsx`;
+      const { url } = await generarYSubirExcelInversionista(inversionista as any, filename, logoUrl);
+
+      // const liquidacionActualizada = await updateLiquidacionReporteUrl(Number(liquidacionId), url);
+
+      return {
+        success: true,
+        url,
+        filename,
+        liquidacion:  null,
+      };
+    } catch (error) {
+      console.error("[investor/pdf-liquidados] Error:", error);
+      set.status = 500;
+      return {
+        message: "Error al generar el PDF",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  })
+  // ──────────────────────────────────────────────
+  // Revertir una liquidación completa por liquidacion_id
+  // Deshace: pagos espejo, monto_aportado, cuotas, boleta, reinversión y liquidación
+  // Todo dentro de una transacción
+  // ──────────────────────────────────────────────
+  .post("/investor/revertir-liquidacion", async ({ body, set }) => {
+    const { liquidacion_id } = body as { liquidacion_id?: number };
+
+    if (!liquidacion_id || isNaN(Number(liquidacion_id))) {
+      set.status = 400;
+      return { message: "El parámetro 'liquidacion_id' es obligatorio y debe ser numérico." };
+    }
+
+    try {
+      const result = await revertirLiquidacion(Number(liquidacion_id));
+      return result;
+    } catch (error) {
+      console.error("[investor/revertir-liquidacion] Error:", error);
+      set.status = 500;
+      return {
+        message: "Error al revertir la liquidación",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  })
   .get(
     "/resumen-global",
     async ({ query }) => {
@@ -366,6 +705,52 @@ export const inversionistasRouter = new Elysia()
         anio: t.Optional(t.String()),
         excel: t.Optional(t.String()),
       }),
+    }
+  )
+  .get(
+    "/resumen-global-liquidaciones",
+    async ({ query, set }) => {
+      const { inversionistaId, mes, anio, estado = "pending", excel } = query;
+      const estadoFiltro = estado as "pending" | "uploaded" | "liquidated" | "all";
+
+      // Si hay inversionistaId, permitir liquidated/all sin mes/anio (trae todo el historial)
+      if (requierePeriodoLiquidacion(estadoFiltro) && (!mes || !anio) && !inversionistaId) {
+        set.status = 400;
+        return {
+          message:
+            "Los parámetros 'mes' y 'anio' son obligatorios cuando estado es 'liquidated' o 'all' sin inversionistaId.",
+        };
+      }
+
+      return resumenGlobalLiquidaciones(
+        inversionistaId ? Number(inversionistaId) : undefined,
+        mes ? Number(mes) : undefined,
+        anio ? Number(anio) : undefined,
+        estadoFiltro,
+        excel === "true"
+      );
+    },
+    {
+      query: t.Object({
+        inversionistaId: t.Optional(t.String()),
+        mes: t.Optional(t.String()),
+        anio: t.Optional(t.String()),
+        estado: t.Optional(
+          t.Union([
+            t.Literal("pending"),
+            t.Literal("uploaded"),
+            t.Literal("liquidated"),
+            t.Literal("all"),
+          ])
+        ),
+        excel: t.Optional(t.String()),
+      }),
+      detail: {
+        summary: "Obtiene el resumen global de liquidaciones por inversionista",
+        description:
+          "Devuelve inversionistas clasificados como pending, uploaded o liquidated usando pagos espejo. /resumen-global se mantiene sin cambios y sigue devolviendo solo NO_LIQUIDADO. Si no se envía estado, se usa pending. Para estado=liquidated y estado=all, mes y anio son obligatorios y el período se aplica al resumen consultado.",
+        tags: ["Inversionistas"],
+      },
     }
   )
   .post(
@@ -442,49 +827,11 @@ export const inversionistasRouter = new Elysia()
       },
     }
   )
-  .post(
-    "/reversePagosEspejo",
-    async ({ body, set }) => {
-      try {
-        const { inversionistaId } = body;
-
-        console.log(`🔄 Revirtiendo pagos espejo para inversionista ${inversionistaId}`);
-
-        const resultado = await reversePagosEspejoPorInversionista(inversionistaId);
-
-        set.status = 200;
-        return {
-          ...resultado,
-          success: true,
-          message: "✅ Pagos espejo revertidos correctamente",
-        };
-      } catch (error: any) {
-        console.error("❌ Error en POST /reversePagosEspejo:", error);
-        set.status = 500;
-        return {
-          success: false,
-          error: error.message || "Error al revertir pagos espejo",
-        };
-      }
-    },
-    {
-      detail: {
-        summary: "Revertir todos los pagos espejo de un inversionista",
-        tags: ["Pagos Espejo"],
-      },
-      body: t.Object({
-        inversionistaId: t.Number({
-          description: "ID del inversionista",
-          minimum: 1,
-        }),
-      }),
-    }
-  )
   .get(
     "/liquidaciones",
     async ({ query, set }) => {
       try {
-        const { inversionista_id, liquidacion_id, dpi, page, perPage } = query;
+        const { inversionista_id, liquidacion_id, dpi,email, page, perPage } = query;
 
         const result = await getLiquidaciones({
           inversionista_id: inversionista_id
@@ -492,6 +839,7 @@ export const inversionistasRouter = new Elysia()
             : undefined,
           liquidacion_id: liquidacion_id ? Number(liquidacion_id) : undefined,
           dpi: dpi || undefined,
+          email: email || undefined,
           page: page ? Number(page) : 1,
           perPage: perPage ? Number(perPage) : 10,
         });
@@ -512,6 +860,7 @@ export const inversionistasRouter = new Elysia()
         inversionista_id: t.Optional(t.String()),
         liquidacion_id: t.Optional(t.String()),
         dpi: t.Optional(t.String()),
+        email: t.Optional(t.String()),
         page: t.Optional(t.String()),
         perPage: t.Optional(t.String()),
       }),
@@ -525,17 +874,17 @@ export const inversionistasRouter = new Elysia()
     "/inversionistas/rendimiento",
     async ({ query, set }) => {
       try {
-        const { dpi } = query;
+        const { dpi, email } = query;
 
-        if (!dpi) {
+        if (!dpi && !email) {
           set.status = 400;
           return {
             success: false,
-            message: "El parámetro 'dpi' es obligatorio",
+            message: "Se requiere al menos 'dpi' o 'email'",
           };
         }
 
-        const result = await getInvestorPerformance(dpi);
+        const result = await getInvestorPerformance(dpi, email);
 
         set.status = 200;
         return {
@@ -554,10 +903,11 @@ export const inversionistasRouter = new Elysia()
     },
     {
       query: t.Object({
-        dpi: t.String(),
+        dpi: t.Optional(t.String()),
+        email: t.Optional(t.String()),
       }),
       detail: {
-        summary: "Obtener rendimiento de inversionista por DPI",
+        summary: "Obtener rendimiento de inversionista por DPI o email",
         tags: ["Inversionistas"],
       },
     }
@@ -1108,6 +1458,37 @@ export const inversionistasRouter = new Elysia()
       detail: {
         summary: "Elimina pagos espejo estrictamente NO_LIQUIDADO",
         tags: ["Pagos Espejo"],
+      },
+    }
+  )
+  .get(
+    "/creditos-espejo-pendientes",
+    async ({ set, query }) => {
+      try {
+        const page = Number(query.page) || 1;
+        const pageSize = Number(query.pageSize) || 10;
+        const search = query.search || undefined;
+        const result = await getCreditosEspejoPendientes(page, pageSize, search);
+        return result;
+      } catch (error: any) {
+        console.error("[GET /creditos-espejo-pendientes] Error:", error);
+        set.status = 500;
+        return { message: error.message || "Error al obtener créditos espejo pendientes" };
+      }
+    },
+    {
+      query: t.Object({
+        page: t.Optional(t.String()),
+        pageSize: t.Optional(t.String()),
+        search: t.Optional(t.String()),
+      }),
+      detail: {
+        summary: "Créditos espejo pendientes agrupados por inversionista (paginado)",
+        description:
+          "Devuelve los créditos espejo con status pendiente_reinversion o pendiente_compra_cartera, " +
+          "agrupados por inversionista. Cada inversionista incluye opciones_de_credito (10 candidatos). " +
+          "Soporta paginación con query params page y pageSize.",
+        tags: ["Inversionistas", "Espejos"],
       },
     }
   );

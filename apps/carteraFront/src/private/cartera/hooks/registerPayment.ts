@@ -7,6 +7,10 @@ import {
   getAbonosCuotaService,
   liquidatePagosInversionistasService,
   reversePagosInversionistasService,
+  revertPaymentToPendingService,
+  revalidatePaymentService,
+  processInvestorsService,
+  recalcularPagosService,
   uploadFileService,
   type AbonosCuotaResponse,
   type CancelacionCredito,
@@ -14,7 +18,7 @@ import {
   type Usuario,
 } from "../services/services";
 import { useEffect, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useResetCredit } from "./resetCredit";
 import { useAuth } from "@/Provider/authProvider";
 import { toast } from "sonner";
@@ -35,7 +39,8 @@ export const pagoSchema = z.object({
   url_boletas: z.array(z.string().max(500)),
   banco_id: z.number().int().positive({ message: "Debe seleccionar un banco" }),
   numeroAutorizacion: z.string().optional(),
-  registerBy: z.string().min(1, { message: "Usuario registrador requerido" })
+  registerBy: z.string().min(1, { message: "Usuario registrador requerido" }),
+  origen_pago: z.enum(["transferencia", "cheque", "boleta"], { errorMap: () => ({ message: "Debe seleccionar un origen de pago" }) }),
 });
 
 export type PagoFormValues = z.infer<typeof pagoSchema>;
@@ -53,7 +58,7 @@ function zodToFormikValidate(schema: z.ZodSchema<any>) {
 }
 
 export function usePagoForm() {
-  
+  const queryClient = useQueryClient();
 const { mutate: resetCredit } = useResetCredit();
 const [resetBuscador, setResetBuscador] = useState(false);
   const [modalMode, setModalMode] = useState<"excedente" | "pagada">(
@@ -74,6 +79,7 @@ const [resetBuscador, setResetBuscador] = useState(false);
     cuotas: any[];
     cuotaMasAntigua?: number;
   } | null>(null);
+  const [permiteAbonoCapital, setPermiteAbonoCapital] = useState<boolean>(false);
 const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
   convenio_id: number;
   credito_id: number;
@@ -105,7 +111,6 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
   const [archivosParaSubir, setArchivosParaSubir] = useState<File[]>([]);
   const [abonosCuota, setAbonosCuota] = useState<AbonosCuotaResponse | null>(null);
   const { user } = useAuth(); //
-  console.log(user)
 
   // Fetch abonos cuando cambia la cuota seleccionada
   useEffect(() => {
@@ -145,7 +150,8 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
       url_boletas: [],
       banco_id: 0,
       numeroAutorizacion: "",
-      registerBy: user?.email || ""
+      registerBy: user?.email || "",
+      origen_pago: "" as any,
     },
     validate: zodToFormikValidate(pagoSchema),
     onSubmit: async (values, { setSubmitting, setStatus, resetForm }) => {
@@ -192,6 +198,7 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
         setDataCredito(null); // Limpiar datos del crédito
         setCuotaActualInfo(null);
         setCuotasAtrasadasInfo(null);
+        setPermiteAbonoCapital(false);
         setCuotasPendientesInfo(null);
         setModalExcesoOpen(false); // Cerrar modal de exceso
         setExcedente(0); // Reiniciar excedente
@@ -232,6 +239,7 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
         setDataCredito(result);
         setCuotaActualInfo(null);
         setCuotasAtrasadasInfo(null);
+        setPermiteAbonoCapital(false);
         setCuotasPendientesInfo(null);
         setCuotaSeleccionada(0);
         setSaldoAFavorUser(0);
@@ -297,6 +305,8 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
             ? result.cuotasAtrasadas[0].numero_cuota
             : undefined,
       });
+
+      setPermiteAbonoCapital(!!result.credito?.permite_abono_capital);
 
       setCuotasPendientesInfo({
         total: result.cuotasPendientes.length,
@@ -502,6 +512,23 @@ const handleAbonoCapital = () => {
   setModalExcesoOpen(false);
   formik.handleSubmit();
 };
+const handleAbonoCapitalDirecto = () => {
+  if (!cuotaSeleccionada || cuotaSeleccionada === 0) {
+    toast.error("Debes seleccionar una cuota antes de continuar");
+    return;
+  }
+
+  const montoBoleta = Number(formik.values.monto_boleta) || 0;
+
+  console.log("=== ABONO DIRECTO A CAPITAL ===");
+  console.log("Monto boleta completo:", montoBoleta);
+  console.log("Cuota seleccionada:", cuotaSeleccionada);
+
+  formik.values.abono_directo_capital = montoBoleta;
+  formik.values.cuotaApagar = cuotaSeleccionada;
+
+  formik.handleSubmit();
+};
 const handleAbonoSiguienteCuota = () => {
   // ✅ Validar que haya cuota seleccionada
   if (!cuotaSeleccionada || cuotaSeleccionada === 0) {
@@ -574,6 +601,46 @@ const handleAbonoOtros = () => {
       },
     });
   }
+
+  function useRevertPaymentToPending() {
+    return useMutation({
+      mutationFn: revertPaymentToPendingService,
+      onSuccess: () => {
+        toast.success("Pago reversado a pendiente correctamente");
+        queryClient.invalidateQueries({ queryKey: ["pagos-inversionistas"] });
+      },
+      onError: (err: any) => {
+        toast.error("Error al reversar pago a pendiente: " + (err?.response?.data?.message || "Error desconocido"));
+      },
+    });
+  }
+
+  function useRevalidatePayment() {
+    return useMutation({
+      mutationFn: revalidatePaymentService,
+      onSuccess: () => {
+        toast.success("Pago revalidado correctamente");
+        queryClient.invalidateQueries({ queryKey: ["pagos-inversionistas"] });
+      },
+      onError: (err: any) => {
+        toast.error("Error al revalidar pago: " + (err?.response?.data?.message || "Error desconocido"));
+      },
+    });
+  }
+
+  function useProcessInvestors() {
+    return useMutation({
+      mutationFn: processInvestorsService,
+      onSuccess: () => {
+        toast.success("Inversionistas procesados correctamente");
+        queryClient.invalidateQueries({ queryKey: ["pagos-inversionistas"] });
+      },
+      onError: (err: any) => {
+        toast.error("Error al procesar inversionistas: " + (err?.response?.data?.message || "Error desconocido"));
+      },
+    });
+  }
+
   const liquidatePago = useLiquidatePagosInversionistas();
   const [liquidandoId, setLiquidandoId] = useState<number | null>(null);
   function handleLiquidar(pago_id: number, credito_id: number, cuota?: number) {
@@ -595,11 +662,49 @@ const handleAbonoOtros = () => {
     }
   }
   const reversePago = useReversePagosInversionistas();
+  const revertPaymentToPending = useRevertPaymentToPending();
+  const revalidatePayment = useRevalidatePayment();
+  const processInvestors = useProcessInvestors();
+
+  function useRecalcularPagos() {
+    return useMutation({
+      mutationFn: recalcularPagosService,
+      onSuccess: () => {
+        toast.success("Pagos recalculados correctamente");
+        queryClient.invalidateQueries({ queryKey: ["pagosByCredito"] });
+      },
+      onError: (err: any) => {
+        toast.error("Error al recalcular pagos: " + (err?.response?.data?.message || "Error desconocido"));
+      },
+    });
+  }
+
+  const recalcularPagos = useRecalcularPagos();
+
+  function handleRecalcularPagos(numero_credito_sifco: string, numero_cuota: number) {
+    recalcularPagos.mutate({ numero_credito_sifco, numero_cuota }, {});
+  }
 
   // Handler:
   function handleReverse(pago_id: number, credito_id: number, reverseAccounting: boolean) {
     reversePago.mutate({ pago_id, credito_id, reverseAccounting }, {});
   }
+
+  // Handler:
+  function handleRevertToPending(pago_id: number, credito_id: number) {
+    revertPaymentToPending.mutate({ pago_id, credito_id }, {});
+  }
+
+  // Handler:
+  function handleRevalidatePayment(pago_id: number, credito_id: number) {
+    revalidatePayment.mutate({ pago_id, credito_id }, {});
+  }
+
+  // Handler:
+  function handleProcessInvestors(pago_id: number, credito_id: number) {
+    processInvestors.mutate({ pago_id, credito_id }, {});
+  }
+
 async function handleResetCredito() {
  
   console.log(cuotaSeleccionada, " cuotaSeleccionada");
@@ -638,6 +743,7 @@ async function handleResetCredito() {
         setDataCredito(null);
         setCuotaActualInfo(null);
         setCuotasAtrasadasInfo(null);
+        setPermiteAbonoCapital(false);
         setCuotasPendientesInfo(null);
         setModalExcesoOpen(false);
         setExcedente(0);
@@ -664,6 +770,7 @@ async function handleResetCredito() {
     errorCredito,
     cuotaActualInfo,
     cuotasAtrasadasInfo,
+    permiteAbonoCapital,
     cuotasPendientesInfo,
     useReversePagosInversionistas,
     // Para el modal de excedente:
@@ -672,14 +779,23 @@ async function handleResetCredito() {
     setModalExcesoOpen,
     excedente,
     handleAbonoCapital,
-    handleAbonoSiguienteCuota, 
+    handleAbonoCapitalDirecto,
+    handleAbonoSiguienteCuota,
     handleAbonoOtros,
     useLiquidatePagosInversionistas,
     modalMode,
     handleLiquidar,
     liquidandoId,
     handleReverse,
+    handleRevertToPending,
+    handleRevalidatePayment,
     reversePago,
+    revertPaymentToPending,
+    revalidatePayment,
+    processInvestors,
+    handleProcessInvestors,
+    recalcularPagos,
+    handleRecalcularPagos,
     setCuotaSeleccionada,
     setFileToUpload,
     fileToUpload,

@@ -29,13 +29,17 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
   const [perPage, setPerPage] = useState(10);
   const [creditoSifco, setCreditoSifco] = useState("");
   const [estado, setEstado] = useState<
-    "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO" | "EN_CONVENIO"
+    "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO" | "EN_CONVENIO" | "CAIDO"
   >("ACTIVO");
-  const [excel, setExcel] = useState(false);
-
   // 🆕 Nuevos states para filtros con valor inicial
   const [asesorId, setAsesorId] = useState<number | undefined>(options?.initialAsesorId);
   
+  // 🆕 Filtro vehículo propio
+  const [isVehiculoPropio, setIsVehiculoPropio] = useState<boolean | undefined>(undefined);
+
+  // Filtro por inversionistas (multi-select)
+  const [inversionistaIds, setInversionistaIds] = useState<number[]>([]);
+
   // 🔥 Estado local del input (lo que escribe el usuario)
   const [nombreUsuarioInput, setNombreUsuarioInput] = useState("");
   // 🔥 Estado que realmente dispara la búsqueda
@@ -51,9 +55,10 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
       perPage,
       creditoSifco,
       estado,
-      excel,
       asesorId,
       nombreUsuario, // 👈 Este es el que realmente busca
+      isVehiculoPropio,
+      inversionistaIds,
     ],
     queryFn: () =>
       getCreditosPaginados({
@@ -63,9 +68,11 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
         perPage,
         numero_credito_sifco: creditoSifco.trim() !== "" ? creditoSifco : undefined,
         estado,
-        excel,
+        excel: false,
         asesor_id: asesorId,
         nombre_usuario: nombreUsuario.trim() !== "" ? nombreUsuario : undefined,
+        is_vehiculo_propio: isVehiculoPropio,
+        inversionista_ids: inversionistaIds.length > 0 ? inversionistaIds.join(",") : undefined,
       }),
     staleTime: 1000 * 60,
     refetchOnWindowFocus: false,
@@ -76,13 +83,26 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
     setPage(1);
   };
 
-  const handleExcel = (valor: boolean) => {
-    setExcel(valor);
-  };
-
   const clearSifco = () => {
     setCreditoSifco("");
     setPage(1);
+  };
+
+  // 🔥 Nueva función para descargar Excel
+  const downloadExcel = async () => {
+    return getCreditosPaginados({
+      mes,
+      anio,
+      page,
+      perPage,
+      numero_credito_sifco: creditoSifco.trim() !== "" ? creditoSifco : undefined,
+      estado,
+      excel: true,
+      asesor_id: asesorId,
+      nombre_usuario: nombreUsuario.trim() !== "" ? nombreUsuario : undefined,
+      is_vehiculo_propio: isVehiculoPropio,
+      inversionista_ids: inversionistaIds.length > 0 ? inversionistaIds.join(",") : undefined,
+    });
   };
 
   // 🆕 Handler para asesor
@@ -115,6 +135,8 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
     setNombreUsuarioInput("");
     setNombreUsuario("");
     setAsesorId(options?.initialAsesorId);
+    setIsVehiculoPropio(undefined);
+    setInversionistaIds([]);
     setPage(1);
   };
 
@@ -125,6 +147,7 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
     { value: "PENDIENTE_CANCELACION", label: "Pendiente de Cancelación", color: "bg-blue-100 text-blue-800" },
     { value: "MOROSO", label: "Moroso", color: "bg-purple-100 text-purple-800" },
     { value: "EN_CONVENIO", label: "En Convenio", color: "bg-indigo-100 text-indigo-800" },
+    { value: "CAIDO", label: "Caído", color: "bg-gray-200 text-gray-800" },
   ];
 
   return {
@@ -158,8 +181,7 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
     setEstado,
     estado,
     estados,
-    excel,
-    handleExcel,
+    downloadExcel,
     // 🆕 Exports para asesor
     asesorId,
     setAsesorId,
@@ -172,5 +194,11 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
     clearNombreUsuario,        // 👈 Para limpiar
     // 🆕 Limpiar todos
     clearAllFilters,
+    // 🆕 Filtro vehículo propio
+    isVehiculoPropio,
+    setIsVehiculoPropio,
+    // Filtro inversionistas
+    inversionistaIds,
+    setInversionistaIds,
   };
 }

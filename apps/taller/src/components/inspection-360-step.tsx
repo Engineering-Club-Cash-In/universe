@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { useInspection, InspectionStatus } from '../contexts/InspectionContext';
+import { useInspection, InspectionStatus, type Inspection360Item } from '../contexts/InspectionContext';
 import { INSPECTION_AREAS } from '../lib/inspection-data';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
@@ -30,7 +30,7 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
 
     // Limpiar metadatos de cilindros que ya no existen si bajó la cantidad
     useEffect(() => {
-        setItems360(prevItems => {
+        setItems360((prevItems: Inspection360Item[]) => {
             let overallChanged = false;
             const updatedItems = prevItems.map(item => {
                 if (!item.metadata) return item;
@@ -81,7 +81,7 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
     };
 
     const fillWithDummyData = () => {
-        const newItems: any[] = [];
+        const newItems: Inspection360Item[] = [];
         const failureMessages = [
             "Desgaste excesivo visible",
             "Fuga de fluidos detectada",
@@ -136,30 +136,27 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
     };
 
     const handleStatusChange = (category: string, itemLabel: string, status: InspectionStatus) => {
-        const existing = items360.slice();
-        const existingIndex = existing.findIndex(i => i.item === itemLabel && i.category === category);
-
-        if (existingIndex >= 0) {
-            existing[existingIndex] = {
-                ...existing[existingIndex],
-                status,
-                // Si cambia de estado, no borramos las notas para que el usuario siempre las tenga
-            };
-            setItems360(existing);
-        } else {
-            setItems360([...existing, { category, item: itemLabel, status }]);
-        }
+        setItems360(prev => {
+            const existing = prev.slice();
+            const existingIndex = existing.findIndex(i => i.item === itemLabel && i.category === category);
+            if (existingIndex >= 0) {
+                existing[existingIndex] = { ...existing[existingIndex], status };
+                return existing;
+            }
+            return [...existing, { category, item: itemLabel, status }];
+        });
     };
 
     const handleObservationChange = (category: string, itemLabel: string, notes: string) => {
-        const existing = items360.slice();
-        const existingIndex = existing.findIndex(i => i.item === itemLabel && i.category === category);
-        if (existingIndex >= 0) {
-            existing[existingIndex] = { ...existing[existingIndex], notes };
-            setItems360(existing);
-        } else {
-             setItems360([...existing, { category, item: itemLabel, status: InspectionStatus.NA, notes }]);
-        }
+        setItems360(prev => {
+            const existing = prev.slice();
+            const existingIndex = existing.findIndex(i => i.item === itemLabel && i.category === category);
+            if (existingIndex >= 0) {
+                existing[existingIndex] = { ...existing[existingIndex], notes };
+                return existing;
+            }
+            return [...existing, { category, item: itemLabel, status: InspectionStatus.NA, notes }];
+        });
     };
 
     const handleMetadataChange = (category: string, itemLabel: string, metadataKey: string, rawValue: string) => {
@@ -179,70 +176,89 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
             }
         }
 
-        const existing = items360.slice();
-        const existingIndex = existing.findIndex(i => i.item === itemLabel && i.category === category);
-        if (existingIndex >= 0) {
-            existing[existingIndex] = { 
-                ...existing[existingIndex], 
-                metadata: {
-                    ...(existing[existingIndex].metadata || {}),
-                    [metadataKey]: metadataValue
-                }
-            };
-            setItems360(existing);
-        } else {
+        setItems360(prev => {
+            const existing = prev.slice();
+            const existingIndex = existing.findIndex(i => i.item === itemLabel && i.category === category);
+            if (existingIndex >= 0) {
+                existing[existingIndex] = {
+                    ...existing[existingIndex],
+                    metadata: {
+                        ...(existing[existingIndex].metadata || {}),
+                        [metadataKey]: metadataValue
+                    }
+                };
+                return existing;
+            }
             // Default to 'bueno' explicitly if they start typing compressions without selecting status
-            setItems360([...existing, { category, item: itemLabel, status: InspectionStatus.GOOD, metadata: { [metadataKey]: metadataValue } }]);
-        }
-    };
-
-    const getItemState = (category: string, itemLabel: string) => {
-        return items360.find(i => i.category === category && i.item === itemLabel);
+            return [...existing, { category, item: itemLabel, status: InspectionStatus.GOOD, metadata: { [metadataKey]: metadataValue } }];
+        });
     };
 
     const totalPoints = useMemo(() => INSPECTION_AREAS.reduce((acc, area) => acc + area.points.length, 0), []);
-    
+
+    // Deduplicar items por (category, item) — quedarse con el último entry
+    const uniqueItemsMap = useMemo(() => {
+        const map = new Map<string, typeof items360[number]>();
+        for (const item of items360) {
+            map.set(`${item.category}::${item.item}`, item);
+        }
+        return map;
+    }, [items360]);
+
+    const getItemState = (category: string, itemLabel: string) => {
+        return uniqueItemsMap.get(`${category}::${itemLabel}`);
+    };
+
     // Todo envuelto permanentemente en useMemo para evitar re-cálculos si items360 no cambia
-    const { 
-        completedPoints, 
-        progressPercentage, 
-        isComplete, 
-        failedItemsCount, 
-        okItemsCount, 
-        healthScore 
+    const {
+        completedPoints,
+        progressPercentage,
+        isComplete,
+        failedItemsCount,
+        okItemsCount,
+        healthScore
     } = useMemo(() => {
-        const completed = items360.length;
-        const _failedItemsCount = items360.filter(i => [InspectionStatus.LEGACY_BAD, InspectionStatus.REGULAR, InspectionStatus.BAD].includes(i.status as InspectionStatus)).length;
-        const _okItemsCount = items360.filter(i => [InspectionStatus.OK, InspectionStatus.GOOD, InspectionStatus.NA].includes(i.status as InspectionStatus)).length;
-        
-        // Calcular Salud
-        let _healthScore = 0;
-        if (completed > 0) {
-            const countableItems = items360.filter(i => i.status !== InspectionStatus.NA);
-            if (countableItems.length === 0) {
-                _healthScore = 100;
+        const uniqueItems = Array.from(uniqueItemsMap.values());
+
+        const completed = Math.min(uniqueItems.length, totalPoints);
+
+        // Single pass: count failed, ok, and compute health score
+        let _failedItemsCount = 0;
+        let _okItemsCount = 0;
+        let countableCount = 0;
+        let totalScore = 0;
+
+        for (const item of uniqueItems) {
+            const s = item.status as InspectionStatus;
+            if (s === InspectionStatus.OK || s === InspectionStatus.GOOD) {
+                _okItemsCount++;
+                countableCount++;
+                totalScore += 100;
+            } else if (s === InspectionStatus.NA) {
+                _okItemsCount++;
+            } else if (s === InspectionStatus.REGULAR) {
+                _failedItemsCount++;
+                countableCount++;
+                totalScore += 50;
             } else {
-                let totalScore = 0;
-                countableItems.forEach(item => {
-                    if (item.status === InspectionStatus.OK || item.status === InspectionStatus.GOOD) {
-                        totalScore += 100;
-                    } else if (item.status === InspectionStatus.REGULAR) {
-                        totalScore += 50;
-                    }
-                });
-                _healthScore = Math.round(totalScore / countableItems.length);
+                _failedItemsCount++;
+                countableCount++;
             }
         }
 
+        const _healthScore = completed === 0 ? 0
+            : countableCount === 0 ? 100
+            : Math.round(totalScore / countableCount);
+
         return {
             completedPoints: completed,
-            progressPercentage: Math.round((completed / totalPoints) * 100),
-            isComplete: completed === totalPoints,
+            progressPercentage: Math.min(100, Math.round((completed / totalPoints) * 100)),
+            isComplete: completed >= totalPoints,
             failedItemsCount: _failedItemsCount,
             okItemsCount: _okItemsCount,
             healthScore: _healthScore
         };
-    }, [items360, totalPoints]);
+    }, [uniqueItemsMap, totalPoints]);
 
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
@@ -314,9 +330,9 @@ export default function Inspection360Step({ onComplete }: Inspection360StepProps
             {/* Áreas de Inspección usando Collapsible */}
             <div className="space-y-4">
                 {INSPECTION_AREAS.map((area) => {
-                    const areaItems = items360.filter(i => i.category === area.id);
+                    const areaItems = Array.from(uniqueItemsMap.values()).filter(i => i.category === area.id);
                     const areaTotal = area.points.length;
-                    const areaCompleted = areaItems.length;
+                    const areaCompleted = Math.min(areaItems.length, areaTotal);
                     const areaFails = areaItems.filter(i => i.status === InspectionStatus.BAD).length;
                     const isOpen = openSections[area.id];
 

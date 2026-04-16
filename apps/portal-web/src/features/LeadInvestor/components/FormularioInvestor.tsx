@@ -1,4 +1,4 @@
-import { Input, Button, Select } from "@/components";
+import { Input, Button, Link, Select } from "@/components";
 import { IconPersonIndividual } from "@/components/icons/IconPersonIndividual";
 import { IconPersonJuridica } from "@/components/icons/IconPersonJuridica";
 import { useFormInvestor } from "../hooks/useFormInvestor";
@@ -38,11 +38,36 @@ const AMOUNT_OPTIONS = [
   { value: "1000000", label: "Q1,000,000" },
 ];
 
-interface FormularioInvestorProps {
-  initialAmount?: string;
+const TYPE_LABELS: Record<string, string> = {
+  tradicional: "tradicional",
+  vencimiento: "reinversión de capital",
+  compuesto: "compuesto",
+};
+
+function buildDefaultMessage(amount?: string, term?: string, type?: string): string {
+  const parts: string[] = [];
+  if (amount) parts.push(`un monto de Q${Number(amount).toLocaleString()}`);
+  if (term) parts.push(`un plazo de ${term} meses`);
+  if (type) parts.push(`tipo ${TYPE_LABELS[type] || type}`);
+  if (parts.length === 0) return "";
+  return `Estoy interesado en invertir con ${parts.join(", ")}.`;
 }
 
-export const FormularioInvestor = ({ initialAmount }: FormularioInvestorProps) => {
+interface FormularioInvestorProps {
+  initialAmount?: string;
+  initialTerm?: string;
+  initialType?: string;
+  source?: string;
+  campaign?: string;
+}
+
+export const FormularioInvestor = ({
+  initialAmount,
+  initialTerm,
+  initialType,
+  source,
+  campaign,
+}: FormularioInvestorProps) => {
   const {
     values,
     errors,
@@ -54,7 +79,12 @@ export const FormularioInvestor = ({ initialAmount }: FormularioInvestorProps) =
     handleSubmit,
     isSubmitting,
     serverError,
-  } = useFormInvestor(initialAmount);
+  } = useFormInvestor(
+    initialAmount,
+    buildDefaultMessage(initialAmount, initialTerm, initialType),
+    source,
+    campaign
+  );
   const isMobile = useIsMobile();
 
   const handleProfileSelect = (type: ProfileType) => {
@@ -68,9 +98,7 @@ export const FormularioInvestor = ({ initialAmount }: FormularioInvestorProps) =
         Solicita asesoría personalizada
       </h1>
       <p className="text-base text-[#7A7A8A] mb-4">
-        Déjanos tus datos y un asesor de inversiones se comunicará
-        <br />
-        contigo para brindarte información detallada.
+        Déjanos tus datos y un asesor de inversiones se comunicará contigo para brindarte información detallada.
       </p>
 
       {/* Selector de tipo de perfil */}
@@ -243,6 +271,17 @@ export const FormularioInvestor = ({ initialAmount }: FormularioInvestorProps) =
           >
             {isSubmitting ? "Enviando..." : "Enviar formulario"}
           </Button>
+          <p className="text-xs text-[#7A7A8A]">
+            Al enviar tus datos, confirmas que has leído y aceptas los{" "}
+            <Link
+              href="/terms&conditions"
+              className="text-primary"
+              underline
+            >
+              Términos y Condiciones
+            </Link>
+            .
+          </p>
           <p className="text-xs text-[#7A7A8A]">
             Tus datos están protegidos. No compartimos tu información con terceros.
           </p>

@@ -18,11 +18,10 @@ import {
 } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
-	generateUniqueFilename,
+	buildUploadPrefix,
 	getFileUrl,
 	getFileUrlWithBucketInKey,
-	uploadFileToR2,
-	validateFile,
+	verifyUploadedDocumentInR2,
 } from "../lib/storage";
 import { closeOpportunity } from "../services/close-opportunity";
 import { createNotification } from "./notifications";
@@ -52,7 +51,7 @@ export const legalContractsRouter = {
 						name: z.string(),
 						type: z.string(),
 						size: z.number(),
-						data: z.string(), // Base64
+						key: z.string(), // R2 key from presigned upload
 					})
 					.optional(),
 			}),
@@ -96,32 +95,20 @@ export const legalContractsRouter = {
 				}
 			}
 
-			// Subir PDF si se proporciona
+			// Guardar key del PDF si se proporciono (ya subido a R2 via presigned URL)
 			let pdfLink: string | undefined;
 			if (input.pdfFile) {
-				const validation = validateFile({
-					type: input.pdfFile.type,
-					size: input.pdfFile.size,
-				} as File);
+				const uploadedFile = await verifyUploadedDocumentInR2({
+					key: input.pdfFile.key,
+					expectedPrefix: buildUploadPrefix(
+						"legal_contract_pdf",
+						input.opportunityId || input.leadId,
+					),
+					filename: input.pdfFile.name,
+					mimeType: input.pdfFile.type,
+				});
 
-				if (!validation.valid) {
-					throw new ORPCError("BAD_REQUEST", {
-						message: validation.error || "Archivo inválido",
-					});
-				}
-
-				const fileBuffer = Buffer.from(input.pdfFile.data, "base64");
-				const fileBlob = new Blob([fileBuffer], { type: input.pdfFile.type });
-				const uniqueFilename = generateUniqueFilename(input.pdfFile.name);
-
-				const { key } = await uploadFileToR2(
-					fileBlob,
-					uniqueFilename,
-					`legal-contracts/${input.opportunityId || input.leadId}`,
-				);
-
-				// Guardar solo la key, no la URL firmada temporal
-				pdfLink = key;
+				pdfLink = uploadedFile.key;
 			}
 
 			// Crear el contrato (sin incluir pdfFile en los valores)
@@ -154,7 +141,7 @@ export const legalContractsRouter = {
 						name: z.string(),
 						type: z.string(),
 						size: z.number(),
-						data: z.string(), // Base64
+						key: z.string(), // R2 key from presigned upload
 					})
 					.optional(),
 			}),
@@ -180,32 +167,20 @@ export const legalContractsRouter = {
 				});
 			}
 
-			// Subir PDF si se proporciona
+			// Guardar key del PDF si se proporciono (ya subido a R2 via presigned URL)
 			let pdfLink: string | undefined;
 			if (input.pdfFile) {
-				const validation = validateFile({
-					type: input.pdfFile.type,
-					size: input.pdfFile.size,
-				} as File);
+				const uploadedFile = await verifyUploadedDocumentInR2({
+					key: input.pdfFile.key,
+					expectedPrefix: buildUploadPrefix(
+						"legal_contract_pdf",
+						existingContract.opportunityId || existingContract.leadId,
+					),
+					filename: input.pdfFile.name,
+					mimeType: input.pdfFile.type,
+				});
 
-				if (!validation.valid) {
-					throw new ORPCError("BAD_REQUEST", {
-						message: validation.error || "Archivo inválido",
-					});
-				}
-
-				const fileBuffer = Buffer.from(input.pdfFile.data, "base64");
-				const fileBlob = new Blob([fileBuffer], { type: input.pdfFile.type });
-				const uniqueFilename = generateUniqueFilename(input.pdfFile.name);
-
-				const { key } = await uploadFileToR2(
-					fileBlob,
-					uniqueFilename,
-					`legal-contracts/${existingContract.opportunityId || existingContract.leadId}`,
-				);
-
-				// Guardar solo la key, no la URL firmada temporal
-				pdfLink = key;
+				pdfLink = uploadedFile.key;
 			}
 
 			// Actualizar el contrato
@@ -944,7 +919,20 @@ export const legalContractsRouter = {
 				});
 			}
 
-			// En transacción: re-verificar etapa + marcar contratos + mover a 90%
+			// Primero: cerrar la oportunidad (crear crédito en cartera-back, cliente, contrato)
+			// Si falla, la oportunidad se queda en 85% y no se mueve a 90%
+			const closeResult = await closeOpportunity({
+				opportunityId: input.opportunityId,
+				userId: context.userId,
+			});
+
+			if (!closeResult.success) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: closeResult.error || "Error al cerrar la oportunidad",
+				});
+			}
+
+			// Solo si cartera-back respondió OK: marcar contratos + mover a 90%
 			await db.transaction(async (tx) => {
 				// Re-verificar que la oportunidad sigue en 85% (previene race condition)
 				const [currentOpp] = await tx
@@ -979,13 +967,11 @@ export const legalContractsRouter = {
 						),
 					);
 
-				// Mover oportunidad a 90% y marcar como ganada
+				// Mover oportunidad a 90% (closeOpportunity ya seteó status "won")
 				await tx
 					.update(opportunities)
 					.set({
 						stageId: targetStage.id,
-						status: "won",
-						actualCloseDate: new Date(),
 						updatedAt: new Date(),
 					})
 					.where(eq(opportunities.id, input.opportunityId));
@@ -999,18 +985,6 @@ export const legalContractsRouter = {
 					reason: "Contratos firmados confirmados - Avanza a formalización",
 				});
 			});
-
-			// Cerrar la oportunidad (crear crédito, cliente, contrato en cartera)
-			const closeResult = await closeOpportunity({
-				opportunityId: input.opportunityId,
-				userId: context.userId,
-			});
-
-			if (!closeResult.success) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: closeResult.error || "Error al cerrar la oportunidad",
-				});
-			}
 
 			// Notificar a análisis que está lista para desembolso
 			await createNotification({

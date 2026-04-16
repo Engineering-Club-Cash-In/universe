@@ -142,6 +142,7 @@ export interface CreateCreditoParams {
 	membresias_pago?: number;
 	reserva?: number;
 	inversionistas?: any[];
+	is_vehiculo_propio?: boolean;
 	// campos para la facturacion
 	direccion?: string;
 	rubros?: any[];
@@ -150,6 +151,14 @@ export interface CreateCreditoParams {
 	departamento?: string | null;
 	codigo_postal?: string | null;
 	pais?: string | null;
+	dia_pago_mensual?: 15 | 30;
+	// Campos para el correo de notificación
+	vehiculo_marca?: string;
+	vehiculo_linea?: string;
+	vehiculo_modelo?: string;
+	vehiculo_placa?: string;
+	vehiculo_vin?: string;
+	monto_asegurado?: number;
 }
 
 export interface CreateCreditoResult {
@@ -190,6 +199,7 @@ export async function createCreditoInCarteraBack(
 			// Nuevos campos adicionales
 			categoria: params.categoria,
 			nit: params.nit,
+			dia_pago_mensual: params.dia_pago_mensual,
 			royalti: params.royalti ?? 0,
 			porcentaje_royalti: params.porcentaje_royalti ?? 0,
 			inversionistas: params.inversionistas,
@@ -198,10 +208,19 @@ export async function createCreditoInCarteraBack(
 			como_se_entero: "",
 			otros: params.otros ?? 0,
 			reserva: params.reserva ?? 0,
+			is_vehiculo_propio: params.is_vehiculo_propio ?? false,
 			municipio: params.municipio || "",
 			departamento: params.departamento || "",
 			codigo_postal: params.codigo_postal || "",
 			pais: params.pais || "",
+			// Campos para el correo de notificación
+			vehiculo_marca: params.vehiculo_marca,
+			vehiculo_linea: params.vehiculo_linea,
+			vehiculo_modelo: params.vehiculo_modelo,
+			vehiculo_placa: params.vehiculo_placa,
+			vehiculo_vin: params.vehiculo_vin,
+			monto_asegurado: params.monto_asegurado,
+			opportunity_id: params.opportunityId,
 		};
 
 		console.log(

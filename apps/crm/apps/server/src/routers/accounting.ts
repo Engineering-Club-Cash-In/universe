@@ -1,15 +1,47 @@
 import { z } from "zod";
-import { crmProcedure } from "../lib/orpc";
+import { crmCobrosOrInvestmentsProcedure, crmProcedure } from "../lib/orpc";
 import { carteraBackClient } from "../services/cartera-back-client";
 
 export const accountingRouter = {
-	getResumenGlobalInversionistas: crmProcedure.handler(async () => {
-		const data = await carteraBackClient.getResumenGlobalInversionistas();
-		return data.filter(
-			(item: { total_a_recibir_con_reinversion: string }) =>
-				Number(item.total_a_recibir_con_reinversion) > 0,
-		);
-	}),
+	getResumenGlobalInversionistas: crmCobrosOrInvestmentsProcedure
+		.input(
+			z
+				.object({
+					inversionistaId: z.union([z.string(), z.number()]).optional(),
+					estado: z
+						.enum(["pending", "uploaded", "liquidated", "all"])
+						.optional()
+						.default("pending"),
+					mes: z.number().int().min(1).max(12).optional(),
+					anio: z.number().int().min(2000).max(2100).optional(),
+				})
+				.refine(
+					(value) =>
+						// Si se filtra por inversionista específico, mes/anio son opcionales
+						value.inversionistaId !== undefined ||
+						!["liquidated", "all"].includes(value.estado) ||
+						(value.mes !== undefined && value.anio !== undefined),
+					{
+						message:
+							"Los parámetros 'mes' y 'anio' son obligatorios cuando estado es 'liquidated' o 'all' sin inversionistaId.",
+						path: ["mes"],
+					},
+				),
+		)
+		.output(z.array(z.any()))
+		.handler(async ({ input }) => {
+			try {
+				const data =
+					await carteraBackClient.getResumenGlobalInversionistas(input);
+				const filtered = data.filter(
+					(item) => Number(item.total_a_recibir_con_reinversion) >= 0,
+				);
+				return filtered;
+			} catch (error) {
+				console.error("[ORPC] getResumenGlobalInversionistas error:", error);
+				throw error;
+			}
+		}),
 
 	createBoleta: crmProcedure
 		.input(
@@ -29,5 +61,18 @@ export const accountingRouter = {
 				subido_por: 1,
 			});
 			return boleta;
+		}),
+
+	liquidateInversionista: crmProcedure
+		.input(
+			z.object({
+				inversionista_id: z.number().int().positive(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const result = await carteraBackClient.liquidateInversionista(
+				input.inversionista_id,
+			);
+			return result;
 		}),
 };

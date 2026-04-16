@@ -54,6 +54,13 @@ interface CarteraBackClientConfig {
 	cacheTtl: number;
 }
 
+export interface ResumenGlobalInversionistasFilters {
+	inversionistaId?: string | number;
+	estado?: "pending" | "uploaded" | "liquidated" | "all";
+	mes?: number;
+	anio?: number;
+}
+
 const DEFAULT_CONFIG: CarteraBackClientConfig = {
 	baseUrl: process.env.CARTERA_BACK_URL || "http://localhost:7000",
 	apiKey: process.env.CARTERA_BACK_API_KEY,
@@ -548,6 +555,30 @@ export class CarteraBackClient {
 	}
 
 	// ========================================================================
+	// NIT VALIDATION
+	// ========================================================================
+
+	async consultarNit(
+		nit: string,
+	): Promise<{ success: boolean; data?: { nit: string; nombre: string | null }; mensaje: string }> {
+		return this.request("/api/dte/consultarNit", {
+			method: "POST",
+			body: JSON.stringify({ nit }),
+		});
+	}
+
+	// ========================================================================
+	// BANCOS (BANKS)
+	// ========================================================================
+
+	async getBancos(): Promise<{ banco_id: number; nombre: string }[]> {
+		const response = await this.request<{
+			data: { banco_id: number; nombre: string }[];
+		}>("/bancos", { method: "GET" }, true);
+		return response.data ?? [];
+	}
+
+	// ========================================================================
 	// INVERSIONISTAS (INVESTORS)
 	// ========================================================================
 
@@ -555,6 +586,7 @@ export class CarteraBackClient {
 		params: GetInvestorsParams = {},
 	): Promise<PaginatedResponse<CarteraInversionista>> {
 		const queryParams = new URLSearchParams({
+			...(params.id && { id: params.id.toString() }),
 			...(params.page && { page: params.page.toString() }),
 			...(params.perPage && { perPage: params.perPage.toString() }),
 		});
@@ -572,6 +604,34 @@ export class CarteraBackClient {
 			total: response.length,
 			totalPages: 1,
 		};
+	}
+
+	async getInvestorRendimiento(
+		email: string,
+	): Promise<{
+		success: boolean;
+		data: {
+			inversionista_id: number;
+			nombre: string;
+			dpi: string;
+			capital_total_aportado: number;
+			cantidad_inversiones: number;
+			rendimiento_estimado: number;
+		};
+	}> {
+		const queryParams = new URLSearchParams({ email });
+		const response = await this.request<{
+			success: boolean;
+			data: {
+				inversionista_id: number;
+				nombre: string;
+				dpi: string;
+				capital_total_aportado: number;
+				cantidad_inversiones: number;
+				rendimiento_estimado: number;
+			};
+		}>(`/inversionistas/rendimiento?${queryParams}`, { method: "GET" }, true);
+		return response;
 	}
 
 	async getInvestorReport(
@@ -695,13 +755,51 @@ export class CarteraBackClient {
 	// RESUMEN GLOBAL INVERSIONISTAS
 	// ========================================================================
 
-	async getResumenGlobalInversionistas(): Promise<
-		ResumenGlobalInversionista[]
-	> {
+	async getResumenGlobalInversionistas(
+		filters: ResumenGlobalInversionistasFilters = {},
+	): Promise<ResumenGlobalInversionista[]> {
+		const queryParams = new URLSearchParams();
+
+		if (filters.inversionistaId !== undefined) {
+			queryParams.set("inversionistaId", String(filters.inversionistaId));
+		}
+		queryParams.set("estado", filters.estado ?? "pending");
+		if (filters.mes !== undefined) {
+			queryParams.set("mes", String(filters.mes));
+		}
+		if (filters.anio !== undefined) {
+			queryParams.set("anio", String(filters.anio));
+		}
+
 		const response = await this.request<ResumenGlobalInversionista[]>(
-			"/resumen-global",
+			`/resumen-global-liquidaciones?${queryParams.toString()}`,
 			{ method: "GET" },
 			true,
+		);
+		return response;
+	}
+
+	async getResumenGlobalExcel(
+		filters: ResumenGlobalInversionistasFilters = {},
+	): Promise<{ success: boolean; url: string }> {
+		const queryParams = new URLSearchParams();
+
+		if (filters.inversionistaId !== undefined) {
+			queryParams.set("inversionistaId", String(filters.inversionistaId));
+		}
+		queryParams.set("estado", filters.estado ?? "pending");
+		if (filters.mes !== undefined) {
+			queryParams.set("mes", String(filters.mes));
+		}
+		if (filters.anio !== undefined) {
+			queryParams.set("anio", String(filters.anio));
+		}
+		queryParams.set("excel", "true");
+
+		const response = await this.request<{ success: boolean; url: string }>(
+			`/resumen-global-liquidaciones?${queryParams.toString()}`,
+			{ method: "GET" },
+			false,
 		);
 		return response;
 	}
@@ -738,7 +836,175 @@ export class CarteraBackClient {
 			method: "POST",
 			body: JSON.stringify(input),
 		});
-		this.cache.invalidate("resumen-global");
+		this.cache.invalidate("resumen-global-liquidaciones");
+		return response;
+	}
+
+	async liquidateInversionista(
+		inversionista_id: number,
+	): Promise<Record<string, any>> {
+		const response = await this.request<Record<string, any>>(
+			"/liquidate-inversionista-pagos",
+			{
+				method: "POST",
+				body: JSON.stringify({ inversionista_id }),
+			},
+		);
+		this.cache.invalidate("resumen-global-liquidaciones");
+		return response;
+	}
+
+	// ========================================================================
+	// INVESTOR DOCUMENTS (DOCUMENTOS DE INVERSIONISTA)
+	// ========================================================================
+
+	async createInvestorDocument(input: {
+		file: File | Blob;
+		inversionista_id: number;
+		nombre: string;
+		descripcion?: string;
+		visible?: boolean;
+		created_by?: string;
+	}): Promise<{
+		success: boolean;
+		message: string;
+		data?: Record<string, any>;
+	}> {
+		const url = `${this.config.baseUrl}/investor-documents`;
+		const formData = new FormData();
+		formData.append("file", input.file, input.nombre);
+		formData.append("inversionista_id", String(input.inversionista_id));
+		formData.append("nombre", input.nombre);
+		if (input.descripcion) formData.append("descripcion", input.descripcion);
+		if (input.visible !== undefined)
+			formData.append("visible", String(input.visible));
+		if (input.created_by) formData.append("created_by", input.created_by);
+
+		const response = await fetch(url, {
+			method: "POST",
+			body: formData,
+			...(this.config.apiKey && {
+				headers: { Authorization: `Bearer ${this.config.apiKey}` },
+			}),
+			signal: AbortSignal.timeout(this.config.timeout),
+		});
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new Error(`Error al crear documento: ${errorText}`);
+		}
+
+		this.cache.invalidate("investor-documents");
+		return response.json();
+	}
+
+	async getInvestorDocumentsAdmin(
+		inversionistaId: number,
+	): Promise<{ success: boolean; data: Record<string, any>[] }> {
+		const response = await this.request<{
+			success: boolean;
+			data: Record<string, any>[];
+		}>(`/investor-documents/admin/${inversionistaId}`, { method: "GET" }, true);
+		return response;
+	}
+
+	async toggleInvestorDocumentVisibility(
+		documentoId: number,
+		visible: boolean,
+	): Promise<{
+		success: boolean;
+		message: string;
+		data?: Record<string, any>;
+	}> {
+		const response = await this.request<{
+			success: boolean;
+			message: string;
+			data?: Record<string, any>;
+		}>(`/investor-documents/${documentoId}/visibility`, {
+			method: "PUT",
+			body: JSON.stringify({ visible }),
+		});
+		this.cache.invalidate("investor-documents");
+		return response;
+	}
+
+	async deleteInvestorDocument(
+		documentoId: number,
+	): Promise<{
+		success: boolean;
+		message: string;
+		data?: Record<string, any>;
+	}> {
+		const response = await this.request<{
+			success: boolean;
+			message: string;
+			data?: Record<string, any>;
+		}>(`/investor-documents/${documentoId}/delete`, {
+			method: "PATCH",
+		});
+		this.cache.invalidate("investor-documents");
+		return response;
+	}
+
+	// ========================================================================
+	// CREAR INVERSIONISTA
+	// ========================================================================
+
+	async createInvestor(input: {
+		inversionista_id?: number;
+		nombre: string;
+		dpi?: number | null;
+		email?: string | null;
+		emite_factura?: boolean;
+		banco?: number | null;
+		tipo_cuenta?: string | null;
+		numero_cuenta?: string | null;
+		tipo_reinversion?: string | null;
+		monto_reinversion?: number | null;
+		moneda?: string;
+	}): Promise<{ message: string; data: { inversionista_id: number; nombre: string; [key: string]: any }[] }> {
+		const response = await this.request<{
+			message: string;
+			data: { inversionista_id: number; nombre: string; [key: string]: any }[];
+		}>("/investor", {
+			method: "POST",
+			body: JSON.stringify({
+				...(input.inversionista_id && { inversionista_id: input.inversionista_id }),
+				nombre: input.nombre,
+				dpi: input.dpi ?? null,
+				email: input.email ?? null,
+				emite_factura: input.emite_factura ?? false,
+				banco: input.banco ?? null,
+				tipo_cuenta: input.tipo_cuenta ?? null,
+				numero_cuenta: input.numero_cuenta ?? null,
+				tipo_reinversion: input.tipo_reinversion ?? "sin_reinversion",
+				monto_reinversion: input.monto_reinversion ?? null,
+				moneda: input.moneda ?? "quetzales",
+			}),
+		});
+		this.cache.invalidate("investor");
+		return response;
+	}
+
+	// ========================================================================
+	// COMPRA DE CARTERA
+	// ========================================================================
+
+	async compraCartera(input: {
+		inversionista_id: number;
+		monto_aportado: number;
+		tipo_operacion: "compra_cartera";
+		porcentaje_inversion?: number;
+		porcentaje_cash_in?: number;
+		fecha_inicio_participacion?: string;
+	}): Promise<{ success: boolean; message: string }> {
+		const response = await this.request<{
+			success: boolean;
+			message: string;
+		}>("/agregar-inversionista-credito", {
+			method: "POST",
+			body: JSON.stringify(input),
+		});
 		return response;
 	}
 

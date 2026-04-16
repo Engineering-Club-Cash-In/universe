@@ -16,22 +16,24 @@ import {
 import { motion } from "framer-motion";
 import { ContainerMenu } from "../components/ContainerMenu";
 import { useIsMobile } from "@/hooks";
+import { InvestorDocuments } from "./InvestorDocuments";
 
 export const MyDocuments = () => {
   const { user } = useAuth();
+  const isInvestor = user?.role === "INVESTOR";
 
-  // Obtener contratos
+  // Obtener contratos - solo para clientes
   const { data: contracts, isLoading: loadingContracts } = useQuery({
     queryKey: ["contracts", user?.email],
     queryFn: () => getContracts(user?.email || "", user?.dpi || ""),
-    enabled: !!user?.email,
+    enabled: !!user?.email && !isInvestor,
   });
 
-  // Obtener documentos personales
+  // Obtener documentos personales - solo para clientes
   const { data: documents, isLoading: loadingDocuments } = useQuery({
     queryKey: ["personal-documents", user?.email],
     queryFn: () => getPersonalDocuments(user?.email || "", user?.dpi || ""),
-    enabled: !!user?.email,
+    enabled: !!user?.email && !isInvestor,
   });
 
   const formatDate = (dateString: string) => {
@@ -47,7 +49,7 @@ export const MyDocuments = () => {
   };
 
   const isMobile = useIsMobile();
-  const isLoading = loadingContracts || loadingDocuments;
+  const isLoading = !isInvestor && (loadingContracts || loadingDocuments);
 
   // Agrupar documentos por tipo
   const groupedDocuments =
@@ -75,6 +77,24 @@ export const MyDocuments = () => {
     );
   }
 
+  // Vista para inversionistas
+  if (isInvestor) {
+    return (
+      <div>
+        <NavBar />
+        <ContainerMenu>
+          <div className="">
+            <h1 className="text-xl lg:text-header-body font-bold mb-8">
+              Mis Documentos
+            </h1>
+            <InvestorDocuments />
+          </div>
+        </ContainerMenu>
+      </div>
+    );
+  }
+
+  // Vista para clientes
   return (
     <div>
       <NavBar />

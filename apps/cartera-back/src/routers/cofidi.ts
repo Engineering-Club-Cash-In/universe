@@ -15,7 +15,9 @@ import {
   pagos_credito_inversionistas,
   usuarios,
 } from "../database/db";
-import { eq, desc, and, sql } from "drizzle-orm";
+import { eq, desc, and, sql, gte, lte } from "drizzle-orm";
+import ExcelJS from "exceljs";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { NITSoapClient } from "../cofidi/nitGenerator";
 import {
   SAT_CONFIG,
@@ -45,6 +47,12 @@ const EMISORES_CONFIG = {
 } as const;
 
 type EmisorKey = keyof typeof EMISORES_CONFIG;
+
+// 🔥 Mapa inverso: NIT emisor → config (para anulación automática)
+const EMISOR_POR_NIT: Record<string, { config: typeof CLUB_CASHIN_CONFIG; satConfig: typeof SAT_CONFIG }> = {};
+for (const [, value] of Object.entries(EMISORES_CONFIG)) {
+  EMISOR_POR_NIT[value.config.emisor.nit] = value as any;
+}
 
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
 
@@ -230,13 +238,41 @@ if (facturasExistentes.length > 0) {
         return pais;
       };
 
+      // 🔥 Extraer todos los NITs disponibles (separados por /)
+      const nitsDisponibles = pagoData.nit
+        ? pagoData.nit.split('/').map((n: string) => n.trim().replace(/-/g, '')).filter((n: string) => n.length > 0)
+        : [];
+
+      const nitReceptor = nitsDisponibles.length > 0 ? nitsDisponibles[0] : "CF";
+
+      // 🔥 Consultar nombre del receptor en SAT via COFIDI
+      let nombreReceptor = pagoData.nombre
+        ? pagoData.nombre.split('/')[0].trim()
+        : "CONSUMIDOR FINAL";
+
+      if (nitReceptor && nitReceptor !== "CF") {
+        try {
+          const nitClient = new NITSoapClient(COFIDI_CONFIG.endpointUrl);
+          const resultadoNit = await nitClient.consultarNIT({
+            nit: nitReceptor,
+            entity: COFIDI_CONFIG.entity,
+            requestor: COFIDI_CONFIG.requestor,
+          });
+
+          if (resultadoNit.success && resultadoNit.nombre) {
+            nombreReceptor = resultadoNit.nombre;
+            console.log(`✅ NIT receptor encontrado en SAT: ${nombreReceptor}`);
+          } else {
+            console.log(`⚠️ NIT no encontrado en SAT, usando nombre del sistema: ${nombreReceptor}`);
+          }
+        } catch (nitError) {
+          console.error("❌ Error consultando NIT del receptor:", nitError);
+        }
+      }
+
       const receptor = {
-        idReceptor: pagoData.nit
-          ? pagoData.nit.split('/')[0].trim().replace(/[kK]/g, '').replace(/-$/, '') // 🔥 Tomar primer NIT, quitar K y guión final
-          : "CF",
-        nombreReceptor: pagoData.nombre
-          ? pagoData.nombre.split('/')[0].trim() // 🔥 Tomar solo el primer nombre
-          : pagoData.nombre,
+        idReceptor: nitReceptor,
+        nombreReceptor: nombreReceptor,
         direccion: pagoData.direccion
           ? {
               direccion: pagoData.direccion,
@@ -361,6 +397,7 @@ if (facturasExistentes.length > 0) {
             items: itemsMora,
             complementos: complementosMora,
             created_by,
+            nitsFallback: nitsDisponibles.slice(1),
           });
 
           facturasGeneradas.push({
@@ -518,6 +555,7 @@ if (facturasExistentes.length > 0) {
             items: itemsOtrosServicios,
             complementos: complementosOtrosServicios,
             created_by,
+            nitsFallback: nitsDisponibles.slice(1),
           });
 
           facturasGeneradas.push({
@@ -601,6 +639,7 @@ if (facturasExistentes.length > 0) {
             items: itemsOtros,
             complementos: complementosOtros,
             created_by,
+            nitsFallback: nitsDisponibles.slice(1),
           });
 
           facturasGeneradas.push({
@@ -742,6 +781,7 @@ if (facturasExistentes.length > 0) {
               created_by,
               customConfig: inversionistaConfig?.config,
               customSatConfig: inversionistaConfig?.satConfig,
+              nitsFallback: nitsDisponibles.slice(1),
             });
 
             facturasGeneradas.push({
@@ -828,6 +868,7 @@ if (facturasExistentes.length > 0) {
               items: itemsCube,
               complementos: complementosCube,
               created_by,
+              nitsFallback: nitsDisponibles.slice(1),
             });
 
             facturasGeneradas.push({
@@ -1049,15 +1090,15 @@ if (facturasExistentes.length > 0) {
         usuario_departamento: usuarios.departamento,
       })
       .from(facturas_electronicas)
-      .innerJoin(
+      .leftJoin(
         pagos_credito,
         eq(facturas_electronicas.pago_id, pagos_credito.pago_id)
       )
-      .innerJoin(
+      .leftJoin(
         creditos,
         eq(pagos_credito.credito_id, creditos.credito_id)
       )
-      .innerJoin(
+      .leftJoin(
         usuarios,
         eq(creditos.usuario_id, usuarios.usuario_id)
       )
@@ -1167,54 +1208,63 @@ if (facturasExistentes.length > 0) {
     console.log('📋 Tipo documento:', facturaCompleta.factura_tipo_documento);
 
     // ============================================
-    // 4️⃣ CONSTRUIR XML DE ANULACIÓN
+    // 6️⃣ ANULAR EN COFIDI/SAT (detectar emisor automáticamente)
     // ============================================
-    const xmlAnulacion = `<?xml version="1.0" encoding="UTF-8"?>
+    console.log('📡 Intentando anulación con cada emisor...');
+
+    const emisoresParaIntentar = Object.entries(EMISORES_CONFIG);
+    let resultado: any = null;
+    let emisorUsado = "";
+
+    for (const [emisorKey, emisorConf] of emisoresParaIntentar) {
+      const nitEmisor = emisorConf.config.emisor.nit;
+
+      // Reconstruir XML con el NIT del emisor correcto
+      const xmlAnulacionEmisor = `<?xml version="1.0" encoding="UTF-8"?>
 <dte:GTAnulacionDocumento xmlns:dte="http://www.sat.gob.gt/dte/fel/0.1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Version="0.1" xsi:schemaLocation="http://www.sat.gob.gt/dte/fel/0.1.0 GT_AnulacionDocumento-0.1.0.xsd">
   <dte:SAT>
     <dte:AnulacionDTE ID="DatosCertificados">
-      <dte:DatosGenerales 
-        ID="DatosAnulacion" 
-        NumeroDocumentoAAnular="${facturaCompleta.factura_uuid}" 
-        NITEmisor="${CLUB_CASHIN_CONFIG.emisor.nit}" 
-        IDReceptor="${facturaCompleta.usuario_nit || 'CF'}" 
-        FechaEmisionDocumentoAnular="${fechaEmisionDocumento}" 
-        FechaHoraAnulacion="${fechaHoraAnulacion}" 
+      <dte:DatosGenerales
+        ID="DatosAnulacion"
+        NumeroDocumentoAAnular="${facturaCompleta.factura_uuid}"
+        NITEmisor="${nitEmisor}"
+        IDReceptor="${facturaCompleta.factura_receptor_nit || 'CF'}"
+        FechaEmisionDocumentoAnular="${fechaEmisionDocumento}"
+        FechaHoraAnulacion="${fechaHoraAnulacion}"
         MotivoAnulacion="${motivo}"/>
     </dte:AnulacionDTE>
   </dte:SAT>
 </dte:GTAnulacionDocumento>`;
 
-    console.log('📄 XML de anulación construido');
-    if (process.env.NODE_ENV === 'development') {
-      console.log('📝 XML completo:\n', xmlAnulacion);
+      const xmlBase64Emisor = Buffer.from(xmlAnulacionEmisor, 'utf-8').toString('base64');
+
+      const satClient = new SATClientService(
+        {
+          requestor: emisorConf.satConfig.requestor,
+          user: emisorConf.satConfig.user || emisorConf.satConfig.requestor,
+          userName: emisorConf.satConfig.userName,
+          entity: nitEmisor
+        },
+        emisorConf.satConfig.endpointUrl
+      );
+
+      console.log(`   🔄 Intentando con ${emisorKey} (NIT: ${nitEmisor})...`);
+
+      try {
+        resultado = await satClient.anularDocumento(uuid, xmlBase64Emisor);
+        if (resultado.anulado) {
+          emisorUsado = emisorKey;
+          console.log(`   ✅ Anulado exitosamente con ${emisorKey}`);
+          break;
+        }
+        console.log(`   ❌ ${emisorKey}: ${resultado.descripcion || 'No anulado'}`);
+      } catch (e) {
+        console.log(`   ❌ ${emisorKey}: Error - ${(e as Error).message}`);
+      }
     }
 
-    // ============================================
-    // 5️⃣ CONVERTIR A BASE64
-    // ============================================
-    const xmlBase64 = Buffer.from(xmlAnulacion, 'utf-8').toString('base64');
-    console.log('🔐 XML convertido a Base64');
-
-    // ============================================
-    // 6️⃣ ANULAR EN COFIDI/SAT
-    // ============================================
-    console.log('📡 Enviando solicitud de anulación a COFIDI...');
-    
-    const satClient = new SATClientService(
-      {
-        requestor: SAT_CONFIG.requestor,
-        user: SAT_CONFIG.user,
-        userName: SAT_CONFIG.userName,
-        entity: SAT_CONFIG.entity
-      },
-      SAT_CONFIG.endpointUrl
-    );
-
-    const resultado = await satClient.anularDocumento(uuid, xmlBase64);
-
     // 🔥 VALIDACIÓN: Error en COFIDI
-    if (!resultado.anulado) {
+    if (!resultado || !resultado.anulado) {
       console.error('❌ COFIDI rechazó la anulación');
       console.error('📋 Respuesta:', resultado);
       
@@ -1987,7 +2037,7 @@ if (facturasExistentes.length > 0) {
     "/facturar-generico",
     async ({ body, set, request }) => {
       try {
-        const { nit, items: itemsInput, created_by: bodyCreatedBy, emisor } = body;
+        const { nit, items: itemsInput, created_by: bodyCreatedBy, emisor, credito_nuevo} = body;
 
         // Si no viene created_by en el body, extraerlo del token
         let created_by = bodyCreatedBy;
@@ -2137,6 +2187,7 @@ if (facturasExistentes.length > 0) {
           created_by,
           customConfig: emisorKey !== "CUBE" ? emisorConfig.config : undefined,
           customSatConfig: emisorKey !== "CUBE" ? emisorConfig.satConfig : undefined,
+          usarFechaActual: credito_nuevo,
         });
 
         console.log("🎉 ========== FACTURA GENÉRICA GENERADA ==========");
@@ -2192,6 +2243,7 @@ if (facturasExistentes.length > 0) {
           t.Literal("GRUPO_BATRO"),
           t.Literal("AUTOCASH"),
         ]),
+        credito_nuevo: t.Optional(t.Boolean({ default: false })),
       }),
     }
   )
@@ -2203,16 +2255,18 @@ if (facturasExistentes.length > 0) {
     "/facturas-genericas",
     async ({ query, set }) => {
       try {
-        const { created_by, nit, page = "1", limit = "10" } = query;
+        const { created_by, nit, fecha_inicio, fecha_fin, excel, tipo, page = "1", limit = "10" } = query;
+        const isExcel = excel === "true";
 
-        // Paginación
+        // Paginación (solo si no es Excel)
         const pageNum = Math.max(1, parseInt(page));
-        const limitNum = Math.min(100, Math.max(1, parseInt(limit))); // Max 100 por página
+        const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
         const offset = (pageNum - 1) * limitNum;
 
         console.log("📋 ========== BUSCANDO FACTURAS ==========");
         console.log(`👤 Usuario: ${created_by || "N/A"} | 🏷️ NIT: ${nit || "N/A"}`);
-        console.log(`📄 Página: ${pageNum} | Límite: ${limitNum}`);
+        console.log(`📅 Desde: ${fecha_inicio || "N/A"} | Hasta: ${fecha_fin || "N/A"}`);
+        console.log(`📊 Excel: ${isExcel} | 📄 Página: ${pageNum} | Límite: ${limitNum}`);
 
         // Construir condiciones dinámicamente
         const conditions = [eq(facturas_electronicas.status, "ACTIVA")];
@@ -2225,14 +2279,30 @@ if (facturasExistentes.length > 0) {
           conditions.push(eq(facturas_electronicas.receptor_nit, nit));
         }
 
+        if (fecha_inicio) {
+          conditions.push(gte(facturas_electronicas.fecha_emision, new Date(fecha_inicio)));
+        }
+
+        if (fecha_fin) {
+          const fin = new Date(fecha_fin);
+          fin.setHours(23, 59, 59, 999);
+          conditions.push(lte(facturas_electronicas.fecha_emision, fin));
+        }
+
+        if (tipo === "pago") {
+          conditions.push(sql`${facturas_electronicas.pago_id} IS NOT NULL`);
+        } else if (tipo === "credito_nuevo") {
+          conditions.push(sql`${facturas_electronicas.pago_id} IS NULL`);
+        }
+
         // Contar total de registros
         const [{ count: totalCount }] = await db
           .select({ count: sql<number>`count(*)::int` })
           .from(facturas_electronicas)
           .where(and(...conditions));
 
-        // Obtener facturas paginadas
-        const facturas = await db
+        // Obtener facturas (sin paginación si es Excel)
+        const baseQuery = db
           .select({
             factura_id: facturas_electronicas.factura_id,
             pago_id: facturas_electronicas.pago_id,
@@ -2248,18 +2318,203 @@ if (facturasExistentes.length > 0) {
             fecha_emision: facturas_electronicas.fecha_emision,
             fecha_certificacion: facturas_electronicas.fecha_certificacion,
             status: facturas_electronicas.status,
+            emisor_nit: facturas_electronicas.emisor_nit,
+            emisor_nombre: facturas_electronicas.emisor_nombre,
             created_by: facturas_electronicas.created_by,
             created_at: facturas_electronicas.created_at,
           })
           .from(facturas_electronicas)
           .where(and(...conditions))
-          .orderBy(desc(facturas_electronicas.fecha_emision))
-          .limit(limitNum)
-          .offset(offset);
+          .orderBy(desc(facturas_electronicas.fecha_emision));
 
-        console.log(`✅ ${facturas.length} facturas en página ${pageNum}`);
+        const facturas = isExcel
+          ? await baseQuery
+          : await baseQuery.limit(limitNum).offset(offset);
 
-        // Calcular totales de la página
+        console.log(`✅ ${facturas.length} facturas ${isExcel ? "para Excel" : `en página ${pageNum}`}`);
+
+        // ============================================
+        // 📊 GENERAR EXCEL
+        // ============================================
+        if (isExcel) {
+          const workbook = new ExcelJS.Workbook();
+          const sheet = workbook.addWorksheet("Facturas");
+
+          // Logo
+          const logoUrl = process.env.LOGO_URL || "";
+          if (logoUrl) {
+            try {
+              const logoResponse = await fetch(logoUrl);
+              const logoBuffer = Buffer.from(await logoResponse.arrayBuffer());
+              const logoImage = workbook.addImage({
+                buffer: logoBuffer,
+                extension: "png",
+              });
+              sheet.addImage(logoImage, {
+                tl: { col: 0, row: 0 },
+                ext: { width: 180, height: 50 },
+              });
+            } catch (e) {
+              console.log("⚠️ No se pudo cargar el logo:", e);
+            }
+          }
+
+          // Espacio para el logo
+          sheet.addRow([]);
+          sheet.addRow([]);
+          sheet.addRow([]);
+
+          // Título
+          const rangoFechas = fecha_inicio && fecha_fin
+            ? `Del ${fecha_inicio} al ${fecha_fin}`
+            : fecha_inicio
+            ? `Desde ${fecha_inicio}`
+            : fecha_fin
+            ? `Hasta ${fecha_fin}`
+            : "Todas las fechas";
+
+          const titleRow = sheet.addRow(["REPORTE DE FACTURAS ELECTRÓNICAS"]);
+          titleRow.font = { bold: true, size: 14, color: { argb: "FF1A3C7A" } };
+          sheet.mergeCells(titleRow.number, 1, titleRow.number, 15);
+          titleRow.alignment = { horizontal: "center" };
+
+          const subtitleRow = sheet.addRow([`${rangoFechas} | ${facturas.length} facturas | NIT: ${nit || "Todos"}`]);
+          subtitleRow.font = { size: 10, color: { argb: "FF666666" } };
+          sheet.mergeCells(subtitleRow.number, 1, subtitleRow.number, 15);
+          subtitleRow.alignment = { horizontal: "center" };
+
+          sheet.addRow([]);
+
+          // Headers
+          const headers = [
+            "No.", "NIT Emisor", "Emisor", "Serie", "Número", "UUID", "Tipo Doc.",
+            "NIT Receptor", "Nombre Receptor", "Subtotal",
+            "IVA (12%)", "Total", "Tipo", "Fecha Emisión", "Fecha Certificación",
+          ];
+
+          const headerRow = sheet.addRow(headers);
+          headerRow.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 10 };
+          headerRow.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FF1A3C7A" },
+          };
+          headerRow.alignment = { horizontal: "center", vertical: "middle" };
+          headerRow.height = 25;
+
+          // Data
+          let totalMonto = 0;
+          let totalIva = 0;
+
+          facturas.forEach((f, index) => {
+            const montoTotal = parseFloat(f.monto_total as string);
+            const montoIva = parseFloat(f.monto_iva as string);
+            const subtotal = montoTotal - montoIva;
+            totalMonto += montoTotal;
+            totalIva += montoIva;
+
+            const row = sheet.addRow([
+              index + 1,
+              f.emisor_nit || "N/A",
+              f.emisor_nombre || "N/A",
+              f.serie,
+              f.numero,
+              f.uuid,
+              f.tipo_documento,
+              f.receptor_nit,
+              f.receptor_nombre,
+              subtotal,
+              montoIva,
+              montoTotal,
+              f.pago_id ? "Pago de cuota" : "Crédito nuevo",
+              f.fecha_emision ? new Date(f.fecha_emision).toLocaleDateString("es-GT", { timeZone: "America/Guatemala" }) : "",
+              f.fecha_certificacion ? new Date(f.fecha_certificacion).toLocaleDateString("es-GT", { timeZone: "America/Guatemala" }) : "",
+            ]);
+
+            if (index % 2 === 0) {
+              row.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF5F7FA" } };
+            }
+            row.getCell(10).numFmt = "Q#,##0.00";
+            row.getCell(11).numFmt = "Q#,##0.00";
+            row.getCell(12).numFmt = "Q#,##0.00";
+          });
+
+          // Totales
+          sheet.addRow([]);
+          const totalsRow = sheet.addRow([
+            "", "", "", "", "", "", "", "", "TOTALES:",
+            totalMonto - totalIva, totalIva, totalMonto, "", "", "",
+          ]);
+          totalsRow.font = { bold: true, size: 11 };
+          totalsRow.getCell(9).alignment = { horizontal: "right" };
+          totalsRow.getCell(10).numFmt = "Q#,##0.00";
+          totalsRow.getCell(11).numFmt = "Q#,##0.00";
+          totalsRow.getCell(12).numFmt = "Q#,##0.00";
+          totalsRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8EDF5" } };
+
+          // Auto-width
+          sheet.columns.forEach((col) => {
+            let maxLength = 12;
+            col.eachCell?.({ includeEmpty: true }, (cell) => {
+              const len = cell.value ? cell.value.toString().length : 0;
+              if (len > maxLength) maxLength = len;
+            });
+            col.width = Math.min(maxLength + 2, 40);
+          });
+
+          // Freeze header + bordes
+          sheet.views = [{ state: "frozen", ySplit: 7 }];
+          const dataStart = 7;
+          const dataEnd = dataStart + facturas.length;
+          for (let r = dataStart; r <= dataEnd; r++) {
+            const row = sheet.getRow(r);
+            for (let c = 1; c <= 15; c++) {
+              row.getCell(c).border = {
+                top: { style: "thin", color: { argb: "FFD0D5DD" } },
+                bottom: { style: "thin", color: { argb: "FFD0D5DD" } },
+                left: { style: "thin", color: { argb: "FFD0D5DD" } },
+                right: { style: "thin", color: { argb: "FFD0D5DD" } },
+              };
+            }
+          }
+
+          // Subir a R2
+          const buffer = await workbook.xlsx.writeBuffer();
+          const filename = `reportes/facturas_${Date.now()}.xlsx`;
+
+          const s3 = new S3Client({
+            endpoint: process.env.BUCKET_REPORTS_URL,
+            region: "auto",
+            credentials: {
+              accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
+              secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
+            },
+          });
+
+          await s3.send(
+            new PutObjectCommand({
+              Bucket: process.env.BUCKET_REPORTS,
+              Key: filename,
+              Body: Buffer.from(buffer),
+              ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            })
+          );
+
+          const publicUrl = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
+          console.log(`📊 Excel generado: ${publicUrl}`);
+
+          return {
+            success: true,
+            mensaje: `Excel generado con ${facturas.length} facturas`,
+            url: publicUrl,
+            total_facturas: facturas.length,
+            monto_total: totalMonto.toFixed(2),
+          };
+        }
+
+        // ============================================
+        // 📄 RESPUESTA NORMAL (JSON paginado)
+        // ============================================
         const montoTotalPagina = facturas.reduce(
           (sum, f) => sum + parseFloat(f.monto_total as string),
           0
@@ -2282,10 +2537,13 @@ if (facturasExistentes.length > 0) {
             filtros: {
               created_by: created_by || null,
               nit: nit || null,
+              fecha_inicio: fecha_inicio || null,
+              fecha_fin: fecha_fin || null,
+              tipo: tipo || null,
             },
             facturas: facturas.map((f) => ({
               ...f,
-              es_generica: f.pago_id === null,
+              tipo: f.pago_id ? "Pago de cuota" : "Crédito nuevo",
               link_pdf: f.pdf_url,
             })),
           },
@@ -2305,11 +2563,17 @@ if (facturasExistentes.length > 0) {
       query: t.Object({
         created_by: t.Optional(t.String()),
         nit: t.Optional(t.String()),
+        fecha_inicio: t.Optional(t.String()),
+        fecha_fin: t.Optional(t.String()),
+        excel: t.Optional(t.String()),
+        tipo: t.Optional(t.String()),
         page: t.Optional(t.String()),
         limit: t.Optional(t.String()),
       }),
     }
-  );
+  )
+
+;
 
 // ============================================
 // 🔥 FUNCIÓN HELPER PARA CERTIFICAR FACTURA
@@ -2322,6 +2586,8 @@ async function certificarFacturaHelper({
   created_by,
   customConfig,
   customSatConfig,
+  usarFechaActual = false,
+  nitsFallback = [],
 }: {
   pago_id?: number | null;
   receptor: any;
@@ -2337,6 +2603,8 @@ async function certificarFacturaHelper({
     nit?: string;
     entity?: string;
   };
+  usarFechaActual?: boolean;
+  nitsFallback?: string[];
 }) {
   try {
     console.log(`\n📄 ========== CERTIFICANDO FACTURA ==========`);
@@ -2351,7 +2619,13 @@ async function certificarFacturaHelper({
     const idInterno = generarIdInternoRandom();
 const fechaGuatemala = new Date();
 fechaGuatemala.setUTCHours(fechaGuatemala.getUTCHours() - 6);
-const fechaHoraEmision = fechaGuatemala.toISOString().substring(0, 19);
+
+// Si estamos en los primeros 5 días del mes, usar último día del mes anterior (a menos que usarFechaActual sea true)
+let fechaEmision = fechaGuatemala;
+if (!usarFechaActual && fechaGuatemala.getUTCDate() <= 5) {
+  fechaEmision = new Date(Date.UTC(fechaGuatemala.getUTCFullYear(), fechaGuatemala.getUTCMonth(), 0, 23, 59, 59));
+}
+const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
 
 
     // ============================================
@@ -2421,6 +2695,47 @@ const fechaHoraEmision = fechaGuatemala.toISOString().substring(0, 19);
         throw new Error(
           `Las credenciales de certificación no son válidas. ` +
             `Verifique con COFIDI que el usuario '${SAT_CONFIG.user}' tenga permisos activos.`
+        );
+      }
+
+      if (errorMessage.includes("NIT del Receptor es inválido") || errorMessage.includes("1014")) {
+        // 🔥 Si hay NITs alternativos, intentar con el siguiente
+        if (nitsFallback.length > 0) {
+          const siguienteNit = nitsFallback[0];
+          const restantesFallback = nitsFallback.slice(1);
+          console.log(`   🔄 NIT "${receptor.idReceptor}" inválido, reintentando con: "${siguienteNit}"`);
+          return certificarFacturaHelper({
+            pago_id,
+            receptor: { ...receptor, idReceptor: siguienteNit },
+            items,
+            complementos,
+            created_by,
+            customConfig,
+            customSatConfig,
+            usarFechaActual,
+            nitsFallback: restantesFallback,
+          });
+        }
+
+        // 🔥 Si no hay más NITs, intentar con "CF" como último recurso
+        if (receptor.idReceptor !== "CF") {
+          console.log(`   🔄 NIT "${receptor.idReceptor}" inválido, reintentando con "CF"`);
+          return certificarFacturaHelper({
+            pago_id,
+            receptor: { ...receptor, idReceptor: "CF" },
+            items,
+            complementos,
+            created_by,
+            customConfig,
+            customSatConfig,
+            usarFechaActual,
+            nitsFallback: [],
+          });
+        }
+
+        throw new Error(
+          `NIT del receptor inválido. NIT enviado: "${receptor.idReceptor}" para "${receptor.nombreReceptor}". ` +
+            `Respuesta COFIDI: ${errorMessage}`
         );
       }
 
@@ -2633,13 +2948,15 @@ const fechaHoraEmision = fechaGuatemala.toISOString().substring(0, 19);
           ]
         ).toString(),
         pdf_url: pdfUrl,
+        emisor_nit: emisorConfig.emisor.nit,
+        emisor_nombre: emisorConfig.emisor.nombreEmisor,
         receptor_nit: receptorXML["@_IDReceptor"],
         receptor_nombre: receptorXML["@_NombreReceptor"],
-        
+
         // 🔥 CONVERTIR A HORA DE GUATEMALA ANTES DE GUARDAR
         fecha_emision: new Date(datosGenerales["@_FechaHoraEmision"]),
         fecha_certificacion: convertirAGuatemala(certificacion["dte:FechaHoraCertificacion"]),
-        
+
         status: "ACTIVA",
         created_by: created_by || null,
       })

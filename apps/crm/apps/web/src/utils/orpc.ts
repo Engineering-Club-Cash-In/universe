@@ -4,8 +4,13 @@ import type { RouterClient } from "@orpc/server";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { QueryCache, QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import type { appRouter } from "../../../server/src/routers/index";
-import type { investmentsRouter } from "../../../server/src/routers/investments";
+import type {
+	AppRouter,
+	disbursementRouter,
+	manualVehicleRouter,
+} from "../../../server/src/routers/index";
+type InvestmentsRouter =
+	typeof import("../../../server/src/routers/investments").investmentsRouter;
 
 // Detectar si es un error de sesión/autenticación
 const isSessionError = (error: Error): boolean => {
@@ -59,7 +64,10 @@ export const link = new RPCLink({
 
 // Merge router types to avoid TS7056 with declaration emit
 // See: https://orpc.dev/docs/advanced/exceeds-the-maximum-length-problem
-type MergedRouter = typeof appRouter & typeof investmentsRouter;
+type MergedRouter = AppRouter &
+	typeof manualVehicleRouter &
+	InvestmentsRouter &
+	typeof disbursementRouter;
 
 export const client: RouterClient<MergedRouter> = createORPCClient(link);
 

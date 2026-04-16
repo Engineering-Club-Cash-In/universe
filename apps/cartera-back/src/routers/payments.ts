@@ -12,12 +12,15 @@ import { z } from "zod";
 import { promises as fs } from "fs";
 import { mapPagosPorCreditos, mapPagosDesdeJson } from "../migration/migration";
 import { authMiddleware } from "./midleware";
-import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagosToExcel } from "../controllers/reports";
-import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment } from "../controllers/registerPayment";
+import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagosToExcel, generateReciboPagoPDF, getPagosByVencimiento } from "../controllers/reports";
+import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment, aplicarMontoAPago, editarPago } from "../controllers/registerPayment";
 import { eq } from "drizzle-orm";
 import { db } from "../database";
 import { creditos, pagos_credito } from "../database/db";
+import { revalidatePayment } from "../controllers/revalidatePayment";
 import { reversePayment } from "../controllers/reversePayment";
+import { revertPaymentToPending } from "../controllers/revertPaymentToPending";
+import { processInvestors } from "../controllers/processInvestors";
 import { ajustarCuotasConSIFCO, marcarCuotasPagadasHastaNumero, procesarPagosSIFCODesdeJSON } from "../controllers/migratePayments";
 import { updateInstallments, updateAllInstallments } from "../controllers/updateCredit";
 
@@ -38,6 +41,23 @@ export const paymentRouter = new Elysia()
   // Endpoint para registrar pago (ya lo tienes)
   .post("/newPayment", insertPayment)
   .post("/reversePayment", reversePayment)
+  .post("/revertPaymentToPending", revertPaymentToPending)
+  .post("/revalidatePayment", revalidatePayment)
+  .post("/processInvestors", processInvestors)
+
+  // Endpoint para editar un pago (abonos, restantes, mora, otros, etc.)
+  .patch("/editPayment/:pagoId", async ({ params, body, set }: any) => {
+    const pagoId = Number(params.pagoId);
+    if (!pagoId || isNaN(pagoId)) {
+      set.status = 400;
+      return { success: false, message: "pago_id inválido" };
+    }
+    const result = await editarPago(pagoId, body);
+    if (!result.success) {
+      set.status = result.message.includes("no encontrado") ? 404 : 400;
+    }
+    return result;
+  })
 
   // Nuevo endpoint para buscar pagos por SIFCO y/o fecha
   .get("/paymentByCredit", async ({ query, set }) => {
@@ -77,7 +97,29 @@ export const paymentRouter = new Elysia()
     return { message: "Error consultando pagos", error: String(error) };
   }
 })
- 
+
+  .get("/recibo-pago/:pagoId", async ({ params, set }) => {
+    try {
+      const pagoId = Number(params.pagoId);
+      if (!pagoId || isNaN(pagoId)) {
+        set.status = 400;
+        return { message: "El parámetro 'pagoId' debe ser un número válido" };
+      }
+      const result = await generateReciboPagoPDF(pagoId);
+      set.status = 200;
+      return result;
+    } catch (error: any) {
+      console.error("❌ Error en /recibo-pago:", error);
+      set.status = error.message?.includes("No se encontró") ? 404 : 500;
+      return { message: error.message || "Error generando recibo de pago" };
+    }
+  }, {
+    detail: {
+      summary: "Genera recibo de pago en PDF",
+      description: "Recibe un pago_id, genera un PDF con el recibo de pago estilo Club Cash-In y lo sube a R2. Devuelve el link del PDF.",
+      tags: ["Pagos", "Reportes", "PDF"],
+    },
+  })
 
   .get("/payments", async ({ query, set }) => {
     const { mes, anio, page, perPage, numero_credito_sifco } = query;
@@ -196,6 +238,7 @@ export const paymentRouter = new Elysia()
           formatoCredito,
           soloAplicados,
           fechaAplicado,
+          fechaBoleta,
         } = query;
 
         // ✅ Si viene reportAdvisor=true, generamos el reporte Excel de asesores (sin inversionistas)
@@ -207,9 +250,17 @@ export const paymentRouter = new Elysia()
             dia,
             mes,
             anio,
+            fechaInicio,
+            fechaFin,
             inversionistaId,
             usuarioNombre,
             validationStatus,
+            categoriaCredito,
+            tipoCredito,
+            formatoCredito,
+            soloAplicados,
+            fechaAplicado,
+            fechaBoleta,
           });
           set.status = 200;
           return {
@@ -227,8 +278,17 @@ export const paymentRouter = new Elysia()
             dia,
             mes,
             anio,
+            fechaInicio,
+            fechaFin,
             inversionistaId,
-            usuarioNombre,validationStatus
+            usuarioNombre,
+            validationStatus,
+            categoriaCredito,
+            tipoCredito,
+            formatoCredito,
+            soloAplicados,
+            fechaAplicado,
+            fechaBoleta,
           });
           set.status = 200;
           return {
@@ -249,11 +309,13 @@ export const paymentRouter = new Elysia()
           fechaFin,
           inversionistaId,
           usuarioNombre,
+          validationStatus,
           categoriaCredito,
           tipoCredito,
           formatoCredito,
           soloAplicados,
           fechaAplicado,
+          fechaBoleta,
         });
 
         set.status = 200;
@@ -293,6 +355,7 @@ export const paymentRouter = new Elysia()
         formatoCredito: t.Optional(t.String()),
         soloAplicados: t.Optional(t.Boolean()),
         fechaAplicado: t.Optional(t.String({ format: "date" })),
+        fechaBoleta: t.Optional(t.String({ format: "date" })),
       }),
       response: {
         200: t.Object({
@@ -312,6 +375,44 @@ export const paymentRouter = new Elysia()
       },
     }
   )
+.get(
+  "/pagos-por-vencimiento",
+  async ({ query, set }) => {
+    try {
+      const result = await getPagosByVencimiento({
+        mes: query.mes,
+        anio: query.anio,
+        page: query.page,
+        pageSize: query.pageSize,
+        numero_credito_sifco: query.numero_credito_sifco,
+        nombre_usuario: query.nombre_usuario,
+        tipo_fecha: query.tipo_fecha as "vencimiento" | "creacion",
+      });
+      set.status = 200;
+      return { success: true, ...result };
+    } catch (error: any) {
+      console.error("Error en /pagos-por-vencimiento:", error);
+      set.status = 500;
+      return { success: false, error: error.message || "Error obteniendo pagos por vencimiento" };
+    }
+  },
+  {
+    detail: {
+      summary: "Obtiene pagos filtrados por mes/año de vencimiento",
+      description: "Lista paginada de pagos filtrados por fecha de vencimiento con totales globales (capital, interés, IVA, seguro, membresías) y desglose de Cube.",
+      tags: ["Pagos", "Reportes"],
+    },
+    query: t.Object({
+      mes: t.Integer({ minimum: 1, maximum: 12 }),
+      anio: t.Integer({ minimum: 2020 }),
+      page: t.Optional(t.Integer({ minimum: 1, default: 1 })),
+      pageSize: t.Optional(t.Integer({ minimum: 1, default: 20 })),
+      numero_credito_sifco: t.Optional(t.String()),
+      nombre_usuario: t.Optional(t.String()),
+      tipo_fecha: t.Optional(t.String({ default: "vencimiento" })),
+    }),
+  }
+)
 .post(
   "/aplicar-pago",
   async ({ query, set }) => {
@@ -1169,7 +1270,7 @@ export const paymentRouter = new Elysia()
     body: t.Object({
       numero_credito_sifco: t.String(),
       hasta_cuota: t.Number(),
-      fecha_primer_pago: t.String(),
+      fecha_primer_pago: t.Optional(t.String()),
     }),
     detail: {
       tags: ["Créditos"],
@@ -1181,14 +1282,15 @@ export const paymentRouter = new Elysia()
   "/update-pagos-espejo",
   async ({ body, set }) => {
     try {
-      const { numero_credito_sifco, nombre_inversionista, abono_capital, abono_interes, abono_iva } = body;
+      const { numero_credito_sifco, nombre_inversionista, abono_capital, abono_interes, abono_iva, nombre_cliente } = body;
 
       const result = await updatePagosEspejoPorCredito(
         numero_credito_sifco,
         nombre_inversionista,
         abono_capital,
         abono_interes,
-        abono_iva
+        abono_iva,
+        nombre_cliente
       );
 
       set.status = 200;
@@ -1209,6 +1311,7 @@ export const paymentRouter = new Elysia()
       abono_capital: t.Optional(t.Number()),
       abono_interes: t.Optional(t.Number()),
       abono_iva: t.Optional(t.Number()),
+      nombre_cliente: t.Optional(t.String()),
     }),
     detail: {
       tags: ["Pagos/Inversionistas"],
@@ -1244,6 +1347,36 @@ export const paymentRouter = new Elysia()
     detail: {
       tags: ["Pagos"],
       summary: "Obtener abonos de una cuota por número de crédito SIFCO",
+    },
+  }
+)
+.post(
+  "/aplicar-monto-pago",
+  async ({ body, set }) => {
+    try {
+      const { pago_id, monto, fecha_pago, validationStatus } = body;
+      const result = await aplicarMontoAPago(pago_id, monto, fecha_pago, validationStatus);
+      set.status = result.success ? 200 : 400;
+      return result;
+    } catch (error: any) {
+      console.error("Error en /aplicar-monto-pago:", error);
+      set.status = 500;
+      return {
+        success: false,
+        message: error.message || "Error al aplicar monto al pago",
+      };
+    }
+  },
+  {
+    body: t.Object({
+      pago_id: t.Number(),
+      monto: t.Number(),
+      fecha_pago: t.Optional(t.String()),
+      validationStatus: t.Optional(t.String()),
+    }),
+    detail: {
+      tags: ["Pagos"],
+      summary: "Aplicar un monto adicional a los restantes de un pago existente",
     },
   }
 )

@@ -7,14 +7,19 @@ import { registerExternalUser } from "../services";
 
 interface CompleteProfileFormProps {
   onSuccess: () => void;
+  onlyApi?: boolean; // Si es true, no actualiza el rol en better-auth (usado para completar perfil desde admin)
 }
 
 export const CompleteProfileForm = ({
   onSuccess,
+  onlyApi = false,
 }: CompleteProfileFormProps) => {
   const { user } = useAuth();
   const [dpi, setDpi] = useState("");
-  const [userType, setUserType] = useState<"CLIENT" | "INVESTOR">("CLIENT");
+  const hasRole = user?.role === "CLIENT" || user?.role === "INVESTOR";
+  const [userType, setUserType] = useState<"CLIENT" | "INVESTOR">(
+    user?.role ?? "CLIENT",
+  );
   const [error, setError] = useState("");
 
   const completeMutation = useMutation({
@@ -24,10 +29,12 @@ export const CompleteProfileForm = ({
       }
 
       // 1. Actualizar usuario en better-auth
-      await authClient.updateUser({
-        dpi: dpi,
-        role: userType,
-      } as any);
+      if (!onlyApi) {
+        await authClient.updateUser({
+          dpi: dpi,
+          role: userType,
+        } as any);
+      }
 
       await registerExternalUser({
         userType: userType,
@@ -79,59 +86,61 @@ export const CompleteProfileForm = ({
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Tipo de Usuario */}
-        <div>
-          <label className="text-white font-medium mb-3 block">
-            ¿Qué deseas hacer? *
-          </label>
-          <div className="flex flex-col lg:flex-row gap-4">
-            <label
-              className={`flex-1 flex items-center gap-3 p-4 border rounded-lg cursor-pointer transition-all ${
-                userType === "CLIENT"
-                  ? "border-primary bg-primary/10"
-                  : "border-white/20 hover:border-white/40"
-              }`}
-            >
-              <input
-                type="radio"
-                name="userType"
-                value="CLIENT"
-                checked={userType === "CLIENT"}
-                onChange={() => setUserType("CLIENT")}
-                className="w-4 h-4 accent-primary"
-              />
-              <div className="text-left">
-                <p className="font-semibold">Solicitar Crédito</p>
-                <p className="text-xs text-white/65">
-                  Para financiar tu vehículo
-                </p>
-              </div>
+        {/* Tipo de Usuario - solo si no tiene rol asignado */}
+        {!hasRole && (
+          <div>
+            <label className="text-white font-medium mb-3 block">
+              ¿Qué deseas hacer? *
             </label>
+            <div className="flex flex-col lg:flex-row gap-4">
+              <label
+                className={`flex-1 flex items-center gap-3 p-4 border rounded-lg cursor-pointer transition-all ${
+                  userType === "CLIENT"
+                    ? "border-primary bg-primary/10"
+                    : "border-white/20 hover:border-white/40"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="userType"
+                  value="CLIENT"
+                  checked={userType === "CLIENT"}
+                  onChange={() => setUserType("CLIENT")}
+                  className="w-4 h-4 accent-primary"
+                />
+                <div className="text-left">
+                  <p className="font-semibold">Solicitar Crédito</p>
+                  <p className="text-xs text-white/65">
+                    Para financiar tu vehículo
+                  </p>
+                </div>
+              </label>
 
-            <label
-              className={`flex-1 flex items-center gap-3 p-4 border rounded-lg cursor-pointer transition-all ${
-                userType === "INVESTOR"
-                  ? "border-primary bg-primary/10"
-                  : "border-white/20 hover:border-white/40"
-              }`}
-            >
-              <input
-                type="radio"
-                name="userType"
-                value="INVESTOR"
-                checked={userType === "INVESTOR"}
-                onChange={() => setUserType("INVESTOR")}
-                className="w-4 h-4 accent-primary"
-              />
-              <div className="text-left">
-                <p className="font-semibold">Invertir</p>
-                <p className="text-xs text-white/65">
-                  Para generar rendimientos
-                </p>
-              </div>
-            </label>
+              <label
+                className={`flex-1 flex items-center gap-3 p-4 border rounded-lg cursor-pointer transition-all ${
+                  userType === "INVESTOR"
+                    ? "border-primary bg-primary/10"
+                    : "border-white/20 hover:border-white/40"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="userType"
+                  value="INVESTOR"
+                  checked={userType === "INVESTOR"}
+                  onChange={() => setUserType("INVESTOR")}
+                  className="w-4 h-4 accent-primary"
+                />
+                <div className="text-left">
+                  <p className="font-semibold">Invertir</p>
+                  <p className="text-xs text-white/65">
+                    Para generar rendimientos
+                  </p>
+                </div>
+              </label>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* DPI */}
         <div>
@@ -148,6 +157,7 @@ export const CompleteProfileForm = ({
             }}
             type="text"
             name="dpi"
+            maxLength={13}
           />
         </div>
 

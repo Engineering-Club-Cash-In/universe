@@ -10,6 +10,7 @@ import {
   pagos_credito_inversionistas_espejo,
   boletas,
   cuotas_credito,
+  abonos_capital,
 } from "../database/db/schema";
 import { desc, gte } from "drizzle-orm";
 import Big from "big.js";
@@ -98,6 +99,7 @@ export async function getAllPagosWithCreditAndInversionistas(
         paymentFalse: pagos_credito.paymentFalse,
         monto_aplicado: pagos_credito.monto_aplicado,
         fecha_aplicado: pagos_credito.fecha_aplicado,
+        origen_pago: pagos_credito.origen_pago,
       })
       .from(pagos_credito)
       .innerJoin(creditos, eq(pagos_credito.credito_id, creditos.credito_id))
@@ -391,7 +393,7 @@ export async function insertPagosCreditoInversionistas(
     `\n🔍 Inversionistas después de filtrar (excludeCube=${excludeCube}, inversionista_id=${inversionista_id ?? 'todos'}): ${filteredInversionistas.length}`
   );
   filteredInversionistas.forEach((inv, idx) => {
-    console.log(`   ${idx + 1}. ${inv.nombre}`);
+    console.log(`   ${idx + 1}. ${inv.nombre} | cuota_inversionista: [${inv.cuota_inversionista}] (type: ${typeof inv.cuota_inversionista}) | Big: ${new Big(inv.cuota_inversionista || 0).toString()}`);
   });
 
   if (filteredInversionistas.length === 0) {
@@ -408,6 +410,8 @@ export async function insertPagosCreditoInversionistas(
         : maxIdx,
     0
   );
+  const mayorCuotaInversionistaId =
+    filteredInversionistas[indexMayorCuota].inversionista_id;
 
   console.log(`\n🏆 Mayor cuota encontrada:`);
   console.log(`   Índice: ${indexMayorCuota}`);
@@ -416,6 +420,9 @@ export async function insertPagosCreditoInversionistas(
   );
   console.log(
     `   Valor cuota: ${filteredInversionistas[indexMayorCuota].cuota_inversionista}`
+  );
+  console.log(
+    `   inversionista_id: ${mayorCuotaInversionistaId}`
   );
 
   // Si se pasa inversionista_id, solo procesar ese inversionista
@@ -438,6 +445,29 @@ export async function insertPagosCreditoInversionistas(
       inv.nombre.trim().toLowerCase() === "cube investments s.a.".toLowerCase();
 
     console.log(`   ¿Es Cube? ${isCube ? "SÍ ✅" : "NO ❌"}`);
+
+    // --- Calcular los 4 campos desde monto_aportado (misma lógica que processAndReplaceCreditInvestors) ---
+    const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
+    const porcentajeInversion = new Big(inv.porcentaje_participacion_inversionista);
+    const cuotaCalc = new Big(inv.monto_aportado)
+      .times(currentCredit?.porcentaje_interes ?? 0)
+      .div(100)
+      .round(2);
+
+    const montoInversionistaCalc = cuotaCalc.times(porcentajeInversion).div(100).round(2);
+    const montoCashInCalc = cuotaCalc.times(porcentajeCashIn).div(100).round(2);
+    const ivaInversionistaCalc = montoInversionistaCalc.gt(0)
+      ? montoInversionistaCalc.times(0.12).round(2)
+      : new Big(0);
+    const ivaCashInCalc = montoCashInCalc.gt(0)
+      ? montoCashInCalc.times(0.12).round(2)
+      : new Big(0);
+
+    console.log(`   🔢 Valores calculados desde monto_aportado:`);
+    console.log(`      monto_inversionista: ${montoInversionistaCalc.toString()}`);
+    console.log(`      monto_cash_in: ${montoCashInCalc.toString()}`);
+    console.log(`      iva_inversionista: ${ivaInversionistaCalc.toString()}`);
+    console.log(`      iva_cash_in: ${ivaCashInCalc.toString()}`);
 
     // --- Interés proporcional si fecha_inicio_participacion es del mes anterior ---
     const fechaInicio = inv.fecha_inicio_participacion
@@ -469,12 +499,13 @@ export async function insertPagosCreditoInversionistas(
         fechaInicio!.getMonth() + 1,
         0
       ).getDate();
-      const diaInicio = fechaInicio!.getDate(); // ej: 18
+      const diaInicio = fechaInicio!.getDate(); // ej: 7
+      const diasProporcionales = diasDelMes - diaInicio; // ej: 31 - 7 = 24 días restantes
 
-      // Interés proporcional = (monto_inversionista / diasDelMes) * diaInicio
-      bigInteres = new Big(inv.monto_inversionista)
+      // Interés proporcional = (montoInversionistaCalc / diasDelMes) * diasProporcionales
+      bigInteres = montoInversionistaCalc
         .div(diasDelMes)
-        .times(diaInicio)
+        .times(diasProporcionales)
         .round(2);
 
       // IVA proporcional = interés proporcional * 12%
@@ -484,16 +515,12 @@ export async function insertPagosCreditoInversionistas(
       console.log(`      fecha_inicio: ${inv.fecha_inicio_participacion}`);
       console.log(`      días del mes: ${diasDelMes}`);
       console.log(`      día inicio: ${diaInicio}`);
+      console.log(`      días proporcionales: ${diasProporcionales}`);
       console.log(`      interés proporcional: ${bigInteres.toString()}`);
       console.log(`      IVA proporcional: ${bigIVA.toString()}`);
     } else {
-      bigInteres = isCube
-        ? new Big(inv.monto_cash_in ?? 0)
-        : new Big(inv.monto_inversionista);
-
-      bigIVA = isCube
-        ? new Big(inv.iva_cash_in ?? 0)
-        : new Big(inv.iva_inversionista);
+      bigInteres = isCube ? montoCashInCalc : montoInversionistaCalc;
+      bigIVA = isCube ? ivaCashInCalc : ivaInversionistaCalc;
     }
 
     console.log(
@@ -507,18 +534,15 @@ export async function insertPagosCreditoInversionistas(
       `   💰 cuota_inversionista original: ${inv.cuota_inversionista}`
     );
 
-    let abono_capital = isCube
-      ? new Big(inv?.cuota_inversionista ?? 0)
-      : new Big(inv.cuota_inversionista ?? 0);
-
+    let abono_capital = new Big(inv.monto_aportado || 0).eq(0)
+      ? new Big(0)
+      : (isCube
+          ? new Big(inv?.cuota_inversionista ?? 0)
+          : new Big(inv.cuota_inversionista ?? 0));
     console.log(`   💰 abono_capital inicial: ${abono_capital.toString()}`);
 
-    const totalMontos = new Big(inv.monto_cash_in ?? 0).plus(
-      new Big(inv.monto_inversionista ?? 0)
-    );
-    const totalIVA = new Big(inv.iva_cash_in ?? 0).plus(
-      new Big(inv.iva_inversionista ?? 0)
-    );
+    const totalMontos = montoCashInCalc.plus(montoInversionistaCalc);
+    const totalIVA = ivaCashInCalc.plus(ivaInversionistaCalc);
 
     console.log(
       `   📊 totalMontos (cash_in + inversionista): ${totalMontos.toString()}`
@@ -527,7 +551,7 @@ export async function insertPagosCreditoInversionistas(
       `   📊 totalIVA (cash_in + inversionista): ${totalIVA.toString()}`
     );
 
-    if (idx === indexMayorCuota && !excludeCube) {
+    if (inv.inversionista_id === mayorCuotaInversionistaId && !excludeCube) {
       console.log(
         `   🏆 ES EL MAYOR INVERSIONISTA - Aplicando descuentos completos`
       );
@@ -549,6 +573,8 @@ export async function insertPagosCreditoInversionistas(
         .minus(new Big(currentCredit?.gps ?? 0))
         .minus(new Big(currentCredit?.seguro_10_cuotas ?? 0));
 
+      if (abono_capital.lt(0)) abono_capital = new Big(0);
+
       console.log(
         `   ✅ abono_capital después de restas: ${abono_capital.toString()}`
       );
@@ -559,6 +585,8 @@ export async function insertPagosCreditoInversionistas(
       console.log(`      - totalMontos: ${totalMontos.toString()}`);
 
       abono_capital = abono_capital.minus(totalIVA).minus(totalMontos);
+
+      if (abono_capital.lt(0)) abono_capital = new Big(0);
 
       console.log(
         `   ✅ abono_capital después de restas: ${abono_capital.toString()}`
@@ -589,6 +617,36 @@ export async function insertPagosCreditoInversionistas(
       `      porcentaje_participacion_inversionista: ${inv.porcentaje_participacion_inversionista}`
     );
 
+    // ── Buscar abonos a capital NO liquidados para este crédito/inversionista ──
+    const abonosNoLiquidados = await db
+      .select()
+      .from(abonos_capital)
+      .where(
+        and(
+          eq(abonos_capital.credito_id, credito_id),
+          eq(abonos_capital.inversionista_id, inv.inversionista_id),
+          eq(abonos_capital.liquidado, false)
+        )
+      );
+
+    let abonoCapitalId: number | null = null;
+    if (abonosNoLiquidados.length > 0) {
+      let montoAbono = new Big(0);
+      for (const abono of abonosNoLiquidados) {
+        // Solo sumar si es tipo CAPITAL; CANCELACION ya fue sumado previamente
+        if (abono.tipo === "CAPITAL") {
+          montoAbono = montoAbono.plus(abono.monto);
+        }
+      }
+      if (!montoAbono.eq(0)) {
+        abono_capital = abono_capital.plus(montoAbono);
+      }
+      abonoCapitalId = abonosNoLiquidados[0].abono_id;
+
+      console.log(`   💰 Abono a capital encontrado (id: ${abonoCapitalId}): +${montoAbono.toFixed(6)} (tipo: ${abonosNoLiquidados[0].tipo})`);
+      console.log(`      abono_capital con abono sumado: ${abono_capital.toString()}`);
+    }
+
     const resultado = {
       pago_id,
       inversionista_id: inv.inversionista_id,
@@ -601,6 +659,7 @@ export async function insertPagosCreditoInversionistas(
         : inv.porcentaje_participacion_inversionista,
       cuota: currentPago?.cuota ?? "0",
       estado_liquidacion: "NO_LIQUIDADO" as const,
+      abono_capital_id: abonoCapitalId,
     };
 
     console.log(`   ✅ Resultado final para ${inv.nombre}:`, {
@@ -619,25 +678,10 @@ export async function insertPagosCreditoInversionistas(
 
   // 4. Insertar todos los registros (ESPEJO)
   const resolvedInserts = await Promise.all(inserts);
-await db
-  .insert(pagos_credito_inversionistas_espejo)
-  .values(resolvedInserts)
-  .onConflictDoUpdate({
-    target: [
-      pagos_credito_inversionistas_espejo.pago_id,
-      pagos_credito_inversionistas_espejo.inversionista_id,
-    ],
-    set: {
-      abono_capital: sql`EXCLUDED.abono_capital`,
-      abono_interes: sql`EXCLUDED.abono_interes`,
-      abono_iva_12: sql`EXCLUDED.abono_iva_12`,
-      porcentaje_participacion: sql`EXCLUDED.porcentaje_participacion`,
-      cuota: sql`EXCLUDED.cuota`,
-      fecha_pago: sql`EXCLUDED.fecha_pago`,
-      estado_liquidacion: sql`EXCLUDED.estado_liquidacion`,
-      credito_id: sql`EXCLUDED.credito_id`,
-    },
-  });
+
+  await db
+    .insert(pagos_credito_inversionistas_espejo)
+    .values(resolvedInserts);
 
   return resolvedInserts;
 }
@@ -705,7 +749,7 @@ export async function insertPagosCreditoInversionistasV2(
       : new Big(inv.porcentaje_participacion_inversionista ?? 0).div(100);
 
     // Distribuir abonos: primero por participación, luego por porcentaje general
-    const abonoCapitalInv = pagoAbonoCapital.times(porcentajeParticipacion).times(porcentajeGeneral);
+    const abonoCapitalInv = pagoAbonoCapital.times(porcentajeGeneral);
     const abonoInteresInv = pagoAbonoInteres.times(porcentajeParticipacion).times(porcentajeGeneral);
     const abonoIvaInv = pagoAbonoIva.times(porcentajeParticipacion).times(porcentajeGeneral);
 
@@ -1221,6 +1265,7 @@ interface GetPagosOptions {
   formatoCredito?: string;
   soloAplicados?: boolean;
   fechaAplicado?: string;
+  fechaBoleta?: string;
 }
 /**
  * 📊 Obtiene los pagos junto con su información detallada de créditos, usuarios, cuotas e inversionistas.
@@ -1250,6 +1295,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     formatoCredito,
     soloAplicados,
     fechaAplicado,
+    fechaBoleta,
   } = options;
 
   try {
@@ -1265,23 +1311,27 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     // 📅 Rango de fechas (zona Guatemala UTC-6)
     if (fechaInicio) {
       whereClauses.push(
-        `(p.fecha_pago AT TIME ZONE 'America/Guatemala')::date >= '${fechaInicio}'::date`
+        `(p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date >= '${fechaInicio}'::date`
       );
     }
     if (fechaFin) {
       whereClauses.push(
-        `(p.fecha_pago AT TIME ZONE 'America/Guatemala')::date <= '${fechaFin}'::date`
+        `(p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date <= '${fechaFin}'::date`
       );
     }
 
     // 📅 Filtros individuales de día/mes/año (legacy, compatibilidad)
-    if (anio && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(YEAR FROM p.fecha_pago AT TIME ZONE 'America/Guatemala') = ${anio}`);
-    if (mes && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(MONTH FROM p.fecha_pago AT TIME ZONE 'America/Guatemala') = ${mes}`);
-    if (dia && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(DAY FROM p.fecha_pago AT TIME ZONE 'America/Guatemala') = ${dia}`);
+    if (anio && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(YEAR FROM p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala') = ${anio}`);
+    if (mes && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(MONTH FROM p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala') = ${mes}`);
+    if (dia && !fechaInicio && !fechaFin) whereClauses.push(`EXTRACT(DAY FROM p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala') = ${dia}`);
 
-    whereClauses.push(
-      `p.validation_status IN ('validated', 'pending' ,'reset', 'capital')`
-    );
+    if (validationStatus) {
+      whereClauses.push(`p.validation_status = '${validationStatus}'`);
+    } else {
+      whereClauses.push(
+        `p.validation_status IN ('validated', 'pending' ,'reset', 'capital')`
+      );
+    }
 
     if (inversionistaId) {
       whereClauses.push(`
@@ -1302,13 +1352,18 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     if (soloAplicados === false) whereClauses.push(`p.fecha_aplicado IS NULL`);
     if (fechaAplicado) {
       whereClauses.push(
-        `(p.fecha_aplicado AT TIME ZONE 'America/Guatemala')::date = '${fechaAplicado}'::date`
+        `(p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala')::date = '${fechaAplicado}'::date`
+      );
+    }
+    if (fechaBoleta) {
+      whereClauses.push(
+        `(p.fecha_boleta AT TIME ZONE 'America/Guatemala')::date = '${fechaBoleta}'::date`
       );
     }
 
-    // ✅ Solo créditos activos
+    // ✅ Créditos activos y cancelados
     whereClauses.push(
-      `c."statusCredit" IN ('ACTIVO', 'MOROSO','PENDIENTE_CANCELACION','EN_CONVENIO')`
+      `c."statusCredit" IN ('ACTIVO', 'MOROSO','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO')`
     );
     const whereSQL = whereClauses.length
       ? `WHERE ${whereClauses.join(" AND ")}`
@@ -1333,7 +1388,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         p.pago_id AS "pagoId",
         p.monto_boleta AS "montoBoleta",
         p.numeroAutorizacion AS "numeroAutorizacion",
-        TO_CHAR(p.fecha_pago, 'YYYY-MM-DD HH24:MI:SS') AS "fechaPago",
+        TO_CHAR(p.fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD HH24:MI:SS') AS "fechaPago",
 
         -- 💸 Campos propios del pago
         p.mora AS "mora",
@@ -1352,7 +1407,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         ce.numero_cuenta AS "cuentaEmpresaNumero",
 
         -- 📅 Fecha boleta en zona Guatemala
-        TO_CHAR(p.fecha_boleta::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD') AS "fechaBoleta",
+        TO_CHAR(p.fecha_boleta AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD') AS "fechaBoleta",
 
         -- 📅 Fecha en que se aplicó el pago (zona Guatemala)
         TO_CHAR(p.fecha_aplicado AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD HH24:MI:SS') AS "fechaAplicado",
@@ -1370,6 +1425,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         p.abono_gps AS "abono_gps",
         p.validation_status AS "validation_status",
         p.monto_aplicado AS "monto_aplicado",
+        p.origen_pago AS "origenPago",
 
         -- 💳 Info del crédito
         json_build_object(
@@ -1436,7 +1492,37 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
           )
           FROM cartera.boletas bol
           WHERE bol.pago_id = p.pago_id
-        ), '[]'::json) AS "boletas"
+        ), '[]'::json) AS "boletas",
+
+        -- 🔴 Cancelación del crédito (solo si validation_status = 'reset')
+        CASE WHEN p.validation_status = 'reset' THEN (
+          SELECT json_build_object(
+            'id', cc.id,
+            'motivo', cc.motivo,
+            'observaciones', cc.observaciones,
+            'fechaCancelacion', TO_CHAR(cc.fecha_cancelacion AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD HH24:MI:SS'),
+            'montoCancelacion', cc.monto_cancelacion,
+            'activo', cc.activo,
+            'traspaso', cc.traspaso,
+            'garantiaMobiliaria', cc.garantia_mobiliaria,
+            'otros', cc.otros,
+            'cuotasAtrasadas', cc.cuotas_atrasadas,
+            'montosAdicionales', COALESCE((
+              SELECT json_agg(
+                json_build_object(
+                  'concepto', ma.concepto,
+                  'monto', ma.monto
+                )
+              )
+              FROM cartera.montos_adicionales ma
+              WHERE ma.credit_id = cc.credit_id
+            ), '[]'::json)
+          )
+          FROM cartera.credit_cancelations cc
+          WHERE cc.credit_id = p.credito_id
+          ORDER BY cc.id DESC
+          LIMIT 1
+        ) ELSE NULL END AS "cancelacion"
 
       FROM cartera.pagos_credito p
       LEFT JOIN cartera.creditos c ON c.credito_id = p.credito_id
@@ -1481,6 +1567,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       validationStatus: r.validation_status,
       abono_gps: r.abono_gps,
       monto_aplicado: r.monto_aplicado,
+      origenPago: r.origenPago,
       credito: r.credito,
       cuota: r.cuota,
       usuario: r.usuario,
@@ -1494,6 +1581,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         : JSON.parse(
             typeof r.boletas === "string" ? r.boletas : "[]"
           ),
+      cancelacion: r.cancelacion ?? null,
     }));
 
     interface TotalesGenerales {
@@ -1581,6 +1669,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       SELECT
         i.inversionista_id AS "inversionistaId",
         i.nombre AS "nombreInversionista",
+        i.emite_factura AS "emiteFactura",
         COALESCE(SUM(pci.abono_capital::numeric), 0) AS "totalAbonoCapital",
         COALESCE(SUM(pci.abono_interes::numeric), 0) AS "totalAbonoInteres",
         COALESCE(SUM(pci.abono_iva_12::numeric), 0) AS "totalAbonoIva",
@@ -1596,7 +1685,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         AND ci.inversionista_id = pci.inversionista_id
       ${sql.raw(whereSQL)}
       ${sql.raw(inversionistaId ? `AND pci.inversionista_id = '${inversionistaId}'` : '')}
-      GROUP BY i.inversionista_id, i.nombre
+      GROUP BY i.inversionista_id, i.nombre, i.emite_factura
       ORDER BY i.nombre
     `;
 
@@ -1604,6 +1693,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     const totalesInversionistas = totalesInvResult.rows.map((r: any) => ({
       inversionistaId: r.inversionistaId,
       nombreInversionista: r.nombreInversionista,
+      emiteFactura: r.emiteFactura ?? false,
       totalAbonoCapital: new Big(r.totalAbonoCapital).round(2).toNumber(),
       totalAbonoInteres: new Big(r.totalAbonoInteres).round(2).toNumber(),
       totalAbonoIva: new Big(r.totalAbonoIva).round(2).toNumber(),
@@ -1988,6 +2078,7 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number) {
             "MOROSO",
             "PENDIENTE_CANCELACION",
             "EN_CONVENIO",
+            "CANCELADO",
           ])
         )
       );
@@ -2086,7 +2177,8 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number) {
             credito.creditoId,
             false,  // excludeCube
             false,  // cuotaPagada
-            false   // updateCredito ← omite el UPDATE a creditos_inversionistas_espejo
+            false,  // updateCredito ← omite el UPDATE a creditos_inversionistas_espejo
+            inversionistaId
           );
 
           console.log(
@@ -2143,10 +2235,11 @@ export async function updatePagosEspejoPorCredito(
   nombre_inversionista: string,
   abono_capital?: number,
   abono_interes?: number,
-  abono_iva?: number
+  abono_iva?: number,
+  nombre_cliente?: string
 ) {
   // 1. Buscar el crédito por numero_credito_sifco
-  const [credito] = await db
+  let [credito] = await db
     .select({
       credito_id: creditos.credito_id,
       numero_credito_sifco: creditos.numero_credito_sifco,
@@ -2155,8 +2248,46 @@ export async function updatePagosEspejoPorCredito(
     .where(eq(creditos.numero_credito_sifco, numero_credito_sifco.trim()))
     .limit(1);
 
+  // Fallback: buscar por nombre de cliente (fuzzy)
+  if (!credito && nombre_cliente) {
+    const clienteNorm = removeAccents(nombre_cliente.trim().toLowerCase());
+    const palabras = clienteNorm.split(/\s+/).filter(p => p.length > 2);
+
+    if (palabras.length > 0) {
+      const candidatos = await db
+        .select({
+          credito_id: creditos.credito_id,
+          numero_credito_sifco: creditos.numero_credito_sifco,
+          nombre_cliente: usuarios.nombre,
+        })
+        .from(creditos)
+        .leftJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+        .where(
+          sql`translate(lower(${usuarios.nombre}), 'áéíóúàèìòùäëïöüâêîôûñ', 'aeiouaeiouaeiouaeioun') ILIKE ${"%" + palabras.join("%") + "%"}`
+        )
+        .limit(5);
+
+      if (candidatos.length === 1) {
+        credito = candidatos[0];
+      } else if (candidatos.length > 1) {
+        // Elegir el que más palabras coincida
+        let mejor = candidatos[0];
+        let mejorScore = 0;
+        for (const c of candidatos) {
+          const nombreNorm = removeAccents((c.nombre_cliente ?? "").toLowerCase());
+          const score = palabras.filter(p => nombreNorm.includes(p)).length;
+          if (score > mejorScore) {
+            mejorScore = score;
+            mejor = c;
+          }
+        }
+        credito = mejor;
+      }
+    }
+  }
+
   if (!credito) {
-    throw new Error(`No se encontró crédito con numero_credito_sifco: "${numero_credito_sifco}"`);
+    throw new Error(`No se encontró crédito con numero_credito_sifco: "${numero_credito_sifco}"${nombre_cliente ? ` ni por cliente: "${nombre_cliente}"` : ""}`);
   }
 
   // 2. Buscar inversionista por nombre (sin tildes, sin mayúsculas)
@@ -2183,7 +2314,7 @@ export async function updatePagosEspejoPorCredito(
   }
 
   // 3. Armar el set dinámico solo con los campos que vienen
-  const setData: Record<string, string> = {};
+  const setData: Record<string, any> = {};
   if (abono_capital !== undefined) setData.abono_capital = abono_capital.toString();
   if (abono_interes !== undefined) setData.abono_interes = abono_interes.toString();
   if (abono_iva !== undefined) setData.abono_iva_12 = abono_iva.toString();
@@ -2192,7 +2323,8 @@ export async function updatePagosEspejoPorCredito(
     throw new Error("Debe enviar al menos un campo a actualizar (abono_capital, abono_interes, abono_iva)");
   }
 
-  // 4. Actualizar los registros NO_LIQUIDADO de ese crédito e inversionista en la tabla espejo
+  // 4. Intentar actualizar registros existentes
+  setData.updated_at = new Date();
   const result = await db
     .update(pagos_credito_inversionistas_espejo)
     .set(setData)
@@ -2204,15 +2336,18 @@ export async function updatePagosEspejoPorCredito(
       )
     );
 
+  const updatedCount = result.rowCount ?? 0;
+
   return {
     success: true,
-    message: `Pagos espejo actualizados para SIFCO: ${credito.numero_credito_sifco}, inversionista "${inversionista.nombre}"`,
+    message: updatedCount > 0
+      ? `Pagos espejo actualizados para SIFCO: ${credito.numero_credito_sifco}, inversionista "${inversionista.nombre}"`
+      : `Sin registros espejo NO_LIQUIDADO para SIFCO: ${credito.numero_credito_sifco}, inversionista "${inversionista.nombre}" - saltado`,
     credito_id: credito.credito_id,
     numero_credito_sifco: credito.numero_credito_sifco,
     inversionista_id: inversionista.inversionista_id,
     nombre_inversionista: inversionista.nombre,
-    numero_credito_sifco: credito.numero_credito_sifco,
-    registrosActualizados: result.rowCount ?? 0,
+    registrosActualizados: updatedCount,
   };
 }
 

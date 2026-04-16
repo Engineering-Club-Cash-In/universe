@@ -7,11 +7,11 @@ import { opportunityDocuments } from "../db/schema/documents";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { vehiclePhotos, vehicles } from "../db/schema/vehicles";
 import { getFileUrl, getFileUrlWithBucketInKey } from "../lib/storage";
-import { getRenapInfoController } from "./bot";
+import { getOnlyRenapInfoController } from "./bot";
+import { validarDpi } from "../utils/cui-validation";
 import {
 	createOpportunityForLead,
 	getSalesUserWithLeastLeads,
-	getSalesUserWithLeastOpportunities,
 } from "./public-lead";
 
 /**
@@ -182,6 +182,17 @@ export async function updateLeadByEmail(c: Context) {
 
 		const existingLead = result.lead;
 
+		// Validar DPI si se envía
+		if (dpi !== undefined && dpi.trim() !== "") {
+			const resultadoDpi = validarDpi(dpi);
+			if (!resultadoDpi.valid) {
+				return c.json(
+					{ success: false, error: resultadoDpi.error },
+					400,
+				);
+			}
+		}
+
 		// Check if new DPI or phone already exists in another lead
 		if (dpi !== undefined || phone !== undefined) {
 			const conditions = [ne(leads.id, existingLead.id)];
@@ -264,8 +275,7 @@ export async function updateLeadByEmail(c: Context) {
 		// If DPI was updated, call RENAP to get information
 		let renapInfo = null;
 		if (dpi !== undefined && dpi.trim() !== "" && updatedLead) {
-			const phoneToUse = phone ?? existingLead.phone ?? "";
-			renapInfo = await getRenapInfoController(dpi, phoneToUse);
+			renapInfo = await getOnlyRenapInfoController(dpi);
 		}
 
 		return c.json({
@@ -607,13 +617,25 @@ export async function createPortalRegisterLead(c: Context) {
 		}
 
 		// Separar nombre completo en firstName y lastName por el primer espacio
-		const [firstName, ...rest] = (body.nombreCompleto as string).trim().split(" ");
+		const [firstName, ...rest] = (body.nombreCompleto as string)
+			.trim()
+			.split(" ");
 		const lastName = rest.join(" ") || "-";
 
 		const email: string = body.correo.trim();
-		const dpi: string = body.dpi.trim();
+		const dpiRaw: string = body.dpi.trim();
 		const phone: string | undefined = body.telefono?.trim();
 		const notes: string | undefined = body.descripcion?.trim();
+
+		// Validar DPI
+		const resultadoDpi = validarDpi(dpiRaw);
+		if (!resultadoDpi.valid) {
+			return c.json(
+				{ success: false, error: resultadoDpi.error },
+				400,
+			);
+		}
+		const dpi = resultadoDpi.dpiLimpio;
 
 		// Verificar si ya existe un lead con ese DPI (o email)
 		const [existingLead] = await db
@@ -660,17 +682,6 @@ export async function createPortalRegisterLead(c: Context) {
 			);
 		}
 
-		const salesUserForOpportunity = await getSalesUserWithLeastOpportunities();
-		if (!salesUserForOpportunity) {
-			return c.json(
-				{
-					success: false,
-					error: "No hay usuario de ventas disponible para asignar oportunidad",
-				},
-				500,
-			);
-		}
-
 		const [newLead] = await db
 			.insert(leads)
 			.values({
@@ -682,6 +693,7 @@ export async function createPortalRegisterLead(c: Context) {
 				notes,
 				source: "website",
 				status: "new",
+				assignmentType: "auto",
 				clientType: "individual",
 				dependents: 0,
 				ownsHome: false,
@@ -694,15 +706,15 @@ export async function createPortalRegisterLead(c: Context) {
 			.returning();
 
 		let renapInfo = null;
-		if (phone) {
-			renapInfo = await getRenapInfoController(dpi, phone);
+		if (dpi) {
+			renapInfo = await getOnlyRenapInfoController(dpi);
 		}
 
 		const newOpportunity = await createOpportunityForLead(
 			newLead.id,
 			newLead.firstName,
 			newLead.lastName,
-			salesUserForOpportunity.id,
+			salesUserForLead.id,
 			notes ?? "",
 			"website",
 		);

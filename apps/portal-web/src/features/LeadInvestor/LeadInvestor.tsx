@@ -1,22 +1,26 @@
 import { useIsMobile } from "@/hooks";
-import { useLeadInvestor } from "./store/useLeadInvestor";
-import { FormularioInvestor, ThanksInvestor } from "./components";
+import { FormularioInvestor } from "./components";
 import { IconCashIn } from "@/features/FormLeads/FormLeads";
 
 const urlImage = import.meta.env.VITE_IMAGE_URL;
 
 interface LeadInvestorProps {
   initialAmount?: string;
+  initialTerm?: string;
+  initialType?: string;
+  source?: string;
+  campaign?: string;
 }
 
-export const LeadInvestor = ({ initialAmount }: LeadInvestorProps) => {
+export const LeadInvestor = ({
+  initialAmount,
+  initialTerm,
+  initialType,
+  source,
+  campaign,
+}: LeadInvestorProps) => {
   const imageUrl = urlImage + "/Frame 1321315308.png";
   const isMobile = useIsMobile();
-  const isSubmitted = useLeadInvestor((state) => state.isSubmitted);
-
-  if (isSubmitted) {
-    return <ThanksInvestor />;
-  }
 
   return (
     <div className="flex flex-col  pt-4 lg:pt-6 mb-20">
@@ -45,12 +49,18 @@ export const LeadInvestor = ({ initialAmount }: LeadInvestorProps) => {
               </div>
             )}
             <h2 className="text-2xl font-bold lg:text-header-body xl:text-header-3 text-white text-center px-6 lg:px-30">
-              Pequeñas decisiones, grandes momentos.
+              Oportunidades reales. Crecimiento real.
             </h2>
           </div>
         </div>
         <div className="py-12 lg:py-0 lg:-mt-6 px-10 lg:px-30 xl:px-40">
-          <FormularioInvestor initialAmount={initialAmount} />
+          <FormularioInvestor
+            initialAmount={initialAmount}
+            initialTerm={initialTerm}
+            initialType={initialType}
+            source={source}
+            campaign={campaign}
+          />
         </div>
       </div>
     </div>

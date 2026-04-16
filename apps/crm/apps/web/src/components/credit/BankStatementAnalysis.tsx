@@ -4,6 +4,7 @@ import {
 	ChevronUp,
 	FileText,
 	Loader2,
+	RotateCcw,
 	Trash2,
 	Upload,
 } from "lucide-react";
@@ -19,9 +20,16 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { client } from "@/utils/orpc";
+import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
+import { client, orpc } from "@/utils/orpc";
 
 const MAX_AI_ATTEMPTS = 2;
+
+function isPdfFile(file: File) {
+	return (
+		file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
+	);
+}
 
 interface BankStatementAnalysisProps {
 	leadId?: string;
@@ -39,7 +47,7 @@ export function BankStatementAnalysis({
 	const [annualRate, setAnnualRate] = useState("0.18");
 	const [termMonths, setTermMonths] = useState("60");
 	const [maxDebtRatio, setMaxDebtRatio] = useState("0.2");
-	const [maxVariableDebtRatio, setMaxVariableDebtRatio] = useState("0.3");
+	const [maxVariableDebtRatio, setMaxVariableDebtRatio] = useState("0.2");
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const queryClient = useQueryClient();
 
@@ -63,27 +71,44 @@ export function BankStatementAnalysis({
 	const attemptCount = existingAnalysis?.attemptCount ?? 0;
 	const canAnalyze = !hasSuccessfulAnalysis && attemptCount < MAX_AI_ATTEMPTS;
 
+	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
+	const canReset =
+		userProfile.data?.role === "admin" ||
+		userProfile.data?.role === "sales_supervisor" ||
+		userProfile.data?.role === "analyst";
+
+	const resetMutation = useMutation({
+		mutationFn: () =>
+			client.resetCreditAnalysis(
+				leadId ? { leadId } : { coDebtorId: coDebtorId! },
+			),
+		onSuccess: () => {
+			toast.success(
+				"Análisis reseteado. Puede volver a subir estados de cuenta.",
+			);
+			queryClient.invalidateQueries({ queryKey });
+			onAnalysisComplete?.();
+		},
+		onError: (error) => {
+			toast.error(`Error al resetear: ${error.message}`);
+		},
+	});
+
 	const analyzeMutation = useMutation({
 		mutationFn: async () => {
+			// Upload all files to R2 first
 			const filePayloads = await Promise.all(
-				files.map(
-					(file) =>
-						new Promise<{ name: string; data: string; mimeType: string }>(
-							(resolve, reject) => {
-								const reader = new FileReader();
-								reader.onload = () => {
-									const base64 = (reader.result as string).split(",")[1];
-									resolve({
-										name: file.name,
-										data: base64,
-										mimeType: file.type || "application/pdf",
-									});
-								};
-								reader.onerror = reject;
-								reader.readAsDataURL(file);
-							},
-						),
-				),
+				files.map(async (file) => {
+					const { key } = await uploadFileToR2WithRetry(file, {
+						resourceType: "bank_statement",
+						resourceId: leadId || coDebtorId!,
+					});
+					return {
+						name: file.name,
+						key,
+						mimeType: file.type || "application/pdf",
+					};
+				}),
 			);
 
 			return client.analyzeBankStatements({
@@ -111,16 +136,16 @@ export function BankStatementAnalysis({
 
 	const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
 		const selectedFiles = Array.from(e.target.files || []);
-		const pdfFiles = selectedFiles.filter((f) => f.type === "application/pdf");
+		const pdfFiles = selectedFiles.filter(isPdfFile);
 
 		if (pdfFiles.length !== selectedFiles.length) {
 			toast.warning("Solo se permiten archivos PDF");
 		}
 
 		const totalFiles = files.length + pdfFiles.length;
-		if (totalFiles > 3) {
-			toast.warning("Máximo 3 archivos permitidos");
-			const allowed = pdfFiles.slice(0, 3 - files.length);
+		if (totalFiles > 9) {
+			toast.warning("Máximo 9 archivos permitidos");
+			const allowed = pdfFiles.slice(0, 9 - files.length);
 			setFiles((prev) => [...prev, ...allowed]);
 		} else {
 			setFiles((prev) => [...prev, ...pdfFiles]);
@@ -142,8 +167,8 @@ export function BankStatementAnalysis({
 					Análisis de Estados de Cuenta
 				</CardTitle>
 				<CardDescription className="text-xs">
-					Suba 1 a 3 estados de cuenta bancarios en PDF para análisis automático
-					con IA
+					Suba de 1 a 9 estados de cuenta bancarios en PDF para análisis
+					automático con IA (hasta 3 bancos diferentes)
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="space-y-3">
@@ -156,7 +181,7 @@ export function BankStatementAnalysis({
 						multiple
 						className="hidden"
 						onChange={handleFileChange}
-						disabled={files.length >= 3 || analyzeMutation.isPending}
+						disabled={files.length >= 9 || analyzeMutation.isPending}
 					/>
 					<Button
 						type="button"
@@ -164,10 +189,10 @@ export function BankStatementAnalysis({
 						size="sm"
 						className="w-full"
 						onClick={() => fileInputRef.current?.click()}
-						disabled={files.length >= 3 || analyzeMutation.isPending}
+						disabled={files.length >= 9 || analyzeMutation.isPending}
 					>
 						<Upload className="mr-2 h-4 w-4" />
-						Seleccionar PDFs ({files.length}/3)
+						Seleccionar PDFs ({files.length}/9)
 					</Button>
 				</div>
 
@@ -297,15 +322,71 @@ export function BankStatementAnalysis({
 					)}
 				</Button>
 				{hasSuccessfulAnalysis && (
-					<p className="text-center text-green-600 text-xs">
-						Análisis completado exitosamente.
-					</p>
+					<div className="space-y-2">
+						<p className="text-center text-green-600 text-xs">
+							Análisis completado exitosamente.
+						</p>
+						{canReset && (
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								className="w-full text-destructive hover:text-destructive"
+								onClick={() => {
+									if (
+										window.confirm(
+											"¿Está seguro? Esto eliminará el análisis actual y permitirá volver a subir estados de cuenta.",
+										)
+									) {
+										resetMutation.mutate();
+									}
+								}}
+								disabled={resetMutation.isPending}
+							>
+								{resetMutation.isPending ? (
+									<>
+										<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+										Reseteando...
+									</>
+								) : (
+									<>
+										<RotateCcw className="mr-2 h-4 w-4" />
+										Resetear Análisis
+									</>
+								)}
+							</Button>
+						)}
+					</div>
 				)}
 				{!hasSuccessfulAnalysis && attemptCount >= MAX_AI_ATTEMPTS && (
-					<p className="text-center text-muted-foreground text-xs">
-						Se alcanzó el límite de {MAX_AI_ATTEMPTS} intentos. Contacte al
-						administrador.
-					</p>
+					<div className="space-y-2">
+						<p className="text-center text-muted-foreground text-xs">
+							Se alcanzó el límite de {MAX_AI_ATTEMPTS} intentos. Contacte al
+							administrador.
+						</p>
+						{canReset && (
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								className="w-full text-destructive hover:text-destructive"
+								onClick={() => resetMutation.mutate()}
+								disabled={resetMutation.isPending}
+							>
+								{resetMutation.isPending ? (
+									<>
+										<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+										Reseteando...
+									</>
+								) : (
+									<>
+										<RotateCcw className="mr-2 h-4 w-4" />
+										Resetear Intentos
+									</>
+								)}
+							</Button>
+						)}
+					</div>
 				)}
 			</CardContent>
 		</Card>

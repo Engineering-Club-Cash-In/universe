@@ -611,6 +611,336 @@ export async function buildCancelationWorkbook(
   const arr = (await wb.xlsx.writeBuffer()) as ArrayBuffer;
   return Buffer.from(arr);
 }
+/** ───────── Excel inversionista ───────── */
+
+export async function buildInversionistaWorkbook(
+  inv: InversionistaReporte,
+  opts?: { logoUrl?: string; showCreditId?: boolean }
+): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Club Cashin.com";
+  wb.created = new Date();
+
+  const ws = wb.addWorksheet("Reporte", {
+    properties: { defaultRowHeight: 18 },
+  });
+  const showId = opts?.showCreditId ?? false;
+  const offset = showId ? 1 : 0;
+  const totalCols = 15 + offset;
+
+  // Calcular ancho dinámico para la columna Codigo si se muestra
+  let dynamicCodigoWidth = 14; 
+  if (showId) {
+    inv.creditos.forEach(cr => {
+      const len = (cr.numero_credito_sifco || "").length;
+      if (len > dynamicCodigoWidth) dynamicCodigoWidth = len;
+    });
+    dynamicCodigoWidth += 4; // Un pequeño margen extra
+  }
+
+  // anchos de columna (15 o 16 cols)
+  const baseWidths = [10, 22, 14, 12, 16, 20, 16, 12, 12, 14, 20, 16, 22, 10, 14];
+  if (showId) baseWidths.unshift(dynamicCodigoWidth);
+
+  baseWidths.forEach((w, i) => (ws.getColumn(i + 1).width = w));
+
+  const CINV = {
+    navy:  "FF0F1B4C",
+    blue:  "FF0485C2",
+    text:  "FF0F172A",
+    slate: "FF334155",
+    white: "FFFFFFFF",
+    line:  "FFE0E7EF",
+    zebra: "FFF9FBFF",
+    total: "FFF0F9FF",
+    gray:  "FF8C98B5",
+  };
+
+  const esDolares = inv.moneda === "dolares";
+  const sym = esDolares ? "$" : "Q";
+  const numFmt = `"${sym}"#,##0.00`;
+  const pctFmt = `0.00"%"`;
+
+  function toN(v: any) { return Number(v || 0); }
+
+  // ── fila 1-2: logo + título
+  ws.getRow(1).height = 45;
+  ws.getRow(2).height = 35;
+
+  const logo = await fetchImageBase64(opts?.logoUrl);
+  if (logo) {
+    const imgId = wb.addImage({ base64: logo.data, extension: logo.ext });
+    ws.addImage(imgId, "A1:C2");
+  }
+
+  ws.mergeCells(1, 4 + offset, 1, 15 + offset);
+  ws.getCell(1, 4 + offset).value = "REPORTE DE INVERSIONES";
+  ws.getCell(1, 4 + offset).font = { bold: true, size: 14, color: { argb: CINV.navy } };
+  ws.getCell(1, 4 + offset).alignment = { vertical: "middle" };
+
+  ws.mergeCells(2, 4 + offset, 2, 15 + offset);
+  ws.getCell(2, 4 + offset).value = inv.nombre_inversionista;
+  ws.getCell(2, 4 + offset).font = { bold: true, size: 12, color: { argb: CINV.blue } };
+  ws.getCell(2, 4 + offset).alignment = { vertical: "middle" };
+
+  // ── fila 3: totales resumen (4 bloques)
+  const sub = inv.subtotal;
+  const capitalActivo = inv.creditos.reduce((s, c) => s + toN(c.monto_aportado), 0);
+  const resumen: [string, number][] = [
+    ["Capital activo",       capitalActivo],
+    ["Abono capital",        toN(sub.total_abono_capital)],
+    ["Interés recibido",     toN(sub.total_abono_general_interes)],
+    ["Gran total a recibir", toN(sub.total_cuota_con_reinversion)],
+  ];
+  const resumenCols = [1, 4 + offset, 8 + offset, 12 + offset];
+  for (let i = 0; i < resumen.length; i++) {
+    const col = resumenCols[i];
+    const labelCell = ws.getCell(3, col);
+    labelCell.value = resumen[i][0];
+    labelCell.font = { bold: true, color: { argb: CINV.slate }, size: 9 };
+    labelCell.alignment = { horizontal: "center" };
+    ws.mergeCells(3, col, 3, col + 2);
+
+    const valCell = ws.getCell(4, col);
+    valCell.value = resumen[i][1];
+    valCell.numFmt = numFmt;
+    valCell.font = { bold: true, size: 12, color: { argb: CINV.navy } };
+    valCell.alignment = { horizontal: "center" };
+    ws.mergeCells(4, col, 4, col + 2);
+  }
+
+  // ── tablas de datos
+  const esCombinada = inv.reinversion === "reinversion_combinada";
+  const labelMapR: Record<string, string> = {
+    reinversion_capital: "Reinversión Capital",
+    reinversion_interes: "Reinversión Interés",
+    reinversion_total:   "Reinversión Total",
+    sin_reinversion:     "Sin Reinversión",
+  };
+
+  const grupos = esCombinada
+    ? ["reinversion_capital", "reinversion_interes", "reinversion_total", "sin_reinversion", null]
+    : ["all"];
+
+  let row = 5;
+
+  let headerRowSet = false;
+  let firstHeaderRow = 6;
+
+  for (const grupo of grupos) {
+    let credGrupo = inv.creditos;
+    if (esCombinada) {
+      credGrupo = inv.creditos.filter((c) => (c.tipo_reinversion ?? null) === grupo);
+      if (credGrupo.length === 0) continue;
+
+      row += 2;
+      const titleRow = ws.getRow(row);
+      titleRow.getCell(2).value = labelMapR[grupo ?? ""] ?? "Sin tipo definido";
+      titleRow.getCell(2).font = { bold: true, size: 11, color: { argb: CINV.white } };
+      titleRow.getCell(2).fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINV.blue } };
+      row += 1; // header va una fila debajo del título
+    } else {
+      row += 1; // en modo normal el header es directo en fila 6
+    }
+
+    const headRowIdx = row;
+    if (!headerRowSet) {
+      firstHeaderRow = headRowIdx;
+      headerRowSet = true;
+    }
+
+    const head = ws.getRow(headRowIdx);
+    head.values = [
+      ...(showId ? ["Codigo"] : []),
+      "Meses en crédito", "Nombre", "Capital",
+      "% Interés", "% Inversionista", "Tasa interés inversor",
+      "Interés Inversor", "IVA", "ISR",
+      "Abono capital", "% Inv. Neto", "Capital restante",
+      "Cuota de mes", "Plazo", "NIT",
+    ];
+
+    for (let i = 1; i <= totalCols; i++) {
+      const c = head.getCell(i);
+      c.font = { bold: true, color: { argb: CINV.white } };
+      c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: esCombinada ? CINV.navy : CINV.blue } };
+      c.alignment = { horizontal: i === (13 + offset) || i === (15 + offset) ? "right" : "center", wrapText: true };
+      c.border = { bottom: { style: "thin", color: { argb: CINV.line } } };
+    }
+    head.height = 28;
+
+    let rowIdx = 0;
+    const firstDataRow = row + 1;
+    let hasData = false;
+
+    for (const cr of credGrupo) {
+      for (const pago of cr.pagos ?? []) {
+        row++;
+        rowIdx++;
+        hasData = true;
+        const rr = ws.getRow(row);
+
+        const capital = toN(cr.monto_aportado) + toN(pago.abono_capital);
+        const tasaFmt = toN(pago.tasaInteresInvesor) / 100;
+        const cuotaMes = `${pago.mes || "-"}${pago.cuota ? ` (Cuota #${pago.cuota})` : ""}`;
+
+        rr.values = [
+          ...(showId ? [cr.numero_credito_sifco] : []),
+          pago.cuota ?? cr.meses_en_credito ?? "",
+          cr.nombre_usuario ?? "",
+          capital,
+          String(cr.porcentaje_interes ?? "") + " %",
+          String(pago.porcentaje_inversor ?? "") + " %",
+          tasaFmt,
+          toN(pago.abono_interes),
+          toN(pago.abono_iva),
+          toN(pago.isr),
+          toN(pago.abono_capital),
+          toN(pago.abonoGeneralInteres),
+          toN(cr.monto_aportado),
+          cuotaMes,
+          cr.plazo ?? "",
+          cr.nit_usuario ?? "",
+        ];
+
+        rr.getCell(3 + offset).numFmt  = numFmt;
+        rr.getCell(6 + offset).numFmt  = pctFmt;
+        [7, 8, 9, 10, 11, 12].forEach(i => (rr.getCell(i + offset).numFmt = numFmt));
+
+        rr.getCell(7 + offset).font  = { color: { argb: CINV.navy } };
+        rr.getCell(10 + offset).font = { color: { argb: CINV.navy } };
+        rr.getCell(13 + offset).alignment = { horizontal: "right" };
+        rr.getCell(15 + offset).alignment = { horizontal: "right" };
+
+        if (rowIdx % 2 === 0) {
+          for (let c = 1; c <= totalCols; c++) {
+            rr.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINV.zebra } };
+          }
+        }
+        rr.eachCell(cell => {
+          cell.border = { bottom: { style: "thin", color: { argb: CINV.line } } };
+        });
+      }
+    }
+
+    if (!hasData) {
+      row++;
+      ws.mergeCells(row, 1, row, totalCols);
+      ws.getCell(row, 1).value = "Sin pagos registrados";
+      ws.getCell(row, 1).alignment = { horizontal: "center" };
+    }
+
+    const lastDataRow = row;
+
+    // ── fila de totales con fórmulas SUM
+    row++;
+    const totalRow = ws.getRow(row);
+    const r1 = firstDataRow;
+    const r2 = lastDataRow;
+
+    if (esCombinada) {
+      totalRow.getCell(2).value = `Total ${labelMapR[grupo ?? ""] ?? "Sin tipo"}`;
+    } else {
+      totalRow.getCell(1).value = "Total";
+    }
+
+    if (hasData) {
+      const colC = showId ? "D" : "C";
+      totalRow.getCell(3 + offset).value  = { formula: `SUM(${colC}${r1}:${colC}${r2})` };
+      totalRow.getCell(3 + offset).numFmt = numFmt;
+
+      // Definición de las columnas que se suman y sus letras correspondientes
+      const sumCols: [number, string, string][] = [
+        [7,  "G", "H"], // Interés Inversor
+        [8,  "H", "I"], // IVA
+        [9,  "I", "J"], // ISR
+        [10, "J", "K"], // Abono capital
+        [11, "K", "L"], // % Inv. Neto
+        [12, "L", "M"], // Capital restante
+      ];
+
+      for (const [ci, colLetterDefault, colLetterShifted] of sumCols) {
+        const targetCi = ci + offset;
+        const targetColLetter = showId ? colLetterShifted : colLetterDefault;
+        totalRow.getCell(targetCi).value  = { formula: `SUM(${targetColLetter}${r1}:${targetColLetter}${r2})` };
+        totalRow.getCell(targetCi).numFmt = numFmt;
+      }
+    }
+
+    for (let c = 1; c <= totalCols; c++) {
+      const cell = totalRow.getCell(c);
+      cell.font = { bold: true, color: { argb: CINV.navy } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINV.total } };
+      cell.border = {
+        top:    { style: "medium", color: { argb: CINV.blue } },
+        bottom: { style: "thin",   color: { argb: CINV.line } },
+      };
+    }
+  }
+
+  // ── sección reinversión (2 filas abajo de la tabla)
+  row += 2;
+  const reinv: [string, number][] = [
+    ["Reinversión Capital",  toN(sub.total_reinversion_capital)],
+    ["Reinversión Interés",  toN(sub.total_reinversion_interes)],
+    ["Total Reinversión",    toN(sub.total_reinversion)],
+  ];
+  let col = 1;
+  for (const [label, val] of reinv) {
+    ws.getCell(row, col).value = label;
+    ws.getCell(row, col).font = { color: { argb: CINV.gray }, size: 9 };
+    ws.mergeCells(row, col, row, col + 2);
+    col += 3;
+
+    ws.getCell(row + 1, col - 3).value = val;
+    ws.getCell(row + 1, col - 3).numFmt = numFmt;
+    ws.getCell(row + 1, col - 3).font = { bold: true, size: 11, color: { argb: CINV.blue } };
+    ws.mergeCells(row + 1, col - 3, row + 1, col - 1);
+  }
+
+  // ── pie
+  row += 3;
+  ws.mergeCells(row, 1, row, totalCols);
+  ws.getCell(row, 1).value = `Generado por Club Cashin.com · ${new Date().toLocaleDateString("es-GT")}`;
+  ws.getCell(row, 1).font = { color: { argb: CINV.gray }, size: 9 };
+
+  ws.views = [{ state: "frozen", ySplit: firstHeaderRow }];
+
+  const arr = (await wb.xlsx.writeBuffer()) as ArrayBuffer;
+  return Buffer.from(arr);
+}
+
+export async function generarYSubirExcelInversionista(
+  inversionista: InversionistaReporte,
+  filename: string,
+  logoUrl: string = "",
+  showCreditId: boolean = false
+): Promise<{ url: string; excelBuffer: Buffer }> {
+  const excelBuffer = await buildInversionistaWorkbook(inversionista, { logoUrl, showCreditId });
+
+  const s3 = new S3Client({
+    endpoint: process.env.BUCKET_REPORTS_URL,
+    region: "auto",
+    credentials: {
+      accessKeyId:     process.env.R2_ACCESS_KEY_ID     as string,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
+    },
+  });
+
+  await s3.send(
+    new PutObjectCommand({
+      Bucket:      process.env.BUCKET_REPORTS,
+      Key:         filename,
+      Body:        excelBuffer,
+      ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    })
+  );
+
+  return {
+    url: `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`,
+    excelBuffer,
+  };
+}
+
 /**
  * Convierte un string o número en Big, limpiando %, Q, comas y guiones
  * @param value valor original

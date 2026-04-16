@@ -12,7 +12,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useFormik } from "formik";
-import { useRef } from "react";
+import { Fragment, useRef, useState, useMemo } from "react";
+import { Combobox, Transition } from "@headlessui/react";
+import { ChevronsUpDown, Check } from "lucide-react";
 import { toast } from "sonner";
 import { useUpdateCredit } from "../hooks/updateCredit";
 import { useRecalculateQuota } from "../hooks/recalculateQuota";
@@ -104,6 +106,18 @@ export function ModalEditCredit({
 
   // Ref para acumular los cambios de saldo reinversion desde InvestorsList
   const saldoChangesRef = useRef<Record<number, number>>({});
+  const [nuevaCuota, setNuevaCuota] = useState<number | null>(null);
+  const [asesorQuery, setAsesorQuery] = useState("");
+
+  const filteredAdvisors = useMemo(
+    () =>
+      asesorQuery === ""
+        ? advisorsOptions
+        : advisorsOptions.filter((a) =>
+            a.nombre.toLowerCase().includes(asesorQuery.toLowerCase())
+          ),
+    [advisorsOptions, asesorQuery]
+  );
 
   const parseParticipantDate = (dateString?: string | Date | null) => {
     return dateString ? new Date(dateString).toISOString().split('T')[0] : "2025-12-01";
@@ -117,6 +131,7 @@ export function ModalEditCredit({
       porcentaje_cash_in: Number(inv.porcentaje_cash_in),
       porcentaje_inversion: Number(inv.porcentaje_inversion),
       fecha_inicio_participacion: parseParticipantDate(inv.fecha_inicio_participacion),
+      cuota_inversionista: Number(inv.cuota_inversionista || 0),
     })) || [];
 
   const parsedInvestors = parseInvestors(investorsInitial);
@@ -128,22 +143,25 @@ export function ModalEditCredit({
     );
 
     if (mirrorItem) {
+      // El espejo está sincronizado con el padre: usar los valores ACTUALES del principal
+      // para monto_aportado, cuota y porcentajes. Solo confirmamos que el espejo existe.
       return {
         inversionista_id: Number(mirrorItem.inversionista_id),
-        monto_aportado: Number(mirrorItem.monto_aportado),
-        porcentaje_cash_in: Number(mirrorItem.porcentaje_cash_in),
-        porcentaje_inversion: Number(mirrorItem.porcentaje_inversion),
+        monto_aportado: inv.monto_aportado,           // ← Siempre del padre actual
+        porcentaje_cash_in: inv.porcentaje_cash_in,   // ← Siempre del padre actual
+        porcentaje_inversion: inv.porcentaje_inversion, // ← Siempre del padre actual
         fecha_inicio_participacion: parseParticipantDate(mirrorItem.fecha_inicio_participacion),
+        cuota_inversionista: inv.cuota_inversionista, // ← Siempre del padre actual
       };
     }
-    // Si no hay espejo para ese inversionista, devolvemos objeto vacío
-    const today = new Date().toISOString().split("T")[0];
+    // Si no hay espejo para ese inversionista en DB, sincronizar desde el principal
     return {
-      inversionista_id: 0,
-      monto_aportado: 0,
-      porcentaje_cash_in: 0,
-      porcentaje_inversion: 0,
-      fecha_inicio_participacion: today,
+      inversionista_id: inv.inversionista_id,
+      monto_aportado: inv.monto_aportado,
+      porcentaje_cash_in: inv.porcentaje_cash_in,
+      porcentaje_inversion: inv.porcentaje_inversion,
+      fecha_inicio_participacion: inv.fecha_inicio_participacion,
+      cuota_inversionista: inv.cuota_inversionista,
     };
   });
 
@@ -154,28 +172,26 @@ export function ModalEditCredit({
       investorsMirror: parsedInvestorsMirror, // 🆕 Campo para espejo
     },
     enableReinitialize: true,
-    validate: (values) => {
-      const errors: any = {};
-      const capital = Number(values.capital || 0);
+    // validate: (values) => {
+    //   const errors: any = {};
+    //   const capital = Number(values.capital || 0);
 
-      // 🔥 VALIDACIÓN 1: Inversionistas Principales
-      if (values.investors.length > 0) {
-        const sumaMontos = values.investors.reduce(
-          (sum, inv) => sum + Number(inv.monto_aportado || 0),
-          0
-        );
+    //   // 🔥 VALIDACIÓN 1: Inversionistas Principales
+    //   if (values.investors.length > 0) {
+    //     const sumaMontos = values.investors.reduce(
+    //       (sum, inv) => sum + Number(inv.monto_aportado || 0),
+    //       0
+    //     );
 
-        if (Math.abs(sumaMontos - capital) > 0.01) {
-          errors.investors = `La suma de montos aportados (Q${sumaMontos.toFixed(
-            2
-          )}) debe ser igual al capital (Q${capital.toFixed(2)})`;
-        }
-      }
+    //     if (Math.abs(sumaMontos - capital) > 0.01) {
+    //       errors.investors = `La suma de montos aportados (Q${sumaMontos.toFixed(
+    //         2
+    //       )}) debe ser igual al capital (Q${capital.toFixed(2)})`;
+    //     }
+    //   }
 
-
-
-      return errors;
-    },
+    //   return errors;
+    // },
     onSubmit: (values) => {
       if (Object.keys(formik.errors).length > 0) {
         Object.entries(formik.errors).forEach(([, error]) => {
@@ -198,6 +214,7 @@ export function ModalEditCredit({
         capital: Number(values.capital),
         porcentaje_interes: Number(values.porcentaje_interes),
         plazo: Number(values.plazo),
+        asesor_id: Number(values.asesor_id) || undefined,
 
         observaciones: values.observaciones ?? "",
         mora: Number(values.mora ?? 0),
@@ -224,6 +241,9 @@ export function ModalEditCredit({
         // Formato de crédito
         formato_credito: values.formato_credito ?? undefined,
 
+        // Abono capital
+        permite_abono_capital: !!values.permite_abono_capital,
+
         // Lista Principal
         inversionistas: values.investors.map((i: InvestorItem) => ({
           inversionista_id: Number(i.inversionista_id),
@@ -231,6 +251,7 @@ export function ModalEditCredit({
           porcentaje_cash_in: Number(i.porcentaje_cash_in),
           porcentaje_inversion: Number(i.porcentaje_inversion),
           fecha_inicio_participacion: i.fecha_inicio_participacion,
+          cuota_inversionista: Number(i.cuota_inversionista || 0),
         })),
 
         // Lista Espejo
@@ -240,6 +261,7 @@ export function ModalEditCredit({
           porcentaje_cash_in: Number(i.porcentaje_cash_in),
           porcentaje_inversion: Number(i.porcentaje_inversion),
           fecha_inicio_participacion: i.fecha_inicio_participacion,
+          cuota_inversionista: Number(i.cuota_inversionista || 0),
         })),
       };
       updateCredit(payload, {
@@ -278,6 +300,7 @@ export function ModalEditCredit({
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent
+        onInteractOutside={(e) => e.preventDefault()}
         className="max-w-3xl w-full bg-white text-gray-800 shadow-2xl border border-blue-100 p-0"
         style={{
           maxHeight: "94vh",
@@ -311,8 +334,19 @@ export function ModalEditCredit({
               recalculateQuota(
                 { numero_credito_sifco: sifco },
                 {
-                  onSuccess: () => {
-                    onSuccess();
+                  onSuccess: (data: any) => {
+                    console.log("Recalculate response:", data);
+                    const raw = data?.cuota ?? data?.nueva_cuota ?? data?.newQuota ?? data?.data?.cuota ?? data?.data?.nueva_cuota ?? data?.result?.cuota;
+                    const cuotaRecalculada = Number(Number(raw || 0).toFixed(2));
+                    if (cuotaRecalculada > 0) {
+                      setNuevaCuota(cuotaRecalculada);
+                      formik.setFieldValue("cuota", cuotaRecalculada);
+                    } else {
+                      const currentCuota = Number(formik.values.cuota || 0);
+                      if (currentCuota > 0) {
+                        setNuevaCuota(currentCuota);
+                      }
+                    }
                   },
                 }
               );
@@ -339,22 +373,76 @@ export function ModalEditCredit({
                         <Label className="text-gray-700 font-medium">
                           {fieldLabels[name]}
                         </Label>
-                        <select
-                          name={name}
-                          value={formik.values[name] ?? ""}
-                          onChange={formik.handleChange}
-                          className="w-full border rounded-lg px-3 py-2 bg-blue-50 border-blue-200 text-gray-800 h-10"
+                        <Combobox
+                          value={formik.values[name] as any ?? ""}
+                          onChange={(value: any) => {
+                            formik.setFieldValue(name, Number(value));
+                            setAsesorQuery("");
+                          }}
                         >
-                          <option value="">Seleccione un asesor</option>
-                          {advisorsOptions.map((adv) => (
-                            <option
-                              key={adv.asesor_id}
-                              value={adv.asesor_id}
+                          <div className="relative">
+                            <div className="relative w-full">
+                              <Combobox.Input
+                                className="w-full border rounded-lg pl-3 pr-10 py-2 bg-blue-50 border-blue-200 text-gray-800 h-10 font-medium focus:ring-2 focus:ring-blue-400 focus:border-blue-500 focus:outline-none placeholder:text-gray-400 transition-all"
+                                displayValue={(id: any) =>
+                                  id === ""
+                                    ? ""
+                                    : advisorsOptions.find((a) => a.asesor_id === Number(id))?.nombre || ""
+                                }
+                                onChange={(e) => setAsesorQuery(e.target.value)}
+                                onFocus={(e) => e.target.select()}
+                                placeholder="Buscar asesor..."
+                              />
+                              <Combobox.Button className="absolute inset-y-0 right-0 flex items-center pr-3">
+                                <ChevronsUpDown className="h-5 w-5 text-gray-400 hover:text-gray-600 transition-colors" />
+                              </Combobox.Button>
+                            </div>
+                            <Transition
+                              as={Fragment as any}
+                              leave="transition ease-in duration-100"
+                              leaveFrom="opacity-100"
+                              leaveTo="opacity-0"
+                              afterLeave={() => setAsesorQuery("")}
                             >
-                              {adv.nombre}
-                            </option>
-                          ))}
-                        </select>
+                              <Combobox.Options className="absolute z-50 mt-2 w-full max-h-60 overflow-auto rounded-xl bg-white py-2 shadow-2xl border-2 border-blue-200 focus:outline-none">
+                                {filteredAdvisors.length === 0 && asesorQuery !== "" ? (
+                                  <div className="relative cursor-default select-none py-4 px-4 text-center text-gray-500 text-sm">
+                                    No se encontró asesor
+                                  </div>
+                                ) : (
+                                  filteredAdvisors.map((adv) => (
+                                    <Combobox.Option
+                                      key={adv.asesor_id}
+                                      value={adv.asesor_id}
+                                      className={({ active, selected }) =>
+                                        `relative cursor-pointer select-none py-2.5 pl-10 pr-4 transition-colors ${
+                                          active
+                                            ? "bg-blue-50 text-blue-900"
+                                            : selected
+                                              ? "bg-blue-50 text-blue-900"
+                                              : "bg-white text-gray-700 hover:bg-gray-50"
+                                        }`
+                                      }
+                                    >
+                                      {({ selected }) => (
+                                        <>
+                                          <span className={`block truncate ${selected ? "font-bold" : "font-medium"}`}>
+                                            {adv.nombre}
+                                          </span>
+                                          {selected && (
+                                            <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-green-600">
+                                              <Check className="h-5 w-5" />
+                                            </span>
+                                          )}
+                                        </>
+                                      )}
+                                    </Combobox.Option>
+                                  ))
+                                )}
+                              </Combobox.Options>
+                            </Transition>
+                          </div>
+                        </Combobox>
                       </div>
                     );
                   }
@@ -397,8 +485,16 @@ export function ModalEditCredit({
                         }
                         name={name}
                         value={formik.values[name] ?? ""}
-                        onChange={formik.handleChange}
-                        className="bg-blue-50 border-blue-200 text-gray-800"
+                        onFocus={(e) => e.target.select()}
+                        onChange={(e) => { formik.handleChange(e); if (name === "cuota") setNuevaCuota(null); }}
+                        onBlur={(e) => {
+                          formik.handleBlur(e);
+                          if (!["observaciones", "no_poliza", "numero_credito_sifco", "formato_credito"].includes(name)) {
+                            const val = Number(e.target.value);
+                            formik.setFieldValue(name, Number(val.toFixed(2)));
+                          }
+                        }}
+                        className={`border-blue-200 text-gray-800 ${name === "cuota" && nuevaCuota !== null ? "bg-green-50 border-green-400 ring-2 ring-green-200" : "bg-blue-50"}`}
                         min={
                           [
                             "observaciones",
@@ -411,9 +507,52 @@ export function ModalEditCredit({
                         }
                         step="any"
                       />
+                      {name === "cuota" && nuevaCuota !== null && (
+                        <span className="text-xs font-semibold text-green-600 mt-1 flex items-center gap-1">
+                          Nueva cuota recalculada: Q{nuevaCuota.toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                        </span>
+                      )}
                     </div>
                   );
                 })}
+              </div>
+            </div>
+
+            {/* Opciones del crédito */}
+            <div className="mt-4 p-4 rounded-xl border border-blue-100 bg-blue-50/50">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-gray-800 font-bold text-sm">
+                    Permite Abono a Capital
+                  </Label>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Si está activo, el cliente puede abonar a capital aunque tenga cuotas atrasadas
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={!!formik.values.permite_abono_capital}
+                  onClick={() =>
+                    formik.setFieldValue(
+                      "permite_abono_capital",
+                      !formik.values.permite_abono_capital
+                    )
+                  }
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                    formik.values.permite_abono_capital
+                      ? "bg-green-500"
+                      : "bg-gray-300"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      formik.values.permite_abono_capital
+                        ? "translate-x-5"
+                        : "translate-x-0"
+                    }`}
+                  />
+                </button>
               </div>
             </div>
 
@@ -432,7 +571,15 @@ export function ModalEditCredit({
                       type={name === "saldo_a_favor" ? "number" : "text"}
                       name={name}
                       value={formik.values[name] ?? ""}
+                      onFocus={(e) => e.target.select()}
                       onChange={formik.handleChange}
+                      onBlur={(e) => {
+                        formik.handleBlur(e);
+                        if (name === "saldo_a_favor") {
+                          const val = Number(e.target.value);
+                          formik.setFieldValue(name, Number(val.toFixed(2)));
+                        }
+                      }}
                       className="bg-blue-50 border-blue-200 text-gray-800"
                       min={name === "saldo_a_favor" ? 0 : undefined}
                       step="any"

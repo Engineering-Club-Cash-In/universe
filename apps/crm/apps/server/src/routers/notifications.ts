@@ -3,6 +3,7 @@ import { and, count, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
+import { opportunities } from "../db/schema/crm";
 import type { NewNotification } from "../db/schema/notifications";
 import {
 	notificationDocuments,
@@ -10,11 +11,10 @@ import {
 } from "../db/schema/notifications";
 import { adminProcedure, protectedProcedure } from "../lib/orpc";
 import {
-	generateUniqueFilename,
+	buildUploadPrefix,
+	deleteFileFromR2,
 	getFileUrl,
-	resolveMimeType,
-	uploadFileToR2,
-	validateFile,
+	verifyUploadedDocumentInR2,
 } from "../lib/storage";
 
 // Campos de selección con join al creador
@@ -370,6 +370,7 @@ export const notificationsRouter = {
 				.where(
 					and(
 						eq(notifications.assignedToRole, "accounting"),
+						eq(notifications.type, "action_upload_files"),
 						eq(notifications.relatedEntityType, "opportunity"),
 						inArray(notifications.relatedEntityId, input.opportunityIds),
 					),
@@ -408,6 +409,60 @@ export const notificationsRouter = {
 			return docsWithUrls;
 		}),
 
+	// Obtener info de desembolso para una oportunidad (notificación + documentos)
+	getDisbursementForOpportunity: protectedProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			// Buscar notificación de contabilidad para desembolso
+			const [notif] = await db
+				.select({
+					id: notifications.id,
+					titulo: notifications.titulo,
+					status: notifications.status,
+					createdAt: notifications.createdAt,
+				})
+				.from(notifications)
+				.where(
+					and(
+						eq(notifications.assignedToRole, "accounting"),
+						eq(notifications.type, "action_upload_files"),
+						inArray(notifications.relatedEntityType, [
+							"opportunity",
+							"opportunity_client",
+						]),
+						eq(notifications.relatedEntityId, input.opportunityId),
+					),
+				)
+				.limit(1);
+
+			if (!notif) {
+				return { notificationId: null, documents: [] };
+			}
+
+			// Obtener documentos de esa notificación
+			const docs = await db
+				.select()
+				.from(notificationDocuments)
+				.where(eq(notificationDocuments.notificationId, notif.id))
+				.orderBy(desc(notificationDocuments.uploadedAt));
+
+			const docsWithUrls = await Promise.all(
+				docs.map(async (doc) => ({
+					...doc,
+					url: await getFileUrl(doc.filePath),
+				})),
+			);
+
+			return {
+				notificationId: notif.id,
+				documents: docsWithUrls,
+			};
+		}),
+
 	// Agregar documento a una notificación (sube a R2)
 	addDocumentToNotification: protectedProcedure
 		.input(
@@ -417,7 +472,7 @@ export const notificationsRouter = {
 					name: z.string(),
 					type: z.string(),
 					size: z.number(),
-					data: z.string(), // Base64
+					key: z.string(), // R2 key from presigned upload
 				}),
 			}),
 		)
@@ -446,35 +501,16 @@ export const notificationsRouter = {
 				});
 			}
 
-			// Resolver MIME type (fallback por extensión)
-			const resolvedMimeType = resolveMimeType({
-				type: input.file.type,
-				name: input.file.name,
-			} as File);
-
-			// Validar archivo
-			const validation = validateFile({
-				type: resolvedMimeType,
-				size: input.file.size,
-				name: input.file.name,
-			} as File);
-
-			if (!validation.valid) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: validation.error || "Archivo inválido",
-				});
-			}
-
-			// Subir a R2
-			const fileBuffer = Buffer.from(input.file.data, "base64");
-			const fileBlob = new Blob([fileBuffer], { type: resolvedMimeType });
-			const uniqueFilename = generateUniqueFilename(input.file.name);
-
-			const { key } = await uploadFileToR2(
-				fileBlob,
-				uniqueFilename,
-				`notifications/${input.notificationId}`,
-			);
+			const uploadedFile = await verifyUploadedDocumentInR2({
+				key: input.file.key,
+				expectedPrefix: buildUploadPrefix(
+					"notification_document",
+					input.notificationId,
+				),
+				filename: input.file.name,
+				mimeType: input.file.type,
+			});
+			const uniqueFilename = uploadedFile.key.split("/").pop()!;
 
 			// Guardar registro en la base de datos
 			const [document] = await db
@@ -483,13 +519,109 @@ export const notificationsRouter = {
 					notificationId: input.notificationId,
 					filename: uniqueFilename,
 					originalName: input.file.name,
-					mimeType: resolvedMimeType,
-					size: input.file.size,
-					filePath: key,
+					mimeType: uploadedFile.mimeType,
+					size: uploadedFile.size,
+					filePath: uploadedFile.key,
 					uploadedBy: userId,
 				})
 				.returning();
 
 			return document;
+		}),
+
+	// Eliminar documento de una notificación
+	deleteNotificationDocument: protectedProcedure
+		.input(
+			z.object({
+				documentId: z.string().uuid(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const [document] = await db
+				.select()
+				.from(notificationDocuments)
+				.where(eq(notificationDocuments.id, input.documentId))
+				.limit(1);
+
+			if (!document) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Documento no encontrado",
+				});
+			}
+
+			// Solo el que subió o admin puede borrar
+			const userRole = context.session.user.role;
+			if (
+				document.uploadedBy !== context.session.user.id &&
+				userRole !== "admin"
+			) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permisos para eliminar este documento",
+				});
+			}
+
+			// Eliminar de R2
+			await deleteFileFromR2(document.filePath);
+
+			// Eliminar de la base de datos
+			await db
+				.delete(notificationDocuments)
+				.where(eq(notificationDocuments.id, input.documentId));
+
+			return { success: true };
+		}),
+
+	// Notificar al asesor de ventas que el desembolso fue completado
+	notifyDisbursementCompleted: protectedProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const userId = context.session.user.id;
+			const [userData] = await db
+				.select({ role: user.role })
+				.from(user)
+				.where(eq(user.id, userId))
+				.limit(1);
+
+			// Obtener la oportunidad para saber el asesor asignado y el título
+			const [opportunity] = await db
+				.select({
+					id: opportunities.id,
+					title: opportunities.title,
+					assignedTo: opportunities.assignedTo,
+				})
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
+			}
+
+			if (!opportunity.assignedTo) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "La oportunidad no tiene un asesor de ventas asignado",
+				});
+			}
+
+			await createNotification({
+				titulo: `Desembolso completado - ${opportunity.title}`,
+				descripcion: `El desembolso de la oportunidad "${opportunity.title}" ha sido completado. Las boletas ya fueron subidas.`,
+				type: "aviso",
+				createdBy: userId,
+				createdByRole: userData?.role ?? "accounting",
+				assignedToRole: "sales",
+				assignedTo: opportunity.assignedTo,
+				redirectPage: "client_details_disbursement",
+				relatedEntityType: "opportunity_client",
+				relatedEntityId: input.opportunityId,
+			});
+
+			return { success: true };
 		}),
 };

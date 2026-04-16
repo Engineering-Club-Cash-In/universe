@@ -185,7 +185,11 @@ export default function Header() {
 									<DropdownMenuItem asChild>
 										<Link
 											to="/vehicles"
-											search={{ vehicleId: undefined, inspectionId: undefined, tab: undefined }}
+											search={{
+												vehicleId: undefined,
+												inspectionId: undefined,
+												tab: undefined,
+											}}
 											className="cursor-pointer"
 										>
 											<Car className="mr-2 h-4 w-4" />
@@ -254,32 +258,78 @@ export default function Header() {
 
 						{/* Jurídico */}
 						{session && userRole && PERMISSIONS.canAccessJuridico(userRole) && (
-							<Button
-								variant={isActive("/juridico") ? "secondary" : "ghost"}
-								size="sm"
-								asChild
-							>
-								<Link to="/juridico">
-									<Scale className="mr-2 h-4 w-4" />
-									Jurídico
-								</Link>
-							</Button>
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									<Button
+										variant={isActive("/juridico") ? "secondary" : "ghost"}
+										size="sm"
+										className="gap-1"
+									>
+										<Scale className="h-4 w-4" />
+										Jurídico
+										<ChevronDown className="h-3 w-3 opacity-50" />
+									</Button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="start" className="w-56">
+									<DropdownMenuItem asChild>
+										<Link to="/juridico" className="cursor-pointer">
+											<Scale className="mr-2 h-4 w-4" />
+											Gestión jurídica
+										</Link>
+									</DropdownMenuItem>
+									<DropdownMenuItem asChild>
+										<Link to="/juridico/dashboard" className="cursor-pointer">
+											<LayoutDashboard className="mr-2 h-4 w-4" />
+											Dashboard
+										</Link>
+									</DropdownMenuItem>
+									<DropdownMenuItem asChild>
+										<Link
+											to="/juridico/dashboard-data"
+											className="cursor-pointer"
+										>
+											<Database className="mr-2 h-4 w-4" />
+											Carga de datos
+										</Link>
+									</DropdownMenuItem>
+								</DropdownMenuContent>
+							</DropdownMenu>
 						)}
 
 						{/* Inversiones */}
 						{session &&
 							userRole &&
 							PERMISSIONS.canAccessInvestments(userRole) && (
-								<Button
-									variant={isActive("/inversiones") ? "secondary" : "ghost"}
-									size="sm"
-									asChild
-								>
-									<Link to="/inversiones">
-										<TrendingUp className="mr-2 h-4 w-4" />
-										Inversiones
-									</Link>
-								</Button>
+								<DropdownMenu>
+									<DropdownMenuTrigger asChild>
+										<Button
+											variant={isActive("/inversiones") ? "secondary" : "ghost"}
+											size="sm"
+											className="gap-1"
+										>
+											<TrendingUp className="h-4 w-4" />
+											Inversiones
+											<ChevronDown className="h-3 w-3 opacity-50" />
+										</Button>
+									</DropdownMenuTrigger>
+									<DropdownMenuContent align="start" className="w-56">
+										<DropdownMenuItem asChild>
+											<Link to="/inversiones" className="cursor-pointer">
+												<Target className="mr-2 h-4 w-4" />
+												Leads
+											</Link>
+										</DropdownMenuItem>
+										<DropdownMenuItem asChild>
+											<Link
+												to="/inversiones/liquidaciones"
+												className="cursor-pointer"
+											>
+												<Landmark className="mr-2 h-4 w-4" />
+												Inversionistas
+											</Link>
+										</DropdownMenuItem>
+									</DropdownMenuContent>
+								</DropdownMenu>
 							)}
 
 						{/* Contabilidad Dropdown */}

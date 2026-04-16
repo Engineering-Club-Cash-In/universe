@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import {
 	formatCurrency,
 	formatGuatemalaDate,
+	formatGuatemalaDateTime,
 	getClientTypeLabel,
 	getGenderLabel,
 	getLeadStatusBadgeColor,
@@ -25,6 +26,17 @@ import {
 	getWorkTimeLabel,
 } from "@/lib/crm-formatters";
 import { client, orpc } from "@/utils/orpc";
+
+function formatLeadFullName(lead: {
+	firstName?: string | null;
+	middleName?: string | null;
+	lastName?: string | null;
+	secondLastName?: string | null;
+}) {
+	return [lead.firstName, lead.middleName, lead.lastName, lead.secondLastName]
+		.filter((part): part is string => Boolean(part && part.trim()))
+		.join(" ");
+}
 
 // Type for the lead data
 export type LeadForModal = {
@@ -214,8 +226,7 @@ export function LeadDetailModal({
 					<div className="flex items-start justify-between">
 						<div>
 							<h3 className="font-semibold text-lg">
-								{displayLead.firstName} {displayLead.middleName || ""}{" "}
-								{displayLead.lastName} {displayLead.secondLastName || ""}
+								{formatLeadFullName(displayLead)}
 							</h3>
 							<p className="text-muted-foreground text-sm">
 								{displayLead.email}
@@ -252,8 +263,7 @@ export function LeadDetailModal({
 										Nombre Completo
 									</Label>
 									<p className="font-medium text-sm">
-										{displayLead.firstName} {displayLead.middleName || ""}{" "}
-										{displayLead.lastName} {displayLead.secondLastName || ""}
+										{formatLeadFullName(displayLead)}
 									</p>
 								</div>
 								<div>
@@ -576,7 +586,7 @@ export function LeadDetailModal({
 										Fecha de Creación
 									</Label>
 									<p className="text-sm">
-										{formatGuatemalaDate(displayLead.createdAt)}
+										{formatGuatemalaDateTime(displayLead.createdAt)}
 									</p>
 								</div>
 								{displayLead.convertedAt && (

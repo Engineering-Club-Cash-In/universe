@@ -8,6 +8,7 @@ import {
 	ilike,
 	inArray,
 	isNotNull,
+	isNull,
 	lt,
 	lte,
 	not,
@@ -56,18 +57,18 @@ import {
 import { analystProcedure, crmProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
+	buildUploadPrefix,
 	deleteFileFromR2,
-	generateUniqueFilename,
 	getFileUrl,
-	resolveMimeType,
-	uploadFileToR2,
-	validateFile,
+	verifyUploadedDocumentInR2,
 } from "../lib/storage";
 import {
 	formatMissingFields,
 	getMissingFieldsForCompletion,
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
+import { hasStaleAnalysisChecklistVehicleState } from "../lib/analysis-checklist";
+import { validarDpi } from "../utils/cui-validation";
 import { scoreLead } from "../services/lead-scoring";
 import { createNotification } from "./notifications";
 
@@ -511,6 +512,7 @@ export const crmRouter = {
 				jobTitle: z.string().optional(),
 				companyId: z.string().uuid().optional(),
 				source: z.enum(leadSourceEnum.enumValues),
+				campaign: z.string().min(1).optional(),
 				assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
 				notes: z.string().optional(),
 			}),
@@ -527,10 +529,101 @@ export const crmRouter = {
 				});
 			}
 
+			// Normalizar y validar DPI
+			let normalizedDpi: string | undefined;
+			if (input.dpi) {
+				const resultado = validarDpi(input.dpi);
+				if (!resultado.valid) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: resultado.error,
+					});
+				}
+				normalizedDpi = resultado.dpiLimpio;
+			}
+
+			// Validar DPI duplicado
+			if (normalizedDpi) {
+				const [existingLead] = await db
+					.select({
+						id: leads.id,
+						assignedTo: leads.assignedTo,
+						assignedToName: user.name,
+					})
+					.from(leads)
+					.innerJoin(user, eq(leads.assignedTo, user.id))
+					.where(eq(leads.dpi, normalizedDpi))
+					.limit(1);
+
+				if (existingLead) {
+					// Verificar si tiene oportunidades activas (open o on_hold)
+					const [activeOpportunity] = await db
+						.select({ id: opportunities.id })
+						.from(opportunities)
+						.where(
+							and(
+								eq(opportunities.leadId, existingLead.id),
+								inArray(opportunities.status, ["open", "on_hold"]),
+							),
+						)
+						.limit(1);
+
+					if (activeOpportunity) {
+						throw new ORPCError("CONFLICT", {
+							message: `Ya existe un lead con este DPI y tiene un proceso activo, asignado al asesor: ${existingLead.assignedToName}`,
+						});
+					}
+
+					// Lead existe pero sin procesos activos → reasignar al nuevo asesor
+					const reassignedLead = await db.transaction(async (tx) => {
+						const [lead] = await tx
+							.update(leads)
+							.set({
+								assignedTo,
+								status: "new",
+								source: input.source,
+								campaign: input.campaign,
+								updatedAt: new Date(),
+							})
+							.where(eq(leads.id, existingLead.id))
+							.returning();
+
+						// Crear nueva oportunidad en el primer stage
+						const [firstStage] = await tx
+							.select({ id: salesStages.id })
+							.from(salesStages)
+							.orderBy(salesStages.order)
+							.limit(1);
+
+						if (!firstStage) {
+							throw new ORPCError("INTERNAL_SERVER_ERROR", {
+								message: "No se encontró el primer stage de ventas",
+							});
+						}
+
+						await tx.insert(opportunities).values({
+							title: `${input.firstName} ${input.lastName}`,
+							leadId: existingLead.id,
+							creditType: "autocompra",
+							stageId: firstStage.id,
+							probability: 1,
+							assignedTo,
+							createdBy: context.userId,
+							source: input.source,
+							campaign: input.campaign,
+						});
+
+						return lead;
+					});
+
+					return reassignedLead;
+				}
+			}
+
 			const newLead = await db
 				.insert(leads)
 				.values({
 					...input,
+					dpi: normalizedDpi,
 					monthlyIncome: input.monthlyIncome?.toString(),
 					loanAmount: input.loanAmount?.toString(),
 					assignedTo,
@@ -578,6 +671,7 @@ export const crmRouter = {
 				jobTitle: z.string().optional(),
 				companyId: z.string().uuid().optional(),
 				source: z.enum(leadSourceEnum.enumValues).optional(),
+				campaign: z.string().min(1).optional(),
 				status: z
 					.enum(["new", "contacted", "qualified", "unqualified", "converted"])
 					.optional(),
@@ -589,6 +683,17 @@ export const crmRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			const { id, assignedTo, ...updateData } = input;
+
+			// Validar DPI si se envía
+			if (updateData.dpi) {
+				const resultado = validarDpi(updateData.dpi);
+				if (!resultado.valid) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: resultado.error,
+					});
+				}
+				updateData.dpi = resultado.dpiLimpio;
+			}
 
 			// Admin and juridico can update any lead, others only their own
 			const canUpdateAnyLead = context.userRole !== "sales";
@@ -633,6 +738,35 @@ export const crmRouter = {
 					.update(opportunities)
 					.set({ nit: updateData.nit || null, updatedAt: new Date() })
 					.where(eq(opportunities.leadId, id));
+			}
+
+			if (updateData.source !== undefined || updateData.campaign !== undefined) {
+				const [activeOpportunity] = await db
+					.select({ id: opportunities.id })
+					.from(opportunities)
+					.where(
+						and(
+							eq(opportunities.leadId, id),
+							inArray(opportunities.status, ["open", "on_hold"]),
+						),
+					)
+					.orderBy(desc(opportunities.createdAt))
+					.limit(1);
+
+				if (activeOpportunity) {
+					await db
+						.update(opportunities)
+					.set({
+						...(updateData.source !== undefined
+							? { source: updateData.source }
+							: {}),
+						...(updateData.campaign !== undefined
+							? { campaign: updateData.campaign }
+							: {}),
+						updatedAt: new Date(),
+					})
+						.where(eq(opportunities.id, activeOpportunity.id));
+				}
 			}
 
 			return updatedLead[0];
@@ -846,6 +980,46 @@ export const crmRouter = {
 			});
 		}),
 
+	resetCreditAnalysis: crmProcedure
+		.input(
+			z
+				.object({
+					leadId: z.string().uuid().optional(),
+					coDebtorId: z.string().uuid().optional(),
+				})
+				.refine((data) => data.leadId || data.coDebtorId, {
+					message: "Debe proporcionar leadId o coDebtorId",
+				}),
+		)
+		.handler(async ({ input, context }) => {
+			if (
+				context.userRole !== "admin" &&
+				context.userRole !== "sales_supervisor" &&
+				context.userRole !== "analyst"
+			) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para resetear análisis crediticios",
+				});
+			}
+
+			const whereCondition = input.leadId
+				? eq(creditAnalysis.leadId, input.leadId)
+				: eq(creditAnalysis.coDebtorId, input.coDebtorId!);
+
+			const deleted = await db
+				.delete(creditAnalysis)
+				.where(whereCondition)
+				.returning({ id: creditAnalysis.id });
+
+			if (deleted.length === 0) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "No se encontró análisis crediticio para resetear",
+				});
+			}
+
+			return { success: true };
+		}),
+
 	// Opportunities
 	getOpportunities: crmProcedure
 		.input(
@@ -861,12 +1035,45 @@ export const crmRouter = {
 					// Filtro por mes/año para alinear con dashboard
 					month: z.number().min(1).max(12).optional(),
 					year: z.number().optional(),
+					// NEW: Filtro por fecha de creación
+					createdMonth: z.number().min(1).max(12).optional(),
+					createdYear: z.number().optional(),
+					// NEW: Filtro por fuente/medio
+					source: z.enum(leadSourceEnum.enumValues).optional(),
 				})
 				.optional(),
 		)
 		.handler(async ({ input, context }) => {
 			const leadIdFilter = input?.leadId;
 			const searchTerm = input?.search;
+			const firstClosedStageDates = db
+				.select({
+					opportunityId: opportunityStageHistory.opportunityId,
+					firstClosedStageAt:
+						sql<Date>`min(${opportunityStageHistory.changedAt})`.as(
+							"first_closed_stage_at",
+						),
+				})
+				.from(opportunityStageHistory)
+				.innerJoin(
+					salesStages,
+					eq(opportunityStageHistory.toStageId, salesStages.id),
+				)
+				.where(gte(salesStages.closurePercentage, 90))
+				.groupBy(opportunityStageHistory.opportunityId)
+				.as("first_closed_stage_dates");
+
+			const latestStageHistory = db
+				.select({
+					opportunityId: opportunityStageHistory.opportunityId,
+					latestStageChangedAt:
+						sql<Date>`max(${opportunityStageHistory.changedAt})`.as(
+							"latest_stage_changed_at",
+						),
+				})
+				.from(opportunityStageHistory)
+				.groupBy(opportunityStageHistory.opportunityId)
+				.as("latest_stage_history");
 
 			const selectFields = {
 				id: opportunities.id,
@@ -880,6 +1087,14 @@ export const crmRouter = {
 				assignedTo: opportunities.assignedTo,
 				notes: opportunities.notes,
 				createdAt: opportunities.createdAt,
+				closedAt:
+					sql<Date | null>`coalesce(${opportunities.actualCloseDate}, ${firstClosedStageDates.firstClosedStageAt})`.as(
+						"closed_at",
+					),
+				latestStageChangedAt:
+					sql<Date>`coalesce(${latestStageHistory.latestStageChangedAt}, ${opportunities.createdAt})`.as(
+						"latest_stage_changed_at",
+					),
 				updatedAt: opportunities.updatedAt,
 				numeroSifco: opportunities.numeroSifco,
 				// Analysis status for tracking rejection/resubmission
@@ -902,6 +1117,7 @@ export const crmRouter = {
 				membresiaPago: opportunities.membresiaPago,
 				inversionistas: opportunities.inversionistas,
 				asesorId: opportunities.asesorId,
+				source: opportunities.source,
 				rubros: opportunities.rubros,
 				loanPurpose: opportunities.loanPurpose,
 				company: {
@@ -911,8 +1127,11 @@ export const crmRouter = {
 				lead: {
 					id: leads.id,
 					firstName: leads.firstName,
+					middleName: leads.middleName,
 					lastName: leads.lastName,
+					secondLastName: leads.secondLastName,
 					email: leads.email,
+					phone: leads.phone,
 					age: leads.age,
 					direccion: leads.direccion,
 					departamento: leads.departamento,
@@ -943,6 +1162,7 @@ export const crmRouter = {
 					kmMileage: vehicles.kmMileage,
 					status: vehicles.status,
 					isNew: vehicles.isNew,
+					isOwned: vehicles.isOwned,
 					fuelType: vehicles.fuelType,
 					transmission: vehicles.transmission,
 				},
@@ -951,6 +1171,14 @@ export const crmRouter = {
 			const baseQuery = db
 				.select(selectFields)
 				.from(opportunities)
+				.leftJoin(
+					firstClosedStageDates,
+					eq(opportunities.id, firstClosedStageDates.opportunityId),
+				)
+				.leftJoin(
+					latestStageHistory,
+					eq(opportunities.id, latestStageHistory.opportunityId),
+				)
 				.leftJoin(companies, eq(opportunities.companyId, companies.id))
 				.leftJoin(leads, eq(opportunities.leadId, leads.id))
 				.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
@@ -969,7 +1197,7 @@ export const crmRouter = {
 				conditions.push(eq(opportunities.id, input.opportunityId));
 			}
 
-			// Search filter (by title, company name, or lead name)
+			// Search filter (by title, company name, lead name, phone, or opportunity ID)
 			if (searchTerm) {
 				conditions.push(
 					or(
@@ -978,6 +1206,8 @@ export const crmRouter = {
 						ilike(leads.firstName, `%${searchTerm}%`),
 						ilike(leads.lastName, `%${searchTerm}%`),
 						ilike(opportunities.numeroSifco, `%${searchTerm}%`),
+						ilike(leads.phone, `%${searchTerm}%`),
+						sql`${opportunities.id}::text ILIKE ${`%${searchTerm}%`}`,
 					),
 				);
 			}
@@ -989,98 +1219,42 @@ export const crmRouter = {
 				);
 			}
 
-			// Filtros de stage/fecha solo aplican cuando se pasan month/year explícitamente
-			const filterMonth = input?.month;
-			const filterYear = input?.year;
+			// Filtro por fuente/medio de la oportunidad
+			if (input?.source) {
+				conditions.push(eq(opportunities.source, input.source));
+			}
 
-			if (filterMonth && filterYear) {
-				const startOfMonth = new Date(filterYear, filterMonth - 1, 1);
-				const endOfMonth = new Date(filterYear, filterMonth, 1);
+			// Filtro por mes/año: oportunidades abiertas siempre visibles, cerradas filtradas por actual_close_date
+			if (input?.createdMonth && input?.createdYear) {
+				const startOfMonth = new Date(
+					input.createdYear,
+					input.createdMonth - 1,
+					1,
+				);
+				const endOfMonth = new Date(input.createdYear, input.createdMonth, 1);
 
-				// Solo mostrar oportunidades al 100% que llegaron ahí en el mes seleccionado
-				const fullStages = await db
-					.select({ id: salesStages.id })
-					.from(salesStages)
-					.where(eq(salesStages.closurePercentage, 100));
-				const fullStageIds = fullStages.map((s) => s.id);
-
-				if (fullStageIds.length > 0) {
-					const thisMonthFullOpps = await db
-						.select({
-							opportunityId: opportunityStageHistory.opportunityId,
-						})
-						.from(opportunityStageHistory)
-						.where(
-							and(
-								inArray(
-									opportunityStageHistory.toStageId,
-									fullStageIds,
-								),
-								gte(opportunityStageHistory.changedAt, startOfMonth),
-								lt(opportunityStageHistory.changedAt, endOfMonth),
-							),
-						);
-
-					const thisMonthOppIds = thisMonthFullOpps.map(
-						(o) => o.opportunityId,
-					);
-
-					conditions.push(
-						or(
-							not(inArray(opportunities.stageId, fullStageIds)),
-							...(thisMonthOppIds.length > 0
-								? [inArray(opportunities.id, thisMonthOppIds)]
-								: []),
-						),
-					);
-				}
-
-				// Filtrar oportunidades colocadas (>= 90%) que llegaron a ese stage en el mes
-				const PLACED_STAGE_THRESHOLD = 90;
-				const placedStages = await db
-					.select({ id: salesStages.id })
-					.from(salesStages)
-					.where(
+				conditions.push(
+					or(
+						// Oportunidades abiertas/on_hold: siempre visibles
+						inArray(opportunities.status, ["open", "on_hold"]),
+						// Oportunidades cerradas (won/lost): filtrar por fecha de cierre
 						and(
-							gte(
-								salesStages.closurePercentage,
-								PLACED_STAGE_THRESHOLD,
-							),
-							lt(salesStages.closurePercentage, 100),
-						),
-					);
-				const placedStageIds = placedStages.map((s) => s.id);
-
-				if (placedStageIds.length > 0) {
-					const placedThisMonth = await db
-						.select({
-							opportunityId: opportunityStageHistory.opportunityId,
-						})
-						.from(opportunityStageHistory)
-						.where(
-							and(
-								inArray(
-									opportunityStageHistory.toStageId,
-									placedStageIds,
+							inArray(opportunities.status, ["won", "lost"]),
+							or(
+								and(
+									gte(opportunities.actualCloseDate, startOfMonth),
+									lt(opportunities.actualCloseDate, endOfMonth),
 								),
-								gte(opportunityStageHistory.changedAt, startOfMonth),
-								lt(opportunityStageHistory.changedAt, endOfMonth),
+								// Fallback: si no tiene fecha de cierre, usar fecha de creación
+								and(
+									isNull(opportunities.actualCloseDate),
+									gte(opportunities.createdAt, startOfMonth),
+									lt(opportunities.createdAt, endOfMonth),
+								),
 							),
-						);
-
-					const placedOppIds = placedThisMonth.map(
-						(o) => o.opportunityId,
-					);
-
-					conditions.push(
-						or(
-							not(inArray(opportunities.stageId, placedStageIds)),
-							...(placedOppIds.length > 0
-								? [inArray(opportunities.id, placedOppIds)]
-								: []),
 						),
-					);
-				}
+					),
+				);
 			}
 
 			// Role-based filter: admin and sales_supervisor can see all, others only their own
@@ -1106,6 +1280,7 @@ export const crmRouter = {
 				vehicleId: z.string().uuid().optional(),
 				creditType: z.enum(["autocompra", "sobre_vehiculo"]),
 				source: z.enum(leadSourceEnum.enumValues).optional(),
+				campaign: z.string().min(1).optional(),
 				loanPurpose: z.enum(["personal", "business"]).optional(),
 				value: z.string().optional(), // Will be converted to decimal
 				stageId: z.string().uuid(),
@@ -1162,6 +1337,7 @@ export const crmRouter = {
 			// If a lead is provided, get the company and source from the lead
 			let companyId = input.companyId;
 			let source = input.source;
+			let campaign = input.campaign;
 			let leadNit: string | null = null;
 			if (input.leadId) {
 				const lead = await db
@@ -1177,6 +1353,9 @@ export const crmRouter = {
 					if (!source && lead[0].source) {
 						source = lead[0].source;
 					}
+					if (!campaign && lead[0].campaign) {
+						campaign = lead[0].campaign;
+					}
 					// Copy NIT from lead to opportunity
 					if (lead[0].nit) {
 						leadNit = lead[0].nit;
@@ -1190,6 +1369,7 @@ export const crmRouter = {
 					...input,
 					companyId,
 					source,
+					campaign,
 					nit: leadNit,
 					assignedTo,
 					expectedCloseDate: input.expectedCloseDate
@@ -1211,6 +1391,8 @@ export const crmRouter = {
 				companyId: z.string().uuid().optional(),
 				vehicleId: z.string().uuid().nullable().optional(),
 				creditType: z.enum(["autocompra", "sobre_vehiculo"]).optional(),
+				source: z.enum(leadSourceEnum.enumValues).optional(),
+				campaign: z.string().min(1).optional(),
 				value: z.string().optional(),
 				stageId: z.string().uuid().optional(),
 				probability: z.number().min(0).max(100).optional(),
@@ -1224,7 +1406,7 @@ export const crmRouter = {
 				tasaInteres: z.string().optional(),
 				cuotaMensual: z.string().optional(),
 				fechaInicio: z.string().optional(),
-				diaPagoMensual: z.number().int().min(1).max(31).optional(),
+				diaPagoMensual: z.union([z.literal(15), z.literal(30)]).optional(),
 				// Additional fields
 				seguro: z.number().optional(),
 				gps: z.number().optional(),
@@ -1486,6 +1668,9 @@ export const crmRouter = {
 			// Check if this is a stage change
 			const isStageChange =
 				input.stageId && input.stageId !== currentOpportunity[0].stageId;
+			const vehicleChanged =
+				input.vehicleId !== undefined &&
+				input.vehicleId !== currentOpportunity[0].vehicleId;
 
 			// Check if this is an override (sales moving from analysis stage)
 			let isOverride = false;
@@ -1567,6 +1752,12 @@ export const crmRouter = {
 						updatedAt: new Date(),
 					})
 					.where(eq(leads.id, currentOpportunity[0].leadId));
+			}
+
+			if (vehicleChanged) {
+				await db
+					.delete(analysisChecklists)
+					.where(eq(analysisChecklists.opportunityId, id));
 			}
 
 			// Record stage history if stage changed
@@ -1659,7 +1850,7 @@ export const crmRouter = {
 			// Build conditions
 			const conditions = [eq(opportunities.stageId, analysisStage[0].id)];
 
-			// Search filter (name, license plate)
+			// Search filter (name, license plate, opportunity ID)
 			if (search && search.trim() !== "") {
 				const searchTerms = search.trim().split(/\s+/);
 				for (const term of searchTerms) {
@@ -1669,6 +1860,7 @@ export const crmRouter = {
 							ilike(leads.firstName, searchPattern),
 							ilike(leads.lastName, searchPattern),
 							ilike(vehicles.licensePlate, searchPattern),
+							sql`CAST(${opportunities.id} AS TEXT) ILIKE ${searchPattern}`,
 						)!,
 					);
 				}
@@ -2567,33 +2759,12 @@ export const crmRouter = {
 		.handler(async ({ input, context }) => {
 			const { limit, offset, search } = input;
 
-			// First, get all stages with 100% closure
-			const closedStages = await db
-				.select({ id: salesStages.id })
-				.from(salesStages)
-				.where(gte(salesStages.closurePercentage, 100));
-
-			const closedStageIds = closedStages.map((s) => s.id);
-
-			// Build subquery to find leads with at least one closed opportunity
-			// A closed opportunity is one with numeroSifco OR in a 100% stage
+			// Build subquery to find leads with at least one won opportunity
 			const leadsWithClosedOpportunities = await db
 				.selectDistinct({ leadId: opportunities.leadId })
 				.from(opportunities)
-				.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
 				.where(
-					and(
-						isNotNull(opportunities.leadId),
-						or(
-							isNotNull(opportunities.numeroSifco),
-							closedStageIds.length > 0
-								? sql`${opportunities.stageId} IN (${sql.join(
-										closedStageIds.map((id) => sql`${id}`),
-										sql`, `,
-									)})`
-								: sql`false`,
-						),
-					),
+					and(isNotNull(opportunities.leadId), eq(opportunities.status, "won")),
 				);
 
 			const clientLeadIds = leadsWithClosedOpportunities
@@ -2633,7 +2804,9 @@ export const crmRouter = {
 				conditions.push(
 					or(
 						ilike(leads.firstName, searchPattern),
+						ilike(leads.middleName, searchPattern),
 						ilike(leads.lastName, searchPattern),
+						ilike(leads.secondLastName, searchPattern),
 						ilike(leads.email, searchPattern),
 						ilike(leads.phone, searchPattern),
 						ilike(leads.dpi, searchPattern),
@@ -2666,7 +2839,9 @@ export const crmRouter = {
 				.select({
 					id: leads.id,
 					firstName: leads.firstName,
+					middleName: leads.middleName,
 					lastName: leads.lastName,
+					secondLastName: leads.secondLastName,
 					email: leads.email,
 					phone: leads.phone,
 					dpi: leads.dpi,
@@ -3001,8 +3176,8 @@ export const crmRouter = {
 					return { placedCount: 0, placedAmount: 0 };
 				}
 
-				// Find opportunities that moved to a placed stage within this month
-				const placedThisMonth = await db
+				// Find opportunities that FIRST reached a placed stage within this month
+				const movedToPlacedThisMonth = await db
 					.select({ opportunityId: opportunityStageHistory.opportunityId })
 					.from(opportunityStageHistory)
 					.where(
@@ -3013,9 +3188,36 @@ export const crmRouter = {
 						),
 					);
 
-				const placedOppIds = [
-					...new Set(placedThisMonth.map((o) => o.opportunityId)),
+				const candidateIds = [
+					...new Set(movedToPlacedThisMonth.map((o) => o.opportunityId)),
 				];
+
+				// Exclude opportunities that already reached placed before this month
+				const alreadyPlacedBefore =
+					candidateIds.length > 0
+						? await db
+								.select({
+									opportunityId: opportunityStageHistory.opportunityId,
+								})
+								.from(opportunityStageHistory)
+								.where(
+									and(
+										inArray(
+											opportunityStageHistory.opportunityId,
+											candidateIds,
+										),
+										inArray(opportunityStageHistory.toStageId, placedStageIds),
+										lt(opportunityStageHistory.changedAt, startOfMonth),
+									),
+								)
+						: [];
+
+				const alreadyPlacedIds = new Set(
+					alreadyPlacedBefore.map((o) => o.opportunityId),
+				);
+				const placedOppIds = candidateIds.filter(
+					(id) => !alreadyPlacedIds.has(id),
+				);
 
 				if (placedOppIds.length === 0) {
 					return { placedCount: 0, placedAmount: 0 };
@@ -3064,6 +3266,26 @@ export const crmRouter = {
 							not(eq(opportunities.status, "migrate")),
 						),
 					);
+				const [wonOpportunities] = await db
+					.select({ count: count() })
+					.from(opportunities)
+					.where(
+						and(
+							eq(opportunities.status, "won"),
+							gte(opportunities.createdAt, startOfMonth),
+							lt(opportunities.createdAt, endOfMonth),
+						),
+					);
+				const [totalValue] = await db
+					.select({ total: sum(opportunities.value) })
+					.from(opportunities)
+					.where(
+						and(
+							gte(opportunities.createdAt, startOfMonth),
+							lt(opportunities.createdAt, endOfMonth),
+							not(eq(opportunities.status, "migrate")),
+						),
+					);
 				const [totalClients] = await db
 					.select({ count: count() })
 					.from(clients)
@@ -3078,6 +3300,8 @@ export const crmRouter = {
 				return {
 					totalLeads: totalLeads?.count || 0,
 					totalOpportunities: totalOpportunities?.count || 0,
+					wonOpportunities: wonOpportunities?.count || 0,
+					totalValue: Number.parseFloat(totalValue?.total ?? "0"),
 					totalClients: totalClients?.count || 0,
 					placedCount: placed.placedCount,
 					placedAmount: placed.placedAmount,
@@ -3104,6 +3328,26 @@ export const crmRouter = {
 							not(eq(opportunities.status, "migrate")),
 						),
 					);
+				const [wonOpportunities] = await db
+					.select({ count: count() })
+					.from(opportunities)
+					.where(
+						and(
+							eq(opportunities.status, "won"),
+							gte(opportunities.createdAt, startOfMonth),
+							lt(opportunities.createdAt, endOfMonth),
+						),
+					);
+				const [totalValue] = await db
+					.select({ total: sum(opportunities.value) })
+					.from(opportunities)
+					.where(
+						and(
+							gte(opportunities.createdAt, startOfMonth),
+							lt(opportunities.createdAt, endOfMonth),
+							not(eq(opportunities.status, "migrate")),
+						),
+					);
 				const [totalClients] = await db
 					.select({ count: count() })
 					.from(clients)
@@ -3118,6 +3362,8 @@ export const crmRouter = {
 				return {
 					teamLeads: totalLeads?.count || 0,
 					teamOpportunities: totalOpportunities?.count || 0,
+					wonOpportunities: wonOpportunities?.count || 0,
+					totalValue: Number.parseFloat(totalValue?.total ?? "0"),
 					teamClients: totalClients?.count || 0,
 					placedCount: placed.placedCount,
 					placedAmount: placed.placedAmount,
@@ -3146,6 +3392,28 @@ export const crmRouter = {
 						not(eq(opportunities.status, "migrate")),
 					),
 				);
+			const [myWonOpportunities] = await db
+				.select({ count: count() })
+				.from(opportunities)
+				.where(
+					and(
+						eq(opportunities.assignedTo, context.userId),
+						eq(opportunities.status, "won"),
+						gte(opportunities.createdAt, startOfMonth),
+						lt(opportunities.createdAt, endOfMonth),
+					),
+				);
+			const [myTotalValue] = await db
+				.select({ total: sum(opportunities.value) })
+				.from(opportunities)
+				.where(
+					and(
+						eq(opportunities.assignedTo, context.userId),
+						gte(opportunities.createdAt, startOfMonth),
+						lt(opportunities.createdAt, endOfMonth),
+						not(eq(opportunities.status, "migrate")),
+					),
+				);
 			const [myClients] = await db
 				.select({ count: count() })
 				.from(clients)
@@ -3161,6 +3429,8 @@ export const crmRouter = {
 			return {
 				myLeads: myLeads?.count || 0,
 				myOpportunities: myOpportunities?.count || 0,
+				wonOpportunities: myWonOpportunities?.count || 0,
+				totalValue: Number.parseFloat(myTotalValue?.total ?? "0"),
 				myClients: myClients?.count || 0,
 				placedCount: placed.placedCount,
 				placedAmount: placed.placedAmount,
@@ -3240,7 +3510,7 @@ export const crmRouter = {
 					name: z.string(),
 					type: z.string(),
 					size: z.number(),
-					data: z.string(), // Base64
+					key: z.string(), // R2 key from presigned upload
 				}),
 			}),
 		)
@@ -3279,36 +3549,17 @@ export const crmRouter = {
 				});
 			}
 
-			// Resolver MIME type (fallback por extensión para archivos con extensión en mayúsculas)
-			const resolvedMimeType = resolveMimeType({
-				type: input.file.type,
-				name: input.file.name,
-			} as File);
+			const uploadedFile = await verifyUploadedDocumentInR2({
+				key: input.file.key,
+				expectedPrefix: buildUploadPrefix(
+					"opportunity_document",
+					input.opportunityId,
+				),
+				filename: input.file.name,
+				mimeType: input.file.type,
+			});
 
-			// Crear un File/Blob desde los datos
-			const fileBuffer = Buffer.from(input.file.data, "base64");
-			const fileBlob = new Blob([fileBuffer], { type: resolvedMimeType });
-
-			// Validar archivo
-			const validation = validateFile({
-				type: resolvedMimeType,
-				size: input.file.size,
-				name: input.file.name,
-			} as File);
-
-			if (!validation.valid) {
-				throw new ORPCError("BAD_REQUEST", { message: validation.error });
-			}
-
-			// Generar nombre único
-			const uniqueFilename = generateUniqueFilename(input.file.name);
-
-			// Subir a R2
-			const { key } = await uploadFileToR2(
-				fileBlob,
-				uniqueFilename,
-				input.opportunityId,
-			);
+			const uniqueFilename = uploadedFile.key.split("/").pop()!;
 
 			// Guardar en base de datos
 			const [newDocument] = await db
@@ -3317,12 +3568,12 @@ export const crmRouter = {
 					opportunityId: input.opportunityId,
 					filename: uniqueFilename,
 					originalName: input.file.name,
-					mimeType: resolvedMimeType,
-					size: input.file.size,
+					mimeType: uploadedFile.mimeType,
+					size: uploadedFile.size,
 					documentType: input.documentType,
 					description: input.description,
 					uploadedBy: context.userId,
-					filePath: key,
+					filePath: uploadedFile.key,
 				})
 				.returning();
 
@@ -3339,12 +3590,12 @@ export const crmRouter = {
 						vehicleId: opportunity[0].vehicleId,
 						filename: uniqueFilename,
 						originalName: input.file.name,
-						mimeType: resolvedMimeType,
-						size: input.file.size,
+						mimeType: uploadedFile.mimeType,
+						size: uploadedFile.size,
 						documentType: input.documentType,
 						description: input.description,
 						uploadedBy: context.userId,
-						filePath: key,
+						filePath: uploadedFile.key,
 					})
 					.returning();
 
@@ -3568,9 +3819,27 @@ export const crmRouter = {
 
 			console.log("[getAnalysisChecklist] opportunity:", opportunity);
 
-			// Early return if checklist already exists
+			// Early return if checklist already exists and is still aligned
 			if (existingChecklist) {
+				const inspectionResult = opportunity.vehicleId
+					? await getVehicleInspectionStatus(opportunity.vehicleId)
+					: {
+							isInspected: false,
+						};
+
+				if (
+					hasStaleAnalysisChecklistVehicleState(
+						existingChecklist.checklistData as any,
+						opportunity.vehicleId,
+						inspectionResult.isInspected,
+					)
+				) {
+					await db
+						.delete(analysisChecklists)
+						.where(eq(analysisChecklists.id, existingChecklist.id));
+				} else {
 				return existingChecklist.checklistData;
+				}
 			}
 
 			// Phase 2: Run independent queries in parallel
@@ -4248,6 +4517,21 @@ export const crmRouter = {
 	// DISBURSEMENT CHECKLIST ENDPOINTS (90% → 100%)
 	// ============================================================
 
+	// Get disbursement notes for an opportunity (lightweight, no stage check)
+	getDisbursementNotes: crmProcedure
+		.input(z.object({ opportunityId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			const [checklist] = await db
+				.select({ notes: disbursementChecklists.notes })
+				.from(disbursementChecklists)
+				.where(
+					eq(disbursementChecklists.opportunityId, input.opportunityId),
+				)
+				.limit(1);
+
+			return { notes: checklist?.notes ?? null };
+		}),
+
 	// Get or create disbursement checklist for an opportunity
 	getDisbursementChecklist: analystProcedure
 		.input(z.object({ opportunityId: z.string().uuid() }))
@@ -4575,7 +4859,7 @@ export const crmRouter = {
 				assignedToRole: "accounting",
 				relatedEntityType: "opportunity_client",
 				relatedEntityId: input.opportunityId,
-				redirectPage: "client_details",
+				redirectPage: "client_details_disbursement",
 			});
 
 			return {
@@ -5018,7 +5302,7 @@ export const crmRouter = {
 					"Vehículo",
 				]),
 				nit: z.string(),
-				diaPagoMensual: z.number().min(1).max(31),
+				diaPagoMensual: z.union([z.literal(15), z.literal(30)]),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -5110,6 +5394,17 @@ export const crmRouter = {
 				throw new ORPCError("BAD_REQUEST", {
 					message:
 						"No se pueden tener más de 20 inversionistas por oportunidad",
+				});
+			}
+
+			// Validate total participation equals 100%
+			const totalParticipacion = allInvestors.reduce(
+				(sum, inv) => sum + (inv.porcentaje_participacion || 0),
+				0,
+			);
+			if (Math.abs(totalParticipacion - 100) > 0.01) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `La suma de porcentajes de participación debe ser exactamente 100% (actual: ${totalParticipacion}%)`,
 				});
 			}
 
@@ -5338,6 +5633,17 @@ export const crmRouter = {
 				}
 			}
 
+			// Validate total participation equals 100%
+			const totalParticipacion = parsedInvestors.reduce(
+				(sum, inv) => sum + (inv.porcentaje_participacion || 0),
+				0,
+			);
+			if (Math.abs(totalParticipacion - 100) > 0.01) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `La suma de porcentajes de participación debe ser exactamente 100% (actual: ${totalParticipacion}%)`,
+				});
+			}
+
 			// Update
 			await db
 				.update(opportunities)
@@ -5402,6 +5708,14 @@ export const crmRouter = {
 			}),
 		)
 		.handler(async ({ input }) => {
+			// Validar DPI del co-deudor
+			const resultadoDpi = validarDpi(input.dpi);
+			if (!resultadoDpi.valid) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: resultadoDpi.error,
+				});
+			}
+
 			// Verificar que la oportunidad existe
 			const [opportunity] = await db
 				.select({ id: opportunities.id })
@@ -5420,7 +5734,7 @@ export const crmRouter = {
 				.values({
 					opportunityId: input.opportunityId,
 					fullName: input.fullName,
-					dpi: input.dpi,
+					dpi: resultadoDpi.dpiLimpio,
 					age: input.age,
 					gender: input.gender,
 					maritalStatus: input.maritalStatus,
@@ -5464,6 +5778,17 @@ export const crmRouter = {
 		)
 		.handler(async ({ input }) => {
 			const { id, ...updateData } = input;
+
+			// Validar DPI si se envía
+			if (updateData.dpi) {
+				const resultadoDpi = validarDpi(updateData.dpi);
+				if (!resultadoDpi.valid) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: resultadoDpi.error,
+					});
+				}
+				updateData.dpi = resultadoDpi.dpiLimpio;
+			}
 
 			const [updatedCoDebtor] = await db
 				.update(coDebtors)
@@ -5739,6 +6064,9 @@ export const crmRouter = {
 			const placedStageIds = placedStages.map((s) => s.id);
 
 			let ranking: { name: string; monto: number }[] = [];
+			let byTipoCredito: { name: string; monto: number }[] = [];
+			let byMarca: { name: string; monto: number; cantidad: number }[] = [];
+			let byMedio: { name: string; monto: number }[] = [];
 			if (placedStageIds.length > 0) {
 				// Find opportunities that moved to a placed stage within this month
 				const placedThisMonth = await db
@@ -5752,9 +6080,36 @@ export const crmRouter = {
 						),
 					);
 
-				const placedOppIds = [
+				const candidateIds = [
 					...new Set(placedThisMonth.map((o) => o.opportunityId)),
 				];
+
+				// Exclude opportunities that already reached placed before this month
+				const alreadyPlacedBefore =
+					candidateIds.length > 0
+						? await db
+								.select({
+									opportunityId: opportunityStageHistory.opportunityId,
+								})
+								.from(opportunityStageHistory)
+								.where(
+									and(
+										inArray(
+											opportunityStageHistory.opportunityId,
+											candidateIds,
+										),
+										inArray(opportunityStageHistory.toStageId, placedStageIds),
+										lt(opportunityStageHistory.changedAt, startOfMonth),
+									),
+								)
+						: [];
+
+				const alreadyPlacedIds = new Set(
+					alreadyPlacedBefore.map((o) => o.opportunityId),
+				);
+				const placedOppIds = candidateIds.filter(
+					(id) => !alreadyPlacedIds.has(id),
+				);
 
 				if (placedOppIds.length > 0) {
 					const rankingConditions = [
@@ -5779,6 +6134,102 @@ export const crmRouter = {
 
 					ranking = rankingRows.map((r) => ({
 						name: r.userName || "Sin asignar",
+						monto: Number.parseFloat(r.monto) || 0,
+					}));
+
+					// 4) Monto colocado por tipo de crédito
+					const tipoCreditoConditions = [
+						inArray(opportunities.id, placedOppIds),
+						inArray(opportunities.stageId, placedStageIds),
+						not(eq(opportunities.status, "migrate")),
+					];
+					if (userFilter) {
+						tipoCreditoConditions.push(
+							eq(opportunities.assignedTo, userFilter),
+						);
+					}
+					const tipoCreditoRows = await db
+						.select({
+							creditType: opportunities.creditType,
+							monto: sql<string>`coalesce(sum(${opportunities.value}), 0)`,
+						})
+						.from(opportunities)
+						.where(and(...tipoCreditoConditions))
+						.groupBy(opportunities.creditType);
+
+					const CREDIT_TYPE_LABELS: Record<string, string> = {
+						autocompra: "Autocompra",
+						sobre_vehiculo: "Sobre Vehículo",
+					};
+					byTipoCredito = tipoCreditoRows.map((r) => ({
+						name: CREDIT_TYPE_LABELS[r.creditType] || r.creditType,
+						monto: Number.parseFloat(r.monto) || 0,
+					}));
+
+					// 5) Monto colocado y cantidad por marca de vehículo
+					const marcaConditions = [
+						inArray(opportunities.id, placedOppIds),
+						inArray(opportunities.stageId, placedStageIds),
+						not(eq(opportunities.status, "migrate")),
+						isNotNull(opportunities.vehicleId),
+					];
+					if (userFilter) {
+						marcaConditions.push(eq(opportunities.assignedTo, userFilter));
+					}
+					const marcaNorm = sql<string>`upper(trim(${vehicles.make}))`;
+					const marcaRows = await db
+						.select({
+							make: marcaNorm,
+							monto: sql<string>`coalesce(sum(${opportunities.value}), 0)`,
+							cantidad: count(),
+						})
+						.from(opportunities)
+						.innerJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+						.where(and(...marcaConditions))
+						.groupBy(marcaNorm)
+						.orderBy(desc(sql`sum(${opportunities.value})`));
+
+					byMarca = marcaRows.map((r) => ({
+						name: r.make || "Sin marca",
+						monto: Number.parseFloat(r.monto) || 0,
+						cantidad: r.cantidad,
+					}));
+
+					// 6) Monto colocado por medio/fuente
+					const medioConditions = [
+						inArray(opportunities.id, placedOppIds),
+						inArray(opportunities.stageId, placedStageIds),
+						not(eq(opportunities.status, "migrate")),
+					];
+					if (userFilter) {
+						medioConditions.push(eq(opportunities.assignedTo, userFilter));
+					}
+					const medioRows = await db
+						.select({
+							source: opportunities.source,
+							monto: sql<string>`coalesce(sum(${opportunities.value}), 0)`,
+						})
+						.from(opportunities)
+						.where(and(...medioConditions))
+						.groupBy(opportunities.source)
+						.orderBy(desc(sql`sum(${opportunities.value})`));
+
+					const SOURCE_LABELS: Record<string, string> = {
+						website: "Sitio Web",
+						referral: "Referido",
+						cold_call: "Llamada en Frío",
+						email: "Email",
+						social_media: "Redes Sociales",
+						event: "Evento",
+						other: "Otro",
+						facebook: "Facebook",
+						instagram: "Instagram",
+						google: "Google",
+						meta: "Meta",
+						Whatsapp: "WhatsApp",
+					};
+					byMedio = medioRows.map((r) => ({
+						name: SOURCE_LABELS[r.source || ""] || r.source || "Sin fuente",
 						monto: Number.parseFloat(r.monto) || 0,
 					}));
 				}
@@ -5822,6 +6273,6 @@ export const crmRouter = {
 				(a, b) => b.abiertas + b.cerradas - (a.abiertas + a.cerradas),
 			);
 
-			return { pipeline, ranking, activity };
+			return { pipeline, ranking, activity, byTipoCredito, byMarca, byMedio };
 		}),
 };

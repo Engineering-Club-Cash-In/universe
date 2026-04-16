@@ -19,8 +19,11 @@ import { Route as InversionesIndexRouteImport } from './routes/inversiones/index
 import { Route as CobrosIndexRouteImport } from './routes/cobros/index'
 import { Route as VehiclesInspectionRouteImport } from './routes/vehicles/inspection'
 import { Route as VehiclesAuctionVehiclesRouteImport } from './routes/vehicles/auction-vehicles'
+import { Route as JuridicoDashboardDataRouteImport } from './routes/juridico/dashboard-data'
+import { Route as JuridicoDashboardRouteImport } from './routes/juridico/dashboard'
 import { Route as JuridicoLeadIdRouteImport } from './routes/juridico/$leadId'
 import { Route as InversionesOpportunityIdRouteImport } from './routes/inversiones/$opportunityId'
+import { Route as FormularioTokenRouteImport } from './routes/formulario.$token'
 import { Route as CrmWhatsappRouteImport } from './routes/crm/whatsapp'
 import { Route as CrmVendorsRouteImport } from './routes/crm/vendors'
 import { Route as CrmQuoterRouteImport } from './routes/crm/quoter'
@@ -34,9 +37,11 @@ import { Route as AdminUsersRouteImport } from './routes/admin/users'
 import { Route as AdminSettingsRouteImport } from './routes/admin/settings'
 import { Route as AdminImportRouteImport } from './routes/admin/import'
 import { Route as AccountingPayInvestorsRouteImport } from './routes/accounting/pay-investors'
+import { Route as InversionesLiquidacionesIndexRouteImport } from './routes/inversiones/liquidaciones.index'
 import { Route as CrmAnalysisIndexRouteImport } from './routes/crm/analysis/index'
 import { Route as AdminReportsIndexRouteImport } from './routes/admin/reports/index'
 import { Route as JuridicoGenerateOpportunityIdRouteImport } from './routes/juridico/generate.$opportunityId'
+import { Route as InversionesLiquidacionesInversionistaIdRouteImport } from './routes/inversiones/liquidaciones.$inversionistaId'
 import { Route as CrmAnalysisOpportunityIdRouteImport } from './routes/crm/analysis/$opportunityId'
 import { Route as CrmAdminMiniagentRouteImport } from './routes/crm/admin/miniagent'
 
@@ -90,6 +95,16 @@ const VehiclesAuctionVehiclesRoute = VehiclesAuctionVehiclesRouteImport.update({
   path: '/vehicles/auction-vehicles',
   getParentRoute: () => rootRouteImport,
 } as any)
+const JuridicoDashboardDataRoute = JuridicoDashboardDataRouteImport.update({
+  id: '/juridico/dashboard-data',
+  path: '/juridico/dashboard-data',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const JuridicoDashboardRoute = JuridicoDashboardRouteImport.update({
+  id: '/juridico/dashboard',
+  path: '/juridico/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const JuridicoLeadIdRoute = JuridicoLeadIdRouteImport.update({
   id: '/juridico/$leadId',
   path: '/juridico/$leadId',
@@ -101,6 +116,11 @@ const InversionesOpportunityIdRoute =
     path: '/inversiones/$opportunityId',
     getParentRoute: () => rootRouteImport,
   } as any)
+const FormularioTokenRoute = FormularioTokenRouteImport.update({
+  id: '/formulario/$token',
+  path: '/formulario/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CrmWhatsappRoute = CrmWhatsappRouteImport.update({
   id: '/crm/whatsapp',
   path: '/crm/whatsapp',
@@ -166,6 +186,12 @@ const AccountingPayInvestorsRoute = AccountingPayInvestorsRouteImport.update({
   path: '/accounting/pay-investors',
   getParentRoute: () => rootRouteImport,
 } as any)
+const InversionesLiquidacionesIndexRoute =
+  InversionesLiquidacionesIndexRouteImport.update({
+    id: '/inversiones/liquidaciones/',
+    path: '/inversiones/liquidaciones/',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const CrmAnalysisIndexRoute = CrmAnalysisIndexRouteImport.update({
   id: '/crm/analysis/',
   path: '/crm/analysis/',
@@ -180,6 +206,12 @@ const JuridicoGenerateOpportunityIdRoute =
   JuridicoGenerateOpportunityIdRouteImport.update({
     id: '/juridico/generate/$opportunityId',
     path: '/juridico/generate/$opportunityId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const InversionesLiquidacionesInversionistaIdRoute =
+  InversionesLiquidacionesInversionistaIdRouteImport.update({
+    id: '/inversiones/liquidaciones/$inversionistaId',
+    path: '/inversiones/liquidaciones/$inversionistaId',
     getParentRoute: () => rootRouteImport,
   } as any)
 const CrmAnalysisOpportunityIdRoute =
@@ -212,8 +244,11 @@ export interface FileRoutesByFullPath {
   '/crm/quoter': typeof CrmQuoterRoute
   '/crm/vendors': typeof CrmVendorsRoute
   '/crm/whatsapp': typeof CrmWhatsappRoute
+  '/formulario/$token': typeof FormularioTokenRoute
   '/inversiones/$opportunityId': typeof InversionesOpportunityIdRoute
   '/juridico/$leadId': typeof JuridicoLeadIdRoute
+  '/juridico/dashboard': typeof JuridicoDashboardRoute
+  '/juridico/dashboard-data': typeof JuridicoDashboardDataRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
   '/cobros/': typeof CobrosIndexRoute
@@ -222,9 +257,11 @@ export interface FileRoutesByFullPath {
   '/vehicles/': typeof VehiclesIndexRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
+  '/inversiones/liquidaciones/$inversionistaId': typeof InversionesLiquidacionesInversionistaIdRoute
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
   '/admin/reports/': typeof AdminReportsIndexRoute
   '/crm/analysis/': typeof CrmAnalysisIndexRoute
+  '/inversiones/liquidaciones/': typeof InversionesLiquidacionesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -244,8 +281,11 @@ export interface FileRoutesByTo {
   '/crm/quoter': typeof CrmQuoterRoute
   '/crm/vendors': typeof CrmVendorsRoute
   '/crm/whatsapp': typeof CrmWhatsappRoute
+  '/formulario/$token': typeof FormularioTokenRoute
   '/inversiones/$opportunityId': typeof InversionesOpportunityIdRoute
   '/juridico/$leadId': typeof JuridicoLeadIdRoute
+  '/juridico/dashboard': typeof JuridicoDashboardRoute
+  '/juridico/dashboard-data': typeof JuridicoDashboardDataRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
   '/cobros': typeof CobrosIndexRoute
@@ -254,9 +294,11 @@ export interface FileRoutesByTo {
   '/vehicles': typeof VehiclesIndexRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
+  '/inversiones/liquidaciones/$inversionistaId': typeof InversionesLiquidacionesInversionistaIdRoute
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
   '/admin/reports': typeof AdminReportsIndexRoute
   '/crm/analysis': typeof CrmAnalysisIndexRoute
+  '/inversiones/liquidaciones': typeof InversionesLiquidacionesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -277,8 +319,11 @@ export interface FileRoutesById {
   '/crm/quoter': typeof CrmQuoterRoute
   '/crm/vendors': typeof CrmVendorsRoute
   '/crm/whatsapp': typeof CrmWhatsappRoute
+  '/formulario/$token': typeof FormularioTokenRoute
   '/inversiones/$opportunityId': typeof InversionesOpportunityIdRoute
   '/juridico/$leadId': typeof JuridicoLeadIdRoute
+  '/juridico/dashboard': typeof JuridicoDashboardRoute
+  '/juridico/dashboard-data': typeof JuridicoDashboardDataRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
   '/cobros/': typeof CobrosIndexRoute
@@ -287,9 +332,11 @@ export interface FileRoutesById {
   '/vehicles/': typeof VehiclesIndexRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/crm/analysis/$opportunityId': typeof CrmAnalysisOpportunityIdRoute
+  '/inversiones/liquidaciones/$inversionistaId': typeof InversionesLiquidacionesInversionistaIdRoute
   '/juridico/generate/$opportunityId': typeof JuridicoGenerateOpportunityIdRoute
   '/admin/reports/': typeof AdminReportsIndexRoute
   '/crm/analysis/': typeof CrmAnalysisIndexRoute
+  '/inversiones/liquidaciones/': typeof InversionesLiquidacionesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -311,8 +358,11 @@ export interface FileRouteTypes {
     | '/crm/quoter'
     | '/crm/vendors'
     | '/crm/whatsapp'
+    | '/formulario/$token'
     | '/inversiones/$opportunityId'
     | '/juridico/$leadId'
+    | '/juridico/dashboard'
+    | '/juridico/dashboard-data'
     | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
     | '/cobros/'
@@ -321,9 +371,11 @@ export interface FileRouteTypes {
     | '/vehicles/'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
+    | '/inversiones/liquidaciones/$inversionistaId'
     | '/juridico/generate/$opportunityId'
     | '/admin/reports/'
     | '/crm/analysis/'
+    | '/inversiones/liquidaciones/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -343,8 +395,11 @@ export interface FileRouteTypes {
     | '/crm/quoter'
     | '/crm/vendors'
     | '/crm/whatsapp'
+    | '/formulario/$token'
     | '/inversiones/$opportunityId'
     | '/juridico/$leadId'
+    | '/juridico/dashboard'
+    | '/juridico/dashboard-data'
     | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
     | '/cobros'
@@ -353,9 +408,11 @@ export interface FileRouteTypes {
     | '/vehicles'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
+    | '/inversiones/liquidaciones/$inversionistaId'
     | '/juridico/generate/$opportunityId'
     | '/admin/reports'
     | '/crm/analysis'
+    | '/inversiones/liquidaciones'
   id:
     | '__root__'
     | '/'
@@ -375,8 +432,11 @@ export interface FileRouteTypes {
     | '/crm/quoter'
     | '/crm/vendors'
     | '/crm/whatsapp'
+    | '/formulario/$token'
     | '/inversiones/$opportunityId'
     | '/juridico/$leadId'
+    | '/juridico/dashboard'
+    | '/juridico/dashboard-data'
     | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
     | '/cobros/'
@@ -385,9 +445,11 @@ export interface FileRouteTypes {
     | '/vehicles/'
     | '/crm/admin/miniagent'
     | '/crm/analysis/$opportunityId'
+    | '/inversiones/liquidaciones/$inversionistaId'
     | '/juridico/generate/$opportunityId'
     | '/admin/reports/'
     | '/crm/analysis/'
+    | '/inversiones/liquidaciones/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -408,8 +470,11 @@ export interface RootRouteChildren {
   CrmQuoterRoute: typeof CrmQuoterRoute
   CrmVendorsRoute: typeof CrmVendorsRoute
   CrmWhatsappRoute: typeof CrmWhatsappRoute
+  FormularioTokenRoute: typeof FormularioTokenRoute
   InversionesOpportunityIdRoute: typeof InversionesOpportunityIdRoute
   JuridicoLeadIdRoute: typeof JuridicoLeadIdRoute
+  JuridicoDashboardRoute: typeof JuridicoDashboardRoute
+  JuridicoDashboardDataRoute: typeof JuridicoDashboardDataRoute
   VehiclesAuctionVehiclesRoute: typeof VehiclesAuctionVehiclesRoute
   VehiclesInspectionRoute: typeof VehiclesInspectionRoute
   CobrosIndexRoute: typeof CobrosIndexRoute
@@ -418,9 +483,11 @@ export interface RootRouteChildren {
   VehiclesIndexRoute: typeof VehiclesIndexRoute
   CrmAdminMiniagentRoute: typeof CrmAdminMiniagentRoute
   CrmAnalysisOpportunityIdRoute: typeof CrmAnalysisOpportunityIdRoute
+  InversionesLiquidacionesInversionistaIdRoute: typeof InversionesLiquidacionesInversionistaIdRoute
   JuridicoGenerateOpportunityIdRoute: typeof JuridicoGenerateOpportunityIdRoute
   AdminReportsIndexRoute: typeof AdminReportsIndexRoute
   CrmAnalysisIndexRoute: typeof CrmAnalysisIndexRoute
+  InversionesLiquidacionesIndexRoute: typeof InversionesLiquidacionesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -495,6 +562,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof VehiclesAuctionVehiclesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/juridico/dashboard-data': {
+      id: '/juridico/dashboard-data'
+      path: '/juridico/dashboard-data'
+      fullPath: '/juridico/dashboard-data'
+      preLoaderRoute: typeof JuridicoDashboardDataRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/juridico/dashboard': {
+      id: '/juridico/dashboard'
+      path: '/juridico/dashboard'
+      fullPath: '/juridico/dashboard'
+      preLoaderRoute: typeof JuridicoDashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/juridico/$leadId': {
       id: '/juridico/$leadId'
       path: '/juridico/$leadId'
@@ -507,6 +588,13 @@ declare module '@tanstack/react-router' {
       path: '/inversiones/$opportunityId'
       fullPath: '/inversiones/$opportunityId'
       preLoaderRoute: typeof InversionesOpportunityIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/formulario/$token': {
+      id: '/formulario/$token'
+      path: '/formulario/$token'
+      fullPath: '/formulario/$token'
+      preLoaderRoute: typeof FormularioTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/crm/whatsapp': {
@@ -600,6 +688,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AccountingPayInvestorsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/inversiones/liquidaciones/': {
+      id: '/inversiones/liquidaciones/'
+      path: '/inversiones/liquidaciones'
+      fullPath: '/inversiones/liquidaciones/'
+      preLoaderRoute: typeof InversionesLiquidacionesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/crm/analysis/': {
       id: '/crm/analysis/'
       path: '/crm/analysis'
@@ -619,6 +714,13 @@ declare module '@tanstack/react-router' {
       path: '/juridico/generate/$opportunityId'
       fullPath: '/juridico/generate/$opportunityId'
       preLoaderRoute: typeof JuridicoGenerateOpportunityIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/inversiones/liquidaciones/$inversionistaId': {
+      id: '/inversiones/liquidaciones/$inversionistaId'
+      path: '/inversiones/liquidaciones/$inversionistaId'
+      fullPath: '/inversiones/liquidaciones/$inversionistaId'
+      preLoaderRoute: typeof InversionesLiquidacionesInversionistaIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/crm/analysis/$opportunityId': {
@@ -656,8 +758,11 @@ const rootRouteChildren: RootRouteChildren = {
   CrmQuoterRoute: CrmQuoterRoute,
   CrmVendorsRoute: CrmVendorsRoute,
   CrmWhatsappRoute: CrmWhatsappRoute,
+  FormularioTokenRoute: FormularioTokenRoute,
   InversionesOpportunityIdRoute: InversionesOpportunityIdRoute,
   JuridicoLeadIdRoute: JuridicoLeadIdRoute,
+  JuridicoDashboardRoute: JuridicoDashboardRoute,
+  JuridicoDashboardDataRoute: JuridicoDashboardDataRoute,
   VehiclesAuctionVehiclesRoute: VehiclesAuctionVehiclesRoute,
   VehiclesInspectionRoute: VehiclesInspectionRoute,
   CobrosIndexRoute: CobrosIndexRoute,
@@ -666,9 +771,12 @@ const rootRouteChildren: RootRouteChildren = {
   VehiclesIndexRoute: VehiclesIndexRoute,
   CrmAdminMiniagentRoute: CrmAdminMiniagentRoute,
   CrmAnalysisOpportunityIdRoute: CrmAnalysisOpportunityIdRoute,
+  InversionesLiquidacionesInversionistaIdRoute:
+    InversionesLiquidacionesInversionistaIdRoute,
   JuridicoGenerateOpportunityIdRoute: JuridicoGenerateOpportunityIdRoute,
   AdminReportsIndexRoute: AdminReportsIndexRoute,
   CrmAnalysisIndexRoute: CrmAnalysisIndexRoute,
+  InversionesLiquidacionesIndexRoute: InversionesLiquidacionesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

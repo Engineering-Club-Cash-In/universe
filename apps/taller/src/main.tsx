@@ -14,6 +14,7 @@ import VehicleInspectionRoute from './routes/vehicle-inspection.tsx'
 import * as TanStackQueryProvider from './integrations/tanstack-query/root-provider.tsx'
 import { InspectionProvider } from './contexts/InspectionContext.tsx'
 
+import { ErrorBoundary } from './components/error-boundary.tsx'
 import './styles.css'
 import reportWebVitals from './reportWebVitals.ts'
 
@@ -63,11 +64,13 @@ if (rootElement && !rootElement.innerHTML) {
   const root = ReactDOM.createRoot(rootElement)
   root.render(
     <StrictMode>
-      <TanStackQueryProvider.Provider {...TanStackQueryProviderContext}>
-        <InspectionProvider>
-          <RouterProvider router={router} />
-        </InspectionProvider>
-      </TanStackQueryProvider.Provider>
+      <ErrorBoundary>
+        <TanStackQueryProvider.Provider {...TanStackQueryProviderContext}>
+          <InspectionProvider>
+            <RouterProvider router={router} />
+          </InspectionProvider>
+        </TanStackQueryProvider.Provider>
+      </ErrorBoundary>
     </StrictMode>,
   )
 }

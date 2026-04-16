@@ -38,6 +38,7 @@ const COMPRA_CARTERA_ACEPTADA_RECIPIENTS = {
     "lucia.s@clubcashin.com",
     "diego.a@sepresta.com",
     "sara.r@sepresta.com",
+    "caja@sepresta.com"
   ],
   cc: [
     "diego.l@clubcashin.com",

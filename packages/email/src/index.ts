@@ -539,6 +539,38 @@ export const sendCompraCarteraAcceptedNotification = async ({
   }
 };
 
+/**
+ * Envía un correo con HTML arbitrario (sin envolver en <strong>).
+ * Útil para mensajes editados por el usuario, donde el caller arma el HTML.
+ */
+export const sendPlainEmail = async (
+  to: string,
+  subject: string,
+  html: string,
+) => {
+  emailSchema.parse(to);
+
+  try {
+    const { data, error } = await resend.emails.send({
+      from: `Club Cash In <no-reply@${domain}>`,
+      to: [to],
+      subject,
+      html,
+    });
+
+    if (error) {
+      console.error("[sendPlainEmail] Resend API Error:", error);
+      return { success: false, error };
+    }
+
+    console.log(`[sendPlainEmail] Email sent to ${to}. ID: ${data?.id}`);
+    return { success: true, data };
+  } catch (err) {
+    console.error("[sendPlainEmail] Unexpected Error:", err);
+    return { success: false, error: err };
+  }
+};
+
 export const sendSimpleEmail = async (to: string, subject: string, message: string) => {
   // Validar formato de correo antes de enviar
   emailSchema.parse(to);

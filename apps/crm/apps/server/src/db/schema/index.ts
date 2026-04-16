@@ -6,6 +6,7 @@ export * from "./cartera-shared-enums";
 export * from "./checks";
 export * from "./client-forms";
 export * from "./cobros";
+export * from "./cobros-send-logs";
 export * from "./crm";
 export * from "./documents";
 export * from "./insurance";

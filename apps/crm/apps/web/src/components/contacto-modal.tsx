@@ -235,33 +235,82 @@ export function ContactoModal({
 		| "email-api"
 		| "sms-api";
 
-	// TODO: conectar al endpoint ORPC cuando esté listo el backend
 	const enviarWhatsappApi = async (telefono: string, mensaje: string) => {
-		console.log("[WhatsApp API] pendiente de implementación", {
-			telefono,
-			mensaje,
-		});
-		toast.info("Envío por API de WhatsApp aún no implementado");
+		if (!telefono) {
+			toast.error("No hay teléfono para enviar WhatsApp");
+			return;
+		}
+		if (!mensaje.trim()) {
+			toast.error("No hay mensaje para enviar");
+			return;
+		}
+		try {
+			const res = await client.enviarWhatsappCobros({
+				telefono,
+				mensaje,
+				casoCobroId,
+			});
+			if (res.success) {
+				toast.success("WhatsApp enviado correctamente");
+			}
+		} catch (error: any) {
+			toast.error(error?.message || "Error enviando WhatsApp");
+		}
 	};
 
-	// TODO: conectar al endpoint ORPC cuando esté listo el backend
 	const enviarEmailApi = async (
 		destinatario: string,
 		asunto: string,
 		cuerpo: string,
 	) => {
-		console.log("[Email API] pendiente de implementación", {
-			destinatario,
-			asunto,
-			cuerpo,
-		});
-		toast.info("Envío por API de Email aún no implementado");
+		if (!destinatario) {
+			toast.error("No hay email de destino");
+			return;
+		}
+		if (!asunto.trim()) {
+			toast.error("El asunto es requerido");
+			return;
+		}
+		if (!cuerpo.trim()) {
+			toast.error("El mensaje es requerido");
+			return;
+		}
+		try {
+			const res = await client.enviarEmailCobros({
+				destinatario,
+				asunto,
+				mensaje: cuerpo,
+				casoCobroId,
+			});
+			if (res.success) {
+				toast.success("Email enviado correctamente");
+			}
+		} catch (error: any) {
+			toast.error(error?.message || "Error enviando email");
+		}
 	};
 
-	// TODO: conectar al endpoint ORPC cuando esté listo el backend
 	const enviarSmsApi = async (telefono: string, mensaje: string) => {
-		console.log("[SMS API] pendiente de implementación", { telefono, mensaje });
-		toast.info("Envío por API de SMS aún no implementado");
+		if (!telefono) {
+			toast.error("No hay teléfono para enviar SMS");
+			return;
+		}
+		if (!mensaje.trim()) {
+			toast.error("No hay mensaje para enviar");
+			return;
+		}
+		try {
+			const res = await client.enviarSmsCobros({
+				telefono,
+				mensaje,
+				casoCobroId,
+			});
+			if (res.success) {
+				toast.success("SMS enviado correctamente");
+			}
+		} catch (error: any) {
+			toast.error(error?.message || "Error enviando SMS");
+		}
 	};
 
 	const ejecutarAccion = (metodo: AccionContacto) => {

@@ -2027,15 +2027,7 @@ export async function aplicarPagoAlCredito(pago_id: number) {
 
     console.log("✅ Crédito actualizado y pago validado");
 
-    // 8. INSERTAR PAGOS DE INVERSIONISTAS (si no es un pago con paymentFalse)
-    if (!pago.paymentFalse && pago.credito_id !== null) {
-      console.log("✅ Pagos a inversionistas insertados");
-      
-    await db
-      .update(cuotas_credito)
-      .set({ liquidado_inversionistas: true,fecha_liquidacion_inversionistas: new Date() })
-      .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
-    }
+  
 
     return {
       success: true,

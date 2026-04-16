@@ -5,6 +5,7 @@ import {
   reemplazarInversionistaCreditoService,
   getCreditCandidatesService,
   devolverPendientesACubeService,
+  compraCarteraAceptadaService,
   type CompletarEspejoPayload,
   type CompletarEspejoResponse,
   type ReemplazarInversionistaCreditoPayload,
@@ -13,6 +14,8 @@ import {
   type OtroCreditoDisponible,
   type DevolverPendientesACubePayload,
   type DevolverPendientesACubeResponse,
+  type CompraCarteraAceptadaPayload,
+  type CompraCarteraAceptadaResponse,
 } from "../services/services";
 
 export const sesionesPendientesKeys = {
@@ -88,3 +91,19 @@ export function useDevolverPendientesACube() {
     },
   });
 }
+
+export function useCompraCarteraAceptada() {
+  const queryClient = useQueryClient();
+
+  return useMutation<
+    CompraCarteraAceptadaResponse,
+    Error,
+    CompraCarteraAceptadaPayload
+  >({
+    mutationFn: (payload) => compraCarteraAceptadaService(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: sesionesPendientesKeys.all });
+    },
+  });
+}
+

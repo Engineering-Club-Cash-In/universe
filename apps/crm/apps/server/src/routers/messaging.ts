@@ -1,6 +1,5 @@
 import { ORPCError } from "@orpc/server";
-// @ts-ignore - getToken existe en el package pero TS no lo resuelve bien
-import { getToken, SimpleTechClient } from "@repo/simpletech";
+import { SimpleTechClient } from "@repo/simpletech";
 import { and, count, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
@@ -33,11 +32,10 @@ async function resolvePdfUrl(
 	}
 }
 
-let cachedClient: { client: SimpleTechClient; obtainedAt: number } | null =
-	null;
-const SIX_DAYS_MS = 6 * 24 * 60 * 60 * 1000;
+const BOT_NUMBER = process.env.CCI_BOT_NUMBER!;
+const TEMPLATE_NAME = process.env.SIMPLETECH_TEMPLATE_NAME || "mensaje2";
 
-async function getSimpletechClient(): Promise<SimpleTechClient | null> {
+function getSimpletechClient(): SimpleTechClient | null {
 	if (
 		!process.env.SIMPLETECH_BASE_URL ||
 		!process.env.SIMPLETECH_USERNAME ||
@@ -46,30 +44,13 @@ async function getSimpletechClient(): Promise<SimpleTechClient | null> {
 		return null;
 	}
 
-	if (cachedClient && Date.now() - cachedClient.obtainedAt < SIX_DAYS_MS) {
-		return cachedClient.client;
-	}
-
-	try {
-		console.log("[SimpleTech] Obteniendo token desde:", process.env.SIMPLETECH_BASE_URL);
-		const token = await getToken(process.env.SIMPLETECH_BASE_URL, {
+	return new SimpleTechClient({
+		credentials: {
 			username: process.env.SIMPLETECH_USERNAME,
 			password: process.env.SIMPLETECH_PASSWORD,
-		});
-		console.log("[SimpleTech] Token obtenido correctamente");
-
-		const client = new SimpleTechClient({
-			credentials: { token },
-			baseUrl: process.env.SIMPLETECH_BASE_URL,
-		});
-
-		cachedClient = { client, obtainedAt: Date.now() };
-		return client;
-	} catch (err) {
-		console.error("[SimpleTech] Error obteniendo token:", err);
-		console.error("[SimpleTech] Error detalle:", JSON.stringify(err, Object.getOwnPropertyNames(err as object)));
-		return null;
-	}
+		},
+		baseUrl: process.env.SIMPLETECH_BASE_URL,
+	});
 }
 
 function normalizePhone(phone: string): string {
@@ -183,7 +164,7 @@ export async function sendContractLinksToLead(params: {
 	let leadStatus: "sent" | "pending" | "failed" = "pending";
 	let leadReason: string | undefined;
 
-	const stClient = await getSimpletechClient();
+	const stClient = getSimpletechClient();
 
 	if (!stClient) {
 		leadReason = "Servicio de mensajería no configurado";
@@ -199,17 +180,24 @@ export async function sendContractLinksToLead(params: {
 	} else {
 		// Todo OK — intentar enviar
 		try {
-			console.log("[SimpleTech] Enviando auto a:", lead.phone, "mensaje:", leadMessage!.substring(0, 100) + "...");
-			const sendResult = await stClient.sendText(
-				normalizePhone(lead.phone),
-				"WHATSAPP",
-				leadMessage!,
-			);
-			console.log("[SimpleTech] Resultado envío auto:", JSON.stringify(sendResult));
-			leadStatus = "sent";
+			const sendResult = await stClient.sendTemplate({
+				templateName: TEMPLATE_NAME,
+				serviceIdentifier: BOT_NUMBER,
+				messages: [
+					{
+						number: normalizePhone(lead.phone),
+						body: [leadMessage!],
+					},
+				],
+			});
+			if (sendResult.success) {
+				leadStatus = "sent";
+			} else {
+				leadStatus = "failed";
+				leadReason = sendResult.failed[0]?.error ?? "Error desconocido";
+			}
 		} catch (err) {
 			console.error("[SimpleTech] Error envío auto:", err);
-			console.error("[SimpleTech] Error detalle:", JSON.stringify(err, Object.getOwnPropertyNames(err as object)));
 			leadStatus = "failed";
 			leadReason =
 				err instanceof Error ? err.message : "Error desconocido";
@@ -282,18 +270,23 @@ export const messagingRouter = {
 				});
 			}
 
-			const stClientGeneric = await getSimpletechClient();
+			const stClientGeneric = getSimpletechClient();
 			if (!stClientGeneric) {
 				throw new ORPCError("INTERNAL_SERVER_ERROR", {
 					message: "Servicio de mensajería no configurado",
 				});
 			}
 
-			const result = await stClientGeneric.sendText(
-				normalizePhone(lead.phone),
-				"WHATSAPP",
-				input.message,
-			);
+			const result = await stClientGeneric.sendTemplate({
+				templateName: TEMPLATE_NAME,
+				serviceIdentifier: BOT_NUMBER,
+				messages: [
+					{
+						number: normalizePhone(lead.phone),
+						body: [input.message],
+					},
+				],
+			});
 
 			return result;
 		}),
@@ -478,22 +471,28 @@ export const messagingRouter = {
 			let status: "sent" | "failed" = "failed";
 			let reason: string | null = null;
 
-			const stClientUpdate = await getSimpletechClient();
+			const stClientUpdate = getSimpletechClient();
 			if (!stClientUpdate) {
 				reason = "Servicio de mensajería no configurado";
 			} else {
 				try {
-					console.log("[SimpleTech] Enviando manual a:", input.phone, "mensaje:", message.substring(0, 100) + "...");
-					const sendResult = await stClientUpdate.sendText(
-						normalizePhone(input.phone),
-						"WHATSAPP",
-						message,
-					);
-					console.log("[SimpleTech] Resultado envío manual:", JSON.stringify(sendResult));
-					status = "sent";
+					const sendResult = await stClientUpdate.sendTemplate({
+						templateName: TEMPLATE_NAME,
+						serviceIdentifier: BOT_NUMBER,
+						messages: [
+							{
+								number: normalizePhone(input.phone),
+								body: [message],
+							},
+						],
+					});
+					if (sendResult.success) {
+						status = "sent";
+					} else {
+						reason = sendResult.failed[0]?.error ?? "Error desconocido al enviar";
+					}
 				} catch (err) {
 					console.error("[SimpleTech] Error envío manual:", err);
-					console.error("[SimpleTech] Error detalle:", JSON.stringify(err, Object.getOwnPropertyNames(err as object)));
 					reason =
 						err instanceof Error
 							? err.message

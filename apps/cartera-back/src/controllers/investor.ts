@@ -1404,10 +1404,10 @@ export async function resumeInvestor(
 
               // 🔥 USAR FECHA DE LA CUOTA PARA EL MES (prioridad: fecha_pago_efectivo, luego fecha_vencimiento)
         const fechaParaMes = pago.fecha_vencimiento_cuota || pago.fecha_vencimiento_cuota;
-const mes = fechaParaMes
-  ? dayjs(fechaParaMes).format('MMMM') // 🔥 Esto da el mes correcto
-  : null;
-  console.log("Fecha para mes:", fechaParaMes, "→ Mes:", mes);
+          const mes = fechaParaMes
+            ? dayjs(fechaParaMes).format('MMMM') // 🔥 Esto da el mes correcto
+            : null;
+            console.log("Fecha para mes:", fechaParaMes, "→ Mes:", mes);
        // 🆕 CORRECCIÓN: Cálculo según emite_factura
               if (inv.emite_factura) {
                 abonoGeneralInteres = abono_interes.plus(abono_iva);
@@ -1429,21 +1429,17 @@ const mes = fechaParaMes
 
                 case "reinversion_capital":
                   reinvCapital = abono_capital;
-                  cuota_inversor = abono_interes.plus(
-                    inv.emite_factura ? abono_iva : isr.neg()
-                  );
+                  cuota_inversor = abonoGeneralInteres;
                   break;
 
                 case "reinversion_interes":
-                  reinvInteres = abono_interes;
-                  cuota_inversor = abono_capital.plus(
-                    inv.emite_factura ? abono_iva : isr.neg()
-                  );
+                  reinvInteres = abonoGeneralInteres;
+                  cuota_inversor = abono_capital;
                   break;
 
                 case "reinversion_total":
                   reinvCapital = abono_capital;
-                  reinvInteres = abono_interes;
+                  reinvInteres = abonoGeneralInteres;
                   cuota_inversor = new Big(0);
                   break;
 
@@ -1881,7 +1877,7 @@ export async function getInvestorTotalsGlobales(
           break;
         case "reinversion_interes":
           reinvInteres = abono_interes;
-          cuota_inversor = abono_capital.plus(inv.emite_factura ? abono_iva : isr.neg());
+          cuota_inversor = abono_capital;
           break;
         case "reinversion_total":
           reinvCapital = abono_capital;
@@ -1986,7 +1982,7 @@ export async function getInvestorTotalsGlobales(
   };
 }
 
-export async function updateLiquidacionReporteUrl(inversionistaId: number, url: string) {
+export async function updateLiquidacionReporteUrl(liquidacion_id: number, url: string) {
   const [liquidacion] = await db
     .select({
       liquidacion_id: liquidaciones.liquidacion_id,
@@ -1994,7 +1990,7 @@ export async function updateLiquidacionReporteUrl(inversionistaId: number, url: 
       reporte_liquidacion_url: liquidaciones.reporte_liquidacion_url,
     })
     .from(liquidaciones)
-    .where(eq(liquidaciones.inversionista_id, inversionistaId))
+    .where(eq(liquidaciones.liquidacion_id, liquidacion_id))
     .orderBy(desc(liquidaciones.fecha_liquidacion))
     .limit(1);
 
@@ -2509,12 +2505,12 @@ export async function getInvestorMirrorSummary(
           cuota_inversor = interesTotal;
           break;
         case "reinversion_interes":
-          reinvInteres = abono_interes;
-          cuota_inversor = abono_capital.plus(inv.emite_factura ? abono_iva : isr.neg());
+          reinvInteres = interesTotal;
+          cuota_inversor = abono_capital;
           break;
         case "reinversion_total":
           reinvCapital = abono_capital;
-          reinvInteres = abono_interes;
+          reinvInteres = interesTotal;
           cuota_inversor = new Big(0);
           break;
         case "reinversion_variable":

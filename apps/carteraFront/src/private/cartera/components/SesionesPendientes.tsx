@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { useSesionesPendientes, useCompletarEspejo, useReemplazarInversionistaCredito, useCreditCandidates, useDevolverPendientesACube } from "../hooks/useSesionesPendientes";
+import { useSesionesPendientes, useCompletarEspejo, useReemplazarInversionistaCredito, useCreditCandidates, useDevolverPendientesACube, useCompraCarteraAceptada } from "../hooks/useSesionesPendientes";
 import type { InversionistaSesionPendiente, OtroCreditoDisponible } from "../services/services";
 import {
   Loader2,
@@ -34,12 +34,14 @@ function formatQ(v: number | string | null | undefined): string {
 function statusLabel(status: string): string {
   return status === "pendiente_reinversion" ? "Reinversión"
     : status === "pendiente_compra_cartera" ? "Compra Cartera"
+    : status === "pendiente_revision" ? "Pendiente Autorizacion"
     : status;
 }
 
 function statusColor(status: string): string {
   return status === "pendiente_reinversion" ? "border-purple-300 text-purple-700 bg-purple-50"
     : status === "pendiente_compra_cartera" ? "border-amber-300 text-amber-700 bg-amber-50"
+    : status === "pendiente_revision" ? "border-green-300 text-green-700 bg-green-50"
     : "border-gray-300 text-gray-700 bg-gray-50";
 }
 
@@ -278,6 +280,7 @@ function InvestorCard({
   const reemplazar = useReemplazarInversionistaCredito();
   const completarEspejo = useCompletarEspejo();
   const devolverPendientes = useDevolverPendientesACube();
+  const aceptarCompra = useCompraCarteraAceptada();
 
   const isEditing = editingCreditId !== null;
   const editingCredit = investor.creditosPendientes.find((c) => c.id === editingCreditId);
@@ -378,8 +381,8 @@ function InvestorCard({
     (c) => c.status === "pendiente_compra_cartera"
   );
   const cancelLabel = tieneCompraCartera ? "Cancelar Compra Cartera" : "Cancelar Sesión";
-
   const handleCancelSesion = useCallback(() => {
+
     const creditoIds = investor.creditosPendientes.map((c) => c.credito_id);
     if (creditoIds.length === 0) return;
 
@@ -397,6 +400,27 @@ function InvestorCard({
       }
     );
   }, [devolverPendientes, investor]);
+
+
+  const handleAceptarCompraCartera = useCallback(() => {
+    const creditoIds = investor.creditosPendientes
+      .filter((c) => c.status === "pendiente_compra_cartera")
+      .map((c) => c.credito_id);
+
+    if (creditoIds.length === 0) return;
+
+    aceptarCompra.mutate(
+      { creditos: creditoIds },
+      {
+        onSuccess: (res) => {
+          toast.success(res.message || "Compra de cartera aceptada y notificada.");
+        },
+        onError: (err) => {
+          toast.error(err?.message || "Error al aceptar la compra de cartera");
+        },
+      }
+    );
+  }, [aceptarCompra, investor]);
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
@@ -663,16 +687,30 @@ function InvestorCard({
                     size="sm"
                     variant="outline"
                     onClick={() => setConfirmingCancel(true)}
-                    disabled={completarEspejo.isPending || devolverPendientes.isPending}
+                    disabled={completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending}
                     className="gap-1 text-[11px] h-7 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
                   >
                     <Ban className="w-3 h-3" aria-hidden="true" />
                     {cancelLabel}
                   </Button>
+                  {tieneCompraCartera && (
+                    <Button
+                      size="sm"
+                      onClick={handleAceptarCompraCartera}
+                      disabled={aceptarCompra.isPending || completarEspejo.isPending || devolverPendientes.isPending}
+                      className="gap-1 text-[11px] h-7 bg-amber-500 text-white hover:bg-amber-600 border-none"
+                    >
+                      {aceptarCompra.isPending
+                        ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                        : <Check className="w-3 h-3" aria-hidden="true" />
+                      }
+                      Aceptar Compra Cartera
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     onClick={handleConfirm}
-                    disabled={completarEspejo.isPending || devolverPendientes.isPending}
+                    disabled={completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending}
                     className="gap-1 text-[11px] h-7 bg-blue-600 text-white hover:bg-blue-700"
                   >
                     {completarEspejo.isPending
@@ -682,6 +720,7 @@ function InvestorCard({
                     Confirmar Sesión
                   </Button>
                 </div>
+
               )}
             </div>
           )}

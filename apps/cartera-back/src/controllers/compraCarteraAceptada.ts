@@ -11,6 +11,7 @@ import {
   inversionistas,
   platform_users,
   usuarios,
+  pagos_credito,
 } from "../database/db";
 import z from "zod";
 import { sendCompraCarteraAcceptedNotification } from "@cci/email";
@@ -38,6 +39,7 @@ const COMPRA_CARTERA_ACEPTADA_RECIPIENTS = {
     "lucia.s@clubcashin.com",
     "diego.a@sepresta.com",
     "sara.r@sepresta.com",
+    "caja@sepresta.com"
   ],
   cc: [
     "diego.l@clubcashin.com",
@@ -95,13 +97,15 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
       };
     }
 
-    // ── 3. Traer la composición del pool (todos los inversionistas
-    //      de los créditos seleccionados, agregados por inversionista) ──
+    // ── 3. Traer la composición del pool POR CRÉDITO ──
     const inversionistasRows = await db
       .select({
+        credito_id: creditos_inversionistas.credito_id,
         inversionista_id: creditos_inversionistas.inversionista_id,
         inversionista_nombre: inversionistas.nombre,
         monto_aportado: creditos_inversionistas.monto_aportado,
+        porcentaje_participacion_inversionista:
+          creditos_inversionistas.porcentaje_participacion_inversionista,
       })
       .from(creditos_inversionistas)
       .innerJoin(
@@ -113,32 +117,45 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
       )
       .where(inArray(creditos_inversionistas.credito_id, creditoIds));
 
-    // Agregar montos por inversionista (sumando entre todos los créditos)
-    const poolMap = new Map<number, { nombre: string; monto: Big }>();
+    // Index rápido para pool por crédito: Map<credito_id, rows[]>
+    const rowsPorCredito = new Map<
+      number,
+      Array<{
+        inversionista_id: number;
+        inversionista_nombre: string;
+        monto: Big;
+        porcentajeInversion: Big;
+      }>
+    >();
     for (const row of inversionistasRows) {
-      const prev = poolMap.get(row.inversionista_id);
-      const monto = new Big(row.monto_aportado);
-      if (prev) {
-        prev.monto = prev.monto.plus(monto);
-      } else {
-        poolMap.set(row.inversionista_id, {
-          nombre: row.inversionista_nombre,
-          monto,
-        });
-      }
+      const list = rowsPorCredito.get(row.credito_id) ?? [];
+      list.push({
+        inversionista_id: row.inversionista_id,
+        inversionista_nombre: row.inversionista_nombre,
+        monto: new Big(row.monto_aportado),
+        porcentajeInversion: new Big(
+          row.porcentaje_participacion_inversionista,
+        ),
+      });
+      rowsPorCredito.set(row.credito_id, list);
     }
 
-    // CUBE primero, luego el resto en el orden que vinieron
-    const pool = Array.from(poolMap.entries())
-      .sort(([idA], [idB]) => {
-        if (idA === CUBE_INVESTMENT_ID) return -1;
-        if (idB === CUBE_INVESTMENT_ID) return 1;
-        return 0;
-      })
-      .map(([, v]) => ({
-        inversionista_nombre: v.nombre,
-        capital: v.monto.toFixed(2),
-      }));
+    // Pool por crédito en el orden que vinieron los créditos en creditosRows.
+    // Dentro de cada pool, CUBE va primero.
+    const pool = creditosRows.map((c) => ({
+      numero_credito_sifco: c.numero_credito_sifco,
+      cliente_nombre: c.cliente_nombre,
+      rows: (rowsPorCredito.get(c.credito_id) ?? [])
+        .sort((a, b) => {
+          if (a.inversionista_id === CUBE_INVESTMENT_ID) return -1;
+          if (b.inversionista_id === CUBE_INVESTMENT_ID) return 1;
+          return 0;
+        })
+        .map((r) => ({
+          inversionista_nombre: r.inversionista_nombre,
+          capital: r.monto.toFixed(2),
+        })),
+    }));
 
     // ── 4. Resolver quién aceptó (JWT, opcional) ──
     let usuarioEmail: string | undefined;
@@ -182,22 +199,98 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
       );
     }
 
+
     // ── 4.5. Marcar el espejo como aceptado ──
-    // Pasamos a "completado" todos los rows de los créditos que estén
-    // actualmente en "pendiente_revision". Los demás status no se tocan.
+    // Pasamos a "pendiente_revision" todos los rows de los créditos que estén
+    // actualmente en "pendiente_compra_cartera".
     const updateRes = await db
       .update(creditos_inversionistas_espejo)
-      .set({ status: "completado", updated_at: new Date() })
+      .set({ status: "pendiente_revision", updated_at: new Date() })
       .where(
         and(
           inArray(creditos_inversionistas_espejo.credito_id, creditoIds),
-          eq(creditos_inversionistas_espejo.status, "pendiente_revision"),
+          eq(creditos_inversionistas_espejo.status, "pendiente_compra_cartera"),
         ),
       )
       .returning({
         credito_id: creditos_inversionistas_espejo.credito_id,
         inversionista_id: creditos_inversionistas_espejo.inversionista_id,
       });
+
+    // ── 4.6. Armar el header "VENTA DE CARTERA" a partir del inversionista
+    //         que acaba de pasar de pendiente_revision → completado.
+    //         Si hay exactamente 1 target, mostramos su Modalidad, Factura
+    //         y Repartición. Si hay 0 o más de 1, omitimos el header. ──
+    const targetIds = Array.from(
+      new Set(
+        updateRes
+          .map((r) => r.inversionista_id)
+          .filter((id) => id !== CUBE_INVESTMENT_ID),
+      ),
+    );
+
+    let operacionInfo:
+      | {
+          inversionistaNombre: string;
+          monto: string;
+          modalidad: string;
+          factura: string;
+          porcentajeInversionista: string;
+          porcentajeCube: string;
+        }
+      | undefined;
+
+    if (targetIds.length === 1) {
+      const targetId = targetIds[0];
+      const [targetInv] = await db
+        .select({
+          nombre: inversionistas.nombre,
+          tipo_reinversion: inversionistas.tipo_reinversion,
+          emite_factura: inversionistas.emite_factura,
+        })
+        .from(inversionistas)
+        .where(eq(inversionistas.inversionista_id, targetId));
+
+      // Sumamos el monto total del target entre todos los créditos
+      // y calculamos su % de inversión ponderado por monto.
+      let targetMontoTotal = new Big(0);
+      let targetInversionPonderada = new Big(0);
+      for (const rows of rowsPorCredito.values()) {
+        for (const r of rows) {
+          if (r.inversionista_id === targetId) {
+            targetMontoTotal = targetMontoTotal.plus(r.monto);
+            targetInversionPonderada = targetInversionPonderada.plus(
+              r.porcentajeInversion.times(r.monto),
+            );
+          }
+        }
+      }
+
+      if (targetInv && targetMontoTotal.gt(0)) {
+        const porcInv = targetInversionPonderada.div(targetMontoTotal);
+        const porcCube = new Big(100).minus(porcInv);
+
+        const modalidadMap: Record<string, string> = {
+          sin_reinversion: "Sin Reinversión",
+          reinversion_capital: "Reinversión de Capital",
+          reinversion_interes: "Reinversión de Interés",
+          reinversion_total: "Reinversión Total",
+          reinversion_variable: "Reinversión Variable",
+          reinversion_combinada: "Reinversión Combinada",
+        };
+
+        operacionInfo = {
+          inversionistaNombre: targetInv.nombre,
+          monto: targetMontoTotal.toFixed(2),
+          modalidad:
+            modalidadMap[targetInv.tipo_reinversion] ??
+            targetInv.tipo_reinversion,
+          factura: targetInv.emite_factura ? "Propia" : "No emite",
+          porcentajeInversionista: porcInv.toFixed(2),
+          porcentajeCube: porcCube.toFixed(2),
+        };
+      }
+    }
 
     // ── 5. Mandar el correo (destinatarios fijos por negocio) ──
     const mailRes = await sendCompraCarteraAcceptedNotification({
@@ -210,6 +303,7 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
         observaciones: c.observaciones,
       })),
       pool,
+      operacionInfo,
       notasAdicionales: notas_adicionales,
       usuarioNombre,
       usuarioEmail,

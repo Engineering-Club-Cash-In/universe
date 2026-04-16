@@ -1662,6 +1662,7 @@ export const cobrosRouter = {
 									creditoCompleto = {
 										credito: creditoListado.creditos,
 										usuario: creditoListado.usuarios,
+										asesor: null,
 										cuotasPagadas: [],
 										cuotasPendientes: [],
 										cuotasAtrasadas: [],
@@ -1958,7 +1959,15 @@ export const cobrosRouter = {
 					// Datos adicionales de Cartera-Back
 					numeroCreditoSifco: creditoCompleto.credito.numero_credito_sifco,
 					deudaTotal: creditoCompleto.credito.deudatotal,
-					asesor: null, // Cartera-back no devuelve asesor completo en endpoint /credito
+					asesor: creditoCompleto.asesor
+						? {
+								asesor_id: creditoCompleto.asesor.asesor_id,
+								nombre: creditoCompleto.asesor.nombre,
+								telefono: creditoCompleto.asesor.telefono,
+								activo: creditoCompleto.asesor.activo,
+								emailCashIn: creditoCompleto.asesor.emailCashIn,
+							}
+						: null,
 
 					// Notas de la oportunidad
 					oportunidadNotes: oportunidadData?.notes || null,
@@ -2133,8 +2142,16 @@ export const cobrosRouter = {
 						categoria: creditoData.usuario.categoria,
 						saldoAFavor: creditoData.usuario.saldo_a_favor,
 					},
-					// Asesor (no disponible en endpoint /credito)
-					asesor: null,
+					// Asesor (devuelto por endpoint /credito)
+					asesor: creditoData.asesor
+						? {
+								asesor_id: creditoData.asesor.asesor_id,
+								nombre: creditoData.asesor.nombre,
+								telefono: creditoData.asesor.telefono,
+								activo: creditoData.asesor.activo,
+								emailCashIn: creditoData.asesor.emailCashIn,
+							}
+						: null,
 					// Cuotas
 					cuotas: todasCuotas.map((cuota) => ({
 						cuotaId: cuota.cuota_id,

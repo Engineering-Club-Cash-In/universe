@@ -10,19 +10,25 @@ function getProgressPercentage(target: string, achieved: string, isInverse?: boo
 	const targetNum = parseFloat(target);
 	const achievedNum = parseFloat(achieved);
 
-	if (targetNum <= 0) return 0;
-
 	if (isInverse) {
+		if (targetNum === 0 && achievedNum === 0) {
+			return 100;
+		}
+
+		if (targetNum <= 0) return 0;
+
 		// Para metas inversas: menor o igual = 100%
 		if (achievedNum <= targetNum) {
 			return 100; // Cumplió o superó la meta de reducción
 		} else {
 			return Math.max((targetNum / achievedNum) * 100, 0);
 		}
-	} else {
-		// Para metas normales: mayor valor logrado = mejor progreso
-		return (achievedNum / targetNum) * 100;
 	}
+
+	if (targetNum <= 0) return 0;
+
+	// Para metas normales: mayor valor logrado = mejor progreso
+	return (achievedNum / targetNum) * 100;
 }
 
 // Status badge calculation function
@@ -122,7 +128,7 @@ describe("Presentation Utility Functions", () => {
 		});
 
 		test("should handle inverse goal edge cases", () => {
-			// Perfect achievement (0 target = invalid)
+			expect(getProgressPercentage("0", "0", true)).toBe(100);
 			expect(getProgressPercentage("0", "5", true)).toBe(0);
 
 			// High achievement on inverse goal (achieved <= target = 100%)

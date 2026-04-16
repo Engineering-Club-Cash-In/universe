@@ -52,6 +52,7 @@ export const completeEspejo = async ({ body, set }: any) => {
           .update(creditos_inversionistas_espejo)
           .set({
             status: "completado",
+            fecha_inicio_participacion: new Date().toISOString().split('T')[0],
             updated_at: new Date(),
           })
           .where(whereConditions)

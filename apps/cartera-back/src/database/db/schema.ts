@@ -29,6 +29,7 @@
     "pendiente_reinversion",
     "pendiente_compra_cartera",
     "completado",
+    "pendiente_revision"
   ]);
 
   export const tipoReinversionEnum = customSchema.enum("tipo_reinversion", [

@@ -51,6 +51,10 @@ function GoalsIndexPage() {
 
 	const calculatePercentage = (target: number, achieved: number, isInverse: boolean | null): number => {
 		if (isInverse) {
+			if (target === 0 && achieved === 0) {
+				return 100;
+			}
+
 			// Para metas inversas: menor o igual al target = 100%
 			// Ejemplo: meta de 0 errores, si logró 0 errores = 100%
 			if (achieved <= target) {

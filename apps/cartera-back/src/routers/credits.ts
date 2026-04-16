@@ -39,7 +39,7 @@ import {
 import { authMiddleware } from "./midleware";
 import { getCreditosWithUserByMesAnioExcel } from "../controllers/reports";
 import { insertCredit } from "../controllers/createCredit";
-import {  updateAllInstallments, updateCredit, recalculateQuota, recalcularPagosCredito, calculateInvestorQuotas } from "../controllers/updateCredit";
+import {  updateAllInstallments, updateCredit, recalculateQuota, recalcularPagosCredito, calculateInvestorQuotas, repararTotalRestante } from "../controllers/updateCredit";
 import { updateDueDates, updateSingleDueDate, fixCreditosWithoutFebruary, updateDueDatesFromJson, cambiarFechaInicio, getHistorialCambioFecha } from "../controllers/updateDueDate";
 import { creditos, cuotas_credito } from "../database/db";
 import { and, desc, eq } from "drizzle-orm";

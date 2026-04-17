@@ -953,8 +953,8 @@ function RouteComponent() {
 											cuotasAtraso={caso.cuotasVencidas ?? 0}
 											estadoMora={caso.estadoMora || undefined}
 											fechaInicio={caso.fechaInicio || null}
-											nombreAsesor={session?.user?.name || ""}
-											telefonoAsesor=""
+											nombreAsesor={caso.asesor?.nombre || ""}
+											telefonoAsesor={caso.asesor?.telefono || ""}
 										>
 											<Button className="flex items-center gap-2">
 												<Phone className="h-4 w-4" />
@@ -985,8 +985,8 @@ function RouteComponent() {
 											cuotasAtraso={caso.cuotasVencidas ?? 0}
 											estadoMora={caso.estadoMora || undefined}
 											fechaInicio={caso.fechaInicio || null}
-											nombreAsesor={session?.user?.name || ""}
-											telefonoAsesor=""
+											nombreAsesor={caso.asesor?.nombre || ""}
+											telefonoAsesor={caso.asesor?.telefono || ""}
 										>
 											<Button
 												variant="outline"
@@ -1020,8 +1020,8 @@ function RouteComponent() {
 											cuotasAtraso={caso.cuotasVencidas ?? 0}
 											estadoMora={caso.estadoMora || undefined}
 											fechaInicio={caso.fechaInicio || null}
-											nombreAsesor={session?.user?.name || ""}
-											telefonoAsesor=""
+											nombreAsesor={caso.asesor?.nombre || ""}
+											telefonoAsesor={caso.asesor?.telefono || ""}
 										>
 											<Button
 												variant="outline"

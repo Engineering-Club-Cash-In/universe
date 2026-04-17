@@ -41,10 +41,10 @@ export function interpolar(
 	texto: string,
 	variables: VariablesPlantilla,
 ): string {
-	const v = (val: string | number, placeholder: string) =>
+	const v = (val: string | number, _placeholder: string) =>
 		val !== undefined && val !== null && val !== "" && val !== 0
 			? String(val)
-			: `[${placeholder}]`;
+			: "";
 
 	const nombre = variables.clienteNombre
 		? toCapitalCase(variables.clienteNombre)

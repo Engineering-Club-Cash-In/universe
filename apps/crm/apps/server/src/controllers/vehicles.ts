@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { opportunities, vehicles } from "@/db/schema";
 import { db } from "../db";
 
@@ -10,7 +10,6 @@ export const getVehicleByCodigoController = async (numero_sifco: string) => {
 	}
 
 	try {
-		// TODO: replace `opportunities.id` with the actual filter field once defined
 		const result = await db
 			.select({
 					vehicle: {
@@ -36,7 +35,11 @@ export const getVehicleByCodigoController = async (numero_sifco: string) => {
 			})
 			.from(opportunities)
 			.innerJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
-			.where(eq(opportunities.numeroSifco, numero_sifco)) // <-- swap field here
+			.where(
+				and(eq(opportunities.numeroSifco, numero_sifco), 
+				inArray(opportunities.status, ["won", "migrate"]),),
+			)
+			.orderBy(desc(opportunities.updatedAt))
 			.limit(1)
 			.then((rows) => rows[0] || null);
 

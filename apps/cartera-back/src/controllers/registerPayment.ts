@@ -1136,13 +1136,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
                 );
               }
 
-              // Distribuir pago entre inversionistas
-              if (pagoInsertado?.pago_id) {
-                await insertPagosCreditoInversionistasV2(
-                  pagoInsertado.pago_id,
-                  credito.credito_id
-                );
-              }
+             
             } else {
               disponible_para_cuotasPosteriores =
                 disponible_para_cuotasPosteriores.plus(disponible);
@@ -1270,13 +1264,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
                 );
               }
 
-              // Distribuir pago entre inversionistas
-              if (pagoInsertado?.pago_id) {
-                await insertPagosCreditoInversionistasV2(
-                  pagoInsertado.pago_id,
-                  credito.credito_id
-                );
-              }
+              
             }
           }
           if (disponible_restante.lte(0)) {
@@ -2026,7 +2014,10 @@ export async function aplicarPagoAlCredito(pago_id: number) {
       .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
 
     console.log("✅ Crédito actualizado y pago validado");
-
+ // 8. Distribuir entre inversionistas
+    if (pago.credito_id) {
+      await insertPagosCreditoInversionistasV2(pago_id, pago.credito_id);
+    }
   
 
     return {

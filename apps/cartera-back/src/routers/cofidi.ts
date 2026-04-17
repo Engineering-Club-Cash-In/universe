@@ -153,7 +153,11 @@ if (facturasExistentes.length > 0) {
         return { success: false, error: "Pago no encontrado" };
       }
 
-      if (pagoData.validationStatus !== "validated") {
+      if (
+        pagoData.validationStatus !== "validated" &&
+        pagoData.validationStatus !== "reset" &&
+        pagoData.validationStatus !== "capital"
+      ) {
         set.status = 400;
         console.error(
           `❌ Pago no validado - Status: ${pagoData.validationStatus}`

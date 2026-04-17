@@ -9,10 +9,8 @@ import { creditos, pagos_credito } from "../database/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
 
 const SIFCO_NUMBERS: string[] = [
-  "01010214116210",
-  "CRM-9d0af70b-5636-40d0-b741-c4080cf1d770",
-  "CRM-a2966935-8775-4bab-a6a9-5838bff15142",
-  "01010214118940",
+  "CRM-036226c5-01d3-4f92-9ec9-d9f2a941594d",
+  "CRM-bcc49909-6243-4473-97c4-02bfbe1c9c91",
 ];
 
 async function main() {

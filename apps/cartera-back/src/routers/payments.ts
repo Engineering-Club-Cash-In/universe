@@ -239,6 +239,8 @@ export const paymentRouter = new Elysia()
           soloAplicados,
           fechaAplicado,
           fechaBoleta,
+          fechaBoletaInicio,
+          fechaBoletaFin,
         } = query;
 
         // ✅ Si viene reportAdvisor=true, generamos el reporte Excel de asesores (sin inversionistas)
@@ -261,6 +263,8 @@ export const paymentRouter = new Elysia()
             soloAplicados,
             fechaAplicado,
             fechaBoleta,
+            fechaBoletaInicio,
+            fechaBoletaFin,
           });
           set.status = 200;
           return {
@@ -289,6 +293,8 @@ export const paymentRouter = new Elysia()
             soloAplicados,
             fechaAplicado,
             fechaBoleta,
+            fechaBoletaInicio,
+            fechaBoletaFin,
           });
           set.status = 200;
           return {
@@ -316,6 +322,8 @@ export const paymentRouter = new Elysia()
           soloAplicados,
           fechaAplicado,
           fechaBoleta,
+          fechaBoletaInicio,
+          fechaBoletaFin,
         });
 
         set.status = 200;
@@ -356,6 +364,8 @@ export const paymentRouter = new Elysia()
         soloAplicados: t.Optional(t.Boolean()),
         fechaAplicado: t.Optional(t.String({ format: "date" })),
         fechaBoleta: t.Optional(t.String({ format: "date" })),
+        fechaBoletaInicio: t.Optional(t.String({ format: "date" })),
+        fechaBoletaFin: t.Optional(t.String({ format: "date" })),
       }),
       response: {
         200: t.Object({

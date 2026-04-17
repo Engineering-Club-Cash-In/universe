@@ -1684,6 +1684,7 @@ export interface CreditoPago {
   statusCredit: string;
   porcentajeInteres: number;
   fechaCreacion: string;
+  banderaReinversion?: boolean;
 }
 
 // 🧍‍♂️ Información del usuario del crédito
@@ -1755,6 +1756,10 @@ export interface PagoDataInvestor {
   cuentaEmpresaNombre: string | null;
   cuentaEmpresaNumero: string | null;
 
+  // 🚩 Bandera del crédito: true mientras haya compra de cartera o reinversión pendiente.
+  // Cuando es true, cofidi redirige a CUBE los intereses del inversionista en ese status.
+  banderaReinversion?: boolean;
+
   // 🔄 Cancelación (solo presente en pagos reset)
   cancelacion?: CancelacionPago | null;
 }
@@ -1818,6 +1823,8 @@ export interface GetPagosParams {
   validationStatus?: string;
   reportAdvisor?: boolean;
   fechaBoleta?: string;
+  fechaBoletaInicio?: string;
+  fechaBoletaFin?: string;
 }
 
 /**

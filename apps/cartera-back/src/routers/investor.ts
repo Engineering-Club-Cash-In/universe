@@ -516,6 +516,7 @@ export const inversionistasRouter = new Elysia()
 
       for (const liq of liquidacionesDelDia) {
         const { inversionista_id: id, liquidacion_id: liqId } = liq;
+        if (id === 38) continue;
         try {
           const result = await resumeInvestor(
             id,
@@ -557,7 +558,7 @@ export const inversionistasRouter = new Elysia()
             logoUrl
           );
 
-          const liquidacionActualizada = await updateLiquidacionReporteUrl(id, url);
+          const liquidacionActualizada = await updateLiquidacionReporteUrl(liqId, url);
 
           resultados.push({
             inversionista_id: id,

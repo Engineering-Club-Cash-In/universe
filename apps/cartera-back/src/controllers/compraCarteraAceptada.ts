@@ -217,6 +217,19 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
         inversionista_id: creditos_inversionistas_espejo.inversionista_id,
       });
 
+    // ── 4.5.1 Apagar bandera_reinversion de los créditos aceptados ──
+    // Ya no hay que redirigir intereses a CUBE: el espejo pasó a
+    // pendiente_revision y el nuevo inversionista empieza a cobrar.
+    if (updateRes.length > 0) {
+      const creditosAfectados = Array.from(
+        new Set(updateRes.map((r) => r.credito_id)),
+      );
+      await db
+        .update(creditos)
+        .set({ bandera_reinversion: false })
+        .where(inArray(creditos.credito_id, creditosAfectados));
+    }
+
     // ── 4.6. Armar el header "VENTA DE CARTERA" a partir del inversionista
     //         que acaba de pasar de pendiente_revision → completado.
     //         Si hay exactamente 1 target, mostramos su Modalidad, Factura

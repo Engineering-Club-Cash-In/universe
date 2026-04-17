@@ -9,6 +9,7 @@ import { db } from "../database";
 import {
   creditos,
   creditos_inversionistas,
+  creditos_inversionistas_espejo,
   facturas_electronicas,
   inversionistas,
   pagos_credito,
@@ -128,6 +129,7 @@ if (facturasExistentes.length > 0) {
           abono_iva_12: pagos_credito.abono_iva_12,
 
           capital_credito: creditos.capital,
+          bandera_reinversion: creditos.bandera_reinversion,
 
           usuario_id: usuarios.usuario_id,
           nombre: usuarios.nombre,
@@ -184,6 +186,7 @@ if (facturasExistentes.length > 0) {
           monto_aportado: creditos_inversionistas.monto_aportado,
           monto_inversionista: creditos_inversionistas.monto_inversionista,
           iva_inversionista: creditos_inversionistas.iva_inversionista,
+          status_espejo: creditos_inversionistas_espejo.status,
         })
         .from(creditos_inversionistas)
         .innerJoin(
@@ -191,6 +194,19 @@ if (facturasExistentes.length > 0) {
           eq(
             creditos_inversionistas.inversionista_id,
             inversionistas.inversionista_id
+          )
+        )
+        .leftJoin(
+          creditos_inversionistas_espejo,
+          and(
+            eq(
+              creditos_inversionistas_espejo.credito_id,
+              creditos_inversionistas.credito_id
+            ),
+            eq(
+              creditos_inversionistas_espejo.inversionista_id,
+              creditos_inversionistas.inversionista_id
+            )
           )
         )
         .where(eq(creditos_inversionistas.credito_id, pagoData.credito_id!));
@@ -243,7 +259,18 @@ if (facturasExistentes.length > 0) {
         ? pagoData.nit.split('/').map((n: string) => n.trim().replace(/-/g, '')).filter((n: string) => n.length > 0)
         : [];
 
-      const nitReceptor = nitsDisponibles.length > 0 ? nitsDisponibles[0] : "CF";
+      // 🔥 Si el cliente NO tiene NIT registrado → FALLAR (NO usar "CF")
+      if (nitsDisponibles.length === 0) {
+        set.status = 400;
+        console.error(`❌ Cliente sin NIT registrado - Pago ID: ${pago_id}`);
+        return {
+          success: false,
+          error: `El cliente "${pagoData.nombre}" no tiene NIT registrado. No se puede facturar sin un NIT válido.`,
+          pago_id: pago_id,
+        };
+      }
+
+      const nitReceptor = nitsDisponibles[0];
 
       // 🔥 Consultar nombre del receptor en SAT via COFIDI
       let nombreReceptor = pagoData.nombre
@@ -692,6 +719,23 @@ if (facturasExistentes.length > 0) {
           }
 
           const interesProporcional = new Big(inv.interes_proporcional || "0");
+
+          // 🔥 REDIRIGIR A CUBE: si bandera_reinversion del crédito activa
+          // y status del espejo = pendiente_reinversion o pendiente_compra_cartera
+          const redirigirACube =
+            pagoData.bandera_reinversion === true &&
+            (inv.status_espejo === "pendiente_reinversion" ||
+              inv.status_espejo === "pendiente_compra_cartera");
+
+          if (redirigirACube) {
+            console.log(
+              `   🔁 ${inv.nombre} → REDIRIGIDO A CUBE (bandera_reinversion=true, status_espejo=${inv.status_espejo}) | Q${interesProporcional.toFixed(2)}`
+            );
+            // NO sumar a totalInteresesNoCube ni a cashInAcumulado:
+            // CUBE absorbe todo (parteInversionista + parteCashIn) por RESIDUO.
+            continue;
+          }
+
           totalInteresesNoCube = totalInteresesNoCube.plus(interesProporcional);
           if (interesProporcional.lte(0)) {
             console.log(`   ⏭️  ${inv.nombre} - Sin intereses`);
@@ -2065,37 +2109,42 @@ if (facturasExistentes.length > 0) {
         console.log(`🏢 Emisor: ${emisorKey} (${emisorConfig.config.emisor.nombreEmisor})`);
 
         // ============================================
-        // 1️⃣ CONSULTAR NIT EN COFIDI PARA OBTENER NOMBRE
+        // 1️⃣ VALIDAR NIT Y CONSULTAR EN COFIDI
         // ============================================
-        let nombreReceptor = "CONSUMIDOR FINAL";
+        const nitNormalizado = (nit || "").trim().replace(/-/g, "").toUpperCase();
 
-        if (nit && nit !== "CF") {
-          try {
-            const nitClient = new NITSoapClient(COFIDI_CONFIG.endpointUrl);
-            const resultadoNit = await nitClient.consultarNIT({
-              nit: nit,
-              entity: COFIDI_CONFIG.entity,
-              requestor: COFIDI_CONFIG.requestor,
-            });
-
-            if (resultadoNit.success && resultadoNit.nombre) {
-              nombreReceptor = resultadoNit.nombre;
-              console.log(`✅ NIT encontrado: ${nombreReceptor}`);
-            } else {
-              console.log(`⚠️ NIT no encontrado, usando: ${nombreReceptor}`);
-            }
-          } catch (nitError) {
-            console.error("❌ Error consultando NIT:", nitError);
-            // Continuamos con "CONSUMIDOR FINAL"
-          }
+        if (!nitNormalizado || nitNormalizado === "CF") {
+          set.status = 400;
+          return {
+            success: false,
+            error: "NIT requerido. No se permite facturar a Consumidor Final (CF) en facturas genéricas.",
+          };
         }
+
+        const nitClient = new NITSoapClient(COFIDI_CONFIG.endpointUrl);
+        const resultadoNit = await nitClient.consultarNIT({
+          nit: nitNormalizado,
+          entity: COFIDI_CONFIG.entity,
+          requestor: COFIDI_CONFIG.requestor,
+        });
+
+        if (!resultadoNit.success || !resultadoNit.nombre) {
+          set.status = 400;
+          return {
+            success: false,
+            error: `NIT "${nitNormalizado}" no encontrado en SAT. No se puede facturar.`,
+          };
+        }
+
+        const nombreReceptor = resultadoNit.nombre;
+        console.log(`✅ NIT validado en SAT: ${nombreReceptor}`);
 
         // ============================================
         // 2️⃣ CONSTRUIR RECEPTOR
         // ============================================
         const receptor = {
-          idReceptor: nit || "CF",
-          nombreReceptor: nombreReceptor,
+          idReceptor: nitNormalizado,
+          nombreReceptor,
         };
 
         console.log(`👤 Receptor: ${receptor.nombreReceptor} (${receptor.idReceptor})`);
@@ -2717,22 +2766,7 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
           });
         }
 
-        // 🔥 Si no hay más NITs, intentar con "CF" como último recurso
-        if (receptor.idReceptor !== "CF") {
-          console.log(`   🔄 NIT "${receptor.idReceptor}" inválido, reintentando con "CF"`);
-          return certificarFacturaHelper({
-            pago_id,
-            receptor: { ...receptor, idReceptor: "CF" },
-            items,
-            complementos,
-            created_by,
-            customConfig,
-            customSatConfig,
-            usarFechaActual,
-            nitsFallback: [],
-          });
-        }
-
+        // 🔥 Sin más NITs alternativos → FALLAR (NO caer en "CF")
         throw new Error(
           `NIT del receptor inválido. NIT enviado: "${receptor.idReceptor}" para "${receptor.nombreReceptor}". ` +
             `Respuesta COFIDI: ${errorMessage}`

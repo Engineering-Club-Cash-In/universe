@@ -25,6 +25,7 @@ import {
   reconcileMirrorPercentages,
   auditMirrorPercentages,
   getCreditosEspejoPendientes,
+  detectPagosHuerfanos,
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
 import { generarYSubirPDFInversionista, generarYSubirExcelInversionista } from "../utils/functions/generalFunctions";
@@ -516,8 +517,19 @@ export const inversionistasRouter = new Elysia()
 
       for (const liq of liquidacionesDelDia) {
         const { inversionista_id: id, liquidacion_id: liqId } = liq;
-        if (id === 38) continue;
+        if (id === 38 || id === 84) continue;
         try {
+          const huerfanos = await detectPagosHuerfanos(id, liqId);
+          if (huerfanos.length) {
+            errores.push({
+              id,
+              liquidacion_id: liqId,
+              error: `Se encontraron ${huerfanos.length} pago(s) huérfano(s) (sin crédito espejo asociado). No se generó el reporte.`,
+              pagos_huerfanos: huerfanos,
+            });
+            continue;
+          }
+
           const result = await resumeInvestor(
             id,
             1,

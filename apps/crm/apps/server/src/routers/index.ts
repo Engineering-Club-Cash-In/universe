@@ -156,6 +156,7 @@ export const cobrosAppRouter = {
 	enviarSmsCobros: cobrosRouter.enviarSmsCobros,
 	enviarEmailCobros: cobrosRouter.enviarEmailCobros,
 	enviarWhatsappCobros: cobrosRouter.enviarWhatsappCobros,
+	enviarWhatsappMasivoCobros: cobrosRouter.enviarWhatsappMasivoCobros,
 	getReferencias: cobrosRouter.getReferencias,
 	createReferencia: cobrosRouter.createReferencia,
 	updateReferencia: cobrosRouter.updateReferencia,

@@ -1266,6 +1266,8 @@ interface GetPagosOptions {
   soloAplicados?: boolean;
   fechaAplicado?: string;
   fechaBoleta?: string;
+  fechaBoletaInicio?: string;
+  fechaBoletaFin?: string;
 }
 /**
  * 📊 Obtiene los pagos junto con su información detallada de créditos, usuarios, cuotas e inversionistas.
@@ -1296,6 +1298,8 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     soloAplicados,
     fechaAplicado,
     fechaBoleta,
+    fechaBoletaInicio,
+    fechaBoletaFin,
   } = options;
 
   try {
@@ -1358,6 +1362,18 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     if (fechaBoleta) {
       whereClauses.push(
         `(p.fecha_boleta AT TIME ZONE 'America/Guatemala')::date = '${fechaBoleta}'::date`
+      );
+    }
+    // 📅 Rango de fecha_boleta (zona Guatemala). Inclusivo en ambos extremos.
+    // Se puede usar combinado o por separado con fechaBoleta (exacta).
+    if (fechaBoletaInicio) {
+      whereClauses.push(
+        `(p.fecha_boleta AT TIME ZONE 'America/Guatemala')::date >= '${fechaBoletaInicio}'::date`
+      );
+    }
+    if (fechaBoletaFin) {
+      whereClauses.push(
+        `(p.fecha_boleta AT TIME ZONE 'America/Guatemala')::date <= '${fechaBoletaFin}'::date`
       );
     }
 
@@ -1435,8 +1451,12 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
           'deudaTotal', c.deudatotal,
           'statusCredit', c."statusCredit",
           'porcentajeInteres', c.porcentaje_interes,
-          'fechaCreacion', c.fecha_creacion
+          'fechaCreacion', c.fecha_creacion,
+          'banderaReinversion', c.bandera_reinversion
         ) AS "credito",
+
+        -- 🚩 Bandera top-level: crédito con compra de cartera / reinversión pendiente
+        c.bandera_reinversion AS "banderaReinversion",
 
         -- 📅 Info de la cuota
         (
@@ -1569,6 +1589,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       monto_aplicado: r.monto_aplicado,
       origenPago: r.origenPago,
       credito: r.credito,
+      banderaReinversion: r.banderaReinversion ?? false,
       cuota: r.cuota,
       usuario: r.usuario,
       inversionistas: Array.isArray(r.inversionistas)
@@ -2369,8 +2390,11 @@ export async function getAbonosPorCuota(
     throw new Error(`No se encontró el crédito con SIFCO: ${numero_credito_sifco}`);
   }
 
-  // 2. Buscar la cuota
-  const [cuota] = await db
+  // 2. Buscar la(s) cuota(s) con ese numero_cuota
+  // Nota: pueden existir cuotas duplicadas con el mismo numero_cuota para un mismo
+  // credito (p. ej. tras regeneraciones de calendario). Se consideran todas para
+  // no perder pagos vinculados al cuota_id "viejo".
+  const cuotasMatch = await db
     .select({ cuota_id: cuotas_credito.cuota_id })
     .from(cuotas_credito)
     .where(
@@ -2378,14 +2402,15 @@ export async function getAbonosPorCuota(
         eq(cuotas_credito.credito_id, credito.credito_id),
         eq(cuotas_credito.numero_cuota, numero_cuota)
       )
-    )
-    .limit(1);
+    );
 
-  if (!cuota) {
+  if (cuotasMatch.length === 0) {
     throw new Error(`No se encontró la cuota ${numero_cuota} para el crédito ${numero_credito_sifco}`);
   }
 
-  // 3. Buscar los pagos de esa cuota
+  const cuotaIds = cuotasMatch.map((c) => c.cuota_id);
+
+  // 3. Buscar los pagos de esas cuotas
   const pagos = await db
     .select({
       pago_id: pagos_credito.pago_id,
@@ -2401,7 +2426,7 @@ export async function getAbonosPorCuota(
     .where(
       and(
         eq(pagos_credito.credito_id, credito.credito_id),
-        eq(pagos_credito.cuota_id, cuota.cuota_id)
+        inArray(pagos_credito.cuota_id, cuotaIds)
       )
     );
 

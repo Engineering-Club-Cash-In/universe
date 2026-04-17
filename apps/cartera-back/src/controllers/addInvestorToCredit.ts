@@ -5,6 +5,7 @@ import { db } from "../database";
 import {
   admins,
   asesores,
+  creditos,
   creditos_inversionistas,
   creditos_inversionistas_espejo,
   inversionistas,
@@ -541,13 +542,13 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
 
           // ── Determinar el status del espejo según tipo_operacion ──
           // "reinversion" → "pendiente_reinversion"
-          // "compra_cartera" → "pendiente_revision" (queda esperando aprobación)
+          // "compra_cartera" → "pendiente_compra_cartera" (espera aceptación)
           // Solo el inversionista nuevo recibe este status.
           // Los demás inversionistas quedan como "completado".
           const statusEspejo =
             tipo_operacion === "reinversion"
               ? "pendiente_reinversion"
-              : "pendiente_revision";
+              : "pendiente_compra_cartera";
 
           const dataEspejoConStatus = dataEspejo.map((inv) => ({
             ...inv,
@@ -559,7 +560,7 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
             // Los demás se mantienen como "completado"
             status: (inv.inversionista_id === inversionista_id
                 ? statusEspejo
-                : "completado") as "pendiente_reinversion" | "pendiente_revision" | "completado",
+                : "completado") as "pendiente_reinversion" | "pendiente_compra_cartera" | "completado",
             updated_at: new Date(),
           }));
 
@@ -575,6 +576,20 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
             await tx
               .insert(creditos_inversionistas_espejo)
               .values(dataEspejoConStatus);
+          }
+
+          // ================================================================
+          // Activar bandera_reinversion en el crédito cuando sea compra_cartera
+          // Mientras el espejo esté en pendiente_compra_cartera, cofidi
+          // redirige los intereses del inversionista nuevo a CUBE.
+          // Se apaga en compraCarteraAceptada (o en replaceInvestorCredit
+          // si se cancela/reasigna).
+          // ================================================================
+          if (tipo_operacion === "compra_cartera") {
+            await tx
+              .update(creditos)
+              .set({ bandera_reinversion: true })
+              .where(eq(creditos.credito_id, credito_id));
           }
 
           // ================================================================

@@ -354,6 +354,13 @@ export const returnPendingInvestorsToCube = async ({ body, set }: any) => {
           await tx.insert(creditos_inversionistas_espejo).values(dataEspejo);
         }
 
+        // ── Apagar bandera_reinversion del crédito ──
+        // Ya no hay pendientes: el espejo quedó todo en "completado".
+        await tx
+          .update(creditos)
+          .set({ bandera_reinversion: false })
+          .where(eq(creditos.credito_id, creditoId));
+
         resultados.push({
           credito_id: creditoId,
           numero_credito_sifco: creditoData.numero_credito_sifco,
@@ -760,6 +767,17 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
             .values(dataEspejoDestinoFinal);
         }
 
+        // ── Activar bandera_reinversion en el destino si es compra_cartera ──
+        // Mientras el espejo esté en pendiente_compra_cartera, cofidi redirige
+        // los intereses del inversionista nuevo a CUBE. Se apaga al aceptar
+        // la compra o si se limpia/cancela después.
+        if (tipo_operacion === "compra_cartera") {
+          await tx
+            .update(creditos)
+            .set({ bandera_reinversion: true })
+            .where(eq(creditos.credito_id, credito_destino_id));
+        }
+
         resultadosAsignacion.push({
           credito_destino_id,
           numero_credito_sifco: creditoDestino.numero_credito_sifco,
@@ -914,6 +932,14 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
           .insert(creditos_inversionistas_espejo)
           .values(dataEspejoOrigenConStatus);
       }
+
+      // ── Apagar bandera_reinversion del crédito origen ──
+      // El espejo del origen quedó todo en "completado": ya no hay
+      // inversionistas pendientes a quienes redirigir intereses.
+      await tx
+        .update(creditos)
+        .set({ bandera_reinversion: false })
+        .where(eq(creditos.credito_id, credito_espejo_removido_id));
 
       console.log(
         `   🧹 Crédito origen ${creditoOrigen.numero_credito_sifco} limpio - ${dataPadreOrigenFinal.length} inversionistas restantes`,

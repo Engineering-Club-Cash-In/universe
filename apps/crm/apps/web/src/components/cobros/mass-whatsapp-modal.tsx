@@ -30,7 +30,6 @@ interface MassWhatsappModalProps {
 		estadoMora?: string;
 		searchTerm?: string;
 		time?: "WEEK" | "MONTH" | "DUEMONTH" | "TODAY";
-		emailCobrador?: string;
 	};
 	children: React.ReactNode;
 }
@@ -52,7 +51,6 @@ export function MassWhatsappModal({ filtros, children }: MassWhatsappModalProps)
 				estadoMora: filtros.estadoMora,
 				searchTerm: filtros.searchTerm,
 				time: filtros.time,
-				emailCobrador: filtros.emailCobrador,
 			}),
 		onSuccess: (res) => {
 			toast.success(
@@ -120,9 +118,6 @@ export function MassWhatsappModal({ filtros, children }: MassWhatsappModalProps)
 							<li>Estado de mora: {filtros.estadoMora ?? "todos"}</li>
 							<li>Rango temporal: {filtros.time ?? "todos"}</li>
 							<li>Búsqueda: {filtros.searchTerm ?? "—"}</li>
-							{filtros.emailCobrador && (
-								<li>Cobrador: {filtros.emailCobrador}</li>
-							)}
 						</ul>
 					</div>
 				</div>

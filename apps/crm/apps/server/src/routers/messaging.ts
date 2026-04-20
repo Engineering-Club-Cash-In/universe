@@ -8,7 +8,7 @@ import {
 	whatsappLogRecipients,
 	whatsappLogs,
 } from "../db/schema/whatsapp-logs";
-import { protectedProcedure } from "../lib/orpc";
+import { crmProcedure } from "../lib/orpc";
 import {
 	getSimpletechClient,
 	sendWhatsappTemplate,
@@ -208,7 +208,7 @@ export async function sendContractLinksToLead(params: {
 }
 
 export const messagingRouter = {
-	sendWhatsAppMessage: protectedProcedure
+	sendWhatsAppMessage: crmProcedure
 		.input(
 			z.object({
 				leadId: z.string(),
@@ -252,7 +252,7 @@ export const messagingRouter = {
 	/**
 	 * Arma el mensaje de contratos para un lead + oportunidad.
 	 */
-	getContractLinksMessage: protectedProcedure
+	getContractLinksMessage: crmProcedure
 		.input(
 			z.object({
 				leadId: z.string().uuid(),
@@ -315,7 +315,7 @@ export const messagingRouter = {
 	/**
 	 * Obtiene el log de WhatsApp de una oportunidad con sus destinatarios.
 	 */
-	getWhatsappLog: protectedProcedure
+	getWhatsappLog: crmProcedure
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -369,7 +369,7 @@ export const messagingRouter = {
 	 * Recibe los links individuales por contrato, arma el mensaje, lo envía,
 	 * y guarda el resultado real (sent/failed).
 	 */
-	updateWhatsappLog: protectedProcedure
+	updateWhatsappLog: crmProcedure
 		.input(
 			z.object({
 				recipientId: z.string().uuid(),

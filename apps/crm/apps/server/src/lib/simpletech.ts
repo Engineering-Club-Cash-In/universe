@@ -158,25 +158,37 @@ export async function sendWhatsappTemplateBatch(params: {
 		const result = await client.sendTemplate(templateRequest);
 
 		// SimpleTech puede devolver el número con formato distinto al que enviamos
-		// (con o sin "+", con prefijo, etc.). Comparamos por dígitos para evitar
-		// falsos negativos.
+		// (con o sin "+", con prefijo, etc.). Comparamos por dígitos.
 		const toDigits = (n: string) => n.replaceAll(/\D/g, "");
 
-		// `results[]` contiene todos los items: los que fallaron tienen `error` no vacío.
-		const byDigits = new Map<
-			string,
-			{ templateMessageId: string; error: string }
-		>();
+		// Si dos destinatarios comparten el mismo número (p.ej. un cliente con
+		// varios créditos), usar un Map por dígitos pisaría al primero. Matcheamos
+		// posicionalmente: recorremos `results[]` en el orden devuelto y lo
+		// asociamos al primer recipient no consumido con dígitos iguales.
+		const matchByIdx = new Array<
+			{ templateMessageId: string; error: string } | undefined
+		>(normalized.length);
+		const used = new Array<boolean>(normalized.length).fill(false);
 		for (const r of result.results ?? []) {
-			byDigits.set(toDigits(String(r.number)), {
-				templateMessageId: r.templateMessageId ?? "",
-				error: r.error ?? "",
-			});
+			const rDigits = toDigits(String(r.number));
+			for (let i = 0; i < normalized.length; i++) {
+				if (
+					!used[i] &&
+					toDigits(normalized[i].phoneNormalized) === rDigits
+				) {
+					matchByIdx[i] = {
+						templateMessageId: r.templateMessageId ?? "",
+						error: r.error ?? "",
+					};
+					used[i] = true;
+					break;
+				}
+			}
 		}
 
 		return {
-			items: normalized.map((r) => {
-				const match = byDigits.get(toDigits(r.phoneNormalized));
+			items: normalized.map((r, idx) => {
+				const match = matchByIdx[idx];
 				if (match?.error === "") {
 					return {
 						phone: r.phone,

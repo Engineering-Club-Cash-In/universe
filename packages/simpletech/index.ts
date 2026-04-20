@@ -38,7 +38,7 @@
 // Cliente principal
 // =============================================================================
 
-export { SimpleTechClient, createClientFromEnv } from './src/client';
+export { SimpleTechClient, createClientFromEnv, getToken } from './src/client';
 
 // =============================================================================
 // Tipos
@@ -61,6 +61,9 @@ export type {
   ImageMessage,
   VideoMessage,
   AudioMessage,
+  // Auth
+  TokenRequest,
+  TokenResponse,
   // Request/Response
   SendRequest,
   SendResponse,

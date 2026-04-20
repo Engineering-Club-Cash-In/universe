@@ -1,5 +1,4 @@
 import { ORPCError } from "@orpc/server";
-import { SimpleTechClient } from "@repo/simpletech";
 import { and, count, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
@@ -9,7 +8,11 @@ import {
 	whatsappLogRecipients,
 	whatsappLogs,
 } from "../db/schema/whatsapp-logs";
-import { protectedProcedure } from "../lib/orpc";
+import { crmProcedure } from "../lib/orpc";
+import {
+	getSimpletechClient,
+	sendWhatsappTemplate,
+} from "../lib/simpletech";
 import { getFileUrl, getFileUrlWithBucketInKey } from "../lib/storage";
 
 const R2_LEGAL_DOCS_BUCKET_NAME =
@@ -30,33 +33,6 @@ async function resolvePdfUrl(
 	} catch {
 		return null;
 	}
-}
-
-const BOT_NUMBER = process.env.CCI_BOT_NUMBER!;
-const TEMPLATE_NAME = process.env.SIMPLETECH_TEMPLATE_NAME || "mensaje2";
-
-function getSimpletechClient(): SimpleTechClient | null {
-	if (
-		!process.env.SIMPLETECH_BASE_URL ||
-		!process.env.SIMPLETECH_USERNAME ||
-		!process.env.SIMPLETECH_PASSWORD
-	) {
-		return null;
-	}
-
-	return new SimpleTechClient({
-		credentials: {
-			username: process.env.SIMPLETECH_USERNAME,
-			password: process.env.SIMPLETECH_PASSWORD,
-		},
-		baseUrl: process.env.SIMPLETECH_BASE_URL,
-	});
-}
-
-function normalizePhone(phone: string): string {
-	const digits = phone.replace(/\D/g, "");
-	if (digits.startsWith("502")) return `+${digits}`;
-	return `+502${digits}`;
 }
 
 export interface ContractLink {
@@ -179,35 +155,16 @@ export async function sendContractLinksToLead(params: {
 		leadReason = "El lead no tiene teléfono registrado";
 	} else {
 		// Todo OK — intentar enviar
-		const phoneNormalized = normalizePhone(lead.phone);
-		const templateRequest = {
-			templateName: TEMPLATE_NAME,
-			serviceIdentifier: BOT_NUMBER,
-			messages: [
-				{
-					number: phoneNormalized,
-					body: [leadMessage!],
-				},
-			],
-		};
-		console.log("[SimpleTech][auto] Enviando template a:", phoneNormalized);
-		console.log("[SimpleTech][auto] Request:", JSON.stringify(templateRequest, null, 2));
-		try {
-			const sendResult = await stClient.sendTemplate(templateRequest);
-			console.log("[SimpleTech][auto] Response:", JSON.stringify(sendResult, null, 2));
-			if (sendResult.success) {
-				leadStatus = "sent";
-				console.log("[SimpleTech][auto] Envío exitoso. templateMessageId:", sendResult.results[0]?.templateMessageId);
-			} else {
-				leadStatus = "failed";
-				leadReason = sendResult.failed[0]?.error ?? "Error desconocido";
-				console.log("[SimpleTech][auto] Envío fallido. Error:", leadReason);
-			}
-		} catch (err) {
-			console.error("[SimpleTech][auto] Exception:", err);
+		const sendResult = await sendWhatsappTemplate({
+			phone: lead.phone,
+			message: leadMessage!,
+			logPrefix: "[SimpleTech][auto]",
+		});
+		if (sendResult.success) {
+			leadStatus = "sent";
+		} else {
 			leadStatus = "failed";
-			leadReason =
-				err instanceof Error ? err.message : "Error desconocido";
+			leadReason = sendResult.error ?? "Error desconocido";
 		}
 	}
 
@@ -251,7 +208,7 @@ export async function sendContractLinksToLead(params: {
 }
 
 export const messagingRouter = {
-	sendWhatsAppMessage: protectedProcedure
+	sendWhatsAppMessage: crmProcedure
 		.input(
 			z.object({
 				leadId: z.string(),
@@ -277,29 +234,17 @@ export const messagingRouter = {
 				});
 			}
 
-			const stClientGeneric = getSimpletechClient();
-			if (!stClientGeneric) {
-				throw new ORPCError("INTERNAL_SERVER_ERROR", {
-					message: "Servicio de mensajería no configurado",
+			const result = await sendWhatsappTemplate({
+				phone: lead.phone,
+				message: input.message,
+				logPrefix: "[SimpleTech][msg]",
+			});
+
+			if (!result.success) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: result.error ?? "Error enviando mensaje",
 				});
 			}
-
-			const phoneNormalized = normalizePhone(lead.phone);
-			const templateRequest = {
-				templateName: TEMPLATE_NAME,
-				serviceIdentifier: BOT_NUMBER,
-				messages: [
-					{
-						number: phoneNormalized,
-						body: [input.message],
-					},
-				],
-			};
-			console.log("[SimpleTech][msg] Enviando template a:", phoneNormalized);
-			console.log("[SimpleTech][msg] Request:", JSON.stringify(templateRequest, null, 2));
-
-			const result = await stClientGeneric.sendTemplate(templateRequest);
-			console.log("[SimpleTech][msg] Response:", JSON.stringify(result, null, 2));
 
 			return result;
 		}),
@@ -307,7 +252,7 @@ export const messagingRouter = {
 	/**
 	 * Arma el mensaje de contratos para un lead + oportunidad.
 	 */
-	getContractLinksMessage: protectedProcedure
+	getContractLinksMessage: crmProcedure
 		.input(
 			z.object({
 				leadId: z.string().uuid(),
@@ -370,7 +315,7 @@ export const messagingRouter = {
 	/**
 	 * Obtiene el log de WhatsApp de una oportunidad con sus destinatarios.
 	 */
-	getWhatsappLog: protectedProcedure
+	getWhatsappLog: crmProcedure
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
@@ -424,7 +369,7 @@ export const messagingRouter = {
 	 * Recibe los links individuales por contrato, arma el mensaje, lo envía,
 	 * y guarda el resultado real (sent/failed).
 	 */
-	updateWhatsappLog: protectedProcedure
+	updateWhatsappLog: crmProcedure
 		.input(
 			z.object({
 				recipientId: z.string().uuid(),
@@ -481,44 +426,17 @@ export const messagingRouter = {
 			);
 
 			// Enviar por WhatsApp
-			let status: "sent" | "failed" = "failed";
-			let reason: string | null = null;
-
-			const stClientUpdate = getSimpletechClient();
-			if (!stClientUpdate) {
-				reason = "Servicio de mensajería no configurado";
-			} else {
-				const phoneNormalized = normalizePhone(input.phone);
-				const templateRequest = {
-					templateName: TEMPLATE_NAME,
-					serviceIdentifier: BOT_NUMBER,
-					messages: [
-						{
-							number: phoneNormalized,
-							body: [message],
-						},
-					],
-				};
-				console.log("[SimpleTech][manual] Enviando template a:", phoneNormalized);
-				console.log("[SimpleTech][manual] Request:", JSON.stringify(templateRequest, null, 2));
-				try {
-					const sendResult = await stClientUpdate.sendTemplate(templateRequest);
-					console.log("[SimpleTech][manual] Response:", JSON.stringify(sendResult, null, 2));
-					if (sendResult.success) {
-						status = "sent";
-						console.log("[SimpleTech][manual] Envío exitoso. templateMessageId:", sendResult.results[0]?.templateMessageId);
-					} else {
-						reason = sendResult.failed[0]?.error ?? "Error desconocido al enviar";
-						console.log("[SimpleTech][manual] Envío fallido. Error:", reason);
-					}
-				} catch (err) {
-					console.error("[SimpleTech][manual] Exception:", err);
-					reason =
-						err instanceof Error
-							? err.message
-							: "Error desconocido al enviar";
-				}
-			}
+			const sendResult = await sendWhatsappTemplate({
+				phone: input.phone,
+				message,
+				logPrefix: "[SimpleTech][manual]",
+			});
+			const status: "sent" | "failed" = sendResult.success
+				? "sent"
+				: "failed";
+			const reason: string | null = sendResult.success
+				? null
+				: (sendResult.error ?? "Error desconocido al enviar");
 
 			const [updated] = await db
 				.update(whatsappLogRecipients)

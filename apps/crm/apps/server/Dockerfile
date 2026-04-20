@@ -8,9 +8,11 @@ WORKDIR /usr/src/app
 FROM base AS builder
 WORKDIR /usr/src/app
 
-# Copiamos los paquetes locales (infornet y sms)
+# Copiamos los paquetes locales (infornet, sms, simpletech, email)
 COPY packages/infornet ./packages/infornet
 COPY packages/sms ./packages/sms
+COPY packages/simpletech ./packages/simpletech
+COPY packages/email ./packages/email
 
 # Instalamos dependencias del paquete infornet
 WORKDIR /usr/src/app/packages/infornet
@@ -18,6 +20,14 @@ RUN bun install
 
 # Instalamos dependencias del paquete sms
 WORKDIR /usr/src/app/packages/sms
+RUN bun install
+
+# Instalamos dependencias del paquete simpletech
+WORKDIR /usr/src/app/packages/simpletech
+RUN bun install
+
+# Instalamos dependencias del paquete email
+WORKDIR /usr/src/app/packages/email
 RUN bun install
 
 # Copiamos el código del server manteniendo la estructura de rutas
@@ -28,11 +38,14 @@ COPY apps/crm/apps/server ./apps/crm/apps/server
 WORKDIR /usr/src/app/apps/crm/apps/server
 RUN bun install
 
-# Reemplazar los symlinks de @repo/* con el contenido real
-RUN rm -rf node_modules/@repo/infornet node_modules/@repo/sms && \
-    mkdir -p node_modules/@repo && \
+# Reemplazar los symlinks de @repo/* y @cci/* con el contenido real
+RUN rm -rf node_modules/@repo/infornet node_modules/@repo/sms \
+           node_modules/@repo/simpletech node_modules/@cci/email && \
+    mkdir -p node_modules/@repo node_modules/@cci && \
     cp -r /usr/src/app/packages/infornet node_modules/@repo/infornet && \
-    cp -r /usr/src/app/packages/sms node_modules/@repo/sms
+    cp -r /usr/src/app/packages/sms node_modules/@repo/sms && \
+    cp -r /usr/src/app/packages/simpletech node_modules/@repo/simpletech && \
+    cp -r /usr/src/app/packages/email node_modules/@cci/email
 
 # Compilamos la app
 RUN bun build \

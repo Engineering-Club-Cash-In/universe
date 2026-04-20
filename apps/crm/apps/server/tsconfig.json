@@ -9,14 +9,12 @@
 		"baseUrl": "./",
 		"paths": {
 			"@/*": ["./src/*"],
-			"@cci/email": ["./src/types/cci-email.d.ts"],
 			"@repo/infornet": ["../../../../packages/infornet/dist"]
 		},
 		"outDir": "./dist",
 		"types": ["bun"],
 		"composite": true,
-		"jsx": "react-jsx",
-		"jsxImportSource": "hono/jsx"
+		"jsx": "react-jsx"
 	},
 	"include": ["src/**/*"],
 	"tsc-alias": {

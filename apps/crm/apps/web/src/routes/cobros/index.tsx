@@ -988,9 +988,6 @@ function RouteComponent() {
 									estadoMora: filtroEtapa || undefined,
 									searchTerm: debouncedFilterValue || undefined,
 									time: timeParam,
-									emailCobrador: !PERMISSIONS.canAssignCobros(userRole ?? "")
-										? session?.user?.email
-										: undefined,
 								}}
 							>
 								<Button

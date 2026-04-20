@@ -2903,11 +2903,12 @@ export const cobrosRouter = {
 		.input(
 			z.object({
 				plantillaId: z.string(),
-				// Mismos filtros que getTodosLosCreditos
+				// Mismos filtros que getTodosLosCreditos (salvo emailCobrador, que
+				// se deriva del context para evitar que un cobrador mande fuera de
+				// su cartera).
 				estadoMora: z.string().optional(),
 				searchTerm: z.string().optional(),
 				time: z.enum(["WEEK", "MONTH", "DUEMONTH", "TODAY"]).optional(),
-				emailCobrador: z.string().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -2925,6 +2926,12 @@ export const cobrosRouter = {
 					message: `Plantilla '${input.plantillaId}' no existe`,
 				});
 			}
+
+			// Scope server-side: solo supervisores/admins pueden ver toda la
+			// cartera; el resto queda restringido a sus propios créditos.
+			const emailCobrador = PERMISSIONS.canAssignCobros(context.userRole)
+				? undefined
+				: context.user?.email;
 
 			// 1. Mapear estadoMora → params de cartera-back (mismo mapping que
 			// getTodosLosCreditos).
@@ -2967,28 +2974,75 @@ export const cobrosRouter = {
 				}
 			}
 
-			// 2. Paginar getAllCreditos hasta traer todos los matcheos.
+			// 2. Resolver búsqueda igual que getTodosLosCreditos: si el término
+			// tiene dígitos se asume placa y se convierte a número SIFCO
+			// consultando el CRM; si es alfabético se usa nombre_usuario.
+			const searchTerm = input.searchTerm?.trim() || "";
+			const hasNumber = /\d/.test(searchTerm);
+			const isPlateSearch = searchTerm.length > 0 && hasNumber;
+			const isNameSearch = searchTerm.length > 0 && !hasNumber;
+
+			let numeroSifcoFiltro: string | undefined;
+			let searchPorPlacaSinMatch = false;
+			const matchingSifcos = new Set<string>();
+			if (isPlateSearch) {
+				const matchingOpportunities = await db
+					.select({
+						numeroSifco: opportunities.numeroSifco,
+					})
+					.from(opportunities)
+					.innerJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+					.where(
+						and(
+							sql`LOWER(REPLACE(REPLACE(${vehicles.licensePlate}, '-', ''), ' ', '')) LIKE ${"%" + searchTerm.toLowerCase().replaceAll(/[\s-]+/g, "") + "%"}`,
+							sql`${opportunities.numeroSifco} IS NOT NULL`,
+						),
+					);
+
+				if (matchingOpportunities.length === 0) {
+					searchPorPlacaSinMatch = true;
+				} else if (matchingOpportunities.length === 1) {
+					numeroSifcoFiltro = matchingOpportunities[0].numeroSifco ?? undefined;
+				}
+				for (const m of matchingOpportunities) {
+					if (m.numeroSifco) matchingSifcos.add(m.numeroSifco);
+				}
+			}
+
+			// 3. Paginar getAllCreditos hasta traer todos los matcheos.
 			const creditosFiltrados: Awaited<
 				ReturnType<typeof carteraBackClient.getAllCreditos>
 			>["data"] = [];
-			const perPage = 100;
-			let page = 1;
-			while (true) {
-				const resp = await carteraBackClient.getAllCreditos({
-					mes: 0,
-					anio: new Date().getFullYear(),
-					estado: estadoCartera,
-					cuotas_atrasadas: cuotasAtrasadas,
-					time: input.time,
-					email_cobrador: input.emailCobrador,
-					nombre_usuario: input.searchTerm?.trim() || undefined,
-					page,
-					perPage,
-				});
-				creditosFiltrados.push(...resp.data);
-				if (resp.data.length < perPage) break;
-				if (page >= resp.totalPages) break;
-				page += 1;
+			if (!searchPorPlacaSinMatch) {
+				const perPage = 100;
+				let page = 1;
+				while (true) {
+					const resp = await obtenerTodosLosCreditosCarteraBack({
+						mes: 0,
+						anio: new Date().getFullYear(),
+						estado: estadoCartera,
+						cuotasAtrasadas,
+						time: input.time,
+						email_cobrador: emailCobrador,
+						nombre_usuario: isNameSearch ? searchTerm : undefined,
+						numero_credito_sifco: numeroSifcoFiltro,
+						page,
+						perPage,
+					});
+					creditosFiltrados.push(...resp.data);
+					if (resp.data.length < perPage) break;
+					if (page >= resp.totalPages) break;
+					page += 1;
+				}
+
+				// Filtrado local cuando la placa matcheó varias SIFCOs.
+				if (isPlateSearch && !numeroSifcoFiltro) {
+					for (let i = creditosFiltrados.length - 1; i >= 0; i--) {
+						const sifco = creditosFiltrados[i].creditos.numero_credito_sifco;
+						if (!sifco || !matchingSifcos.has(sifco))
+							creditosFiltrados.splice(i, 1);
+					}
+				}
 			}
 
 			// 3. Traer en un solo query nuestros datos locales (teléfono, placa,
@@ -3324,10 +3378,14 @@ export const cobrosRouter = {
 
 			const numeroSifco = await resolveSifcoFromCaso(input.casoCobroId);
 			const testMode = isTestModeEnabled();
-			// Para SMS el número debe incluir prefijo 502 completo.
+			// Para SMS el número debe incluir prefijo 502 completo. El input viene
+			// validado a solo dígitos; si son 8 (local) le ponemos el 502, si ya
+			// trae 502 (p.ej. 50258446376) lo dejamos.
+			const ensure502 = (digits: string) =>
+				digits.startsWith("502") ? digits : `502${digits}`;
 			const telefonoDestino = testMode
-				? `502${getTestPhone()}`
-				: input.telefono;
+				? ensure502(getTestPhone())
+				: ensure502(input.telefono);
 
 			let sendError: string | null = null;
 			let mailingId: number | undefined;

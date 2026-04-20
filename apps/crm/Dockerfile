@@ -8,6 +8,8 @@ COPY apps/crm/apps/web/package.json ./apps/crm/apps/web/
 COPY apps/crm/apps/server/package.json ./apps/crm/apps/server/
 COPY packages/infornet ./packages/infornet
 COPY packages/sms ./packages/sms
+COPY packages/simpletech ./packages/simpletech
+COPY packages/email ./packages/email
 
 WORKDIR /app/apps/crm
 RUN bun install --frozen-lockfile

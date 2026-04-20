@@ -1,5 +1,18 @@
+import { sendPlainEmail } from "@cci/email";
 import { ORPCError } from "@orpc/server";
-import { and, asc, count, desc, eq, gte, ilike, or, sql } from "drizzle-orm";
+import { SMSClient } from "@repo/sms";
+import {
+	and,
+	asc,
+	count,
+	desc,
+	eq,
+	gte,
+	ilike,
+	inArray,
+	or,
+	sql,
+} from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -15,6 +28,7 @@ import {
 	metodoContactoEnum,
 	recuperacionesVehiculo,
 } from "../db/schema/cobros";
+import { cobrosSendLogs } from "../db/schema/cobros-send-logs";
 import {
 	clients,
 	leads,
@@ -32,7 +46,20 @@ import {
 	crmCobrosOrInvestmentsProcedure,
 	crmOrCobrosProcedure,
 } from "../lib/orpc";
+import {
+	interpolar as interpolarPlantilla,
+	PLANTILLAS_MENSAJES,
+} from "../lib/cobros-plantillas";
+import {
+	getTestPhone,
+	isTestModeEnabled,
+	TEST_EMAIL,
+} from "../lib/messaging-test-mode";
 import { PERMISSIONS } from "../lib/roles";
+import {
+	sendWhatsappTemplate,
+	sendWhatsappTemplateBatch,
+} from "../lib/simpletech";
 import { carteraBackClient } from "../services/cartera-back-client";
 import {
 	createPagoInCarteraBack,
@@ -2811,4 +2838,663 @@ export const cobrosRouter = {
 
 			return updated;
 		}),
+
+	// ========================================================================
+	// ENVÍO DE MENSAJES (SMS / WhatsApp / Email)
+	// ========================================================================
+
+	enviarWhatsappCobros: cobrosProcedure
+		.input(
+			z.object({
+				telefono: z.string().min(8, "Teléfono inválido"),
+				mensaje: z.string().min(1, "Mensaje requerido"),
+				casoCobroId: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const numeroSifco = await resolveSifcoFromCaso(input.casoCobroId);
+			const testMode = isTestModeEnabled();
+			const telefonoDestino = testMode ? getTestPhone() : input.telefono;
+
+			const result = await sendWhatsappTemplate({
+				phone: telefonoDestino,
+				message: input.mensaje,
+				logPrefix: testMode ? "[SimpleTech][cobros][TEST]" : "[SimpleTech][cobros]",
+			});
+
+			await persistCobrosSendLog({
+				numeroCreditoSifco: numeroSifco,
+				canal: "whatsapp",
+				telefono: telefonoDestino,
+				mensaje: input.mensaje,
+				result: result.success
+					? {
+							success: true,
+							providerResponse: {
+								templateMessageId: result.templateMessageId,
+								testMode,
+								realTarget: testMode ? input.telefono : undefined,
+							},
+						}
+					: {
+							success: false,
+							errorMessage: result.error,
+							providerResponse: testMode
+								? { testMode, realTarget: input.telefono }
+								: undefined,
+						},
+				createdBy: context.userId,
+			});
+
+			if (!result.success) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Error enviando WhatsApp: ${result.error ?? "desconocido"}`,
+				});
+			}
+
+			return {
+				success: true,
+				templateMessageId: result.templateMessageId,
+				casoCobroId: input.casoCobroId,
+			};
+		}),
+
+	enviarWhatsappMasivoCobros: cobrosProcedure
+		.input(
+			z.object({
+				plantillaId: z.string(),
+				// Mismos filtros que getTodosLosCreditos (salvo emailCobrador, que
+				// se deriva del context para evitar que un cobrador mande fuera de
+				// su cartera).
+				estadoMora: z.string().optional(),
+				searchTerm: z.string().optional(),
+				time: z.enum(["WEEK", "MONTH", "DUEMONTH", "TODAY"]).optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con Cartera-Back no está habilitada",
+				});
+			}
+
+			const plantilla = PLANTILLAS_MENSAJES.find(
+				(p) => p.id === input.plantillaId,
+			);
+			if (!plantilla) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Plantilla '${input.plantillaId}' no existe`,
+				});
+			}
+
+			// Scope server-side: solo supervisores/admins pueden ver toda la
+			// cartera; el resto queda restringido a sus propios créditos.
+			const emailCobrador = PERMISSIONS.canAssignCobros(context.userRole)
+				? undefined
+				: context.user?.email;
+
+			// 1. Mapear estadoMora → params de cartera-back (mismo mapping que
+			// getTodosLosCreditos).
+			let cuotasAtrasadas: number | undefined;
+			let estadoCartera:
+				| "ACTIVO"
+				| "CANCELADO"
+				| "INCOBRABLE"
+				| undefined = "ACTIVO";
+			if (input.estadoMora) {
+				switch (input.estadoMora) {
+					case "al_dia":
+						cuotasAtrasadas = 0;
+						estadoCartera = "ACTIVO";
+						break;
+					case "mora_30":
+						cuotasAtrasadas = 1;
+						estadoCartera = "ACTIVO";
+						break;
+					case "mora_60":
+						cuotasAtrasadas = 2;
+						estadoCartera = "ACTIVO";
+						break;
+					case "mora_90":
+						cuotasAtrasadas = 3;
+						estadoCartera = "ACTIVO";
+						break;
+					case "mora_120":
+						cuotasAtrasadas = 4;
+						estadoCartera = "ACTIVO";
+						break;
+					case "incobrable":
+						estadoCartera = "INCOBRABLE";
+						break;
+					case "completado":
+						estadoCartera = "CANCELADO";
+						break;
+					default:
+						estadoCartera = "ACTIVO";
+				}
+			}
+
+			// 2. Resolver búsqueda igual que getTodosLosCreditos: si el término
+			// tiene dígitos se asume placa y se convierte a número SIFCO
+			// consultando el CRM; si es alfabético se usa nombre_usuario.
+			const searchTerm = input.searchTerm?.trim() || "";
+			const hasNumber = /\d/.test(searchTerm);
+			const isPlateSearch = searchTerm.length > 0 && hasNumber;
+			const isNameSearch = searchTerm.length > 0 && !hasNumber;
+
+			let numeroSifcoFiltro: string | undefined;
+			let searchPorPlacaSinMatch = false;
+			const matchingSifcos = new Set<string>();
+			if (isPlateSearch) {
+				const matchingOpportunities = await db
+					.select({
+						numeroSifco: opportunities.numeroSifco,
+					})
+					.from(opportunities)
+					.innerJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+					.where(
+						and(
+							sql`LOWER(REPLACE(REPLACE(${vehicles.licensePlate}, '-', ''), ' ', '')) LIKE ${"%" + searchTerm.toLowerCase().replaceAll(/[\s-]+/g, "") + "%"}`,
+							sql`${opportunities.numeroSifco} IS NOT NULL`,
+						),
+					);
+
+				if (matchingOpportunities.length === 0) {
+					searchPorPlacaSinMatch = true;
+				} else if (matchingOpportunities.length === 1) {
+					numeroSifcoFiltro = matchingOpportunities[0].numeroSifco ?? undefined;
+				}
+				for (const m of matchingOpportunities) {
+					if (m.numeroSifco) matchingSifcos.add(m.numeroSifco);
+				}
+			}
+
+			// 3. Paginar getAllCreditos hasta traer todos los matcheos.
+			const creditosFiltrados: Awaited<
+				ReturnType<typeof carteraBackClient.getAllCreditos>
+			>["data"] = [];
+			if (!searchPorPlacaSinMatch) {
+				const perPage = 100;
+				let page = 1;
+				while (true) {
+					const resp = await obtenerTodosLosCreditosCarteraBack({
+						mes: 0,
+						anio: new Date().getFullYear(),
+						estado: estadoCartera,
+						cuotasAtrasadas,
+						time: input.time,
+						email_cobrador: emailCobrador,
+						nombre_usuario: isNameSearch ? searchTerm : undefined,
+						numero_credito_sifco: numeroSifcoFiltro,
+						page,
+						perPage,
+					});
+					creditosFiltrados.push(...resp.data);
+					if (resp.data.length < perPage) break;
+					if (page >= resp.totalPages) break;
+					page += 1;
+				}
+
+				// Filtrado local cuando la placa matcheó varias SIFCOs.
+				if (isPlateSearch && !numeroSifcoFiltro) {
+					for (let i = creditosFiltrados.length - 1; i >= 0; i--) {
+						const sifco = creditosFiltrados[i].creditos.numero_credito_sifco;
+						if (!sifco || !matchingSifcos.has(sifco))
+							creditosFiltrados.splice(i, 1);
+					}
+				}
+			}
+
+			// 3. Traer en un solo query nuestros datos locales (teléfono, placa,
+			// vehículo) indexados por numero_sifco.
+			const numerosSifco = creditosFiltrados
+				.map((c) => c.creditos.numero_credito_sifco)
+				.filter((s): s is string => !!s);
+
+			type LocalInfo = {
+				telefono: string | null;
+				placa: string | null;
+				marca: string | null;
+				modelo: string | null;
+				year: number | null;
+			};
+			const locales = new Map<string, LocalInfo>();
+
+			if (numerosSifco.length > 0) {
+				const oppRows = await db
+					.select({
+						numeroSifco: opportunities.numeroSifco,
+						leadPhone: leads.phone,
+						placa: vehicles.licensePlate,
+						marca: vehicles.make,
+						modelo: vehicles.model,
+						year: vehicles.year,
+					})
+					.from(opportunities)
+					.leftJoin(leads, eq(opportunities.leadId, leads.id))
+					.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+					.where(inArray(opportunities.numeroSifco, numerosSifco));
+
+				for (const row of oppRows) {
+					if (!row.numeroSifco) continue;
+					locales.set(row.numeroSifco, {
+						telefono: row.leadPhone,
+						placa: row.placa,
+						marca: row.marca,
+						modelo: row.modelo,
+						year: row.year,
+					});
+				}
+
+				// Casos de cobros pueden tener telefonoPrincipal override.
+				const casosRows = await db
+					.select({
+						numeroSifco: casosCobros.numeroCreditoSifco,
+						telefonoPrincipal: casosCobros.telefonoPrincipal,
+					})
+					.from(casosCobros)
+					.where(inArray(casosCobros.numeroCreditoSifco, numerosSifco));
+
+				for (const row of casosRows) {
+					if (!row.numeroSifco) continue;
+					const prev = locales.get(row.numeroSifco);
+					locales.set(row.numeroSifco, {
+						telefono: row.telefonoPrincipal ?? prev?.telefono ?? null,
+						placa: prev?.placa ?? null,
+						marca: prev?.marca ?? null,
+						modelo: prev?.modelo ?? null,
+						year: prev?.year ?? null,
+					});
+				}
+			}
+
+			// 4. Construir recipients, aplicando reglas de descarte.
+			const testMode = isTestModeEnabled();
+			type Candidato = {
+				numeroSifco: string;
+				telefono: string; // destino efectivo (test o real)
+				telefonoReal: string; // destino original (para trazabilidad)
+				mensaje: string;
+			};
+			const candidatos: Candidato[] = [];
+			const descartados: Array<{
+				numeroSifco: string | null;
+				motivo: string;
+			}> = [];
+
+			for (const credito of creditosFiltrados) {
+				const sifco = credito.creditos.numero_credito_sifco;
+				const cuota = credito.creditos.cuota;
+				const asesor = credito.asesores;
+				const info = sifco ? locales.get(sifco) : undefined;
+				const telefono = info?.telefono ?? null;
+
+				if (!cuota || Number(cuota) === 0) {
+					descartados.push({ numeroSifco: sifco, motivo: "sin cuota" });
+					continue;
+				}
+				if (!telefono) {
+					descartados.push({ numeroSifco: sifco, motivo: "sin teléfono" });
+					continue;
+				}
+				if (!asesor) {
+					descartados.push({ numeroSifco: sifco, motivo: "sin asesor" });
+					continue;
+				}
+
+				const marcaLineaModelo = [
+					info?.marca ?? "",
+					info?.modelo ?? "",
+					info?.year ? String(info.year) : "",
+				]
+					.filter(Boolean)
+					.join(" ")
+					.trim();
+
+				// Total a cobrar = monto en mora + cuota mensual (mismo criterio
+				// que se muestra en la pantalla de detalle del caso).
+				const montoMora = Number(credito.mora?.monto_mora ?? 0);
+				const totalACobrar =
+					montoMora > 0 ? montoMora + Number(cuota) : 0;
+
+				const mensaje = interpolarPlantilla(plantilla.cuerpo, {
+					clienteNombre: credito.usuarios.nombre ?? "",
+					fechaPago: "",
+					cuotaMensual: String(cuota),
+					placa: info?.placa ?? "",
+					marcaLineaModelo,
+					montoAdeudado:
+						totalACobrar > 0
+							? totalACobrar.toLocaleString("es-GT", {
+									minimumFractionDigits: 2,
+									maximumFractionDigits: 2,
+								})
+							: "",
+					cuotasAtraso: credito.mora?.cuotas_atrasadas ?? 0,
+					telefonoAsesor: asesor.telefono ?? "",
+					nombreAsesor: asesor.nombre ?? "",
+				});
+
+				candidatos.push({
+					numeroSifco: sifco ?? "",
+					telefono: testMode ? getTestPhone(candidatos.length) : telefono,
+					telefonoReal: telefono,
+					mensaje,
+				});
+			}
+
+			// 5. Enviar en chunks de 100 y loguear cada resultado.
+			const CHUNK_SIZE = 100;
+			let enviados = 0;
+			let fallidos = 0;
+			const detalle: Array<{
+				numeroSifco: string;
+				telefono: string;
+				success: boolean;
+				error?: string;
+			}> = [];
+
+			for (let i = 0; i < candidatos.length; i += CHUNK_SIZE) {
+				const chunk = candidatos.slice(i, i + CHUNK_SIZE);
+				const batch = await sendWhatsappTemplateBatch({
+					recipients: chunk.map((c) => ({
+						phone: c.telefono,
+						message: c.mensaje,
+						externalRef: c.numeroSifco,
+					})),
+					logPrefix: "[SimpleTech][cobros-masivo]",
+				});
+
+				const byRef = new Map(
+					batch.items.map((item) => [item.externalRef ?? "", item]),
+				);
+
+				for (const c of chunk) {
+					const res = byRef.get(c.numeroSifco);
+					const ok = res?.success === true;
+					if (ok) enviados += 1;
+					else fallidos += 1;
+
+					detalle.push({
+						numeroSifco: c.numeroSifco,
+						telefono: c.telefono,
+						success: ok,
+						error: res?.error,
+					});
+
+					await persistCobrosSendLog({
+						numeroCreditoSifco: c.numeroSifco || null,
+						canal: "whatsapp",
+						telefono: c.telefono,
+						mensaje: c.mensaje,
+						createdBy: context.userId,
+						result: ok
+							? {
+									success: true,
+									providerResponse: {
+										templateMessageId: res?.templateMessageId,
+										testMode,
+										realTarget: testMode ? c.telefonoReal : undefined,
+									},
+								}
+							: {
+									success: false,
+									errorMessage:
+										res?.error ??
+										batch.transportError ??
+										"Error desconocido",
+									providerResponse: testMode
+										? { testMode, realTarget: c.telefonoReal }
+										: undefined,
+								},
+					});
+				}
+			}
+
+			return {
+				plantillaId: input.plantillaId,
+				totalCreditos: creditosFiltrados.length,
+				elegibles: candidatos.length,
+				enviados,
+				fallidos,
+				descartados,
+				detalle,
+			};
+		}),
+
+	enviarEmailCobros: cobrosProcedure
+		.input(
+			z.object({
+				destinatario: z.string().email("Email inválido"),
+				asunto: z.string().min(1, "Asunto requerido").max(200),
+				mensaje: z.string().min(1, "Mensaje requerido"),
+				casoCobroId: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const escapeHtml = (s: string) =>
+				s
+					.replace(/&/g, "&amp;")
+					.replace(/</g, "&lt;")
+					.replace(/>/g, "&gt;")
+					.replace(/"/g, "&quot;")
+					.replace(/'/g, "&#039;");
+
+			const html = `<div style="font-family:Arial,sans-serif;color:#111827;font-size:14px;line-height:1.5;white-space:pre-wrap;">${escapeHtml(
+				input.mensaje,
+			)}</div>`;
+
+			const numeroSifco = await resolveSifcoFromCaso(input.casoCobroId);
+			const testMode = isTestModeEnabled();
+			const emailDestino = testMode ? TEST_EMAIL : input.destinatario;
+
+			let sendError: string | null = null;
+			let emailId: string | undefined;
+			try {
+				const result = await sendPlainEmail(
+					emailDestino,
+					input.asunto,
+					html,
+				);
+
+				if (!result.success) {
+					sendError =
+						result.error && typeof result.error === "object"
+							? JSON.stringify(result.error)
+							: String(result.error ?? "desconocido");
+				} else {
+					emailId = result.data?.id;
+				}
+			} catch (error) {
+				sendError =
+					error instanceof Error ? error.message : String(error);
+			}
+
+			await persistCobrosSendLog({
+				numeroCreditoSifco: numeroSifco,
+				canal: "email",
+				email: emailDestino,
+				asunto: input.asunto,
+				mensaje: input.mensaje,
+				result: sendError
+					? {
+							success: false,
+							errorMessage: sendError,
+							providerResponse: testMode
+								? { testMode, realTarget: input.destinatario }
+								: undefined,
+						}
+					: {
+							success: true,
+							providerResponse: {
+								emailId,
+								testMode,
+								realTarget: testMode ? input.destinatario : undefined,
+							},
+						},
+				createdBy: context.userId,
+			});
+
+			if (sendError) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Error enviando email: ${sendError}`,
+				});
+			}
+
+			return {
+				success: true,
+				emailId,
+				casoCobroId: input.casoCobroId,
+			};
+		}),
+
+	enviarSmsCobros: cobrosProcedure
+		.input(
+			z.object({
+				telefono: z
+					.string()
+					.min(8, "Teléfono inválido")
+					.transform((v) => v.replace(/[^0-9]/g, "")),
+				mensaje: z.string().min(1, "Mensaje requerido").max(480),
+				casoCobroId: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const token = process.env.SMS_TOKEN;
+			const apiKeyRaw = process.env.SMS_API_KEY;
+			if (!token || !apiKeyRaw) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Credenciales SMS no configuradas",
+				});
+			}
+
+			const smsClient = new SMSClient({
+				credentials: {
+					token,
+					apiKey: Number.parseInt(apiKeyRaw, 10),
+				},
+				timeout: 60000, // SMS API a veces tarda >30s, subir a 60s.
+			});
+
+			const numeroSifco = await resolveSifcoFromCaso(input.casoCobroId);
+			const testMode = isTestModeEnabled();
+			// Para SMS el número debe incluir prefijo 502 completo. El input viene
+			// validado a solo dígitos; si son 8 (local) le ponemos el 502, si ya
+			// trae 502 (p.ej. 50258446376) lo dejamos.
+			const ensure502 = (digits: string) =>
+				digits.startsWith("502") ? digits : `502${digits}`;
+			const telefonoDestino = testMode
+				? ensure502(getTestPhone())
+				: ensure502(input.telefono);
+
+			let sendError: string | null = null;
+			let mailingId: number | undefined;
+			try {
+				const result = await smsClient.send({
+					msisdns: [telefonoDestino],
+					message: input.mensaje,
+					country: "GT",
+					tag: "cobros-contacto",
+					dial: 50237633199,
+				});
+
+				if (!result.success) {
+					sendError =
+						result.error?.hint ||
+						result.error?.message ||
+						"desconocido";
+				} else {
+					mailingId = result.mailingId;
+				}
+			} catch (error) {
+				sendError =
+					error instanceof Error ? error.message : String(error);
+			}
+
+			await persistCobrosSendLog({
+				numeroCreditoSifco: numeroSifco,
+				canal: "sms",
+				telefono: telefonoDestino,
+				mensaje: input.mensaje,
+				result: sendError
+					? {
+							success: false,
+							errorMessage: sendError,
+							providerResponse: testMode
+								? { testMode, realTarget: input.telefono }
+								: undefined,
+						}
+					: {
+							success: true,
+							providerResponse: {
+								mailingId,
+								testMode,
+								realTarget: testMode ? input.telefono : undefined,
+							},
+						},
+				createdBy: context.userId,
+			});
+
+			if (sendError) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Error enviando SMS: ${sendError}`,
+				});
+			}
+
+			return {
+				success: true,
+				mailingId,
+				casoCobroId: input.casoCobroId,
+			};
+		}),
 };
+
+/**
+ * Resuelve el número SIFCO del caso de cobros (si existe).
+ */
+async function resolveSifcoFromCaso(
+	casoCobroId: string | undefined,
+): Promise<string | null> {
+	if (!casoCobroId) return null;
+	const [caso] = await db
+		.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
+		.from(casosCobros)
+		.where(eq(casosCobros.id, casoCobroId))
+		.limit(1);
+	return caso?.numeroCreditoSifco ?? null;
+}
+
+/**
+ * Inserta una fila en cobros_send_logs. Nunca propaga errores: si el log falla
+ * (por un problema transitorio de DB) no queremos romper el flujo del envío.
+ */
+async function persistCobrosSendLog(params: {
+	numeroCreditoSifco: string | null;
+	canal: "sms" | "email" | "whatsapp";
+	telefono?: string;
+	email?: string;
+	asunto?: string;
+	mensaje: string;
+	createdBy: string;
+	result:
+		| { success: true; providerResponse?: Record<string, unknown> }
+		| { success: false; errorMessage?: string; providerResponse?: Record<string, unknown> };
+}) {
+	try {
+		await db.insert(cobrosSendLogs).values({
+			numeroCreditoSifco: params.numeroCreditoSifco,
+			canal: params.canal,
+			telefono: params.telefono,
+			email: params.email,
+			asunto: params.asunto,
+			mensaje: params.mensaje,
+			status: params.result.success ? "sent" : "failed",
+			errorMessage: params.result.success ? null : params.result.errorMessage,
+			providerResponse: params.result.providerResponse,
+			createdBy: params.createdBy,
+			sentAt: params.result.success ? new Date() : null,
+		});
+	} catch (err) {
+		console.error("[cobros_send_logs] Error guardando log:", err);
+	}
+}

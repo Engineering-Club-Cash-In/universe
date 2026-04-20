@@ -28,7 +28,7 @@ import {
   abonos_capital,
 } from "../database/db/schema";
 import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
-import { eq, and, sql, inArray, ilike, like, desc, count, SQL } from "drizzle-orm";
+import { eq, and, sql, inArray, ilike, like, desc, count, SQL, isNull } from "drizzle-orm";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import Big from "big.js";
 import { sendLiquidationEmail, sendSimpleEmail } from "@cci/email";
@@ -1502,7 +1502,7 @@ export async function resumeInvestor(
                 isr: inv.emite_factura ? 0 : formatValue(isr.round(2).toString()),
                 porcentaje_inversor: pago.porcentaje_participacion,
                 cuota_inversor: formatValue(cuota_inversor.toString()),
-                cuota: formatValue(cuota),
+                cuota: Number(cuota) || 0,
                 fecha_pago: pago.fecha_pago,
                 fecha_vencimiento_cuota: pago.fecha_vencimiento_cuota, // 🔥 NUEVA
                 fecha_pago_efectivo_cuota: pago.fecha_pago_efectivo_cuota, // 🔥 NUEVA
@@ -2018,6 +2018,46 @@ export async function getLiquidacionesPorFecha(fecha: string) {
     })
     .from(liquidaciones)
     .where(sql`${liquidaciones.fecha_liquidacion}::date = ${fecha}`);
+}
+
+/**
+ * Detecta pagos huérfanos: pagos en pagos_credito_inversionistas_espejo cuyo
+ * credito_id ya no existe en creditos_inversionistas_espejo para ese inversionista
+ * (el crédito fue removido de la participación pero el pago quedó).
+ */
+export async function detectPagosHuerfanos(
+  inversionistaId: number,
+  liquidacionId: number
+) {
+  const huerfanos = await db
+    .select({
+      pago_id: pagos_credito_inversionistas_espejo.id,
+      credito_id: pagos_credito_inversionistas_espejo.credito_id,
+      fecha_pago: pagos_credito_inversionistas_espejo.fecha_pago,
+    })
+    .from(pagos_credito_inversionistas_espejo)
+    .leftJoin(
+      creditos_inversionistas_espejo,
+      and(
+        eq(
+          creditos_inversionistas_espejo.credito_id,
+          pagos_credito_inversionistas_espejo.credito_id
+        ),
+        eq(
+          creditos_inversionistas_espejo.inversionista_id,
+          pagos_credito_inversionistas_espejo.inversionista_id
+        )
+      )
+    )
+    .where(
+      and(
+        eq(pagos_credito_inversionistas_espejo.inversionista_id, inversionistaId),
+        eq(pagos_credito_inversionistas_espejo.liquidacion_id, liquidacionId),
+        isNull(creditos_inversionistas_espejo.id)
+      )
+    );
+
+  return huerfanos;
 }
 
 // ============================================

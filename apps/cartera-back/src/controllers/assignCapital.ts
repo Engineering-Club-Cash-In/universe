@@ -8,8 +8,14 @@ import {
   inversionistas,
   usuarios,
 } from "../database/db";
-import { eq, and, sql, inArray, notInArray, gt } from "drizzle-orm";
+import { eq, and, sql, inArray, notInArray, gt, lt } from "drizzle-orm";
 import Big from "big.js";
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
+import timezone from "dayjs/plugin/timezone";
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 // ============================================================
 // TIPOS
@@ -131,6 +137,10 @@ export async function getCreditCandidates(
   console.log("\n🔍 ========== getCreditCandidates ==========");
   console.log(`   monto: ${monto ?? "no especificado"}`);
 
+  // Para optimizar el rendimiento y aprovechar índices (sargable), calculamos la fecha
+  // exacta de inicio de mes en UTC basándonos en la zona horaria de Guatemala.
+  const inicioMesGuateUTC = dayjs().tz("America/Guatemala").startOf("month").toDate();
+
   // ──────────────────────────────────────────────────────────
   // 1. Diagnóstico de embudo de filtros inicial
   // ──────────────────────────────────────────────────────────
@@ -142,16 +152,18 @@ export async function getCreditCandidates(
     .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
     .where(and(
       eq(creditos.statusCredit, "ACTIVO"),
-      sql`LOWER(${usuarios.categoria}) LIKE '%cv veh_culo%'`
+      sql`LOWER(${usuarios.categoria}) LIKE '%cv veh_culo%'`,
+      lt(creditos.fecha_creacion, inicioMesGuateUTC)
     ));
 
   console.log(`   - Créditos ACTIVOS en total: ${totalActivos}`);
-  console.log(`   - Créditos ACTIVOS de Vehículo: ${totalCandidatosBase}`);
+  console.log(`   - Créditos ACTIVOS de Vehículo (meses anteriores): ${totalCandidatosBase}`);
 
   // ──────────────────────────────────────────────────────────
   // 1. Créditos Activos de Vehículo
   //    - usuarios.categoria = 'CV Vehículo'
   //    - statusCredit = 'ACTIVO'
+  //    - Solo meses anteriores al actual
   //    - Optimización: Sin pagos 'pending' (Subquery NOT IN)
   // ──────────────────────────────────────────────────────────
   const baseCredits = await db
@@ -172,7 +184,9 @@ export async function getCreditCandidates(
         // Solo activos
         eq(creditos.statusCredit, "ACTIVO"),
         // Descartar créditos sin interés (0%)
-        gt(creditos.porcentaje_interes, "0")
+        gt(creditos.porcentaje_interes, "0"),
+        // Excluir créditos creados en el mes actual (fecha pre-calculada y optimizada)
+        lt(creditos.fecha_creacion, inicioMesGuateUTC)
       )
     );
 

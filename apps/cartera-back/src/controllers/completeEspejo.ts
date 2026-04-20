@@ -1,5 +1,5 @@
 import { db } from "../database";
-import { creditos_inversionistas_espejo } from "../database/db";
+import { creditos_inversionistas_espejo, creditos_inversionistas } from "../database/db";
 import { eq, inArray, and } from "drizzle-orm";
 import z from "zod";
 
@@ -62,6 +62,20 @@ export const completeEspejo = async ({ body, set }: any) => {
             inversionista_id: creditos_inversionistas_espejo.inversionista_id,
             status: creditos_inversionistas_espejo.status,
           });
+
+        const whereConditionsPadre = inversionista_id
+          ? and(
+              eq(creditos_inversionistas.credito_id, credito_id),
+              eq(creditos_inversionistas.inversionista_id, inversionista_id),
+            )
+          : eq(creditos_inversionistas.credito_id, credito_id);
+
+        await tx
+          .update(creditos_inversionistas)
+          .set({
+            fecha_inicio_participacion: new Date().toISOString().split('T')[0],
+          })
+          .where(whereConditionsPadre);
 
         resultados.push({
           credito_id,

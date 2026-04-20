@@ -519,6 +519,7 @@ export interface CreditoConInfo {
     porcentaje_participacion_inversionista: string;
     porcentaje_cash_in: string;
     cuota_inversionista: string;
+    fecha_inicio_participacion?: string;
   }[];
   resumen: {
     total_cash_in_monto: number;
@@ -543,6 +544,7 @@ export interface CreditoConInfo {
     monto_cash_in: string;
     monto_inversionista: string;
     cuota_inversionista: string;
+    fecha_inicio_participacion?: string;
   }[];
   fecha_inicio?: string | null;
 }
@@ -835,6 +837,7 @@ export async function getCreditosWithUserByMesAnio(
             creditos_inversionistas.porcentaje_participacion_inversionista,
           porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
           cuota_inversionista: creditos_inversionistas.cuota_inversionista,
+          fecha_inicio_participacion: creditos_inversionistas.fecha_inicio_participacion,
         })
         .from(creditos_inversionistas)
         .innerJoin(
@@ -863,6 +866,8 @@ export async function getCreditosWithUserByMesAnio(
             creditos_inversionistas_espejo.monto_inversionista,
           cuota_inversionista:
             creditos_inversionistas_espejo.cuota_inversionista,
+          fecha_inicio_participacion:
+            creditos_inversionistas_espejo.fecha_inicio_participacion,
         })
         .from(creditos_inversionistas_espejo)
         .innerJoin(

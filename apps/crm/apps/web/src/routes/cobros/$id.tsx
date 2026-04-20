@@ -947,9 +947,13 @@ function RouteComponent() {
 											).toLocaleString()}
 											placa={caso.vehiculoPlaca || ""}
 											marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
-											montoAdeudado={Number(
-												caso.montoEnMora || 0,
-											).toLocaleString()}
+											montoAdeudado={(
+												Number(caso.montoEnMora || 0) +
+												Number(caso.cuotaMensual || 0)
+											).toLocaleString("es-GT", {
+												minimumFractionDigits: 2,
+												maximumFractionDigits: 2,
+											})}
 											cuotasAtraso={caso.cuotasVencidas ?? 0}
 											estadoMora={caso.estadoMora || undefined}
 											fechaInicio={caso.fechaInicio || null}
@@ -979,9 +983,13 @@ function RouteComponent() {
 											).toLocaleString()}
 											placa={caso.vehiculoPlaca || ""}
 											marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
-											montoAdeudado={Number(
-												caso.montoEnMora || 0,
-											).toLocaleString()}
+											montoAdeudado={(
+												Number(caso.montoEnMora || 0) +
+												Number(caso.cuotaMensual || 0)
+											).toLocaleString("es-GT", {
+												minimumFractionDigits: 2,
+												maximumFractionDigits: 2,
+											})}
 											cuotasAtraso={caso.cuotasVencidas ?? 0}
 											estadoMora={caso.estadoMora || undefined}
 											fechaInicio={caso.fechaInicio || null}
@@ -1014,9 +1022,13 @@ function RouteComponent() {
 											).toLocaleString()}
 											placa={caso.vehiculoPlaca || ""}
 											marcaLineaModelo={`${caso.vehiculoMarca || ""} ${caso.vehiculoModelo || ""} ${caso.vehiculoYear || ""}`.trim()}
-											montoAdeudado={Number(
-												caso.montoEnMora || 0,
-											).toLocaleString()}
+											montoAdeudado={(
+												Number(caso.montoEnMora || 0) +
+												Number(caso.cuotaMensual || 0)
+											).toLocaleString("es-GT", {
+												minimumFractionDigits: 2,
+												maximumFractionDigits: 2,
+											})}
 											cuotasAtraso={caso.cuotasVencidas ?? 0}
 											estadoMora={caso.estadoMora || undefined}
 											fechaInicio={caso.fechaInicio || null}

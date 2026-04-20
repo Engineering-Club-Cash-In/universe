@@ -15,6 +15,7 @@ import {
 } from "../database/db";
 import z from "zod";
 import { sendCompraCarteraAcceptedNotification } from "@cci/email";
+import { getVehicleDetailsBySifco } from "../services/crm.service";
 
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
 
@@ -306,15 +307,25 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
     }
 
     // ── 5. Mandar el correo (destinatarios fijos por negocio) ──
+    const creditosParaEmail = await Promise.all(
+      creditosRows.map(async (c) => {
+        const vehicleRes = await getVehicleDetailsBySifco(c.numero_credito_sifco);
+        console.log(vehicleRes.data);     
+        return {
+          numero_credito_sifco: c.numero_credito_sifco,
+          cliente_nombre: c.cliente_nombre,
+          capital: new Big(c.capital).toFixed(2),
+          observaciones: vehicleRes.data?.vehicle
+            ? `${vehicleRes.data.vehicle.model}\n${vehicleRes.data.vehicle.year} | ${vehicleRes.data.vehicle.make} | ${vehicleRes.data.vehicle.licensePlate} `
+            : c.observaciones,
+        };
+      }),
+    );
+
     const mailRes = await sendCompraCarteraAcceptedNotification({
-      to: COMPRA_CARTERA_ACEPTADA_RECIPIENTS.to,
+      to: COMPRA_CARTERA_ACEPTADA_RECIPIENTS.to, 
       cc: COMPRA_CARTERA_ACEPTADA_RECIPIENTS.cc,
-      creditos: creditosRows.map((c) => ({
-        numero_credito_sifco: c.numero_credito_sifco,
-        cliente_nombre: c.cliente_nombre,
-        capital: new Big(c.capital).toFixed(2),
-        observaciones: c.observaciones,
-      })),
+      creditos: creditosParaEmail,
       pool,
       operacionInfo,
       notasAdicionales: notas_adicionales,

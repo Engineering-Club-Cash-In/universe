@@ -54,6 +54,7 @@ import {
 	formatMissingLeadFields,
 	getMissingLeadFieldsForContracts,
 } from "../lib/lead-helpers";
+import { getLeadSourceLabel } from "../lib/lead-sources";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -6214,22 +6215,8 @@ export const crmRouter = {
 						.groupBy(opportunities.source)
 						.orderBy(desc(sql`sum(${opportunities.value})`));
 
-					const SOURCE_LABELS: Record<string, string> = {
-						website: "Sitio Web",
-						referral: "Referido",
-						cold_call: "Llamada en Frío",
-						email: "Email",
-						social_media: "Redes Sociales",
-						event: "Evento",
-						other: "Otro",
-						facebook: "Facebook",
-						instagram: "Instagram",
-						google: "Google",
-						meta: "Meta",
-						Whatsapp: "WhatsApp",
-					};
 					byMedio = medioRows.map((r) => ({
-						name: SOURCE_LABELS[r.source || ""] || r.source || "Sin fuente",
+						name: getLeadSourceLabel(r.source),
 						monto: Number.parseFloat(r.monto) || 0,
 					}));
 				}

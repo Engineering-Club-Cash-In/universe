@@ -90,6 +90,7 @@ import {
 	getLoanPurposeLabel,
 	getSourceLabel,
 	getStatusLabel,
+	LEAD_SOURCE_OPTIONS,
 } from "@/lib/crm-formatters";
 import {
 	type Opportunity,
@@ -1684,19 +1685,11 @@ function RouteComponent() {
 						</SelectTrigger>
 						<SelectContent>
 							<SelectItem value="all">Todas las Fuentes</SelectItem>
-							<SelectItem value="facebook">Facebook</SelectItem>
-							<SelectItem value="instagram">Instagram</SelectItem>
-							<SelectItem value="google">Google</SelectItem>
-							<SelectItem value="Whatsapp">WhatsApp</SelectItem>
-							<SelectItem value="website">Sitio Web</SelectItem>
-							<SelectItem value="referral">Referencia</SelectItem>
-							<SelectItem value="cold_call">Llamada en Frío</SelectItem>
-							<SelectItem value="email">Correo Electrónico</SelectItem>
-							<SelectItem value="social_media">Redes Sociales</SelectItem>
-							<SelectItem value="event">Evento</SelectItem>
-							<SelectItem value="agency">Agencia</SelectItem>
-							<SelectItem value="property">Predio</SelectItem>
-							<SelectItem value="other">Otro</SelectItem>
+							{LEAD_SOURCE_OPTIONS.map((option) => (
+								<SelectItem key={option.value} value={option.value}>
+									{option.label}
+								</SelectItem>
+							))}
 						</SelectContent>
 					</Select>
 					<Button

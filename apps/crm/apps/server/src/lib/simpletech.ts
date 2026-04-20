@@ -157,37 +157,45 @@ export async function sendWhatsappTemplateBatch(params: {
 	try {
 		const result = await client.sendTemplate(templateRequest);
 
-		// SimpleTech responde `results[]` para exitosos y `failed[]` para fallidos,
-		// cada uno con el número. Indexamos por número para matchear.
-		const successByNumber = new Map<string, string | undefined>();
+		// SimpleTech puede devolver el número con formato distinto al que enviamos
+		// (con o sin "+", con prefijo, etc.). Comparamos por dígitos para evitar
+		// falsos negativos.
+		const toDigits = (n: string) => n.replaceAll(/\D/g, "");
+
+		// `results[]` contiene todos los items: los que fallaron tienen `error` no vacío.
+		const byDigits = new Map<
+			string,
+			{ templateMessageId: string; error: string }
+		>();
 		for (const r of result.results ?? []) {
-			successByNumber.set(String(r.number), r.templateMessageId);
-		}
-		const failByNumber = new Map<string, string>();
-		for (const f of result.failed ?? []) {
-			failByNumber.set(String(f.number), f.error ?? "Error desconocido");
+			byDigits.set(toDigits(String(r.number)), {
+				templateMessageId: r.templateMessageId ?? "",
+				error: r.error ?? "",
+			});
 		}
 
 		return {
 			items: normalized.map((r) => {
-				if (successByNumber.has(r.phoneNormalized)) {
+				const match = byDigits.get(toDigits(r.phoneNormalized));
+				if (match?.error === "") {
 					return {
 						phone: r.phone,
 						phoneNormalized: r.phoneNormalized,
 						externalRef: r.externalRef,
 						success: true,
-						templateMessageId: successByNumber.get(r.phoneNormalized),
+						templateMessageId: match.templateMessageId || undefined,
 					};
 				}
-				const err =
-					failByNumber.get(r.phoneNormalized) ??
-					(result.success ? undefined : "Error desconocido");
 				return {
 					phone: r.phone,
 					phoneNormalized: r.phoneNormalized,
 					externalRef: r.externalRef,
 					success: false,
-					error: err ?? "No reportado por SimpleTech",
+					error:
+						match?.error ||
+						(result.success
+							? "No reportado por SimpleTech"
+							: "SimpleTech reportó fallo en el batch"),
 				};
 			}),
 		};

@@ -5,6 +5,7 @@ import { es } from "date-fns/locale";
 import {
 	CalendarIcon,
 	ChevronDown,
+	Loader2,
 	Mail,
 	MessageCircle,
 	MessageSquare,
@@ -235,83 +236,43 @@ export function ContactoModal({
 		| "email-api"
 		| "sms-api";
 
-	const enviarWhatsappApi = async (telefono: string, mensaje: string) => {
-		if (!telefono) {
-			toast.error("No hay teléfono para enviar WhatsApp");
-			return;
-		}
-		if (!mensaje.trim()) {
-			toast.error("No hay mensaje para enviar");
-			return;
-		}
-		try {
-			const res = await client.enviarWhatsappCobros({
-				telefono,
-				mensaje,
-				casoCobroId,
-			});
-			if (res.success) {
-				toast.success("WhatsApp enviado correctamente");
-			}
-		} catch (error: any) {
-			toast.error(error?.message || "Error enviando WhatsApp");
-		}
-	};
+	const whatsappApiMutation = useMutation({
+		mutationFn: (vars: { telefono: string; mensaje: string }) =>
+			client.enviarWhatsappCobros({ ...vars, casoCobroId }),
+		onSuccess: (res) => {
+			if (res.success) toast.success("WhatsApp enviado correctamente");
+		},
+		onError: (error: any) =>
+			toast.error(error?.message || "Error enviando WhatsApp"),
+	});
 
-	const enviarEmailApi = async (
-		destinatario: string,
-		asunto: string,
-		cuerpo: string,
-	) => {
-		if (!destinatario) {
-			toast.error("No hay email de destino");
-			return;
-		}
-		if (!asunto.trim()) {
-			toast.error("El asunto es requerido");
-			return;
-		}
-		if (!cuerpo.trim()) {
-			toast.error("El mensaje es requerido");
-			return;
-		}
-		try {
-			const res = await client.enviarEmailCobros({
-				destinatario,
-				asunto,
-				mensaje: cuerpo,
-				casoCobroId,
-			});
-			if (res.success) {
-				toast.success("Email enviado correctamente");
-			}
-		} catch (error: any) {
-			toast.error(error?.message || "Error enviando email");
-		}
-	};
+	const emailApiMutation = useMutation({
+		mutationFn: (vars: {
+			destinatario: string;
+			asunto: string;
+			mensaje: string;
+		}) => client.enviarEmailCobros({ ...vars, casoCobroId }),
+		onSuccess: (res) => {
+			if (res.success) toast.success("Email enviado correctamente");
+		},
+		onError: (error: any) =>
+			toast.error(error?.message || "Error enviando email"),
+	});
 
-	const enviarSmsApi = async (telefono: string, mensaje: string) => {
-		if (!telefono) {
-			toast.error("No hay teléfono para enviar SMS");
-			return;
-		}
-		if (!mensaje.trim()) {
-			toast.error("No hay mensaje para enviar");
-			return;
-		}
-		try {
-			const res = await client.enviarSmsCobros({
-				telefono,
-				mensaje,
-				casoCobroId,
-			});
-			if (res.success) {
-				toast.success("SMS enviado correctamente");
-			}
-		} catch (error: any) {
-			toast.error(error?.message || "Error enviando SMS");
-		}
-	};
+	const smsApiMutation = useMutation({
+		mutationFn: (vars: { telefono: string; mensaje: string }) =>
+			client.enviarSmsCobros({ ...vars, casoCobroId }),
+		onSuccess: (res) => {
+			if (res.success) toast.success("SMS enviado correctamente");
+		},
+		onError: (error: any) =>
+			toast.error(error?.message || "Error enviando SMS"),
+	});
+
+	const envioEnCurso =
+		whatsappApiMutation.isPending ||
+		emailApiMutation.isPending ||
+		smsApiMutation.isPending;
 
 	const ejecutarAccion = (metodo: AccionContacto) => {
 		const tel = telefonoSeleccionado || telefonoPrincipal;
@@ -328,7 +289,18 @@ export function ContactoModal({
 				break;
 			}
 			case "whatsapp-api":
-				enviarWhatsappApi(telLimpio, mensajeEditado);
+				if (!telLimpio) {
+					toast.error("No hay teléfono para enviar WhatsApp");
+					return;
+				}
+				if (!mensajeEditado.trim()) {
+					toast.error("No hay mensaje para enviar");
+					return;
+				}
+				whatsappApiMutation.mutate({
+					telefono: telLimpio,
+					mensaje: mensajeEditado,
+				});
 				break;
 			case "email-link": {
 				const params = new URLSearchParams();
@@ -339,10 +311,37 @@ export function ContactoModal({
 				break;
 			}
 			case "email-api":
-				enviarEmailApi(emailCliente || "", asuntoEditado, mensajeEditado);
+				if (!emailCliente) {
+					toast.error("No hay email de destino");
+					return;
+				}
+				if (!asuntoEditado.trim()) {
+					toast.error("El asunto es requerido");
+					return;
+				}
+				if (!mensajeEditado.trim()) {
+					toast.error("El mensaje es requerido");
+					return;
+				}
+				emailApiMutation.mutate({
+					destinatario: emailCliente,
+					asunto: asuntoEditado,
+					mensaje: mensajeEditado,
+				});
 				break;
 			case "sms-api":
-				enviarSmsApi(telLimpio, mensajeEditado);
+				if (!telLimpio) {
+					toast.error("No hay teléfono para enviar SMS");
+					return;
+				}
+				if (!mensajeEditado.trim()) {
+					toast.error("No hay mensaje para enviar");
+					return;
+				}
+				smsApiMutation.mutate({
+					telefono: telLimpio,
+					mensaje: mensajeEditado,
+				});
 				break;
 		}
 	};
@@ -526,6 +525,7 @@ export function ContactoModal({
 								variant="outline"
 								size="sm"
 								onClick={() => ejecutarAccion("llamada")}
+								disabled={envioEnCurso}
 								className="flex items-center gap-2"
 							>
 								<Phone className="h-4 w-4" />
@@ -538,11 +538,18 @@ export function ContactoModal({
 										type="button"
 										variant="outline"
 										size="sm"
+										disabled={envioEnCurso}
 										className="flex items-center gap-2"
 									>
-										<MessageCircle className="h-4 w-4" />
+										{whatsappApiMutation.isPending ? (
+											<Loader2 className="h-4 w-4 animate-spin" />
+										) : (
+											<MessageCircle className="h-4 w-4" />
+										)}
 										WhatsApp
-										<ChevronDown className="h-3 w-3" />
+										{whatsappApiMutation.isPending ? null : (
+											<ChevronDown className="h-3 w-3" />
+										)}
 									</Button>
 								</DropdownMenuTrigger>
 								<DropdownMenuContent align="start">
@@ -565,11 +572,18 @@ export function ContactoModal({
 										type="button"
 										variant="outline"
 										size="sm"
+										disabled={envioEnCurso}
 										className="flex items-center gap-2"
 									>
-										<Mail className="h-4 w-4" />
+										{emailApiMutation.isPending ? (
+											<Loader2 className="h-4 w-4 animate-spin" />
+										) : (
+											<Mail className="h-4 w-4" />
+										)}
 										Email
-										<ChevronDown className="h-3 w-3" />
+										{emailApiMutation.isPending ? null : (
+											<ChevronDown className="h-3 w-3" />
+										)}
 									</Button>
 								</DropdownMenuTrigger>
 								<DropdownMenuContent align="start">
@@ -587,10 +601,15 @@ export function ContactoModal({
 								variant="outline"
 								size="sm"
 								onClick={() => ejecutarAccion("sms-api")}
+								disabled={envioEnCurso}
 								className="flex items-center gap-2"
 							>
-								<MessageSquare className="h-4 w-4" />
-								SMS
+								{smsApiMutation.isPending ? (
+									<Loader2 className="h-4 w-4 animate-spin" />
+								) : (
+									<MessageSquare className="h-4 w-4" />
+								)}
+								{smsApiMutation.isPending ? "Enviando SMS..." : "SMS"}
 							</Button>
 						</div>
 

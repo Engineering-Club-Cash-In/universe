@@ -50,6 +50,11 @@ import {
 	interpolar as interpolarPlantilla,
 	PLANTILLAS_MENSAJES,
 } from "../lib/cobros-plantillas";
+import {
+	getTestPhone,
+	isTestModeEnabled,
+	TEST_EMAIL,
+} from "../lib/messaging-test-mode";
 import { PERMISSIONS } from "../lib/roles";
 import {
 	sendWhatsappTemplate,
@@ -2848,25 +2853,36 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			const numeroSifco = await resolveSifcoFromCaso(input.casoCobroId);
+			const testMode = isTestModeEnabled();
+			const telefonoDestino = testMode ? getTestPhone() : input.telefono;
+
 			const result = await sendWhatsappTemplate({
-				phone: input.telefono,
+				phone: telefonoDestino,
 				message: input.mensaje,
-				logPrefix: "[SimpleTech][cobros]",
+				logPrefix: testMode ? "[SimpleTech][cobros][TEST]" : "[SimpleTech][cobros]",
 			});
 
 			await persistCobrosSendLog({
 				numeroCreditoSifco: numeroSifco,
 				canal: "whatsapp",
-				telefono: input.telefono,
+				telefono: telefonoDestino,
 				mensaje: input.mensaje,
 				result: result.success
 					? {
 							success: true,
 							providerResponse: {
 								templateMessageId: result.templateMessageId,
+								testMode,
+								realTarget: testMode ? input.telefono : undefined,
 							},
 						}
-					: { success: false, errorMessage: result.error },
+					: {
+							success: false,
+							errorMessage: result.error,
+							providerResponse: testMode
+								? { testMode, realTarget: input.telefono }
+								: undefined,
+						},
 				createdBy: context.userId,
 			});
 
@@ -3039,9 +3055,11 @@ export const cobrosRouter = {
 			}
 
 			// 4. Construir recipients, aplicando reglas de descarte.
+			const testMode = isTestModeEnabled();
 			type Candidato = {
 				numeroSifco: string;
-				telefono: string;
+				telefono: string; // destino efectivo (test o real)
+				telefonoReal: string; // destino original (para trazabilidad)
 				mensaje: string;
 			};
 			const candidatos: Candidato[] = [];
@@ -3093,7 +3111,8 @@ export const cobrosRouter = {
 
 				candidatos.push({
 					numeroSifco: sifco ?? "",
-					telefono,
+					telefono: testMode ? getTestPhone(candidatos.length) : telefono,
+					telefonoReal: telefono,
 					mensaje,
 				});
 			}
@@ -3148,6 +3167,8 @@ export const cobrosRouter = {
 									success: true,
 									providerResponse: {
 										templateMessageId: res?.templateMessageId,
+										testMode,
+										realTarget: testMode ? c.telefonoReal : undefined,
 									},
 								}
 							: {
@@ -3156,6 +3177,9 @@ export const cobrosRouter = {
 										res?.error ??
 										batch.transportError ??
 										"Error desconocido",
+									providerResponse: testMode
+										? { testMode, realTarget: c.telefonoReal }
+										: undefined,
 								},
 					});
 				}
@@ -3195,12 +3219,14 @@ export const cobrosRouter = {
 			)}</div>`;
 
 			const numeroSifco = await resolveSifcoFromCaso(input.casoCobroId);
+			const testMode = isTestModeEnabled();
+			const emailDestino = testMode ? TEST_EMAIL : input.destinatario;
 
 			let sendError: string | null = null;
 			let emailId: string | undefined;
 			try {
 				const result = await sendPlainEmail(
-					input.destinatario,
+					emailDestino,
 					input.asunto,
 					html,
 				);
@@ -3221,12 +3247,25 @@ export const cobrosRouter = {
 			await persistCobrosSendLog({
 				numeroCreditoSifco: numeroSifco,
 				canal: "email",
-				email: input.destinatario,
+				email: emailDestino,
 				asunto: input.asunto,
 				mensaje: input.mensaje,
 				result: sendError
-					? { success: false, errorMessage: sendError }
-					: { success: true, providerResponse: { emailId } },
+					? {
+							success: false,
+							errorMessage: sendError,
+							providerResponse: testMode
+								? { testMode, realTarget: input.destinatario }
+								: undefined,
+						}
+					: {
+							success: true,
+							providerResponse: {
+								emailId,
+								testMode,
+								realTarget: testMode ? input.destinatario : undefined,
+							},
+						},
 				createdBy: context.userId,
 			});
 
@@ -3264,17 +3303,25 @@ export const cobrosRouter = {
 			}
 
 			const smsClient = new SMSClient({
-				token,
-				apiKey: Number.parseInt(apiKeyRaw, 10),
+				credentials: {
+					token,
+					apiKey: Number.parseInt(apiKeyRaw, 10),
+				},
+				timeout: 60000, // SMS API a veces tarda >30s, subir a 60s.
 			});
 
 			const numeroSifco = await resolveSifcoFromCaso(input.casoCobroId);
+			const testMode = isTestModeEnabled();
+			// Para SMS el número debe incluir prefijo 502 completo.
+			const telefonoDestino = testMode
+				? `502${getTestPhone()}`
+				: input.telefono;
 
 			let sendError: string | null = null;
 			let mailingId: number | undefined;
 			try {
 				const result = await smsClient.send({
-					msisdns: [input.telefono],
+					msisdns: [telefonoDestino],
 					message: input.mensaje,
 					country: "GT",
 					tag: "cobros-contacto",
@@ -3297,11 +3344,24 @@ export const cobrosRouter = {
 			await persistCobrosSendLog({
 				numeroCreditoSifco: numeroSifco,
 				canal: "sms",
-				telefono: input.telefono,
+				telefono: telefonoDestino,
 				mensaje: input.mensaje,
 				result: sendError
-					? { success: false, errorMessage: sendError }
-					: { success: true, providerResponse: { mailingId } },
+					? {
+							success: false,
+							errorMessage: sendError,
+							providerResponse: testMode
+								? { testMode, realTarget: input.telefono }
+								: undefined,
+						}
+					: {
+							success: true,
+							providerResponse: {
+								mailingId,
+								testMode,
+								realTarget: testMode ? input.telefono : undefined,
+							},
+						},
 				createdBy: context.userId,
 			});
 

@@ -10,6 +10,12 @@ import {
 } from "../database/db";
 import { eq, and, sql, inArray, notInArray, gt, lt } from "drizzle-orm";
 import Big from "big.js";
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
+import timezone from "dayjs/plugin/timezone";
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 // ============================================================
 // TIPOS
@@ -131,8 +137,9 @@ export async function getCreditCandidates(
   console.log("\n🔍 ========== getCreditCandidates ==========");
   console.log(`   monto: ${monto ?? "no especificado"}`);
 
-  const now = new Date();
-  const firstDayOfCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  // Para optimizar el rendimiento y aprovechar índices (sargable), calculamos la fecha
+  // exacta de inicio de mes en UTC basándonos en la zona horaria de Guatemala.
+  const inicioMesGuateUTC = dayjs().tz("America/Guatemala").startOf("month").toDate();
 
   // ──────────────────────────────────────────────────────────
   // 1. Diagnóstico de embudo de filtros inicial
@@ -146,7 +153,7 @@ export async function getCreditCandidates(
     .where(and(
       eq(creditos.statusCredit, "ACTIVO"),
       sql`LOWER(${usuarios.categoria}) LIKE '%cv veh_culo%'`,
-      lt(creditos.fecha_creacion, firstDayOfCurrentMonth)
+      lt(creditos.fecha_creacion, inicioMesGuateUTC)
     ));
 
   console.log(`   - Créditos ACTIVOS en total: ${totalActivos}`);
@@ -178,8 +185,8 @@ export async function getCreditCandidates(
         eq(creditos.statusCredit, "ACTIVO"),
         // Descartar créditos sin interés (0%)
         gt(creditos.porcentaje_interes, "0"),
-        // Excluir créditos creados en el mes actual
-        lt(creditos.fecha_creacion, firstDayOfCurrentMonth)
+        // Excluir créditos creados en el mes actual (fecha pre-calculada y optimizada)
+        lt(creditos.fecha_creacion, inicioMesGuateUTC)
       )
     );
 

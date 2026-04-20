@@ -19,7 +19,7 @@ ENV VITE_FRONTEND_URL=https://crm.s3.devteamatcci.site
 
 # Copy server files needed by web (vite alias: server -> ../server)
 COPY apps/crm/apps/server/tsconfig.json ./apps/server/
-COPY apps/crm/apps/server/src/lib/roles.ts ./apps/server/src/lib/roles.ts
+COPY apps/crm/apps/server/src/lib ./apps/server/src/lib
 COPY apps/crm/apps/server/src/db/schema ./apps/server/src/db/schema
 
 # Copy web source and config

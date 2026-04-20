@@ -663,6 +663,92 @@ export class SimpleTechClient {
 }
 
 // =============================================================================
+// Autenticacion
+// =============================================================================
+
+/**
+ * Obtiene un token de autenticacion para la API de SimpleTech
+ *
+ * El token es valido por 7 dias. Cada vez que se genera uno nuevo, el anterior se invalida.
+ *
+ * @example
+ * ```typescript
+ * const token = await getToken('https://your-instance.simpletech.com', {
+ *   username: 'user',
+ *   password: 'pass',
+ * });
+ *
+ * const client = new SimpleTechClient({
+ *   credentials: { token },
+ *   baseUrl: 'https://your-instance.simpletech.com',
+ * });
+ * ```
+ */
+export async function getToken(
+  baseUrl: string,
+  credentials: TokenRequest,
+  timeout: number = DEFAULT_TIMEOUT,
+): Promise<string> {
+  if (!baseUrl) {
+    throw new ValidationError('baseUrl es requerido', 'baseUrl');
+  }
+  if (!credentials.username) {
+    throw new ValidationError('username es requerido', 'username');
+  }
+  if (!credentials.password) {
+    throw new ValidationError('password es requerido', 'password');
+  }
+
+  const url = `${baseUrl}${AUTH_ENDPOINT}`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'username': credentials.username,
+        'password': credentials.password,
+      },
+      signal: AbortSignal.timeout(timeout),
+    });
+
+    const responseText = await response.text();
+
+    if (!response.ok) {
+      throw new ConnectionError(
+        `Error HTTP ${response.status}: ${response.statusText}`,
+        response.status,
+        responseText,
+      );
+    }
+
+    const data = JSON.parse(responseText) as TokenResponse;
+
+    if (data.status !== 'success') {
+      throw new SimpleTechError(`Error al obtener token: ${data.data}`);
+    }
+
+    return data.data;
+  } catch (error) {
+    if (error instanceof SimpleTechError) {
+      throw error;
+    }
+
+    if ((error as Error).name === 'TimeoutError' ||
+        (error as Error).name === 'AbortError') {
+      throw new ConnectionError(`Timeout: La peticion excedio ${timeout}ms`);
+    }
+
+    if ((error as Error).name === 'SyntaxError') {
+      throw new ConnectionError('Respuesta JSON invalida del servidor');
+    }
+
+    throw new ConnectionError(
+      `Error de conexion: ${(error as Error).message}`
+    );
+  }
+}
+
+// =============================================================================
 // Factory function
 // =============================================================================
 

@@ -556,12 +556,12 @@ export function ContactoModal({
 									<DropdownMenuItem
 										onClick={() => ejecutarAccion("whatsapp-api")}
 									>
-										Enviar por API
+										Enviar Directo (Automático)
 									</DropdownMenuItem>
 									<DropdownMenuItem
 										onClick={() => ejecutarAccion("whatsapp-link")}
 									>
-										Abrir WhatsApp Web
+										Abrir WhatsApp Web (Manual)
 									</DropdownMenuItem>
 								</DropdownMenuContent>
 							</DropdownMenu>
@@ -588,10 +588,10 @@ export function ContactoModal({
 								</DropdownMenuTrigger>
 								<DropdownMenuContent align="start">
 									<DropdownMenuItem onClick={() => ejecutarAccion("email-api")}>
-										Enviar por API
+										Enviar Directo (Automático)
 									</DropdownMenuItem>
 									<DropdownMenuItem onClick={() => ejecutarAccion("email-link")}>
-										Abrir cliente de correo
+										Abrir cliente de correo (Manual)
 									</DropdownMenuItem>
 								</DropdownMenuContent>
 							</DropdownMenu>

@@ -3097,14 +3097,26 @@ export const cobrosRouter = {
 					.join(" ")
 					.trim();
 
+				// Total a cobrar = monto en mora + cuota mensual (mismo criterio
+				// que se muestra en la pantalla de detalle del caso).
+				const montoMora = Number(credito.mora?.monto_mora ?? 0);
+				const totalACobrar =
+					montoMora > 0 ? montoMora + Number(cuota) : 0;
+
 				const mensaje = interpolarPlantilla(plantilla.cuerpo, {
 					clienteNombre: credito.usuarios.nombre ?? "",
 					fechaPago: "",
 					cuotaMensual: String(cuota),
 					placa: info?.placa ?? "",
 					marcaLineaModelo,
-					montoAdeudado: credito.creditos.deudatotal ?? "",
-					cuotasAtraso: 0,
+					montoAdeudado:
+						totalACobrar > 0
+							? totalACobrar.toLocaleString("es-GT", {
+									minimumFractionDigits: 2,
+									maximumFractionDigits: 2,
+								})
+							: "",
+					cuotasAtraso: credito.mora?.cuotas_atrasadas ?? 0,
 					telefonoAsesor: asesor.telefono ?? "",
 					nombreAsesor: asesor.nombre ?? "",
 				});

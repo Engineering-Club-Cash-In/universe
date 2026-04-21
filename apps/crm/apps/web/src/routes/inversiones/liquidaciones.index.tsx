@@ -25,6 +25,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
+import { CurrencyInput } from "@/components/ui/currency-input";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -444,7 +445,7 @@ function LiquidacionesInversionistas() {
 						{/* Reinversión */}
 						<div className="grid grid-cols-2 gap-3">
 							<div className="space-y-1.5">
-								<Label htmlFor="inv-reinversion">Tipo reinversión</Label>
+								<Label htmlFor="inv-reinversion">Modelo de Inversión</Label>
 								<Select
 									value={formTipoReinversion}
 									onValueChange={setFormTipoReinversion}
@@ -454,17 +455,10 @@ function LiquidacionesInversionistas() {
 									</SelectTrigger>
 									<SelectContent>
 										<SelectItem value="sin_reinversion">
-											Sin reinversión
+											Tradicional
 										</SelectItem>
-										<SelectItem value="reinversion_capital">Capital</SelectItem>
-										<SelectItem value="reinversion_interes">Interés</SelectItem>
-										<SelectItem value="reinversion_total">Total</SelectItem>
-										<SelectItem value="reinversion_variable">
-											Variable
-										</SelectItem>
-										<SelectItem value="reinversion_combinada">
-											Combinada
-										</SelectItem>
+										<SelectItem value="reinversion_capital">Reinversión Capital</SelectItem>
+										<SelectItem value="reinversion_total">Interés Compuesto</SelectItem>
 									</SelectContent>
 								</Select>
 							</div>
@@ -495,7 +489,7 @@ function LiquidacionesInversionistas() {
 									onCheckedChange={(v) => setHacerCompra(v === true)}
 								/>
 								<Label htmlFor="inv-compra" className="font-semibold">
-									Hacer compra de cartera de una vez
+									Hacer compra de cartera
 								</Label>
 							</div>
 
@@ -504,14 +498,10 @@ function LiquidacionesInversionistas() {
 									<div className="grid grid-cols-2 gap-3">
 										<div className="space-y-1.5">
 											<Label htmlFor="inv-monto-compra">Monto aportado *</Label>
-											<Input
+											<CurrencyInput
 												id="inv-monto-compra"
-												type="number"
-												min="0"
-												step="0.01"
-												placeholder="0.00"
 												value={formMontoCompra}
-												onChange={(e) => setFormMontoCompra(e.target.value)}
+												onChange={setFormMontoCompra}
 											/>
 										</div>
 										<div className="space-y-1.5">
@@ -528,7 +518,7 @@ function LiquidacionesInversionistas() {
 									</div>
 									<div className="grid grid-cols-2 gap-3">
 										<div className="space-y-1.5">
-											<Label htmlFor="inv-pct-inv">% Inversión</Label>
+											<Label htmlFor="inv-pct-inv">% Inversiónista</Label>
 											<Input
 												id="inv-pct-inv"
 												type="number"

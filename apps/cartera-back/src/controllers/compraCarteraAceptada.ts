@@ -16,41 +16,20 @@ import {
 import z from "zod";
 import { sendCompraCarteraAcceptedNotification } from "@cci/email";
 import { getVehicleDetailsBySifco } from "../services/crm.service";
+import {
+  calcularExpiracionCompraCartera,
+  formatFechaLargaGT,
+  nowGT,
+} from "../utils/functions/businessDays";
+import { COMPRA_CARTERA_RECIPIENTS } from "../utils/functions/compraCarteraRecipients";
 
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
 
 // ID fijo de CUBE INVESTMENTS S.A. (siempre va primero en el pool)
 const CUBE_INVESTMENT_ID = 86;
 
-// ================================================================
-// DESTINATARIOS DEL CORREO "COMPRA DE CARTERA ACEPTADA"
-// Lista hardcodeada solicitada por negocio: TO + CC.
-// ================================================================
-const COMPRA_CARTERA_ACEPTADA_RECIPIENTS = {
-  to: [
-    "info@clubcashin.com",
-    "contabilidad@sepresta.com",
-    "arturo.a@sepresta.com",
-    "juridico2@sepresta.com",
-    "richard.kachler@clubcashin.com",
-    "andres@sepresta.com",
-    "juridico@sepresta.com",
-    "asistentejuridico@sepresta.com",
-    "doris.analiss@sepresta.com",
-    "lucia.s@clubcashin.com",
-    "diego.a@sepresta.com",
-    "sara.r@sepresta.com",
-    "caja@sepresta.com",
-    "alexander.p@clubcashin.com",
-    "juan.r@clubcashin.com",
-    "roxana.g@clubcashin.com"
-  ],
-  cc: [
-    "diego.l@clubcashin.com",
-    "guillermo.v@sepresta.com",
-    "pablo.z@clubcashin.com",
-  ],
-};
+// Destinatarios fijos (compartidos con el correo de expiración): ver
+// src/utils/functions/compraCarteraRecipients.ts
 
 const compraCarteraAceptadaSchema = z.object({
   creditos: z
@@ -206,10 +185,16 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
 
     // ── 4.5. Marcar el espejo como aceptado ──
     // Pasamos a "pendiente_revision" todos los rows de los créditos que estén
-    // actualmente en "pendiente_compra_cartera".
+    // actualmente en "pendiente_compra_cartera". Registramos cuándo y quién.
+    const ahora = nowGT();
     const updateRes = await db
       .update(creditos_inversionistas_espejo)
-      .set({ status: "pendiente_revision", updated_at: new Date() })
+      .set({
+        status: "pendiente_revision",
+        updated_at: ahora,
+        aceptada_at: ahora,
+        aceptada_por: usuarioEmail ?? null,
+      })
       .where(
         and(
           inArray(creditos_inversionistas_espejo.credito_id, creditoIds),
@@ -325,21 +310,27 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
       }),
     );
 
+    const { expira, diaBaja } = calcularExpiracionCompraCartera(ahora);
+
     const mailRes = await sendCompraCarteraAcceptedNotification({
-      to: COMPRA_CARTERA_ACEPTADA_RECIPIENTS.to, 
-      cc: COMPRA_CARTERA_ACEPTADA_RECIPIENTS.cc,
+      to: COMPRA_CARTERA_RECIPIENTS.to,
+      cc: COMPRA_CARTERA_RECIPIENTS.cc,
       creditos: creditosParaEmail,
       pool,
       operacionInfo,
       notasAdicionales: notas_adicionales,
       usuarioNombre,
       usuarioEmail,
+      expiracion: {
+        fechaExpiraLabel: formatFechaLargaGT(expira),
+        fechaBajaLabel: formatFechaLargaGT(diaBaja),
+      },
     });
 
     set.status = 200;
     return {
       success: true,
-      message: `Notificación enviada a ${COMPRA_CARTERA_ACEPTADA_RECIPIENTS.to.length} destinatario(s) + ${COMPRA_CARTERA_ACEPTADA_RECIPIENTS.cc.length} en CC`,
+      message: `Notificación enviada a ${COMPRA_CARTERA_RECIPIENTS.to.length} destinatario(s) + ${COMPRA_CARTERA_RECIPIENTS.cc.length} en CC`,
       creditos_notificados: creditosRows.length,
       pool_size: pool.length,
       espejo_actualizados: updateRes.length,

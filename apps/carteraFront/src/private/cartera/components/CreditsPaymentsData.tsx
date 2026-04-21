@@ -207,12 +207,13 @@ export function ListaCreditosPagos() {
     });
 
     const mappedInvestors = inversionistas.map((inv: any) => ({
-      inversionista_id: inv.inversionista_id,
+      inversionista_id: inv.inversionista_id || inv.inversionista?.inversionista_id,
       porcentaje_participacion: inv.porcentaje_participacion,
       monto_aportado: inv.monto_aportado,
       porcentaje_cash_in: inv.porcentaje_cash_in,
       porcentaje_inversion: inv.porcentaje_participacion_inversionista,
       cuota_inversionista: inv.cuota_inversionista ?? 0,
+      fecha_inicio_participacion: inv.fecha_inicio_participacion,
     }));
 
     setInvestorsToEdit(mappedInvestors);
@@ -220,12 +221,13 @@ export function ListaCreditosPagos() {
     // Mapeo seguro de espejo
     const mirrorData = credit.creditos_inversionistas_espejo || [];
     const mappedMirror = mirrorData.map((inv: any) => ({
-      inversionista_id: inv.inversionista_id,
+      inversionista_id: inv.inversionista_id || inv.inversionista?.inversionista_id,
       porcentaje_participacion: inv.porcentaje_participacion,
       monto_aportado: inv.monto_aportado,
       porcentaje_cash_in: inv.porcentaje_cash_in,
       porcentaje_inversion: inv.porcentaje_inversion,
       cuota_inversionista: inv.cuota_inversionista ?? 0,
+      fecha_inicio_participacion: inv.fecha_inicio_participacion,
     }));
 
     setInvestorsMirrorToEdit(mappedMirror);

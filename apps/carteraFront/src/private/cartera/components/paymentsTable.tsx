@@ -264,6 +264,8 @@ export function PaymentsTable() {
   const [fechaFin, setFechaFin] = React.useState("");
   const [fechaAplicado, setFechaAplicado] = React.useState("");
   const [fechaBoleta, setFechaBoleta] = React.useState("");
+  const [fechaBoletaInicio, setFechaBoletaInicio] = React.useState("");
+  const [fechaBoletaFin, setFechaBoletaFin] = React.useState("");
 
   // Filtros de crédito
   const [sifco, setSifco] = React.useState("");
@@ -451,21 +453,23 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
     page,
     pageSize,
     numeroCredito: sifco || undefined,
-    // Fecha: modo simple, rango o aplicado (mutuamente excluyentes)
+    // Fecha: modo simple, rango, aplicado o boleta (mutuamente excluyentes)
     ...(modoFecha === "simple"
       ? { dia, mes, anio }
       : modoFecha === "rango"
         ? { fechaInicio: fechaInicio || undefined, fechaFin: fechaFin || undefined }
         : modoFecha === "aplicado"
           ? { fechaAplicado: fechaAplicado || undefined }
-          : { fechaBoleta: fechaBoleta || undefined }),
+          : {
+              fechaBoletaInicio: fechaBoletaInicio || undefined,
+              fechaBoletaFin: fechaBoletaFin || undefined,
+            }),
     categoriaCredito: categoriaCredito || undefined,
     formatoCredito: formatoCredito || undefined,
     soloAplicados,
     inversionistaId,
     usuarioNombre: usuarioNombre || undefined,
     validationStatus: validationStatusFilter || undefined,
-    fechaBoleta: fechaBoleta || undefined,
   });
 
   const pagos: PagoDataInvestor[] = data?.data || [];
@@ -497,14 +501,18 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
           ? { dia, mes, anio }
           : modoFecha === "rango"
             ? { fechaInicio: fechaInicio || undefined, fechaFin: fechaFin || undefined }
-            : { fechaAplicado: fechaAplicado || undefined }),
+            : modoFecha === "aplicado"
+              ? { fechaAplicado: fechaAplicado || undefined }
+              : {
+                  fechaBoletaInicio: fechaBoletaInicio || undefined,
+                  fechaBoletaFin: fechaBoletaFin || undefined,
+                }),
         categoriaCredito: categoriaCredito || undefined,
         formatoCredito: formatoCredito || undefined,
         soloAplicados,
         inversionistaId,
         usuarioNombre: usuarioNombre || undefined,
         validationStatus: validationStatusFilter || undefined,
-        fechaBoleta: fechaBoleta || undefined,
         excel: true,
       });
 
@@ -537,14 +545,18 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
           ? { dia, mes, anio }
           : modoFecha === "rango"
             ? { fechaInicio: fechaInicio || undefined, fechaFin: fechaFin || undefined }
-            : { fechaAplicado: fechaAplicado || undefined }),
+            : modoFecha === "aplicado"
+              ? { fechaAplicado: fechaAplicado || undefined }
+              : {
+                  fechaBoletaInicio: fechaBoletaInicio || undefined,
+                  fechaBoletaFin: fechaBoletaFin || undefined,
+                }),
         categoriaCredito: categoriaCredito || undefined,
         formatoCredito: formatoCredito || undefined,
         soloAplicados,
         inversionistaId,
         usuarioNombre: usuarioNombre || undefined,
         validationStatus: validationStatusFilter || undefined,
-        fechaBoleta: fechaBoleta || undefined,
         reportAdvisor: true,
       });
 
@@ -599,6 +611,8 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                 setFechaFin("");
                 setFechaAplicado("");
                 setFechaBoleta("");
+                setFechaBoletaInicio("");
+                setFechaBoletaFin("");
                 setCategoriaCredito("");
                 setFormatoCredito("");
                 setSoloAplicados(undefined);
@@ -625,28 +639,28 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
               <div className="flex gap-1 flex-wrap">
                 <button
                   type="button"
-                  onClick={() => { setModoFecha("simple"); setFechaInicio(""); setFechaFin(""); setFechaAplicado(""); setFechaBoleta(""); setPage(1); }}
+                  onClick={() => { setModoFecha("simple"); setFechaInicio(""); setFechaFin(""); setFechaAplicado(""); setFechaBoleta(""); setFechaBoletaInicio(""); setFechaBoletaFin(""); setPage(1); }}
                   className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all ${modoFecha === "simple" ? "bg-blue-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
                 >
                   Fecha
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setModoFecha("rango"); setDia(undefined); setFechaAplicado(""); setFechaBoleta(""); setPage(1); }}
+                  onClick={() => { setModoFecha("rango"); setDia(undefined); setFechaAplicado(""); setFechaBoleta(""); setFechaBoletaInicio(""); setFechaBoletaFin(""); setPage(1); }}
                   className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all ${modoFecha === "rango" ? "bg-blue-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
                 >
                   Rango
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setModoFecha("aplicado"); setDia(undefined); setFechaInicio(""); setFechaFin(""); setFechaBoleta(""); setPage(1); }}
+                  onClick={() => { setModoFecha("aplicado"); setDia(undefined); setFechaInicio(""); setFechaFin(""); setFechaBoleta(""); setFechaBoletaInicio(""); setFechaBoletaFin(""); setPage(1); }}
                   className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all ${modoFecha === "aplicado" ? "bg-emerald-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
                 >
                   Aplicado
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setModoFecha("boleta"); setDia(undefined); setFechaInicio(""); setFechaFin(""); setFechaAplicado(""); setPage(1); }}
+                  onClick={() => { setModoFecha("boleta"); setDia(undefined); setFechaInicio(""); setFechaFin(""); setFechaAplicado(""); setFechaBoleta(""); setPage(1); }}
                   className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all ${modoFecha === "boleta" ? "bg-amber-600 text-white shadow-sm" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
                 >
                   Boleta
@@ -716,23 +730,25 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                   />
                 </div>
               ) : (
-                <div>
-                  <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Fecha de Boleta</label>
-                  <DatePickerMUI
-                    value={fechaBoleta}
-                    onChange={(value) => { setFechaBoleta(value); setPage(1); }}
-                    disableFuture={false}
-                  />
+                <div className="space-y-1.5">
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Boleta desde</label>
+                    <DatePickerMUI
+                      value={fechaBoletaInicio}
+                      onChange={(value) => { setFechaBoletaInicio(value); setPage(1); }}
+                      disableFuture={false}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Boleta hasta</label>
+                    <DatePickerMUI
+                      value={fechaBoletaFin}
+                      onChange={(value) => { setFechaBoletaFin(value); setPage(1); }}
+                      disableFuture={false}
+                    />
+                  </div>
                 </div>
               )}
-              <div className="pt-1">
-                <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Fecha de Boleta</label>
-                <DatePickerMUI
-                  value={fechaBoleta}
-                  onChange={(value) => { setFechaBoleta(value); setPage(1); }}
-                  disableFuture={false}
-                />
-              </div>
             </div>
 
             {/* Columna 2: Crédito y Usuario */}
@@ -1153,13 +1169,22 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                     </p>
 
                     {/* Badge de estado en móvil */}
-                    <div className="mt-2 flex items-center gap-2">
+                    <div className="mt-2 flex items-center gap-2 flex-wrap">
                       <span
                         className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full font-semibold text-sm ${statusConfig.bgColor} ${statusConfig.color}`}
                       >
                         {statusConfig.icon}
                         {statusConfig.label}
                       </span>
+                      {pago.banderaReinversion && (
+                        <span
+                          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full font-semibold text-sm bg-red-100 text-red-700"
+                          title="Mientras esté activa, los intereses del inversionista pendiente se redirigen a CUBE"
+                        >
+                          <AlertCircle className="w-4 h-4" />
+                          Compra cartera pendiente
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -1556,7 +1581,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                     <div className="flex items-center justify-between">
                       {/* Info principal */}
                       <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-3">
+                        <div className="flex items-center gap-3 mb-3 flex-wrap">
                           <h3 className="text-2xl font-bold text-blue-900">
                             #{pago.credito?.numeroCreditoSifco}
                           </h3>
@@ -1566,6 +1591,15 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                             {statusConfig.icon}
                             {statusConfig.label}
                           </span>
+                          {pago.banderaReinversion && (
+                            <span
+                              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full font-semibold text-sm bg-red-100 text-red-700"
+                              title="Mientras esté activa, los intereses del inversionista pendiente se redirigen a CUBE"
+                            >
+                              <AlertCircle className="w-4 h-4" />
+                              Compra cartera pendiente
+                            </span>
+                          )}
                         </div>
 
                         {/* Stats Grid */}

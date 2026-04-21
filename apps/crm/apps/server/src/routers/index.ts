@@ -16,6 +16,7 @@ import { investorDocumentsRouter } from "./investor-documents";
 import { juridicoDashboardRouter } from "./juridico-dashboard";
 import { legalContractsRouter } from "./legal-contracts";
 import { locationsRouter } from "./locations";
+import { messagingRouter } from "./messaging";
 import { miniagentRouter } from "./miniagent";
 import { notesRouter } from "./notes";
 import { notificationsRouter } from "./notifications";
@@ -152,6 +153,10 @@ export const cobrosAppRouter = {
 	getAsesores: cobrosRouter.getAsesores,
 	updateContactInfoCobros: cobrosRouter.updateContactInfoCobros,
 	updateEtiquetasCobros: cobrosRouter.updateEtiquetasCobros,
+	enviarSmsCobros: cobrosRouter.enviarSmsCobros,
+	enviarEmailCobros: cobrosRouter.enviarEmailCobros,
+	enviarWhatsappCobros: cobrosRouter.enviarWhatsappCobros,
+	enviarWhatsappMasivoCobros: cobrosRouter.enviarWhatsappMasivoCobros,
 	getReferencias: cobrosRouter.getReferencias,
 	createReferencia: cobrosRouter.createReferencia,
 	updateReferencia: cobrosRouter.updateReferencia,
@@ -342,6 +347,7 @@ export const reportsAppRouter = {
 		accountingRouter.getResumenGlobalInversionistas,
 	createBoleta: accountingRouter.createBoleta,
 	liquidateInversionista: accountingRouter.liquidateInversionista,
+
 };
 
 const healthRouter = {
@@ -376,6 +382,12 @@ export const disbursementRouter = {
 
 	// Upload (presigned URLs) — placed here to avoid TS7056 in appRouter
 	getUploadPresignedUrl: uploadRouter.getUploadPresignedUrl,
+
+	// Messaging routes (WhatsApp via SimpleTech) — separado para evitar TS7056
+	sendWhatsAppMessage: messagingRouter.sendWhatsAppMessage,
+	getContractLinksMessage: messagingRouter.getContractLinksMessage,
+	getWhatsappLog: messagingRouter.getWhatsappLog,
+	updateWhatsappLog: messagingRouter.updateWhatsappLog,
 
 	// Dashboard jurídico manual
 	getJuridicoDashboardSnapshot: juridicoDashboardRouter.getSnapshot,

@@ -1,6 +1,43 @@
 import type { leads } from "../db/schema/crm";
 
 type Lead = typeof leads.$inferSelect;
+type PublicLeadCreditType = "autocompra" | "sobre_vehiculo";
+
+type ExistingPublicLeadOpportunity = {
+	creditType: PublicLeadCreditType;
+	campaign?: string | null;
+};
+
+type IncomingPublicLeadOpportunity = {
+	creditType?: PublicLeadCreditType;
+	campaign?: string;
+};
+
+export function getPublicLeadExistingOpportunityUpdates(
+	existingOpportunity: ExistingPublicLeadOpportunity,
+	incoming: IncomingPublicLeadOpportunity,
+) {
+	const updates: Partial<{
+		creditType: PublicLeadCreditType;
+		campaign: string;
+	}> = {};
+
+	if (
+		incoming.creditType &&
+		incoming.creditType !== existingOpportunity.creditType
+	) {
+		updates.creditType = incoming.creditType;
+	}
+
+	if (
+		incoming.campaign &&
+		incoming.campaign !== existingOpportunity.campaign
+	) {
+		updates.campaign = incoming.campaign;
+	}
+
+	return updates;
+}
 
 /**
  * Campos del lead requeridos para generar contratos legales.

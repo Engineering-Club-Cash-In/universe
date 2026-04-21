@@ -18,6 +18,7 @@ import {
 	formatGuatemalaDateTime,
 	getClientTypeLabel,
 	getGenderLabel,
+	getLeadSourceBadgeClass,
 	getLeadStatusBadgeColor,
 	getMaritalStatusLabel,
 	getOccupationLabel,
@@ -94,20 +95,6 @@ type LeadDetailModalProps = {
 	readOnly?: boolean;
 	onEdit?: () => void;
 };
-
-// Helper function for source badge color
-function getSourceBadgeColor(source: string): string {
-	const colors: Record<string, string> = {
-		website: "bg-blue-100 text-blue-800",
-		referral: "bg-green-100 text-green-800",
-		cold_call: "bg-yellow-100 text-yellow-800",
-		email: "bg-purple-100 text-purple-800",
-		social_media: "bg-pink-100 text-pink-800",
-		event: "bg-orange-100 text-orange-800",
-		other: "bg-gray-100 text-gray-800",
-	};
-	return colors[source] || "bg-gray-100 text-gray-800";
-}
 
 export function LeadDetailModal({
 	open,
@@ -537,7 +524,7 @@ export function LeadDetailModal({
 										Fuente
 									</Label>
 									<Badge
-										className={getSourceBadgeColor(displayLead.source)}
+										className={getLeadSourceBadgeClass(displayLead.source)}
 										variant="outline"
 									>
 										{getSourceLabel(displayLead.source)}

@@ -155,17 +155,9 @@ export async function sendContractLinksToLead(params: {
 		leadReason = "El lead no tiene teléfono registrado";
 	} else {
 		// Todo OK — intentar enviar
-		const sendResult = await sendWhatsappTemplate({
-			phone: lead.phone,
-			message: leadMessage!,
-			logPrefix: "[SimpleTech][auto]",
-		});
-		if (sendResult.success) {
-			leadStatus = "sent";
-		} else {
-			leadStatus = "failed";
-			leadReason = sendResult.error ?? "Error desconocido";
-		}
+		leadStatus = "failed";
+		leadReason = "No enviado por el momento";
+
 	}
 
 	// Insertar destinatario lead
@@ -178,7 +170,7 @@ export async function sendContractLinksToLead(params: {
 		contracts: recipientContracts,
 		status: leadStatus,
 		reason: leadReason,
-		sentAt: leadStatus === "sent" ? new Date() : undefined,
+		sentAt:  undefined,
 	});
 
 	// Cofirmantes: mismos contratos pero siempre sin links
@@ -202,7 +194,7 @@ export async function sendContractLinksToLead(params: {
 	}
 
 	return {
-		sent: leadStatus === "sent",
+		sent: false,
 		reason: leadReason,
 	};
 }

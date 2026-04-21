@@ -367,6 +367,8 @@
       updated_at: timestamp("updated_at").defaultNow(),
       tipo_reinversion: tipoReinversionEnum("tipo_reinversion"),
       status: statusCreditoInversionistaEspejoEnum("status").notNull().default("completado"),
+      aceptada_at: timestamp("aceptada_at", { withTimezone: true }),
+      aceptada_por: text("aceptada_por"),
     },
     (t) => ({
       uxCreditoInvEspejo: uniqueIndex("ux_credito_inversionista_espejo").on(t.credito_id, t.inversionista_id),

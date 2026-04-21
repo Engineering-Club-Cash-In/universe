@@ -338,6 +338,13 @@ export interface SendCompraCarteraAcceptedNotificationParams {
   usuarioNombre?: string;
   usuarioEmail?: string;
   notasAdicionales?: string;
+  // Aviso de expiración por 3 días hábiles.
+  // `fechaExpiraLabel`: último día hábil de vigencia (ej. "viernes 24 de abril de 2026").
+  // `fechaBajaLabel`: día en que el job automático la dará de baja a las 00:00 (ej. "lunes 27 de abril de 2026").
+  expiracion?: {
+    fechaExpiraLabel: string;
+    fechaBajaLabel: string;
+  };
 }
 
 export const sendCompraCarteraAcceptedNotification = async ({
@@ -350,6 +357,7 @@ export const sendCompraCarteraAcceptedNotification = async ({
   usuarioNombre,
   usuarioEmail,
   notasAdicionales,
+  expiracion,
 }: SendCompraCarteraAcceptedNotificationParams) => {
   try {
     const validEmails = to.filter((email) => {
@@ -451,6 +459,21 @@ export const sendCompraCarteraAcceptedNotification = async ({
           <strong style="color:#166534;">✓ Compra de Cartera aceptada</strong>
         </div>
 
+        ${
+          expiracion
+            ? `
+          <div style="background:#fef3c7;border-left:4px solid #d97706;padding:12px 16px;border-radius:6px;margin-bottom:16px;color:#78350f;">
+            <p style="margin:0 0 6px 0;"><strong>⚠ Vigencia: 3 días hábiles</strong></p>
+            <p style="margin:0;font-size:13px;">
+              Esta compra tiene validez hasta el <strong>${expiracion.fechaExpiraLabel}</strong>.
+              Si no se completa, será dada de baja automáticamente el
+              <strong>${expiracion.fechaBajaLabel}</strong> a las 00:00 (GT).
+            </p>
+          </div>
+        `
+            : ""
+        }
+
         ${headerBlock}
 
         <p>${intro}</p>
@@ -535,6 +558,132 @@ export const sendCompraCarteraAcceptedNotification = async ({
     return { success: true, data };
   } catch (err) {
     console.error("[sendCompraCarteraAcceptedNotification] Unexpected Error:", err);
+    return { success: false, error: err };
+  }
+};
+
+// ================================================================
+// NOTIFICACIÓN: COMPRA DE CARTERA EXPIRADA / CANCELADA AUTOMÁTICAMENTE
+// Se dispara desde el job diario cuando una compra aceptada no se
+// completó dentro de los 3 días hábiles de vigencia.
+// ================================================================
+export interface SendCompraCarteraExpiradaNotificationParams {
+  to: string[];
+  cc?: string[];
+  // Cada inversionista cuya compra se canceló, con los créditos que afectaba.
+  inversionistas: Array<{
+    inversionista_nombre: string;
+    creditos: Array<{
+      numero_credito_sifco: string;
+      cliente_nombre: string;
+      monto_aportado: string;
+    }>;
+  }>;
+  currencySymbol?: string;
+  fechaEjecucionLabel?: string;
+}
+
+export const sendCompraCarteraExpiradaNotification = async ({
+  to,
+  cc,
+  inversionistas,
+  currencySymbol = "Q",
+  fechaEjecucionLabel,
+}: SendCompraCarteraExpiradaNotificationParams) => {
+  try {
+    const validEmails = to.filter((email) => {
+      try { emailSchema.parse(email); return true; } catch { return false; }
+    });
+
+    if (validEmails.length === 0) {
+      console.warn("[sendCompraCarteraExpiradaNotification] No valid admin emails found");
+      return { success: false, error: "No valid emails" };
+    }
+
+    if (inversionistas.length === 0) {
+      return { success: false, error: "No hay inversionistas para notificar" };
+    }
+
+    const bloqueInversionistas = inversionistas
+      .map((inv) => {
+        const filas = inv.creditos
+          .map(
+            (c) => `
+              <tr>
+                <td style="padding:8px 12px;border:1px solid #dc2626;background:#ffffff;">${c.numero_credito_sifco}</td>
+                <td style="padding:8px 12px;border:1px solid #dc2626;background:#ffffff;">${c.cliente_nombre}</td>
+                <td style="padding:8px 12px;border:1px solid #dc2626;background:#ffffff;text-align:right;">${currencySymbol} ${c.monto_aportado}</td>
+              </tr>`,
+          )
+          .join("");
+
+        return `
+          <h3 style="margin-top:20px;background:#dc2626;color:#ffffff;padding:8px 12px;border:1px solid #dc2626;display:inline-block;margin-bottom:0;">
+            ${inv.inversionista_nombre}
+          </h3>
+          <table style="border-collapse:collapse;width:100%;font-size:14px;margin-top:0;margin-bottom:12px;">
+            <thead>
+              <tr>
+                <th style="padding:8px 12px;border:1px solid #dc2626;background:#dc2626;color:#ffffff;text-align:left;">Número SIFCO</th>
+                <th style="padding:8px 12px;border:1px solid #dc2626;background:#dc2626;color:#ffffff;text-align:left;">Cliente</th>
+                <th style="padding:8px 12px;border:1px solid #dc2626;background:#dc2626;color:#ffffff;text-align:right;">Monto aportado</th>
+              </tr>
+            </thead>
+            <tbody>${filas}</tbody>
+          </table>
+        `;
+      })
+      .join("");
+
+    const html = `
+      <div style="font-family:Arial,sans-serif;color:#111827;max-width:720px;margin:0 auto;">
+        <div style="background:#fee2e2;border-left:4px solid #dc2626;padding:12px 16px;border-radius:6px;margin-bottom:16px;">
+          <strong style="color:#7f1d1d;">✕ Compra de Cartera cancelada por vencimiento</strong>
+          ${fechaEjecucionLabel ? `<div style="margin-top:4px;color:#7f1d1d;font-size:12px;">Ejecutado el ${fechaEjecucionLabel}</div>` : ""}
+        </div>
+
+        <p>
+          Los siguientes inversionistas no completaron su compra de cartera
+          dentro de los <strong>3 días hábiles</strong> de vigencia. Su monto
+          fue <strong>devuelto automáticamente a CUBE INVESTMENTS, S.A.</strong>
+          y los créditos quedaron restituidos.
+        </p>
+
+        ${bloqueInversionistas}
+
+        <p style="margin-top:24px;">Cualquier duda o consulta quedo a la orden,</p>
+        <p>saludos cordiales</p>
+      </div>
+    `;
+
+    const subjectLabel =
+      inversionistas.length === 1
+        ? inversionistas[0].inversionista_nombre
+        : `${inversionistas.length} inversionistas`;
+
+    const validCc = (cc ?? []).filter((email) => {
+      try { emailSchema.parse(email); return true; } catch { return false; }
+    });
+
+    const { data, error } = await resend.emails.send({
+      from: `Club Cash In <no-reply@${domain}>`,
+      to: validEmails,
+      cc: validCc.length > 0 ? validCc : undefined,
+      subject: `Compra de Cartera cancelada por vencimiento - ${subjectLabel}`,
+      html,
+    });
+
+    if (error) {
+      console.error("[sendCompraCarteraExpiradaNotification] Resend API Error:", error);
+      return { success: false, error };
+    }
+
+    console.log(
+      `[sendCompraCarteraExpiradaNotification] Email sent to ${validEmails.length} admins. ID: ${data?.id}`,
+    );
+    return { success: true, data };
+  } catch (err) {
+    console.error("[sendCompraCarteraExpiradaNotification] Unexpected Error:", err);
     return { success: false, error: err };
   }
 };

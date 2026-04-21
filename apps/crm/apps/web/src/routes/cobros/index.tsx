@@ -8,6 +8,7 @@ import {
 	CalendarRange,
 	ChevronDown,
 	Loader2,
+	MessageCircle,
 	Phone,
 	Target,
 	TrendingDown,
@@ -15,6 +16,7 @@ import {
 	Users,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { MassWhatsappModal } from "@/components/cobros/mass-whatsapp-modal";
 import { DataTable } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -980,9 +982,27 @@ function RouteComponent() {
 								Enfocado en prevenir mora - Ordenado por proximidad de pago
 							</CardDescription>
 						</div>
-						<Badge variant="outline" className="text-sm">
-							{creditosFiltrados.length} casos mostrados
-						</Badge>
+						<div className="flex items-center gap-2">
+							<MassWhatsappModal
+								filtros={{
+									estadoMora: filtroEtapa || undefined,
+									searchTerm: debouncedFilterValue || undefined,
+									time: timeParam,
+								}}
+							>
+								<Button
+									variant="outline"
+									size="sm"
+									className="flex items-center gap-2"
+								>
+									<MessageCircle className="h-4 w-4" />
+									Enviar WhatsApp masivo
+								</Button>
+							</MassWhatsappModal>
+							<Badge variant="outline" className="text-sm">
+								{creditosFiltrados.length} casos mostrados
+							</Badge>
+						</div>
 					</div>
 				</CardHeader>
 				<CardContent className="space-y-4">

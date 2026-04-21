@@ -330,8 +330,8 @@ export async function exportPagosToExcel(credito_sifco: string) {
     totalCapital += capitalPago;
     totalInteres += interesPago;
 
-    const fechaPago = pago.fecha_pago
-      ? new Date(pago.fecha_pago).toLocaleDateString("es-GT", { year: "numeric", month: "2-digit", day: "2-digit" })
+    const fechaPago = pago.fecha_vencimiento
+      ? new Date(pago.fecha_vencimiento).toLocaleDateString("es-GT", { year: "numeric", month: "2-digit", day: "2-digit" })
       : "";
 
     const isEven = index % 2 === 0;
@@ -467,7 +467,7 @@ export async function exportPagosToExcel(credito_sifco: string) {
           <th>Mora</th>
           <th>Monto Aplicado</th>
           <th>Capital Rest.</th>
-          <th>Fecha Pago</th>
+          <th>Fecha Vencimiento Cuota</th>
         </tr>
       </thead>
       <tbody>

@@ -9,6 +9,7 @@ import {
 	salesStages,
 } from "../db/schema/crm";
 import { canReceiveAutoAssignedLead } from "../lib/lead-assignment";
+import { getPublicLeadExistingOpportunityUpdates } from "../lib/lead-helpers";
 import { validarDpi } from "../utils/cui-validation";
 import { getOnlyRenapInfoController } from "./bot";
 
@@ -191,6 +192,7 @@ export async function getOpenOpportunityBySource(
 			id: opportunities.id,
 			source: opportunities.source,
 			campaign: opportunities.campaign,
+			creditType: opportunities.creditType,
 		})
 		.from(opportunities)
 		.where(
@@ -300,11 +302,17 @@ export async function createPublicLead(c: Context) {
 				source,
 			);
 			if (existingOpportunity) {
-				if (body.campaign) {
+				const opportunityUpdates =
+					getPublicLeadExistingOpportunityUpdates(existingOpportunity, {
+						campaign: body.campaign,
+						creditType,
+					});
+
+				if (Object.keys(opportunityUpdates).length > 0) {
 					await db
 						.update(opportunities)
 						.set({
-							campaign,
+							...opportunityUpdates,
 							updatedAt: new Date(),
 						})
 						.where(eq(opportunities.id, existingOpportunity.id));

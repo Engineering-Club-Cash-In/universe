@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DateRange } from "react-day-picker";
-import type { leadSourceEnum } from "server/src/db/schema/crm";
+import type { LeadSource } from "server/src/lib/lead-sources";
 import { toast } from "sonner";
 import { z } from "zod";
 import { BankStatementAnalysis } from "@/components/credit/BankStatementAnalysis";
@@ -77,11 +77,13 @@ import {
 	formatCurrency,
 	formatGuatemalaDate,
 	formatGuatemalaDateTime,
+	getLeadSourceBadgeClass,
 	getMaritalStatusLabel,
 	getOccupationLabel,
 	getSourceLabel,
 	getStatusLabel,
 	getWorkTimeLabel,
+	LEAD_SOURCE_OPTIONS,
 } from "@/lib/crm-formatters";
 import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
@@ -316,7 +318,7 @@ function RouteComponent() {
 			hasCreditCard: false,
 			jobTitle: "",
 			companyId: "none",
-			source: "website" as (typeof leadSourceEnum.enumValues)[number],
+			source: "website" as LeadSource,
 			assignedTo: "",
 			notes: "",
 			score: "",
@@ -787,29 +789,6 @@ function RouteComponent() {
 		}
 	};
 
-	const getSourceBadgeColor = (source: string) => {
-		switch (source) {
-			case "website":
-				return "bg-indigo-100 text-indigo-800";
-			case "referral":
-				return "bg-green-100 text-green-800";
-			case "cold_call":
-				return "bg-orange-100 text-orange-800";
-			case "email":
-				return "bg-blue-100 text-blue-800";
-			case "social_media":
-				return "bg-pink-100 text-pink-800";
-			case "event":
-				return "bg-purple-100 text-purple-800";
-			case "agency":
-				return "bg-teal-100 text-teal-800";
-			case "property":
-				return "bg-amber-100 text-amber-800";
-			default:
-				return "bg-gray-100 text-gray-800";
-		}
-	};
-
 	const handleStatusChange = (leadId: string, newStatus: string) => {
 		updateLeadMutation.mutate({
 			id: leadId,
@@ -1241,18 +1220,7 @@ function RouteComponent() {
 													<Select
 														value={field.state.value}
 														onValueChange={(value) =>
-															field.handleChange(
-																value as
-																	| "website"
-																	| "referral"
-																	| "cold_call"
-																	| "email"
-																	| "social_media"
-																	| "event"
-																	| "agency"
-																	| "property"
-																	| "other",
-															)
+															field.handleChange(value as LeadSource)
 														}
 													>
 														<SelectTrigger
@@ -1265,23 +1233,14 @@ function RouteComponent() {
 															<SelectValue placeholder="Seleccionar fuente" />
 														</SelectTrigger>
 														<SelectContent>
-															<SelectItem value="website">Sitio Web</SelectItem>
-															<SelectItem value="referral">
-																Referencia
-															</SelectItem>
-															<SelectItem value="cold_call">
-																Llamada en Frío
-															</SelectItem>
-															<SelectItem value="email">
-																Correo Electrónico
-															</SelectItem>
-															<SelectItem value="social_media">
-																Redes Sociales
-															</SelectItem>
-															<SelectItem value="event">Evento</SelectItem>
-															<SelectItem value="agency">Agencia</SelectItem>
-															<SelectItem value="property">Predio</SelectItem>
-															<SelectItem value="other">Otro</SelectItem>
+															{LEAD_SOURCE_OPTIONS.map((option) => (
+																<SelectItem
+																	key={option.value}
+																	value={option.value}
+																>
+																	{option.label}
+																</SelectItem>
+															))}
 														</SelectContent>
 													</Select>
 													{field.state.meta.errors.map((error) => (
@@ -2080,7 +2039,7 @@ function RouteComponent() {
 										</TableCell>
 										<TableCell>
 											<Badge
-												className={getSourceBadgeColor(lead.source)}
+												className={getLeadSourceBadgeClass(lead.source)}
 												variant="outline"
 											>
 												{getSourceLabel(lead.source)}
@@ -2485,7 +2444,7 @@ function RouteComponent() {
 												Fuente
 											</Label>
 											<Badge
-												className={getSourceBadgeColor(selectedLead.source)}
+												className={getLeadSourceBadgeClass(selectedLead.source)}
 												variant="outline"
 											>
 												{getSourceLabel(selectedLead.source)}

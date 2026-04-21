@@ -155,7 +155,7 @@ export interface CreateCreditoInput {
 export interface CreditoDetailResponse {
 	creditos: CarteraCredito;
 	usuarios: CarteraUsuario;
-	asesores: CarteraAsesor | null;
+	asesores: CarteraAsesorCredito | null;
 	inversionistas: Array<{
 		credito_id: number;
 		inversionista_id: number;

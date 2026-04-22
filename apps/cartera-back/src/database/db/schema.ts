@@ -40,6 +40,12 @@
     "reinversion_variable",
     "reinversion_combinada"
   ]);
+
+  export const statusInversionistaEnum = customSchema.enum("status_inversionista", [
+    "activo",
+    "inactivo",
+    "pendiente_devolucion",
+  ]);
   export const admins = customSchema.table("admins", {
     admin_id: serial("admin_id").primaryKey(),
     nombre: varchar("nombre", { length: 150 }).notNull(),
@@ -617,6 +623,7 @@
     saldo_reinversion: numeric("saldo_reinversion", { precision: 18, scale: 2 }).notNull().default("0"),
     dpi_rep_legal: varchar("dpi_rep_legal", { length: 20 }),
     celular: varchar("celular", { length: 100 }),
+    status: statusInversionistaEnum("status").notNull().default("activo"),
   });
 
   export const reinversiones = customSchema.table("reinversiones", {

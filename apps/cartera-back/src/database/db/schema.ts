@@ -1022,6 +1022,7 @@
     path: varchar("path", { length: 500 }).notNull(),
     status_code: integer("status_code"),
     body: text("body"),
+    response: text("response"),
     created_at: timestamp("created_at", { withTimezone: true })
       .notNull()
       .default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),

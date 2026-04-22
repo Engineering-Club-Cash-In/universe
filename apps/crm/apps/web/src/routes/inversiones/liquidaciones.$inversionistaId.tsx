@@ -35,6 +35,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { CurrencyInput } from "@/components/ui/currency-input";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -1374,7 +1375,7 @@ function InvestorLiquidacionesPage() {
 
 						<div className="grid grid-cols-2 gap-3">
 							<div className="space-y-1.5">
-								<Label htmlFor="edit-reinversion">Tipo reinversión</Label>
+								<Label htmlFor="edit-reinversion">Modelo de Inversión</Label>
 								<Select
 									value={editTipoReinversion}
 									onValueChange={setEditTipoReinversion}
@@ -1382,19 +1383,13 @@ function InvestorLiquidacionesPage() {
 									<SelectTrigger id="edit-reinversion">
 										<SelectValue />
 									</SelectTrigger>
+									
 									<SelectContent>
 										<SelectItem value="sin_reinversion">
-											Sin reinversión
+											Tradicional
 										</SelectItem>
-										<SelectItem value="reinversion_capital">Capital</SelectItem>
-										<SelectItem value="reinversion_interes">Interés</SelectItem>
-										<SelectItem value="reinversion_total">Total</SelectItem>
-										<SelectItem value="reinversion_variable">
-											Variable
-										</SelectItem>
-										<SelectItem value="reinversion_combinada">
-											Combinada
-										</SelectItem>
+										<SelectItem value="reinversion_capital">Reinversión Capital</SelectItem>
+										<SelectItem value="reinversion_total">Interés Compuesto</SelectItem>
 									</SelectContent>
 								</Select>
 							</div>
@@ -1479,22 +1474,41 @@ function InvestorLiquidacionesPage() {
 						</DialogDescription>
 					</DialogHeader>
 
+					<div className="rounded-md border border-purple-200 bg-purple-50 p-3 dark:border-purple-800 dark:bg-purple-950/40">
+						<div className="flex items-center justify-between gap-2">
+							<span className="text-xs font-medium text-purple-900 dark:text-purple-200">
+								Modelo de reinversión
+							</span>
+							<Badge
+								variant="outline"
+								className="border-purple-300 bg-white text-[11px] text-purple-700 dark:border-purple-700 dark:bg-purple-950 dark:text-purple-300"
+							>
+								{{
+									reinversion_capital: "Reinversión Capital",
+									reinversion_interes: "Reinversión Interés",
+									reinversion_total: "Interés Compuesto",
+									reinversion_variable: "Reinversión Variable",
+									reinversion_combinada: "Reinversión Combinada",
+									sin_reinversion: "Sin reinversión",
+								}[
+									(investor?.tipoReinversion as string) ?? "sin_reinversion"
+								] ?? "Sin reinversión"}
+							</Badge>
+						</div>
+					</div>
+
 					<div className="space-y-4 py-2">
 						<div className="space-y-1.5">
 							<Label htmlFor="compra-monto">Monto aportado</Label>
-							<Input
+							<CurrencyInput
 								id="compra-monto"
-								type="number"
-								min="0"
-								step="0.01"
-								placeholder="0.00"
 								value={compraCarteraMonto}
-								onChange={(e) => setCompraCarteraMonto(e.target.value)}
+								onChange={setCompraCarteraMonto}
 							/>
 						</div>
 						<div className="grid grid-cols-2 gap-3">
 							<div className="space-y-1.5">
-								<Label htmlFor="compra-pct-inv">% Inversión</Label>
+								<Label htmlFor="compra-pct-inv">% Inversiónista</Label>
 								<Input
 									id="compra-pct-inv"
 									type="number"
@@ -1543,7 +1557,7 @@ function InvestorLiquidacionesPage() {
 						</div>
 					</div>
 
-					<DialogFooter className="gap-2 sm:gap-0">
+					<DialogFooter className="gap-3 sm:gap-3">
 						<Button
 							variant="outline"
 							onClick={() => {

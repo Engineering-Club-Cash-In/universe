@@ -3795,6 +3795,7 @@ export const updateInvestorStatus = async ({ body, set, request }: any) => {
         nombre: inversionistas.nombre,
         email: inversionistas.email,
         status: inversionistas.status,
+        tipo_reinversion: inversionistas.tipo_reinversion,
       })
       .from(inversionistas)
       .where(eq(inversionistas.inversionista_id, inversionista_id));
@@ -3814,9 +3815,23 @@ export const updateInvestorStatus = async ({ body, set, request }: any) => {
       };
     }
 
+    // Cuando el inversionista pasa a "pendiente_devolucion", forzamos que
+    // deje de reinvertir. Así la próxima liquidación no genera más capital
+    // reinvertido y el saldo queda listo para devolverse.
+    const setReinversionASinReinversion =
+      status === "pendiente_devolucion" && current.tipo_reinversion !== "sin_reinversion";
+
+    const updateData: {
+      status: typeof status;
+      tipo_reinversion?: "sin_reinversion";
+    } = { status };
+    if (setReinversionASinReinversion) {
+      updateData.tipo_reinversion = "sin_reinversion";
+    }
+
     const [updated] = await db
       .update(inversionistas)
-      .set({ status })
+      .set(updateData)
       .where(eq(inversionistas.inversionista_id, inversionista_id))
       .returning();
 

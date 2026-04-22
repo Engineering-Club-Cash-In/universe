@@ -31,7 +31,19 @@ import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
 import { eq, and, sql, inArray, ilike, like, desc, count, SQL, isNull } from "drizzle-orm";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import Big from "big.js";
-import { sendLiquidationEmail, sendSimpleEmail } from "@cci/email";
+import { sendLiquidationEmail, sendPlainEmail, sendSimpleEmail } from "@cci/email";
+import jwt from "jsonwebtoken";
+
+const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
+
+const INVESTOR_STATUS_CHANGE_RECIPIENTS = [
+  "alexander.p@clubcashin.com",
+  "juan.r@clubcashin.com",
+  "roxana.g@clubcashin.com",
+  "sara.r@sepresta.com",
+  "jalvarado@clubcashin.com",
+  "lralda@clubcashin.com",
+];
 import {
   boletaEstaEnPeriodo,
   resolveEstadoLiquidacionResumen,
@@ -3757,6 +3769,780 @@ export const updateInvestor = async ({ body, set }: any) => {
   } catch (error) {
     set.status = 500;
     return { message: "Error updating investors", error: String(error) };
+  }
+};
+
+export const updateInvestorStatus = async ({ body, set, request }: any) => {
+  try {
+    const { inversionista_id, status } = body ?? {};
+
+    if (typeof inversionista_id !== "number" || !Number.isFinite(inversionista_id)) {
+      set.status = 400;
+      return { success: false, message: "inversionista_id es obligatorio y debe ser numérico" };
+    }
+    const STATUS_VALIDOS = ["activo", "inactivo", "pendiente_devolucion"] as const;
+    if (!STATUS_VALIDOS.includes(status)) {
+      set.status = 400;
+      return {
+        success: false,
+        message: `status debe ser uno de: ${STATUS_VALIDOS.join(", ")}`,
+      };
+    }
+
+    const [current] = await db
+      .select({
+        inversionista_id: inversionistas.inversionista_id,
+        nombre: inversionistas.nombre,
+        email: inversionistas.email,
+        status: inversionistas.status,
+      })
+      .from(inversionistas)
+      .where(eq(inversionistas.inversionista_id, inversionista_id));
+
+    if (!current) {
+      set.status = 404;
+      return { success: false, message: `Inversionista ${inversionista_id} no encontrado` };
+    }
+
+    if (current.status === status) {
+      set.status = 200;
+      return {
+        success: true,
+        message: `El inversionista ya se encuentra ${status}. No se realizaron cambios.`,
+        inversionista: current,
+        correos_enviados: 0,
+      };
+    }
+
+    const [updated] = await db
+      .update(inversionistas)
+      .set({ status })
+      .where(eq(inversionistas.inversionista_id, inversionista_id))
+      .returning();
+
+    let usuarioEmail: string | undefined;
+    let usuarioNombre: string | undefined;
+    try {
+      const authHeader = request?.headers?.get?.("Authorization");
+      if (authHeader?.startsWith("Bearer ")) {
+        const token = authHeader.replace("Bearer ", "").trim();
+        const decoded = jwt.verify(token, JWT_SECRET) as any;
+        usuarioEmail = decoded.email ?? decoded.correo ?? undefined;
+        usuarioNombre = decoded.nombre ?? decoded.name ?? undefined;
+      }
+    } catch (err) {
+      console.warn("[updateInvestorStatus] No se pudo resolver el usuario del JWT:", err);
+    }
+
+    const accionMap: Record<typeof status, { label: string; color: string }> = {
+      activo: { label: "ACTIVADO", color: "#16a34a" },
+      inactivo: { label: "INACTIVADO", color: "#dc2626" },
+      pendiente_devolucion: { label: "PENDIENTE DE DEVOLUCIÓN", color: "#d97706" },
+    };
+    const { label: accion, color: colorEstado } = accionMap[status];
+    const fechaGT = new Date().toLocaleString("es-GT", { timeZone: "America/Guatemala" });
+
+    const accionPendienteHtml =
+      status === "pendiente_devolucion"
+        ? `
+        <div style="margin-top:16px; padding:12px 14px; border-left:4px solid #d97706; background:#fef3c7; border-radius:4px;">
+          <p style="margin:0; font-weight:bold; color:#92400e;">⚠️ Acción pendiente</p>
+          <p style="margin:6px 0 0 0; color:#92400e;">
+            En la próxima liquidación se le devolverá el saldo correspondiente a este inversionista.
+            Por favor verificar antes de correr el proceso de liquidación para incluir el monto a devolver.
+          </p>
+        </div>
+      `
+        : "";
+
+    const subject = `Inversionista ${accion}: ${current.nombre}`;
+    const html = `
+      <div style="font-family: Arial, sans-serif; color:#111;">
+        <h2 style="margin-bottom: 8px;">Cambio de estado de inversionista</h2>
+        <p>
+          El inversionista
+          <strong>${current.nombre}</strong>
+          (ID: ${current.inversionista_id})
+          pasó a
+          <strong style="color:${colorEstado};">${accion}</strong>.
+        </p>
+        <table style="border-collapse: collapse; margin-top: 8px;">
+          <tr><td style="padding:4px 8px;"><strong>Estado anterior:</strong></td><td style="padding:4px 8px;">${current.status}</td></tr>
+          <tr><td style="padding:4px 8px;"><strong>Estado nuevo:</strong></td><td style="padding:4px 8px; color:${colorEstado};"><strong>${status}</strong></td></tr>
+          <tr><td style="padding:4px 8px;"><strong>Fecha (GT):</strong></td><td style="padding:4px 8px;">${fechaGT}</td></tr>
+          ${usuarioNombre || usuarioEmail
+            ? `<tr><td style="padding:4px 8px;"><strong>Ejecutado por:</strong></td><td style="padding:4px 8px;">${[usuarioNombre, usuarioEmail].filter(Boolean).join(" — ")}</td></tr>`
+            : ""}
+        </table>
+        ${accionPendienteHtml}
+        <p style="margin-top:16px; color:#555; font-size:12px;">Correo automático — Club Cash In / Cartera.</p>
+      </div>
+    `;
+
+    const mailResults = await Promise.allSettled(
+      INVESTOR_STATUS_CHANGE_RECIPIENTS.map((to) => sendPlainEmail(to, subject, html))
+    );
+
+    const enviados = mailResults.filter(
+      (r) => r.status === "fulfilled" && (r as any).value?.success
+    ).length;
+    const fallidos = INVESTOR_STATUS_CHANGE_RECIPIENTS.length - enviados;
+
+    if (fallidos > 0) {
+      console.warn(
+        `[updateInvestorStatus] ${fallidos} correo(s) fallaron de ${INVESTOR_STATUS_CHANGE_RECIPIENTS.length}`,
+        mailResults
+      );
+    }
+
+    set.status = 200;
+    return {
+      success: true,
+      message: `Inversionista marcado como ${status} correctamente`,
+      inversionista: updated,
+      correos_enviados: enviados,
+      correos_fallidos: fallidos,
+      total_destinatarios: INVESTOR_STATUS_CHANGE_RECIPIENTS.length,
+    };
+  } catch (error) {
+    console.error("[updateInvestorStatus] Error:", error);
+    set.status = 500;
+    return {
+      success: false,
+      message: "Error al actualizar el status del inversionista",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+};
+
+// ============================================================================
+// ID fijo de CUBE INVESTMENTS S.A.
+// CUBE es "la casa": el inversionista principal al que se le
+// devuelve/absorbe la participación cuando otros inversionistas entran o salen.
+// ============================================================================
+const CUBE_INVESTMENT_ID = 86;
+
+// ============================================================================
+// CONTROLLER: exitInvestor
+// ============================================================================
+//
+// PROPÓSITO
+// Saca a un inversionista del sistema transfiriéndole toda su participación
+// a CUBE en los créditos indicados, y lo marca como `inactivo`. Al final
+// notifica por correo a la lista hardcodeada de destinatarios.
+//
+// FLUJO GENERAL (todo dentro de una transacción)
+// Para cada `credito_id` de la lista:
+//   1. Leer el row del inversionista en `creditos_inversionistas` (PADRE).
+//      Si no está → se salta y se reporta en `errores` (no aborta todo).
+//   2. Ver si CUBE ya tiene row en ese crédito:
+//      - Caso A (SWAP): CUBE NO está → UPDATE set inversionista_id=CUBE
+//        en el row del inversionista. Mismo monto, misma cuota, mismos
+//        campos. CUBE "toma la posición" tal cual.
+//      - Caso B (MERGE): CUBE YA está → sumar al row de CUBE los campos
+//        numéricos del inversionista (monto_aportado, porcentaje, cuota,
+//        intereses, IVA) y DELETE el row del inversionista.
+//   3. Mismo tratamiento en `creditos_inversionistas_espejo`, dejando
+//      `status = "completado"` (se cierra cualquier pendiente).
+//   4. `creditos.bandera_reinversion = false` (ya no hay pendientes en
+//      este crédito asociados al inversionista).
+// Al terminar el loop, si se procesó al menos un crédito:
+//   5. `inversionistas.status = "inactivo"`.
+// Fuera de la transacción:
+//   6. Mandar correo a los destinatarios fijos con el detalle: créditos
+//      afectados, monto devuelto a CUBE por cada uno, total, ejecutor.
+//
+// NOTAS DE DISEÑO
+// - No se recalcula la distribución del resto del pool (a diferencia de
+//   `addInvestorToCredit` / `manualReassignInvestor`). La premisa del
+//   negocio es: "el row pasa a ser de CUBE tal cual"; por simetría, en
+//   el merge simplemente se suman los absolutos al row de CUBE existente.
+// - `porcentaje_cash_in` de CUBE se preserva en el caso B (no se suma).
+//   Es el único campo "configuración" que se mantiene; el resto son
+//   montos/porcentajes/cuotas que son agregables.
+// - Los `.returning()` sirven para loggear cuántos rows tocó cada
+//   operación; si un UPDATE/DELETE no afecta rows, el log lo evidencia.
+// - `runId` identifica los logs de una misma ejecución para poder
+//   hilarlos cuando hay varios requests concurrentes.
+//
+// VALIDACIONES
+// - `inversionista_id` debe ser numérico.
+// - `creditos` debe ser un array no vacío de números.
+// - No se permite sacar a CUBE del sistema (`inversionista_id !== 86`).
+// - El inversionista debe existir en `inversionistas`.
+//
+// RESPUESTAS
+// - 200: operación exitosa (puede traer algunos `errores` parciales).
+// - 400: validación falló O ningún crédito se pudo procesar (entonces
+//   el inversionista NO queda inactivo).
+// - 404: inversionista no encontrado.
+// - 500: error inesperado (la transacción hace rollback).
+// ============================================================================
+export const exitInvestor = async ({ body, set, request }: any) => {
+  // ── Helper de logging con prefijo único por request ──
+  // runId: 6 chars alfanuméricos en mayúsculas, para hilar logs de un
+  // mismo request cuando hay múltiples corriendo en paralelo.
+  const runId = Math.random().toString(36).slice(2, 8).toUpperCase();
+  const log = (...args: any[]) => console.log(`[exitInvestor][${runId}]`, ...args);
+  const warn = (...args: any[]) => console.warn(`[exitInvestor][${runId}]`, ...args);
+  const err = (...args: any[]) => console.error(`[exitInvestor][${runId}]`, ...args);
+  const t0 = Date.now(); // Para medir duración total al final
+
+  try {
+    log("═══════════════════════════════════════════════════════════");
+    log("🚀 Inicio de salida de inversionista");
+    log("📥 Body recibido:", JSON.stringify(body));
+
+    // ========================================================================
+    // PASO 1: VALIDACIÓN DEL BODY
+    // ========================================================================
+    // Se valida manualmente (Elysia ya valida el schema a nivel router, pero
+    // acá defendemos por si se llama internamente sin pasar por el router).
+    const { inversionista_id, creditos: creditoIds } = body ?? {};
+
+    if (typeof inversionista_id !== "number" || !Number.isFinite(inversionista_id)) {
+      warn("❌ Validación falló: inversionista_id inválido →", inversionista_id);
+      set.status = 400;
+      return { success: false, message: "inversionista_id es obligatorio y debe ser numérico" };
+    }
+    if (!Array.isArray(creditoIds) || creditoIds.length === 0 || !creditoIds.every((id) => typeof id === "number" && Number.isFinite(id))) {
+      warn("❌ Validación falló: creditos inválido →", creditoIds);
+      set.status = 400;
+      return { success: false, message: "creditos debe ser un arreglo no vacío de números" };
+    }
+    // Salvaguarda: CUBE es la contraparte, nunca puede ser el "saliente".
+    if (inversionista_id === CUBE_INVESTMENT_ID) {
+      warn("❌ Intento de sacar a CUBE. Bloqueado.");
+      set.status = 400;
+      return { success: false, message: "No se puede sacar a CUBE del sistema" };
+    }
+
+    log(`✅ Validación OK — inversionista_id=${inversionista_id}, creditos=${creditoIds.length} [${creditoIds.join(", ")}]`);
+
+    // ========================================================================
+    // PASO 2: VERIFICAR QUE EL INVERSIONISTA EXISTA
+    // ========================================================================
+    // Traemos nombre y status actual para:
+    //   - devolverlos en la respuesta,
+    //   - loggear el cambio,
+    //   - incluirlos en el correo (estado anterior → nuevo).
+    const [invRow] = await db
+      .select({
+        inversionista_id: inversionistas.inversionista_id,
+        nombre: inversionistas.nombre,
+        status: inversionistas.status,
+      })
+      .from(inversionistas)
+      .where(eq(inversionistas.inversionista_id, inversionista_id));
+
+    if (!invRow) {
+      warn(`❌ Inversionista ${inversionista_id} no encontrado en DB`);
+      set.status = 404;
+      return { success: false, message: `Inversionista ${inversionista_id} no encontrado` };
+    }
+
+    log(`👤 Inversionista encontrado: [${invRow.inversionista_id}] ${invRow.nombre} (status=${invRow.status})`);
+
+    // ========================================================================
+    // PASO 3: ACUMULADORES DE RESULTADOS
+    // ========================================================================
+    // - `resultados`: créditos que se procesaron OK (para respuesta + correo).
+    // - `errores`: créditos que se saltaron (no existen / inversionista no
+    //   está en ellos). No abortan la transacción: se reportan pero se sigue.
+    // - `totalTransferido`: suma de montos movidos a CUBE (usando Big.js
+    //   para evitar problemas de precisión de floats).
+    const resultados: Array<{
+      credito_id: number;
+      numero_credito_sifco: string | null;
+      monto_transferido: string;
+      cube_preexistente: boolean;
+      accion: "swap" | "merge";
+    }> = [];
+    const errores: Array<{ credito_id: number; razon: string }> = [];
+    let totalTransferido = new Big(0);
+
+    // ========================================================================
+    // PASO 4: TRANSACCIÓN PRINCIPAL
+    // ========================================================================
+    // Todo el trabajo (padre + espejo + bandera + status final) va en una
+    // sola transacción. Si algo falla, ROLLBACK total: ni cambia el status
+    // del inversionista, ni queda nada a medias en los créditos.
+    log("🔒 Abriendo transacción...");
+    await db.transaction(async (tx) => {
+      for (const [idx, credito_id] of creditoIds.entries()) {
+        log(`─────────────────────────────────────────────────────────`);
+        log(`📂 [${idx + 1}/${creditoIds.length}] Procesando crédito_id=${credito_id}`);
+
+        // ────────────────────────────────────────────────────────────────────
+        // 4.1 — Verificar que el crédito exista.
+        // Solo se trae SIFCO porque lo necesitamos para el log y el correo.
+        // ────────────────────────────────────────────────────────────────────
+        const [creditoData] = await tx
+          .select({
+            credito_id: creditos.credito_id,
+            numero_credito_sifco: creditos.numero_credito_sifco,
+          })
+          .from(creditos)
+          .where(eq(creditos.credito_id, credito_id))
+          .limit(1);
+
+        if (!creditoData) {
+          warn(`   ⚠️  Crédito ${credito_id} no existe → agregado a errores`);
+          errores.push({ credito_id, razon: "Crédito no existe" });
+          continue; // Se sigue con el próximo crédito de la lista
+        }
+        log(`   ✅ Crédito existe — SIFCO=${creditoData.numero_credito_sifco ?? "(null)"}`);
+
+        // ────────────────────────────────────────────────────────────────────
+        // 4.2 — Leer row del inversionista en PADRE (creditos_inversionistas).
+        // Este row es el que vamos a "swappear" o "mergear" con CUBE.
+        // Si el inversionista no está aquí, no hay nada que mover en este
+        // crédito → se reporta como error y se salta.
+        // ────────────────────────────────────────────────────────────────────
+        const [invEnPadre] = await tx
+          .select()
+          .from(creditos_inversionistas)
+          .where(
+            and(
+              eq(creditos_inversionistas.credito_id, credito_id),
+              eq(creditos_inversionistas.inversionista_id, inversionista_id),
+            ),
+          )
+          .limit(1);
+
+        if (!invEnPadre) {
+          warn(`   ⚠️  Inversionista ${inversionista_id} NO está en creditos_inversionistas de este crédito → agregado a errores`);
+          errores.push({ credito_id, razon: `Inversionista ${inversionista_id} no está en este crédito` });
+          continue;
+        }
+        log(`   💰 Row padre del inversionista: monto_aportado=${invEnPadre.monto_aportado}, cuota=${invEnPadre.cuota_inversionista}, %participacion=${invEnPadre.porcentaje_participacion_inversionista}`);
+
+        // ────────────────────────────────────────────────────────────────────
+        // 4.3 — Ver si CUBE ya tiene row en este crédito.
+        // La presencia/ausencia de CUBE define el camino:
+        //   - Sin CUBE → SWAP (cambiar el inversionista_id del row).
+        //   - Con CUBE → MERGE (sumar campos + borrar row del inversionista).
+        // ────────────────────────────────────────────────────────────────────
+        const [cubeEnPadre] = await tx
+          .select()
+          .from(creditos_inversionistas)
+          .where(
+            and(
+              eq(creditos_inversionistas.credito_id, credito_id),
+              eq(creditos_inversionistas.inversionista_id, CUBE_INVESTMENT_ID),
+            ),
+          )
+          .limit(1);
+
+        // Monto que va a quedar "a nombre de" CUBE en este crédito.
+        // Usamos Big.js para no perder precisión al sumar montos monetarios.
+        const montoTransferido = new Big(invEnPadre.monto_aportado);
+        const cubePreexistente = !!cubeEnPadre;
+
+        if (cubePreexistente && cubeEnPadre) {
+          log(`   🟡 CUBE YA existe en el crédito (padre): monto_aportado=${cubeEnPadre.monto_aportado}`);
+        } else {
+          log(`   🟢 CUBE NO existe en el crédito (padre)`);
+        }
+
+        if (!cubeEnPadre) {
+          // ──────────────────────────────────────────────────────────────────
+          // 4.4A — CASO A: SWAP en PADRE
+          // CUBE no está en el crédito → sencillamente cambiamos el
+          // `inversionista_id` del row del inversionista a CUBE. El row
+          // conserva monto, cuota, porcentajes, fechas, etc. Es la operación
+          // más barata (un solo UPDATE) y no modifica ningún otro row del
+          // pool.
+          // ──────────────────────────────────────────────────────────────────
+          log(`   🔄 [PADRE] Caso A (SWAP): cambiando inversionista_id ${inversionista_id} → ${CUBE_INVESTMENT_ID}`);
+          const resA = await tx
+            .update(creditos_inversionistas)
+            .set({ inversionista_id: CUBE_INVESTMENT_ID })
+            .where(
+              and(
+                eq(creditos_inversionistas.credito_id, credito_id),
+                eq(creditos_inversionistas.inversionista_id, inversionista_id),
+              ),
+            )
+            .returning({ id: creditos_inversionistas.id });
+          log(`   ✅ [PADRE] SWAP aplicado en ${resA.length} row(s)`);
+        } else {
+          // ──────────────────────────────────────────────────────────────────
+          // 4.4B — CASO B: MERGE en PADRE
+          // CUBE ya está en el crédito → no podemos tener dos rows de CUBE
+          // (uniqueIndex ux_credito_inversionista). Entonces:
+          //   1. Sumar todos los campos numéricos del inversionista al row
+          //      de CUBE (monto, %participación, cuota, intereses, IVA).
+          //   2. Borrar el row del inversionista.
+          // No se tocan otros inversionistas del pool. `porcentaje_cash_in`
+          // de CUBE se preserva (es config, no acumulable).
+          // ──────────────────────────────────────────────────────────────────
+          const suma = (a: string | number, b: string | number) => new Big(a).plus(new Big(b)).toString();
+          const payload = {
+            monto_aportado: suma(cubeEnPadre.monto_aportado, invEnPadre.monto_aportado),
+            porcentaje_participacion_inversionista: suma(
+              cubeEnPadre.porcentaje_participacion_inversionista,
+              invEnPadre.porcentaje_participacion_inversionista,
+            ),
+            monto_inversionista: suma(cubeEnPadre.monto_inversionista, invEnPadre.monto_inversionista),
+            monto_cash_in: suma(cubeEnPadre.monto_cash_in, invEnPadre.monto_cash_in),
+            iva_inversionista: suma(cubeEnPadre.iva_inversionista, invEnPadre.iva_inversionista),
+            iva_cash_in: suma(cubeEnPadre.iva_cash_in, invEnPadre.iva_cash_in),
+            cuota_inversionista: suma(cubeEnPadre.cuota_inversionista, invEnPadre.cuota_inversionista),
+          };
+          log(`   🔀 [PADRE] Caso B (MERGE): sumando en CUBE →`, payload);
+
+          const resB1 = await tx
+            .update(creditos_inversionistas)
+            .set(payload)
+            .where(
+              and(
+                eq(creditos_inversionistas.credito_id, credito_id),
+                eq(creditos_inversionistas.inversionista_id, CUBE_INVESTMENT_ID),
+              ),
+            )
+            .returning({ id: creditos_inversionistas.id });
+          log(`   ✅ [PADRE] MERGE aplicado en row CUBE (${resB1.length})`);
+
+          const resB2 = await tx
+            .delete(creditos_inversionistas)
+            .where(
+              and(
+                eq(creditos_inversionistas.credito_id, credito_id),
+                eq(creditos_inversionistas.inversionista_id, inversionista_id),
+              ),
+            )
+            .returning({ id: creditos_inversionistas.id });
+          log(`   ✅ [PADRE] DELETE row del inversionista (${resB2.length})`);
+        }
+
+        // ────────────────────────────────────────────────────────────────────
+        // 4.5 — Mismo tratamiento en la tabla ESPEJO (creditos_inversionistas_espejo)
+        // El espejo refleja el estado "operativo" que usa el proceso de
+        // liquidación. La lógica es idéntica al padre (SWAP vs MERGE), pero
+        // además forzamos `status = "completado"` en el row resultante para
+        // cerrar cualquier pendiente que tuviera el inversionista.
+        //
+        // Si el inversionista no tiene row en espejo para este crédito
+        // (escenario posible por desincronizaciones históricas), se salta
+        // esta sección sin error.
+        // ────────────────────────────────────────────────────────────────────
+        const [invEnEspejo] = await tx
+          .select()
+          .from(creditos_inversionistas_espejo)
+          .where(
+            and(
+              eq(creditos_inversionistas_espejo.credito_id, credito_id),
+              eq(creditos_inversionistas_espejo.inversionista_id, inversionista_id),
+            ),
+          )
+          .limit(1);
+
+        if (!invEnEspejo) {
+          log(`   ℹ️  [ESPEJO] Inversionista NO tiene row en espejo de este crédito — se salta el espejo`);
+        } else {
+          log(`   💰 [ESPEJO] Row del inversionista: monto_aportado=${invEnEspejo.monto_aportado}, status=${invEnEspejo.status}`);
+
+          // Mismo check de "¿existe CUBE en espejo?" para definir SWAP vs MERGE
+          const [cubeEnEspejo] = await tx
+            .select()
+            .from(creditos_inversionistas_espejo)
+            .where(
+              and(
+                eq(creditos_inversionistas_espejo.credito_id, credito_id),
+                eq(creditos_inversionistas_espejo.inversionista_id, CUBE_INVESTMENT_ID),
+              ),
+            )
+            .limit(1);
+
+          if (!cubeEnEspejo) {
+            // 4.5A — ESPEJO SWAP: sólo cambia el id y fuerza status completado.
+            log(`   🔄 [ESPEJO] Caso A (SWAP): cambiando inversionista_id ${inversionista_id} → ${CUBE_INVESTMENT_ID}, status→completado`);
+            const resEA = await tx
+              .update(creditos_inversionistas_espejo)
+              .set({
+                inversionista_id: CUBE_INVESTMENT_ID,
+                status: "completado",
+                updated_at: new Date(),
+              })
+              .where(
+                and(
+                  eq(creditos_inversionistas_espejo.credito_id, credito_id),
+                  eq(creditos_inversionistas_espejo.inversionista_id, inversionista_id),
+                ),
+              )
+              .returning({ id: creditos_inversionistas_espejo.id });
+            log(`   ✅ [ESPEJO] SWAP aplicado (${resEA.length})`);
+          } else {
+            // 4.5B — ESPEJO MERGE: mismos campos que el padre + status=completado.
+            log(`   🟡 [ESPEJO] CUBE YA existe en espejo: monto_aportado=${cubeEnEspejo.monto_aportado}, status=${cubeEnEspejo.status}`);
+            const suma = (a: string | number, b: string | number) =>
+              new Big(a).plus(new Big(b)).toString();
+
+            const payloadE = {
+              monto_aportado: suma(cubeEnEspejo.monto_aportado, invEnEspejo.monto_aportado),
+              porcentaje_participacion_inversionista: suma(
+                cubeEnEspejo.porcentaje_participacion_inversionista,
+                invEnEspejo.porcentaje_participacion_inversionista,
+              ),
+              monto_inversionista: suma(cubeEnEspejo.monto_inversionista, invEnEspejo.monto_inversionista),
+              monto_cash_in: suma(cubeEnEspejo.monto_cash_in, invEnEspejo.monto_cash_in),
+              iva_inversionista: suma(cubeEnEspejo.iva_inversionista, invEnEspejo.iva_inversionista),
+              iva_cash_in: suma(cubeEnEspejo.iva_cash_in, invEnEspejo.iva_cash_in),
+              cuota_inversionista: suma(cubeEnEspejo.cuota_inversionista, invEnEspejo.cuota_inversionista),
+              status: "completado" as const,
+              updated_at: new Date(),
+            };
+            log(`   🔀 [ESPEJO] Caso B (MERGE): sumando en CUBE →`, payloadE);
+
+            const resEB1 = await tx
+              .update(creditos_inversionistas_espejo)
+              .set(payloadE)
+              .where(
+                and(
+                  eq(creditos_inversionistas_espejo.credito_id, credito_id),
+                  eq(creditos_inversionistas_espejo.inversionista_id, CUBE_INVESTMENT_ID),
+                ),
+              )
+              .returning({ id: creditos_inversionistas_espejo.id });
+            log(`   ✅ [ESPEJO] MERGE aplicado en row CUBE (${resEB1.length})`);
+
+            const resEB2 = await tx
+              .delete(creditos_inversionistas_espejo)
+              .where(
+                and(
+                  eq(creditos_inversionistas_espejo.credito_id, credito_id),
+                  eq(creditos_inversionistas_espejo.inversionista_id, inversionista_id),
+                ),
+              )
+              .returning({ id: creditos_inversionistas_espejo.id });
+            log(`   ✅ [ESPEJO] DELETE row del inversionista (${resEB2.length})`);
+          }
+        }
+
+        // ────────────────────────────────────────────────────────────────────
+        // 4.6 — Apagar bandera_reinversion del crédito.
+        // Esta bandera, cuando está en true, redirige los intereses del
+        // inversionista "pendiente" hacia CUBE. Como ya no hay ningún
+        // inversionista en ese estado (lo acabamos de sacar o fusionar con
+        // CUBE), la bandera pierde sentido y se apaga.
+        // ────────────────────────────────────────────────────────────────────
+        const resBandera = await tx
+          .update(creditos)
+          .set({ bandera_reinversion: false })
+          .where(eq(creditos.credito_id, credito_id))
+          .returning({ credito_id: creditos.credito_id });
+        log(`   🏁 bandera_reinversion=false aplicada en crédito ${credito_id} (${resBandera.length})`);
+
+        // ────────────────────────────────────────────────────────────────────
+        // 4.7 — Acumular resultado del crédito.
+        // Monto transferido se agrega al total global y se deja un resumen
+        // en `resultados[]` para incluirlo en la respuesta y el correo.
+        // ────────────────────────────────────────────────────────────────────
+        totalTransferido = totalTransferido.plus(montoTransferido);
+        resultados.push({
+          credito_id,
+          numero_credito_sifco: creditoData.numero_credito_sifco ?? null,
+          monto_transferido: montoTransferido.toFixed(2),
+          cube_preexistente: cubePreexistente,
+          accion: cubePreexistente ? "merge" : "swap",
+        });
+        log(`   ✅ Crédito ${credito_id} procesado — monto_transferido=Q${montoTransferido.toFixed(2)}, acción=${cubePreexistente ? "merge" : "swap"}`);
+        log(`   📊 Total acumulado transferido a CUBE: Q${totalTransferido.toFixed(2)}`);
+      }
+
+      log(`─────────────────────────────────────────────────────────`);
+      log(`📊 Resumen transacción: procesados=${resultados.length}, errores=${errores.length}, total=Q${totalTransferido.toFixed(2)}`);
+
+      // ──────────────────────────────────────────────────────────────────────
+      // 4.8 — Cambio final de status del inversionista.
+      // Solo se aplica si al menos un crédito se procesó. Si todos fallaron
+      // (p.ej. todos los credit_ids no tenían al inversionista), NO se cambia
+      // el status — sería prematuro marcarlo como inactivo sin haberlo
+      // sacado efectivamente de ningún crédito.
+      // ──────────────────────────────────────────────────────────────────────
+      if (resultados.length > 0) {
+        log(`🔻 Pasando inversionista ${inversionista_id} → status='inactivo'`);
+        const resStatus = await tx
+          .update(inversionistas)
+          .set({ status: "inactivo" })
+          .where(eq(inversionistas.inversionista_id, inversionista_id))
+          .returning({ inversionista_id: inversionistas.inversionista_id, status: inversionistas.status });
+        log(`   ✅ Status actualizado:`, resStatus[0]);
+      } else {
+        warn(`⚠️  Ningún crédito se procesó → NO se cambia el status del inversionista`);
+      }
+    });
+    log(`🔓 Transacción COMMIT`);
+
+    // ========================================================================
+    // PASO 5: SALIDA TEMPRANA SI NO SE HIZO NADA
+    // ========================================================================
+    // Si la transacción terminó sin haber procesado un solo crédito,
+    // respondemos 400 y NO mandamos correo (no hay nada que notificar).
+    if (resultados.length === 0) {
+      warn(`🚫 Sin créditos procesados — respondiendo 400 y sin correo`);
+      set.status = 400;
+      return {
+        success: false,
+        message: "No se procesó ningún crédito. El inversionista no fue inactivado.",
+        errores,
+      };
+    }
+
+    // ========================================================================
+    // PASO 6: RESOLVER USUARIO EJECUTOR (OPCIONAL)
+    // ========================================================================
+    // A partir del JWT del request tratamos de sacar nombre y correo del
+    // usuario que disparó la operación. Va en try/catch: si el token está
+    // expirado o mal formado, seguimos sin ejecutor (el correo lo muestra
+    // como "no identificado").
+    let usuarioEmail: string | undefined;
+    let usuarioNombre: string | undefined;
+    try {
+      const authHeader = request?.headers?.get?.("Authorization");
+      if (authHeader?.startsWith("Bearer ")) {
+        const token = authHeader.replace("Bearer ", "").trim();
+        const decoded = jwt.verify(token, JWT_SECRET) as any;
+        usuarioEmail = decoded.email ?? decoded.correo ?? undefined;
+        usuarioNombre = decoded.nombre ?? decoded.name ?? undefined;
+        log(`🔐 JWT resuelto → usuarioNombre=${usuarioNombre ?? "(none)"} usuarioEmail=${usuarioEmail ?? "(none)"}`);
+      } else {
+        log(`🔐 Sin header Authorization (o no es Bearer) — correo sin ejecutor`);
+      }
+    } catch (jwtErr) {
+      warn("🔐 No se pudo resolver el usuario del JWT:", jwtErr);
+    }
+
+    // ========================================================================
+    // PASO 7: ARMAR Y ENVIAR EL CORREO
+    // ========================================================================
+    // Fecha en GT (zona horaria Guatemala) para mostrar el momento exacto
+    // del cambio sin depender de la zona del server.
+    const fechaGT = new Date().toLocaleString("es-GT", { timeZone: "America/Guatemala" });
+    const subject = `Inversionista INACTIVADO (cartera transferida a CUBE): ${invRow.nombre}`;
+
+    // Una fila por crédito procesado, con SIFCO, ID interno, monto y
+    // leyenda de qué acción se tomó (swap vs merge).
+    const filasCreditos = resultados
+      .map(
+        (r) => `
+          <tr>
+            <td style="padding:6px 10px; border:1px solid #e5e7eb;">${r.numero_credito_sifco ?? "—"}</td>
+            <td style="padding:6px 10px; border:1px solid #e5e7eb;">${r.credito_id}</td>
+            <td style="padding:6px 10px; border:1px solid #e5e7eb; text-align:right;">Q${r.monto_transferido}</td>
+            <td style="padding:6px 10px; border:1px solid #e5e7eb;">${r.accion === "merge" ? "Sumado a CUBE existente" : "CUBE tomó la posición"}</td>
+          </tr>
+        `,
+      )
+      .join("");
+
+    // Si hubo créditos saltados, se listan al final en rojo para que
+    // el equipo pueda revisarlos aparte.
+    const erroresHtml =
+      errores.length > 0
+        ? `
+          <h3 style="margin-top:16px; color:#b91c1c;">Créditos omitidos</h3>
+          <ul style="color:#b91c1c;">
+            ${errores.map((e) => `<li>Crédito ${e.credito_id}: ${e.razon}</li>`).join("")}
+          </ul>
+        `
+        : "";
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; color:#111;">
+        <h2 style="margin-bottom: 8px;">Salida de inversionista — cartera transferida a CUBE</h2>
+        <p>
+          El inversionista <strong>${invRow.nombre}</strong> (ID: ${invRow.inversionista_id})
+          fue <strong style="color:#dc2626;">INACTIVADO</strong>.
+          Su participación en los créditos listados fue transferida a <strong>CUBE INVESTMENTS S.A.</strong>
+        </p>
+        <table style="border-collapse: collapse; margin-top: 8px;">
+          <tr><td style="padding:4px 8px;"><strong>Estado anterior:</strong></td><td style="padding:4px 8px;">${invRow.status}</td></tr>
+          <tr><td style="padding:4px 8px;"><strong>Estado nuevo:</strong></td><td style="padding:4px 8px; color:#dc2626;"><strong>inactivo</strong></td></tr>
+          <tr><td style="padding:4px 8px;"><strong>Fecha (GT):</strong></td><td style="padding:4px 8px;">${fechaGT}</td></tr>
+          ${usuarioNombre || usuarioEmail
+            ? `<tr><td style="padding:4px 8px;"><strong>Ejecutado por:</strong></td><td style="padding:4px 8px;">${[usuarioNombre, usuarioEmail].filter(Boolean).join(" — ")}</td></tr>`
+            : ""}
+          <tr><td style="padding:4px 8px;"><strong>Total transferido a CUBE:</strong></td><td style="padding:4px 8px;"><strong>Q${totalTransferido.toFixed(2)}</strong></td></tr>
+          <tr><td style="padding:4px 8px;"><strong>Créditos procesados:</strong></td><td style="padding:4px 8px;">${resultados.length}</td></tr>
+        </table>
+
+        <h3 style="margin-top:16px;">Créditos transferidos</h3>
+        <table style="border-collapse: collapse; margin-top: 4px; min-width: 520px;">
+          <thead>
+            <tr style="background:#f3f4f6;">
+              <th style="padding:6px 10px; border:1px solid #e5e7eb; text-align:left;">SIFCO</th>
+              <th style="padding:6px 10px; border:1px solid #e5e7eb; text-align:left;">Crédito ID</th>
+              <th style="padding:6px 10px; border:1px solid #e5e7eb; text-align:right;">Monto a CUBE</th>
+              <th style="padding:6px 10px; border:1px solid #e5e7eb; text-align:left;">Acción</th>
+            </tr>
+          </thead>
+          <tbody>${filasCreditos}</tbody>
+        </table>
+        ${erroresHtml}
+        <p style="margin-top:16px; color:#555; font-size:12px;">Correo automático — Club Cash In / Cartera.</p>
+      </div>
+    `;
+
+    log(`📧 Enviando correo a ${INVESTOR_STATUS_CHANGE_RECIPIENTS.length} destinatario(s): [${INVESTOR_STATUS_CHANGE_RECIPIENTS.join(", ")}]`);
+    log(`📧 Asunto: "${subject}"`);
+
+    // `allSettled` para que un destinatario que falle no tumbe el resto.
+    // Enviamos individualmente (sendPlainEmail acepta un solo `to`) en paralelo.
+    const mailResults = await Promise.allSettled(
+      INVESTOR_STATUS_CHANGE_RECIPIENTS.map((to) => sendPlainEmail(to, subject, html)),
+    );
+
+    mailResults.forEach((r, i) => {
+      const to = INVESTOR_STATUS_CHANGE_RECIPIENTS[i];
+      if (r.status === "fulfilled" && (r as any).value?.success) {
+        log(`   ✉️  OK → ${to} (id=${(r as any).value?.data?.id ?? "?"})`);
+      } else if (r.status === "fulfilled") {
+        warn(`   ✉️  FAIL → ${to}:`, (r as any).value?.error);
+      } else {
+        warn(`   ✉️  REJECTED → ${to}:`, r.reason);
+      }
+    });
+
+    const enviados = mailResults.filter(
+      (r) => r.status === "fulfilled" && (r as any).value?.success,
+    ).length;
+    const fallidos = INVESTOR_STATUS_CHANGE_RECIPIENTS.length - enviados;
+    log(`📧 Correos: enviados=${enviados}, fallidos=${fallidos}`);
+
+    log(`⏱️  Duración total: ${Date.now() - t0}ms`);
+    log(`✅ DONE — inversionista ${invRow.inversionista_id} inactivado, ${resultados.length} crédito(s), Q${totalTransferido.toFixed(2)} a CUBE`);
+    log("═══════════════════════════════════════════════════════════");
+
+    // ========================================================================
+    // PASO 8: RESPUESTA FINAL
+    // ========================================================================
+    // Se devuelve todo el detalle para que el frontend pueda mostrar un
+    // resumen (inversionista, total, créditos uno por uno, errores y
+    // métricas de correo).
+    set.status = 200;
+    return {
+      success: true,
+      message: `Inversionista inactivado. ${resultados.length} crédito(s) transferido(s) a CUBE. Total: Q${totalTransferido.toFixed(2)}.`,
+      inversionista: { inversionista_id: invRow.inversionista_id, nombre: invRow.nombre, status: "inactivo" },
+      total_transferido_a_cube: totalTransferido.toFixed(2),
+      creditos_procesados: resultados,
+      errores,
+      correos_enviados: enviados,
+      correos_fallidos: fallidos,
+      total_destinatarios: INVESTOR_STATUS_CHANGE_RECIPIENTS.length,
+    };
+  } catch (error) {
+    err("💥 Error fatal:", error);
+    err(`⏱️  Duración hasta el error: ${Date.now() - t0}ms`);
+    err("═══════════════════════════════════════════════════════════");
+    set.status = 500;
+    return {
+      success: false,
+      message: "Error al procesar la salida del inversionista",
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 };
 

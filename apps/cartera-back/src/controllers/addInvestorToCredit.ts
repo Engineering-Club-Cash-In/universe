@@ -28,6 +28,8 @@ const COMPRA_CARTERA_PENDIENTE_RECIPIENTS = {
     "jalvaradp@clubcashin.com",
     "daniel.r@clubcashin.com",
       "diego.a@sepresta.com",
+      "pablo.z@clubcashin.com"
+
   ],
 };
 

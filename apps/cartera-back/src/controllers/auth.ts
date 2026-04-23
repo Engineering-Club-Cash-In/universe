@@ -122,7 +122,10 @@ export async function loginService(email: string, password: string) {
   const refreshToken = jwt.sign(
     {
       id: user.id,
+      email: user.email,
       role: user.role,
+      admin_id: user.admin_id,
+      asesor_id: user.asesor_id,
     },
     JWT_REFRESH_SECRET,
     { expiresIn: "7d" }

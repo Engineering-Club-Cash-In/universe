@@ -361,19 +361,25 @@ export async function insertPagosCreditoInversionistas(
   const inversionistasWithName = await Promise.all(
     inversionistasData.map(async (inv) => {
       const [invRow] = await db
-        .select({ nombre: inversionistas.nombre })
+        .select({
+          nombre: inversionistas.nombre,
+          // 🆕 Traemos también el status para decidir si le devolvemos
+          // todo su monto_aportado como abono_capital (pendiente_devolucion).
+          status: inversionistas.status,
+        })
         .from(inversionistas)
         .where(eq(inversionistas.inversionista_id, inv.inversionista_id));
       return {
         ...inv,
         nombre: invRow?.nombre ?? "",
+        status_inversionista: invRow?.status ?? null,
       };
     })
   );
 
   console.log("\n👥 Inversionistas con nombres:");
   inversionistasWithName.forEach((inv, idx) => {
-    console.log(`   ${idx + 1}. ${inv.nombre} (ID: ${inv.inversionista_id})`);
+    console.log(`   ${idx + 1}. ${inv.nombre} (ID: ${inv.inversionista_id}) status=${inv.status_inversionista}`);
   });
 
   if (!inversionistasWithName.length) {
@@ -551,7 +557,16 @@ export async function insertPagosCreditoInversionistas(
       `   📊 totalIVA (cash_in + inversionista): ${totalIVA.toString()}`
     );
 
-    if (inv.inversionista_id === mayorCuotaInversionistaId && !excludeCube) {
+    if (inv.status_inversionista === "pendiente_devolucion") {
+      // 🆕 CASO ESPECIAL: inversionista pendiente de devolución.
+      // Se le devuelve TODO su monto_aportado como abono_capital en este pago
+      // (sin restar interés, IVA ni cargos fijos). El interés/IVA del último
+      // período se calcula normal y viaja en abono_interes/abono_iva_12.
+      abono_capital = new Big(inv.monto_aportado || 0);
+      console.log(
+        `   ⭐ PENDIENTE DE DEVOLUCIÓN - abono_capital = monto_aportado completo: ${abono_capital.toString()}`
+      );
+    } else if (inv.inversionista_id === mayorCuotaInversionistaId && !excludeCube) {
       console.log(
         `   🏆 ES EL MAYOR INVERSIONISTA - Aplicando descuentos completos`
       );
@@ -631,20 +646,33 @@ export async function insertPagosCreditoInversionistas(
 
     let abonoCapitalId: number | null = null;
     if (abonosNoLiquidados.length > 0) {
-      let montoAbono = new Big(0);
-      for (const abono of abonosNoLiquidados) {
-        // Solo sumar si es tipo CAPITAL; CANCELACION ya fue sumado previamente
-        if (abono.tipo === "CAPITAL") {
-          montoAbono = montoAbono.plus(abono.monto);
+      if (inv.status_inversionista === "pendiente_devolucion") {
+        // 🆕 Si está en pendiente_devolucion, su abono_capital ya es el
+        // monto_aportado completo del espejo. Sumarle los abonos_capital
+        // pendientes sería devolverle más de lo que realmente tiene (doble
+        // conteo). Los registros quedan como liquidado=false para que otro
+        // flujo los resuelva después.
+        console.log(
+          `   ⏭️  PENDIENTE DE DEVOLUCIÓN: saltando ${abonosNoLiquidados.length} ` +
+            `abono(s) a capital pendiente(s) (no se suman al abono_capital ` +
+            `ni se linkea abono_capital_id)`
+        );
+      } else {
+        let montoAbono = new Big(0);
+        for (const abono of abonosNoLiquidados) {
+          // Solo sumar si es tipo CAPITAL; CANCELACION ya fue sumado previamente
+          if (abono.tipo === "CAPITAL") {
+            montoAbono = montoAbono.plus(abono.monto);
+          }
         }
-      }
-      if (!montoAbono.eq(0)) {
-        abono_capital = abono_capital.plus(montoAbono);
-      }
-      abonoCapitalId = abonosNoLiquidados[0].abono_id;
+        if (!montoAbono.eq(0)) {
+          abono_capital = abono_capital.plus(montoAbono);
+        }
+        abonoCapitalId = abonosNoLiquidados[0].abono_id;
 
-      console.log(`   💰 Abono a capital encontrado (id: ${abonoCapitalId}): +${montoAbono.toFixed(6)} (tipo: ${abonosNoLiquidados[0].tipo})`);
-      console.log(`      abono_capital con abono sumado: ${abono_capital.toString()}`);
+        console.log(`   💰 Abono a capital encontrado (id: ${abonoCapitalId}): +${montoAbono.toFixed(6)} (tipo: ${abonosNoLiquidados[0].tipo})`);
+        console.log(`      abono_capital con abono sumado: ${abono_capital.toString()}`);
+      }
     }
 
     const resultado = {

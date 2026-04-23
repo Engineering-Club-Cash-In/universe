@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { InvestorStatusBadge } from "@/components/investments/InvestorStatusBadge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -305,6 +306,10 @@ function LiquidacionesInversionistas() {
 												}[inv.tipoReinversion as string] ?? "Reinversión"}
 											</Badge>
 										)}
+										<InvestorStatusBadge
+											status={(inv as any).status}
+											size="sm"
+										/>
 									</div>
 								</Link>
 							))}

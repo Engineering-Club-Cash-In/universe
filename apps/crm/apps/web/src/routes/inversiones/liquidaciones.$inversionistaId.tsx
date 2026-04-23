@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
+	AlertCircle,
 	ArrowLeft,
 	Banknote,
 	CalendarDays,
@@ -32,6 +33,7 @@ import {
 } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { InvestorStatusBadge } from "@/components/investments/InvestorStatusBadge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -676,6 +678,9 @@ function InvestorLiquidacionesPage() {
 	const [page, setPage] = useState(1);
 	const PER_PAGE = 25;
 
+	// Liquidar todo el monto aportado (cambia status a pendiente_devolucion)
+	const [liquidarTodoOpen, setLiquidarTodoOpen] = useState(false);
+
 	// Compra de cartera
 	const [compraCarteraOpen, setCompraCarteraOpen] = useState(false);
 	const [compraCarteraMonto, setCompraCarteraMonto] = useState("");
@@ -775,6 +780,31 @@ function InvestorLiquidacionesPage() {
 		},
 	});
 
+	const cambiarStatusMutation = useMutation({
+		...orpc.cambiarStatusInversionista.mutationOptions(),
+		onSuccess: () => {
+			toast.success(
+				"Inversionista marcado para devolución total. Se liquidará en la próxima corrida.",
+			);
+			setLiquidarTodoOpen(false);
+			queryClient.invalidateQueries({
+				queryKey: orpc.getInversionistas.queryOptions({
+					input: { id: investorIdNum, page: 1, perPage: 1 },
+				}).queryKey,
+				refetchType: "all",
+			});
+			queryClient.invalidateQueries({
+				queryKey: orpc.getInvestorActivityLog.queryOptions({
+					input: { inversionistaId: investorIdNum },
+				}).queryKey,
+				refetchType: "all",
+			});
+		},
+		onError: (err: any) => {
+			toast.error(err?.message ?? "Error al cambiar el status del inversionista");
+		},
+	});
+
 	// Fetch investor info by ID from cartera
 	const investorsQuery = useQuery({
 		...orpc.getInversionistas.queryOptions({
@@ -855,9 +885,12 @@ function InvestorLiquidacionesPage() {
 								<Users className="h-5 w-5" />
 							</div>
 							<div>
-								<h1 className="font-bold text-lg leading-tight">
-									{investor?.nombre ?? "Inversionista"}
-								</h1>
+								<div className="flex flex-wrap items-center gap-2">
+									<h1 className="font-bold text-lg leading-tight">
+										{investor?.nombre ?? "Inversionista"}
+									</h1>
+									<InvestorStatusBadge status={investor?.status} />
+								</div>
 								{investor?.dpi && (
 									<p className="flex items-center gap-1 text-muted-foreground text-xs">
 										<Shield className="h-3 w-3" />
@@ -878,6 +911,17 @@ function InvestorLiquidacionesPage() {
 								<Pencil className="h-4 w-4" />
 								Editar
 							</Button>
+							{investor?.status === "activo" && (
+								<Button
+									variant="outline"
+									size="sm"
+									className="gap-2 border-orange-500/60 text-orange-700 hover:bg-orange-500/10 hover:text-orange-800 dark:text-orange-300 dark:hover:text-orange-200"
+									onClick={() => setLiquidarTodoOpen(true)}
+								>
+									<Banknote className="h-4 w-4" />
+									Liquidar todo el monto aportado
+								</Button>
+							)}
 							<Button
 								variant="outline"
 								size="sm"
@@ -1446,6 +1490,74 @@ function InvestorLiquidacionesPage() {
 							) : (
 								"Guardar cambios"
 							)}
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			{/* Modal confirmación — devolución total del monto aportado */}
+			<Dialog
+				open={liquidarTodoOpen}
+				onOpenChange={(open) => {
+					if (cambiarStatusMutation.isPending) return;
+					setLiquidarTodoOpen(open);
+				}}
+			>
+				<DialogContent className="sm:max-w-md">
+					<DialogHeader>
+						<div className="flex items-center gap-3">
+							<div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-orange-500/15 text-orange-600 dark:text-orange-300">
+								<AlertCircle className="h-5 w-5" />
+							</div>
+							<DialogTitle>Liquidar todo el monto aportado</DialogTitle>
+						</div>
+						<DialogDescription className="pt-2">
+							Estás por marcar a{" "}
+							<span className="font-semibold">
+								{investor?.nombre ?? "este inversionista"}
+							</span>{" "}
+							como{" "}
+							<span className="font-semibold text-orange-700 dark:text-orange-300">
+								pendiente de devolución
+							</span>
+							{". "}
+							En la próxima corrida de liquidación se le entregará la
+							totalidad de su monto aportado.
+						</DialogDescription>
+					</DialogHeader>
+
+					<div className="rounded-md border border-orange-300/60 bg-orange-50 p-3 text-sm text-orange-900 dark:border-orange-800/60 dark:bg-orange-950/40 dark:text-orange-200">
+						<p className="font-semibold">Esta acción no se puede revertir.</p>
+						<p className="mt-1 text-xs">
+							Una vez confirmada, el inversionista quedará bloqueado para
+							nuevas operaciones hasta completarse la devolución.
+						</p>
+					</div>
+
+					<DialogFooter className="gap-2 sm:gap-2">
+						<Button
+							variant="outline"
+							onClick={() => setLiquidarTodoOpen(false)}
+							disabled={cambiarStatusMutation.isPending}
+						>
+							Cancelar
+						</Button>
+						<Button
+							className="gap-2 bg-orange-600 text-white hover:bg-orange-700"
+							onClick={() =>
+								cambiarStatusMutation.mutate({
+									inversionistaId: investorIdNum,
+									status: "pendiente_devolucion",
+								})
+							}
+							disabled={cambiarStatusMutation.isPending}
+						>
+							{cambiarStatusMutation.isPending ? (
+								<Loader2 className="h-4 w-4 animate-spin" />
+							) : (
+								<Banknote className="h-4 w-4" />
+							)}
+							Sí, marcar para devolución total
 						</Button>
 					</DialogFooter>
 				</DialogContent>

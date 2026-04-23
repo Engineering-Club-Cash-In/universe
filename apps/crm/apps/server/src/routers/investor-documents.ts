@@ -202,6 +202,41 @@ export const investorDocumentsRouter = {
 			return { success: true, data: result.data };
 		}),
 
+	// Cambiar status del inversionista — pendiente_devolucion / activo / inactivo
+	cambiarStatusInversionista: crmCobrosOrInvestmentsProcedure
+		.input(
+			z.object({
+				inversionistaId: z.number().int().positive(),
+				status: z.enum(["activo", "inactivo", "pendiente_devolucion"]),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const result = await carteraBackClient.setInvestorStatus({
+				inversionista_id: input.inversionistaId,
+				status: input.status,
+			});
+
+			try {
+				await db.insert(investorActivityLog).values({
+					inversionistaId: input.inversionistaId,
+					action: "investor_updated",
+					details: {
+						statusChange: input.status,
+					},
+					performedBy: context.session.user.id,
+					performedByName:
+						context.session.user.name ?? context.session.user.email,
+				});
+			} catch (logError) {
+				console.error(
+					"Error al registrar log de cambio de status:",
+					logError,
+				);
+			}
+
+			return { success: true, data: result };
+		}),
+
 	// Crear inversionista — opcionalmente con compra de cartera
 	crearInversionista: crmCobrosOrInvestmentsProcedure
 		.input(

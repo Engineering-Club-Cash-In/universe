@@ -1390,7 +1390,7 @@ function MobileView({
                 </Button>
               )}
             {canViewReports(item.creditos.statusCredit) &&
-              user?.role === "ADMIN" && (
+              (user?.role === "ADMIN" || user?.role === "ASESOR") && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -1695,7 +1695,7 @@ function DesktopView({
                           )}
 
                         {canViewReports(item.creditos.statusCredit) &&
-                          user?.role === "ADMIN" && (
+                          (user?.role === "ADMIN" || user?.role === "ASESOR") && (
                             <Button
                               variant="outline"
                               className="text-green-700 border-green-300 hover:bg-green-50"

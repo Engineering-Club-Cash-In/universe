@@ -2317,6 +2317,7 @@ export const cobrosRouter = {
 						numeroCuenta: inv.numero_cuenta ?? null,
 						moneda: inv.moneda ?? "quetzales",
 						celular: inv.celular ?? null,
+						status: inv.status ?? null,
 					})),
 					pagination: {
 						page: result.page,

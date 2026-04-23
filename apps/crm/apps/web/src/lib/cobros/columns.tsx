@@ -22,6 +22,7 @@ export type ContratoCobranza = {
 	cuotaMensual: string | null;
 	etiquetas: string[] | null;
 	isPool?: boolean;
+	responsableCobros: string | null;
 };
 
 function getEstadoBadge(estado: string) {
@@ -167,6 +168,23 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 					{row.getValue("clienteNombre")}
 				</div>
 			);
+		},
+	},
+	{
+		accessorKey: "responsableCobros",
+		header: ({ column }) => (
+			<Button
+				variant="ghost"
+				onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+			>
+				Asesor
+				<ArrowUpDown className="ml-2 h-4 w-4" />
+			</Button>
+		),
+		cell: ({ row }) => {
+			const asesor = row.getValue("responsableCobros") as string | null;
+			if (!asesor) return <span className="text-muted-foreground text-xs">Sin asignar</span>;
+			return <span className="font-medium text-sm">{asesor}</span>;
 		},
 	},
 	{

@@ -387,7 +387,10 @@ function InvestorCard({
     if (creditoIds.length === 0) return;
 
     devolverPendientes.mutate(
-      { creditos: creditoIds.length === 1 ? creditoIds[0] : creditoIds },
+      {
+        creditos: creditoIds.length === 1 ? creditoIds[0] : creditoIds,
+        inversionista_id: investor.inversionista_id,
+      },
       {
         onSuccess: (res) => {
           const count = res.creditos_limpiados?.length ?? creditoIds.length;

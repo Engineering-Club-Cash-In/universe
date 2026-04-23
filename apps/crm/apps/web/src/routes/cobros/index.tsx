@@ -1112,12 +1112,17 @@ function RouteComponent() {
 								</div>
 							</div>
 						}
+						pageSizeOptions={[25, 50, 75, 100, 200]}
 						serverPagination={{
 							page: page,
 							pageSize: pageSize,
 							totalPages: totalPages,
 							totalItems: totalCreditos,
 							onPageChange: (newPage) => setPage(newPage),
+							onPageSizeChange: (newSize) => {
+								setPageSize(newSize);
+								setPage(1);
+							},
 						}}
 					/>
 				</CardContent>

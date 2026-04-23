@@ -11,39 +11,42 @@ export const s3 = new S3Client({
   },
 });
 
-export async function uploadFileController({ request, set }: any) {
+export async function uploadFileController({ body, set }: any) {
   try {
-  const form = await request.formData();
-  const file = form.get("file");
-  console.log("Received file:", file);
-  if (!file || !(file instanceof Blob)) {
-    set.status = 400;
-    return { error: "No file uploaded" };
-  }
+    // Elysia ya parseó el multipart. El archivo llega en `body.file` como un
+    // File/Blob. NO usar `request.formData()` acá: el body ya fue consumido
+    // por el parser interno de Elysia y tirar "ERR_BODY_ALREADY_USED".
+    const file = body?.file;
+    console.log("Received file:", file);
 
-  // Obtener extensión
-  let ext = "";
-  if ("name" in file) {
-    const parts = (file as any).name.split(".");
-    if (parts.length > 1) ext = "." + parts.pop();
-  }
-  const filename = `${uuidv4()}${ext}`;
+    if (!file || !(file instanceof Blob)) {
+      set.status = 400;
+      return { error: "No file uploaded" };
+    }
 
-  // Convertir Blob a Buffer
-  const buffer = Buffer.from(await file.arrayBuffer());
+    // Obtener extensión
+    let ext = "";
+    if ("name" in file) {
+      const parts = (file as any).name.split(".");
+      if (parts.length > 1) ext = "." + parts.pop();
+    }
+    const filename = `${uuidv4()}${ext}`;
 
-  await s3.send(
-    new PutObjectCommand({
-      Bucket: process.env.R2_BUCKET,
-      Key: filename,
-      Body: buffer,
-      ContentType: file.type || "application/octet-stream",
-    })
-  );
+    // Convertir Blob a Buffer
+    const buffer = Buffer.from(await file.arrayBuffer());
 
-  const url = `${filename}`;
-  return { success: true, url, filename };}
-  catch (error) {
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: process.env.R2_BUCKET,
+        Key: filename,
+        Body: buffer,
+        ContentType: file.type || "application/octet-stream",
+      })
+    );
+
+    const url = `${filename}`;
+    return { success: true, url, filename };
+  } catch (error) {
     console.error("Error uploading file:", error);
     set.status = 500;
     return { error: "Error uploading file" };

@@ -44,6 +44,7 @@ interface DataTableProps<TData, TValue> {
 	setGlobalFilterParam?: (filter: string) => void;
 	onRowClick?: (row: TData) => void;
 	hideSearch?: boolean;
+	pageSizeOptions?: number[];
 }
 
 export function DataTable<TData, TValue>({
@@ -57,6 +58,7 @@ export function DataTable<TData, TValue>({
 	setGlobalFilterParam,
 	onRowClick,
 	hideSearch,
+	pageSizeOptions = [10, 20, 30, 40, 50],
 }: DataTableProps<TData, TValue>) {
 	const [sorting, setSorting] = useState<SortingState>([]);
 	const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -219,24 +221,31 @@ export function DataTable<TData, TValue>({
 					)}
 				</div>
 				<div className="flex items-center space-x-6 lg:space-x-8">
-					{!isServerPagination && (
-						<div className="flex items-center space-x-2">
-							<p className="font-medium text-sm">Filas por página</p>
-							<select
-								value={table.getState().pagination.pageSize}
-								onChange={(e) => {
-									table.setPageSize(Number(e.target.value));
-								}}
-								className="h-8 w-[70px] rounded-md border border-input bg-background px-2 py-1 text-sm"
-							>
-								{[10, 20, 30, 40, 50].map((pageSize) => (
-									<option key={pageSize} value={pageSize}>
-										{pageSize}
-									</option>
-								))}
-							</select>
-						</div>
-					)}
+					<div className="flex items-center space-x-2">
+						<p className="font-medium text-sm">Filas por página</p>
+						<select
+							value={
+								isServerPagination
+									? serverPagination.pageSize
+									: table.getState().pagination.pageSize
+							}
+							onChange={(e) => {
+								const size = Number(e.target.value);
+								if (isServerPagination) {
+									serverPagination.onPageSizeChange?.(size);
+								} else {
+									table.setPageSize(size);
+								}
+							}}
+							className="h-8 w-[70px] rounded-md border border-input bg-background px-2 py-1 text-sm"
+						>
+							{pageSizeOptions.map((pageSize) => (
+								<option key={pageSize} value={pageSize}>
+									{pageSize}
+								</option>
+							))}
+						</select>
+					</div>
 					<div className="flex w-[100px] items-center justify-center font-medium text-sm">
 						Página{" "}
 						{isServerPagination

@@ -67,10 +67,10 @@ export function useReemplazarInversionistaCredito() {
   });
 }
 
-export function useCreditCandidates(monto: number | null) {
+export function useCreditCandidates(monto: number | null, inversionista_id?: number) {
   return useQuery<OtroCreditoDisponible[]>({
-    queryKey: [...creditCandidatesKeys.all, monto] as const,
-    queryFn: () => getCreditCandidatesService({ monto: monto! }),
+    queryKey: [...creditCandidatesKeys.all, monto, inversionista_id] as const,
+    queryFn: () => getCreditCandidatesService({ monto: monto!, inversionista_id }),
     enabled: monto !== null && monto > 0,
     staleTime: 1000 * 60 * 2,
     gcTime: 1000 * 60 * 5,

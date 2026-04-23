@@ -1,5 +1,5 @@
 import Big from "big.js";
-import { eq, and, inArray, asc, gt, lte, gte } from "drizzle-orm";
+import { eq, and, inArray, asc, gt, lte, gte, sql } from "drizzle-orm";
 import { db } from "../database";
 import {
   creditos,
@@ -1333,6 +1333,110 @@ export const repararTotalRestante = async ({
     capital_arranque: capitalArranque.toString(),
     ultima_cuota_pagada: ultimaCuotaPagada,
     pagos_actualizados: actualizaciones.length,
+  };
+};
+
+// ========================================
+// REPARAR total_restante EN MASA (créditos ACTIVOS, excluye CRM)
+// ========================================
+
+interface RepararTotalRestanteBulkParams {
+  concurrencia?: number;
+  numeros_credito?: string[];
+  statuses?: Array<
+    "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO" | "EN_CONVENIO" | "CAIDO"
+  >;
+}
+
+interface RepararTotalRestanteBulkResult {
+  total: number;
+  exitosos: number;
+  fallidos: number;
+  pagos_actualizados_total: number;
+  detalle_exitosos: Array<{
+    numero_credito_sifco: string;
+    credito_id: number;
+    capital_arranque: string;
+    ultima_cuota_pagada: number | null;
+    pagos_actualizados: number;
+  }>;
+  detalle_fallidos: Array<{ numero_credito_sifco: string; error: string }>;
+}
+
+export const repararTotalRestanteBulk = async ({
+  concurrencia = 3,
+  numeros_credito,
+  statuses,
+}: RepararTotalRestanteBulkParams): Promise<RepararTotalRestanteBulkResult> => {
+  console.log("\n🚀 ========== REPARAR total_restante BULK ==========");
+
+  let candidatos: string[];
+  if (numeros_credito && numeros_credito.length > 0) {
+    candidatos = numeros_credito;
+    console.log(`📋 Usando ${candidatos.length} créditos pasados por body`);
+  } else {
+    const statusesFiltro = statuses && statuses.length > 0 ? statuses : ["ACTIVO" as const];
+    console.log(`🔎 [DIAG] statuses recibido: ${JSON.stringify(statuses)} → filtro a usar: ${JSON.stringify(statusesFiltro)}`);
+    const rows = await db
+      .select({ numero_credito_sifco: creditos.numero_credito_sifco })
+      .from(creditos)
+      .where(
+        and(
+          inArray(creditos.statusCredit, statusesFiltro),
+          sql`${creditos.numero_credito_sifco} NOT ILIKE '%CRM%'`,
+        ),
+      );
+    candidatos = rows.map((r) => r.numero_credito_sifco);
+    console.log(
+      `📋 Créditos en [${statusesFiltro.join(",")}] (excluidos CRM): ${candidatos.length}`,
+    );
+  }
+
+  const detalle_exitosos: RepararTotalRestanteBulkResult["detalle_exitosos"] = [];
+  const detalle_fallidos: RepararTotalRestanteBulkResult["detalle_fallidos"] = [];
+
+  const workers = Math.max(1, concurrencia);
+  let idx = 0;
+
+  const runOne = async (numero: string) => {
+    try {
+      const r = await repararTotalRestante({ numero_credito_sifco: numero });
+      detalle_exitosos.push({ numero_credito_sifco: numero, ...r });
+    } catch (error: any) {
+      const msg = error?.message || String(error);
+      console.error(`❌ [${numero}] ${msg}`);
+      detalle_fallidos.push({ numero_credito_sifco: numero, error: msg });
+    }
+  };
+
+  const worker = async () => {
+    while (true) {
+      const i = idx++;
+      if (i >= candidatos.length) return;
+      const numero = candidatos[i];
+      console.log(`\n▶️  (${i + 1}/${candidatos.length}) ${numero}`);
+      await runOne(numero);
+    }
+  };
+
+  await Promise.all(Array.from({ length: workers }, () => worker()));
+
+  const pagos_actualizados_total = detalle_exitosos.reduce(
+    (acc, r) => acc + r.pagos_actualizados,
+    0,
+  );
+
+  console.log(
+    `\n✅ BULK terminado | total=${candidatos.length} exitosos=${detalle_exitosos.length} fallidos=${detalle_fallidos.length} pagos_actualizados=${pagos_actualizados_total}`,
+  );
+
+  return {
+    total: candidatos.length,
+    exitosos: detalle_exitosos.length,
+    fallidos: detalle_fallidos.length,
+    pagos_actualizados_total,
+    detalle_exitosos,
+    detalle_fallidos,
   };
 };
 

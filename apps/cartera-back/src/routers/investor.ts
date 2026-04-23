@@ -8,6 +8,8 @@ import {
   liquidateByInvestorId,
   liquidateByInvestorSchema,
   updateInvestor,
+  updateInvestorStatus,
+  exitInvestor,
   resumenGlobalInversionistas,
   resumenGlobalLiquidaciones,
   getLiquidaciones,
@@ -40,6 +42,51 @@ export const inversionistasRouter = new Elysia()
   .post("/investor", insertInvestor)
   .get("/investor", getInvestors)
   .post("/investor/update", updateInvestor)
+  .post(
+    "/investor/status",
+    updateInvestorStatus,
+    {
+      body: t.Object({
+        inversionista_id: t.Number({ minimum: 1 }),
+        status: t.Union([
+          t.Literal("activo"),
+          t.Literal("inactivo"),
+          t.Literal("pendiente_devolucion"),
+        ]),
+      }),
+      detail: {
+        summary: "Cambia el status de un inversionista y notifica por correo",
+        description:
+          "Cambia el campo status del inversionista a 'activo', 'inactivo' o " +
+          "'pendiente_devolucion'. Si el status cambia realmente, envía un correo " +
+          "de notificación a la lista hardcodeada de destinatarios. Cuando el status " +
+          "pasa a 'pendiente_devolucion', el correo incluye un aviso de que en la " +
+          "próxima liquidación se le devolverá el saldo al inversionista.",
+        tags: ["Inversionistas"],
+      },
+    }
+  )
+  .post(
+    "/investor/exit",
+    exitInvestor,
+    {
+      body: t.Object({
+        inversionista_id: t.Number({ minimum: 1 }),
+        creditos: t.Array(t.Number({ minimum: 1 }), { minItems: 1 }),
+      }),
+      detail: {
+        summary: "Saca a un inversionista de los créditos indicados (CUBE absorbe) y lo marca como inactivo",
+        description:
+          "Por cada crédito de la lista: si CUBE NO está en el crédito, el row del " +
+          "inversionista cambia de dueño a CUBE (mismo monto, misma cuota). Si CUBE " +
+          "YA está, los campos numéricos del row del inversionista se suman al row de " +
+          "CUBE y el row del inversionista se elimina. Lo mismo en el espejo, dejando " +
+          "status='completado'. Al final, el inversionista pasa a status='inactivo' y " +
+          "se envía correo de notificación a la lista hardcodeada.",
+        tags: ["Inversionistas"],
+      },
+    }
+  )
   .post("/investor/saldo-reinversion", updateSaldoReinversion)
   .post("/investor/fix-cube", fixCubeInvestment)
   .post("/investor/reconcile-mirror-percentages", reconcileMirrorPercentages)

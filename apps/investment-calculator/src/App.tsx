@@ -24,7 +24,7 @@ import {
   SelectItem,
   SelectValue,
 } from "@/components/ui/select";
-import Logo from "@/assets/logo.png";
+import Logo from "@/assets/logo.svg";
 import { Button } from "@/components/ui/button";
 import { Download, Settings } from "lucide-react";
 import { Toaster } from "@/components/ui/sonner";

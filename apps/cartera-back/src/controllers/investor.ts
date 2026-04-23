@@ -4355,7 +4355,7 @@ export const exitInvestor = async ({ body, set, request }: any) => {
               .set({
                 inversionista_id: CUBE_INVESTMENT_ID,
                 porcentaje_cash_in: "100",
-                porcentaje_participacion_inversionista: "100",
+                porcentaje_participacion_inversionista: "0",
                 monto_aportado: nuevoMontoCubePadre.toString(),
                 status: "completado",
                 updated_at: new Date(),
@@ -4379,7 +4379,7 @@ export const exitInvestor = async ({ body, set, request }: any) => {
 
             const payloadE = {
               monto_aportado: nuevoMontoCubePadre.toString(),
-              porcentaje_participacion_inversionista: "100",
+              porcentaje_participacion_inversionista: "0",
               porcentaje_cash_in: "100",
               monto_inversionista: suma(cubeEnEspejo.monto_inversionista, invEnEspejo.monto_inversionista),
               monto_cash_in: suma(cubeEnEspejo.monto_cash_in, invEnEspejo.monto_cash_in),
@@ -4389,7 +4389,7 @@ export const exitInvestor = async ({ body, set, request }: any) => {
               status: "completado" as const,
               updated_at: new Date(),
             };
-            log(`   🔀 [ESPEJO] Caso B (MERGE): porcentajes 100/100, monto_aportado=${nuevoMontoCubePadre.toString()} (sincronizado con padre) →`, payloadE);
+            log(`   🔀 [ESPEJO] Caso B (MERGE): porcentajes 100, monto_aportado=${nuevoMontoCubePadre.toString()} (sincronizado con padre) →`, payloadE);
 
             const resEB1 = await tx
               .update(creditos_inversionistas_espejo)

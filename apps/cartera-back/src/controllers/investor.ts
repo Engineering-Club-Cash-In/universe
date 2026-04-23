@@ -3072,6 +3072,61 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
             console.error(`  ❌ Error en reinversión automática (liquidación ya guardada):`, reinvError);
           }
         }
+
+        // ========================================
+        // FASE 5: SALIDA AUTOMÁTICA (pendiente_devolucion)
+        // Si el inversionista quedó marcado como `pendiente_devolucion`,
+        // se ejecuta exitInvestor sobre los créditos con pagos liquidados
+        // en esta corrida. exitInvestor traslada la participación a CUBE
+        // y marca al inversionista como `inactivo`. Como salvaguarda,
+        // forzamos el status a `inactivo` después.
+        // ========================================
+        try {
+          const [invRow] = await db
+            .select({ status: inversionistas.status })
+            .from(inversionistas)
+            .where(eq(inversionistas.inversionista_id, inv_id))
+            .limit(1);
+
+          if (invRow?.status === "pendiente_devolucion") {
+            const creditoIdsSalida = [
+              ...new Set(pagosNoLiquidados.map((p) => p.credito_id)),
+            ];
+
+            if (creditoIdsSalida.length > 0) {
+              console.log(
+                `  🚪 Inversionista ${inv_id} en pendiente_devolucion → exitInvestor sobre ${creditoIdsSalida.length} crédito(s)`
+              );
+
+              const exitResult = await exitInvestor({
+                body: {
+                  inversionista_id: inv_id,
+                  creditos: creditoIdsSalida,
+                },
+                set: { status: 200 },
+                request: {} as any,
+              });
+
+              console.log(`  ✅ Salida ejecutada:`, exitResult);
+
+              await db
+                .update(inversionistas)
+                .set({ status: "inactivo" })
+                .where(eq(inversionistas.inversionista_id, inv_id));
+
+              console.log(`  ✅ Inversionista ${inv_id} marcado como inactivo`);
+            } else {
+              console.warn(
+                `  ⚠️ Inversionista ${inv_id} pendiente_devolucion pero sin créditos con pagos en esta corrida; se omite exitInvestor`
+              );
+            }
+          }
+        } catch (exitError) {
+          console.error(
+            `  ❌ Error en salida automática (liquidación ya guardada):`,
+            exitError
+          );
+        }
       } catch (excelError) {
         console.error(`  ❌ Error generando Excel (datos financieros ya guardados):`, excelError);
       }
@@ -6011,14 +6066,19 @@ export async function getInvestorPerformance(dpi?: string, email?: string) {
     throw new Error(`No se encontró inversionista con ${dpi ? 'DPI: ' + dpi : 'email: ' + email}`);
   }
 
-  // 2️⃣ Obtener totales de inversiones de forma agregada
+  // 2️⃣ Obtener totales de inversiones de forma agregada (solo créditos completados)
   const [totalesInversion] = await db
     .select({
       capital_total: sql<string>`coalesce(sum(${creditos_inversionistas_espejo.monto_aportado}), 0)`,
       cantidad: count(),
     })
     .from(creditos_inversionistas_espejo)
-    .where(eq(creditos_inversionistas_espejo.inversionista_id, inversionista.inversionista_id));
+    .where(
+      and(
+        eq(creditos_inversionistas_espejo.inversionista_id, inversionista.inversionista_id),
+        eq(creditos_inversionistas_espejo.status, "completado"),
+      ),
+    );
 
   // 3️⃣ Obtener total de rendimiento (intereses liquidados * 1.2) de forma agregada
   const [totalesRendimiento] = await db

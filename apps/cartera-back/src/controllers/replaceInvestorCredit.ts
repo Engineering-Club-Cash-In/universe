@@ -29,6 +29,11 @@ const returnPendingToCubeSchema = z.object({
     z.number().int().positive(),
     z.array(z.number().int().positive()).min(1),
   ]),
+  // Si viene, la limpieza se restringe a ese inversionista (solo se
+  // sacan sus filas y su monto vuelve a CUBE). Si no viene, se mantiene
+  // el comportamiento original: sacar a todos los inversionistas con
+  // status != "completado" de los créditos indicados.
+  inversionista_id: z.number().int().positive().optional(),
 });
 
 // ========================================
@@ -167,7 +172,8 @@ export const returnPendingInvestorsToCube = async ({ body, set }: any) => {
       };
     }
 
-    const { creditos: creditosInput } = parseResult.data;
+    const { creditos: creditosInput, inversionista_id: filtroInversionistaId } =
+      parseResult.data;
 
     // Normalizar a array
     const creditoIds = Array.isArray(creditosInput)
@@ -177,7 +183,8 @@ export const returnPendingInvestorsToCube = async ({ body, set }: any) => {
     // ================================================================
     // PASO 2: BUSCAR INVERSIONISTAS PENDIENTES
     // Todos los registros del espejo con status != "completado"
-    // en los créditos indicados.
+    // en los créditos indicados. Si viene filtroInversionistaId, se
+    // limita a ese inversionista.
     // ================================================================
     const pendientes = await db
       .select({
@@ -190,6 +197,14 @@ export const returnPendingInvestorsToCube = async ({ body, set }: any) => {
         and(
           inArray(creditos_inversionistas_espejo.credito_id, creditoIds),
           ne(creditos_inversionistas_espejo.status, "completado"),
+          ...(typeof filtroInversionistaId === "number"
+            ? [
+                eq(
+                  creditos_inversionistas_espejo.inversionista_id,
+                  filtroInversionistaId,
+                ),
+              ]
+            : []),
         ),
       );
 
@@ -197,7 +212,9 @@ export const returnPendingInvestorsToCube = async ({ body, set }: any) => {
       set.status = 404;
       return {
         success: false,
-        message: "No se encontraron inversionistas pendientes en los créditos indicados",
+        message: filtroInversionistaId
+          ? `No se encontraron filas pendientes del inversionista ${filtroInversionistaId} en los créditos indicados`
+          : "No se encontraron inversionistas pendientes en los créditos indicados",
       };
     }
 
@@ -961,9 +978,12 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
       success: true,
       message: `Reasignación manual completada: ${resultadosAsignacion.length} destinos, ${errores.length} errores`,
       credito_origen: {
+        //@ts-ignore
         credito_id: origenInfo?.credito_id,
+        //@ts-ignore
         numero_credito_sifco: origenInfo?.numero_credito_sifco,
         inversionista_removido: inversionista_id,
+        //@ts-ignore
         monto_devuelto_a_cube: origenInfo?.monto_devuelto,
       },
       reasignaciones: resultadosAsignacion,

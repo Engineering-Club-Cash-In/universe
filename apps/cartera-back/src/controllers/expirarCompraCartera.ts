@@ -94,51 +94,88 @@ export async function expirarCompraCarteraVencidas(): Promise<{
     };
   }
 
-  // 3) Créditos únicos a limpiar.
-  const creditoIds = Array.from(new Set(vencidos.map((r) => r.credito_id)));
+  // 3) Agrupar los vencidos por inversionista. Así la limpieza es
+  //    quirúrgica: solo se sacan los rows del inversionista vencido,
+  //    respetando cualquier otro pendiente que tenga el mismo crédito.
+  type CreditoInfo = {
+    numero_credito_sifco: string;
+    cliente_nombre: string;
+    monto_aportado: string;
+  };
+  const porInversionista = new Map<
+    number,
+    {
+      inversionista_nombre: string;
+      creditoIds: Set<number>;
+      creditos: CreditoInfo[];
+    }
+  >();
+  for (const row of vencidos) {
+    const entry = porInversionista.get(row.inversionista_id) ?? {
+      inversionista_nombre: row.inversionista_nombre,
+      creditoIds: new Set<number>(),
+      creditos: [],
+    };
+    entry.creditoIds.add(row.credito_id);
+    entry.creditos.push({
+      numero_credito_sifco: row.numero_credito_sifco,
+      cliente_nombre: row.cliente_nombre,
+      monto_aportado: new Big(row.monto_aportado).toFixed(2),
+    });
+    porInversionista.set(row.inversionista_id, entry);
+  }
 
+  const creditosUnicos = new Set(vencidos.map((r) => r.credito_id));
   console.log(
-    `[expirarCompraCartera] ${vencidos.length} row(s) vencidos en ${creditoIds.length} crédito(s) al ${hoyKey}, devolviendo a CUBE...`,
+    `[expirarCompraCartera] ${vencidos.length} row(s) vencidos, ${porInversionista.size} inversionista(s) en ${creditosUnicos.size} crédito(s) al ${hoyKey}, devolviendo a CUBE...`,
   );
 
-  // 4) Reusar el controller existente. Mock set mínimo porque internamente
-  //    solo escribe set.status.
-  const mockSet: { status: number } = { status: 200 };
-  const resultado = await returnPendingInvestorsToCube({
-    body: { creditos: creditoIds },
-    set: mockSet,
-  });
-  const success = mockSet.status < 400;
+  // 4) Llamar al controller por inversionista con filtro específico.
+  const inversionistasOk: Array<{
+    inversionista_nombre: string;
+    creditos: CreditoInfo[];
+  }> = [];
+  const resultadosPorInversionista: Array<{
+    inversionista_id: number;
+    status: number;
+    resultado: unknown;
+  }> = [];
 
-  // 5) Si la limpieza fue bien, agrupar por inversionista y mandar correo.
-  if (success) {
-    type CreditoInfo = {
-      numero_credito_sifco: string;
-      cliente_nombre: string;
-      monto_aportado: string;
-    };
-    const porInversionista = new Map<
-      number,
-      { inversionista_nombre: string; creditos: CreditoInfo[] }
-    >();
-    for (const row of vencidos) {
-      const entry = porInversionista.get(row.inversionista_id) ?? {
-        inversionista_nombre: row.inversionista_nombre,
-        creditos: [],
-      };
-      entry.creditos.push({
-        numero_credito_sifco: row.numero_credito_sifco,
-        cliente_nombre: row.cliente_nombre,
-        monto_aportado: new Big(row.monto_aportado).toFixed(2),
+  for (const [invId, entry] of porInversionista) {
+    const mockSet: { status: number } = { status: 200 };
+    const resultado = await returnPendingInvestorsToCube({
+      body: {
+        creditos: Array.from(entry.creditoIds),
+        inversionista_id: invId,
+      },
+      set: mockSet,
+    });
+    resultadosPorInversionista.push({
+      inversionista_id: invId,
+      status: mockSet.status,
+      resultado,
+    });
+    if (mockSet.status < 400) {
+      inversionistasOk.push({
+        inversionista_nombre: entry.inversionista_nombre,
+        creditos: entry.creditos,
       });
-      porInversionista.set(row.inversionista_id, entry);
+    } else {
+      console.error(
+        `[expirarCompraCartera] Falló return-to-cube para inversionista ${invId}:`,
+        resultado,
+      );
     }
+  }
 
+  // 5) Un solo correo resumen con todos los inversionistas que sí se
+  //    limpiaron. Si alguno falló, queda fuera del correo (pero logueado).
+  if (inversionistasOk.length > 0) {
     try {
       await sendCompraCarteraExpiradaNotification({
         to: COMPRA_CARTERA_RECIPIENTS.to,
         cc: COMPRA_CARTERA_RECIPIENTS.cc,
-        inversionistas: Array.from(porInversionista.values()),
+        inversionistas: inversionistasOk,
         fechaEjecucionLabel: formatFechaLargaGT(ahora),
       });
     } catch (mailErr) {
@@ -150,10 +187,10 @@ export async function expirarCompraCarteraVencidas(): Promise<{
   }
 
   return {
-    success,
+    success: inversionistasOk.length === porInversionista.size,
     escaneados: candidatos.length,
     vencidos: vencidos.length,
-    creditosProcesados: creditoIds.length,
-    resultado,
+    creditosProcesados: creditosUnicos.size,
+    resultado: resultadosPorInversionista,
   };
 }

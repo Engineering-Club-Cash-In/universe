@@ -3578,6 +3578,11 @@ export async function completarEspejoService(
 
 export interface DevolverPendientesACubePayload {
   creditos: number | number[];
+  // Si se envía, la limpieza se restringe a ese inversionista: solo se sacan
+  // sus filas pendientes del espejo y su monto vuelve a CUBE. Si se omite,
+  // se limpian TODOS los inversionistas con status != "completado" de los
+  // créditos indicados (comportamiento original).
+  inversionista_id?: number;
 }
 
 export interface DevolverPendientesACubeCreditoLimpiado {

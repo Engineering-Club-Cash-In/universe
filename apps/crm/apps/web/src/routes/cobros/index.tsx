@@ -292,7 +292,7 @@ function RouteComponent() {
 	const [page, setPage] = useState(1);
 	const [filterValue, setFilterValue] = useState("");
 	const [debouncedFilterValue, setDebouncedFilterValue] = useState("");
-	const [pageSize, setPageSize] = useState(10);
+	const [pageSize, setPageSize] = useState(25);
 
 	// Debounce para el filtro de búsqueda (1 segundos)
 	useEffect(() => {

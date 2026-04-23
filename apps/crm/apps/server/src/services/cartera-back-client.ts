@@ -987,6 +987,26 @@ export class CarteraBackClient {
 	}
 
 	// ========================================================================
+	// CAMBIAR STATUS INVERSIONISTA
+	// ========================================================================
+
+	async setInvestorStatus(input: {
+		inversionista_id: number;
+		status: "activo" | "inactivo" | "pendiente_devolucion";
+	}): Promise<{ success?: boolean; message?: string; data?: any }> {
+		const response = await this.request<{
+			success?: boolean;
+			message?: string;
+			data?: any;
+		}>("/investor/status", {
+			method: "POST",
+			body: JSON.stringify(input),
+		});
+		this.cache.invalidate("investor");
+		return response;
+	}
+
+	// ========================================================================
 	// COMPRA DE CARTERA
 	// ========================================================================
 

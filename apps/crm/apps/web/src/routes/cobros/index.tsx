@@ -292,7 +292,7 @@ function RouteComponent() {
 	const [page, setPage] = useState(1);
 	const [filterValue, setFilterValue] = useState("");
 	const [debouncedFilterValue, setDebouncedFilterValue] = useState("");
-	const [pageSize, setPageSize] = useState(10);
+	const [pageSize, setPageSize] = useState(25);
 
 	// Debounce para el filtro de búsqueda (1 segundos)
 	useEffect(() => {
@@ -1112,12 +1112,17 @@ function RouteComponent() {
 								</div>
 							</div>
 						}
+						pageSizeOptions={[25, 50, 75, 100, 200]}
 						serverPagination={{
 							page: page,
 							pageSize: pageSize,
 							totalPages: totalPages,
 							totalItems: totalCreditos,
 							onPageChange: (newPage) => setPage(newPage),
+							onPageSizeChange: (newSize) => {
+								setPageSize(newSize);
+								setPage(1);
+							},
 						}}
 					/>
 				</CardContent>

@@ -2,7 +2,67 @@ import { SimpleTechClient } from "@repo/simpletech";
 
 export const SIMPLETECH_BOT_NUMBER = process.env.CCI_BOT_NUMBER!;
 export const SIMPLETECH_TEMPLATE_NAME =
-	process.env.SIMPLETECH_TEMPLATE_NAME || "mensaje2";
+	process.env.SIMPLETECH_TEMPLATE_NAME || "mensaje1parametro";
+
+function splitTemplateParams(message: string): string[] {
+	const parts = message
+		.split(/\n\s*\n/g)
+		.map((part) => part.trim())
+		.filter(Boolean);
+
+	if (parts.length === 0) {
+		return [message.trim()];
+	}
+
+	if (parts.length <= 4) {
+		return parts;
+	}
+
+	// SimpleTech solo soporta hasta 4 parámetros por template.
+	// Concatenamos cualquier exceso en el 4to parámetro para no perder texto.
+	return [...parts.slice(0, 3), parts.slice(3).join("\n\n")];
+}
+
+function resolveTemplateNameByParamCount(
+	baseTemplateName: string,
+	paramCount: number,
+): string {
+	const match = /\d+/.exec(baseTemplateName);
+	if (!match) return baseTemplateName;
+
+	const baseNumber = Number.parseInt(match[0], 10);
+	if (!Number.isFinite(baseNumber) || baseNumber <= 0) {
+		return baseTemplateName;
+	}
+
+	const nextNumber = baseNumber * Math.max(1, paramCount);
+	return baseTemplateName.replace(match[0], String(nextNumber));
+}
+
+function normalizeParamsForTemplate(
+	params: string[],
+	templateParamCount: number,
+): string[] {
+	if (params.length === templateParamCount) {
+		return params;
+	}
+
+	if (params.length > templateParamCount) {
+		if (templateParamCount <= 1) {
+			return [params.join("\n\n")];
+		}
+
+		return [
+			...params.slice(0, templateParamCount - 1),
+			params.slice(templateParamCount - 1).join("\n\n"),
+		];
+	}
+
+	return [
+		...params,
+		...new Array(templateParamCount - params.length).fill(""),
+	];
+}
 
 export function getSimpletechClient(): SimpleTechClient | null {
 	if (
@@ -23,7 +83,7 @@ export function getSimpletechClient(): SimpleTechClient | null {
 }
 
 export function normalizePhone(phone: string): string {
-	const digits = phone.replace(/\D/g, "");
+	const digits = phone.replaceAll(/\D/g, "");
 	if (digits.startsWith("502")) return `+${digits}`;
 	return `+502${digits}`;
 }
@@ -50,13 +110,18 @@ export async function sendWhatsappTemplate(params: {
 	}
 
 	const phoneNormalized = normalizePhone(params.phone);
+	const bodyParams = splitTemplateParams(params.message);
+	const templateName = resolveTemplateNameByParamCount(
+		SIMPLETECH_TEMPLATE_NAME,
+		bodyParams.length,
+	);
 	const templateRequest = {
-		templateName: SIMPLETECH_TEMPLATE_NAME,
+		templateName,
 		serviceIdentifier: SIMPLETECH_BOT_NUMBER,
 		messages: [
 			{
 				number: phoneNormalized,
-				body: [params.message],
+				body: bodyParams,
 			},
 		],
 	};
@@ -143,16 +208,41 @@ export async function sendWhatsappTemplateBatch(params: {
 		};
 	}
 
+	const firstMessage = normalized[0]?.message ?? "";
+	const templateParamCount = splitTemplateParams(firstMessage).length;
+	const templateName = resolveTemplateNameByParamCount(
+		SIMPLETECH_TEMPLATE_NAME,
+		templateParamCount,
+	);
+
 	const templateRequest = {
-		templateName: SIMPLETECH_TEMPLATE_NAME,
+		templateName,
 		serviceIdentifier: SIMPLETECH_BOT_NUMBER,
 		messages: normalized.map((r) => ({
 			number: r.phoneNormalized,
-			body: [r.message],
+			body: normalizeParamsForTemplate(
+				splitTemplateParams(r.message),
+				templateParamCount,
+			),
 		})),
 	};
 
 	console.log(`${prefix} Enviando batch a ${normalized.length} destinatarios`);
+	console.log(
+		`${prefix} Template debug:`,
+		JSON.stringify(
+			{
+				templateBase: SIMPLETECH_TEMPLATE_NAME,
+				templateParamCount,
+				templateName,
+				firstMessagePreview: firstMessage.slice(0, 200),
+				firstBody: templateRequest.messages[0]?.body,
+			},
+			null,
+			2,
+		),
+	);
+	console.log(`${prefix} Request:`, JSON.stringify(templateRequest, null, 2));
 
 	try {
 		const result = await client.sendTemplate(templateRequest);

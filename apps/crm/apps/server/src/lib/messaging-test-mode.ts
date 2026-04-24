@@ -19,11 +19,11 @@ export const TEST_EMAIL = "mdaniel.r543@gmail.com";
  * 502 se agrega en `normalizePhone` al enviar.
  */
 export const TEST_PHONES = [
-	"35219722",
+	"57099747",
 	"58446376",
+	"35219722",
 	"30047424",
 	"30440828",
-	"57099747",
 	"47705027",
 	"54673367",
 	"59226561",

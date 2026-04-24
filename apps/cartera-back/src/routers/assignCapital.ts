@@ -30,6 +30,7 @@ export const assignCapitalRouter = new Elysia()
       monto: montoStr,
       solo_insertable: soloInsertableStr,
       minimo: minimoStr,
+      inversionista_id: inversionistaIdStr,
     } = query as Record<string, string | undefined>;
 
     // ── Validar monto ──────────────────────────────────────────
@@ -65,8 +66,17 @@ export const assignCapitalRouter = new Elysia()
       minimo = parsed;
     }
 
+    // ── Validar inversionista_id ───────────────────────────────
+    let inversionista_id: number | undefined;
+    if (inversionistaIdStr !== undefined) {
+      const parsed = Number(inversionistaIdStr);
+      if (!isNaN(parsed)) {
+        inversionista_id = parsed;
+      }
+    }
+
     try {
-      const allCandidates = await getCreditCandidates(monto, minimo);
+      const allCandidates = await getCreditCandidates(monto, minimo, inversionista_id);
 
       let result: CreditCandidate[];
 

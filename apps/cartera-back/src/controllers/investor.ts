@@ -36,14 +36,7 @@ import jwt from "jsonwebtoken";
 
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
 
-const INVESTOR_STATUS_CHANGE_RECIPIENTS = [
-  "alexander.p@clubcashin.com",
-  "juan.r@clubcashin.com",
-  "roxana.g@clubcashin.com",
-  "sara.r@sepresta.com",
-  "jalvarado@clubcashin.com",
-  "lralda@clubcashin.com",
-];
+import { INVESTOR_STATUS_CHANGE_RECIPIENTS } from "../utils/functions/investorStatusRecipients";
 import {
   boletaEstaEnPeriodo,
   resolveEstadoLiquidacionResumen,
@@ -3949,6 +3942,20 @@ export const updateInvestorStatus = async ({ body, set, request }: any) => {
       </div>
     `;
 
+    // Cuando el inversionista pasa a 'activo' NO se envía correo: solo
+    // se notifica en salidas (inactivo / pendiente_devolucion).
+    if (status === "activo") {
+      set.status = 200;
+      return {
+        success: true,
+        message: `Inversionista marcado como ${status} correctamente (sin correo)`,
+        inversionista: updated,
+        correos_enviados: 0,
+        correos_fallidos: 0,
+        total_destinatarios: 0,
+      };
+    }
+
     const mailResults = await Promise.allSettled(
       INVESTOR_STATUS_CHANGE_RECIPIENTS.map((to) => sendPlainEmail(to, subject, html))
     );
@@ -4209,6 +4216,15 @@ export const exitInvestor = async ({ body, set, request }: any) => {
         const montoTransferido = new Big(invEnPadre.monto_aportado);
         const cubePreexistente = !!cubeEnPadre;
 
+        // Monto final que va a tener CUBE en PADRE tras la operación.
+        // - SWAP: lo que aportaba el inversionista (el row es el mismo).
+        // - MERGE: suma del que ya tenía CUBE + el del inversionista.
+        // Este mismo valor se fuerza en el espejo para que espejo = padre
+        // (Opción 1: sincronización total de capital).
+        const nuevoMontoCubePadre: Big = cubeEnPadre
+          ? new Big(cubeEnPadre.monto_aportado).plus(new Big(invEnPadre.monto_aportado))
+          : new Big(invEnPadre.monto_aportado);
+
         if (cubePreexistente && cubeEnPadre) {
           log(`   🟡 CUBE YA existe en el crédito (padre): monto_aportado=${cubeEnPadre.monto_aportado}`);
         } else {
@@ -4218,16 +4234,19 @@ export const exitInvestor = async ({ body, set, request }: any) => {
         if (!cubeEnPadre) {
           // ──────────────────────────────────────────────────────────────────
           // 4.4A — CASO A: SWAP en PADRE
-          // CUBE no está en el crédito → sencillamente cambiamos el
-          // `inversionista_id` del row del inversionista a CUBE. El row
-          // conserva monto, cuota, porcentajes, fechas, etc. Es la operación
-          // más barata (un solo UPDATE) y no modifica ningún otro row del
-          // pool.
+          // CUBE no está en el crédito → cambiamos el `inversionista_id` del
+          // row del inversionista a CUBE. El row conserva monto, cuota, etc.,
+          // pero forzamos los porcentajes de CUBE (100/100): CUBE siempre
+          // tiene participación total y cash-in total en el row que ocupa.
           // ──────────────────────────────────────────────────────────────────
-          log(`   🔄 [PADRE] Caso A (SWAP): cambiando inversionista_id ${inversionista_id} → ${CUBE_INVESTMENT_ID}`);
+          log(`   🔄 [PADRE] Caso A (SWAP): cambiando inversionista_id ${inversionista_id} → ${CUBE_INVESTMENT_ID} (porcentajes forzados a 100/100)`);
           const resA = await tx
             .update(creditos_inversionistas)
-            .set({ inversionista_id: CUBE_INVESTMENT_ID })
+            .set({
+              inversionista_id: CUBE_INVESTMENT_ID,
+              porcentaje_cash_in: "100",
+              porcentaje_participacion_inversionista: "100",
+            })
             .where(
               and(
                 eq(creditos_inversionistas.credito_id, credito_id),
@@ -4241,26 +4260,26 @@ export const exitInvestor = async ({ body, set, request }: any) => {
           // 4.4B — CASO B: MERGE en PADRE
           // CUBE ya está en el crédito → no podemos tener dos rows de CUBE
           // (uniqueIndex ux_credito_inversionista). Entonces:
-          //   1. Sumar todos los campos numéricos del inversionista al row
-          //      de CUBE (monto, %participación, cuota, intereses, IVA).
-          //   2. Borrar el row del inversionista.
-          // No se tocan otros inversionistas del pool. `porcentaje_cash_in`
-          // de CUBE se preserva (es config, no acumulable).
+          //   1. Sumar los campos de monto/cuota/intereses/IVA del
+          //      inversionista al row de CUBE.
+          //   2. Forzar porcentaje_cash_in=100 y
+          //      porcentaje_participacion_inversionista=100 (no se suman —
+          //      CUBE siempre queda al 100/100 en su row).
+          //   3. Borrar el row del inversionista.
+          // No se tocan otros inversionistas del pool.
           // ──────────────────────────────────────────────────────────────────
           const suma = (a: string | number, b: string | number) => new Big(a).plus(new Big(b)).toString();
           const payload = {
             monto_aportado: suma(cubeEnPadre.monto_aportado, invEnPadre.monto_aportado),
-            porcentaje_participacion_inversionista: suma(
-              cubeEnPadre.porcentaje_participacion_inversionista,
-              invEnPadre.porcentaje_participacion_inversionista,
-            ),
+            porcentaje_participacion_inversionista: "100",
+            porcentaje_cash_in: "100",
             monto_inversionista: suma(cubeEnPadre.monto_inversionista, invEnPadre.monto_inversionista),
             monto_cash_in: suma(cubeEnPadre.monto_cash_in, invEnPadre.monto_cash_in),
             iva_inversionista: suma(cubeEnPadre.iva_inversionista, invEnPadre.iva_inversionista),
             iva_cash_in: suma(cubeEnPadre.iva_cash_in, invEnPadre.iva_cash_in),
             cuota_inversionista: suma(cubeEnPadre.cuota_inversionista, invEnPadre.cuota_inversionista),
           };
-          log(`   🔀 [PADRE] Caso B (MERGE): sumando en CUBE →`, payload);
+          log(`   🔀 [PADRE] Caso B (MERGE): sumando en CUBE + porcentajes 100/100 →`, payload);
 
           const resB1 = await tx
             .update(creditos_inversionistas)
@@ -4326,12 +4345,18 @@ export const exitInvestor = async ({ body, set, request }: any) => {
             .limit(1);
 
           if (!cubeEnEspejo) {
-            // 4.5A — ESPEJO SWAP: sólo cambia el id y fuerza status completado.
-            log(`   🔄 [ESPEJO] Caso A (SWAP): cambiando inversionista_id ${inversionista_id} → ${CUBE_INVESTMENT_ID}, status→completado`);
+            // 4.5A — ESPEJO SWAP: cambia id, fuerza status=completado,
+            // fija porcentajes de CUBE a 100/100 y sincroniza monto_aportado
+            // con el valor del PADRE (para que CUBE quede con el capital
+            // "original", sin descuentos por pagos previos).
+            log(`   🔄 [ESPEJO] Caso A (SWAP): cambiando inversionista_id ${inversionista_id} → ${CUBE_INVESTMENT_ID}, status→completado, porcentajes 100/100, monto_aportado=${nuevoMontoCubePadre.toString()} (sincronizado con padre)`);
             const resEA = await tx
               .update(creditos_inversionistas_espejo)
               .set({
                 inversionista_id: CUBE_INVESTMENT_ID,
+                porcentaje_cash_in: "100",
+                porcentaje_participacion_inversionista: "0",
+                monto_aportado: nuevoMontoCubePadre.toString(),
                 status: "completado",
                 updated_at: new Date(),
               })
@@ -4344,17 +4369,18 @@ export const exitInvestor = async ({ body, set, request }: any) => {
               .returning({ id: creditos_inversionistas_espejo.id });
             log(`   ✅ [ESPEJO] SWAP aplicado (${resEA.length})`);
           } else {
-            // 4.5B — ESPEJO MERGE: mismos campos que el padre + status=completado.
+            // 4.5B — ESPEJO MERGE: sumar intereses/IVA del investor al row
+            // CUBE, forzar porcentajes a 100/100 y fijar monto_aportado al
+            // valor del PADRE (sincroniza capital, ignora cuánto había en
+            // espejo para ese campo).
             log(`   🟡 [ESPEJO] CUBE YA existe en espejo: monto_aportado=${cubeEnEspejo.monto_aportado}, status=${cubeEnEspejo.status}`);
             const suma = (a: string | number, b: string | number) =>
               new Big(a).plus(new Big(b)).toString();
 
             const payloadE = {
-              monto_aportado: suma(cubeEnEspejo.monto_aportado, invEnEspejo.monto_aportado),
-              porcentaje_participacion_inversionista: suma(
-                cubeEnEspejo.porcentaje_participacion_inversionista,
-                invEnEspejo.porcentaje_participacion_inversionista,
-              ),
+              monto_aportado: nuevoMontoCubePadre.toString(),
+              porcentaje_participacion_inversionista: "0",
+              porcentaje_cash_in: "100",
               monto_inversionista: suma(cubeEnEspejo.monto_inversionista, invEnEspejo.monto_inversionista),
               monto_cash_in: suma(cubeEnEspejo.monto_cash_in, invEnEspejo.monto_cash_in),
               iva_inversionista: suma(cubeEnEspejo.iva_inversionista, invEnEspejo.iva_inversionista),
@@ -4363,7 +4389,7 @@ export const exitInvestor = async ({ body, set, request }: any) => {
               status: "completado" as const,
               updated_at: new Date(),
             };
-            log(`   🔀 [ESPEJO] Caso B (MERGE): sumando en CUBE →`, payloadE);
+            log(`   🔀 [ESPEJO] Caso B (MERGE): porcentajes 100, monto_aportado=${nuevoMontoCubePadre.toString()} (sincronizado con padre) →`, payloadE);
 
             const resEB1 = await tx
               .update(creditos_inversionistas_espejo)

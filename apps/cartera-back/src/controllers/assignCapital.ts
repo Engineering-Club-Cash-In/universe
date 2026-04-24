@@ -36,6 +36,7 @@ interface ScoreBreakdown {
   formato: number;
   cuotas: number;
   proximidad: number;
+  reinversion: number;
   total: number;
 }
 
@@ -74,6 +75,7 @@ const SCORE_PENALTY_PER_CUOTA = 30; // Reducido de 50 a 30
 const SCORE_PROXIMITY_BASE_FITS = 300; // Bono porque el capital del crédito cubre todo el monto
 const SCORE_PROXIMITY_HIGH = 200;      // Diferencia < 10%
 const SCORE_PROXIMITY_MED = 100;       // Diferencia < 25%
+const SCORE_REINVERSION = 3000;       // Prioridad para inversionistas existentes
 
 // ============================================================
 // FUNCIONES DE SCORING
@@ -132,7 +134,8 @@ function calcCapitalProximityBonus(
 
 export async function getCreditCandidates(
   monto?: number,
-  limit?: number
+  limit?: number,
+  inversionistaIdSolicitante?: number
 ): Promise<CreditCandidate[]> {
   console.log("\n🔍 ========== getCreditCandidates ==========");
   console.log(`   monto: ${monto ?? "no especificado"}`);
@@ -387,17 +390,18 @@ export async function getCreditCandidates(
     const invs = invsByCredito.get(credito_id) ?? [];
     const cubeInv = invs.find((i) => i.es_cube);
 
+    // Filtro Universal: Todo crédito candidato DEBE tener a Cube
+    if (!cubeInv) {
+      console.log(
+        `   ❌ [${numero_credito_sifco}] Descartado: Crédito sin participación de Cube (ID ${CUBE_ID})`
+      );
+      continue;
+    }
+
     // Identificar formato dinámicamente si viene null (para evitar saltarse validación de Pool)
     const actualFormadoCredito = formato_credito ?? (invs.length > 1 ? "Pool" : "Individual");
 
     if (actualFormadoCredito === "Pool") {
-      // No tiene a Cube → descartado
-      if (!cubeInv) {
-        console.log(
-          `   ❌ [${numero_credito_sifco}] Descartado: Pool sin Cube (ID ${CUBE_ID})`
-        );
-        continue;
-      }
 
       // VALIDACIÓN: Cube debe ser el líder del Pool.
       // Si existe algún otro inversionista con un monto estrictamente mayor, se descarta.
@@ -430,10 +434,19 @@ export async function getCreditCandidates(
     const capitalParaEvaluar = cubeInv ? cubeInv.monto_aportado : capitalActivoNum;
     const proximityBonus = monto !== undefined ? calcCapitalProximityBonus(capitalParaEvaluar, monto) : 0;
 
-    const score = SCORE_BASE + crmBonus + formatoBonus + cuotasBonus + proximityBonus;
+    // Bono de Reinversión: Si el inversionista ya tiene participación en este crédito
+    let reinversionBonus = 0;
+    if (inversionistaIdSolicitante !== undefined) {
+      const yaParticipa = invs.some((i) => i.inversionista_id === inversionistaIdSolicitante);
+      if (yaParticipa) {
+        reinversionBonus = SCORE_REINVERSION;
+      }
+    }
+
+    const score = SCORE_BASE + crmBonus + formatoBonus + cuotasBonus + proximityBonus + reinversionBonus;
 
     console.log(
-      `   ✅ [${numero_credito_sifco}] score=${score} (crm=${crmBonus}, fmt=${formatoBonus}, cuotas=${cuotasBonus}, prox=${proximityBonus})`
+      `   ✅ [${numero_credito_sifco}] score=${score} (crm=${crmBonus}, fmt=${formatoBonus}, cuotas=${cuotasBonus}, prox=${proximityBonus}, reinv=${reinversionBonus})`
     );
 
     candidates.push({
@@ -451,6 +464,7 @@ export async function getCreditCandidates(
         formato: formatoBonus,
         cuotas: cuotasBonus,
         proximidad: proximityBonus,
+        reinversion: reinversionBonus,
         total: score,
       },
       capital_evaluado: capitalParaEvaluar,

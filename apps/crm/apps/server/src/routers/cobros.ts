@@ -3167,6 +3167,16 @@ export const cobrosRouter = {
 					setEtq.has(s),
 				);
 				if (sifcosPorEtiquetas.length === 0) return respuestaVacia;
+			} else if (
+				!sifcosPorEtiquetas &&
+				isPlateSearch &&
+				!numeroSifcoFiltro &&
+				matchingSifcos.size > 0
+			) {
+				// Placa con varias coincidencias sin etiquetas: en lugar de traer
+				// toda la cartera y filtrar después, mandamos directo la lista de
+				// SIFCOs de la placa como numeros_credito_sifco.
+				sifcosPorEtiquetas = Array.from(matchingSifcos);
 			}
 
 			// 3. Paginar getAllCreditos hasta traer todos los matcheos.
@@ -3194,15 +3204,6 @@ export const cobrosRouter = {
 					if (resp.data.length < perPage) break;
 					if (page >= resp.totalPages) break;
 					page += 1;
-				}
-
-				// Filtrado local cuando la placa matcheó varias SIFCOs.
-				if (isPlateSearch && !numeroSifcoFiltro) {
-					for (let i = creditosFiltrados.length - 1; i >= 0; i--) {
-						const sifco = creditosFiltrados[i].creditos.numero_credito_sifco;
-						if (!sifco || !matchingSifcos.has(sifco))
-							creditosFiltrados.splice(i, 1);
-					}
 				}
 			}
 

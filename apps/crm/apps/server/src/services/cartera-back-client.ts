@@ -1063,6 +1063,10 @@ export class CarteraBackClient {
 		inversionista_id: number;
 		monto_aportado: number;
 		tipo_operacion: "compra_cartera";
+		tipo_reinversion?:
+			| "sin_reinversion"
+			| "reinversion_capital"
+			| "reinversion_total";
 		porcentaje_inversion?: number;
 		porcentaje_cash_in?: number;
 		fecha_inicio_participacion?: string;

@@ -684,6 +684,10 @@ function InvestorLiquidacionesPage() {
 	// Compra de cartera
 	const [compraCarteraOpen, setCompraCarteraOpen] = useState(false);
 	const [compraCarteraMonto, setCompraCarteraMonto] = useState("");
+	const [compraCarteraTipoReinversion, setCompraCarteraTipoReinversion] =
+		useState<"sin_reinversion" | "reinversion_capital" | "reinversion_total">(
+			"sin_reinversion",
+		);
 	const [compraCarteraPctInversion, setCompraCarteraPctInversion] = useState("70");
 	const [compraCarteraPctCashIn, setCompraCarteraPctCashIn] = useState("30");
 	const [compraCarteraFecha, setCompraCarteraFecha] = useState(
@@ -926,7 +930,32 @@ function InvestorLiquidacionesPage() {
 								variant="outline"
 								size="sm"
 								className="gap-2"
-								onClick={() => setCompraCarteraOpen(true)}
+								onClick={() => {
+									const inv =
+										(investor?.tipoReinversion as string | undefined) ??
+										(investor as any)?.tipo_reinversion ??
+										"sin_reinversion";
+									const allowed = [
+										"sin_reinversion",
+										"reinversion_capital",
+										"reinversion_total",
+									];
+									const next = allowed.includes(inv)
+										? (inv as
+												| "sin_reinversion"
+												| "reinversion_capital"
+												| "reinversion_total")
+										: "sin_reinversion";
+									console.log("[CompraCartera] abrir modal", {
+										investorTipoReinversion: investor?.tipoReinversion,
+										investor_tipo_reinversion: (investor as any)
+											?.tipo_reinversion,
+										resolved: inv,
+										preselected: next,
+									});
+									setCompraCarteraTipoReinversion(next);
+									setCompraCarteraOpen(true);
+								}}
 							>
 								<ShoppingCart className="h-4 w-4" />
 								Compra de Cartera
@@ -1586,30 +1615,34 @@ function InvestorLiquidacionesPage() {
 						</DialogDescription>
 					</DialogHeader>
 
-					<div className="rounded-md border border-purple-200 bg-purple-50 p-3 dark:border-purple-800 dark:bg-purple-950/40">
-						<div className="flex items-center justify-between gap-2">
-							<span className="text-xs font-medium text-purple-900 dark:text-purple-200">
-								Modelo de reinversión
-							</span>
-							<Badge
-								variant="outline"
-								className="border-purple-300 bg-white text-[11px] text-purple-700 dark:border-purple-700 dark:bg-purple-950 dark:text-purple-300"
-							>
-								{{
-									reinversion_capital: "Reinversión Capital",
-									reinversion_interes: "Reinversión Interés",
-									reinversion_total: "Interés Compuesto",
-									reinversion_variable: "Reinversión Variable",
-									reinversion_combinada: "Reinversión Combinada",
-									sin_reinversion: "Sin reinversión",
-								}[
-									(investor?.tipoReinversion as string) ?? "sin_reinversion"
-								] ?? "Sin reinversión"}
-							</Badge>
-						</div>
-					</div>
-
 					<div className="space-y-4 py-2">
+						<div className="space-y-1.5">
+							<Label htmlFor="compra-modalidad">Modelo de Inversión</Label>
+							<Select
+								value={compraCarteraTipoReinversion}
+								onValueChange={(v) =>
+									setCompraCarteraTipoReinversion(
+										v as
+											| "sin_reinversion"
+											| "reinversion_capital"
+											| "reinversion_total",
+									)
+								}
+							>
+								<SelectTrigger id="compra-modalidad">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="sin_reinversion">Tradicional</SelectItem>
+									<SelectItem value="reinversion_capital">
+										Reinversión Capital
+									</SelectItem>
+									<SelectItem value="reinversion_total">
+										Interés Compuesto
+									</SelectItem>
+								</SelectContent>
+							</Select>
+						</div>
 						<div className="space-y-1.5">
 							<Label htmlFor="compra-monto">Monto aportado</Label>
 							<CurrencyInput
@@ -1691,6 +1724,7 @@ function InvestorLiquidacionesPage() {
 								compraCarteraMutation.mutate({
 									inversionistaId: investorIdNum,
 									montoAportado: Number(compraCarteraMonto),
+									tipoReinversion: compraCarteraTipoReinversion,
 									porcentajeInversion: Number(compraCarteraPctInversion),
 									porcentajeCashIn: Number(compraCarteraPctCashIn),
 									fechaInicioParticipacion: compraCarteraFecha || undefined,

@@ -297,10 +297,16 @@ export const investorDocumentsRouter = {
 			// 3. Si pidió compra de cartera, ejecutarla con el ID del nuevo inversionista
 			let compraResult = null;
 			if (input.hacerCompraCartera && input.montoCompraCartera) {
+				const tipoReinversionCompra: "sin_reinversion" | "reinversion_capital" | "reinversion_total" =
+					input.tipoReinversion === "reinversion_capital" ||
+					input.tipoReinversion === "reinversion_total"
+						? input.tipoReinversion
+						: "sin_reinversion";
 				compraResult = await carteraBackClient.compraCartera({
 					inversionista_id: created.inversionista_id,
 					monto_aportado: input.montoCompraCartera,
 					tipo_operacion: "compra_cartera",
+					tipo_reinversion: tipoReinversionCompra,
 					porcentaje_inversion: input.porcentajeInversion,
 					porcentaje_cash_in: input.porcentajeCashIn,
 					fecha_inicio_participacion:
@@ -313,6 +319,7 @@ export const investorDocumentsRouter = {
 					action: "compra_cartera",
 					details: {
 						monto_aportado: input.montoCompraCartera,
+						tipo_reinversion: tipoReinversionCompra,
 						fecha_inicio_participacion: input.fechaInicioParticipacion,
 					},
 					performedBy: context.session.user.id,
@@ -334,6 +341,11 @@ export const investorDocumentsRouter = {
 			z.object({
 				inversionistaId: z.number().int().positive(),
 				montoAportado: z.number().positive(),
+				tipoReinversion: z.enum([
+					"sin_reinversion",
+					"reinversion_capital",
+					"reinversion_total",
+				]),
 				porcentajeInversion: z.number().min(0).max(100).optional(),
 				porcentajeCashIn: z.number().min(0).max(100).optional(),
 				fechaInicioParticipacion: z.string().optional(),
@@ -345,6 +357,7 @@ export const investorDocumentsRouter = {
 				inversionista_id: input.inversionistaId,
 				monto_aportado: input.montoAportado,
 				tipo_operacion: "compra_cartera",
+				tipo_reinversion: input.tipoReinversion,
 				porcentaje_inversion: input.porcentajeInversion,
 				porcentaje_cash_in: input.porcentajeCashIn,
 				fecha_inicio_participacion: input.fechaInicioParticipacion || undefined,
@@ -356,6 +369,7 @@ export const investorDocumentsRouter = {
 				action: "compra_cartera",
 				details: {
 					monto_aportado: input.montoAportado,
+					tipo_reinversion: input.tipoReinversion,
 					porcentaje_inversion: input.porcentajeInversion,
 					porcentaje_cash_in: input.porcentajeCashIn,
 					fecha_inicio_participacion: input.fechaInicioParticipacion,

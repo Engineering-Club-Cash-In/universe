@@ -541,6 +541,7 @@ export interface GetAllCreditsParams {
 	page?: number;
 	perPage?: number;
 	numero_credito_sifco?: string;
+	numeros_credito_sifco?: string[];
 	excel?: boolean;
 	cuotas_atrasadas?: number;
 	nombre_usuario?: string;

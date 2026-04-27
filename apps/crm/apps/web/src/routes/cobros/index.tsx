@@ -16,7 +16,9 @@ import {
 	Users,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import type { DateRange } from "react-day-picker";
 import { MassWhatsappModal } from "@/components/cobros/mass-whatsapp-modal";
+import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { DataTable } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -281,6 +283,7 @@ const ETIQUETA_LABELS_FILTRO: Record<string, string> = {
 	reclamo: "Reclamo",
 };
 
+
 function RouteComponent() {
 	const { data: session } = authClient.useSession();
 	const navigate = useNavigate();
@@ -293,6 +296,10 @@ function RouteComponent() {
 	const [filterValue, setFilterValue] = useState("");
 	const [debouncedFilterValue, setDebouncedFilterValue] = useState("");
 	const [pageSize, setPageSize] = useState(25);
+	const [fechaDesde, setFechaDesde] = useState<string | undefined>(undefined);
+	const [fechaHasta, setFechaHasta] = useState<string | undefined>(undefined);
+	const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
+	const [fechaError, setFechaError] = useState<string | null>(null);
 
 	// Debounce para el filtro de búsqueda (1 segundos)
 	useEffect(() => {
@@ -400,11 +407,12 @@ function RouteComponent() {
 				offset: (page - 1) * pageSize,
 				estadoMora: filtroEtapa || undefined,
 				searchTerm: debouncedFilterValue || undefined,
-				time: timeParam,
+				time: fechaDesde || fechaHasta ? undefined : timeParam,
 				emailCobrador: !PERMISSIONS.canAssignCobros(userRole ?? "")
 					? session?.user?.email
 					: undefined,
-				etiquetas: filtroEtiquetas.length > 0 ? filtroEtiquetas : undefined,
+				fechaDesde,
+				fechaHasta,
 			},
 		}),
 		enabled: !!session,
@@ -455,12 +463,21 @@ function RouteComponent() {
 		let filtrados = creditosConDias;
 
 		// Excluir completados e incobrables si el filtro está desactivado
-		// NOTA: El filtro por etapa y por etiquetas se hacen en el servidor.
+		// NOTA: El filtro por etapa ahora se hace en el servidor mediante estadoMora
 		if (!mostrarCompletadosIncobrables && !filtroEtapa) {
 			filtrados = filtrados.filter(
 				(c) =>
 					c.estadoContrato !== "completado" &&
 					c.estadoContrato !== "incobrable",
+			);
+		}
+
+		// Filtrar por etiquetas (AND: el caso debe tener todas las seleccionadas)
+		if (filtroEtiquetas.length > 0) {
+			filtrados = filtrados.filter(
+				(c) =>
+					c.etiquetas &&
+					filtroEtiquetas.every((et) => c.etiquetas!.includes(et)),
 			);
 		}
 
@@ -481,7 +498,12 @@ function RouteComponent() {
 			// Incluir casos en mora (días negativos) y casos próximos a vencer
 			return c?.diasHastaPago !== null && c?.diasHastaPago <= limite;
 		});
-	}, [creditosConDias, filtroTemporal, mostrarCompletadosIncobrables, filtroEtapa]);
+	}, [
+		creditosConDias,
+		filtroTemporal,
+		mostrarCompletadosIncobrables,
+		filtroEtiquetas,
+	]);
 
 	// Check permissions after all hooks
 	if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
@@ -975,11 +997,7 @@ function RouteComponent() {
 									estadoMora: filtroEtapa || undefined,
 									searchTerm: debouncedFilterValue || undefined,
 									time: timeParam,
-									etiquetas:
-										filtroEtiquetas.length > 0 ? filtroEtiquetas : undefined,
 								}}
-								etiquetaLabels={ETIQUETA_LABELS_FILTRO}
-								totalDestinatarios={totalCreditos}
 							>
 								<Button
 									variant="outline"
@@ -991,7 +1009,7 @@ function RouteComponent() {
 								</Button>
 							</MassWhatsappModal>
 							<Badge variant="outline" className="text-sm">
-								{totalCreditos} casos
+								{creditosFiltrados.length} casos mostrados
 							</Badge>
 						</div>
 					</div>
@@ -1037,6 +1055,41 @@ function RouteComponent() {
 						}}
 						filterContent={
 							<div className="flex w-full flex-col gap-3">
+								<div className="flex flex-wrap items-center gap-2 rounded-md border border-border/50 bg-muted/30 px-3 py-2">
+									<span className="font-semibold text-foreground text-sm">
+										Filtrar por fecha de pago:
+									</span>
+									<DateRangeFilter
+										dateRange={dateRange}
+										onDateRangeChange={(range) => {
+											if (!range) {
+												setDateRange(undefined);
+												setFechaDesde(undefined);
+												setFechaHasta(undefined);
+												setFechaError(null);
+												setPage(1);
+												return;
+											}
+											const hoy = new Date();
+											hoy.setHours(0, 0, 0, 0);
+											if (range.from && range.from < hoy) {
+												setFechaError("La fecha no puede ser menor al día de hoy");
+												setDateRange(range);
+												return;
+											}
+											setFechaError(null);
+											setDateRange(range);
+											if (!range.from || !range.to) return;
+											setFechaDesde(range.from.toISOString().slice(0, 10));
+											setFechaHasta(range.to.toISOString().slice(0, 10));
+											setFiltroTemporal("todos");
+											setPage(1);
+										}}
+									/>
+									{fechaError && (
+										<span className="text-destructive text-xs">{fechaError}</span>
+									)}
+								</div>
 								<div className="flex flex-wrap items-center gap-2 rounded-md border border-border/50 bg-muted/30 px-3 py-2">
 									<span className="font-semibold text-foreground text-sm">
 										Filtrar por etapa:

@@ -134,6 +134,8 @@ export const creditRouter = new Elysia()
     proximidad_pago,     // 🆕 NUEVO
     is_vehiculo_propio,
     inversionista_ids,
+    fecha_desde,
+    fecha_hasta,
   } = query as Record<string, string>;
 
   // Validar parámetros requeridos
@@ -219,10 +221,22 @@ export const creditRouter = new Elysia()
   // 🆕 Validar proximidad_pago si se envía
   if (proximidad_pago && !["TODAY", "WEEK", "TWO_WEEKS", "MONTH", "DUEMONTH"].includes(proximidad_pago)) {
     set.status = 400;
-    return { 
-      message: "Parámetro 'proximidad_pago' debe ser: TODAY, WEEK, TWO_WEEKS, MONTH o DUEMONTH" 
+    return {
+      message: "Parámetro 'proximidad_pago' debe ser: TODAY, WEEK, TWO_WEEKS, MONTH o DUEMONTH"
     };
   }
+
+  // Validar fechas si se envían
+  if (fecha_desde && isNaN(Date.parse(fecha_desde))) {
+    set.status = 400;
+    return { message: "Parámetro 'fecha_desde' debe ser una fecha válida (YYYY-MM-DD)" };
+  }
+  if (fecha_hasta && isNaN(Date.parse(fecha_hasta))) {
+    set.status = 400;
+    return { message: "Parámetro 'fecha_hasta' debe ser una fecha válida (YYYY-MM-DD)" };
+  }
+  const fechaDesdeParam = fecha_desde ?? undefined;
+  const fechaHastaParam = fecha_hasta ?? undefined;
 
   // Llamar servicio
   try {
@@ -263,6 +277,8 @@ export const creditRouter = new Elysia()
         proximidadPagoParam,
         isVehiculoPropioParam,
         inversionistaIdsArray,
+        fechaDesdeParam,
+        fechaHastaParam,
         numerosCreditoSifcoArray
       );
       set.status = 200;

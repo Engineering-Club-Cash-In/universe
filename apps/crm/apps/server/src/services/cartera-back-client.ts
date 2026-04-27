@@ -430,6 +430,10 @@ export class CarteraBackClient {
 			...(params.numero_credito_sifco && {
 				numero_credito_sifco: params.numero_credito_sifco,
 			}),
+			...(params.numeros_credito_sifco &&
+				params.numeros_credito_sifco.length > 0 && {
+					numeros_credito_sifco: params.numeros_credito_sifco.join(","),
+				}),
 			...(params.email_cobrador && { email_asesor: params.email_cobrador }),
 			excel: "false",
 		});

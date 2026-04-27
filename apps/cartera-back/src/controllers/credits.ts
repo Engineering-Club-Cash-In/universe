@@ -594,7 +594,8 @@ export async function getCreditosWithUserByMesAnio(
   cuotas_atrasadas?: number,
   proximidad_pago?: ProximidadPago,
   is_vehiculo_propio?: boolean,
-  inversionista_ids?: number[]
+  inversionista_ids?: number[],
+  numeros_credito_sifco?: string[]
 ): Promise<{
   data: CreditoConInfo[];
   page: number;
@@ -617,7 +618,16 @@ export async function getCreditosWithUserByMesAnio(
 
   try {
     // 📌 Filtros
-    if (numero_credito_sifco && numero_credito_sifco.trim().length > 0) {
+    // Normalizar lista multi-SIFCO (tiene prioridad sobre el filtro single).
+    const sifcosLimpios = numeros_credito_sifco
+      ?.map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    if (sifcosLimpios && sifcosLimpios.length > 0) {
+      console.log(
+        `🔎 Filtrando por ${sifcosLimpios.length} número(s) de crédito (multi)`
+      );
+      conditions.push(inArray(creditos.numero_credito_sifco, sifcosLimpios));
+    } else if (numero_credito_sifco && numero_credito_sifco.trim().length > 0) {
       console.log(`🔎 Filtrando por número de crédito: ${numero_credito_sifco}`);
       conditions.push(eq(creditos.numero_credito_sifco, numero_credito_sifco.trim()));
     } else {

@@ -595,6 +595,8 @@ export async function getCreditosWithUserByMesAnio(
   proximidad_pago?: ProximidadPago,
   is_vehiculo_propio?: boolean,
   inversionista_ids?: number[],
+  fecha_desde?: string,
+  fecha_hasta?: string,
   numeros_credito_sifco?: string[]
 ): Promise<{
   data: CreditoConInfo[];
@@ -692,8 +694,8 @@ export async function getCreditosWithUserByMesAnio(
     throw new Error("Error building filters");
   }
 
-  // 🔥 Filtro de proximidad_pago - se aplica ANTES de la paginación
-  const needsProximidadJoin = !!proximidad_pago;
+  // 🔥 Filtro de proximidad_pago / rango de fechas - se aplica ANTES de la paginación
+  const needsProximidadJoin = !!proximidad_pago || !!fecha_desde || !!fecha_hasta;
   if (proximidad_pago) {
     console.log(`🔎 Filtrando por proximidad de pago: ${proximidad_pago}`);
 
@@ -738,6 +740,22 @@ export async function getCreditosWithUserByMesAnio(
     conditions.push(eq(cuotas_credito.pagado, false));
     conditions.push(gt(cuotas_credito.numero_cuota, 0));
   }
+
+  if (fecha_desde || fecha_hasta) {
+    if (!proximidad_pago) {
+      conditions.push(eq(cuotas_credito.pagado, false));
+      conditions.push(gt(cuotas_credito.numero_cuota, 0));
+    }
+    if (fecha_desde) {
+      conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date >= ${fecha_desde}::date`);
+    }
+    if (fecha_hasta) {
+      conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date <= ${fecha_hasta}::date`);
+    }
+  }
+
+  console.log(`fecha desde ${fecha_desde}`);
+  console.log(`fecha hasta ${fecha_hasta}`);
 
   const whereCondition = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -971,7 +989,8 @@ export async function getCreditosWithUserByMesAnio(
         .where(
           and(
             inArray(cuotas_credito.credito_id, creditosIds),
-            gte(cuotas_credito.fecha_vencimiento, hoyStr),
+            gte(cuotas_credito.fecha_vencimiento, fecha_desde ?? hoyStr),
+            fecha_hasta ? lte(cuotas_credito.fecha_vencimiento, fecha_hasta) : undefined,
             gt(cuotas_credito.numero_cuota, 0)
           )
         )

@@ -547,6 +547,8 @@ export interface GetAllCreditsParams {
 	nombre_usuario?: string;
 	time?: "WEEK" | "MONTH" | "DUEMONTH" | "TODAY";
 	email_cobrador?: string;
+	fecha_desde?: string;
+	fecha_hasta?: string;
 }
 
 export interface GetPaymentsParams {

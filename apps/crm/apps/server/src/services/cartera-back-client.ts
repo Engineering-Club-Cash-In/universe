@@ -416,39 +416,84 @@ export class CarteraBackClient {
 	async getAllCreditos(
 		params: GetAllCreditsParams,
 	): Promise<PaginatedResponse<CreditoDetailResponse>> {
-		const queryParams = new URLSearchParams({
-			mes: params.mes.toString(),
-			anio: params.anio.toString(),
-			...(params.estado && { estado: params.estado }),
-			...(params.page && { page: params.page.toString() }),
-			...(params.perPage && { perPage: params.perPage.toString() }),
-			...(params.cuotas_atrasadas !== undefined && {
-				cuotas_atrasadas: params.cuotas_atrasadas.toString(),
-			}),
-			...(params.time && { proximidad_pago: params.time }),
-			...(params.nombre_usuario && { nombre_usuario: params.nombre_usuario }),
-			...(params.numero_credito_sifco && {
-				numero_credito_sifco: params.numero_credito_sifco,
-			}),
-			...(params.numeros_credito_sifco &&
-				params.numeros_credito_sifco.length > 0 && {
-					numeros_credito_sifco: params.numeros_credito_sifco.join(","),
-				}),
-			...(params.email_cobrador && { email_asesor: params.email_cobrador }),
-			excel: "false",
-		});
+		// Si la lista de SIFCOs es grande, usar POST para evitar URL too long
+		// (414). Threshold conservador: ~50 SIFCOs * 15 chars ≈ 750 bytes, muy
+		// por debajo de cualquier límite. Por arriba de eso, body en POST.
+		const SIFCO_LIST_POST_THRESHOLD = 50;
+		const useBulkPost =
+			!!params.numeros_credito_sifco &&
+			params.numeros_credito_sifco.length > SIFCO_LIST_POST_THRESHOLD;
 
-		console.log(
-			`[CarteraBackClient] getAllCreditos query: ${queryParams.toString()}`,
-		);
-		// Este endpoint retorna PaginatedResponse directamente, no envuelto en CarteraBackApiResponse
-		const response = await this.request<
-			PaginatedResponse<CreditoDetailResponse>
-		>(
-			`/getAllCredits?${queryParams}`,
-			{ method: "GET" },
-			true, // use cache
-		);
+		let response: PaginatedResponse<CreditoDetailResponse>;
+
+		if (useBulkPost) {
+			console.log(
+				`[CarteraBackClient] getAllCreditos: usando POST (${params.numeros_credito_sifco?.length} SIFCOs en lista)`,
+			);
+			response = await this.request<PaginatedResponse<CreditoDetailResponse>>(
+				`/getAllCredits`,
+				{
+					method: "POST",
+					body: JSON.stringify({
+						mes: params.mes,
+						anio: params.anio,
+						estado: params.estado,
+						...(params.page !== undefined && { page: params.page }),
+						...(params.perPage !== undefined && { perPage: params.perPage }),
+						...(params.cuotas_atrasadas !== undefined && {
+							cuotas_atrasadas: params.cuotas_atrasadas,
+						}),
+						...(params.time && { proximidad_pago: params.time }),
+						...(params.nombre_usuario && {
+							nombre_usuario: params.nombre_usuario,
+						}),
+						...(params.numero_credito_sifco && {
+							numero_credito_sifco: params.numero_credito_sifco,
+						}),
+						...(params.numeros_credito_sifco && {
+							numeros_credito_sifco: params.numeros_credito_sifco,
+						}),
+						...(params.email_cobrador && {
+							email_asesor: params.email_cobrador,
+						}),
+						excel: false,
+					}),
+				},
+			);
+		} else {
+			const queryParams = new URLSearchParams({
+				mes: params.mes.toString(),
+				anio: params.anio.toString(),
+				...(params.estado && { estado: params.estado }),
+				...(params.page && { page: params.page.toString() }),
+				...(params.perPage && { perPage: params.perPage.toString() }),
+				...(params.cuotas_atrasadas !== undefined && {
+					cuotas_atrasadas: params.cuotas_atrasadas.toString(),
+				}),
+				...(params.time && { proximidad_pago: params.time }),
+				...(params.nombre_usuario && {
+					nombre_usuario: params.nombre_usuario,
+				}),
+				...(params.numero_credito_sifco && {
+					numero_credito_sifco: params.numero_credito_sifco,
+				}),
+				...(params.numeros_credito_sifco &&
+					params.numeros_credito_sifco.length > 0 && {
+						numeros_credito_sifco: params.numeros_credito_sifco.join(","),
+					}),
+				...(params.email_cobrador && { email_asesor: params.email_cobrador }),
+				excel: "false",
+			});
+
+			console.log(
+				`[CarteraBackClient] getAllCreditos query: ${queryParams.toString()}`,
+			);
+			response = await this.request<PaginatedResponse<CreditoDetailResponse>>(
+				`/getAllCredits?${queryParams}`,
+				{ method: "GET" },
+				true, // use cache (solo GET)
+			);
+		}
 
 		// Validar que la respuesta tenga la estructura de PaginatedResponse
 		if (!response.data || !Array.isArray(response.data)) {

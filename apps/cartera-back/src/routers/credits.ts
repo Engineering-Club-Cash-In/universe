@@ -274,6 +274,132 @@ export const creditRouter = new Elysia()
   }
 })
 
+  /**
+   * Variante POST de /getAllCredits.
+   *
+   * Mismos parámetros y misma lógica que el GET — internamente llama al mismo
+   * controller — pero los recibe en el body. Pensado para casos donde la lista
+   * `numeros_credito_sifco` es demasiado grande para entrar en una URL (filtros
+   * por etiqueta que resuelven cientos/miles de SIFCOs disparaban 414 URI Too
+   * Long en proxies).
+   */
+  .post(
+    "/getAllCredits",
+    async ({ body, set }) => {
+      const {
+        mes,
+        anio,
+        page = 1,
+        perPage = 10,
+        numero_credito_sifco,
+        numeros_credito_sifco,
+        estado,
+        excel,
+        asesor_id,
+        nombre_usuario,
+        email_asesor,
+        cuotas_atrasadas,
+        proximidad_pago,
+        is_vehiculo_propio,
+        inversionista_ids,
+      } = body;
+
+      if (mes === undefined || anio === undefined || !estado) {
+        set.status = 400;
+        return { message: "Faltan parámetros 'mes', 'anio' y/o 'estado'." };
+      }
+      if (mes < 0 || mes > 12 || anio < 0) {
+        set.status = 400;
+        return { message: "Parámetros 'mes' y/o 'anio' inválidos." };
+      }
+
+      const sifcosLimpios = numeros_credito_sifco
+        ?.map((s) => s.trim())
+        .filter((s) => s.length > 0);
+
+      try {
+        if (excel) {
+          const result = await getCreditosWithUserByMesAnioExcel({
+            mes,
+            anio,
+            page,
+            perPage,
+            numero_credito_sifco,
+            numeros_credito_sifco: sifcosLimpios,
+            estado,
+            asesor_id,
+            nombre_usuario,
+            email_asesor,
+            cuotas_atrasadas,
+            proximidad_pago,
+            is_vehiculo_propio,
+            inversionista_ids,
+            excel: true,
+          });
+          set.status = 200;
+          return result;
+        }
+
+        const result = await getCreditosWithUserByMesAnio(
+          mes,
+          anio,
+          page,
+          perPage,
+          numero_credito_sifco,
+          estado,
+          asesor_id,
+          nombre_usuario,
+          email_asesor,
+          cuotas_atrasadas,
+          proximidad_pago,
+          is_vehiculo_propio,
+          inversionista_ids,
+          sifcosLimpios
+        );
+        set.status = 200;
+        return result;
+      } catch (error) {
+        set.status = 500;
+        return { message: "Error obteniendo créditos", error: String(error) };
+      }
+    },
+    {
+      body: t.Object({
+        mes: t.Number(),
+        anio: t.Number(),
+        page: t.Optional(t.Number()),
+        perPage: t.Optional(t.Number()),
+        numero_credito_sifco: t.Optional(t.String()),
+        numeros_credito_sifco: t.Optional(t.Array(t.String())),
+        estado: t.Union([
+          t.Literal("ACTIVO"),
+          t.Literal("CANCELADO"),
+          t.Literal("INCOBRABLE"),
+          t.Literal("PENDIENTE_CANCELACION"),
+          t.Literal("EN_CONVENIO"),
+          t.Literal("MOROSO"),
+          t.Literal("CAIDO"),
+        ]),
+        excel: t.Optional(t.Boolean()),
+        asesor_id: t.Optional(t.Number()),
+        nombre_usuario: t.Optional(t.String()),
+        email_asesor: t.Optional(t.String()),
+        cuotas_atrasadas: t.Optional(t.Number()),
+        proximidad_pago: t.Optional(
+          t.Union([
+            t.Literal("TODAY"),
+            t.Literal("WEEK"),
+            t.Literal("TWO_WEEKS"),
+            t.Literal("MONTH"),
+            t.Literal("DUEMONTH"),
+          ])
+        ),
+        is_vehiculo_propio: t.Optional(t.Boolean()),
+        inversionista_ids: t.Optional(t.Array(t.Number())),
+      }),
+    }
+  )
+
   .post("/cancelCredit", async ({ body, set }) => {
     // Validar que venga el creditId en el body
     const { creditId } = body as { creditId?: number };

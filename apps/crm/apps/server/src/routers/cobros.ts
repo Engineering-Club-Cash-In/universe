@@ -95,45 +95,38 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 }) {
 	const estado = params.estado || "ACTIVO";
 
-	const response = await carteraBackClient
-		.getAllCreditos({
-			mes: params.mes,
-			anio: params.anio,
-			page: params.page,
-			perPage: params.perPage,
-			estado: estado,
-			...(params.cuotasAtrasadas !== undefined && {
-				cuotas_atrasadas: params.cuotasAtrasadas,
+	// Antes había un .catch que devolvía respuesta vacía si cartera fallaba.
+	// Eso enmascaraba errores reales (ej. 414 URI Too Long con listas grandes
+	// de SIFCOs) y hacía que la tabla mostrara 0 casos y el envío masivo
+	// despachara a 0 destinatarios silenciosamente. Ahora propagamos el error
+	// para que el endpoint ORPC lo levante como tal.
+	const response = await carteraBackClient.getAllCreditos({
+		mes: params.mes,
+		anio: params.anio,
+		page: params.page,
+		perPage: params.perPage,
+		estado: estado,
+		...(params.cuotasAtrasadas !== undefined && {
+			cuotas_atrasadas: params.cuotasAtrasadas,
+		}),
+		...(params.nombre_usuario !== undefined &&
+			params.nombre_usuario !== "" && {
+				nombre_usuario: params.nombre_usuario,
 			}),
-			...(params.nombre_usuario !== undefined &&
-				params.nombre_usuario !== "" && {
-					nombre_usuario: params.nombre_usuario,
-				}),
-			...(params.numero_credito_sifco !== undefined &&
-				params.numero_credito_sifco !== "" && {
-					numero_credito_sifco: params.numero_credito_sifco,
-				}),
-			...(params.numeros_credito_sifco !== undefined &&
-				params.numeros_credito_sifco.length > 0 && {
-					numeros_credito_sifco: params.numeros_credito_sifco,
-				}),
-			...(params.time !== undefined && { time: params.time }),
-			...(params.email_cobrador !== undefined &&
-				params.email_cobrador !== "" && {
-					email_cobrador: params.email_cobrador,
-				}),
-		})
-		.catch((error) => {
-			console.error("[Cobros] Error obteniendo créditos:", error);
-			// Retornar respuesta vacía si falla
-			return {
-				data: [],
-				page: params.page || 1,
-				perPage: params.perPage || 1000,
-				totalCount: 0,
-				totalPages: 0,
-			};
-		});
+		...(params.numero_credito_sifco !== undefined &&
+			params.numero_credito_sifco !== "" && {
+				numero_credito_sifco: params.numero_credito_sifco,
+			}),
+		...(params.numeros_credito_sifco !== undefined &&
+			params.numeros_credito_sifco.length > 0 && {
+				numeros_credito_sifco: params.numeros_credito_sifco,
+			}),
+		...(params.time !== undefined && { time: params.time }),
+		...(params.email_cobrador !== undefined &&
+			params.email_cobrador !== "" && {
+				email_cobrador: params.email_cobrador,
+			}),
+	});
 
 	return {
 		data: response.data,

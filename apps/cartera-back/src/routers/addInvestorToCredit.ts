@@ -16,6 +16,13 @@ export const addInvestorToCreditRouter = new Elysia().post(
         t.Literal("reinversion"),
         t.Literal("compra_cartera"),
       ]),
+      tipo_reinversion: t.Optional(
+        t.Union([
+          t.Literal("reinversion_capital"),
+          t.Literal("reinversion_total"),
+          t.Literal("sin_reinversion"),
+        ]),
+      ),
       fecha_inicio_participacion: t.Optional(t.String()),
     }),
     detail: {

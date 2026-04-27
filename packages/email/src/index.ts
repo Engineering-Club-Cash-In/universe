@@ -204,6 +204,11 @@ export interface SendInvestorAddedToCreditsNotificationParams {
     numero_credito_sifco: string;
     monto_asignado: string;
     cube_eliminado: boolean;
+    tipo_reinversion?:
+      | "reinversion_capital"
+      | "reinversion_interes"
+      | "reinversion_total"
+      | null;
   }>;
   currencySymbol?: string;
   usuarioNombre?: string;
@@ -236,12 +241,21 @@ export const sendInvestorAddedToCreditsNotification = async ({
     const operacionLabel =
       tipoOperacion === "compra_cartera" ? "Compra de Cartera" : "Reinversión";
 
+    const modalidadLabel: Record<string, string> = {
+      reinversion_capital: "Reinversión de Capital",
+      reinversion_interes: "Reinversión de Interés",
+      reinversion_total: "Reinversión Total",
+    };
+
     const filas = creditos
       .map(
         (c) => `
           <tr>
             <td style="padding:8px;border:1px solid #e5e7eb;">${c.numero_credito_sifco}</td>
             <td style="padding:8px;border:1px solid #e5e7eb;text-align:right;">${currencySymbol}${c.monto_asignado}</td>
+            <td style="padding:8px;border:1px solid #e5e7eb;text-align:center;">${
+              c.tipo_reinversion ? modalidadLabel[c.tipo_reinversion] ?? c.tipo_reinversion : "—"
+            }</td>
             <td style="padding:8px;border:1px solid #e5e7eb;text-align:center;">
               <span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:9999px;font-size:12px;font-weight:600;">POR VALIDAR</span>
             </td>
@@ -272,6 +286,7 @@ export const sendInvestorAddedToCreditsNotification = async ({
             <tr style="background:#f3f4f6;">
               <th style="padding:8px;border:1px solid #e5e7eb;text-align:left;">Crédito</th>
               <th style="padding:8px;border:1px solid #e5e7eb;text-align:right;">Monto asignado</th>
+              <th style="padding:8px;border:1px solid #e5e7eb;text-align:center;">Modalidad</th>
               <th style="padding:8px;border:1px solid #e5e7eb;text-align:center;">Estado</th>
               <th style="padding:8px;border:1px solid #e5e7eb;text-align:center;">CUBE eliminado</th>
             </tr>
@@ -317,6 +332,14 @@ export interface SendCompraCarteraAcceptedNotificationParams {
     cliente_nombre: string;
     capital: string;
     observaciones?: string;
+    tipo_reinversion?:
+      | "sin_reinversion"
+      | "reinversion_capital"
+      | "reinversion_interes"
+      | "reinversion_total"
+      | "reinversion_variable"
+      | "reinversion_combinada"
+      | null;
   }>;
   pool: Array<{
     numero_credito_sifco: string;
@@ -399,6 +422,15 @@ export const sendCompraCarteraAcceptedNotification = async ({
       })
       .join("");
 
+    const modalidadLabelCreditos: Record<string, string> = {
+      sin_reinversion: "Sin Reinversión",
+      reinversion_capital: "Reinversión de Capital",
+      reinversion_interes: "Reinversión de Interés",
+      reinversion_total: "Reinversión Total",
+      reinversion_variable: "Reinversión Variable",
+      reinversion_combinada: "Reinversión Combinada",
+    };
+
     const filasCreditos = creditos
       .map(
         (c) => `
@@ -406,6 +438,11 @@ export const sendCompraCarteraAcceptedNotification = async ({
             <td style="padding:8px 12px;border:1px solid #f59e0b;background:#ffffff;">${c.numero_credito_sifco}</td>
             <td style="padding:8px 12px;border:1px solid #f59e0b;background:#ffffff;">${c.cliente_nombre}</td>
             <td style="padding:8px 12px;border:1px solid #f59e0b;background:#ffffff;text-align:right;">${currencySymbol} ${c.capital}</td>
+            <td style="padding:8px 12px;border:1px solid #f59e0b;background:#ffffff;text-align:center;">${
+              c.tipo_reinversion
+                ? modalidadLabelCreditos[c.tipo_reinversion] ?? c.tipo_reinversion
+                : "—"
+            }</td>
           </tr>`
       )
       .join("");
@@ -488,6 +525,7 @@ export const sendCompraCarteraAcceptedNotification = async ({
               <th style="padding:8px 12px;border:1px solid #f59e0b;background:#f59e0b;color:#ffffff;text-align:left;">Número SIFCO</th>
               <th style="padding:8px 12px;border:1px solid #f59e0b;background:#f59e0b;color:#ffffff;text-align:left;">Nombre</th>
               <th style="padding:8px 12px;border:1px solid #f59e0b;background:#f59e0b;color:#ffffff;text-align:right;">Capital</th>
+              <th style="padding:8px 12px;border:1px solid #f59e0b;background:#f59e0b;color:#ffffff;text-align:center;">Modalidad</th>
             </tr>
           </thead>
           <tbody>${filasCreditos}</tbody>

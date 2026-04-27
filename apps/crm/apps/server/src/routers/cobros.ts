@@ -92,6 +92,8 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 	numeros_credito_sifco?: string[];
 	time?: "WEEK" | "MONTH" | "DUEMONTH" | "TODAY";
 	email_cobrador?: string;
+	fecha_desde?: string;
+	fecha_hasta?: string;
 }) {
 	const estado = params.estado || "ACTIVO";
 
@@ -126,6 +128,8 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 			params.email_cobrador !== "" && {
 				email_cobrador: params.email_cobrador,
 			}),
+			...(params.fecha_desde !== undefined && { fecha_desde: params.fecha_desde }),
+			...(params.fecha_hasta !== undefined && { fecha_hasta: params.fecha_hasta }),
 	});
 
 	return {
@@ -594,6 +598,8 @@ export const cobrosRouter = {
 				searchTerm: z.string().optional(),
 				time: z.enum(["WEEK", "MONTH", "DUEMONTH", "TODAY"]).optional(),
 				emailCobrador: z.string().optional(),
+				fechaDesde: z.string().optional(),
+				fechaHasta: z.string().optional(),
 				etiquetas: z.array(z.string()).optional(),
 			}),
 		)
@@ -756,6 +762,8 @@ export const cobrosRouter = {
 									time: input.time,
 									email_cobrador: input.emailCobrador,
 									numero_credito_sifco: numeroSifco,
+								fecha_desde: input.fechaDesde,
+								fecha_hasta: input.fechaHasta,
 								});
 							}
 						} else {
@@ -796,6 +804,8 @@ export const cobrosRouter = {
 									estado: estadoCartera,
 									time: input.time,
 									email_cobrador: input.emailCobrador,
+								fecha_desde: input.fechaDesde,
+								fecha_hasta: input.fechaHasta,
 									numeros_credito_sifco: sifcosFiltro,
 								});
 
@@ -811,6 +821,8 @@ export const cobrosRouter = {
 										estado: estadoCartera,
 										time: input.time,
 										email_cobrador: input.emailCobrador,
+									fecha_desde: input.fechaDesde,
+									fecha_hasta: input.fechaHasta,
 										numeros_credito_sifco: sifcosFiltro,
 									});
 									allCredits.push(...nextPage.data);
@@ -838,6 +850,8 @@ export const cobrosRouter = {
 							time: input.time,
 							email_cobrador: input.emailCobrador,
 							nombre_usuario: isNameSearch ? searchTerm : undefined,
+							fecha_desde: input.fechaDesde,
+							fecha_hasta: input.fechaHasta,
 							numeros_credito_sifco: sifcosPorEtiquetas,
 						});
 					}

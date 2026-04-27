@@ -727,65 +727,108 @@ export const cobrosRouter = {
 								totalPages: 0,
 							};
 						} else if (matchingOpportunities.length === 1) {
-							// Una sola coincidencia: buscar directamente por número SIFCO (más rápido)
+							// Una sola coincidencia: buscar directamente por número SIFCO (más rápido).
+							// Si además hay filtro de etiquetas y el SIFCO de la placa no está en
+							// la lista, la combinación no produce match. Ojo: cartera-back le da
+							// prioridad al param multi sobre el single, por eso no mandamos ambos.
 							const numeroSifco = matchingOpportunities[0].numeroSifco!;
-							console.log(
-								`[Cobros] Placa ${searchTerm} encontró 1 coincidencia, buscando crédito SIFCO: ${numeroSifco}`,
-							);
-							creditosResponse = await obtenerTodosLosCreditosCarteraBack({
-								mes,
-								anio,
-								page: 1,
-								perPage: 50,
-								cuotasAtrasadas,
-								estado: estadoCartera,
-								time: input.time,
-								email_cobrador: input.emailCobrador,
-								numero_credito_sifco: numeroSifco,
-							});
-						} else {
-							// Múltiples coincidencias: traer todos los créditos y filtrar localmente
-							console.log(
-								`[Cobros] Placa ${searchTerm} encontró ${matchingOpportunities.length} coincidencias, trayendo todos los créditos`,
-							);
-							const perPage = 200;
-							const firstPage = await obtenerTodosLosCreditosCarteraBack({
-								mes,
-								anio,
-								page: 1,
-								perPage,
-								cuotasAtrasadas,
-								estado: estadoCartera,
-								time: input.time,
-								email_cobrador: input.emailCobrador,
-								numeros_credito_sifco: sifcosPorEtiquetas,
-							});
-
-							const allCredits = [...firstPage.data];
-
-							for (let page = 2; page <= firstPage.totalPages; page++) {
-								const nextPage = await obtenerTodosLosCreditosCarteraBack({
+							if (
+								sifcosPorEtiquetas &&
+								!sifcosPorEtiquetas.includes(numeroSifco)
+							) {
+								console.log(
+									`[Cobros] Placa ${searchTerm} matcheó SIFCO ${numeroSifco}, pero no está en las etiquetas seleccionadas — respuesta vacía`,
+								);
+								creditosResponse = {
+									data: [],
+									page: 1,
+									perPage: 0,
+									totalCount: 0,
+									totalPages: 0,
+								};
+							} else {
+								console.log(
+									`[Cobros] Placa ${searchTerm} encontró 1 coincidencia, buscando crédito SIFCO: ${numeroSifco}`,
+								);
+								creditosResponse = await obtenerTodosLosCreditosCarteraBack({
 									mes,
 									anio,
-									page,
+									page: 1,
+									perPage: 50,
+									cuotasAtrasadas,
+									estado: estadoCartera,
+									time: input.time,
+									email_cobrador: input.emailCobrador,
+									numero_credito_sifco: numeroSifco,
+								});
+							}
+						} else {
+							// Múltiples coincidencias: si además hay filtro de etiquetas,
+							// intersectar la lista de SIFCOs de la placa con la de las
+							// etiquetas y mandar la intersección a cartera (en vez de mandar
+							// todos los etiquetados o todos los de la placa por separado).
+							const sifcosPlaca = matchingOpportunities
+								.map((m) => m.numeroSifco)
+								.filter((s): s is string => !!s);
+							let sifcosFiltro: string[] | undefined;
+							if (sifcosPorEtiquetas) {
+								const setEtq = new Set(sifcosPorEtiquetas);
+								sifcosFiltro = sifcosPlaca.filter((s) => setEtq.has(s));
+							} else {
+								sifcosFiltro = sifcosPlaca;
+							}
+
+							if (sifcosFiltro.length === 0) {
+								creditosResponse = {
+									data: [],
+									page: 1,
+									perPage: 0,
+									totalCount: 0,
+									totalPages: 0,
+								};
+							} else {
+								console.log(
+									`[Cobros] Placa ${searchTerm} encontró ${matchingOpportunities.length} coincidencias (intersección con etiquetas: ${sifcosFiltro.length}), trayendo créditos`,
+								);
+								const perPage = 200;
+								const firstPage = await obtenerTodosLosCreditosCarteraBack({
+									mes,
+									anio,
+									page: 1,
 									perPage,
 									cuotasAtrasadas,
 									estado: estadoCartera,
 									time: input.time,
 									email_cobrador: input.emailCobrador,
-									numeros_credito_sifco: sifcosPorEtiquetas,
+									numeros_credito_sifco: sifcosFiltro,
 								});
-								allCredits.push(...nextPage.data);
-							}
 
-							creditosResponse = {
-								...firstPage,
-								data: allCredits,
-								totalCount: allCredits.length,
-								page: 1,
-								perPage: allCredits.length,
-								totalPages: 1,
-							};
+								const allCredits = [...firstPage.data];
+
+								for (let page = 2; page <= firstPage.totalPages; page++) {
+									const nextPage = await obtenerTodosLosCreditosCarteraBack({
+										mes,
+										anio,
+										page,
+										perPage,
+										cuotasAtrasadas,
+										estado: estadoCartera,
+										time: input.time,
+										email_cobrador: input.emailCobrador,
+										numeros_credito_sifco: sifcosFiltro,
+									});
+									allCredits.push(...nextPage.data);
+								}
+
+								creditosResponse = {
+									...firstPage,
+									data: allCredits,
+									totalCount: allCredits.length,
+									page: 1,
+									perPage: allCredits.length,
+									totalPages: 1,
+								};
+							}
 						}
 					} else {
 						// Búsqueda por nombre (cartera-back filtra) o sin búsqueda
@@ -3084,6 +3127,46 @@ export const cobrosRouter = {
 						detalle: [],
 					};
 				}
+			}
+
+			// 2.6 Intersectar búsqueda por placa con etiquetas. En cartera-back la
+			// lista multi-SIFCO tiene prioridad sobre el single, así que mandar
+			// ambos sin intersectar haría que la placa se ignore y el envío
+			// masivo salga a destinatarios incorrectos.
+			const respuestaVacia = {
+				plantillaId: input.plantillaId,
+				totalCreditos: 0,
+				elegibles: 0,
+				enviados: 0,
+				fallidos: 0,
+				descartados: [] as Array<{ numeroSifco: string | null; motivo: string }>,
+				detalle: [] as Array<{
+					numeroSifco: string;
+					telefono: string;
+					success: boolean;
+					error?: string;
+				}>,
+			};
+			if (sifcosPorEtiquetas && numeroSifcoFiltro) {
+				if (sifcosPorEtiquetas.includes(numeroSifcoFiltro)) {
+					// La placa única coincide con alguna etiqueta: basta mandar el
+					// single y descartar la lista para no perder ese filtro.
+					sifcosPorEtiquetas = undefined;
+				} else {
+					return respuestaVacia;
+				}
+			} else if (
+				sifcosPorEtiquetas &&
+				isPlateSearch &&
+				matchingSifcos.size > 0
+			) {
+				// Placa con varias coincidencias + etiquetas: mandar la intersección
+				// a cartera para no traer créditos que no son de la placa.
+				const setEtq = new Set(sifcosPorEtiquetas);
+				sifcosPorEtiquetas = Array.from(matchingSifcos).filter((s) =>
+					setEtq.has(s),
+				);
+				if (sifcosPorEtiquetas.length === 0) return respuestaVacia;
 			}
 
 			// 3. Paginar getAllCreditos hasta traer todos los matcheos.

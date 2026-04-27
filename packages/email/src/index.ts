@@ -242,9 +242,9 @@ export const sendInvestorAddedToCreditsNotification = async ({
       tipoOperacion === "compra_cartera" ? "Compra de Cartera" : "Reinversión";
 
     const modalidadLabel: Record<string, string> = {
-      reinversion_capital: "Reinversión de Capital",
+      reinversion_capital: "Reinversión Capital",
       reinversion_interes: "Reinversión de Interés",
-      reinversion_total: "Reinversión Total",
+      reinversion_total: "Interés Compuesto",
     };
 
     const filas = creditos
@@ -254,7 +254,7 @@ export const sendInvestorAddedToCreditsNotification = async ({
             <td style="padding:8px;border:1px solid #e5e7eb;">${c.numero_credito_sifco}</td>
             <td style="padding:8px;border:1px solid #e5e7eb;text-align:right;">${currencySymbol}${c.monto_asignado}</td>
             <td style="padding:8px;border:1px solid #e5e7eb;text-align:center;">${
-              c.tipo_reinversion ? modalidadLabel[c.tipo_reinversion] ?? c.tipo_reinversion : "—"
+              c.tipo_reinversion ? modalidadLabel[c.tipo_reinversion] ?? c.tipo_reinversion : "Tradicional"
             }</td>
             <td style="padding:8px;border:1px solid #e5e7eb;text-align:center;">
               <span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:9999px;font-size:12px;font-weight:600;">POR VALIDAR</span>
@@ -424,9 +424,9 @@ export const sendCompraCarteraAcceptedNotification = async ({
 
     const modalidadLabelCreditos: Record<string, string> = {
       sin_reinversion: "Sin Reinversión",
-      reinversion_capital: "Reinversión de Capital",
+      reinversion_capital: "Reinversión Capital",
       reinversion_interes: "Reinversión de Interés",
-      reinversion_total: "Reinversión Total",
+      reinversion_total: "Interés Compuesto",
       reinversion_variable: "Reinversión Variable",
       reinversion_combinada: "Reinversión Combinada",
     };
@@ -441,7 +441,7 @@ export const sendCompraCarteraAcceptedNotification = async ({
             <td style="padding:8px 12px;border:1px solid #f59e0b;background:#ffffff;text-align:center;">${
               c.tipo_reinversion
                 ? modalidadLabelCreditos[c.tipo_reinversion] ?? c.tipo_reinversion
-                : "—"
+                : "Tradicional"
             }</td>
           </tr>`
       )

@@ -139,47 +139,50 @@ export function MassWhatsappModal({
 								</p>
 							</div>
 
-							<div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
-								<p className="font-medium">Filtros aplicados</p>
-								<ul className="mt-1 list-inside list-disc text-muted-foreground text-xs">
-									<li>
-										Estado de mora:{" "}
-										{filtros.estadoMora
-											? (ESTADO_MORA_LABELS[filtros.estadoMora] ??
-												filtros.estadoMora)
-											: "Todos"}
-									</li>
-									<li>
-										Rango temporal:{" "}
-										{filtros.time
-											? (TIME_LABELS[filtros.time] ?? filtros.time)
-											: "Todos"}
-									</li>
-									<li>Búsqueda: {filtros.searchTerm ?? "—"}</li>
-									<li>
-										Etiquetas:{" "}
-										{filtros.etiquetas && filtros.etiquetas.length > 0
-											? filtros.etiquetas
-													.map((e) => etiquetaLabels?.[e] ?? e)
-													.join(", ")
-											: "Todas"}
-									</li>
-								</ul>
-							</div>
-
-							{typeof totalDestinatarios === "number" && (
-								<div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
-									<p className="font-medium">
-										Se enviará a {totalDestinatarios.toLocaleString("es-GT")}{" "}
-										{totalDestinatarios === 1 ? "crédito" : "créditos"}
-									</p>
-									<p className="mt-1 text-muted-foreground text-xs">
-										Los créditos sin teléfono, sin cuota o sin asesor se
-										descartan automáticamente, por lo que el número final puede
-										ser menor.
-									</p>
+							<div className="grid gap-3 md:grid-cols-2">
+								<div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+									<p className="font-medium">Filtros aplicados</p>
+									<ul className="mt-1 list-inside list-disc text-muted-foreground text-xs">
+										<li>
+											Estado de mora:{" "}
+											{filtros.estadoMora
+												? (ESTADO_MORA_LABELS[filtros.estadoMora] ??
+													filtros.estadoMora)
+												: "Todos"}
+										</li>
+										<li>
+											Rango temporal:{" "}
+											{filtros.time
+												? (TIME_LABELS[filtros.time] ?? filtros.time)
+												: "Todos"}
+										</li>
+										<li>Búsqueda: {filtros.searchTerm ?? "—"}</li>
+										<li>
+											Etiquetas:{" "}
+											{filtros.etiquetas && filtros.etiquetas.length > 0
+												? filtros.etiquetas
+														.map((e) => etiquetaLabels?.[e] ?? e)
+														.join(", ")
+												: "Todas"}
+										</li>
+									</ul>
 								</div>
-							)}
+
+								{typeof totalDestinatarios === "number" && (
+									<div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
+										<p className="font-medium">
+											Se enviará a{" "}
+											{totalDestinatarios.toLocaleString("es-GT")}{" "}
+											{totalDestinatarios === 1 ? "crédito" : "créditos"}
+										</p>
+										<p className="mt-1 text-muted-foreground text-xs">
+											Los créditos sin teléfono, sin cuota o sin asesor se
+											descartan automáticamente, por lo que el número final
+											puede ser menor.
+										</p>
+									</div>
+								)}
+							</div>
 						</>
 					) : (
 						<div className="flex flex-col items-center justify-center gap-2 rounded-md border border-border border-dashed bg-muted/20 p-8 text-center">

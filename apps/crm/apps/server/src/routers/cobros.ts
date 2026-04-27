@@ -672,7 +672,10 @@ export const cobrosRouter = {
 							})
 							.from(casosCobros)
 							.where(
-								sql`${casosCobros.etiquetas} && ${input.etiquetas}::text[]`,
+								sql`${casosCobros.etiquetas} && ARRAY[${sql.join(
+							input.etiquetas.map((e) => sql`${e}`),
+							sql`, `,
+						)}]::text[]`,
 							);
 						sifcosPorEtiquetas = filas
 							.map((r) => r.numeroSifco)
@@ -3104,7 +3107,10 @@ export const cobrosRouter = {
 					})
 					.from(casosCobros)
 					.where(
-						sql`${casosCobros.etiquetas} && ${input.etiquetas}::text[]`,
+						sql`${casosCobros.etiquetas} && ARRAY[${sql.join(
+							input.etiquetas.map((e) => sql`${e}`),
+							sql`, `,
+						)}]::text[]`,
 					);
 				sifcosPorEtiquetas = filas
 					.map((r) => r.numeroSifco)

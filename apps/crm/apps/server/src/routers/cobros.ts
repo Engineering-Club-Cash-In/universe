@@ -3356,7 +3356,7 @@ export const cobrosRouter = {
 					.string()
 					.min(8, "Teléfono inválido")
 					.transform((v) => v.replace(/[^0-9]/g, "")),
-				mensaje: z.string().min(1, "Mensaje requerido").max(480),
+				mensaje: z.string().min(1, "Mensaje requerido"),
 				casoCobroId: z.string().optional(),
 			}),
 		)

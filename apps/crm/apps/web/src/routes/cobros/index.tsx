@@ -404,6 +404,7 @@ function RouteComponent() {
 				emailCobrador: !PERMISSIONS.canAssignCobros(userRole ?? "")
 					? session?.user?.email
 					: undefined,
+				etiquetas: filtroEtiquetas.length > 0 ? filtroEtiquetas : undefined,
 			},
 		}),
 		enabled: !!session,
@@ -454,21 +455,12 @@ function RouteComponent() {
 		let filtrados = creditosConDias;
 
 		// Excluir completados e incobrables si el filtro está desactivado
-		// NOTA: El filtro por etapa ahora se hace en el servidor mediante estadoMora
+		// NOTA: El filtro por etapa y por etiquetas se hacen en el servidor.
 		if (!mostrarCompletadosIncobrables && !filtroEtapa) {
 			filtrados = filtrados.filter(
 				(c) =>
 					c.estadoContrato !== "completado" &&
 					c.estadoContrato !== "incobrable",
-			);
-		}
-
-		// Filtrar por etiquetas (AND: el caso debe tener todas las seleccionadas)
-		if (filtroEtiquetas.length > 0) {
-			filtrados = filtrados.filter(
-				(c) =>
-					c.etiquetas &&
-					filtroEtiquetas.every((et) => c.etiquetas!.includes(et)),
 			);
 		}
 
@@ -489,12 +481,7 @@ function RouteComponent() {
 			// Incluir casos en mora (días negativos) y casos próximos a vencer
 			return c?.diasHastaPago !== null && c?.diasHastaPago <= limite;
 		});
-	}, [
-		creditosConDias,
-		filtroTemporal,
-		mostrarCompletadosIncobrables,
-		filtroEtiquetas,
-	]);
+	}, [creditosConDias, filtroTemporal, mostrarCompletadosIncobrables, filtroEtapa]);
 
 	// Check permissions after all hooks
 	if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
@@ -988,7 +975,11 @@ function RouteComponent() {
 									estadoMora: filtroEtapa || undefined,
 									searchTerm: debouncedFilterValue || undefined,
 									time: timeParam,
+									etiquetas:
+										filtroEtiquetas.length > 0 ? filtroEtiquetas : undefined,
 								}}
+								etiquetaLabels={ETIQUETA_LABELS_FILTRO}
+								totalDestinatarios={totalCreditos}
 							>
 								<Button
 									variant="outline"
@@ -1000,7 +991,7 @@ function RouteComponent() {
 								</Button>
 							</MassWhatsappModal>
 							<Badge variant="outline" className="text-sm">
-								{creditosFiltrados.length} casos mostrados
+								{totalCreditos} casos
 							</Badge>
 						</div>
 					</div>

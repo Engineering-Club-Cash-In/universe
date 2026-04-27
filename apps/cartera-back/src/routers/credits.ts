@@ -124,6 +124,7 @@ export const creditRouter = new Elysia()
     page = "1",
     perPage = "10",
     numero_credito_sifco,
+    numeros_credito_sifco,
     estado,
     excel,
     asesor_id,
@@ -148,6 +149,14 @@ export const creditRouter = new Elysia()
   const perPageNum = Number(perPage);
   const numeroCreditoSifco = numero_credito_sifco
     ? String(numero_credito_sifco)
+    : undefined;
+  // Lista opcional de números SIFCO separados por coma. Tiene prioridad
+  // sobre numero_credito_sifco cuando trae al menos un valor válido.
+  const numerosCreditoSifcoArray = numeros_credito_sifco
+    ? String(numeros_credito_sifco)
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
     : undefined;
   const estadoParam = String(estado) as
     | "ACTIVO"
@@ -225,6 +234,7 @@ export const creditRouter = new Elysia()
         page: pageNum,
         perPage: perPageNum,
         numero_credito_sifco: numeroCreditoSifco,
+        numeros_credito_sifco: numerosCreditoSifcoArray,
         estado: estadoParam,
         asesor_id: asesorIdNum,
         nombre_usuario: nombreUsuarioParam,
@@ -252,7 +262,8 @@ export const creditRouter = new Elysia()
         cuotasAtrasadasNum,
         proximidadPagoParam,
         isVehiculoPropioParam,
-        inversionistaIdsArray
+        inversionistaIdsArray,
+        numerosCreditoSifcoArray
       );
       set.status = 200;
       return result;

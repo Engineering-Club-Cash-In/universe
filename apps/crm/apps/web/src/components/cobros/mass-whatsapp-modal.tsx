@@ -30,15 +30,38 @@ interface MassWhatsappModalProps {
 		estadoMora?: string;
 		searchTerm?: string;
 		time?: "WEEK" | "MONTH" | "DUEMONTH" | "TODAY";
+		etiquetas?: string[];
 	};
+	etiquetaLabels?: Record<string, string>;
+	totalDestinatarios?: number;
 	children: React.ReactNode;
 }
 
-export function MassWhatsappModal({ filtros, children }: MassWhatsappModalProps) {
+const ESTADO_MORA_LABELS: Record<string, string> = {
+	al_dia: "Al Día",
+	mora_30: "Mora 30",
+	mora_60: "Mora 60",
+	mora_90: "Mora 90",
+	mora_120: "Mora 120+",
+	incobrable: "Incobrable",
+	completado: "Completado",
+};
+
+const TIME_LABELS: Record<string, string> = {
+	TODAY: "Hoy",
+	WEEK: "Esta Semana",
+	DUEMONTH: "Esta Quincena",
+	MONTH: "Este Mes",
+};
+
+export function MassWhatsappModal({
+	filtros,
+	etiquetaLabels,
+	totalDestinatarios,
+	children,
+}: MassWhatsappModalProps) {
 	const [open, setOpen] = useState(false);
-	const [plantillaId, setPlantillaId] = useState<string>(
-		PLANTILLAS_MENSAJES[0]?.id ?? "",
-	);
+	const [plantillaId, setPlantillaId] = useState<string>("");
 
 	const plantillaSeleccionada = PLANTILLAS_MENSAJES.find(
 		(p) => p.id === plantillaId,
@@ -51,6 +74,10 @@ export function MassWhatsappModal({ filtros, children }: MassWhatsappModalProps)
 				estadoMora: filtros.estadoMora,
 				searchTerm: filtros.searchTerm,
 				time: filtros.time,
+				etiquetas:
+					filtros.etiquetas && filtros.etiquetas.length > 0
+						? filtros.etiquetas
+						: undefined,
 			}),
 		onSuccess: (res) => {
 			toast.success(
@@ -66,7 +93,7 @@ export function MassWhatsappModal({ filtros, children }: MassWhatsappModalProps)
 	return (
 		<Dialog open={open} onOpenChange={setOpen}>
 			<DialogTrigger asChild>{children}</DialogTrigger>
-			<DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+			<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
 				<DialogHeader>
 					<DialogTitle className="flex items-center gap-2">
 						<MessageCircle className="h-5 w-5" />
@@ -96,30 +123,76 @@ export function MassWhatsappModal({ filtros, children }: MassWhatsappModalProps)
 						</Select>
 					</div>
 
-					{plantillaSeleccionada && (
-						<div className="space-y-2">
-							<Label>Vista previa</Label>
-							<Textarea
-								readOnly
-								className="min-h-[220px] text-sm"
-								value={plantillaSeleccionada.cuerpo}
-							/>
+					{plantillaSeleccionada ? (
+						<>
+							<div className="space-y-2">
+								<Label>Vista previa</Label>
+								<Textarea
+									readOnly
+									className="min-h-55 text-sm"
+									value={plantillaSeleccionada.cuerpo}
+								/>
+								<p className="text-muted-foreground text-xs">
+									Las variables entre llaves se reemplazan por los datos
+									reales de cada crédito. Si un dato no existe (p. ej. placa),
+									queda vacío en el mensaje.
+								</p>
+							</div>
+
+							<div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+								<p className="font-medium">Filtros aplicados</p>
+								<ul className="mt-1 list-inside list-disc text-muted-foreground text-xs">
+									<li>
+										Estado de mora:{" "}
+										{filtros.estadoMora
+											? (ESTADO_MORA_LABELS[filtros.estadoMora] ??
+												filtros.estadoMora)
+											: "Todos"}
+									</li>
+									<li>
+										Rango temporal:{" "}
+										{filtros.time
+											? (TIME_LABELS[filtros.time] ?? filtros.time)
+											: "Todos"}
+									</li>
+									<li>Búsqueda: {filtros.searchTerm ?? "—"}</li>
+									<li>
+										Etiquetas:{" "}
+										{filtros.etiquetas && filtros.etiquetas.length > 0
+											? filtros.etiquetas
+													.map((e) => etiquetaLabels?.[e] ?? e)
+													.join(", ")
+											: "Todas"}
+									</li>
+								</ul>
+							</div>
+
+							{typeof totalDestinatarios === "number" && (
+								<div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
+									<p className="font-medium">
+										Se enviará a {totalDestinatarios.toLocaleString("es-GT")}{" "}
+										{totalDestinatarios === 1 ? "crédito" : "créditos"}
+									</p>
+									<p className="mt-1 text-muted-foreground text-xs">
+										Los créditos sin teléfono, sin cuota o sin asesor se
+										descartan automáticamente, por lo que el número final puede
+										ser menor.
+									</p>
+								</div>
+							)}
+						</>
+					) : (
+						<div className="flex flex-col items-center justify-center gap-2 rounded-md border border-border border-dashed bg-muted/20 p-8 text-center">
+							<MessageCircle className="h-8 w-8 text-muted-foreground" />
+							<p className="font-medium text-sm">
+								Selecciona una plantilla para continuar
+							</p>
 							<p className="text-muted-foreground text-xs">
-								Las variables entre llaves se reemplazan por los datos reales
-								de cada crédito. Si un dato no existe (p. ej. placa), queda
-								vacío en el mensaje.
+								Una vez elegida verás la vista previa, los filtros aplicados y
+								la cantidad de destinatarios.
 							</p>
 						</div>
 					)}
-
-					<div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
-						<p className="font-medium">Filtros aplicados</p>
-						<ul className="mt-1 list-inside list-disc text-muted-foreground text-xs">
-							<li>Estado de mora: {filtros.estadoMora ?? "todos"}</li>
-							<li>Rango temporal: {filtros.time ?? "todos"}</li>
-							<li>Búsqueda: {filtros.searchTerm ?? "—"}</li>
-						</ul>
-					</div>
 				</div>
 
 				<DialogFooter>

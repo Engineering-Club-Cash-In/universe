@@ -89,6 +89,7 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 		| "MOROSO";
 	nombre_usuario?: string;
 	numero_credito_sifco?: string;
+	numeros_credito_sifco?: string[];
 	time?: "WEEK" | "MONTH" | "DUEMONTH" | "TODAY";
 	email_cobrador?: string;
 }) {
@@ -111,6 +112,10 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 			...(params.numero_credito_sifco !== undefined &&
 				params.numero_credito_sifco !== "" && {
 					numero_credito_sifco: params.numero_credito_sifco,
+				}),
+			...(params.numeros_credito_sifco !== undefined &&
+				params.numeros_credito_sifco.length > 0 && {
+					numeros_credito_sifco: params.numeros_credito_sifco,
 				}),
 			...(params.time !== undefined && { time: params.time }),
 			...(params.email_cobrador !== undefined &&
@@ -596,6 +601,7 @@ export const cobrosRouter = {
 				searchTerm: z.string().optional(),
 				time: z.enum(["WEEK", "MONTH", "DUEMONTH", "TODAY"]).optional(),
 				emailCobrador: z.string().optional(),
+				etiquetas: z.array(z.string()).optional(),
 			}),
 		)
 		.handler(async ({ input }) => {
@@ -655,8 +661,44 @@ export const cobrosRouter = {
 					}
 
 					console.log(
-						`[Cobros] Obteniendo créditos de Cartera-Back: mes=${mes} (todos), anio=${anio}, page=${Math.floor((input.offset || 0) / (input.limit || 50)) + 1}, perPage=${input.limit || 50}, cuotasAtrasadas=${cuotasAtrasadas}, estado=${estadoCartera}, time=${input.time}, emailCobrador=${input.emailCobrador}, search=${input.searchTerm || ""}`,
+						`[Cobros] Obteniendo créditos de Cartera-Back: mes=${mes} (todos), anio=${anio}, page=${Math.floor((input.offset || 0) / (input.limit || 50)) + 1}, perPage=${input.limit || 50}, cuotasAtrasadas=${cuotasAtrasadas}, estado=${estadoCartera}, time=${input.time}, emailCobrador=${input.emailCobrador}, search=${input.searchTerm || ""}, etiquetas=${input.etiquetas?.join(",") || ""}`,
 					);
+
+					// Si hay filtro de etiquetas, primero resolver en CRM la lista de
+					// numero_credito_sifco cuyos casos_cobros tengan AL MENOS UNA de las
+					// etiquetas seleccionadas (criterio OR / overlap con `&&`). Un caso
+					// con `{moras_pendientes,cobro}` matchea si el usuario filtra por
+					// `{cobro}` o por `{cobro,juridico}`. La lista resuelta se manda a
+					// cartera-back vía numeros_credito_sifco para filtrar en origen.
+					let sifcosPorEtiquetas: string[] | undefined;
+					if (input.etiquetas && input.etiquetas.length > 0) {
+						const filas = await db
+							.select({
+								numeroSifco: casosCobros.numeroCreditoSifco,
+								etiquetas: casosCobros.etiquetas,
+							})
+							.from(casosCobros)
+							.where(
+								sql`${casosCobros.etiquetas} && ${input.etiquetas}::text[]`,
+							);
+						sifcosPorEtiquetas = filas
+							.map((r) => r.numeroSifco)
+							.filter((s): s is string => !!s);
+						console.log(
+							`[Cobros] Filtro etiquetas resolvió ${sifcosPorEtiquetas.length} numero_credito_sifco`,
+						);
+						if (sifcosPorEtiquetas.length === 0) {
+							const limit = input.limit || 50;
+							const offset = input.offset || 0;
+							return {
+								data: [],
+								total: 0,
+								page: Math.floor(offset / limit) + 1,
+								perPage: limit,
+								totalPages: 0,
+							};
+						}
+					}
 
 					let creditosResponse;
 					if (isPlateSearch) {
@@ -716,6 +758,7 @@ export const cobrosRouter = {
 								estado: estadoCartera,
 								time: input.time,
 								email_cobrador: input.emailCobrador,
+								numeros_credito_sifco: sifcosPorEtiquetas,
 							});
 
 							const allCredits = [...firstPage.data];
@@ -730,6 +773,7 @@ export const cobrosRouter = {
 									estado: estadoCartera,
 									time: input.time,
 									email_cobrador: input.emailCobrador,
+									numeros_credito_sifco: sifcosPorEtiquetas,
 								});
 								allCredits.push(...nextPage.data);
 							}
@@ -755,6 +799,7 @@ export const cobrosRouter = {
 							time: input.time,
 							email_cobrador: input.emailCobrador,
 							nombre_usuario: isNameSearch ? searchTerm : undefined,
+							numeros_credito_sifco: sifcosPorEtiquetas,
 						});
 					}
 
@@ -2910,6 +2955,7 @@ export const cobrosRouter = {
 				estadoMora: z.string().optional(),
 				searchTerm: z.string().optional(),
 				time: z.enum(["WEEK", "MONTH", "DUEMONTH", "TODAY"]).optional(),
+				etiquetas: z.array(z.string()).optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -3010,6 +3056,36 @@ export const cobrosRouter = {
 				}
 			}
 
+			// 2.5 Si hay filtro de etiquetas, resolver primero la lista de
+			// numero_credito_sifco que tengan AL MENOS UNA de las etiquetas
+			// seleccionadas (operador `&&` / overlap) y mandarla a cartera-back
+			// para que filtre en origen, en vez de traer todo y filtrar acá.
+			let sifcosPorEtiquetas: string[] | undefined;
+			if (input.etiquetas && input.etiquetas.length > 0) {
+				const filas = await db
+					.select({
+						numeroSifco: casosCobros.numeroCreditoSifco,
+					})
+					.from(casosCobros)
+					.where(
+						sql`${casosCobros.etiquetas} && ${input.etiquetas}::text[]`,
+					);
+				sifcosPorEtiquetas = filas
+					.map((r) => r.numeroSifco)
+					.filter((s): s is string => !!s);
+				if (sifcosPorEtiquetas.length === 0) {
+					return {
+						plantillaId: input.plantillaId,
+						totalCreditos: 0,
+						elegibles: 0,
+						enviados: 0,
+						fallidos: 0,
+						descartados: [],
+						detalle: [],
+					};
+				}
+			}
+
 			// 3. Paginar getAllCreditos hasta traer todos los matcheos.
 			const creditosFiltrados: Awaited<
 				ReturnType<typeof carteraBackClient.getAllCreditos>
@@ -3027,6 +3103,7 @@ export const cobrosRouter = {
 						email_cobrador: emailCobrador,
 						nombre_usuario: isNameSearch ? searchTerm : undefined,
 						numero_credito_sifco: numeroSifcoFiltro,
+						numeros_credito_sifco: sifcosPorEtiquetas,
 						page,
 						perPage,
 					});

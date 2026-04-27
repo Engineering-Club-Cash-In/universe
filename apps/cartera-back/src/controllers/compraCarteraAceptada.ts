@@ -204,7 +204,17 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
       .returning({
         credito_id: creditos_inversionistas_espejo.credito_id,
         inversionista_id: creditos_inversionistas_espejo.inversionista_id,
+        tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion,
       });
+
+    // ── Mapa credito_id → tipo_reinversion del target ──
+    // El update filtró por status "pendiente_compra_cartera", y esa es la
+    // fila del inversionista nuevo (el resto está en "completado"), así
+    // que cada credito_id aquí apunta al tipo_reinversion que quedó
+    // estampado para ese crédito en el espejo.
+    const tipoReinvPorCredito = new Map<number, string | null>(
+      updateRes.map((r) => [r.credito_id, r.tipo_reinversion ?? null]),
+    );
 
     // ── 4.5.1 Apagar bandera_reinversion de los créditos aceptados ──
     // Ya no hay que redirigir intereses a CUBE: el espejo pasó a
@@ -298,7 +308,7 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
     const creditosParaEmail = await Promise.all(
       creditosRows.map(async (c) => {
         const vehicleRes = await getVehicleDetailsBySifco(c.numero_credito_sifco);
-        console.log(vehicleRes.data);     
+        console.log(vehicleRes.data);
         return {
           numero_credito_sifco: c.numero_credito_sifco,
           cliente_nombre: c.cliente_nombre,
@@ -306,6 +316,14 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
           observaciones: vehicleRes.data?.vehicle
             ? `${vehicleRes.data.vehicle.model}\n${vehicleRes.data.vehicle.year} | ${vehicleRes.data.vehicle.make} | ${vehicleRes.data.vehicle.licensePlate} `
             : c.observaciones,
+          tipo_reinversion: (tipoReinvPorCredito.get(c.credito_id) ?? null) as
+            | "sin_reinversion"
+            | "reinversion_capital"
+            | "reinversion_interes"
+            | "reinversion_total"
+            | "reinversion_variable"
+            | "reinversion_combinada"
+            | null,
         };
       }),
     );

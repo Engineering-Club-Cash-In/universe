@@ -123,6 +123,7 @@ export function ContactoModal({
 
 	const [plantillaId, setPlantillaId] = useState<string>("");
 	const [mensajeEditado, setMensajeEditado] = useState("");
+	const [mensajeWhatsappEditado, setMensajeWhatsappEditado] = useState("");
 	const [asuntoEditado, setAsuntoEditado] = useState("");
 
 	const variables: VariablesPlantilla = useMemo(
@@ -157,6 +158,9 @@ export function ContactoModal({
 		const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === sugerida);
 		if (plantilla) {
 			setMensajeEditado(interpolar(plantilla.cuerpo, variables));
+			setMensajeWhatsappEditado(
+				interpolar(plantilla.cuerpoWhastapp || plantilla.cuerpo, variables),
+			);
 			setAsuntoEditado(interpolar(plantilla.asunto, variables));
 		}
 	}, [estadoMora, fechaInicio, variables]);
@@ -166,6 +170,9 @@ export function ContactoModal({
 		const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === id);
 		if (plantilla) {
 			setMensajeEditado(interpolar(plantilla.cuerpo, variables));
+			setMensajeWhatsappEditado(
+				interpolar(plantilla.cuerpoWhastapp || plantilla.cuerpo, variables),
+			);
 			setAsuntoEditado(interpolar(plantilla.asunto, variables));
 		}
 	};
@@ -277,6 +284,7 @@ export function ContactoModal({
 	const ejecutarAccion = (metodo: AccionContacto) => {
 		const tel = telefonoSeleccionado || telefonoPrincipal;
 		const telLimpio = tel.replace(/[^0-9]/g, "");
+		const mensajeWhatsapp = mensajeWhatsappEditado || mensajeEditado;
 		switch (metodo) {
 			case "llamada":
 				window.open(`tel:${tel}`);
@@ -293,13 +301,13 @@ export function ContactoModal({
 					toast.error("No hay teléfono para enviar WhatsApp");
 					return;
 				}
-				if (!mensajeEditado.trim()) {
+				if (!mensajeWhatsapp.trim()) {
 					toast.error("No hay mensaje para enviar");
 					return;
 				}
 				whatsappApiMutation.mutate({
 					telefono: telLimpio,
-					mensaje: mensajeEditado,
+					mensaje: mensajeWhatsapp,
 				});
 				break;
 			case "email-link": {

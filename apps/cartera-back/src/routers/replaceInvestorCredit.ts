@@ -3,8 +3,10 @@ import {
   manualReassignInvestor,
   returnPendingInvestorsToCube,
 } from "../controllers/replaceInvestorCredit";
+import { authMiddleware } from "./midleware";
 
 export const replaceInvestorCreditRouter = new Elysia()
+  .use(authMiddleware)
   .post(
     "/reemplazar-inversionista-credito",
     manualReassignInvestor,

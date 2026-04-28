@@ -4,6 +4,7 @@ import {
   creditos_inversionistas,
   creditos,
   inversionistas,
+  usuarios,
 } from "../database/db";
 import { eq, inArray, and } from "drizzle-orm";
 import z from "zod";
@@ -23,6 +24,10 @@ const completeEspejoSchema = z.object({
     z.array(z.number().int().positive()).min(1),
   ]),
   inversionista_id: z.number().int().positive().optional(),
+  // Si viene true, el correo dice "Aceptada por el inversionista {nombre}"
+  // en lugar del usuario del JWT / "Contabilidad". Útil cuando el flujo
+  // se dispara desde el portal del inversionista.
+  aceptada_por_inversionista: z.boolean().optional(),
 });
 
 // ========================================
@@ -40,7 +45,11 @@ export const completeEspejo = async ({ body, set, request }: any) => {
       };
     }
 
-    const { creditos: creditosInput, inversionista_id } = parseResult.data;
+    const {
+      creditos: creditosInput,
+      inversionista_id,
+      aceptada_por_inversionista,
+    } = parseResult.data;
 
     // Normalizar a array
     const creditoIds = Array.isArray(creditosInput)
@@ -57,6 +66,14 @@ export const completeEspejo = async ({ body, set, request }: any) => {
               eq(creditos_inversionistas_espejo.inversionista_id, inversionista_id),
             )
           : eq(creditos_inversionistas_espejo.credito_id, credito_id);
+
+        // Capturar status PREVIOS antes de hacer el update.
+        // Lo usamos abajo para decidir el asunto/encabezado del correo
+        // (reinversion vs compra de cartera).
+        const previos = await tx
+          .select({ status: creditos_inversionistas_espejo.status })
+          .from(creditos_inversionistas_espejo)
+          .where(whereConditions);
 
         const updated = await tx
           .update(creditos_inversionistas_espejo)
@@ -91,6 +108,7 @@ export const completeEspejo = async ({ body, set, request }: any) => {
           credito_id,
           registros_actualizados: updated.length,
           detalle: updated,
+          statuses_previos: previos.map((p) => p.status),
         });
 
         console.log(
@@ -98,6 +116,20 @@ export const completeEspejo = async ({ body, set, request }: any) => {
         );
       }
     });
+
+    // Determinar el tipo de operación que se está cerrando a partir de los
+    // status previos. Usamos esto para personalizar el asunto/encabezado.
+    const allPrevStatuses = resultados.flatMap((r) => r.statuses_previos);
+    const huboReinversion = allPrevStatuses.includes("pendiente_reinversion");
+    const huboCompraCartera = allPrevStatuses.some(
+      (s) => s === "pendiente_revision" || s === "pendiente_compra_cartera",
+    );
+    const tipoOperacion: "reinversion" | "compra_cartera" | "otro" =
+      huboReinversion && !huboCompraCartera
+        ? "reinversion"
+        : !huboReinversion && huboCompraCartera
+          ? "compra_cartera"
+          : "otro";
 
     const totalActualizados = resultados.reduce(
       (acc, r) => acc + r.registros_actualizados,
@@ -130,16 +162,21 @@ export const completeEspejo = async ({ body, set, request }: any) => {
           console.warn("[completeEspejo] No se pudo resolver el usuario del JWT:", jwtErr);
         }
 
-        // Datos de los créditos para la tabla del correo
+        // Datos de los créditos para la tabla del correo (incluye cliente)
         const creditosInfo = await db
           .select({
             credito_id: creditos.credito_id,
             numero_credito_sifco: creditos.numero_credito_sifco,
+            cliente_nombre: usuarios.nombre,
           })
           .from(creditos)
+          .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
           .where(inArray(creditos.credito_id, creditoIds));
         const sifcoPorCredito = new Map(
           creditosInfo.map((c) => [c.credito_id, c.numero_credito_sifco]),
+        );
+        const clientePorCredito = new Map(
+          creditosInfo.map((c) => [c.credito_id, c.cliente_nombre]),
         );
 
         // Nombre del inversionista si el completar fue filtrado por uno solo
@@ -159,9 +196,11 @@ export const completeEspejo = async ({ body, set, request }: any) => {
         const filasCreditos = resultados
           .map((r) => {
             const sifco = sifcoPorCredito.get(r.credito_id) ?? "—";
+            const cliente = clientePorCredito.get(r.credito_id) ?? "—";
             return `
               <tr>
                 <td style="padding:6px 10px; border:1px solid #e5e7eb;">${sifco}</td>
+                <td style="padding:6px 10px; border:1px solid #e5e7eb;">${cliente}</td>
                 <td style="padding:6px 10px; border:1px solid #e5e7eb;">${r.credito_id}</td>
                 <td style="padding:6px 10px; border:1px solid #e5e7eb; text-align:right;">${r.registros_actualizados}</td>
               </tr>
@@ -169,13 +208,28 @@ export const completeEspejo = async ({ body, set, request }: any) => {
           })
           .join("");
 
+        // ── Asunto y encabezado dinámicos según tipo de operación ──
+        const subjectPrefix =
+          tipoOperacion === "reinversion"
+            ? "Reinversión completada"
+            : tipoOperacion === "compra_cartera"
+              ? "Compra de cartera aceptada por contabilidad"
+              : "Espejos marcados como completado";
+
+        const headingHtml =
+          tipoOperacion === "reinversion"
+            ? `Reinversión <strong style="color:#16a34a;">COMPLETADA</strong>`
+            : tipoOperacion === "compra_cartera"
+              ? `Compra de cartera <strong style="color:#16a34a;">ACEPTADA POR CONTABILIDAD</strong>`
+              : `Espejos <strong style="color:#16a34a;">COMPLETADOS</strong>`;
+
         const subject = inversionista_id
-          ? `Compra de cartera aceptada por contabilidad — ${inversionistaNombre ?? `Inversionista ${inversionista_id}`}`
-          : `Compra de cartera aceptada por contabilidad — ${creditoIds.length} crédito(s)`;
+          ? `${subjectPrefix} — ${inversionistaNombre ?? `Inversionista ${inversionista_id}`}`
+          : `${subjectPrefix} — ${creditoIds.length} crédito(s)`;
 
         const html = `
           <div style="font-family: Arial, sans-serif; color:#111;">
-            <h2 style="margin-bottom: 8px;">Compra de cartera <strong style="color:#16a34a;">ACEPTADA POR CONTABILIDAD</strong></h2>
+            <h2 style="margin-bottom: 8px;">${headingHtml}</h2>
             <p>Los registros espejo de los créditos listados fueron marcados como <strong>completado</strong>.</p>
             <table style="border-collapse: collapse; margin-top: 8px;">
               ${inversionista_id
@@ -184,9 +238,11 @@ export const completeEspejo = async ({ body, set, request }: any) => {
               <tr><td style="padding:4px 8px;"><strong>Créditos:</strong></td><td style="padding:4px 8px;">${creditoIds.length}</td></tr>
               <tr><td style="padding:4px 8px;"><strong>Registros actualizados:</strong></td><td style="padding:4px 8px;"><strong>${totalActualizados}</strong></td></tr>
               <tr><td style="padding:4px 8px;"><strong>Fecha (GT):</strong></td><td style="padding:4px 8px;">${fechaGT}</td></tr>
-              ${usuarioNombre || usuarioEmail
-                ? `<tr><td style="padding:4px 8px;"><strong>Aceptada por:</strong></td><td style="padding:4px 8px;">${[usuarioNombre, usuarioEmail].filter(Boolean).join(" — ")}</td></tr>`
-                : `<tr><td style="padding:4px 8px;"><strong>Aceptada por:</strong></td><td style="padding:4px 8px;">Contabilidad</td></tr>`}
+              ${aceptada_por_inversionista
+                ? `<tr><td style="padding:4px 8px;"><strong>Aceptada por:</strong></td><td style="padding:4px 8px;">El inversionista ${inversionistaNombre ?? (inversionista_id ? `(ID: ${inversionista_id})` : "(desconocido)")}</td></tr>`
+                : usuarioNombre || usuarioEmail
+                  ? `<tr><td style="padding:4px 8px;"><strong>Aceptada por:</strong></td><td style="padding:4px 8px;">${[usuarioNombre, usuarioEmail].filter(Boolean).join(" — ")}</td></tr>`
+                  : `<tr><td style="padding:4px 8px;"><strong>Aceptada por:</strong></td><td style="padding:4px 8px;">Contabilidad</td></tr>`}
             </table>
 
             <h3 style="margin-top:16px;">Detalle por crédito</h3>
@@ -194,6 +250,7 @@ export const completeEspejo = async ({ body, set, request }: any) => {
               <thead>
                 <tr style="background:#f3f4f6;">
                   <th style="padding:6px 10px; border:1px solid #e5e7eb; text-align:left;">SIFCO</th>
+                  <th style="padding:6px 10px; border:1px solid #e5e7eb; text-align:left;">Cliente</th>
                   <th style="padding:6px 10px; border:1px solid #e5e7eb; text-align:left;">Crédito ID</th>
                   <th style="padding:6px 10px; border:1px solid #e5e7eb; text-align:right;">Registros completados</th>
                 </tr>

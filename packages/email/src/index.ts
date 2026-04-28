@@ -25,6 +25,37 @@ if (!domain) {
 
 const resend = new Resend(apiKey);
 
+// ================================================================
+// DEV MODE: redirige TODOS los correos a un solo destinatario.
+// Controlado por la env SERVER (default: "DEV"):
+//   - SERVER=DEV   → todos los correos van solo a EMAIL_DEV_RECIPIENT
+//                    (default: jalvarado@clubcashin.com).
+//   - SERVER=PROD  → envío normal con destinatarios originales.
+// Por seguridad, el default es DEV: si la env no está seteada, NO se
+// mandan correos a destinatarios reales.
+// ================================================================
+const SERVER = (process.env.SERVER ?? "DEV").toUpperCase();
+const EMAIL_DEV_RECIPIENT =
+  process.env.EMAIL_DEV_RECIPIENT ?? "jalvarado@clubcashin.com";
+
+if (SERVER !== "PROD") {
+  const originalSend = resend.emails.send.bind(resend.emails);
+  resend.emails.send = (async (payload: any, options?: any) => {
+    const original = { to: payload?.to, cc: payload?.cc, bcc: payload?.bcc };
+    const overridden = {
+      ...payload,
+      to: [EMAIL_DEV_RECIPIENT],
+      cc: undefined,
+      bcc: undefined,
+    };
+    console.log(
+      `[Email ${SERVER}] Redirigiendo correo a ${EMAIL_DEV_RECIPIENT}. Originales:`,
+      original,
+    );
+    return originalSend(overridden, options);
+  }) as typeof resend.emails.send;
+}
+
 // Schema para validación de correo
 const emailSchema = z.string().email({ message: "Formato de correo electrónico inválido" });
 

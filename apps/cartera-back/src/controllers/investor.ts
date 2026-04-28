@@ -6288,7 +6288,12 @@ export async function testUploadAndEmail(investorId: number, testEmail: string) 
  * agrupados por inversionista. Incluye un array `otrosCreditos` placeholder (5 créditos random)
  * que será reemplazado por la consulta real cuando esté lista.
  */
-export async function getCreditosEspejoPendientes(page: number = 1, pageSize: number = 10, search?: string) {
+export async function getCreditosEspejoPendientes(
+  page: number = 1,
+  pageSize: number = 10,
+  search?: string,
+  inversionistaId?: number,
+) {
   // 1. Créditos espejo pendientes con info del inversionista + crédito + usuario
   const pendientes = await db
     .select({
@@ -6330,7 +6335,12 @@ export async function getCreditosEspejoPendientes(page: number = 1, pageSize: nu
       eq(creditos.usuario_id, usuarios.usuario_id)
     )
     .where(
-      sql`${creditos_inversionistas_espejo.status} IN ('pendiente_reinversion', 'pendiente_compra_cartera', 'pendiente_revision')`
+      and(
+        sql`${creditos_inversionistas_espejo.status} IN ('pendiente_reinversion', 'pendiente_compra_cartera', 'pendiente_revision')`,
+        inversionistaId !== undefined
+          ? eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId)
+          : undefined,
+      ),
     );
 
   if (pendientes.length === 0) {

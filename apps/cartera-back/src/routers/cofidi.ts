@@ -2,6 +2,7 @@
 
 import { Elysia, t } from "elysia";
 import jwt from "jsonwebtoken";
+import { authMiddleware } from "./midleware";
 import { SATClientService } from "../cofidi/satClientService";
 import { DTEService } from "../cofidi/dteService";
 import { generarHTMLFacturaPro } from "../cofidi/functions";
@@ -64,6 +65,7 @@ function generarIdInternoRandom(): string {
 
 
 export const dteController = new Elysia({ prefix: "/api/dte" })
+  .use(authMiddleware)
 
   // 🔥 POST - Certificar DTE
   // ========================================================================

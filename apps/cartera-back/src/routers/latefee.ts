@@ -6,7 +6,7 @@ import { authMiddleware } from "./midleware";
 import { createMora, updateMora, procesarMoras, condonarMora, getCreditosWithMoras, getCondonacionesMora, condonarTodasLasMoras } from "../controllers/latefee";
 
 export const morasRouter = new Elysia()
- 
+  .use(authMiddleware)
 
   /**
    * Crear una mora manualmente

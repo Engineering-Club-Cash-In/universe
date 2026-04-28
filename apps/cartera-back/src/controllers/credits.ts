@@ -38,6 +38,7 @@ import {
 } from "drizzle-orm";
 import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./payments";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
+import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
 
 
 export const getCreditoByNumero = async (numero_credito_sifco: string) => {
@@ -663,7 +664,8 @@ export async function getCreditosWithUserByMesAnio(
 
     if (nombre_usuario && nombre_usuario.trim().length > 0) {
       console.log(`🔎 Filtrando por nombre de usuario: ${nombre_usuario}`);
-      conditions.push(sql`${usuarios.nombre} ILIKE ${`%${nombre_usuario.trim()}%`}`);
+      const nameCond = buildNameSearchCondition(usuarios.nombre, nombre_usuario);
+      if (nameCond) conditions.push(nameCond);
     }
 
     if (email_asesor && email_asesor.trim().length > 0) {

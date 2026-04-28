@@ -29,6 +29,7 @@ interface MassWhatsappModalProps {
 	filtros: {
 		estadoMora?: string;
 		searchTerm?: string;
+		numeroSifco?: string;
 		time?: "WEEK" | "MONTH" | "DUEMONTH" | "TODAY";
 		etiquetas?: string[];
 	};
@@ -73,6 +74,7 @@ export function MassWhatsappModal({
 				plantillaId,
 				estadoMora: filtros.estadoMora,
 				searchTerm: filtros.searchTerm,
+				numeroSifco: filtros.numeroSifco,
 				time: filtros.time,
 				etiquetas:
 					filtros.etiquetas && filtros.etiquetas.length > 0
@@ -163,6 +165,7 @@ export function MassWhatsappModal({
 												: "Todos"}
 										</li>
 										<li>Búsqueda: {filtros.searchTerm ?? "—"}</li>
+										<li>No. SIFCO: {filtros.numeroSifco ?? "—"}</li>
 										<li>
 											Etiquetas:{" "}
 											{filtros.etiquetas && filtros.etiquetas.length > 0

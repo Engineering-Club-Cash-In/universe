@@ -318,6 +318,8 @@ export const creditRouter = new Elysia()
         proximidad_pago,
         is_vehiculo_propio,
         inversionista_ids,
+        fecha_desde,
+        fecha_hasta,
       } = body;
 
       if (mes === undefined || anio === undefined || !estado) {
@@ -370,6 +372,8 @@ export const creditRouter = new Elysia()
           proximidad_pago,
           is_vehiculo_propio,
           inversionista_ids,
+          fecha_desde ?? undefined,
+          fecha_hasta ?? undefined,
           sifcosLimpios
         );
         set.status = 200;
@@ -412,6 +416,8 @@ export const creditRouter = new Elysia()
         ),
         is_vehiculo_propio: t.Optional(t.Boolean()),
         inversionista_ids: t.Optional(t.Array(t.Number())),
+        fecha_desde: t.Optional(t.String()),
+        fecha_hasta: t.Optional(t.String()),
       }),
     }
   )

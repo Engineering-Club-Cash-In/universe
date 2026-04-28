@@ -871,6 +871,36 @@ export const cobrosRouter = {
 						`[Cobros] Obtenidos ${creditosResponse.data.length} créditos de Cartera-Back`,
 					);
 
+					// Cargar en una sola query las etiquetas (y el id del caso) de los
+					// créditos que ya tienen un caso de cobro asociado, para no hacer
+					// una query individual dentro del map.
+					const sifcosPagina = creditosResponse.data
+						.map((c) => c.creditos.numero_credito_sifco)
+						.filter((s): s is string => !!s);
+					const casosPorSifco = new Map<
+						string,
+						{ id: string; etiquetas: string[] }
+					>();
+					if (sifcosPagina.length > 0) {
+						const casosRows = await db
+							.select({
+								id: casosCobros.id,
+								numeroSifco: casosCobros.numeroCreditoSifco,
+								etiquetas: casosCobros.etiquetas,
+							})
+							.from(casosCobros)
+							.where(
+								inArray(casosCobros.numeroCreditoSifco, sifcosPagina),
+							);
+						for (const row of casosRows) {
+							if (!row.numeroSifco) continue;
+							casosPorSifco.set(row.numeroSifco, {
+								id: row.id,
+								etiquetas: row.etiquetas ?? [],
+							});
+						}
+					}
+
 					// Mapear los datos de Cartera-Back al formato esperado por el frontend
 					const contratos = await Promise.all(
 						creditosResponse.data.map(async (credito) => {
@@ -931,6 +961,10 @@ export const cobrosRouter = {
 								}
 							}
 
+							const casoCobro = numeroSifco
+								? casosPorSifco.get(numeroSifco)
+								: undefined;
+
 							return {
 								contratoId: credito.creditos.credito_id.toString(),
 								clienteNombre: credito.usuarios.nombre,
@@ -944,7 +978,7 @@ export const cobrosRouter = {
 								fechaProximoPago:
 									credito.proxima_cuota?.fecha_vencimiento || null,
 								responsableCobros: credito.asesores?.nombre || null,
-								casoCobroId: null,
+								casoCobroId: casoCobro?.id ?? null,
 								estadoMora,
 								montoEnMora: montoEnMora.toFixed(2),
 								diasMoraMaximo: diasMora,
@@ -953,7 +987,7 @@ export const cobrosRouter = {
 								proximoContacto: null,
 								responsableNombre: null,
 								numeroCredito: numeroSifco || null,
-								etiquetas: null as string[] | null,
+								etiquetas: (casoCobro?.etiquetas ?? null) as string[] | null,
 								isPool:
 									credito.creditos.formato_credito
 										?.toUpperCase()

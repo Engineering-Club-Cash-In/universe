@@ -13,11 +13,8 @@ export const COMPRA_CARTERA_RECIPIENTS = {
     "doris.analiss@sepresta.com",
     "lucia.s@clubcashin.com",
     "diego.a@sepresta.com",
-    "sara.r@sepresta.com",
-    "caja@sepresta.com",
-    "alexander.p@clubcashin.com",
-    "juan.r@clubcashin.com",
-    "roxana.g@clubcashin.com",
+    "sara.r@clubcashin.com",
+    "caja@sepresta.com", 
   ],
   cc: [
     "diego.l@clubcashin.com",

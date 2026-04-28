@@ -871,6 +871,36 @@ export const cobrosRouter = {
 						`[Cobros] Obtenidos ${creditosResponse.data.length} créditos de Cartera-Back`,
 					);
 
+					// Cargar en una sola query las etiquetas (y el id del caso) de los
+					// créditos que ya tienen un caso de cobro asociado, para no hacer
+					// una query individual dentro del map.
+					const sifcosPagina = creditosResponse.data
+						.map((c) => c.creditos.numero_credito_sifco)
+						.filter((s): s is string => !!s);
+					const casosPorSifco = new Map<
+						string,
+						{ id: string; etiquetas: string[] }
+					>();
+					if (sifcosPagina.length > 0) {
+						const casosRows = await db
+							.select({
+								id: casosCobros.id,
+								numeroSifco: casosCobros.numeroCreditoSifco,
+								etiquetas: casosCobros.etiquetas,
+							})
+							.from(casosCobros)
+							.where(
+								inArray(casosCobros.numeroCreditoSifco, sifcosPagina),
+							);
+						for (const row of casosRows) {
+							if (!row.numeroSifco) continue;
+							casosPorSifco.set(row.numeroSifco, {
+								id: row.id,
+								etiquetas: row.etiquetas ?? [],
+							});
+						}
+					}
+
 					// Mapear los datos de Cartera-Back al formato esperado por el frontend
 					const contratos = await Promise.all(
 						creditosResponse.data.map(async (credito) => {
@@ -931,6 +961,10 @@ export const cobrosRouter = {
 								}
 							}
 
+							const casoCobro = numeroSifco
+								? casosPorSifco.get(numeroSifco)
+								: undefined;
+
 							return {
 								contratoId: credito.creditos.credito_id.toString(),
 								clienteNombre: credito.usuarios.nombre,
@@ -944,7 +978,7 @@ export const cobrosRouter = {
 								fechaProximoPago:
 									credito.proxima_cuota?.fecha_vencimiento || null,
 								responsableCobros: credito.asesores?.nombre || null,
-								casoCobroId: null,
+								casoCobroId: casoCobro?.id ?? null,
 								estadoMora,
 								montoEnMora: montoEnMora.toFixed(2),
 								diasMoraMaximo: diasMora,
@@ -953,7 +987,7 @@ export const cobrosRouter = {
 								proximoContacto: null,
 								responsableNombre: null,
 								numeroCredito: numeroSifco || null,
-								etiquetas: null as string[] | null,
+								etiquetas: (casoCobro?.etiquetas ?? null) as string[] | null,
 								isPool:
 									credito.creditos.formato_credito
 										?.toUpperCase()
@@ -3138,6 +3172,8 @@ export const cobrosRouter = {
 						fallidos: 0,
 						descartados: [],
 						detalle: [],
+						contactosRegistrados: 0,
+						contactosSinCaso: 0,
 					};
 				}
 			}
@@ -3159,6 +3195,8 @@ export const cobrosRouter = {
 					success: boolean;
 					error?: string;
 				}>,
+				contactosRegistrados: 0,
+				contactosSinCaso: 0,
 			};
 			if (sifcosPorEtiquetas && numeroSifcoFiltro) {
 				if (sifcosPorEtiquetas.includes(numeroSifcoFiltro)) {
@@ -3234,6 +3272,7 @@ export const cobrosRouter = {
 				year: number | null;
 			};
 			const locales = new Map<string, LocalInfo>();
+			const casoIdPorSifco = new Map<string, string>();
 
 			if (numerosSifco.length > 0) {
 				const oppRows = await db
@@ -3262,8 +3301,11 @@ export const cobrosRouter = {
 				}
 
 				// Casos de cobros pueden tener telefonoPrincipal override.
+				// También cargamos el id para registrar historial de contacto en
+				// los casos que ya existen.
 				const casosRows = await db
 					.select({
+						id: casosCobros.id,
 						numeroSifco: casosCobros.numeroCreditoSifco,
 						telefonoPrincipal: casosCobros.telefonoPrincipal,
 					})
@@ -3280,6 +3322,7 @@ export const cobrosRouter = {
 						modelo: prev?.modelo ?? null,
 						year: prev?.year ?? null,
 					});
+					casoIdPorSifco.set(row.numeroSifco, row.id);
 				}
 			}
 
@@ -3290,6 +3333,7 @@ export const cobrosRouter = {
 				telefono: string; // destino efectivo (test o real)
 				telefonoReal: string; // destino original (para trazabilidad)
 				mensaje: string;
+				casoCobroId: string | null;
 			};
 			const candidatos: Candidato[] = [];
 			const descartados: Array<{
@@ -3355,6 +3399,7 @@ export const cobrosRouter = {
 					telefono: testMode ? getTestPhone(candidatos.length) : telefono,
 					telefonoReal: telefono,
 					mensaje,
+					casoCobroId: sifco ? (casoIdPorSifco.get(sifco) ?? null) : null,
 				});
 			}
 
@@ -3367,6 +3412,17 @@ export const cobrosRouter = {
 				telefono: string;
 				success: boolean;
 				error?: string;
+			}> = [];
+
+			// Buffer para registrar contactos en historial al final, en una sola
+			// inserción batch. Solo se registran envíos exitosos a créditos que
+			// ya tienen un caso_cobros (la FK es notNull).
+			const contactosARegistrar: Array<{
+				casoCobroId: string;
+				metodoContacto: "whatsapp";
+				estadoContacto: "contactado";
+				comentarios: string;
+				realizadoPor: string;
 			}> = [];
 
 			for (let i = 0; i < candidatos.length; i += CHUNK_SIZE) {
@@ -3423,6 +3479,36 @@ export const cobrosRouter = {
 										: undefined,
 								},
 					});
+
+					// Registrar en historial del caso (mismo flujo que contacto-modal)
+					// solo cuando el envío fue exitoso y el crédito tiene caso.
+					if (ok && c.casoCobroId) {
+						contactosARegistrar.push({
+							casoCobroId: c.casoCobroId,
+							metodoContacto: "whatsapp",
+							estadoContacto: "contactado",
+							comentarios: `Envío masivo de WhatsApp — Plantilla: ${plantilla.nombre}`,
+							realizadoPor: context.userId,
+						});
+					}
+				}
+			}
+
+			// Insertar todo el historial en una sola query.
+			let contactosRegistrados = 0;
+			let contactosSinCaso = 0;
+			for (const c of candidatos) {
+				if (!c.casoCobroId) contactosSinCaso += 1;
+			}
+			if (contactosARegistrar.length > 0) {
+				try {
+					await db.insert(contactosCobros).values(contactosARegistrar);
+					contactosRegistrados = contactosARegistrar.length;
+				} catch (error) {
+					console.error(
+						"[Cobros] Error registrando historial de contactos masivo:",
+						error,
+					);
 				}
 			}
 
@@ -3434,6 +3520,8 @@ export const cobrosRouter = {
 				fallidos,
 				descartados,
 				detalle,
+				contactosRegistrados,
+				contactosSinCaso,
 			};
 		}),
 

@@ -80,9 +80,15 @@ export function MassWhatsappModal({
 						: undefined,
 			}),
 		onSuccess: (res) => {
-			toast.success(
-				`WhatsApp masivo: ${res.enviados} enviados, ${res.fallidos} fallidos, ${res.descartados.length} descartados`,
-			);
+			const partes = [
+				`${res.enviados} enviados`,
+				`${res.fallidos} fallidos`,
+				`${res.descartados.length} descartados`,
+			];
+			if (typeof res.contactosRegistrados === "number") {
+				partes.push(`${res.contactosRegistrados} en historial`);
+			}
+			toast.success(`WhatsApp masivo: ${partes.join(", ")}`);
 			setOpen(false);
 		},
 		onError: (error: any) => {

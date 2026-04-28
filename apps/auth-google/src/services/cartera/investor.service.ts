@@ -64,7 +64,7 @@ export interface InvestorDocument {
  * Crear o actualizar un inversionista
  */
 export const createInvestor = async (
-  payload: CreateInvestorPayload
+  payload: CreateInvestorPayload,
 ): Promise<CreateInvestorResponse> => {
   try {
     // Asegurar autenticación
@@ -76,7 +76,7 @@ export const createInvestor = async (
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        // Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify(payload),
     });
@@ -97,16 +97,22 @@ export const createInvestor = async (
 /**
  * Obtener perfil de inversionista por DPI
  */
-export const getInvestorProfile = async (dpi: string, email: string): Promise<InvestorProfile> => {
+export const getInvestorProfile = async (
+  dpi: string,
+  email: string,
+): Promise<InvestorProfile> => {
   try {
     // Asegurar autenticación
     const token = await ensureCarteraAuth();
 
-    const response = await fetch(`${env.CARTERA_API_URL}/investor?dpi=${dpi}&email=${email}`, {
-      headers: {
-        // Authorization: `Bearer ${token}`,
+    const response = await fetch(
+      `${env.CARTERA_API_URL}/investor?dpi=${dpi}&email=${email}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
       },
-    });
+    );
 
     if (!response.ok) {
       throw new Error("Error al obtener perfil del inversionista");
@@ -123,7 +129,9 @@ export const getInvestorProfile = async (dpi: string, email: string): Promise<In
 /**
  * Obtener documentos de un inversionista por email
  */
-export const getInvestorDocuments = async (email: string): Promise<InvestorDocument[]> => {
+export const getInvestorDocuments = async (
+  email: string,
+): Promise<InvestorDocument[]> => {
   try {
     const token = await ensureCarteraAuth();
 
@@ -133,7 +141,7 @@ export const getInvestorDocuments = async (email: string): Promise<InvestorDocum
         headers: {
           Authorization: `Bearer ${token}`,
         },
-      }
+      },
     );
     console.log("Response status for getInvestorDocuments:", response);
 
@@ -141,7 +149,10 @@ export const getInvestorDocuments = async (email: string): Promise<InvestorDocum
       throw new Error("Error al obtener documentos del inversionista");
     }
 
-    const json = (await response.json()) as { success: boolean; data: InvestorDocument[] };
+    const json = (await response.json()) as {
+      success: boolean;
+      data: InvestorDocument[];
+    };
     return json.data;
   } catch (error) {
     console.error("Error al obtener documentos del inversionista:", error);

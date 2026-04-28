@@ -935,6 +935,7 @@ export async function buildInversionistaWorkbook(
     let reinvCap_cap = new Big(0);
     let reinvTot_cap = new Big(0);
     let reinvTot_int = new Big(0);
+    let reinvInt_int = new Big(0);
 
     for (const cr of inv.creditos) {
       const tipo = cr.tipo_reinversion || "sin_reinversion";
@@ -957,6 +958,11 @@ export async function buildInversionistaWorkbook(
           const netInteresForReinv = abonoGeneralInteres.minus(isrReinv);
           
           reinvTot_int = reinvTot_int.plus(netInteresForReinv);
+        } else if (tipo === "reinversion_interes") {
+          const isrReinv = inv.emite_factura ? new Big(0) : abonoGeneralInteres.times(0.07);
+          const netInteresForReinv = abonoGeneralInteres.minus(isrReinv);
+          
+          reinvInt_int = reinvInt_int.plus(netInteresForReinv);
         }
       }
     }
@@ -969,6 +975,9 @@ export async function buildInversionistaWorkbook(
     }
     if (reinvTot_int.gt(0)) {
       reinv.push(["Interés Compuesto (Interés Neto)", reinvTot_int.toNumber()]);
+    }
+    if (reinvInt_int.gt(0)) {
+      reinv.push(["Reinversión Interés (Interés Neto)", reinvInt_int.toNumber()]);
     }
     reinv.push(["Total Reinversión", toN(sub.total_reinversion)]);
   } else {

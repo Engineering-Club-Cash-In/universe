@@ -7,8 +7,10 @@ import {
   getSignedDocumentUrl,
   deleteDocumentoFromR2,
 } from "../utils/functions/uploadsFiles";
+import { authMiddleware } from "./midleware";
 
 export const investorDocumentsRouter = new Elysia()
+  .use(authMiddleware)
 
   // POST - Crear documento
   .post(

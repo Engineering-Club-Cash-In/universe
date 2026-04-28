@@ -1,7 +1,9 @@
 import { Elysia, t } from "elysia";
 import { marcarCreditoComoCaido, getCreditosCaidos } from "../controllers/fallenCredits";
+import { authMiddleware } from "./midleware";
 
 export const fallenCreditsRouter = new Elysia()
+  .use(authMiddleware)
 
   // POST - Marcar crédito como caído
   .post(

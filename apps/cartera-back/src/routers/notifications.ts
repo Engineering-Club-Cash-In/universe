@@ -1,7 +1,9 @@
 import { Elysia, t } from "elysia";
 import { notifyPayInvestors } from "../services/crm.service";
+import { authMiddleware } from "./midleware";
 
 export const notificationsRouter = new Elysia({ prefix: "/notifications" })
+  .use(authMiddleware)
   .post(
     "/pay-investors",
     async ({ body, set }) => {

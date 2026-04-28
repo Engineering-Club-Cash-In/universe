@@ -81,7 +81,7 @@ const RouterBodySchema = z.object({
 });
 export const creditRouter = new Elysia()
  
-//.use(authMiddleware)
+.use(authMiddleware)
   // Crear nuevo crédito
 .post("/newCredit", async ({ body, set }) => {
   const result = await insertCredit({ body, set });

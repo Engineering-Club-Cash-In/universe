@@ -107,6 +107,8 @@ export function ModalEditCredit({
   // Ref para acumular los cambios de saldo reinversion desde InvestorsList
   const saldoChangesRef = useRef<Record<number, number>>({});
   const [nuevaCuota, setNuevaCuota] = useState<number | null>(null);
+  const [nuevasCuotasInvestors, setNuevasCuotasInvestors] = useState<Record<number, number>>({});
+  const [nuevasCuotasInvestorsMirror, setNuevasCuotasInvestorsMirror] = useState<Record<number, number>>({});
   const [asesorQuery, setAsesorQuery] = useState("");
 
   const filteredAdvisors = useMemo(
@@ -336,7 +338,8 @@ export function ModalEditCredit({
                 {
                   onSuccess: (data: any) => {
                     console.log("Recalculate response:", data);
-                    const raw = data?.cuota ?? data?.nueva_cuota ?? data?.newQuota ?? data?.data?.cuota ?? data?.data?.nueva_cuota ?? data?.result?.cuota;
+                    const payload = data?.data ?? data?.result ?? data;
+                    const raw = payload?.cuota ?? payload?.nueva_cuota ?? payload?.newQuota;
                     const cuotaRecalculada = Number(Number(raw || 0).toFixed(2));
                     if (cuotaRecalculada > 0) {
                       setNuevaCuota(cuotaRecalculada);
@@ -346,6 +349,42 @@ export function ModalEditCredit({
                       if (currentCuota > 0) {
                         setNuevaCuota(currentCuota);
                       }
+                    }
+
+                    const mergeCuota = (
+                      list: typeof formik.values.investors,
+                      incoming: any[] | undefined
+                    ) => {
+                      const highlights: Record<number, number> = {};
+                      const merged = list.map((inv) => {
+                        const match = incoming?.find(
+                          (i) => Number(i.inversionista_id) === Number(inv.inversionista_id)
+                        );
+                        if (!match) return inv;
+                        const nueva = Number(Number(match.cuota_inversionista || 0).toFixed(2));
+                        if (Math.abs(nueva - Number(inv.cuota_inversionista || 0)) > 0.005) {
+                          highlights[Number(inv.inversionista_id)] = nueva;
+                        }
+                        return { ...inv, cuota_inversionista: nueva };
+                      });
+                      return { merged, highlights };
+                    };
+
+                    if (Array.isArray(payload?.inversionistas)) {
+                      const { merged, highlights } = mergeCuota(
+                        formik.values.investors,
+                        payload.inversionistas
+                      );
+                      formik.setFieldValue("investors", merged);
+                      setNuevasCuotasInvestors(highlights);
+                    }
+                    if (Array.isArray(payload?.inversionistas_espejo)) {
+                      const { merged, highlights } = mergeCuota(
+                        formik.values.investorsMirror,
+                        payload.inversionistas_espejo
+                      );
+                      formik.setFieldValue("investorsMirror", merged);
+                      setNuevasCuotasInvestorsMirror(highlights);
                     }
                   },
                 }
@@ -600,6 +639,23 @@ export function ModalEditCredit({
               errorMessage={formik.errors.investors as string}
               errorMessageMirror={formik.errors.investorsMirror as string}
               onSaldoChanges={(changes) => { saldoChangesRef.current = changes; }}
+              recalculatedQuotas={nuevasCuotasInvestors}
+              recalculatedQuotasMirror={nuevasCuotasInvestorsMirror}
+              onClearRecalculatedQuota={(invId, isMirror) => {
+                if (isMirror) {
+                  setNuevasCuotasInvestorsMirror((prev) => {
+                    const next = { ...prev };
+                    delete next[invId];
+                    return next;
+                  });
+                } else {
+                  setNuevasCuotasInvestors((prev) => {
+                    const next = { ...prev };
+                    delete next[invId];
+                    return next;
+                  });
+                }
+              }}
             />
           </form>
         </div>

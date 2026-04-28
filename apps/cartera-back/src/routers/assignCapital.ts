@@ -1,7 +1,9 @@
 import { Elysia } from "elysia";
 import { getCreditCandidates, type CreditCandidate } from "../controllers/assignCapital";
+import { authMiddleware } from "./midleware";
 
 export const assignCapitalRouter = new Elysia()
+  .use(authMiddleware)
 
   /**
    * GET /assign-capital/candidates

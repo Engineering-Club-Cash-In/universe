@@ -413,6 +413,7 @@ function RouteComponent() {
 					: undefined,
 				fechaDesde,
 				fechaHasta,
+				etiquetas: filtroEtiquetas.length > 0 ? filtroEtiquetas : undefined,
 			},
 		}),
 		enabled: !!session,
@@ -498,12 +499,7 @@ function RouteComponent() {
 			// Incluir casos en mora (días negativos) y casos próximos a vencer
 			return c?.diasHastaPago !== null && c?.diasHastaPago <= limite;
 		});
-	}, [
-		creditosConDias,
-		filtroTemporal,
-		mostrarCompletadosIncobrables,
-		filtroEtiquetas,
-	]);
+	}, [creditosConDias, filtroTemporal, mostrarCompletadosIncobrables, filtroEtiquetas, filtroEtapa]);
 
 	// Check permissions after all hooks
 	if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
@@ -997,7 +993,11 @@ function RouteComponent() {
 									estadoMora: filtroEtapa || undefined,
 									searchTerm: debouncedFilterValue || undefined,
 									time: timeParam,
+									etiquetas:
+										filtroEtiquetas.length > 0 ? filtroEtiquetas : undefined,
 								}}
+								etiquetaLabels={ETIQUETA_LABELS_FILTRO}
+								totalDestinatarios={totalCreditos}
 							>
 								<Button
 									variant="outline"
@@ -1009,7 +1009,7 @@ function RouteComponent() {
 								</Button>
 							</MassWhatsappModal>
 							<Badge variant="outline" className="text-sm">
-								{creditosFiltrados.length} casos mostrados
+								{totalCreditos} casos
 							</Badge>
 						</div>
 					</div>

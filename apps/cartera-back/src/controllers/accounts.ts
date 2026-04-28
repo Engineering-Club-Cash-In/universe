@@ -1,14 +1,34 @@
 // services/cuentas.service.ts
-import { eq } from "drizzle-orm";
-import { cuentasEmpresa } from "../database/db";
+import { and, eq, ilike } from "drizzle-orm";
+import { cuentasEmpresa, cuentas_empresa_movimientos } from "../database/db";
 import { db } from "../database";
 
-export async function getCuentasEmpresa() {
+type MonedaCuenta = "quetzales" | "dolares";
+type TipoMovimiento = "ingreso" | "egreso";
+
+// Lista cuentas con filtros opcionales: nombre (ilike, parcial),
+// cuentaId (exacto), soloActivas (default false: trae activas e inactivas).
+export async function getCuentasEmpresa(filters?: {
+  nombreCuenta?: string;
+  cuentaId?: number;
+  soloActivas?: boolean;
+}) {
   try {
+    const conditions = [];
+    if (filters?.cuentaId !== undefined) {
+      conditions.push(eq(cuentasEmpresa.cuentaId, filters.cuentaId));
+    }
+    if (filters?.nombreCuenta) {
+      conditions.push(ilike(cuentasEmpresa.nombreCuenta, `%${filters.nombreCuenta}%`));
+    }
+    if (filters?.soloActivas) {
+      conditions.push(eq(cuentasEmpresa.activo, true));
+    }
+
     const cuentas = await db
       .select()
       .from(cuentasEmpresa)
-      .where(eq(cuentasEmpresa.activo, true))
+      .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(cuentasEmpresa.nombreCuenta);
 
     return {
@@ -66,6 +86,7 @@ export async function createCuentaEmpresa(data: {
   banco: string;
   numeroCuenta: string;
   descripcion?: string;
+  moneda?: MonedaCuenta;
 }) {
   try {
     const [nuevaCuenta] = await db
@@ -75,6 +96,7 @@ export async function createCuentaEmpresa(data: {
         banco: data.banco,
         numeroCuenta: data.numeroCuenta,
         descripcion: data.descripcion,
+        ...(data.moneda ? { moneda: data.moneda } : {}),
       })
       .returning();
 
@@ -102,15 +124,13 @@ export async function updateCuentaEmpresa(
     numeroCuenta: string;
     descripcion: string;
     activo: boolean;
+    moneda: MonedaCuenta;
   }>
 ) {
   try {
     const [cuentaActualizada] = await db
       .update(cuentasEmpresa)
-      .set({
-        ...data,
-        fechaActualizacion: new Date(),
-      })
+      .set(data)
       .where(eq(cuentasEmpresa.cuentaId, cuentaId))
       .returning();
 
@@ -143,10 +163,7 @@ export async function deleteCuentaEmpresa(cuentaId: number) {
     // Soft delete - solo desactivar
     const [cuentaDesactivada] = await db
       .update(cuentasEmpresa)
-      .set({
-        activo: false,
-        fechaActualizacion: new Date(),
-      })
+      .set({ activo: false })
       .where(eq(cuentasEmpresa.cuentaId, cuentaId))
       .returning();
 
@@ -168,6 +185,49 @@ export async function deleteCuentaEmpresa(cuentaId: number) {
       success: false,
       message: "❌ Error al desactivar la cuenta",
       error: error.message,
+    };
+  }
+}
+
+// Inserta un movimiento (ingreso/egreso) en el ledger.
+// Toda la lógica de saldo está en la DB:
+//   - El trigger trg_cuentas_empresa_mov_aplicar (BEFORE INSERT) suma o resta
+//     `monto` al saldo_actual de la cuenta y rellena `saldo_post`.
+//   - Si el cuenta_id no existe, el trigger tira RAISE EXCEPTION → cae al catch.
+// Pasamos saldo_post: "0" como placeholder porque la columna es NOT NULL;
+// el trigger lo sobrescribe antes de insertar.
+export async function crearMovimientoCuentaEmpresa(data: {
+  cuentaId: number;
+  tipo: TipoMovimiento;
+  monto: string;
+  motivo?: string;
+  createdBy?: number;
+}) {
+  try {
+    const [movimiento] = await db
+      .insert(cuentas_empresa_movimientos)
+      .values({
+        cuenta_id: data.cuentaId,
+        tipo: data.tipo,
+        monto: data.monto,
+        saldo_post: "0",
+        motivo: data.motivo,
+        created_by: data.createdBy,
+      })
+      .returning();
+
+    return {
+      success: true,
+      message: "✅ Movimiento registrado correctamente",
+      data: movimiento,
+    };
+  } catch (error: any) {
+    console.error("❌ Error al crear movimiento de cuenta:", error);
+    return {
+      success: false,
+      message: "❌ Error al registrar el movimiento",
+      error: error.message,
+      data: null,
     };
   }
 }

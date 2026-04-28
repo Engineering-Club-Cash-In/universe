@@ -109,7 +109,7 @@ export const getCredits = async (numerosSifco: string[]): Promise<CreditoRespons
         `${env.CARTERA_API_URL}/credito?numero_credito_sifco=${encodeURIComponent(numeroSifco)}`,
         {
           headers: {
-           //  Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${token}`,
           },
         }
       );
@@ -146,7 +146,7 @@ export const getCreditByNumeroSifco = async (
       `${env.CARTERA_API_URL}/credito?numero_credito_sifco=${encodeURIComponent(numeroSifco)}`,
       {
         headers: {
-          // Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
         },
       }
     );

@@ -31,6 +31,7 @@ interface DataTableProps<TData, TValue> {
 	searchPlaceholder?: string;
 	searchColumn?: string;
 	filterContent?: React.ReactNode;
+	extraSearch?: React.ReactNode;
 	isLoading?: boolean;
 	// Paginación del servidor
 	serverPagination?: {
@@ -55,6 +56,7 @@ export function DataTable<TData, TValue>({
 	isLoading,
 	searchColumn,
 	filterContent,
+	extraSearch,
 	serverPagination,
 	setGlobalFilterParam,
 	onRowClick,
@@ -106,20 +108,25 @@ export function DataTable<TData, TValue>({
 
 	return (
 		<div className="space-y-4">
-			{(!hideSearch || filterContent) && (
+			{(!hideSearch || filterContent || extraSearch) && (
 				<div className="flex flex-col gap-4">
-					{!hideSearch && (
-						<Input
-							placeholder={searchPlaceholder}
-							value={globalFilter ?? ""}
-							onChange={(event) => {
-								if (setGlobalFilterParam) {
-									setGlobalFilterParam(event.target.value);
-								}
-								setGlobalFilter(event.target.value);
-							}}
-							className="max-w-sm"
-						/>
+					{(!hideSearch || extraSearch) && (
+						<div className="flex flex-wrap items-center gap-2">
+							{!hideSearch && (
+								<Input
+									placeholder={searchPlaceholder}
+									value={globalFilter ?? ""}
+									onChange={(event) => {
+										if (setGlobalFilterParam) {
+											setGlobalFilterParam(event.target.value);
+										}
+										setGlobalFilter(event.target.value);
+									}}
+									className="max-w-sm"
+								/>
+							)}
+							{extraSearch}
+						</div>
 					)}
 					{filterContent && (
 						<div className="flex flex-wrap gap-2">{filterContent}</div>

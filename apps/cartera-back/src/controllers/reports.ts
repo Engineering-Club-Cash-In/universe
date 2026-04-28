@@ -4,6 +4,7 @@ import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getCreditosWithUserByMesAnio } from "./credits";
 import { getAllPagosWithCreditAndInversionistas, getPagosConInversionistas } from "./payments";
 import { fetchImageBase64 } from "../utils/functions/internReportCancelations";
+import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
 import { db } from "../database";
 import { sql } from "drizzle-orm";
 
@@ -1462,7 +1463,8 @@ export async function getPagosByVencimiento({
     filters.push(sql`c.numero_credito_sifco ILIKE ${"%" + numero_credito_sifco + "%"}`);
   }
   if (nombre_usuario) {
-    filters.push(sql`u.nombre ILIKE ${"%" + nombre_usuario + "%"}`);
+    const nameCond = buildNameSearchCondition(sql`u.nombre`, nombre_usuario);
+    if (nameCond) filters.push(nameCond);
   }
   const whereClause = sql.join(filters, sql` AND `);
 

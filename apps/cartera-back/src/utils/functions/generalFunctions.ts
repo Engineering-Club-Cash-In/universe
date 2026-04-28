@@ -5,6 +5,7 @@ import ExcelJS from "exceljs";
 import axios from "axios";
 import Big from "big.js";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { sql, type SQL } from "drizzle-orm";
 // Tipos auxiliares
 
 /**
@@ -21,6 +22,45 @@ export function removeAccents(str: string): string {
  * Nota: el searchTerm debe pasar por removeAccents() antes.
  */
 export const SQL_UNACCENT = `translate(lower(COLUMN), 'áéíóúàèìòùäëïöüâêîôûãõñÁÉÍÓÚÀÈÌÒÙÄËÏÖÜÂÊÎÔÛÃÕÑ', 'aeiouaeiouaeiouaeiouaonAEIOUAEIOUAEIOUAEIOUAON')`;
+
+/**
+ * Construye un filtro SQL para búsqueda de nombres tolerante a:
+ * - Acentos/tildes (Óscar = Oscar)
+ * - Mayúsculas/minúsculas
+ * - Espacios extra entre palabras
+ * - Orden de palabras (cada token puede aparecer en cualquier posición)
+ *
+ * Ej: term "Oscar Alf" hace match con "Óscar Alfredo Méndez" porque divide
+ * la búsqueda en tokens ["oscar", "alf"] y exige que TODOS aparezcan en la
+ * columna (ya normalizada sin acentos y en minúsculas).
+ *
+ * @param column Columna o expresión SQL sobre la que buscar (ej: usuarios.nombre o sql`u.nombre`)
+ * @param term Texto de búsqueda del usuario
+ * @returns SQL con el filtro, o undefined si el término queda vacío
+ */
+export function buildNameSearchCondition(
+  column: unknown,
+  term: string | undefined | null
+): SQL | undefined {
+  if (!term) return undefined;
+  const normalized = removeAccents(term).toLowerCase().trim().replace(/\s+/g, " ");
+  if (!normalized) return undefined;
+  const tokens = normalized.split(" ").filter((t) => t.length > 0);
+  if (tokens.length === 0) return undefined;
+
+  const ACCENTS_FROM = "áéíóúàèìòùäëïöüâêîôûãõñÁÉÍÓÚÀÈÌÒÙÄËÏÖÜÂÊÎÔÛÃÕÑ";
+  const ACCENTS_TO = "aeiouaeiouaeiouaeiouaonAEIOUAEIOUAEIOUAEIOUAON";
+
+  // Aplicamos translate ANTES de lower: así, aunque el locale del Postgres no
+  // foldee mayúsculas acentuadas (ej. 'Ó' → 'ó'), translate ya las convirtió
+  // a ASCII y lower() funciona sobre puro ASCII.
+  const tokenConds = tokens.map(
+    (t) =>
+      sql`lower(translate(${column as any}, ${ACCENTS_FROM}, ${ACCENTS_TO})) LIKE ${"%" + t + "%"}`
+  );
+
+  return sql.join(tokenConds, sql` AND `);
+}
 
 
 export async function generarPDFBuffer(

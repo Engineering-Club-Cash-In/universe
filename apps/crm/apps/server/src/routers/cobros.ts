@@ -596,6 +596,7 @@ export const cobrosRouter = {
 				offset: z.number().optional(),
 				estadoMora: z.string().optional(),
 				searchTerm: z.string().optional(),
+				numeroSifco: z.string().optional(),
 				time: z.enum(["WEEK", "MONTH", "DUEMONTH", "TODAY"]).optional(),
 				emailCobrador: z.string().optional(),
 				fechaDesde: z.string().optional(),
@@ -615,9 +616,14 @@ export const cobrosRouter = {
 					let cuotasAtrasadas: number | undefined;
 					let estadoCartera: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | undefined;
 					const searchTerm = input.searchTerm?.trim() || "";
+					const numeroSifcoExacto = input.numeroSifco?.trim() || "";
 					const hasNumber = /\d/.test(searchTerm);
-					const isPlateSearch = searchTerm.length > 0 && hasNumber;
-					const isNameSearch = searchTerm.length > 0 && !hasNumber;
+					// Si hay numeroSifco explícito, ignoramos cualquier búsqueda por
+					// cliente/placa: es un equals contra cartera-back y sólo retorna 0 ó 1.
+					const isPlateSearch =
+						!numeroSifcoExacto && searchTerm.length > 0 && hasNumber;
+					const isNameSearch =
+						!numeroSifcoExacto && searchTerm.length > 0 && !hasNumber;
 
 					if (input.estadoMora) {
 						switch (input.estadoMora) {
@@ -837,6 +843,36 @@ export const cobrosRouter = {
 									totalPages: 1,
 								};
 							}
+						}
+					} else if (numeroSifcoExacto) {
+						// Búsqueda exacta por número SIFCO. Si además hay etiquetas,
+						// validamos en el CRM que el SIFCO esté en la lista filtrada,
+						// porque cartera-back le da prioridad al multi sobre el single.
+						if (
+							sifcosPorEtiquetas &&
+							!sifcosPorEtiquetas.includes(numeroSifcoExacto)
+						) {
+							creditosResponse = {
+								data: [],
+								page: 1,
+								perPage: 0,
+								totalCount: 0,
+								totalPages: 0,
+							};
+						} else {
+							creditosResponse = await obtenerTodosLosCreditosCarteraBack({
+								mes,
+								anio,
+								page: 1,
+								perPage: input.limit || 50,
+								cuotasAtrasadas,
+								estado: estadoCartera,
+								time: input.time,
+								email_cobrador: input.emailCobrador,
+								numero_credito_sifco: numeroSifcoExacto,
+								fecha_desde: input.fechaDesde,
+								fecha_hasta: input.fechaHasta,
+							});
 						}
 					} else {
 						// Búsqueda por nombre (cartera-back filtra) o sin búsqueda
@@ -3041,6 +3077,7 @@ export const cobrosRouter = {
 				// su cartera).
 				estadoMora: z.string().optional(),
 				searchTerm: z.string().optional(),
+				numeroSifco: z.string().optional(),
 				time: z.enum(["WEEK", "MONTH", "DUEMONTH", "TODAY"]).optional(),
 				etiquetas: z.array(z.string()).optional(),
 			}),
@@ -3112,11 +3149,15 @@ export const cobrosRouter = {
 			// tiene dígitos se asume placa y se convierte a número SIFCO
 			// consultando el CRM; si es alfabético se usa nombre_usuario.
 			const searchTerm = input.searchTerm?.trim() || "";
+			const numeroSifcoExacto = input.numeroSifco?.trim() || "";
 			const hasNumber = /\d/.test(searchTerm);
-			const isPlateSearch = searchTerm.length > 0 && hasNumber;
-			const isNameSearch = searchTerm.length > 0 && !hasNumber;
+			// numeroSifco explícito tiene prioridad: ignora plate/name search.
+			const isPlateSearch =
+				!numeroSifcoExacto && searchTerm.length > 0 && hasNumber;
+			const isNameSearch =
+				!numeroSifcoExacto && searchTerm.length > 0 && !hasNumber;
 
-			let numeroSifcoFiltro: string | undefined;
+			let numeroSifcoFiltro: string | undefined = numeroSifcoExacto || undefined;
 			let searchPorPlacaSinMatch = false;
 			const matchingSifcos = new Set<string>();
 			if (isPlateSearch) {

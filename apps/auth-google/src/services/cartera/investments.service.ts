@@ -139,7 +139,7 @@ export const getLiquidaciones = async (
       `${env.CARTERA_API_URL}/liquidaciones?dpi=${dpi}&email=${email}&page=${page}&perPage=${perPage}`,
       {
         headers: {
-          // Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
         },
       },
     );
@@ -171,7 +171,7 @@ export const getInvestmentsStats = async (
       `${env.CARTERA_API_URL}/inversionistas/rendimiento?dpi=${dpi}&email=${email}`,
       {
         headers: {
-          // Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
         },
       },
     );
@@ -199,7 +199,7 @@ export const getAsesorById = async (asesorId: number): Promise<Asesor> => {
       `${env.CARTERA_API_URL}/advisor?id=${asesorId}`,
       {
         headers: {
-          // Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
         },
       },
     );

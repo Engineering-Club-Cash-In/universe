@@ -473,15 +473,6 @@ function RouteComponent() {
 			);
 		}
 
-		// Filtrar por etiquetas (AND: el caso debe tener todas las seleccionadas)
-		if (filtroEtiquetas.length > 0) {
-			filtrados = filtrados.filter(
-				(c) =>
-					c.etiquetas &&
-					filtroEtiquetas.every((et) => c.etiquetas!.includes(et)),
-			);
-		}
-
 		// Filtrar por rango temporal
 		if (filtroTemporal === "todos") return filtrados;
 

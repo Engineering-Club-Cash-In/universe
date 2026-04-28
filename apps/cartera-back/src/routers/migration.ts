@@ -121,7 +121,8 @@ const csvMoraPath = path.resolve(
   "C:/Users/Kelvin Palacios/Documents/analis de datos/moraGeneral.csv"
 );
 export const sifcoRouter = new Elysia()
- 
+  .use(authMiddleware)
+
   /**
    * 🔄 Sincronizar cliente(s) con préstamos desde SIFCO
    */

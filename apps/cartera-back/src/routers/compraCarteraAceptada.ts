@@ -1,7 +1,10 @@
 import { Elysia, t } from "elysia";
 import { compraCarteraAceptada } from "../controllers/compraCarteraAceptada";
+import { authMiddleware } from "./midleware";
 
-export const compraCarteraAceptadaRouter = new Elysia().post(
+export const compraCarteraAceptadaRouter = new Elysia()
+  .use(authMiddleware)
+  .post(
   "/compra-cartera-aceptada",
   compraCarteraAceptada,
   {

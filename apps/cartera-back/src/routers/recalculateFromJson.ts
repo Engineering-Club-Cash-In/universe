@@ -8,6 +8,7 @@ import {
   eliminarCreditos,
   actualizarCuotasInversionistas,
 } from "../controllers/recalculateFromJson";
+import { authMiddleware } from "./midleware";
 
 // ========================================
 // SCHEMA PARA VALIDACIÓN
@@ -59,6 +60,7 @@ const CreditoEliminarSchema = t.Object({
 // ========================================
 
 export const recalculateFromJsonRouter = new Elysia({ prefix: "/recalculate" })
+  .use(authMiddleware)
   // 📌 POST: Recibir JSON directamente en el body
   .post(
     "/from-json",

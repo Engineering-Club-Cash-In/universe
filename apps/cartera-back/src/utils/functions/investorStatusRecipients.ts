@@ -3,7 +3,7 @@
 export const INVESTOR_STATUS_CHANGE_RECIPIENTS = [
   "info@clubcashin.com",
   "diego.a@sepresta.com",
-  "sara.r@sepresta.com",
+  "sara.r@clubcashin.com",
   "caja@sepresta.com",
   "alexander.p@clubcashin.com",
   "juan.r@clubcashin.com",

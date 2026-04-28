@@ -392,13 +392,20 @@ app.post("/api/upload-opportunity-document", async (c) => {
 });
 app.post("/info/renap", async (c) => {
 	try {
-		const body = await c.req.json<{ dpi: string; phone: string }>();
+		const body = await c.req.json<{ dpi: unknown; phone: unknown }>();
 
-		const result = await getRenapInfoController(body.dpi, body.phone);
+		const dpi = String(body.dpi ?? "").trim();
+		const phone = String(body.phone ?? "").trim();
+
+		if (!dpi || !phone) {
+			return c.json({ error: "dpi y phone son requeridos" }, 400);
+		}
+
+		const result = await getRenapInfoController(dpi, phone);
 
 		return c.json(result);
 	} catch (err: any) {
-		console.error("[ERROR] /test/renap:", err);
+		console.error("[ERROR] /info/renap:", err);
 		return c.json({ error: err.message || "Internal server error" }, 500);
 	}
 });

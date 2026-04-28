@@ -1,7 +1,10 @@
 import { Elysia, t } from "elysia";
 import { addInvestorToCredit } from "../controllers/addInvestorToCredit";
+import { authMiddleware } from "./midleware";
 
-export const addInvestorToCreditRouter = new Elysia().post(
+export const addInvestorToCreditRouter = new Elysia()
+  .use(authMiddleware)
+  .post(
   "/agregar-inversionista-credito",
   addInvestorToCredit,
   {

@@ -37,7 +37,8 @@ const falsePaymentSchema = z.object({
 
 
 
-export const paymentRouter = new Elysia() 
+export const paymentRouter = new Elysia()
+  .use(authMiddleware)
   // Endpoint para registrar pago (ya lo tienes)
   .post("/newPayment", insertPayment)
   .post("/reversePayment", reversePayment)

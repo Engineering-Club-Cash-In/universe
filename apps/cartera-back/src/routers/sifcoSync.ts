@@ -1,7 +1,10 @@
 import { Elysia } from "elysia";
 import { syncTodosLosClientes } from "../controllers/sifcoSync";
+import { authMiddleware } from "./midleware";
 
-export const sifcoSyncRouter = new Elysia({ prefix: "/api/sifco-sync" }).post(
+export const sifcoSyncRouter = new Elysia({ prefix: "/api/sifco-sync" })
+  .use(authMiddleware)
+  .post(
   "/all",
   async () => {
     // Lanzar en background y responder inmediatamente

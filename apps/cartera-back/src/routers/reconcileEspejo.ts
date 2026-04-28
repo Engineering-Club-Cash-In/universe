@@ -1,7 +1,9 @@
 import { Elysia, t } from "elysia";
 import { reconcileEspejo } from "../controllers/reconcileEspejo";
+import { authMiddleware } from "./midleware";
 
 export const reconcileEspejoRouter = new Elysia()
+  .use(authMiddleware)
   .post("/reconcile-espejo", reconcileEspejo, {
     body: t.Object({
       inversionista: t.String({ minLength: 1 }),

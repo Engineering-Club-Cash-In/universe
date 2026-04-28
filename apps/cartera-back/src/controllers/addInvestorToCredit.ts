@@ -722,32 +722,22 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
     // ================================================================
     if (tipo_operacion === "compra_cartera" && resultados.length > 0) {
       try {
-        // ── Resolver quién disparó la operación a partir del JWT ──
         let usuarioEmail: string | undefined;
         let usuarioNombre: string | undefined;
-
         try {
           const authHeader = request?.headers?.get?.("Authorization");
           if (authHeader?.startsWith("Bearer ")) {
             const token = authHeader.replace("Bearer ", "").trim();
             const decoded = jwt.verify(token, JWT_SECRET) as any;
             usuarioEmail = decoded.email ?? decoded.correo ?? undefined;
-
             if (usuarioEmail) {
               const [pu] = await db
-                .select({
-                  admin_id: platform_users.admin_id,
-                  asesor_id: platform_users.asesor_id,
-                })
+                .select({ admin_id: platform_users.admin_id, asesor_id: platform_users.asesor_id })
                 .from(platform_users)
                 .where(eq(platform_users.email, usuarioEmail));
-
               if (pu?.admin_id) {
                 const [a] = await db
-                  .select({
-                    nombre: admins.nombre,
-                    apellido: admins.apellido,
-                  })
+                  .select({ nombre: admins.nombre, apellido: admins.apellido })
                   .from(admins)
                   .where(eq(admins.admin_id, pu.admin_id));
                 if (a) usuarioNombre = `${a.nombre} ${a.apellido}`.trim();
@@ -761,21 +751,13 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
             }
           }
         } catch (jwtErr) {
-          console.warn(
-            "[addInvestorToCredit] No se pudo resolver el usuario desde el JWT:",
-            jwtErr,
-          );
+          console.warn("[addInvestorToCredit] No se pudo resolver el usuario desde el JWT:", jwtErr);
         }
-
         const [inv] = await db
           .select({ nombre: inversionistas.nombre })
           .from(inversionistas)
           .where(eq(inversionistas.inversionista_id, inversionista_id));
-
-        const montoDistribuido = new Big(monto_aportado)
-          .minus(montoRestante)
-          .toString();
-
+        const montoDistribuido = new Big(monto_aportado).minus(montoRestante).toString();
         await sendInvestorAddedToCreditsNotification({
           to: COMPRA_CARTERA_PENDIENTE_RECIPIENTS.to,
           inversionistaNombre: inv?.nombre ?? `Inversionista ${inversionista_id}`,
@@ -793,10 +775,7 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           usuarioEmail,
         });
       } catch (mailErr) {
-        console.error(
-          "[addInvestorToCredit] Error enviando notificación por correo:",
-          mailErr,
-        );
+        console.error("[addInvestorToCredit] Error enviando notificación por correo:", mailErr);
       }
     }
 

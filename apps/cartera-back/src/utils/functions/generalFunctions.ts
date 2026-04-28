@@ -935,7 +935,6 @@ export async function buildInversionistaWorkbook(
     let reinvCap_cap = new Big(0);
     let reinvTot_cap = new Big(0);
     let reinvTot_int = new Big(0);
-    let reinvTot_isr = new Big(0);
 
     for (const cr of inv.creditos) {
       const tipo = cr.tipo_reinversion || "sin_reinversion";
@@ -953,10 +952,11 @@ export async function buildInversionistaWorkbook(
           reinvCap_cap = reinvCap_cap.plus(cap);
         } else if (tipo === "reinversion_total") {
           reinvTot_cap = reinvTot_cap.plus(cap);
-          reinvTot_int = reinvTot_int.plus(abonoGeneralInteres);
           
           const isrReinv = inv.emite_factura ? new Big(0) : abonoGeneralInteres.times(0.07);
-          reinvTot_isr = reinvTot_isr.plus(isrReinv);
+          const netInteresForReinv = abonoGeneralInteres.minus(isrReinv);
+          
+          reinvTot_int = reinvTot_int.plus(netInteresForReinv);
         }
       }
     }

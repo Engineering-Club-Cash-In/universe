@@ -3,6 +3,10 @@
  * Type-safe HTTP client with retry logic, circuit breaker, and caching
  */
 
+import {
+	getCarteraAccessToken,
+	invalidateAndReauth,
+} from "./cartera-auth.service";
 import type {
 	BoletaPagoInversionista,
 	CarteraAsesor,
@@ -44,7 +48,6 @@ import type {
 
 interface CarteraBackClientConfig {
 	baseUrl: string;
-	apiKey?: string;
 	timeout: number;
 	retryAttempts: number;
 	retryDelay: number;
@@ -63,7 +66,6 @@ export interface ResumenGlobalInversionistasFilters {
 
 const DEFAULT_CONFIG: CarteraBackClientConfig = {
 	baseUrl: process.env.CARTERA_BACK_URL || "http://localhost:7000",
-	apiKey: process.env.CARTERA_BACK_API_KEY,
 	timeout: Number.parseInt(process.env.CARTERA_BACK_TIMEOUT || "30000"),
 	retryAttempts: Number.parseInt(
 		process.env.CARTERA_BACK_RETRY_ATTEMPTS || "3",
@@ -216,23 +218,30 @@ export class CarteraBackClient {
 			}
 		}
 
-		const requestOptions: RequestInit = {
-			...options,
-			headers: {
-				"Content-Type": "application/json",
-				...(this.config.apiKey && {
-					Authorization: `Bearer ${this.config.apiKey}`,
-				}),
-				...options.headers,
-			},
-			signal: AbortSignal.timeout(this.config.timeout),
+		const buildRequestOptions = async (
+			forceRefresh = false,
+		): Promise<RequestInit> => {
+			const token = forceRefresh
+				? await invalidateAndReauth()
+				: await getCarteraAccessToken();
+			return {
+				...options,
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${token}`,
+					...options.headers,
+				},
+				signal: AbortSignal.timeout(this.config.timeout),
+			};
 		};
 
 		let lastError: Error | null = null;
+		let didReauth = false;
 
 		for (let attempt = 0; attempt <= this.config.retryAttempts; attempt++) {
 			try {
 				const response = await this.circuitBreaker.execute(async () => {
+					const requestOptions = await buildRequestOptions();
 					const res = await fetch(url, requestOptions);
 
 					if (!res.ok) {
@@ -246,6 +255,22 @@ export class CarteraBackClient {
 						}
 
 						if (res.status === 401 || res.status === 403) {
+							if (!didReauth) {
+								didReauth = true;
+								const retryOptions = await buildRequestOptions(true);
+								const retryRes = await fetch(url, retryOptions);
+								if (retryRes.ok) return retryRes;
+								const retryText = await retryRes.text();
+								let retryData: { error?: string; message?: string } = {};
+								try {
+									retryData = JSON.parse(retryText);
+								} catch {
+									retryData = { error: retryText };
+								}
+								throw new Error(
+									`Authentication failed: ${retryData.error || retryData.message || retryText}`,
+								);
+							}
 							throw new Error(
 								`Authentication failed: ${errorData.error || errorData.message}`,
 							);
@@ -863,12 +888,11 @@ export class CarteraBackClient {
 		const formData = new FormData();
 		formData.append("file", file, filename);
 
+		const token = await getCarteraAccessToken();
 		const response = await fetch(url, {
 			method: "POST",
 			body: formData,
-			...(this.config.apiKey && {
-				headers: { Authorization: `Bearer ${this.config.apiKey}` },
-			}),
+			headers: { Authorization: `Bearer ${token}` },
 			signal: AbortSignal.timeout(this.config.timeout),
 		});
 
@@ -931,12 +955,11 @@ export class CarteraBackClient {
 			formData.append("visible", String(input.visible));
 		if (input.created_by) formData.append("created_by", input.created_by);
 
+		const token = await getCarteraAccessToken();
 		const response = await fetch(url, {
 			method: "POST",
 			body: formData,
-			...(this.config.apiKey && {
-				headers: { Authorization: `Bearer ${this.config.apiKey}` },
-			}),
+			headers: { Authorization: `Bearer ${token}` },
 			signal: AbortSignal.timeout(this.config.timeout),
 		});
 

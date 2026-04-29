@@ -12,18 +12,21 @@ import {
   CopyMinus,
   RefreshCw,
 } from "lucide-react";
-import { documentsService, documentsKeys } from "@/services/documents";
+import { documentsService, documentsKeys, type DocumentCategoria } from "@/services/documents";
 import { NetworkError, ServerError, TimeoutError } from '@/services/errors';
 
 interface Step1Props {
   readonly data: {
     documentTypes?: string[];
+    category?: DocumentCategoria;
   };
   readonly onChange: (field: string, value: string[]) => void;
 }
 
 export function Step1({ data, onChange }: Step1Props) {
-  // Obtener tipos de documentos desde la API
+  const category = data.category;
+
+  // Obtener tipos de documentos desde la API filtrados por categoría
   const {
     data: documentsResponse,
     isLoading,
@@ -31,11 +34,12 @@ export function Step1({ data, onChange }: Step1Props) {
     isError,
     refetch,
   } = useQuery({
-    queryKey: documentsKeys.types(),
-    queryFn: documentsService.getDocumentTypes,
+    queryKey: documentsKeys.types(category),
+    queryFn: () => documentsService.getDocumentTypes(category),
     staleTime: 5 * 60 * 1000, // 5 minutos
     gcTime: 10 * 60 * 1000, // 10 minutos
     retry: false, // Ya manejamos retry en fetchWithRetry
+    enabled: !!category,
   });
 
   const documentTypes = documentsResponse?.data || [];

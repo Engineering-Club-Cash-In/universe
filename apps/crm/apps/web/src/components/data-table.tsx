@@ -46,6 +46,7 @@ interface DataTableProps<TData, TValue> {
 	onRowClick?: (row: TData) => void;
 	hideSearch?: boolean;
 	pageSizeOptions?: number[];
+	tableContainerClass?: string;
 }
 
 export function DataTable<TData, TValue>({
@@ -61,6 +62,7 @@ export function DataTable<TData, TValue>({
 	onRowClick,
 	hideSearch,
 	pageSizeOptions = [10, 20, 30, 40, 50],
+	tableContainerClass,
 }: DataTableProps<TData, TValue>) {
 	const [sorting, setSorting] = useState<SortingState>([]);
 	const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -132,7 +134,7 @@ export function DataTable<TData, TValue>({
 				</div>
 			)}
 
-			<div className="overflow-hidden rounded-md border max-h-[600px] overflow-y-auto">
+			<div className={`overflow-hidden rounded-md border${tableContainerClass ? ` ${tableContainerClass}` : ""}`}>
 				<Table>
 					<TableHeader>
 						{table.getHeaderGroups().map((headerGroup) => (

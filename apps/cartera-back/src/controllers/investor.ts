@@ -1287,6 +1287,9 @@ export async function resumeInvestor(
         totalAbonoGeneralInteres: new Big(0),
         total_capital_creditos: new Big(0),
         total_capital_actual: new Big(0),
+        total_reinv_tipo_capital: new Big(0),
+        total_reinv_tipo_interes: new Big(0),
+        total_reinv_tipo_total: new Big(0),
       };
 
       const formatValue = (val: string | number | null | undefined) =>
@@ -1353,6 +1356,9 @@ export async function resumeInvestor(
           let total_reinversion_capital = new Big(0);
           let total_reinversion_interes = new Big(0);
           let total_reinversion_neta_global = new Big(0);
+          let total_reinv_tipo_capital = new Big(0);
+          let total_reinv_tipo_interes = new Big(0);
+          let total_reinv_tipo_total = new Big(0);
 
           // 🆕 Capital del crédito y capital actual
           const capital_credito = new Big(credito?.capital ?? 0);
@@ -1483,6 +1489,10 @@ export async function resumeInvestor(
               total_reinversion_capital = total_reinversion_capital.plus(reinvCapital);
               total_reinversion_interes = total_reinversion_interes.plus(netReinvInt);
 
+              if (reinversionActual === "reinversion_capital") total_reinv_tipo_capital = total_reinv_tipo_capital.plus(totalReinvNeta);
+              else if (reinversionActual === "reinversion_interes") total_reinv_tipo_interes = total_reinv_tipo_interes.plus(totalReinvNeta);
+              else if (reinversionActual === "reinversion_total") total_reinv_tipo_total = total_reinv_tipo_total.plus(totalReinvNeta);
+
               // 🆕 CORRECCIÓN: Acumular totales
               totalAbonoGeneralInteres =
                 totalAbonoGeneralInteres.plus(abonoGeneralInteres);
@@ -1550,6 +1560,9 @@ export async function resumeInvestor(
             subtotal.total_capital_creditos.plus(capital_credito);
           subtotal.total_capital_actual =
             subtotal.total_capital_actual.plus(capital_actual);
+          subtotal.total_reinv_tipo_capital = subtotal.total_reinv_tipo_capital.plus(total_reinv_tipo_capital);
+          subtotal.total_reinv_tipo_interes = subtotal.total_reinv_tipo_interes.plus(total_reinv_tipo_interes);
+          subtotal.total_reinv_tipo_total = subtotal.total_reinv_tipo_total.plus(total_reinv_tipo_total);
 
           return {
             credito_id: c.credito_id,
@@ -1636,6 +1649,9 @@ export async function resumeInvestor(
           total_abono_general_interes: formatValue(subtotal.totalAbonoGeneralInteres.toString()),
           total_capital_creditos: formatValue(subtotal.total_capital_creditos.toString()),
           total_capital_actual: formatValue(subtotal.total_capital_actual.toString()),
+          total_reinv_tipo_capital: formatValue(subtotal.total_reinv_tipo_capital.toString()),
+          total_reinv_tipo_interes: formatValue(subtotal.total_reinv_tipo_interes.toString()),
+          total_reinv_tipo_total: formatValue(subtotal.total_reinv_tipo_total.toString()),
         },
       };
     })
@@ -3409,19 +3425,23 @@ export function generarHTMLReporte(
       };
 
       // Orden fijo de grupos
-      const grupos = ['reinversion_capital', 'reinversion_interes', 'reinversion_total', 'sin_reinversion', null];
-      const tableHead = `
-        <thead><tr>
-          <th>Meses en crédito</th><th>Nombre</th><th>Capital</th>
-          <th>% Interés</th><th>% Inversionista</th><th>Tasa interés inversor</th>
-          <th>Interés Inversor</th><th>IVA</th><th>ISR</th>
-          <th>Abono capital</th><th>% Inv. Neto</th><th>Capital restante</th>
-          <th>Cuota de mes</th><th>Plazo</th><th>NIT</th>
-        </tr></thead>`;
+      const grupos = ['reinversion_capital', 'reinversion_interes', 'reinversion_total', 'sin_reinversion'];
 
       return grupos.map(grupo => {
-        const credGrupo = creditosData.filter(c => (c.tipo_reinversion ?? null) === grupo);
+        const credGrupo = creditosData.filter(c => {
+          const t = c.tipo_reinversion || 'sin_reinversion';
+          return t === grupo;
+        });
         if (credGrupo.length === 0) return '';
+
+        const tableHead = `
+          <thead><tr>
+            <th>Meses en crédito</th><th>Nombre</th><th>Capital</th>
+            <th>% Interés</th><th>% Inversionista</th><th>Tasa interés inversor</th>
+            <th>Interés Inversor</th><th>IVA</th><th>ISR</th>
+            <th>Abono capital</th><th>% Inv. Interés Neto</th><th>Capital restante</th>
+            <th>Cuota de mes</th><th>Plazo</th><th>NIT</th>
+          </tr></thead>`;
 
         const label = labelMap[grupo ?? ''] ?? 'Sin tipo definido';
         const colorBadge: Record<string, string> = {
@@ -3499,7 +3519,7 @@ export function generarHTMLReporte(
             <th>IVA</th>
             <th>ISR</th>
             <th>Abono capital</th>
-            <th>% Inversionista Neto</th>
+            <th>% Inversionista Interés Neto</th>
             <th>Capital restante</th>
             <th>Cuota de mes</th>
             <th>Plazo</th>
@@ -6268,7 +6288,12 @@ export async function testUploadAndEmail(investorId: number, testEmail: string) 
  * agrupados por inversionista. Incluye un array `otrosCreditos` placeholder (5 créditos random)
  * que será reemplazado por la consulta real cuando esté lista.
  */
-export async function getCreditosEspejoPendientes(page: number = 1, pageSize: number = 10, search?: string) {
+export async function getCreditosEspejoPendientes(
+  page: number = 1,
+  pageSize: number = 10,
+  search?: string,
+  inversionistaId?: number,
+) {
   // 1. Créditos espejo pendientes con info del inversionista + crédito + usuario
   const pendientes = await db
     .select({
@@ -6310,7 +6335,12 @@ export async function getCreditosEspejoPendientes(page: number = 1, pageSize: nu
       eq(creditos.usuario_id, usuarios.usuario_id)
     )
     .where(
-      sql`${creditos_inversionistas_espejo.status} IN ('pendiente_reinversion', 'pendiente_compra_cartera', 'pendiente_revision')`
+      and(
+        sql`${creditos_inversionistas_espejo.status} IN ('pendiente_reinversion', 'pendiente_compra_cartera', 'pendiente_revision')`,
+        inversionistaId !== undefined
+          ? eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId)
+          : undefined,
+      ),
     );
 
   if (pendientes.length === 0) {

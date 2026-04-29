@@ -1179,6 +1179,7 @@ function RouteComponent() {
 								</div>
 							</div>
 						}
+						tableContainerClass="max-h-[600px] overflow-y-auto"
 						pageSizeOptions={[25, 50, 75, 100, 200]}
 						serverPagination={{
 							page: page,

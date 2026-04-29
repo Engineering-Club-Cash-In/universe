@@ -200,7 +200,27 @@ export const recalculateQuota = async ({ body, set }: any) => {
 
     const capital = Number(credito.capital);
     const monthlyRate = Number(credito.porcentaje_interes);
-    const termMonths = Number(credito.plazo);
+
+    const [{ cuotasPagadas }] = await db
+      .select({ cuotasPagadas: sql<number>`count(*)::int` })
+      .from(cuotas_credito)
+      .where(
+        and(
+          eq(cuotas_credito.credito_id, credito.credito_id),
+          eq(cuotas_credito.pagado, true),
+        ),
+      );
+
+    const termMonths = Number(credito.plazo) - Number(cuotasPagadas);
+
+    if (termMonths <= 0) {
+      set.status = 400;
+      return {
+        message:
+          "No hay cuotas pendientes para recalcular (plazo - cuotas pagadas <= 0)",
+      };
+    }
+
     const insuranceCost = Number(credito.seguro_10_cuotas ?? 0);
     const gpsCost = Number(credito.gps ?? 0);
     const membresiasCost = Number(credito.membresias_pago ?? 0);
@@ -233,6 +253,79 @@ export const recalculateQuota = async ({ body, set }: any) => {
       nueva_cuota: nuevaCuota,
     });
 
+    // 5. Recalcular cuotas de inversionistas (padre + espejo) con la nueva cuota total
+    const updateFieldsRecalc = {
+      cuota: nuevaCuota.toString(),
+      porcentaje_interes: credito.porcentaje_interes,
+      seguro_10_cuotas: credito.seguro_10_cuotas,
+      gps: credito.gps,
+      membresias_pago: credito.membresias_pago,
+    };
+
+    const invsPadre = await db
+      .select()
+      .from(creditos_inversionistas)
+      .where(eq(creditos_inversionistas.credito_id, credito.credito_id));
+
+    const invsEspejo = await db
+      .select()
+      .from(creditos_inversionistas_espejo)
+      .where(eq(creditos_inversionistas_espejo.credito_id, credito.credito_id));
+
+    const mapToInvestorInput = (inv: any) => ({
+      inversionista_id: inv.inversionista_id,
+      monto_aportado: inv.monto_aportado,
+      porcentaje_cash_in: inv.porcentaje_cash_in,
+      porcentaje_inversion: inv.porcentaje_participacion_inversionista,
+      fecha_inicio_participacion: inv.fecha_inicio_participacion,
+    });
+
+    let parentCuotas: Map<number, string> = new Map();
+    if (invsPadre.length > 0) {
+      parentCuotas = await updateInvestors(
+        credito.credito_id,
+        invsPadre.map(mapToInvestorInput) as any,
+        updateFieldsRecalc,
+        credito,
+        numero_credito_sifco,
+        Number(credito.seguro_10_cuotas ?? 0),
+        Number(credito.membresias_pago ?? 0),
+        Number(credito.gps ?? 0),
+        creditos_inversionistas,
+      );
+    }
+
+    if (invsEspejo.length > 0) {
+      const espejoSincronizado = invsEspejo.map((inv) => ({
+        ...mapToInvestorInput(inv),
+        cuota_inversionista: parentCuotas.get(inv.inversionista_id),
+      }));
+
+      await updateInvestors(
+        credito.credito_id,
+        espejoSincronizado as any,
+        updateFieldsRecalc,
+        credito,
+        numero_credito_sifco,
+        Number(credito.seguro_10_cuotas ?? 0),
+        Number(credito.membresias_pago ?? 0),
+        Number(credito.gps ?? 0),
+        creditos_inversionistas_espejo,
+        parentCuotas,
+      );
+    }
+
+    // 6. Traer los inversionistas ya recalculados para devolverlos
+    const invsPadreActualizado = await db
+      .select()
+      .from(creditos_inversionistas)
+      .where(eq(creditos_inversionistas.credito_id, credito.credito_id));
+
+    const invsEspejoActualizado = await db
+      .select()
+      .from(creditos_inversionistas_espejo)
+      .where(eq(creditos_inversionistas_espejo.credito_id, credito.credito_id));
+
     set.status = 200;
     return {
       success: true,
@@ -243,6 +336,32 @@ export const recalculateQuota = async ({ body, set }: any) => {
         nueva_cuota: nuevaCuota.toString(),
         porcentaje_interes: monthlyRate.toString(),
         plazo: termMonths,
+        inversionistas: invsPadreActualizado.map((inv) => ({
+          inversionista_id: inv.inversionista_id,
+          monto_aportado: inv.monto_aportado,
+          porcentaje_participacion_inversionista:
+            inv.porcentaje_participacion_inversionista,
+          porcentaje_cash_in: inv.porcentaje_cash_in,
+          cuota_inversionista: inv.cuota_inversionista,
+          monto_inversionista: inv.monto_inversionista,
+          monto_cash_in: inv.monto_cash_in,
+          iva_inversionista: inv.iva_inversionista,
+          iva_cash_in: inv.iva_cash_in,
+        })),
+        inversionistas_espejo: invsEspejoActualizado.map((inv) => ({
+          inversionista_id: inv.inversionista_id,
+          monto_aportado: inv.monto_aportado,
+          porcentaje_participacion_inversionista:
+            inv.porcentaje_participacion_inversionista,
+          porcentaje_cash_in: inv.porcentaje_cash_in,
+          cuota_inversionista: inv.cuota_inversionista,
+          monto_inversionista: inv.monto_inversionista,
+          monto_cash_in: inv.monto_cash_in,
+          iva_inversionista: inv.iva_inversionista,
+          iva_cash_in: inv.iva_cash_in,
+          status: inv.status,
+          tipo_reinversion: inv.tipo_reinversion,
+        })),
       },
     };
   } catch (error) {
@@ -1004,8 +1123,77 @@ export const updateCredit = async ({ body, set }: any) => {
       .where(eq(creditos.credito_id, credito_id))
       .returning();
 
+    // 8.1 Si la cuota cambió, sincronizar cuotas pendientes y recalcular
+    // cuotas de inversionistas (solo si NO vinieron en el body — si vinieron,
+    // el bloque siguiente las maneja con la cuota nueva).
+    if (willChangeCuota) {
+      const sifco = numero_credito_sifco ?? current.numero_credito_sifco;
+      const cuotaNuevaNum = Number(updateFields.cuota);
 
-        
+      await updateInstallments({
+        numero_credito_sifco: sifco,
+        nueva_cuota: cuotaNuevaNum,
+      });
+
+      const bodyTraeInversionistas =
+        (inversionistas && inversionistas.length > 0) ||
+        (inversionistas_espejo && inversionistas_espejo.length > 0);
+
+      if (!bodyTraeInversionistas) {
+        const invsPadreActuales = await db
+          .select()
+          .from(creditos_inversionistas)
+          .where(eq(creditos_inversionistas.credito_id, credito_id));
+
+        const invsEspejoActuales = await db
+          .select()
+          .from(creditos_inversionistas_espejo)
+          .where(eq(creditos_inversionistas_espejo.credito_id, credito_id));
+
+        const mapToInvestorInput = (inv: any) => ({
+          inversionista_id: inv.inversionista_id,
+          monto_aportado: inv.monto_aportado,
+          porcentaje_cash_in: inv.porcentaje_cash_in,
+          porcentaje_inversion: inv.porcentaje_participacion_inversionista,
+          fecha_inicio_participacion: inv.fecha_inicio_participacion,
+        });
+
+        let cuotasPadreAuto: Map<number, string> = new Map();
+        if (invsPadreActuales.length > 0) {
+          cuotasPadreAuto = await updateInvestors(
+            credito_id,
+            invsPadreActuales.map(mapToInvestorInput) as any,
+            updateFields,
+            current,
+            sifco,
+            Number(updateFields.seguro_10_cuotas ?? current.seguro_10_cuotas),
+            Number(updateFields.membresias_pago ?? current.membresias_pago),
+            Number(updateFields.gps ?? current.gps),
+            creditos_inversionistas,
+          );
+        }
+
+        if (invsEspejoActuales.length > 0) {
+          const espejoSinc = invsEspejoActuales.map((inv) => ({
+            ...mapToInvestorInput(inv),
+            cuota_inversionista: cuotasPadreAuto.get(inv.inversionista_id),
+          }));
+
+          await updateInvestors(
+            credito_id,
+            espejoSinc as any,
+            updateFields,
+            current,
+            sifco,
+            Number(updateFields.seguro_10_cuotas ?? current.seguro_10_cuotas),
+            Number(updateFields.membresias_pago ?? current.membresias_pago),
+            Number(updateFields.gps ?? current.gps),
+            creditos_inversionistas_espejo,
+            cuotasPadreAuto,
+          );
+        }
+      }
+    }
 
     // 9. Actualizar inversionistas (Principal)
     let parentCuotas: Map<number, string> = new Map();

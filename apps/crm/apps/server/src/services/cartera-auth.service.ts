@@ -41,7 +41,7 @@ let tokenCache: TokenCache = {
 	expiresAt: 0,
 };
 
-const TOKEN_EXPIRY_MS = 25 * 60 * 1000;
+const TOKEN_EXPIRY_MS = 12 * 60 * 60 * 1000;
 
 function getBaseUrl(): string {
 	return process.env.CARTERA_BACK_URL || "http://localhost:7000";
@@ -125,10 +125,9 @@ async function refreshCarteraToken(): Promise<string | null> {
 
 export async function getCarteraAccessToken(): Promise<string> {
 	if (tokenCache.accessToken && Date.now() < tokenCache.expiresAt) {
-		return tokenCache.accessToken;
-	}
+		const verified = await verifyCarteraToken(tokenCache.accessToken);
+		if (verified) return verified;
 
-	if (tokenCache.refreshToken) {
 		const refreshed = await refreshCarteraToken();
 		if (refreshed) return refreshed;
 	}

@@ -3,9 +3,12 @@ import { fetchWithRetry } from './fetchWithRetry';
 import { ValidationError, ServerError } from './errors';
 
 // Types
+export type DocumentCategoria = "ventas" | "inversiones" | "carta_poder"
+
 export interface DocumentType {
   enum: string
   label: string
+  categoria?: DocumentCategoria
 }
 
 export interface DocumentsResponse {
@@ -21,7 +24,7 @@ export interface DocumentField {
 
 export interface Contracts {
   contractType: string
-  data: Record<string, string>
+  data: Record<string, string | Array<Record<string, string>>>
   emails?: string[]
   options: {
     gender: "male" | "female"
@@ -86,16 +89,18 @@ const API_URL = import.meta.env.VITE_API_URL
 const DOCUMENTS_API_URL = import.meta.env.VITE_API_URL_DOCUMENTS
 
 export const documentsService = {
-  // Obtener todos los tipos de documentos disponibles
-  getDocumentTypes: async (): Promise<DocumentsResponse> => {
+  // Obtener todos los tipos de documentos disponibles, opcionalmente filtrados por categoría
+  getDocumentTypes: async (
+    categoria?: DocumentCategoria
+  ): Promise<DocumentsResponse> => {
     try {
-      const response = await fetchWithRetry(
-        `${API_URL}/docuSeal/documents`,
-        {
-          maxRetries: 2,
-          timeout: 10000, // 10 segundos
-        }
-      );
+      const url = categoria
+        ? `${API_URL}/docuSeal/documents?categoria=${encodeURIComponent(categoria)}`
+        : `${API_URL}/docuSeal/documents`;
+      const response = await fetchWithRetry(url, {
+        maxRetries: 2,
+        timeout: 10000, // 10 segundos
+      });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -207,5 +212,6 @@ export const documentsService = {
 // React Query Keys
 export const documentsKeys = {
   all: ['documents'] as const,
-  types: () => [...documentsKeys.all, 'types'] as const,
+  types: (categoria?: DocumentCategoria) =>
+    [...documentsKeys.all, 'types', categoria ?? 'all'] as const,
 }

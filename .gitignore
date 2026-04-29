@@ -141,3 +141,7 @@ dist
 
 # Monorepo docs folders
 **/docs/
+
+
+# Claude Code local settings
+.claude/settings.local.json

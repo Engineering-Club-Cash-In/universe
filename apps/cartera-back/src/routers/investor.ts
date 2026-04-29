@@ -39,6 +39,7 @@ import { requierePeriodoLiquidacion } from "../utils/investorLiquidationSummary"
  
 
 export const inversionistasRouter = new Elysia()
+  .use(authMiddleware)
   .post("/investor", insertInvestor)
   .get("/investor", getInvestors)
   .post("/investor/update", updateInvestor)
@@ -1528,7 +1529,15 @@ export const inversionistasRouter = new Elysia()
         const page = Number(query.page) || 1;
         const pageSize = Number(query.pageSize) || 10;
         const search = query.search || undefined;
-        const result = await getCreditosEspejoPendientes(page, pageSize, search);
+        const inversionistaId = query.inversionista_id
+          ? Number(query.inversionista_id)
+          : undefined;
+        const result = await getCreditosEspejoPendientes(
+          page,
+          pageSize,
+          search,
+          inversionistaId,
+        );
         return result;
       } catch (error: any) {
         console.error("[GET /creditos-espejo-pendientes] Error:", error);
@@ -1541,13 +1550,14 @@ export const inversionistasRouter = new Elysia()
         page: t.Optional(t.String()),
         pageSize: t.Optional(t.String()),
         search: t.Optional(t.String()),
+        inversionista_id: t.Optional(t.String()),
       }),
       detail: {
         summary: "Créditos espejo pendientes agrupados por inversionista (paginado)",
         description:
-          "Devuelve los créditos espejo con status pendiente_reinversion o pendiente_compra_cartera, " +
-          "agrupados por inversionista. Cada inversionista incluye opciones_de_credito (10 candidatos). " +
-          "Soporta paginación con query params page y pageSize.",
+          "Devuelve los créditos espejo con status pendiente_reinversion, pendiente_compra_cartera " +
+          "o pendiente_revision, agrupados por inversionista. Soporta paginación (page, pageSize), " +
+          "búsqueda por nombre (search) y filtro por inversionista_id.",
         tags: ["Inversionistas", "Espejos"],
       },
     }

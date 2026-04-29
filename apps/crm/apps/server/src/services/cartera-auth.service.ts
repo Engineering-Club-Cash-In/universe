@@ -127,7 +127,9 @@ export async function getCarteraAccessToken(): Promise<string> {
 	if (tokenCache.accessToken && Date.now() < tokenCache.expiresAt) {
 		const verified = await verifyCarteraToken(tokenCache.accessToken);
 		if (verified) return verified;
+	}
 
+	if (tokenCache.refreshToken) {
 		const refreshed = await refreshCarteraToken();
 		if (refreshed) return refreshed;
 	}

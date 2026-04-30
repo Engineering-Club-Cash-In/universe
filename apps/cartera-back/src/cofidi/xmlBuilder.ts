@@ -105,9 +105,15 @@ construirXML(data: DTERequest, totales: DTETotales): string {
 
     const frasesElem = parent.ele('dte:Frases');
     frases.forEach(frase => {
-      frasesElem.ele('dte:Frase')
+      const fraseElem = frasesElem.ele('dte:Frase')
         .att('TipoFrase', frase.tipoFrase.toString())
         .att('CodigoEscenario', frase.codigoEscenario);
+      if (frase.numeroResolucion) {
+        fraseElem.att('NumeroResolucion', frase.numeroResolucion);
+      }
+      if (frase.fechaResolucion) {
+        fraseElem.att('FechaResolucion', frase.fechaResolucion);
+      }
     });
   }
 

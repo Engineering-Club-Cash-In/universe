@@ -558,8 +558,7 @@ export function generarHTMLFacturaPro(
             </div>
 
             <p class="legal-notice">
-               Sujeto a retención definitiva ISR. Factura electrónica emitida en línea.
-                Válida sin sello ni firma.
+                Sujeto a pago directo ISR. Resolución No. 6130294202615373132 29/04/2026
             </p>
         </footer>
     </div>

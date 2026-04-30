@@ -308,8 +308,9 @@ export async function getCreditCandidates(
     .where(
       and(
         inArray(cuotas_credito.credito_id, creditoIds),
-        eq(cuotas_credito.pagado, true)
-        // Se incluyen todas las cuotas: 0, 1, 2, 3...
+        eq(cuotas_credito.pagado, true),
+        gt(cuotas_credito.numero_cuota, 0)
+        // Solo se cuentan cuotas a partir de la 1 (se descarta la 0)
       )
     )
     .groupBy(cuotas_credito.credito_id);
@@ -328,7 +329,12 @@ export async function getCreditCandidates(
       count: sql<number>`COUNT(*)::int`,
     })
     .from(cuotas_credito)
-    .where(inArray(cuotas_credito.credito_id, creditoIds))
+    .where(
+      and(
+        inArray(cuotas_credito.credito_id, creditoIds),
+        gt(cuotas_credito.numero_cuota, 0)
+      )
+    )
     .groupBy(cuotas_credito.credito_id);
 
   const totalCuotasByCredito = new Map<number, number>();
@@ -424,6 +430,14 @@ export async function getCreditCandidates(
     // Cuotas pagadas y totales
     const cuotasPagadas = cuotasPagadasByCredito.get(credito_id) ?? 0;
     const totalCuotas = totalCuotasByCredito.get(credito_id) ?? 0;
+
+    // FILTRO CRÍTICO: Solo si es cuota 1 confirmada pa delante (se descarta si solo tiene cuota 0 o ninguna)
+    if (cuotasPagadas === 0) {
+      console.log(
+        `   ❌ [${numero_credito_sifco}] Descartado: No tiene ninguna cuota pagada (>= 1)`
+      );
+      continue;
+    }
 
     // Score
     const crmBonus = numero_credito_sifco?.toLowerCase().startsWith("crm") ? SCORE_CRM_BONUS : 0;

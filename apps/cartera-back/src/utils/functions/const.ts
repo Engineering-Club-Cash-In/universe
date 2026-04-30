@@ -31,9 +31,12 @@ export const CLUB_CASHIN_CONFIG = {
   tipoDocumento: "FCAM" as const,
   codigoMoneda: "GTQ",
   frases: [
+     
     {
       tipoFrase: 1 as const,
-      codigoEscenario: "2",
+      codigoEscenario: "3",
+      numeroResolucion: "6130294202615373132",
+      fechaResolucion: "2026-04-29",
     },
   ],
 };

@@ -953,10 +953,10 @@ export async function mapEstadoCuentaToPagosBig(
       gps_restante: "0.00",
       total_restante: "0.00",
       membresias: credito?.membresias,
-      membresias_pago: credito?.membresias
+      membresias_pago: isPagado && credito?.membresias
         ? credito?.membresias.toString()
         : "0.00",
-      membresias_mes: credito?.membresias
+      membresias_mes: isPagado && credito?.membresias
         ? credito?.membresias.toString()
         : "0.00",
       otros: "",

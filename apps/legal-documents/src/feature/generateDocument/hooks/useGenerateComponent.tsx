@@ -164,9 +164,15 @@ export function useGenerateComponent() {
     );
 
     try {
-      // Obtener el email del campo "correo"
+      // Obtener el email del campo "correo".
+      // En inversiones no existe el campo, así que usamos un correo de referencia
+      // para que la API lo acepte como placeholder.
+      const FALLBACK_EMAIL = "correo@clubcashin.com";
+      const isInversiones = formData.category === "inversiones";
       const email =
-        formData.fieldValues?.correo || formData.fieldValues?.email || "";
+        formData.fieldValues?.correo ||
+        formData.fieldValues?.email ||
+        (isInversiones ? FALLBACK_EMAIL : "");
 
       if (!email) {
         // si no aparece el campo que contacte a soporte
@@ -197,6 +203,15 @@ export function useGenerateComponent() {
               } catch {
                 return { [field.key]: [] };
               }
+            }
+            // Para selects: además del value, mandar una flag por opción (☒ / ☐)
+            // para que el template pueda marcar el checkbox correspondiente.
+            if (field.type === "select" && Array.isArray(field.options)) {
+              const flags: Record<string, string> = {};
+              for (const opt of field.options) {
+                flags[`${field.key}_${opt.value}`] = raw === opt.value ? "☒" : "☐";
+              }
+              return { [field.key]: raw, ...flags };
             }
             return { [field.key]: raw };
           });

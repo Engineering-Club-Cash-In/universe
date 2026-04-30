@@ -361,19 +361,25 @@ export async function insertPagosCreditoInversionistas(
   const inversionistasWithName = await Promise.all(
     inversionistasData.map(async (inv) => {
       const [invRow] = await db
-        .select({ nombre: inversionistas.nombre })
+        .select({
+          nombre: inversionistas.nombre,
+          // 🆕 Traemos también el status para decidir si le devolvemos
+          // todo su monto_aportado como abono_capital (pendiente_devolucion).
+          status: inversionistas.status,
+        })
         .from(inversionistas)
         .where(eq(inversionistas.inversionista_id, inv.inversionista_id));
       return {
         ...inv,
         nombre: invRow?.nombre ?? "",
+        status_inversionista: invRow?.status ?? null,
       };
     })
   );
 
   console.log("\n👥 Inversionistas con nombres:");
   inversionistasWithName.forEach((inv, idx) => {
-    console.log(`   ${idx + 1}. ${inv.nombre} (ID: ${inv.inversionista_id})`);
+    console.log(`   ${idx + 1}. ${inv.nombre} (ID: ${inv.inversionista_id}) status=${inv.status_inversionista}`);
   });
 
   if (!inversionistasWithName.length) {
@@ -551,7 +557,16 @@ export async function insertPagosCreditoInversionistas(
       `   📊 totalIVA (cash_in + inversionista): ${totalIVA.toString()}`
     );
 
-    if (inv.inversionista_id === mayorCuotaInversionistaId && !excludeCube) {
+    if (inv.status_inversionista === "pendiente_devolucion") {
+      // 🆕 CASO ESPECIAL: inversionista pendiente de devolución.
+      // Se le devuelve TODO su monto_aportado como abono_capital en este pago
+      // (sin restar interés, IVA ni cargos fijos). El interés/IVA del último
+      // período se calcula normal y viaja en abono_interes/abono_iva_12.
+      abono_capital = new Big(inv.monto_aportado || 0);
+      console.log(
+        `   ⭐ PENDIENTE DE DEVOLUCIÓN - abono_capital = monto_aportado completo: ${abono_capital.toString()}`
+      );
+    } else if (inv.inversionista_id === mayorCuotaInversionistaId && !excludeCube) {
       console.log(
         `   🏆 ES EL MAYOR INVERSIONISTA - Aplicando descuentos completos`
       );
@@ -631,20 +646,33 @@ export async function insertPagosCreditoInversionistas(
 
     let abonoCapitalId: number | null = null;
     if (abonosNoLiquidados.length > 0) {
-      let montoAbono = new Big(0);
-      for (const abono of abonosNoLiquidados) {
-        // Solo sumar si es tipo CAPITAL; CANCELACION ya fue sumado previamente
-        if (abono.tipo === "CAPITAL") {
-          montoAbono = montoAbono.plus(abono.monto);
+      if (inv.status_inversionista === "pendiente_devolucion") {
+        // 🆕 Si está en pendiente_devolucion, su abono_capital ya es el
+        // monto_aportado completo del espejo. Sumarle los abonos_capital
+        // pendientes sería devolverle más de lo que realmente tiene (doble
+        // conteo). Los registros quedan como liquidado=false para que otro
+        // flujo los resuelva después.
+        console.log(
+          `   ⏭️  PENDIENTE DE DEVOLUCIÓN: saltando ${abonosNoLiquidados.length} ` +
+            `abono(s) a capital pendiente(s) (no se suman al abono_capital ` +
+            `ni se linkea abono_capital_id)`
+        );
+      } else {
+        let montoAbono = new Big(0);
+        for (const abono of abonosNoLiquidados) {
+          // Solo sumar si es tipo CAPITAL; CANCELACION ya fue sumado previamente
+          if (abono.tipo === "CAPITAL") {
+            montoAbono = montoAbono.plus(abono.monto);
+          }
         }
-      }
-      if (!montoAbono.eq(0)) {
-        abono_capital = abono_capital.plus(montoAbono);
-      }
-      abonoCapitalId = abonosNoLiquidados[0].abono_id;
+        if (!montoAbono.eq(0)) {
+          abono_capital = abono_capital.plus(montoAbono);
+        }
+        abonoCapitalId = abonosNoLiquidados[0].abono_id;
 
-      console.log(`   💰 Abono a capital encontrado (id: ${abonoCapitalId}): +${montoAbono.toFixed(6)} (tipo: ${abonosNoLiquidados[0].tipo})`);
-      console.log(`      abono_capital con abono sumado: ${abono_capital.toString()}`);
+        console.log(`   💰 Abono a capital encontrado (id: ${abonoCapitalId}): +${montoAbono.toFixed(6)} (tipo: ${abonosNoLiquidados[0].tipo})`);
+        console.log(`      abono_capital con abono sumado: ${abono_capital.toString()}`);
+      }
     }
 
     const resultado = {
@@ -1266,6 +1294,8 @@ interface GetPagosOptions {
   soloAplicados?: boolean;
   fechaAplicado?: string;
   fechaBoleta?: string;
+  fechaBoletaInicio?: string;
+  fechaBoletaFin?: string;
 }
 /**
  * 📊 Obtiene los pagos junto con su información detallada de créditos, usuarios, cuotas e inversionistas.
@@ -1296,6 +1326,8 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     soloAplicados,
     fechaAplicado,
     fechaBoleta,
+    fechaBoletaInicio,
+    fechaBoletaFin,
   } = options;
 
   try {
@@ -1360,10 +1392,22 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         `(p.fecha_boleta AT TIME ZONE 'America/Guatemala')::date = '${fechaBoleta}'::date`
       );
     }
+    // 📅 Rango de fecha_boleta (zona Guatemala). Inclusivo en ambos extremos.
+    // Se puede usar combinado o por separado con fechaBoleta (exacta).
+    if (fechaBoletaInicio) {
+      whereClauses.push(
+        `(p.fecha_boleta AT TIME ZONE 'America/Guatemala')::date >= '${fechaBoletaInicio}'::date`
+      );
+    }
+    if (fechaBoletaFin) {
+      whereClauses.push(
+        `(p.fecha_boleta AT TIME ZONE 'America/Guatemala')::date <= '${fechaBoletaFin}'::date`
+      );
+    }
 
     // ✅ Créditos activos y cancelados
     whereClauses.push(
-      `c."statusCredit" IN ('ACTIVO', 'MOROSO','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO')`
+      `c."statusCredit" IN ('ACTIVO', 'MOROSO','PENDIENTE_CANCELACION','EN_CONVENIO','CANCELADO','INCOBRABLE')`
     );
     const whereSQL = whereClauses.length
       ? `WHERE ${whereClauses.join(" AND ")}`
@@ -1435,8 +1479,12 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
           'deudaTotal', c.deudatotal,
           'statusCredit', c."statusCredit",
           'porcentajeInteres', c.porcentaje_interes,
-          'fechaCreacion', c.fecha_creacion
+          'fechaCreacion', c.fecha_creacion,
+          'banderaReinversion', c.bandera_reinversion
         ) AS "credito",
+
+        -- 🚩 Bandera top-level: crédito con compra de cartera / reinversión pendiente
+        c.bandera_reinversion AS "banderaReinversion",
 
         -- 📅 Info de la cuota
         (
@@ -1569,6 +1617,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       monto_aplicado: r.monto_aplicado,
       origenPago: r.origenPago,
       credito: r.credito,
+      banderaReinversion: r.banderaReinversion ?? false,
       cuota: r.cuota,
       usuario: r.usuario,
       inversionistas: Array.isArray(r.inversionistas)
@@ -2369,8 +2418,11 @@ export async function getAbonosPorCuota(
     throw new Error(`No se encontró el crédito con SIFCO: ${numero_credito_sifco}`);
   }
 
-  // 2. Buscar la cuota
-  const [cuota] = await db
+  // 2. Buscar la(s) cuota(s) con ese numero_cuota
+  // Nota: pueden existir cuotas duplicadas con el mismo numero_cuota para un mismo
+  // credito (p. ej. tras regeneraciones de calendario). Se consideran todas para
+  // no perder pagos vinculados al cuota_id "viejo".
+  const cuotasMatch = await db
     .select({ cuota_id: cuotas_credito.cuota_id })
     .from(cuotas_credito)
     .where(
@@ -2378,14 +2430,15 @@ export async function getAbonosPorCuota(
         eq(cuotas_credito.credito_id, credito.credito_id),
         eq(cuotas_credito.numero_cuota, numero_cuota)
       )
-    )
-    .limit(1);
+    );
 
-  if (!cuota) {
+  if (cuotasMatch.length === 0) {
     throw new Error(`No se encontró la cuota ${numero_cuota} para el crédito ${numero_credito_sifco}`);
   }
 
-  // 3. Buscar los pagos de esa cuota
+  const cuotaIds = cuotasMatch.map((c) => c.cuota_id);
+
+  // 3. Buscar los pagos de esas cuotas
   const pagos = await db
     .select({
       pago_id: pagos_credito.pago_id,
@@ -2401,7 +2454,7 @@ export async function getAbonosPorCuota(
     .where(
       and(
         eq(pagos_credito.credito_id, credito.credito_id),
-        eq(pagos_credito.cuota_id, cuota.cuota_id)
+        inArray(pagos_credito.cuota_id, cuotaIds)
       )
     );
 

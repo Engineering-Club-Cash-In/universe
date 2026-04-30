@@ -38,6 +38,7 @@ import {
 } from "drizzle-orm";
 import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./payments";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
+import { buildNameSearchCondition } from "../utils/functions/generalFunctions";
 
 
 export const getCreditoByNumero = async (numero_credito_sifco: string) => {
@@ -59,6 +60,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         )
       )
       .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+      .innerJoin(asesores, eq(creditos.asesor_id, asesores.asesor_id))
       .limit(1);
 
     if (creditoData.length === 0) {
@@ -90,6 +92,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         return {
           credito: currentCredit.creditos,
           usuario: currentCredit.usuarios,
+          asesor: currentCredit.asesores,
           cancelacion: cancelacion[0],
           flujo: "CANCELADO",
         };
@@ -442,6 +445,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       flujo: "ACTIVO",
       credito: currentCredit.creditos,
       usuario: currentCredit.usuarios,
+      asesor: currentCredit.asesores,
       cuotaActual,
       cuotaActualPagada,
       cuotaActualStatus,
@@ -516,6 +520,7 @@ export interface CreditoConInfo {
     porcentaje_participacion_inversionista: string;
     porcentaje_cash_in: string;
     cuota_inversionista: string;
+    fecha_inicio_participacion?: string;
   }[];
   resumen: {
     total_cash_in_monto: number;
@@ -540,6 +545,7 @@ export interface CreditoConInfo {
     monto_cash_in: string;
     monto_inversionista: string;
     cuota_inversionista: string;
+    fecha_inicio_participacion?: string;
   }[];
   fecha_inicio?: string | null;
 }
@@ -589,7 +595,10 @@ export async function getCreditosWithUserByMesAnio(
   cuotas_atrasadas?: number,
   proximidad_pago?: ProximidadPago,
   is_vehiculo_propio?: boolean,
-  inversionista_ids?: number[]
+  inversionista_ids?: number[],
+  fecha_desde?: string,
+  fecha_hasta?: string,
+  numeros_credito_sifco?: string[]
 ): Promise<{
   data: CreditoConInfo[];
   page: number;
@@ -612,7 +621,16 @@ export async function getCreditosWithUserByMesAnio(
 
   try {
     // 📌 Filtros
-    if (numero_credito_sifco && numero_credito_sifco.trim().length > 0) {
+    // Normalizar lista multi-SIFCO (tiene prioridad sobre el filtro single).
+    const sifcosLimpios = numeros_credito_sifco
+      ?.map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    if (sifcosLimpios && sifcosLimpios.length > 0) {
+      console.log(
+        `🔎 Filtrando por ${sifcosLimpios.length} número(s) de crédito (multi)`
+      );
+      conditions.push(inArray(creditos.numero_credito_sifco, sifcosLimpios));
+    } else if (numero_credito_sifco && numero_credito_sifco.trim().length > 0) {
       console.log(`🔎 Filtrando por número de crédito: ${numero_credito_sifco}`);
       conditions.push(eq(creditos.numero_credito_sifco, numero_credito_sifco.trim()));
     } else {
@@ -646,7 +664,8 @@ export async function getCreditosWithUserByMesAnio(
 
     if (nombre_usuario && nombre_usuario.trim().length > 0) {
       console.log(`🔎 Filtrando por nombre de usuario: ${nombre_usuario}`);
-      conditions.push(sql`${usuarios.nombre} ILIKE ${`%${nombre_usuario.trim()}%`}`);
+      const nameCond = buildNameSearchCondition(usuarios.nombre, nombre_usuario);
+      if (nameCond) conditions.push(nameCond);
     }
 
     if (email_asesor && email_asesor.trim().length > 0) {
@@ -677,8 +696,8 @@ export async function getCreditosWithUserByMesAnio(
     throw new Error("Error building filters");
   }
 
-  // 🔥 Filtro de proximidad_pago - se aplica ANTES de la paginación
-  const needsProximidadJoin = !!proximidad_pago;
+  // 🔥 Filtro de proximidad_pago / rango de fechas - se aplica ANTES de la paginación
+  const needsProximidadJoin = !!proximidad_pago || !!fecha_desde || !!fecha_hasta;
   if (proximidad_pago) {
     console.log(`🔎 Filtrando por proximidad de pago: ${proximidad_pago}`);
 
@@ -723,6 +742,22 @@ export async function getCreditosWithUserByMesAnio(
     conditions.push(eq(cuotas_credito.pagado, false));
     conditions.push(gt(cuotas_credito.numero_cuota, 0));
   }
+
+  if (fecha_desde || fecha_hasta) {
+    if (!proximidad_pago) {
+      conditions.push(eq(cuotas_credito.pagado, false));
+      conditions.push(gt(cuotas_credito.numero_cuota, 0));
+    }
+    if (fecha_desde) {
+      conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date >= ${fecha_desde}::date`);
+    }
+    if (fecha_hasta) {
+      conditions.push(sql`${cuotas_credito.fecha_vencimiento}::date <= ${fecha_hasta}::date`);
+    }
+  }
+
+  console.log(`fecha desde ${fecha_desde}`);
+  console.log(`fecha hasta ${fecha_hasta}`);
 
   const whereCondition = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -832,6 +867,7 @@ export async function getCreditosWithUserByMesAnio(
             creditos_inversionistas.porcentaje_participacion_inversionista,
           porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
           cuota_inversionista: creditos_inversionistas.cuota_inversionista,
+          fecha_inicio_participacion: creditos_inversionistas.fecha_inicio_participacion,
         })
         .from(creditos_inversionistas)
         .innerJoin(
@@ -860,6 +896,8 @@ export async function getCreditosWithUserByMesAnio(
             creditos_inversionistas_espejo.monto_inversionista,
           cuota_inversionista:
             creditos_inversionistas_espejo.cuota_inversionista,
+          fecha_inicio_participacion:
+            creditos_inversionistas_espejo.fecha_inicio_participacion,
         })
         .from(creditos_inversionistas_espejo)
         .innerJoin(
@@ -953,7 +991,8 @@ export async function getCreditosWithUserByMesAnio(
         .where(
           and(
             inArray(cuotas_credito.credito_id, creditosIds),
-            gte(cuotas_credito.fecha_vencimiento, hoyStr),
+            gte(cuotas_credito.fecha_vencimiento, fecha_desde ?? hoyStr),
+            fecha_hasta ? lte(cuotas_credito.fecha_vencimiento, fecha_hasta) : undefined,
             gt(cuotas_credito.numero_cuota, 0)
           )
         )

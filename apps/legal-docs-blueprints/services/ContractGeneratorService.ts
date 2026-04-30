@@ -19,7 +19,19 @@ import { crmApiService } from './CrmApiService';
 import { uploadPdfToR2 } from './R2Service';
 
 // Instancia de WeeTrust (servicio principal de firma)
-const weeTrustService = new WeeTrustService();
+// Si WEETRUST_DISABLED=true o faltan credenciales, queda como null y se usa Documenso directo.
+const weeTrustService: WeeTrustService | null = (() => {
+  if (process.env.WEETRUST_DISABLED === 'true') {
+    console.log('[WeeTrust] Deshabilitado por WEETRUST_DISABLED=true. Usando Documenso.');
+    return null;
+  }
+  try {
+    return new WeeTrustService();
+  } catch (err) {
+    console.warn('[WeeTrust] No inicializado (faltan credenciales). Se usará Documenso:', err);
+    return null;
+  }
+})();
 
 /**
  * Servicio genérico para generación de contratos desde templates DOCX
@@ -199,6 +211,31 @@ export class ContractGeneratorService {
       templateFilenamePlural: 'solicitud_compra_vehiculo/solicitud_compra_vehiculo-plural.docx',
       templateFilenameFemalePlural: 'solicitud_compra_vehiculo/solicitud_compra_vehiculo-mujer-plural.docx',
       description: 'Carta de solicitud de compra de vehículo',
+      requiredFields: []
+    });
+
+    // ===== INVERSIONES =====
+    this.registerTemplate({
+      type: ContractType.ACUERDO_INVERSION_CASH_IN,
+      templateFilename: 'inversiones/acuerdo_inversion/acuerdo_inversion_hombre.docx',
+      templateFilenameFemale: 'inversiones/acuerdo_inversion/acuerdo_inversion_mujer.docx',
+      description: 'Acuerdo de Inversión Cash In',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_CONFIRMACION_INVERSION_INICIAL,
+      templateFilename: 'inversiones/anexo1/carta_confirmacion_hombre.docx',
+      templateFilenameFemale: 'inversiones/anexo1/carta_informacion_mujer.docx',
+      description: 'Anexo 1 - Carta de Confirmación de Inversión Inicial',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION,
+      templateFilename: 'inversiones/anexo2/carta_eleccion_hombre.docx',
+      templateFilenameFemale: 'inversiones/anexo2/carta_eleccion_hombre.docx',
+      description: 'Anexo 2 - Carta de Elección de Modalidad de Pago y Reinversión',
       requiredFields: []
     });
 
@@ -591,8 +628,12 @@ export class ContractGeneratorService {
           console.warn(`⚠ Se esperaban ${requiredEmails} email(s) pero se recibieron ${options.emails.length}`);
         }
 
-        // Intentar primero con WeeTrust
+        // Intentar primero con WeeTrust (si está habilitado)
         try {
+          if (!weeTrustService) {
+            throw new Error('WeeTrust deshabilitado o no inicializado');
+          }
+
           console.log(`🔗 Creando documento en WeeTrust para firma...`);
 
           signing = await weeTrustService.createDocumentForSigning(

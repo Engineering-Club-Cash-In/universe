@@ -16,7 +16,12 @@ export enum ContractType {
   CARTA_SOLICITUD_TRASPASO_VEHICULO = 'carta_traspaso_vehiculo_rdbe',
   CONTRATO_PRIVADO_USO = 'contrato_privado_uso_carro_nuevo',
   SOLICITUD_COMPRA_VEHICULO = 'solicitud_compra_vehiculo_tercero',
-  CARTA_ACEPTACION_INSTALACION_GPS = 'carta_aceptacion_instalacion_gps'
+  CARTA_ACEPTACION_INSTALACION_GPS = 'carta_aceptacion_instalacion_gps',
+
+  // ===== INVERSIONES =====
+  ACUERDO_INVERSION_CASH_IN = 'acuerdo_inversion_cash_in',
+  CARTA_CONFIRMACION_INVERSION_INICIAL = 'carta_confirmacion_inversion_inicial',
+  CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION = 'carta_eleccion_modalidad_pago_reinversion'
   // Agrega más tipos aquí según sea necesario
 }
 

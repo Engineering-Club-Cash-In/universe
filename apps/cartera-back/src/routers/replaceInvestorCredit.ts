@@ -3,8 +3,10 @@ import {
   manualReassignInvestor,
   returnPendingInvestorsToCube,
 } from "../controllers/replaceInvestorCredit";
+import { authMiddleware } from "./midleware";
 
 export const replaceInvestorCreditRouter = new Elysia()
+  .use(authMiddleware)
   .post(
     "/reemplazar-inversionista-credito",
     manualReassignInvestor,
@@ -39,7 +41,7 @@ export const replaceInvestorCreditRouter = new Elysia()
     },
   )
   .post(
-    "/devolver-pendientes-a-cube",
+    "/reemplazar-inversionista-credito/devolver-pendientes-a-cube",
     returnPendingInvestorsToCube,
     {
       body: t.Object({
@@ -47,11 +49,12 @@ export const replaceInvestorCreditRouter = new Elysia()
           t.Number({ minimum: 1 }),
           t.Array(t.Number({ minimum: 1 }), { minItems: 1 }),
         ]),
+        inversionista_id: t.Optional(t.Number({ minimum: 1 })),
       }),
       detail: {
         summary: "Devolver inversionistas pendientes a CUBE",
         description:
-          "Recibe uno o varios credito_id y limpia los créditos sacando a todos los inversionistas con status distinto de 'completado' en el espejo. El monto de cada inversionista removido se devuelve a CUBE y se recalculan las cuotas en padre y espejo.",
+          "Recibe uno o varios credito_id y limpia los créditos sacando inversionistas con status distinto de 'completado' en el espejo, devolviendo su monto a CUBE. Si se envía inversionista_id, la limpieza se restringe a ese inversionista.",
         tags: ["Inversionistas", "Créditos", "Espejo"],
       },
     },

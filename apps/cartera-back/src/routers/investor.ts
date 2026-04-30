@@ -8,6 +8,8 @@ import {
   liquidateByInvestorId,
   liquidateByInvestorSchema,
   updateInvestor,
+  updateInvestorStatus,
+  exitInvestor,
   resumenGlobalInversionistas,
   resumenGlobalLiquidaciones,
   getLiquidaciones,
@@ -25,6 +27,7 @@ import {
   reconcileMirrorPercentages,
   auditMirrorPercentages,
   getCreditosEspejoPendientes,
+  detectPagosHuerfanos,
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
 import { generarYSubirPDFInversionista, generarYSubirExcelInversionista } from "../utils/functions/generalFunctions";
@@ -36,9 +39,55 @@ import { requierePeriodoLiquidacion } from "../utils/investorLiquidationSummary"
  
 
 export const inversionistasRouter = new Elysia()
+  .use(authMiddleware)
   .post("/investor", insertInvestor)
   .get("/investor", getInvestors)
   .post("/investor/update", updateInvestor)
+  .post(
+    "/investor/status",
+    updateInvestorStatus,
+    {
+      body: t.Object({
+        inversionista_id: t.Number({ minimum: 1 }),
+        status: t.Union([
+          t.Literal("activo"),
+          t.Literal("inactivo"),
+          t.Literal("pendiente_devolucion"),
+        ]),
+      }),
+      detail: {
+        summary: "Cambia el status de un inversionista y notifica por correo",
+        description:
+          "Cambia el campo status del inversionista a 'activo', 'inactivo' o " +
+          "'pendiente_devolucion'. Si el status cambia realmente, envía un correo " +
+          "de notificación a la lista hardcodeada de destinatarios. Cuando el status " +
+          "pasa a 'pendiente_devolucion', el correo incluye un aviso de que en la " +
+          "próxima liquidación se le devolverá el saldo al inversionista.",
+        tags: ["Inversionistas"],
+      },
+    }
+  )
+  .post(
+    "/investor/exit",
+    exitInvestor,
+    {
+      body: t.Object({
+        inversionista_id: t.Number({ minimum: 1 }),
+        creditos: t.Array(t.Number({ minimum: 1 }), { minItems: 1 }),
+      }),
+      detail: {
+        summary: "Saca a un inversionista de los créditos indicados (CUBE absorbe) y lo marca como inactivo",
+        description:
+          "Por cada crédito de la lista: si CUBE NO está en el crédito, el row del " +
+          "inversionista cambia de dueño a CUBE (mismo monto, misma cuota). Si CUBE " +
+          "YA está, los campos numéricos del row del inversionista se suman al row de " +
+          "CUBE y el row del inversionista se elimina. Lo mismo en el espejo, dejando " +
+          "status='completado'. Al final, el inversionista pasa a status='inactivo' y " +
+          "se envía correo de notificación a la lista hardcodeada.",
+        tags: ["Inversionistas"],
+      },
+    }
+  )
   .post("/investor/saldo-reinversion", updateSaldoReinversion)
   .post("/investor/fix-cube", fixCubeInvestment)
   .post("/investor/reconcile-mirror-percentages", reconcileMirrorPercentages)
@@ -516,7 +565,19 @@ export const inversionistasRouter = new Elysia()
 
       for (const liq of liquidacionesDelDia) {
         const { inversionista_id: id, liquidacion_id: liqId } = liq;
+        if (id === 38 || id === 84) continue;
         try {
+          const huerfanos = await detectPagosHuerfanos(id, liqId);
+          if (huerfanos.length) {
+            errores.push({
+              id,
+              liquidacion_id: liqId,
+              error: `Se encontraron ${huerfanos.length} pago(s) huérfano(s) (sin crédito espejo asociado). No se generó el reporte.`,
+              pagos_huerfanos: huerfanos,
+            });
+            continue;
+          }
+
           const result = await resumeInvestor(
             id,
             1,
@@ -557,7 +618,7 @@ export const inversionistasRouter = new Elysia()
             logoUrl
           );
 
-          const liquidacionActualizada = await updateLiquidacionReporteUrl(id, url);
+          const liquidacionActualizada = await updateLiquidacionReporteUrl(liqId, url);
 
           resultados.push({
             inversionista_id: id,
@@ -1468,7 +1529,15 @@ export const inversionistasRouter = new Elysia()
         const page = Number(query.page) || 1;
         const pageSize = Number(query.pageSize) || 10;
         const search = query.search || undefined;
-        const result = await getCreditosEspejoPendientes(page, pageSize, search);
+        const inversionistaId = query.inversionista_id
+          ? Number(query.inversionista_id)
+          : undefined;
+        const result = await getCreditosEspejoPendientes(
+          page,
+          pageSize,
+          search,
+          inversionistaId,
+        );
         return result;
       } catch (error: any) {
         console.error("[GET /creditos-espejo-pendientes] Error:", error);
@@ -1481,13 +1550,14 @@ export const inversionistasRouter = new Elysia()
         page: t.Optional(t.String()),
         pageSize: t.Optional(t.String()),
         search: t.Optional(t.String()),
+        inversionista_id: t.Optional(t.String()),
       }),
       detail: {
         summary: "Créditos espejo pendientes agrupados por inversionista (paginado)",
         description:
-          "Devuelve los créditos espejo con status pendiente_reinversion o pendiente_compra_cartera, " +
-          "agrupados por inversionista. Cada inversionista incluye opciones_de_credito (10 candidatos). " +
-          "Soporta paginación con query params page y pageSize.",
+          "Devuelve los créditos espejo con status pendiente_reinversion, pendiente_compra_cartera " +
+          "o pendiente_revision, agrupados por inversionista. Soporta paginación (page, pageSize), " +
+          "búsqueda por nombre (search) y filtro por inversionista_id.",
         tags: ["Inversionistas", "Espejos"],
       },
     }

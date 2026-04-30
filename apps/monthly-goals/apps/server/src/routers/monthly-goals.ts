@@ -289,6 +289,7 @@ export const calculateGoalProgress = protectedProcedure
 			.select({
 				targetValue: monthlyGoals.targetValue,
 				achievedValue: monthlyGoals.achievedValue,
+				isInverse: goalTemplates.isInverse,
 				successThreshold: goalTemplates.successThreshold,
 				warningThreshold: goalTemplates.warningThreshold,
 			})
@@ -303,7 +304,20 @@ export const calculateGoalProgress = protectedProcedure
 
 		const target = parseFloat(goal[0].targetValue);
 		const achieved = parseFloat(goal[0].achievedValue);
-		const percentage = target > 0 ? (achieved / target) * 100 : 0;
+		const isInverse = goal[0].isInverse;
+		let percentage = 0;
+
+		if (isInverse) {
+			if (target === 0 && achieved === 0) {
+				percentage = 100;
+			} else if (target > 0 && achieved <= target) {
+				percentage = 100;
+			} else if (target > 0 && achieved > target) {
+				percentage = Math.max((target / achieved) * 100, 0);
+			}
+		} else if (target > 0) {
+			percentage = (achieved / target) * 100;
+		}
 
 		const successThreshold = parseFloat(goal[0].successThreshold || "80");
 		const warningThreshold = parseFloat(goal[0].warningThreshold || "50");

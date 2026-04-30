@@ -31,6 +31,7 @@ interface DataTableProps<TData, TValue> {
 	searchPlaceholder?: string;
 	searchColumn?: string;
 	filterContent?: React.ReactNode;
+	extraSearch?: React.ReactNode;
 	isLoading?: boolean;
 	// Paginación del servidor
 	serverPagination?: {
@@ -44,6 +45,8 @@ interface DataTableProps<TData, TValue> {
 	setGlobalFilterParam?: (filter: string) => void;
 	onRowClick?: (row: TData) => void;
 	hideSearch?: boolean;
+	pageSizeOptions?: number[];
+	tableContainerClass?: string;
 }
 
 export function DataTable<TData, TValue>({
@@ -53,10 +56,13 @@ export function DataTable<TData, TValue>({
 	isLoading,
 	searchColumn,
 	filterContent,
+	extraSearch,
 	serverPagination,
 	setGlobalFilterParam,
 	onRowClick,
 	hideSearch,
+	pageSizeOptions = [10, 20, 30, 40, 50],
+	tableContainerClass,
 }: DataTableProps<TData, TValue>) {
 	const [sorting, setSorting] = useState<SortingState>([]);
 	const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -102,20 +108,25 @@ export function DataTable<TData, TValue>({
 
 	return (
 		<div className="space-y-4">
-			{(!hideSearch || filterContent) && (
+			{(!hideSearch || filterContent || extraSearch) && (
 				<div className="flex flex-col gap-4">
-					{!hideSearch && (
-						<Input
-							placeholder={searchPlaceholder}
-							value={globalFilter ?? ""}
-							onChange={(event) => {
-								if (setGlobalFilterParam) {
-									setGlobalFilterParam(event.target.value);
-								}
-								setGlobalFilter(event.target.value);
-							}}
-							className="max-w-sm"
-						/>
+					{(!hideSearch || extraSearch) && (
+						<div className="flex flex-wrap items-center gap-2">
+							{!hideSearch && (
+								<Input
+									placeholder={searchPlaceholder}
+									value={globalFilter ?? ""}
+									onChange={(event) => {
+										if (setGlobalFilterParam) {
+											setGlobalFilterParam(event.target.value);
+										}
+										setGlobalFilter(event.target.value);
+									}}
+									className="max-w-sm"
+								/>
+							)}
+							{extraSearch}
+						</div>
 					)}
 					{filterContent && (
 						<div className="flex flex-wrap gap-2">{filterContent}</div>
@@ -123,7 +134,7 @@ export function DataTable<TData, TValue>({
 				</div>
 			)}
 
-			<div className="overflow-hidden rounded-md border">
+			<div className={`overflow-hidden rounded-md border${tableContainerClass ? ` ${tableContainerClass}` : ""}`}>
 				<Table>
 					<TableHeader>
 						{table.getHeaderGroups().map((headerGroup) => (
@@ -219,24 +230,31 @@ export function DataTable<TData, TValue>({
 					)}
 				</div>
 				<div className="flex items-center space-x-6 lg:space-x-8">
-					{!isServerPagination && (
-						<div className="flex items-center space-x-2">
-							<p className="font-medium text-sm">Filas por página</p>
-							<select
-								value={table.getState().pagination.pageSize}
-								onChange={(e) => {
-									table.setPageSize(Number(e.target.value));
-								}}
-								className="h-8 w-[70px] rounded-md border border-input bg-background px-2 py-1 text-sm"
-							>
-								{[10, 20, 30, 40, 50].map((pageSize) => (
-									<option key={pageSize} value={pageSize}>
-										{pageSize}
-									</option>
-								))}
-							</select>
-						</div>
-					)}
+					<div className="flex items-center space-x-2">
+						<p className="font-medium text-sm">Filas por página</p>
+						<select
+							value={
+								isServerPagination
+									? serverPagination.pageSize
+									: table.getState().pagination.pageSize
+							}
+							onChange={(e) => {
+								const size = Number(e.target.value);
+								if (isServerPagination) {
+									serverPagination.onPageSizeChange?.(size);
+								} else {
+									table.setPageSize(size);
+								}
+							}}
+							className="h-8 w-[70px] rounded-md border border-input bg-background px-2 py-1 text-sm"
+						>
+							{pageSizeOptions.map((pageSize) => (
+								<option key={pageSize} value={pageSize}>
+									{pageSize}
+								</option>
+							))}
+						</select>
+					</div>
 					<div className="flex w-[100px] items-center justify-center font-medium text-sm">
 						Página{" "}
 						{isServerPagination

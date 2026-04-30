@@ -69,3 +69,68 @@ export async function notifyPayInvestors(
     };
   }
 }
+
+// ============================================
+// Obtener detalles de vehículo por número SIFCO
+// ============================================
+export interface VehicleDetails {
+  id: string;
+  make: string;
+  model: string;
+  year: number;
+  licensePlate: string;
+  vinNumber: string;
+  color: string;
+  vehicleType: string;
+  kmMileage: number;
+  fuelType: string;
+  transmission: string;
+  status: string;
+  seguroVigente: boolean;
+  numeroPoliza: string | null;
+  companiaSeguro: string | null;
+  fechaVencimientoSeguro: string | null;
+  gpsActivo: boolean;
+  notes: string | null;
+}
+
+export interface VehicleDetailsResponse {
+  success: boolean;
+  data?: {
+    vehicle: VehicleDetails;
+  };
+  message?: string;
+  error?: string;
+}
+
+export async function getVehicleDetailsBySifco(
+  numeroSifco: string,
+): Promise<VehicleDetailsResponse> {
+  try {
+    const { data } = await crmApi.get("/info/vehicle-details", {
+      params: { numero_sifco: numeroSifco },
+    });
+    if (!data) { return { success: false, message: "Sin respuesta del CRM" }}
+
+    const vehicle = data?.data?.vehicle;
+    if (!vehicle) { 
+      console.error(`No contiene datos del vechículo para número ${numeroSifco}`);
+      return { success: false, message: "Vehículo no encontrado en CRM" }; 
+    }
+    
+    console.log("Consultado detalles del vehículo exitosamente");
+    return {
+      success: true,
+      message: "Detalles del vehículo obtenidos correctamente",
+      data: { vehicle },
+    };
+  } catch (error: any) {
+    const msg = error?.response?.data?.message ?? error?.message ?? "Error desconocido";
+    console.error(`ERROR en getVehicleDetailsBySifco: ${msg}`);
+    return {
+      success: false,
+      message: `Error obteniendo detalles del vehículo: ${msg}`,
+      error: msg,
+    };
+  }
+}

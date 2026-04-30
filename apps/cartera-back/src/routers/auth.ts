@@ -146,16 +146,24 @@ export const authRouter = new Elysia()
           return { success: false, error: "Refresh token inválido o expirado" };
         }
 
+        const tokenPayload = {
+          id: decoded.id,
+          email: decoded.email,
+          role: decoded.role,
+          admin_id: decoded.admin_id,
+          asesor_id: decoded.asesor_id,
+        };
+
         // ✅ Generar un nuevo access token
         const newAccessToken = jwt.sign(
-          { id: decoded.id, role: decoded.role },
+          tokenPayload,
           JWT_SECRET,
           { expiresIn: "30m" } // Access token válido por 30 minutos
         );
 
         // Opcional: generar también un nuevo refresh token
         const newRefreshToken = jwt.sign(
-          { id: decoded.id, role: decoded.role },
+          tokenPayload,
           JWT_REFRESH_SECRET,
           { expiresIn: "7d" } // Refresh válido por 7 días
         );

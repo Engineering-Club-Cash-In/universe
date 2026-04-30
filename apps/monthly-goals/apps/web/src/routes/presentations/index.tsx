@@ -35,16 +35,93 @@ export const Route = createFileRoute("/presentations/")({
 type Presentation = {
 	id: string;
 	name: string;
-	month: number;
-	year: number;
+	startMonth: number;
+	startYear: number;
+	endMonth: number;
+	endYear: number;
 	status: string;
 	createdByName: string | null;
 	createdAt: Date;
 };
 
+type PresentationApiItem = {
+	id: string;
+	name: string;
+	status: string;
+	createdByName: string | null;
+	createdAt: Date;
+	startMonth?: number;
+	startYear?: number;
+	endMonth?: number;
+	endYear?: number;
+	month?: number;
+	year?: number;
+};
+
+const months = [
+	{ value: 1, label: "Enero" },
+	{ value: 2, label: "Febrero" },
+	{ value: 3, label: "Marzo" },
+	{ value: 4, label: "Abril" },
+	{ value: 5, label: "Mayo" },
+	{ value: 6, label: "Junio" },
+	{ value: 7, label: "Julio" },
+	{ value: 8, label: "Agosto" },
+	{ value: 9, label: "Septiembre" },
+	{ value: 10, label: "Octubre" },
+	{ value: 11, label: "Noviembre" },
+	{ value: 12, label: "Diciembre" },
+];
+
+function getMonthLabel(month: number) {
+	return months.find((m) => m.value === month)?.label ?? `Mes ${month}`;
+}
+
+function formatPresentationPeriodLabel(presentation: Presentation) {
+	const startLabel = `${getMonthLabel(presentation.startMonth)} ${presentation.startYear}`;
+	const endLabel = `${getMonthLabel(presentation.endMonth)} ${presentation.endYear}`;
+
+	if (
+		presentation.startMonth === presentation.endMonth &&
+		presentation.startYear === presentation.endYear
+	) {
+		return startLabel;
+	}
+
+	return `${startLabel} - ${endLabel}`;
+}
+
+function normalizePresentation(presentation: PresentationApiItem): Presentation {
+	if (
+		presentation.startMonth == null ||
+		presentation.startYear == null ||
+		presentation.endMonth == null ||
+		presentation.endYear == null
+	) {
+		throw new Error("Presentation API response is missing range fields");
+	}
+
+	return {
+		id: presentation.id,
+		name: presentation.name,
+		startMonth: presentation.startMonth,
+		startYear: presentation.startYear,
+		endMonth: presentation.endMonth,
+		endYear: presentation.endYear,
+		status: presentation.status,
+		createdByName: presentation.createdByName,
+		createdAt: presentation.createdAt,
+	};
+}
+
 function PresentationsIndexPage() {
 	const queryClient = useQueryClient();
 	const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+	const currentYear = new Date().getFullYear();
+	const [startMonth, setStartMonth] = useState(String(new Date().getMonth() + 1));
+	const [startYear, setStartYear] = useState(String(currentYear));
+	const [endMonth, setEndMonth] = useState(String(new Date().getMonth() + 1));
+	const [endYear, setEndYear] = useState(String(currentYear));
 
 	// Queries
 	const presentations = useQuery(orpc.presentations.list.queryOptions());
@@ -82,12 +159,25 @@ function PresentationsIndexPage() {
 	const handleCreateSubmit = (e: React.FormEvent<HTMLFormElement>) => {
 		e.preventDefault();
 		const formData = new FormData(e.currentTarget);
+		const parsedStartMonth = parseInt(formData.get("startMonth") as string);
+		const parsedStartYear = parseInt(formData.get("startYear") as string);
+		const parsedEndMonth = parseInt(formData.get("endMonth") as string);
+		const parsedEndYear = parseInt(formData.get("endYear") as string);
+		const startPeriodValue = parsedStartYear * 12 + parsedStartMonth;
+		const endPeriodValue = parsedEndYear * 12 + parsedEndMonth;
+
+		if (endPeriodValue < startPeriodValue) {
+			return;
+		}
+
 		const data = {
 			name: formData.get("name") as string,
-			month: parseInt(formData.get("month") as string),
-			year: parseInt(formData.get("year") as string),
+			startMonth: parsedStartMonth,
+			startYear: parsedStartYear,
+			endMonth: parsedEndMonth,
+			endYear: parsedEndYear,
 		};
-		createMutation.mutate(data);
+		createMutation.mutate(data as never);
 	};
 
 	const handleDelete = (presentation: Presentation) => {
@@ -117,23 +207,13 @@ function PresentationsIndexPage() {
 		}
 	};
 
-	const currentYear = new Date().getFullYear();
-	const months = [
-		{ value: 1, label: "Enero" },
-		{ value: 2, label: "Febrero" },
-		{ value: 3, label: "Marzo" },
-		{ value: 4, label: "Abril" },
-		{ value: 5, label: "Mayo" },
-		{ value: 6, label: "Junio" },
-		{ value: 7, label: "Julio" },
-		{ value: 8, label: "Agosto" },
-		{ value: 9, label: "Septiembre" },
-		{ value: 10, label: "Octubre" },
-		{ value: 11, label: "Noviembre" },
-		{ value: 12, label: "Diciembre" },
-	];
-
 	const years = Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
+	const startPeriodValue = parseInt(startYear) * 12 + parseInt(startMonth);
+	const endPeriodValue = parseInt(endYear) * 12 + parseInt(endMonth);
+	const periodError =
+		endPeriodValue < startPeriodValue
+			? "La fecha final no puede ser anterior a la fecha inicial."
+			: null;
 
 	// Definir columnas para TanStack Table
 	const columns = useMemo<ColumnDef<Presentation>[]>(() => [
@@ -147,12 +227,7 @@ function PresentationsIndexPage() {
 		{
 			id: "period",
 			header: "Período",
-			cell: ({ row }) => {
-				const month = row.original.month;
-				const year = row.original.year;
-				const monthLabel = months.find(m => m.value === month)?.label;
-				return `${monthLabel} ${year}`;
-			},
+			cell: ({ row }) => formatPresentationPeriodLabel(row.original),
 		},
 		{
 			accessorKey: "status",
@@ -199,7 +274,11 @@ function PresentationsIndexPage() {
 				variant: "destructive",
 			},
 		]),
-	], [months]);
+	], []);
+	const presentationRows = useMemo(
+		() => (presentations.data || []).map(normalizePresentation),
+		[presentations.data]
+	);
 
 	return (
 		<div className="space-y-6">
@@ -224,41 +303,100 @@ function PresentationsIndexPage() {
 								/>
 							</div>
 							
-							<div className="grid grid-cols-2 gap-4">
-								<div className="space-y-2">
-									<Label htmlFor="month">Mes</Label>
-									<Select name="month" defaultValue={new Date().getMonth() + 1 + ""}>
-										<SelectTrigger>
-											<SelectValue />
-										</SelectTrigger>
-										<SelectContent>
-											{months.map((month) => (
-												<SelectItem key={month.value} value={month.value.toString()}>
-													{month.label}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
+							<div className="space-y-4">
+								<div className="grid grid-cols-2 gap-4">
+									<div className="space-y-2">
+										<Label htmlFor="startMonth">Mes inicial</Label>
+										<Select
+											name="startMonth"
+											value={startMonth}
+											onValueChange={setStartMonth}
+										>
+											<SelectTrigger>
+												<SelectValue />
+											</SelectTrigger>
+											<SelectContent>
+												{months.map((month) => (
+													<SelectItem key={month.value} value={month.value.toString()}>
+														{month.label}
+													</SelectItem>
+												))}
+											</SelectContent>
+										</Select>
+									</div>
+
+									<div className="space-y-2">
+										<Label htmlFor="startYear">Año inicial</Label>
+										<Select
+											name="startYear"
+											value={startYear}
+											onValueChange={setStartYear}
+										>
+											<SelectTrigger>
+												<SelectValue />
+											</SelectTrigger>
+											<SelectContent>
+												{years.map((year) => (
+													<SelectItem key={year} value={year.toString()}>
+														{year}
+													</SelectItem>
+												))}
+											</SelectContent>
+										</Select>
+									</div>
 								</div>
-								
-								<div className="space-y-2">
-									<Label htmlFor="year">Año</Label>
-									<Select name="year" defaultValue={currentYear.toString()}>
-										<SelectTrigger>
-											<SelectValue />
-										</SelectTrigger>
-										<SelectContent>
-											{years.map((year) => (
-												<SelectItem key={year} value={year.toString()}>
-													{year}
-												</SelectItem>
-											))}
-										</SelectContent>
-									</Select>
+
+								<div className="grid grid-cols-2 gap-4">
+									<div className="space-y-2">
+										<Label htmlFor="endMonth">Mes final</Label>
+										<Select
+											name="endMonth"
+											value={endMonth}
+											onValueChange={setEndMonth}
+										>
+											<SelectTrigger>
+												<SelectValue />
+											</SelectTrigger>
+											<SelectContent>
+												{months.map((month) => (
+													<SelectItem key={month.value} value={month.value.toString()}>
+														{month.label}
+													</SelectItem>
+												))}
+											</SelectContent>
+										</Select>
+									</div>
+
+									<div className="space-y-2">
+										<Label htmlFor="endYear">Año final</Label>
+										<Select
+											name="endYear"
+											value={endYear}
+											onValueChange={setEndYear}
+										>
+											<SelectTrigger>
+												<SelectValue />
+											</SelectTrigger>
+											<SelectContent>
+												{years.map((year) => (
+													<SelectItem key={year} value={year.toString()}>
+														{year}
+													</SelectItem>
+												))}
+											</SelectContent>
+										</Select>
+									</div>
 								</div>
+
+								{periodError ? (
+									<p className="text-sm text-destructive">{periodError}</p>
+								) : null}
 							</div>
-							
-							<Button type="submit" disabled={createMutation.isPending}>
+
+							<Button
+								type="submit"
+								disabled={createMutation.isPending || Boolean(periodError)}
+							>
 								{createMutation.isPending ? "Creando..." : "Crear Presentación"}
 							</Button>
 						</form>
@@ -273,7 +411,7 @@ function PresentationsIndexPage() {
 				<CardContent>
 					<DataTable
 						columns={columns}
-						data={presentations.data || []}
+						data={presentationRows}
 						isLoading={presentations.isLoading}
 						searchPlaceholder="Buscar presentaciones..."
 						emptyMessage="No hay presentaciones creadas"

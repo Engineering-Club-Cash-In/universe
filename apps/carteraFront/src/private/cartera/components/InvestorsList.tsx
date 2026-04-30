@@ -39,6 +39,9 @@ interface InvestorsListProps {
   errorMessage?: string | string[];
   errorMessageMirror?: string | string[];
   onSaldoChanges?: (changes: Record<number, number>) => void;
+  recalculatedQuotas?: Record<number, number>;
+  recalculatedQuotasMirror?: Record<number, number>;
+  onClearRecalculatedQuota?: (inversionistaId: number, isMirror: boolean) => void;
 }
 
 export function InvestorsList({
@@ -51,6 +54,9 @@ export function InvestorsList({
   errorMessage,
   errorMessageMirror,
   onSaldoChanges,
+  recalculatedQuotas,
+  recalculatedQuotasMirror,
+  onClearRecalculatedQuota,
 }: InvestorsListProps) {
   // Estado local para saber qué items tienen el espejo expandido
   const [expandedMirrors, setExpandedMirrors] = useState<Set<number>>(new Set());
@@ -449,19 +455,36 @@ export function InvestorsList({
                 <div className="flex items-center justify-between h-5">
                   <Label className="text-blue-900">Cuota</Label>
                 </div>
-                <Input
-                  className={`mt-1 transition-all duration-300 ${showRecalculated ? "bg-emerald-50 border-emerald-400 ring-2 ring-emerald-100" : ""}`}
-                  type="number"
-                  name={`${fieldName}.${index}.cuota_inversionista`}
-                  value={inv.cuota_inversionista ?? 0}
-                  onFocus={(e) => e.target.select()}
-                  onChange={formik.handleChange}
-                  onBlur={(e) => {
-                    const val = Number(e.target.value);
-                    formik.setFieldValue(`${fieldName}.${index}.cuota_inversionista`, Number(val.toFixed(2)));
-                    setShowRecalculated(false);
-                  }}
-                />
+                {(() => {
+                  const invId = Number(inv.inversionista_id);
+                  const recalc = recalculatedQuotas?.[invId];
+                  const highlight = showRecalculated || recalc !== undefined;
+                  return (
+                    <>
+                      <Input
+                        className={`mt-1 transition-all duration-300 ${highlight ? "bg-emerald-50 border-emerald-400 ring-2 ring-emerald-100" : ""}`}
+                        type="number"
+                        name={`${fieldName}.${index}.cuota_inversionista`}
+                        value={inv.cuota_inversionista ?? 0}
+                        onFocus={(e) => e.target.select()}
+                        onChange={(e) => {
+                          formik.handleChange(e);
+                          if (recalc !== undefined) onClearRecalculatedQuota?.(invId, false);
+                        }}
+                        onBlur={(e) => {
+                          const val = Number(e.target.value);
+                          formik.setFieldValue(`${fieldName}.${index}.cuota_inversionista`, Number(val.toFixed(2)));
+                          setShowRecalculated(false);
+                        }}
+                      />
+                      {recalc !== undefined && (
+                        <span className="text-xs font-semibold text-emerald-600 mt-1 block">
+                          Nueva cuota: Q{recalc.toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                        </span>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
               <div className="w-24">
                 <div className="h-5 flex items-center">
@@ -707,20 +730,37 @@ export function InvestorsList({
                         <div className="flex items-center justify-between h-5">
                           <Label className="text-purple-900 text-xs">Cuota Espejo</Label>
                         </div>
-                        <Input
-                        className={`mt-1 h-9 text-sm border-purple-200 transition-all duration-300 ${isNew ? "bg-gray-100 cursor-not-allowed" : showRecalculated ? "bg-emerald-50 border-emerald-400 ring-2 ring-emerald-100" : ""}`}
-                        type="number"
-                        name={`investorsMirror.${index}.cuota_inversionista`}
-                        value={invMirror.cuota_inversionista ?? 0}
-                        onFocus={(e) => e.target.select()}
-                        onChange={formik.handleChange}
-                        onBlur={(e) => {
-                          const val = Number(e.target.value);
-                          formik.setFieldValue(`investorsMirror.${index}.cuota_inversionista`, Number(val.toFixed(2)));
-                          setShowRecalculated(false);
-                        }}
-                        disabled={isNew}
-                        />
+                        {(() => {
+                          const invId = Number(invMirror.inversionista_id);
+                          const recalc = recalculatedQuotasMirror?.[invId];
+                          const highlight = showRecalculated || recalc !== undefined;
+                          return (
+                            <>
+                              <Input
+                                className={`mt-1 h-9 text-sm border-purple-200 transition-all duration-300 ${isNew ? "bg-gray-100 cursor-not-allowed" : highlight ? "bg-emerald-50 border-emerald-400 ring-2 ring-emerald-100" : ""}`}
+                                type="number"
+                                name={`investorsMirror.${index}.cuota_inversionista`}
+                                value={invMirror.cuota_inversionista ?? 0}
+                                onFocus={(e) => e.target.select()}
+                                onChange={(e) => {
+                                  formik.handleChange(e);
+                                  if (recalc !== undefined) onClearRecalculatedQuota?.(invId, true);
+                                }}
+                                onBlur={(e) => {
+                                  const val = Number(e.target.value);
+                                  formik.setFieldValue(`investorsMirror.${index}.cuota_inversionista`, Number(val.toFixed(2)));
+                                  setShowRecalculated(false);
+                                }}
+                                disabled={isNew}
+                              />
+                              {recalc !== undefined && (
+                                <span className="text-xs font-semibold text-emerald-600 mt-1 block">
+                                  Nueva: Q{recalc.toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+                                </span>
+                              )}
+                            </>
+                          );
+                        })()}
                     </div>
                     <div className="w-24">
                         <div className="h-5 flex items-center">

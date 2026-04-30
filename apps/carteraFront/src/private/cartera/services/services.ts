@@ -1684,6 +1684,7 @@ export interface CreditoPago {
   statusCredit: string;
   porcentajeInteres: number;
   fechaCreacion: string;
+  banderaReinversion?: boolean;
 }
 
 // 🧍‍♂️ Información del usuario del crédito
@@ -1755,6 +1756,10 @@ export interface PagoDataInvestor {
   cuentaEmpresaNombre: string | null;
   cuentaEmpresaNumero: string | null;
 
+  // 🚩 Bandera del crédito: true mientras haya compra de cartera o reinversión pendiente.
+  // Cuando es true, cofidi redirige a CUBE los intereses del inversionista en ese status.
+  banderaReinversion?: boolean;
+
   // 🔄 Cancelación (solo presente en pagos reset)
   cancelacion?: CancelacionPago | null;
 }
@@ -1818,6 +1823,8 @@ export interface GetPagosParams {
   validationStatus?: string;
   reportAdvisor?: boolean;
   fechaBoleta?: string;
+  fechaBoletaInicio?: string;
+  fechaBoletaFin?: string;
 }
 
 /**
@@ -3524,10 +3531,10 @@ export interface CandidatesResponse {
   candidates: OtroCreditoDisponible[];
 }
 
-export async function getCreditCandidatesService(params?: { monto?: number; minimo?: number }): Promise<OtroCreditoDisponible[]> {
+export async function getCreditCandidatesService(params?: { monto?: number; minimo?: number; inversionista_id?: number }): Promise<OtroCreditoDisponible[]> {
   const res = await api.get<CandidatesResponse>(
     `${API_URL}/assign-capital/candidates`,
-    { params: { monto: params?.monto, minimo: params?.minimo ?? 10 } }
+    { params: { monto: params?.monto, minimo: params?.minimo ?? 10, inversionista_id: params?.inversionista_id } }
   );
   return res.data.candidates;
 }
@@ -3571,6 +3578,11 @@ export async function completarEspejoService(
 
 export interface DevolverPendientesACubePayload {
   creditos: number | number[];
+  // Si se envía, la limpieza se restringe a ese inversionista: solo se sacan
+  // sus filas pendientes del espejo y su monto vuelve a CUBE. Si se omite,
+  // se limpian TODOS los inversionistas con status != "completado" de los
+  // créditos indicados (comportamiento original).
+  inversionista_id?: number;
 }
 
 export interface DevolverPendientesACubeCreditoLimpiado {
@@ -3592,6 +3604,32 @@ export async function devolverPendientesACubeService(
 ): Promise<DevolverPendientesACubeResponse> {
   const res = await api.post<DevolverPendientesACubeResponse>(
     `${API_URL}/reemplazar-inversionista-credito/devolver-pendientes-a-cube`,
+    payload
+  );
+  return res.data;
+}
+
+// ============================================================
+// Compra de Cartera Aceptada (Notificación y Status)
+// ============================================================
+export interface CompraCarteraAceptadaPayload {
+  creditos: number[];
+  notas_adicionales?: string;
+}
+
+export interface CompraCarteraAceptadaResponse {
+  success: boolean;
+  message: string;
+  creditos_notificados: number;
+  pool_size: number;
+  espejo_actualizados: number;
+}
+
+export async function compraCarteraAceptadaService(
+  payload: CompraCarteraAceptadaPayload
+): Promise<CompraCarteraAceptadaResponse> {
+  const res = await api.post<CompraCarteraAceptadaResponse>(
+    `${API_URL}/compra-cartera-aceptada`,
     payload
   );
   return res.data;

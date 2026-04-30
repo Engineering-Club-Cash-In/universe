@@ -131,6 +131,12 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
     pattern: 'Firma: __________________________',
     signerCount: 1,
     signers: ['Inversionista']
+  },
+
+  [ContractType.CESION_CREDITOS]: {
+    pattern: '________________________________',
+    signerCount: 1,
+    signers: ['Cedente']
   }
 };
 

@@ -113,6 +113,24 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
     pattern: 'F)_______________________________________',
     signerCount: 1,
     signers: ['Cliente']
+  },
+
+  [ContractType.ACUERDO_INVERSION_CASH_IN]: {
+    pattern: 'F_________________________________________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  [ContractType.CARTA_CONFIRMACION_INVERSION_INICIAL]: {
+    pattern: 'Firma: ____________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  [ContractType.CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION]: {
+    pattern: 'Firma: __________________________',
+    signerCount: 1,
+    signers: ['Inversionista']
   }
 };
 

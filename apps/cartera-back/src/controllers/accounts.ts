@@ -1,5 +1,5 @@
 // services/cuentas.service.ts
-import { and, eq, ilike } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, lte } from "drizzle-orm";
 import { cuentasEmpresa, cuentas_empresa_movimientos } from "../database/db";
 import { db } from "../database";
 
@@ -160,7 +160,7 @@ export async function updateCuentaEmpresa(
 
 export async function deleteCuentaEmpresa(cuentaId: number) {
   try {
-    // Soft delete - solo desactivar
+    // Soft delete - solo desactivar (el trigger DB actualiza fecha_actualizacion)
     const [cuentaDesactivada] = await db
       .update(cuentasEmpresa)
       .set({ activo: false })
@@ -196,6 +196,56 @@ export async function deleteCuentaEmpresa(cuentaId: number) {
 //   - Si el cuenta_id no existe, el trigger tira RAISE EXCEPTION → cae al catch.
 // Pasamos saldo_post: "0" como placeholder porque la columna es NOT NULL;
 // el trigger lo sobrescribe antes de insertar.
+// Lista los movimientos de una cuenta con filtros opcionales:
+// - tipo: ingreso | egreso
+// - desde / hasta: rango de fechas (created_at)
+// - orden: asc | desc (default desc → más reciente primero)
+export async function getMovimientosByCuenta(
+  cuentaId: number,
+  filters?: {
+    tipo?: TipoMovimiento;
+    desde?: Date;
+    hasta?: Date;
+    orden?: "asc" | "desc";
+  }
+) {
+  try {
+    const conditions = [eq(cuentas_empresa_movimientos.cuenta_id, cuentaId)];
+
+    if (filters?.tipo) {
+      conditions.push(eq(cuentas_empresa_movimientos.tipo, filters.tipo));
+    }
+    if (filters?.desde) {
+      conditions.push(gte(cuentas_empresa_movimientos.created_at, filters.desde));
+    }
+    if (filters?.hasta) {
+      conditions.push(lte(cuentas_empresa_movimientos.created_at, filters.hasta));
+    }
+
+    const orderFn = filters?.orden === "asc" ? asc : desc;
+
+    const movimientos = await db
+      .select()
+      .from(cuentas_empresa_movimientos)
+      .where(and(...conditions))
+      .orderBy(orderFn(cuentas_empresa_movimientos.created_at));
+
+    return {
+      success: true,
+      message: "✅ Movimientos obtenidos correctamente",
+      data: movimientos,
+    };
+  } catch (error: any) {
+    console.error("❌ Error al obtener movimientos:", error);
+    return {
+      success: false,
+      message: "❌ Error al obtener los movimientos",
+      error: error.message,
+      data: [],
+    };
+  }
+}
+
 export async function crearMovimientoCuentaEmpresa(data: {
   cuentaId: number;
   tipo: TipoMovimiento;

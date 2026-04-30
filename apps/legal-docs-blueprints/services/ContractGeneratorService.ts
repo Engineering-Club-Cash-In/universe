@@ -241,9 +241,9 @@ export class ContractGeneratorService {
 
     this.registerTemplate({
       type: ContractType.CESION_CREDITOS,
-      // Nota: el archivo de hombre tiene typo en el nombre (cestion en vez de cesion)
+      // Nota: ambos archivos tienen typo en el nombre (cestion en vez de cesion)
       templateFilename: 'inversiones/cesion_creditos/cestion_creditos_hombre.docx',
-      templateFilenameFemale: 'inversiones/cesion_creditos/cesion_creditos_mujer.docx',
+      templateFilenameFemale: 'inversiones/cesion_creditos/cestion_creditos_mujer.docx',
       description: 'Cesión de Créditos',
       requiredFields: []
     });

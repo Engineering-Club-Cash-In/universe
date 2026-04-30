@@ -1,34 +1,14 @@
 // CRM formatting utilities for consistent display across the application
+export {
+	getLeadSourceBadgeClass,
+	getLeadSourceLabel,
+	LEAD_SOURCE_OPTIONS,
+} from "server/src/lib/lead-sources";
+
+import { getLeadSourceLabel } from "server/src/lib/lead-sources";
 
 export const getSourceLabel = (source: string) => {
-	switch (source) {
-		case "website":
-			return "Sitio Web";
-		case "referral":
-			return "Referencia";
-		case "cold_call":
-			return "Llamada en Frío";
-		case "email":
-			return "Correo Electrónico";
-		case "social_media":
-			return "Redes Sociales";
-		case "event":
-			return "Evento";
-		case "other":
-			return "Otro";
-		case "facebook":
-			return "Facebook";
-		case "instagram":
-			return "Instagram";
-		case "google":
-			return "Google";
-		case "agency":
-			return "Agencia";
-		case "property":
-			return "Predio";
-		default:
-			return source;
-	}
+	return getLeadSourceLabel(source);
 };
 
 export const getStatusLabel = (status: string) => {

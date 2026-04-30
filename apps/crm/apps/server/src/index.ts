@@ -38,6 +38,8 @@ import { appRouter, disbursementRouter, manualVehicleRouter } from "./routers/in
 import { investmentsRouter } from "./routers/investments";
 import externalContractsRouter from "./routes/external-contracts";
 
+import { getVehicleByCodigoController } from "./controllers/vehicles";
+
 const app = new Hono();
 
 app.use(logger());
@@ -390,13 +392,20 @@ app.post("/api/upload-opportunity-document", async (c) => {
 });
 app.post("/info/renap", async (c) => {
 	try {
-		const body = await c.req.json<{ dpi: string; phone: string }>();
+		const body = await c.req.json<{ dpi: unknown; phone: unknown }>();
 
-		const result = await getRenapInfoController(body.dpi, body.phone);
+		const dpi = String(body.dpi ?? "").trim();
+		const phone = String(body.phone ?? "").trim();
+
+		if (!dpi || !phone) {
+			return c.json({ error: "dpi y phone son requeridos" }, 400);
+		}
+
+		const result = await getRenapInfoController(dpi, phone);
 
 		return c.json(result);
 	} catch (err: any) {
-		console.error("[ERROR] /test/renap:", err);
+		console.error("[ERROR] /info/renap:", err);
 		return c.json({ error: err.message || "Internal server error" }, 500);
 	}
 });
@@ -943,6 +952,20 @@ app.delete("/api/migrate/cleanup", async (c) => {
 		return c.json({ error: err.message }, 500);
 	}
 });
+
+// Endpoint para traer información del vehiculo a través del sifco
+app.get("/info/vehicle-details", async (c) => {
+	const { numero_sifco } = c.req.query() as { numero_sifco?: string };
+
+	if (!numero_sifco) {
+		return c.json({ success: false, message: "numero_sifco is required" }, 400);
+	}
+
+	const result = await getVehicleByCodigoController(numero_sifco);
+	return c.json(result, result.success ? 200 : 404);
+});
+
+
 
 // Job periódico de notificaciones de cobros (cada hora)
 setInterval(

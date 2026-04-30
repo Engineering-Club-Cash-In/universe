@@ -407,9 +407,18 @@ export const contractGenerationRouter = {
 			);
 
 			try {
+				// Derivar isPlural automáticamente desde deudoresAdicionales
+				const contractsWithPlural = input.contracts.map((contract) => ({
+					...contract,
+					options: {
+						...contract.options,
+						isPlural: (contract.data.deudoresAdicionales?.length ?? 0) > 0,
+					},
+				}));
+
 				// Llamar a la API de generación de contratos
 				const apiResult = await generateContractsBatch({
-					contracts: input.contracts,
+					contracts: contractsWithPlural,
 				});
 
 				// Transformar resultados al formato esperado por el frontend
@@ -531,6 +540,7 @@ export const contractGenerationRouter = {
 							options: z.object({
 								gender: z.enum(["male", "female"]),
 								generatePdf: z.boolean(),
+								isPlural: z.boolean().optional(),
 								filenamePrefix: z.string(),
 							}),
 						}),
@@ -655,6 +665,7 @@ export const contractGenerationRouter = {
 						options: z.object({
 							gender: z.enum(["male", "female"]),
 							generatePdf: z.boolean(),
+							isPlural: z.boolean().optional(),
 							filenamePrefix: z.string(),
 						}),
 					}),
@@ -810,6 +821,11 @@ export const contractGenerationRouter = {
 					return {
 						...contract,
 						data: newData,
+						options: {
+							...contract.options,
+							isPlural:
+								(newData.deudoresAdicionales?.length ?? 0) > 0,
+						},
 					};
 				});
 

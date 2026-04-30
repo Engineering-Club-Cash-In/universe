@@ -10,6 +10,7 @@ const CREDIT_SOURCE_MAP: Record<string, string> = {
   instagram: "instagram",
   google: "google",
   meta: "meta",
+  linkedin: "linkedin",
   whatsapp: "Whatsapp",
 };
 
@@ -25,6 +26,7 @@ const INVESTMENT_SOURCE_MAP: Record<string, string> = {
   instagram: "instagram",
   google: "google",
   meta: "meta",
+  linkedin: "linkedin",
   whatsapp: "whatsapp",
 };
 

@@ -2,7 +2,15 @@ import { useForm } from "@tanstack/react-form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { CalendarIcon, Mail, MessageCircle, Phone } from "lucide-react";
+import {
+	CalendarIcon,
+	ChevronDown,
+	Loader2,
+	Mail,
+	MessageCircle,
+	MessageSquare,
+	Phone,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -26,6 +34,12 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
 	Select,
 	SelectContent,
@@ -109,6 +123,7 @@ export function ContactoModal({
 
 	const [plantillaId, setPlantillaId] = useState<string>("");
 	const [mensajeEditado, setMensajeEditado] = useState("");
+	const [mensajeWhatsappEditado, setMensajeWhatsappEditado] = useState("");
 	const [asuntoEditado, setAsuntoEditado] = useState("");
 
 	const variables: VariablesPlantilla = useMemo(
@@ -143,6 +158,9 @@ export function ContactoModal({
 		const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === sugerida);
 		if (plantilla) {
 			setMensajeEditado(interpolar(plantilla.cuerpo, variables));
+			setMensajeWhatsappEditado(
+				interpolar(plantilla.cuerpoWhastapp || plantilla.cuerpo, variables),
+			);
 			setAsuntoEditado(interpolar(plantilla.asunto, variables));
 		}
 	}, [estadoMora, fechaInicio, variables]);
@@ -152,6 +170,9 @@ export function ContactoModal({
 		const plantilla = PLANTILLAS_MENSAJES.find((p) => p.id === id);
 		if (plantilla) {
 			setMensajeEditado(interpolar(plantilla.cuerpo, variables));
+			setMensajeWhatsappEditado(
+				interpolar(plantilla.cuerpoWhastapp || plantilla.cuerpo, variables),
+			);
 			setAsuntoEditado(interpolar(plantilla.asunto, variables));
 		}
 	};
@@ -214,21 +235,82 @@ export function ContactoModal({
 		}
 	};
 
-	const ejecutarAccion = (metodo: "llamada" | "whatsapp" | "email") => {
+	type AccionContacto =
+		| "llamada"
+		| "whatsapp-link"
+		| "whatsapp-api"
+		| "email-link"
+		| "email-api"
+		| "sms-api";
+
+	const whatsappApiMutation = useMutation({
+		mutationFn: (vars: { telefono: string; mensaje: string }) =>
+			client.enviarWhatsappCobros({ ...vars, casoCobroId }),
+		onSuccess: (res) => {
+			if (res.success) toast.success("WhatsApp enviado correctamente");
+		},
+		onError: (error: any) =>
+			toast.error(error?.message || "Error enviando WhatsApp"),
+	});
+
+	const emailApiMutation = useMutation({
+		mutationFn: (vars: {
+			destinatario: string;
+			asunto: string;
+			mensaje: string;
+		}) => client.enviarEmailCobros({ ...vars, casoCobroId }),
+		onSuccess: (res) => {
+			if (res.success) toast.success("Email enviado correctamente");
+		},
+		onError: (error: any) =>
+			toast.error(error?.message || "Error enviando email"),
+	});
+
+	const smsApiMutation = useMutation({
+		mutationFn: (vars: { telefono: string; mensaje: string }) =>
+			client.enviarSmsCobros({ ...vars, casoCobroId }),
+		onSuccess: (res) => {
+			if (res.success) toast.success("SMS enviado correctamente");
+		},
+		onError: (error: any) =>
+			toast.error(error?.message || "Error enviando SMS"),
+	});
+
+	const envioEnCurso =
+		whatsappApiMutation.isPending ||
+		emailApiMutation.isPending ||
+		smsApiMutation.isPending;
+
+	const ejecutarAccion = (metodo: AccionContacto) => {
 		const tel = telefonoSeleccionado || telefonoPrincipal;
+		const telLimpio = tel.replace(/[^0-9]/g, "");
+		const mensajeWhatsapp = mensajeWhatsappEditado || mensajeEditado;
 		switch (metodo) {
 			case "llamada":
 				window.open(`tel:${tel}`);
 				break;
-			case "whatsapp": {
-				const telLimpio = tel.replace(/[^0-9]/g, "");
+			case "whatsapp-link": {
 				const url = mensajeEditado
 					? `https://wa.me/${telLimpio}?text=${encodeURIComponent(mensajeEditado)}`
 					: `https://wa.me/${telLimpio}`;
 				window.open(url);
 				break;
 			}
-			case "email": {
+			case "whatsapp-api":
+				if (!telLimpio) {
+					toast.error("No hay teléfono para enviar WhatsApp");
+					return;
+				}
+				if (!mensajeWhatsapp.trim()) {
+					toast.error("No hay mensaje para enviar");
+					return;
+				}
+				whatsappApiMutation.mutate({
+					telefono: telLimpio,
+					mensaje: mensajeWhatsapp,
+				});
+				break;
+			case "email-link": {
 				const params = new URLSearchParams();
 				if (asuntoEditado) params.set("subject", asuntoEditado);
 				if (mensajeEditado) params.set("body", mensajeEditado);
@@ -236,6 +318,39 @@ export function ContactoModal({
 				window.open(`mailto:${emailCliente || ""}${query ? `?${query}` : ""}`);
 				break;
 			}
+			case "email-api":
+				if (!emailCliente) {
+					toast.error("No hay email de destino");
+					return;
+				}
+				if (!asuntoEditado.trim()) {
+					toast.error("El asunto es requerido");
+					return;
+				}
+				if (!mensajeEditado.trim()) {
+					toast.error("El mensaje es requerido");
+					return;
+				}
+				emailApiMutation.mutate({
+					destinatario: emailCliente,
+					asunto: asuntoEditado,
+					mensaje: mensajeEditado,
+				});
+				break;
+			case "sms-api":
+				if (!telLimpio) {
+					toast.error("No hay teléfono para enviar SMS");
+					return;
+				}
+				if (!mensajeEditado.trim()) {
+					toast.error("No hay mensaje para enviar");
+					return;
+				}
+				smsApiMutation.mutate({
+					telefono: telLimpio,
+					mensaje: mensajeEditado,
+				});
+				break;
 		}
 	};
 
@@ -412,36 +527,97 @@ export function ContactoModal({
 						)}
 
 						{/* Botones para ejecutar acción */}
-						<div className="flex gap-2">
+						<div className="flex flex-wrap gap-2">
 							<Button
 								type="button"
 								variant="outline"
 								size="sm"
 								onClick={() => ejecutarAccion("llamada")}
+								disabled={envioEnCurso}
 								className="flex items-center gap-2"
 							>
 								<Phone className="h-4 w-4" />
 								Llamar {telefonos.length <= 1 ? telefonos[0] || "" : ""}
 							</Button>
+
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										disabled={envioEnCurso}
+										className="flex items-center gap-2"
+									>
+										{whatsappApiMutation.isPending ? (
+											<Loader2 className="h-4 w-4 animate-spin" />
+										) : (
+											<MessageCircle className="h-4 w-4" />
+										)}
+										WhatsApp
+										{whatsappApiMutation.isPending ? null : (
+											<ChevronDown className="h-3 w-3" />
+										)}
+									</Button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="start">
+									<DropdownMenuItem
+										onClick={() => ejecutarAccion("whatsapp-api")}
+									>
+										Enviar Directo (Automático)
+									</DropdownMenuItem>
+									<DropdownMenuItem
+										onClick={() => ejecutarAccion("whatsapp-link")}
+									>
+										Abrir WhatsApp Web (Manual)
+									</DropdownMenuItem>
+								</DropdownMenuContent>
+							</DropdownMenu>
+
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										disabled={envioEnCurso}
+										className="flex items-center gap-2"
+									>
+										{emailApiMutation.isPending ? (
+											<Loader2 className="h-4 w-4 animate-spin" />
+										) : (
+											<Mail className="h-4 w-4" />
+										)}
+										Email
+										{emailApiMutation.isPending ? null : (
+											<ChevronDown className="h-3 w-3" />
+										)}
+									</Button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="start">
+									<DropdownMenuItem onClick={() => ejecutarAccion("email-api")}>
+										Enviar Directo (Automático)
+									</DropdownMenuItem>
+									<DropdownMenuItem onClick={() => ejecutarAccion("email-link")}>
+										Abrir cliente de correo (Manual)
+									</DropdownMenuItem>
+								</DropdownMenuContent>
+							</DropdownMenu>
+
 							<Button
 								type="button"
 								variant="outline"
 								size="sm"
-								onClick={() => ejecutarAccion("whatsapp")}
+								onClick={() => ejecutarAccion("sms-api")}
+								disabled={envioEnCurso}
 								className="flex items-center gap-2"
 							>
-								<MessageCircle className="h-4 w-4" />
-								WhatsApp
-							</Button>
-							<Button
-								type="button"
-								variant="outline"
-								size="sm"
-								onClick={() => ejecutarAccion("email")}
-								className="flex items-center gap-2"
-							>
-								<Mail className="h-4 w-4" />
-								Email
+								{smsApiMutation.isPending ? (
+									<Loader2 className="h-4 w-4 animate-spin" />
+								) : (
+									<MessageSquare className="h-4 w-4" />
+								)}
+								{smsApiMutation.isPending ? "Enviando SMS..." : "SMS"}
 							</Button>
 						</div>
 

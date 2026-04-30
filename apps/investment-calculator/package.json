@@ -11,7 +11,8 @@
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:run": "vitest run",
-    "precommit": "bun test:run && bun run build"
+    "precommit": "bun test:run && bun run build",
+    "push": "./deploy.sh"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.6",

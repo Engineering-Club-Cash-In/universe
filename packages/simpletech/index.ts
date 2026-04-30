@@ -38,7 +38,7 @@
 // Cliente principal
 // =============================================================================
 
-export { SimpleTechClient, createClientFromEnv } from './src/client';
+export { SimpleTechClient, createClientFromEnv, getToken } from './src/client';
 
 // =============================================================================
 // Tipos
@@ -49,6 +49,7 @@ export type {
   SimpleTechCredentials,
   SimpleTechConfig,
   RetryConfig,
+  TokenResponse,
   // Canales y tipos
   Channel,
   MessageType,
@@ -60,11 +61,29 @@ export type {
   ImageMessage,
   VideoMessage,
   AudioMessage,
+  // Auth
+  TokenRequest,
+  TokenResponse,
   // Request/Response
   SendRequest,
   SendResponse,
   SendResultItem,
+  SendResultItemRaw,
   SimpleTechResult,
+  // getMessageInfo
+  GetMessageInfoRequest,
+  GetMessageInfoResponse,
+  MessageInfo,
+  MessageStatus,
+  // sendTemplate
+  SendTemplateRequest,
+  SendTemplateResponse,
+  SendTemplateResult,
+  SendTemplateResultItem,
+  TemplateMessage,
+  TemplateHeader,
+  TemplateHeaderType,
+  TemplateSchedule,
 } from './src/types';
 
 // =============================================================================

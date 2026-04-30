@@ -29,6 +29,7 @@
     "pendiente_reinversion",
     "pendiente_compra_cartera",
     "completado",
+    "pendiente_revision"
   ]);
 
   export const tipoReinversionEnum = customSchema.enum("tipo_reinversion", [
@@ -38,6 +39,12 @@
     "reinversion_total",
     "reinversion_variable",
     "reinversion_combinada"
+  ]);
+
+  export const statusInversionistaEnum = customSchema.enum("status_inversionista", [
+    "activo",
+    "inactivo",
+    "pendiente_devolucion",
   ]);
   export const admins = customSchema.table("admins", {
     admin_id: serial("admin_id").primaryKey(),
@@ -170,6 +177,7 @@
     otros: numeric("otros", { precision: 18, scale: 2 }).notNull().default("0"), // Otros cargos o pagos adicionales
     permite_abono_capital: boolean("permite_abono_capital").notNull().default(false),
     is_vehiculo_propio: boolean("is_vehiculo_propio").notNull().default(false), // true si el vehículo es propiedad de Cash In
+    bandera_reinversion: boolean("bandera_reinversion").notNull().default(false),
   });
   export const cuotas_credito = customSchema.table("cuotas_credito", {
     cuota_id: serial("cuota_id").primaryKey(),
@@ -365,6 +373,8 @@
       updated_at: timestamp("updated_at").defaultNow(),
       tipo_reinversion: tipoReinversionEnum("tipo_reinversion"),
       status: statusCreditoInversionistaEspejoEnum("status").notNull().default("completado"),
+      aceptada_at: timestamp("aceptada_at", { withTimezone: true }),
+      aceptada_por: text("aceptada_por"),
     },
     (t) => ({
       uxCreditoInvEspejo: uniqueIndex("ux_credito_inversionista_espejo").on(t.credito_id, t.inversionista_id),
@@ -613,6 +623,7 @@
     saldo_reinversion: numeric("saldo_reinversion", { precision: 18, scale: 2 }).notNull().default("0"),
     dpi_rep_legal: varchar("dpi_rep_legal", { length: 20 }),
     celular: varchar("celular", { length: 100 }),
+    status: statusInversionistaEnum("status").notNull().default("activo"),
   });
 
   export const reinversiones = customSchema.table("reinversiones", {
@@ -1018,6 +1029,7 @@
     path: varchar("path", { length: 500 }).notNull(),
     status_code: integer("status_code"),
     body: text("body"),
+    response: text("response"),
     created_at: timestamp("created_at", { withTimezone: true })
       .notNull()
       .default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),

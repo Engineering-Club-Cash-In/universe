@@ -47,6 +47,7 @@ import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
 import { ConsolidatedCreditSummary } from "@/components/credit/ConsolidatedCreditSummary";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
 import { ConfirmContractsSignedModal } from "@/components/crm/ConfirmContractsSignedModal";
+import { WhatsappLogBadge } from "@/components/crm/WhatsappLogBadge";
 import { ManualVehicleValuationDialog } from "@/components/crm/ManualVehicleValuationDialog";
 import { DataTable } from "@/components/data-table";
 import { NotesTimeline } from "@/components/notes-timeline";
@@ -89,6 +90,7 @@ import {
 	getLoanPurposeLabel,
 	getSourceLabel,
 	getStatusLabel,
+	LEAD_SOURCE_OPTIONS,
 } from "@/lib/crm-formatters";
 import {
 	type Opportunity,
@@ -227,6 +229,13 @@ function DraggableOpportunityCard({
 						Reenviado a Análisis
 					</Badge>
 				)}
+				{opportunity.stage?.closurePercentage === 85 &&
+					opportunity.lead?.id && (
+						<WhatsappLogBadge
+							opportunityId={opportunity.id}
+							leadId={opportunity.lead.id}
+						/>
+					)}
 				<div className="space-y-1 border-t pt-1">
 					<div className="flex items-center justify-between">
 						<span className="text-muted-foreground text-xs">Probabilidad</span>
@@ -1676,19 +1685,11 @@ function RouteComponent() {
 						</SelectTrigger>
 						<SelectContent>
 							<SelectItem value="all">Todas las Fuentes</SelectItem>
-							<SelectItem value="facebook">Facebook</SelectItem>
-							<SelectItem value="instagram">Instagram</SelectItem>
-							<SelectItem value="google">Google</SelectItem>
-							<SelectItem value="Whatsapp">WhatsApp</SelectItem>
-							<SelectItem value="website">Sitio Web</SelectItem>
-							<SelectItem value="referral">Referencia</SelectItem>
-							<SelectItem value="cold_call">Llamada en Frío</SelectItem>
-							<SelectItem value="email">Correo Electrónico</SelectItem>
-							<SelectItem value="social_media">Redes Sociales</SelectItem>
-							<SelectItem value="event">Evento</SelectItem>
-							<SelectItem value="agency">Agencia</SelectItem>
-							<SelectItem value="property">Predio</SelectItem>
-							<SelectItem value="other">Otro</SelectItem>
+							{LEAD_SOURCE_OPTIONS.map((option) => (
+								<SelectItem key={option.value} value={option.value}>
+									{option.label}
+								</SelectItem>
+							))}
 						</SelectContent>
 					</Select>
 					<Button

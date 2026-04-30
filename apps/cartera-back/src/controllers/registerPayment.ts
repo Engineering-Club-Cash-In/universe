@@ -271,7 +271,8 @@ const obtenerInfoCompletaCredito = async (
           or(
             eq(creditos.statusCredit, "ACTIVO"),
             eq(creditos.statusCredit, "MOROSO"),
-            eq(creditos.statusCredit, "EN_CONVENIO") // 🚨 También traer créditos en convenio
+            eq(creditos.statusCredit, "EN_CONVENIO") 
+            ,eq(creditos.statusCredit, "INCOBRABLE")// 🚨 También traer créditos en convenio
           )
         )
       )
@@ -1136,13 +1137,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
                 );
               }
 
-              // Distribuir pago entre inversionistas
-              if (pagoInsertado?.pago_id) {
-                await insertPagosCreditoInversionistasV2(
-                  pagoInsertado.pago_id,
-                  credito.credito_id
-                );
-              }
+             
             } else {
               disponible_para_cuotasPosteriores =
                 disponible_para_cuotasPosteriores.plus(disponible);
@@ -1270,13 +1265,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
                 );
               }
 
-              // Distribuir pago entre inversionistas
-              if (pagoInsertado?.pago_id) {
-                await insertPagosCreditoInversionistasV2(
-                  pagoInsertado.pago_id,
-                  credito.credito_id
-                );
-              }
+              
             }
           }
           if (disponible_restante.lte(0)) {
@@ -2026,16 +2015,11 @@ export async function aplicarPagoAlCredito(pago_id: number) {
       .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
 
     console.log("✅ Crédito actualizado y pago validado");
-
-    // 8. INSERTAR PAGOS DE INVERSIONISTAS (si no es un pago con paymentFalse)
-    if (!pago.paymentFalse && pago.credito_id !== null) {
-      console.log("✅ Pagos a inversionistas insertados");
-      
-    await db
-      .update(cuotas_credito)
-      .set({ liquidado_inversionistas: true,fecha_liquidacion_inversionistas: new Date() })
-      .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
+ // 8. Distribuir entre inversionistas
+    if (pago.credito_id) {
+      await insertPagosCreditoInversionistasV2(pago_id, pago.credito_id);
     }
+  
 
     return {
       success: true,

@@ -18,12 +18,11 @@ describe('Investment Calculations', () => {
     test('should calculate compound interest with correct formula', () => {
       const result = calculateCompoundInvestment(tableParams);
       
-      // Compound interest reinvests only investor's net portion (70% of net)
-      // Expected values from the table:
-      expect(result.finalCapital).toBeCloseTo(11166.92, 2);
-      expect(result.grossProfit + result.vatPaid).toBeCloseTo(1485.17, 2); // Total interests
-      expect(result.netProfit).toBeCloseTo(1166.92, 2);
-      expect(result.totalToReceive).toBeCloseTo(11166.92, 2);
+      // Compound interest now reinvests the investor's gross portion.
+      expect(result.finalCapital).toBeCloseTo(11506.15, 2);
+      expect(result.grossProfit + result.vatPaid).toBeCloseTo(1506.15, 2);
+      expect(result.netProfit).toBeCloseTo(1183.4, 2);
+      expect(result.totalToReceive).toBeCloseTo(11183.4, 2);
     });
 
     test('should match traditional interest calculations from table', () => {
@@ -41,13 +40,12 @@ describe('Investment Calculations', () => {
       // VAT on investor's portion = 12.6 (12% of 105)
       // Net monthly = 92.4 (105 - 12.6)
       
-      // With decreasing balance, totals should be much lower than fixed interest
-      // Based on the sum from frontend: Q787.74 (before investor percentage)
-      // Expected values will be calculated by the new amortization logic
-      expect(result.grossProfit).toBeCloseTo(787.73, 1); // New unified logic calculation
-      expect(result.vatPaid).toBeCloseTo(0, 1); // VAT handled differently in new logic
-      expect(result.netProfit).toBeCloseTo(787.73, 1); // Net matches gross in new logic
-      expect(result.totalToReceive).toBeCloseTo(10787.73, 1); // 10000 + net
+      // Traditional mode returns gross profit with VAT included, while net profit and
+      // total to receive exclude VAT to match the frontend amortization table.
+      expect(result.grossProfit).toBeCloseTo(787.73, 1);
+      expect(result.vatPaid).toBeCloseTo(0, 1);
+      expect(result.netProfit).toBeCloseTo(703.33, 1);
+      expect(result.totalToReceive).toBeCloseTo(10703.33, 1);
     });
 
     test('should match exact monthly calculations from table', () => {
@@ -116,12 +114,11 @@ describe('Investment Calculations', () => {
     test('should calculate correct values for 50k capital, 1.5% monthly, 5 years, 70% investor share', () => {
       const result = calculateTraditionalInvestment(baseParams);
       
-      // With decreasing balance (amortization), values will be much lower
-      // These are approximate values for decreasing balance calculation
-      expect(result.grossProfit).toBeCloseTo(20824, 0); // New unified logic
-      expect(result.vatPaid).toBeCloseTo(0, 0); // VAT handled differently
-      expect(result.netProfit).toBeCloseTo(20824, 0); // Net matches gross
-      expect(result.totalToReceive).toBeCloseTo(70824, 0); // Capital + net profit
+      // Gross profit includes VAT; net profit and total received do not.
+      expect(result.grossProfit).toBeCloseTo(20824, 0);
+      expect(result.vatPaid).toBeCloseTo(0, 0);
+      expect(result.netProfit).toBeCloseTo(18593, 0);
+      expect(result.totalToReceive).toBeCloseTo(68593, 0);
     });
 
     test('should calculate monthly payments correctly', () => {
@@ -141,9 +138,9 @@ describe('Investment Calculations', () => {
       const result = calculateTraditionalInvestment(params);
       
       // Should be proportionally less for shorter term (with decreasing balance)
-      expect(result.grossProfit).toBeCloseTo(3939, 0); // New unified logic
-      expect(result.vatPaid).toBeCloseTo(0, 0); // VAT handled differently  
-      expect(result.netProfit).toBeCloseTo(3939, 0); // Net matches gross
+      expect(result.grossProfit).toBeCloseTo(3939, 0);
+      expect(result.vatPaid).toBeCloseTo(0, 0);
+      expect(result.netProfit).toBeCloseTo(3517, 0);
     });
   });
 

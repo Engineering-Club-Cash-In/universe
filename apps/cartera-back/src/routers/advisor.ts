@@ -11,7 +11,8 @@ import {
 import { authMiddleware } from "./midleware";
 
 export const advisorRouter = new Elysia()
- 
+  .use(authMiddleware)
+
   .post("/advisor", insertAdvisor)
   .post("/updateAdvisor", updateAdvisor)
   .get("/advisor", getAdvisors)

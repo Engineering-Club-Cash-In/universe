@@ -12,6 +12,7 @@ import AdvisorsManager from "./private/cartera/components/advisor";
 import MorasManager from "./private/cartera/components/Latefee";
 import CreditosPorAsesorManager from "./private/cartera/components/resumeAdvisor";
 import { BancosManager } from "./private/cartera/components/bank";
+import { CuentasEmpresaManager } from "./private/cartera/components/CuentasEmpresaManager";
 import { CreatePaymentAgreementForm } from "./private/cartera/components/paymentAgreement";
 import { FacturasGenericas } from "./private/cartera/components/FacturasGenericas";
 import EfectividadAsesores from "./private/cartera/components/EfectividadAsesores";
@@ -137,6 +138,15 @@ function App() {
           element={
             <RoleRoute allowedRoles={["ADMIN"]}>
               <BancosManager />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="cuentas-empresa"
+          element={
+            <RoleRoute allowedRoles={["ADMIN", "CONTA"]}>
+              <CuentasEmpresaManager />
             </RoleRoute>
           }
         />

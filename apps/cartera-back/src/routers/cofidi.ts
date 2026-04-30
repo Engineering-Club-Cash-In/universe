@@ -1412,7 +1412,7 @@ if (facturasExistentes.length > 0) {
       );
 
       console.log(`   🔄 Intentando con ${emisorKey} (NIT: ${nitEmisor})...`);
-
+ 
       try {
         resultado = await satClient.anularDocumento(uuid, xmlBase64Emisor);
         if (resultado.anulado) {

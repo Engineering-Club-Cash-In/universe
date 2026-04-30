@@ -28,17 +28,16 @@ export async function getDocusealDocumentsController(
   categoria?: DocumentCategoria
 ) {
   try {
-    const baseQuery = db
+    // Default a "ventas" para no afectar a llamadas existentes
+    const categoriaFiltro: DocumentCategoria = categoria ?? "ventas";
+
+    const result = await db
       .select({
         nombre_documento: docusealDocuments.nombre_documento,
         categoria: docusealDocuments.categoria,
       })
-      .from(docusealDocuments);
-
-    const result = await (categoria
-      ? baseQuery.where(eq(docusealDocuments.categoria, categoria))
-      : baseQuery
-    )
+      .from(docusealDocuments)
+      .where(eq(docusealDocuments.categoria, categoriaFiltro))
       .groupBy(
         docusealDocuments.nombre_documento,
         docusealDocuments.categoria

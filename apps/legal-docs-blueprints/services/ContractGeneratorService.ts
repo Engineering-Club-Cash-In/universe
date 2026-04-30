@@ -226,7 +226,7 @@ export class ContractGeneratorService {
     this.registerTemplate({
       type: ContractType.CARTA_CONFIRMACION_INVERSION_INICIAL,
       templateFilename: 'inversiones/anexo1/carta_confirmacion_hombre.docx',
-      templateFilenameFemale: 'inversiones/anexo1/carta_informacion_mujer.docx',
+      templateFilenameFemale: 'inversiones/anexo1/carta_confirmacion_mujer.docx',
       description: 'Anexo 1 - Carta de Confirmación de Inversión Inicial',
       requiredFields: []
     });

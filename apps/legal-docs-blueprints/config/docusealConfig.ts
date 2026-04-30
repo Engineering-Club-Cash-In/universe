@@ -120,6 +120,35 @@ export const docusealConfig: Record<ContractType, SignerConfig> = {
       { role: 'Cliente', required: true },
     ],
   },
+
+  // ===== INVERSIONES =====
+  [ContractType.ACUERDO_INVERSION_CASH_IN]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.CARTA_CONFIRMACION_INVERSION_INICIAL]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.CESION_CREDITOS]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cedente', required: true },
+    ],
+  },
 };
 
 /**

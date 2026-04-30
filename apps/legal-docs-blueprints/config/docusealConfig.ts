@@ -142,6 +142,13 @@ export const docusealConfig: Record<ContractType, SignerConfig> = {
       { role: 'Inversionista', required: true },
     ],
   },
+
+  [ContractType.CESION_CREDITOS]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cedente', required: true },
+    ],
+  },
 };
 
 /**

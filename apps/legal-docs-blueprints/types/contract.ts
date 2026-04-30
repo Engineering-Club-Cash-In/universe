@@ -21,7 +21,8 @@ export enum ContractType {
   // ===== INVERSIONES =====
   ACUERDO_INVERSION_CASH_IN = 'acuerdo_inversion_cash_in',
   CARTA_CONFIRMACION_INVERSION_INICIAL = 'carta_confirmacion_inversion_inicial',
-  CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION = 'carta_eleccion_modalidad_pago_reinversion'
+  CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION = 'carta_eleccion_modalidad_pago_reinversion',
+  CESION_CREDITOS = 'cesion_creditos'
   // Agrega más tipos aquí según sea necesario
 }
 

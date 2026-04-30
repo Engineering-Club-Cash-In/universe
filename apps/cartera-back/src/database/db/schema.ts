@@ -653,9 +653,50 @@
     numeroCuenta: varchar("numero_cuenta", { length: 50 }).notNull().unique(),
     descripcion: varchar("descripcion", { length: 255 }),
     activo: boolean("activo").default(true).notNull(),
-    fechaCreacion: timestamp("fecha_creacion").defaultNow().notNull(),
-    fechaActualizacion: timestamp("fecha_actualizacion").defaultNow().notNull(),
+    moneda: tipoMonedaEnum("moneda").notNull().default("quetzales"),
+    // saldo_actual NO se modifica desde la app: lo mueve solo el trigger
+    // BEFORE INSERT en cuentas_empresa_movimientos.
+    saldo_actual: numeric("saldo_actual", { precision: 18, scale: 2 })
+      .notNull()
+      .default("0"),
+    fechaCreacion: timestamp("fecha_creacion")
+      .notNull()
+      .default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
+    fechaActualizacion: timestamp("fecha_actualizacion")
+      .notNull()
+      .default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
   });
+
+  export const tipoMovimientoCuentaEmpresaEnum = customSchema.enum(
+    "tipo_movimiento_cuenta_empresa",
+    ["ingreso", "egreso"]
+  );
+
+  // Ledger de movimientos por cuenta. Cada fila es un evento de plata
+  // (entrada o salida). El saldo_actual de cuentas_empresa se deriva de
+  // la suma de estos movimientos — la columna saldo_actual es solo un
+  // cache mantenido por el trigger DB para lectura rápida.
+  export const cuentas_empresa_movimientos = customSchema.table(
+    "cuentas_empresa_movimientos",
+    {
+      movimiento_id: serial("movimiento_id").primaryKey(),
+      cuenta_id: integer("cuenta_id")
+        .notNull()
+        .references(() => cuentasEmpresa.cuentaId, { onDelete: "restrict" }),
+      tipo: tipoMovimientoCuentaEmpresaEnum("tipo").notNull(),
+      monto: numeric("monto", { precision: 18, scale: 2 }).notNull(),
+      saldo_post: numeric("saldo_post", { precision: 18, scale: 2 }).notNull(),
+      motivo: text("motivo"),
+      created_by: integer("created_by").references(() => platform_users.id),
+      created_at: timestamp("created_at", { withTimezone: true })
+        .notNull()
+        .default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
+    },
+    (t) => ({
+      cuentaIdx: index("idx_cuentas_empresa_mov_cuenta").on(t.cuenta_id),
+      fechaIdx: index("idx_cuentas_empresa_mov_fecha").on(t.created_at),
+    })
+  );
 
 
   export const convenios_pago = customSchema.table("convenios_pago", {

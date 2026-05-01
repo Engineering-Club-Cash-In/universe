@@ -317,6 +317,12 @@ export default function VehicleRegistrationOCR({
                   {result.ocrData.motor && (
                     <div><strong>No. Motor:</strong> {result.ocrData.motor}</div>
                   )}
+                  {result.ocrData.use && (
+                    <div><strong>Uso:</strong> {result.ocrData.use}</div>
+                  )}
+                  {result.ocrData.seats && (
+                    <div><strong>Asientos:</strong> {result.ocrData.seats}</div>
+                  )}
                 </div>
               </div>
             )}

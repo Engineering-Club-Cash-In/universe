@@ -131,6 +131,7 @@ interface CreateCreditParams {
 	lead: LeadData;
 	numeroSifco: string;
 	userId: string;
+	cuotaMensual?: string;
 	isVehicleOwned?: boolean;
 	// Info del vehículo para el correo
 	vehiculo_marca?: string;
@@ -179,6 +180,7 @@ interface QuotationDataForBilling {
 	extraAdminCost: string | null; // Gastos administrativos
 	insuredAmount: string | null; // Monto asegurado (para correo)
 	value: string | null; // Valor del vehículo (para correo)
+	monthlyPayment: string | null; // Cuota mensual (para asegurar el valor que es)
 }
 
 /** Parámetros para generación de facturas en background */
@@ -401,7 +403,8 @@ async function getLatestApprovedQuotation(
 				extraInsuranceCost: quotations.extraInsuranceCost,
 				extraAdminCost: quotations.extraAdminCost,
 				insuredAmount: quotations.insuredAmount,
-				value: quotations.vehicleValue
+				value: quotations.vehicleValue,
+				monthlyPayment: quotations.monthlyPayment,
 			})
 			.from(quotations)
 			.where(eq(quotations.opportunityId, opportunityId))
@@ -814,7 +817,7 @@ async function createCredit(
 			capital: Number.parseFloat(opportunity.value as string),
 			porcentaje_interes: Number.parseFloat(opportunity.tasaInteres as string),
 			plazo: opportunity.numeroCuotas as number,
-			cuota: Number.parseFloat(opportunity.cuotaMensual as string),
+			cuota: params.cuotaMensual ? Number(params.cuotaMensual) : Number.parseFloat(opportunity.cuotaMensual as string),
 			dia_pago_mensual: diaPagoMensual,
 			tipoCredito: opportunity.creditType || "autocompra",
 			observaciones: `Crédito generado desde CRM - Oportunidad: ${opportunity.title}`,
@@ -1214,6 +1217,7 @@ export async function closeOpportunity(
 			lead,
 			numeroSifco,
 			userId,
+			cuotaMensual: quotation?.monthlyPayment ? String(quotation.monthlyPayment) : undefined,
 			isVehicleOwned: vehicleData?.isOwned ?? false,
 			// Enviar info del vehículo para que llegue en el correo de cartera
 			vehiculo_marca: vehicleData?.make ?? undefined,

@@ -8,6 +8,7 @@ import {
 	CalendarRange,
 	ChevronDown,
 	Loader2,
+	MessageCircle,
 	Phone,
 	Target,
 	TrendingDown,
@@ -15,9 +16,13 @@ import {
 	Users,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import type { DateRange } from "react-day-picker";
+import { MassWhatsappModal } from "@/components/cobros/mass-whatsapp-modal";
+import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { DataTable } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
 	Card,
 	CardContent,
@@ -279,6 +284,7 @@ const ETIQUETA_LABELS_FILTRO: Record<string, string> = {
 	reclamo: "Reclamo",
 };
 
+
 function RouteComponent() {
 	const { data: session } = authClient.useSession();
 	const navigate = useNavigate();
@@ -290,7 +296,13 @@ function RouteComponent() {
 	const [page, setPage] = useState(1);
 	const [filterValue, setFilterValue] = useState("");
 	const [debouncedFilterValue, setDebouncedFilterValue] = useState("");
-	const [pageSize, setPageSize] = useState(10);
+	const [sifcoFilterValue, setSifcoFilterValue] = useState("");
+	const [debouncedSifcoFilterValue, setDebouncedSifcoFilterValue] = useState("");
+	const [pageSize, setPageSize] = useState(25);
+	const [fechaDesde, setFechaDesde] = useState<string | undefined>(undefined);
+	const [fechaHasta, setFechaHasta] = useState<string | undefined>(undefined);
+	const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
+	const [fechaError, setFechaError] = useState<string | null>(null);
 
 	// Debounce para el filtro de búsqueda (1 segundos)
 	useEffect(() => {
@@ -301,6 +313,16 @@ function RouteComponent() {
 
 		return () => clearTimeout(timer);
 	}, [filterValue]);
+
+	// Debounce para el filtro por número SIFCO (1 segundo)
+	useEffect(() => {
+		const timer = setTimeout(() => {
+			setDebouncedSifcoFilterValue(sifcoFilterValue);
+			setPage(1);
+		}, 1000);
+
+		return () => clearTimeout(timer);
+	}, [sifcoFilterValue]);
 
 	const userRole = session?.user.role;
 
@@ -398,10 +420,14 @@ function RouteComponent() {
 				offset: (page - 1) * pageSize,
 				estadoMora: filtroEtapa || undefined,
 				searchTerm: debouncedFilterValue || undefined,
-				time: timeParam,
+				numeroSifco: debouncedSifcoFilterValue || undefined,
+				time: fechaDesde || fechaHasta ? undefined : timeParam,
 				emailCobrador: !PERMISSIONS.canAssignCobros(userRole ?? "")
 					? session?.user?.email
 					: undefined,
+				fechaDesde,
+				fechaHasta,
+				etiquetas: filtroEtiquetas.length > 0 ? filtroEtiquetas : undefined,
 			},
 		}),
 		enabled: !!session,
@@ -461,15 +487,6 @@ function RouteComponent() {
 			);
 		}
 
-		// Filtrar por etiquetas (AND: el caso debe tener todas las seleccionadas)
-		if (filtroEtiquetas.length > 0) {
-			filtrados = filtrados.filter(
-				(c) =>
-					c.etiquetas &&
-					filtroEtiquetas.every((et) => c.etiquetas!.includes(et)),
-			);
-		}
-
 		// Filtrar por rango temporal
 		if (filtroTemporal === "todos") return filtrados;
 
@@ -487,12 +504,7 @@ function RouteComponent() {
 			// Incluir casos en mora (días negativos) y casos próximos a vencer
 			return c?.diasHastaPago !== null && c?.diasHastaPago <= limite;
 		});
-	}, [
-		creditosConDias,
-		filtroTemporal,
-		mostrarCompletadosIncobrables,
-		filtroEtiquetas,
-	]);
+	}, [creditosConDias, filtroTemporal, mostrarCompletadosIncobrables, filtroEtiquetas, filtroEtapa]);
 
 	// Check permissions after all hooks
 	if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
@@ -980,34 +992,35 @@ function RouteComponent() {
 								Enfocado en prevenir mora - Ordenado por proximidad de pago
 							</CardDescription>
 						</div>
-						<Badge variant="outline" className="text-sm">
-							{creditosFiltrados.length} casos mostrados
-						</Badge>
+						<div className="flex items-center gap-2">
+							<MassWhatsappModal
+								filtros={{
+									estadoMora: filtroEtapa || undefined,
+									searchTerm: debouncedFilterValue || undefined,
+									numeroSifco: debouncedSifcoFilterValue || undefined,
+									time: timeParam,
+									etiquetas:
+										filtroEtiquetas.length > 0 ? filtroEtiquetas : undefined,
+								}}
+								etiquetaLabels={ETIQUETA_LABELS_FILTRO}
+								totalDestinatarios={totalCreditos}
+							>
+								<Button
+									variant="outline"
+									size="sm"
+									className="flex items-center gap-2"
+								>
+									<MessageCircle className="h-4 w-4" />
+									Enviar WhatsApp masivo
+								</Button>
+							</MassWhatsappModal>
+							<Badge variant="outline" className="text-sm">
+								{totalCreditos} casos
+							</Badge>
+						</div>
 					</div>
 				</CardHeader>
 				<CardContent className="space-y-4">
-					{/* Filtros Temporales */}
-					<div className="flex flex-wrap items-center gap-4">
-						<div className="flex flex-wrap gap-2">
-							{filtros.map((filtro) => {
-								const Icon = filtro.icon;
-								const isActive = filtroTemporal === filtro.key;
-
-								return (
-									<Button
-										key={filtro.key}
-										variant={isActive ? "default" : "outline"}
-										size="sm"
-										onClick={() => setFiltroTemporal(filtro.key)}
-									>
-										<Icon className="mr-2 h-4 w-4" />
-										{filtro.label}
-									</Button>
-								);
-							})}
-						</div>
-					</div>
-
 					{/* Data Table */}
 					<DataTable
 						columns={columns}
@@ -1015,6 +1028,14 @@ function RouteComponent() {
 						isLoading={todosLosCreditos.isLoading}
 						setGlobalFilterParam={setFilterValue}
 						searchPlaceholder="Buscar por cliente o placa"
+						extraSearch={
+							<Input
+								placeholder="Buscar por No. SIFCO (exacto)"
+								value={sifcoFilterValue}
+								onChange={(e) => setSifcoFilterValue(e.target.value)}
+								className="max-w-xs"
+							/>
+						}
 						onRowClick={(row) => {
 							const linkId = row.numeroCredito || row.contratoId;
 							const tipoLink = row.casoCobroId ? "caso" : "contrato";
@@ -1026,78 +1047,150 @@ function RouteComponent() {
 						}}
 						filterContent={
 							<div className="flex w-full flex-col gap-3">
-								<div className="flex flex-wrap items-center gap-2 rounded-md border border-border/50 bg-muted/30 px-3 py-2">
-									<span className="font-semibold text-foreground text-sm">
-										Filtrar por etapa:
+								{/* Período: presets rápidos + rango personalizado */}
+								<div className="flex flex-col gap-2">
+									<span className="font-semibold text-muted-foreground text-xs uppercase tracking-wide">
+										Período de pago
 									</span>
-									<Button
-										variant={filtroEtapa === null ? "default" : "outline"}
-										size="sm"
-										onClick={() => {
-											setFiltroEtapa(null);
-											setPage(1);
-										}}
-									>
-										Todas
-									</Button>
-									{filtrosEtapa.map((filtro) => (
-										<Badge
-											key={filtro.key}
-											className={`cursor-pointer ${filtroEtapa === filtro.key ? filtro.color : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
+									<div className="flex flex-wrap items-center gap-2">
+										{filtros.map((filtro) => {
+											const Icon = filtro.icon;
+											const isActive = filtroTemporal === filtro.key;
+											return (
+												<Button
+													key={filtro.key}
+													variant={isActive ? "default" : "outline"}
+													size="sm"
+													onClick={() => setFiltroTemporal(filtro.key)}
+												>
+													<Icon className="mr-2 h-4 w-4" />
+													{filtro.label}
+												</Button>
+											);
+										})}
+										<Separator orientation="vertical" className="mx-1 h-6" />
+										<DateRangeFilter
+											dateRange={dateRange}
+											onDateRangeChange={(range) => {
+												if (!range) {
+													setDateRange(undefined);
+													setFechaDesde(undefined);
+													setFechaHasta(undefined);
+													setFechaError(null);
+													setPage(1);
+													return;
+												}
+												const hoy = new Date();
+												hoy.setHours(0, 0, 0, 0);
+												if (range.from && range.from < hoy) {
+													setFechaError(
+														"La fecha no puede ser menor al día de hoy",
+													);
+													setDateRange(range);
+													return;
+												}
+												setFechaError(null);
+												setDateRange(range);
+												if (!range.from || !range.to) return;
+												setFechaDesde(range.from.toISOString().slice(0, 10));
+												setFechaHasta(range.to.toISOString().slice(0, 10));
+												setFiltroTemporal("todos");
+												setPage(1);
+											}}
+										/>
+										{fechaError && (
+											<span className="text-destructive text-xs">
+												{fechaError}
+											</span>
+										)}
+									</div>
+								</div>
+
+								{/* Etapa de mora */}
+								<div className="flex flex-col gap-2">
+									<span className="font-semibold text-muted-foreground text-xs uppercase tracking-wide">
+										Etapa de mora
+									</span>
+									<div className="flex flex-wrap items-center gap-2">
+										<Button
+											variant={filtroEtapa === null ? "default" : "outline"}
+											size="sm"
 											onClick={() => {
-												setFiltroEtapa(
-													filtroEtapa === filtro.key ? null : filtro.key,
-												);
+												setFiltroEtapa(null);
 												setPage(1);
 											}}
 										>
-											{filtro.label}
-										</Badge>
-									))}
-								</div>
-								<div className="flex flex-wrap items-center gap-2 rounded-md border border-border/50 bg-muted/30 px-3 py-2">
-									<span className="font-semibold text-foreground text-sm">
-										Etiquetas:
-									</span>
-									<Button
-										variant={
-											filtroEtiquetas.length === 0 ? "default" : "outline"
-										}
-										size="sm"
-										onClick={() => {
-											setFiltroEtiquetas([]);
-											setPage(1);
-										}}
-									>
-										Todas
-									</Button>
-									{Object.entries(ETIQUETA_LABELS_FILTRO).map(
-										([key, label]) => (
+											Todas
+										</Button>
+										{filtrosEtapa.map((filtro) => (
 											<Badge
-												key={key}
-												className={`cursor-pointer ${filtroEtiquetas.includes(key) ? "bg-primary text-primary-foreground" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
+												key={filtro.key}
+												className={`cursor-pointer ${filtroEtapa === filtro.key ? filtro.color : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
 												onClick={() => {
-													setFiltroEtiquetas((prev) =>
-														prev.includes(key)
-															? prev.filter((e) => e !== key)
-															: [...prev, key],
+													setFiltroEtapa(
+														filtroEtapa === filtro.key ? null : filtro.key,
 													);
 													setPage(1);
 												}}
 											>
-												{label}
+												{filtro.label}
 											</Badge>
-										),
-									)}
+										))}
+									</div>
+								</div>
+
+								{/* Etiquetas */}
+								<div className="flex flex-col gap-2">
+									<span className="font-semibold text-muted-foreground text-xs uppercase tracking-wide">
+										Etiquetas
+									</span>
+									<div className="flex flex-wrap items-center gap-2">
+										<Button
+											variant={
+												filtroEtiquetas.length === 0 ? "default" : "outline"
+											}
+											size="sm"
+											onClick={() => {
+												setFiltroEtiquetas([]);
+												setPage(1);
+											}}
+										>
+											Todas
+										</Button>
+										{Object.entries(ETIQUETA_LABELS_FILTRO).map(
+											([key, label]) => (
+												<Badge
+													key={key}
+													className={`cursor-pointer ${filtroEtiquetas.includes(key) ? "bg-primary text-primary-foreground" : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
+													onClick={() => {
+														setFiltroEtiquetas((prev) =>
+															prev.includes(key)
+																? prev.filter((e) => e !== key)
+																: [...prev, key],
+														);
+														setPage(1);
+													}}
+												>
+													{label}
+												</Badge>
+											),
+										)}
+									</div>
 								</div>
 							</div>
 						}
+						tableContainerClass="max-h-[600px] overflow-y-auto"
+						pageSizeOptions={[25, 50, 75, 100, 200]}
 						serverPagination={{
 							page: page,
 							pageSize: pageSize,
 							totalPages: totalPages,
 							totalItems: totalCreditos,
 							onPageChange: (newPage) => setPage(newPage),
+							onPageSizeChange: (newSize) => {
+								setPageSize(newSize);
+								setPage(1);
+							},
 						}}
 					/>
 				</CardContent>

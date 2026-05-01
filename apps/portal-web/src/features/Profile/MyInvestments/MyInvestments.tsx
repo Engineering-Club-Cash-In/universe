@@ -72,11 +72,12 @@ export const MyInvestments = () => {
     setPagosPage(1);
   };
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("es-GT", {
-      style: "currency",
-      currency: "GTQ",
+  const formatCurrency = (amount: number, currencySymbol: string = "Q.") => {
+    const formatted = new Intl.NumberFormat("es-GT", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
     }).format(amount);
+    return `${currencySymbol}${formatted}`;
   };
 
   const formatDate = (dateString: string) => {
@@ -247,7 +248,7 @@ export const MyInvestments = () => {
                             Total Pago
                           </span>
                           <span className="text-2xl lg:text-3xl font-bold text-primary tabular-nums">
-                            {formatCurrency(liquidacion.totales.total_cuota)}
+                            {formatCurrency(liquidacion.totales.total_cuota, liquidacion.currencySymbol)}
                           </span>
                         </div>
                       </div>
@@ -259,7 +260,7 @@ export const MyInvestments = () => {
                             Amortización Capital
                           </span>
                           <span className="text-base lg:text-lg text-white/90 tabular-nums">
-                            {formatCurrency(liquidacion.totales.total_capital)}
+                            {formatCurrency(liquidacion.totales.total_capital, liquidacion.currencySymbol)}
                           </span>
                         </div>
                         <div>
@@ -267,7 +268,7 @@ export const MyInvestments = () => {
                             Interés
                           </span>
                           <span className="text-base lg:text-lg text-green-400 tabular-nums">
-                            {formatCurrency(liquidacion.totales.total_interes)}
+                            {formatCurrency(liquidacion.totales.total_interes, liquidacion.currencySymbol)}
                           </span>
                         </div>
                         <div>
@@ -275,7 +276,7 @@ export const MyInvestments = () => {
                             IVA
                           </span>
                           <span className="text-base lg:text-lg text-white/70 tabular-nums">
-                            {formatCurrency(liquidacion.totales.total_iva)}
+                            {formatCurrency(liquidacion.totales.total_iva, liquidacion.currencySymbol)}
                           </span>
                         </div>
                         {liquidacion.totales.total_isr > 0 && (
@@ -284,7 +285,7 @@ export const MyInvestments = () => {
                               ISR
                             </span>
                             <span className="text-base lg:text-lg text-red-400 tabular-nums">
-                              {formatCurrency(liquidacion.totales.total_isr)}
+                              {formatCurrency(liquidacion.totales.total_isr, liquidacion.currencySymbol)}
                             </span>
                           </div>
                         )}
@@ -307,7 +308,7 @@ export const MyInvestments = () => {
                               <h4 className="text-sm font-semibold text-white/70 uppercase tracking-wide mb-3">
                                 Boleta
                               </h4>
-                              <div className="grid grid-cols-2 gap-4">
+                              <div className="grid grid-cols-3 gap-4">
                                 <div>
                                   <span className="text-xs text-white/40 block mb-1">
                                     Monto
@@ -315,6 +316,7 @@ export const MyInvestments = () => {
                                   <span className="text-base text-white/90 tabular-nums">
                                     {formatCurrency(
                                       Math.abs(liquidacion.boleta.monto_boleta),
+                                      liquidacion.currencySymbol,
                                     )}
                                   </span>
                                 </div>
@@ -363,29 +365,16 @@ export const MyInvestments = () => {
                               <h4 className="text-sm font-semibold text-white/70 uppercase tracking-wide mb-3">
                                 Reinversión
                               </h4>
-                              <div className="grid grid-cols-2 gap-4">
-                                {/*<div>
-                                  <span className="text-xs text-white/40 block mb-1">Capital</span>
-                                  <span className="text-base text-white/90 tabular-nums">
-                                    {formatCurrency(liquidacion.reinversion.reinversion_capital)}
-                                  </span>
-                                </div>
-                                <div>
-                                  <span className="text-xs text-white/40 block mb-1">Interés</span>
-                                  <span className="text-base text-green-400 tabular-nums">
-                                    {formatCurrency(liquidacion.reinversion.reinversion_interes)}
-                                  </span>
-                                </div>*/}
-                                <div className="col-span-2">
-                                  <span className="text-xs text-white/40 block mb-1">
-                                    Total Reinvertido
-                                  </span>
-                                  <span className="text-lg lg:text-xl font-semibold text-white tabular-nums">
-                                    {formatCurrency(
-                                      liquidacion.reinversion.reinversion_total,
-                                    )}
-                                  </span>
-                                </div>
+                              <div>
+                                <span className="text-xs text-white/40 block mb-1">
+                                  Total Reinvertido
+                                </span>
+                                <span className="text-base font-semibold text-white tabular-nums">
+                                  {formatCurrency(
+                                    liquidacion.reinversion.reinversion_total,
+                                    liquidacion.currencySymbol,
+                                  )}
+                                </span>
                               </div>
                             </div>
                           )}
@@ -481,7 +470,7 @@ export const MyInvestments = () => {
                                           Pago:
                                         </span>
                                         <span className="text-xl lg:text-2xl text-primary font-bold tabular-nums">
-                                          {formatCurrency(pago.cuota)}
+                                          {formatCurrency(pago.cuota, liquidacion.currencySymbol)}
                                         </span>
                                       </div>
                                     </div>
@@ -517,7 +506,7 @@ export const MyInvestments = () => {
                                           Amortización Capital
                                         </span>
                                         <span className="text-base text-white/80 tabular-nums">
-                                          {formatCurrency(pago.abono_capital)}
+                                          {formatCurrency(pago.abono_capital, liquidacion.currencySymbol)}
                                         </span>
                                       </div>
                                       <div>
@@ -525,7 +514,7 @@ export const MyInvestments = () => {
                                           Interés
                                         </span>
                                         <span className="text-base text-green-400 tabular-nums">
-                                          {formatCurrency(pago.abono_interes)}
+                                          {formatCurrency(pago.abono_interes, liquidacion.currencySymbol)}
                                         </span>
                                       </div>
                                       <div>
@@ -533,7 +522,7 @@ export const MyInvestments = () => {
                                           IVA
                                         </span>
                                         <span className="text-base text-white/70 tabular-nums">
-                                          {formatCurrency(pago.abono_iva)}
+                                          {formatCurrency(pago.abono_iva, liquidacion.currencySymbol)}
                                         </span>
                                       </div>
                                     </div>

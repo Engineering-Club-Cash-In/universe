@@ -5,6 +5,7 @@ import ExcelJS from "exceljs";
 import axios from "axios";
 import Big from "big.js";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { sql, type SQL } from "drizzle-orm";
 // Tipos auxiliares
 
 /**
@@ -21,6 +22,45 @@ export function removeAccents(str: string): string {
  * Nota: el searchTerm debe pasar por removeAccents() antes.
  */
 export const SQL_UNACCENT = `translate(lower(COLUMN), 'áéíóúàèìòùäëïöüâêîôûãõñÁÉÍÓÚÀÈÌÒÙÄËÏÖÜÂÊÎÔÛÃÕÑ', 'aeiouaeiouaeiouaeiouaonAEIOUAEIOUAEIOUAEIOUAON')`;
+
+/**
+ * Construye un filtro SQL para búsqueda de nombres tolerante a:
+ * - Acentos/tildes (Óscar = Oscar)
+ * - Mayúsculas/minúsculas
+ * - Espacios extra entre palabras
+ * - Orden de palabras (cada token puede aparecer en cualquier posición)
+ *
+ * Ej: term "Oscar Alf" hace match con "Óscar Alfredo Méndez" porque divide
+ * la búsqueda en tokens ["oscar", "alf"] y exige que TODOS aparezcan en la
+ * columna (ya normalizada sin acentos y en minúsculas).
+ *
+ * @param column Columna o expresión SQL sobre la que buscar (ej: usuarios.nombre o sql`u.nombre`)
+ * @param term Texto de búsqueda del usuario
+ * @returns SQL con el filtro, o undefined si el término queda vacío
+ */
+export function buildNameSearchCondition(
+  column: unknown,
+  term: string | undefined | null
+): SQL | undefined {
+  if (!term) return undefined;
+  const normalized = removeAccents(term).toLowerCase().trim().replace(/\s+/g, " ");
+  if (!normalized) return undefined;
+  const tokens = normalized.split(" ").filter((t) => t.length > 0);
+  if (tokens.length === 0) return undefined;
+
+  const ACCENTS_FROM = "áéíóúàèìòùäëïöüâêîôûãõñÁÉÍÓÚÀÈÌÒÙÄËÏÖÜÂÊÎÔÛÃÕÑ";
+  const ACCENTS_TO = "aeiouaeiouaeiouaeiouaonAEIOUAEIOUAEIOUAEIOUAON";
+
+  // Aplicamos translate ANTES de lower: así, aunque el locale del Postgres no
+  // foldee mayúsculas acentuadas (ej. 'Ó' → 'ó'), translate ya las convirtió
+  // a ASCII y lower() funciona sobre puro ASCII.
+  const tokenConds = tokens.map(
+    (t) =>
+      sql`lower(translate(${column as any}, ${ACCENTS_FROM}, ${ACCENTS_TO})) LIKE ${"%" + t + "%"}`
+  );
+
+  return sql.join(tokenConds, sql` AND `);
+}
 
 
 export async function generarPDFBuffer(
@@ -714,15 +754,16 @@ export async function buildInversionistaWorkbook(
   const labelMapR: Record<string, string> = {
     reinversion_capital: "Reinversión Capital",
     reinversion_interes: "Reinversión Interés",
-    reinversion_total:   "Reinversión Total",
-    sin_reinversion:     "Sin Reinversión",
+    reinversion_total:   "Interés Compuesto",
+    sin_reinversion:     "Tradicional",
   };
 
   const grupos = esCombinada
-    ? ["reinversion_capital", "reinversion_interes", "reinversion_total", "sin_reinversion", null]
+    ? ["reinversion_capital", "reinversion_interes", "reinversion_total", "sin_reinversion"]
     : ["all"];
 
   let row = 5;
+  const groupTotalRows: number[] = [];
 
   let headerRowSet = false;
   let firstHeaderRow = 6;
@@ -730,7 +771,10 @@ export async function buildInversionistaWorkbook(
   for (const grupo of grupos) {
     let credGrupo = inv.creditos;
     if (esCombinada) {
-      credGrupo = inv.creditos.filter((c) => (c.tipo_reinversion ?? null) === grupo);
+      credGrupo = inv.creditos.filter((c) => {
+        const t = c.tipo_reinversion || "sin_reinversion";
+        return t === grupo;
+      });
       if (credGrupo.length === 0) continue;
 
       row += 2;
@@ -755,7 +799,7 @@ export async function buildInversionistaWorkbook(
       "Meses en crédito", "Nombre", "Capital",
       "% Interés", "% Inversionista", "Tasa interés inversor",
       "Interés Inversor", "IVA", "ISR",
-      "Abono capital", "% Inv. Neto", "Capital restante",
+      "Abono capital", "% Inv. Interés Neto", "Capital restante",
       "Cuota de mes", "Plazo", "NIT",
     ];
 
@@ -839,6 +883,9 @@ export async function buildInversionistaWorkbook(
 
     if (esCombinada) {
       totalRow.getCell(2).value = `Total ${labelMapR[grupo ?? ""] ?? "Sin tipo"}`;
+      if (hasData) {
+        groupTotalRows.push(row);
+      }
     } else {
       totalRow.getCell(1).value = "Total";
     }
@@ -877,17 +924,112 @@ export async function buildInversionistaWorkbook(
     }
   }
 
+  if (esCombinada && groupTotalRows.length > 1) {
+    row += 2;
+    const granTotalRow = ws.getRow(row);
+    granTotalRow.getCell(2).value = "Gran Total";
+    
+    const colC = showId ? "D" : "C";
+    const formulaC = groupTotalRows.map(r => `${colC}${r}`).join("+");
+    granTotalRow.getCell(3 + offset).value = { formula: formulaC };
+    granTotalRow.getCell(3 + offset).numFmt = numFmt;
+    
+    const sumCols: [number, string, string][] = [
+      [7,  "G", "H"], // Interés Inversor
+      [8,  "H", "I"], // IVA
+      [9,  "I", "J"], // ISR
+      [10, "J", "K"], // Abono capital
+      [11, "K", "L"], // % Inv. Neto
+      [12, "L", "M"], // Capital restante
+    ];
+    
+    for (const [ci, colLetterDefault, colLetterShifted] of sumCols) {
+      const targetCi = ci + offset;
+      const targetColLetter = showId ? colLetterShifted : colLetterDefault;
+      const formula = groupTotalRows.map(r => `${targetColLetter}${r}`).join("+");
+      granTotalRow.getCell(targetCi).value = { formula };
+      granTotalRow.getCell(targetCi).numFmt = numFmt;
+    }
+    
+    for (let c = 1; c <= totalCols; c++) {
+      const cell = granTotalRow.getCell(c);
+      cell.font = { bold: true, color: { argb: CINV.white } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: CINV.navy } };
+      cell.border = {
+        top:    { style: "double", color: { argb: CINV.blue } },
+        bottom: { style: "medium", color: { argb: CINV.navy } },
+      };
+    }
+  }
+
   // ── sección reinversión (2 filas abajo de la tabla)
   row += 2;
-  const reinv: [string, number][] = [
-    ["Reinversión Capital",  toN(sub.total_reinversion_capital)],
-    ["Reinversión Interés",  toN(sub.total_reinversion_interes)],
-    ["Total Reinversión",    toN(sub.total_reinversion)],
-  ];
+  const titleRow = ws.getRow(row);
+  titleRow.getCell(1).value = "Totales de Reinversión";
+  titleRow.getCell(1).font = { bold: true, size: 12, color: { argb: CINV.navy } };
+  
+  row += 2;
+  const reinv: [string, number][] = [];
+
+  if (esCombinada) {
+    let reinvCap_cap = new Big(0);
+    let reinvTot_cap = new Big(0);
+    let reinvTot_int = new Big(0);
+    let reinvInt_int = new Big(0);
+
+    for (const cr of inv.creditos) {
+      const tipo = cr.tipo_reinversion || "sin_reinversion";
+      for (const pago of cr.pagos ?? []) {
+        const cap = new Big(pago.abono_capital || 0);
+        const int = new Big(pago.abono_interes || 0);
+        const iva = new Big(pago.abono_iva || 0);
+        const isr = new Big(pago.isr || 0);
+        
+        const abonoGeneralInteres = inv.emite_factura 
+          ? int.plus(iva) 
+          : int.minus(isr);
+
+        if (tipo === "reinversion_capital") {
+          reinvCap_cap = reinvCap_cap.plus(cap);
+        } else if (tipo === "reinversion_total") {
+          reinvTot_cap = reinvTot_cap.plus(cap);
+          
+          const isrReinv = inv.emite_factura ? new Big(0) : abonoGeneralInteres.times(0.07);
+          const netInteresForReinv = abonoGeneralInteres.minus(isrReinv);
+          
+          reinvTot_int = reinvTot_int.plus(netInteresForReinv);
+        } else if (tipo === "reinversion_interes") {
+          const isrReinv = inv.emite_factura ? new Big(0) : abonoGeneralInteres.times(0.07);
+          const netInteresForReinv = abonoGeneralInteres.minus(isrReinv);
+          
+          reinvInt_int = reinvInt_int.plus(netInteresForReinv);
+        }
+      }
+    }
+
+    if (reinvCap_cap.gt(0)) {
+      reinv.push(["Reinversión Capital (Abono Capital)", reinvCap_cap.toNumber()]);
+    }
+    if (reinvTot_cap.gt(0)) {
+      reinv.push(["Interés Compuesto (Abono Capital)", reinvTot_cap.toNumber()]);
+    }
+    if (reinvTot_int.gt(0)) {
+      reinv.push(["Interés Compuesto (Interés Neto)", reinvTot_int.toNumber()]);
+    }
+    if (reinvInt_int.gt(0)) {
+      reinv.push(["Reinversión Interés (Interés Neto)", reinvInt_int.toNumber()]);
+    }
+    reinv.push(["Total Reinversión", toN(sub.total_reinversion)]);
+  } else {
+    reinv.push(["Reinversión Capital", toN(sub.total_reinversion_capital)]);
+    reinv.push(["Reinversión Interés", toN(sub.total_reinversion_interes)]);
+    reinv.push(["Total Reinversión", toN(sub.total_reinversion)]);
+  }
+
   let col = 1;
   for (const [label, val] of reinv) {
     ws.getCell(row, col).value = label;
-    ws.getCell(row, col).font = { color: { argb: CINV.gray }, size: 9 };
+    ws.getCell(row, col).font = { bold: true, color: { argb: CINV.text }, size: 9 };
     ws.mergeCells(row, col, row, col + 2);
     col += 3;
 

@@ -42,7 +42,7 @@ export const Menu = () => {
       roles: ["INVESTOR"], // Solo para inversionistas
     },
     {
-      id: "/loans",
+      id: "/loans", 
       label: "Mis Préstamos",
       icon: <IconCar2 width="24" height="24" />,
       roles: ["CLIENT"], // Solo para clientes

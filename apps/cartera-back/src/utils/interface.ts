@@ -57,6 +57,9 @@ export interface Subtotal {
   total_reinversion: number;
   total_capital_creditos: number;
   total_capital_actual: number;
+  total_reinv_tipo_capital?: number;
+  total_reinv_tipo_interes?: number;
+  total_reinv_tipo_total?: number;
 }
 
 export interface InversionistaReporte {

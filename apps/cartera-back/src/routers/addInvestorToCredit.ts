@@ -1,7 +1,10 @@
 import { Elysia, t } from "elysia";
 import { addInvestorToCredit } from "../controllers/addInvestorToCredit";
+import { authMiddleware } from "./midleware";
 
-export const addInvestorToCreditRouter = new Elysia().post(
+export const addInvestorToCreditRouter = new Elysia()
+  .use(authMiddleware)
+  .post(
   "/agregar-inversionista-credito",
   addInvestorToCredit,
   {
@@ -16,6 +19,13 @@ export const addInvestorToCreditRouter = new Elysia().post(
         t.Literal("reinversion"),
         t.Literal("compra_cartera"),
       ]),
+      tipo_reinversion: t.Optional(
+        t.Union([
+          t.Literal("reinversion_capital"),
+          t.Literal("reinversion_total"),
+          t.Literal("sin_reinversion"),
+        ]),
+      ),
       fecha_inicio_participacion: t.Optional(t.String()),
     }),
     detail: {

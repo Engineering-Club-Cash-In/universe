@@ -7,6 +7,8 @@ export type TipoFrase = 1 | 2 | 3 | 4;
 export interface Frase {
   tipoFrase: TipoFrase;
   codigoEscenario: string;
+  numeroResolucion?: string;
+  fechaResolucion?: string;
 }
 
 export interface Emisor {

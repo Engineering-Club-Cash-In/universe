@@ -1,5 +1,18 @@
+import { sendPlainEmail } from "@cci/email";
 import { ORPCError } from "@orpc/server";
-import { and, asc, count, desc, eq, gte, ilike, or, sql } from "drizzle-orm";
+import { SMSClient } from "@repo/sms";
+import {
+	and,
+	asc,
+	count,
+	desc,
+	eq,
+	gte,
+	ilike,
+	inArray,
+	or,
+	sql,
+} from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -15,6 +28,7 @@ import {
 	metodoContactoEnum,
 	recuperacionesVehiculo,
 } from "../db/schema/cobros";
+import { cobrosSendLogs } from "../db/schema/cobros-send-logs";
 import {
 	clients,
 	leads,
@@ -32,7 +46,20 @@ import {
 	crmCobrosOrInvestmentsProcedure,
 	crmOrCobrosProcedure,
 } from "../lib/orpc";
+import {
+	interpolar as interpolarPlantilla,
+	PLANTILLAS_MENSAJES,
+} from "../lib/cobros-plantillas";
+import {
+	getTestPhone,
+	isTestModeEnabled,
+	TEST_EMAIL,
+} from "../lib/messaging-test-mode";
 import { PERMISSIONS } from "../lib/roles";
+import {
+	sendWhatsappTemplate,
+	sendWhatsappTemplateBatch,
+} from "../lib/simpletech";
 import { carteraBackClient } from "../services/cartera-back-client";
 import {
 	createPagoInCarteraBack,
@@ -62,46 +89,48 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 		| "MOROSO";
 	nombre_usuario?: string;
 	numero_credito_sifco?: string;
+	numeros_credito_sifco?: string[];
 	time?: "WEEK" | "MONTH" | "DUEMONTH" | "TODAY";
 	email_cobrador?: string;
+	fecha_desde?: string;
+	fecha_hasta?: string;
 }) {
 	const estado = params.estado || "ACTIVO";
 
-	const response = await carteraBackClient
-		.getAllCreditos({
-			mes: params.mes,
-			anio: params.anio,
-			page: params.page,
-			perPage: params.perPage,
-			estado: estado,
-			...(params.cuotasAtrasadas !== undefined && {
-				cuotas_atrasadas: params.cuotasAtrasadas,
+	// Antes había un .catch que devolvía respuesta vacía si cartera fallaba.
+	// Eso enmascaraba errores reales (ej. 414 URI Too Long con listas grandes
+	// de SIFCOs) y hacía que la tabla mostrara 0 casos y el envío masivo
+	// despachara a 0 destinatarios silenciosamente. Ahora propagamos el error
+	// para que el endpoint ORPC lo levante como tal.
+	const response = await carteraBackClient.getAllCreditos({
+		mes: params.mes,
+		anio: params.anio,
+		page: params.page,
+		perPage: params.perPage,
+		estado: estado,
+		...(params.cuotasAtrasadas !== undefined && {
+			cuotas_atrasadas: params.cuotasAtrasadas,
+		}),
+		...(params.nombre_usuario !== undefined &&
+			params.nombre_usuario !== "" && {
+				nombre_usuario: params.nombre_usuario,
 			}),
-			...(params.nombre_usuario !== undefined &&
-				params.nombre_usuario !== "" && {
-					nombre_usuario: params.nombre_usuario,
-				}),
-			...(params.numero_credito_sifco !== undefined &&
-				params.numero_credito_sifco !== "" && {
-					numero_credito_sifco: params.numero_credito_sifco,
-				}),
-			...(params.time !== undefined && { time: params.time }),
-			...(params.email_cobrador !== undefined &&
-				params.email_cobrador !== "" && {
-					email_cobrador: params.email_cobrador,
-				}),
-		})
-		.catch((error) => {
-			console.error("[Cobros] Error obteniendo créditos:", error);
-			// Retornar respuesta vacía si falla
-			return {
-				data: [],
-				page: params.page || 1,
-				perPage: params.perPage || 1000,
-				totalCount: 0,
-				totalPages: 0,
-			};
-		});
+		...(params.numero_credito_sifco !== undefined &&
+			params.numero_credito_sifco !== "" && {
+				numero_credito_sifco: params.numero_credito_sifco,
+			}),
+		...(params.numeros_credito_sifco !== undefined &&
+			params.numeros_credito_sifco.length > 0 && {
+				numeros_credito_sifco: params.numeros_credito_sifco,
+			}),
+		...(params.time !== undefined && { time: params.time }),
+		...(params.email_cobrador !== undefined &&
+			params.email_cobrador !== "" && {
+				email_cobrador: params.email_cobrador,
+			}),
+			...(params.fecha_desde !== undefined && { fecha_desde: params.fecha_desde }),
+			...(params.fecha_hasta !== undefined && { fecha_hasta: params.fecha_hasta }),
+	});
 
 	return {
 		data: response.data,
@@ -567,8 +596,12 @@ export const cobrosRouter = {
 				offset: z.number().optional(),
 				estadoMora: z.string().optional(),
 				searchTerm: z.string().optional(),
+				numeroSifco: z.string().optional(),
 				time: z.enum(["WEEK", "MONTH", "DUEMONTH", "TODAY"]).optional(),
 				emailCobrador: z.string().optional(),
+				fechaDesde: z.string().optional(),
+				fechaHasta: z.string().optional(),
+				etiquetas: z.array(z.string()).optional(),
 			}),
 		)
 		.handler(async ({ input }) => {
@@ -583,9 +616,14 @@ export const cobrosRouter = {
 					let cuotasAtrasadas: number | undefined;
 					let estadoCartera: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | undefined;
 					const searchTerm = input.searchTerm?.trim() || "";
+					const numeroSifcoExacto = input.numeroSifco?.trim() || "";
 					const hasNumber = /\d/.test(searchTerm);
-					const isPlateSearch = searchTerm.length > 0 && hasNumber;
-					const isNameSearch = searchTerm.length > 0 && !hasNumber;
+					// Si hay numeroSifco explícito, ignoramos cualquier búsqueda por
+					// cliente/placa: es un equals contra cartera-back y sólo retorna 0 ó 1.
+					const isPlateSearch =
+						!numeroSifcoExacto && searchTerm.length > 0 && hasNumber;
+					const isNameSearch =
+						!numeroSifcoExacto && searchTerm.length > 0 && !hasNumber;
 
 					if (input.estadoMora) {
 						switch (input.estadoMora) {
@@ -628,8 +666,47 @@ export const cobrosRouter = {
 					}
 
 					console.log(
-						`[Cobros] Obteniendo créditos de Cartera-Back: mes=${mes} (todos), anio=${anio}, page=${Math.floor((input.offset || 0) / (input.limit || 50)) + 1}, perPage=${input.limit || 50}, cuotasAtrasadas=${cuotasAtrasadas}, estado=${estadoCartera}, time=${input.time}, emailCobrador=${input.emailCobrador}, search=${input.searchTerm || ""}`,
+						`[Cobros] Obteniendo créditos de Cartera-Back: mes=${mes} (todos), anio=${anio}, page=${Math.floor((input.offset || 0) / (input.limit || 50)) + 1}, perPage=${input.limit || 50}, cuotasAtrasadas=${cuotasAtrasadas}, estado=${estadoCartera}, time=${input.time}, emailCobrador=${input.emailCobrador}, search=${input.searchTerm || ""}, etiquetas=${input.etiquetas?.join(",") || ""}`,
 					);
+
+					// Si hay filtro de etiquetas, primero resolver en CRM la lista de
+					// numero_credito_sifco cuyos casos_cobros tengan AL MENOS UNA de las
+					// etiquetas seleccionadas (criterio OR / overlap con `&&`). Un caso
+					// con `{moras_pendientes,cobro}` matchea si el usuario filtra por
+					// `{cobro}` o por `{cobro,juridico}`. La lista resuelta se manda a
+					// cartera-back vía numeros_credito_sifco para filtrar en origen.
+					let sifcosPorEtiquetas: string[] | undefined;
+					if (input.etiquetas && input.etiquetas.length > 0) {
+						const filas = await db
+							.select({
+								numeroSifco: casosCobros.numeroCreditoSifco,
+								etiquetas: casosCobros.etiquetas,
+							})
+							.from(casosCobros)
+							.where(
+								sql`${casosCobros.etiquetas} && ARRAY[${sql.join(
+							input.etiquetas.map((e) => sql`${e}`),
+							sql`, `,
+						)}]::text[]`,
+							);
+						sifcosPorEtiquetas = filas
+							.map((r) => r.numeroSifco)
+							.filter((s): s is string => !!s);
+						console.log(
+							`[Cobros] Filtro etiquetas resolvió ${sifcosPorEtiquetas.length} numero_credito_sifco`,
+						);
+						if (sifcosPorEtiquetas.length === 0) {
+							const limit = input.limit || 50;
+							const offset = input.offset || 0;
+							return {
+								data: [],
+								total: 0,
+								page: Math.floor(offset / limit) + 1,
+								perPage: limit,
+								totalPages: 0,
+							};
+						}
+					}
 
 					let creditosResponse;
 					if (isPlateSearch) {
@@ -658,63 +735,144 @@ export const cobrosRouter = {
 								totalPages: 0,
 							};
 						} else if (matchingOpportunities.length === 1) {
-							// Una sola coincidencia: buscar directamente por número SIFCO (más rápido)
+							// Una sola coincidencia: buscar directamente por número SIFCO (más rápido).
+							// Si además hay filtro de etiquetas y el SIFCO de la placa no está en
+							// la lista, la combinación no produce match. Ojo: cartera-back le da
+							// prioridad al param multi sobre el single, por eso no mandamos ambos.
 							const numeroSifco = matchingOpportunities[0].numeroSifco!;
-							console.log(
-								`[Cobros] Placa ${searchTerm} encontró 1 coincidencia, buscando crédito SIFCO: ${numeroSifco}`,
-							);
-							creditosResponse = await obtenerTodosLosCreditosCarteraBack({
-								mes,
-								anio,
-								page: 1,
-								perPage: 50,
-								cuotasAtrasadas,
-								estado: estadoCartera,
-								time: input.time,
-								email_cobrador: input.emailCobrador,
-								numero_credito_sifco: numeroSifco,
-							});
-						} else {
-							// Múltiples coincidencias: traer todos los créditos y filtrar localmente
-							console.log(
-								`[Cobros] Placa ${searchTerm} encontró ${matchingOpportunities.length} coincidencias, trayendo todos los créditos`,
-							);
-							const perPage = 200;
-							const firstPage = await obtenerTodosLosCreditosCarteraBack({
-								mes,
-								anio,
-								page: 1,
-								perPage,
-								cuotasAtrasadas,
-								estado: estadoCartera,
-								time: input.time,
-								email_cobrador: input.emailCobrador,
-							});
-
-							const allCredits = [...firstPage.data];
-
-							for (let page = 2; page <= firstPage.totalPages; page++) {
-								const nextPage = await obtenerTodosLosCreditosCarteraBack({
+							if (
+								sifcosPorEtiquetas &&
+								!sifcosPorEtiquetas.includes(numeroSifco)
+							) {
+								console.log(
+									`[Cobros] Placa ${searchTerm} matcheó SIFCO ${numeroSifco}, pero no está en las etiquetas seleccionadas — respuesta vacía`,
+								);
+								creditosResponse = {
+									data: [],
+									page: 1,
+									perPage: 0,
+									totalCount: 0,
+									totalPages: 0,
+								};
+							} else {
+								console.log(
+									`[Cobros] Placa ${searchTerm} encontró 1 coincidencia, buscando crédito SIFCO: ${numeroSifco}`,
+								);
+								creditosResponse = await obtenerTodosLosCreditosCarteraBack({
 									mes,
 									anio,
-									page,
+									page: 1,
+									perPage: 50,
+									cuotasAtrasadas,
+									estado: estadoCartera,
+									time: input.time,
+									email_cobrador: input.emailCobrador,
+									numero_credito_sifco: numeroSifco,
+								fecha_desde: input.fechaDesde,
+								fecha_hasta: input.fechaHasta,
+								});
+							}
+						} else {
+							// Múltiples coincidencias: si además hay filtro de etiquetas,
+							// intersectar la lista de SIFCOs de la placa con la de las
+							// etiquetas y mandar la intersección a cartera (en vez de mandar
+							// todos los etiquetados o todos los de la placa por separado).
+							const sifcosPlaca = matchingOpportunities
+								.map((m) => m.numeroSifco)
+								.filter((s): s is string => !!s);
+							let sifcosFiltro: string[] | undefined;
+							if (sifcosPorEtiquetas) {
+								const setEtq = new Set(sifcosPorEtiquetas);
+								sifcosFiltro = sifcosPlaca.filter((s) => setEtq.has(s));
+							} else {
+								sifcosFiltro = sifcosPlaca;
+							}
+
+							if (sifcosFiltro.length === 0) {
+								creditosResponse = {
+									data: [],
+									page: 1,
+									perPage: 0,
+									totalCount: 0,
+									totalPages: 0,
+								};
+							} else {
+								console.log(
+									`[Cobros] Placa ${searchTerm} encontró ${matchingOpportunities.length} coincidencias (intersección con etiquetas: ${sifcosFiltro.length}), trayendo créditos`,
+								);
+								const perPage = 200;
+								const firstPage = await obtenerTodosLosCreditosCarteraBack({
+									mes,
+									anio,
+									page: 1,
 									perPage,
 									cuotasAtrasadas,
 									estado: estadoCartera,
 									time: input.time,
 									email_cobrador: input.emailCobrador,
+								fecha_desde: input.fechaDesde,
+								fecha_hasta: input.fechaHasta,
+									numeros_credito_sifco: sifcosFiltro,
 								});
-								allCredits.push(...nextPage.data);
-							}
 
+								const allCredits = [...firstPage.data];
+
+								for (let page = 2; page <= firstPage.totalPages; page++) {
+									const nextPage = await obtenerTodosLosCreditosCarteraBack({
+										mes,
+										anio,
+										page,
+										perPage,
+										cuotasAtrasadas,
+										estado: estadoCartera,
+										time: input.time,
+										email_cobrador: input.emailCobrador,
+									fecha_desde: input.fechaDesde,
+									fecha_hasta: input.fechaHasta,
+										numeros_credito_sifco: sifcosFiltro,
+									});
+									allCredits.push(...nextPage.data);
+								}
+
+								creditosResponse = {
+									...firstPage,
+									data: allCredits,
+									totalCount: allCredits.length,
+									page: 1,
+									perPage: allCredits.length,
+									totalPages: 1,
+								};
+							}
+						}
+					} else if (numeroSifcoExacto) {
+						// Búsqueda exacta por número SIFCO. Si además hay etiquetas,
+						// validamos en el CRM que el SIFCO esté en la lista filtrada,
+						// porque cartera-back le da prioridad al multi sobre el single.
+						if (
+							sifcosPorEtiquetas &&
+							!sifcosPorEtiquetas.includes(numeroSifcoExacto)
+						) {
 							creditosResponse = {
-								...firstPage,
-								data: allCredits,
-								totalCount: allCredits.length,
+								data: [],
 								page: 1,
-								perPage: allCredits.length,
-								totalPages: 1,
+								perPage: 0,
+								totalCount: 0,
+								totalPages: 0,
 							};
+						} else {
+							creditosResponse = await obtenerTodosLosCreditosCarteraBack({
+								mes,
+								anio,
+								page: 1,
+								perPage: input.limit || 50,
+								cuotasAtrasadas,
+								estado: estadoCartera,
+								time: input.time,
+								email_cobrador: input.emailCobrador,
+								numero_credito_sifco: numeroSifcoExacto,
+								fecha_desde: input.fechaDesde,
+								fecha_hasta: input.fechaHasta,
+							});
 						}
 					} else {
 						// Búsqueda por nombre (cartera-back filtra) o sin búsqueda
@@ -728,6 +886,9 @@ export const cobrosRouter = {
 							time: input.time,
 							email_cobrador: input.emailCobrador,
 							nombre_usuario: isNameSearch ? searchTerm : undefined,
+							fecha_desde: input.fechaDesde,
+							fecha_hasta: input.fechaHasta,
+							numeros_credito_sifco: sifcosPorEtiquetas,
 						});
 					}
 
@@ -745,6 +906,36 @@ export const cobrosRouter = {
 					console.log(
 						`[Cobros] Obtenidos ${creditosResponse.data.length} créditos de Cartera-Back`,
 					);
+
+					// Cargar en una sola query las etiquetas (y el id del caso) de los
+					// créditos que ya tienen un caso de cobro asociado, para no hacer
+					// una query individual dentro del map.
+					const sifcosPagina = creditosResponse.data
+						.map((c) => c.creditos.numero_credito_sifco)
+						.filter((s): s is string => !!s);
+					const casosPorSifco = new Map<
+						string,
+						{ id: string; etiquetas: string[] }
+					>();
+					if (sifcosPagina.length > 0) {
+						const casosRows = await db
+							.select({
+								id: casosCobros.id,
+								numeroSifco: casosCobros.numeroCreditoSifco,
+								etiquetas: casosCobros.etiquetas,
+							})
+							.from(casosCobros)
+							.where(
+								inArray(casosCobros.numeroCreditoSifco, sifcosPagina),
+							);
+						for (const row of casosRows) {
+							if (!row.numeroSifco) continue;
+							casosPorSifco.set(row.numeroSifco, {
+								id: row.id,
+								etiquetas: row.etiquetas ?? [],
+							});
+						}
+					}
 
 					// Mapear los datos de Cartera-Back al formato esperado por el frontend
 					const contratos = await Promise.all(
@@ -806,6 +997,10 @@ export const cobrosRouter = {
 								}
 							}
 
+							const casoCobro = numeroSifco
+								? casosPorSifco.get(numeroSifco)
+								: undefined;
+
 							return {
 								contratoId: credito.creditos.credito_id.toString(),
 								clienteNombre: credito.usuarios.nombre,
@@ -819,7 +1014,7 @@ export const cobrosRouter = {
 								fechaProximoPago:
 									credito.proxima_cuota?.fecha_vencimiento || null,
 								responsableCobros: credito.asesores?.nombre || null,
-								casoCobroId: null,
+								casoCobroId: casoCobro?.id ?? null,
 								estadoMora,
 								montoEnMora: montoEnMora.toFixed(2),
 								diasMoraMaximo: diasMora,
@@ -828,7 +1023,7 @@ export const cobrosRouter = {
 								proximoContacto: null,
 								responsableNombre: null,
 								numeroCredito: numeroSifco || null,
-								etiquetas: null as string[] | null,
+								etiquetas: (casoCobro?.etiquetas ?? null) as string[] | null,
 								isPool:
 									credito.creditos.formato_credito
 										?.toUpperCase()
@@ -1662,6 +1857,7 @@ export const cobrosRouter = {
 									creditoCompleto = {
 										credito: creditoListado.creditos,
 										usuario: creditoListado.usuarios,
+										asesor: null,
 										cuotasPagadas: [],
 										cuotasPendientes: [],
 										cuotasAtrasadas: [],
@@ -1958,7 +2154,15 @@ export const cobrosRouter = {
 					// Datos adicionales de Cartera-Back
 					numeroCreditoSifco: creditoCompleto.credito.numero_credito_sifco,
 					deudaTotal: creditoCompleto.credito.deudatotal,
-					asesor: null, // Cartera-back no devuelve asesor completo en endpoint /credito
+					asesor: creditoCompleto.asesor
+						? {
+								asesor_id: creditoCompleto.asesor.asesor_id,
+								nombre: creditoCompleto.asesor.nombre,
+								telefono: creditoCompleto.asesor.telefono,
+								activo: creditoCompleto.asesor.activo,
+								emailCashIn: creditoCompleto.asesor.emailCashIn,
+							}
+						: null,
 
 					// Notas de la oportunidad
 					oportunidadNotes: oportunidadData?.notes || null,
@@ -2133,8 +2337,16 @@ export const cobrosRouter = {
 						categoria: creditoData.usuario.categoria,
 						saldoAFavor: creditoData.usuario.saldo_a_favor,
 					},
-					// Asesor (no disponible en endpoint /credito)
-					asesor: null,
+					// Asesor (devuelto por endpoint /credito)
+					asesor: creditoData.asesor
+						? {
+								asesor_id: creditoData.asesor.asesor_id,
+								nombre: creditoData.asesor.nombre,
+								telefono: creditoData.asesor.telefono,
+								activo: creditoData.asesor.activo,
+								emailCashIn: creditoData.asesor.emailCashIn,
+							}
+						: null,
 					// Cuotas
 					cuotas: todasCuotas.map((cuota) => ({
 						cuotaId: cuota.cuota_id,
@@ -2257,6 +2469,7 @@ export const cobrosRouter = {
 
 				return {
 					inversionistas: inversionistasList.map((inv: any) => ({
+						...inv,
 						inversionistaId: inv.inversionista_id,
 						nombre: inv.nombre,
 						dpi: inv.dpi ?? null,
@@ -2264,6 +2477,7 @@ export const cobrosRouter = {
 						emiteFactura: inv.emite_factura,
 						reinversion:
 							inv.reinversion ?? inv.tipo_reinversion !== "sin_reinversion",
+						tipoReinversion: inv.tipo_reinversion ?? "sin_reinversion",
 						banco: inv.banco_id
 							? (bancosMap.get(inv.banco_id) ?? null)
 							: (inv.banco ?? null),
@@ -2271,6 +2485,7 @@ export const cobrosRouter = {
 						numeroCuenta: inv.numero_cuenta ?? null,
 						moneda: inv.moneda ?? "quetzales",
 						celular: inv.celular ?? null,
+						status: inv.status ?? null,
 					})),
 					pagination: {
 						page: result.page,
@@ -2792,4 +3007,798 @@ export const cobrosRouter = {
 
 			return updated;
 		}),
+
+	// ========================================================================
+	// ENVÍO DE MENSAJES (SMS / WhatsApp / Email)
+	// ========================================================================
+
+	enviarWhatsappCobros: cobrosProcedure
+		.input(
+			z.object({
+				telefono: z.string().min(8, "Teléfono inválido"),
+				mensaje: z.string().min(1, "Mensaje requerido"),
+				casoCobroId: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const numeroSifco = await resolveSifcoFromCaso(input.casoCobroId);
+			const testMode = isTestModeEnabled();
+			const telefonoDestino = testMode ? getTestPhone() : input.telefono;
+
+			const result = await sendWhatsappTemplate({
+				phone: telefonoDestino,
+				message: input.mensaje,
+				logPrefix: testMode ? "[SimpleTech][cobros][TEST]" : "[SimpleTech][cobros]",
+			});
+
+			await persistCobrosSendLog({
+				numeroCreditoSifco: numeroSifco,
+				canal: "whatsapp",
+				telefono: telefonoDestino,
+				mensaje: input.mensaje,
+				result: result.success
+					? {
+							success: true,
+							providerResponse: {
+								templateMessageId: result.templateMessageId,
+								testMode,
+								realTarget: testMode ? input.telefono : undefined,
+							},
+						}
+					: {
+							success: false,
+							errorMessage: result.error,
+							providerResponse: testMode
+								? { testMode, realTarget: input.telefono }
+								: undefined,
+						},
+				createdBy: context.userId,
+			});
+
+			if (!result.success) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Error enviando WhatsApp: ${result.error ?? "desconocido"}`,
+				});
+			}
+
+			return {
+				success: true,
+				templateMessageId: result.templateMessageId,
+				casoCobroId: input.casoCobroId,
+			};
+		}),
+
+	enviarWhatsappMasivoCobros: cobrosProcedure
+		.input(
+			z.object({
+				plantillaId: z.string(),
+				// Mismos filtros que getTodosLosCreditos (salvo emailCobrador, que
+				// se deriva del context para evitar que un cobrador mande fuera de
+				// su cartera).
+				estadoMora: z.string().optional(),
+				searchTerm: z.string().optional(),
+				numeroSifco: z.string().optional(),
+				time: z.enum(["WEEK", "MONTH", "DUEMONTH", "TODAY"]).optional(),
+				etiquetas: z.array(z.string()).optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			if (!isCarteraBackEnabled()) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Integración con Cartera-Back no está habilitada",
+				});
+			}
+
+			const plantilla = PLANTILLAS_MENSAJES.find(
+				(p) => p.id === input.plantillaId,
+			);
+			if (!plantilla) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Plantilla '${input.plantillaId}' no existe`,
+				});
+			}
+
+			// Scope server-side: solo supervisores/admins pueden ver toda la
+			// cartera; el resto queda restringido a sus propios créditos.
+			const emailCobrador = PERMISSIONS.canAssignCobros(context.userRole)
+				? undefined
+				: context.user?.email;
+
+			// 1. Mapear estadoMora → params de cartera-back (mismo mapping que
+			// getTodosLosCreditos).
+			let cuotasAtrasadas: number | undefined;
+			let estadoCartera:
+				| "ACTIVO"
+				| "CANCELADO"
+				| "INCOBRABLE"
+				| undefined = "ACTIVO";
+			if (input.estadoMora) {
+				switch (input.estadoMora) {
+					case "al_dia":
+						cuotasAtrasadas = 0;
+						estadoCartera = "ACTIVO";
+						break;
+					case "mora_30":
+						cuotasAtrasadas = 1;
+						estadoCartera = "ACTIVO";
+						break;
+					case "mora_60":
+						cuotasAtrasadas = 2;
+						estadoCartera = "ACTIVO";
+						break;
+					case "mora_90":
+						cuotasAtrasadas = 3;
+						estadoCartera = "ACTIVO";
+						break;
+					case "mora_120":
+						cuotasAtrasadas = 4;
+						estadoCartera = "ACTIVO";
+						break;
+					case "incobrable":
+						estadoCartera = "INCOBRABLE";
+						break;
+					case "completado":
+						estadoCartera = "CANCELADO";
+						break;
+					default:
+						estadoCartera = "ACTIVO";
+				}
+			}
+
+			// 2. Resolver búsqueda igual que getTodosLosCreditos: si el término
+			// tiene dígitos se asume placa y se convierte a número SIFCO
+			// consultando el CRM; si es alfabético se usa nombre_usuario.
+			const searchTerm = input.searchTerm?.trim() || "";
+			const numeroSifcoExacto = input.numeroSifco?.trim() || "";
+			const hasNumber = /\d/.test(searchTerm);
+			// numeroSifco explícito tiene prioridad: ignora plate/name search.
+			const isPlateSearch =
+				!numeroSifcoExacto && searchTerm.length > 0 && hasNumber;
+			const isNameSearch =
+				!numeroSifcoExacto && searchTerm.length > 0 && !hasNumber;
+
+			let numeroSifcoFiltro: string | undefined = numeroSifcoExacto || undefined;
+			let searchPorPlacaSinMatch = false;
+			const matchingSifcos = new Set<string>();
+			if (isPlateSearch) {
+				const matchingOpportunities = await db
+					.select({
+						numeroSifco: opportunities.numeroSifco,
+					})
+					.from(opportunities)
+					.innerJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+					.where(
+						and(
+							sql`LOWER(REPLACE(REPLACE(${vehicles.licensePlate}, '-', ''), ' ', '')) LIKE ${"%" + searchTerm.toLowerCase().replaceAll(/[\s-]+/g, "") + "%"}`,
+							sql`${opportunities.numeroSifco} IS NOT NULL`,
+						),
+					);
+
+				if (matchingOpportunities.length === 0) {
+					searchPorPlacaSinMatch = true;
+				} else if (matchingOpportunities.length === 1) {
+					numeroSifcoFiltro = matchingOpportunities[0].numeroSifco ?? undefined;
+				}
+				for (const m of matchingOpportunities) {
+					if (m.numeroSifco) matchingSifcos.add(m.numeroSifco);
+				}
+			}
+
+			// 2.5 Si hay filtro de etiquetas, resolver primero la lista de
+			// numero_credito_sifco que tengan AL MENOS UNA de las etiquetas
+			// seleccionadas (operador `&&` / overlap) y mandarla a cartera-back
+			// para que filtre en origen, en vez de traer todo y filtrar acá.
+			let sifcosPorEtiquetas: string[] | undefined;
+			if (input.etiquetas && input.etiquetas.length > 0) {
+				const filas = await db
+					.select({
+						numeroSifco: casosCobros.numeroCreditoSifco,
+					})
+					.from(casosCobros)
+					.where(
+						sql`${casosCobros.etiquetas} && ARRAY[${sql.join(
+							input.etiquetas.map((e) => sql`${e}`),
+							sql`, `,
+						)}]::text[]`,
+					);
+				sifcosPorEtiquetas = filas
+					.map((r) => r.numeroSifco)
+					.filter((s): s is string => !!s);
+				if (sifcosPorEtiquetas.length === 0) {
+					return {
+						plantillaId: input.plantillaId,
+						totalCreditos: 0,
+						elegibles: 0,
+						enviados: 0,
+						fallidos: 0,
+						descartados: [],
+						detalle: [],
+						contactosRegistrados: 0,
+						contactosSinCaso: 0,
+					};
+				}
+			}
+
+			// 2.6 Intersectar búsqueda por placa con etiquetas. En cartera-back la
+			// lista multi-SIFCO tiene prioridad sobre el single, así que mandar
+			// ambos sin intersectar haría que la placa se ignore y el envío
+			// masivo salga a destinatarios incorrectos.
+			const respuestaVacia = {
+				plantillaId: input.plantillaId,
+				totalCreditos: 0,
+				elegibles: 0,
+				enviados: 0,
+				fallidos: 0,
+				descartados: [] as Array<{ numeroSifco: string | null; motivo: string }>,
+				detalle: [] as Array<{
+					numeroSifco: string;
+					telefono: string;
+					success: boolean;
+					error?: string;
+				}>,
+				contactosRegistrados: 0,
+				contactosSinCaso: 0,
+			};
+			if (sifcosPorEtiquetas && numeroSifcoFiltro) {
+				if (sifcosPorEtiquetas.includes(numeroSifcoFiltro)) {
+					// La placa única coincide con alguna etiqueta: basta mandar el
+					// single y descartar la lista para no perder ese filtro.
+					sifcosPorEtiquetas = undefined;
+				} else {
+					return respuestaVacia;
+				}
+			} else if (
+				sifcosPorEtiquetas &&
+				isPlateSearch &&
+				matchingSifcos.size > 0
+			) {
+				// Placa con varias coincidencias + etiquetas: mandar la intersección
+				// a cartera para no traer créditos que no son de la placa.
+				const setEtq = new Set(sifcosPorEtiquetas);
+				sifcosPorEtiquetas = Array.from(matchingSifcos).filter((s) =>
+					setEtq.has(s),
+				);
+				if (sifcosPorEtiquetas.length === 0) return respuestaVacia;
+			} else if (
+				!sifcosPorEtiquetas &&
+				isPlateSearch &&
+				!numeroSifcoFiltro &&
+				matchingSifcos.size > 0
+			) {
+				// Placa con varias coincidencias sin etiquetas: en lugar de traer
+				// toda la cartera y filtrar después, mandamos directo la lista de
+				// SIFCOs de la placa como numeros_credito_sifco.
+				sifcosPorEtiquetas = Array.from(matchingSifcos);
+			}
+
+			// 3. Paginar getAllCreditos hasta traer todos los matcheos.
+			const creditosFiltrados: Awaited<
+				ReturnType<typeof carteraBackClient.getAllCreditos>
+			>["data"] = [];
+			if (!searchPorPlacaSinMatch) {
+				const perPage = 100;
+				let page = 1;
+				while (true) {
+					const resp = await obtenerTodosLosCreditosCarteraBack({
+						mes: 0,
+						anio: new Date().getFullYear(),
+						estado: estadoCartera,
+						cuotasAtrasadas,
+						time: input.time,
+						email_cobrador: emailCobrador,
+						nombre_usuario: isNameSearch ? searchTerm : undefined,
+						numero_credito_sifco: numeroSifcoFiltro,
+						numeros_credito_sifco: sifcosPorEtiquetas,
+						page,
+						perPage,
+					});
+					creditosFiltrados.push(...resp.data);
+					if (resp.data.length < perPage) break;
+					if (page >= resp.totalPages) break;
+					page += 1;
+				}
+			}
+
+			// 3. Traer en un solo query nuestros datos locales (teléfono, placa,
+			// vehículo) indexados por numero_sifco.
+			const numerosSifco = creditosFiltrados
+				.map((c) => c.creditos.numero_credito_sifco)
+				.filter((s): s is string => !!s);
+
+			type LocalInfo = {
+				telefono: string | null;
+				placa: string | null;
+				marca: string | null;
+				modelo: string | null;
+				year: number | null;
+			};
+			const locales = new Map<string, LocalInfo>();
+			const casoIdPorSifco = new Map<string, string>();
+
+			if (numerosSifco.length > 0) {
+				const oppRows = await db
+					.select({
+						numeroSifco: opportunities.numeroSifco,
+						leadPhone: leads.phone,
+						placa: vehicles.licensePlate,
+						marca: vehicles.make,
+						modelo: vehicles.model,
+						year: vehicles.year,
+					})
+					.from(opportunities)
+					.leftJoin(leads, eq(opportunities.leadId, leads.id))
+					.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+					.where(inArray(opportunities.numeroSifco, numerosSifco));
+
+				for (const row of oppRows) {
+					if (!row.numeroSifco) continue;
+					locales.set(row.numeroSifco, {
+						telefono: row.leadPhone,
+						placa: row.placa,
+						marca: row.marca,
+						modelo: row.modelo,
+						year: row.year,
+					});
+				}
+
+				// Casos de cobros pueden tener telefonoPrincipal override.
+				// También cargamos el id para registrar historial de contacto en
+				// los casos que ya existen.
+				const casosRows = await db
+					.select({
+						id: casosCobros.id,
+						numeroSifco: casosCobros.numeroCreditoSifco,
+						telefonoPrincipal: casosCobros.telefonoPrincipal,
+					})
+					.from(casosCobros)
+					.where(inArray(casosCobros.numeroCreditoSifco, numerosSifco));
+
+				for (const row of casosRows) {
+					if (!row.numeroSifco) continue;
+					const prev = locales.get(row.numeroSifco);
+					locales.set(row.numeroSifco, {
+						telefono: row.telefonoPrincipal ?? prev?.telefono ?? null,
+						placa: prev?.placa ?? null,
+						marca: prev?.marca ?? null,
+						modelo: prev?.modelo ?? null,
+						year: prev?.year ?? null,
+					});
+					casoIdPorSifco.set(row.numeroSifco, row.id);
+				}
+			}
+
+			// 4. Construir recipients, aplicando reglas de descarte.
+			const testMode = isTestModeEnabled();
+			type Candidato = {
+				numeroSifco: string;
+				telefono: string; // destino efectivo (test o real)
+				telefonoReal: string; // destino original (para trazabilidad)
+				mensaje: string;
+				casoCobroId: string | null;
+			};
+			const candidatos: Candidato[] = [];
+			const descartados: Array<{
+				numeroSifco: string | null;
+				motivo: string;
+			}> = [];
+
+			for (const credito of creditosFiltrados) {
+				const sifco = credito.creditos.numero_credito_sifco;
+				const cuota = credito.creditos.cuota;
+				const asesor = credito.asesores;
+				const info = sifco ? locales.get(sifco) : undefined;
+				const telefono = info?.telefono ?? null;
+
+				if (!cuota || Number(cuota) === 0) {
+					descartados.push({ numeroSifco: sifco, motivo: "sin cuota" });
+					continue;
+				}
+				if (!telefono) {
+					descartados.push({ numeroSifco: sifco, motivo: "sin teléfono" });
+					continue;
+				}
+				if (!asesor) {
+					descartados.push({ numeroSifco: sifco, motivo: "sin asesor" });
+					continue;
+				}
+
+				const marcaLineaModelo = [
+					info?.marca ?? "",
+					info?.modelo ?? "",
+					info?.year ? String(info.year) : "",
+				]
+					.filter(Boolean)
+					.join(" ")
+					.trim();
+
+				// Total a cobrar = monto en mora + cuota mensual (mismo criterio
+				// que se muestra en la pantalla de detalle del caso).
+				const montoMora = Number(credito.mora?.monto_mora ?? 0);
+				const totalACobrar =
+					montoMora > 0 ? montoMora + Number(cuota) : 0;
+
+				const mensaje = interpolarPlantilla(plantilla.cuerpo, {
+					clienteNombre: credito.usuarios.nombre ?? "",
+					fechaPago: "",
+					cuotaMensual: String(cuota),
+					placa: info?.placa ?? "",
+					marcaLineaModelo,
+					montoAdeudado:
+						totalACobrar > 0
+							? totalACobrar.toLocaleString("es-GT", {
+									minimumFractionDigits: 2,
+									maximumFractionDigits: 2,
+								})
+							: "",
+					cuotasAtraso: credito.mora?.cuotas_atrasadas ?? 0,
+					telefonoAsesor: asesor.telefono ?? "",
+					nombreAsesor: asesor.nombre ?? "",
+				});
+
+				candidatos.push({
+					numeroSifco: sifco ?? "",
+					telefono: testMode ? getTestPhone(candidatos.length) : telefono,
+					telefonoReal: telefono,
+					mensaje,
+					casoCobroId: sifco ? (casoIdPorSifco.get(sifco) ?? null) : null,
+				});
+			}
+
+			// 5. Enviar en chunks de 100 y loguear cada resultado.
+			const CHUNK_SIZE = 100;
+			let enviados = 0;
+			let fallidos = 0;
+			const detalle: Array<{
+				numeroSifco: string;
+				telefono: string;
+				success: boolean;
+				error?: string;
+			}> = [];
+
+			// Buffer para registrar contactos en historial al final, en una sola
+			// inserción batch. Solo se registran envíos exitosos a créditos que
+			// ya tienen un caso_cobros (la FK es notNull).
+			const contactosARegistrar: Array<{
+				casoCobroId: string;
+				metodoContacto: "whatsapp";
+				estadoContacto: "contactado";
+				comentarios: string;
+				realizadoPor: string;
+			}> = [];
+
+			for (let i = 0; i < candidatos.length; i += CHUNK_SIZE) {
+				const chunk = candidatos.slice(i, i + CHUNK_SIZE);
+				const batch = await sendWhatsappTemplateBatch({
+					recipients: chunk.map((c) => ({
+						phone: c.telefono,
+						message: c.mensaje,
+						externalRef: c.numeroSifco,
+					})),
+					logPrefix: "[SimpleTech][cobros-masivo]",
+				});
+
+				const byRef = new Map(
+					batch.items.map((item) => [item.externalRef ?? "", item]),
+				);
+
+				for (const c of chunk) {
+					const res = byRef.get(c.numeroSifco);
+					const ok = res?.success === true;
+					if (ok) enviados += 1;
+					else fallidos += 1;
+
+					detalle.push({
+						numeroSifco: c.numeroSifco,
+						telefono: c.telefono,
+						success: ok,
+						error: res?.error,
+					});
+
+					await persistCobrosSendLog({
+						numeroCreditoSifco: c.numeroSifco || null,
+						canal: "whatsapp",
+						telefono: c.telefono,
+						mensaje: c.mensaje,
+						createdBy: context.userId,
+						result: ok
+							? {
+									success: true,
+									providerResponse: {
+										templateMessageId: res?.templateMessageId,
+										testMode,
+										realTarget: testMode ? c.telefonoReal : undefined,
+									},
+								}
+							: {
+									success: false,
+									errorMessage:
+										res?.error ??
+										batch.transportError ??
+										"Error desconocido",
+									providerResponse: testMode
+										? { testMode, realTarget: c.telefonoReal }
+										: undefined,
+								},
+					});
+
+					// Registrar en historial del caso (mismo flujo que contacto-modal)
+					// solo cuando el envío fue exitoso y el crédito tiene caso.
+					if (ok && c.casoCobroId) {
+						contactosARegistrar.push({
+							casoCobroId: c.casoCobroId,
+							metodoContacto: "whatsapp",
+							estadoContacto: "contactado",
+							comentarios: `Envío masivo de WhatsApp — Plantilla: ${plantilla.nombre}`,
+							realizadoPor: context.userId,
+						});
+					}
+				}
+			}
+
+			// Insertar todo el historial en una sola query.
+			let contactosRegistrados = 0;
+			let contactosSinCaso = 0;
+			for (const c of candidatos) {
+				if (!c.casoCobroId) contactosSinCaso += 1;
+			}
+			if (contactosARegistrar.length > 0) {
+				try {
+					await db.insert(contactosCobros).values(contactosARegistrar);
+					contactosRegistrados = contactosARegistrar.length;
+				} catch (error) {
+					console.error(
+						"[Cobros] Error registrando historial de contactos masivo:",
+						error,
+					);
+				}
+			}
+
+			return {
+				plantillaId: input.plantillaId,
+				totalCreditos: creditosFiltrados.length,
+				elegibles: candidatos.length,
+				enviados,
+				fallidos,
+				descartados,
+				detalle,
+				contactosRegistrados,
+				contactosSinCaso,
+			};
+		}),
+
+	enviarEmailCobros: cobrosProcedure
+		.input(
+			z.object({
+				destinatario: z.string().email("Email inválido"),
+				asunto: z.string().min(1, "Asunto requerido").max(200),
+				mensaje: z.string().min(1, "Mensaje requerido"),
+				casoCobroId: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const escapeHtml = (s: string) =>
+				s
+					.replace(/&/g, "&amp;")
+					.replace(/</g, "&lt;")
+					.replace(/>/g, "&gt;")
+					.replace(/"/g, "&quot;")
+					.replace(/'/g, "&#039;");
+
+			const html = `<div style="font-family:Arial,sans-serif;color:#111827;font-size:14px;line-height:1.5;white-space:pre-wrap;">${escapeHtml(
+				input.mensaje,
+			)}</div>`;
+
+			const numeroSifco = await resolveSifcoFromCaso(input.casoCobroId);
+			const testMode = isTestModeEnabled();
+			const emailDestino = testMode ? TEST_EMAIL : input.destinatario;
+
+			let sendError: string | null = null;
+			let emailId: string | undefined;
+			try {
+				const result = await sendPlainEmail(
+					emailDestino,
+					input.asunto,
+					html,
+				);
+
+				if (!result.success) {
+					sendError =
+						result.error && typeof result.error === "object"
+							? JSON.stringify(result.error)
+							: String(result.error ?? "desconocido");
+				} else {
+					emailId = result.data?.id;
+				}
+			} catch (error) {
+				sendError =
+					error instanceof Error ? error.message : String(error);
+			}
+
+			await persistCobrosSendLog({
+				numeroCreditoSifco: numeroSifco,
+				canal: "email",
+				email: emailDestino,
+				asunto: input.asunto,
+				mensaje: input.mensaje,
+				result: sendError
+					? {
+							success: false,
+							errorMessage: sendError,
+							providerResponse: testMode
+								? { testMode, realTarget: input.destinatario }
+								: undefined,
+						}
+					: {
+							success: true,
+							providerResponse: {
+								emailId,
+								testMode,
+								realTarget: testMode ? input.destinatario : undefined,
+							},
+						},
+				createdBy: context.userId,
+			});
+
+			if (sendError) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Error enviando email: ${sendError}`,
+				});
+			}
+
+			return {
+				success: true,
+				emailId,
+				casoCobroId: input.casoCobroId,
+			};
+		}),
+
+	enviarSmsCobros: cobrosProcedure
+		.input(
+			z.object({
+				telefono: z
+					.string()
+					.min(8, "Teléfono inválido")
+					.transform((v) => v.replace(/[^0-9]/g, "")),
+				mensaje: z.string().min(1, "Mensaje requerido"),
+				casoCobroId: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const token = process.env.SMS_TOKEN;
+			const apiKeyRaw = process.env.SMS_API_KEY;
+			if (!token || !apiKeyRaw) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Credenciales SMS no configuradas",
+				});
+			}
+
+			const smsClient = new SMSClient({
+				credentials: {
+					token,
+					apiKey: Number.parseInt(apiKeyRaw, 10),
+				},
+				timeout: 60000, // SMS API a veces tarda >30s, subir a 60s.
+			});
+
+			const numeroSifco = await resolveSifcoFromCaso(input.casoCobroId);
+			const testMode = isTestModeEnabled();
+			// Para SMS el número debe incluir prefijo 502 completo. El input viene
+			// validado a solo dígitos; si son 8 (local) le ponemos el 502, si ya
+			// trae 502 (p.ej. 50258446376) lo dejamos.
+			const ensure502 = (digits: string) =>
+				digits.startsWith("502") ? digits : `502${digits}`;
+			const telefonoDestino = testMode
+				? ensure502(getTestPhone())
+				: ensure502(input.telefono);
+
+			let sendError: string | null = null;
+			let mailingId: number | undefined;
+			try {
+				const result = await smsClient.send({
+					msisdns: [telefonoDestino],
+					message: input.mensaje,
+					country: "GT",
+					tag: "cobros-contacto",
+					dial: 50237633199,
+				});
+
+				if (!result.success) {
+					sendError =
+						result.error?.hint ||
+						result.error?.message ||
+						"desconocido";
+				} else {
+					mailingId = result.mailingId;
+				}
+			} catch (error) {
+				sendError =
+					error instanceof Error ? error.message : String(error);
+			}
+
+			await persistCobrosSendLog({
+				numeroCreditoSifco: numeroSifco,
+				canal: "sms",
+				telefono: telefonoDestino,
+				mensaje: input.mensaje,
+				result: sendError
+					? {
+							success: false,
+							errorMessage: sendError,
+							providerResponse: testMode
+								? { testMode, realTarget: input.telefono }
+								: undefined,
+						}
+					: {
+							success: true,
+							providerResponse: {
+								mailingId,
+								testMode,
+								realTarget: testMode ? input.telefono : undefined,
+							},
+						},
+				createdBy: context.userId,
+			});
+
+			if (sendError) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Error enviando SMS: ${sendError}`,
+				});
+			}
+
+			return {
+				success: true,
+				mailingId,
+				casoCobroId: input.casoCobroId,
+			};
+		}),
 };
+
+/**
+ * Resuelve el número SIFCO del caso de cobros (si existe).
+ */
+async function resolveSifcoFromCaso(
+	casoCobroId: string | undefined,
+): Promise<string | null> {
+	if (!casoCobroId) return null;
+	const [caso] = await db
+		.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
+		.from(casosCobros)
+		.where(eq(casosCobros.id, casoCobroId))
+		.limit(1);
+	return caso?.numeroCreditoSifco ?? null;
+}
+
+/**
+ * Inserta una fila en cobros_send_logs. Nunca propaga errores: si el log falla
+ * (por un problema transitorio de DB) no queremos romper el flujo del envío.
+ */
+async function persistCobrosSendLog(params: {
+	numeroCreditoSifco: string | null;
+	canal: "sms" | "email" | "whatsapp";
+	telefono?: string;
+	email?: string;
+	asunto?: string;
+	mensaje: string;
+	createdBy: string;
+	result:
+		| { success: true; providerResponse?: Record<string, unknown> }
+		| { success: false; errorMessage?: string; providerResponse?: Record<string, unknown> };
+}) {
+	try {
+		await db.insert(cobrosSendLogs).values({
+			numeroCreditoSifco: params.numeroCreditoSifco,
+			canal: params.canal,
+			telefono: params.telefono,
+			email: params.email,
+			asunto: params.asunto,
+			mensaje: params.mensaje,
+			status: params.result.success ? "sent" : "failed",
+			errorMessage: params.result.success ? null : params.result.errorMessage,
+			providerResponse: params.result.providerResponse,
+			createdBy: params.createdBy,
+			sentAt: params.result.success ? new Date() : null,
+		});
+	} catch (err) {
+		console.error("[cobros_send_logs] Error guardando log:", err);
+	}
+}

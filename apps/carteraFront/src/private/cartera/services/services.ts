@@ -652,6 +652,7 @@ export interface InversionistaPayload {
   porcentaje_cash_in: number;
   porcentaje_inversion: number; 
   fecha_inicio_participacion?: string;
+  cuota_inversionista?: number;
 }
 
 export interface UpdateCreditBody {
@@ -696,6 +697,18 @@ export interface UpdateCreditBody {
 }
 export async function updateCreditService(body: UpdateCreditBody) {
   const response = await api.post(`${API_URL}/updateCredit`, body);
+  return response.data;
+}
+
+export async function calculateInvestorQuotasService(body: {
+  capital: number;
+  cuota: number;
+  seguro_10_cuotas?: number;
+  gps?: number;
+  membresias_pago?: number;
+  inversionistas: { inversionista_id: number; monto_aportado: number }[];
+}) {
+  const response = await api.post(`${API_URL}/calculate-investor-quotas`, body);
   return response.data;
 }
 
@@ -1671,6 +1684,7 @@ export interface CreditoPago {
   statusCredit: string;
   porcentajeInteres: number;
   fechaCreacion: string;
+  banderaReinversion?: boolean;
 }
 
 // 🧍‍♂️ Información del usuario del crédito
@@ -1742,6 +1756,10 @@ export interface PagoDataInvestor {
   cuentaEmpresaNombre: string | null;
   cuentaEmpresaNumero: string | null;
 
+  // 🚩 Bandera del crédito: true mientras haya compra de cartera o reinversión pendiente.
+  // Cuando es true, cofidi redirige a CUBE los intereses del inversionista en ese status.
+  banderaReinversion?: boolean;
+
   // 🔄 Cancelación (solo presente en pagos reset)
   cancelacion?: CancelacionPago | null;
 }
@@ -1805,6 +1823,8 @@ export interface GetPagosParams {
   validationStatus?: string;
   reportAdvisor?: boolean;
   fechaBoleta?: string;
+  fechaBoletaInicio?: string;
+  fechaBoletaFin?: string;
 }
 
 /**
@@ -2030,6 +2050,8 @@ export interface BoletaLiquidacion {
 export interface LiquidacionResumen {
   inversionista_id: number;
   nombre: string;
+  moneda: string;
+  currencySymbol: string;
   emite_factura: boolean;
   reinversion: string;
   banco: string | null;
@@ -3404,6 +3426,10 @@ export interface CreditoEspejoPendiente {
   tipo_reinversion: string | null;
   numero_credito_sifco: string;
   nombre_usuario: string;
+  otrosInversionistas?: {
+    nombre: string;
+    monto_aportado: string;
+  }[];
 }
 
 export interface CreditCandidateInversionista {
@@ -3440,11 +3466,24 @@ export interface InversionistaSesionPendiente {
   monto_reinversion: string | null;
   saldo_reinversion: string;
   creditosPendientes: CreditoEspejoPendiente[];
+  opciones_de_credito?: OtroCreditoDisponible[];
 }
 
-export async function getCreditosEspejoPendientesService(): Promise<InversionistaSesionPendiente[]> {
-  const res = await api.get<InversionistaSesionPendiente[]>(
-    `${API_URL}/creditos-espejo-pendientes`
+export interface SesionesPendientesPaginatedResponse {
+  data: InversionistaSesionPendiente[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export async function getCreditosEspejoPendientesService(params: {
+  page: number;
+  pageSize: number;
+  search?: string;
+}): Promise<SesionesPendientesPaginatedResponse> {
+  const res = await api.get<SesionesPendientesPaginatedResponse>(
+    `${API_URL}/creditos-espejo-pendientes`,
+    { params: { page: params.page, pageSize: params.pageSize, search: params.search || undefined } }
   );
   return res.data;
 }
@@ -3492,10 +3531,10 @@ export interface CandidatesResponse {
   candidates: OtroCreditoDisponible[];
 }
 
-export async function getCreditCandidatesService(minimo = 10): Promise<OtroCreditoDisponible[]> {
+export async function getCreditCandidatesService(params?: { monto?: number; minimo?: number; inversionista_id?: number }): Promise<OtroCreditoDisponible[]> {
   const res = await api.get<CandidatesResponse>(
     `${API_URL}/assign-capital/candidates`,
-    { params: { minimo } }
+    { params: { monto: params?.monto, minimo: params?.minimo ?? 10, inversionista_id: params?.inversionista_id } }
   );
   return res.data.candidates;
 }
@@ -3532,6 +3571,65 @@ export async function completarEspejoService(
 ): Promise<CompletarEspejoResponse> {
   const res = await api.post<CompletarEspejoResponse>(
     `${API_URL}/completar-espejo`,
+    payload
+  );
+  return res.data;
+}
+
+export interface DevolverPendientesACubePayload {
+  creditos: number | number[];
+  // Si se envía, la limpieza se restringe a ese inversionista: solo se sacan
+  // sus filas pendientes del espejo y su monto vuelve a CUBE. Si se omite,
+  // se limpian TODOS los inversionistas con status != "completado" de los
+  // créditos indicados (comportamiento original).
+  inversionista_id?: number;
+}
+
+export interface DevolverPendientesACubeCreditoLimpiado {
+  credito_id: number;
+  numero_credito_sifco: string;
+  inversionistas_removidos: number[];
+  monto_devuelto_a_cube: string;
+  inversionistas_restantes: number;
+}
+
+export interface DevolverPendientesACubeResponse {
+  success: boolean;
+  message: string;
+  creditos_limpiados?: DevolverPendientesACubeCreditoLimpiado[];
+}
+
+export async function devolverPendientesACubeService(
+  payload: DevolverPendientesACubePayload
+): Promise<DevolverPendientesACubeResponse> {
+  const res = await api.post<DevolverPendientesACubeResponse>(
+    `${API_URL}/reemplazar-inversionista-credito/devolver-pendientes-a-cube`,
+    payload
+  );
+  return res.data;
+}
+
+// ============================================================
+// Compra de Cartera Aceptada (Notificación y Status)
+// ============================================================
+export interface CompraCarteraAceptadaPayload {
+  creditos: number[];
+  notas_adicionales?: string;
+}
+
+export interface CompraCarteraAceptadaResponse {
+  success: boolean;
+  message: string;
+  creditos_notificados: number;
+  pool_size: number;
+  espejo_actualizados: number;
+}
+
+export async function compraCarteraAceptadaService(
+  payload: CompraCarteraAceptadaPayload
+): Promise<CompraCarteraAceptadaResponse> {
+  const res = await api.post<CompraCarteraAceptadaResponse>(
+    `${API_URL}/compra-cartera-aceptada`,
     payload
   );
   return res.data;

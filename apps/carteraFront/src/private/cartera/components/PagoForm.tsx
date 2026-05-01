@@ -111,12 +111,13 @@ export function PagoForm() {
     const files = Array.from(e.dataTransfer.files).filter(
       (f) => f.type.startsWith("image/") || f.type === "application/pdf"
     );
-    if (files.length + archivosParaSubir.length > 3) {
-      toast.error("Solo puedes seleccionar hasta 3 archivos en total");
+    if (files.length === 0) return;
+    if (files.length > 1) {
+      toast.error("Solo se puede cargar una boleta");
       return;
     }
-    setArchivosParaSubir([...archivosParaSubir, ...files]);
-  }, [archivosParaSubir, setArchivosParaSubir]);
+    setArchivosParaSubir([files[0]]);
+  }, [setArchivosParaSubir]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -811,37 +812,43 @@ export function PagoForm() {
               </div>
               <div className="flex flex-col gap-1">
                 <Label className="text-gray-700 font-semibold text-sm">
-                  Boletas / Comprobantes
+                  Boleta / Comprobante
                 </Label>
                 <label
                   htmlFor="boleta-upload"
-                  className={`flex items-center justify-center gap-2 w-full border-2 border-dashed rounded-lg px-4 py-3 cursor-pointer transition text-sm ${
-                    isDragging
-                      ? "border-blue-500 bg-blue-50 text-blue-600"
-                      : "border-gray-300 hover:border-blue-400 hover:bg-blue-50/50 text-gray-500"
+                  className={`flex items-center justify-center gap-2 w-full border-2 border-dashed rounded-lg px-4 py-3 transition text-sm ${
+                    archivosParaSubir.length >= 1
+                      ? "border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed"
+                      : isDragging
+                        ? "border-blue-500 bg-blue-50 text-blue-600 cursor-pointer"
+                        : "border-gray-300 hover:border-blue-400 hover:bg-blue-50/50 text-gray-500 cursor-pointer"
                   }`}
-                  onDrop={handleDrop}
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
+                  onDrop={archivosParaSubir.length >= 1 ? undefined : handleDrop}
+                  onDragOver={archivosParaSubir.length >= 1 ? undefined : handleDragOver}
+                  onDragLeave={archivosParaSubir.length >= 1 ? undefined : handleDragLeave}
                 >
                   <Info className="w-4 h-4" />
-                  {isDragging
-                    ? "Suelta los archivos aquí"
-                    : "Haz clic o arrastra archivos aquí (max. 3)"}
+                  {archivosParaSubir.length >= 1
+                    ? "Ya hay una boleta cargada (elimínala para subir otra)"
+                    : isDragging
+                      ? "Suelta el archivo aquí"
+                      : "Haz clic o arrastra el archivo aquí (solo 1)"}
                 </label>
                 <input
                   id="boleta-upload"
                   type="file"
                   accept="image/*,application/pdf"
-                  multiple
                   className="hidden"
+                  disabled={archivosParaSubir.length >= 1}
                   onChange={(e) => {
                     const files = Array.from(e.target.files ?? []);
-                    if (files.length + archivosParaSubir.length > 3) {
-                      toast.error("Solo puedes seleccionar hasta 3 archivos en total");
+                    if (files.length === 0) return;
+                    if (archivosParaSubir.length >= 1) {
+                      toast.error("Solo se puede cargar una boleta");
+                      e.target.value = "";
                       return;
                     }
-                    setArchivosParaSubir([...archivosParaSubir, ...files]);
+                    setArchivosParaSubir([files[0]]);
                     e.target.value = "";
                   }}
                 />

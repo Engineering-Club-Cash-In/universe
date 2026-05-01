@@ -1077,6 +1077,9 @@ export const crmRouter = {
 				.groupBy(opportunityStageHistory.opportunityId)
 				.as("latest_stage_history");
 
+			const closedAtExpression =
+				sql<Date | null>`coalesce(${firstClosedStageDates.firstClosedStageAt}, ${opportunities.actualCloseDate})`;
+
 			const selectFields = {
 				id: opportunities.id,
 				title: opportunities.title,
@@ -1089,10 +1092,7 @@ export const crmRouter = {
 				assignedTo: opportunities.assignedTo,
 				notes: opportunities.notes,
 				createdAt: opportunities.createdAt,
-				closedAt:
-					sql<Date | null>`coalesce(${opportunities.actualCloseDate}, ${firstClosedStageDates.firstClosedStageAt})`.as(
-						"closed_at",
-					),
+				closedAt: closedAtExpression.as("closed_at"),
 				latestStageChangedAt:
 					sql<Date>`coalesce(${latestStageHistory.latestStageChangedAt}, ${opportunities.createdAt})`.as(
 						"latest_stage_changed_at",
@@ -1226,30 +1226,31 @@ export const crmRouter = {
 				conditions.push(eq(opportunities.source, input.source));
 			}
 
-			// Filtro por mes/año: oportunidades abiertas siempre visibles, cerradas filtradas por actual_close_date
+			// Filtro por mes/año: oportunidades abiertas siempre visibles, cerradas por
+			// la primera fecha en que llegaron a una etapa colocada (>= 90%).
 			if (input?.createdMonth && input?.createdYear) {
-				const startOfMonth = new Date(
+				const { startOfMonth, endOfMonth } = getGuatemalaMonthWindow(
 					input.createdYear,
-					input.createdMonth - 1,
-					1,
+					input.createdMonth,
 				);
-				const endOfMonth = new Date(input.createdYear, input.createdMonth, 1);
 
 				conditions.push(
 					or(
 						// Oportunidades abiertas/on_hold: siempre visibles
 						inArray(opportunities.status, ["open", "on_hold"]),
-						// Oportunidades cerradas (won/lost): filtrar por fecha de cierre
+						// Oportunidades cerradas (won/lost): filtrar por la primera fecha
+						// en que llegaron a una etapa colocada para alinear la tabla con
+						// el dashboard de colocación mensual.
 						and(
 							inArray(opportunities.status, ["won", "lost"]),
 							or(
 								and(
-									gte(opportunities.actualCloseDate, startOfMonth),
-									lt(opportunities.actualCloseDate, endOfMonth),
+									gte(closedAtExpression, startOfMonth),
+									lt(closedAtExpression, endOfMonth),
 								),
 								// Fallback: si no tiene fecha de cierre, usar fecha de creación
 								and(
-									isNull(opportunities.actualCloseDate),
+									isNull(closedAtExpression),
 									gte(opportunities.createdAt, startOfMonth),
 									lt(opportunities.createdAt, endOfMonth),
 								),

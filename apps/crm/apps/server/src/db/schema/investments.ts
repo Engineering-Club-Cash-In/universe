@@ -280,7 +280,7 @@ export const investmentAuditLog = pgTable("investment_audit_log", {
 // --- Investor Activity Log (acciones sobre inversionistas) ---
 export const investorActivityLogActionEnum = pgEnum(
 	"investor_activity_log_action",
-	["document_created", "document_deleted", "document_visibility_toggled"],
+	["document_created", "document_deleted", "document_visibility_toggled", "compra_cartera", "investor_created", "investor_updated"],
 );
 
 export const investorActivityLog = pgTable("investor_activity_log", {

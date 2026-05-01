@@ -121,8 +121,7 @@ export function ListaCreditosPagos() {
     | "CAIDO";
 
   // Helpers de permisos
-  const canEdit = (s: CreditStatus) =>
-    ["ACTIVO", "MOROSO", "PENDIENTE_CANCELACION", "EN_CONVENIO"].includes(s);
+  const canEdit = (_s: CreditStatus) => true;
   const canCancel = (s: CreditStatus) => ["ACTIVO", "MOROSO"].includes(s);
   const canActivate = (s: CreditStatus) => s === "PENDIENTE_CANCELACION";
   const canViewPayments = (_s: CreditStatus) => true;
@@ -208,12 +207,13 @@ export function ListaCreditosPagos() {
     });
 
     const mappedInvestors = inversionistas.map((inv: any) => ({
-      inversionista_id: inv.inversionista_id,
+      inversionista_id: inv.inversionista_id || inv.inversionista?.inversionista_id,
       porcentaje_participacion: inv.porcentaje_participacion,
       monto_aportado: inv.monto_aportado,
       porcentaje_cash_in: inv.porcentaje_cash_in,
       porcentaje_inversion: inv.porcentaje_participacion_inversionista,
       cuota_inversionista: inv.cuota_inversionista ?? 0,
+      fecha_inicio_participacion: inv.fecha_inicio_participacion,
     }));
 
     setInvestorsToEdit(mappedInvestors);
@@ -221,12 +221,13 @@ export function ListaCreditosPagos() {
     // Mapeo seguro de espejo
     const mirrorData = credit.creditos_inversionistas_espejo || [];
     const mappedMirror = mirrorData.map((inv: any) => ({
-      inversionista_id: inv.inversionista_id,
+      inversionista_id: inv.inversionista_id || inv.inversionista?.inversionista_id,
       porcentaje_participacion: inv.porcentaje_participacion,
       monto_aportado: inv.monto_aportado,
       porcentaje_cash_in: inv.porcentaje_cash_in,
       porcentaje_inversion: inv.porcentaje_inversion,
       cuota_inversionista: inv.cuota_inversionista ?? 0,
+      fecha_inicio_participacion: inv.fecha_inicio_participacion,
     }));
 
     setInvestorsMirrorToEdit(mappedMirror);
@@ -1389,7 +1390,7 @@ function MobileView({
                 </Button>
               )}
             {canViewReports(item.creditos.statusCredit) &&
-              user?.role === "ADMIN" && (
+              (user?.role === "ADMIN" || user?.role === "ASESOR") && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -1694,7 +1695,7 @@ function DesktopView({
                           )}
 
                         {canViewReports(item.creditos.statusCredit) &&
-                          user?.role === "ADMIN" && (
+                          (user?.role === "ADMIN" || user?.role === "ASESOR") && (
                             <Button
                               variant="outline"
                               className="text-green-700 border-green-300 hover:bg-green-50"

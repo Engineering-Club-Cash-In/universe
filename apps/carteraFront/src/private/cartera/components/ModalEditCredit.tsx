@@ -107,6 +107,8 @@ export function ModalEditCredit({
   // Ref para acumular los cambios de saldo reinversion desde InvestorsList
   const saldoChangesRef = useRef<Record<number, number>>({});
   const [nuevaCuota, setNuevaCuota] = useState<number | null>(null);
+  const [nuevasCuotasInvestors, setNuevasCuotasInvestors] = useState<Record<number, number>>({});
+  const [nuevasCuotasInvestorsMirror, setNuevasCuotasInvestorsMirror] = useState<Record<number, number>>({});
   const [asesorQuery, setAsesorQuery] = useState("");
 
   const filteredAdvisors = useMemo(
@@ -131,6 +133,7 @@ export function ModalEditCredit({
       porcentaje_cash_in: Number(inv.porcentaje_cash_in),
       porcentaje_inversion: Number(inv.porcentaje_inversion),
       fecha_inicio_participacion: parseParticipantDate(inv.fecha_inicio_participacion),
+      cuota_inversionista: Number(inv.cuota_inversionista || 0),
     })) || [];
 
   const parsedInvestors = parseInvestors(investorsInitial);
@@ -142,22 +145,25 @@ export function ModalEditCredit({
     );
 
     if (mirrorItem) {
+      // El espejo está sincronizado con el padre: usar los valores ACTUALES del principal
+      // para monto_aportado, cuota y porcentajes. Solo confirmamos que el espejo existe.
       return {
         inversionista_id: Number(mirrorItem.inversionista_id),
         monto_aportado: Number(mirrorItem.monto_aportado),
         porcentaje_cash_in: Number(mirrorItem.porcentaje_cash_in),
         porcentaje_inversion: Number(mirrorItem.porcentaje_inversion),
         fecha_inicio_participacion: parseParticipantDate(mirrorItem.fecha_inicio_participacion),
+        cuota_inversionista: Number(mirrorItem.cuota_inversionista || 0),
       };
     }
-    // Si no hay espejo para ese inversionista, devolvemos objeto vacío
-    const today = new Date().toISOString().split("T")[0];
+    // Si no hay espejo para ese inversionista en DB, sincronizar desde el principal
     return {
-      inversionista_id: 0,
-      monto_aportado: 0,
-      porcentaje_cash_in: 0,
-      porcentaje_inversion: 0,
-      fecha_inicio_participacion: today,
+      inversionista_id: inv.inversionista_id,
+      monto_aportado: inv.monto_aportado,
+      porcentaje_cash_in: inv.porcentaje_cash_in,
+      porcentaje_inversion: inv.porcentaje_inversion,
+      fecha_inicio_participacion: inv.fecha_inicio_participacion,
+      cuota_inversionista: inv.cuota_inversionista,
     };
   });
 
@@ -247,6 +253,7 @@ export function ModalEditCredit({
           porcentaje_cash_in: Number(i.porcentaje_cash_in),
           porcentaje_inversion: Number(i.porcentaje_inversion),
           fecha_inicio_participacion: i.fecha_inicio_participacion,
+          cuota_inversionista: Number(i.cuota_inversionista || 0),
         })),
 
         // Lista Espejo
@@ -256,6 +263,7 @@ export function ModalEditCredit({
           porcentaje_cash_in: Number(i.porcentaje_cash_in),
           porcentaje_inversion: Number(i.porcentaje_inversion),
           fecha_inicio_participacion: i.fecha_inicio_participacion,
+          cuota_inversionista: Number(i.cuota_inversionista || 0),
         })),
       };
       updateCredit(payload, {
@@ -330,8 +338,9 @@ export function ModalEditCredit({
                 {
                   onSuccess: (data: any) => {
                     console.log("Recalculate response:", data);
-                    const raw = data?.cuota ?? data?.nueva_cuota ?? data?.newQuota ?? data?.data?.cuota ?? data?.data?.nueva_cuota ?? data?.result?.cuota;
-                    const cuotaRecalculada = Number(raw || 0);
+                    const payload = data?.data ?? data?.result ?? data;
+                    const raw = payload?.cuota ?? payload?.nueva_cuota ?? payload?.newQuota;
+                    const cuotaRecalculada = Number(Number(raw || 0).toFixed(2));
                     if (cuotaRecalculada > 0) {
                       setNuevaCuota(cuotaRecalculada);
                       formik.setFieldValue("cuota", cuotaRecalculada);
@@ -340,6 +349,42 @@ export function ModalEditCredit({
                       if (currentCuota > 0) {
                         setNuevaCuota(currentCuota);
                       }
+                    }
+
+                    const mergeCuota = (
+                      list: typeof formik.values.investors,
+                      incoming: any[] | undefined
+                    ) => {
+                      const highlights: Record<number, number> = {};
+                      const merged = list.map((inv) => {
+                        const match = incoming?.find(
+                          (i) => Number(i.inversionista_id) === Number(inv.inversionista_id)
+                        );
+                        if (!match) return inv;
+                        const nueva = Number(Number(match.cuota_inversionista || 0).toFixed(2));
+                        if (Math.abs(nueva - Number(inv.cuota_inversionista || 0)) > 0.005) {
+                          highlights[Number(inv.inversionista_id)] = nueva;
+                        }
+                        return { ...inv, cuota_inversionista: nueva };
+                      });
+                      return { merged, highlights };
+                    };
+
+                    if (Array.isArray(payload?.inversionistas)) {
+                      const { merged, highlights } = mergeCuota(
+                        formik.values.investors,
+                        payload.inversionistas
+                      );
+                      formik.setFieldValue("investors", merged);
+                      setNuevasCuotasInvestors(highlights);
+                    }
+                    if (Array.isArray(payload?.inversionistas_espejo)) {
+                      const { merged, highlights } = mergeCuota(
+                        formik.values.investorsMirror,
+                        payload.inversionistas_espejo
+                      );
+                      formik.setFieldValue("investorsMirror", merged);
+                      setNuevasCuotasInvestorsMirror(highlights);
                     }
                   },
                 }
@@ -481,6 +526,13 @@ export function ModalEditCredit({
                         value={formik.values[name] ?? ""}
                         onFocus={(e) => e.target.select()}
                         onChange={(e) => { formik.handleChange(e); if (name === "cuota") setNuevaCuota(null); }}
+                        onBlur={(e) => {
+                          formik.handleBlur(e);
+                          if (!["observaciones", "no_poliza", "numero_credito_sifco", "formato_credito"].includes(name)) {
+                            const val = Number(e.target.value);
+                            formik.setFieldValue(name, Number(val.toFixed(2)));
+                          }
+                        }}
                         className={`border-blue-200 text-gray-800 ${name === "cuota" && nuevaCuota !== null ? "bg-green-50 border-green-400 ring-2 ring-green-200" : "bg-blue-50"}`}
                         min={
                           [
@@ -560,6 +612,13 @@ export function ModalEditCredit({
                       value={formik.values[name] ?? ""}
                       onFocus={(e) => e.target.select()}
                       onChange={formik.handleChange}
+                      onBlur={(e) => {
+                        formik.handleBlur(e);
+                        if (name === "saldo_a_favor") {
+                          const val = Number(e.target.value);
+                          formik.setFieldValue(name, Number(val.toFixed(2)));
+                        }
+                      }}
                       className="bg-blue-50 border-blue-200 text-gray-800"
                       min={name === "saldo_a_favor" ? 0 : undefined}
                       step="any"
@@ -580,6 +639,23 @@ export function ModalEditCredit({
               errorMessage={formik.errors.investors as string}
               errorMessageMirror={formik.errors.investorsMirror as string}
               onSaldoChanges={(changes) => { saldoChangesRef.current = changes; }}
+              recalculatedQuotas={nuevasCuotasInvestors}
+              recalculatedQuotasMirror={nuevasCuotasInvestorsMirror}
+              onClearRecalculatedQuota={(invId, isMirror) => {
+                if (isMirror) {
+                  setNuevasCuotasInvestorsMirror((prev) => {
+                    const next = { ...prev };
+                    delete next[invId];
+                    return next;
+                  });
+                } else {
+                  setNuevasCuotasInvestors((prev) => {
+                    const next = { ...prev };
+                    delete next[invId];
+                    return next;
+                  });
+                }
+              }}
             />
           </form>
         </div>

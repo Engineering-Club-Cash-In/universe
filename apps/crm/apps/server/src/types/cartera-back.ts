@@ -155,7 +155,7 @@ export interface CreateCreditoInput {
 export interface CreditoDetailResponse {
 	creditos: CarteraCredito;
 	usuarios: CarteraUsuario;
-	asesores: CarteraAsesor | null;
+	asesores: CarteraAsesorCredito | null;
 	inversionistas: Array<{
 		credito_id: number;
 		inversionista_id: number;
@@ -211,12 +211,25 @@ export interface CreditoConInversionistas extends CarteraCredito {
 }
 
 /**
+ * Asesor tal como lo devuelve el endpoint /credito (campos crudos de la tabla `asesores`).
+ * Difiere de CarteraAsesor (que se enriquece con datos de platform_users en /advisor).
+ */
+export interface CarteraAsesorCredito {
+	asesor_id: number;
+	nombre: string;
+	telefono: string | null;
+	activo: boolean | null;
+	emailCashIn: string | null;
+}
+
+/**
  * Estructura real devuelta por el endpoint /credito?numero_credito_sifco=XXX
  * Retorna los datos del crédito con las cuotas separadas por estado
  */
 export interface CreditoDirectoResponse {
 	credito: CarteraCredito;
 	usuario: CarteraUsuario;
+	asesor: CarteraAsesorCredito | null;
 	cuotasPagadas: CarteraCuotaCredito[];
 	cuotasPendientes: CarteraCuotaCredito[];
 	cuotasAtrasadas: CarteraCuotaCredito[];
@@ -528,11 +541,14 @@ export interface GetAllCreditsParams {
 	page?: number;
 	perPage?: number;
 	numero_credito_sifco?: string;
+	numeros_credito_sifco?: string[];
 	excel?: boolean;
 	cuotas_atrasadas?: number;
 	nombre_usuario?: string;
 	time?: "WEEK" | "MONTH" | "DUEMONTH" | "TODAY";
 	email_cobrador?: string;
+	fecha_desde?: string;
+	fecha_hasta?: string;
 }
 
 export interface GetPaymentsParams {

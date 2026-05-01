@@ -1,4 +1,4 @@
-FROM nginx:latest
+FROM docker.io/library/nginx:latest
 
 COPY dist /usr/share/nginx/html
 

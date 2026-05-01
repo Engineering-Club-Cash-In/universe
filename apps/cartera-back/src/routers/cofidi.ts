@@ -2,13 +2,16 @@
 
 import { Elysia, t } from "elysia";
 import jwt from "jsonwebtoken";
+import { authMiddleware } from "./midleware";
 import { SATClientService } from "../cofidi/satClientService";
 import { DTEService } from "../cofidi/dteService";
 import { generarHTMLFacturaPro } from "../cofidi/functions";
 import { db } from "../database";
 import {
+  credit_cancelations,
   creditos,
   creditos_inversionistas,
+  creditos_inversionistas_espejo,
   facturas_electronicas,
   inversionistas,
   pagos_credito,
@@ -62,13 +65,35 @@ function generarIdInternoRandom(): string {
 
 
 export const dteController = new Elysia({ prefix: "/api/dte" })
+  .use(authMiddleware)
 
   // 🔥 POST - Certificar DTE
+  // ========================================================================
+  // FLUJO GENERAL DE /facturar-pago-completo
+  // ------------------------------------------------------------------------
+  //  0️⃣  PRE-VALIDACIÓN: verifica que el pago NO tenga ya facturas ACTIVAS
+  //  1️⃣  OBTENER DATOS DEL PAGO  (incluye cuotas_atrasadas para cancelaciones)
+  //  2️⃣  OBTENER INVERSIONISTAS + CALCULAR PARTICIPACIÓN POR CADA UNO
+  //        - Pago normal   → base = monto_aportado
+  //        - Pago "reset"  → base = cuota_inversionista (mayor: se le restan
+  //                          seguro+membresía+gps por cuota)
+  //  3️⃣  CONSTRUIR RECEPTOR  (NIT, consulta SAT, dirección)
+  //  4️⃣  FACTURA DE MORA                (si mora > 0)
+  //  5️⃣  FACTURA DE OTROS SERVICIOS     (seguro + gps + membresía en 1 factura)
+  //  5.5️⃣ FACTURA DE OTROS              (garantía/traspaso/extras en 1 factura)
+  //  6️⃣  FACTURAS DE INTERESES         (1 por cada inversionista no-Cube + 1 para Cube por residuo)
+  //  7️⃣  RESPUESTA FINAL
+  // ========================================================================
 .post(
   "/facturar-pago-completo",
   async ({ body, set }) => {
     try {
       const { pago_id, created_by } = body;
+
+      // ============================================
+      // 0️⃣ PRE-VALIDACIÓN: ¿ya existen facturas ACTIVAS para este pago?
+      //    - Si sí → aborta (no permitir doble facturación)
+      // ============================================
 const facturasExistentes = await db
   .select({
     factura_id: facturas_electronicas.factura_id,
@@ -108,6 +133,10 @@ if (facturasExistentes.length > 0) {
 
       // ============================================
       // 1️⃣ OBTENER DATOS COMPLETOS DEL PAGO
+      //    - JOIN pagos_credito + creditos + usuarios + credit_cancelations
+      //    - credit_cancelations es LEFT JOIN: solo trae data si el crédito
+      //      está cancelado (necesario para dividir por cuotas_atrasadas)
+      //    - Valida que el status del pago sea "validated" | "reset" | "capital"
       // ============================================
       const [pagoData] = await db
         .select({
@@ -128,6 +157,7 @@ if (facturasExistentes.length > 0) {
           abono_iva_12: pagos_credito.abono_iva_12,
 
           capital_credito: creditos.capital,
+          bandera_reinversion: creditos.bandera_reinversion,
 
           usuario_id: usuarios.usuario_id,
           nombre: usuarios.nombre,
@@ -137,6 +167,8 @@ if (facturasExistentes.length > 0) {
           departamento: usuarios.departamento,
           codigo_postal: usuarios.codigo_postal,
           pais: usuarios.pais,
+
+          cuotas_atrasadas: credit_cancelations.cuotas_atrasadas,
         })
         .from(pagos_credito)
         .innerJoin(
@@ -144,6 +176,10 @@ if (facturasExistentes.length > 0) {
           eq(pagos_credito.credito_id, creditos.credito_id)
         )
         .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+        .leftJoin(
+          credit_cancelations,
+          eq(credit_cancelations.credit_id, creditos.credito_id)
+        )
         .where(eq(pagos_credito.pago_id, pago_id));
 
       if (!pagoData) {
@@ -151,7 +187,11 @@ if (facturasExistentes.length > 0) {
         return { success: false, error: "Pago no encontrado" };
       }
 
-      if (pagoData.validationStatus !== "validated") {
+      if (
+        pagoData.validationStatus !== "validated" &&
+        pagoData.validationStatus !== "reset" &&
+        pagoData.validationStatus !== "capital"
+      ) {
         set.status = 400;
         console.error(
           `❌ Pago no validado - Status: ${pagoData.validationStatus}`
@@ -167,7 +207,17 @@ if (facturasExistentes.length > 0) {
       console.log(`✅ Pago VALIDADO - Cliente: ${pagoData.nombre}`);
 
       // ============================================
-      // 2️⃣ OBTENER INVERSIONISTAS DEL CRÉDITO
+      // 2️⃣ OBTENER INVERSIONISTAS DEL CRÉDITO + CALCULAR PARTICIPACIÓN
+      //    a) SELECT de todos los inversionistas del crédito (con LEFT JOIN al espejo
+      //       para saber si su status es pendiente_reinversion / pendiente_compra_cartera)
+      //    b) Calcular la BASE de reparto según el tipo de pago:
+      //         - validated/capital → base = monto_aportado
+      //         - reset (cancelación) → base = cuota_inversionista,
+      //           restando seguro+membresía+gps por cuota al MAYOR
+      //           (el mayor es quien tiene la cuota_inversionista más alta,
+      //            porque al crear el crédito se le sumaron esos cargos)
+      //    c) participacion_real = base / SUM(base)
+      //    d) interes_proporcional = (abono_interes + abono_iva_12) × participacion_real
       // ============================================
       const BigJs = (await import("big.js")).default;
       BigJs.DP = 20;
@@ -184,6 +234,7 @@ if (facturasExistentes.length > 0) {
           monto_aportado: creditos_inversionistas.monto_aportado,
           monto_inversionista: creditos_inversionistas.monto_inversionista,
           iva_inversionista: creditos_inversionistas.iva_inversionista,
+          status_espejo: creditos_inversionistas_espejo.status,
         })
         .from(creditos_inversionistas)
         .innerJoin(
@@ -193,28 +244,81 @@ if (facturasExistentes.length > 0) {
             inversionistas.inversionista_id
           )
         )
+        .leftJoin(
+          creditos_inversionistas_espejo,
+          and(
+            eq(
+              creditos_inversionistas_espejo.credito_id,
+              creditos_inversionistas.credito_id
+            ),
+            eq(
+              creditos_inversionistas_espejo.inversionista_id,
+              creditos_inversionistas.inversionista_id
+            )
+          )
+        )
         .where(eq(creditos_inversionistas.credito_id, pagoData.credito_id!));
 
-      // 🔥 Calcular participación real: monto_aportado / suma_total_aportes
+      // 🔥 Calcular participación real
+      // - Cancelación (validationStatus = "reset"): cuota_inversionista / suma_total_cuotas,
+      //   restando seguro + membresía + GPS por cuota al inversionista MAYOR
+      //   (ese inversionista trae esos cargos sumados en su cuota_inversionista al crear el crédito)
+      // - Resto: monto_aportado / suma_total_aportes
+      const esCancelacion = pagoData.validationStatus === "reset";
+
       const totalInteresesConIva = new BigJs(pagoData.abono_interes || "0")
         .plus(new BigJs(pagoData.abono_iva_12 || "0"));
 
-      const totalAportado = inversionistasDelCredito.reduce(
-        (sum, inv) => sum.plus(new BigJs(inv.monto_aportado || "0")),
+      // 🔥 En cancelación: identificar al MAYOR (máxima cuota_inversionista)
+      //    y calcular los cargos por cuota (seguro/membresía/gps) dividiendo entre cuotas_atrasadas
+      let mayorInversionistaId: number | null = null;
+      let cargosPorCuota = new BigJs(0);
+
+      if (esCancelacion) {
+        const n = new BigJs(pagoData.cuotas_atrasadas || 1);
+        const nSafe = n.gt(0) ? n : new BigJs(1);
+
+        const seguroPorCuota = new BigJs(pagoData.abono_seguro || "0").div(nSafe);
+        const membresiaPorCuota = new BigJs(pagoData.membresias_pago || "0").div(nSafe);
+        const gpsPorCuota = new BigJs(pagoData.abono_gps || "0").div(nSafe);
+        cargosPorCuota = seguroPorCuota.plus(membresiaPorCuota).plus(gpsPorCuota);
+
+        const mayor = inversionistasDelCredito.reduce((max, inv) => {
+          const cuotaInv = new BigJs(inv.cuota_inversionista || "0");
+          return cuotaInv.gt(new BigJs(max.cuota_inversionista || "0")) ? inv : max;
+        }, inversionistasDelCredito[0]);
+        mayorInversionistaId = mayor?.inversionista_id ?? null;
+
+        console.log(`   🏆 Mayor (cancelación): inv ${mayorInversionistaId} | cuotas_atrasadas=${nSafe.toFixed(0)} | cargosPorCuota=Q${cargosPorCuota.toFixed(2)} (seguro Q${seguroPorCuota.toFixed(2)} + membresía Q${membresiaPorCuota.toFixed(2)} + gps Q${gpsPorCuota.toFixed(2)})`);
+      }
+
+      const getBaseInv = (inv: typeof inversionistasDelCredito[number]) => {
+        if (!esCancelacion) return new BigJs(inv.monto_aportado || "0");
+        const cuota = new BigJs(inv.cuota_inversionista || "0");
+        return inv.inversionista_id === mayorInversionistaId
+          ? cuota.minus(cargosPorCuota)
+          : cuota;
+      };
+
+      const totalBase = inversionistasDelCredito.reduce(
+        (sum, inv) => sum.plus(getBaseInv(inv)),
         new BigJs(0)
       );
 
-      console.log(`   💰 Suma total aportes inversionistas: Q${totalAportado.toFixed(2)}`);
+      console.log(`   💰 Suma total ${esCancelacion ? "cuotas inversionistas limpias (cancelación)" : "aportes inversionistas"}: Q${totalBase.toFixed(2)}`);
       console.log(`   💰 Total intereses + IVA del pago: Q${totalInteresesConIva.toFixed(2)}`);
 
       const inversionistasDelPago = inversionistasDelCredito.map((inv) => {
-        const montoAportado = new BigJs(inv.monto_aportado || "0");
-        const participacion = totalAportado.gt(0)
-          ? montoAportado.div(totalAportado)
+        const base = getBaseInv(inv);
+        const participacion = totalBase.gt(0)
+          ? base.div(totalBase)
           : new BigJs(0);
         const interesProporcional = totalInteresesConIva.times(participacion).round(2).toString();
 
-        console.log(`   📊 ${inv.nombre}: aportó Q${montoAportado.toFixed(2)} / Q${totalAportado.toFixed(2)} = ${participacion.times(100).toFixed(2)}% → interés Q${interesProporcional}`);
+        const etiqueta = esCancelacion
+          ? (inv.inversionista_id === mayorInversionistaId ? "cuota limpia (mayor)" : "cuota")
+          : "aportó";
+        console.log(`   📊 ${inv.nombre}: ${etiqueta} Q${base.toFixed(2)} / Q${totalBase.toFixed(2)} = ${participacion.times(100).toFixed(2)}% → interés Q${interesProporcional}`);
 
         return {
           ...inv,
@@ -228,7 +332,11 @@ if (facturasExistentes.length > 0) {
       );
 
       // ============================================
-      // 3️⃣ CONSTRUIR RECEPTOR
+      // 3️⃣ CONSTRUIR RECEPTOR (cliente al que se le factura)
+      //    - Normalizar país a ISO (SAT no acepta "GUATEMALA", requiere "GT")
+      //    - Extraer NITs (pueden venir separados por "/")
+      //    - Si no hay NIT → falla (NO usa "CF" por política)
+      //    - Consultar nombre oficial en SAT vía COFIDI (con fallback al del sistema)
       // ============================================
       // 🔥 Normalizar país a código ISO (GT) - SAT no acepta "GUATEMALA"
       const normalizarPais = (pais: string | null | undefined): string => {
@@ -243,7 +351,18 @@ if (facturasExistentes.length > 0) {
         ? pagoData.nit.split('/').map((n: string) => n.trim().replace(/-/g, '')).filter((n: string) => n.length > 0)
         : [];
 
-      const nitReceptor = nitsDisponibles.length > 0 ? nitsDisponibles[0] : "CF";
+      // 🔥 Si el cliente NO tiene NIT registrado → FALLAR (NO usar "CF")
+      if (nitsDisponibles.length === 0) {
+        set.status = 400;
+        console.error(`❌ Cliente sin NIT registrado - Pago ID: ${pago_id}`);
+        return {
+          success: false,
+          error: `El cliente "${pagoData.nombre}" no tiene NIT registrado. No se puede facturar sin un NIT válido.`,
+          pago_id: pago_id,
+        };
+      }
+
+      const nitReceptor = nitsDisponibles[0];
 
       // 🔥 Consultar nombre del receptor en SAT via COFIDI
       let nombreReceptor = pagoData.nombre
@@ -300,7 +419,10 @@ if (facturasExistentes.length > 0) {
       console.log("===============================================\n");
 
       // ============================================
-      // 🔥 FUNCIÓN HELPER PARA CALCULAR IVA CORRECTO
+      // 🔥 HELPER: calcularIvaExacto
+      //    - Recibe un total con IVA incluido
+      //    - Devuelve { precioUnitario, precio, montoGravable, montoImpuesto, total }
+      //    - Ajusta la base si hay diferencia de centavos para que base+IVA = total
       // ============================================
       const calcularIvaExacto = (totalConIva: number) => {
         const Big = require("big.js");
@@ -338,6 +460,9 @@ if (facturasExistentes.length > 0) {
 
       // ============================================
       // 4️⃣ FACTURA DE MORA (INDEPENDIENTE)
+      //    - Se emite SOLO si pagoData.mora > 0
+      //    - 1 solo ítem: "CARGO POR SERVICIOS MORATORIOS"
+      //    - Si falla, no interrumpe el flujo (registra el error y sigue)
       // ============================================
       if (pagoData.mora && parseFloat(pagoData.mora) > 0) {
         console.log("\n⚠️ Generando factura de MORA...");
@@ -420,6 +545,10 @@ if (facturasExistentes.length > 0) {
 
       // ============================================
       // 5️⃣ FACTURA DE OTROS SERVICIOS (INDEPENDIENTE)
+      //    - Agrupa SEGURO + GPS + MEMBRESÍA en UNA sola factura con N ítems
+      //    - Solo se genera si al menos uno de los 3 es > 0
+      //    - Cada ítem se describe como "GASTOS VARIOS"
+      //    - El monto ya viene × cuotas_atrasadas (se calculó en resetCredit)
       // ============================================
       const tieneOtrosServicios =
         (pagoData.abono_seguro && parseFloat(pagoData.abono_seguro) > 0) ||
@@ -580,6 +709,9 @@ if (facturasExistentes.length > 0) {
 
       // ============================================
       // 5.5️⃣ FACTURA DE OTROS (INDEPENDIENTE)
+      //    - Campo pagoData.otros: garantía + traspaso + extras
+      //      (llega ya sumado desde resetCredit → otrosCancelacion)
+      //    - 1 solo ítem: "GASTOS VARIOS"
       // ============================================
       if (pagoData.otros && parseFloat(pagoData.otros) > 0) {
         console.log("\n💼 Generando factura de OTROS...");
@@ -660,7 +792,18 @@ if (facturasExistentes.length > 0) {
       }
 
       // ============================================
-      // 6️⃣ FACTURAS DE INTERESES (monto_aportado / capital)
+      // 6️⃣ FACTURAS DE INTERESES (1 por inversionista + 1 para CUBE)
+      //    Estrategia:
+      //      PASO 1: loop por cada inversionista (saltando CUBE)
+      //              - Si bandera_reinversion=true y status_espejo pendiente → redirigir a CUBE
+      //              - Separar interes_proporcional en parteInversionista + parteCashIn
+      //              - Acumular parteCashIn en cashInAcumulado (para sumárselo a CUBE al final)
+      //              - Si el inversionista emite su propia factura y no hay config → skip
+      //              - Si no, facturar la parteInversionista con su emisor correspondiente
+      //      PASO 2: CUBE se calcula por RESIDUO:
+      //              cubePropio = total_pago − suma_intereses_no_cube
+      //              totalCube  = cubePropio + cashInAcumulado
+      //      PASO 3: 1 factura para CUBE con totalCube
       // ============================================
       const totalInteresesPago = new Big(pagoData.abono_interes || "0");
       const totalIvaPago = new Big(pagoData.abono_iva_12 || "0");
@@ -676,7 +819,7 @@ if (facturasExistentes.length > 0) {
         let cashInAcumulado = new Big(0);
         let totalInteresesNoCube = new Big(0);
 
-        // PASO 1: Facturas individuales para inversionistas NO-CUBE
+        // -------- PASO 1: Facturas individuales para inversionistas NO-CUBE --------
         for (const inv of inversionistasDelPago) {
           console.log(`\n   🔍 Procesando: "${inv.nombre}" (emite_factura: ${inv.emite_factura})`);
 
@@ -692,6 +835,23 @@ if (facturasExistentes.length > 0) {
           }
 
           const interesProporcional = new Big(inv.interes_proporcional || "0");
+
+          // 🔥 REDIRIGIR A CUBE: si bandera_reinversion del crédito activa
+          // y status del espejo = pendiente_reinversion o pendiente_compra_cartera
+          const redirigirACube =
+            pagoData.bandera_reinversion === true &&
+            (inv.status_espejo === "pendiente_reinversion" ||
+              inv.status_espejo === "pendiente_compra_cartera");
+
+          if (redirigirACube) {
+            console.log(
+              `   🔁 ${inv.nombre} → REDIRIGIDO A CUBE (bandera_reinversion=true, status_espejo=${inv.status_espejo}) | Q${interesProporcional.toFixed(2)}`
+            );
+            // NO sumar a totalInteresesNoCube ni a cashInAcumulado:
+            // CUBE absorbe todo (parteInversionista + parteCashIn) por RESIDUO.
+            continue;
+          }
+
           totalInteresesNoCube = totalInteresesNoCube.plus(interesProporcional);
           if (interesProporcional.lte(0)) {
             console.log(`   ⏭️  ${inv.nombre} - Sin intereses`);
@@ -805,7 +965,7 @@ if (facturasExistentes.length > 0) {
           }
         }
 
-        // PASO 2: Calcular parte de CUBE como RESIDUO (total - lo que les tocó a los demás)
+        // -------- PASO 2: Calcular parte de CUBE como RESIDUO (total - lo que les tocó a los demás) --------
         const cubePropio = totalInteresesConIvaPago.minus(totalInteresesNoCube);
         console.log(`\n   📊 CUBE propio (residuo): Q${cubePropio.toFixed(2)} (total Q${totalInteresesConIvaPago.toFixed(2)} - otros Q${totalInteresesNoCube.toFixed(2)})`);
 
@@ -814,7 +974,7 @@ if (facturasExistentes.length > 0) {
         console.log(`   📊 Cash-in acumulado de otros: Q${cashInAcumulado.toFixed(2)}`);
         console.log(`   💵 Total CUBE: Q${totalCube.toFixed(2)} (residuo + cash_in)`);
 
-        // PASO 3: Factura CUBE
+        // -------- PASO 3: Generar 1 factura para CUBE con (residuo + cash_in acumulado) --------
         if (totalCube.gt(0)) {
           console.log(`   💼 Generando factura CUBE...`);
 
@@ -893,6 +1053,9 @@ if (facturasExistentes.length > 0) {
 
       // ============================================
       // 7️⃣ RESPUESTA FINAL
+      //    - Separa facturasGeneradas en exitosas vs con error
+      //    - Si ninguna se generó → responde 500
+      //    - Si al menos 1 se generó → responde 200 con el detalle
       // ============================================
       console.log("\n🎉 Facturación completada");
 
@@ -2065,37 +2228,42 @@ if (facturasExistentes.length > 0) {
         console.log(`🏢 Emisor: ${emisorKey} (${emisorConfig.config.emisor.nombreEmisor})`);
 
         // ============================================
-        // 1️⃣ CONSULTAR NIT EN COFIDI PARA OBTENER NOMBRE
+        // 1️⃣ VALIDAR NIT Y CONSULTAR EN COFIDI
         // ============================================
-        let nombreReceptor = "CONSUMIDOR FINAL";
+        const nitNormalizado = (nit || "").trim().replace(/-/g, "").toUpperCase();
 
-        if (nit && nit !== "CF") {
-          try {
-            const nitClient = new NITSoapClient(COFIDI_CONFIG.endpointUrl);
-            const resultadoNit = await nitClient.consultarNIT({
-              nit: nit,
-              entity: COFIDI_CONFIG.entity,
-              requestor: COFIDI_CONFIG.requestor,
-            });
-
-            if (resultadoNit.success && resultadoNit.nombre) {
-              nombreReceptor = resultadoNit.nombre;
-              console.log(`✅ NIT encontrado: ${nombreReceptor}`);
-            } else {
-              console.log(`⚠️ NIT no encontrado, usando: ${nombreReceptor}`);
-            }
-          } catch (nitError) {
-            console.error("❌ Error consultando NIT:", nitError);
-            // Continuamos con "CONSUMIDOR FINAL"
-          }
+        if (!nitNormalizado || nitNormalizado === "CF") {
+          set.status = 400;
+          return {
+            success: false,
+            error: "NIT requerido. No se permite facturar a Consumidor Final (CF) en facturas genéricas.",
+          };
         }
+
+        const nitClient = new NITSoapClient(COFIDI_CONFIG.endpointUrl);
+        const resultadoNit = await nitClient.consultarNIT({
+          nit: nitNormalizado,
+          entity: COFIDI_CONFIG.entity,
+          requestor: COFIDI_CONFIG.requestor,
+        });
+
+        if (!resultadoNit.success || !resultadoNit.nombre) {
+          set.status = 400;
+          return {
+            success: false,
+            error: `NIT "${nitNormalizado}" no encontrado en SAT. No se puede facturar.`,
+          };
+        }
+
+        const nombreReceptor = resultadoNit.nombre;
+        console.log(`✅ NIT validado en SAT: ${nombreReceptor}`);
 
         // ============================================
         // 2️⃣ CONSTRUIR RECEPTOR
         // ============================================
         const receptor = {
-          idReceptor: nit || "CF",
-          nombreReceptor: nombreReceptor,
+          idReceptor: nitNormalizado,
+          nombreReceptor,
         };
 
         console.log(`👤 Receptor: ${receptor.nombreReceptor} (${receptor.idReceptor})`);
@@ -2717,22 +2885,7 @@ const fechaHoraEmision = fechaEmision.toISOString().substring(0, 19);
           });
         }
 
-        // 🔥 Si no hay más NITs, intentar con "CF" como último recurso
-        if (receptor.idReceptor !== "CF") {
-          console.log(`   🔄 NIT "${receptor.idReceptor}" inválido, reintentando con "CF"`);
-          return certificarFacturaHelper({
-            pago_id,
-            receptor: { ...receptor, idReceptor: "CF" },
-            items,
-            complementos,
-            created_by,
-            customConfig,
-            customSatConfig,
-            usarFechaActual,
-            nitsFallback: [],
-          });
-        }
-
+        // 🔥 Sin más NITs alternativos → FALLAR (NO caer en "CF")
         throw new Error(
           `NIT del receptor inválido. NIT enviado: "${receptor.idReceptor}" para "${receptor.nombreReceptor}". ` +
             `Respuesta COFIDI: ${errorMessage}`

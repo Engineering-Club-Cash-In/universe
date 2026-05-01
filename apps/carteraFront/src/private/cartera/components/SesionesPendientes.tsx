@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState, useMemo, useCallback } from "react";
-import { useSesionesPendientes, useCompletarEspejo, useReemplazarInversionistaCredito, useCreditCandidates } from "../hooks/useSesionesPendientes";
+import { useState, useMemo, useCallback, useEffect } from "react";
+import { useSesionesPendientes, useCompletarEspejo, useReemplazarInversionistaCredito, useCreditCandidates, useDevolverPendientesACube, useCompraCarteraAceptada } from "../hooks/useSesionesPendientes";
 import type { InversionistaSesionPendiente, OtroCreditoDisponible } from "../services/services";
 import {
   Loader2,
@@ -11,32 +11,37 @@ import {
   RefreshCw,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   Undo2,
   User,
   Mail,
   CreditCard,
   X,
+  Ban,
+  AlertCircle,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 
-function formatQ(v: number | string | null | undefined, moneda?: string): string {
+function formatQ(v: number | string | null | undefined): string {
   const num = Number(v ?? 0);
-  const s = moneda === "dolares" ? "$" : "Q";
-  return `${s}${num.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `Q${num.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function statusLabel(status: string): string {
   return status === "pendiente_reinversion" ? "Reinversión"
     : status === "pendiente_compra_cartera" ? "Compra Cartera"
+    : status === "pendiente_revision" ? "Pendiente Autorizacion"
     : status;
 }
 
 function statusColor(status: string): string {
   return status === "pendiente_reinversion" ? "border-purple-300 text-purple-700 bg-purple-50"
     : status === "pendiente_compra_cartera" ? "border-amber-300 text-amber-700 bg-amber-50"
+    : status === "pendiente_revision" ? "border-green-300 text-green-700 bg-green-50"
     : "border-gray-300 text-gray-700 bg-gray-50";
 }
 
@@ -71,24 +76,35 @@ function distribuirMonto(
 // ============================================
 // Componente principal
 // ============================================
-export function SesionesPendientes() {
-  const { data, isLoading, isError, error, refetch, isFetching } = useSesionesPendientes();
-  const [search, setSearch] = useState("");
+const PAGE_SIZE = 10;
 
-  const filtered = useMemo(() => {
-    if (!data) return [];
-    if (!search.trim()) return data;
-    const q = search.toLowerCase();
-    return data.filter((inv) =>
-      inv.nombre.toLowerCase().includes(q) ||
-      String(inv.dpi ?? "").includes(q) ||
-      (inv.email ?? "").toLowerCase().includes(q)
-    );
-  }, [data, search]);
+export function SesionesPendientes() {
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const { data: response, isLoading, isError, error, refetch, isFetching } = useSesionesPendientes(page, PAGE_SIZE, debouncedSearch);
+
+  // Debounce search to avoid firing on every keystroke
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 800);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const investors = useMemo(() => response?.data ?? [], [response]);
+  const total = response?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const totalCreditos = useMemo(
-    () => data?.reduce((a, inv) => a + inv.creditosPendientes.length, 0) ?? 0,
-    [data]
+    () => investors.reduce((a, inv) => a + inv.creditosPendientes.length, 0),
+    [investors]
+  );
+
+  const handleSearchChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      setSearch(e.target.value);
+      setPage(1);
+    },
+    [],
   );
 
   if (isLoading) {
@@ -116,7 +132,7 @@ export function SesionesPendientes() {
   }
 
   return (
-    <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-4 sm:px-6 lg:px-8 overflow-auto pt-6 pb-8">
+    <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-4 sm:px-6 lg:px-8 overflow-auto pt-6 pb-20">
       <div className="w-full max-w-[1400px] space-y-4">
         {/* Header */}
         <div className="flex items-center justify-between gap-4">
@@ -137,23 +153,26 @@ export function SesionesPendientes() {
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" aria-hidden="true" />
             <Input
-              placeholder="Buscar por nombre, DPI o email&hellip;"
+              placeholder="Buscar por nombre"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9 h-8 text-xs"
+              onChange={handleSearchChange}
+              className="pl-9 h-8 text-xs text-gray-900"
               aria-label="Buscar inversionistas"
             />
           </div>
           <Badge variant="outline" className="text-[11px] border-blue-200 text-blue-700 bg-blue-50 tabular-nums">
-            {data?.length ?? 0} inversionistas
+            {total} inversionistas
           </Badge>
           <Badge variant="outline" className="text-[11px] border-purple-200 text-purple-700 bg-purple-50 tabular-nums">
             {totalCreditos} créditos
           </Badge>
+          <span className="text-xs text-gray-500">
+            Página {page} de {totalPages}
+          </span>
         </div>
 
         {/* Cards */}
-        {filtered.length === 0 ? (
+        {investors.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-gray-400 gap-2">
             <CreditCard className="w-8 h-8 text-gray-300" aria-hidden="true" />
             <p className="text-xs">
@@ -162,12 +181,60 @@ export function SesionesPendientes() {
           </div>
         ) : (
           <div className="space-y-4">
-            {filtered.map((inv) => (
+            {investors.map((inv) => (
               <InvestorCard key={inv.inversionista_id} investor={inv} />
             ))}
           </div>
         )}
       </div>
+
+      {/* Pagination - fixed bottom */}
+      {totalPages > 1 && (
+        <div className="border-t border-gray-200 bg-white px-6 py-3 flex items-center justify-center gap-1.5 fixed bottom-0 inset-x-0 z-10 shadow-[0_-2px_10px_rgba(0,0,0,0.06)]">
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page === 1}
+            className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+            let pageNum: number;
+            if (totalPages <= 5) {
+              pageNum = i + 1;
+            } else if (page <= 3) {
+              pageNum = i + 1;
+            } else if (page >= totalPages - 2) {
+              pageNum = totalPages - 4 + i;
+            } else {
+              pageNum = page - 2 + i;
+            }
+            return (
+              <button
+                key={pageNum}
+                type="button"
+                onClick={() => setPage(pageNum)}
+                className={`h-8 w-9 inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors ${
+                  pageNum === page
+                    ? "bg-blue-600 text-white border border-blue-600"
+                    : "border border-gray-300 bg-white text-gray-700 hover:bg-gray-100"
+                }`}
+              >
+                {pageNum}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page === totalPages}
+            className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -182,7 +249,6 @@ function getCashInMonto(oc: OtroCreditoDisponible): number {
 // ============================================
 function buildDestinos(
   candidates: OtroCreditoDisponible[],
-  moneda: string
 ): CreditoDestino[] {
   const destinos: CreditoDestino[] = [];
 
@@ -190,12 +256,11 @@ function buildDestinos(
     const cashInMonto = getCashInMonto(oc);
     destinos.push({
       id: oc.credito_id,
-      label: `${oc.numero_credito_sifco || `#${oc.credito_id}`} · ${oc.credito_completo?.usuario?.nombre ?? ""} · Aportado: ${formatQ(cashInMonto, moneda)}`,
+      label: `${oc.numero_credito_sifco || `#${oc.credito_id}`} · ${oc.credito_completo?.usuario?.nombre ?? ""} · Aportado: ${formatQ(cashInMonto)}`,
       capacidad: cashInMonto || oc.capital_activo,
       tipo: "existente",
     });
   }
-
 
   return destinos;
 }
@@ -211,17 +276,22 @@ function InvestorCard({
   const [expanded, setExpanded] = useState(true);
   const [editingCreditId, setEditingCreditId] = useState<number | null>(null);
   const [selectedDestinoIds, setSelectedDestinoIds] = useState<Set<number>>(new Set());
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
   const reemplazar = useReemplazarInversionistaCredito();
   const completarEspejo = useCompletarEspejo();
-  const { data: candidates = [] } = useCreditCandidates();
+  const devolverPendientes = useDevolverPendientesACube();
+  const aceptarCompra = useCompraCarteraAceptada();
 
   const isEditing = editingCreditId !== null;
   const editingCredit = investor.creditosPendientes.find((c) => c.id === editingCreditId);
 
+  const montoParaCandidatos = editingCredit ? Number(editingCredit.monto_aportado) : null;
+  const { data: candidates, isLoading: isLoadingCandidates } = useCreditCandidates(montoParaCandidatos, investor.inversionista_id);
+
   const destinos = useMemo(() => {
-    if (!editingCreditId) return [];
-    return buildDestinos(candidates, investor.moneda);
-  }, [editingCreditId, investor, candidates]);
+    if (!editingCreditId || !candidates) return [];
+    return buildDestinos(candidates);
+  }, [editingCreditId, candidates]);
 
   const montoAportado = editingCredit ? Number(editingCredit.monto_aportado) : 0;
 
@@ -307,6 +377,54 @@ function InvestorCard({
     );
   }, [completarEspejo, investor]);
 
+  const tieneCompraCartera = investor.creditosPendientes.some(
+    (c) => c.status === "pendiente_compra_cartera"
+  );
+  const cancelLabel = tieneCompraCartera ? "Cancelar Compra Cartera" : "Cancelar Sesión";
+  const handleCancelSesion = useCallback(() => {
+
+    const creditoIds = investor.creditosPendientes.map((c) => c.credito_id);
+    if (creditoIds.length === 0) return;
+
+    devolverPendientes.mutate(
+      {
+        creditos: creditoIds.length === 1 ? creditoIds[0] : creditoIds,
+        inversionista_id: investor.inversionista_id,
+      },
+      {
+        onSuccess: (res) => {
+          const count = res.creditos_limpiados?.length ?? creditoIds.length;
+          toast.success(res.message || `${count} crédito(s) devueltos a cube.`);
+          setConfirmingCancel(false);
+        },
+        onError: (err) => {
+          toast.error(err?.message || "Error al cancelar la sesión");
+        },
+      }
+    );
+  }, [devolverPendientes, investor]);
+
+
+  const handleAceptarCompraCartera = useCallback(() => {
+    const creditoIds = investor.creditosPendientes
+      .filter((c) => c.status === "pendiente_compra_cartera")
+      .map((c) => c.credito_id);
+
+    if (creditoIds.length === 0) return;
+
+    aceptarCompra.mutate(
+      { creditos: creditoIds },
+      {
+        onSuccess: (res) => {
+          toast.success(res.message || "Compra de cartera aceptada y notificada.");
+        },
+        onError: (err) => {
+          toast.error(err?.message || "Error al aceptar la compra de cartera");
+        },
+      }
+    );
+  }, [aceptarCompra, investor]);
+
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
       {/* Header compacto */}
@@ -344,7 +462,7 @@ function InvestorCard({
             <div className="text-right hidden sm:block">
               <p className="text-[10px] text-gray-400">Saldo</p>
               <p className="text-xs font-bold text-gray-800 tabular-nums">
-                {formatQ(investor.saldo_reinversion, investor.moneda)}
+                {formatQ(investor.saldo_reinversion)}
               </p>
             </div>
           )}
@@ -352,7 +470,7 @@ function InvestorCard({
             <div className="text-right hidden md:block">
               <p className="text-[10px] text-gray-400">Reinversión</p>
               <p className="text-xs font-bold text-gray-800 tabular-nums">
-                {formatQ(investor.monto_reinversion, investor.moneda)}
+                {formatQ(investor.monto_reinversion)}
               </p>
             </div>
           )}
@@ -396,11 +514,20 @@ function InvestorCard({
                         )}
                       </div>
                       <div className="flex items-center gap-4 mt-1 text-[11px] text-gray-500">
-                        <span><b className="text-gray-800">{formatQ(credito.monto_aportado, investor.moneda)}</b> aportado</span>
-                        <span>Cuota: {formatQ(credito.cuota_inversionista, investor.moneda)}</span>
+                        <span><b className="text-gray-800">{formatQ(credito.monto_aportado)}</b> aportado</span>
+                        <span>Cuota: {formatQ(credito.cuota_inversionista)}</span>
                         <span>{credito.porcentaje_participacion_inversionista}% part.</span>
-                        <span className="hidden sm:inline">Cash In: {formatQ(credito.monto_cash_in, investor.moneda)} ({credito.porcentaje_cash_in}%)</span>
+                        <span>Cash In: {credito.porcentaje_cash_in}%</span>
                       </div>
+                      {credito.otrosInversionistas && credito.otrosInversionistas.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-3 mt-1 text-[10px] text-gray-400">
+                          {credito.otrosInversionistas.map((otro, idx) => (
+                            <span key={idx}>
+                              {otro.nombre}: <b className="text-gray-600">{formatQ(otro.monto_aportado)}</b>
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     {/* Botón quitar / cancelar */}
@@ -429,11 +556,11 @@ function InvestorCard({
                       <div className="flex items-center justify-between">
                         <p className="text-[11px] text-amber-800">
                           <ArrowRight className="w-3 h-3 inline mr-1" aria-hidden="true" />
-                          Reasignar <b className="tabular-nums">{formatQ(montoAportado, investor.moneda)}</b>
+                          Reasignar <b className="tabular-nums">{formatQ(montoAportado)}</b>
                         </p>
                         {restante > 0.01 && (
                           <span className="text-[11px] text-amber-600 font-semibold tabular-nums">
-                            Pendiente: {formatQ(restante, investor.moneda)}
+                            Pendiente: {formatQ(restante)}
                           </span>
                         )}
                         {isBalanced && (
@@ -444,7 +571,12 @@ function InvestorCard({
                       </div>
 
                       <div className="space-y-1.5">
-                        {destinos.length === 0 ? (
+                        {isLoadingCandidates ? (
+                          <div className="flex items-center gap-2 py-2">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600" aria-hidden="true" />
+                            <p className="text-[11px] text-gray-500">Cargando créditos disponibles&hellip;</p>
+                          </div>
+                        ) : destinos.length === 0 ? (
                           <p className="text-[11px] text-gray-500 italic">Sin créditos disponibles</p>
                         ) : (
                           destinos.map((d) => {
@@ -474,7 +606,7 @@ function InvestorCard({
                                 </Badge>
                                 {sel && asignado > 0 && (
                                   <span className="text-[11px] font-bold text-blue-700 tabular-nums shrink-0">
-                                    +{formatQ(asignado, investor.moneda)}
+                                    +{formatQ(asignado)}
                                   </span>
                                 )}
                               </button>
@@ -511,21 +643,88 @@ function InvestorCard({
 
 
 
-          {/* Confirmar sesión - solo visible cuando NO hay reasignación activa */}
+          {/* Acciones de sesión - solo visible cuando NO hay reasignación activa */}
           {!isEditing && (
-            <div className="flex justify-end pt-1 border-t border-gray-100">
-              <Button
-                size="sm"
-                onClick={handleConfirm}
-                disabled={completarEspejo.isPending}
-                className="gap-1 text-[11px] h-7 bg-blue-600 text-white hover:bg-blue-700"
-              >
-                {completarEspejo.isPending
-                  ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
-                  : <Check className="w-3 h-3" aria-hidden="true" />
-                }
-                Confirmar Sesión
-              </Button>
+            <div className="pt-2 border-t border-gray-100">
+              {confirmingCancel ? (
+                <div className="flex items-center justify-between gap-3 rounded-md border border-red-200 bg-red-50/70 px-3 py-2">
+                  <div className="flex items-start gap-2 min-w-0">
+                    <AlertCircle className="w-3.5 h-3.5 text-red-600 mt-0.5 shrink-0" aria-hidden="true" />
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-semibold text-red-800">
+                        ¿{cancelLabel}?
+                      </p>
+                      <p className="text-[10px] text-red-700/80 leading-tight">
+                        Se devolverán {investor.creditosPendientes.length} crédito(s) a cube y se removerán los inversionistas pendientes. Esta acción no se puede deshacer.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setConfirmingCancel(false)}
+                      disabled={devolverPendientes.isPending}
+                      className="gap-1 text-[11px] h-7 border-gray-300"
+                    >
+                      <Undo2 className="w-3 h-3" aria-hidden="true" />
+                      No
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={handleCancelSesion}
+                      disabled={devolverPendientes.isPending}
+                      className="gap-1 text-[11px] h-7 bg-red-600 text-white hover:bg-red-700"
+                    >
+                      {devolverPendientes.isPending
+                        ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                        : <Check className="w-3 h-3" aria-hidden="true" />
+                      }
+                      Sí, cancelar
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex justify-end gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setConfirmingCancel(true)}
+                    disabled={completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending}
+                    className="gap-1 text-[11px] h-7 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                  >
+                    <Ban className="w-3 h-3" aria-hidden="true" />
+                    {cancelLabel}
+                  </Button>
+                  {tieneCompraCartera && (
+                    <Button
+                      size="sm"
+                      onClick={handleAceptarCompraCartera}
+                      disabled={aceptarCompra.isPending || completarEspejo.isPending || devolverPendientes.isPending}
+                      className="gap-1 text-[11px] h-7 bg-amber-500 text-white hover:bg-amber-600 border-none"
+                    >
+                      {aceptarCompra.isPending
+                        ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                        : <Check className="w-3 h-3" aria-hidden="true" />
+                      }
+                      Aceptar Compra Cartera
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    onClick={handleConfirm}
+                    disabled={completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending}
+                    className="gap-1 text-[11px] h-7 bg-blue-600 text-white hover:bg-blue-700"
+                  >
+                    {completarEspejo.isPending
+                      ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                      : <Check className="w-3 h-3" aria-hidden="true" />
+                    }
+                    Confirmar Sesión
+                  </Button>
+                </div>
+
+              )}
             </div>
           )}
         </div>

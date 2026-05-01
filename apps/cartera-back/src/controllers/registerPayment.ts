@@ -271,7 +271,8 @@ const obtenerInfoCompletaCredito = async (
           or(
             eq(creditos.statusCredit, "ACTIVO"),
             eq(creditos.statusCredit, "MOROSO"),
-            eq(creditos.statusCredit, "EN_CONVENIO") // 🚨 También traer créditos en convenio
+            eq(creditos.statusCredit, "EN_CONVENIO") 
+            ,eq(creditos.statusCredit, "INCOBRABLE")// 🚨 También traer créditos en convenio
           )
         )
       )
@@ -1136,13 +1137,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
                 );
               }
 
-              // Distribuir pago entre inversionistas
-              if (pagoInsertado?.pago_id) {
-                await insertPagosCreditoInversionistasV2(
-                  pagoInsertado.pago_id,
-                  credito.credito_id
-                );
-              }
+             
             } else {
               disponible_para_cuotasPosteriores =
                 disponible_para_cuotasPosteriores.plus(disponible);
@@ -1270,13 +1265,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
                 );
               }
 
-              // Distribuir pago entre inversionistas
-              if (pagoInsertado?.pago_id) {
-                await insertPagosCreditoInversionistasV2(
-                  pagoInsertado.pago_id,
-                  credito.credito_id
-                );
-              }
+              
             }
           }
           if (disponible_restante.lte(0)) {
@@ -1802,14 +1791,54 @@ export async function aplicarPagoAlCredito(pago_id: number) {
     const membresias_restante = new Big(pago.membresias ?? 0);
     const capital_restante_pago = new Big(pago.capital_restante ?? 0);
 
-    // ✅ Si CUALQUIER restante > 0 → NO está completo
+    // 🔎 Buscar TODOS los pagos de la misma cuota para validar si hay restantes
+    // en cualquier otro pago (ej: pagos "otros" que dejan restantes en el pago
+    // original de la cuota sin tocarlos). Excluye paymentFalse.
+    const pagosDeLaCuota = pago.cuota_id !== null
+      ? await db
+          .select({
+            pago_id: pagos_credito.pago_id,
+            interes_restante: pagos_credito.interes_restante,
+            iva_12_restante: pagos_credito.iva_12_restante,
+            seguro_restante: pagos_credito.seguro_restante,
+            gps_restante: pagos_credito.gps_restante,
+            membresias: pagos_credito.membresias,
+            capital_restante: pagos_credito.capital_restante,
+          })
+          .from(pagos_credito)
+          .where(
+            and(
+              eq(pagos_credito.cuota_id, pago.cuota_id),
+              eq(pagos_credito.paymentFalse, false)
+            )
+          )
+      : [];
+
+    const algunPagoDeLaCuotaTieneRestantes = pagosDeLaCuota.some(
+      (p) =>
+        new Big(p.interes_restante ?? 0).gt(0) ||
+        new Big(p.iva_12_restante ?? 0).gt(0) ||
+        new Big(p.seguro_restante ?? 0).gt(0) ||
+        new Big(p.gps_restante ?? 0).gt(0) ||
+        new Big(p.membresias ?? 0).gt(0) ||
+        new Big(p.capital_restante ?? 0).gt(0)
+    );
+
+    // ✅ Si CUALQUIER restante > 0 (en este pago o en otro pago de la misma cuota) → NO está completo
     const tieneRestantes =
       interes_restante.gt(0) ||
       iva_restante.gt(0) ||
       seguro_restante.gt(0) ||
       gps_restante.gt(0) ||
       membresias_restante.gt(0) ||
-      capital_restante_pago.gt(0);
+      capital_restante_pago.gt(0) ||
+      algunPagoDeLaCuotaTieneRestantes;
+
+    if (algunPagoDeLaCuotaTieneRestantes) {
+      console.log(
+        `⚠️ Otro pago de la cuota ${pago.cuota_id} tiene restantes pendientes → no se marcará la cuota como pagada`
+      );
+    }
 
     if (tieneRestantes) {
       console.log("⚠️ El pago tiene restantes pendientes:");
@@ -1986,16 +2015,11 @@ export async function aplicarPagoAlCredito(pago_id: number) {
       .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
 
     console.log("✅ Crédito actualizado y pago validado");
-
-    // 8. INSERTAR PAGOS DE INVERSIONISTAS (si no es un pago con paymentFalse)
-    if (!pago.paymentFalse && pago.credito_id !== null) {
-      console.log("✅ Pagos a inversionistas insertados");
-      
-    await db
-      .update(cuotas_credito)
-      .set({ liquidado_inversionistas: true,fecha_liquidacion_inversionistas: new Date() })
-      .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
+ // 8. Distribuir entre inversionistas
+    if (pago.credito_id) {
+      await insertPagosCreditoInversionistasV2(pago_id, pago.credito_id);
     }
+  
 
     return {
       success: true,

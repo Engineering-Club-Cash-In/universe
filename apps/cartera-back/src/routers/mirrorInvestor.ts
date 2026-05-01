@@ -1,7 +1,9 @@
 import { Elysia, t } from "elysia";
 import { llenarTablaEspejo, getCreditsWithMirrors, getCreditsByInvestor, asignarReinversionEspejo } from "../controllers/mirrorInvestor";
+import { authMiddleware } from "./midleware";
 
 export const mirrorInvestorRouter = new Elysia()
+  .use(authMiddleware)
   .post("/llenar-tabla-espejo", llenarTablaEspejo, {
     query: t.Object({
       calcular_cuota: t.Optional(t.String()),

@@ -4,39 +4,39 @@ import {
   completarEspejoService,
   reemplazarInversionistaCreditoService,
   getCreditCandidatesService,
+  devolverPendientesACubeService,
+  compraCarteraAceptadaService,
   type CompletarEspejoPayload,
   type CompletarEspejoResponse,
   type ReemplazarInversionistaCreditoPayload,
   type ReemplazarInversionistaCreditoResponse,
+  type SesionesPendientesPaginatedResponse,
+  type OtroCreditoDisponible,
+  type DevolverPendientesACubePayload,
+  type DevolverPendientesACubeResponse,
+  type CompraCarteraAceptadaPayload,
+  type CompraCarteraAceptadaResponse,
 } from "../services/services";
 
 export const sesionesPendientesKeys = {
   all: ["sesiones-pendientes"] as const,
-  list: () => [...sesionesPendientesKeys.all, "list"] as const,
-  candidates: () => [...sesionesPendientesKeys.all, "candidates"] as const,
+  list: (page: number, pageSize: number, search: string) => [...sesionesPendientesKeys.all, "list", page, pageSize, search] as const,
 };
 
-export function useSesionesPendientes() {
-  return useQuery({
-    queryKey: sesionesPendientesKeys.list(),
-    queryFn: getCreditosEspejoPendientesService,
+export const creditCandidatesKeys = {
+  all: ["credit-candidates"] as const,
+};
+
+export function useSesionesPendientes(page: number, pageSize: number, search: string) {
+  return useQuery<SesionesPendientesPaginatedResponse>({
+    queryKey: sesionesPendientesKeys.list(page, pageSize, search),
+    queryFn: () => getCreditosEspejoPendientesService({ page, pageSize, search }),
     staleTime: 1000 * 60 * 2,
     gcTime: 1000 * 60 * 5,
     refetchOnWindowFocus: false,
     refetchOnReconnect: true,
     retry: 2,
     retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
-  });
-}
-
-export function useCreditCandidates() {
-  return useQuery({
-    queryKey: sesionesPendientesKeys.candidates(),
-    queryFn: () => getCreditCandidatesService(10),
-    staleTime: 0, // siempre fresco
-    gcTime: 1000 * 60 * 5,
-    refetchOnWindowFocus: false,
-    retry: 2,
   });
 }
 
@@ -62,6 +62,48 @@ export function useReemplazarInversionistaCredito() {
     mutationFn: (payload) => reemplazarInversionistaCreditoService(payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: sesionesPendientesKeys.all });
+      queryClient.invalidateQueries({ queryKey: creditCandidatesKeys.all });
     },
   });
 }
+
+export function useCreditCandidates(monto: number | null, inversionista_id?: number) {
+  return useQuery<OtroCreditoDisponible[]>({
+    queryKey: [...creditCandidatesKeys.all, monto, inversionista_id] as const,
+    queryFn: () => getCreditCandidatesService({ monto: monto!, inversionista_id }),
+    enabled: monto !== null && monto > 0,
+    staleTime: 1000 * 60 * 2,
+    gcTime: 1000 * 60 * 5,
+  });
+}
+
+export function useDevolverPendientesACube() {
+  const queryClient = useQueryClient();
+
+  return useMutation<
+    DevolverPendientesACubeResponse,
+    Error,
+    DevolverPendientesACubePayload
+  >({
+    mutationFn: (payload) => devolverPendientesACubeService(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: sesionesPendientesKeys.all });
+    },
+  });
+}
+
+export function useCompraCarteraAceptada() {
+  const queryClient = useQueryClient();
+
+  return useMutation<
+    CompraCarteraAceptadaResponse,
+    Error,
+    CompraCarteraAceptadaPayload
+  >({
+    mutationFn: (payload) => compraCarteraAceptadaService(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: sesionesPendientesKeys.all });
+    },
+  });
+}
+

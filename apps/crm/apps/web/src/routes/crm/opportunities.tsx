@@ -47,6 +47,7 @@ import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
 import { ConsolidatedCreditSummary } from "@/components/credit/ConsolidatedCreditSummary";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
 import { ConfirmContractsSignedModal } from "@/components/crm/ConfirmContractsSignedModal";
+import { WhatsappLogBadge } from "@/components/crm/WhatsappLogBadge";
 import { ManualVehicleValuationDialog } from "@/components/crm/ManualVehicleValuationDialog";
 import { DataTable } from "@/components/data-table";
 import { NotesTimeline } from "@/components/notes-timeline";
@@ -228,6 +229,13 @@ function DraggableOpportunityCard({
 						Reenviado a Análisis
 					</Badge>
 				)}
+				{opportunity.stage?.closurePercentage === 85 &&
+					opportunity.lead?.id && (
+						<WhatsappLogBadge
+							opportunityId={opportunity.id}
+							leadId={opportunity.lead.id}
+						/>
+					)}
 				<div className="space-y-1 border-t pt-1">
 					<div className="flex items-center justify-between">
 						<span className="text-muted-foreground text-xs">Probabilidad</span>

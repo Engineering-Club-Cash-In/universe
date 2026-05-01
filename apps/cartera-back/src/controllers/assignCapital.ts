@@ -8,8 +8,14 @@ import {
   inversionistas,
   usuarios,
 } from "../database/db";
-import { eq, and, sql, inArray, notInArray } from "drizzle-orm";
+import { eq, and, sql, inArray, notInArray, gt, lt } from "drizzle-orm";
 import Big from "big.js";
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
+import timezone from "dayjs/plugin/timezone";
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 // ============================================================
 // TIPOS
@@ -30,6 +36,7 @@ interface ScoreBreakdown {
   formato: number;
   cuotas: number;
   proximidad: number;
+  reinversion: number;
   total: number;
 }
 
@@ -51,6 +58,7 @@ export interface CreditCandidate {
   inversionistas: InversionistaResult[];
   score: number;
   score_breakdown: ScoreBreakdown;
+  capital_evaluado: number;
   credito_completo?: FullCreditData;
 }
 
@@ -67,6 +75,7 @@ const SCORE_PENALTY_PER_CUOTA = 30; // Reducido de 50 a 30
 const SCORE_PROXIMITY_BASE_FITS = 300; // Bono porque el capital del crédito cubre todo el monto
 const SCORE_PROXIMITY_HIGH = 200;      // Diferencia < 10%
 const SCORE_PROXIMITY_MED = 100;       // Diferencia < 25%
+const SCORE_REINVERSION = 3000;       // Prioridad para inversionistas existentes
 
 // ============================================================
 // FUNCIONES DE SCORING
@@ -125,10 +134,15 @@ function calcCapitalProximityBonus(
 
 export async function getCreditCandidates(
   monto?: number,
-  limit?: number
+  limit?: number,
+  inversionistaIdSolicitante?: number
 ): Promise<CreditCandidate[]> {
   console.log("\n🔍 ========== getCreditCandidates ==========");
   console.log(`   monto: ${monto ?? "no especificado"}`);
+
+  // Para optimizar el rendimiento y aprovechar índices (sargable), calculamos la fecha
+  // exacta de inicio de mes en UTC basándonos en la zona horaria de Guatemala.
+  const inicioMesGuateUTC = dayjs().tz("America/Guatemala").startOf("month").toDate();
 
   // ──────────────────────────────────────────────────────────
   // 1. Diagnóstico de embudo de filtros inicial
@@ -141,16 +155,18 @@ export async function getCreditCandidates(
     .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
     .where(and(
       eq(creditos.statusCredit, "ACTIVO"),
-      sql`LOWER(${usuarios.categoria}) LIKE '%cv veh_culo%'`
+      sql`LOWER(${usuarios.categoria}) LIKE '%cv veh_culo%'`,
+      lt(creditos.fecha_creacion, inicioMesGuateUTC)
     ));
 
   console.log(`   - Créditos ACTIVOS en total: ${totalActivos}`);
-  console.log(`   - Créditos ACTIVOS de Vehículo: ${totalCandidatosBase}`);
+  console.log(`   - Créditos ACTIVOS de Vehículo (meses anteriores): ${totalCandidatosBase}`);
 
   // ──────────────────────────────────────────────────────────
   // 1. Créditos Activos de Vehículo
   //    - usuarios.categoria = 'CV Vehículo'
   //    - statusCredit = 'ACTIVO'
+  //    - Solo meses anteriores al actual
   //    - Optimización: Sin pagos 'pending' (Subquery NOT IN)
   // ──────────────────────────────────────────────────────────
   const baseCredits = await db
@@ -169,7 +185,11 @@ export async function getCreditCandidates(
         // La categoría debe contener 'cv vehiculo' o 'cv vehículo'
         sql`LOWER(${usuarios.categoria}) LIKE '%cv veh_culo%'`,
         // Solo activos
-        eq(creditos.statusCredit, "ACTIVO")
+        eq(creditos.statusCredit, "ACTIVO"),
+        // Descartar créditos sin interés (0%)
+        gt(creditos.porcentaje_interes, "0"),
+        // Excluir créditos creados en el mes actual (fecha pre-calculada y optimizada)
+        lt(creditos.fecha_creacion, inicioMesGuateUTC)
       )
     );
 
@@ -288,8 +308,9 @@ export async function getCreditCandidates(
     .where(
       and(
         inArray(cuotas_credito.credito_id, creditoIds),
-        eq(cuotas_credito.pagado, true)
-        // Se incluyen todas las cuotas: 0, 1, 2, 3...
+        eq(cuotas_credito.pagado, true),
+        gt(cuotas_credito.numero_cuota, 0)
+        // Solo se cuentan cuotas a partir de la 1 (se descarta la 0)
       )
     )
     .groupBy(cuotas_credito.credito_id);
@@ -308,7 +329,12 @@ export async function getCreditCandidates(
       count: sql<number>`COUNT(*)::int`,
     })
     .from(cuotas_credito)
-    .where(inArray(cuotas_credito.credito_id, creditoIds))
+    .where(
+      and(
+        inArray(cuotas_credito.credito_id, creditoIds),
+        gt(cuotas_credito.numero_cuota, 0)
+      )
+    )
     .groupBy(cuotas_credito.credito_id);
 
   const totalCuotasByCredito = new Map<number, number>();
@@ -370,17 +396,18 @@ export async function getCreditCandidates(
     const invs = invsByCredito.get(credito_id) ?? [];
     const cubeInv = invs.find((i) => i.es_cube);
 
+    // Filtro Universal: Todo crédito candidato DEBE tener a Cube
+    if (!cubeInv) {
+      console.log(
+        `   ❌ [${numero_credito_sifco}] Descartado: Crédito sin participación de Cube (ID ${CUBE_ID})`
+      );
+      continue;
+    }
+
     // Identificar formato dinámicamente si viene null (para evitar saltarse validación de Pool)
     const actualFormadoCredito = formato_credito ?? (invs.length > 1 ? "Pool" : "Individual");
 
     if (actualFormadoCredito === "Pool") {
-      // No tiene a Cube → descartado
-      if (!cubeInv) {
-        console.log(
-          `   ❌ [${numero_credito_sifco}] Descartado: Pool sin Cube (ID ${CUBE_ID})`
-        );
-        continue;
-      }
 
       // VALIDACIÓN: Cube debe ser el líder del Pool.
       // Si existe algún otro inversionista con un monto estrictamente mayor, se descarta.
@@ -404,16 +431,36 @@ export async function getCreditCandidates(
     const cuotasPagadas = cuotasPagadasByCredito.get(credito_id) ?? 0;
     const totalCuotas = totalCuotasByCredito.get(credito_id) ?? 0;
 
+    // FILTRO CRÍTICO: Solo si es cuota 1 confirmada pa delante (se descarta si solo tiene cuota 0 o ninguna)
+    if (cuotasPagadas === 0) {
+      console.log(
+        `   ❌ [${numero_credito_sifco}] Descartado: No tiene ninguna cuota pagada (>= 1)`
+      );
+      continue;
+    }
+
     // Score
     const crmBonus = numero_credito_sifco?.toLowerCase().startsWith("crm") ? SCORE_CRM_BONUS : 0;
     const formatoBonus = calcFormatoBonus(actualFormadoCredito, invs);
     const cuotasBonus = calcCuotasBonus(cuotasPagadas);
-    const proximityBonus = monto !== undefined ? calcCapitalProximityBonus(capitalActivoNum, monto) : 0;
+    
+    // Evaluar la proximidad utilizando específicamente el monto original aportado por Cube en lugar del capital total del crédito
+    const capitalParaEvaluar = cubeInv ? cubeInv.monto_aportado : capitalActivoNum;
+    const proximityBonus = monto !== undefined ? calcCapitalProximityBonus(capitalParaEvaluar, monto) : 0;
 
-    const score = SCORE_BASE + crmBonus + formatoBonus + cuotasBonus + proximityBonus;
+    // Bono de Reinversión: Si el inversionista ya tiene participación en este crédito
+    let reinversionBonus = 0;
+    if (inversionistaIdSolicitante !== undefined) {
+      const yaParticipa = invs.some((i) => i.inversionista_id === inversionistaIdSolicitante);
+      if (yaParticipa) {
+        reinversionBonus = SCORE_REINVERSION;
+      }
+    }
+
+    const score = SCORE_BASE + crmBonus + formatoBonus + cuotasBonus + proximityBonus + reinversionBonus;
 
     console.log(
-      `   ✅ [${numero_credito_sifco}] score=${score} (crm=${crmBonus}, fmt=${formatoBonus}, cuotas=${cuotasBonus}, prox=${proximityBonus})`
+      `   ✅ [${numero_credito_sifco}] score=${score} (crm=${crmBonus}, fmt=${formatoBonus}, cuotas=${cuotasBonus}, prox=${proximityBonus}, reinv=${reinversionBonus})`
     );
 
     candidates.push({
@@ -431,13 +478,25 @@ export async function getCreditCandidates(
         formato: formatoBonus,
         cuotas: cuotasBonus,
         proximidad: proximityBonus,
+        reinversion: reinversionBonus,
         total: score,
       },
+      capital_evaluado: capitalParaEvaluar,
     });
   }
 
-  // Ordenar DESC por score
-  candidates.sort((a, b) => b.score - a.score);
+  // Ordenar DESC por score. En caso de empate, gana el capital más cercano al monto
+  candidates.sort((a, b) => {
+    if (b.score !== a.score) {
+      return b.score - a.score;
+    }
+    if (monto !== undefined) {
+      const diffA = Math.abs(a.capital_evaluado - monto);
+      const diffB = Math.abs(b.capital_evaluado - monto);
+      return diffA - diffB;
+    }
+    return 0;
+  });
 
   // Si se especificó un límite, cortar antes de las queries de relaciones
   if (limit !== undefined) {

@@ -40,6 +40,8 @@ export interface Liquidacion {
   nombre_inversionista: string;
   emite_factura: boolean;
   dpi: string;
+  moneda: string;
+  currencySymbol: string;
   totales: LiquidacionTotales;
   reporte_liquidacion: string;
   fecha_liquidacion: string;
@@ -59,7 +61,10 @@ export interface LiquidacionesResponse {
 // ============================================
 
 export type InvestmentStatus = "activa" | "finalizada" | "pendiente";
-export type InvestmentType = "tradicional" | "al_vencimiento" | "interes_compuesto";
+export type InvestmentType =
+  | "tradicional"
+  | "al_vencimiento"
+  | "interes_compuesto";
 
 export interface Investment {
   id: string;
@@ -124,7 +129,7 @@ export const getLiquidaciones = async (
   dpi: string,
   email: string,
   page: number = 1,
-  perPage: number = 10
+  perPage: number = 10,
 ): Promise<LiquidacionesResponse> => {
   try {
     // Asegurar autenticación
@@ -134,9 +139,9 @@ export const getLiquidaciones = async (
       `${env.CARTERA_API_URL}/liquidaciones?dpi=${dpi}&email=${email}&page=${page}&perPage=${perPage}`,
       {
         headers: {
-         // Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
         },
-      }
+      },
     );
 
     if (!response.ok) {
@@ -154,7 +159,10 @@ export const getLiquidaciones = async (
 /**
  * Obtener estadísticas de inversiones desde la API de Cartera
  */
-export const getInvestmentsStats = async (dpi: string, email: string): Promise<InvestmentsStats> => {
+export const getInvestmentsStats = async (
+  dpi: string,
+  email: string,
+): Promise<InvestmentsStats> => {
   try {
     // Asegurar autenticación
     const token = await ensureCarteraAuth();
@@ -163,9 +171,9 @@ export const getInvestmentsStats = async (dpi: string, email: string): Promise<I
       `${env.CARTERA_API_URL}/inversionistas/rendimiento?dpi=${dpi}&email=${email}`,
       {
         headers: {
-          // Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
         },
-      }
+      },
     );
 
     if (!response.ok) {
@@ -187,11 +195,14 @@ export const getAsesorById = async (asesorId: number): Promise<Asesor> => {
   try {
     const token = await ensureCarteraAuth();
 
-    const response = await fetch(`${env.CARTERA_API_URL}/advisor?id=${asesorId}`, {
-      headers: {
-        // Authorization: `Bearer ${token}`,
+    const response = await fetch(
+      `${env.CARTERA_API_URL}/advisor?id=${asesorId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
       },
-    });
+    );
 
     if (!response.ok) {
       throw new Error("Error al cargar información del asesor");
@@ -200,7 +211,7 @@ export const getAsesorById = async (asesorId: number): Promise<Asesor> => {
     const result = (await response.json()) as AsesorResponse | Asesor;
 
     // Si la respuesta tiene formato { success, data }
-    if ('success' in result && result.success && result.data) {
+    if ("success" in result && result.success && result.data) {
       return result.data;
     }
 

@@ -214,6 +214,12 @@ export function useStep3({
     return numberToText(day);
   }, [getCurrentDay, numberToText]);
 
+  // Obtener el mes actual en formato numérico (01-12)
+  const getCurrentMonth = useCallback((): string => {
+    const today = new Date();
+    return (today.getMonth() + 1).toString().padStart(2, "0");
+  }, []);
+
   // Obtener el mes actual en formato texto (enero, febrero, etc.)
   const getCurrentMonthText = useCallback((): string => {
     const today = new Date();
@@ -249,6 +255,61 @@ export function useStep3({
 
     return numberToText(lastTwoDigits);
   }, [numberToText]);
+
+  // Convertir un grupo numérico (hasta miles) a palabras en español (lowercase)
+  const dpiGroupToWords = useCallback((numStr: string): string => {
+    const num = Number.parseInt(numStr, 10);
+    if (Number.isNaN(num)) return numStr;
+
+    const unidades = ["", "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve"];
+    const especiales = ["diez", "once", "doce", "trece", "catorce", "quince", "dieciséis", "diecisiete", "dieciocho", "diecinueve"];
+    const decenas = ["", "", "veinte", "treinta", "cuarenta", "cincuenta", "sesenta", "setenta", "ochenta", "noventa"];
+    const centenas = ["", "ciento", "doscientos", "trescientos", "cuatrocientos", "quinientos", "seiscientos", "setecientos", "ochocientos", "novecientos"];
+
+    if (num === 0) return "cero";
+    if (num === 100) return "cien";
+
+    const groupConvert = (n: number): string => {
+      let r = "";
+      if (n >= 1000) {
+        const miles = Math.floor(n / 1000);
+        r = miles === 1 ? "mil" : `${groupConvert(miles)} mil`;
+      }
+      const resto = n % 1000;
+      if (resto > 0) {
+        if (resto >= 100) {
+          const c = Math.floor(resto / 100);
+          r += r ? (resto === 100 ? " cien" : ` ${centenas[c]}`) : (resto === 100 ? "cien" : centenas[c]);
+        }
+        const du = resto % 100;
+        if (du > 0) {
+          if (du < 10) r += r ? ` ${unidades[du]}` : unidades[du];
+          else if (du < 20) r += r ? ` ${especiales[du - 10]}` : especiales[du - 10];
+          else {
+            const d = Math.floor(du / 10);
+            const u = du % 10;
+            if (u === 0) r += r ? ` ${decenas[d]}` : decenas[d];
+            else if (d === 2) r += r ? ` veinti${unidades[u]}` : `veinti${unidades[u]}`;
+            else r += r ? ` ${decenas[d]} y ${unidades[u]}` : `${decenas[d]} y ${unidades[u]}`;
+          }
+        }
+      }
+      return r.trim();
+    };
+
+    return groupConvert(num);
+  }, []);
+
+  // Convierte DPI numérico a "<palabras> (NNNNNNNNNNNNN)" — mismo formato que el CRM
+  const dpiToWords = useCallback((dpi: string): string => {
+    const cleanDpi = dpi.replace(/\D/g, "");
+    if (cleanDpi.length !== 13) return dpi.toUpperCase();
+    const grupo1 = cleanDpi.slice(0, 4);
+    const grupo2 = cleanDpi.slice(4, 9);
+    const grupo3 = cleanDpi.slice(9, 13);
+    const texto = `${dpiGroupToWords(grupo1)} ${dpiGroupToWords(grupo2)} ${dpiGroupToWords(grupo3)}`.toLowerCase();
+    return `${texto} (${cleanDpi})`;
+  }, [dpiGroupToWords]);
 
   // Obtener fecha completa en formato: "02 de junio de 2025"
   const getFormattedContractDate = useCallback((): string => {
@@ -507,6 +568,10 @@ export function useStep3({
             case "cui":
               initialValues[field.key] = renapData.dpi;
               return;
+            case "dpitexto":
+            case "dpi_texto":
+              initialValues[field.key] = dpiToWords(renapData.dpi);
+              return;
             case "edad":
             case "age":
               initialValues[field.key] = String(
@@ -553,9 +618,11 @@ export function useStep3({
             initialValues[field.key] = getCurrentDayText();
             return;
           case "mes":
+          case "month":
+            initialValues[field.key] = getCurrentMonth();
+            return;
           case "mestexto":
           case "mes_texto":
-          case "month":
           case "monthtext":
           case "month_text":
             initialValues[field.key] = getCurrentMonthText();
@@ -611,11 +678,13 @@ export function useStep3({
     calculateAge,
     getCurrentDay,
     getCurrentDayText,
+    getCurrentMonth,
     getCurrentMonthText,
     getCurrentYear,
     getCurrentYearText,
     getFormattedContractDate,
     numberToText,
+    dpiToWords,
   ]);
 
   // Función para validar sin mostrar errores

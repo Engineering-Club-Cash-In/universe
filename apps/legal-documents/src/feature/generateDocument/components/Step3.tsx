@@ -1,4 +1,3 @@
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,6 +5,7 @@ import { Separator } from "@/components/ui/separator";
 import { CheckCircle, AlertCircle, User, Calendar, Sparkles } from "lucide-react";
 import { type Document, type Field, type RenapData } from "../hooks/useStep2";
 import { useStep3 } from "../hooks/useStep3";
+import { FieldRenderer } from "./FieldRenderer";
 
 interface Step3Props {
   readonly data: {
@@ -121,7 +121,10 @@ export function Step3({
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {relevantFields.map((field) => (
-                <div key={field.key} className="flex flex-col">
+                <div
+                  key={field.key}
+                  className={`flex flex-col ${field.type === "list" ? "md:col-span-2" : ""}`}
+                >
                   {/* Label - altura fija */}
                   <Label htmlFor={field.key} className="mb-1.5">
                     {field.name}
@@ -139,19 +142,12 @@ export function Step3({
                     )}
                   </div>
                   
-                  {/* Input */}
-                  <Input
-                    id={field.key}
+                  {/* Input según tipo (text/select/list) */}
+                  <FieldRenderer
+                    field={field}
                     value={fieldValues[field.key] || ""}
-                    onChange={(e) =>
-                      handleFieldChange(field.key, e.target.value)
-                    }
-                    placeholder={
-                      field.default 
-                        ? `Por defecto: ${field.default}`
-                        : `Ingresa ${field.name.toLowerCase()}`
-                    }
-                    className={fieldErrors[field.key] ? "border-red-500" : ""}
+                    hasError={!!fieldErrors[field.key]}
+                    onChange={handleFieldChange}
                   />
                   
                   {/* Error - altura fija reservada */}

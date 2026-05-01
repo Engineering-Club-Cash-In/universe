@@ -3,6 +3,10 @@
  * Type-safe HTTP client with retry logic, circuit breaker, and caching
  */
 
+import {
+	getCarteraAccessToken,
+	invalidateAndReauth,
+} from "./cartera-auth.service";
 import type {
 	BoletaPagoInversionista,
 	CarteraAsesor,
@@ -44,7 +48,6 @@ import type {
 
 interface CarteraBackClientConfig {
 	baseUrl: string;
-	apiKey?: string;
 	timeout: number;
 	retryAttempts: number;
 	retryDelay: number;
@@ -63,7 +66,6 @@ export interface ResumenGlobalInversionistasFilters {
 
 const DEFAULT_CONFIG: CarteraBackClientConfig = {
 	baseUrl: process.env.CARTERA_BACK_URL || "http://localhost:7000",
-	apiKey: process.env.CARTERA_BACK_API_KEY,
 	timeout: Number.parseInt(process.env.CARTERA_BACK_TIMEOUT || "30000"),
 	retryAttempts: Number.parseInt(
 		process.env.CARTERA_BACK_RETRY_ATTEMPTS || "3",
@@ -216,23 +218,30 @@ export class CarteraBackClient {
 			}
 		}
 
-		const requestOptions: RequestInit = {
-			...options,
-			headers: {
-				"Content-Type": "application/json",
-				...(this.config.apiKey && {
-					Authorization: `Bearer ${this.config.apiKey}`,
-				}),
-				...options.headers,
-			},
-			signal: AbortSignal.timeout(this.config.timeout),
+		const buildRequestOptions = async (
+			forceRefresh = false,
+		): Promise<RequestInit> => {
+			const token = forceRefresh
+				? await invalidateAndReauth()
+				: await getCarteraAccessToken();
+			return {
+				...options,
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${token}`,
+					...options.headers,
+				},
+				signal: AbortSignal.timeout(this.config.timeout),
+			};
 		};
 
 		let lastError: Error | null = null;
+		let didReauth = false;
 
 		for (let attempt = 0; attempt <= this.config.retryAttempts; attempt++) {
 			try {
 				const response = await this.circuitBreaker.execute(async () => {
+					const requestOptions = await buildRequestOptions();
 					const res = await fetch(url, requestOptions);
 
 					if (!res.ok) {
@@ -246,6 +255,22 @@ export class CarteraBackClient {
 						}
 
 						if (res.status === 401 || res.status === 403) {
+							if (!didReauth) {
+								didReauth = true;
+								const retryOptions = await buildRequestOptions(true);
+								const retryRes = await fetch(url, retryOptions);
+								if (retryRes.ok) return retryRes;
+								const retryText = await retryRes.text();
+								let retryData: { error?: string; message?: string } = {};
+								try {
+									retryData = JSON.parse(retryText);
+								} catch {
+									retryData = { error: retryText };
+								}
+								throw new Error(
+									`Authentication failed: ${retryData.error || retryData.message || retryText}`,
+								);
+							}
 							throw new Error(
 								`Authentication failed: ${errorData.error || errorData.message}`,
 							);
@@ -416,35 +441,86 @@ export class CarteraBackClient {
 	async getAllCreditos(
 		params: GetAllCreditsParams,
 	): Promise<PaginatedResponse<CreditoDetailResponse>> {
-		const queryParams = new URLSearchParams({
-			mes: params.mes.toString(),
-			anio: params.anio.toString(),
-			...(params.estado && { estado: params.estado }),
-			...(params.page && { page: params.page.toString() }),
-			...(params.perPage && { perPage: params.perPage.toString() }),
-			...(params.cuotas_atrasadas !== undefined && {
-				cuotas_atrasadas: params.cuotas_atrasadas.toString(),
-			}),
-			...(params.time && { proximidad_pago: params.time }),
-			...(params.nombre_usuario && { nombre_usuario: params.nombre_usuario }),
-			...(params.numero_credito_sifco && {
-				numero_credito_sifco: params.numero_credito_sifco,
-			}),
-			...(params.email_cobrador && { email_asesor: params.email_cobrador }),
-			excel: "false",
-		});
+		// Si la lista de SIFCOs es grande, usar POST para evitar URL too long
+		// (414). Threshold conservador: ~50 SIFCOs * 15 chars ≈ 750 bytes, muy
+		// por debajo de cualquier límite. Por arriba de eso, body en POST.
+		const SIFCO_LIST_POST_THRESHOLD = 50;
+		const useBulkPost =
+			!!params.numeros_credito_sifco &&
+			params.numeros_credito_sifco.length > SIFCO_LIST_POST_THRESHOLD;
 
-		console.log(
-			`[CarteraBackClient] getAllCreditos query: ${queryParams.toString()}`,
-		);
-		// Este endpoint retorna PaginatedResponse directamente, no envuelto en CarteraBackApiResponse
-		const response = await this.request<
-			PaginatedResponse<CreditoDetailResponse>
-		>(
-			`/getAllCredits?${queryParams}`,
-			{ method: "GET" },
-			true, // use cache
-		);
+		let response: PaginatedResponse<CreditoDetailResponse>;
+
+		if (useBulkPost) {
+			console.log(
+				`[CarteraBackClient] getAllCreditos: usando POST (${params.numeros_credito_sifco?.length} SIFCOs en lista)`,
+			);
+			response = await this.request<PaginatedResponse<CreditoDetailResponse>>(
+				`/getAllCredits`,
+				{
+					method: "POST",
+					body: JSON.stringify({
+						mes: params.mes,
+						anio: params.anio,
+						estado: params.estado,
+						...(params.page !== undefined && { page: params.page }),
+						...(params.perPage !== undefined && { perPage: params.perPage }),
+						...(params.cuotas_atrasadas !== undefined && {
+							cuotas_atrasadas: params.cuotas_atrasadas,
+						}),
+						...(params.time && { proximidad_pago: params.time }),
+						...(params.nombre_usuario && {
+							nombre_usuario: params.nombre_usuario,
+						}),
+						...(params.numero_credito_sifco && {
+							numero_credito_sifco: params.numero_credito_sifco,
+						}),
+						...(params.numeros_credito_sifco && {
+							numeros_credito_sifco: params.numeros_credito_sifco,
+						}),
+						...(params.email_cobrador && {
+							email_asesor: params.email_cobrador,
+						}),
+						excel: false,
+					}),
+				},
+			);
+		} else {
+			const queryParams = new URLSearchParams({
+				mes: params.mes.toString(),
+				anio: params.anio.toString(),
+				...(params.estado && { estado: params.estado }),
+				...(params.page && { page: params.page.toString() }),
+				...(params.perPage && { perPage: params.perPage.toString() }),
+				...(params.cuotas_atrasadas !== undefined && {
+					cuotas_atrasadas: params.cuotas_atrasadas.toString(),
+				}),
+				...(params.time && { proximidad_pago: params.time }),
+				...(params.nombre_usuario && {
+					nombre_usuario: params.nombre_usuario,
+				}),
+				...(params.numero_credito_sifco && {
+					numero_credito_sifco: params.numero_credito_sifco,
+				}),
+				...(params.numeros_credito_sifco &&
+					params.numeros_credito_sifco.length > 0 && {
+						numeros_credito_sifco: params.numeros_credito_sifco.join(","),
+					}),
+				...(params.email_cobrador && { email_asesor: params.email_cobrador }),
+				...(params.fecha_desde && { fecha_desde: params.fecha_desde }),
+			...(params.fecha_hasta && { fecha_hasta: params.fecha_hasta }),
+			excel: "false",
+			});
+
+			console.log(
+				`[CarteraBackClient] getAllCreditos query: ${queryParams.toString()}`,
+			);
+			response = await this.request<PaginatedResponse<CreditoDetailResponse>>(
+				`/getAllCredits?${queryParams}`,
+				{ method: "GET" },
+				true, // use cache (solo GET)
+			);
+		}
 
 		// Validar que la respuesta tenga la estructura de PaginatedResponse
 		if (!response.data || !Array.isArray(response.data)) {
@@ -812,12 +888,11 @@ export class CarteraBackClient {
 		const formData = new FormData();
 		formData.append("file", file, filename);
 
+		const token = await getCarteraAccessToken();
 		const response = await fetch(url, {
 			method: "POST",
 			body: formData,
-			...(this.config.apiKey && {
-				headers: { Authorization: `Bearer ${this.config.apiKey}` },
-			}),
+			headers: { Authorization: `Bearer ${token}` },
 			signal: AbortSignal.timeout(this.config.timeout),
 		});
 
@@ -880,12 +955,11 @@ export class CarteraBackClient {
 			formData.append("visible", String(input.visible));
 		if (input.created_by) formData.append("created_by", input.created_by);
 
+		const token = await getCarteraAccessToken();
 		const response = await fetch(url, {
 			method: "POST",
 			body: formData,
-			...(this.config.apiKey && {
-				headers: { Authorization: `Bearer ${this.config.apiKey}` },
-			}),
+			headers: { Authorization: `Bearer ${token}` },
 			signal: AbortSignal.timeout(this.config.timeout),
 		});
 
@@ -943,6 +1017,92 @@ export class CarteraBackClient {
 			method: "PATCH",
 		});
 		this.cache.invalidate("investor-documents");
+		return response;
+	}
+
+	// ========================================================================
+	// CREAR INVERSIONISTA
+	// ========================================================================
+
+	async createInvestor(input: {
+		inversionista_id?: number;
+		nombre: string;
+		dpi?: number | null;
+		email?: string | null;
+		emite_factura?: boolean;
+		banco?: number | null;
+		tipo_cuenta?: string | null;
+		numero_cuenta?: string | null;
+		tipo_reinversion?: string | null;
+		monto_reinversion?: number | null;
+		moneda?: string;
+	}): Promise<{ message: string; data: { inversionista_id: number; nombre: string; [key: string]: any }[] }> {
+		const response = await this.request<{
+			message: string;
+			data: { inversionista_id: number; nombre: string; [key: string]: any }[];
+		}>("/investor", {
+			method: "POST",
+			body: JSON.stringify({
+				...(input.inversionista_id && { inversionista_id: input.inversionista_id }),
+				nombre: input.nombre,
+				dpi: input.dpi ?? null,
+				email: input.email ?? null,
+				emite_factura: input.emite_factura ?? false,
+				banco: input.banco ?? null,
+				tipo_cuenta: input.tipo_cuenta ?? null,
+				numero_cuenta: input.numero_cuenta ?? null,
+				tipo_reinversion: input.tipo_reinversion ?? "sin_reinversion",
+				monto_reinversion: input.monto_reinversion ?? null,
+				moneda: input.moneda ?? "quetzales",
+			}),
+		});
+		this.cache.invalidate("investor");
+		return response;
+	}
+
+	// ========================================================================
+	// CAMBIAR STATUS INVERSIONISTA
+	// ========================================================================
+
+	async setInvestorStatus(input: {
+		inversionista_id: number;
+		status: "activo" | "inactivo" | "pendiente_devolucion";
+	}): Promise<{ success?: boolean; message?: string; data?: any }> {
+		const response = await this.request<{
+			success?: boolean;
+			message?: string;
+			data?: any;
+		}>("/investor/status", {
+			method: "POST",
+			body: JSON.stringify(input),
+		});
+		this.cache.invalidate("investor");
+		return response;
+	}
+
+	// ========================================================================
+	// COMPRA DE CARTERA
+	// ========================================================================
+
+	async compraCartera(input: {
+		inversionista_id: number;
+		monto_aportado: number;
+		tipo_operacion: "compra_cartera";
+		tipo_reinversion?:
+			| "sin_reinversion"
+			| "reinversion_capital"
+			| "reinversion_total";
+		porcentaje_inversion?: number;
+		porcentaje_cash_in?: number;
+		fecha_inicio_participacion?: string;
+	}): Promise<{ success: boolean; message: string }> {
+		const response = await this.request<{
+			success: boolean;
+			message: string;
+		}>("/agregar-inversionista-credito", {
+			method: "POST",
+			body: JSON.stringify(input),
+		});
 		return response;
 	}
 

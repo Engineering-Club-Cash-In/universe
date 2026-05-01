@@ -39,7 +39,7 @@ import {
 import { authMiddleware } from "./midleware";
 import { getCreditosWithUserByMesAnioExcel } from "../controllers/reports";
 import { insertCredit } from "../controllers/createCredit";
-import {  updateAllInstallments, updateCredit, recalculateQuota, recalcularPagosCredito } from "../controllers/updateCredit";
+import {  updateAllInstallments, updateCredit, recalculateQuota, recalcularPagosCredito, calculateInvestorQuotas, repararTotalRestante } from "../controllers/updateCredit";
 import { updateDueDates, updateSingleDueDate, fixCreditosWithoutFebruary, updateDueDatesFromJson, cambiarFechaInicio, getHistorialCambioFecha } from "../controllers/updateDueDate";
 import { creditos, cuotas_credito } from "../database/db";
 import { and, desc, eq } from "drizzle-orm";
@@ -81,7 +81,7 @@ const RouterBodySchema = z.object({
 });
 export const creditRouter = new Elysia()
  
-//.use(authMiddleware)
+.use(authMiddleware)
   // Crear nuevo crédito
 .post("/newCredit", async ({ body, set }) => {
   const result = await insertCredit({ body, set });
@@ -91,6 +91,7 @@ export const creditRouter = new Elysia()
   return result;
 })
   .post("/updateCredit", updateCredit)
+  .post("/calculate-investor-quotas", calculateInvestorQuotas)
   // Obtener crédito por query param ?numero_credito_sifco=XXXX
   .get("/credito", async ({ query, set }) => {
     const { numero_credito_sifco } = query;
@@ -123,6 +124,7 @@ export const creditRouter = new Elysia()
     page = "1",
     perPage = "10",
     numero_credito_sifco,
+    numeros_credito_sifco,
     estado,
     excel,
     asesor_id,
@@ -132,6 +134,8 @@ export const creditRouter = new Elysia()
     proximidad_pago,     // 🆕 NUEVO
     is_vehiculo_propio,
     inversionista_ids,
+    fecha_desde,
+    fecha_hasta,
   } = query as Record<string, string>;
 
   // Validar parámetros requeridos
@@ -147,6 +151,14 @@ export const creditRouter = new Elysia()
   const perPageNum = Number(perPage);
   const numeroCreditoSifco = numero_credito_sifco
     ? String(numero_credito_sifco)
+    : undefined;
+  // Lista opcional de números SIFCO separados por coma. Tiene prioridad
+  // sobre numero_credito_sifco cuando trae al menos un valor válido.
+  const numerosCreditoSifcoArray = numeros_credito_sifco
+    ? String(numeros_credito_sifco)
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
     : undefined;
   const estadoParam = String(estado) as
     | "ACTIVO"
@@ -209,10 +221,22 @@ export const creditRouter = new Elysia()
   // 🆕 Validar proximidad_pago si se envía
   if (proximidad_pago && !["TODAY", "WEEK", "TWO_WEEKS", "MONTH", "DUEMONTH"].includes(proximidad_pago)) {
     set.status = 400;
-    return { 
-      message: "Parámetro 'proximidad_pago' debe ser: TODAY, WEEK, TWO_WEEKS, MONTH o DUEMONTH" 
+    return {
+      message: "Parámetro 'proximidad_pago' debe ser: TODAY, WEEK, TWO_WEEKS, MONTH o DUEMONTH"
     };
   }
+
+  // Validar fechas si se envían
+  if (fecha_desde && isNaN(Date.parse(fecha_desde))) {
+    set.status = 400;
+    return { message: "Parámetro 'fecha_desde' debe ser una fecha válida (YYYY-MM-DD)" };
+  }
+  if (fecha_hasta && isNaN(Date.parse(fecha_hasta))) {
+    set.status = 400;
+    return { message: "Parámetro 'fecha_hasta' debe ser una fecha válida (YYYY-MM-DD)" };
+  }
+  const fechaDesdeParam = fecha_desde ?? undefined;
+  const fechaHastaParam = fecha_hasta ?? undefined;
 
   // Llamar servicio
   try {
@@ -224,6 +248,7 @@ export const creditRouter = new Elysia()
         page: pageNum,
         perPage: perPageNum,
         numero_credito_sifco: numeroCreditoSifco,
+        numeros_credito_sifco: numerosCreditoSifcoArray,
         estado: estadoParam,
         asesor_id: asesorIdNum,
         nombre_usuario: nombreUsuarioParam,
@@ -251,7 +276,10 @@ export const creditRouter = new Elysia()
         cuotasAtrasadasNum,
         proximidadPagoParam,
         isVehiculoPropioParam,
-        inversionistaIdsArray
+        inversionistaIdsArray,
+        fechaDesdeParam,
+        fechaHastaParam,
+        numerosCreditoSifcoArray
       );
       set.status = 200;
       return result;
@@ -261,6 +289,138 @@ export const creditRouter = new Elysia()
     return { message: "Error obteniendo créditos", error: String(error) };
   }
 })
+
+  /**
+   * Variante POST de /getAllCredits.
+   *
+   * Mismos parámetros y misma lógica que el GET — internamente llama al mismo
+   * controller — pero los recibe en el body. Pensado para casos donde la lista
+   * `numeros_credito_sifco` es demasiado grande para entrar en una URL (filtros
+   * por etiqueta que resuelven cientos/miles de SIFCOs disparaban 414 URI Too
+   * Long en proxies).
+   */
+  .post(
+    "/getAllCredits",
+    async ({ body, set }) => {
+      const {
+        mes,
+        anio,
+        page = 1,
+        perPage = 10,
+        numero_credito_sifco,
+        numeros_credito_sifco,
+        estado,
+        excel,
+        asesor_id,
+        nombre_usuario,
+        email_asesor,
+        cuotas_atrasadas,
+        proximidad_pago,
+        is_vehiculo_propio,
+        inversionista_ids,
+        fecha_desde,
+        fecha_hasta,
+      } = body;
+
+      if (mes === undefined || anio === undefined || !estado) {
+        set.status = 400;
+        return { message: "Faltan parámetros 'mes', 'anio' y/o 'estado'." };
+      }
+      if (mes < 0 || mes > 12 || anio < 0) {
+        set.status = 400;
+        return { message: "Parámetros 'mes' y/o 'anio' inválidos." };
+      }
+
+      const sifcosLimpios = numeros_credito_sifco
+        ?.map((s) => s.trim())
+        .filter((s) => s.length > 0);
+
+      try {
+        if (excel) {
+          const result = await getCreditosWithUserByMesAnioExcel({
+            mes,
+            anio,
+            page,
+            perPage,
+            numero_credito_sifco,
+            numeros_credito_sifco: sifcosLimpios,
+            estado,
+            asesor_id,
+            nombre_usuario,
+            email_asesor,
+            cuotas_atrasadas,
+            proximidad_pago,
+            is_vehiculo_propio,
+            inversionista_ids,
+            excel: true,
+          });
+          set.status = 200;
+          return result;
+        }
+
+        const result = await getCreditosWithUserByMesAnio(
+          mes,
+          anio,
+          page,
+          perPage,
+          numero_credito_sifco,
+          estado,
+          asesor_id,
+          nombre_usuario,
+          email_asesor,
+          cuotas_atrasadas,
+          proximidad_pago,
+          is_vehiculo_propio,
+          inversionista_ids,
+          fecha_desde ?? undefined,
+          fecha_hasta ?? undefined,
+          sifcosLimpios
+        );
+        set.status = 200;
+        return result;
+      } catch (error) {
+        set.status = 500;
+        return { message: "Error obteniendo créditos", error: String(error) };
+      }
+    },
+    {
+      body: t.Object({
+        mes: t.Number(),
+        anio: t.Number(),
+        page: t.Optional(t.Number()),
+        perPage: t.Optional(t.Number()),
+        numero_credito_sifco: t.Optional(t.String()),
+        numeros_credito_sifco: t.Optional(t.Array(t.String())),
+        estado: t.Union([
+          t.Literal("ACTIVO"),
+          t.Literal("CANCELADO"),
+          t.Literal("INCOBRABLE"),
+          t.Literal("PENDIENTE_CANCELACION"),
+          t.Literal("EN_CONVENIO"),
+          t.Literal("MOROSO"),
+          t.Literal("CAIDO"),
+        ]),
+        excel: t.Optional(t.Boolean()),
+        asesor_id: t.Optional(t.Number()),
+        nombre_usuario: t.Optional(t.String()),
+        email_asesor: t.Optional(t.String()),
+        cuotas_atrasadas: t.Optional(t.Number()),
+        proximidad_pago: t.Optional(
+          t.Union([
+            t.Literal("TODAY"),
+            t.Literal("WEEK"),
+            t.Literal("TWO_WEEKS"),
+            t.Literal("MONTH"),
+            t.Literal("DUEMONTH"),
+          ])
+        ),
+        is_vehiculo_propio: t.Optional(t.Boolean()),
+        inversionista_ids: t.Optional(t.Array(t.Number())),
+        fecha_desde: t.Optional(t.String()),
+        fecha_hasta: t.Optional(t.String()),
+      }),
+    }
+  )
 
   .post("/cancelCredit", async ({ body, set }) => {
     // Validar que venga el creditId en el body
@@ -1148,6 +1308,35 @@ export const creditRouter = new Elysia()
     detail: {
       summary: "Recalcular pagos desde una cuota",
       description: "Recalcula abonos y restantes de los pagos. Si se pasa numero_cuota, procesa desde esa cuota (pagadas y no pagadas). Si no, solo procesa las no pagadas.",
+      tags: ["Créditos", "Cuotas"],
+    },
+  })
+  // ========================================
+  // ENDPOINT: REPARAR total_restante DE LOS PAGOS
+  // ========================================
+  .post("/reparar-total-restante", async ({ body, set }: any) => {
+    try {
+      const { numero_credito_sifco, capital_inicial } = body;
+      const result = await repararTotalRestante({
+        numero_credito_sifco,
+        capital_inicial,
+      });
+      set.status = 200;
+      return { success: true, ...result };
+    } catch (error: any) {
+      console.error("❌ Error en /reparar-total-restante:", error);
+      set.status = 500;
+      return { success: false, error: error.message };
+    }
+  }, {
+    body: t.Object({
+      numero_credito_sifco: t.String({ minLength: 1 }),
+      capital_inicial: t.Optional(t.Union([t.Number(), t.String()])),
+    }),
+    detail: {
+      summary: "Reparar total_restante de los pagos de un crédito",
+      description:
+        "Recalcula y reescribe SOLO el campo total_restante de los pagos desde la cuota 0 hasta la última cuota pagada, amortizando teóricamente. Si no se pasa capital_inicial, se usa el total_restante del pago de la cuota 0 (desembolso) como ancla. No toca abonos, capital_restante, pagado ni ningún otro campo.",
       tags: ["Créditos", "Cuotas"],
     },
   })

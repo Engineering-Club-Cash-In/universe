@@ -50,6 +50,7 @@ import {
 	updateChecklistForClientDocument,
 	updateChecklistForVehicleDocument,
 } from "../lib/checklist";
+import { getGuatemalaMonthWindow } from "../lib/guatemala-month-window";
 import {
 	formatMissingLeadFields,
 	getMissingLeadFieldsForContracts,
@@ -3159,8 +3160,10 @@ export const crmRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			const PLACED_STAGE_THRESHOLD = 90;
-			const startOfMonth = new Date(input.year, input.month - 1, 1);
-			const endOfMonth = new Date(input.year, input.month, 1);
+			const { startOfMonth, endOfMonth } = getGuatemalaMonthWindow(
+				input.year,
+				input.month,
+			);
 
 			// Helper: get placed credits stats (stage >= threshold) with optional user filter
 			// Uses opportunityStageHistory.changedAt to determine when an opportunity
@@ -6013,8 +6016,10 @@ export const crmRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			const PLACED_STAGE_THRESHOLD = 90;
-			const startOfMonth = new Date(input.year, input.month - 1, 1);
-			const endOfMonth = new Date(input.year, input.month, 1);
+			const { startOfMonth, endOfMonth } = getGuatemalaMonthWindow(
+				input.year,
+				input.month,
+			);
 
 			// Only admin and sales_supervisor see global charts
 			const isGlobal =

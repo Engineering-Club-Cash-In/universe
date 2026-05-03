@@ -270,7 +270,17 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
         ? cuotaActualObj.numero_cuota
         : cuotaActualObj;
 
-      setCuotaSeleccionada(result.cuotasAtrasadas?.[0]?.numero_cuota ?? cuotaActualNumero ?? 0);
+      const siguienteCuotaPagable = [
+        ...(result.cuotasAtrasadas ?? []),
+        ...(result.cuotasPendientes ?? []),
+      ]
+        .filter(
+          (c: any) =>
+            c.validationStatus !== "pending" && c.validationStatus !== "validated"
+        )
+        .sort((a: any, b: any) => a.numero_cuota - b.numero_cuota)[0];
+
+      setCuotaSeleccionada(siguienteCuotaPagable?.numero_cuota ?? cuotaActualNumero ?? 0);
       setMora(result.moraActual || 0);
 
       // 👇 AGREGA INFO DE CONVENIO

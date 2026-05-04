@@ -1524,7 +1524,7 @@ export async function getPagosByVencimiento({
     INNER JOIN cartera.usuarios u ON c.usuario_id = u.usuario_id
     INNER JOIN cartera.asesores a ON c.asesor_id = a.asesor_id
     LEFT JOIN cartera.cuotas_credito q ON p.cuota_id = q.cuota_id
-    LEFT JOIN cartera.moras_credito m ON c.credito_id = m.credito_id
+    LEFT JOIN cartera.moras_credito m ON c.credito_id = m.credito_id AND m.activa = true
     ${cubeSubquery}
     WHERE ${whereClause}
   `);
@@ -1570,7 +1570,7 @@ export async function getPagosByVencimiento({
     INNER JOIN cartera.usuarios u ON c.usuario_id = u.usuario_id
     INNER JOIN cartera.asesores a ON c.asesor_id = a.asesor_id
     LEFT JOIN cartera.cuotas_credito q ON p.cuota_id = q.cuota_id
-    LEFT JOIN cartera.moras_credito m ON c.credito_id = m.credito_id
+    LEFT JOIN cartera.moras_credito m ON c.credito_id = m.credito_id AND m.activa = true
     ${cubeSubquery}
     WHERE ${whereClause}
     ORDER BY COALESCE(q.fecha_vencimiento, p.fecha_vencimiento)

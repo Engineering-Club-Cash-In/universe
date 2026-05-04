@@ -114,7 +114,7 @@ export function PagosPorVencimiento() {
             <select
               className="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm text-blue-800 bg-blue-50 focus:ring-blue-400"
               value={tipoFecha}
-              onChange={(e) => { setTipoFecha(e.target.value as any); setPage(1); }}
+              onChange={(e) => { setTipoFecha(e.target.value as "vencimiento" | "creacion"); setPage(1); }}
             >
               <option value="vencimiento">Fecha Vencimiento</option>
               <option value="creacion">Fecha Creación</option>
@@ -179,7 +179,7 @@ export function PagosPorVencimiento() {
           </div>
 
           <div className="min-w-[150px]">
-            <label className="text-sm font-semibold text-blue-800 mb-1 block">Días Mora</label>
+            <label className="text-sm font-semibold text-blue-800 mb-1 block">Etapa de Mora</label>
             <select
               className="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm text-blue-800 bg-blue-50 focus:ring-blue-400"
               value={rangoMoraInput}
@@ -190,10 +190,10 @@ export function PagosPorVencimiento() {
               }}
             >
               <option value="">Todos</option>
-              <option value="0-30">0-30 días</option>
-              <option value="31-60">31-60 días</option>
-              <option value="61-90">61-90 días</option>
-              <option value="+90">Más de 90 días</option>
+              <option value="0-30">Mora 30</option>
+              <option value="31-60">Mora 60</option>
+              <option value="61-90">Mora 90</option>
+              <option value="+90">Mora 120+</option>
             </select>
           </div>
 
@@ -267,7 +267,7 @@ export function PagosPorVencimiento() {
                   <TableHead className="font-bold text-blue-800">Vencimiento</TableHead>
                   <TableHead className="font-bold text-blue-800">Fecha Pago</TableHead>
                   <TableHead className="font-bold text-blue-800 text-center">Estado</TableHead>
-                  <TableHead className="font-bold text-blue-800 text-center">Días Mora</TableHead>
+                  <TableHead className="font-bold text-blue-800 text-center">Etapa de Mora</TableHead>
                   <TableHead className="font-bold text-blue-800 text-right">Boleta</TableHead>
                   <TableHead className="font-bold text-blue-800 text-right">Capital</TableHead>
                   <TableHead className="font-bold text-blue-800 text-right">Interés</TableHead>

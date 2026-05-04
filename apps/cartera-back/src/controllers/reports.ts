@@ -1432,6 +1432,8 @@ export async function getPagosByVencimiento({
   numero_credito_sifco,
   nombre_usuario,
   tipo_fecha = "vencimiento",
+  asesor,
+  rango_mora,
 }: {
   mes: number;
   anio: number;
@@ -1440,6 +1442,8 @@ export async function getPagosByVencimiento({
   numero_credito_sifco?: string;
   nombre_usuario?: string;
   tipo_fecha?: "vencimiento" | "creacion";
+  asesor?: string;
+  rango_mora?: string;
 }) {
   const fechaInicio = `${anio}-${String(mes).padStart(2, "0")}-01`;
   const fechaFinDate = new Date(anio, mes, 0);
@@ -1448,8 +1452,8 @@ export async function getPagosByVencimiento({
   // Filtros dinámicos
   // Siempre filtramos por el mes de vencimiento para que el reporte sea coherente con el mes seleccionado
   const filters: any[] = [
-    sql`p.fecha_vencimiento::date >= ${fechaInicio}`,
-    sql`p.fecha_vencimiento::date <= ${fechaFin}`,
+    sql`q.fecha_vencimiento::date >= ${fechaInicio}`,
+    sql`q.fecha_vencimiento::date <= ${fechaFin}`,
   ];
 
   // Si el usuario pide filtrar por fecha de creación, agregamos esa restricción adicional
@@ -1465,6 +1469,15 @@ export async function getPagosByVencimiento({
   if (nombre_usuario) {
     const nameCond = buildNameSearchCondition(sql`u.nombre`, nombre_usuario);
     if (nameCond) filters.push(nameCond);
+  }
+  if (asesor) {
+    filters.push(sql`a.nombre ILIKE ${"%" + asesor + "%"}`);
+  }
+  if (rango_mora) {
+    if (rango_mora === "0-30") filters.push(sql`(CURRENT_DATE - q.fecha_vencimiento::date) >= 0 AND (CURRENT_DATE - q.fecha_vencimiento::date) <= 30 AND p.pagado = false`);
+    else if (rango_mora === "31-60") filters.push(sql`(CURRENT_DATE - q.fecha_vencimiento::date) > 30 AND (CURRENT_DATE - q.fecha_vencimiento::date) <= 60 AND p.pagado = false`);
+    else if (rango_mora === "61-90") filters.push(sql`(CURRENT_DATE - q.fecha_vencimiento::date) > 60 AND (CURRENT_DATE - q.fecha_vencimiento::date) <= 90 AND p.pagado = false`);
+    else if (rango_mora === "+90") filters.push(sql`(CURRENT_DATE - q.fecha_vencimiento::date) > 90 AND p.pagado = false`);
   }
   const whereClause = sql.join(filters, sql` AND `);
 
@@ -1507,6 +1520,7 @@ export async function getPagosByVencimiento({
     FROM cartera.pagos_credito p
     INNER JOIN cartera.creditos c ON p.credito_id = c.credito_id
     INNER JOIN cartera.usuarios u ON c.usuario_id = u.usuario_id
+    INNER JOIN cartera.asesores a ON c.asesor_id = a.asesor_id
     LEFT JOIN cartera.cuotas_credito q ON p.cuota_id = q.cuota_id
     ${cubeSubquery}
     WHERE ${whereClause}
@@ -1525,7 +1539,7 @@ export async function getPagosByVencimiento({
       u.nombre AS nombre_usuario,
       p.cuota_id,
       q.numero_cuota,
-      p.fecha_vencimiento,
+      q.fecha_vencimiento AS fecha_vencimiento,
       p.fecha_pago,
       p.pagado,
       p.monto_boleta,
@@ -1537,15 +1551,23 @@ export async function getPagosByVencimiento({
       p.gps_restante,
       p.membresias,
       c.fecha_creacion,
+      c.royalti,
+      a.nombre AS asesor,
+      CASE
+        WHEN p.pagado = false AND q.fecha_vencimiento < CURRENT_DATE
+        THEN CURRENT_DATE - q.fecha_vencimiento::date
+        ELSE 0
+      END AS dias_mora,
       ROUND(p.interes_restante::numeric * COALESCE(cube_data.cube_pct, 0), 2) AS interes_cube,
       ROUND(p.iva_12_restante::numeric * COALESCE(cube_data.cube_pct, 0), 2) AS iva_cube
     FROM cartera.pagos_credito p
     INNER JOIN cartera.creditos c ON p.credito_id = c.credito_id
     INNER JOIN cartera.usuarios u ON c.usuario_id = u.usuario_id
+    INNER JOIN cartera.asesores a ON c.asesor_id = a.asesor_id
     LEFT JOIN cartera.cuotas_credito q ON p.cuota_id = q.cuota_id
     ${cubeSubquery}
     WHERE ${whereClause}
-    ORDER BY p.fecha_vencimiento
+    ORDER BY q.fecha_vencimiento
     LIMIT ${pageSize} OFFSET ${offset}
   `);
 

@@ -3346,6 +3346,9 @@ export interface PagoPorVencimientoItem {
   membresias: string;
   interes_cube: string;
   iva_cube: string;
+  asesor?: string;
+  dias_mora?: number;
+  royalti?: string;
 }
 
 export interface PagoPorVencimientoTotales {
@@ -3379,6 +3382,8 @@ export interface PagosPorVencimientoParams {
   numero_credito_sifco?: string;
   nombre_usuario?: string;
   tipo_fecha?: "vencimiento" | "creacion";
+  asesor?: string;
+  rango_mora?: string;
 }
 
 export async function getPagosPorVencimiento(
@@ -3398,6 +3403,12 @@ export async function getPagosPorVencimiento(
         }),
         ...(params.nombre_usuario && {
           nombre_usuario: params.nombre_usuario,
+        }),
+        ...(params.asesor && {
+          asesor: params.asesor,
+        }),
+        ...(params.rango_mora && {
+          rango_mora: params.rango_mora,
         }),
       },
     }

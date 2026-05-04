@@ -118,7 +118,7 @@ export function MiniCardCredito({
   };
 
   const cuotasFiltradas =
-    cuotasPendientesInfo?.cuotas?.filter((cuota, idx) => idx < 2) ?? [];
+    cuotasPendientesInfo?.cuotas?.filter((cuota, idx) => idx < 1) ?? [];
 
   return (
     <div className="w-full flex flex-col items-center gap-4">

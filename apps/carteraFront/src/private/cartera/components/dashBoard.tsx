@@ -16,6 +16,7 @@ import {
   Briefcase,
   TrendingDown,
   Clock,
+  Wallet,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useState, useRef, useEffect } from "react";
@@ -177,6 +178,13 @@ const menuSections: MenuSection[] = [
         icon: <Landmark className="h-4 w-4" />,
         path: "/bancos",
         roles: ["ADMIN"],
+      },
+      {
+        key: "cuentas-empresa",
+        label: "Cuentas de empresa",
+        icon: <Wallet className="h-4 w-4" />,
+        path: "/cuentas-empresa",
+        roles: ["ADMIN", "CONTA"],
       },
     ],
   },

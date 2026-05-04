@@ -32,7 +32,8 @@ export const documentNameEnum = docusealSchema.enum("document_name_enum", [
   "carta_incremento_inversion",
   "carta_instruccion_pago_anticipado",
   "cesion_creditos",
-  "contrato_servicios_cash_in_inversor_general"
+  "contrato_servicios_cash_in_inversor_general",
+  "designacion_beneficiario"
 ]);
 
 // 📗 Tabla principal

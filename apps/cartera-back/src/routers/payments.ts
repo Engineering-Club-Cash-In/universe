@@ -398,6 +398,8 @@ export const paymentRouter = new Elysia()
         numero_credito_sifco: query.numero_credito_sifco,
         nombre_usuario: query.nombre_usuario,
         tipo_fecha: query.tipo_fecha as "vencimiento" | "creacion",
+        asesor: query.asesor,
+        rango_mora: query.rango_mora,
       });
       set.status = 200;
       return { success: true, ...result };
@@ -421,6 +423,8 @@ export const paymentRouter = new Elysia()
       numero_credito_sifco: t.Optional(t.String()),
       nombre_usuario: t.Optional(t.String()),
       tipo_fecha: t.Optional(t.String({ default: "vencimiento" })),
+      asesor: t.Optional(t.String()),
+      rango_mora: t.Optional(t.String()),
     }),
   }
 )

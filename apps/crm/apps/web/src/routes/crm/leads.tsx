@@ -85,6 +85,7 @@ import {
 	getWorkTimeLabel,
 	LEAD_SOURCE_OPTIONS,
 } from "@/lib/crm-formatters";
+import { getLeadNameAutocomplete } from "@/lib/lead-name-autocomplete";
 import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
@@ -912,6 +913,7 @@ function RouteComponent() {
 										e.stopPropagation();
 										void createLeadForm.handleSubmit();
 									}}
+									autoComplete="off"
 									className="space-y-4"
 								>
 									<div className="grid grid-cols-4 gap-4">
@@ -942,6 +944,9 @@ function RouteComponent() {
 														<Input
 															id={field.name}
 															name={field.name}
+															autoComplete={getLeadNameAutocomplete(
+																"firstName",
+															)}
 															value={field.state.value}
 															onBlur={field.handleBlur}
 															onChange={(e) =>
@@ -970,6 +975,9 @@ function RouteComponent() {
 														<Input
 															id={field.name}
 															name={field.name}
+															autoComplete={getLeadNameAutocomplete(
+																"middleName",
+															)}
 															value={field.state.value}
 															onBlur={field.handleBlur}
 															onChange={(e) =>
@@ -1007,6 +1015,9 @@ function RouteComponent() {
 														<Input
 															id={field.name}
 															name={field.name}
+															autoComplete={getLeadNameAutocomplete(
+																"lastName",
+															)}
 															value={field.state.value}
 															onBlur={field.handleBlur}
 															onChange={(e) =>
@@ -1035,6 +1046,9 @@ function RouteComponent() {
 														<Input
 															id={field.name}
 															name={field.name}
+															autoComplete={getLeadNameAutocomplete(
+																"secondLastName",
+															)}
 															value={field.state.value}
 															onBlur={field.handleBlur}
 															onChange={(e) =>

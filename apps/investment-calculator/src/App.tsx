@@ -60,17 +60,19 @@ interface AmortizationRow {
   finalBalance: number;
 }
 
-const INVESTOR_SPLIT_OPTIONS = [
-  { investorPercentage: 70, label: "70 inversionista / 30 cube" },
-  { investorPercentage: 45, label: "45 inversionista / 55 cube" },
-] as const;
-
-const DEFAULT_INVESTOR_PERCENTAGE = INVESTOR_SPLIT_OPTIONS[0].investorPercentage;
+const DEFAULT_INVESTOR_PERCENTAGE = 70;
 
 const normalizeInvestorPercentage = (value: number) =>
-  INVESTOR_SPLIT_OPTIONS.some((option) => option.investorPercentage === value)
-    ? value
-    : DEFAULT_INVESTOR_PERCENTAGE;
+  Math.min(Math.max(Number.isFinite(value) ? value : DEFAULT_INVESTOR_PERCENTAGE, 1), 100);
+
+const parseInvestorPercentageInput = (value: string) => {
+  if (value.trim() === "") {
+    return null;
+  }
+
+  const parsedValue = Number(value);
+  return Number.isFinite(parsedValue) ? parsedValue : null;
+};
 
 // Main investment calculator component
 export default function InvestmentCalculator() {
@@ -80,6 +82,9 @@ export default function InvestmentCalculator() {
   const [term, setTerm] = useState<number>(1);
   const [investorPercentage, setInvestorPercentage] = useState<number>(
     DEFAULT_INVESTOR_PERCENTAGE
+  );
+  const [investorPercentageInput, setInvestorPercentageInput] = useState<string>(
+    String(DEFAULT_INVESTOR_PERCENTAGE)
   );
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
@@ -98,6 +103,8 @@ export default function InvestmentCalculator() {
   const [adminInterestRate, setAdminInterestRate] = useState<number>(1.5);
   const [adminInvestorPercentage, setAdminInvestorPercentage] =
     useState<number>(DEFAULT_INVESTOR_PERCENTAGE);
+  const [adminInvestorPercentageInput, setAdminInvestorPercentageInput] =
+    useState<string>(String(DEFAULT_INVESTOR_PERCENTAGE));
 
   // Admin small taxpayer state
   const [adminIsSmallTaxpayer, setAdminIsSmallTaxpayer] =
@@ -690,6 +697,39 @@ export default function InvestmentCalculator() {
     setIsDialogOpen(false);
   };
 
+  const handleInvestorPercentageChange = (value: string) => {
+    setInvestorPercentageInput(value);
+    const parsedValue = parseInvestorPercentageInput(value);
+    if (parsedValue !== null) {
+      setInvestorPercentage(parsedValue);
+    }
+  };
+
+  const handleInvestorPercentageBlur = () => {
+    const normalizedValue = normalizeInvestorPercentage(
+      parseInvestorPercentageInput(investorPercentageInput) ?? investorPercentage
+    );
+    setInvestorPercentage(normalizedValue);
+    setInvestorPercentageInput(String(normalizedValue));
+  };
+
+  const handleAdminInvestorPercentageChange = (value: string) => {
+    setAdminInvestorPercentageInput(value);
+    const parsedValue = parseInvestorPercentageInput(value);
+    if (parsedValue !== null) {
+      setAdminInvestorPercentage(parsedValue);
+    }
+  };
+
+  const handleAdminInvestorPercentageBlur = () => {
+    const normalizedValue = normalizeInvestorPercentage(
+      parseInvestorPercentageInput(adminInvestorPercentageInput) ??
+        adminInvestorPercentage
+    );
+    setAdminInvestorPercentage(normalizedValue);
+    setAdminInvestorPercentageInput(String(normalizedValue));
+  };
+
   // Admin login functionality
   const handleLogin = () => {
     // Simple hardcoded credentials for demo purposes
@@ -701,6 +741,7 @@ export default function InvestmentCalculator() {
       // Initialize admin settings with current values
       setAdminInterestRate(interestRate);
       setAdminInvestorPercentage(investorPercentage);
+      setAdminInvestorPercentageInput(String(investorPercentage));
       // Open admin panel after successful login
       setIsAdminPanelOpen(true);
     } else {
@@ -710,8 +751,15 @@ export default function InvestmentCalculator() {
 
   const handleSaveAdminSettings = () => {
     // Apply the admin settings to the actual calculator with validation
+    const normalizedInvestorPercentage = normalizeInvestorPercentage(
+      parseInvestorPercentageInput(adminInvestorPercentageInput) ??
+        adminInvestorPercentage
+    );
     setInterestRate(adminInterestRate);
-    setInvestorPercentage(normalizeInvestorPercentage(adminInvestorPercentage));
+    setInvestorPercentage(normalizedInvestorPercentage);
+    setInvestorPercentageInput(String(normalizedInvestorPercentage));
+    setAdminInvestorPercentage(normalizedInvestorPercentage);
+    setAdminInvestorPercentageInput(String(normalizedInvestorPercentage));
 
     setIsSmallTaxpayer(adminIsSmallTaxpayer);
 
@@ -869,28 +917,20 @@ export default function InvestmentCalculator() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="investorSplit">
-                    Repartición de intereses
+                    Porcentaje del inversionista (%)
                   </Label>
-                  <Select
-                    value={String(investorPercentage)}
-                    onValueChange={(value) =>
-                      setInvestorPercentage(Number(value))
+                  <Input
+                    id="investorSplit"
+                    type="number"
+                    value={investorPercentageInput}
+                    onChange={(e) =>
+                      handleInvestorPercentageChange(e.target.value)
                     }
-                  >
-                    <SelectTrigger id="investorSplit">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {INVESTOR_SPLIT_OPTIONS.map((option) => (
-                        <SelectItem
-                          key={option.investorPercentage}
-                          value={String(option.investorPercentage)}
-                        >
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    onBlur={handleInvestorPercentageBlur}
+                    min="1"
+                    max="100"
+                    step="1"
+                  />
                 </div>
                 <div className="space-y-2">
                   <div className="flex items-center space-x-2">
@@ -990,28 +1030,20 @@ export default function InvestmentCalculator() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="investorSplitGoal">
-                    Repartición de intereses
+                    Porcentaje del inversionista (%)
                   </Label>
-                  <Select
-                    value={String(investorPercentage)}
-                    onValueChange={(value) =>
-                      setInvestorPercentage(Number(value))
+                  <Input
+                    id="investorSplitGoal"
+                    type="number"
+                    value={investorPercentageInput}
+                    onChange={(e) =>
+                      handleInvestorPercentageChange(e.target.value)
                     }
-                  >
-                    <SelectTrigger id="investorSplitGoal">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {INVESTOR_SPLIT_OPTIONS.map((option) => (
-                        <SelectItem
-                          key={option.investorPercentage}
-                          value={String(option.investorPercentage)}
-                        >
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    onBlur={handleInvestorPercentageBlur}
+                    min="1"
+                    max="100"
+                    step="1"
+                  />
                 </div>
               </div>
               <div className="space-y-2">
@@ -1575,31 +1607,21 @@ export default function InvestmentCalculator() {
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="adminInvestorPercentage" className="text-right">
-                Repartición de intereses
+                Porcentaje del inversionista (%)
               </Label>
-              <Select
-                value={String(adminInvestorPercentage)}
-                onValueChange={(value) =>
-                  setAdminInvestorPercentage(Number(value))
+              <Input
+                id="adminInvestorPercentage"
+                type="number"
+                value={adminInvestorPercentageInput}
+                onChange={(e) =>
+                  handleAdminInvestorPercentageChange(e.target.value)
                 }
-              >
-                <SelectTrigger
-                  id="adminInvestorPercentage"
-                  className="col-span-3"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {INVESTOR_SPLIT_OPTIONS.map((option) => (
-                    <SelectItem
-                      key={option.investorPercentage}
-                      value={String(option.investorPercentage)}
-                    >
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                onBlur={handleAdminInvestorPercentageBlur}
+                min="1"
+                max="100"
+                step="1"
+                className="col-span-3"
+              />
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="adminSmallTaxpayer" className="text-right">

@@ -117,8 +117,15 @@ export function MiniCardCredito({
     if (onCuotaSeleccionadaChange) onCuotaSeleccionadaChange(num);
   };
 
-  const cuotasFiltradas =
-    cuotasPendientesInfo?.cuotas?.filter((cuota, idx) => idx < 1) ?? [];
+  const cuotasFiltradas = [
+    ...(cuotasAtrasadasInfo?.cuotas ?? []),
+    ...(cuotasPendientesInfo?.cuotas ?? []),
+  ]
+    .filter(
+      (c) => c.validationStatus !== "pending" && c.validationStatus !== "validated"
+    )
+    .sort((a, b) => a.numero_cuota - b.numero_cuota)
+    .slice(0, 1);
 
   return (
     <div className="w-full flex flex-col items-center gap-4">
@@ -527,9 +534,7 @@ export function MiniCardCredito({
            
 
           {/* Selector de cuotas */}
-          {cuotasPendientesInfo &&
-            cuotasPendientesInfo.cuotas &&
-            cuotasPendientesInfo.cuotas.length > 0 && (
+          {cuotasFiltradas.length > 0 && (
               <div className="lg:col-span-2 flex flex-col bg-white rounded-lg p-4 shadow-sm border-2 border-indigo-300">
                 <span className="font-bold text-indigo-700 text-sm mb-3 text-center">
                   📋 Elige la cuota a pagar:

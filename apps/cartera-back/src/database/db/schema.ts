@@ -653,9 +653,111 @@
     numeroCuenta: varchar("numero_cuenta", { length: 50 }).notNull().unique(),
     descripcion: varchar("descripcion", { length: 255 }),
     activo: boolean("activo").default(true).notNull(),
-    fechaCreacion: timestamp("fecha_creacion").defaultNow().notNull(),
-    fechaActualizacion: timestamp("fecha_actualizacion").defaultNow().notNull(),
+    moneda: tipoMonedaEnum("moneda").notNull().default("quetzales"),
+    // saldo_actual NO se modifica desde la app: lo mueve solo el trigger
+    // BEFORE INSERT en cuentas_empresa_movimientos (ver más abajo).
+    saldo_actual: numeric("saldo_actual", { precision: 18, scale: 2 })
+      .notNull()
+      .default("0"),
+    fechaCreacion: timestamp("fecha_creacion")
+      .notNull()
+      .default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
+    fechaActualizacion: timestamp("fecha_actualizacion")
+      .notNull()
+      .default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
   });
+
+  export const tipoMovimientoCuentaEmpresaEnum = customSchema.enum(
+    "tipo_movimiento_cuenta_empresa",
+    ["ingreso", "egreso" ]
+  );
+
+  // Ledger de movimientos por cuenta. Cada fila es un evento de plata
+  // (entrada o salida). El saldo_actual de cuentas_empresa se deriva de
+  // la suma de estos movimientos — la columna saldo_actual es solo un
+  // cache mantenido por el trigger DB para lectura rápida.
+  //
+  // saldo_post guarda el saldo de la cuenta justo después de aplicar
+  // este movimiento (snapshot histórico, sirve para auditoría).
+  export const cuentas_empresa_movimientos = customSchema.table(
+    "cuentas_empresa_movimientos",
+    {
+      movimiento_id: serial("movimiento_id").primaryKey(),
+      // ON DELETE RESTRICT: no se puede borrar una cuenta con movimientos.
+      cuenta_id: integer("cuenta_id")
+        .notNull()
+        .references(() => cuentasEmpresa.cuentaId, { onDelete: "restrict" }),
+      tipo: tipoMovimientoCuentaEmpresaEnum("tipo").notNull(),
+      // monto siempre positivo; el signo lo determina `tipo` (CHECK monto > 0 en DB).
+      monto: numeric("monto", { precision: 18, scale: 2 }).notNull(),
+      // El trigger BEFORE INSERT sobrescribe este valor con el saldo real
+      // de la cuenta tras aplicar el movimiento.
+      saldo_post: numeric("saldo_post", { precision: 18, scale: 2 }).notNull(),
+      motivo: text("motivo"),
+      created_by: integer("created_by").references(() => platform_users.id),
+      created_at: timestamp("created_at", { withTimezone: true })
+        .notNull()
+        .default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
+    },
+    (t) => ({
+      cuentaIdx: index("idx_cuentas_empresa_mov_cuenta").on(t.cuenta_id),
+      fechaIdx: index("idx_cuentas_empresa_mov_fecha").on(t.created_at),
+    })
+  );
+
+  // ===== Funciones + triggers de cuentas_empresa (hora Guatemala) =====
+  // Aplica un movimiento al saldo_actual de la cuenta y guarda saldo_post.
+  export const aplicarMovimientoCuentaEmpresaFn = sql`
+    CREATE OR REPLACE FUNCTION cartera.aplicar_movimiento_cuenta_empresa()
+    RETURNS TRIGGER AS $$
+    DECLARE
+      v_delta numeric(18,2);
+      v_nuevo_saldo numeric(18,2);
+    BEGIN
+      v_delta := CASE NEW.tipo WHEN 'ingreso' THEN NEW.monto ELSE -NEW.monto END;
+
+      UPDATE cartera.cuentas_empresa
+         SET saldo_actual = saldo_actual + v_delta
+       WHERE cuenta_id = NEW.cuenta_id
+       RETURNING saldo_actual INTO v_nuevo_saldo;
+
+      IF v_nuevo_saldo IS NULL THEN
+        RAISE EXCEPTION 'cuenta_id % no existe', NEW.cuenta_id;
+      END IF;
+
+      NEW.saldo_post := v_nuevo_saldo;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+  `;
+
+  export const aplicarMovimientoCuentaEmpresaTrigger = sql`
+    DROP TRIGGER IF EXISTS trg_cuentas_empresa_mov_aplicar ON cartera.cuentas_empresa_movimientos;
+    CREATE TRIGGER trg_cuentas_empresa_mov_aplicar
+    BEFORE INSERT ON cartera.cuentas_empresa_movimientos
+    FOR EACH ROW
+    EXECUTE FUNCTION cartera.aplicar_movimiento_cuenta_empresa();
+  `;
+
+  // Auto-actualiza fecha_actualizacion en cualquier UPDATE.
+  export const setFechaActualizacionFn = sql`
+    CREATE OR REPLACE FUNCTION cartera.set_fecha_actualizacion()
+    RETURNS TRIGGER AS $$
+    BEGIN
+      NEW.fecha_actualizacion = NOW() AT TIME ZONE 'America/Guatemala';
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+  `;
+
+  export const cuentasEmpresaSetFechaTrigger = sql`
+    DROP TRIGGER IF EXISTS trg_cuentas_empresa_set_fecha_actualizacion ON cartera.cuentas_empresa;
+    CREATE TRIGGER trg_cuentas_empresa_set_fecha_actualizacion
+    BEFORE UPDATE ON cartera.cuentas_empresa
+    FOR EACH ROW
+    EXECUTE FUNCTION cartera.set_fecha_actualizacion();
+  `;
+
 
 
   export const convenios_pago = customSchema.table("convenios_pago", {

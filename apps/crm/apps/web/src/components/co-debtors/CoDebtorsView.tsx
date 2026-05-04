@@ -507,7 +507,7 @@ function CoDebtorCard({
 								<div className="space-y-3">
 									{/* Resumen de ingresos y gastos */}
 									<div className="grid grid-cols-2 gap-4 text-sm">
-										<div className="rounded bg-green-50 p-2">
+										<div className="rounded bg-green-50 dark:bg-green-900/20 p-2">
 											<p className="text-muted-foreground text-xs">
 												Total Ingresos
 											</p>
@@ -523,7 +523,7 @@ function CoDebtorCard({
 												)}
 											</p>
 										</div>
-										<div className="rounded bg-red-50 p-2">
+										<div className="rounded bg-red-50 dark:bg-red-900/20 p-2">
 											<p className="text-muted-foreground text-xs">
 												Total Gastos
 											</p>
@@ -542,7 +542,7 @@ function CoDebtorCard({
 									</div>
 
 									{/* Disponibilidad */}
-									<div className="rounded bg-blue-50 p-2 text-center">
+									<div className="rounded bg-blue-50 dark:bg-blue-900/20 p-2 text-center">
 										<p className="text-muted-foreground text-xs">
 											Disponibilidad Económica
 										</p>

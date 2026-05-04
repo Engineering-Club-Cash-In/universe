@@ -157,6 +157,17 @@ export function PagosPorVencimiento() {
           </div>
 
           <div className="flex-1 min-w-[180px]">
+            <label className="text-sm font-semibold text-blue-800 mb-1 block">Nombre Usuario</label>
+            <Input
+              placeholder="Buscar por nombre..."
+              value={nombreInput}
+              onChange={(e) => setNombreInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+              className="text-gray-900 border-blue-200 bg-blue-50 focus:ring-blue-400"
+            />
+          </div>
+
+          <div className="flex-1 min-w-[180px]">
             <label className="text-sm font-semibold text-blue-800 mb-1 block">Asesor</label>
             <Input
               placeholder="Buscar por asesor..."

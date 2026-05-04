@@ -1942,31 +1942,16 @@ export async function aplicarPagoAlCredito(pago_id: number) {
       throw new Error(`Crédito ${pago.credito_id} no encontrado`);
     }
 
-    // 4. CALCULAR NUEVO CAPITAL (restar el abono_capital del pago)
+    // 4. CALCULAR NUEVO CAPITAL (restar SOLO el abono_capital de este pago)
+    // El capital del crédito ya viene descontado por cada pago previo validated
+    // (cada uno restó su abono_capital cuando se ejecutó esta función).
+    // Re-sumarlos aquí y restarlos otra vez causa doble descuento.
     const capital_actual = new Big(credito.capital ?? 0);
-    const todosPagosCuota = await db
-      .select({ abono_capital: pagos_credito.abono_capital })
-      .from(pagos_credito)
-      .where(
-        and(
-          eq(pagos_credito.cuota_id, pago.cuota_id),
-          eq(pagos_credito.validationStatus, "validated")
-        )
-      );
-
-    let abono_capital_total = new Big(0);
-    for (const p of todosPagosCuota) {
-      abono_capital_total = abono_capital_total.plus(p.abono_capital ?? 0);
-    }
-
-    // Incluir el abono del pago actual (aún no está "validated")
-    abono_capital_total = abono_capital_total.plus(pago.abono_capital ?? 0);
-
-    console.log(`💰 Total capital: ${abono_capital_total.toString()}`);
-    const nuevo_capital = capital_actual.minus(abono_capital_total);
+    const abono_capital_pago = new Big(pago.abono_capital ?? 0);
+    const nuevo_capital = capital_actual.minus(abono_capital_pago);
 
     console.log("💰 Capital actual:", capital_actual.toString());
-    console.log("💰 Abono capital:", abono_capital_total.toString());
+    console.log("💰 Abono capital:", abono_capital_pago.toString());
     console.log("💰 Nuevo capital:", nuevo_capital.toString());
 
     // 5. CALCULAR NUEVA DEUDA TOTAL
@@ -2028,7 +2013,7 @@ export async function aplicarPagoAlCredito(pago_id: number) {
       data: {
         credito_id: pago.credito_id,
         capital_anterior: capital_actual.toString(),
-        abono_capital: abono_capital_total.toString(),
+        abono_capital: abono_capital_pago.toString(),
         capital_nuevo: nuevo_capital.toString(),
         deuda_total_nueva: nueva_deuda_total.toString(),
       },

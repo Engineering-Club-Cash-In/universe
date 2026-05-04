@@ -248,6 +248,46 @@ export class ContractGeneratorService {
       requiredFields: []
     });
 
+    this.registerTemplate({
+      type: ContractType.CARTA_INSTRUCCION_INVERSION_CARTERA_ACTIVA,
+      templateFilename: 'inversiones/anexo3/carta_instruccion_hombre.docx',
+      templateFilenameFemale: 'inversiones/anexo3/carta_instruccion_mujer.docx',
+      description: 'Anexo 3 - Carta de Instrucción para Inversión en Cartera Activa',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_INCREMENTO_INVERSION,
+      templateFilename: 'inversiones/anexo4/carta_incremento_hombre.docx',
+      templateFilenameFemale: 'inversiones/anexo4/carta_incremento_mujer.docx',
+      description: 'Anexo 4 - Carta de Incremento de Inversión',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_INSTRUCCION_PAGO_ANTICIPADO,
+      templateFilename: 'inversiones/anexo6/carta_instruccion_pago_anticipado_hombre.docx',
+      templateFilenameFemale: 'inversiones/anexo6/carta_instruccion_pago_anticipado_mujer.docx',
+      description: 'Anexo 6 - Carta de Instrucción por Pago Anticipado',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL,
+      templateFilename: 'inversiones/contrato_servicio_cashin/inversor_general_hombre.docx',
+      templateFilenameFemale: 'inversiones/contrato_servicio_cashin/inversor_general_mujer.docx',
+      description: 'Contrato de Servicios Cash In - Inversor General',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.DESIGNACION_BENEFICIARIO,
+      templateFilename: 'inversiones/anexo7/designacion_beneficiarios.docx',
+      templateFilenameFemale: 'inversiones/anexo7/designacion_beneficiarios.docx',
+      description: 'Anexo 7 - Designación de Beneficiarios',
+      requiredFields: []
+    });
+
   }
 
   /**

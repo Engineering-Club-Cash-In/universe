@@ -263,12 +263,9 @@ export function PagosPorVencimiento() {
                   <TableHead className="font-bold text-blue-800">No. SIFCO</TableHead>
                   <TableHead className="font-bold text-blue-800">Cliente</TableHead>
                   <TableHead className="font-bold text-blue-800">Asesor</TableHead>
-                  <TableHead className="font-bold text-blue-800">Cuota</TableHead>
-                  <TableHead className="font-bold text-blue-800">Vencimiento</TableHead>
-                  <TableHead className="font-bold text-blue-800">Fecha Pago</TableHead>
-                  <TableHead className="font-bold text-blue-800 text-center">Estado</TableHead>
+                  <TableHead className="font-bold text-blue-800 text-center">Cuotas</TableHead>
                   <TableHead className="font-bold text-blue-800 text-center">Etapa de Mora</TableHead>
-                  <TableHead className="font-bold text-blue-800 text-right">Boleta</TableHead>
+                  <TableHead className="font-bold text-blue-800 text-right">Boletas Totales</TableHead>
                   <TableHead className="font-bold text-blue-800 text-right">Capital</TableHead>
                   <TableHead className="font-bold text-blue-800 text-right">Interés</TableHead>
                   <TableHead className="font-bold text-blue-800 text-right">IVA 12%</TableHead>
@@ -277,32 +274,31 @@ export function PagosPorVencimiento() {
                   <TableHead className="font-bold text-blue-800 text-right">Membresías</TableHead>
                   <TableHead className="font-bold text-blue-800 text-right">Int. CUBE</TableHead>
                   <TableHead className="font-bold text-blue-800 text-right">IVA CUBE</TableHead>
-                  <TableHead className="font-bold text-purple-800 text-right">Royalti</TableHead>
+                  <TableHead className="font-bold text-green-800 text-right">Total Pagos Mes</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {items.map((item) => (
-                  <TableRow key={item.pago_id} className="hover:bg-blue-50/50 transition">
+                  <TableRow key={item.credito_id} className="hover:bg-blue-50/50 transition">
                     <TableCell className="font-semibold text-blue-700">
                       {item.numero_credito_sifco}
                     </TableCell>
                     <TableCell className="text-black">{item.nombre_usuario}</TableCell>
                     <TableCell className="text-black text-xs">{item.asesor || "--"}</TableCell>
-                    <TableCell className="text-black text-center">{item.numero_cuota}</TableCell>
-                    <TableCell className="text-black">{formatFecha(item.fecha_vencimiento)}</TableCell>
-                    <TableCell className="text-black">{formatFecha(item.fecha_pago)}</TableCell>
-                    <TableCell className="text-center">
-                      {item.pagado ? (
-                        <span className="inline-flex items-center gap-1 text-green-600 font-semibold text-xs">
-                          <CheckCircle2 className="w-4 h-4" /> Pagado
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-amber-600 font-semibold text-xs">
-                          <Clock className="w-4 h-4" /> Pendiente
-                        </span>
-                      )}
+                    <TableCell className="text-black text-center">
+                      {item.cuota_min === item.cuota_max 
+                        ? item.cuota_min 
+                        : `${item.cuota_min} - ${item.cuota_max}`}
                     </TableCell>
-                    <TableCell className="text-center font-medium text-red-600">{item.dias_mora || 0}</TableCell>
+                    <TableCell className="text-center">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        item.dias_mora === 'Al día' 
+                          ? 'bg-green-100 text-green-700' 
+                          : 'bg-red-100 text-red-700'
+                      }`}>
+                        {item.dias_mora}
+                      </span>
+                    </TableCell>
                     <TableCell className="text-right font-medium text-black">{formatQ(item.monto_boleta)}</TableCell>
                     <TableCell className="text-right text-black">{formatQ(item.capital_restante)}</TableCell>
                     <TableCell className="text-right text-black">{formatQ(item.interes_restante)}</TableCell>
@@ -312,8 +308,8 @@ export function PagosPorVencimiento() {
                     <TableCell className="text-right text-black">{formatQ(item.membresias)}</TableCell>
                     <TableCell className="text-right text-black">{formatQ(item.interes_cube)}</TableCell>
                     <TableCell className="text-right text-black">{formatQ(item.iva_cube)}</TableCell>
-                    <TableCell className="text-right text-purple-700 font-semibold">
-                      {item.numero_cuota === 0 ? formatQ(item.royalti) : "--"}
+                    <TableCell className="text-right text-green-700 font-bold bg-green-50/50">
+                      {formatQ(item.total_pagos_del_mes)}
                     </TableCell>
                   </TableRow>
                 ))}

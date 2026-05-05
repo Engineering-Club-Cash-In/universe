@@ -2677,7 +2677,7 @@ function RouteComponent() {
 												<h4 className="font-medium text-base">
 													Ingresos Mensuales
 												</h4>
-												<div className="space-y-3 rounded-lg bg-green-50 p-4">
+												<div className="space-y-3 rounded-lg bg-green-50 dark:bg-green-900/20 p-4">
 													<div className="space-y-2">
 														<Label className="text-sm">Ingresos Fijos</Label>
 														<Input
@@ -2719,7 +2719,7 @@ function RouteComponent() {
 												<h4 className="font-medium text-base">
 													Gastos Mensuales
 												</h4>
-												<div className="space-y-3 rounded-lg bg-red-50 p-4">
+												<div className="space-y-3 rounded-lg bg-red-50 dark:bg-red-900/20 p-4">
 													<div className="space-y-2">
 														<Label className="text-sm">Gastos Fijos</Label>
 														<Input
@@ -2757,7 +2757,7 @@ function RouteComponent() {
 										</div>
 
 										{/* Economic Availability */}
-										<div className="rounded-lg bg-blue-50 p-4">
+										<div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 p-4">
 											<div className="space-y-2">
 												<Label className="font-medium text-sm">
 													Disponibilidad Económica
@@ -2844,7 +2844,7 @@ function RouteComponent() {
 												<h4 className="font-medium text-base">
 													Ingresos Mensuales
 												</h4>
-												<div className="space-y-3 rounded-lg bg-green-50 p-4">
+												<div className="space-y-3 rounded-lg bg-green-50 dark:bg-green-900/20 p-4">
 													<div className="flex justify-between">
 														<span className="text-muted-foreground text-sm">
 															Ingresos Fijos:
@@ -2899,7 +2899,7 @@ function RouteComponent() {
 												<h4 className="font-medium text-base">
 													Gastos Mensuales
 												</h4>
-												<div className="space-y-3 rounded-lg bg-red-50 p-4">
+												<div className="space-y-3 rounded-lg bg-red-50 dark:bg-red-900/20 p-4">
 													<div className="flex justify-between">
 														<span className="text-muted-foreground text-sm">
 															Gastos Fijos:
@@ -2952,7 +2952,7 @@ function RouteComponent() {
 										</div>
 
 										{/* Economic Availability */}
-										<div className="rounded-lg bg-blue-50 p-4">
+										<div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 p-4">
 											<div className="flex items-center justify-between">
 												<div>
 													<Label className="font-medium text-muted-foreground text-sm">

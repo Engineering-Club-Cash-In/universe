@@ -137,6 +137,62 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
     pattern: '________________________________',
     signerCount: 1,
     signers: ['Cedente']
+  },
+
+  [ContractType.CARTA_INSTRUCCION_INVERSION_CARTERA_ACTIVA]: {
+    pattern: 'Firma: _________________________________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  [ContractType.CARTA_INCREMENTO_INVERSION]: {
+    pattern: 'Firma: __________________________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  [ContractType.CARTA_INSTRUCCION_PAGO_ANTICIPADO]: {
+    pattern: 'Firma: ____________________________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  [ContractType.CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL]: {
+    pattern: 'f) __________________________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  [ContractType.DESIGNACION_BENEFICIARIO]: {
+    pattern: 'Firma: __________________________',
+    signerCount: 1,
+    signers: ['Inversionista']
+  },
+
+  // ===== CARTA PODER =====
+  // Todas las cartas de poder usan el mismo patrón: F.___________________________ (29 underscores)
+  [ContractType.CARTA_CUBE_ANDRES]: {
+    pattern: 'F.___________________________',
+    signerCount: 1,
+    signers: ['Cliente']
+  },
+
+  [ContractType.CARTA_CUBE_DON_ALEX]: {
+    pattern: 'F.___________________________',
+    signerCount: 1,
+    signers: ['Cliente']
+  },
+
+  [ContractType.CARTA_RDBE_DON_ALEX]: {
+    pattern: 'F.___________________________',
+    signerCount: 1,
+    signers: ['Cliente']
+  },
+
+  [ContractType.CARTA_RDBE_RICHARD]: {
+    pattern: 'F.___________________________',
+    signerCount: 1,
+    signers: ['Cliente']
   }
 };
 

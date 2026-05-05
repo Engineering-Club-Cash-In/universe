@@ -149,6 +149,70 @@ export const docusealConfig: Record<ContractType, SignerConfig> = {
       { role: 'Cedente', required: true },
     ],
   },
+
+  [ContractType.CARTA_INSTRUCCION_INVERSION_CARTERA_ACTIVA]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.CARTA_INCREMENTO_INVERSION]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.CARTA_INSTRUCCION_PAGO_ANTICIPADO]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  [ContractType.DESIGNACION_BENEFICIARIO]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Inversionista', required: true },
+    ],
+  },
+
+  // ===== CARTA PODER =====
+  [ContractType.CARTA_CUBE_ANDRES]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
+
+  [ContractType.CARTA_CUBE_DON_ALEX]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
+
+  [ContractType.CARTA_RDBE_DON_ALEX]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
+
+  [ContractType.CARTA_RDBE_RICHARD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
 };
 
 /**

@@ -2295,6 +2295,9 @@ export const morasService = {
 
 // types/cuentasEmpresa.types.ts
 
+export type MonedaCuenta = "quetzales" | "dolares";
+export type TipoMovimientoCuenta = "ingreso" | "egreso";
+
 export interface CuentaEmpresa {
   cuentaId: number;
   nombreCuenta: string;
@@ -2302,14 +2305,72 @@ export interface CuentaEmpresa {
   numeroCuenta: string;
   descripcion?: string | null;
   activo: boolean;
+  moneda: MonedaCuenta;
+  saldo_actual: string; // numeric viene como string
   fecha_creacion: string;
   fecha_actualizacion: string;
+  fechaCreacion?: string;
+  fechaActualizacion?: string;
 }
 
 export interface CuentasEmpresaResponse {
   success: boolean;
   message: string;
   data: CuentaEmpresa[];
+}
+
+export interface CuentaEmpresaResponse {
+  success: boolean;
+  message: string;
+  data: CuentaEmpresa | null;
+  error?: string;
+}
+
+export interface ListarCuentasParams {
+  nombre?: string;
+  cuentaId?: number;
+  soloActivas?: boolean;
+}
+
+export interface CrearCuentaPayload {
+  nombreCuenta: string;
+  banco: string;
+  numeroCuenta: string;
+  descripcion?: string;
+  moneda?: MonedaCuenta;
+}
+
+export interface ActualizarCuentaPayload {
+  nombreCuenta?: string;
+  banco?: string;
+  numeroCuenta?: string;
+  descripcion?: string;
+  activo?: boolean;
+  moneda?: MonedaCuenta;
+}
+
+export interface MovimientoCuentaEmpresa {
+  movimiento_id: number;
+  cuenta_id: number;
+  tipo: TipoMovimientoCuenta;
+  monto: string;
+  saldo_post: string;
+  motivo: string | null;
+  created_by: number | null;
+  created_at: string;
+}
+
+export interface CrearMovimientoPayload {
+  tipo: TipoMovimientoCuenta;
+  monto: number;
+  motivo?: string;
+}
+
+export interface MovimientoCuentaResponse {
+  success: boolean;
+  message: string;
+  data: MovimientoCuentaEmpresa | null;
+  error?: string;
 }
 
 export interface ActualizarCuentaPagoRequest {
@@ -2326,22 +2387,150 @@ export interface ActualizarCuentaPagoResponse {
 
 
 
-// 🏦 Obtener todas las cuentas de empresa activas
-export async function getCuentasEmpresaService(): Promise<CuentasEmpresaResponse> {
+// 🏦 Listar cuentas de empresa con filtros opcionales (nombre parcial, cuentaId exacto, soloActivas).
+// Por default trae activas e inactivas.
+export async function getCuentasEmpresaService(
+  params?: ListarCuentasParams
+): Promise<CuentasEmpresaResponse> {
   try {
-    const { data } = await api.get<CuentasEmpresaResponse>(
-      `${API_URL}/api/cuentas`
-    );
-
+    const { data } = await api.get<CuentasEmpresaResponse>(`/api/cuentas`, {
+      params: {
+        nombre: params?.nombre || undefined,
+        cuentaId: params?.cuentaId,
+        soloActivas: params?.soloActivas ? "true" : undefined,
+      },
+    });
     return data;
   } catch (error: any) {
     console.error("❌ Error en getCuentasEmpresaService:", error);
-    
-    // Retornar respuesta de error estructurada
     return {
       success: false,
       message: error.response?.data?.message || "Error al obtener las cuentas de empresa",
       data: [],
+    };
+  }
+}
+
+// ➕ Crear nueva cuenta
+export async function crearCuentaEmpresaService(
+  payload: CrearCuentaPayload
+): Promise<CuentaEmpresaResponse> {
+  try {
+    const { data } = await api.post<CuentaEmpresaResponse>(`/api/cuentas`, payload);
+    return data;
+  } catch (error: any) {
+    console.error("❌ Error en crearCuentaEmpresaService:", error);
+    return {
+      success: false,
+      message: error.response?.data?.message || "Error al crear la cuenta",
+      data: null,
+      error: error.message,
+    };
+  }
+}
+
+// ✏️ Actualizar cuenta por id
+export async function actualizarCuentaEmpresaService(
+  cuentaId: number,
+  payload: ActualizarCuentaPayload
+): Promise<CuentaEmpresaResponse> {
+  try {
+    const { data } = await api.put<CuentaEmpresaResponse>(
+      `/api/cuentas/${cuentaId}`,
+      payload
+    );
+    return data;
+  } catch (error: any) {
+    console.error("❌ Error en actualizarCuentaEmpresaService:", error);
+    return {
+      success: false,
+      message: error.response?.data?.message || "Error al actualizar la cuenta",
+      data: null,
+      error: error.message,
+    };
+  }
+}
+
+// 🗑️ Soft delete (marca activo=false)
+export async function eliminarCuentaEmpresaService(
+  cuentaId: number
+): Promise<CuentaEmpresaResponse> {
+  try {
+    const { data } = await api.delete<CuentaEmpresaResponse>(
+      `/api/cuentas/${cuentaId}`
+    );
+    return data;
+  } catch (error: any) {
+    console.error("❌ Error en eliminarCuentaEmpresaService:", error);
+    return {
+      success: false,
+      message: error.response?.data?.message || "Error al desactivar la cuenta",
+      data: null,
+      error: error.message,
+    };
+  }
+}
+
+export interface ListarMovimientosParams {
+  tipo?: TipoMovimientoCuenta;
+  desde?: string; // ISO date
+  hasta?: string;
+  orden?: "asc" | "desc";
+}
+
+export interface MovimientosCuentaListResponse {
+  success: boolean;
+  message: string;
+  data: MovimientoCuentaEmpresa[];
+}
+
+// 📑 Listar movimientos de una cuenta con filtros opcionales
+export async function getMovimientosByCuentaService(
+  cuentaId: number,
+  filters?: ListarMovimientosParams
+): Promise<MovimientosCuentaListResponse> {
+  try {
+    const { data } = await api.get<MovimientosCuentaListResponse>(
+      `/api/cuentas/${cuentaId}/movimientos`,
+      {
+        params: {
+          tipo: filters?.tipo || undefined,
+          desde: filters?.desde || undefined,
+          hasta: filters?.hasta || undefined,
+          orden: filters?.orden || undefined,
+        },
+      }
+    );
+    return data;
+  } catch (error: any) {
+    console.error("❌ Error en getMovimientosByCuentaService:", error);
+    return {
+      success: false,
+      message: error.response?.data?.message || "Error al obtener los movimientos",
+      data: [],
+    };
+  }
+}
+
+// 💸 Registrar movimiento (ingreso/egreso). El backend (vía trigger DB) actualiza
+// saldo_actual de la cuenta y guarda saldo_post en este movimiento.
+export async function crearMovimientoCuentaEmpresaService(
+  cuentaId: number,
+  payload: CrearMovimientoPayload
+): Promise<MovimientoCuentaResponse> {
+  try {
+    const { data } = await api.post<MovimientoCuentaResponse>(
+      `/api/cuentas/${cuentaId}/movimientos`,
+      payload
+    );
+    return data;
+  } catch (error: any) {
+    console.error("❌ Error en crearMovimientoCuentaEmpresaService:", error);
+    return {
+      success: false,
+      message: error.response?.data?.message || "Error al registrar el movimiento",
+      data: null,
+      error: error.message,
     };
   }
 }
@@ -3346,6 +3535,9 @@ export interface PagoPorVencimientoItem {
   membresias: string;
   interes_cube: string;
   iva_cube: string;
+  asesor?: string;
+  dias_mora?: number;
+  royalti?: string;
 }
 
 export interface PagoPorVencimientoTotales {
@@ -3379,6 +3571,8 @@ export interface PagosPorVencimientoParams {
   numero_credito_sifco?: string;
   nombre_usuario?: string;
   tipo_fecha?: "vencimiento" | "creacion";
+  asesor?: string;
+  rango_mora?: string;
 }
 
 export async function getPagosPorVencimiento(
@@ -3398,6 +3592,12 @@ export async function getPagosPorVencimiento(
         }),
         ...(params.nombre_usuario && {
           nombre_usuario: params.nombre_usuario,
+        }),
+        ...(params.asesor && {
+          asesor: params.asesor,
+        }),
+        ...(params.rango_mora && {
+          rango_mora: params.rango_mora,
         }),
       },
     }

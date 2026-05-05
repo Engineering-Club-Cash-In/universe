@@ -9,7 +9,7 @@ import { getCuentasEmpresaService, type ActualizarCuentaPagoRequest, actualizarC
 export function useCuentasEmpresa() {
   return useQuery({
     queryKey: ["cuentas-empresa"],
-    queryFn: getCuentasEmpresaService,
+    queryFn: () => getCuentasEmpresaService(),
     select: (data) => data.data, // Retorna solo el array de cuentas
     staleTime: 5 * 60 * 1000, // 5 minutos
     retry: 2,

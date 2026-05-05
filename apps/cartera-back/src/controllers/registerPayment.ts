@@ -1994,10 +1994,12 @@ export async function aplicarPagoAlCredito(pago_id: number) {
       .set({ validationStatus: "validated", fecha_aplicado: new Date() })
       .where(eq(pagos_credito.pago_id, pago_id));
 
-    await db
-      .update(cuotas_credito)
-      .set({ pagado: true })
-      .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
+    if (pago.cuota_id !== null) {
+      await db
+        .update(cuotas_credito)
+        .set({ pagado: true })
+        .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
+    }
 
     console.log("✅ Crédito actualizado y pago validado");
  // 8. Distribuir entre inversionistas

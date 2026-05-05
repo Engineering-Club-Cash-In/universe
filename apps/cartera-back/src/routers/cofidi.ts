@@ -22,6 +22,7 @@ import { eq, desc, and, sql, gte, lte } from "drizzle-orm";
 import ExcelJS from "exceljs";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { NITSoapClient } from "../cofidi/nitGenerator";
+import type { DTERequest } from "../cofidi/types";
 import {
   SAT_CONFIG,
   CLUB_CASHIN_CONFIG,
@@ -50,6 +51,11 @@ const EMISORES_CONFIG = {
 } as const;
 
 type EmisorKey = keyof typeof EMISORES_CONFIG;
+type FacturadorConfig = Pick<DTERequest, "emisor" | "tipoDocumento" | "codigoMoneda" | "frases">;
+type FacturarGenericoItem = {
+  monto: number;
+  rubro: string;
+};
 
 // 🔥 Mapa inverso: NIT emisor → config (para anulación automática)
 const EMISOR_POR_NIT: Record<string, { config: typeof CLUB_CASHIN_CONFIG; satConfig: typeof SAT_CONFIG }> = {};
@@ -1378,6 +1384,7 @@ if (facturasExistentes.length > 0) {
     const emisoresParaIntentar = Object.entries(EMISORES_CONFIG);
     let resultado: any = null;
     let emisorUsado = "";
+    let xmlAnulacion = "";
 
     for (const [emisorKey, emisorConf] of emisoresParaIntentar) {
       const nitEmisor = emisorConf.config.emisor.nit;
@@ -1400,6 +1407,7 @@ if (facturasExistentes.length > 0) {
 </dte:GTAnulacionDocumento>`;
 
       const xmlBase64Emisor = Buffer.from(xmlAnulacionEmisor, 'utf-8').toString('base64');
+      xmlAnulacion = xmlAnulacionEmisor;
 
       const satClient = new SATClientService(
         {
@@ -2297,7 +2305,7 @@ if (facturasExistentes.length > 0) {
         };
 
         let totalFactura = new Big(0);
-        const itemsFactura = itemsInput.map((item, index) => {
+        const itemsFactura = itemsInput.map((item: FacturarGenericoItem, index: number) => {
           const calc = calcularIvaExacto(item.monto);
           totalFactura = totalFactura.plus(calc.total);
 
@@ -2515,7 +2523,7 @@ if (facturasExistentes.length > 0) {
               const logoResponse = await fetch(logoUrl);
               const logoBuffer = Buffer.from(await logoResponse.arrayBuffer());
               const logoImage = workbook.addImage({
-                buffer: logoBuffer,
+                base64: `data:image/png;base64,${logoBuffer.toString("base64")}`,
                 extension: "png",
               });
               sheet.addImage(logoImage, {
@@ -2762,7 +2770,7 @@ async function certificarFacturaHelper({
   items: any[];
   complementos: any[];
   created_by?: number;
-  customConfig?: typeof CLUB_CASHIN_CONFIG;
+  customConfig?: FacturadorConfig;
   customSatConfig?: {
     requestor: string;
     user: string;

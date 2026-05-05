@@ -13,6 +13,7 @@ interface FilaExcelInversionista {
   CreditoSIFCO: string;
   Inversionista: string;
   Capital: number | string;
+  CapitalRestante?: number | string;
   porcentaje: number | string;
   PorcentajeCashIn?: number | string;
   PorcentajeInversionista?: number | string;

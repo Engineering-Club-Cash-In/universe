@@ -281,10 +281,12 @@ export const reversePayment = async ({ body, set }: any) => {
           "📝 Pago estaba PAGADO - Marcando cuota como NO pagada y reseteando pago",
         );
 
-        await tx
-          .update(cuotas_credito)
-          .set({ pagado: false })
-          .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
+        if (pago.cuota_id !== null) {
+          await tx
+            .update(cuotas_credito)
+            .set({ pagado: false })
+            .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
+        }
 
         console.log("✅ Cuota marcada como NO pagada");
 
@@ -347,10 +349,12 @@ export const reversePayment = async ({ body, set }: any) => {
         console.log("✅ Boletas eliminadas");
       } else {
         // Pago parcial - verificar si es el único registro de la cuota
-        const [{ count: cantidadPagos }] = await tx
-          .select({ count: sql<number>`COUNT(*)` })
-          .from(pagos_credito)
-          .where(eq(pagos_credito.cuota_id, pago.cuota_id));
+        const cantidadPagos = pago.cuota_id === null
+          ? 0
+          : (await tx
+              .select({ count: sql<number>`COUNT(*)` })
+              .from(pagos_credito)
+              .where(eq(pagos_credito.cuota_id, pago.cuota_id)))[0].count;
 
         await tx.delete(boletas).where(eq(boletas.pago_id, pago_id));
         console.log("✅ Boletas eliminadas");
@@ -563,16 +567,18 @@ export const reversePayment = async ({ body, set }: any) => {
         console.log("\n🧹 ========== LIMPIANDO PAGOS DUPLICADOS ==========");
 
         // Primero obtener los IDs de pagos duplicados
-        const pagosDuplicadosIds = await tx
-          .select({ pago_id: pagos_credito.pago_id })
-          .from(pagos_credito)
-          .where(
-            and(
-              eq(pagos_credito.cuota_id, pago.cuota_id),
-              eq(pagos_credito.credito_id, credito_id),
-              not(eq(pagos_credito.pago_id, pago_id))
-            )
-          );
+        const pagosDuplicadosIds = pago.cuota_id === null
+          ? []
+          : await tx
+              .select({ pago_id: pagos_credito.pago_id })
+              .from(pagos_credito)
+              .where(
+                and(
+                  eq(pagos_credito.cuota_id, pago.cuota_id),
+                  eq(pagos_credito.credito_id, credito_id),
+                  not(eq(pagos_credito.pago_id, pago_id))
+                )
+              );
 
         const ids = pagosDuplicadosIds.map((p) => p.pago_id);
 

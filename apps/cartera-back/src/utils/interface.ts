@@ -151,6 +151,9 @@ export type CuotaExcelRow = {
   capital_pendiente: string; // numeric -> string
   total_cancelar: string; // numeric -> string
   fecha_vencimiento: string; // YYYY-MM-DD
+  seguro: string;
+  gps: string;
+  membresias: string;
 };
 
 // DTO principal
@@ -166,6 +169,16 @@ export interface GetCreditDTO {
     observaciones: string | null;
   };
   closure: ClosureInfo;
+  totales?: {
+    total_interes: string;
+    total_seguro: string;
+    total_membresias: string;
+    total_mora: string;
+    total_otros: string;
+    total_gps: string;
+    total_cuotas_atrasadas: string;
+    gran_total: string;
+  };
   cuotas_atrasadas: {
     total: number;
     items: CuotaExcelRow[];

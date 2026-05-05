@@ -123,23 +123,6 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
       rowsPorCredito.set(row.credito_id, list);
     }
 
-    // Pool por crédito en el orden que vinieron los créditos en creditosRows.
-    // Dentro de cada pool, CUBE va primero.
-    const pool = creditosRows.map((c) => ({
-      numero_credito_sifco: c.numero_credito_sifco,
-      cliente_nombre: c.cliente_nombre,
-      rows: (rowsPorCredito.get(c.credito_id) ?? [])
-        .sort((a, b) => {
-          if (a.inversionista_id === CUBE_INVESTMENT_ID) return -1;
-          if (b.inversionista_id === CUBE_INVESTMENT_ID) return 1;
-          return 0;
-        })
-        .map((r) => ({
-          inversionista_nombre: r.inversionista_nombre,
-          capital: r.monto.toFixed(2),
-        })),
-    }));
-
     // ── 4. Resolver quién aceptó (JWT, opcional) ──
     let usuarioEmail: string | undefined;
     let usuarioNombre: string | undefined;
@@ -215,6 +198,33 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
     const tipoReinvPorCredito = new Map<number, string | null>(
       updateRes.map((r) => [r.credito_id, r.tipo_reinversion ?? null]),
     );
+
+    // Pool por crédito en el orden que vinieron los créditos en creditosRows.
+    // Dentro de cada pool, CUBE va primero. Incluimos la modalidad
+    // (tipo_reinversion del target en el espejo) para mostrarla en el
+    // header de cada bloque del correo.
+    const pool = creditosRows.map((c) => ({
+      numero_credito_sifco: c.numero_credito_sifco,
+      cliente_nombre: c.cliente_nombre,
+      tipo_reinversion: (tipoReinvPorCredito.get(c.credito_id) ?? null) as
+        | "sin_reinversion"
+        | "reinversion_capital"
+        | "reinversion_interes"
+        | "reinversion_total"
+        | "reinversion_variable"
+        | "reinversion_combinada"
+        | null,
+      rows: (rowsPorCredito.get(c.credito_id) ?? [])
+        .sort((a, b) => {
+          if (a.inversionista_id === CUBE_INVESTMENT_ID) return -1;
+          if (b.inversionista_id === CUBE_INVESTMENT_ID) return 1;
+          return 0;
+        })
+        .map((r) => ({
+          inversionista_nombre: r.inversionista_nombre,
+          capital: r.monto.toFixed(2),
+        })),
+    }));
 
     // ── 4.5.1 Apagar bandera_reinversion de los créditos aceptados ──
     // Ya no hay que redirigir intereses a CUBE: el espejo pasó a
@@ -316,14 +326,6 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
           observaciones: vehicleRes.data?.vehicle
             ? `${vehicleRes.data.vehicle.model}\n${vehicleRes.data.vehicle.year} | ${vehicleRes.data.vehicle.make} | ${vehicleRes.data.vehicle.licensePlate} `
             : c.observaciones,
-          tipo_reinversion: (tipoReinvPorCredito.get(c.credito_id) ?? null) as
-            | "sin_reinversion"
-            | "reinversion_capital"
-            | "reinversion_interes"
-            | "reinversion_total"
-            | "reinversion_variable"
-            | "reinversion_combinada"
-            | null,
         };
       }),
     );

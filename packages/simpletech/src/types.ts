@@ -7,14 +7,6 @@ export type SimpleTechCredentials =
   | { username: string; password: string };
 
 /**
- * Respuesta del endpoint /auth.php/token
- */
-export interface TokenResponse {
-  status: 'success' | 'error';
-  data: string;
-}
-
-/**
  * Configuracion de retry con exponential backoff
  */
 export interface RetryConfig {

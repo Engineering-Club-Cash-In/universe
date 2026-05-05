@@ -406,7 +406,7 @@ export const insertInvestor = async ({ body, set }: any) => {
 
     // 🔥 PROCESAR UNO POR UNO para manejar INSERT vs UPDATE
     for (const inv of inversionistasToUpsert) {
-      // 🔥 Verificar si ya existe solo por ID explícito. Email/nombre/DPI no prueban identidad.
+      const isStrictCreate = inv.operation === "CREATE" || inv.mode === "create";
       let existente = null;
 
       // Buscar por inversionista_id primero (para ediciones directas)
@@ -427,24 +427,87 @@ export const insertInvestor = async ({ body, set }: any) => {
         }
       }
 
-      if (inv.email?.trim()) {
-        const email = inv.email.trim().toLowerCase();
-        const result = await db
-          .select()
-          .from(inversionistas)
-          .where(ilike(inversionistas.email, email))
-          .limit(1);
-        const inversionistaConEmail = result[0] || null;
+      if (!existente && isStrictCreate) {
+        if (inv.email?.trim()) {
+          const email = inv.email.trim().toLowerCase();
+          const result = await db
+            .select()
+            .from(inversionistas)
+            .where(ilike(inversionistas.email, email))
+            .limit(1);
 
-        if (
-          inversionistaConEmail &&
-          inversionistaConEmail.inversionista_id !== existente?.inversionista_id
-        ) {
-          set.status = 409;
-          return {
-            message: "Ya existe un inversionista con ese email",
-            error: "duplicate_email",
-          };
+          if (result[0]) {
+            set.status = 409;
+            return {
+              message: "Ya existe un inversionista con ese email",
+              error: "duplicate_email",
+            };
+          }
+        }
+
+        if (inv.dpi) {
+          const result = await db
+            .select()
+            .from(inversionistas)
+            .where(eq(inversionistas.dpi, inv.dpi))
+            .limit(1);
+
+          if (result[0]) {
+            set.status = 409;
+            return {
+              message: "Ya existe un inversionista con ese DPI",
+              error: "duplicate_dpi",
+            };
+          }
+        }
+
+        if (inv.nombre?.trim()) {
+          const result = await db
+            .select()
+            .from(inversionistas)
+            .where(eq(inversionistas.nombre, inv.nombre.trim()))
+            .limit(1);
+
+          if (result[0]) {
+            set.status = 409;
+            return {
+              message: "Ya existe un inversionista con ese nombre",
+              error: "duplicate_nombre",
+            };
+          }
+        }
+      }
+
+      if (!existente && !isStrictCreate) {
+        if (inv.dpi) {
+          // Compatibilidad legacy: upsert por DPI.
+          const result = await db
+            .select()
+            .from(inversionistas)
+            .where(eq(inversionistas.dpi, inv.dpi))
+            .limit(1);
+          existente = result[0] || null;
+        }
+
+        if (!existente && inv.email?.trim()) {
+          // Compatibilidad legacy: upsert por email.
+          const email = inv.email.trim().toLowerCase();
+          const result = await db
+            .select()
+            .from(inversionistas)
+            .where(ilike(inversionistas.email, email))
+            .limit(1);
+          existente = result[0] || null;
+        }
+
+        if (!existente && inv.nombre?.trim()) {
+          // Compatibilidad legacy: upsert por nombre.
+          const result = await db
+            .select()
+            .from(inversionistas)
+            .where(eq(inversionistas.nombre, inv.nombre.trim()))
+            .limit(1);
+          existente = result[0] || null;
         }
       }
 
@@ -520,6 +583,13 @@ export const insertInvestor = async ({ body, set }: any) => {
 
     if (error.code === "23505") {
       const detalle = error.detail || "";
+      if (detalle.includes("email")) {
+        set.status = 409;
+        return {
+          message: "Ya existe un inversionista con ese email",
+          error: "duplicate_email",
+        };
+      }
       if (detalle.includes("dpi")) {
         set.status = 409;
         return {

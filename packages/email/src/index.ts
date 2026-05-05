@@ -363,6 +363,10 @@ export interface SendCompraCarteraAcceptedNotificationParams {
     cliente_nombre: string;
     capital: string;
     observaciones?: string;
+  }>;
+  pool: Array<{
+    numero_credito_sifco: string;
+    cliente_nombre: string;
     tipo_reinversion?:
       | "sin_reinversion"
       | "reinversion_capital"
@@ -371,10 +375,6 @@ export interface SendCompraCarteraAcceptedNotificationParams {
       | "reinversion_variable"
       | "reinversion_combinada"
       | null;
-  }>;
-  pool: Array<{
-    numero_credito_sifco: string;
-    cliente_nombre: string;
     rows: Array<{
       inversionista_nombre: string;
       capital: string;
@@ -428,7 +428,16 @@ export const sendCompraCarteraAcceptedNotification = async ({
         ? `Buen día, comparto información solicitada, el crédito de <strong>${creditos[0].cliente_nombre}</strong> se convertirá en pool quedando de la siguiente manera:`
         : `Buen día, comparto información solicitada, los siguientes créditos se convertirán en pool quedando de la siguiente manera:`;
 
-    // Una tabla por crédito: encabezado con cliente/SIFCO y filas de inversionistas.
+    const modalidadLabelCreditos: Record<string, string> = {
+      sin_reinversion: "Sin Reinversión",
+      reinversion_capital: "Reinversión Capital",
+      reinversion_interes: "Reinversión de Interés",
+      reinversion_total: "Interés Compuesto",
+      reinversion_variable: "Reinversión Variable",
+      reinversion_combinada: "Reinversión Combinada",
+    };
+
+    // Una tabla por crédito: encabezado con cliente/SIFCO/capital/modalidad y filas de inversionistas.
     const poolsPorCredito = pool
       .map((grupo) => {
         const filas = grupo.rows
@@ -441,41 +450,28 @@ export const sendCompraCarteraAcceptedNotification = async ({
           )
           .join("");
 
+        const modalidad = grupo.tipo_reinversion
+          ? modalidadLabelCreditos[grupo.tipo_reinversion] ?? grupo.tipo_reinversion
+          : "Tradicional";
+
         return `
           <p style="margin:12px 0 4px 0;font-size:13px;color:#374151;">
             <strong>${grupo.cliente_nombre}</strong>
             <span style="color:#6b7280;"> — ${grupo.numero_credito_sifco}</span>
+            <span style="color:#6b7280;"> — Modalidad: ${modalidad}</span>
           </p>
           <table style="border-collapse:collapse;width:100%;font-size:14px;margin-top:0;margin-bottom:12px;">
+            <thead>
+              <tr>
+                <th colspan="2" style="padding:8px 12px;border:1px solid #f59e0b;background:#fef3c7;color:#78350f;text-align:left;font-weight:600;">
+                  Modalidad: ${modalidad}
+                </th>
+              </tr>
+            </thead>
             <tbody>${filas}</tbody>
           </table>
         `;
       })
-      .join("");
-
-    const modalidadLabelCreditos: Record<string, string> = {
-      sin_reinversion: "Sin Reinversión",
-      reinversion_capital: "Reinversión Capital",
-      reinversion_interes: "Reinversión de Interés",
-      reinversion_total: "Interés Compuesto",
-      reinversion_variable: "Reinversión Variable",
-      reinversion_combinada: "Reinversión Combinada",
-    };
-
-    const filasCreditos = creditos
-      .map(
-        (c) => `
-          <tr>
-            <td style="padding:8px 12px;border:1px solid #f59e0b;background:#ffffff;">${c.numero_credito_sifco}</td>
-            <td style="padding:8px 12px;border:1px solid #f59e0b;background:#ffffff;">${c.cliente_nombre}</td>
-            <td style="padding:8px 12px;border:1px solid #f59e0b;background:#ffffff;text-align:right;">${currencySymbol} ${c.capital}</td>
-            <td style="padding:8px 12px;border:1px solid #f59e0b;background:#ffffff;text-align:center;">${
-              c.tipo_reinversion
-                ? modalidadLabelCreditos[c.tipo_reinversion] ?? c.tipo_reinversion
-                : "Tradicional"
-            }</td>
-          </tr>`
-      )
       .join("");
 
     // Observaciones por crédito (solo incluimos créditos que tengan obs)
@@ -548,19 +544,6 @@ export const sendCompraCarteraAcceptedNotification = async ({
 
         <h3 style="margin-top:20px;background:#f59e0b;color:#ffffff;padding:8px 12px;border:1px solid #f59e0b;display:inline-block;margin-bottom:0;">Pool resultante por crédito</h3>
         ${poolsPorCredito}
-
-        <h3 style="margin-top:24px;background:#f59e0b;color:#ffffff;padding:8px 12px;border:1px solid #f59e0b;display:inline-block;margin-bottom:0;">Créditos</h3>
-        <table style="border-collapse:collapse;width:100%;font-size:14px;margin-top:0;">
-          <thead>
-            <tr>
-              <th style="padding:8px 12px;border:1px solid #f59e0b;background:#f59e0b;color:#ffffff;text-align:left;">Número SIFCO</th>
-              <th style="padding:8px 12px;border:1px solid #f59e0b;background:#f59e0b;color:#ffffff;text-align:left;">Nombre</th>
-              <th style="padding:8px 12px;border:1px solid #f59e0b;background:#f59e0b;color:#ffffff;text-align:right;">Capital</th>
-              <th style="padding:8px 12px;border:1px solid #f59e0b;background:#f59e0b;color:#ffffff;text-align:center;">Modalidad</th>
-            </tr>
-          </thead>
-          <tbody>${filasCreditos}</tbody>
-        </table>
 
         ${
           creditosConObs.length > 0

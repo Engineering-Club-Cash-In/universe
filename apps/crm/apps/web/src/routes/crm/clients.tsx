@@ -876,7 +876,7 @@ function RouteComponent() {
 											key={opp.id}
 											className={`group flex items-center gap-3 rounded-lg border p-3 transition-all hover:shadow-sm ${
 												opp.isClosed
-													? "border-green-200 bg-green-50/50"
+													? "border-green-200 bg-green-50/50 dark:bg-green-900/20"
 													: "bg-card hover:bg-muted/40"
 											}`}
 										>
@@ -1274,7 +1274,7 @@ function RouteComponent() {
 										Análisis de Capacidad de Pago
 									</h3>
 									<div className="grid grid-cols-2 gap-4">
-										<div className="space-y-3 rounded-lg bg-green-50 p-3">
+										<div className="space-y-3 rounded-lg bg-green-50 dark:bg-green-900/20 p-3">
 											<h4 className="font-medium text-sm">
 												Ingresos Mensuales
 											</h4>
@@ -1322,7 +1322,7 @@ function RouteComponent() {
 											</div>
 										</div>
 
-										<div className="space-y-3 rounded-lg bg-red-50 p-3">
+										<div className="space-y-3 rounded-lg bg-red-50 dark:bg-red-900/20 p-3">
 											<h4 className="font-medium text-sm">Gastos Mensuales</h4>
 											<div className="flex justify-between text-sm">
 												<span className="text-muted-foreground">Fijos:</span>
@@ -1370,7 +1370,7 @@ function RouteComponent() {
 									</div>
 
 									{/* Disponibilidad Económica */}
-									<div className="rounded-lg bg-blue-50 p-3">
+									<div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 p-3">
 										<div className="flex items-center justify-between">
 											<div>
 												<p className="font-medium text-sm">

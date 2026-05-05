@@ -1,10 +1,13 @@
 export type EstadoLiquidacionResumen =
   | "pending"
   | "uploaded"
-  | "liquidated";
+  | "liquidated"
+  | "sin_movimiento";
 
 export type EstadoLiquidacionResumenFilter =
-  | EstadoLiquidacionResumen
+  | "pending"
+  | "uploaded"
+  | "liquidated"
   | "all";
 
 interface ResumenLiquidacionDecisionInput {

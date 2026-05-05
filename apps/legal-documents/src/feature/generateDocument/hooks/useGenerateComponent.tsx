@@ -165,14 +165,15 @@ export function useGenerateComponent() {
 
     try {
       // Obtener el email del campo "correo".
-      // En inversiones no existe el campo, así que usamos un correo de referencia
-      // para que la API lo acepte como placeholder.
+      // Solo en ventas el correo es obligatorio. Para el resto de categorías
+      // (inversiones, carta_poder) usamos un correo de referencia como placeholder
+      // para que la API lo acepte.
       const FALLBACK_EMAIL = "correo@clubcashin.com";
-      const isInversiones = formData.category === "inversiones";
+      const isVentas = formData.category === "ventas";
       const email =
         formData.fieldValues?.correo ||
         formData.fieldValues?.email ||
-        (isInversiones ? FALLBACK_EMAIL : "");
+        (isVentas ? "" : FALLBACK_EMAIL);
 
       if (!email) {
         // si no aparece el campo que contacte a soporte

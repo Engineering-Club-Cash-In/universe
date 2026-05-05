@@ -22,7 +22,18 @@ export enum ContractType {
   ACUERDO_INVERSION_CASH_IN = 'acuerdo_inversion_cash_in',
   CARTA_CONFIRMACION_INVERSION_INICIAL = 'carta_confirmacion_inversion_inicial',
   CARTA_ELECCION_MODALIDAD_PAGO_REINVERSION = 'carta_eleccion_modalidad_pago_reinversion',
-  CESION_CREDITOS = 'cesion_creditos'
+  CARTA_INSTRUCCION_INVERSION_CARTERA_ACTIVA = 'carta_instruccion_inversion_cartera_activa',
+  CARTA_INCREMENTO_INVERSION = 'carta_incremento_inversion',
+  CARTA_INSTRUCCION_PAGO_ANTICIPADO = 'carta_instruccion_pago_anticipado',
+  CESION_CREDITOS = 'cesion_creditos',
+  CONTRATO_SERVICIOS_CASH_IN_INVERSOR_GENERAL = 'contrato_servicios_cash_in_inversor_general',
+  DESIGNACION_BENEFICIARIO = 'designacion_beneficiario',
+
+  // ===== CARTA PODER =====
+  CARTA_CUBE_ANDRES = 'carta_cube_andres',
+  CARTA_CUBE_DON_ALEX = 'carta_cube_don_alex',
+  CARTA_RDBE_DON_ALEX = 'carta_rdbe_don_alex',
+  CARTA_RDBE_RICHARD = 'carta_rdbe_richard'
   // Agrega más tipos aquí según sea necesario
 }
 

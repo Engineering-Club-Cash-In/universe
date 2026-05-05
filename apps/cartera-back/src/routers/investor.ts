@@ -771,7 +771,7 @@ export const inversionistasRouter = new Elysia()
   .get(
     "/resumen-global-liquidaciones",
     async ({ query, set }) => {
-      const { inversionistaId, mes, anio, estado = "pending", excel } = query;
+      const { inversionistaId, mes, anio, estado = "pending", excel, incluirSinMovimiento } = query;
       const estadoFiltro = estado as "pending" | "uploaded" | "liquidated" | "all";
 
       // Si hay inversionistaId, permitir liquidated/all sin mes/anio (trae todo el historial)
@@ -788,7 +788,8 @@ export const inversionistasRouter = new Elysia()
         mes ? Number(mes) : undefined,
         anio ? Number(anio) : undefined,
         estadoFiltro,
-        excel === "true"
+        excel === "true",
+        incluirSinMovimiento === "true"
       );
     },
     {
@@ -805,6 +806,7 @@ export const inversionistasRouter = new Elysia()
           ])
         ),
         excel: t.Optional(t.String()),
+        incluirSinMovimiento: t.Optional(t.String()),
       }),
       detail: {
         summary: "Obtiene el resumen global de liquidaciones por inversionista",

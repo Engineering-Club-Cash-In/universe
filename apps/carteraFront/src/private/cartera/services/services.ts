@@ -3517,27 +3517,23 @@ export async function getFallenCredits(params: {
 // ============================================
 
 export interface PagoPorVencimientoItem {
-  pago_id: number;
   credito_id: number;
   numero_credito_sifco: string;
   nombre_usuario: string;
-  cuota_id: number;
-  numero_cuota: number;
-  fecha_vencimiento: string;
-  fecha_pago: string | null;
-  pagado: boolean;
-  monto_boleta: string;
+  asesor: string;
+  cuota_min: number;
+  cuota_max: number;
   capital_restante: string;
   interes_restante: string;
   iva_12_restante: string;
   seguro_restante: string;
   gps_restante: string;
   membresias: string;
+  monto_boleta: string;
   interes_cube: string;
   iva_cube: string;
-  asesor?: string;
-  dias_mora?: number;
-  royalti?: string;
+  total_pagos_del_mes: string;
+  dias_mora: string;
 }
 
 export interface PagoPorVencimientoTotales {

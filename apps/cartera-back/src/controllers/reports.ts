@@ -1452,14 +1452,11 @@ export async function getPagosByVencimiento({
   const fechaFin = `${anio}-${String(mes).padStart(2, "0")}-${String(fechaFinDate.getDate()).padStart(2, "0")}`;
 
   // Filtros dinámicos
-  // Siempre filtramos por el mes de vencimiento para que el reporte sea coherente con el mes seleccionado
   const filters: any[] = [
     sql`COALESCE(q.fecha_vencimiento, p.fecha_vencimiento)::date >= ${fechaInicio}`,
     sql`COALESCE(q.fecha_vencimiento, p.fecha_vencimiento)::date <= ${fechaFin}`,
   ];
 
-  // Si el usuario pide filtrar por fecha de creación, agregamos esa restricción adicional
-  // sobre el crédito, pero mantenemos el filtro de vencimiento para el mes actual.
   if (tipo_fecha === "creacion") {
     filters.push(sql`c.fecha_creacion::date >= ${fechaInicio}`);
     filters.push(sql`c.fecha_creacion::date <= ${fechaFin}`);
@@ -1483,8 +1480,7 @@ export async function getPagosByVencimiento({
   }
   const whereClause = sql.join(filters, sql` AND `);
 
-  // Subquery para los porcentajes de Cube por crédito (1 solo query)
-  // cube_pct = (porcentaje_cash_in / 100) * (monto_aportado / sum_montos)
+  // Subquery para los porcentajes de Cube por crédito
   const cubeSubquery = sql`
     LEFT JOIN LATERAL (
       SELECT
@@ -1507,18 +1503,34 @@ export async function getPagosByVencimiento({
     ) cube_data ON true
   `;
 
-  // 1. Count + totales globales en un solo query
+  // SQL para calcular el total por fila (Suma de restantes + Suma de abonos)
+  const totalFilaSql = sql`(
+    COALESCE(p.capital_restante, 0)::numeric + 
+    COALESCE(p.interes_restante, 0)::numeric + 
+    COALESCE(p.iva_12_restante, 0)::numeric + 
+    COALESCE(p.seguro_restante, 0)::numeric + 
+    COALESCE(p.gps_restante, 0)::numeric + 
+    COALESCE(p.membresias, 0)::numeric + 
+    COALESCE(p.membresias_pago, 0)::numeric + 
+    COALESCE(p.abono_capital, 0)::numeric + 
+    COALESCE(p.abono_interes, 0)::numeric + 
+    COALESCE(p.abono_iva_12, 0)::numeric + 
+    COALESCE(p.abono_seguro, 0)::numeric + 
+    COALESCE(p.abono_gps, 0)::numeric
+  )`;
+
+  // 1. Totales globales y conteo de créditos únicos
   const totalesResult = await db.execute<any>(sql`
     SELECT
-      COUNT(*)::int AS total_count,
-      COALESCE(SUM(p.capital_restante::numeric), 0) AS total_capital_restante,
-      COALESCE(SUM(p.interes_restante::numeric), 0) AS total_interes_restante,
-      COALESCE(SUM(p.iva_12_restante::numeric), 0) AS total_iva_12_restante,
-      COALESCE(SUM(p.seguro_restante::numeric), 0) AS total_seguro_restante,
-      COALESCE(SUM(p.gps_restante::numeric), 0) AS total_gps_restante,
-      COALESCE(SUM(p.membresias::numeric), 0) AS total_membresias,
-      COALESCE(SUM(p.interes_restante::numeric * COALESCE(cube_data.cube_pct, 0)), 0) AS total_interes_cube,
-      COALESCE(SUM(p.iva_12_restante::numeric * COALESCE(cube_data.cube_pct, 0)), 0) AS total_iva_cube
+      COUNT(DISTINCT c.credito_id)::int AS total_count,
+      COALESCE(SUM(p.capital_restante::numeric + COALESCE(p.abono_capital, 0)::numeric), 0) AS total_capital_restante,
+      COALESCE(SUM(p.interes_restante::numeric + COALESCE(p.abono_interes, 0)::numeric), 0) AS total_interes_restante,
+      COALESCE(SUM(p.iva_12_restante::numeric + COALESCE(p.abono_iva_12, 0)::numeric), 0) AS total_iva_12_restante,
+      COALESCE(SUM(p.seguro_restante::numeric + COALESCE(p.abono_seguro, 0)::numeric), 0) AS total_seguro_restante,
+      COALESCE(SUM(p.gps_restante::numeric + COALESCE(p.abono_gps, 0)::numeric), 0) AS total_gps_restante,
+      COALESCE(SUM(p.membresias::numeric + COALESCE(p.membresias_pago, 0)::numeric), 0) AS total_membresias,
+      COALESCE(SUM((p.interes_restante::numeric + COALESCE(p.abono_interes, 0)::numeric) * COALESCE(cube_data.cube_pct, 0)), 0) AS total_interes_cube,
+      COALESCE(SUM((p.iva_12_restante::numeric + COALESCE(p.abono_iva_12, 0)::numeric) * COALESCE(cube_data.cube_pct, 0)), 0) AS total_iva_cube
     FROM cartera.pagos_credito p
     INNER JOIN cartera.creditos c ON p.credito_id = c.credito_id
     INNER JOIN cartera.usuarios u ON c.usuario_id = u.usuario_id
@@ -1527,44 +1539,39 @@ export async function getPagosByVencimiento({
     LEFT JOIN cartera.moras_credito m ON c.credito_id = m.credito_id AND m.activa = true
     ${cubeSubquery}
     WHERE ${whereClause}
+      AND ${totalFilaSql} <> 0
   `);
 
   const totalesRow = totalesResult.rows[0];
   const total = Number(totalesRow?.total_count ?? 0);
   const offset = (page - 1) * pageSize;
 
-  // 2. Pagos paginados con Cube ya calculado
+  // 2. Pagos agrupados por crédito
   const pagosResult = await db.execute<any>(sql`
     SELECT
-      p.pago_id,
-      p.credito_id,
+      c.credito_id,
       c.numero_credito_sifco,
       u.nombre AS nombre_usuario,
-      p.cuota_id,
-      q.numero_cuota,
-      COALESCE(q.fecha_vencimiento, p.fecha_vencimiento) AS fecha_vencimiento,
-      p.fecha_pago,
-      p.pagado,
-      p.monto_boleta,
-      p.cuota,
-      p.capital_restante,
-      p.interes_restante,
-      p.iva_12_restante,
-      p.seguro_restante,
-      p.gps_restante,
-      p.membresias,
-      c.fecha_creacion,
-      c.royalti,
       a.nombre AS asesor,
+      MIN(q.numero_cuota) AS cuota_min,
+      MAX(q.numero_cuota) AS cuota_max,
+      COALESCE(SUM(p.capital_restante::numeric + COALESCE(p.abono_capital, 0)::numeric), 0) AS capital_restante,
+      COALESCE(SUM(p.interes_restante::numeric + COALESCE(p.abono_interes, 0)::numeric), 0) AS interes_restante,
+      COALESCE(SUM(p.iva_12_restante::numeric + COALESCE(p.abono_iva_12, 0)::numeric), 0) AS iva_12_restante,
+      COALESCE(SUM(p.seguro_restante::numeric + COALESCE(p.abono_seguro, 0)::numeric), 0) AS seguro_restante,
+      COALESCE(SUM(p.gps_restante::numeric + COALESCE(p.abono_gps, 0)::numeric), 0) AS gps_restante,
+      COALESCE(SUM(p.membresias::numeric + COALESCE(p.membresias_pago, 0)::numeric), 0) AS membresias,
+      COALESCE(SUM(p.monto_boleta::numeric), 0) AS monto_boleta,
+      COALESCE(SUM((p.interes_restante::numeric + COALESCE(p.abono_interes, 0)::numeric) * COALESCE(cube_data.cube_pct, 0)), 0) AS interes_cube,
+      COALESCE(SUM((p.iva_12_restante::numeric + COALESCE(p.abono_iva_12, 0)::numeric) * COALESCE(cube_data.cube_pct, 0)), 0) AS iva_cube,
+      COALESCE(SUM(${totalFilaSql}), 0) AS total_pagos_del_mes,
       CASE
-        WHEN m.cuotas_atrasadas = 1 THEN 'Mora 30'
-        WHEN m.cuotas_atrasadas = 2 THEN 'Mora 60'
-        WHEN m.cuotas_atrasadas = 3 THEN 'Mora 90'
-        WHEN m.cuotas_atrasadas >= 4 THEN 'Mora 120+'
+        WHEN MAX(m.cuotas_atrasadas) = 1 THEN 'Mora 30'
+        WHEN MAX(m.cuotas_atrasadas) = 2 THEN 'Mora 60'
+        WHEN MAX(m.cuotas_atrasadas) = 3 THEN 'Mora 90'
+        WHEN MAX(m.cuotas_atrasadas) >= 4 THEN 'Mora 120+'
         ELSE 'Al día'
-      END AS dias_mora,
-      ROUND(p.interes_restante::numeric * COALESCE(cube_data.cube_pct, 0), 2) AS interes_cube,
-      ROUND(p.iva_12_restante::numeric * COALESCE(cube_data.cube_pct, 0), 2) AS iva_cube
+      END AS dias_mora
     FROM cartera.pagos_credito p
     INNER JOIN cartera.creditos c ON p.credito_id = c.credito_id
     INNER JOIN cartera.usuarios u ON c.usuario_id = u.usuario_id
@@ -1573,7 +1580,9 @@ export async function getPagosByVencimiento({
     LEFT JOIN cartera.moras_credito m ON c.credito_id = m.credito_id AND m.activa = true
     ${cubeSubquery}
     WHERE ${whereClause}
-    ORDER BY COALESCE(q.fecha_vencimiento, p.fecha_vencimiento)
+    GROUP BY c.credito_id, c.numero_credito_sifco, u.nombre, a.nombre
+    HAVING SUM(${totalFilaSql}) <> 0
+    ORDER BY c.numero_credito_sifco
     LIMIT ${pageSize} OFFSET ${offset}
   `);
 

@@ -288,6 +288,39 @@ export class ContractGeneratorService {
       requiredFields: []
     });
 
+    // ===== CARTA PODER =====
+    this.registerTemplate({
+      type: ContractType.CARTA_CUBE_ANDRES,
+      templateFilename: 'carta_poder/CARTA-CUBE-ANDRES-HOMBRE.docx',
+      templateFilenameFemale: 'carta_poder/CARTA-CUBE-ANDRES-MUJER.docx',
+      description: 'Carta poder CUBE - Andrés',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_CUBE_DON_ALEX,
+      templateFilename: 'carta_poder/CARTA-CUBE-DON ALEX-HOMBRE.docx',
+      templateFilenameFemale: 'carta_poder/CARTA-CUBE-DON ALEX-MUJER.docx',
+      description: 'Carta poder CUBE - Don Alex',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_RDBE_DON_ALEX,
+      templateFilename: 'carta_poder/CARTA-RDBE-DON ALEX-HOMBRE.docx',
+      templateFilenameFemale: 'carta_poder/CARTA-RDBE-DON ALEX-MUJER.docx',
+      description: 'Carta poder RDBE - Don Alex',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_RDBE_RICHARD,
+      templateFilename: 'carta_poder/CARTA-RDBE-RICHARD-HOMBRE.docx',
+      templateFilenameFemale: 'carta_poder/CARTA-RDBE-RICHARD-MUJER.docx',
+      description: 'Carta poder RDBE - Richard',
+      requiredFields: []
+    });
+
   }
 
   /**

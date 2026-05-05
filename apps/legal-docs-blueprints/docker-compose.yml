@@ -15,29 +15,6 @@ services:
     networks:
       - legal-docs-network
 
-  app:
-    build: .
-    ports:
-      - "${PORT:-4000}:4000"
-    restart: unless-stopped
-    environment:
-      - NODE_ENV=production
-      - PORT=4000
-      - GOTENBERG_URL=http://gotenberg:3000
-      - DOCUMENSO_API_TOKEN=${DOCUMENSO_API_TOKEN}
-      - DOCUMENSO_BASE_URL=${DOCUMENSO_BASE_URL}
-      - CRM_API_URL=${CRM_API_URL:-http://host.docker.internal:3000}
-      - CRM_SERVICE_ACCOUNT_EMAIL=${CRM_SERVICE_ACCOUNT_EMAIL}
-      - CRM_SERVICE_ACCOUNT_PASSWORD=${CRM_SERVICE_ACCOUNT_PASSWORD}
-    depends_on:
-      gotenberg:
-        condition: service_healthy
-    networks:
-      - legal-docs-network
-    volumes:
-      - ./output:/app/output
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
 
 networks:
   legal-docs-network:

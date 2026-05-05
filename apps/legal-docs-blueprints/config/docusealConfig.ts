@@ -184,6 +184,35 @@ export const docusealConfig: Record<ContractType, SignerConfig> = {
       { role: 'Inversionista', required: true },
     ],
   },
+
+  // ===== CARTA PODER =====
+  [ContractType.CARTA_CUBE_ANDRES]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
+
+  [ContractType.CARTA_CUBE_DON_ALEX]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
+
+  [ContractType.CARTA_RDBE_DON_ALEX]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
+
+  [ContractType.CARTA_RDBE_RICHARD]: {
+    signerCount: 1,
+    signers: [
+      { role: 'Cliente', required: true },
+    ],
+  },
 };
 
 /**

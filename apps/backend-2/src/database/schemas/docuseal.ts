@@ -33,14 +33,17 @@ export const documentNameEnum = docusealSchema.enum("document_name_enum", [
   "carta_instruccion_pago_anticipado",
   "cesion_creditos",
   "contrato_servicios_cash_in_inversor_general",
-  "designacion_beneficiario"
+  "designacion_beneficiario",
+  "carta_cube_andres",
+  "carta_cube_don_alex",
+  "carta_rdbe_don_alex",
+  "carta_rdbe_richard"
 ]);
 
 // 📗 Tabla principal
 export const docusealDocuments = docusealSchema.table(
   "documents",
-  { 
-
+  {
     nombre_documento: documentNameEnum("nombre_documento").notNull(),
     categoria: documentCategoriaEnum("categoria").notNull().default("ventas"),
     id_docuseal: integer("id_docuseal").notNull().primaryKey(),
@@ -49,12 +52,11 @@ export const docusealDocuments = docusealSchema.table(
     serialid: varchar("serialid", { length: 255 }).notNull(),
     url_insercion: text("url_insercion").notNull(),
     large_spacing: boolean("large_spacing").default(false),
-    count_double_line:integer("count_double_line").default(0)
+    count_double_line: integer("count_double_line").default(0),
   },
   (table) => ({
     // 🚫 Evita duplicados
     uniqueDocusealId: uniqueIndex("unique_docuseal_id").on(table.id_docuseal),
- 
     uniqueCombo: uniqueIndex("unique_document_combo").on(
       table.nombre_documento,
       table.id_docuseal

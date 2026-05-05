@@ -167,6 +167,32 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
     pattern: 'Firma: __________________________',
     signerCount: 1,
     signers: ['Inversionista']
+  },
+
+  // ===== CARTA PODER =====
+  // Todas las cartas de poder usan el mismo patrón: F.___________________________ (29 underscores)
+  [ContractType.CARTA_CUBE_ANDRES]: {
+    pattern: 'F.___________________________',
+    signerCount: 1,
+    signers: ['Cliente']
+  },
+
+  [ContractType.CARTA_CUBE_DON_ALEX]: {
+    pattern: 'F.___________________________',
+    signerCount: 1,
+    signers: ['Cliente']
+  },
+
+  [ContractType.CARTA_RDBE_DON_ALEX]: {
+    pattern: 'F.___________________________',
+    signerCount: 1,
+    signers: ['Cliente']
+  },
+
+  [ContractType.CARTA_RDBE_RICHARD]: {
+    pattern: 'F.___________________________',
+    signerCount: 1,
+    signers: ['Cliente']
   }
 };
 

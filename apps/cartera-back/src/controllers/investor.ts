@@ -406,7 +406,7 @@ export const insertInvestor = async ({ body, set }: any) => {
 
     // 🔥 PROCESAR UNO POR UNO para manejar INSERT vs UPDATE
     for (const inv of inversionistasToUpsert) {
-      // 🔥 Verificar si ya existe
+      // 🔥 Verificar si ya existe solo por ID explícito. Email/nombre/DPI no prueban identidad.
       let existente = null;
 
       // Buscar por inversionista_id primero (para ediciones directas)
@@ -417,36 +417,35 @@ export const insertInvestor = async ({ body, set }: any) => {
           .where(eq(inversionistas.inversionista_id, Number(inv.inversionista_id)))
           .limit(1);
         existente = result[0] || null;
+
+        if (!existente) {
+          set.status = 404;
+          return {
+            message: "Inversionista no encontrado",
+            error: "investor_not_found",
+          };
+        }
       }
 
-      if (!existente && inv.dpi) {
-        // Buscar por DPI primero
+      if (inv.email?.trim()) {
+        const email = inv.email.trim().toLowerCase();
         const result = await db
           .select()
           .from(inversionistas)
-          .where(eq(inversionistas.dpi, inv.dpi))
+          .where(ilike(inversionistas.email, email))
           .limit(1);
-        existente = result[0] || null;
-      }
+        const inversionistaConEmail = result[0] || null;
 
-      // Si no lo encontro por DPI, buscar por email
-      if (!existente && inv.email?.trim()) {
-        const result = await db
-          .select()
-          .from(inversionistas)
-          .where(eq(inversionistas.email, inv.email.trim().toLowerCase()))
-          .limit(1);
-        existente = result[0] || null;
-      }
-
-      // Si no lo encontro por email, buscar por nombre
-      if (!existente && inv.nombre?.trim()) {
-        const result = await db
-          .select()
-          .from(inversionistas)
-          .where(eq(inversionistas.nombre, inv.nombre.trim()))
-          .limit(1);
-        existente = result[0] || null;
+        if (
+          inversionistaConEmail &&
+          inversionistaConEmail.inversionista_id !== existente?.inversionista_id
+        ) {
+          set.status = 409;
+          return {
+            message: "Ya existe un inversionista con ese email",
+            error: "duplicate_email",
+          };
+        }
       }
 
       if (existente) {
@@ -6438,4 +6437,3 @@ export async function getCreditosEspejoPendientes(
 
   return { data: paginados, total, page, pageSize };
 }
-

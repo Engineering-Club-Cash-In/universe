@@ -1511,6 +1511,7 @@ export async function getPagosByVencimiento({
     COALESCE(p.seguro_restante, 0)::numeric + 
     COALESCE(p.gps_restante, 0)::numeric + 
     COALESCE(p.membresias, 0)::numeric + 
+    COALESCE(p.membresias_pago, 0)::numeric + 
     COALESCE(p.abono_capital, 0)::numeric + 
     COALESCE(p.abono_interes, 0)::numeric + 
     COALESCE(p.abono_iva_12, 0)::numeric + 

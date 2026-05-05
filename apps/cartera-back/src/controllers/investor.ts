@@ -406,7 +406,7 @@ export const insertInvestor = async ({ body, set }: any) => {
 
     // 🔥 PROCESAR UNO POR UNO para manejar INSERT vs UPDATE
     for (const inv of inversionistasToUpsert) {
-      // 🔥 Verificar si ya existe
+      const isStrictCreate = inv.operation === "CREATE" || inv.mode === "create";
       let existente = null;
 
       // Buscar por inversionista_id primero (para ediciones directas)
@@ -417,36 +417,98 @@ export const insertInvestor = async ({ body, set }: any) => {
           .where(eq(inversionistas.inversionista_id, Number(inv.inversionista_id)))
           .limit(1);
         existente = result[0] || null;
+
+        if (!existente) {
+          set.status = 404;
+          return {
+            message: "Inversionista no encontrado",
+            error: "investor_not_found",
+          };
+        }
       }
 
-      if (!existente && inv.dpi) {
-        // Buscar por DPI primero
-        const result = await db
-          .select()
-          .from(inversionistas)
-          .where(eq(inversionistas.dpi, inv.dpi))
-          .limit(1);
-        existente = result[0] || null;
+      if (!existente && isStrictCreate) {
+        if (inv.email?.trim()) {
+          const email = inv.email.trim().toLowerCase();
+          const result = await db
+            .select()
+            .from(inversionistas)
+            .where(ilike(inversionistas.email, email))
+            .limit(1);
+
+          if (result[0]) {
+            set.status = 409;
+            return {
+              message: "Ya existe un inversionista con ese email",
+              error: "duplicate_email",
+            };
+          }
+        }
+
+        if (inv.dpi) {
+          const result = await db
+            .select()
+            .from(inversionistas)
+            .where(eq(inversionistas.dpi, inv.dpi))
+            .limit(1);
+
+          if (result[0]) {
+            set.status = 409;
+            return {
+              message: "Ya existe un inversionista con ese DPI",
+              error: "duplicate_dpi",
+            };
+          }
+        }
+
+        if (inv.nombre?.trim()) {
+          const result = await db
+            .select()
+            .from(inversionistas)
+            .where(eq(inversionistas.nombre, inv.nombre.trim()))
+            .limit(1);
+
+          if (result[0]) {
+            set.status = 409;
+            return {
+              message: "Ya existe un inversionista con ese nombre",
+              error: "duplicate_nombre",
+            };
+          }
+        }
       }
 
-      // Si no lo encontro por DPI, buscar por email
-      if (!existente && inv.email?.trim()) {
-        const result = await db
-          .select()
-          .from(inversionistas)
-          .where(eq(inversionistas.email, inv.email.trim().toLowerCase()))
-          .limit(1);
-        existente = result[0] || null;
-      }
+      if (!existente && !isStrictCreate) {
+        if (inv.dpi) {
+          // Compatibilidad legacy: upsert por DPI.
+          const result = await db
+            .select()
+            .from(inversionistas)
+            .where(eq(inversionistas.dpi, inv.dpi))
+            .limit(1);
+          existente = result[0] || null;
+        }
 
-      // Si no lo encontro por email, buscar por nombre
-      if (!existente && inv.nombre?.trim()) {
-        const result = await db
-          .select()
-          .from(inversionistas)
-          .where(eq(inversionistas.nombre, inv.nombre.trim()))
-          .limit(1);
-        existente = result[0] || null;
+        if (!existente && inv.email?.trim()) {
+          // Compatibilidad legacy: upsert por email.
+          const email = inv.email.trim().toLowerCase();
+          const result = await db
+            .select()
+            .from(inversionistas)
+            .where(ilike(inversionistas.email, email))
+            .limit(1);
+          existente = result[0] || null;
+        }
+
+        if (!existente && inv.nombre?.trim()) {
+          // Compatibilidad legacy: upsert por nombre.
+          const result = await db
+            .select()
+            .from(inversionistas)
+            .where(eq(inversionistas.nombre, inv.nombre.trim()))
+            .limit(1);
+          existente = result[0] || null;
+        }
       }
 
       if (existente) {
@@ -521,6 +583,13 @@ export const insertInvestor = async ({ body, set }: any) => {
 
     if (error.code === "23505") {
       const detalle = error.detail || "";
+      if (detalle.includes("email")) {
+        set.status = 409;
+        return {
+          message: "Ya existe un inversionista con ese email",
+          error: "duplicate_email",
+        };
+      }
       if (detalle.includes("dpi")) {
         set.status = 409;
         return {
@@ -6736,4 +6805,3 @@ export async function getCreditosEspejoPendientes(
 
   return { data: paginados, total, page, pageSize };
 }
-

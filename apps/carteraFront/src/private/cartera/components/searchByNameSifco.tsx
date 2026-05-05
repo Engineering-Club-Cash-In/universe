@@ -7,11 +7,11 @@ import {
   SelectTrigger,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { useUsersWithSifco } from "../hooks/getUsers";
-import { User, BadgeDollarSign, XCircle } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { getCreditosPaginados } from "../services/services";
+import { User, BadgeDollarSign, XCircle, ChevronLeft, ChevronRight } from "lucide-react";
 
 type OpcionSifco = {
-  usuario_id: number;
   nombre: string;
   sifco: string;
 };
@@ -22,45 +22,71 @@ interface BuscadorUsuarioSifcoProps {
   onReset?: () => void;
 }
 
-export function BuscadorUsuarioSifco({ onSelect, reset, onReset }: BuscadorUsuarioSifcoProps) {
-  const { data = [], isLoading } = useUsersWithSifco();
-  const [search, setSearch] = useState<string>("");
-  const [selectedSifco, setSelectedSifco] = useState<string>(""); // ✅ "" en vez de undefined
+function esSifco(search: string): boolean {
+  return /\d/.test(search);
+}
 
-  // Aplana los SIFCOs
+export function BuscadorUsuarioSifco({ onSelect, reset, onReset }: BuscadorUsuarioSifcoProps) {
+  const [search, setSearch] = useState<string>("");
+  const [debouncedSearch, setDebouncedSearch] = useState<string>("");
+  const [page, setPage] = useState<number>(1);
+  const [selectedSifco, setSelectedSifco] = useState<string>("");
+  const [selectedOption, setSelectedOption] = useState<OpcionSifco | null>(null);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["buscador-creditos", debouncedSearch, page],
+    queryFn: () => {
+      const searchTrimmed = debouncedSearch.trim();
+      const hasFilter = searchTrimmed.length >= 2;
+      return getCreditosPaginados({
+        mes: 0,
+        anio: new Date().getFullYear(),
+        page,
+        perPage: 10,
+        estado: "ACTIVO",
+        excel: false,
+        ...(hasFilter && esSifco(searchTrimmed)
+          ? { numero_credito_sifco: searchTrimmed }
+          : hasFilter
+          ? { nombre_usuario: searchTrimmed }
+          : {}),
+      });
+    },
+    staleTime: 1000 * 30,
+    refetchOnWindowFocus: false,
+  });
+
   const opciones: OpcionSifco[] = useMemo(() => {
-    const usuarios = data || [];
-    
-    return usuarios.flatMap(u =>
-      u.numeros_credito_sifco.map(sifco => ({
-        usuario_id: u.usuario_id,
-        nombre: u.nombre,
-        sifco,
-      }))
-    );
+    if (!data?.data) return [];
+    return data.data.map((item) => ({
+      nombre: item.usuarios.nombre,
+      sifco: item.creditos.numero_credito_sifco,
+    }));
   }, [data]);
 
-  // Filtra en tiempo real por nombre o sifco
-  const opcionesFiltradas = useMemo(
-    () =>
-      opciones.filter(
-        o =>
-          o.nombre.toLowerCase().includes(search.toLowerCase()) ||
-          o.sifco.toLowerCase().includes(search.toLowerCase())
-      ),
-    [opciones, search]
-  );
-
-  const selectedOption = opciones.find(o => o.sifco === selectedSifco);
+  const totalPages = data?.totalPages ?? 1;
 
   const handleChange = (valor: string) => {
+    const opt = opciones.find((o) => o.sifco === valor) || null;
+    setSelectedOption(opt);
     setSelectedSifco(valor);
     onSelect(valor);
   };
 
   const handleClear = () => {
-    setSelectedSifco(""); // ✅ "" en vez de undefined
+    setSelectedSifco("");
+    setSelectedOption(null);
     setSearch("");
+    setDebouncedSearch("");
+    setPage(1);
     onSelect("");
   };
 
@@ -69,7 +95,7 @@ export function BuscadorUsuarioSifco({ onSelect, reset, onReset }: BuscadorUsuar
       handleClear();
       onReset?.();
     }
-  }, [reset, onReset]); // ✅ Agregué onReset a las dependencias
+  }, [reset, onReset]);
 
   return (
     <div className="mb-4 w-full max-w-md flex flex-col gap-2">
@@ -83,7 +109,7 @@ export function BuscadorUsuarioSifco({ onSelect, reset, onReset }: BuscadorUsuar
           placeholder="Nombre o número de crédito SIFCO"
           className="border px-4 py-2 rounded-lg text-gray-900 text-lg bg-white/90 flex-1"
           value={search}
-          onChange={e => setSearch(e.target.value)}
+          onChange={(e) => setSearch(e.target.value)}
           autoComplete="off"
         />
         {(selectedSifco || search) && (
@@ -97,74 +123,90 @@ export function BuscadorUsuarioSifco({ onSelect, reset, onReset }: BuscadorUsuar
           </button>
         )}
       </div>
+
       {isLoading ? (
         <div className="text-gray-400 px-2 py-2">Cargando...</div>
-      ) : opcionesFiltradas.length === 0 ? (
+      ) : opciones.length === 0 ? (
         <div className="text-gray-400 px-2 py-2">No hay resultados</div>
       ) : (
-        <Select
-          value={selectedSifco || ""} // ✅ Siempre string, nunca undefined
-          onValueChange={handleChange}
-          disabled={opcionesFiltradas.length === 0}
-        >
-          <SelectTrigger className="w-full border px-4 py-2 rounded-lg text-gray-900 bg-white shadow hover:border-blue-400 focus:ring-2 focus:ring-blue-300 transition min-w-0 overflow-hidden">
-            {selectedOption ? (
-              <div className="flex items-center gap-3 min-w-0 w-full">
-                <User className="w-4 h-4 text-blue-700 flex-shrink-0" />
-                <span
-                  className="font-bold text-blue-900 bg-blue-100 px-2 py-0.5 rounded-md truncate block max-w-[140px]"
-                  title={selectedOption.nombre}
-                >
-                  {selectedOption.nombre}
-                </span>
-                <BadgeDollarSign className="w-4 h-4 text-emerald-500 flex-shrink-0" />
-                <span
-                  className="font-mono font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md tracking-wider truncate block max-w-[110px]"
-                  title={selectedOption.sifco}
-                >
-                  {selectedOption.sifco}
-                </span>
+        <>
+          <Select value={selectedSifco || ""} onValueChange={handleChange}>
+            <SelectTrigger className="w-full border px-4 py-2 rounded-lg text-gray-900 bg-white shadow hover:border-blue-400 focus:ring-2 focus:ring-blue-300 transition min-w-0 overflow-hidden">
+              {selectedOption ? (
+                <div className="flex items-center gap-3 min-w-0 w-full">
+                  <User className="w-4 h-4 text-blue-700 flex-shrink-0" />
+                  <span
+                    className="font-bold text-blue-900 bg-blue-100 px-2 py-0.5 rounded-md truncate block max-w-[140px]"
+                    title={selectedOption.nombre}
+                  >
+                    {selectedOption.nombre}
+                  </span>
+                  <BadgeDollarSign className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                  <span
+                    className="font-mono font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md tracking-wider truncate block max-w-[110px]"
+                    title={selectedOption.sifco}
+                  >
+                    {selectedOption.sifco}
+                  </span>
+                </div>
+              ) : (
+                <span className="text-gray-400">Selecciona un crédito SIFCO</span>
+              )}
+            </SelectTrigger>
+            <SelectContent className="bg-white border rounded-xl shadow-lg max-w-full w-full p-0">
+              <div className="max-h-60 overflow-y-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: "none" }}>
+                {opciones.map((option) => (
+                  <SelectItem
+                    key={option.sifco}
+                    value={option.sifco}
+                    className="flex flex-col sm:flex-row sm:items-center gap-1 py-2 px-3 rounded-lg hover:bg-blue-50 transition-all w-full max-w-full"
+                  >
+                    <span className="flex items-center gap-2 min-w-0 max-w-full">
+                      <User className="w-4 h-4 text-blue-700 flex-shrink-0" />
+                      <span className="font-bold text-blue-900 bg-blue-100 px-2 py-0.5 rounded-md truncate max-w-[180px] whitespace-nowrap block">
+                        {option.nombre}
+                      </span>
+                    </span>
+                    <span className="flex items-center gap-1 min-w-0 max-w-full sm:ml-3">
+                      <BadgeDollarSign className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                      <span className="font-mono font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md tracking-wider truncate max-w-[150px] whitespace-nowrap block">
+                        {option.sifco}
+                      </span>
+                    </span>
+                  </SelectItem>
+                ))}
               </div>
-            ) : (
-              <span className="text-gray-400">Selecciona un crédito SIFCO</span>
-            )}
-          </SelectTrigger>
-        <SelectContent
-  className="
-    bg-white border rounded-xl shadow-lg 
-    max-w-full w-full 
-    max-h-72 overflow-y-auto 
-    scrollbar-thin scrollbar-thumb-blue-300 scrollbar-track-blue-50
-  "
->
-  {opcionesFiltradas.map((option) => (
-    <SelectItem
-      key={option.sifco}
-      value={option.sifco}
-      className="
-        flex flex-col sm:flex-row sm:items-center gap-1 py-2 px-3 
-        rounded-lg hover:bg-blue-50 transition-all 
-        w-full max-w-full
-      "
-    >
-      <span className="flex items-center gap-2 min-w-0 max-w-full">
-        <User className="w-4 h-4 text-blue-700 flex-shrink-0" />
-        <span className="font-bold text-blue-900 bg-blue-100 px-2 py-0.5 rounded-md truncate max-w-[180px] whitespace-nowrap block">
-          {option.nombre}
-        </span>
-      </span>
-
-      <span className="flex items-center gap-1 min-w-0 max-w-full sm:ml-3">
-        <BadgeDollarSign className="w-4 h-4 text-emerald-500 flex-shrink-0" />
-        <span className="font-mono font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md tracking-wider truncate max-w-[150px] whitespace-nowrap block">
-          {option.sifco}
-        </span>
-      </span>
-    </SelectItem>
-  ))}
-</SelectContent>
-
-        </Select>
+              {totalPages > 1 && (
+                <div
+                  className="flex items-center justify-between px-3 py-2 border-t border-blue-100 bg-blue-50/60"
+                  onPointerDown={(e) => e.preventDefault()}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.max(p - 1, 1))}
+                    disabled={page <= 1 || isLoading}
+                    className="flex items-center gap-1 px-2 py-1 rounded-lg text-blue-700 font-semibold text-sm hover:bg-blue-100 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                    Anterior
+                  </button>
+                  <span className="text-xs text-gray-600 font-medium">
+                    {page} / {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
+                    disabled={page >= totalPages || isLoading}
+                    className="flex items-center gap-1 px-2 py-1 rounded-lg text-blue-700 font-semibold text-sm hover:bg-blue-100 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Siguiente
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+            </SelectContent>
+          </Select>
+        </>
       )}
     </div>
   );

@@ -5,6 +5,7 @@ import Big from "big.js";
 
 export async function createAbonoCapital(data: {
   credito_id: number;
+  inversionista_id: number;
   monto: string;
   tipo: "CANCELACION" | "CAPITAL";
   liquidado?: boolean;
@@ -14,6 +15,7 @@ export async function createAbonoCapital(data: {
       .insert(abonos_capital)
       .values({
         credito_id: data.credito_id,
+        inversionista_id: data.inversionista_id,
         monto: data.monto,
         tipo: data.tipo,
         liquidado: data.liquidado ?? false,
@@ -208,5 +210,4 @@ export async function updateAbonoCapital(
     };
   }
 }
-
 

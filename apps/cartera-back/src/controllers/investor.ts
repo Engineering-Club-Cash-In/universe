@@ -406,7 +406,7 @@ export const insertInvestor = async ({ body, set }: any) => {
 
     // 🔥 PROCESAR UNO POR UNO para manejar INSERT vs UPDATE
     for (const inv of inversionistasToUpsert) {
-      // 🔥 Verificar si ya existe
+      const isStrictCreate = inv.operation === "CREATE" || inv.mode === "create";
       let existente = null;
 
       // Buscar por inversionista_id primero (para ediciones directas)
@@ -417,36 +417,98 @@ export const insertInvestor = async ({ body, set }: any) => {
           .where(eq(inversionistas.inversionista_id, Number(inv.inversionista_id)))
           .limit(1);
         existente = result[0] || null;
+
+        if (!existente) {
+          set.status = 404;
+          return {
+            message: "Inversionista no encontrado",
+            error: "investor_not_found",
+          };
+        }
       }
 
-      if (!existente && inv.dpi) {
-        // Buscar por DPI primero
-        const result = await db
-          .select()
-          .from(inversionistas)
-          .where(eq(inversionistas.dpi, inv.dpi))
-          .limit(1);
-        existente = result[0] || null;
+      if (!existente && isStrictCreate) {
+        if (inv.email?.trim()) {
+          const email = inv.email.trim().toLowerCase();
+          const result = await db
+            .select()
+            .from(inversionistas)
+            .where(ilike(inversionistas.email, email))
+            .limit(1);
+
+          if (result[0]) {
+            set.status = 409;
+            return {
+              message: "Ya existe un inversionista con ese email",
+              error: "duplicate_email",
+            };
+          }
+        }
+
+        if (inv.dpi) {
+          const result = await db
+            .select()
+            .from(inversionistas)
+            .where(eq(inversionistas.dpi, inv.dpi))
+            .limit(1);
+
+          if (result[0]) {
+            set.status = 409;
+            return {
+              message: "Ya existe un inversionista con ese DPI",
+              error: "duplicate_dpi",
+            };
+          }
+        }
+
+        if (inv.nombre?.trim()) {
+          const result = await db
+            .select()
+            .from(inversionistas)
+            .where(eq(inversionistas.nombre, inv.nombre.trim()))
+            .limit(1);
+
+          if (result[0]) {
+            set.status = 409;
+            return {
+              message: "Ya existe un inversionista con ese nombre",
+              error: "duplicate_nombre",
+            };
+          }
+        }
       }
 
-      // Si no lo encontro por DPI, buscar por email
-      if (!existente && inv.email?.trim()) {
-        const result = await db
-          .select()
-          .from(inversionistas)
-          .where(eq(inversionistas.email, inv.email.trim().toLowerCase()))
-          .limit(1);
-        existente = result[0] || null;
-      }
+      if (!existente && !isStrictCreate) {
+        if (inv.dpi) {
+          // Compatibilidad legacy: upsert por DPI.
+          const result = await db
+            .select()
+            .from(inversionistas)
+            .where(eq(inversionistas.dpi, inv.dpi))
+            .limit(1);
+          existente = result[0] || null;
+        }
 
-      // Si no lo encontro por email, buscar por nombre
-      if (!existente && inv.nombre?.trim()) {
-        const result = await db
-          .select()
-          .from(inversionistas)
-          .where(eq(inversionistas.nombre, inv.nombre.trim()))
-          .limit(1);
-        existente = result[0] || null;
+        if (!existente && inv.email?.trim()) {
+          // Compatibilidad legacy: upsert por email.
+          const email = inv.email.trim().toLowerCase();
+          const result = await db
+            .select()
+            .from(inversionistas)
+            .where(ilike(inversionistas.email, email))
+            .limit(1);
+          existente = result[0] || null;
+        }
+
+        if (!existente && inv.nombre?.trim()) {
+          // Compatibilidad legacy: upsert por nombre.
+          const result = await db
+            .select()
+            .from(inversionistas)
+            .where(eq(inversionistas.nombre, inv.nombre.trim()))
+            .limit(1);
+          existente = result[0] || null;
+        }
       }
 
       if (existente) {
@@ -521,6 +583,13 @@ export const insertInvestor = async ({ body, set }: any) => {
 
     if (error.code === "23505") {
       const detalle = error.detail || "";
+      if (detalle.includes("email")) {
+        set.status = 409;
+        return {
+          message: "Ya existe un inversionista con ese email",
+          error: "duplicate_email",
+        };
+      }
       if (detalle.includes("dpi")) {
         set.status = 409;
         return {
@@ -5009,6 +5078,7 @@ interface InversionistaResumen {
     | "reinversion_interes"
     | "reinversion_total"
     | "reinversion_variable";
+  status: "activo" | "inactivo" | "pendiente_devolucion";
   banco: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;
@@ -5019,6 +5089,8 @@ interface InversionistaResumen {
   total_abono_general_interes: number;
   total_a_recibir_sin_reinversion: number;
   total_reinversion: number;
+  total_reinversion_capital: number;
+  total_reinversion_interes: number;
   total_a_recibir_con_reinversion: number;
   total_cuota: number;
   boleta_pendiente: BoletaPendiente | null;
@@ -5045,6 +5117,7 @@ interface InversionistaResumenRow {
     | "reinversion_interes"
     | "reinversion_total"
     | "reinversion_variable";
+  status: "activo" | "inactivo" | "pendiente_devolucion";
   banco_nombre: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;
@@ -5055,6 +5128,8 @@ interface InversionistaResumenRow {
   total_abono_general_interes: number;
   total_a_recibir_sin_reinversion: number;
   total_reinversion: number;
+  total_reinversion_capital: number;
+  total_reinversion_interes: number;
   total_a_recibir_con_reinversion: number;
   total_cuota: number;
   reporte_liquidacion_url?: string | null;
@@ -5234,12 +5309,15 @@ async function consultarResumenGlobalPorEstadoPago(
     moneda: inversionistas.moneda,
     emite_factura: inversionistas.emite_factura,
     reinversion: inversionistas.tipo_reinversion,
+    status: inversionistas.status,
     banco_nombre: bancos.nombre,
     tipo_cuenta: inversionistas.tipo_cuenta,
     numero_cuenta: inversionistas.numero_cuenta,
     total_abono_capital: sql<number>`COALESCE(SUM(${pe.abono_capital}), 0)`,
     total_abono_interes: sql<number>`COALESCE(SUM(${pe.abono_interes}), 0)`,
     total_abono_iva: sql<number>`COALESCE(SUM(${pe.abono_iva_12}), 0)`,
+    total_reinversion_capital: sql<number>`0`,
+    total_reinversion_interes: sql<number>`0`,
     total_isr: sql<number>`COALESCE(SUM(
       CASE
         WHEN ${inversionistas.emite_factura} THEN 0
@@ -5431,6 +5509,7 @@ async function consultarResumenGlobalPorEstadoPago(
     inversionistas.moneda,
     inversionistas.emite_factura,
     inversionistas.tipo_reinversion,
+    inversionistas.status,
     inversionistas.monto_reinversion,
     bancos.nombre,
     inversionistas.tipo_cuenta,
@@ -5487,6 +5566,7 @@ async function consultarResumenGlobalDesdeLiquidaciones(
     moneda: inversionistas.moneda,
     emite_factura: inversionistas.emite_factura,
     reinversion: inversionistas.tipo_reinversion,
+    status: inversionistas.status,
     banco_nombre: bancos.nombre,
     tipo_cuenta: inversionistas.tipo_cuenta,
     numero_cuenta: inversionistas.numero_cuenta,
@@ -5496,6 +5576,8 @@ async function consultarResumenGlobalDesdeLiquidaciones(
     total_isr: sql<number>`COALESCE(SUM(${liquidaciones.total_isr}), 0)`,
     total_abono_general_interes: sql<number>`COALESCE(SUM(${liquidaciones.total_interes} + ${liquidaciones.total_iva} - ${liquidaciones.total_isr}), 0)`,
     total_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.reinversion_total}), 0)`,
+    total_reinversion_capital: sql<number>`COALESCE(SUM(${liquidaciones.reinversion_capital}), 0)`,
+    total_reinversion_interes: sql<number>`COALESCE(SUM(${liquidaciones.reinversion_interes}), 0)`,
     total_cuota: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0)`,
     total_a_recibir_con_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0)`,
     total_a_recibir_sin_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0) + COALESCE(SUM(${liquidaciones.reinversion_total}), 0)`,
@@ -5513,6 +5595,7 @@ async function consultarResumenGlobalDesdeLiquidaciones(
     inversionistas.moneda,
     inversionistas.emite_factura,
     inversionistas.tipo_reinversion,
+    inversionistas.status,
     bancos.nombre,
     inversionistas.tipo_cuenta,
     inversionistas.numero_cuenta,
@@ -5559,6 +5642,7 @@ function mapResumenRow(
     currencySymbol,
     emite_factura: inv.emite_factura,
     reinversion: inv.reinversion,
+    status: inv.status,
     banco: inv.banco_nombre,
     tipo_cuenta: inv.tipo_cuenta,
     numero_cuenta: inv.numero_cuenta,
@@ -5569,6 +5653,8 @@ function mapResumenRow(
     total_abono_general_interes: convert(inv.total_abono_general_interes),
     total_a_recibir_sin_reinversion: convert(inv.total_a_recibir_sin_reinversion),
     total_reinversion: convert(inv.total_reinversion),
+    total_reinversion_capital: convert(inv.total_reinversion_capital),
+    total_reinversion_interes: convert(inv.total_reinversion_interes),
     total_a_recibir_con_reinversion: convert(inv.total_a_recibir_con_reinversion),
     total_cuota: convert(inv.total_cuota),
     boleta_pendiente,
@@ -5584,12 +5670,31 @@ async function generateResumenGlobalWorkbook(
   includeEstado: boolean
 ) {
   const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet("Resumen Inversionistas");
+  workbook.creator = "Club Cashin";
+  workbook.created = new Date();
+  const sheet = workbook.addWorksheet("Resumen Inversionistas", {
+    views: [{ showGridLines: false }],
+  });
+
+  // Paleta corporativa
+  const COLOR = {
+    navy: "FF0F1B4C",
+    blue: "FF1E40AF",
+    blueLight: "FFDBE6F8",
+    green: "FF00B050",
+    greenSoft: "FFD7F0DA",
+    grayHeader: "FF305496",
+    zebra: "FFF7F8FA",
+    border: "FFB7BCC8",
+    textMuted: "FF64748B",
+    isrMuted: "FFE0E0E0",
+  };
 
   const headers = [
     "ID",
     "Nombre",
     ...(includeEstado ? ["Estado"] : []),
+    "Status Inversionista",
     "Factura",
     "Reinversión",
     "Banco",
@@ -5600,34 +5705,146 @@ async function generateResumenGlobalWorkbook(
     "IVA",
     "ISR",
     "Total sin Reinversión",
+    "Reinversión Capital",
+    "Reinversión Interés",
     "Reinversión",
     "Total con Reinversión",
     "Cuota",
   ];
 
-  const headerRow = sheet.addRow(headers);
-  headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  const lastColLetter = (() => {
+    const n = headers.length;
+    let s = "";
+    let v = n;
+    while (v > 0) {
+      const r = (v - 1) % 26;
+      s = String.fromCharCode(65 + r) + s;
+      v = Math.floor((v - 1) / 26);
+    }
+    return s;
+  })();
+
+  // ── Encabezado con logo + título ────────────────────────────────────────────
+  const logoUrl = process.env.LOGO_URL || "";
+  let logoCols = 0;
+  if (logoUrl) {
+    try {
+      const res = await fetch(logoUrl);
+      if (res.ok) {
+        const buf = Buffer.from(await res.arrayBuffer());
+        const ct = res.headers.get("content-type") || "";
+        const ext: "png" | "jpeg" = ct.includes("png") ? "png" : "jpeg";
+        const imgId = workbook.addImage({
+          base64: buf.toString("base64"),
+          extension: ext,
+        });
+        sheet.addImage(imgId, {
+          tl: { col: 0, row: 0 },
+          ext: { width: 140, height: 70 },
+        });
+        logoCols = 2;
+      }
+    } catch {
+      // si falla la imagen seguimos sin logo
+    }
+  }
+
+  // Filas 1-3 reservadas para el header del reporte
+  sheet.getRow(1).height = 28;
+  sheet.getRow(2).height = 24;
+  sheet.getRow(3).height = 20;
+
+  const titleStartCol = logoCols > 0 ? logoCols + 1 : 1;
+  const titleStartLetter = String.fromCharCode(64 + titleStartCol);
+
+  sheet.mergeCells(`${titleStartLetter}1:${lastColLetter}2`);
+  const titleCell = sheet.getCell(`${titleStartLetter}1`);
+  titleCell.value = "Resumen de Inversionistas";
+  titleCell.font = { bold: true, size: 18, color: { argb: COLOR.navy } };
+  titleCell.alignment = { horizontal: "left", vertical: "middle" };
+
+  sheet.mergeCells(`${titleStartLetter}3:${lastColLetter}3`);
+  const fechaCell = sheet.getCell(`${titleStartLetter}3`);
+  const ahora = new Date();
+  fechaCell.value = `Generado el ${ahora.toLocaleString("es-GT", {
+    timeZone: "America/Guatemala",
+  })}`;
+  fechaCell.font = { italic: true, size: 10, color: { argb: COLOR.textMuted } };
+  fechaCell.alignment = { horizontal: "left", vertical: "middle" };
+
+  // Fila 4 vacía como separador
+  sheet.getRow(4).height = 6;
+
+  // ── Header de columnas en fila 5 ────────────────────────────────────────────
+  const HEADER_ROW = 5;
+  const headerRow = sheet.getRow(HEADER_ROW);
+  headers.forEach((h, i) => {
+    headerRow.getCell(i + 1).value = h;
+  });
+  headerRow.height = 32;
+  headerRow.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
   headerRow.fill = {
     type: "pattern",
     pattern: "solid",
-    fgColor: { argb: "FF0070C0" },
+    fgColor: { argb: COLOR.blue },
   };
-  headerRow.alignment = { horizontal: "center", vertical: "middle" };
+  headerRow.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+  headerRow.eachCell((cell) => {
+    cell.border = {
+      top: { style: "thin", color: { argb: COLOR.border } },
+      bottom: { style: "medium", color: { argb: COLOR.navy } },
+      left: { style: "thin", color: { argb: COLOR.border } },
+      right: { style: "thin", color: { argb: COLOR.border } },
+    };
+  });
 
   // Header de "Cuota" resaltado en verde
   const cuotaHeaderCell = headerRow.getCell(headers.length);
   cuotaHeaderCell.fill = {
     type: "pattern",
     pattern: "solid",
-    fgColor: { argb: "FF00B050" },
+    fgColor: { argb: COLOR.green },
   };
-  cuotaHeaderCell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  cuotaHeaderCell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
 
-  rows.forEach((inv) => {
+  // Mapa de etiquetas para el estado de liquidación en el Excel
+  const estadoLabel: Record<string, string> = {
+    pending: "Pendiente",
+    uploaded: "Boleta subida",
+    liquidated: "Liquidado",
+    sin_movimiento: "Pendiente de liquidar",
+  };
+
+  // Acumuladores para fila de TOTALES
+  const totales = {
+    capital: 0,
+    interes: 0,
+    iva: 0,
+    isr: 0,
+    sin_reinversion: 0,
+    reinversion_capital: 0,
+    reinversion_interes: 0,
+    reinversion: 0,
+    con_reinversion: 0,
+    cuota: 0,
+  };
+
+  // Índices de columnas (1-based, según orden en `headers`)
+  const offset = includeEstado ? 1 : 0; // columna "Estado" desplaza todo en 1
+  const isrCellIndex = 12 + offset;
+  const firstMoneyColumn = 9 + offset;
+  const lastMoneyColumn = 18 + offset;
+
+  rows.forEach((inv, idx) => {
+    const estadoRaw =
+      "estado_liquidacion_resumen" in inv ? inv.estado_liquidacion_resumen : "";
+    const estadoCell = estadoRaw ? estadoLabel[estadoRaw] ?? estadoRaw : "";
+
     const row = sheet.addRow([
       inv.inversionista_id,
       inv.nombre,
-      ...("estado_liquidacion_resumen" in inv ? [inv.estado_liquidacion_resumen] : includeEstado ? [""] : []),
+      ...(includeEstado ? [estadoCell] : []),
+      inv.status ?? "",
       inv.emite_factura ? "Sí" : "No",
       inv.reinversion || "sin_reinversion",
       inv.banco ?? "",
@@ -5638,21 +5855,55 @@ async function generateResumenGlobalWorkbook(
       Number(inv.total_abono_iva).toFixed(2),
       Number(inv.total_isr).toFixed(2),
       Number(inv.total_a_recibir_sin_reinversion).toFixed(2),
+      Number(inv.total_reinversion_capital ?? 0).toFixed(2),
+      Number(inv.total_reinversion_interes ?? 0).toFixed(2),
       Number(inv.total_reinversion).toFixed(2),
       Number(inv.total_a_recibir_con_reinversion).toFixed(2),
       Number(inv.total_cuota).toFixed(2),
     ]);
 
-    const isrCellIndex = includeEstado ? 12 : 11;
-    const firstMoneyColumn = includeEstado ? 9 : 8;
-    const lastMoneyColumn = includeEstado ? 16 : 15;
+    row.height = 18;
+    row.alignment = { vertical: "middle" };
+
+    totales.capital += Number(inv.total_abono_capital) || 0;
+    totales.interes += Number(inv.total_abono_interes) || 0;
+    totales.iva += Number(inv.total_abono_iva) || 0;
+    totales.isr += Number(inv.total_isr) || 0;
+    totales.sin_reinversion += Number(inv.total_a_recibir_sin_reinversion) || 0;
+    totales.reinversion_capital += Number(inv.total_reinversion_capital ?? 0) || 0;
+    totales.reinversion_interes += Number(inv.total_reinversion_interes ?? 0) || 0;
+    totales.reinversion += Number(inv.total_reinversion) || 0;
+    totales.con_reinversion += Number(inv.total_a_recibir_con_reinversion) || 0;
+    totales.cuota += Number(inv.total_cuota) || 0;
+
+    // Zebra striping y bordes
+    const isZebra = idx % 2 === 1;
+    row.eachCell({ includeEmpty: true }, (cell) => {
+      if (isZebra) {
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: COLOR.zebra },
+        };
+      }
+      cell.border = {
+        top: { style: "hair", color: { argb: COLOR.border } },
+        bottom: { style: "hair", color: { argb: COLOR.border } },
+        left: { style: "hair", color: { argb: COLOR.border } },
+        right: { style: "hair", color: { argb: COLOR.border } },
+      };
+    });
+
+    // Negrita para nombre y tipo de reinversión (más fácil de leer)
+    row.getCell(2).font = { bold: true, color: { argb: COLOR.navy } };
+    row.getCell(5 + offset).font = { italic: true, color: { argb: COLOR.textMuted } }; // Reinversión (tipo)
 
     if (inv.emite_factura) {
       const isrCell = row.getCell(isrCellIndex);
       isrCell.fill = {
         type: "pattern",
         pattern: "solid",
-        fgColor: { argb: "FFE0E0E0" },
+        fgColor: { argb: COLOR.isrMuted },
       };
       isrCell.font = { color: { argb: "FF808080" } };
     }
@@ -5661,26 +5912,84 @@ async function generateResumenGlobalWorkbook(
       row.getCell(i).numFmt = "Q#,##0.00";
     }
 
-    // Resaltar columna "Cuota" (última columna) en verde
+    // Resaltar columna "Cuota" (última columna) en verde suave
     const cuotaCell = row.getCell(lastMoneyColumn);
     cuotaCell.fill = {
       type: "pattern",
       pattern: "solid",
-      fgColor: { argb: "FF92D050" },
+      fgColor: { argb: COLOR.greenSoft },
     };
-    cuotaCell.font = { bold: true };
+    cuotaCell.font = { bold: true, color: { argb: COLOR.navy } };
   });
 
-  sheet.columns.forEach((col) => {
+  // ── Fila de TOTALES al final ────────────────────────────────────────────────
+  if (rows.length > 0) {
+    const totalesRowData: any[] = new Array(headers.length).fill("");
+    totalesRowData[0] = "";
+    totalesRowData[1] = "TOTALES";
+    totalesRowData[firstMoneyColumn - 1] = Number(totales.capital).toFixed(2);
+    totalesRowData[firstMoneyColumn] = Number(totales.interes).toFixed(2);
+    totalesRowData[firstMoneyColumn + 1] = Number(totales.iva).toFixed(2);
+    totalesRowData[firstMoneyColumn + 2] = Number(totales.isr).toFixed(2);
+    totalesRowData[firstMoneyColumn + 3] = Number(totales.sin_reinversion).toFixed(2);
+    totalesRowData[firstMoneyColumn + 4] = Number(totales.reinversion_capital).toFixed(2);
+    totalesRowData[firstMoneyColumn + 5] = Number(totales.reinversion_interes).toFixed(2);
+    totalesRowData[firstMoneyColumn + 6] = Number(totales.reinversion).toFixed(2);
+    totalesRowData[firstMoneyColumn + 7] = Number(totales.con_reinversion).toFixed(2);
+    totalesRowData[firstMoneyColumn + 8] = Number(totales.cuota).toFixed(2);
+
+    const totalesRow = sheet.addRow(totalesRowData);
+    totalesRow.height = 24;
+    totalesRow.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+    totalesRow.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: COLOR.grayHeader },
+    };
+    totalesRow.alignment = { vertical: "middle" };
+    totalesRow.eachCell({ includeEmpty: true }, (cell) => {
+      cell.border = {
+        top: { style: "medium", color: { argb: COLOR.navy } },
+        bottom: { style: "medium", color: { argb: COLOR.navy } },
+        left: { style: "thin", color: { argb: COLOR.border } },
+        right: { style: "thin", color: { argb: COLOR.border } },
+      };
+    });
+    for (let i = firstMoneyColumn; i <= lastMoneyColumn; i++) {
+      totalesRow.getCell(i).numFmt = "Q#,##0.00";
+    }
+    const totalesCuotaCell = totalesRow.getCell(lastMoneyColumn);
+    totalesCuotaCell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: COLOR.green },
+    };
+  }
+
+  // ── Anchos de columna inteligentes ──────────────────────────────────────────
+  sheet.columns.forEach((col, i) => {
     let maxLength = 10;
-    col.eachCell?.({ includeEmpty: true }, (cell) => {
-      const len = cell.value ? cell.value.toString().length : 0;
+    col.eachCell?.({ includeEmpty: false }, (cell) => {
+      const v = cell.value;
+      if (v == null) return;
+      const txt = typeof v === "object" ? "" : String(v);
+      const len = txt.length;
       if (len > maxLength) maxLength = len;
     });
-    col.width = maxLength + 2;
+    // El ID puede ser angosto; el nombre necesita más espacio
+    if (i === 0) col.width = 6;
+    else if (i === 1) col.width = Math.min(Math.max(maxLength + 2, 22), 36);
+    else col.width = Math.min(maxLength + 3, 28);
   });
 
-  sheet.views = [{ state: "frozen", ySplit: 1 }];
+  // Filtros + congelar header
+  sheet.autoFilter = {
+    from: { row: HEADER_ROW, column: 1 },
+    to: { row: HEADER_ROW, column: headers.length },
+  };
+  sheet.views = [
+    { state: "frozen", xSplit: 2, ySplit: HEADER_ROW, showGridLines: false },
+  ];
 
   const buffer = await workbook.xlsx.writeBuffer();
   const filename = `resumen_inversionistas_${Date.now()}.xlsx`;
@@ -5747,7 +6056,8 @@ export async function resumenGlobalLiquidaciones(
   mes?: number,
   anio?: number,
   estado: EstadoLiquidacionResumenFilter = "pending",
-  excel: boolean = false
+  excel: boolean = false,
+  incluirSinMovimiento: boolean = false
 ): Promise<
   InversionistaResumenConEstado[] | { success: boolean; url: string; filename: string }
 > {
@@ -5815,6 +6125,63 @@ export async function resumenGlobalLiquidaciones(
       ),
       estado_liquidacion_resumen: estadoResumen,
     });
+  }
+
+  if (incluirSinMovimiento) {
+    const idsConMovimiento = new Set(result.map((r) => r.inversionista_id));
+    const filtros: any[] = [eq(inversionistas.permite_distribucion, false)];
+    if (inversionistaId) {
+      filtros.push(eq(inversionistas.inversionista_id, inversionistaId));
+    }
+
+    const todos = await db
+      .select({
+        inversionista_id: inversionistas.inversionista_id,
+        nombre: inversionistas.nombre,
+        moneda: inversionistas.moneda,
+        emite_factura: inversionistas.emite_factura,
+        reinversion: inversionistas.tipo_reinversion,
+        status: inversionistas.status,
+        banco_nombre: bancos.nombre,
+        tipo_cuenta: inversionistas.tipo_cuenta,
+        numero_cuenta: inversionistas.numero_cuenta,
+      })
+      .from(inversionistas)
+      .leftJoin(bancos, eq(inversionistas.banco_id, bancos.banco_id))
+      .where(and(...filtros));
+
+    for (const inv of todos) {
+      if (idsConMovimiento.has(inv.inversionista_id)) continue;
+
+      const stub: InversionistaResumenRow = {
+        inversionista_id: inv.inversionista_id,
+        nombre: inv.nombre,
+        moneda: inv.moneda as "quetzales" | "dolares",
+        emite_factura: inv.emite_factura,
+        reinversion: inv.reinversion as InversionistaResumenRow["reinversion"],
+        status: inv.status as InversionistaResumenRow["status"],
+        banco_nombre: inv.banco_nombre,
+        tipo_cuenta: inv.tipo_cuenta,
+        numero_cuenta: inv.numero_cuenta,
+        total_abono_capital: 0,
+        total_abono_interes: 0,
+        total_abono_iva: 0,
+        total_isr: 0,
+        total_abono_general_interes: 0,
+        total_a_recibir_sin_reinversion: 0,
+        total_reinversion: 0,
+        total_reinversion_capital: 0,
+        total_reinversion_interes: 0,
+        total_a_recibir_con_reinversion: 0,
+        total_cuota: 0,
+        reporte_liquidacion_url: null,
+      };
+
+      result.push({
+        ...mapResumenRow(stub, null, null),
+        estado_liquidacion_resumen: "sin_movimiento",
+      });
+    }
   }
 
   console.log("resumen-global-liquidaciones estado:", estado);
@@ -6438,4 +6805,3 @@ export async function getCreditosEspejoPendientes(
 
   return { data: paginados, total, page, pageSize };
 }
-

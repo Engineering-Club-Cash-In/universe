@@ -49,7 +49,6 @@ export type {
   SimpleTechCredentials,
   SimpleTechConfig,
   RetryConfig,
-  TokenResponse,
   // Canales y tipos
   Channel,
   MessageType,

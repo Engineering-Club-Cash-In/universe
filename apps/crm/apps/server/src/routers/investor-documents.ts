@@ -262,6 +262,7 @@ export const investorDocumentsRouter = {
 		.handler(async ({ input, context }) => {
 			// 1. Crear inversionista en cartera-back
 			const createResult = await carteraBackClient.createInvestor({
+				operation: "CREATE",
 				nombre: input.nombre,
 				dpi: input.dpi ? Number(input.dpi) : null,
 				email: input.email ?? null,

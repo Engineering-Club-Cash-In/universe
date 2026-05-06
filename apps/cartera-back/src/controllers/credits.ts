@@ -758,15 +758,11 @@ export async function getCreditosWithUserByMesAnio(
     }
   }
 
-  console.log(`fecha desde ${fecha_desde}`);
-  console.log(`fecha hasta ${fecha_hasta}`);
 
   if (capital_min !== undefined) {
-    console.log(`🔎 Filtrando por capital mínimo: ${capital_min}`);
     conditions.push(sql`${creditos.capital}::numeric >= ${capital_min}`);
   }
   if (capital_max !== undefined) {
-    console.log(`🔎 Filtrando por capital máximo: ${capital_max}`);
     conditions.push(sql`${creditos.capital}::numeric <= ${capital_max}`);
   }
 

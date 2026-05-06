@@ -15,7 +15,7 @@ import {
 import { desc, gte } from "drizzle-orm";
 import Big from "big.js";
 import { z } from "zod";
-import { and, eq, lt, sql, asc, lte, inArray } from "drizzle-orm";
+import { and, eq, lt, gt, sql, asc, lte, inArray } from "drizzle-orm";
 import { removeAccents } from "../utils/functions/generalFunctions";
 import {
   processAndReplaceCreditInvestors,
@@ -1860,7 +1860,8 @@ export async function obtenerCreditosConPagosPendientes(
           eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId),
           inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "PENDIENTE_CANCELACION", "EN_CONVENIO"]),
           eq(creditos_inversionistas_espejo.status, "completado"),
-          lt(creditos_inversionistas_espejo.fecha_inicio_participacion, rangoMesActual.inicio)
+          lt(creditos_inversionistas_espejo.fecha_inicio_participacion, rangoMesActual.inicio),
+          gt(creditos_inversionistas_espejo.monto_aportado, "0")
         )
       );
 

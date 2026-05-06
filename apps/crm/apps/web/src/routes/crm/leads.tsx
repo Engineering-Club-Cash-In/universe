@@ -457,12 +457,23 @@ function RouteComponent() {
 
 	const updateLeadMutation = useMutation({
 		mutationFn: (input: UpdateLeadInput) => client.updateLead(input),
-		onSuccess: (_data, variables) => {
-			queryClient.invalidateQueries({
+		onSuccess: async (_data, variables) => {
+			await queryClient.invalidateQueries({
 				predicate: (query) =>
 					query.queryKey[0] === "getLeads" ||
-					query.queryKey[0] === "getLeadsStats",
+					query.queryKey[0] === "getLeadsStats" ||
+					query.queryKey[0] === "getLeadById",
 			});
+
+			// Refrescar el lead seleccionado para que el modal muestre los datos actualizados
+			if (selectedLead?.id === variables.id) {
+				const freshResult = await client.getLeads({ id: variables.id });
+				const freshLead = (freshResult?.data as Lead[] | undefined)?.[0];
+				if (freshLead) {
+					setSelectedLead(freshLead);
+				}
+			}
+
 			// Solo mostrar toast y cerrar dialogs si NO es una conversión
 			if (variables.status !== "converted") {
 				toast.success("Lead actualizado exitosamente");

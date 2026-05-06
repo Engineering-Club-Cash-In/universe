@@ -12,6 +12,7 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { authClient } from "@/lib/auth-client";
+import { shouldRedirectToLogin } from "@/lib/auth-session";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/admin/import")({
@@ -19,14 +20,18 @@ export const Route = createFileRoute("/admin/import")({
 });
 
 function RouteComponent() {
-	const { data: session, isPending } = authClient.useSession();
+	const {
+		data: session,
+		error: sessionError,
+		isPending,
+	} = authClient.useSession();
 	const navigate = Route.useNavigate();
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 	const [companyId, setCompanyId] = useState<string | null>(null);
 
 	useEffect(() => {
-		if (!session && !isPending) {
+		if (shouldRedirectToLogin({ error: sessionError, isPending, session })) {
 			navigate({ to: "/login" });
 		} else if (
 			session &&
@@ -36,7 +41,7 @@ function RouteComponent() {
 			navigate({ to: "/dashboard" });
 			toast.error("Acceso denegado: se requiere rol de administrador");
 		}
-	}, [session, isPending, userProfile.data]);
+	}, [session, sessionError, isPending, userProfile.data, navigate]);
 
 	// Setup mutation
 	const setupMutation = useMutation({

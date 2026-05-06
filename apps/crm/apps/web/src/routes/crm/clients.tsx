@@ -67,6 +67,7 @@ import {
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { authClient } from "@/lib/auth-client";
+import { shouldRedirectToLogin } from "@/lib/auth-session";
 import { formatGuatemalaDate } from "@/lib/crm-formatters";
 import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
@@ -219,7 +220,11 @@ type ClientData = {
 };
 
 function RouteComponent() {
-	const { data: session, isPending } = authClient.useSession();
+	const {
+		data: session,
+		error: sessionError,
+		isPending,
+	} = authClient.useSession();
 	const navigate = Route.useNavigate();
 	const search = Route.useSearch();
 	const [searchTerm, setSearchTerm] = useState("");
@@ -412,7 +417,7 @@ function RouteComponent() {
 	});
 
 	useEffect(() => {
-		if (!session && !isPending) {
+		if (shouldRedirectToLogin({ error: sessionError, isPending, session })) {
 			navigate({ to: "/login" });
 		} else if (
 			session &&
@@ -422,7 +427,7 @@ function RouteComponent() {
 			navigate({ to: "/dashboard" });
 			toast.error("Acceso denegado: Se requiere acceso al CRM");
 		}
-	}, [session, isPending, userProfile.data?.role, navigate]);
+	}, [session, sessionError, isPending, userProfile.data?.role, navigate]);
 
 	const updateLeadMutation = useMutation({
 		mutationFn: (input: {
@@ -549,7 +554,11 @@ function RouteComponent() {
 					</CardHeader>
 					<CardContent>
 						<div className="font-bold text-2xl">
-							Q{(statsQuery.data?.totalValue ?? 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+							Q
+							{(statsQuery.data?.totalValue ?? 0).toLocaleString("es-GT", {
+								minimumFractionDigits: 2,
+								maximumFractionDigits: 2,
+							})}
 						</div>
 						<p className="text-muted-foreground text-xs">
 							En créditos cerrados
@@ -1274,7 +1283,7 @@ function RouteComponent() {
 										Análisis de Capacidad de Pago
 									</h3>
 									<div className="grid grid-cols-2 gap-4">
-										<div className="space-y-3 rounded-lg bg-green-50 dark:bg-green-900/20 p-3">
+										<div className="space-y-3 rounded-lg bg-green-50 p-3 dark:bg-green-900/20">
 											<h4 className="font-medium text-sm">
 												Ingresos Mensuales
 											</h4>
@@ -1322,7 +1331,7 @@ function RouteComponent() {
 											</div>
 										</div>
 
-										<div className="space-y-3 rounded-lg bg-red-50 dark:bg-red-900/20 p-3">
+										<div className="space-y-3 rounded-lg bg-red-50 p-3 dark:bg-red-900/20">
 											<h4 className="font-medium text-sm">Gastos Mensuales</h4>
 											<div className="flex justify-between text-sm">
 												<span className="text-muted-foreground">Fijos:</span>
@@ -1370,7 +1379,7 @@ function RouteComponent() {
 									</div>
 
 									{/* Disponibilidad Económica */}
-									<div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 p-3">
+									<div className="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
 										<div className="flex items-center justify-between">
 											<div>
 												<p className="font-medium text-sm">

@@ -16,7 +16,56 @@ export function shouldRedirectToLogin({
 	isPending,
 	session,
 }: RedirectToLoginInput) {
-	return !session && !isPending && !error;
+	return !session && !isPending && !isTransientSessionError(error);
+}
+
+function getErrorStatus(error: unknown) {
+	if (!error || typeof error !== "object") {
+		return undefined;
+	}
+
+	const maybeError = error as {
+		response?: { status?: unknown };
+		status?: unknown;
+	};
+	const status = maybeError.status ?? maybeError.response?.status;
+
+	return typeof status === "number" ? status : undefined;
+}
+
+function getErrorMessage(error: unknown) {
+	if (error instanceof Error) {
+		return error.message.toLowerCase();
+	}
+
+	if (!error || typeof error !== "object") {
+		return "";
+	}
+
+	const maybeError = error as { message?: unknown };
+	return typeof maybeError.message === "string"
+		? maybeError.message.toLowerCase()
+		: "";
+}
+
+function isTransientSessionError(error: unknown) {
+	if (!error) {
+		return false;
+	}
+
+	const status = getErrorStatus(error);
+	if (status === 401 || status === 403) {
+		return false;
+	}
+
+	const message = getErrorMessage(error);
+	return (
+		message.includes("failed to fetch") ||
+		message.includes("network") ||
+		message.includes("timeout") ||
+		message.includes("load failed") ||
+		message.includes("internet")
+	);
 }
 
 function safeDetail(detail: Record<string, unknown> | undefined) {

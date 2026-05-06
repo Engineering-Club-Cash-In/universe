@@ -22,7 +22,7 @@ describe("shouldRedirectToLogin", () => {
 		).toBe(false);
 	});
 
-	test("does not redirect when session lookup failed", () => {
+	test("does not redirect when session lookup failed due to network", () => {
 		expect(
 			shouldRedirectToLogin({
 				error: new Error("Failed to fetch"),
@@ -30,6 +30,36 @@ describe("shouldRedirectToLogin", () => {
 				session: null,
 			}),
 		).toBe(false);
+	});
+
+	test("redirects when session lookup fails with unauthorized status", () => {
+		expect(
+			shouldRedirectToLogin({
+				error: { status: 401 },
+				isPending: false,
+				session: null,
+			}),
+		).toBe(true);
+	});
+
+	test("redirects when session lookup fails with forbidden status", () => {
+		expect(
+			shouldRedirectToLogin({
+				error: { response: { status: 403 } },
+				isPending: false,
+				session: null,
+			}),
+		).toBe(true);
+	});
+
+	test("redirects when session lookup fails with a non-transient error", () => {
+		expect(
+			shouldRedirectToLogin({
+				error: new Error("Invalid cookie signature"),
+				isPending: false,
+				session: null,
+			}),
+		).toBe(true);
 	});
 
 	test("does not redirect when a session exists", () => {

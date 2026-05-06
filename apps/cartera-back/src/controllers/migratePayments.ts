@@ -66,7 +66,7 @@ export const ajustarCuotasConSIFCO = async ({
     const infoPagos = await consultarEstadoCuentaPrestamo(numero_credito_sifco);
     
     // 🔥 Agarrar la PRIMERA transacción (el desembolso)
-    const transaccionDesembolso = infoPagos.ConsultaResultado.EstadoCuenta_Transacciones[0];
+    const transaccionDesembolso = infoPagos?.ConsultaResultado?.EstadoCuenta_Transacciones?.[0];
     
     if (transaccionDesembolso && transaccionDesembolso.EstadoCuenta_Detalles) {
       // Buscar el detalle "LIQUIDO A DESEMBOLSAR" (CrMoDeSalCod: 59)
@@ -728,7 +728,7 @@ export const marcarCuotasPagadasHastaNumero = async ({
 
   try {
     const infoPagos = await consultarEstadoCuentaPrestamo(numero_credito_sifco);
-    const trx = infoPagos.ConsultaResultado.EstadoCuenta_Transacciones?.[0];
+    const trx = infoPagos?.ConsultaResultado?.EstadoCuenta_Transacciones?.[0];
     const liquido = trx?.EstadoCuenta_Detalles?.find(
       (d: any) => d.CrMoDeSalCod === 59
     );

@@ -17,6 +17,7 @@ export const abonosCapitalRouter = new Elysia({ prefix: "/api/abonos-capital" })
     {
       body: t.Object({
         credito_id: t.Number(),
+        inversionista_id: t.Number(),
         monto: t.String(),
         tipo: t.Union([t.Literal("CANCELACION"), t.Literal("CAPITAL")]),
         liquidado: t.Optional(t.Boolean()),

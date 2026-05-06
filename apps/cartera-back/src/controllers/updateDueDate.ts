@@ -218,9 +218,7 @@ export const updateDueDates = async ({
           );
 
           // Solo actualizar si la fecha cambió
-          const fechaOriginalStr = typeof fechaOriginal === "string"
-            ? fechaOriginal
-            : `${fechaOriginal.getFullYear()}-${(fechaOriginal.getMonth() + 1).toString().padStart(2, "0")}-${fechaOriginal.getDate().toString().padStart(2, "0")}`;
+          const fechaOriginalStr = fechaOriginal;
 
           if (nuevaFecha !== fechaOriginalStr) {
             // Actualizar cuotas_credito
@@ -363,9 +361,7 @@ export const fixCreditosWithoutFebruary = async ({
 
       if (ultimaCuotaPagada) {
         const fecha = ultimaCuotaPagada.fecha_vencimiento;
-        const dia = typeof fecha === "string"
-          ? parseInt(fecha.split("-")[2], 10)
-          : fecha.getDate();
+        const dia = parseInt(fecha.split("-")[2], 10);
 
         // Si el día es 28 o 29, probablemente es un ajuste de febrero, usar 30
         const diaPago = dia >= 28 && dia <= 29 ? 30 : dia;
@@ -497,9 +493,7 @@ export const cambiarFechaInicio = async ({
       return { success: false, message: "El crédito no tiene cuota 1" };
     }
 
-    const fechaAnterior = typeof cuotaUno.fecha_vencimiento === "string"
-      ? cuotaUno.fecha_vencimiento
-      : `${cuotaUno.fecha_vencimiento.getFullYear()}-${(cuotaUno.fecha_vencimiento.getMonth() + 1).toString().padStart(2, "0")}-${cuotaUno.fecha_vencimiento.getDate().toString().padStart(2, "0")}`;
+    const fechaAnterior = cuotaUno.fecha_vencimiento;
 
     await db.insert(historial_cambio_fecha).values({
       credito_id: creditoDb.credito_id,
@@ -528,9 +522,7 @@ export const cambiarFechaInicio = async ({
         diaInicio
       );
 
-      const fechaOriginalStr = typeof cuota.fecha_vencimiento === "string"
-        ? cuota.fecha_vencimiento
-        : `${cuota.fecha_vencimiento.getFullYear()}-${(cuota.fecha_vencimiento.getMonth() + 1).toString().padStart(2, "0")}-${cuota.fecha_vencimiento.getDate().toString().padStart(2, "0")}`;
+      const fechaOriginalStr = cuota.fecha_vencimiento;
 
       if (nuevaFecha !== fechaOriginalStr) {
         // Actualizar cuotas_credito

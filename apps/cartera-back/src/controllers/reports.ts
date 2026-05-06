@@ -580,6 +580,9 @@ export async function exportPagosConInversionistasExcel(
     formatoCredito?: string;
     soloAplicados?: boolean;
     fechaAplicado?: string;
+    fechaBoleta?: string;
+    fechaBoletaInicio?: string;
+    fechaBoletaFin?: string;
   }
 ) {
   // 1️⃣ Obtener los datos completos de tu servicio
@@ -887,6 +890,9 @@ export async function exportPagosAdvisorExcel(
     formatoCredito?: string;
     soloAplicados?: boolean;
     fechaAplicado?: string;
+    fechaBoleta?: string;
+    fechaBoletaInicio?: string;
+    fechaBoletaFin?: string;
   }
 ) {
   const result = await getPagosConInversionistas({

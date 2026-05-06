@@ -141,6 +141,7 @@ export interface Credito {
   formato_credito: string;
   statusCredit: string; // ACTIVO, CANCELADO, INCOBRABLE
   permite_abono_capital?: boolean;
+  devolucion_cube?: boolean;
 }
 
 export interface Usuario {
@@ -210,7 +211,7 @@ export interface ConvenioActivo {
   created_by: number;
   created_at: string;
   updated_at: string;
-  
+
   // 🔥 NUEVOS CAMPOS TIPADOS
   cuotasEnConvenio: CuotaEnConvenio[];
   pagosConvenio: PagoConvenio[];
@@ -267,10 +268,10 @@ export interface GetCreditoByNumeroActivoResponse {
   cuotasAtrasadas: Cuota[];
   cuotasPagadas: Cuota[];
   cuotasPendientes: Cuota[];
-  
+
   // 🔥 CONVENIO (puede ser null)
   convenioActivo: ConvenioActivo | null;
-  
+
   // 🔥 ESTOS YA NO SON NECESARIOS porque están dentro de convenioActivo
   // pero los dejamos para compatibilidad
   cuotasEnConvenio: Cuota[];
@@ -409,6 +410,7 @@ export interface Credito {
   royalti: string;
   mora: string;
   permite_abono_capital?: boolean;
+  devolucion_cube?: boolean;
 }
 
 export interface Usuario {
@@ -650,7 +652,7 @@ export interface InversionistaPayload {
   inversionista_id: number;
   monto_aportado: number;
   porcentaje_cash_in: number;
-  porcentaje_inversion: number; 
+  porcentaje_inversion: number;
   fecha_inicio_participacion?: string;
   cuota_inversionista?: number;
 }
@@ -666,7 +668,7 @@ export interface UpdateCreditBody {
   porcentaje_interes?: number;
   deudaTotal?: number;
   cuota: number;
-  iva_12?: number; 
+  iva_12?: number;
   gps?: number;
   observaciones?: string;
   no_poliza?: number;
@@ -690,6 +692,7 @@ export interface UpdateCreditBody {
 
   // Abono capital
   permite_abono_capital?: boolean;
+  devolucion_cube?: boolean;
 
   // Inversionistas nuevos
   inversionistas?: InversionistaPayload[];
@@ -936,9 +939,9 @@ export async function getInvestorTotalsService(
   if (params?.id !== undefined) query.append("id", String(params.id));
   if (params?.dpi) query.append("dpi", params.dpi);
   if (params?.tipo) query.append("tipo", params.tipo);
-  if (params?.incluirLiquidados !== undefined) 
+  if (params?.incluirLiquidados !== undefined)
     query.append("incluirLiquidados", String(params.incluirLiquidados));
-  if (params?.numeroCuota !== undefined) 
+  if (params?.numeroCuota !== undefined)
     query.append("numeroCuota", String(params.numeroCuota));
 
   const url = `${import.meta.env.VITE_BACK_URL}/getInvestorTotals${query.toString() ? `?${query.toString()}` : ""}`;
@@ -1161,7 +1164,7 @@ export async function downloadInvestorPDFService(
     {
       // Asegura que el backend responda JSON (no blob)
       headers: { Accept: "application/json" },
-      responseType: "json", 
+      responseType: "json",
     }
   );
 
@@ -1231,7 +1234,7 @@ export interface CancelCreditResponse {
   };
   error?: string;
 }
- 
+
 
 export async function cancelCreditService(creditId: number): Promise<CancelCreditResponse> {
   const res = await api.post(`${API_URL}/cancelCredit`, { creditId });
@@ -1271,7 +1274,7 @@ export interface PendingCancelCreditPayload {
 export interface ActivateCreditPayload {
   creditId: number;
   accion: "ACTIVAR";
-} 
+}
 export interface BadDebtCreditPayload {
   creditId: number;
   accion: "INCOBRABLE";
@@ -1293,7 +1296,7 @@ export interface CreditActionResponse {
   message: string;
 }
 
-// Cambia esta URL por la de tu backend 
+// Cambia esta URL por la de tu backend
 // Servicio para cancelar o activar crédito
 export async function creditAction(payload: CreditActionPayload): Promise<CreditActionResponse> {
   const { data } = await api.post(`${API_URL}/creditAction`, payload);
@@ -1451,7 +1454,7 @@ export async function getResumenInversionistas(params?: {
   email?: string;
 }
 
- 
+
 
 export const createAdvisor = async (data: Partial<Advisor> & { password?: string }) => {
   const res = await api.post(`${API_URL}/advisor`, data);
@@ -1648,7 +1651,7 @@ export async function getCondonacionesMoraService(params?: {
   );
   return data;}
 
- 
+
 export interface CuotaPago {
   cuotaId: number;
   numeroCuota: number;
@@ -1994,8 +1997,8 @@ export interface ResumenGlobalExcelResponse {
   filename: string;
 }
 
-export type ResumenGlobalResponse = 
-  | InversionistaResumen[] 
+export type ResumenGlobalResponse =
+  | InversionistaResumen[]
   | ResumenGlobalExcelResponse;
 
 
@@ -2010,11 +2013,11 @@ export const notificarContabilidadBoletas = async () => {
 };
 
 export const inversionistasService = {
-  
+
   // 📊 Obtener resumen global
   getResumenGlobal: async (params: ResumenGlobalParams): Promise<ResumenGlobalResponse> => {
     const queryParams = new URLSearchParams();
-    
+
     if (params.inversionistaId) {
       queryParams.append("inversionistaId", params.inversionistaId.toString());
     }
@@ -2031,7 +2034,7 @@ export const inversionistasService = {
     const { data } = await api.get(
       `/resumen-global?${queryParams.toString()}`
     );
-    
+
     return data;
   },
 
@@ -2203,17 +2206,17 @@ export interface GenerateFalsePaymentsError {
 }
 /**
  * 🚀 Genera pagos falsos para un inversionista
- * 
+ *
  * @param params - Parámetros del request
  * @returns Promesa con la respuesta del servidor
- * 
+ *
  * @example
  * // Solo consultar sin generar
  * const resultado = await generateFalsePaymentsService({
  *   inversionistaId: 123,
  *   generateFalsePayment: false
  * });
- * 
+ *
  * @example
  * // Consultar y generar pagos
  * const resultado = await generateFalsePaymentsService({
@@ -2233,7 +2236,7 @@ export async function generateFalsePaymentsService(
     return data;
   } catch (error: any) {
     console.error("❌ Error en generateFalsePaymentsService:", error);
-    
+
     // Retornar error estructurado
     return {
       success: false,
@@ -2598,7 +2601,7 @@ export async function actualizarCuentaPagoService(
     return data;
   } catch (error: any) {
     console.error("❌ Error en actualizarCuentaPagoService:", error);
-    
+
     return {
       success: false,
       message: error.response?.data?.message || "Error al actualizar la cuenta del pago",
@@ -2606,7 +2609,7 @@ export async function actualizarCuentaPagoService(
     };
   }
 }
- 
+
 export interface CreatePaymentAgreementInput {
   credit_id: number;
   payment_ids: number[];
@@ -2893,7 +2896,7 @@ interface Cliente {
   direccion: string;
 }
 
- 
+
 
 interface Factura {
   factura_id: number;
@@ -3016,7 +3019,7 @@ export const getBoletas = async (filters?: GetBoletasFilters) => {
     console.log("📋 Obteniendo boletas con filtros:", filters);
 
     const params = new URLSearchParams();
-    
+
     if (filters?.inversionista_id) {
       params.append("inversionista_id", filters.inversionista_id.toString());
     }

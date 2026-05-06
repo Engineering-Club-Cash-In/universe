@@ -73,7 +73,7 @@
   });
   export const conta_users = customSchema.table("conta_users", {
     conta_id: serial("conta_id").primaryKey(),
-    nombre: varchar("nombre", { length: 150 }).notNull(), 
+    nombre: varchar("nombre", { length: 150 }).notNull(),
     email: varchar("email", { length: 150 }).notNull().unique(),
     telefono: varchar("telefono", { length: 30 }),
     activo: boolean("activo").notNull().default(true),
@@ -89,14 +89,14 @@
     usuario_id: serial("usuario_id").primaryKey(),
     nombre: varchar("nombre", { length: 200 }).notNull(),
     nit: varchar("nit", { length: 30 }),
-    
+
     // 🔥 CAMPOS NUEVOS PARA FACTURACIÓN
     direccion: varchar("direccion", { length: 300 }),
     municipio: varchar("municipio", { length: 100 }),
     departamento: varchar("departamento", { length: 100 }),
     codigo_postal: varchar("codigo_postal", { length: 10 }).default("01001"),
     pais: varchar("pais").default("GT"),
-    
+
     // Campos existentes
     categoria: varchar("categoria", { length: 100 }),
     como_se_entero: varchar("como_se_entero", { length: 100 }),
@@ -139,7 +139,7 @@
     iva_12: numeric("iva_12", { precision: 18, scale: 2 }).notNull(),
     seguro_10_cuotas: numeric("seguro_10_cuotas", {
       precision: 18,
-      scale: 2, 
+      scale: 2,
     }).notNull(),
     gps: numeric("gps", { precision: 18, scale: 2 }).notNull(),
     observaciones: text("observaciones").notNull(),
@@ -168,7 +168,7 @@
       precision: 18,
       scale: 2,
     }).notNull(),
-  
+
     statusCredit: text("statusCredit", {
       enum: ["ACTIVO", "CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION","MOROSO", "EN_CONVENIO", "CAIDO"],
     })
@@ -176,6 +176,7 @@
       .default(StatusCredit.ACTIVO),
     otros: numeric("otros", { precision: 18, scale: 2 }).notNull().default("0"), // Otros cargos o pagos adicionales
     permite_abono_capital: boolean("permite_abono_capital").notNull().default(false),
+    devolucion_cube: boolean("devolucion_cube").notNull().default(false),
     is_vehiculo_propio: boolean("is_vehiculo_propio").notNull().default(false), // true si el vehículo es propiedad de Cash In
     bandera_reinversion: boolean("bandera_reinversion").notNull().default(false),
   });
@@ -187,11 +188,11 @@
     numero_cuota: integer("numero_cuota").notNull(), // Ej: 1, 2, 3...
     fecha_vencimiento: date("fecha_vencimiento").notNull(),
     pagado: boolean("pagado").default(false), // 👈 Si el cliente ya pagó esta cuota
-    
+
     // 👇 NUEVO - Para control de liquidación a inversionistas
     liquidado_inversionistas: boolean("liquidado_inversionistas").default(false).notNull(), // 👈 Si ya se liquidó a TODOS los inversionistas
     fecha_liquidacion_inversionistas: timestamp("fecha_liquidacion_inversionistas"), // 👈 Cuándo se liquidó
-    
+
     createdAt: timestamp("createdat").defaultNow(),
   });
   export const moras_credito = customSchema.table("moras_credito", {
@@ -207,7 +208,7 @@
       .notNull()
       .default("0"),
     cuotas_atrasadas: integer("cuotas_atrasadas").notNull().default(0),
-  
+
     created_at: timestamp("created_at").defaultNow(),
     updated_at: timestamp("updated_at").defaultNow(),
   });
@@ -260,7 +261,7 @@
     cuota_interes: numeric("cuota_interes").notNull(), //esto viene del credito
     cuota_id: integer("cuota_id")
       .references(() => cuotas_credito.cuota_id),
-    fecha_pago: timestamp("fecha_pago").defaultNow(), //esto viene del credito 
+    fecha_pago: timestamp("fecha_pago").defaultNow(), //esto viene del credito
     abono_capital: numeric("abono_capital", { precision: 18, scale: 2 }), //aca abonamos a capital solo si el monto de la cuota que viene del credito es igual al monto de la boleta y se van a restar todos los abonos
 
     abono_interes: numeric("abono_interes", { precision: 18, scale: 2 }), // aca jala el interes del credito si ? pero solo si  el monto de la boleta  es igual al de la cuota
@@ -273,7 +274,7 @@
 
     llamada: varchar("llamada", { length: 100 }), // ""
 
-    monto_boleta: numeric("monto_boleta", { precision: 18, scale: 2 }), // esto si viene del input 
+    monto_boleta: numeric("monto_boleta", { precision: 18, scale: 2 }), // esto si viene del input
     fecha_vencimiento: date("fecha_vencimiento").defaultNow(), // viene del credito
 
     renuevo_o_nuevo: varchar("renuevo_o_nuevo", { length: 50 }), //input
@@ -313,10 +314,10 @@
     .default('no_required'),
     createdAt: timestamp("createdat").defaultNow(),
       banco_id: integer("banco_id").references(() => bancos.banco_id), // 👈 OPCIONAL
-    numeroAutorizacion: varchar("numeroautorizacion", { length: 100 }), 
+    numeroAutorizacion: varchar("numeroautorizacion", { length: 100 }),
     registerBy:varchar("registerby",{length:150}).notNull(),
       cuenta_empresa_id: integer("cuenta_empresa_id")
-      .references(() => cuentasEmpresa.cuentaId), // 
+      .references(() => cuentasEmpresa.cuentaId), //
     pagoConvenio :numeric("pago_convenio",{precision:18,scale:2}).notNull(),
 
     fecha_boleta: date("fecha_boleta"), // Fecha del pago en la boleta
@@ -489,7 +490,7 @@
         .notNull()
         .default("NO_LIQUIDADO"),
       cuota: numeric("cuota", { precision: 18, scale: 2 }).notNull(),
-      
+
       // 🆕 ENLACE A LIQUIDACIÓN
       liquidacion_id: integer("liquidacion_id").references(
         () => liquidaciones.liquidacion_id,
@@ -550,7 +551,7 @@
         () => abonos_capital.abono_id,
         { onDelete: "set null" }
       ),
- 
+
       // 🆕 ENLACE A LIQUIDACIÓN
       liquidacion_id: integer("liquidacion_id").references(
         () => liquidaciones.liquidacion_id,
@@ -762,54 +763,54 @@
 
   export const convenios_pago = customSchema.table("convenios_pago", {
     convenio_id: serial("convenio_id").primaryKey(),
-    
+
     // Relación con el crédito
     credito_id: integer("credito_id")
       .notNull()
       .references(() => creditos.credito_id, { onDelete: "cascade" }),
-    
+
     // Detalles del convenio
-    monto_total_convenio: numeric("monto_total_convenio", { 
-      precision: 18, 
-      scale: 2 
+    monto_total_convenio: numeric("monto_total_convenio", {
+      precision: 18,
+      scale: 2
     }).notNull(),
-    
+
     numero_meses: integer("numero_meses").notNull(),
-    
-    cuota_mensual: numeric("cuota_mensual", { 
-      precision: 18, 
-      scale: 2 
+
+    cuota_mensual: numeric("cuota_mensual", {
+      precision: 18,
+      scale: 2
     }).notNull(),
-    
+
     fecha_convenio: timestamp("fecha_convenio").notNull(),
-    
+
     // 🎯 CONTROL DEL CONVENIO
-    monto_pagado: numeric("monto_pagado", { 
-      precision: 18, 
-      scale: 2 
+    monto_pagado: numeric("monto_pagado", {
+      precision: 18,
+      scale: 2
     }).notNull().default("0"), // Cuánto se ha pagado
-    
-    monto_pendiente: numeric("monto_pendiente", { 
-      precision: 18, 
-      scale: 2 
+
+    monto_pendiente: numeric("monto_pendiente", {
+      precision: 18,
+      scale: 2
     }).notNull(), // Cuánto falta (se actualiza con cada pago)
-    
+
     pagos_realizados: integer("pagos_realizados").notNull().default(0), // Cuántos pagos se han hecho
-    
+
     pagos_pendientes: integer("pagos_pendientes").notNull(), // Cuántos pagos faltan
-    
+
     // Estado del convenio
     activo: boolean("activo").notNull().default(true),
-    
+
     completado: boolean("completado").notNull().default(false),
-    
+
     // Metadata
     motivo: text("motivo"),
     observaciones: text("observaciones"),
-    
+
     created_by: integer("created_by")
       .references(() => platform_users.id),
-    
+
     created_at: timestamp("created_at").defaultNow(),
     updated_at: timestamp("updated_at").defaultNow(),
   });
@@ -817,27 +818,27 @@
 
   export const convenios_pagos_resume = customSchema.table("convenios_pagos_resume", {
     id: serial("id").primaryKey(),
-    
+
     convenio_id: integer("convenio_id")
       .notNull()
       .references(() => convenios_pago.convenio_id, { onDelete: "cascade" }),
-    
+
     pago_id: integer("pago_id")
       .notNull()
       .references(() => pagos_credito.pago_id, { onDelete: "cascade" }),
-    
+
     created_at: timestamp("created_at").defaultNow(),
   });export const convenio_cuotas = customSchema.table("convenio_cuotas", {
     cuota_convenio_id: serial("cuota_convenio_id").primaryKey(),
     convenio_id: integer("convenio_id")
       .references(() => convenios_pago.convenio_id)
       .notNull(),
-    
+
     // Control mínimo
     numero_cuota: integer("numero_cuota").notNull(), // 1, 2, 3... hasta numero_meses
     fecha_vencimiento: date("fecha_vencimiento").notNull(), // Cuándo vence esta cuota
     fecha_pago: timestamp("fecha_pago"), // NULL si no está pagada, timestamp cuando se paga
-    
+
     created_at: timestamp("created_at").defaultNow(),
   });
 
@@ -858,22 +859,22 @@
     // 🔥 Opcional: puede ser null para facturas genéricas (sin pago asociado)
     pago_id: integer("pago_id")
       .references(() => pagos_credito.pago_id, { onDelete: "set null" }),
-    
+
     // Datos del DTE
     serie: varchar("serie", { length: 50 }).notNull(),
     numero: varchar("numero", { length: 100 }).notNull(),
     uuid: varchar("uuid", { length: 255 }).notNull().unique(),
-    
+
     tipo_documento: varchar("tipo_documento", { length: 10 }).notNull(),
-    
+
     // Montos
     monto_total: numeric("monto_total", { precision: 18, scale: 2 }).notNull(),
     monto_iva: numeric("monto_iva", { precision: 18, scale: 2 }).notNull(),
-    
+
     // URLs
     pdf_url: varchar("pdf_url", { length: 500 }).notNull(),
     xml_url: varchar("xml_url", { length: 500 }),
-    
+
     // Emisor
     emisor_nit: varchar("emisor_nit", { length: 30 }),
     emisor_nombre: varchar("emisor_nombre", { length: 200 }),
@@ -881,17 +882,17 @@
     // Receptor
     receptor_nit: varchar("receptor_nit", { length: 30 }).notNull(),
     receptor_nombre: varchar("receptor_nombre", { length: 200 }).notNull(),
-    
+
     // Fechas
     fecha_emision: timestamp("fecha_emision").notNull(),
     fecha_certificacion: timestamp("fecha_certificacion").notNull(),
-    
+
     // STATUS Y ANULACIÓN
     status: statusFacturaEnum("status").notNull().default("ACTIVA"),
     fecha_anulacion: timestamp("fecha_anulacion"),
     motivo_anulacion: text("motivo_anulacion"),
     anulada_por: integer("anulada_por").references(() => platform_users.id),
-    
+
     // Metadata
     created_at: timestamp("created_at").defaultNow().notNull(),
     created_by: integer("created_by").references(() => platform_users.id),
@@ -914,28 +915,28 @@
     "boletas_pago_inversionista",
     {
       boleta_id: serial("boleta_id").primaryKey(),
-      
+
       // 🔥 INVERSIONISTA (obligatorio)
       inversionista_id: integer("inversionista_id")
         .notNull()
         .references(() => inversionistas.inversionista_id, { onDelete: "cascade" }),
-      
+
       // URL de la boleta del banco (foto o PDF)
       boleta_url: text("boleta_url").notNull(),
-      
+
       // Estado del comprobante
       estado: estadoBoletaEnum("estado").notNull().default("PENDIENTE"),
-      
+
       // Metadata
       notas: text("notas"),
       monto_boleta: numeric("monto_boleta", { precision: 18, scale: 2 }),
-      
+
       // Fechas
       fecha_subida: timestamp("fecha_subida", { withTimezone: true })
         .notNull()
         .$default(() => new Date()),
       fecha_procesado: timestamp("fecha_procesado", { withTimezone: true }),
-      
+
       // Quién subió la boleta
       subido_por: integer("subido_por")
         .references(() => platform_users.id, { onDelete: "set null" }),
@@ -956,16 +957,16 @@
     "liquidaciones",
     {
       liquidacion_id: serial("liquidacion_id").primaryKey(),
-      
+
       // Inversionista (OBLIGATORIO)
       inversionista_id: integer("inversionista_id")
         .notNull()
         .references(() => inversionistas.inversionista_id, { onDelete: "cascade" }),
-      
+
       // 🆕 ENLACE A LA BOLETA que originó esta liquidación
       boleta_id: integer("boleta_id")
         .references(() => boletasPagoInversionista.boleta_id, { onDelete: "set null" }),
-      
+
       // Totales de la liquidación
       total_pagos_liquidados: integer("total_pagos_liquidados").notNull().default(0),
       total_capital: numeric("total_capital", { precision: 18, scale: 2 }).notNull().default("0"),
@@ -981,12 +982,12 @@
 
       // Reporte de liquidación (Excel/PDF)
       reporte_liquidacion_url: text("reporte_liquidacion_url"),
-      
+
       // Fecha
       fecha_liquidacion: timestamp("fecha_liquidacion", { withTimezone: true })
         .notNull()
         .$default(() => new Date()),
-      
+
       // Metadata
       creado_por: integer("creado_por")
         .references(() => platform_users.id, { onDelete: "set null" }),

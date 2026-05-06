@@ -245,6 +245,7 @@ export function ModalEditCredit({
 
         // Abono capital
         permite_abono_capital: !!values.permite_abono_capital,
+        devolucion_cube: !!values.devolucion_cube,
 
         // Lista Principal
         inversionistas: values.investors.map((i: InvestorItem) => ({
@@ -558,7 +559,7 @@ export function ModalEditCredit({
             </div>
 
             {/* Opciones del crédito */}
-            <div className="mt-4 p-4 rounded-xl border border-blue-100 bg-blue-50/50">
+            <div className="mt-4 p-4 rounded-xl border border-blue-100 bg-blue-50/50 space-y-4">
               <div className="flex items-center justify-between">
                 <div>
                   <Label className="text-gray-800 font-bold text-sm">
@@ -587,6 +588,41 @@ export function ModalEditCredit({
                   <span
                     className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
                       formik.values.permite_abono_capital
+                        ? "translate-x-5"
+                        : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-gray-800 font-bold text-sm">
+                    Devolución a CUBE
+                  </Label>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Si está activo, la generación de pagos usa la lógica de devolución a CUBE
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={!!formik.values.devolucion_cube}
+                  onClick={() =>
+                    formik.setFieldValue(
+                      "devolucion_cube",
+                      !formik.values.devolucion_cube
+                    )
+                  }
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                    formik.values.devolucion_cube
+                      ? "bg-green-500"
+                      : "bg-gray-300"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      formik.values.devolucion_cube
                         ? "translate-x-5"
                         : "translate-x-0"
                     }`}

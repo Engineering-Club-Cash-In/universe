@@ -36,7 +36,7 @@ import { obtenerCreditosConPagosPendientes, calcularYRegistrarPagosEspejo } from
 import { createBoleta, getBoletaById, getAllBoletas, getBoletasPendientes, updateBoleta, marcarBoletaComoProcesada, marcarBoletaComoPendiente, deleteBoleta, getBoletasStats } from "../controllers/liquidateInvestor";
 import { requierePeriodoLiquidacion } from "../utils/investorLiquidationSummary";
 // 🔥 IMPORTAR SERVICIO DE BOLETAS
- 
+
 
 export const inversionistasRouter = new Elysia()
   .use(authMiddleware)
@@ -125,7 +125,7 @@ export const inversionistasRouter = new Elysia()
 
       const incluirLiquidadosBool = incluirLiquidados === "true";
       const numeroCuotaNum = numeroCuota ? Number(numeroCuota) : undefined;
-      
+
       if (numeroCuota && isNaN(numeroCuotaNum!)) {
         set.status = 400;
         return { message: "El parámetro 'numeroCuota' debe ser numérico." };
@@ -355,12 +355,12 @@ export const inversionistasRouter = new Elysia()
     }
   )
   .post("/investor/pdf", async ({ body, set }) => {
-    const { id, page = 1, perPage = 1 } = body as { 
-      id?: number; 
-      page?: number; 
-      perPage?: number 
+    const { id, page = 1, perPage = 1 } = body as {
+      id?: number;
+      page?: number;
+      perPage?: number
     };
-    
+
     console.log("Generando PDF para inversionista ID:", id);
     const pageNum = Number(page);
     const perPageNum = Number(perPage);
@@ -841,8 +841,8 @@ export const inversionistasRouter = new Elysia()
         set.status = 200;
         return {
           success: true,
-          message: generateFalsePayment 
-            ? "✅ Pagos generados correctamente" 
+          message: generateFalsePayment
+            ? "✅ Pagos generados correctamente"
             : "📄 Datos obtenidos correctamente",
           inversionistaId: resultado.inversionistaId ?? inversionistaId,
           totalCreditosConPagos: resultado.totalCreditosConCuotas ?? 0,
@@ -1379,6 +1379,7 @@ export const inversionistasRouter = new Elysia()
       },
     }
   )
+
   .post(
     "/recalcularPagosEspejo",
     async ({ body, set }) => {
@@ -1493,7 +1494,7 @@ export const inversionistasRouter = new Elysia()
     "/deletePagosEspejoNoLiquidados",
     async ({ body, set }) => {
       const { inversionistaId } = body;
-      
+
       console.log(`🗑️ DELETE /deletePagosEspejoNoLiquidados (ID: ${inversionistaId})`);
 
       if (!inversionistaId) {
@@ -1503,10 +1504,10 @@ export const inversionistasRouter = new Elysia()
 
       try {
         const result = await deletePagosEspejoNoLiquidados(inversionistaId);
-        return { 
-          success: true, 
-          deletedCount: result.deletedCount, 
-          message: "Pagos eliminados correctamente" 
+        return {
+          success: true,
+          deletedCount: result.deletedCount,
+          message: "Pagos eliminados correctamente"
         };
       } catch (error: any) {
         console.error(error);

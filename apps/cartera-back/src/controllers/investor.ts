@@ -2,10 +2,10 @@
 import { z } from "zod";
 import { formatToUSD } from "../utils/functions/currencyConverter";
 import { USD_EXCHANGE_RATE } from "../utils/functions/const";
-import { 
-  generarYSubirPDFInversionista, 
-  generarPDFBuffer, 
-  generarYSubirExcelInversionista 
+import {
+  generarYSubirPDFInversionista,
+  generarPDFBuffer,
+  generarYSubirExcelInversionista
 } from "../utils/functions/generalFunctions";
 import { db } from "../database/index";
 import {
@@ -56,12 +56,12 @@ type OrigenDatos = "original" | "espejo";
 export type TipoConsulta = "originales" | "espejos" | "ambas";
 
 // 🔥 MEJORADO: Usar tipos genéricos de Drizzle para type-safety completo
-type CreditosInversionistasTable = 
-  | typeof creditos_inversionistas 
+type CreditosInversionistasTable =
+  | typeof creditos_inversionistas
   | typeof creditos_inversionistas_espejo;
 
-type PagosCreditoInversionistasTable = 
-  | typeof pagos_credito_inversionistas 
+type PagosCreditoInversionistasTable =
+  | typeof pagos_credito_inversionistas
   | typeof pagos_credito_inversionistas_espejo;
 
 // Configuración de tablas según tipo
@@ -98,7 +98,7 @@ async function consultarCreditosInversionista(
 ) {
   // 🔥 Type assertion segura: sabemos que ambas tablas tienen la misma estructura
   const tabla = config.creditosInversionistas as typeof creditos_inversionistas;
-  
+
   return await db
     .select({
       credito_id: tabla.credito_id,
@@ -1254,8 +1254,8 @@ export async function resumeInvestor(
       email: inversionistas.email,
    tiene_boleta_pendiente: sql<boolean>`
       EXISTS (
-        SELECT 1 
-        FROM cartera.boletas_pago_inversionista 
+        SELECT 1
+        FROM cartera.boletas_pago_inversionista
         WHERE cartera.boletas_pago_inversionista.inversionista_id = ${inversionistas.inversionista_id}
         AND cartera.boletas_pago_inversionista.estado = 'PENDIENTE'
       )
@@ -1553,7 +1553,7 @@ export async function resumeInvestor(
               const isrReinv = inv.emite_factura ? new Big(0) : reinvInteres.times(0.07);
               const totalReinvNeta = reinvCapital.plus(reinvInteres).minus(isrReinv);
               const netReinvInt = reinvInteres.minus(isrReinv);
-              
+
               total_reinversion_neta_global = total_reinversion_neta_global.plus(totalReinvNeta);
               total_reinversion_capital = total_reinversion_capital.plus(reinvCapital);
               total_reinversion_interes = total_reinversion_interes.plus(netReinvInt);
@@ -1992,7 +1992,7 @@ export async function getInvestorTotalsGlobales(
       }
       subtotal.total_cuota = subtotal.total_cuota.plus(cuota_inversor);
       subtotal.totalAbonoGeneralInteres = subtotal.totalAbonoGeneralInteres.plus(abonoGeneralInteres);
-      
+
       // 🔑 ACUMULADOR NETO INDEPENDIENTE
       const pagoNetoGlobal = abono_capital.plus(interesTotal);
       subtotal.total_cuota_sin_reinversion = subtotal.total_cuota_sin_reinversion.plus(pagoNetoGlobal);
@@ -2654,7 +2654,7 @@ export async function getInvestorMirrorSummary(
       sg.total_isr                = sg.total_isr.plus(isr);
       sg.total_cuota              = sg.total_cuota.plus(cuota_inversor);
       sg.total_abono_general_interes = sg.total_abono_general_interes.plus(abonoGeneralInteres);
-      
+
       // 🔑 ACUMULADOR NETO INDEPENDIENTE
       const pagoNetoEspejo = abono_capital.plus(interesTotal);
       sg.total_cuota_sin_reinversion = sg.total_cuota_sin_reinversion.plus(pagoNetoEspejo);
@@ -2790,8 +2790,8 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
   let totalPagosLiquidados = 0;
   let totalLiquidaciones = 0;
   let inversionistasSaltados = 0;
-  const reportesGenerados: Array<{ 
-    inversionista_id: number; 
+  const reportesGenerados: Array<{
+    inversionista_id: number;
     url: string;
     boleta_id: number;
     boleta_url: string;
@@ -3060,7 +3060,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
             try {
               // Validar que subtotal existe para evitar crash
               const subtotalStr = inversionista.subtotal?.total_cuota_con_reinversion?.toString() || "0";
-              
+
               const emailResult = await sendLiquidationEmail({
                 to: inversionista.email,
                 investorName: inversionista.nombre_inversionista,
@@ -3074,7 +3074,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
                   content: excelBuffer,
                 }
               });
-              
+
               if (emailResult.success) {
                 console.log(`  ✅ Correo enviado exitosamente a ${inversionista.email}`);
               } else {
@@ -3160,6 +3160,43 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
         // forzamos el status a `inactivo` después.
         // ========================================
         try {
+          // 5A) Salida automática por créditos con devolucion_cube=true
+          //     (independiente del status del inversionista)
+          const creditoIdsConPagos = [
+            ...new Set(pagosNoLiquidados.map((p) => p.credito_id)),
+          ];
+
+          if (creditoIdsConPagos.length > 0) {
+            const creditosConDevolucion = await db
+              .select({ credito_id: creditos.credito_id })
+              .from(creditos)
+              .where(
+                and(
+                  inArray(creditos.credito_id, creditoIdsConPagos),
+                  eq(creditos.devolucion_cube, true)
+                )
+              );
+
+            const creditoIdsDevolucion = creditosConDevolucion.map((c) => c.credito_id);
+
+            if (creditoIdsDevolucion.length > 0) {
+              console.log(
+                `  🚪 Inversionista ${inv_id} → exitInvestor por devolucion_cube=true en ${creditoIdsDevolucion.length} crédito(s)`
+              );
+
+              const exitResultDevolucion = await exitInvestor({
+                body: {
+                  inversionista_id: inv_id,
+                  creditos: creditoIdsDevolucion,
+                },
+                set: { status: 200 },
+                request: {} as any,
+              });
+
+              console.log(`  ✅ Salida por devolucion_cube ejecutada:`, exitResultDevolucion);
+            }
+          }
+
           const [invRow] = await db
             .select({ status: inversionistas.status })
             .from(inversionistas)
@@ -3223,7 +3260,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
 
   // 📝 PASO 8: Mensaje final
   const mensaje = inversionista_id
-    ? totalLiquidaciones > 0 
+    ? totalLiquidaciones > 0
       ? `Inversionista ${inversionista_id} liquidado correctamente`
       : `No se pudo liquidar al inversionista ${inversionista_id}`
     : `${totalLiquidaciones} inversionistas liquidados correctamente (${inversionistasSaltados} saltados)`;
@@ -3234,7 +3271,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
   console.log(`   - Excels generados: ${reportesGenerados.length}`);
   console.log(`   - Boletas procesadas: ${reportesGenerados.length}`);
   console.log(`   - Inversionistas saltados: ${inversionistasSaltados}`);
-  
+
   if (errores.length > 0) {
     console.log(`\n⚠️ INVERSIONISTAS NO PROCESADOS:`);
     errores.forEach(e => {
@@ -3685,11 +3722,11 @@ export const findOrCreateInvestor = async (
   emite_factura: boolean = true
 ) => {
   console.log(`🔍 Buscando/creando inversionista: "${nombre}"`);
-  
+
   // 🧹 NORMALIZAR nombre
   const nombreNormalizado = nombre.trim();
   const nombreLower = nombreNormalizado.toLowerCase();
-  
+
   // 1️⃣ BÚSQUEDA EXACTA (case insensitive)
   console.log(`   🎯 Estrategia 1: Búsqueda exacta...`);
   const exactMatch = await db
@@ -3709,7 +3746,7 @@ export const findOrCreateInvestor = async (
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
-  
+
   const withoutAccents = await db
     .select()
     .from(inversionistas)
@@ -3717,8 +3754,8 @@ export const findOrCreateInvestor = async (
       sql`LOWER(
         TRIM(
           translate(
-            ${inversionistas.nombre}, 
-            'áéíóúÁÉÍÓÚñÑ', 
+            ${inversionistas.nombre},
+            'áéíóúÁÉÍÓÚñÑ',
             'aeiouAEIOUnN'
           )
         )
@@ -3733,20 +3770,20 @@ export const findOrCreateInvestor = async (
 
   // 3️⃣ BÚSQUEDA "COMIENZA CON" - Para nombres con apellidos extras
   console.log(`   🎯 Estrategia 3: Búsqueda "comienza con"...`);
-  
+
   // 🔥 BUSCAR SI ALGÚN NOMBRE EN BD ESTÁ CONTENIDO EN EL NOMBRE DEL EXCEL
   // Ejemplo: Si en BD hay "Ana Lucia Salvatierra" y en Excel "Ana Lucia Salvatierra Mayen"
   //          debería encontrar el de BD porque "Ana Lucia Salvatierra" está contenido
-  
+
   const allInvestors = await db
     .select()
     .from(inversionistas);
-  
+
   // Buscar si el nombre del Excel COMIENZA con algún nombre de BD
   const startsWithMatch = allInvestors.find(inv => {
     const invNombreLower = inv.nombre.toLowerCase().trim();
     const nombreLowerTrim = nombreLower.trim();
-    
+
     // Si el nombre de BD está contenido al inicio del nombre del Excel
     return nombreLowerTrim.startsWith(invNombreLower) && nombreLowerTrim.length > invNombreLower.length;
   });
@@ -3759,11 +3796,11 @@ export const findOrCreateInvestor = async (
 
   // 4️⃣ BÚSQUEDA INVERSA - Si en BD hay un nombre más largo
   console.log(`   🎯 Estrategia 4: Búsqueda inversa (nombre más largo en BD)...`);
-  
+
   const containsMatch = allInvestors.find(inv => {
     const invNombreLower = inv.nombre.toLowerCase().trim();
     const nombreLowerTrim = nombreLower.trim();
-    
+
     // Si el nombre del Excel está contenido al inicio del nombre de BD
     return invNombreLower.startsWith(nombreLowerTrim) && invNombreLower.length > nombreLowerTrim.length;
   });
@@ -3776,18 +3813,18 @@ export const findOrCreateInvestor = async (
 
   // 5️⃣ BÚSQUEDA POR PALABRAS CLAVE (más restrictiva)
   console.log(`   🎯 Estrategia 5: Búsqueda por palabras clave...`);
-  
+
   // Dividir en palabras (ignorar palabras muy cortas como "de", "la", etc.)
   const palabras = nombreNormalizado
     .split(/\s+/)
     .filter(p => p.length > 2 && !['del', 'de', 'la', 'los', 'las'].includes(p.toLowerCase()));
-  
+
   if (palabras.length >= 2) { // Solo si tiene al menos 2 palabras significativas
     // Buscar inversionistas que tengan TODAS las palabras importantes
     const wordMatches = allInvestors.filter(inv => {
       const invWords = inv.nombre.toLowerCase().split(/\s+/);
       // Verificar que TODAS las palabras del Excel estén en el nombre de BD
-      return palabras.every(palabra => 
+      return palabras.every(palabra =>
         invWords.some(w => w.includes(palabra.toLowerCase()))
       );
     });
@@ -3800,12 +3837,12 @@ export const findOrCreateInvestor = async (
       wordMatches.forEach((inv, idx) => {
         console.log(`      ${idx + 1}. ${inv.nombre} (ID: ${inv.inversionista_id})`);
       });
-      
+
       // 🔥 Usar el que tenga el nombre más corto (más probable que sea el base)
-      const shortest = wordMatches.reduce((prev, curr) => 
+      const shortest = wordMatches.reduce((prev, curr) =>
         prev.nombre.length < curr.nombre.length ? prev : curr
       );
-      
+
       console.log(`   ✅ Usando el más corto: ${shortest.nombre} (ID: ${shortest.inversionista_id})`);
       return shortest;
     }
@@ -3813,7 +3850,7 @@ export const findOrCreateInvestor = async (
 
   // 6️⃣ NO EXISTE → CREAR NUEVO
   console.log(`   ➕ Inversionista no encontrado, creando nuevo...`);
-  
+
   const [newInvestor] = await db
     .insert(inversionistas)
     .values({
@@ -4760,7 +4797,7 @@ export const fixCubeInvestment = async ({ set }: any) => {
     // 3. Procesar originales
     for (const oc of originalCredits) {
       // Verificar si ya tiene los porcentajes correctos para evitar updates innecesarios
-      const isCorrect = Number(oc.porcentaje_participacion_inversionista) === 0 && 
+      const isCorrect = Number(oc.porcentaje_participacion_inversionista) === 0 &&
                         Number(oc.porcentaje_cash_in) === 100;
 
       if (!isCorrect) {
@@ -4800,7 +4837,7 @@ export const fixCubeInvestment = async ({ set }: any) => {
 
     // 4. Procesar espejos existentes (para asegurar que todos tengan 0/100)
     for (const mc of mirrorCredits) {
-      const isCorrect = Number(mc.porcentaje_participacion_inversionista) === 0 && 
+      const isCorrect = Number(mc.porcentaje_participacion_inversionista) === 0 &&
                         Number(mc.porcentaje_cash_in) === 100;
 
       if (!isCorrect) {
@@ -4879,12 +4916,12 @@ export const reconcileMirrorPercentages = async ({ set }: any) => {
       if (mc) {
         const pInvOriginal = Number(oc.p_inversor);
         const pCashOriginal = Number(oc.p_cashin);
-        
+
         const pInvMirror = Number(mc.porcentaje_participacion_inversionista);
         const pCashMirror = Number(mc.porcentaje_cash_in);
 
         if (pInvOriginal !== pInvMirror || pCashOriginal !== pCashMirror) {
-          
+
           const isSwapped = pInvOriginal === pCashMirror && pCashOriginal === pInvMirror;
 
           const data = {
@@ -4908,7 +4945,7 @@ export const reconcileMirrorPercentages = async ({ set }: any) => {
                 porcentaje_cash_in: oc.p_cashin,
               })
               .where(eq(creditos_inversionistas_espejo.id, mc.id));
-            
+
             results.updatedSwappedCount++;
             results.updatedSwapped.push(data);
           } else {
@@ -4994,7 +5031,7 @@ export const auditMirrorPercentages = async ({ set }: any) => {
       if (mc) {
         const pInvOriginal = Number(oc.p_inversor);
         const pCashOriginal = Number(oc.p_cashin);
-        
+
         const pInvMirror = Number(mc.porcentaje_participacion_inversionista);
         const pCashMirror = Number(mc.porcentaje_cash_in);
 
@@ -5002,7 +5039,7 @@ export const auditMirrorPercentages = async ({ set }: any) => {
           results.discrepanciesCount++;
 
           const isSwapped = pInvOriginal === pCashMirror && pCashOriginal === pInvMirror;
-          
+
           const discrepancyData = {
             inversionista_id: oc.inversionista_id,
             inversionista_nombre: oc.inversionista_nombre,
@@ -6250,7 +6287,7 @@ export async function getLiquidaciones({
   } else if (!isNullorEmpty(dpi)) {
     conditions.push(eq(inversionistas.dpi, parseInt(dpi)));
   }
- 
+
 
   // 📊 Query principal con joins
   const query = db
@@ -6308,10 +6345,10 @@ export async function getLiquidaciones({
     liquidacionesData.map(async (liq) => {
       // 📄 Traer boleta asociada a esta liquidación (si existe)
       let boletaData = null;
-      
+
       if (liq.boleta_id) {
         console.log(`🔍 Buscando boleta ID: ${liq.boleta_id} para liquidación ${liq.liquidacion_id}`);
-        
+
         const [boleta] = await db
           .select({
             boleta_id: boletasPagoInversionista.boleta_id,
@@ -6344,7 +6381,7 @@ export async function getLiquidaciones({
             fecha_procesado: boleta.fecha_procesado,
             subido_por: boleta.subido_por_nombre,
           };
-          
+
           console.log(`✅ Boleta encontrada: ${boleta.boleta_url}`);
         } else {
           console.warn(`⚠️ Boleta ID ${liq.boleta_id} no encontrada en BD`);
@@ -6568,7 +6605,7 @@ export async function aplicarPagosEspejo(inversionistaId: number) {
           )
         );
 
-      // Drizzle update devuelve result info dependiendo del driver, 
+      // Drizzle update devuelve result info dependiendo del driver,
       // pero aquí simplemente contamos las iteraciones exitosas.
       totalActualizados++;
     }
@@ -6609,7 +6646,7 @@ export async function deletePagosEspejoNoLiquidados(inversionistaId: number) {
 // ============================================
 export async function testUploadAndEmail(investorId: number, testEmail: string) {
     console.log(`🧪 Iniciando prueba de envío (PDF Adjunto) para inversionista ${investorId}...`);
-    
+
     // 1. Obtener datos
     const result = await resumeInvestor(investorId, 1, 999);
     if (!result.inversionistas.length) {

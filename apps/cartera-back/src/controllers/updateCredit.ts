@@ -424,6 +424,7 @@ const creditUpdateSchema = z.object({
   // Formato de crédito manual
   formato_credito: z.string().max(50).optional(),
   permite_abono_capital: z.boolean().optional(),
+  devolucion_cube: z.boolean().optional(),
   bandera_reinversion: z.boolean().optional(),
 });
 
@@ -576,7 +577,7 @@ const detectDebtAffectingChanges = (
     "otros",
     "cuota",
     "plazo",
-    
+
   ];
 
   return camposQueModificanDeuda.some((campo) => {
@@ -652,7 +653,7 @@ const updateInvestors = async (
     .select()
     .from(targetTable)
     .where(eq(targetTable.credito_id, credito_id));
-    
+
   const statePrevioMap = new Map();
   existingRecords.forEach((record: any) => {
       // Guardamos status y tipo_reinversion si existen en la tabla (aplica para tabla espejo)
@@ -873,8 +874,8 @@ const updateInvestors = async (
       iva_inversionista: ivaInversionista.toString(),
       iva_cash_in: ivaCashIn.toString(),
       fecha_creacion: new Date(),
-      fecha_inicio_participacion: inv.fecha_inicio_participacion 
-        ? new Date(inv.fecha_inicio_participacion).toISOString().split('T')[0] 
+      fecha_inicio_participacion: inv.fecha_inicio_participacion
+        ? new Date(inv.fecha_inicio_participacion).toISOString().split('T')[0]
         : "2025-12-01",
       cuota_inversionista: cuotaInversionista.toString(), // 🔥 CON LÓGICA CORRECTA
       numero_credito_sifco: numero_credito_sifco ?? undefined,
@@ -958,6 +959,7 @@ export const updateCredit = async ({ body, set }: any) => {
       saldo_a_favor,
       formato_credito,
       permite_abono_capital,
+      devolucion_cube,
       bandera_reinversion,
       ...fieldsToUpdate
     } = parseResult.data;
@@ -1047,6 +1049,9 @@ export const updateCredit = async ({ body, set }: any) => {
     if (permite_abono_capital !== undefined) {
       updateFields.permite_abono_capital = permite_abono_capital;
     }
+    if (devolucion_cube !== undefined) {
+      updateFields.devolucion_cube = devolucion_cube;
+    }
     if (bandera_reinversion !== undefined) {
       updateFields.bandera_reinversion = bandera_reinversion;
     }
@@ -1103,14 +1108,14 @@ export const updateCredit = async ({ body, set }: any) => {
       updateFields.seguro_10_cuotas =
         fieldsToUpdate.seguro_10_cuotas ?? current.seguro_10_cuotas;
 
-     
+
 
       // Actualizar "otros" en la cuota inicial si cambió
       if (otrosModificado) {
         await updateInitialQuotaOtros(credito_id, fieldsToUpdate.otros);
       }
 
-    
+
     }
 
     updateFields.membresias =
@@ -1219,7 +1224,7 @@ export const updateCredit = async ({ body, set }: any) => {
       const principalMontos = new Map(
         (inversionistas || []).map((inv) => [inv.inversionista_id, inv.monto_aportado])
       );
-      
+
       // 🔥 NUEVO: Sincronizar cuotas capturadas del padre
       const principalCuotas = new Map(
         (inversionistas || []).map((inv) => [inv.inversionista_id, inv.cuota_inversionista ?? 0])
@@ -2026,7 +2031,7 @@ export const calculateInvestorQuotas = async ({ body, set }: any) => {
     const resultados = inversionistas.map((inv) => {
       const montoAportado = new Big(inv.monto_aportado);
       // Usamos el capitalTotalCalculado para el % de participación exacto
-      const porcentajeParticipacion = capitalTotalCalculado.gt(0) 
+      const porcentajeParticipacion = capitalTotalCalculado.gt(0)
         ? montoAportado.div(capitalTotalCalculado)
         : new Big(0);
 

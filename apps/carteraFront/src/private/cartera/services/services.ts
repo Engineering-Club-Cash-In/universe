@@ -2054,6 +2054,7 @@ export interface LiquidacionResumen {
   currencySymbol: string;
   emite_factura: boolean;
   reinversion: string;
+  status?: "activo" | "inactivo" | "pendiente_devolucion";
   banco: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;
@@ -2063,21 +2064,57 @@ export interface LiquidacionResumen {
   total_isr: number;
   total_a_recibir_sin_reinversion: number;
   total_reinversion: number;
+  total_reinversion_capital?: number;
+  total_reinversion_interes?: number;
   total_a_recibir_con_reinversion: number;
   total_cuota: number;
   boleta_pendiente: string | null;
   boleta_liquidacion: BoletaLiquidacion | null;
   reporte_liquidacion_url: string | null;
-  estado_liquidacion_resumen: string;
+  estado_liquidacion_resumen:
+    | "pending"
+    | "uploaded"
+    | "liquidated"
+    | "sin_movimiento";
 }
 
 export async function getResumenGlobalLiquidaciones(params: {
   mes: number;
   anio: number;
   estado?: string;
+  incluirSinMovimiento?: boolean;
 }): Promise<LiquidacionResumen[]> {
   const { data } = await api.get(`${API_URL}/resumen-global-liquidaciones`, {
-    params: { mes: params.mes, anio: params.anio, estado: params.estado ?? "liquidated" },
+    params: {
+      mes: params.mes,
+      anio: params.anio,
+      estado: params.estado ?? "liquidated",
+      ...(params.incluirSinMovimiento ? { incluirSinMovimiento: "true" } : {}),
+    },
+  });
+  return data;
+}
+
+export interface ResumenLiquidacionesExcelResponse {
+  success: boolean;
+  url: string;
+  filename: string;
+}
+
+export async function descargarResumenLiquidacionesExcel(params: {
+  mes: number;
+  anio: number;
+  estado?: string;
+  incluirSinMovimiento?: boolean;
+}): Promise<ResumenLiquidacionesExcelResponse> {
+  const { data } = await api.get(`${API_URL}/resumen-global-liquidaciones`, {
+    params: {
+      mes: params.mes,
+      anio: params.anio,
+      estado: params.estado ?? "liquidated",
+      excel: "true",
+      ...(params.incluirSinMovimiento ? { incluirSinMovimiento: "true" } : {}),
+    },
   });
   return data;
 }

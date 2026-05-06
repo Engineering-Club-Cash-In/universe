@@ -598,7 +598,9 @@ export async function getCreditosWithUserByMesAnio(
   inversionista_ids?: number[],
   fecha_desde?: string,
   fecha_hasta?: string,
-  numeros_credito_sifco?: string[]
+  numeros_credito_sifco?: string[],
+  capital_min?: number,
+  capital_max?: number
 ): Promise<{
   data: CreditoConInfo[];
   page: number;
@@ -758,6 +760,15 @@ export async function getCreditosWithUserByMesAnio(
 
   console.log(`fecha desde ${fecha_desde}`);
   console.log(`fecha hasta ${fecha_hasta}`);
+
+  if (capital_min !== undefined) {
+    console.log(`🔎 Filtrando por capital mínimo: ${capital_min}`);
+    conditions.push(sql`${creditos.capital}::numeric >= ${capital_min}`);
+  }
+  if (capital_max !== undefined) {
+    console.log(`🔎 Filtrando por capital máximo: ${capital_max}`);
+    conditions.push(sql`${creditos.capital}::numeric <= ${capital_max}`);
+  }
 
   const whereCondition = conditions.length > 0 ? and(...conditions) : undefined;
 

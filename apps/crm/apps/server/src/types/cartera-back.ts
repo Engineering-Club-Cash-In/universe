@@ -549,6 +549,8 @@ export interface GetAllCreditsParams {
 	email_cobrador?: string;
 	fecha_desde?: string;
 	fecha_hasta?: string;
+	capital_min?: number;
+	capital_max?: number;
 }
 
 export interface GetPaymentsParams {

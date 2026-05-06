@@ -10,6 +10,7 @@ import type {
   GetMessageInfoRequest,
   GetMessageInfoResponse,
   MessageInfo,
+  TokenRequest,
   TokenResponse,
   SendTemplateRequest,
   SendTemplateRawBody,

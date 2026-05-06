@@ -48,6 +48,10 @@ export function PagosPorVencimiento() {
   const [sifcoFilter, setSifcoFilter] = useState("");
   const [nombreInput, setNombreInput] = useState("");
   const [nombreFilter, setNombreFilter] = useState("");
+  const [asesorInput, setAsesorInput] = useState("");
+  const [asesorFilter, setAsesorFilter] = useState("");
+  const [rangoMoraInput, setRangoMoraInput] = useState("");
+  const [rangoMoraFilter, setRangoMoraFilter] = useState("");
 
   const { data, isLoading, isError } = usePagosPorVencimiento({
     mes,
@@ -57,11 +61,15 @@ export function PagosPorVencimiento() {
     numero_credito_sifco: sifcoFilter || undefined,
     nombre_usuario: nombreFilter || undefined,
     tipo_fecha: tipoFecha,
+    asesor: asesorFilter || undefined,
+    rango_mora: rangoMoraFilter || undefined,
   });
 
   const handleSearch = () => {
     setSifcoFilter(sifcoInput.trim());
     setNombreFilter(nombreInput.trim());
+    setAsesorFilter(asesorInput.trim());
+    setRangoMoraFilter(rangoMoraInput);
     setPage(1);
   };
 
@@ -70,6 +78,10 @@ export function PagosPorVencimiento() {
     setSifcoFilter("");
     setNombreInput("");
     setNombreFilter("");
+    setAsesorInput("");
+    setAsesorFilter("");
+    setRangoMoraInput("");
+    setRangoMoraFilter("");
     setPage(1);
   };
 
@@ -102,7 +114,7 @@ export function PagosPorVencimiento() {
             <select
               className="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm text-blue-800 bg-blue-50 focus:ring-blue-400"
               value={tipoFecha}
-              onChange={(e) => { setTipoFecha(e.target.value as any); setPage(1); }}
+              onChange={(e) => { setTipoFecha(e.target.value as "vencimiento" | "creacion"); setPage(1); }}
             >
               <option value="vencimiento">Fecha Vencimiento</option>
               <option value="creacion">Fecha Creación</option>
@@ -153,6 +165,36 @@ export function PagosPorVencimiento() {
               onKeyDown={(e) => e.key === "Enter" && handleSearch()}
               className="text-gray-900 border-blue-200 bg-blue-50 focus:ring-blue-400"
             />
+          </div>
+
+          <div className="flex-1 min-w-[180px]">
+            <label className="text-sm font-semibold text-blue-800 mb-1 block">Asesor</label>
+            <Input
+              placeholder="Buscar por asesor..."
+              value={asesorInput}
+              onChange={(e) => setAsesorInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+              className="text-gray-900 border-blue-200 bg-blue-50 focus:ring-blue-400"
+            />
+          </div>
+
+          <div className="min-w-[150px]">
+            <label className="text-sm font-semibold text-blue-800 mb-1 block">Etapa de Mora</label>
+            <select
+              className="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm text-blue-800 bg-blue-50 focus:ring-blue-400"
+              value={rangoMoraInput}
+              onChange={(e) => { 
+                setRangoMoraInput(e.target.value); 
+                setRangoMoraFilter(e.target.value);
+                setPage(1); 
+              }}
+            >
+              <option value="">Todos</option>
+              <option value="0-30">Mora 30</option>
+              <option value="31-60">Mora 60</option>
+              <option value="61-90">Mora 90</option>
+              <option value="+90">Mora 120+</option>
+            </select>
           </div>
 
           <Button
@@ -220,11 +262,10 @@ export function PagosPorVencimiento() {
                 <TableRow className="bg-gradient-to-r from-blue-50 to-blue-100">
                   <TableHead className="font-bold text-blue-800">No. SIFCO</TableHead>
                   <TableHead className="font-bold text-blue-800">Cliente</TableHead>
-                  <TableHead className="font-bold text-blue-800">Cuota</TableHead>
-                  <TableHead className="font-bold text-blue-800">Vencimiento</TableHead>
-                  <TableHead className="font-bold text-blue-800">Fecha Pago</TableHead>
-                  <TableHead className="font-bold text-blue-800 text-center">Estado</TableHead>
-                  <TableHead className="font-bold text-blue-800 text-right">Boleta</TableHead>
+                  <TableHead className="font-bold text-blue-800">Asesor</TableHead>
+                  <TableHead className="font-bold text-blue-800 text-center">Cuotas</TableHead>
+                  <TableHead className="font-bold text-blue-800 text-center">Etapa de Mora</TableHead>
+                  <TableHead className="font-bold text-blue-800 text-right">Boletas Totales</TableHead>
                   <TableHead className="font-bold text-blue-800 text-right">Capital</TableHead>
                   <TableHead className="font-bold text-blue-800 text-right">Interés</TableHead>
                   <TableHead className="font-bold text-blue-800 text-right">IVA 12%</TableHead>
@@ -233,28 +274,30 @@ export function PagosPorVencimiento() {
                   <TableHead className="font-bold text-blue-800 text-right">Membresías</TableHead>
                   <TableHead className="font-bold text-blue-800 text-right">Int. CUBE</TableHead>
                   <TableHead className="font-bold text-blue-800 text-right">IVA CUBE</TableHead>
+                  <TableHead className="font-bold text-green-800 text-right">Total Pagos Mes</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {items.map((item) => (
-                  <TableRow key={item.pago_id} className="hover:bg-blue-50/50 transition">
+                  <TableRow key={item.credito_id} className="hover:bg-blue-50/50 transition">
                     <TableCell className="font-semibold text-blue-700">
                       {item.numero_credito_sifco}
                     </TableCell>
                     <TableCell className="text-black">{item.nombre_usuario}</TableCell>
-                    <TableCell className="text-black text-center">{item.numero_cuota}</TableCell>
-                    <TableCell className="text-black">{formatFecha(item.fecha_vencimiento)}</TableCell>
-                    <TableCell className="text-black">{formatFecha(item.fecha_pago)}</TableCell>
+                    <TableCell className="text-black text-xs">{item.asesor || "--"}</TableCell>
+                    <TableCell className="text-black text-center">
+                      {item.cuota_min === item.cuota_max 
+                        ? item.cuota_min 
+                        : `${item.cuota_min} - ${item.cuota_max}`}
+                    </TableCell>
                     <TableCell className="text-center">
-                      {item.pagado ? (
-                        <span className="inline-flex items-center gap-1 text-green-600 font-semibold text-xs">
-                          <CheckCircle2 className="w-4 h-4" /> Pagado
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-amber-600 font-semibold text-xs">
-                          <Clock className="w-4 h-4" /> Pendiente
-                        </span>
-                      )}
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        item.dias_mora === 'Al día' 
+                          ? 'bg-green-100 text-green-700' 
+                          : 'bg-red-100 text-red-700'
+                      }`}>
+                        {item.dias_mora}
+                      </span>
                     </TableCell>
                     <TableCell className="text-right font-medium text-black">{formatQ(item.monto_boleta)}</TableCell>
                     <TableCell className="text-right text-black">{formatQ(item.capital_restante)}</TableCell>
@@ -265,6 +308,9 @@ export function PagosPorVencimiento() {
                     <TableCell className="text-right text-black">{formatQ(item.membresias)}</TableCell>
                     <TableCell className="text-right text-black">{formatQ(item.interes_cube)}</TableCell>
                     <TableCell className="text-right text-black">{formatQ(item.iva_cube)}</TableCell>
+                    <TableCell className="text-right text-green-700 font-bold bg-green-50/50">
+                      {formatQ(item.total_pagos_del_mes)}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

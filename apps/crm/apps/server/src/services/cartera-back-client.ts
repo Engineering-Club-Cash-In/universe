@@ -1026,6 +1026,7 @@ export class CarteraBackClient {
 
 	async createInvestor(input: {
 		inversionista_id?: number;
+		operation?: "CREATE";
 		nombre: string;
 		dpi?: number | null;
 		email?: string | null;
@@ -1044,6 +1045,7 @@ export class CarteraBackClient {
 			method: "POST",
 			body: JSON.stringify({
 				...(input.inversionista_id && { inversionista_id: input.inversionista_id }),
+				...(input.operation && { operation: input.operation }),
 				nombre: input.nombre,
 				dpi: input.dpi ?? null,
 				email: input.email ?? null,

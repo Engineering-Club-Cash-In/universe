@@ -880,6 +880,32 @@ export class CarteraBackClient {
 		return response;
 	}
 
+	async getResumenTransferenciasExcel(filters: {
+		mes: number;
+		anio: number;
+		ach: boolean;
+		moneda?: "quetzales" | "dolar";
+	}): Promise<{ success: boolean; url: string; filename: string }> {
+		const queryParams = new URLSearchParams();
+		queryParams.set("mes", String(filters.mes));
+		queryParams.set("anio", String(filters.anio));
+		queryParams.set("ach", filters.ach ? "true" : "false");
+		if (filters.moneda) {
+			queryParams.set("moneda", filters.moneda);
+		}
+
+		const response = await this.request<{
+			success: boolean;
+			url: string;
+			filename: string;
+		}>(
+			`/resumen-transferencias?${queryParams.toString()}`,
+			{ method: "GET" },
+			false,
+		);
+		return response;
+	}
+
 	async uploadFile(
 		file: File | Blob,
 		filename: string,

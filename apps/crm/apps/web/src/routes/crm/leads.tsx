@@ -73,6 +73,7 @@ import {
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
+import { shouldRedirectToLogin } from "@/lib/auth-session";
 import {
 	formatCurrency,
 	formatGuatemalaDate,
@@ -121,7 +122,11 @@ type CreditAnalysis = Awaited<
 >;
 
 function RouteComponent() {
-	const { data: session, isPending } = authClient.useSession();
+	const {
+		data: session,
+		error: sessionError,
+		isPending,
+	} = authClient.useSession();
 	const navigate = Route.useNavigate();
 	const search = Route.useSearch();
 	const queryClient = useQueryClient();
@@ -580,7 +585,7 @@ function RouteComponent() {
 	};
 
 	useEffect(() => {
-		if (!session && !isPending) {
+		if (shouldRedirectToLogin({ error: sessionError, isPending, session })) {
 			navigate({ to: "/login" });
 		} else if (
 			session &&
@@ -590,7 +595,7 @@ function RouteComponent() {
 			navigate({ to: "/dashboard" });
 			toast.error("Acceso denegado: Se requiere acceso al CRM");
 		}
-	}, [session, isPending, userProfile.data?.role]);
+	}, [session, sessionError, isPending, userProfile.data?.role, navigate]);
 
 	// Handle opening create modal with pre-filled company
 	useEffect(() => {
@@ -1015,9 +1020,7 @@ function RouteComponent() {
 														<Input
 															id={field.name}
 															name={field.name}
-															autoComplete={getLeadNameAutocomplete(
-																"lastName",
-															)}
+															autoComplete={getLeadNameAutocomplete("lastName")}
 															value={field.state.value}
 															onBlur={field.handleBlur}
 															onChange={(e) =>
@@ -2677,7 +2680,7 @@ function RouteComponent() {
 												<h4 className="font-medium text-base">
 													Ingresos Mensuales
 												</h4>
-												<div className="space-y-3 rounded-lg bg-green-50 dark:bg-green-900/20 p-4">
+												<div className="space-y-3 rounded-lg bg-green-50 p-4 dark:bg-green-900/20">
 													<div className="space-y-2">
 														<Label className="text-sm">Ingresos Fijos</Label>
 														<Input
@@ -2719,7 +2722,7 @@ function RouteComponent() {
 												<h4 className="font-medium text-base">
 													Gastos Mensuales
 												</h4>
-												<div className="space-y-3 rounded-lg bg-red-50 dark:bg-red-900/20 p-4">
+												<div className="space-y-3 rounded-lg bg-red-50 p-4 dark:bg-red-900/20">
 													<div className="space-y-2">
 														<Label className="text-sm">Gastos Fijos</Label>
 														<Input
@@ -2757,7 +2760,7 @@ function RouteComponent() {
 										</div>
 
 										{/* Economic Availability */}
-										<div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 p-4">
+										<div className="rounded-lg bg-blue-50 p-4 dark:bg-blue-900/20">
 											<div className="space-y-2">
 												<Label className="font-medium text-sm">
 													Disponibilidad Económica
@@ -2844,7 +2847,7 @@ function RouteComponent() {
 												<h4 className="font-medium text-base">
 													Ingresos Mensuales
 												</h4>
-												<div className="space-y-3 rounded-lg bg-green-50 dark:bg-green-900/20 p-4">
+												<div className="space-y-3 rounded-lg bg-green-50 p-4 dark:bg-green-900/20">
 													<div className="flex justify-between">
 														<span className="text-muted-foreground text-sm">
 															Ingresos Fijos:
@@ -2899,7 +2902,7 @@ function RouteComponent() {
 												<h4 className="font-medium text-base">
 													Gastos Mensuales
 												</h4>
-												<div className="space-y-3 rounded-lg bg-red-50 dark:bg-red-900/20 p-4">
+												<div className="space-y-3 rounded-lg bg-red-50 p-4 dark:bg-red-900/20">
 													<div className="flex justify-between">
 														<span className="text-muted-foreground text-sm">
 															Gastos Fijos:
@@ -2952,7 +2955,7 @@ function RouteComponent() {
 										</div>
 
 										{/* Economic Availability */}
-										<div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 p-4">
+										<div className="rounded-lg bg-blue-50 p-4 dark:bg-blue-900/20">
 											<div className="flex items-center justify-between">
 												<div>
 													<Label className="font-medium text-muted-foreground text-sm">
@@ -3121,7 +3124,13 @@ function RouteComponent() {
 															</Badge>
 														)}
 														{opp.value && (
-															<span>Q{Number(opp.value).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+															<span>
+																Q
+																{Number(opp.value).toLocaleString("es-GT", {
+																	minimumFractionDigits: 2,
+																	maximumFractionDigits: 2,
+																})}
+															</span>
 														)}
 													</div>
 												</div>

@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { RPCHandler } from "@orpc/server/fetch";
 import { and, desc, eq, gt, sql } from "drizzle-orm";
-import { Hono } from "hono";
+import { type Context as HonoContext, Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import {
@@ -26,6 +26,7 @@ import {
 	validatePortalToken,
 } from "./controllers/portal-lead";
 import { createPublicLead } from "./controllers/public-lead";
+import { getVehicleByCodigoController } from "./controllers/vehicles";
 import type { db } from "./db";
 import { otps } from "./db/schema/otp";
 import {
@@ -34,13 +35,39 @@ import {
 } from "./jobs/cobros-notifications";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
-import { appRouter, disbursementRouter, manualVehicleRouter } from "./routers/index";
+import {
+	appRouter,
+	disbursementRouter,
+	manualVehicleRouter,
+} from "./routers/index";
 import { investmentsRouter } from "./routers/investments";
 import externalContractsRouter from "./routes/external-contracts";
 
-import { getVehicleByCodigoController } from "./controllers/vehicles";
-
 const app = new Hono();
+const AUTH_DIAG_PREFIX = "CRM_AUTH_DIAG";
+
+function logAuthDiagnostic(reason: string, detail: Record<string, unknown>) {
+	console.warn(
+		AUTH_DIAG_PREFIX,
+		JSON.stringify({
+			...detail,
+			reason,
+			timestamp: new Date().toISOString(),
+		}),
+	);
+}
+
+function getRequestDiagnostic(c: HonoContext) {
+	return {
+		ip:
+			c.req.header("cf-connecting-ip") ||
+			c.req.header("x-forwarded-for") ||
+			"unknown",
+		origin: c.req.header("origin") || null,
+		path: c.req.path,
+		userAgent: c.req.header("user-agent") || null,
+	};
+}
 
 app.use(logger());
 app.use(
@@ -79,7 +106,54 @@ app.use(
 	}),
 );
 
-app.on(["POST", "GET"], "/api/auth/**", (c) => auth.handler(c.req.raw));
+app.post("/api/auth-diagnostics/client-event", async (c) => {
+	let body: unknown = null;
+	try {
+		body = await c.req.json();
+	} catch {
+		body = { parseError: true };
+	}
+
+	logAuthDiagnostic("client-event", {
+		...getRequestDiagnostic(c),
+		body,
+	});
+
+	return c.json({ ok: true });
+});
+
+app.on(["POST", "GET"], "/api/auth/**", async (c) => {
+	const response = await auth.handler(c.req.raw);
+	const requestInfo = getRequestDiagnostic(c);
+
+	if (c.req.path.includes("/sign-out")) {
+		logAuthDiagnostic("auth-sign-out", {
+			...requestInfo,
+			status: response.status,
+		});
+	}
+
+	if (response.status >= 400) {
+		logAuthDiagnostic("auth-response-error", {
+			...requestInfo,
+			status: response.status,
+			statusText: response.statusText,
+		});
+	}
+
+	if (c.req.path.includes("/get-session") && response.status === 200) {
+		const body = await response.clone().text();
+		if (body === "null") {
+			logAuthDiagnostic("auth-get-session-null", {
+				...requestInfo,
+				hasCookie: c.req.header("cookie")?.includes("better-auth") ?? false,
+				status: response.status,
+			});
+		}
+	}
+
+	return response;
+});
 
 // External contracts endpoint (requires service account authentication)
 app.route("/api/contracts/external", externalContractsRouter);
@@ -964,8 +1038,6 @@ app.get("/info/vehicle-details", async (c) => {
 	const result = await getVehicleByCodigoController(numero_sifco);
 	return c.json(result, result.success ? 200 : 404);
 });
-
-
 
 // Job periódico de notificaciones de cobros (cada hora)
 setInterval(

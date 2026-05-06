@@ -10,6 +10,7 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { authClient } from "@/lib/auth-client";
+import { logAuthDiagnostic } from "@/lib/auth-session";
 import { getRoleColor, getRoleLabel } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
@@ -89,6 +90,10 @@ export default function UserMenu() {
 						variant="outline"
 						className="w-full"
 						onClick={async () => {
+							logAuthDiagnostic({
+								detail: { userId: session.user.id },
+								reason: "user-clicked-sign-out",
+							});
 							await authClient.signOut();
 							window.location.href = "/";
 						}}

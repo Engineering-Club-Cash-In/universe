@@ -133,6 +133,7 @@ function RouteComponent() {
 	const [debouncedSearch, setDebouncedSearch] = useState("");
 	const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
 	const [statusFilter, setStatusFilter] = useState<string>("all");
+	const [sourceFilter, setSourceFilter] = useState<string>("all");
 	const [page, setPage] = useState(0);
 	const [isEditingCreditAnalysis, setIsEditingCreditAnalysis] = useState(false);
 	const [isConvertDialogOpen, setIsConvertDialogOpen] = useState(false);
@@ -194,6 +195,8 @@ function RouteComponent() {
 								| "converted"
 								| "unqualified")
 						: undefined,
+				source:
+					sourceFilter !== "all" ? (sourceFilter as LeadSource) : undefined,
 				dateFrom: dateRange?.from?.toISOString(),
 				dateTo: dateRange?.to?.toISOString(),
 			},
@@ -210,6 +213,7 @@ function RouteComponent() {
 			pageSize,
 			debouncedSearch,
 			statusFilter,
+			sourceFilter,
 			dateRange?.from?.toISOString(),
 			dateRange?.to?.toISOString(),
 		],
@@ -1972,6 +1976,26 @@ function RouteComponent() {
 								<SelectItem value="qualified">Calificado</SelectItem>
 								<SelectItem value="unqualified">No Calificado</SelectItem>
 								<SelectItem value="converted">Convertido</SelectItem>
+							</SelectContent>
+						</Select>
+						<Select
+							value={sourceFilter}
+							onValueChange={(value) => {
+								setSourceFilter(value);
+								setPage(0);
+							}}
+						>
+							<SelectTrigger className="w-[190px]">
+								<Filter className="mr-2 h-4 w-4" />
+								<SelectValue placeholder="Filtrar por fuente" />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectItem value="all">Todas las Fuentes</SelectItem>
+								{LEAD_SOURCE_OPTIONS.map((source) => (
+									<SelectItem key={source.value} value={source.value}>
+										{source.label}
+									</SelectItem>
+								))}
 							</SelectContent>
 						</Select>
 					</div>

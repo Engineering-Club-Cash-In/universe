@@ -68,6 +68,7 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { authClient } from "@/lib/auth-client";
+import { shouldRedirectToLogin } from "@/lib/auth-session";
 import {
 	ALL_ROLES,
 	getRoleColor,
@@ -83,7 +84,11 @@ export const Route = createFileRoute("/admin/users")({
 });
 
 function RouteComponent() {
-	const { data: session, isPending } = authClient.useSession();
+	const {
+		data: session,
+		error: sessionError,
+		isPending,
+	} = authClient.useSession();
 	const navigate = Route.useNavigate();
 	const queryClient = useQueryClient();
 	const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -156,7 +161,7 @@ function RouteComponent() {
 	// *fix #13
 	useEffect(() => {
 		console.log("Session:", userProfile.data);
-		if (!session && !isPending) {
+		if (shouldRedirectToLogin({ error: sessionError, isPending, session })) {
 			navigate({ to: "/login" });
 		} else if (
 			session &&
@@ -166,7 +171,7 @@ function RouteComponent() {
 			navigate({ to: "/dashboard" });
 			toast.error("Access denied: Admin role required");
 		}
-	}, [session, isPending, userProfile.data]);
+	}, [session, sessionError, isPending, userProfile.data, navigate]);
 
 	const handleToggleSuspend = (
 		userId: string,

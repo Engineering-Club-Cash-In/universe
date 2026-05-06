@@ -4,11 +4,13 @@ import type { RouterClient } from "@orpc/server";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
 import { QueryCache, QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { logAuthDiagnostic } from "@/lib/auth-session";
 import type {
 	AppRouter,
 	disbursementRouter,
 	manualVehicleRouter,
 } from "../../../server/src/routers/index";
+
 type InvestmentsRouter =
 	typeof import("../../../server/src/routers/investments").investmentsRouter;
 
@@ -32,6 +34,13 @@ export const queryClient = new QueryClient({
 		onError: (error) => {
 			// Si es un error de sesión, redirigir al login sin mostrar toast de error
 			if (isSessionError(error)) {
+				logAuthDiagnostic({
+					detail: {
+						message: error.message,
+						name: error.name,
+					},
+					reason: "orpc-session-error-redirect",
+				});
 				toast.error(
 					"Tu sesión ha expirado. Por favor inicia sesión nuevamente.",
 				);

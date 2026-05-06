@@ -38,6 +38,7 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { authClient } from "@/lib/auth-client";
+import { shouldRedirectToLogin } from "@/lib/auth-session";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/admin/reports/")({
@@ -56,7 +57,11 @@ const COLORS = {
 };
 
 function RouteComponent() {
-	const { data: session, isPending } = authClient.useSession();
+	const {
+		data: session,
+		error: sessionError,
+		isPending,
+	} = authClient.useSession();
 	const navigate = Route.useNavigate();
 	const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
 
@@ -73,13 +78,13 @@ function RouteComponent() {
 	});
 
 	useEffect(() => {
-		if (!session && !isPending) {
+		if (shouldRedirectToLogin({ error: sessionError, isPending, session })) {
 			navigate({ to: "/login" });
 		} else if (session && userProfile.data?.role !== "admin") {
 			navigate({ to: "/dashboard" });
 			toast.error("Acceso denegado: se requiere rol de administrador");
 		}
-	}, [session, isPending, userProfile.data?.role]);
+	}, [session, sessionError, isPending, userProfile.data?.role, navigate]);
 
 	if (isPending || userProfile.isPending) {
 		return <div>Cargando...</div>;

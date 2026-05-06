@@ -94,6 +94,8 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 	email_cobrador?: string;
 	fecha_desde?: string;
 	fecha_hasta?: string;
+	capital_min?: number;
+	capital_max?: number;
 }) {
 	const estado = params.estado || "ACTIVO";
 
@@ -130,6 +132,8 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 			}),
 			...(params.fecha_desde !== undefined && { fecha_desde: params.fecha_desde }),
 			...(params.fecha_hasta !== undefined && { fecha_hasta: params.fecha_hasta }),
+			...(params.capital_min !== undefined && { capital_min: params.capital_min }),
+			...(params.capital_max !== undefined && { capital_max: params.capital_max }),
 	});
 
 	return {
@@ -602,6 +606,8 @@ export const cobrosRouter = {
 				fechaDesde: z.string().optional(),
 				fechaHasta: z.string().optional(),
 				etiquetas: z.array(z.string()).optional(),
+				capitalMin: z.number().optional(),
+				capitalMax: z.number().optional(),
 			}),
 		)
 		.handler(async ({ input }) => {
@@ -768,8 +774,10 @@ export const cobrosRouter = {
 									time: input.time,
 									email_cobrador: input.emailCobrador,
 									numero_credito_sifco: numeroSifco,
-								fecha_desde: input.fechaDesde,
-								fecha_hasta: input.fechaHasta,
+									fecha_desde: input.fechaDesde,
+									fecha_hasta: input.fechaHasta,
+									capital_min: input.capitalMin,
+									capital_max: input.capitalMax,
 								});
 							}
 						} else {
@@ -810,9 +818,11 @@ export const cobrosRouter = {
 									estado: estadoCartera,
 									time: input.time,
 									email_cobrador: input.emailCobrador,
-								fecha_desde: input.fechaDesde,
-								fecha_hasta: input.fechaHasta,
+									fecha_desde: input.fechaDesde,
+									fecha_hasta: input.fechaHasta,
 									numeros_credito_sifco: sifcosFiltro,
+									capital_min: input.capitalMin,
+									capital_max: input.capitalMax,
 								});
 
 								const allCredits = [...firstPage.data];
@@ -827,9 +837,11 @@ export const cobrosRouter = {
 										estado: estadoCartera,
 										time: input.time,
 										email_cobrador: input.emailCobrador,
-									fecha_desde: input.fechaDesde,
-									fecha_hasta: input.fechaHasta,
+										fecha_desde: input.fechaDesde,
+										fecha_hasta: input.fechaHasta,
 										numeros_credito_sifco: sifcosFiltro,
+										capital_min: input.capitalMin,
+										capital_max: input.capitalMax,
 									});
 									allCredits.push(...nextPage.data);
 								}
@@ -872,6 +884,8 @@ export const cobrosRouter = {
 								numero_credito_sifco: numeroSifcoExacto,
 								fecha_desde: input.fechaDesde,
 								fecha_hasta: input.fechaHasta,
+								capital_min: input.capitalMin,
+								capital_max: input.capitalMax,
 							});
 						}
 					} else {
@@ -889,6 +903,8 @@ export const cobrosRouter = {
 							fecha_desde: input.fechaDesde,
 							fecha_hasta: input.fechaHasta,
 							numeros_credito_sifco: sifcosPorEtiquetas,
+							capital_min: input.capitalMin,
+							capital_max: input.capitalMax,
 						});
 					}
 

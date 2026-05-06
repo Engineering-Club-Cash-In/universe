@@ -6312,7 +6312,7 @@ export async function resumenTransferencias(
       id_banco_transferencia: bancos.id_banco_transferencia,
     })
     .from(inversionistas)
-    .innerJoin(bancos, eq(inversionistas.banco_id, bancos.banco_id))
+    .leftJoin(bancos, eq(inversionistas.banco_id, bancos.banco_id))
     .where(condicionesBanco);
 
   const bancoTransfMap = new Map(

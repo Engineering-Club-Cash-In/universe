@@ -239,7 +239,7 @@ export const recalculateFromJsonRouter = new Elysia({ prefix: "/recalculate" })
         // Construir el formato esperado
         const creditoAgrupado = {
           numeroCredito,
-          creditos: inversionistas.map((inv, idx) => ({
+          creditos: inversionistas.map((inv: { nombre: string; capitalRestante: number }, idx: number) => ({
             numeroCredito: idx === 0 ? numeroCredito : `${numeroCredito}_${idx + 1}`,
             capitalRestante: inv.capitalRestante.toString(),
             inversionista: inv.nombre,

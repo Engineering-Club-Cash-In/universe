@@ -367,8 +367,18 @@ export const sifcoRouter = new Elysia()
   async ({ body }) => {
     const { numeroCredito, inversionistasData } = body;
 
+    type InversionistaPagoInput = {
+      inversionista: string;
+      capital: string | number;
+      porcentajeCashIn: string | number;
+      porcentajeInversionista: string | number;
+      porcentaje: string | number;
+      cuota?: string | number;
+      cuotaInversionista?: string | number;
+    };
+
     // Transform inversionistasData to match expected type
-    const inversionistasDataTyped = inversionistasData.map((inv) => ({
+    const inversionistasDataTyped = inversionistasData.map((inv: InversionistaPagoInput) => ({
       inversionista: inv.inversionista,
       capital: inv.capital,
       porcentajeCashIn: inv.porcentajeCashIn,

@@ -261,6 +261,9 @@ export async function procesarCreditoDesdeExcelFull(
     filaRef.ComoSeEntero || null
   );
   const advisor = await findOrCreateAdvisorByName(filaRef.Asesor || "", true);
+  if (!advisor) {
+    throw new Error(`No se pudo encontrar o crear asesor: ${filaRef.Asesor || ""}`);
+  }
 
   // ───────────────────────────────────────────────────────
   // 3. Upsert crédito (limpia pagos/cuotas/inversionistas si existe)

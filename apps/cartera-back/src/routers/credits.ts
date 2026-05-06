@@ -331,9 +331,9 @@ export const creditRouter = new Elysia()
         return { message: "Parámetros 'mes' y/o 'anio' inválidos." };
       }
 
-      const sifcosLimpios = numeros_credito_sifco
-        ?.map((s) => s.trim())
-        .filter((s) => s.length > 0);
+      const sifcosLimpios = (numeros_credito_sifco as string[] | undefined)
+        ?.map((s: string) => s.trim())
+        .filter((s: string) => s.length > 0);
 
       try {
         if (excel) {
@@ -1233,7 +1233,9 @@ export const creditRouter = new Elysia()
   // ========================================
   // ENDPOINT: ACTUALIZAR FECHAS DE VENCIMIENTO
   // ========================================
-  .post("/update-due-dates", updateDueDates, {
+  .post("/update-due-dates", async ({ body, set }) =>
+    updateDueDates({ body, set: set as { status: number } }),
+  {
     body: t.Object({
       creditos: t.Array(
         t.Object({
@@ -1266,7 +1268,9 @@ export const creditRouter = new Elysia()
       tags: ["Créditos", "Cuotas"],
     },
   })
-  .post("/update-single-due-date", updateSingleDueDate, {
+  .post("/update-single-due-date", async ({ body, set }) =>
+    updateSingleDueDate({ body, set: set as { status: number } }),
+  {
     body: t.Object({
       numero_credito_sifco: t.String({ minLength: 1 }),
       dia_pago: t.Number({ minimum: 1, maximum: 31 }),

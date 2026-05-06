@@ -753,6 +753,42 @@ app.get("/api/accounting/resumen-global-excel", async (c) => {
 	}
 });
 
+// Obtener URL del Excel de transferencias (ACH / no-ACH)
+app.get("/api/accounting/resumen-transferencias-excel", async (c) => {
+	try {
+		const context = await createContext({ context: c });
+		if (!context.session?.user?.id) {
+			return c.json({ error: "No autorizado" }, 401);
+		}
+
+		const mes = c.req.query("mes");
+		const anio = c.req.query("anio");
+		const ach = c.req.query("ach");
+		const moneda = c.req.query("moneda");
+
+		if (!mes || !anio) {
+			return c.json({ error: "Los parámetros 'mes' y 'anio' son obligatorios" }, 400);
+		}
+
+		const monedaParam: "quetzales" | "dolar" | undefined =
+			moneda === "quetzales" || moneda === "dolar" ? moneda : undefined;
+
+		const { carteraBackClient } = await import(
+			"./services/cartera-back-client"
+		);
+		const result = await carteraBackClient.getResumenTransferenciasExcel({
+			mes: Number(mes),
+			anio: Number(anio),
+			ach: ach === "true",
+			moneda: monedaParam,
+		});
+		return c.json(result);
+	} catch (err: any) {
+		console.error("[ResumenTransferenciasExcel] Error:", err);
+		return c.json({ error: err.message || "Error al descargar Excel" }, 500);
+	}
+});
+
 // Upload boleta de inversionista a cartera-back
 app.post("/api/accounting/upload-boleta", async (c) => {
 	try {

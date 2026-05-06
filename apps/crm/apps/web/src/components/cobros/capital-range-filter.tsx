@@ -68,13 +68,13 @@ export function CapitalRangeFilter({
 								{capitalMax !== undefined ? formatCapital(capitalMax) : "Sin máx."}
 							</span>
 						) : (
-							<span>Rango de Capital Deuda Total</span>
+							<span>Rango de Capital</span>
 						)}
 					</Button>
 				</PopoverTrigger>
 				<PopoverContent className="w-[220px] p-4" align="start">
 					<div className="flex flex-col gap-3">
-						<p className="font-semibold text-sm">Filtrar por Capital Deuda Total</p>
+						<p className="font-semibold text-sm">Filtrar por Capital</p>
 						<div className="flex flex-col gap-1">
 							<Label htmlFor="capital-min" className="text-xs text-muted-foreground">
 								Mínimo (Q)

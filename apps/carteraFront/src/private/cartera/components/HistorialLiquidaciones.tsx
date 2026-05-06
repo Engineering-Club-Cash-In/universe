@@ -33,7 +33,6 @@ import {
   DialogContent,
   DialogDescription,
   DialogFooter,
-  DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
@@ -62,6 +61,18 @@ function formatCurrency(value: number | string | null | undefined, symbol: strin
 
 function getMesLabel(mes: number): string {
   return MESES.find((m) => m.value === mes)?.label ?? "";
+}
+
+function getMesAnioActualGT(): { mes: number; anio: number } {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Guatemala",
+    year: "numeric",
+    month: "numeric",
+  }).formatToParts(new Date());
+  return {
+    mes: Number(parts.find((p) => p.type === "month")?.value),
+    anio: Number(parts.find((p) => p.type === "year")?.value),
+  };
 }
 
 type EstadoFiltro = "all" | "liquidated" | "pending" | "uploaded" | "sin_movimiento";
@@ -120,9 +131,10 @@ interface LiquidacionCardProps {
   onVerPagos: (id: number) => void;
   generandoId: number | null;
   navegandoId: number | null;
+  esMesActual: boolean;
 }
 
-function LiquidacionCard({ item, onGenerarPagos, onVerPagos, generandoId, navegandoId }: LiquidacionCardProps) {
+function LiquidacionCard({ item, onGenerarPagos, onVerPagos, generandoId, navegandoId, esMesActual }: LiquidacionCardProps) {
   const s = item.currencySymbol;
   const boleta = item.boleta_liquidacion;
   const estadoMeta = ESTADO_META[item.estado_liquidacion_resumen];
@@ -130,8 +142,8 @@ function LiquidacionCard({ item, onGenerarPagos, onVerPagos, generandoId, navega
   const reinvInt = Number(item.total_reinversion_interes ?? 0);
   const estado = item.estado_liquidacion_resumen;
 
-  const puedeGenerarPagos = estado === "sin_movimiento";
-  const puedeVerPagos = estado !== "sin_movimiento";
+  const puedeGenerarPagos = esMesActual && estado === "sin_movimiento";
+  const puedeVerPagos = esMesActual && estado !== "sin_movimiento";
   const generandoEste = generandoId === item.inversionista_id;
   const navegandoEste = navegandoId === item.inversionista_id;
 
@@ -297,9 +309,10 @@ function LiquidacionCard({ item, onGenerarPagos, onVerPagos, generandoId, navega
 }
 
 export function HistorialLiquidaciones() {
-  const now = new Date();
-  const [mes, setMes] = useState(now.getMonth() + 1);
-  const [anio, setAnio] = useState(now.getFullYear());
+  const ahoraGT = useMemo(() => getMesAnioActualGT(), []);
+  const [mes, setMes] = useState(ahoraGT.mes);
+  const [anio, setAnio] = useState(ahoraGT.anio);
+  const esMesActual = mes === ahoraGT.mes && anio === ahoraGT.anio;
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [estadoFiltro, setEstadoFiltro] = useState<EstadoFiltro>("all");
@@ -632,6 +645,7 @@ export function HistorialLiquidaciones() {
                 onVerPagos={handleVerPagos}
                 generandoId={generandoId}
                 navegandoId={navegandoId}
+                esMesActual={esMesActual}
               />
             ))}
           </div>
@@ -723,93 +737,123 @@ function ResultadoGeneracionModal({ resultado, onClose, onVerDetalle }: Resultad
   const sinPagos = success && totalPagos === 0;
   const fallo = !success;
 
-  let icon: React.ReactNode;
+  let HeroIcon: React.ElementType;
   let titulo: string;
   let descripcion: string;
-  let toneClass: string;
+  let iconBgClass: string;
+  let iconColorClass: string;
 
   if (fallo) {
-    icon = <XCircle className="w-6 h-6 text-rose-600" />;
+    HeroIcon = XCircle;
     titulo = "No se pudieron generar los pagos";
     descripcion = errorMsg ?? response?.message ?? "Ocurrió un error al procesar la solicitud.";
-    toneClass = "bg-rose-50 border-rose-200";
+    iconBgClass = "bg-rose-100";
+    iconColorClass = "text-rose-600";
   } else if (sinPagos) {
-    icon = <AlertTriangle className="w-6 h-6 text-amber-600" />;
+    HeroIcon = AlertTriangle;
     titulo = "No se generaron pagos";
     descripcion =
       totalCreditos === 0
-        ? "El inversionista no tiene créditos elegibles para generar pagos en este momento."
+        ? "Este inversionista no tiene créditos elegibles para generar pagos en este momento."
         : "Se procesaron créditos pero ninguno tenía cuotas pendientes para generar pagos.";
-    toneClass = "bg-amber-50 border-amber-200";
+    iconBgClass = "bg-amber-100";
+    iconColorClass = "text-amber-600";
   } else {
-    icon = <CheckCircle2 className="w-6 h-6 text-emerald-600" />;
+    HeroIcon = CheckCircle2;
     titulo = "Pagos generados correctamente";
     descripcion = `Se procesaron ${totalCreditos} crédito${totalCreditos !== 1 ? "s" : ""} y se registraron ${totalPagos} pago${totalPagos !== 1 ? "s" : ""}.`;
-    toneClass = "bg-emerald-50 border-emerald-200";
+    iconBgClass = "bg-emerald-100";
+    iconColorClass = "text-emerald-600";
   }
 
   return (
     <Dialog open={!!resultado} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-gray-900">
-            {icon}
+      <DialogContent className="max-w-xl bg-white p-0 overflow-hidden gap-0">
+        {/* Hero header */}
+        <div className="flex flex-col items-center text-center px-6 pt-8 pb-5 bg-gradient-to-b from-gray-50 to-white border-b border-gray-100">
+          <div className={`flex items-center justify-center w-16 h-16 rounded-full ${iconBgClass} mb-4 shadow-sm`}>
+            <HeroIcon className={`w-8 h-8 ${iconColorClass}`} />
+          </div>
+          <DialogTitle className="text-xl font-bold text-gray-900 mb-1">
             {titulo}
           </DialogTitle>
-          <DialogDescription className="text-gray-600">
-            <span className="font-medium text-gray-800">{nombre}</span>
+          <DialogDescription className="text-sm text-gray-500">
+            <span className="font-semibold text-gray-700">{nombre}</span>
           </DialogDescription>
-        </DialogHeader>
-
-        <div className={`rounded-lg border p-3 text-sm text-gray-700 ${toneClass}`}>
-          {descripcion}
         </div>
 
-        {huboPagos && response?.data && response.data.length > 0 && (
-          <div className="max-h-64 overflow-y-auto rounded-lg border border-gray-200">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-xs uppercase text-gray-600 sticky top-0">
-                <tr>
-                  <th className="px-3 py-2 text-left font-semibold">Crédito SIFCO</th>
-                  <th className="px-3 py-2 text-center font-semibold">Cuota</th>
-                  <th className="px-3 py-2 text-right font-semibold">Pagos</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {response.data.map((row) => (
-                  <tr key={row.creditoId} className="hover:bg-gray-50">
-                    <td className="px-3 py-2 font-medium text-gray-800">{row.numeroCreditoSifco}</td>
-                    <td className="px-3 py-2 text-center text-gray-600">#{row.cuotaProcesada}</td>
-                    <td className="px-3 py-2 text-right">
-                      <Badge
-                        variant="outline"
-                        className={
-                          row.pagosRegistrados > 0
-                            ? "border-emerald-300 text-emerald-700 bg-emerald-50"
-                            : "border-gray-300 text-gray-600 bg-gray-50"
-                        }
-                      >
-                        {row.pagosRegistrados}
-                      </Badge>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        {/* Body */}
+        <div className="px-6 py-5 space-y-4">
+          <p className="text-sm text-gray-700 text-center leading-relaxed">
+            {descripcion}
+          </p>
 
-        <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={onClose}>
-            Cerrar
-          </Button>
           {huboPagos && (
-            <Button
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2.5 text-center">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Créditos</p>
+                <p className="text-2xl font-bold text-emerald-900">{totalCreditos}</p>
+              </div>
+              <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2.5 text-center">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Pagos</p>
+                <p className="text-2xl font-bold text-emerald-900">{totalPagos}</p>
+              </div>
+            </div>
+          )}
+
+          {huboPagos && response?.data && response.data.length > 0 && (
+            <div className="max-h-56 overflow-y-auto rounded-lg border border-gray-200">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-[11px] uppercase text-gray-600 sticky top-0">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold">Crédito SIFCO</th>
+                    <th className="px-3 py-2 text-center font-semibold">Cuota</th>
+                    <th className="px-3 py-2 text-right font-semibold">Pagos</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 bg-white">
+                  {response.data.map((row) => (
+                    <tr key={row.creditoId} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 font-medium text-gray-800">{row.numeroCreditoSifco}</td>
+                      <td className="px-3 py-2 text-center text-gray-600">#{row.cuotaProcesada}</td>
+                      <td className="px-3 py-2 text-right">
+                        <Badge
+                          variant="outline"
+                          className={
+                            row.pagosRegistrados > 0
+                              ? "border-emerald-300 text-emerald-700 bg-emerald-50"
+                              : "border-gray-300 text-gray-600 bg-gray-50"
+                          }
+                        >
+                          {row.pagosRegistrados}
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <DialogFooter className="px-6 py-4 bg-gray-50 border-t border-gray-100 gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="min-w-24 inline-flex items-center justify-center px-4 py-2 rounded-md border border-gray-300 bg-white text-sm font-semibold text-gray-700 hover:bg-gray-100 transition-colors"
+          >
+            Cerrar
+          </button>
+          {huboPagos && (
+            <button
+              type="button"
               onClick={() => onVerDetalle(inversionistaId)}
-              className="bg-blue-600 hover:bg-blue-700"
+              className="min-w-32 inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-sm font-semibold text-white transition-colors"
             >
+              <Eye className="w-4 h-4" />
               Ver Detalle
-            </Button>
+            </button>
           )}
         </DialogFooter>
       </DialogContent>

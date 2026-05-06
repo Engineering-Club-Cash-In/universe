@@ -77,6 +77,10 @@ const SCORE_PROXIMITY_HIGH = 200;      // Diferencia < 10%
 const SCORE_PROXIMITY_MED = 100;       // Diferencia < 25%
 const SCORE_REINVERSION = 3000;       // Prioridad para inversionistas existentes
 
+// --- NUEVOS SCORES PARA NUEVOS INVERSIONISTAS ---
+const SCORE_NUEVO_INVERSIONISTA_INDIVIDUAL = 1000; // Prioridad máxima para que los nuevos tengan créditos solos
+const SCORE_COMPRA_TOTAL_CUBE = 2000;              // Bono por comprar toda la parte de Cube
+
 // ============================================================
 // FUNCIONES DE SCORING
 // ============================================================
@@ -143,6 +147,22 @@ export async function getCreditCandidates(
   // Para optimizar el rendimiento y aprovechar índices (sargable), calculamos la fecha
   // exacta de inicio de mes en UTC basándonos en la zona horaria de Guatemala.
   const inicioMesGuateUTC = dayjs().tz("America/Guatemala").startOf("month").toDate();
+
+  // ──────────────────────────────────────────────────────────
+  // 0. Verificar si el inversionista es nuevo (si se proporciona ID)
+  // ──────────────────────────────────────────────────────────
+  let esInversionistaNuevo = false;
+  if (inversionistaIdSolicitante !== undefined) {
+    const [{ count }] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(creditos_inversionistas)
+      .where(eq(creditos_inversionistas.inversionista_id, inversionistaIdSolicitante));
+    
+    esInversionistaNuevo = count === 0;
+    if (esInversionistaNuevo) {
+      console.log(`   ✨ Inversionista ID ${inversionistaIdSolicitante} detectado como NUEVO.`);
+    }
+  }
 
   // ──────────────────────────────────────────────────────────
   // 1. Diagnóstico de embudo de filtros inicial
@@ -405,10 +425,12 @@ export async function getCreditCandidates(
     }
 
     // Identificar formato dinámicamente si viene null (para evitar saltarse validación de Pool)
+    // MEJORA: Ignorar inversionistas con monto 0 para determinar si es Individual
+    const invsConSaldo = invs.filter(i => i.monto_aportado > 0);
+    const esRealmenteIndividual = invsConSaldo.length === 1 && invsConSaldo[0].es_cube;
     const actualFormadoCredito = formato_credito ?? (invs.length > 1 ? "Pool" : "Individual");
 
     if (actualFormadoCredito === "Pool") {
-
       // VALIDACIÓN: Cube debe ser el líder del Pool.
       // Si existe algún otro inversionista con un monto estrictamente mayor, se descarta.
       // Si Cube está empatado en el primer lugar, se permite.
@@ -441,12 +463,22 @@ export async function getCreditCandidates(
 
     // Score
     const crmBonus = numero_credito_sifco?.toLowerCase().startsWith("crm") ? SCORE_CRM_BONUS : 0;
+    
+    // Si es nuevo y es individual, bono masivo
+    const nuevoInvBonus = (esInversionistaNuevo && esRealmenteIndividual) ? SCORE_NUEVO_INVERSIONISTA_INDIVIDUAL : 0;
+    
     const formatoBonus = calcFormatoBonus(actualFormadoCredito, invs);
     const cuotasBonus = calcCuotasBonus(cuotasPagadas);
     
     // Evaluar la proximidad utilizando específicamente el monto original aportado por Cube en lugar del capital total del crédito
     const capitalParaEvaluar = cubeInv ? cubeInv.monto_aportado : capitalActivoNum;
     const proximityBonus = monto !== undefined ? calcCapitalProximityBonus(capitalParaEvaluar, monto) : 0;
+
+    // Bono de Compra Total: Si el monto solicitado cubre toda la parte de Cube
+    let compraTotalBonus = 0;
+    if (monto !== undefined && cubeInv && monto >= cubeInv.monto_aportado) {
+      compraTotalBonus = SCORE_COMPRA_TOTAL_CUBE;
+    }
 
     // Bono de Reinversión: Si el inversionista ya tiene participación en este crédito
     let reinversionBonus = 0;
@@ -457,10 +489,10 @@ export async function getCreditCandidates(
       }
     }
 
-    const score = SCORE_BASE + crmBonus + formatoBonus + cuotasBonus + proximityBonus + reinversionBonus;
+    const score = SCORE_BASE + crmBonus + nuevoInvBonus + formatoBonus + cuotasBonus + proximityBonus + reinversionBonus + compraTotalBonus;
 
     console.log(
-      `   ✅ [${numero_credito_sifco}] score=${score} (crm=${crmBonus}, fmt=${formatoBonus}, cuotas=${cuotasBonus}, prox=${proximityBonus}, reinv=${reinversionBonus})`
+      `   ✅ [${numero_credito_sifco}] score=${score} (crm=${crmBonus}, nuevo=${nuevoInvBonus}, fmt=${formatoBonus}, cuotas=${cuotasBonus}, prox=${proximityBonus}, reinv=${reinversionBonus}, total=${compraTotalBonus})`
     );
 
     candidates.push({
@@ -485,11 +517,23 @@ export async function getCreditCandidates(
     });
   }
 
-  // Ordenar DESC por score. En caso de empate, gana el capital más cercano al monto
+  // Ordenar DESC por score. 
+  // En caso de empate:
+  // 1. Prioridad a los que tienen MENOS inversionistas activos (más "puros")
+  // 2. Prioridad al capital más cercano al monto buscado
   candidates.sort((a, b) => {
     if (b.score !== a.score) {
       return b.score - a.score;
     }
+
+    // Tie-breaker 1: Cantidad de inversionistas con saldo > 0
+    const invsA = a.inversionistas.filter(i => i.monto_aportado > 0).length;
+    const invsB = b.inversionistas.filter(i => i.monto_aportado > 0).length;
+    if (invsA !== invsB) {
+      return invsA - invsB; // Menos es mejor
+    }
+
+    // Tie-breaker 2: Proximidad al monto
     if (monto !== undefined) {
       const diffA = Math.abs(a.capital_evaluado - monto);
       const diffB = Math.abs(b.capital_evaluado - monto);

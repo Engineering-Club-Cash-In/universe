@@ -57,6 +57,7 @@ import {
 import { Combobox, Transition } from "@headlessui/react";
 import { Input } from "@/components/ui/input";
 import { Fragment, useState, useEffect, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { ConfirmationModal } from "@/components/ui/confirmation-modal";
 import { CrearBoletaInversionista } from "./investorPayment";
 import { InvestorDocumentsModal } from "./investorDocuments";
@@ -246,11 +247,29 @@ export function TableInvestors() {
   const handleCancelarLiquidarTodos = () => {
     setShowLiquidarTodosModal(false);
   };
-  const [selectedInvestor, setSelectedInvestor] = useState<number | "">("");
+  const [searchParams] = useSearchParams();
+  const initialInvestorIdFromUrl = (() => {
+    const raw = searchParams.get("id");
+    const n = raw ? Number(raw) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : "";
+  })();
+  const [selectedInvestor, setSelectedInvestor] = useState<number | "">(initialInvestorIdFromUrl);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const [expandedCredit, setExpandedCredit] = useState<number | null>(null);
+
+  // Si cambia el ?id= en la URL después de montado (navegación interna), reflejarlo
+  useEffect(() => {
+    const raw = searchParams.get("id");
+    if (!raw) return;
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0 && n !== selectedInvestor) {
+      setSelectedInvestor(n);
+      setPage(1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   // Catálogo de inversionistas (para el filtro)
   const { investors = [], loading: loadingCatalogs } = useCatalogs() as {

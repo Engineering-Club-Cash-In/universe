@@ -162,13 +162,21 @@ export const getInvestorDocuments = async (
 
 /**
  * Obtener catálogo de bancos
+ * @param soloConTransferencia Si es true, sólo devuelve bancos con id_banco_transferencia asignado
  */
-export const getBancos = async (): Promise<Banco[]> => {
+export const getBancos = async (
+  soloConTransferencia = false
+): Promise<Banco[]> => {
   try {
     // Asegurar autenticación
     const token = await ensureCarteraAuth();
 
-    const response = await fetch(`${env.CARTERA_API_URL}/bancos`, {
+    const url = new URL(`${env.CARTERA_API_URL}/bancos`);
+    
+    url.searchParams.set("con_transferencia", "true");
+    
+
+    const response = await fetch(url.toString(), {
       method: "GET",
       headers: {
         Authorization: `Bearer ${token}`,

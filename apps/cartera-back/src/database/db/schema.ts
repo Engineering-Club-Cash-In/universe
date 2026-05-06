@@ -569,6 +569,7 @@
   export const bancos = customSchema.table('bancos', {
     banco_id: serial('banco_id').primaryKey(),
     nombre: varchar('nombre', { length: 100 }).notNull().unique(),
+    id_banco_transferencia: varchar('id_banco_transferencia', { length: 50 }).unique(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   });

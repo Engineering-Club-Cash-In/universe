@@ -28,7 +28,7 @@ import {
   abonos_capital,
 } from "../database/db/schema";
 import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
-import { eq, and, sql, inArray, ilike, like, desc, count, SQL, isNull } from "drizzle-orm";
+import { eq, and, or, sql, inArray, ilike, like, desc, count, SQL, isNull, isNotNull, ne } from "drizzle-orm";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import Big from "big.js";
 import { sendLiquidationEmail, sendPlainEmail, sendSimpleEmail } from "@cci/email";
@@ -6222,6 +6222,333 @@ export async function resumenGlobalLiquidaciones(
   }
 
   return result;
+}
+
+const ID_BANCO_TRANSFERENCIA_NO_ACH = "45";
+
+const NOMBRES_MES_ES = [
+  "Enero",
+  "Febrero",
+  "Marzo",
+  "Abril",
+  "Mayo",
+  "Junio",
+  "Julio",
+  "Agosto",
+  "Septiembre",
+  "Octubre",
+  "Noviembre",
+  "Diciembre",
+];
+
+const CUENTA_MONETARIA_LARGO = 11;
+
+function parseCuentaMonetaria(numeroCuenta: string | null | undefined): {
+  agencia: string;
+  correlativo: string;
+  digito: string;
+  valido: boolean;
+} {
+  const limpia = (numeroCuenta ?? "").replace(/\D/g, "");
+  const valido = limpia.length === CUENTA_MONETARIA_LARGO;
+  return {
+    agencia: limpia.slice(0, 3),
+    correlativo: limpia.slice(3, -1),
+    digito: limpia.slice(-1),
+    valido,
+  };
+}
+
+function mapTipoCuentaCodigo(tipo: string | null | undefined): {
+  codigo: number | "";
+  valido: boolean;
+} {
+  if (!tipo) return { codigo: "", valido: false };
+  const upper = tipo.toUpperCase();
+  if (upper.includes("MONETARIA")) return { codigo: 1, valido: true };
+  if (upper.includes("AHORRO")) return { codigo: 2, valido: true };
+  return { codigo: "", valido: false };
+}
+
+function mapMonedaCodigo(moneda: string | null | undefined): 1 | 2 {
+  return moneda === "dolares" ? 2 : 1;
+}
+
+export type MonedaFiltroTransferencias = "quetzales" | "dolar" | "todas";
+
+export async function resumenTransferencias(
+  mes: number,
+  anio: number,
+  ach: boolean,
+  monedaFiltro: MonedaFiltroTransferencias = "todas"
+): Promise<{ success: boolean; url: string; filename: string }> {
+  const condicionesBanco = ach
+    ? and(
+        eq(inversionistas.permite_distribucion, false),
+        or(
+          isNull(bancos.id_banco_transferencia),
+          ne(bancos.id_banco_transferencia, ID_BANCO_TRANSFERENCIA_NO_ACH)
+        )
+      )
+    : and(
+        eq(inversionistas.permite_distribucion, false),
+        eq(bancos.id_banco_transferencia, ID_BANCO_TRANSFERENCIA_NO_ACH)
+      );
+
+  const inversionistasFiltro = await db
+    .select({
+      inversionista_id: inversionistas.inversionista_id,
+      id_banco_transferencia: bancos.id_banco_transferencia,
+    })
+    .from(inversionistas)
+    .leftJoin(bancos, eq(inversionistas.banco_id, bancos.banco_id))
+    .where(condicionesBanco);
+
+  const bancoTransfMap = new Map(
+    inversionistasFiltro.map((i) => [i.inversionista_id, i.id_banco_transferencia ?? ""])
+  );
+
+  if (bancoTransfMap.size === 0) {
+    return ach
+      ? generateAchTransferenciasWorkbook([], mes, anio, bancoTransfMap)
+      : generateTransferenciasWorkbook([], mes, anio);
+  }
+
+  const resumen = await consultarResumenGlobalPorEstadoPago(
+    "NO_LIQUIDADO",
+    undefined,
+    mes,
+    anio,
+    true
+  );
+
+  let monedaPermitida: "quetzales" | "dolares" | null = null;
+  if (monedaFiltro === "quetzales") monedaPermitida = "quetzales";
+  else if (monedaFiltro === "dolar") monedaPermitida = "dolares";
+
+  const filtrados = resumen.filter((r) => {
+    if (!bancoTransfMap.has(r.inversionista_id)) return false;
+    if (monedaPermitida && r.moneda !== monedaPermitida) return false;
+    return true;
+  });
+  const filas = filtrados.map((inv) => mapResumenRow(inv, null, null));
+
+  return ach
+    ? generateAchTransferenciasWorkbook(filas, mes, anio, bancoTransfMap)
+    : generateTransferenciasWorkbook(filas, mes, anio);
+}
+
+async function generateAchTransferenciasWorkbook(
+  rows: InversionistaResumen[],
+  mes: number,
+  anio: number,
+  bancoTransfMap: Map<number, string>
+): Promise<{ success: boolean; url: string; filename: string }> {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "Club Cashin";
+  workbook.created = new Date();
+  const sheet = workbook.addWorksheet("Transferencias ACH");
+
+  const RED_FILL = "FFFFC7CE";
+  const HEADER_FILL = "FF1E40AF";
+  const HEADER_BORDER = "FF0F1B4C";
+  const nombreMes = NOMBRES_MES_ES[mes - 1] ?? `Mes ${mes}`;
+
+  const headers = [
+    "Nombre",
+    "Id Participante",
+    "Cuenta credito / debito",
+    "Tipo Cuenta",
+    "Moneda",
+    "Banco",
+    "Descripcion Corta",
+    "Adenda",
+    "Valor Q.",
+  ];
+  sheet.columns = [
+    { width: 28 }, // Nombre
+    { width: 18 }, // Id Participante
+    { width: 24 }, // Cuenta crédito / débito
+    { width: 14 }, // Tipo Cuenta
+    { width: 12 }, // Moneda
+    { width: 10 }, // Banco
+    { width: 24 }, // Descripción Corta
+    { width: 60 }, // Adenda
+    { width: 16 }, // Valor Q.
+  ];
+
+  const headerRow = sheet.addRow(headers);
+  headerRow.height = 24;
+  headerRow.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+  headerRow.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+  headerRow.eachCell((cell) => {
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: HEADER_FILL },
+    };
+    cell.border = {
+      top: { style: "thin", color: { argb: HEADER_BORDER } },
+      bottom: { style: "medium", color: { argb: HEADER_BORDER } },
+      left: { style: "thin", color: { argb: HEADER_BORDER } },
+      right: { style: "thin", color: { argb: HEADER_BORDER } },
+    };
+  });
+
+  rows.forEach((inv) => {
+    const valor = Number(inv.total_cuota) || 0;
+    if (valor === 0) return;
+
+    const concepto = `Liquidación ${nombreMes} ${anio}, Club CashIn S.A`;
+    const adenda = concepto.slice(0, 80);
+    const tipoCuenta = mapTipoCuentaCodigo(inv.tipo_cuenta);
+    const moneda = mapMonedaCodigo(inv.moneda);
+    const banco = bancoTransfMap.get(inv.inversionista_id) ?? "";
+    const cuentaLimpia = (inv.numero_cuenta ?? "").replace(/\D/g, "");
+
+    const row = sheet.addRow([
+      inv.nombre,
+      "",
+      cuentaLimpia,
+      tipoCuenta.codigo,
+      moneda,
+      banco,
+      concepto,
+      adenda,
+      valor,
+    ]);
+    row.getCell(9).numFmt = "0.00";
+
+    const filaInvalida = !tipoCuenta.valido || !banco;
+    if (filaInvalida) {
+      row.eachCell({ includeEmpty: true }, (cell) => {
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: RED_FILL },
+        };
+      });
+    }
+  });
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const filename = `transferencias_ach_${anio}_${String(mes).padStart(2, "0")}_${Date.now()}.xlsx`;
+  const s3 = new S3Client({
+    endpoint: process.env.BUCKET_REPORTS_URL,
+    region: "auto",
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
+    },
+  });
+
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: process.env.BUCKET_REPORTS,
+      Key: filename,
+      Body: new Uint8Array(buffer),
+      ContentType:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    })
+  );
+
+  return {
+    success: true,
+    url: `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`,
+    filename,
+  };
+}
+
+async function generateTransferenciasWorkbook(
+  rows: InversionistaResumen[],
+  mes: number,
+  anio: number
+): Promise<{ success: boolean; url: string; filename: string }> {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "Club Cashin";
+  workbook.created = new Date();
+  const sheet = workbook.addWorksheet("Transferencias");
+
+  const RED_FILL = "FFFFC7CE";
+  const HEADER_FILL = "FF1E40AF";
+  const HEADER_BORDER = "FF0F1B4C";
+  const nombreMes = NOMBRES_MES_ES[mes - 1] ?? `Mes ${mes}`;
+
+  const headers = ["Agencia", "Correlativo", "Dígito", "Moneda", "Concepto", "Valor"];
+  sheet.columns = [
+    { width: 12 }, // Agencia
+    { width: 16 }, // Correlativo
+    { width: 10 }, // Dígito
+    { width: 12 }, // Moneda
+    { width: 60 }, // Concepto
+    { width: 16 }, // Valor
+  ];
+  const headerRow = sheet.addRow(headers);
+  headerRow.height = 24;
+  headerRow.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+  headerRow.alignment = { horizontal: "center", vertical: "middle" };
+  headerRow.eachCell((cell) => {
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: HEADER_FILL },
+    };
+    cell.border = {
+      top: { style: "thin", color: { argb: HEADER_BORDER } },
+      bottom: { style: "medium", color: { argb: HEADER_BORDER } },
+      left: { style: "thin", color: { argb: HEADER_BORDER } },
+      right: { style: "thin", color: { argb: HEADER_BORDER } },
+    };
+  });
+
+  rows.forEach((inv) => {
+    const valor = Number(inv.total_cuota) || 0;
+    if (valor === 0) return;
+
+    const { agencia, correlativo, digito, valido } = parseCuentaMonetaria(inv.numero_cuenta);
+    const concepto = `Liquidación ${nombreMes} ${anio} - ${inv.nombre}, Club CashIn S.A`;
+    const moneda = mapMonedaCodigo(inv.moneda);
+
+    const row = sheet.addRow([agencia, correlativo, digito, moneda, concepto, valor]);
+    row.getCell(6).numFmt = "0.00";
+
+    if (!valido) {
+      row.eachCell({ includeEmpty: true }, (cell) => {
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: RED_FILL },
+        };
+      });
+    }
+  });
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const filename = `transferencias_${anio}_${String(mes).padStart(2, "0")}_${Date.now()}.xlsx`;
+  const s3 = new S3Client({
+    endpoint: process.env.BUCKET_REPORTS_URL,
+    region: "auto",
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
+    },
+  });
+
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: process.env.BUCKET_REPORTS,
+      Key: filename,
+      Body: new Uint8Array(buffer),
+      ContentType:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    })
+  );
+
+  return {
+    success: true,
+    url: `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`,
+    filename,
+  };
 }
 
 export const isNullorEmpty = (value: string | number | null | undefined): value is null | undefined | "" => {

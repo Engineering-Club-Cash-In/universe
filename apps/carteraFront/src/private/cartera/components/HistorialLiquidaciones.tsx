@@ -1,23 +1,42 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useMemo, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import {
   getResumenGlobalLiquidaciones,
+  descargarResumenLiquidacionesExcel,
   type LiquidacionResumen,
+  type CalcularPagosEspejoResponse,
 } from "../services/services";
+import { useCalcularPagosEspejo } from "../hooks/getInvestor";
 import {
   ChevronLeft,
   ChevronRight,
   Download,
   FileText,
+  FileSpreadsheet,
   Search,
   Loader2,
   Landmark,
   RefreshCw,
+  Eye,
+  Calculator,
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { toast } from "sonner";
 
 const PER_PAGE = 25;
 
@@ -45,26 +64,120 @@ function getMesLabel(mes: number): string {
   return MESES.find((m) => m.value === mes)?.label ?? "";
 }
 
-function LiquidacionCard({ item }: { item: LiquidacionResumen }) {
+type EstadoFiltro = "all" | "liquidated" | "pending" | "uploaded" | "sin_movimiento";
+
+const STATUS_META: Record<
+  "activo" | "inactivo" | "pendiente_devolucion",
+  { label: string; badgeClass: string }
+> = {
+  activo: {
+    label: "Activo",
+    badgeClass: "border-green-300 text-green-700 bg-green-50",
+  },
+  inactivo: {
+    label: "Inactivo",
+    badgeClass: "border-gray-300 text-gray-600 bg-gray-100",
+  },
+  pendiente_devolucion: {
+    label: "Pendiente devolución",
+    badgeClass: "border-rose-300 text-rose-700 bg-rose-50",
+  },
+};
+
+const ESTADO_META: Record<
+  Exclude<EstadoFiltro, "all">,
+  { label: string; chipLabel: string; badgeClass: string; chipActiveClass: string }
+> = {
+  liquidated: {
+    label: "Liquidado",
+    chipLabel: "Liquidados",
+    badgeClass: "border-emerald-300 text-emerald-700 bg-emerald-50",
+    chipActiveClass: "bg-emerald-600 text-white border-emerald-600",
+  },
+  pending: {
+    label: "Con pagos generados",
+    chipLabel: "Con pagos generados",
+    badgeClass: "border-amber-300 text-amber-700 bg-amber-50",
+    chipActiveClass: "bg-amber-500 text-white border-amber-500",
+  },
+  uploaded: {
+    label: "Boleta subida",
+    chipLabel: "Boleta subida",
+    badgeClass: "border-sky-300 text-sky-700 bg-sky-50",
+    chipActiveClass: "bg-sky-600 text-white border-sky-600",
+  },
+  sin_movimiento: {
+    label: "Pendiente de liquidar",
+    chipLabel: "Pendiente de liquidar",
+    badgeClass: "border-slate-300 text-slate-600 bg-slate-100",
+    chipActiveClass: "bg-slate-700 text-white border-slate-700",
+  },
+};
+
+interface LiquidacionCardProps {
+  item: LiquidacionResumen;
+  onGenerarPagos: (id: number) => void;
+  onVerPagos: (id: number) => void;
+  generandoId: number | null;
+  navegandoId: number | null;
+}
+
+function LiquidacionCard({ item, onGenerarPagos, onVerPagos, generandoId, navegandoId }: LiquidacionCardProps) {
   const s = item.currencySymbol;
   const boleta = item.boleta_liquidacion;
+  const estadoMeta = ESTADO_META[item.estado_liquidacion_resumen];
+  const reinvCap = Number(item.total_reinversion_capital ?? 0);
+  const reinvInt = Number(item.total_reinversion_interes ?? 0);
+  const estado = item.estado_liquidacion_resumen;
+
+  const puedeGenerarPagos = estado === "sin_movimiento";
+  const puedeVerPagos = estado !== "sin_movimiento";
+  const generandoEste = generandoId === item.inversionista_id;
+  const navegandoEste = navegandoId === item.inversionista_id;
+
+  const cuentaTexto = item.banco
+    ? `${item.banco} — ${item.tipo_cuenta ?? ""} ${item.numero_cuenta ?? ""}`.trim()
+    : "Sin cuenta bancaria";
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow p-5 pb-4 flex flex-col gap-4">
+    <div className="h-full bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow p-5 pb-4 flex flex-col gap-4">
       {/* Header */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1 min-w-0">
-          <h3 className="text-base font-bold text-gray-900 truncate">
-            {item.nombre}
-          </h3>
-          {item.banco && (
-            <span className="text-xs text-gray-500 flex items-center gap-1 mt-1">
-              <Landmark className="w-3 h-3" />
-              {item.banco} — {item.tipo_cuenta} {item.numero_cuenta}
+      <div className="flex flex-col gap-2">
+        <h3
+          className="text-base font-bold text-gray-900 break-words leading-tight"
+          title={item.nombre}
+        >
+          {item.nombre}
+        </h3>
+
+        <div className="flex items-start justify-between gap-2">
+          {item.banco ? (
+            <span
+              className="text-xs text-gray-500 flex items-center gap-1 truncate cursor-help min-w-0"
+              title={cuentaTexto}
+            >
+              <Landmark className="w-3 h-3 shrink-0" />
+              <span className="truncate">{cuentaTexto}</span>
+            </span>
+          ) : (
+            <span className="text-xs text-gray-400 italic flex items-center gap-1">
+              <Landmark className="w-3 h-3 shrink-0" />
+              Sin cuenta bancaria
             </span>
           )}
         </div>
-        <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {estadoMeta && (
+            <Badge variant="outline" className={`text-[11px] ${estadoMeta.badgeClass}`}>
+              {estadoMeta.label}
+            </Badge>
+          )}
+          {item.status && STATUS_META[item.status] && (
+            <Badge variant="outline" className={`text-[11px] ${STATUS_META[item.status].badgeClass}`}>
+              {STATUS_META[item.status].label}
+            </Badge>
+          )}
           {item.emite_factura && (
             <Badge variant="outline" className="text-[11px] border-blue-300 text-blue-700 bg-blue-50">
               Factura
@@ -78,42 +191,90 @@ function LiquidacionCard({ item }: { item: LiquidacionResumen }) {
         </div>
       </div>
 
-      {/* Montos Grid */}
-      <div className="grid grid-cols-3 gap-1.5">
-        <div className="bg-blue-50 rounded-lg px-2.5 py-1.5">
-          <p className="text-[10px] text-blue-600 font-medium uppercase tracking-wide">Capital</p>
-          <p className="text-[13px] font-bold text-blue-900">{formatCurrency(item.total_abono_capital, s)}</p>
+      {/* Montos Grid: 4 cols x 2 rows */}
+      <div className="grid grid-cols-4 gap-1.5">
+        <div className="bg-blue-50 rounded-lg px-2 py-1.5 min-w-0">
+          <p className="text-[10px] text-blue-600 font-medium uppercase tracking-wide truncate">Capital</p>
+          <p className="text-[12px] font-bold text-blue-900 truncate">{formatCurrency(item.total_abono_capital, s)}</p>
         </div>
-        <div className="bg-indigo-50 rounded-lg px-2.5 py-1.5">
-          <p className="text-[10px] text-indigo-600 font-medium uppercase tracking-wide">Interés</p>
-          <p className="text-[13px] font-bold text-indigo-900">{formatCurrency(item.total_abono_interes, s)}</p>
+        <div className="bg-indigo-50 rounded-lg px-2 py-1.5 min-w-0">
+          <p className="text-[10px] text-indigo-600 font-medium uppercase tracking-wide truncate">Interés</p>
+          <p className="text-[12px] font-bold text-indigo-900 truncate">{formatCurrency(item.total_abono_interes, s)}</p>
         </div>
-        <div className="bg-purple-50 rounded-lg px-2.5 py-1.5">
-          <p className="text-[10px] text-purple-600 font-medium uppercase tracking-wide">IVA</p>
-          <p className="text-[13px] font-bold text-purple-900">{formatCurrency(item.total_abono_iva, s)}</p>
+        <div className="bg-purple-50 rounded-lg px-2 py-1.5 min-w-0">
+          <p className="text-[10px] text-purple-600 font-medium uppercase tracking-wide truncate">IVA</p>
+          <p className="text-[12px] font-bold text-purple-900 truncate">{formatCurrency(item.total_abono_iva, s)}</p>
         </div>
-        <div className="bg-orange-50 rounded-lg px-2.5 py-1.5">
-          <p className="text-[10px] text-orange-600 font-medium uppercase tracking-wide">ISR</p>
-          <p className="text-[13px] font-bold text-orange-900">{formatCurrency(item.total_isr, s)}</p>
+        <div className="bg-orange-50 rounded-lg px-2 py-1.5 min-w-0">
+          <p className="text-[10px] text-orange-600 font-medium uppercase tracking-wide truncate">ISR</p>
+          <p className="text-[12px] font-bold text-orange-900 truncate">{formatCurrency(item.total_isr, s)}</p>
         </div>
-        <div className="bg-teal-50 rounded-lg px-2.5 py-1.5">
-          <p className="text-[10px] text-teal-600 font-medium uppercase tracking-wide">Reinversión</p>
-          <p className="text-[13px] font-bold text-teal-900">{formatCurrency(item.total_reinversion, s)}</p>
+        <div className="bg-cyan-50 rounded-lg px-2 py-1.5 min-w-0" title="Reinversión Capital">
+          <p className="text-[10px] text-cyan-700 font-medium uppercase tracking-wide truncate">Reinv. Cap.</p>
+          <p className="text-[12px] font-bold text-cyan-900 truncate">{formatCurrency(reinvCap, s)}</p>
         </div>
-        <div className="bg-slate-100 rounded-lg px-2.5 py-1.5 border border-slate-300">
-          <p className="text-[10px] text-slate-600 font-medium uppercase tracking-wide">Total c/Reinv.</p>
-          <p className="text-[13px] font-extrabold text-slate-900">{formatCurrency(item.total_a_recibir_con_reinversion, s)}</p>
+        <div className="bg-violet-50 rounded-lg px-2 py-1.5 min-w-0" title="Reinversión Interés">
+          <p className="text-[10px] text-violet-700 font-medium uppercase tracking-wide truncate">Reinv. Int.</p>
+          <p className="text-[12px] font-bold text-violet-900 truncate">{formatCurrency(reinvInt, s)}</p>
+        </div>
+        <div className="bg-teal-50 rounded-lg px-2 py-1.5 min-w-0">
+          <p className="text-[10px] text-teal-600 font-medium uppercase tracking-wide truncate">Reinversión</p>
+          <p className="text-[12px] font-bold text-teal-900 truncate">{formatCurrency(item.total_reinversion, s)}</p>
+        </div>
+        <div className="bg-slate-100 rounded-lg px-2 py-1.5 border border-slate-300 min-w-0">
+          <p className="text-[10px] text-slate-600 font-medium uppercase tracking-wide truncate">Total c/Reinv.</p>
+          <p className="text-[12px] font-extrabold text-slate-900 truncate">{formatCurrency(item.total_a_recibir_con_reinversion, s)}</p>
         </div>
       </div>
 
-      {/* Boleta + Reporte */}
-      <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-100">
+      {/* Acciones */}
+      <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-100 mt-auto">
+        {puedeGenerarPagos && (
+          <button
+            type="button"
+            onClick={() => onGenerarPagos(item.inversionista_id)}
+            disabled={generandoEste}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-60 px-3.5 py-2 rounded-lg shadow-sm transition-colors"
+          >
+            {generandoEste ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Generando...
+              </>
+            ) : (
+              <>
+                <Calculator className="w-3.5 h-3.5" />
+                Generar Pagos
+              </>
+            )}
+          </button>
+        )}
+        {puedeVerPagos && (
+          <button
+            type="button"
+            onClick={() => onVerPagos(item.inversionista_id)}
+            disabled={navegandoEste}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 px-3.5 py-2 rounded-lg shadow-sm transition-colors"
+          >
+            {navegandoEste ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Abriendo...
+              </>
+            ) : (
+              <>
+                <Eye className="w-3.5 h-3.5" />
+                Ver Detalle
+              </>
+            )}
+          </button>
+        )}
         {boleta?.boleta_url && (
           <a
             href={boleta.boleta_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 px-3.5 py-2 rounded-lg shadow-sm transition-colors"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 border border-gray-300 px-3.5 py-2 rounded-lg shadow-sm transition-colors"
           >
             <Download className="w-3.5 h-3.5" />
             Boleta
@@ -130,9 +291,6 @@ function LiquidacionCard({ item }: { item: LiquidacionResumen }) {
             Reporte
           </a>
         )}
-        {!boleta?.boleta_url && !item.reporte_liquidacion_url && (
-          <span className="text-xs text-gray-400 italic">Sin documentos adjuntos</span>
-        )}
       </div>
     </div>
   );
@@ -144,18 +302,119 @@ export function HistorialLiquidaciones() {
   const [anio, setAnio] = useState(now.getFullYear());
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [estadoFiltro, setEstadoFiltro] = useState<EstadoFiltro>("all");
+  const [descargandoExcel, setDescargandoExcel] = useState(false);
+  const [generandoId, setGenerandoId] = useState<number | null>(null);
+  const [navegandoId, setNavegandoId] = useState<number | null>(null);
+  const [resultadoModal, setResultadoModal] = useState<{
+    nombre: string;
+    inversionistaId: number;
+    response?: CalcularPagosEspejoResponse;
+    errorMsg?: string;
+  } | null>(null);
+  const navigate = useNavigate();
+  const { mutate: calcularPagosEspejo } = useCalcularPagosEspejo();
 
   const { data, isLoading, isError, refetch } = useQuery<LiquidacionResumen[]>({
     queryKey: ["historial-liquidaciones", mes, anio],
-    queryFn: () => getResumenGlobalLiquidaciones({ mes, anio, estado: "liquidated" }),
+    queryFn: () =>
+      getResumenGlobalLiquidaciones({
+        mes,
+        anio,
+        estado: "all",
+        incluirSinMovimiento: true,
+      }),
   });
+
+  // Conteos por estado para los chips
+  const counts = useMemo(() => {
+    const base = { all: 0, liquidated: 0, pending: 0, uploaded: 0, sin_movimiento: 0 };
+    if (!data) return base;
+    base.all = data.length;
+    for (const item of data) {
+      const e = item.estado_liquidacion_resumen;
+      if (e in base) (base as any)[e]++;
+    }
+    return base;
+  }, [data]);
 
   const filtered = useMemo(() => {
     if (!data) return [];
-    if (!search.trim()) return data;
-    const q = search.toLowerCase();
-    return data.filter((item) => item.nombre.toLowerCase().includes(q));
-  }, [data, search]);
+    let result = data;
+    if (estadoFiltro !== "all") {
+      result = result.filter((item) => item.estado_liquidacion_resumen === estadoFiltro);
+    }
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter((item) => item.nombre.toLowerCase().includes(q));
+    }
+    return result;
+  }, [data, search, estadoFiltro]);
+
+  const handleDescargarExcel = useCallback(async () => {
+    setDescargandoExcel(true);
+    try {
+      const res = await descargarResumenLiquidacionesExcel({
+        mes,
+        anio,
+        estado: "all",
+        incluirSinMovimiento: true,
+      });
+      if (res?.url) {
+        window.open(res.url, "_blank", "noopener,noreferrer");
+        toast.success("Excel generado correctamente");
+      } else {
+        toast.error("No se pudo generar el Excel");
+      }
+    } catch (err: any) {
+      toast.error(err?.message ?? "Error al generar el Excel");
+    } finally {
+      setDescargandoExcel(false);
+    }
+  }, [mes, anio]);
+
+  const handleChipClick = useCallback((estado: EstadoFiltro) => {
+    setEstadoFiltro(estado);
+    setPage(1);
+  }, []);
+
+  const handleGenerarPagos = useCallback(
+    (inversionistaId: number) => {
+      const inv = data?.find((d) => d.inversionista_id === inversionistaId);
+      const nombre = inv?.nombre ?? `Inversionista #${inversionistaId}`;
+      setGenerandoId(inversionistaId);
+      calcularPagosEspejo(inversionistaId, {
+        onSuccess: (res: any) => {
+          setResultadoModal({
+            nombre,
+            inversionistaId,
+            response: res as CalcularPagosEspejoResponse,
+          });
+          if (res?.success) refetch();
+        },
+        onError: (err: any) => {
+          setResultadoModal({
+            nombre,
+            inversionistaId,
+            errorMsg: err?.message ?? "Error al generar los pagos",
+          });
+        },
+        onSettled: () => setGenerandoId(null),
+      });
+    },
+    [calcularPagosEspejo, refetch, data],
+  );
+
+  const handleVerPagos = useCallback(
+    (inversionistaId: number) => {
+      setNavegandoId(inversionistaId);
+      // Pequeño delay para que el spinner sea visible antes del cambio de ruta
+      setTimeout(() => {
+        navigate(`/inversionistas?id=${inversionistaId}`);
+      }, 250);
+    },
+    [navigate],
+  );
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
   const paginated = useMemo(
@@ -271,7 +530,58 @@ export function HistorialLiquidaciones() {
             >
               {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
             </button>
+
+            <button
+              type="button"
+              onClick={handleDescargarExcel}
+              disabled={descargandoExcel}
+              title="Descargar Excel"
+              className="h-10 inline-flex items-center gap-2 rounded-lg border border-emerald-600 bg-emerald-600 text-white px-3 hover:bg-emerald-700 disabled:opacity-60 transition-colors text-sm font-semibold shrink-0"
+            >
+              {descargandoExcel ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="w-4 h-4" />
+              )}
+              <span className="hidden sm:inline">Descargar Excel</span>
+            </button>
           </div>
+        </div>
+
+        {/* Chips de estado */}
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          {(
+            [
+              { key: "all" as EstadoFiltro, label: "Todos", count: counts.all },
+              { key: "liquidated" as EstadoFiltro, label: ESTADO_META.liquidated.chipLabel, count: counts.liquidated },
+              { key: "pending" as EstadoFiltro, label: ESTADO_META.pending.chipLabel, count: counts.pending },
+              { key: "sin_movimiento" as EstadoFiltro, label: ESTADO_META.sin_movimiento.chipLabel, count: counts.sin_movimiento },
+            ]
+          ).map((chip) => {
+            const active = estadoFiltro === chip.key;
+            const meta = chip.key !== "all" ? ESTADO_META[chip.key] : null;
+            const activeClass =
+              chip.key === "all"
+                ? "bg-blue-600 text-white border-blue-600"
+                : meta?.chipActiveClass ?? "bg-gray-700 text-white border-gray-700";
+            return (
+              <button
+                key={chip.key}
+                type="button"
+                onClick={() => handleChipClick(chip.key)}
+                className={`text-xs font-medium rounded-full px-3 py-1.5 border transition-colors ${
+                  active
+                    ? activeClass
+                    : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
+                }`}
+              >
+                {chip.label}
+                <span className={`ml-1.5 ${active ? "opacity-90" : "opacity-70"}`}>
+                  ({chip.count})
+                </span>
+              </button>
+            );
+          })}
         </div>
 
         {/* Info bar */}
@@ -313,9 +623,16 @@ export function HistorialLiquidaciones() {
         )}
 
         {!isLoading && !isError && paginated.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 w-full items-start">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 w-full items-stretch auto-rows-fr">
             {paginated.map((item) => (
-              <LiquidacionCard key={item.inversionista_id} item={item} />
+              <LiquidacionCard
+                key={item.inversionista_id}
+                item={item}
+                onGenerarPagos={handleGenerarPagos}
+                onVerPagos={handleVerPagos}
+                generandoId={generandoId}
+                navegandoId={navegandoId}
+              />
             ))}
           </div>
         )}
@@ -368,6 +685,134 @@ export function HistorialLiquidaciones() {
           </button>
         </div>
       )}
+
+      <ResultadoGeneracionModal
+        resultado={resultadoModal}
+        onClose={() => setResultadoModal(null)}
+        onVerDetalle={(id) => {
+          setResultadoModal(null);
+          navigate(`/inversionistas?id=${id}`);
+        }}
+      />
     </div>
+  );
+}
+
+interface ResultadoGeneracionModalProps {
+  resultado: {
+    nombre: string;
+    inversionistaId: number;
+    response?: CalcularPagosEspejoResponse;
+    errorMsg?: string;
+  } | null;
+  onClose: () => void;
+  onVerDetalle: (inversionistaId: number) => void;
+}
+
+function ResultadoGeneracionModal({ resultado, onClose, onVerDetalle }: ResultadoGeneracionModalProps) {
+  if (!resultado) return null;
+
+  const { nombre, inversionistaId, response, errorMsg } = resultado;
+  const success = !!response?.success && !errorMsg;
+  const totalCreditos = response?.totalCreditosProcesados ?? 0;
+  const totalPagos = (response?.data ?? []).reduce(
+    (acc, d) => acc + (Number(d.pagosRegistrados) || 0),
+    0,
+  );
+  const huboPagos = success && totalPagos > 0;
+  const sinPagos = success && totalPagos === 0;
+  const fallo = !success;
+
+  let icon: React.ReactNode;
+  let titulo: string;
+  let descripcion: string;
+  let toneClass: string;
+
+  if (fallo) {
+    icon = <XCircle className="w-6 h-6 text-rose-600" />;
+    titulo = "No se pudieron generar los pagos";
+    descripcion = errorMsg ?? response?.message ?? "Ocurrió un error al procesar la solicitud.";
+    toneClass = "bg-rose-50 border-rose-200";
+  } else if (sinPagos) {
+    icon = <AlertTriangle className="w-6 h-6 text-amber-600" />;
+    titulo = "No se generaron pagos";
+    descripcion =
+      totalCreditos === 0
+        ? "El inversionista no tiene créditos elegibles para generar pagos en este momento."
+        : "Se procesaron créditos pero ninguno tenía cuotas pendientes para generar pagos.";
+    toneClass = "bg-amber-50 border-amber-200";
+  } else {
+    icon = <CheckCircle2 className="w-6 h-6 text-emerald-600" />;
+    titulo = "Pagos generados correctamente";
+    descripcion = `Se procesaron ${totalCreditos} crédito${totalCreditos !== 1 ? "s" : ""} y se registraron ${totalPagos} pago${totalPagos !== 1 ? "s" : ""}.`;
+    toneClass = "bg-emerald-50 border-emerald-200";
+  }
+
+  return (
+    <Dialog open={!!resultado} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-gray-900">
+            {icon}
+            {titulo}
+          </DialogTitle>
+          <DialogDescription className="text-gray-600">
+            <span className="font-medium text-gray-800">{nombre}</span>
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className={`rounded-lg border p-3 text-sm text-gray-700 ${toneClass}`}>
+          {descripcion}
+        </div>
+
+        {huboPagos && response?.data && response.data.length > 0 && (
+          <div className="max-h-64 overflow-y-auto rounded-lg border border-gray-200">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-xs uppercase text-gray-600 sticky top-0">
+                <tr>
+                  <th className="px-3 py-2 text-left font-semibold">Crédito SIFCO</th>
+                  <th className="px-3 py-2 text-center font-semibold">Cuota</th>
+                  <th className="px-3 py-2 text-right font-semibold">Pagos</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {response.data.map((row) => (
+                  <tr key={row.creditoId} className="hover:bg-gray-50">
+                    <td className="px-3 py-2 font-medium text-gray-800">{row.numeroCreditoSifco}</td>
+                    <td className="px-3 py-2 text-center text-gray-600">#{row.cuotaProcesada}</td>
+                    <td className="px-3 py-2 text-right">
+                      <Badge
+                        variant="outline"
+                        className={
+                          row.pagosRegistrados > 0
+                            ? "border-emerald-300 text-emerald-700 bg-emerald-50"
+                            : "border-gray-300 text-gray-600 bg-gray-50"
+                        }
+                      >
+                        {row.pagosRegistrados}
+                      </Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={onClose}>
+            Cerrar
+          </Button>
+          {huboPagos && (
+            <Button
+              onClick={() => onVerDetalle(inversionistaId)}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              Ver Detalle
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

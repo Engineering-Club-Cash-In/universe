@@ -119,7 +119,7 @@ carteraRoutes.get("/investor", async (c) => {
  */
 carteraRoutes.get("/bancos", async (c) => {
   try {
-    const bancos = await getBancos();
+    const bancos = await getBancos(true);
 
     return c.json({
       success: true,

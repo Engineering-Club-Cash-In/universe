@@ -1,6 +1,6 @@
 // routes/bancos.ts
 import { Elysia, t } from "elysia";
-import { eq } from 'drizzle-orm';
+import { eq, isNotNull } from 'drizzle-orm';
 import { db } from '../database';
 import { bancos } from '../database/db';
 import { authMiddleware } from "./midleware";
@@ -9,12 +9,16 @@ export const bancosRouter = new Elysia()
   .use(authMiddleware)
 
   // 📋 GET - Obtener todos los bancos
-  .get("/bancos", async () => {
+  .get("/bancos", async ({ query }) => {
     try {
-      const todosBancos = await db
-        .select()
-        .from(bancos)
-        .orderBy(bancos.nombre);
+      const soloConTransferencia = query.con_transferencia === "true";
+
+      const baseQuery = db.select().from(bancos);
+      const todosBancos = soloConTransferencia
+        ? await baseQuery
+            .where(isNotNull(bancos.id_banco_transferencia))
+            .orderBy(bancos.nombre)
+        : await baseQuery.orderBy(bancos.nombre);
 
       return {
         success: true,
@@ -28,6 +32,10 @@ export const bancosRouter = new Elysia()
         error: error instanceof Error ? error.message : 'Error desconocido',
       };
     }
+  }, {
+    query: t.Object({
+      con_transferencia: t.Optional(t.String()),
+    }),
   })
   
   // ✨ POST - Crear nuevo banco

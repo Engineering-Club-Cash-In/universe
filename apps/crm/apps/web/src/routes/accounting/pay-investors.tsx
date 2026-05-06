@@ -10,6 +10,7 @@ import {
 	FileCheck,
 	Loader2,
 	Search,
+	Send,
 	Upload,
 } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -34,6 +35,14 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -552,6 +561,9 @@ function PagarInversionistas() {
 	const [search, setSearch] = useState("");
 	const [page, setPage] = useState(1);
 	const [downloadingExcel, setDownloadingExcel] = useState(false);
+	const [downloadingTransferencia, setDownloadingTransferencia] = useState<
+		null | "ach" | "no-ach"
+	>(null);
 	const [estadoBoletaFilter, setEstadoBoletaFilter] =
 		useState<EstadoBoletaFilter>("all");
 	const [mesFiltro, setMesFiltro] = useState(today.getMonth() + 1);
@@ -570,6 +582,42 @@ function PagarInversionistas() {
 		}),
 		[anioFiltro, estadoBoletaFilter, mesFiltro, requiresPeriodo],
 	);
+
+	const handleDownloadTransferencias = async (
+		ach: boolean,
+		moneda?: "quetzales" | "dolar",
+	) => {
+		const key = ach ? "ach" : "no-ach";
+		setDownloadingTransferencia(key);
+		try {
+			const serverUrl = import.meta.env.VITE_SERVER_URL;
+			const queryParams = new URLSearchParams({
+				mes: String(mesFiltro),
+				anio: String(anioFiltro),
+				ach: ach ? "true" : "false",
+			});
+			if (moneda) queryParams.set("moneda", moneda);
+
+			const res = await fetch(
+				`${serverUrl}/api/accounting/resumen-transferencias-excel?${queryParams.toString()}`,
+				{ credentials: "include" },
+			);
+			if (!res.ok) {
+				const err = await res.json();
+				throw new Error(err.error || "Error al descargar");
+			}
+			const data = await res.json();
+			if (!data.success || !data.url) {
+				throw new Error("No se pudo generar el Excel");
+			}
+			window.open(data.url, "_blank");
+			toast.success("Excel de transferencias descargado");
+		} catch (err: any) {
+			toast.error(err.message || "Error al descargar Excel");
+		} finally {
+			setDownloadingTransferencia(null);
+		}
+	};
 
 	const handleDownloadExcel = async () => {
 		setDownloadingExcel(true);
@@ -694,20 +742,36 @@ function PagarInversionistas() {
 						Resumen global de pagos pendientes
 					</p>
 				</div>
-				<Button
-					variant="outline"
-					size="sm"
-					className="gap-2"
-					disabled={downloadingExcel}
-					onClick={handleDownloadExcel}
-				>
-					{downloadingExcel ? (
-						<Loader2 className="h-4 w-4 animate-spin" />
-					) : (
-						<Download className="h-4 w-4" />
-					)}
-					Exportar Excel
-				</Button>
+				<div className="flex flex-wrap gap-2">
+					<Button
+						variant="outline"
+						size="sm"
+						className="gap-2"
+						disabled={downloadingExcel}
+						onClick={handleDownloadExcel}
+					>
+						{downloadingExcel ? (
+							<Loader2 className="h-4 w-4 animate-spin" />
+						) : (
+							<Download className="h-4 w-4" />
+						)}
+						Exportar Excel
+					</Button>
+
+					<TransferenciasDropdown
+						label="Transferencia a Terceros"
+						loading={downloadingTransferencia === "no-ach"}
+						disabled={downloadingTransferencia !== null}
+						onSelect={(moneda) => handleDownloadTransferencias(false, moneda)}
+					/>
+
+					<TransferenciasDropdown
+						label="Transferencias ACH"
+						loading={downloadingTransferencia === "ach"}
+						disabled={downloadingTransferencia !== null}
+						onSelect={(moneda) => handleDownloadTransferencias(true, moneda)}
+					/>
+				</div>
 			</div>
 
 			{/* Stats */}
@@ -887,6 +951,51 @@ function StatCard({
 				</div>
 			</CardContent>
 		</Card>
+	);
+}
+
+function TransferenciasDropdown({
+	label,
+	loading,
+	disabled,
+	onSelect,
+}: {
+	label: string;
+	loading: boolean;
+	disabled: boolean;
+	onSelect: (moneda?: "quetzales" | "dolar") => void;
+}) {
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger asChild>
+				<Button
+					variant="outline"
+					size="sm"
+					className="gap-2"
+					disabled={disabled}
+				>
+					{loading ? (
+						<Loader2 className="h-4 w-4 animate-spin" />
+					) : (
+						<Send className="h-4 w-4" />
+					)}
+					{label}
+				</Button>
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="end">
+				<DropdownMenuLabel>Seleccionar moneda</DropdownMenuLabel>
+				<DropdownMenuSeparator />
+				<DropdownMenuItem onSelect={() => onSelect("quetzales")}>
+					Quetzales (Q)
+				</DropdownMenuItem>
+				<DropdownMenuItem onSelect={() => onSelect("dolar")}>
+					Dólares ($)
+				</DropdownMenuItem>
+				<DropdownMenuItem onSelect={() => onSelect(undefined)}>
+					Ambas
+				</DropdownMenuItem>
+			</DropdownMenuContent>
+		</DropdownMenu>
 	);
 }
 

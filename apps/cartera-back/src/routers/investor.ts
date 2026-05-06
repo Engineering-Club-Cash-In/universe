@@ -12,6 +12,7 @@ import {
   exitInvestor,
   resumenGlobalInversionistas,
   resumenGlobalLiquidaciones,
+  resumenTransferencias,
   getLiquidaciones,
   getInvestorPerformance,
   getInvestorTotalsGlobales,
@@ -745,6 +746,51 @@ export const inversionistasRouter = new Elysia()
       };
     }
   })
+  .get(
+    "/resumen-transferencias",
+    async ({ query, set }) => {
+      const { mes, anio, ach, moneda } = query;
+
+      const mesNum = Number(mes);
+      const anioNum = Number(anio);
+
+      if (!Number.isFinite(mesNum) || mesNum < 1 || mesNum > 12) {
+        set.status = 400;
+        return { message: "El parámetro 'mes' es obligatorio y debe estar entre 1 y 12." };
+      }
+      if (!Number.isFinite(anioNum) || anioNum < 2000) {
+        set.status = 400;
+        return { message: "El parámetro 'anio' es obligatorio y debe ser un año válido." };
+      }
+
+      let monedaFiltro: "quetzales" | "dolar" | "todas" = "todas";
+      if (moneda === "quetzales" || moneda === "dolar") {
+        monedaFiltro = moneda;
+      } else if (moneda) {
+        set.status = 400;
+        return { message: "El parámetro 'moneda' debe ser 'quetzales' o 'dolar'." };
+      }
+
+      try {
+        return await resumenTransferencias(mesNum, anioNum, ach === "true", monedaFiltro);
+      } catch (error) {
+        console.error("[investor/resumen-transferencias] Error:", error);
+        set.status = 500;
+        return {
+          message: "Error al generar el reporte de transferencias",
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+    {
+      query: t.Object({
+        mes: t.String(),
+        anio: t.String(),
+        ach: t.Optional(t.String()),
+        moneda: t.Optional(t.String()),
+      }),
+    }
+  )
   .get(
     "/resumen-global",
     async ({ query }) => {

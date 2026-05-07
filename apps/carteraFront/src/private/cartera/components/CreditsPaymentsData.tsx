@@ -200,6 +200,7 @@ export function ListaCreditosPagos() {
       gps: credit.gps ?? 0,
       asesor_id: credit.asesor_id,
       formato_credito: credit.formato_credito ?? "",
+      estado_devolucion: credit.estado_devolucion ?? "NO_APLICA",
       nombre: usuario?.nombre ?? (usuario?.nombres ? `${usuario.nombres} ${usuario.apellidos ?? ""}`.trim() : ""),
       nit: usuario?.nit ?? "",
       direccion: usuario?.direccion ?? "",
@@ -321,9 +322,9 @@ export function ListaCreditosPagos() {
 
   return (
 
-    
+
   <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-4 sm:px-6 lg:px-8 overflow-auto pt-8 pb-8">
-   
+
     <div className="w-full max-w-[1400px]">
       <div className="flex flex-col items-center mb-6">
         <h1 className="text-3xl font-extrabold text-blue-700 text-center">
@@ -2228,4 +2229,3 @@ function InversionistasInfo({ inversionistas }: { inversionistas: any[] }) {
     </div>
   );
 }
- 

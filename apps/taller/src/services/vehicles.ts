@@ -23,6 +23,7 @@ export interface VehicleData {
   id?: string;
   seats?: number | null;
   vehicleUse?: string | null;
+  isOwned?: boolean;
 }
 
 export interface InspectionData {
@@ -155,6 +156,7 @@ export const prepareInspectionData = (formData: any, sectionTimes?: Record<strin
     id: formData.vehicleId,
     seats: formData.seats ? parseInt(formData.seats) : null,
     vehicleUse: formData.vehicleUse || null,
+    isOwned: formData.isCashInOwned || false,
   };
 
   const inspectionData: InspectionData = {

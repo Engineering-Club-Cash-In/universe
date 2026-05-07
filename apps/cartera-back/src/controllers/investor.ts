@@ -4164,29 +4164,44 @@ const CUBE_INVESTMENT_ID = 86;
 //      Si no está → se salta y se reporta en `errores` (no aborta todo).
 //   2. Ver si CUBE ya tiene row en ese crédito:
 //      - Caso A (SWAP): CUBE NO está → UPDATE set inversionista_id=CUBE
-//        en el row del inversionista. Mismo monto, misma cuota, mismos
-//        campos. CUBE "toma la posición" tal cual.
-//      - Caso B (MERGE): CUBE YA está → sumar al row de CUBE los campos
-//        numéricos del inversionista (monto_aportado, porcentaje, cuota,
-//        intereses, IVA) y DELETE el row del inversionista.
+//        en el row del inversionista. Conserva monto_aportado y
+//        cuota_inversionista del saliente; fuerza CUBE-puro (cash_in=100,
+//        participacion=0) y recalcula los 4 derivados (monto_inversionista,
+//        iva_inversionista, monto_cash_in, iva_cash_in) consistentes con
+//        esos porcentajes — todo el rendimiento va a Cash-In.
+//      - Caso B (MERGE): CUBE YA está → suma capital y cuota_inversionista
+//        del saliente al row de CUBE, fuerza CUBE-puro (cash_in=100,
+//        participacion=0) y recalcula los 4 derivados a partir de la cuota
+//        total (NO se suman los del saliente, porque con participacion=0
+//        no hay parte para "inversionista"). Borra el row del saliente.
 //   3. Mismo tratamiento en `creditos_inversionistas_espejo`, dejando
-//      `status = "completado"` (se cierra cualquier pendiente).
-//   4. `creditos.bandera_reinversion = false` (ya no hay pendientes en
+//      `status = "completado"` (se cierra cualquier pendiente). En espejo
+//      además `monto_aportado` se sincroniza con el del padre.
+//   4. Recalcular cuota_inversionista + 4 derivados de TODOS los rows del
+//      pool (padre y espejo, independientemente). Usa la fórmula
+//      proporcional de `calculateInvestorQuotas`: cada row recibe una
+//      tajada de la cuota del crédito según su `monto_aportado /
+//      capital_total`, y el inversionista MAYOR absorbe seguro+gps+
+//      membresía. Garantiza que la suma de cuotas ≈ cuota del crédito,
+//      incluso si el saliente era el mayor.
+//   5. `creditos.bandera_reinversion = false` (ya no hay pendientes en
 //      este crédito asociados al inversionista).
 // Al terminar el loop, si se procesó al menos un crédito:
-//   5. `inversionistas.status = "inactivo"`.
+//   6. `inversionistas.status = "inactivo"`.
 // Fuera de la transacción:
-//   6. Mandar correo a los destinatarios fijos con el detalle: créditos
+//   7. Mandar correo a los destinatarios fijos con el detalle: créditos
 //      afectados, monto devuelto a CUBE por cada uno, total, ejecutor.
 //
 // NOTAS DE DISEÑO
-// - No se recalcula la distribución del resto del pool (a diferencia de
-//   `addInvestorToCredit` / `manualReassignInvestor`). La premisa del
-//   negocio es: "el row pasa a ser de CUBE tal cual"; por simetría, en
-//   el merge simplemente se suman los absolutos al row de CUBE existente.
-// - `porcentaje_cash_in` de CUBE se preserva en el caso B (no se suma).
-//   Es el único campo "configuración" que se mantiene; el resto son
-//   montos/porcentajes/cuotas que son agregables.
+// - El `monto_aportado` de los OTROS inversionistas no se toca (su capital
+//   no cambió). La `cuota_inversionista` y los 4 derivados sí se recalculan
+//   en el paso 4 para que la suma del pool cuadre con la cuota del crédito.
+// - CUBE-puro: en padre y espejo, el row resultante de CUBE siempre queda
+//   con porcentaje_cash_in=100 y porcentaje_participacion_inversionista=0.
+//   Por eso monto_inversionista=0, iva_inversionista=0, monto_cash_in=cuota
+//   y iva_cash_in=cuota*0.12. No tiene sentido sumar los derivados del
+//   saliente porque tenía sus propios porcentajes; los del CUBE final
+//   dependen únicamente de la cuota total.
 // - Los `.returning()` sirven para loggear cuántos rows tocó cada
 //   operación; si un UPDATE/DELETE no afecta rows, el log lo evidencia.
 // - `runId` identifica los logs de una misma ejecución para poder
@@ -4302,12 +4317,19 @@ export const exitInvestor = async ({ body, set, request }: any) => {
 
         // ────────────────────────────────────────────────────────────────────
         // 4.1 — Verificar que el crédito exista.
-        // Solo se trae SIFCO porque lo necesitamos para el log y el correo.
+        // Trae SIFCO (log + correo), porcentaje_interes (cuota inicial del
+        // row CUBE en SWAP/MERGE) y los campos para el recálculo del pool
+        // estilo `calculateInvestorQuotas` (cuota total + cargos del mayor).
         // ────────────────────────────────────────────────────────────────────
         const [creditoData] = await tx
           .select({
             credito_id: creditos.credito_id,
             numero_credito_sifco: creditos.numero_credito_sifco,
+            porcentaje_interes: creditos.porcentaje_interes,
+            cuota: creditos.cuota,
+            seguro_10_cuotas: creditos.seguro_10_cuotas,
+            gps: creditos.gps,
+            membresias_pago: creditos.membresias_pago,
           })
           .from(creditos)
           .where(eq(creditos.credito_id, credito_id))
@@ -4381,21 +4403,52 @@ export const exitInvestor = async ({ body, set, request }: any) => {
           log(`   🟢 CUBE NO existe en el crédito (padre)`);
         }
 
+        // Helper canónico: deriva cuota + montos + IVAs para un row CUBE-puro
+        // (porcentaje_cash_in=100, porcentaje_participacion_inversionista=0)
+        // a partir del monto_aportado final y la tasa del crédito. Replica la
+        // fórmula de `processAndReplaceCreditInvestors` para mantener
+        // consistencia con el resto del sistema.
+        const calcDerivadosCubePuro = (montoAportadoNuevo: Big) => {
+          const porcentajeCashIn = new Big("100");
+          const porcentajeInversion = new Big("0");
+          const cuota = montoAportadoNuevo
+            .times(creditoData.porcentaje_interes)
+            .div(100)
+            .round(2);
+          const montoInversionista = cuota.times(porcentajeInversion).div(100).round(2);
+          const montoCashIn = cuota.times(porcentajeCashIn).div(100).round(2);
+          const ivaInversionista = montoInversionista.gt(0)
+            ? montoInversionista.times(0.12).round(2)
+            : new Big(0);
+          const ivaCashIn = montoCashIn.gt(0)
+            ? montoCashIn.times(0.12).round(2)
+            : new Big(0);
+          return {
+            cuota_inversionista: cuota.toFixed(2),
+            monto_inversionista: montoInversionista.toFixed(2),
+            monto_cash_in: montoCashIn.toFixed(2),
+            iva_inversionista: ivaInversionista.toFixed(2),
+            iva_cash_in: ivaCashIn.toFixed(2),
+          };
+        };
+
         if (!cubeEnPadre) {
           // ──────────────────────────────────────────────────────────────────
           // 4.4A — CASO A: SWAP en PADRE
-          // CUBE no está en el crédito → cambiamos el `inversionista_id` del
-          // row del inversionista a CUBE. El row conserva monto, cuota, etc.,
-          // pero forzamos los porcentajes de CUBE (100/100): CUBE siempre
-          // tiene participación total y cash-in total en el row que ocupa.
+          // CUBE no está en el crédito → el row pasa a ser de CUBE conservando
+          // monto_aportado del saliente. CUBE-puro: participacion=0,
+          // cash_in=100 (todo el rendimiento es Cash-In). Cuota e IVAs se
+          // recalculan con la fórmula canónica desde la tasa del crédito.
           // ──────────────────────────────────────────────────────────────────
-          log(`   🔄 [PADRE] Caso A (SWAP): cambiando inversionista_id ${inversionista_id} → ${CUBE_INVESTMENT_ID} (porcentajes forzados a 100/100)`);
+          const derivadosSwapPadre = calcDerivadosCubePuro(new Big(invEnPadre.monto_aportado));
+          log(`   🔄 [PADRE] Caso A (SWAP): inversionista_id ${inversionista_id} → ${CUBE_INVESTMENT_ID}, CUBE puro 0/100 →`, derivadosSwapPadre);
           const resA = await tx
             .update(creditos_inversionistas)
             .set({
               inversionista_id: CUBE_INVESTMENT_ID,
               porcentaje_cash_in: "100",
-              porcentaje_participacion_inversionista: "100",
+              porcentaje_participacion_inversionista: "0",
+              ...derivadosSwapPadre,
             })
             .where(
               and(
@@ -4410,26 +4463,21 @@ export const exitInvestor = async ({ body, set, request }: any) => {
           // 4.4B — CASO B: MERGE en PADRE
           // CUBE ya está en el crédito → no podemos tener dos rows de CUBE
           // (uniqueIndex ux_credito_inversionista). Entonces:
-          //   1. Sumar los campos de monto/cuota/intereses/IVA del
-          //      inversionista al row de CUBE.
-          //   2. Forzar porcentaje_cash_in=100 y
-          //      porcentaje_participacion_inversionista=100 (no se suman —
-          //      CUBE siempre queda al 100/100 en su row).
-          //   3. Borrar el row del inversionista.
+          //   1. Sumar el monto_aportado del saliente al row de CUBE.
+          //   2. Forzar porcentajes a CUBE-puro: cash_in=100, participacion=0.
+          //   3. Recalcular cuota + 4 derivados con la fórmula canónica
+          //      desde la tasa del crédito (NO sumar los del saliente).
+          //   4. Borrar el row del inversionista.
           // No se tocan otros inversionistas del pool.
           // ──────────────────────────────────────────────────────────────────
-          const suma = (a: string | number, b: string | number) => new Big(a).plus(new Big(b)).toString();
+          const derivadosMergePadre = calcDerivadosCubePuro(nuevoMontoCubePadre);
           const payload = {
-            monto_aportado: suma(cubeEnPadre.monto_aportado, invEnPadre.monto_aportado),
-            porcentaje_participacion_inversionista: "100",
+            monto_aportado: nuevoMontoCubePadre.toFixed(2),
+            porcentaje_participacion_inversionista: "0",
             porcentaje_cash_in: "100",
-            monto_inversionista: suma(cubeEnPadre.monto_inversionista, invEnPadre.monto_inversionista),
-            monto_cash_in: suma(cubeEnPadre.monto_cash_in, invEnPadre.monto_cash_in),
-            iva_inversionista: suma(cubeEnPadre.iva_inversionista, invEnPadre.iva_inversionista),
-            iva_cash_in: suma(cubeEnPadre.iva_cash_in, invEnPadre.iva_cash_in),
-            cuota_inversionista: suma(cubeEnPadre.cuota_inversionista, invEnPadre.cuota_inversionista),
+            ...derivadosMergePadre,
           };
-          log(`   🔀 [PADRE] Caso B (MERGE): sumando en CUBE + porcentajes 100/100 →`, payload);
+          log(`   🔀 [PADRE] Caso B (MERGE): suma monto_aportado, CUBE puro 0/100 →`, payload);
 
           const resB1 = await tx
             .update(creditos_inversionistas)
@@ -4496,17 +4544,20 @@ export const exitInvestor = async ({ body, set, request }: any) => {
 
           if (!cubeEnEspejo) {
             // 4.5A — ESPEJO SWAP: cambia id, fuerza status=completado,
-            // fija porcentajes de CUBE a 100/100 y sincroniza monto_aportado
-            // con el valor del PADRE (para que CUBE quede con el capital
-            // "original", sin descuentos por pagos previos).
-            log(`   🔄 [ESPEJO] Caso A (SWAP): cambiando inversionista_id ${inversionista_id} → ${CUBE_INVESTMENT_ID}, status→completado, porcentajes 100/100, monto_aportado=${nuevoMontoCubePadre.toString()} (sincronizado con padre)`);
+            // CUBE-puro: cash_in=100, participacion=0. Sincroniza
+            // monto_aportado con el valor del PADRE (capital original, sin
+            // descuentos por pagos previos). Cuota + 4 derivados se recalculan
+            // con la fórmula canónica desde ese mismo monto_aportado.
+            const derivadosSwapEspejo = calcDerivadosCubePuro(nuevoMontoCubePadre);
+            log(`   🔄 [ESPEJO] Caso A (SWAP): inversionista_id ${inversionista_id} → ${CUBE_INVESTMENT_ID}, status→completado, CUBE puro 0/100, monto_aportado=${nuevoMontoCubePadre.toFixed(2)} (sincronizado con padre) →`, derivadosSwapEspejo);
             const resEA = await tx
               .update(creditos_inversionistas_espejo)
               .set({
                 inversionista_id: CUBE_INVESTMENT_ID,
                 porcentaje_cash_in: "100",
                 porcentaje_participacion_inversionista: "0",
-                monto_aportado: nuevoMontoCubePadre.toString(),
+                monto_aportado: nuevoMontoCubePadre.toFixed(2),
+                ...derivadosSwapEspejo,
                 status: "completado",
                 updated_at: new Date(),
               })
@@ -4519,27 +4570,22 @@ export const exitInvestor = async ({ body, set, request }: any) => {
               .returning({ id: creditos_inversionistas_espejo.id });
             log(`   ✅ [ESPEJO] SWAP aplicado (${resEA.length})`);
           } else {
-            // 4.5B — ESPEJO MERGE: sumar intereses/IVA del investor al row
-            // CUBE, forzar porcentajes a 100/100 y fijar monto_aportado al
-            // valor del PADRE (sincroniza capital, ignora cuánto había en
-            // espejo para ese campo).
+            // 4.5B — ESPEJO MERGE: forzar CUBE-puro (cash_in=100,
+            // participacion=0) en el row CUBE de espejo, fijar
+            // monto_aportado al valor del PADRE (sincroniza capital) y
+            // recalcular cuota + 4 derivados con la fórmula canónica.
             log(`   🟡 [ESPEJO] CUBE YA existe en espejo: monto_aportado=${cubeEnEspejo.monto_aportado}, status=${cubeEnEspejo.status}`);
-            const suma = (a: string | number, b: string | number) =>
-              new Big(a).plus(new Big(b)).toString();
+            const derivadosMergeEspejo = calcDerivadosCubePuro(nuevoMontoCubePadre);
 
             const payloadE = {
-              monto_aportado: nuevoMontoCubePadre.toString(),
+              monto_aportado: nuevoMontoCubePadre.toFixed(2),
               porcentaje_participacion_inversionista: "0",
               porcentaje_cash_in: "100",
-              monto_inversionista: suma(cubeEnEspejo.monto_inversionista, invEnEspejo.monto_inversionista),
-              monto_cash_in: suma(cubeEnEspejo.monto_cash_in, invEnEspejo.monto_cash_in),
-              iva_inversionista: suma(cubeEnEspejo.iva_inversionista, invEnEspejo.iva_inversionista),
-              iva_cash_in: suma(cubeEnEspejo.iva_cash_in, invEnEspejo.iva_cash_in),
-              cuota_inversionista: suma(cubeEnEspejo.cuota_inversionista, invEnEspejo.cuota_inversionista),
+              ...derivadosMergeEspejo,
               status: "completado" as const,
               updated_at: new Date(),
             };
-            log(`   🔀 [ESPEJO] Caso B (MERGE): porcentajes 100, monto_aportado=${nuevoMontoCubePadre.toString()} (sincronizado con padre) →`, payloadE);
+            log(`   🔀 [ESPEJO] Caso B (MERGE): CUBE puro 0/100, monto_aportado=${nuevoMontoCubePadre.toFixed(2)} (sincronizado con padre) →`, payloadE);
 
             const resEB1 = await tx
               .update(creditos_inversionistas_espejo)
@@ -4567,7 +4613,102 @@ export const exitInvestor = async ({ body, set, request }: any) => {
         }
 
         // ────────────────────────────────────────────────────────────────────
-        // 4.6 — Apagar bandera_reinversion del crédito.
+        // 4.6 — Recalcular cuota_inversionista de TODOS los rows del crédito.
+        //
+        // Después del SWAP/MERGE el capital del pool quedó reasignado, así
+        // que las cuotas guardadas pueden no sumar la `cuota` real del
+        // crédito (sobre todo si el saliente era el mayor y cargaba
+        // seguro/GPS/membresía).
+        //
+        // Replicamos la fórmula de `calculateInvestorQuotas`:
+        //   capital_total = Σ monto_aportado del pool (en esa tabla)
+        //   %_part        = monto_aportado / capital_total
+        //   cuota_base    = (cuota_credito − seguro − gps − membresia) × %_part
+        //   cuota_final   = cuota_base   + cargos completos si es el MAYOR
+        //
+        // Y de paso recalculamos los 4 derivados de cada row a partir de
+        // la nueva cuota y los porcentajes ACTUALES del row (CUBE-puro
+        // o los del inversionista) para que queden consistentes.
+        //
+        // Padre y espejo se recalculan INDEPENDIENTEMENTE: el espejo puede
+        // tener montos amortizados distintos al padre, así que el "mayor"
+        // y el reparto pueden diferir — cada tabla refleja su propio
+        // estado operativo.
+        // ────────────────────────────────────────────────────────────────────
+        const recalcularCuotasPool = async (
+          tabla: typeof creditos_inversionistas | typeof creditos_inversionistas_espejo,
+          etiqueta: "PADRE" | "ESPEJO",
+        ) => {
+          const rows = await tx
+            .select()
+            .from(tabla)
+            .where(eq(tabla.credito_id, credito_id));
+
+          if (rows.length === 0) {
+            log(`   ℹ️  [${etiqueta}] Pool vacío tras exit — nada que recalcular`);
+            return;
+          }
+
+          const capitalTotal = rows.reduce(
+            (acc, r) => acc.plus(new Big(r.monto_aportado)),
+            new Big(0),
+          );
+
+          if (capitalTotal.lte(0)) {
+            warn(`   ⚠️  [${etiqueta}] capital_total=0 tras exit — se omite recálculo de cuotas`);
+            return;
+          }
+
+          // Mayor = row con mayor monto_aportado (desempate: el primero).
+          const mayor = rows.reduce((m, r) =>
+            new Big(r.monto_aportado).gt(new Big(m.monto_aportado)) ? r : m,
+          );
+
+          const cuotaCredito = new Big(creditoData.cuota);
+          const seguroBig = new Big(creditoData.seguro_10_cuotas ?? 0);
+          const gpsBig = new Big(creditoData.gps ?? 0);
+          const membresiaBig = new Big(creditoData.membresias_pago ?? 0);
+          const cargosBig = seguroBig.plus(gpsBig).plus(membresiaBig);
+          const cuotaSinCargos = cuotaCredito.minus(cargosBig);
+
+          log(`   📐 [${etiqueta}] Recalc pool: rows=${rows.length}, capital_total=${capitalTotal.toFixed(2)}, cuota=${cuotaCredito.toFixed(2)}, cargos=${cargosBig.toFixed(2)}, mayor_id=${mayor.id} (inv=${mayor.inversionista_id}, monto=${mayor.monto_aportado})`);
+
+          for (const row of rows) {
+            const monto = new Big(row.monto_aportado);
+            const porcParticipacion = capitalTotal.gt(0) ? monto.div(capitalTotal) : new Big(0);
+            const cuotaBase = cuotaSinCargos.times(porcParticipacion);
+            const cuotaFinal = row.id === mayor.id ? cuotaBase.plus(cargosBig) : cuotaBase;
+            const cuotaFinalRound = cuotaFinal.round(2);
+
+            // Derivados con los porcentajes actuales del row (CUBE-puro
+            // tras exit: 0/100; otros inversionistas: lo que tengan).
+            const pCashIn = new Big(row.porcentaje_cash_in);
+            const pInv = new Big(row.porcentaje_participacion_inversionista);
+            const montoInv = cuotaFinalRound.times(pInv).div(100).round(2);
+            const montoCash = cuotaFinalRound.times(pCashIn).div(100).round(2);
+            const ivaInv = montoInv.gt(0) ? montoInv.times(0.12).round(2) : new Big(0);
+            const ivaCash = montoCash.gt(0) ? montoCash.times(0.12).round(2) : new Big(0);
+
+            await tx
+              .update(tabla)
+              .set({
+                cuota_inversionista: cuotaFinalRound.toFixed(2),
+                monto_inversionista: montoInv.toFixed(2),
+                monto_cash_in: montoCash.toFixed(2),
+                iva_inversionista: ivaInv.toFixed(2),
+                iva_cash_in: ivaCash.toFixed(2),
+                ...(etiqueta === "ESPEJO" ? { updated_at: new Date() } : {}),
+              })
+              .where(eq(tabla.id, row.id));
+          }
+          log(`   ✅ [${etiqueta}] Pool recalculado (${rows.length} row(s))`);
+        };
+
+        await recalcularCuotasPool(creditos_inversionistas, "PADRE");
+        await recalcularCuotasPool(creditos_inversionistas_espejo, "ESPEJO");
+
+        // ────────────────────────────────────────────────────────────────────
+        // 4.7 — Apagar bandera_reinversion del crédito.
         // Esta bandera, cuando está en true, redirige los intereses del
         // inversionista "pendiente" hacia CUBE. Como ya no hay ningún
         // inversionista en ese estado (lo acabamos de sacar o fusionar con

@@ -13,6 +13,7 @@ import MorasManager from "./private/cartera/components/Latefee";
 import CreditosPorAsesorManager from "./private/cartera/components/resumeAdvisor";
 import { BancosManager } from "./private/cartera/components/bank";
 import { CuentasEmpresaManager } from "./private/cartera/components/CuentasEmpresaManager";
+import { CuentasExtraInversionistaManager } from "./private/cartera/components/CuentasExtraInversionistaManager";
 import { CreatePaymentAgreementForm } from "./private/cartera/components/paymentAgreement";
 import { FacturasGenericas } from "./private/cartera/components/FacturasGenericas";
 import EfectividadAsesores from "./private/cartera/components/EfectividadAsesores";
@@ -147,6 +148,15 @@ function App() {
           element={
             <RoleRoute allowedRoles={["ADMIN", "CONTA"]}>
               <CuentasEmpresaManager />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="cuentas-extra-inversionista"
+          element={
+            <RoleRoute allowedRoles={["ADMIN", "CONTA"]}>
+              <CuentasExtraInversionistaManager />
             </RoleRoute>
           }
         />

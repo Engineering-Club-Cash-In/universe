@@ -1,6 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { MessageCircle, Send } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,69 @@ import { Textarea } from "@/components/ui/textarea";
 import { PLANTILLAS_MENSAJES } from "@/lib/cobros/plantillas-mensajes";
 import { client } from "@/utils/orpc";
 
+const VARIABLES_DISPONIBLES = [
+	"clienteNombre",
+	"fechaPago",
+	"cuotaMensual",
+	"placa",
+	"marcaLineaModelo",
+	"montoAdeudado",
+	"cuotasAtraso",
+	"telefonoAsesor",
+	"nombreAsesor",
+] as const;
+
+interface DescartadoItem {
+	numeroSifco: string | null;
+	clienteNombre: string | null;
+	motivo: string;
+}
+
+function formatRangoTemporal(filtros: {
+	fechaDesde?: string;
+	fechaHasta?: string;
+	time?: "WEEK" | "MONTH" | "DUEMONTH" | "TODAY";
+}): string {
+	if (filtros.fechaDesde || filtros.fechaHasta) {
+		return `${filtros.fechaDesde ?? "—"} a ${filtros.fechaHasta ?? "—"}`;
+	}
+	if (filtros.time) return TIME_LABELS[filtros.time] ?? filtros.time;
+	return "Todos";
+}
+
+function descartadosToCsv(items: DescartadoItem[]): string {
+	const escape = (val: string) => {
+		// Convención CSV: envolver en comillas si tiene coma, comilla o salto;
+		// duplicar comillas internas para escapar.
+		if (/["\n,]/.test(val)) return `"${val.replaceAll('"', '""')}"`;
+		return val;
+	};
+	const header = "numeroSifco,clienteNombre,motivo";
+	const filas = items.map((d) =>
+		[
+			escape(d.numeroSifco ?? ""),
+			escape(d.clienteNombre ?? ""),
+			escape(d.motivo),
+		].join(","),
+	);
+	return [header, ...filas].join("\n");
+}
+
+function descargarCsv(items: DescartadoItem[]) {
+	const csv = descartadosToCsv(items);
+	const blob = new Blob([`﻿${csv}`], {
+		type: "text/csv;charset=utf-8;",
+	});
+	const url = URL.createObjectURL(blob);
+	const link = document.createElement("a");
+	link.href = url;
+	link.download = `descartados-masivo-${new Date().toISOString().slice(0, 19).replaceAll(":", "-")}.csv`;
+	document.body.appendChild(link);
+	link.click();
+	link.remove();
+	URL.revokeObjectURL(url);
+}
+
 interface MassWhatsappModalProps {
 	filtros: {
 		estadoMora?: string;
@@ -32,6 +95,8 @@ interface MassWhatsappModalProps {
 		numeroSifco?: string;
 		time?: "WEEK" | "MONTH" | "DUEMONTH" | "TODAY";
 		etiquetas?: string[];
+		fechaDesde?: string;
+		fechaHasta?: string;
 	};
 	etiquetaLabels?: Record<string, string>;
 	totalDestinatarios?: number;
@@ -63,15 +128,55 @@ export function MassWhatsappModal({
 }: MassWhatsappModalProps) {
 	const [open, setOpen] = useState(false);
 	const [plantillaId, setPlantillaId] = useState<string>("");
+	const [cuerpoEditado, setCuerpoEditado] = useState<string>("");
+	const [descartadosResult, setDescartadosResult] = useState<
+		DescartadoItem[] | null
+	>(null);
+	const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+	const insertarVariable = (variable: string) => {
+		const token = `{${variable}}`;
+		const textarea = textareaRef.current;
+		// Sin foco/ref no podemos saber dónde está el cursor: caemos al append.
+		if (!textarea) {
+			setCuerpoEditado((prev) => `${prev}${token}`);
+			return;
+		}
+		const start = textarea.selectionStart ?? cuerpoEditado.length;
+		const end = textarea.selectionEnd ?? cuerpoEditado.length;
+		const nuevoTexto =
+			cuerpoEditado.slice(0, start) + token + cuerpoEditado.slice(end);
+		setCuerpoEditado(nuevoTexto);
+		// React aplica el value en el siguiente tick — esperamos para reposicionar
+		// el caret justo después del token insertado y devolver foco al textarea.
+		requestAnimationFrame(() => {
+			textarea.focus();
+			const cursorPos = start + token.length;
+			textarea.setSelectionRange(cursorPos, cursorPos);
+		});
+	};
 
 	const plantillaSeleccionada = PLANTILLAS_MENSAJES.find(
 		(p) => p.id === plantillaId,
 	);
 
+	// Pre-poblar el textarea con el cuerpoWhastapp (versión corta aprobada en
+	// Meta) cuando cambia la plantilla. Si no existe, caemos al cuerpo largo.
+	useEffect(() => {
+		if (!plantillaSeleccionada) {
+			setCuerpoEditado("");
+			return;
+		}
+		setCuerpoEditado(
+			plantillaSeleccionada.cuerpoWhastapp || plantillaSeleccionada.cuerpo,
+		);
+	}, [plantillaSeleccionada]);
+
 	const sendMutation = useMutation({
 		mutationFn: () =>
 			client.enviarWhatsappMasivoCobros({
 				plantillaId,
+				cuerpoEditado: cuerpoEditado || undefined,
 				estadoMora: filtros.estadoMora,
 				searchTerm: filtros.searchTerm,
 				numeroSifco: filtros.numeroSifco,
@@ -80,6 +185,8 @@ export function MassWhatsappModal({
 					filtros.etiquetas && filtros.etiquetas.length > 0
 						? filtros.etiquetas
 						: undefined,
+				fechaDesde: filtros.fechaDesde,
+				fechaHasta: filtros.fechaHasta,
 			}),
 		onSuccess: (res) => {
 			const partes = [
@@ -92,6 +199,9 @@ export function MassWhatsappModal({
 			}
 			toast.success(`WhatsApp masivo: ${partes.join(", ")}`);
 			setOpen(false);
+			if (res.descartados.length > 0) {
+				setDescartadosResult(res.descartados);
+			}
 		},
 		onError: (error: any) => {
 			toast.error(error?.message || "Error enviando WhatsApp masivo");
@@ -99,6 +209,7 @@ export function MassWhatsappModal({
 	});
 
 	return (
+		<>
 		<Dialog open={open} onOpenChange={setOpen}>
 			<DialogTrigger asChild>{children}</DialogTrigger>
 			<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
@@ -134,17 +245,48 @@ export function MassWhatsappModal({
 					{plantillaSeleccionada ? (
 						<>
 							<div className="space-y-2">
-								<Label>Vista previa</Label>
+								<div className="flex items-center justify-between">
+									<Label htmlFor="cuerpo-editado">Mensaje a enviar</Label>
+									<button
+										type="button"
+										onClick={() =>
+											setCuerpoEditado(
+												plantillaSeleccionada.cuerpoWhastapp ||
+													plantillaSeleccionada.cuerpo,
+											)
+										}
+										className="text-muted-foreground text-xs underline-offset-2 hover:text-foreground hover:underline"
+									>
+										Restaurar plantilla original
+									</button>
+								</div>
 								<Textarea
-									readOnly
+									ref={textareaRef}
+									id="cuerpo-editado"
 									className="min-h-55 text-sm"
-									value={plantillaSeleccionada.cuerpo}
+									value={cuerpoEditado}
+									onChange={(e) => setCuerpoEditado(e.target.value)}
 								/>
 								<p className="text-muted-foreground text-xs">
-									Las variables entre llaves se reemplazan por los datos
-									reales de cada crédito. Si un dato no existe (p. ej. placa),
-									queda vacío en el mensaje.
+									Separá con <strong>una línea en blanco</strong> para crear un
+									nuevo párrafo (= un parámetro del template). Mínimo 1, máximo
+									4. Las variables entre <code>{"{llaves}"}</code> se
+									reemplazan por los datos reales de cada crédito; si una
+									variable no existe o queda mal escrita, se manda literal.
 								</p>
+								<div className="flex flex-wrap gap-1">
+									{VARIABLES_DISPONIBLES.map((v) => (
+										<button
+											key={v}
+											type="button"
+											onClick={() => insertarVariable(v)}
+											className="cursor-pointer rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+											title={`Insertar {${v}} en la posición del cursor`}
+										>
+											{`{${v}}`}
+										</button>
+									))}
+								</div>
 							</div>
 
 							<div className="grid gap-3 md:grid-cols-2">
@@ -158,12 +300,7 @@ export function MassWhatsappModal({
 													filtros.estadoMora)
 												: "Todos"}
 										</li>
-										<li>
-											Rango temporal:{" "}
-											{filtros.time
-												? (TIME_LABELS[filtros.time] ?? filtros.time)
-												: "Todos"}
-										</li>
+										<li>Rango temporal: {formatRangoTemporal(filtros)}</li>
 										<li>Búsqueda: {filtros.searchTerm ?? "—"}</li>
 										<li>No. SIFCO: {filtros.numeroSifco ?? "—"}</li>
 										<li>
@@ -226,5 +363,83 @@ export function MassWhatsappModal({
 				</DialogFooter>
 			</DialogContent>
 		</Dialog>
+
+		<Dialog
+			open={!!descartadosResult}
+			onOpenChange={(o) => {
+				if (!o) setDescartadosResult(null);
+			}}
+		>
+			<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+				<DialogHeader>
+					<DialogTitle>
+						Descartados del envío masivo ({descartadosResult?.length ?? 0})
+					</DialogTitle>
+					<DialogDescription>
+						Estos créditos no recibieron mensaje porque les faltaba algún dato
+						(teléfono, cuota o asesor asignado). Podés exportarlos a CSV para
+						hacer seguimiento manual.
+					</DialogDescription>
+				</DialogHeader>
+
+				{descartadosResult && descartadosResult.length > 0 && (
+					<div className="max-h-96 overflow-y-auto rounded-md border border-border">
+						<table className="w-full text-sm">
+							<thead className="sticky top-0 bg-muted/60 backdrop-blur">
+								<tr className="border-b">
+									<th className="px-3 py-2 text-left font-medium text-muted-foreground text-xs">
+										No. SIFCO
+									</th>
+									<th className="px-3 py-2 text-left font-medium text-muted-foreground text-xs">
+										Cliente
+									</th>
+									<th className="px-3 py-2 text-left font-medium text-muted-foreground text-xs">
+										Motivo
+									</th>
+								</tr>
+							</thead>
+							<tbody>
+								{descartadosResult.map((d, idx) => (
+									<tr
+										key={`${d.numeroSifco ?? "sin-sifco"}-${idx}`}
+										className="border-b last:border-b-0"
+									>
+										<td className="px-3 py-2 font-mono text-muted-foreground text-xs">
+											{d.numeroSifco ?? "—"}
+										</td>
+										<td className="px-3 py-2">
+											{d.clienteNombre ?? "—"}
+										</td>
+										<td className="px-3 py-2">
+											<span className="rounded bg-amber-100 px-2 py-0.5 text-amber-900 text-xs">
+												{d.motivo}
+											</span>
+										</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					</div>
+				)}
+
+				<DialogFooter>
+					<Button
+						variant="outline"
+						onClick={() => setDescartadosResult(null)}
+					>
+						Cerrar
+					</Button>
+					<Button
+						onClick={() =>
+							descartadosResult && descargarCsv(descartadosResult)
+						}
+						disabled={!descartadosResult || descartadosResult.length === 0}
+					>
+						Descargar CSV
+					</Button>
+				</DialogFooter>
+			</DialogContent>
+		</Dialog>
+		</>
 	);
 }

@@ -136,6 +136,8 @@ export const creditRouter = new Elysia()
     inversionista_ids,
     fecha_desde,
     fecha_hasta,
+    capital_min,
+    capital_max,
   } = query as Record<string, string>;
 
   // Validar parámetros requeridos
@@ -238,6 +240,18 @@ export const creditRouter = new Elysia()
   const fechaDesdeParam = fecha_desde ?? undefined;
   const fechaHastaParam = fecha_hasta ?? undefined;
 
+  const capitalMinParam = capital_min !== undefined ? Number(capital_min) : undefined;
+  const capitalMaxParam = capital_max !== undefined ? Number(capital_max) : undefined;
+
+  if (capitalMinParam !== undefined && isNaN(capitalMinParam)) {
+    set.status = 400;
+    return { message: "Parámetro 'capital_min' debe ser un número válido." };
+  }
+  if (capitalMaxParam !== undefined && isNaN(capitalMaxParam)) {
+    set.status = 400;
+    return { message: "Parámetro 'capital_max' debe ser un número válido." };
+  }
+
   // Llamar servicio
   try {
     if (excel === "true") {
@@ -279,7 +293,9 @@ export const creditRouter = new Elysia()
         inversionistaIdsArray,
         fechaDesdeParam,
         fechaHastaParam,
-        numerosCreditoSifcoArray
+        numerosCreditoSifcoArray,
+        capitalMinParam,
+        capitalMaxParam
       );
       set.status = 200;
       return result;
@@ -320,6 +336,8 @@ export const creditRouter = new Elysia()
         inversionista_ids,
         fecha_desde,
         fecha_hasta,
+        capital_min,
+        capital_max,
       } = body;
 
       if (mes === undefined || anio === undefined || !estado) {
@@ -374,7 +392,9 @@ export const creditRouter = new Elysia()
           inversionista_ids,
           fecha_desde ?? undefined,
           fecha_hasta ?? undefined,
-          sifcosLimpios
+          sifcosLimpios,
+          capital_min,
+          capital_max
         );
         set.status = 200;
         return result;
@@ -418,6 +438,8 @@ export const creditRouter = new Elysia()
         inversionista_ids: t.Optional(t.Array(t.Number())),
         fecha_desde: t.Optional(t.String()),
         fecha_hasta: t.Optional(t.String()),
+        capital_min: t.Optional(t.Number()),
+        capital_max: t.Optional(t.Number()),
       }),
     }
   )

@@ -481,6 +481,8 @@ export class CarteraBackClient {
 						...(params.email_cobrador && {
 							email_asesor: params.email_cobrador,
 						}),
+						...(params.capital_min !== undefined && { capital_min: params.capital_min }),
+						...(params.capital_max !== undefined && { capital_max: params.capital_max }),
 						excel: false,
 					}),
 				},
@@ -508,8 +510,10 @@ export class CarteraBackClient {
 					}),
 				...(params.email_cobrador && { email_asesor: params.email_cobrador }),
 				...(params.fecha_desde && { fecha_desde: params.fecha_desde }),
-			...(params.fecha_hasta && { fecha_hasta: params.fecha_hasta }),
-			excel: "false",
+				...(params.fecha_hasta && { fecha_hasta: params.fecha_hasta }),
+				...(params.capital_min !== undefined && { capital_min: params.capital_min.toString() }),
+				...(params.capital_max !== undefined && { capital_max: params.capital_max.toString() }),
+				excel: "false",
 			});
 
 			console.log(

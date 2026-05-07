@@ -181,7 +181,6 @@ export async function getCreditCandidates(
     ));
 
   console.log(`   - Créditos ACTIVOS en total: ${totalActivos}`);
-  console.log(`   - Créditos ACTIVOS de Vehículo (meses anteriores): ${totalCandidatosBase}`);
 
   // ──────────────────────────────────────────────────────────
   // 1. Créditos Activos de Vehículo
@@ -429,11 +428,11 @@ export async function getCreditCandidates(
       continue;
     }
 
-    // Identificar formato basándose en los inversionistas REALES con saldo
-    // Si hay más de uno, es Pool, aunque la DB diga lo contrario (corrección de inconsistencias)
+    // Identificar formato basándose en los inversionistas REALES con saldo.
+    // Un crédito es Individual solo si Cube es el ÚNICO con saldo positivo.
     const invsConSaldo = invs.filter((i) => i.monto_aportado > 0);
-    const actualFormadoCredito = invsConSaldo.length > 1 ? "Pool" : "Individual";
-    const esRealmenteIndividual = invsConSaldo.length === 1 && invsConSaldo[0].es_cube;
+    const esRealmenteIndividual = invsConSaldo.length === 1 && invsConSaldo[0].inversionista_id === CUBE_ID;
+    const actualFormadoCredito = esRealmenteIndividual ? "Individual" : "Pool";
 
     if (actualFormadoCredito === "Pool") {
       // VALIDACIÓN: Cube debe ser el líder del Pool.
@@ -501,15 +500,6 @@ export async function getCreditCandidates(
     if (inversionistaIdSolicitante !== undefined) {
       const yaParticipa = invs.some((i) => i.inversionista_id === inversionistaIdSolicitante);
       
-      // LOG DE DEPURACIÓN PARA REINVERSIÓN
-      if (numero_credito_sifco === "01010214118270" || yaParticipa) {
-         const mirrorData = espejoByCredito.get(credito_id) || [];
-         console.log(`   [DEBUG-REINV] Crédito ${numero_credito_sifco}:`);
-         console.log(`     - Buscando Inversionista ID: ${inversionistaIdSolicitante}`);
-         console.log(`     - Inversionistas TABLA PRINCIPAL: ${JSON.stringify(invs.map(i => i.inversionista_id))}`);
-         console.log(`     - Inversionistas TABLA ESPEJO: ${JSON.stringify(mirrorData.map(m => ({id: m.inversionista_id, status: m.status})))}`);
-         console.log(`     - ¿Ya participa?: ${yaParticipa}`);
-      }
 
       if (yaParticipa) {
         reinversionBonus = SCORE_REINVERSION;

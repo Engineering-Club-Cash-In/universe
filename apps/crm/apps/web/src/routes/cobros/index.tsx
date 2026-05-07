@@ -19,6 +19,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { DateRange } from "react-day-picker";
 import { MassWhatsappModal } from "@/components/cobros/mass-whatsapp-modal";
 import { DateRangeFilter } from "@/components/reports/date-range-filter";
+import { CapitalRangeFilter } from "@/components/cobros/capital-range-filter";
 import { DataTable } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -303,6 +304,8 @@ function RouteComponent() {
 	const [fechaHasta, setFechaHasta] = useState<string | undefined>(undefined);
 	const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
 	const [fechaError, setFechaError] = useState<string | null>(null);
+	const [capitalMin, setCapitalMin] = useState<number | undefined>(undefined);
+	const [capitalMax, setCapitalMax] = useState<number | undefined>(undefined);
 
 	// Debounce para el filtro de búsqueda (1 segundos)
 	useEffect(() => {
@@ -428,6 +431,8 @@ function RouteComponent() {
 				fechaDesde,
 				fechaHasta,
 				etiquetas: filtroEtiquetas.length > 0 ? filtroEtiquetas : undefined,
+				capitalMin,
+				capitalMax,
 			},
 		}),
 		enabled: !!session,
@@ -1176,6 +1181,22 @@ function RouteComponent() {
 											),
 										)}
 									</div>
+								</div>
+
+								{/* Capital */}
+								<div className="flex flex-col gap-2">
+									<span className="font-semibold text-muted-foreground text-xs uppercase tracking-wide">
+										Capital
+									</span>
+									<CapitalRangeFilter
+										capitalMin={capitalMin}
+										capitalMax={capitalMax}
+										onCapitalRangeChange={(min, max) => {
+											setCapitalMin(min);
+											setCapitalMax(max);
+											setPage(1);
+										}}
+									/>
 								</div>
 							</div>
 						}

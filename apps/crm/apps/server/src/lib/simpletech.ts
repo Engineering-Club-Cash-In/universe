@@ -23,6 +23,17 @@ function splitTemplateParams(message: string): string[] {
 	return [...parts.slice(0, 3), parts.slice(3).join("\n\n")];
 }
 
+/**
+ * Resuelve el nombre del template según la cantidad de parámetros.
+ *
+ * Las plantillas aprobadas siguen la convención `mensaje{N}parametro`
+ * (`mensaje1parametro`, `mensaje2parametro`, …, `mensaje4parametro`).
+ *
+ * Esta función toma el primer dígito del nombre base
+ * (`SIMPLETECH_TEMPLATE_NAME`) y lo REEMPLAZA por `paramCount`. SimpleTech
+ * solo soporta hasta 4 parámetros, así que `splitTemplateParams` ya colapsa
+ * a 4 cualquier mensaje con más; aquí también clampeamos por seguridad.
+ */
 function resolveTemplateNameByParamCount(
 	baseTemplateName: string,
 	paramCount: number,
@@ -30,13 +41,8 @@ function resolveTemplateNameByParamCount(
 	const match = /\d+/.exec(baseTemplateName);
 	if (!match) return baseTemplateName;
 
-	const baseNumber = Number.parseInt(match[0], 10);
-	if (!Number.isFinite(baseNumber) || baseNumber <= 0) {
-		return baseTemplateName;
-	}
-
-	const nextNumber = baseNumber * Math.max(1, paramCount);
-	return baseTemplateName.replace(match[0], String(nextNumber));
+	const target = Math.min(4, Math.max(1, paramCount));
+	return baseTemplateName.replace(match[0], String(target));
 }
 
 function normalizeParamsForTemplate(
@@ -88,10 +94,70 @@ export function normalizePhone(phone: string): string {
 	return `+502${digits}`;
 }
 
+/**
+ * Extrae detalle útil de una excepción del SDK de SimpleTech para persistir
+ * en el log. Las `ConnectionError` del SDK exponen `statusCode` y
+ * `responseBody` con el mensaje real del proveedor (p. ej. "Template name
+ * not valid"); sin esto solo tendríamos `err.message` ("Error HTTP 400").
+ */
+function buildExceptionPayload(err: unknown): Record<string, unknown> {
+	const anyErr = err as Record<string, unknown> | null;
+	const message = err instanceof Error ? err.message : String(err);
+	const stack = err instanceof Error ? err.stack : undefined;
+
+	const payload: Record<string, unknown> = {
+		exception: message,
+		stack,
+	};
+	if (anyErr && typeof anyErr === "object") {
+		if ("statusCode" in anyErr) payload.statusCode = anyErr.statusCode;
+		if ("responseBody" in anyErr) {
+			const raw = anyErr.responseBody;
+			payload.responseBody = raw;
+			// El SDK suele entregar `responseBody` como string JSON; intentamos
+			// parsearlo para que en la DB quede como objeto consultable.
+			if (typeof raw === "string") {
+				try {
+					payload.responseBodyParsed = JSON.parse(raw);
+				} catch {
+					/* dejar solo el string crudo */
+				}
+			}
+		}
+		if ("name" in anyErr) payload.errorName = anyErr.name;
+	}
+	return payload;
+}
+
+/**
+ * Extrae un texto humano del payload de excepción para mostrarle al usuario.
+ * Combina el mensaje de la excepción con el `data`/`error` del responseBody
+ * parseado (típicamente algo como "Template name not valid"). Stringifica
+ * objetos como JSON en vez de "[object Object]".
+ */
+function formatExceptionMessage(
+	err: unknown,
+	payload: Record<string, unknown>,
+): string {
+	const baseMsg = err instanceof Error ? err.message : "Error desconocido";
+	const parsed = payload.responseBodyParsed as
+		| { data?: unknown; error?: unknown }
+		| undefined;
+	const detail = parsed?.data ?? parsed?.error;
+	if (detail === undefined || detail === null || detail === "") return baseMsg;
+	const detailStr =
+		typeof detail === "string" ? detail : JSON.stringify(detail);
+	return `${baseMsg} — ${detailStr}`;
+}
+
 export interface WhatsappSendResult {
 	success: boolean;
 	templateMessageId?: string;
 	error?: string;
+	/** Payload exacto que se envió al proveedor (para persistir en logs). */
+	providerRequest?: Record<string, unknown>;
+	/** Respuesta cruda del proveedor o detalle de la excepción de transporte. */
+	providerResponse?: Record<string, unknown>;
 }
 
 /**
@@ -132,21 +198,29 @@ export async function sendWhatsappTemplate(params: {
 	try {
 		const result = await client.sendTemplate(templateRequest);
 		console.log(`${prefix} Response:`, JSON.stringify(result, null, 2));
+		const providerResponse = result as unknown as Record<string, unknown>;
 		if (result.success) {
 			return {
 				success: true,
 				templateMessageId: result.results[0]?.templateMessageId,
+				providerRequest: templateRequest,
+				providerResponse,
 			};
 		}
 		return {
 			success: false,
 			error: result.failed[0]?.error ?? "Error desconocido",
+			providerRequest: templateRequest,
+			providerResponse,
 		};
 	} catch (err) {
 		console.error(`${prefix} Exception:`, err);
+		const payload = buildExceptionPayload(err);
 		return {
 			success: false,
-			error: err instanceof Error ? err.message : "Error desconocido",
+			error: formatExceptionMessage(err, payload),
+			providerRequest: templateRequest,
+			providerResponse: payload,
 		};
 	}
 }
@@ -172,6 +246,10 @@ export interface WhatsappBatchResultItem {
 export interface WhatsappBatchResult {
 	transportError?: string;
 	items: WhatsappBatchResultItem[];
+	/** Payload exacto que se envió al proveedor (para persistir en logs). */
+	providerRequest?: Record<string, unknown>;
+	/** Respuesta cruda del proveedor o detalle de la excepción de transporte. */
+	providerResponse?: Record<string, unknown>;
 }
 
 /**
@@ -205,6 +283,7 @@ export async function sendWhatsappTemplateBatch(params: {
 				success: false,
 				error: msg,
 			})),
+			providerResponse: { transportError: msg },
 		};
 	}
 
@@ -300,10 +379,13 @@ export async function sendWhatsappTemplateBatch(params: {
 							: "SimpleTech reportó fallo en el batch"),
 				};
 			}),
+			providerRequest: templateRequest,
+			providerResponse: result as unknown as Record<string, unknown>,
 		};
 	} catch (err) {
 		console.error(`${prefix} Exception:`, err);
-		const msg = err instanceof Error ? err.message : "Error desconocido";
+		const payload = buildExceptionPayload(err);
+		const msg = formatExceptionMessage(err, payload);
 		return {
 			transportError: msg,
 			items: normalized.map((r) => ({
@@ -313,6 +395,8 @@ export async function sendWhatsappTemplateBatch(params: {
 				success: false,
 				error: msg,
 			})),
+			providerRequest: templateRequest,
+			providerResponse: payload,
 		};
 	}
 }

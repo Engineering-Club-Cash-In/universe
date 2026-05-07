@@ -1,6 +1,8 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
+	ArrowDown,
+	ArrowUp,
 	Banknote,
 	ChevronLeft,
 	ChevronRight,
@@ -11,8 +13,11 @@ import {
 	Loader2,
 	Search,
 	Send,
+	Sparkles,
 	Upload,
+	X,
 } from "lucide-react";
+import { PDFDocument } from "pdf-lib";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -130,6 +135,56 @@ const MONTH_OPTIONS = [
 	{ value: 12, label: "Diciembre" },
 ];
 
+// ─── Merge de archivos a un solo PDF ─────────────────────────────────────────
+
+const MAX_BOLETA_FILES = 5;
+const MAX_BOLETA_TOTAL_BYTES = 20 * 1024 * 1024; // 20 MB
+
+async function mergeFilesToPdf(
+	files: File[],
+	outputName: string,
+): Promise<File> {
+	// Atajo: 1 solo PDF → no re-encode, se sube tal cual.
+	if (files.length === 1 && files[0].type === "application/pdf") {
+		return files[0];
+	}
+
+	const merged = await PDFDocument.create();
+
+	for (const file of files) {
+		const bytes = new Uint8Array(await file.arrayBuffer());
+
+		if (file.type === "application/pdf") {
+			const src = await PDFDocument.load(bytes);
+			const copied = await merged.copyPages(src, src.getPageIndices());
+			for (const page of copied) merged.addPage(page);
+			continue;
+		}
+
+		if (file.type.startsWith("image/")) {
+			const isPng = file.type === "image/png";
+			const image = isPng
+				? await merged.embedPng(bytes)
+				: await merged.embedJpg(bytes);
+			const page = merged.addPage([image.width, image.height]);
+			page.drawImage(image, {
+				x: 0,
+				y: 0,
+				width: image.width,
+				height: image.height,
+			});
+			continue;
+		}
+
+		throw new Error(`Tipo de archivo no soportado: ${file.name}`);
+	}
+
+	const pdfBytes = await merged.save();
+	return new File([pdfBytes as BlobPart], outputName, {
+		type: "application/pdf",
+	});
+}
+
 // ─── Upload boleta hook ───────────────────────────────────────────────────────
 
 function useUploadBoleta() {
@@ -195,40 +250,119 @@ function SubirBoletaDialog({
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 }) {
-	const [file, setFile] = useState<File | null>(null);
+	const [files, setFiles] = useState<File[]>([]);
 	const [notas, setNotas] = useState("");
 	const [uploading, setUploading] = useState(false);
+	const [merging, setMerging] = useState(false);
+	const [dragActive, setDragActive] = useState(false);
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const { upload } = useUploadBoleta();
 
+	const totalBytes = files.reduce((acc, f) => acc + f.size, 0);
+
+	let dropzoneLabel: string;
+	if (dragActive) dropzoneLabel = "Soltá los archivos aquí";
+	else if (files.length === 0) dropzoneLabel = "Arrastrá archivos o hacé click";
+	else dropzoneLabel = "Agregar más archivos";
+
+	const handleAddFiles = (incoming: FileList | null) => {
+		if (!incoming || incoming.length === 0) return;
+		const incomingArr = Array.from(incoming);
+
+		const invalid = incomingArr.find(
+			(f) => !(f.type === "application/pdf" || f.type.startsWith("image/")),
+		);
+		if (invalid) {
+			toast.error(`Tipo no soportado: ${invalid.name}`);
+			return;
+		}
+
+		const next = [...files, ...incomingArr];
+		if (next.length > MAX_BOLETA_FILES) {
+			toast.error(`Máximo ${MAX_BOLETA_FILES} archivos`);
+			return;
+		}
+		const nextBytes = next.reduce((acc, f) => acc + f.size, 0);
+		if (nextBytes > MAX_BOLETA_TOTAL_BYTES) {
+			toast.error("El tamaño total supera 20 MB");
+			return;
+		}
+		setFiles(next);
+	};
+
+	const removeFile = (index: number) => {
+		setFiles((prev) => prev.filter((_, i) => i !== index));
+	};
+
+	const moveFile = (index: number, direction: -1 | 1) => {
+		setFiles((prev) => {
+			const target = index + direction;
+			if (target < 0 || target >= prev.length) return prev;
+			const next = [...prev];
+			[next[index], next[target]] = [next[target], next[index]];
+			return next;
+		});
+	};
+
+	const handleDrag = (e: React.DragEvent<HTMLDivElement>) => {
+		e.preventDefault();
+		e.stopPropagation();
+		if (uploading || files.length >= MAX_BOLETA_FILES) return;
+		if (e.type === "dragenter" || e.type === "dragover") setDragActive(true);
+		else if (e.type === "dragleave") setDragActive(false);
+	};
+
+	const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+		e.preventDefault();
+		e.stopPropagation();
+		setDragActive(false);
+		if (uploading || files.length >= MAX_BOLETA_FILES) return;
+		if (e.dataTransfer?.files?.length) {
+			handleAddFiles(e.dataTransfer.files);
+		}
+	};
+
 	const handleSubmit = async () => {
-		if (!file) {
-			toast.error("Selecciona un archivo");
+		if (files.length === 0) {
+			toast.error("Selecciona al menos un archivo");
 			return;
 		}
 
 		setUploading(true);
 		try {
+			let toUpload: File;
+			if (files.length === 1 && files[0].type === "application/pdf") {
+				toUpload = files[0];
+			} else {
+				setMerging(true);
+				toUpload = await mergeFilesToPdf(
+					files,
+					`boleta-${inv.inversionista_id}-${Date.now()}.pdf`,
+				);
+				setMerging(false);
+			}
+
 			await upload({
-				file,
+				file: toUpload,
 				inversionista_id: inv.inversionista_id,
 				monto_boleta: String(inv.total_a_recibir_con_reinversion),
 				notas: notas.trim() || undefined,
 			});
 			toast.success("Boleta subida correctamente");
-			setFile(null);
+			setFiles([]);
 			setNotas("");
 			onOpenChange(false);
 		} catch (err: any) {
 			toast.error(err.message || "Error al subir boleta");
 		} finally {
+			setMerging(false);
 			setUploading(false);
 		}
 	};
 
 	const handleClose = (value: boolean) => {
 		if (!uploading) {
-			setFile(null);
+			setFiles([]);
 			setNotas("");
 			onOpenChange(value);
 		}
@@ -245,39 +379,148 @@ function SubirBoletaDialog({
 				</DialogHeader>
 
 				<div className="space-y-4 py-2">
-					{/* Archivo */}
+					{/* Banner: nueva funcionalidad de múltiples boletas */}
+					<div className="relative overflow-hidden rounded-lg border border-emerald-200 bg-linear-to-br from-emerald-50 to-teal-50 px-3.5 py-3 dark:border-emerald-900/50 dark:from-emerald-950/40 dark:to-teal-950/40">
+						<div className="flex items-start gap-2.5">
+							<div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/60">
+								<Sparkles className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-300" />
+							</div>
+							<div className="min-w-0 flex-1">
+								<div className="mb-0.5 flex items-center gap-1.5">
+									<p className="font-semibold text-[13px] text-emerald-900 dark:text-emerald-100">
+										¡Ahora podés subir varias boletas!
+									</p>
+								</div>
+								<p className="text-[11.5px] text-emerald-800/90 leading-snug dark:text-emerald-200/80">
+									Arrastrá o seleccioná varios PDFs/imágenes a la vez. Se
+									unirán automáticamente en un solo archivo y se subirán como
+									una sola boleta.
+								</p>
+							</div>
+						</div>
+					</div>
+
+					{/* Archivos */}
 					<div className="space-y-2">
-						<Label htmlFor="boleta-file">Archivo</Label>
+						<div className="flex items-center justify-between">
+							<Label htmlFor="boleta-file">
+								Archivos{" "}
+								<span className="font-normal text-muted-foreground text-xs">
+									(máx. 5 — 20 MB)
+								</span>
+							</Label>
+							{files.length > 0 && (
+								<span className="text-muted-foreground text-xs tabular-nums">
+									{files.length}/{MAX_BOLETA_FILES} ·{" "}
+									{(totalBytes / 1024 / 1024).toFixed(1)} MB
+								</span>
+							)}
+						</div>
+
 						<div
-							className="flex cursor-pointer items-center justify-center rounded-lg border-2 border-dashed px-4 py-6 transition-colors hover:border-primary/50 hover:bg-muted/50"
+							className={`flex cursor-pointer items-center justify-center rounded-lg border-2 border-dashed px-4 py-6 transition-colors ${
+								dragActive
+									? "border-primary bg-primary/5"
+									: "hover:border-primary/50 hover:bg-muted/50"
+							} ${
+								files.length >= MAX_BOLETA_FILES
+									? "pointer-events-none opacity-50"
+									: ""
+							}`}
 							onClick={() => fileInputRef.current?.click()}
 							onKeyDown={() => {}}
+							onDragEnter={handleDrag}
+							onDragLeave={handleDrag}
+							onDragOver={handleDrag}
+							onDrop={handleDrop}
 						>
-							{file ? (
-								<div className="text-center">
-									<FileCheck className="mx-auto mb-1 h-6 w-6 text-emerald-600" />
-									<p className="font-medium text-sm">{file.name}</p>
-									<p className="text-muted-foreground text-xs">
-										{(file.size / 1024).toFixed(0)} KB
-									</p>
-								</div>
-							) : (
-								<div className="text-center">
-									<Upload className="mx-auto mb-1 h-6 w-6 text-muted-foreground" />
-									<p className="text-muted-foreground text-sm">
-										Click para seleccionar archivo
-									</p>
-								</div>
-							)}
+							<div className="text-center">
+								<Upload
+									className={`mx-auto mb-1 h-6 w-6 transition-colors ${
+										dragActive ? "text-primary" : "text-muted-foreground"
+									}`}
+								/>
+								<p
+									className={`font-medium text-sm transition-colors ${
+										dragActive ? "text-primary" : "text-foreground"
+									}`}
+								>
+									{dropzoneLabel}
+								</p>
+								<p className="mt-0.5 text-[11px] text-muted-foreground/70">
+									PDF o imágenes — se unirán en un solo PDF
+								</p>
+							</div>
 						</div>
 						<input
 							ref={fileInputRef}
 							id="boleta-file"
 							type="file"
 							accept="image/*,.pdf"
+							multiple
 							className="hidden"
-							onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+							onChange={(e) => {
+								handleAddFiles(e.target.files);
+								if (fileInputRef.current) fileInputRef.current.value = "";
+							}}
 						/>
+
+						{files.length > 0 && (
+							<ul className="space-y-1.5">
+								{files.map((f, index) => (
+									<li
+										key={`${f.name}-${index}`}
+										className="flex items-center gap-2 rounded-md border bg-muted/30 px-2.5 py-1.5"
+									>
+										<span className="w-5 shrink-0 text-center font-mono text-muted-foreground text-xs tabular-nums">
+											{index + 1}
+										</span>
+										<FileCheck className="h-4 w-4 shrink-0 text-emerald-600" />
+										<div className="min-w-0 flex-1">
+											<p className="truncate font-medium text-xs">{f.name}</p>
+											<p className="text-[10px] text-muted-foreground">
+												{(f.size / 1024).toFixed(0)} KB
+											</p>
+										</div>
+										<div className="flex items-center gap-0.5">
+											<Button
+												type="button"
+												variant="ghost"
+												size="icon"
+												className="h-7 w-7"
+												disabled={index === 0 || uploading}
+												onClick={() => moveFile(index, -1)}
+												title="Subir"
+											>
+												<ArrowUp className="h-3.5 w-3.5" />
+											</Button>
+											<Button
+												type="button"
+												variant="ghost"
+												size="icon"
+												className="h-7 w-7"
+												disabled={index === files.length - 1 || uploading}
+												onClick={() => moveFile(index, 1)}
+												title="Bajar"
+											>
+												<ArrowDown className="h-3.5 w-3.5" />
+											</Button>
+											<Button
+												type="button"
+												variant="ghost"
+												size="icon"
+												className="h-7 w-7 text-muted-foreground hover:text-destructive"
+												disabled={uploading}
+												onClick={() => removeFile(index)}
+												title="Quitar"
+											>
+												<X className="h-3.5 w-3.5" />
+											</Button>
+										</div>
+									</li>
+								))}
+							</ul>
+						)}
 					</div>
 
 					{/* Notas */}
@@ -301,9 +544,12 @@ function SubirBoletaDialog({
 					>
 						Cancelar
 					</Button>
-					<Button onClick={handleSubmit} disabled={uploading || !file}>
+					<Button
+						onClick={handleSubmit}
+						disabled={uploading || files.length === 0}
+					>
 						{uploading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-						Subir boleta
+						{merging ? "Uniendo archivos..." : "Subir boleta"}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

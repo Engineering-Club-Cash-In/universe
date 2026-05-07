@@ -1927,6 +1927,7 @@ export const crmRouter = {
 						licensePlate: vehicles.licensePlate,
 						color: vehicles.color,
 						isNew: vehicles.isNew,
+						isOwned: vehicles.isOwned,
 					},
 					stage: {
 						id: salesStages.id,
@@ -4992,6 +4993,7 @@ export const crmRouter = {
 								licensePlate: vehicles.licensePlate,
 								color: vehicles.color,
 								isNew: vehicles.isNew,
+								isOwned: vehicles.isOwned,
 							})
 							.from(vehicles)
 							.where(inArray(vehicles.id, vehicleIds))
@@ -5186,6 +5188,7 @@ export const crmRouter = {
 								licensePlate: vehicles.licensePlate,
 								color: vehicles.color,
 								isNew: vehicles.isNew,
+								isOwned: vehicles.isOwned,
 								vinNumber: vehicles.vinNumber,
 								motorNumber: vehicles.motorNumber,
 								seats: vehicles.seats,
@@ -5273,6 +5276,7 @@ export const crmRouter = {
 								description: `${vehicle.make} ${vehicle.model} ${vehicle.year}`,
 								licensePlate: vehicle.licensePlate,
 								isNew: vehicle.isNew,
+								isOwned: vehicle.isOwned,
 								hasRequiredData: !!(
 									vehicle.vinNumber &&
 									vehicle.seats &&

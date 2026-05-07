@@ -67,8 +67,8 @@ export interface CreditCandidate {
 // ============================================================
 const SCORE_BASE = 1000;
 const SCORE_CRM_BONUS = 500;
-const SCORE_FORMAT_INDIVIDUAL = 400;
-const SCORE_FORMAT_POOL_CUBE_ONLY = 200;
+const SCORE_FORMAT_INDIVIDUAL = 2500;   // Subido de 400 a 2500 para que Individual sea la prioridad absoluta
+const SCORE_FORMAT_POOL_CUBE_ONLY = 500;  // Subido de 200 a 500
 const SCORE_FORMAT_POOL_CUBE_PLUS_1 = 100;
 const SCORE_CUOTA_0 = 300;
 const SCORE_PENALTY_PER_CUOTA = 30; // Reducido de 50 a 30
@@ -78,8 +78,9 @@ const SCORE_PROXIMITY_MED = 100;       // Diferencia < 25%
 const SCORE_REINVERSION = 3000;       // Prioridad para inversionistas existentes
 
 // --- NUEVOS SCORES PARA NUEVOS INVERSIONISTAS ---
-const SCORE_NUEVO_INVERSIONISTA_INDIVIDUAL = 1000; // Prioridad máxima para que los nuevos tengan créditos solos
-const SCORE_COMPRA_TOTAL_CUBE = 2000;              // Bono por comprar toda la parte de Cube
+const SCORE_NUEVO_INVERSIONISTA_INDIVIDUAL = 1000;
+const SCORE_COMPRA_TOTAL_CUBE_INDIVIDUAL = 2000;   // Bono full si queda solo el inversionista
+const SCORE_COMPRA_TOTAL_CUBE_POOL = 500;         // Bono reducido si sigue siendo un Pool
 
 // ============================================================
 // FUNCIONES DE SCORING
@@ -248,25 +249,29 @@ export async function getCreditCandidates(
   const espejoRows = await db
     .select({
       credito_id: creditos_inversionistas_espejo.credito_id,
+      inversionista_id: creditos_inversionistas_espejo.inversionista_id,
       status: creditos_inversionistas_espejo.status,
     })
     .from(creditos_inversionistas_espejo)
     .where(inArray(creditos_inversionistas_espejo.credito_id, creditoIds));
 
   // Agrupar por credito_id
-  const espejoByCredito = new Map<number, string[]>();
+  const espejoByCredito = new Map<number, { inversionista_id: number; status: string }[]>();
   for (const row of espejoRows) {
     if (!espejoByCredito.has(row.credito_id)) {
       espejoByCredito.set(row.credito_id, []);
     }
-    espejoByCredito.get(row.credito_id)!.push(row.status);
+    espejoByCredito.get(row.credito_id)!.push({
+      inversionista_id: row.inversionista_id,
+      status: row.status,
+    });
   }
 
   // Un crédito pasa si TODOS sus registros en espejo están en 'completado'
   // Si alguno está en pendiente_* ya hay un proceso en curso → descartado
   const creditosConEspejoCompleto = new Set<number>();
-  for (const [creditoId, statuses] of espejoByCredito.entries()) {
-    const todosCompletos = statuses.every((s) => s === "completado");
+  for (const [creditoId, data] of espejoByCredito.entries()) {
+    const todosCompletos = data.every((d) => d.status === "completado");
     if (todosCompletos) {
       creditosConEspejoCompleto.add(creditoId);
     }
@@ -424,11 +429,11 @@ export async function getCreditCandidates(
       continue;
     }
 
-    // Identificar formato dinámicamente si viene null (para evitar saltarse validación de Pool)
-    // MEJORA: Ignorar inversionistas con monto 0 para determinar si es Individual
-    const invsConSaldo = invs.filter(i => i.monto_aportado > 0);
+    // Identificar formato basándose en los inversionistas REALES con saldo
+    // Si hay más de uno, es Pool, aunque la DB diga lo contrario (corrección de inconsistencias)
+    const invsConSaldo = invs.filter((i) => i.monto_aportado > 0);
+    const actualFormadoCredito = invsConSaldo.length > 1 ? "Pool" : "Individual";
     const esRealmenteIndividual = invsConSaldo.length === 1 && invsConSaldo[0].es_cube;
-    const actualFormadoCredito = formato_credito ?? (invs.length > 1 ? "Pool" : "Individual");
 
     if (actualFormadoCredito === "Pool") {
       // VALIDACIÓN: Cube debe ser el líder del Pool.
@@ -448,6 +453,14 @@ export async function getCreditCandidates(
     const abonoCapital = abonosByCredito.get(credito_id) ?? new Big(0);
     const capitalActivo = capitalBig.minus(abonoCapital);
     const capitalActivoNum = Math.max(0, capitalActivo.toNumber());
+    
+    // FILTRO: Si el capital activo es 0, no se puede invertir nada
+    if (capitalActivoNum <= 0) {
+      console.log(
+        `   ❌ [${numero_credito_sifco}] Descartado: El capital activo es Q0.00`
+      );
+      continue;
+    }
 
     // Cuotas pagadas y totales
     const cuotasPagadas = cuotasPagadasByCredito.get(credito_id) ?? 0;
@@ -477,13 +490,27 @@ export async function getCreditCandidates(
     // Bono de Compra Total: Si el monto solicitado cubre toda la parte de Cube
     let compraTotalBonus = 0;
     if (monto !== undefined && cubeInv && monto >= cubeInv.monto_aportado) {
-      compraTotalBonus = SCORE_COMPRA_TOTAL_CUBE;
+      // Si el crédito es Individual, el bono es mayor porque el inversionista queda solo.
+      compraTotalBonus = (actualFormadoCredito === "Individual") 
+        ? SCORE_COMPRA_TOTAL_CUBE_INDIVIDUAL 
+        : SCORE_COMPRA_TOTAL_CUBE_POOL;
     }
 
     // Bono de Reinversión: Si el inversionista ya tiene participación en este crédito
     let reinversionBonus = 0;
     if (inversionistaIdSolicitante !== undefined) {
       const yaParticipa = invs.some((i) => i.inversionista_id === inversionistaIdSolicitante);
+      
+      // LOG DE DEPURACIÓN PARA REINVERSIÓN
+      if (numero_credito_sifco === "01010214118270" || yaParticipa) {
+         const mirrorData = espejoByCredito.get(credito_id) || [];
+         console.log(`   [DEBUG-REINV] Crédito ${numero_credito_sifco}:`);
+         console.log(`     - Buscando Inversionista ID: ${inversionistaIdSolicitante}`);
+         console.log(`     - Inversionistas TABLA PRINCIPAL: ${JSON.stringify(invs.map(i => i.inversionista_id))}`);
+         console.log(`     - Inversionistas TABLA ESPEJO: ${JSON.stringify(mirrorData.map(m => ({id: m.inversionista_id, status: m.status})))}`);
+         console.log(`     - ¿Ya participa?: ${yaParticipa}`);
+      }
+
       if (yaParticipa) {
         reinversionBonus = SCORE_REINVERSION;
       }

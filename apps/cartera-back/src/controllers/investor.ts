@@ -2,10 +2,10 @@
 import { z } from "zod";
 import { formatToUSD } from "../utils/functions/currencyConverter";
 import { USD_EXCHANGE_RATE } from "../utils/functions/const";
-import { 
-  generarYSubirPDFInversionista, 
-  generarPDFBuffer, 
-  generarYSubirExcelInversionista 
+import {
+  generarYSubirPDFInversionista,
+  generarPDFBuffer,
+  generarYSubirExcelInversionista
 } from "../utils/functions/generalFunctions";
 import { db } from "../database/index";
 import {
@@ -26,7 +26,6 @@ import {
   liquidacion_locks,
   documentos_inversionista,
   abonos_capital,
-  formatoCuentaBanco,
 } from "../database/db/schema";
 import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
 import { eq, and, or, sql, inArray, ilike, like, desc, count, SQL, isNull, isNotNull, ne } from "drizzle-orm";
@@ -57,12 +56,12 @@ type OrigenDatos = "original" | "espejo";
 export type TipoConsulta = "originales" | "espejos" | "ambas";
 
 // 🔥 MEJORADO: Usar tipos genéricos de Drizzle para type-safety completo
-type CreditosInversionistasTable = 
-  | typeof creditos_inversionistas 
+type CreditosInversionistasTable =
+  | typeof creditos_inversionistas
   | typeof creditos_inversionistas_espejo;
 
-type PagosCreditoInversionistasTable = 
-  | typeof pagos_credito_inversionistas 
+type PagosCreditoInversionistasTable =
+  | typeof pagos_credito_inversionistas
   | typeof pagos_credito_inversionistas_espejo;
 
 // Configuración de tablas según tipo
@@ -99,7 +98,7 @@ async function consultarCreditosInversionista(
 ) {
   // 🔥 Type assertion segura: sabemos que ambas tablas tienen la misma estructura
   const tabla = config.creditosInversionistas as typeof creditos_inversionistas;
-  
+
   return await db
     .select({
       credito_id: tabla.credito_id,
@@ -1008,12 +1007,10 @@ export async function processAndReplaceCreditInvestorsReverse(
   }
 
   // 4. Obtener TODOS los pagos de esa cuota
-  const pagosDeEsaCuota = pago.cuota_id === null
-    ? []
-    : await db
-        .select({ pago_id: pagos_credito.pago_id })
-        .from(pagos_credito)
-        .where(eq(pagos_credito.cuota_id, pago.cuota_id));
+  const pagosDeEsaCuota = await db
+    .select({ pago_id: pagos_credito.pago_id })
+    .from(pagos_credito)
+    .where(eq(pagos_credito.cuota_id, pago.cuota_id));
 
   const pagoIds = pagosDeEsaCuota.map((p) => p.pago_id);
 
@@ -1141,13 +1138,7 @@ export async function reversePagosEspejoPorInversionista(
   }
 
   // 5. Obtener cuotas asociadas a los pagos y marcarlas como NO liquidadas
-  const pagoIds = [
-    ...new Set(
-      pagosEspejo
-        .map((p) => p.pago_id)
-        .filter((id): id is number => id !== null)
-    ),
-  ];
+  const pagoIds = [...new Set(pagosEspejo.map((p) => p.pago_id))];
   console.log(`\n📅 Revirtiendo liquidación de cuotas (${pagoIds.length} pago_ids únicos)...`);
 
   if (pagoIds.length > 0) {
@@ -1263,8 +1254,8 @@ export async function resumeInvestor(
       email: inversionistas.email,
    tiene_boleta_pendiente: sql<boolean>`
       EXISTS (
-        SELECT 1 
-        FROM cartera.boletas_pago_inversionista 
+        SELECT 1
+        FROM cartera.boletas_pago_inversionista
         WHERE cartera.boletas_pago_inversionista.inversionista_id = ${inversionistas.inversionista_id}
         AND cartera.boletas_pago_inversionista.estado = 'PENDIENTE'
       )
@@ -1562,7 +1553,7 @@ export async function resumeInvestor(
               const isrReinv = inv.emite_factura ? new Big(0) : reinvInteres.times(0.07);
               const totalReinvNeta = reinvCapital.plus(reinvInteres).minus(isrReinv);
               const netReinvInt = reinvInteres.minus(isrReinv);
-              
+
               total_reinversion_neta_global = total_reinversion_neta_global.plus(totalReinvNeta);
               total_reinversion_capital = total_reinversion_capital.plus(reinvCapital);
               total_reinversion_interes = total_reinversion_interes.plus(netReinvInt);
@@ -2001,7 +1992,7 @@ export async function getInvestorTotalsGlobales(
       }
       subtotal.total_cuota = subtotal.total_cuota.plus(cuota_inversor);
       subtotal.totalAbonoGeneralInteres = subtotal.totalAbonoGeneralInteres.plus(abonoGeneralInteres);
-      
+
       // 🔑 ACUMULADOR NETO INDEPENDIENTE
       const pagoNetoGlobal = abono_capital.plus(interesTotal);
       subtotal.total_cuota_sin_reinversion = subtotal.total_cuota_sin_reinversion.plus(pagoNetoGlobal);
@@ -2249,13 +2240,7 @@ export async function revertirLiquidacion(liquidacion_id: number) {
     // PASO 5: Revertir cuotas del crédito
     //   Marcamos liquidado_inversionistas = false y limpiamos fecha
     // ──────────────────────────────────────────────
-    const allPagoIds = [
-      ...new Set(
-        pagosLiquidados
-          .map((p) => p.pago_id)
-          .filter((id): id is number => id !== null)
-      ),
-    ];
+    const allPagoIds = [...new Set(pagosLiquidados.map((p) => p.pago_id))];
     if (allPagoIds.length > 0) {
       const cuotasDeLosPagos = await tx
         .select({ cuota_id: pagos_credito.cuota_id })
@@ -2669,7 +2654,7 @@ export async function getInvestorMirrorSummary(
       sg.total_isr                = sg.total_isr.plus(isr);
       sg.total_cuota              = sg.total_cuota.plus(cuota_inversor);
       sg.total_abono_general_interes = sg.total_abono_general_interes.plus(abonoGeneralInteres);
-      
+
       // 🔑 ACUMULADOR NETO INDEPENDIENTE
       const pagoNetoEspejo = abono_capital.plus(interesTotal);
       sg.total_cuota_sin_reinversion = sg.total_cuota_sin_reinversion.plus(pagoNetoEspejo);
@@ -2805,8 +2790,8 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
   let totalPagosLiquidados = 0;
   let totalLiquidaciones = 0;
   let inversionistasSaltados = 0;
-  const reportesGenerados: Array<{ 
-    inversionista_id: number; 
+  const reportesGenerados: Array<{
+    inversionista_id: number;
     url: string;
     boleta_id: number;
     boleta_url: string;
@@ -2990,26 +2975,14 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
         }
 
         // Marcar cuotas como liquidado_inversionistas
-        const allPagoIds = [
-          ...new Set(
-            pagosNoLiquidados
-              .map((p) => p.pago_id)
-              .filter((id): id is number => id !== null)
-          ),
-        ];
+        const allPagoIds = [...new Set(pagosNoLiquidados.map((p) => p.pago_id))];
         if (allPagoIds.length > 0) {
           const cuotasDeLosPagos = await tx
             .select({ cuota_id: pagos_credito.cuota_id })
             .from(pagos_credito)
             .where(inArray(pagos_credito.pago_id, allPagoIds));
 
-          const uniqueCuotaIds = [
-            ...new Set(
-              cuotasDeLosPagos
-                .map((c) => c.cuota_id)
-                .filter((id): id is number => id !== null)
-            ),
-          ];
+          const uniqueCuotaIds = [...new Set(cuotasDeLosPagos.map((c) => c.cuota_id))];
           if (uniqueCuotaIds.length > 0) {
             const fechaGuatemala = new Date(
               new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" })
@@ -3087,7 +3060,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
             try {
               // Validar que subtotal existe para evitar crash
               const subtotalStr = inversionista.subtotal?.total_cuota_con_reinversion?.toString() || "0";
-              
+
               const emailResult = await sendLiquidationEmail({
                 to: inversionista.email,
                 investorName: inversionista.nombre_inversionista,
@@ -3101,7 +3074,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
                   content: excelBuffer,
                 }
               });
-              
+
               if (emailResult.success) {
                 console.log(`  ✅ Correo enviado exitosamente a ${inversionista.email}`);
               } else {
@@ -3187,6 +3160,49 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
         // forzamos el status a `inactivo` después.
         // ========================================
         try {
+          // 5A) Salida automática por créditos con devolucion_cube=true
+          //     (independiente del status del inversionista)
+          const creditoIdsConPagos = [
+            ...new Set(pagosNoLiquidados.map((p) => p.credito_id)),
+          ];
+
+          if (creditoIdsConPagos.length > 0) {
+            const creditosConDevolucion = await db
+              .select({ credito_id: creditos.credito_id })
+              .from(creditos)
+              .where(
+                and(
+                  inArray(creditos.credito_id, creditoIdsConPagos),
+                  eq(creditos.estado_devolucion, 'VERIFICADO')
+                )
+              );
+
+            const creditoIdsDevolucion = creditosConDevolucion.map((c) => c.credito_id);
+
+            if (creditoIdsDevolucion.length > 0) {
+              console.log(
+                `  🚪 Inversionista ${inv_id} → exitInvestor por estado_devolucion=VERIFICADO en ${creditoIdsDevolucion.length} crédito(s)`
+              );
+
+              const exitResultDevolucion = await exitInvestor({
+                body: {
+                  inversionista_id: inv_id,
+                  creditos: creditoIdsDevolucion,
+                },
+                set: { status: 200 },
+                request: {} as any,
+              });
+
+              // Después de separar en exitInvestor, dejar estado_devolucion en NO_APLICA
+              await db
+                .update(creditos)
+                .set({ estado_devolucion: "NO_APLICA" })
+                .where(inArray(creditos.credito_id, creditoIdsDevolucion));
+
+              console.log(`  ✅ Salida por estado_devolucion=VERIFICADO ejecutada y créditos reseteados a NO_APLICA:`, exitResultDevolucion);
+            }
+          }
+
           const [invRow] = await db
             .select({ status: inversionistas.status })
             .from(inversionistas)
@@ -3226,6 +3242,24 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
               );
             }
           }
+
+          // 5C) Regla de cierre: tras liquidar, cualquier estado de devolución
+          // del/los crédito(s) procesado(s) vuelve a NO_APLICA.
+          if (creditoIdsConPagos.length > 0) {
+            await db
+              .update(creditos)
+              .set({ estado_devolucion: "NO_APLICA" })
+              .where(
+                and(
+                  inArray(creditos.credito_id, creditoIdsConPagos),
+                  ne(creditos.estado_devolucion, "NO_APLICA")
+                )
+              );
+
+            console.log(
+              `  ✅ Estado devolución reseteado a NO_APLICA en ${creditoIdsConPagos.length} crédito(s) procesado(s) en liquidación`
+            );
+          }
         } catch (exitError) {
           console.error(
             `  ❌ Error en salida automática (liquidación ya guardada):`,
@@ -3250,7 +3284,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
 
   // 📝 PASO 8: Mensaje final
   const mensaje = inversionista_id
-    ? totalLiquidaciones > 0 
+    ? totalLiquidaciones > 0
       ? `Inversionista ${inversionista_id} liquidado correctamente`
       : `No se pudo liquidar al inversionista ${inversionista_id}`
     : `${totalLiquidaciones} inversionistas liquidados correctamente (${inversionistasSaltados} saltados)`;
@@ -3261,7 +3295,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
   console.log(`   - Excels generados: ${reportesGenerados.length}`);
   console.log(`   - Boletas procesadas: ${reportesGenerados.length}`);
   console.log(`   - Inversionistas saltados: ${inversionistasSaltados}`);
-  
+
   if (errores.length > 0) {
     console.log(`\n⚠️ INVERSIONISTAS NO PROCESADOS:`);
     errores.forEach(e => {
@@ -3712,11 +3746,11 @@ export const findOrCreateInvestor = async (
   emite_factura: boolean = true
 ) => {
   console.log(`🔍 Buscando/creando inversionista: "${nombre}"`);
-  
+
   // 🧹 NORMALIZAR nombre
   const nombreNormalizado = nombre.trim();
   const nombreLower = nombreNormalizado.toLowerCase();
-  
+
   // 1️⃣ BÚSQUEDA EXACTA (case insensitive)
   console.log(`   🎯 Estrategia 1: Búsqueda exacta...`);
   const exactMatch = await db
@@ -3736,7 +3770,7 @@ export const findOrCreateInvestor = async (
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
-  
+
   const withoutAccents = await db
     .select()
     .from(inversionistas)
@@ -3744,8 +3778,8 @@ export const findOrCreateInvestor = async (
       sql`LOWER(
         TRIM(
           translate(
-            ${inversionistas.nombre}, 
-            'áéíóúÁÉÍÓÚñÑ', 
+            ${inversionistas.nombre},
+            'áéíóúÁÉÍÓÚñÑ',
             'aeiouAEIOUnN'
           )
         )
@@ -3760,20 +3794,20 @@ export const findOrCreateInvestor = async (
 
   // 3️⃣ BÚSQUEDA "COMIENZA CON" - Para nombres con apellidos extras
   console.log(`   🎯 Estrategia 3: Búsqueda "comienza con"...`);
-  
+
   // 🔥 BUSCAR SI ALGÚN NOMBRE EN BD ESTÁ CONTENIDO EN EL NOMBRE DEL EXCEL
   // Ejemplo: Si en BD hay "Ana Lucia Salvatierra" y en Excel "Ana Lucia Salvatierra Mayen"
   //          debería encontrar el de BD porque "Ana Lucia Salvatierra" está contenido
-  
+
   const allInvestors = await db
     .select()
     .from(inversionistas);
-  
+
   // Buscar si el nombre del Excel COMIENZA con algún nombre de BD
   const startsWithMatch = allInvestors.find(inv => {
     const invNombreLower = inv.nombre.toLowerCase().trim();
     const nombreLowerTrim = nombreLower.trim();
-    
+
     // Si el nombre de BD está contenido al inicio del nombre del Excel
     return nombreLowerTrim.startsWith(invNombreLower) && nombreLowerTrim.length > invNombreLower.length;
   });
@@ -3786,11 +3820,11 @@ export const findOrCreateInvestor = async (
 
   // 4️⃣ BÚSQUEDA INVERSA - Si en BD hay un nombre más largo
   console.log(`   🎯 Estrategia 4: Búsqueda inversa (nombre más largo en BD)...`);
-  
+
   const containsMatch = allInvestors.find(inv => {
     const invNombreLower = inv.nombre.toLowerCase().trim();
     const nombreLowerTrim = nombreLower.trim();
-    
+
     // Si el nombre del Excel está contenido al inicio del nombre de BD
     return invNombreLower.startsWith(nombreLowerTrim) && invNombreLower.length > nombreLowerTrim.length;
   });
@@ -3803,18 +3837,18 @@ export const findOrCreateInvestor = async (
 
   // 5️⃣ BÚSQUEDA POR PALABRAS CLAVE (más restrictiva)
   console.log(`   🎯 Estrategia 5: Búsqueda por palabras clave...`);
-  
+
   // Dividir en palabras (ignorar palabras muy cortas como "de", "la", etc.)
   const palabras = nombreNormalizado
     .split(/\s+/)
     .filter(p => p.length > 2 && !['del', 'de', 'la', 'los', 'las'].includes(p.toLowerCase()));
-  
+
   if (palabras.length >= 2) { // Solo si tiene al menos 2 palabras significativas
     // Buscar inversionistas que tengan TODAS las palabras importantes
     const wordMatches = allInvestors.filter(inv => {
       const invWords = inv.nombre.toLowerCase().split(/\s+/);
       // Verificar que TODAS las palabras del Excel estén en el nombre de BD
-      return palabras.every(palabra => 
+      return palabras.every(palabra =>
         invWords.some(w => w.includes(palabra.toLowerCase()))
       );
     });
@@ -3827,12 +3861,12 @@ export const findOrCreateInvestor = async (
       wordMatches.forEach((inv, idx) => {
         console.log(`      ${idx + 1}. ${inv.nombre} (ID: ${inv.inversionista_id})`);
       });
-      
+
       // 🔥 Usar el que tenga el nombre más corto (más probable que sea el base)
-      const shortest = wordMatches.reduce((prev, curr) => 
+      const shortest = wordMatches.reduce((prev, curr) =>
         prev.nombre.length < curr.nombre.length ? prev : curr
       );
-      
+
       console.log(`   ✅ Usando el más corto: ${shortest.nombre} (ID: ${shortest.inversionista_id})`);
       return shortest;
     }
@@ -3840,7 +3874,7 @@ export const findOrCreateInvestor = async (
 
   // 6️⃣ NO EXISTE → CREAR NUEVO
   console.log(`   ➕ Inversionista no encontrado, creando nuevo...`);
-  
+
   const [newInvestor] = await db
     .insert(inversionistas)
     .values({
@@ -4787,7 +4821,7 @@ export const fixCubeInvestment = async ({ set }: any) => {
     // 3. Procesar originales
     for (const oc of originalCredits) {
       // Verificar si ya tiene los porcentajes correctos para evitar updates innecesarios
-      const isCorrect = Number(oc.porcentaje_participacion_inversionista) === 0 && 
+      const isCorrect = Number(oc.porcentaje_participacion_inversionista) === 0 &&
                         Number(oc.porcentaje_cash_in) === 100;
 
       if (!isCorrect) {
@@ -4827,7 +4861,7 @@ export const fixCubeInvestment = async ({ set }: any) => {
 
     // 4. Procesar espejos existentes (para asegurar que todos tengan 0/100)
     for (const mc of mirrorCredits) {
-      const isCorrect = Number(mc.porcentaje_participacion_inversionista) === 0 && 
+      const isCorrect = Number(mc.porcentaje_participacion_inversionista) === 0 &&
                         Number(mc.porcentaje_cash_in) === 100;
 
       if (!isCorrect) {
@@ -4906,12 +4940,12 @@ export const reconcileMirrorPercentages = async ({ set }: any) => {
       if (mc) {
         const pInvOriginal = Number(oc.p_inversor);
         const pCashOriginal = Number(oc.p_cashin);
-        
+
         const pInvMirror = Number(mc.porcentaje_participacion_inversionista);
         const pCashMirror = Number(mc.porcentaje_cash_in);
 
         if (pInvOriginal !== pInvMirror || pCashOriginal !== pCashMirror) {
-          
+
           const isSwapped = pInvOriginal === pCashMirror && pCashOriginal === pInvMirror;
 
           const data = {
@@ -4935,7 +4969,7 @@ export const reconcileMirrorPercentages = async ({ set }: any) => {
                 porcentaje_cash_in: oc.p_cashin,
               })
               .where(eq(creditos_inversionistas_espejo.id, mc.id));
-            
+
             results.updatedSwappedCount++;
             results.updatedSwapped.push(data);
           } else {
@@ -5021,7 +5055,7 @@ export const auditMirrorPercentages = async ({ set }: any) => {
       if (mc) {
         const pInvOriginal = Number(oc.p_inversor);
         const pCashOriginal = Number(oc.p_cashin);
-        
+
         const pInvMirror = Number(mc.porcentaje_participacion_inversionista);
         const pCashMirror = Number(mc.porcentaje_cash_in);
 
@@ -5029,7 +5063,7 @@ export const auditMirrorPercentages = async ({ set }: any) => {
           results.discrepanciesCount++;
 
           const isSwapped = pInvOriginal === pCashMirror && pCashOriginal === pInvMirror;
-          
+
           const discrepancyData = {
             inversionista_id: oc.inversionista_id,
             inversionista_nombre: oc.inversionista_nombre,
@@ -6242,87 +6276,33 @@ const NOMBRES_MES_ES = [
   "Diciembre",
 ];
 
-type FormatoCuenta = {
-  banco_id: number;
-  tipo_cuenta: string;
-  moneda: string;
-  longitud: number;
-  patron: string | null;
-};
+const CUENTA_MONETARIA_LARGO = 11;
 
-function normalizarTipoCuenta(tipo: string | null | undefined): "MONETARIA" | "AHORRO" | null {
-  if (!tipo) return null;
-  const upper = tipo.toUpperCase();
-  if (upper.includes("MONETARIA")) return "MONETARIA";
-  if (upper.includes("AHORRO")) return "AHORRO";
-  return null;
+function parseCuentaMonetaria(numeroCuenta: string | null | undefined): {
+  agencia: string;
+  correlativo: string;
+  digito: string;
+  valido: boolean;
+} {
+  const limpia = (numeroCuenta ?? "").replace(/\D/g, "");
+  const valido = limpia.length === CUENTA_MONETARIA_LARGO;
+  return {
+    agencia: limpia.slice(0, 3),
+    correlativo: limpia.slice(3, -1),
+    digito: limpia.slice(-1),
+    valido,
+  };
 }
 
 function mapTipoCuentaCodigo(tipo: string | null | undefined): {
   codigo: number | "";
   valido: boolean;
 } {
-  const normalizado = normalizarTipoCuenta(tipo);
-  if (normalizado === "MONETARIA") return { codigo: 1, valido: true };
-  if (normalizado === "AHORRO") return { codigo: 2, valido: true };
+  if (!tipo) return { codigo: "", valido: false };
+  const upper = tipo.toUpperCase();
+  if (upper.includes("MONETARIA")) return { codigo: 1, valido: true };
+  if (upper.includes("AHORRO")) return { codigo: 2, valido: true };
   return { codigo: "", valido: false };
-}
-
-function validarCuentaContraFormatos(args: {
-  cuentaLimpia: string;
-  bancoId: number | null;
-  tipoCuenta: string | null | undefined;
-  moneda: string | null | undefined;
-  formatosPorClave: Map<string, FormatoCuenta[]>;
-  bancosConFormatos: Set<number>;
-}): boolean {
-  const { cuentaLimpia, bancoId, tipoCuenta, moneda, formatosPorClave, bancosConFormatos } = args;
-  if (bancoId == null) return false;
-  if (!bancosConFormatos.has(bancoId)) return true;
-  const tipoNorm = normalizarTipoCuenta(tipoCuenta);
-  if (!tipoNorm || !moneda) return false;
-  const key = `${bancoId}|${tipoNorm}|${moneda}`;
-  const formatos = formatosPorClave.get(key);
-  if (!formatos || formatos.length === 0) return false;
-  return formatos.some((f) => {
-    if (cuentaLimpia.length !== f.longitud) return false;
-    if (!f.patron) return true;
-    try {
-      return new RegExp(f.patron).test(cuentaLimpia);
-    } catch {
-      return false;
-    }
-  });
-}
-
-async function cargarFormatosCuenta(bancoIds: number[]): Promise<{
-  formatosPorClave: Map<string, FormatoCuenta[]>;
-  bancosConFormatos: Set<number>;
-}> {
-  const formatosPorClave = new Map<string, FormatoCuenta[]>();
-  const bancosConFormatos = new Set<number>();
-  if (bancoIds.length === 0) return { formatosPorClave, bancosConFormatos };
-
-  const filas = await db
-    .select({
-      banco_id: formatoCuentaBanco.banco_id,
-      tipo_cuenta: formatoCuentaBanco.tipo_cuenta,
-      moneda: formatoCuentaBanco.moneda,
-      longitud: formatoCuentaBanco.longitud,
-      patron: formatoCuentaBanco.patron,
-    })
-    .from(formatoCuentaBanco)
-    .where(inArray(formatoCuentaBanco.banco_id, bancoIds));
-
-  for (const f of filas) {
-    bancosConFormatos.add(f.banco_id);
-    const key = `${f.banco_id}|${f.tipo_cuenta}|${f.moneda}`;
-    const arr = formatosPorClave.get(key) ?? [];
-    arr.push(f as FormatoCuenta);
-    formatosPorClave.set(key, arr);
-  }
-
-  return { formatosPorClave, bancosConFormatos };
 }
 
 function mapMonedaCodigo(moneda: string | null | undefined): 1 | 2 {
@@ -6353,7 +6333,6 @@ export async function resumenTransferencias(
   const inversionistasFiltro = await db
     .select({
       inversionista_id: inversionistas.inversionista_id,
-      banco_id: inversionistas.banco_id,
       id_banco_transferencia: bancos.id_banco_transferencia,
     })
     .from(inversionistas)
@@ -6363,23 +6342,11 @@ export async function resumenTransferencias(
   const bancoTransfMap = new Map(
     inversionistasFiltro.map((i) => [i.inversionista_id, i.id_banco_transferencia ?? ""])
   );
-  const bancoIdPorInversionista = new Map<number, number | null>(
-    inversionistasFiltro.map((i) => [i.inversionista_id, i.banco_id ?? null])
-  );
-
-  const bancoIdsRelevantes = Array.from(
-    new Set(
-      inversionistasFiltro
-        .map((i) => i.banco_id)
-        .filter((id): id is number => id != null)
-    )
-  );
-  const { formatosPorClave, bancosConFormatos } = await cargarFormatosCuenta(bancoIdsRelevantes);
 
   if (bancoTransfMap.size === 0) {
     return ach
-      ? generateAchTransferenciasWorkbook([], mes, anio, bancoTransfMap, bancoIdPorInversionista, formatosPorClave, bancosConFormatos)
-      : generateTransferenciasWorkbook([], mes, anio, bancoIdPorInversionista, formatosPorClave, bancosConFormatos);
+      ? generateAchTransferenciasWorkbook([], mes, anio, bancoTransfMap)
+      : generateTransferenciasWorkbook([], mes, anio);
   }
 
   const resumen = await consultarResumenGlobalPorEstadoPago(
@@ -6402,18 +6369,15 @@ export async function resumenTransferencias(
   const filas = filtrados.map((inv) => mapResumenRow(inv, null, null));
 
   return ach
-    ? generateAchTransferenciasWorkbook(filas, mes, anio, bancoTransfMap, bancoIdPorInversionista, formatosPorClave, bancosConFormatos)
-    : generateTransferenciasWorkbook(filas, mes, anio, bancoIdPorInversionista, formatosPorClave, bancosConFormatos);
+    ? generateAchTransferenciasWorkbook(filas, mes, anio, bancoTransfMap)
+    : generateTransferenciasWorkbook(filas, mes, anio);
 }
 
 async function generateAchTransferenciasWorkbook(
   rows: InversionistaResumen[],
   mes: number,
   anio: number,
-  bancoTransfMap: Map<number, string>,
-  bancoIdPorInversionista: Map<number, number | null>,
-  formatosPorClave: Map<string, FormatoCuenta[]>,
-  bancosConFormatos: Set<number>
+  bancoTransfMap: Map<number, string>
 ): Promise<{ success: boolean; url: string; filename: string }> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Club Cashin";
@@ -6434,17 +6398,17 @@ async function generateAchTransferenciasWorkbook(
     "Banco",
     "Descripcion Corta",
     "Adenda",
-    "Valor",
+    "Valor Q.",
   ];
   sheet.columns = [
-    { width: 40 }, // Nombre
+    { width: 28 }, // Nombre
     { width: 18 }, // Id Participante
     { width: 24 }, // Cuenta crédito / débito
     { width: 14 }, // Tipo Cuenta
     { width: 12 }, // Moneda
     { width: 10 }, // Banco
-    { width: 40 }, // Descripción Corta
-    { width: 40 }, // Adenda
+    { width: 24 }, // Descripción Corta
+    { width: 60 }, // Adenda
     { width: 16 }, // Valor Q.
   ];
 
@@ -6476,15 +6440,6 @@ async function generateAchTransferenciasWorkbook(
     const moneda = mapMonedaCodigo(inv.moneda);
     const banco = bancoTransfMap.get(inv.inversionista_id) ?? "";
     const cuentaLimpia = (inv.numero_cuenta ?? "").replace(/\D/g, "");
-    const bancoId = bancoIdPorInversionista.get(inv.inversionista_id) ?? null;
-    const cuentaValida = validarCuentaContraFormatos({
-      cuentaLimpia,
-      bancoId,
-      tipoCuenta: inv.tipo_cuenta,
-      moneda: inv.moneda,
-      formatosPorClave,
-      bancosConFormatos,
-    });
 
     const row = sheet.addRow([
       inv.nombre,
@@ -6499,7 +6454,7 @@ async function generateAchTransferenciasWorkbook(
     ]);
     row.getCell(9).numFmt = "0.00";
 
-    const filaInvalida = !tipoCuenta.valido || !banco || !cuentaValida;
+    const filaInvalida = !tipoCuenta.valido || !banco;
     if (filaInvalida) {
       row.eachCell({ includeEmpty: true }, (cell) => {
         cell.fill = {
@@ -6542,10 +6497,7 @@ async function generateAchTransferenciasWorkbook(
 async function generateTransferenciasWorkbook(
   rows: InversionistaResumen[],
   mes: number,
-  anio: number,
-  bancoIdPorInversionista: Map<number, number | null>,
-  formatosPorClave: Map<string, FormatoCuenta[]>,
-  bancosConFormatos: Set<number>
+  anio: number
 ): Promise<{ success: boolean; url: string; filename: string }> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Club Cashin";
@@ -6588,26 +6540,14 @@ async function generateTransferenciasWorkbook(
     const valor = Number(inv.total_cuota) || 0;
     if (valor === 0) return;
 
-    const cuentaLimpia = (inv.numero_cuenta ?? "").replace(/\D/g, "");
-    const agencia = cuentaLimpia.slice(0, 3);
-    const correlativo = cuentaLimpia.slice(3, -1);
-    const digito = cuentaLimpia.slice(-1);
+    const { agencia, correlativo, digito, valido } = parseCuentaMonetaria(inv.numero_cuenta);
     const concepto = `Liquidación ${nombreMes} ${anio} - ${inv.nombre}, Club CashIn S.A`;
     const moneda = mapMonedaCodigo(inv.moneda);
-    const bancoId = bancoIdPorInversionista.get(inv.inversionista_id) ?? null;
-    const cuentaValida = validarCuentaContraFormatos({
-      cuentaLimpia,
-      bancoId,
-      tipoCuenta: inv.tipo_cuenta,
-      moneda: inv.moneda,
-      formatosPorClave,
-      bancosConFormatos,
-    });
 
     const row = sheet.addRow([agencia, correlativo, digito, moneda, concepto, valor]);
     row.getCell(6).numFmt = "0.00";
 
-    if (!cuentaValida) {
+    if (!valido) {
       row.eachCell({ includeEmpty: true }, (cell) => {
         cell.fill = {
           type: "pattern",
@@ -6698,7 +6638,7 @@ export async function getLiquidaciones({
   } else if (!isNullorEmpty(dpi)) {
     conditions.push(eq(inversionistas.dpi, parseInt(dpi)));
   }
- 
+
 
   // 📊 Query principal con joins
   const query = db
@@ -6756,10 +6696,10 @@ export async function getLiquidaciones({
     liquidacionesData.map(async (liq) => {
       // 📄 Traer boleta asociada a esta liquidación (si existe)
       let boletaData = null;
-      
+
       if (liq.boleta_id) {
         console.log(`🔍 Buscando boleta ID: ${liq.boleta_id} para liquidación ${liq.liquidacion_id}`);
-        
+
         const [boleta] = await db
           .select({
             boleta_id: boletasPagoInversionista.boleta_id,
@@ -6792,7 +6732,7 @@ export async function getLiquidaciones({
             fecha_procesado: boleta.fecha_procesado,
             subido_por: boleta.subido_por_nombre,
           };
-          
+
           console.log(`✅ Boleta encontrada: ${boleta.boleta_url}`);
         } else {
           console.warn(`⚠️ Boleta ID ${liq.boleta_id} no encontrada en BD`);
@@ -7016,7 +6956,7 @@ export async function aplicarPagosEspejo(inversionistaId: number) {
           )
         );
 
-      // Drizzle update devuelve result info dependiendo del driver, 
+      // Drizzle update devuelve result info dependiendo del driver,
       // pero aquí simplemente contamos las iteraciones exitosas.
       totalActualizados++;
     }
@@ -7057,7 +6997,7 @@ export async function deletePagosEspejoNoLiquidados(inversionistaId: number) {
 // ============================================
 export async function testUploadAndEmail(investorId: number, testEmail: string) {
     console.log(`🧪 Iniciando prueba de envío (PDF Adjunto) para inversionista ${investorId}...`);
-    
+
     // 1. Obtener datos
     const result = await resumeInvestor(investorId, 1, 999);
     if (!result.inversionistas.length) {

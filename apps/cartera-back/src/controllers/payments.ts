@@ -15,7 +15,7 @@ import {
 import { desc, gte } from "drizzle-orm";
 import Big from "big.js";
 import { z } from "zod";
-import { and, eq, lt, gt, sql, asc, lte, inArray } from "drizzle-orm";
+import { and, eq, lt, sql, asc, lte, inArray } from "drizzle-orm";
 import { removeAccents } from "../utils/functions/generalFunctions";
 import {
   processAndReplaceCreditInvestors,
@@ -557,14 +557,18 @@ export async function insertPagosCreditoInversionistas(
       `   📊 totalIVA (cash_in + inversionista): ${totalIVA.toString()}`
     );
 
-    if (inv.status_inversionista === "pendiente_devolucion") {
-      // 🆕 CASO ESPECIAL: inversionista pendiente de devolución.
-      // Se le devuelve TODO su monto_aportado como abono_capital en este pago
-      // (sin restar interés, IVA ni cargos fijos). El interés/IVA del último
-      // período se calcula normal y viaja en abono_interes/abono_iva_12.
+    const aplicarDevolucionCube = currentCredit?.estado_devolucion === 'VERIFICADO';
+
+    if (aplicarDevolucionCube || inv.status_inversionista === "pendiente_devolucion") {
+      // 🆕 CASO ESPECIAL:
+      // - crédito con devolucion_cube=true, o
+      // - inversionista en pendiente_devolucion.
+      // En ambos casos se devuelve TODO su monto_aportado como abono_capital
+      // (sin restar interés, IVA ni cargos fijos). El interés/IVA del período
+      // se sigue calculando y registrando normal en sus campos.
       abono_capital = new Big(inv.monto_aportado || 0);
       console.log(
-        `   ⭐ PENDIENTE DE DEVOLUCIÓN - abono_capital = monto_aportado completo: ${abono_capital.toString()}`
+        `   ⭐ DEVOLUCIÓN COMPLETA (${aplicarDevolucionCube ? "devolucion_cube" : "pendiente_devolucion"}) - abono_capital = monto_aportado completo: ${abono_capital.toString()}`
       );
     } else if (inv.inversionista_id === mayorCuotaInversionistaId && !excludeCube) {
       console.log(
@@ -646,14 +650,12 @@ export async function insertPagosCreditoInversionistas(
 
     let abonoCapitalId: number | null = null;
     if (abonosNoLiquidados.length > 0) {
-      if (inv.status_inversionista === "pendiente_devolucion") {
-        // 🆕 Si está en pendiente_devolucion, su abono_capital ya es el
-        // monto_aportado completo del espejo. Sumarle los abonos_capital
-        // pendientes sería devolverle más de lo que realmente tiene (doble
-        // conteo). Los registros quedan como liquidado=false para que otro
-        // flujo los resuelva después.
+      if (inv.status_inversionista === "pendiente_devolucion" || aplicarDevolucionCube) {
+        // 🆕 Si está en pendiente_devolucion o el crédito usa devolucion_cube,
+        // su abono_capital ya es el monto_aportado completo del espejo.
+        // Sumar abonos pendientes provocaría doble conteo.
         console.log(
-          `   ⏭️  PENDIENTE DE DEVOLUCIÓN: saltando ${abonosNoLiquidados.length} ` +
+          `   ⏭️  DEVOLUCIÓN COMPLETA: saltando ${abonosNoLiquidados.length} ` +
             `abono(s) a capital pendiente(s) (no se suman al abono_capital ` +
             `ni se linkea abono_capital_id)`
         );
@@ -1428,7 +1430,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
 
     // 🧩 Query principal
     const query = sql`
-      SELECT 
+      SELECT
         p.pago_id AS "pagoId",
         p.monto_boleta AS "montoBoleta",
         p.numeroAutorizacion AS "numeroAutorizacion",
@@ -1444,7 +1446,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         p.registerBy AS "registerBy",
         p.numeroautorizacion AS "numeroautorizacion",
         b.nombre AS "bancoNombre",
-        
+
         -- 🏦 Info de la cuenta de empresa (NUEVO) 👇
         ce.nombre_cuenta AS "cuentaEmpresaNombre",
         ce.banco AS "cuentaEmpresaBanco",
@@ -1524,8 +1526,8 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
           )
           FROM cartera.pagos_credito_inversionistas pci
           LEFT JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
-          LEFT JOIN cartera.creditos_inversionistas ci 
-            ON ci.credito_id = pci.credito_id 
+          LEFT JOIN cartera.creditos_inversionistas ci
+            ON ci.credito_id = pci.credito_id
             AND ci.inversionista_id = pci.inversionista_id
           WHERE pci.pago_id = p.pago_id
         ), '[]'::json) AS "inversionistas",
@@ -1541,20 +1543,6 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
           FROM cartera.boletas bol
           WHERE bol.pago_id = p.pago_id
         ), '[]'::json) AS "boletas",
-
-        -- 🧾 Facturas electrónicas activas asociadas
-        COALESCE((
-          SELECT json_agg(
-            json_build_object(
-              'facturaId', fe.factura_id,
-              'serie', fe.serie,
-              'numero', fe.numero
-            )
-          )
-          FROM cartera.facturas_electronicas fe
-          WHERE fe.pago_id = p.pago_id
-            AND fe.status = 'ACTIVA'
-        ), '[]'::json) AS "facturas",
 
         -- 🔴 Cancelación del crédito (solo si validation_status = 'reset')
         CASE WHEN p.validation_status = 'reset' THEN (
@@ -1643,11 +1631,6 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         ? r.boletas
         : JSON.parse(
             typeof r.boletas === "string" ? r.boletas : "[]"
-          ),
-      facturas: Array.isArray(r.facturas)
-        ? r.facturas
-        : JSON.parse(
-            typeof r.facturas === "string" ? r.facturas : "[]"
           ),
       cancelacion: r.cancelacion ?? null,
     }));
@@ -1815,7 +1798,7 @@ function obtenerRangoMesActual() {
   );
   const primerDia = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
   const ultimoDia = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0);
-  
+
   return {
     inicio: primerDia.toISOString().slice(0, 10),
     fin: ultimoDia.toISOString().slice(0, 10),
@@ -1829,7 +1812,7 @@ export async function obtenerCreditosConPagosPendientes(
   try {
     const hoy = new Date().toISOString().slice(0, 10);
     const rangoMesActual = obtenerRangoMesActual();
-    
+
     console.log(`📆 Mes actual: ${rangoMesActual.inicio} - ${rangoMesActual.fin} (${rangoMesActual.mes})`);
 
     // 1️⃣ PASO 1: Obtener todos los créditos del inversionista (ESPEJO)
@@ -1858,10 +1841,7 @@ export async function obtenerCreditosConPagosPendientes(
       .where(
         and(
           eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId),
-          inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "PENDIENTE_CANCELACION", "EN_CONVENIO"]),
-          eq(creditos_inversionistas_espejo.status, "completado"),
-          lt(creditos_inversionistas_espejo.fecha_inicio_participacion, rangoMesActual.inicio),
-          gt(creditos_inversionistas_espejo.monto_aportado, "0")
+          inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "PENDIENTE_CANCELACION", "EN_CONVENIO"])
         )
       );
 
@@ -1873,10 +1853,10 @@ export async function obtenerCreditosConPagosPendientes(
     // 2️⃣ PASO 2: Por cada crédito, buscar la PRIMERA cuota NO LIQUIDADA
     const creditosConPagos = await Promise.all(
       creditosInversionista.map(async (credito) => {
-        
+
         // 🆕 PASO 0: Verificar si ESTE CRÉDITO tiene pagos pendientes de liquidar
         console.log(`\n🔍 ========== VERIFICANDO PAGOS PENDIENTES DEL CRÉDITO ${credito.creditoId} ==========`);
-        
+
         const pagosPendientesCredito = await db
           .select()
           .from(pagos_credito_inversionistas_espejo)
@@ -1894,14 +1874,14 @@ export async function obtenerCreditosConPagosPendientes(
           );
           console.log(`   NO se procesará este crédito hasta que se liquiden`);
           console.log(`========================================\n`);
-          
+
           // 🔥 SALTAR ESTE CRÉDITO
           return null;
         }
 
         console.log(`✅ El crédito ${credito.creditoId} NO tiene pagos pendientes, continuando...`);
         console.log(`========================================\n`);
-        
+
         // 📅 Buscar la PRIMERA cuota NO LIQUIDADA con sus PAGOS
         const cuotaConPagos = await db
           .select({
@@ -1960,7 +1940,7 @@ export async function obtenerCreditosConPagosPendientes(
           `📅 Crédito ${credito.creditoId}, Cuota ${numeroCuota}: fecha_vencimiento = ${fechaVencimiento}`
         );
 
-      
+
         console.log(
           `✅ Crédito ${credito.creditoId}, Cuota ${numeroCuota}: Es de mes anterior (${fechaVencimiento}), se PROCESA`
         );
@@ -1982,7 +1962,7 @@ export async function obtenerCreditosConPagosPendientes(
 
           const primerPago = pagosDeLaCuota[0];
           const cuotaPagada = primeraFila.pagadoCuota ?? false;
-          
+
           console.log(
             `  📊 Cuota ${numeroCuota} - Estado pagado: ${cuotaPagada ? 'SÍ' : 'NO'}`
           );
@@ -2230,7 +2210,7 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number) {
         }
 
         const primeraFila = cuotaConPagos[0];
-        const { numeroCuota, cuotaId } = primeraFila;
+        const { numeroCuota } = primeraFila;
         const pagosDeLaCuota = cuotaConPagos.filter(
           (r) => r.numeroCuota === numeroCuota
         );
@@ -2246,9 +2226,9 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number) {
           await insertPagosCreditoInversionistas(
             pagosDeLaCuota[0].pagoId,
             credito.creditoId,
-            false,  // excludeCube
-            false,  // cuotaPagada
-            false,  // updateCredito ← omite el UPDATE a creditos_inversionistas_espejo
+            false, // excludeCube
+            false, // cuotaPagada
+            false, // updateCredito ← omite el UPDATE a creditos_inversionistas_espejo
             inversionistaId
           );
 
@@ -2294,6 +2274,8 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number) {
     };
   }
 }
+
+
 
 /**
  * Actualiza los pagos NO_LIQUIDADO en pagos_credito_inversionistas_espejo

@@ -139,6 +139,13 @@ const MONTH_OPTIONS = [
 
 const MAX_BOLETA_FILES = 5;
 const MAX_BOLETA_TOTAL_BYTES = 20 * 1024 * 1024; // 20 MB
+const ACCEPTED_BOLETA_MIMES = new Set([
+	"application/pdf",
+	"image/png",
+	"image/jpeg",
+	"image/jpg",
+]);
+const ACCEPT_BOLETA_INPUT = ".pdf,image/png,image/jpeg,image/jpg";
 
 async function mergeFilesToPdf(
 	files: File[],
@@ -161,11 +168,15 @@ async function mergeFilesToPdf(
 			continue;
 		}
 
-		if (file.type.startsWith("image/")) {
-			const isPng = file.type === "image/png";
-			const image = isPng
-				? await merged.embedPng(bytes)
-				: await merged.embedJpg(bytes);
+		if (
+			file.type === "image/png" ||
+			file.type === "image/jpeg" ||
+			file.type === "image/jpg"
+		) {
+			const image =
+				file.type === "image/png"
+					? await merged.embedPng(bytes)
+					: await merged.embedJpg(bytes);
 			const page = merged.addPage([image.width, image.height]);
 			page.drawImage(image, {
 				x: 0,
@@ -176,7 +187,9 @@ async function mergeFilesToPdf(
 			continue;
 		}
 
-		throw new Error(`Tipo de archivo no soportado: ${file.name}`);
+		throw new Error(
+			`Tipo de archivo no soportado: ${file.name}. Solo PDF, PNG o JPG.`,
+		);
 	}
 
 	const pdfBytes = await merged.save();
@@ -269,11 +282,11 @@ function SubirBoletaDialog({
 		if (!incoming || incoming.length === 0) return;
 		const incomingArr = Array.from(incoming);
 
-		const invalid = incomingArr.find(
-			(f) => !(f.type === "application/pdf" || f.type.startsWith("image/")),
-		);
+		const invalid = incomingArr.find((f) => !ACCEPTED_BOLETA_MIMES.has(f.type));
 		if (invalid) {
-			toast.error(`Tipo no soportado: ${invalid.name}`);
+			toast.error(
+				`Tipo no soportado: ${invalid.name}. Solo PDF, PNG o JPG.`,
+			);
 			return;
 		}
 
@@ -392,7 +405,7 @@ function SubirBoletaDialog({
 									</p>
 								</div>
 								<p className="text-[11.5px] text-emerald-800/90 leading-snug dark:text-emerald-200/80">
-									Arrastrá o seleccioná varios PDFs/imágenes a la vez. Se
+									Arrastrá o seleccioná varios PDFs, PNGs o JPGs a la vez. Se
 									unirán automáticamente en un solo archivo y se subirán como
 									una sola boleta.
 								</p>
@@ -448,7 +461,7 @@ function SubirBoletaDialog({
 									{dropzoneLabel}
 								</p>
 								<p className="mt-0.5 text-[11px] text-muted-foreground/70">
-									PDF o imágenes — se unirán en un solo PDF
+									PDF, PNG o JPG — se unirán en un solo PDF
 								</p>
 							</div>
 						</div>
@@ -456,7 +469,7 @@ function SubirBoletaDialog({
 							ref={fileInputRef}
 							id="boleta-file"
 							type="file"
-							accept="image/*,.pdf"
+							accept={ACCEPT_BOLETA_INPUT}
 							multiple
 							className="hidden"
 							onChange={(e) => {

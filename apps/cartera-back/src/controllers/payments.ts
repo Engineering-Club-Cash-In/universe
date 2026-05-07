@@ -15,7 +15,7 @@ import {
 import { desc, gte } from "drizzle-orm";
 import Big from "big.js";
 import { z } from "zod";
-import { and, eq, lt, sql, asc, lte, inArray } from "drizzle-orm";
+import { and, eq, lt, gt, sql, asc, lte, inArray } from "drizzle-orm";
 import { removeAccents } from "../utils/functions/generalFunctions";
 import {
   processAndReplaceCreditInvestors,
@@ -1542,6 +1542,20 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
           WHERE bol.pago_id = p.pago_id
         ), '[]'::json) AS "boletas",
 
+        -- 🧾 Facturas electrónicas activas asociadas
+        COALESCE((
+          SELECT json_agg(
+            json_build_object(
+              'facturaId', fe.factura_id,
+              'serie', fe.serie,
+              'numero', fe.numero
+            )
+          )
+          FROM cartera.facturas_electronicas fe
+          WHERE fe.pago_id = p.pago_id
+            AND fe.status = 'ACTIVA'
+        ), '[]'::json) AS "facturas",
+
         -- 🔴 Cancelación del crédito (solo si validation_status = 'reset')
         CASE WHEN p.validation_status = 'reset' THEN (
           SELECT json_build_object(
@@ -1629,6 +1643,11 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         ? r.boletas
         : JSON.parse(
             typeof r.boletas === "string" ? r.boletas : "[]"
+          ),
+      facturas: Array.isArray(r.facturas)
+        ? r.facturas
+        : JSON.parse(
+            typeof r.facturas === "string" ? r.facturas : "[]"
           ),
       cancelacion: r.cancelacion ?? null,
     }));
@@ -1839,7 +1858,10 @@ export async function obtenerCreditosConPagosPendientes(
       .where(
         and(
           eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId),
-          inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "PENDIENTE_CANCELACION", "EN_CONVENIO"])
+          inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "PENDIENTE_CANCELACION", "EN_CONVENIO"]),
+          eq(creditos_inversionistas_espejo.status, "completado"),
+          lt(creditos_inversionistas_espejo.fecha_inicio_participacion, rangoMesActual.inicio),
+          gt(creditos_inversionistas_espejo.monto_aportado, "0")
         )
       );
 

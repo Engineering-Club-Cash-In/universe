@@ -1,11 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useMemo, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import {
   getResumenGlobalLiquidaciones,
   descargarResumenLiquidacionesExcel,
   type LiquidacionResumen,
+  type CalcularPagosEspejoResponse,
 } from "../services/services";
+import { useCalcularPagosEspejo } from "../hooks/getInvestor";
 import {
   ChevronLeft,
   ChevronRight,
@@ -16,10 +19,22 @@ import {
   Loader2,
   Landmark,
   RefreshCw,
+  Eye,
+  Calculator,
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 
 const PER_PAGE = 25;
@@ -46,6 +61,18 @@ function formatCurrency(value: number | string | null | undefined, symbol: strin
 
 function getMesLabel(mes: number): string {
   return MESES.find((m) => m.value === mes)?.label ?? "";
+}
+
+function getMesAnioActualGT(): { mes: number; anio: number } {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Guatemala",
+    year: "numeric",
+    month: "numeric",
+  }).formatToParts(new Date());
+  return {
+    mes: Number(parts.find((p) => p.type === "month")?.value),
+    anio: Number(parts.find((p) => p.type === "year")?.value),
+  };
 }
 
 type EstadoFiltro = "all" | "liquidated" | "pending" | "uploaded" | "sin_movimiento";
@@ -98,12 +125,27 @@ const ESTADO_META: Record<
   },
 };
 
-function LiquidacionCard({ item }: { item: LiquidacionResumen }) {
+interface LiquidacionCardProps {
+  item: LiquidacionResumen;
+  onGenerarPagos: (id: number) => void;
+  onVerPagos: (id: number) => void;
+  generandoId: number | null;
+  navegandoId: number | null;
+  esMesActual: boolean;
+}
+
+function LiquidacionCard({ item, onGenerarPagos, onVerPagos, generandoId, navegandoId, esMesActual }: LiquidacionCardProps) {
   const s = item.currencySymbol;
   const boleta = item.boleta_liquidacion;
   const estadoMeta = ESTADO_META[item.estado_liquidacion_resumen];
   const reinvCap = Number(item.total_reinversion_capital ?? 0);
   const reinvInt = Number(item.total_reinversion_interes ?? 0);
+  const estado = item.estado_liquidacion_resumen;
+
+  const puedeGenerarPagos = esMesActual && estado === "sin_movimiento";
+  const puedeVerPagos = esMesActual && estado !== "sin_movimiento";
+  const generandoEste = generandoId === item.inversionista_id;
+  const navegandoEste = navegandoId === item.inversionista_id;
 
   const cuentaTexto = item.banco
     ? `${item.banco} — ${item.tipo_cuenta ?? ""} ${item.numero_cuenta ?? ""}`.trim()
@@ -197,14 +239,54 @@ function LiquidacionCard({ item }: { item: LiquidacionResumen }) {
         </div>
       </div>
 
-      {/* Boleta + Reporte */}
+      {/* Acciones */}
       <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-100 mt-auto">
+        {puedeGenerarPagos && (
+          <button
+            type="button"
+            onClick={() => onGenerarPagos(item.inversionista_id)}
+            disabled={generandoEste}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-60 px-3.5 py-2 rounded-lg shadow-sm transition-colors"
+          >
+            {generandoEste ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Generando...
+              </>
+            ) : (
+              <>
+                <Calculator className="w-3.5 h-3.5" />
+                Generar Pagos
+              </>
+            )}
+          </button>
+        )}
+        {puedeVerPagos && (
+          <button
+            type="button"
+            onClick={() => onVerPagos(item.inversionista_id)}
+            disabled={navegandoEste}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 px-3.5 py-2 rounded-lg shadow-sm transition-colors"
+          >
+            {navegandoEste ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Abriendo...
+              </>
+            ) : (
+              <>
+                <Eye className="w-3.5 h-3.5" />
+                Ver Detalle
+              </>
+            )}
+          </button>
+        )}
         {boleta?.boleta_url && (
           <a
             href={boleta.boleta_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 px-3.5 py-2 rounded-lg shadow-sm transition-colors"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 border border-gray-300 px-3.5 py-2 rounded-lg shadow-sm transition-colors"
           >
             <Download className="w-3.5 h-3.5" />
             Boleta
@@ -221,22 +303,30 @@ function LiquidacionCard({ item }: { item: LiquidacionResumen }) {
             Reporte
           </a>
         )}
-        {!boleta?.boleta_url && !item.reporte_liquidacion_url && (
-          <span className="text-xs text-gray-400 italic">Sin documentos adjuntos</span>
-        )}
       </div>
     </div>
   );
 }
 
 export function HistorialLiquidaciones() {
-  const now = new Date();
-  const [mes, setMes] = useState(now.getMonth() + 1);
-  const [anio, setAnio] = useState(now.getFullYear());
+  const ahoraGT = useMemo(() => getMesAnioActualGT(), []);
+  const [mes, setMes] = useState(ahoraGT.mes);
+  const [anio, setAnio] = useState(ahoraGT.anio);
+  const esMesActual = mes === ahoraGT.mes && anio === ahoraGT.anio;
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [estadoFiltro, setEstadoFiltro] = useState<EstadoFiltro>("all");
   const [descargandoExcel, setDescargandoExcel] = useState(false);
+  const [generandoId, setGenerandoId] = useState<number | null>(null);
+  const [navegandoId, setNavegandoId] = useState<number | null>(null);
+  const [resultadoModal, setResultadoModal] = useState<{
+    nombre: string;
+    inversionistaId: number;
+    response?: CalcularPagosEspejoResponse;
+    errorMsg?: string;
+  } | null>(null);
+  const navigate = useNavigate();
+  const { mutate: calcularPagosEspejo } = useCalcularPagosEspejo();
 
   const { data, isLoading, isError, refetch } = useQuery<LiquidacionResumen[]>({
     queryKey: ["historial-liquidaciones", mes, anio],
@@ -300,6 +390,44 @@ export function HistorialLiquidaciones() {
     setEstadoFiltro(estado);
     setPage(1);
   }, []);
+
+  const handleGenerarPagos = useCallback(
+    (inversionistaId: number) => {
+      const inv = data?.find((d) => d.inversionista_id === inversionistaId);
+      const nombre = inv?.nombre ?? `Inversionista #${inversionistaId}`;
+      setGenerandoId(inversionistaId);
+      calcularPagosEspejo(inversionistaId, {
+        onSuccess: (res: any) => {
+          setResultadoModal({
+            nombre,
+            inversionistaId,
+            response: res as CalcularPagosEspejoResponse,
+          });
+          if (res?.success) refetch();
+        },
+        onError: (err: any) => {
+          setResultadoModal({
+            nombre,
+            inversionistaId,
+            errorMsg: err?.message ?? "Error al generar los pagos",
+          });
+        },
+        onSettled: () => setGenerandoId(null),
+      });
+    },
+    [calcularPagosEspejo, refetch, data],
+  );
+
+  const handleVerPagos = useCallback(
+    (inversionistaId: number) => {
+      setNavegandoId(inversionistaId);
+      // Pequeño delay para que el spinner sea visible antes del cambio de ruta
+      setTimeout(() => {
+        navigate(`/inversionistas?id=${inversionistaId}`);
+      }, 250);
+    },
+    [navigate],
+  );
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
   const paginated = useMemo(
@@ -510,7 +638,15 @@ export function HistorialLiquidaciones() {
         {!isLoading && !isError && paginated.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 w-full items-stretch auto-rows-fr">
             {paginated.map((item) => (
-              <LiquidacionCard key={item.inversionista_id} item={item} />
+              <LiquidacionCard
+                key={item.inversionista_id}
+                item={item}
+                onGenerarPagos={handleGenerarPagos}
+                onVerPagos={handleVerPagos}
+                generandoId={generandoId}
+                navegandoId={navegandoId}
+                esMesActual={esMesActual}
+              />
             ))}
           </div>
         )}
@@ -563,6 +699,164 @@ export function HistorialLiquidaciones() {
           </button>
         </div>
       )}
+
+      <ResultadoGeneracionModal
+        resultado={resultadoModal}
+        onClose={() => setResultadoModal(null)}
+        onVerDetalle={(id) => {
+          setResultadoModal(null);
+          navigate(`/inversionistas?id=${id}`);
+        }}
+      />
     </div>
+  );
+}
+
+interface ResultadoGeneracionModalProps {
+  resultado: {
+    nombre: string;
+    inversionistaId: number;
+    response?: CalcularPagosEspejoResponse;
+    errorMsg?: string;
+  } | null;
+  onClose: () => void;
+  onVerDetalle: (inversionistaId: number) => void;
+}
+
+function ResultadoGeneracionModal({ resultado, onClose, onVerDetalle }: ResultadoGeneracionModalProps) {
+  if (!resultado) return null;
+
+  const { nombre, inversionistaId, response, errorMsg } = resultado;
+  const success = !!response?.success && !errorMsg;
+  const totalCreditos = response?.totalCreditosProcesados ?? 0;
+  const totalPagos = (response?.data ?? []).reduce(
+    (acc, d) => acc + (Number(d.pagosRegistrados) || 0),
+    0,
+  );
+  const huboPagos = success && totalPagos > 0;
+  const sinPagos = success && totalPagos === 0;
+  const fallo = !success;
+
+  let HeroIcon: React.ElementType;
+  let titulo: string;
+  let descripcion: string;
+  let iconBgClass: string;
+  let iconColorClass: string;
+
+  if (fallo) {
+    HeroIcon = XCircle;
+    titulo = "No se pudieron generar los pagos";
+    descripcion = errorMsg ?? response?.message ?? "Ocurrió un error al procesar la solicitud.";
+    iconBgClass = "bg-rose-100";
+    iconColorClass = "text-rose-600";
+  } else if (sinPagos) {
+    HeroIcon = AlertTriangle;
+    titulo = "No se generaron pagos";
+    descripcion =
+      totalCreditos === 0
+        ? "Este inversionista no tiene créditos elegibles para generar pagos en este momento."
+        : "Se procesaron créditos pero ninguno tenía cuotas pendientes para generar pagos.";
+    iconBgClass = "bg-amber-100";
+    iconColorClass = "text-amber-600";
+  } else {
+    HeroIcon = CheckCircle2;
+    titulo = "Pagos generados correctamente";
+    descripcion = `Se procesaron ${totalCreditos} crédito${totalCreditos !== 1 ? "s" : ""} y se registraron ${totalPagos} pago${totalPagos !== 1 ? "s" : ""}.`;
+    iconBgClass = "bg-emerald-100";
+    iconColorClass = "text-emerald-600";
+  }
+
+  return (
+    <Dialog open={!!resultado} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-xl bg-white p-0 overflow-hidden gap-0">
+        {/* Hero header */}
+        <div className="flex flex-col items-center text-center px-6 pt-8 pb-5 bg-gradient-to-b from-gray-50 to-white border-b border-gray-100">
+          <div className={`flex items-center justify-center w-16 h-16 rounded-full ${iconBgClass} mb-4 shadow-sm`}>
+            <HeroIcon className={`w-8 h-8 ${iconColorClass}`} />
+          </div>
+          <DialogTitle className="text-xl font-bold text-gray-900 mb-1">
+            {titulo}
+          </DialogTitle>
+          <DialogDescription className="text-sm text-gray-500">
+            <span className="font-semibold text-gray-700">{nombre}</span>
+          </DialogDescription>
+        </div>
+
+        {/* Body */}
+        <div className="px-6 py-5 space-y-4">
+          <p className="text-sm text-gray-700 text-center leading-relaxed">
+            {descripcion}
+          </p>
+
+          {huboPagos && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2.5 text-center">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Créditos</p>
+                <p className="text-2xl font-bold text-emerald-900">{totalCreditos}</p>
+              </div>
+              <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2.5 text-center">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Pagos</p>
+                <p className="text-2xl font-bold text-emerald-900">{totalPagos}</p>
+              </div>
+            </div>
+          )}
+
+          {huboPagos && response?.data && response.data.length > 0 && (
+            <div className="max-h-56 overflow-y-auto rounded-lg border border-gray-200">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-[11px] uppercase text-gray-600 sticky top-0">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold">Crédito SIFCO</th>
+                    <th className="px-3 py-2 text-center font-semibold">Cuota</th>
+                    <th className="px-3 py-2 text-right font-semibold">Pagos</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 bg-white">
+                  {response.data.map((row) => (
+                    <tr key={row.creditoId} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 font-medium text-gray-800">{row.numeroCreditoSifco}</td>
+                      <td className="px-3 py-2 text-center text-gray-600">#{row.cuotaProcesada}</td>
+                      <td className="px-3 py-2 text-right">
+                        <Badge
+                          variant="outline"
+                          className={
+                            row.pagosRegistrados > 0
+                              ? "border-emerald-300 text-emerald-700 bg-emerald-50"
+                              : "border-gray-300 text-gray-600 bg-gray-50"
+                          }
+                        >
+                          {row.pagosRegistrados}
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <DialogFooter className="px-6 py-4 bg-gray-50 border-t border-gray-100 gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="min-w-24 inline-flex items-center justify-center px-4 py-2 rounded-md border border-gray-300 bg-white text-sm font-semibold text-gray-700 hover:bg-gray-100 transition-colors"
+          >
+            Cerrar
+          </button>
+          {huboPagos && (
+            <button
+              type="button"
+              onClick={() => onVerDetalle(inversionistaId)}
+              className="min-w-32 inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-sm font-semibold text-white transition-colors"
+            >
+              <Eye className="w-4 h-4" />
+              Ver Detalle
+            </button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

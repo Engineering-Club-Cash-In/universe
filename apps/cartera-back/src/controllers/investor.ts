@@ -26,6 +26,7 @@ import {
   liquidacion_locks,
   documentos_inversionista,
   abonos_capital,
+  formatoCuentaBanco,
 } from "../database/db/schema";
 import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
 import { eq, and, or, sql, inArray, ilike, like, desc, count, SQL, isNull, isNotNull, ne } from "drizzle-orm";
@@ -6241,33 +6242,87 @@ const NOMBRES_MES_ES = [
   "Diciembre",
 ];
 
-const CUENTA_MONETARIA_LARGO = 11;
+type FormatoCuenta = {
+  banco_id: number;
+  tipo_cuenta: string;
+  moneda: string;
+  longitud: number;
+  patron: string | null;
+};
 
-function parseCuentaMonetaria(numeroCuenta: string | null | undefined): {
-  agencia: string;
-  correlativo: string;
-  digito: string;
-  valido: boolean;
-} {
-  const limpia = (numeroCuenta ?? "").replace(/\D/g, "");
-  const valido = limpia.length === CUENTA_MONETARIA_LARGO;
-  return {
-    agencia: limpia.slice(0, 3),
-    correlativo: limpia.slice(3, -1),
-    digito: limpia.slice(-1),
-    valido,
-  };
+function normalizarTipoCuenta(tipo: string | null | undefined): "MONETARIA" | "AHORRO" | null {
+  if (!tipo) return null;
+  const upper = tipo.toUpperCase();
+  if (upper.includes("MONETARIA")) return "MONETARIA";
+  if (upper.includes("AHORRO")) return "AHORRO";
+  return null;
 }
 
 function mapTipoCuentaCodigo(tipo: string | null | undefined): {
   codigo: number | "";
   valido: boolean;
 } {
-  if (!tipo) return { codigo: "", valido: false };
-  const upper = tipo.toUpperCase();
-  if (upper.includes("MONETARIA")) return { codigo: 1, valido: true };
-  if (upper.includes("AHORRO")) return { codigo: 2, valido: true };
+  const normalizado = normalizarTipoCuenta(tipo);
+  if (normalizado === "MONETARIA") return { codigo: 1, valido: true };
+  if (normalizado === "AHORRO") return { codigo: 2, valido: true };
   return { codigo: "", valido: false };
+}
+
+function validarCuentaContraFormatos(args: {
+  cuentaLimpia: string;
+  bancoId: number | null;
+  tipoCuenta: string | null | undefined;
+  moneda: string | null | undefined;
+  formatosPorClave: Map<string, FormatoCuenta[]>;
+  bancosConFormatos: Set<number>;
+}): boolean {
+  const { cuentaLimpia, bancoId, tipoCuenta, moneda, formatosPorClave, bancosConFormatos } = args;
+  if (bancoId == null) return false;
+  if (!bancosConFormatos.has(bancoId)) return true;
+  const tipoNorm = normalizarTipoCuenta(tipoCuenta);
+  if (!tipoNorm || !moneda) return false;
+  const key = `${bancoId}|${tipoNorm}|${moneda}`;
+  const formatos = formatosPorClave.get(key);
+  if (!formatos || formatos.length === 0) return false;
+  return formatos.some((f) => {
+    if (cuentaLimpia.length !== f.longitud) return false;
+    if (!f.patron) return true;
+    try {
+      return new RegExp(f.patron).test(cuentaLimpia);
+    } catch {
+      return false;
+    }
+  });
+}
+
+async function cargarFormatosCuenta(bancoIds: number[]): Promise<{
+  formatosPorClave: Map<string, FormatoCuenta[]>;
+  bancosConFormatos: Set<number>;
+}> {
+  const formatosPorClave = new Map<string, FormatoCuenta[]>();
+  const bancosConFormatos = new Set<number>();
+  if (bancoIds.length === 0) return { formatosPorClave, bancosConFormatos };
+
+  const filas = await db
+    .select({
+      banco_id: formatoCuentaBanco.banco_id,
+      tipo_cuenta: formatoCuentaBanco.tipo_cuenta,
+      moneda: formatoCuentaBanco.moneda,
+      longitud: formatoCuentaBanco.longitud,
+      patron: formatoCuentaBanco.patron,
+    })
+    .from(formatoCuentaBanco)
+    .where(inArray(formatoCuentaBanco.banco_id, bancoIds));
+
+  for (const f of filas) {
+    bancosConFormatos.add(f.banco_id);
+    const key = `${f.banco_id}|${f.tipo_cuenta}|${f.moneda}`;
+    const arr = formatosPorClave.get(key) ?? [];
+    arr.push(f as FormatoCuenta);
+    formatosPorClave.set(key, arr);
+  }
+
+  return { formatosPorClave, bancosConFormatos };
 }
 
 function mapMonedaCodigo(moneda: string | null | undefined): 1 | 2 {
@@ -6298,6 +6353,7 @@ export async function resumenTransferencias(
   const inversionistasFiltro = await db
     .select({
       inversionista_id: inversionistas.inversionista_id,
+      banco_id: inversionistas.banco_id,
       id_banco_transferencia: bancos.id_banco_transferencia,
     })
     .from(inversionistas)
@@ -6307,11 +6363,23 @@ export async function resumenTransferencias(
   const bancoTransfMap = new Map(
     inversionistasFiltro.map((i) => [i.inversionista_id, i.id_banco_transferencia ?? ""])
   );
+  const bancoIdPorInversionista = new Map<number, number | null>(
+    inversionistasFiltro.map((i) => [i.inversionista_id, i.banco_id ?? null])
+  );
+
+  const bancoIdsRelevantes = Array.from(
+    new Set(
+      inversionistasFiltro
+        .map((i) => i.banco_id)
+        .filter((id): id is number => id != null)
+    )
+  );
+  const { formatosPorClave, bancosConFormatos } = await cargarFormatosCuenta(bancoIdsRelevantes);
 
   if (bancoTransfMap.size === 0) {
     return ach
-      ? generateAchTransferenciasWorkbook([], mes, anio, bancoTransfMap)
-      : generateTransferenciasWorkbook([], mes, anio);
+      ? generateAchTransferenciasWorkbook([], mes, anio, bancoTransfMap, bancoIdPorInversionista, formatosPorClave, bancosConFormatos)
+      : generateTransferenciasWorkbook([], mes, anio, bancoIdPorInversionista, formatosPorClave, bancosConFormatos);
   }
 
   const resumen = await consultarResumenGlobalPorEstadoPago(
@@ -6334,15 +6402,18 @@ export async function resumenTransferencias(
   const filas = filtrados.map((inv) => mapResumenRow(inv, null, null));
 
   return ach
-    ? generateAchTransferenciasWorkbook(filas, mes, anio, bancoTransfMap)
-    : generateTransferenciasWorkbook(filas, mes, anio);
+    ? generateAchTransferenciasWorkbook(filas, mes, anio, bancoTransfMap, bancoIdPorInversionista, formatosPorClave, bancosConFormatos)
+    : generateTransferenciasWorkbook(filas, mes, anio, bancoIdPorInversionista, formatosPorClave, bancosConFormatos);
 }
 
 async function generateAchTransferenciasWorkbook(
   rows: InversionistaResumen[],
   mes: number,
   anio: number,
-  bancoTransfMap: Map<number, string>
+  bancoTransfMap: Map<number, string>,
+  bancoIdPorInversionista: Map<number, number | null>,
+  formatosPorClave: Map<string, FormatoCuenta[]>,
+  bancosConFormatos: Set<number>
 ): Promise<{ success: boolean; url: string; filename: string }> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Club Cashin";
@@ -6363,17 +6434,17 @@ async function generateAchTransferenciasWorkbook(
     "Banco",
     "Descripcion Corta",
     "Adenda",
-    "Valor Q.",
+    "Valor",
   ];
   sheet.columns = [
-    { width: 28 }, // Nombre
+    { width: 40 }, // Nombre
     { width: 18 }, // Id Participante
     { width: 24 }, // Cuenta crédito / débito
     { width: 14 }, // Tipo Cuenta
     { width: 12 }, // Moneda
     { width: 10 }, // Banco
-    { width: 24 }, // Descripción Corta
-    { width: 60 }, // Adenda
+    { width: 40 }, // Descripción Corta
+    { width: 40 }, // Adenda
     { width: 16 }, // Valor Q.
   ];
 
@@ -6405,6 +6476,15 @@ async function generateAchTransferenciasWorkbook(
     const moneda = mapMonedaCodigo(inv.moneda);
     const banco = bancoTransfMap.get(inv.inversionista_id) ?? "";
     const cuentaLimpia = (inv.numero_cuenta ?? "").replace(/\D/g, "");
+    const bancoId = bancoIdPorInversionista.get(inv.inversionista_id) ?? null;
+    const cuentaValida = validarCuentaContraFormatos({
+      cuentaLimpia,
+      bancoId,
+      tipoCuenta: inv.tipo_cuenta,
+      moneda: inv.moneda,
+      formatosPorClave,
+      bancosConFormatos,
+    });
 
     const row = sheet.addRow([
       inv.nombre,
@@ -6419,7 +6499,7 @@ async function generateAchTransferenciasWorkbook(
     ]);
     row.getCell(9).numFmt = "0.00";
 
-    const filaInvalida = !tipoCuenta.valido || !banco;
+    const filaInvalida = !tipoCuenta.valido || !banco || !cuentaValida;
     if (filaInvalida) {
       row.eachCell({ includeEmpty: true }, (cell) => {
         cell.fill = {
@@ -6462,7 +6542,10 @@ async function generateAchTransferenciasWorkbook(
 async function generateTransferenciasWorkbook(
   rows: InversionistaResumen[],
   mes: number,
-  anio: number
+  anio: number,
+  bancoIdPorInversionista: Map<number, number | null>,
+  formatosPorClave: Map<string, FormatoCuenta[]>,
+  bancosConFormatos: Set<number>
 ): Promise<{ success: boolean; url: string; filename: string }> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Club Cashin";
@@ -6505,14 +6588,26 @@ async function generateTransferenciasWorkbook(
     const valor = Number(inv.total_cuota) || 0;
     if (valor === 0) return;
 
-    const { agencia, correlativo, digito, valido } = parseCuentaMonetaria(inv.numero_cuenta);
+    const cuentaLimpia = (inv.numero_cuenta ?? "").replace(/\D/g, "");
+    const agencia = cuentaLimpia.slice(0, 3);
+    const correlativo = cuentaLimpia.slice(3, -1);
+    const digito = cuentaLimpia.slice(-1);
     const concepto = `Liquidación ${nombreMes} ${anio} - ${inv.nombre}, Club CashIn S.A`;
     const moneda = mapMonedaCodigo(inv.moneda);
+    const bancoId = bancoIdPorInversionista.get(inv.inversionista_id) ?? null;
+    const cuentaValida = validarCuentaContraFormatos({
+      cuentaLimpia,
+      bancoId,
+      tipoCuenta: inv.tipo_cuenta,
+      moneda: inv.moneda,
+      formatosPorClave,
+      bancosConFormatos,
+    });
 
     const row = sheet.addRow([agencia, correlativo, digito, moneda, concepto, valor]);
     row.getCell(6).numFmt = "0.00";
 
-    if (!valido) {
+    if (!cuentaValida) {
       row.eachCell({ includeEmpty: true }, (cell) => {
         cell.fill = {
           type: "pattern",

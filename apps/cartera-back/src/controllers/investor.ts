@@ -3173,7 +3173,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
               .where(
                 and(
                   inArray(creditos.credito_id, creditoIdsConPagos),
-                  eq(creditos.devolucion_cube, true)
+                  eq(creditos.estado_devolucion, 'VERIFICADO')
                 )
               );
 
@@ -3181,7 +3181,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
 
             if (creditoIdsDevolucion.length > 0) {
               console.log(
-                `  🚪 Inversionista ${inv_id} → exitInvestor por devolucion_cube=true en ${creditoIdsDevolucion.length} crédito(s)`
+                `  🚪 Inversionista ${inv_id} → exitInvestor por estado_devolucion=VERIFICADO en ${creditoIdsDevolucion.length} crédito(s)`
               );
 
               const exitResultDevolucion = await exitInvestor({

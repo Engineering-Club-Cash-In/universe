@@ -200,7 +200,7 @@ export function ListaCreditosPagos() {
       gps: credit.gps ?? 0,
       asesor_id: credit.asesor_id,
       formato_credito: credit.formato_credito ?? "",
-      devolucion_cube: !!credit.devolucion_cube,
+      estado_devolucion: credit.estado_devolucion ?? "NO_APLICA",
       nombre: usuario?.nombre ?? (usuario?.nombres ? `${usuario.nombres} ${usuario.apellidos ?? ""}`.trim() : ""),
       nit: usuario?.nit ?? "",
       direccion: usuario?.direccion ?? "",

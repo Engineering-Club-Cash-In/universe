@@ -141,7 +141,7 @@ export interface Credito {
   formato_credito: string;
   statusCredit: string; // ACTIVO, CANCELADO, INCOBRABLE
   permite_abono_capital?: boolean;
-  devolucion_cube?: boolean;
+  estado_devolucion?: 'NO_APLICA' | 'PENDIENTE_AUTORIZACION' | 'VERIFICADO' | 'RECHAZADO';
 }
 
 export interface Usuario {
@@ -386,7 +386,6 @@ export interface Rubro {
 export interface Credito {
   credito_id: number;
   usuario_id: number;
-  otros: number;
   fecha_creacion: string;
   numero_credito_sifco: string;
   capital: string;
@@ -410,7 +409,7 @@ export interface Credito {
   royalti: string;
   mora: string;
   permite_abono_capital?: boolean;
-  devolucion_cube?: boolean;
+  estado_devolucion?: 'NO_APLICA' | 'PENDIENTE_AUTORIZACION' | 'VERIFICADO' | 'RECHAZADO';
 }
 
 export interface Usuario {
@@ -692,7 +691,7 @@ export interface UpdateCreditBody {
 
   // Abono capital
   permite_abono_capital?: boolean;
-  devolucion_cube?: boolean;
+  estado_devolucion?: 'NO_APLICA' | 'PENDIENTE_AUTORIZACION' | 'VERIFICADO' | 'RECHAZADO';
 
   // Inversionistas nuevos
   inversionistas?: InversionistaPayload[];
@@ -3867,6 +3866,103 @@ export async function compraCarteraAceptadaService(
   const res = await api.post<CompraCarteraAceptadaResponse>(
     `${API_URL}/compra-cartera-aceptada`,
     payload
+  );
+  return res.data;
+}
+
+// ============================================================
+// Devolución crédito (módulo Devolución Cube)
+// ============================================================
+export type EstadoDevolucion =
+  | "NO_APLICA"
+  | "PENDIENTE_AUTORIZACION"
+  | "VERIFICADO"
+  | "RECHAZADO";
+
+export interface DevolucionCreditoItem {
+  credito_id: number;
+  numero_credito_sifco: string;
+  usuario_nombre: string | null;
+  capital: string;
+  cuota: string;
+  fecha_creacion: string;
+  estado_devolucion: EstadoDevolucion;
+  motivo_solicitud?: string | null;
+}
+
+export interface DevolucionHistorialItem {
+  id: number;
+  credito_id: number;
+  usuario_id: number | null;
+  estado_anterior: EstadoDevolucion;
+  estado_nuevo: EstadoDevolucion;
+  motivo?: string | null;
+  created_at: string;
+}
+
+export interface GetPendingDevolucionResponse {
+  success: boolean;
+  data: {
+    credits: DevolucionCreditoItem[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    };
+    status?: string;
+    search?: string;
+  };
+}
+
+export interface BasicDevolucionResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface GetHistorialDevolucionResponse {
+  success: boolean;
+  data: DevolucionHistorialItem[];
+}
+
+export async function getPendingDevolucion(
+  page = 1,
+  limit = 10,
+  status = "PENDIENTE_AUTORIZACION",
+  search = ""
+): Promise<GetPendingDevolucionResponse> {
+  const res = await api.get<GetPendingDevolucionResponse>(
+    `/api/devolucion-credito/list-pending`,
+    { params: { page, limit, status, search } }
+  );
+  return res.data;
+}
+
+export async function aceptarDevolucion(
+  creditoId: number
+): Promise<BasicDevolucionResponse> {
+  const res = await api.post<BasicDevolucionResponse>(
+    `/api/devolucion-credito/${creditoId}/aceptar`
+  );
+  return res.data;
+}
+
+export async function rechazarDevolucion(
+  creditoId: number,
+  motivo: string
+): Promise<BasicDevolucionResponse> {
+  const res = await api.post<BasicDevolucionResponse>(
+    `/api/devolucion-credito/${creditoId}/rechazar`,
+    { motivo }
+  );
+  return res.data;
+}
+
+export async function getHistorialDevolucion(
+  creditoId: number
+): Promise<GetHistorialDevolucionResponse> {
+  const res = await api.get<GetHistorialDevolucionResponse>(
+    `/api/devolucion-credito/${creditoId}/historial`
   );
   return res.data;
 }

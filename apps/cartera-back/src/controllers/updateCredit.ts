@@ -8,6 +8,7 @@ import {
   cuotas_credito,
   pagos_credito,
   usuarios,
+  historial_devolucion_credito,
 } from "../database/db";
 import z from "zod";
 import type { WSCrEstadoCuentaResponse } from "../services/sifco.interface";
@@ -424,7 +425,8 @@ const creditUpdateSchema = z.object({
   // Formato de crédito manual
   formato_credito: z.string().max(50).optional(),
   permite_abono_capital: z.boolean().optional(),
-  devolucion_cube: z.boolean().optional(),
+  estado_devolucion: z.enum(['NO_APLICA', 'PENDIENTE_AUTORIZACION', 'VERIFICADO', 'RECHAZADO']).optional(),
+  motivo_devolucion: z.string().optional(),
   bandera_reinversion: z.boolean().optional(),
 });
 
@@ -959,7 +961,8 @@ export const updateCredit = async ({ body, set }: any) => {
       saldo_a_favor,
       formato_credito,
       permite_abono_capital,
-      devolucion_cube,
+      estado_devolucion,
+      motivo_devolucion,
       bandera_reinversion,
       ...fieldsToUpdate
     } = parseResult.data;
@@ -1049,8 +1052,52 @@ export const updateCredit = async ({ body, set }: any) => {
     if (permite_abono_capital !== undefined) {
       updateFields.permite_abono_capital = permite_abono_capital;
     }
-    if (devolucion_cube !== undefined) {
-      updateFields.devolucion_cube = devolucion_cube;
+    if (estado_devolucion !== undefined) {
+      if (estado_devolucion !== current.estado_devolucion) {
+        const fromState = current.estado_devolucion;
+        let motivoFinal: string | null | undefined = motivo_devolucion;
+
+        const esSolicitudValida =
+          estado_devolucion === "PENDIENTE_AUTORIZACION" &&
+          (fromState === "NO_APLICA" ||
+            fromState === "RECHAZADO" ||
+            fromState === "VERIFICADO");
+        const esDesactivacionValida =
+          estado_devolucion === "NO_APLICA" && fromState === "PENDIENTE_AUTORIZACION";
+
+        // Este endpoint (editar crédito) solo puede solicitar o desactivar solicitud.
+        if (!esSolicitudValida && !esDesactivacionValida) {
+          set.status = 400;
+          return {
+            message: `Transición de estado de devolución no permitida en este endpoint (${fromState} -> ${estado_devolucion})`,
+          };
+        }
+
+        if (esSolicitudValida) {
+          if (!motivo_devolucion || motivo_devolucion.trim() === "") {
+            set.status = 400;
+            return {
+              message:
+                "Motivo de devolución es obligatorio al solicitar devolución",
+            };
+          }
+          motivoFinal = motivo_devolucion.trim();
+        }
+
+        if (esDesactivacionValida) {
+          motivoFinal = null;
+        }
+
+        await db.insert(historial_devolucion_credito).values({
+          credito_id,
+          usuario_id: 1, // TODO integrate auth for real user_id
+          estado_anterior: fromState,
+          estado_nuevo: estado_devolucion,
+          motivo: motivoFinal ?? null,
+        });
+
+        updateFields.estado_devolucion = estado_devolucion;
+      }
     }
     if (bandera_reinversion !== undefined) {
       updateFields.bandera_reinversion = bandera_reinversion;

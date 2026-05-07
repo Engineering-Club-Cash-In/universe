@@ -21,6 +21,7 @@ import { SesionesPendientes } from "./private/cartera/components/SesionesPendien
 import { RecibosGenericos } from "./private/recibos-genericos/components/RecibosGenericos";
 import { FallenCredits } from "./private/cartera/components/FallenCredits";
 import { PagosPorVencimiento } from "./private/cartera/components/PagosPorVencimiento";
+import { DevolucionCube } from "./private/cartera/components/DevolucionCube";
 
 // 🔒 Rutas privadas
 function PrivateRoute({ children }: { children: JSX.Element }) {
@@ -237,6 +238,15 @@ function App() {
           element={
             <RoleRoute allowedRoles={["ADMIN"]}>
               <PagosPorVencimiento />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="devolucion-cube"
+          element={
+            <RoleRoute allowedRoles={["ADMIN"]}>
+              <DevolucionCube />
             </RoleRoute>
           }
         />

@@ -46,6 +46,13 @@
     "inactivo",
     "pendiente_devolucion",
   ]);
+
+  export const estadoDevolucionEnum = customSchema.enum("estado_devolucion", [
+    "NO_APLICA",
+    "PENDIENTE_AUTORIZACION",
+    "VERIFICADO",
+    "RECHAZADO"
+  ]);
   export const admins = customSchema.table("admins", {
     admin_id: serial("admin_id").primaryKey(),
     nombre: varchar("nombre", { length: 150 }).notNull(),
@@ -176,10 +183,26 @@
       .default(StatusCredit.ACTIVO),
     otros: numeric("otros", { precision: 18, scale: 2 }).notNull().default("0"), // Otros cargos o pagos adicionales
     permite_abono_capital: boolean("permite_abono_capital").notNull().default(false),
-    devolucion_cube: boolean("devolucion_cube").notNull().default(false),
+    estado_devolucion: estadoDevolucionEnum("estado_devolucion").notNull().default("NO_APLICA"),
     is_vehiculo_propio: boolean("is_vehiculo_propio").notNull().default(false), // true si el vehículo es propiedad de Cash In
     bandera_reinversion: boolean("bandera_reinversion").notNull().default(false),
   });
+  export const historial_devolucion_credito = customSchema.table("historial_devolucion_credito", {
+    id: serial("id").primaryKey(),
+    credito_id: integer("credito_id")
+      .notNull()
+      .references(() => creditos.credito_id, { onDelete: "cascade" }),
+    usuario_id: integer("usuario_id")
+      .notNull()
+      .references(() => platform_users.id, { onDelete: "set null" }),
+    estado_anterior: estadoDevolucionEnum("estado_anterior").notNull(),
+    estado_nuevo: estadoDevolucionEnum("estado_nuevo").notNull(),
+    motivo: text("motivo"),
+    created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  }, (table) => ({
+    idxCreditoCreated: index("idx_historial_credito_created").on(table.credito_id, table.created_at),
+  }));
+
   export const cuotas_credito = customSchema.table("cuotas_credito", {
     cuota_id: serial("cuota_id").primaryKey(),
     credito_id: integer("credito_id")

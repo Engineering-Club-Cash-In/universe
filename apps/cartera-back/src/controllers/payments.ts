@@ -557,7 +557,7 @@ export async function insertPagosCreditoInversionistas(
       `   📊 totalIVA (cash_in + inversionista): ${totalIVA.toString()}`
     );
 
-    const aplicarDevolucionCube = !!currentCredit?.devolucion_cube;
+    const aplicarDevolucionCube = currentCredit?.estado_devolucion === 'VERIFICADO';
 
     if (aplicarDevolucionCube || inv.status_inversionista === "pendiente_devolucion") {
       // 🆕 CASO ESPECIAL:

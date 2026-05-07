@@ -109,6 +109,13 @@ const menuSections: MenuSection[] = [
         path: "/creditos-caidos",
         roles: ["ADMIN"],
       },
+      {
+        key: "devolucion-cube",
+        label: "Devolución Cube",
+        icon: <Briefcase className="h-4 w-4" />,
+        path: "/devolucion-cube",
+        roles: ["ADMIN"],
+      },
     ],
   },
   {

@@ -47,8 +47,8 @@ import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
 import { ConsolidatedCreditSummary } from "@/components/credit/ConsolidatedCreditSummary";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
 import { ConfirmContractsSignedModal } from "@/components/crm/ConfirmContractsSignedModal";
-import { WhatsappLogBadge } from "@/components/crm/WhatsappLogBadge";
 import { ManualVehicleValuationDialog } from "@/components/crm/ManualVehicleValuationDialog";
+import { WhatsappLogBadge } from "@/components/crm/WhatsappLogBadge";
 import { DataTable } from "@/components/data-table";
 import { NotesTimeline } from "@/components/notes-timeline";
 import { Badge } from "@/components/ui/badge";
@@ -82,6 +82,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
+import { shouldRedirectToLogin } from "@/lib/auth-session";
 import {
 	formatDate,
 	formatGuatemalaDate,
@@ -334,7 +335,12 @@ function DroppableStageColumn({
 				</div>
 				<CardTitle className="font-medium text-sm">{stage.name}</CardTitle>
 				<CardDescription className="text-xs">
-					Q{totalValue.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} valor total
+					Q
+					{totalValue.toLocaleString("es-GT", {
+						minimumFractionDigits: 2,
+						maximumFractionDigits: 2,
+					})}{" "}
+					valor total
 				</CardDescription>
 			</CardHeader>
 			<CardContent className="min-h-0 space-y-3 overflow-y-auto" ref={ref}>
@@ -370,7 +376,11 @@ export const Route = createFileRoute("/crm/opportunities")({
 export type IOpportunity = Opportunity;
 
 function RouteComponent() {
-	const { data: session, isPending } = authClient.useSession();
+	const {
+		data: session,
+		error: sessionError,
+		isPending,
+	} = authClient.useSession();
 	const navigate = Route.useNavigate();
 	const search = Route.useSearch();
 	const queryClient = useQueryClient();
@@ -1006,7 +1016,9 @@ function RouteComponent() {
 						(s) => s.id === value.stageId,
 					);
 					if (targetStage && targetStage.closurePercentage < currentPct) {
-						return { form: "Las oportunidades en 90% o 100% no pueden retroceder" };
+						return {
+							form: "Las oportunidades en 90% o 100% no pueden retroceder",
+						};
 					}
 				}
 				return undefined;
@@ -1246,7 +1258,7 @@ function RouteComponent() {
 	});
 
 	useEffect(() => {
-		if (!session && !isPending) {
+		if (shouldRedirectToLogin({ error: sessionError, isPending, session })) {
 			navigate({ to: "/login" });
 		} else if (
 			session &&
@@ -1256,7 +1268,7 @@ function RouteComponent() {
 			navigate({ to: "/dashboard" });
 			toast.error("Acceso denegado: Se requiere acceso al CRM");
 		}
-	}, [session, isPending, userProfile.data?.role, navigate]);
+	}, [session, sessionError, isPending, userProfile.data?.role, navigate]);
 
 	// Handle opening create modal with pre-filled company leads
 	useEffect(() => {
@@ -1495,7 +1507,12 @@ function RouteComponent() {
 							<>
 								<div className="font-bold text-2xl">{totalOpportunities}</div>
 								<p className="text-muted-foreground text-xs">
-									Q{totalValue.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} en pipeline
+									Q
+									{totalValue.toLocaleString("es-GT", {
+										minimumFractionDigits: 2,
+										maximumFractionDigits: 2,
+									})}{" "}
+									en pipeline
 								</p>
 							</>
 						)}
@@ -1548,7 +1565,11 @@ function RouteComponent() {
 							<Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
 						) : (
 							<div className="font-bold text-2xl text-green-700">
-								Q{placedAmount.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+								Q
+								{placedAmount.toLocaleString("es-GT", {
+									minimumFractionDigits: 2,
+									maximumFractionDigits: 2,
+								})}
 							</div>
 						)}
 					</CardContent>
@@ -1587,7 +1608,11 @@ function RouteComponent() {
 										className="mt-0.5 text-muted-foreground text-sm"
 										style={{ fontVariantNumeric: "tabular-nums" }}
 									>
-										Q{stageValue.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+										Q
+										{stageValue.toLocaleString("es-GT", {
+											minimumFractionDigits: 2,
+											maximumFractionDigits: 2,
+										})}
 									</p>
 								</CardContent>
 							</Card>
@@ -2061,7 +2086,7 @@ function RouteComponent() {
 
 			{/* Opportunity Details Modal */}
 			<Dialog open={isDetailsDialogOpen} onOpenChange={setIsDetailsDialogOpen}>
-				<DialogContent className="max-h-[90vh] w-fit min-w-[320px] md:min-w-[850px] max-w-[95vw] overflow-y-auto overflow-x-hidden">
+				<DialogContent className="max-h-[90vh] w-fit min-w-[320px] max-w-[95vw] overflow-y-auto overflow-x-hidden md:min-w-[850px]">
 					<DialogHeader>
 						<DialogTitle>Detalles de la Oportunidad</DialogTitle>
 					</DialogHeader>
@@ -2076,7 +2101,7 @@ function RouteComponent() {
 								}
 							}}
 						>
-							<TabsList className="flex w-full overflow-x-auto gap-2 p-1">
+							<TabsList className="flex w-full gap-2 overflow-x-auto p-1">
 								<TabsTrigger value="details">Detalles</TabsTrigger>
 								<TabsTrigger value="documents">Documentos</TabsTrigger>
 								<TabsTrigger value="coDebtors">Co-firmantes</TabsTrigger>
@@ -2290,9 +2315,7 @@ function RouteComponent() {
 													<Button
 														size="sm"
 														variant="outline"
-														onClick={() =>
-															setIsManualValuationDialogOpen(true)
-														}
+														onClick={() => setIsManualValuationDialogOpen(true)}
 													>
 														Cargar valores mínimos
 													</Button>
@@ -3012,7 +3035,8 @@ function RouteComponent() {
 												<SelectContent>
 													{salesStagesQuery.data
 														?.filter((stage) => {
-															const current = selectedOpportunity?.stage?.closurePercentage;
+															const current =
+																selectedOpportunity?.stage?.closurePercentage;
 															if (current != null && current >= 90) {
 																return stage.closurePercentage >= current;
 															}
@@ -3762,12 +3786,12 @@ function DocumentsManager({
 							{disbursementQuery.data!.documents.map((doc) => (
 								<div
 									key={doc.id}
-									className="flex flex-col gap-3 sm:flex-row sm:items-center justify-between rounded-md border border-blue-200 bg-white px-4 py-3"
+									className="flex flex-col justify-between gap-3 rounded-md border border-blue-200 bg-white px-4 py-3 sm:flex-row sm:items-center"
 								>
 									<div className="flex min-w-0 flex-1 items-center gap-3">
 										<FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
 										<div className="min-w-0 flex-1">
-											<p className="font-medium text-sm break-all whitespace-normal">
+											<p className="whitespace-normal break-all font-medium text-sm">
 												{doc.originalName}
 											</p>
 											<p className="text-muted-foreground text-xs">
@@ -3821,12 +3845,12 @@ function DocumentsManager({
 							{detalleDocuments.map((detalleDoc) => (
 								<div
 									key={detalleDoc.id}
-									className="flex flex-col gap-3 sm:flex-row sm:items-center justify-between rounded-lg border border-green-200 bg-white p-4"
+									className="flex flex-col justify-between gap-3 rounded-lg border border-green-200 bg-white p-4 sm:flex-row sm:items-center"
 								>
 									<div className="flex min-w-0 flex-1 items-center gap-3">
-										<span className="text-3xl shrink-0">📊</span>
+										<span className="shrink-0 text-3xl">📊</span>
 										<div className="min-w-0 flex-1">
-											<p className="font-medium break-all whitespace-normal">
+											<p className="whitespace-normal break-all font-medium">
 												{detalleDoc.originalName}
 											</p>
 											<p className="text-muted-foreground text-xs">

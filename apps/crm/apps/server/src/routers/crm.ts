@@ -74,6 +74,19 @@ import { validarDpi } from "../utils/cui-validation";
 import { scoreLead } from "../services/lead-scoring";
 import { createNotification } from "./notifications";
 
+export const getLeadsInputSchema = z.object({
+	limit: z.number().min(1).max(100).default(20),
+	offset: z.number().min(0).default(0),
+	search: z.string().optional(),
+	status: z
+		.enum(["new", "contacted", "qualified", "converted", "unqualified"])
+		.optional(),
+	id: z.string().uuid().optional(),
+	source: z.enum(leadSourceEnum.enumValues).optional(),
+	dateFrom: z.string().optional(),
+	dateTo: z.string().optional(),
+});
+
 /**
  * Helper function to check vehicle inspection status.
  * Reduces code duplication across the codebase.
@@ -225,27 +238,14 @@ export const crmRouter = {
 
 	// Leads
 	getLeads: crmProcedure
-		.input(
-			z
-				.object({
-					limit: z.number().min(1).max(100).default(20),
-					offset: z.number().min(0).default(0),
-					search: z.string().optional(),
-					status: z
-						.enum(["new", "contacted", "qualified", "converted", "unqualified"])
-						.optional(),
-					id: z.string().uuid().optional(),
-					dateFrom: z.string().optional(),
-					dateTo: z.string().optional(),
-				})
-				.optional(),
-		)
+		.input(getLeadsInputSchema.optional())
 		.handler(async ({ input, context }) => {
 			const limit = input?.limit ?? 20;
 			const offset = input?.offset ?? 0;
 			const search = input?.search;
 			const status = input?.status;
 			const id = input?.id;
+			const source = input?.source;
 
 			// Build conditions
 			const conditions = [];
@@ -271,6 +271,11 @@ export const crmRouter = {
 			// Status filter
 			if (status) {
 				conditions.push(eq(leads.status, status));
+			}
+
+			// Source filter
+			if (source) {
+				conditions.push(eq(leads.source, source));
 			}
 
 			// Search filter (name, email, company name)

@@ -86,6 +86,9 @@ export async function mapPrestamoDetalleToCredito(
     : 0;
 
   const advisor = await findOrCreateAdvisorByName(excelRow?.Asesor || "", true);
+  if (!advisor) {
+    throw new Error(`No se pudo encontrar o crear asesor: ${excelRow?.Asesor || ""}`);
+  }
 
   const realPorcentaje = porcentaje_interes.mul(100).toFixed(2);
 

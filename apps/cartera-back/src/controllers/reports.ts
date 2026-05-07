@@ -580,6 +580,9 @@ export async function exportPagosConInversionistasExcel(
     formatoCredito?: string;
     soloAplicados?: boolean;
     fechaAplicado?: string;
+    fechaBoleta?: string;
+    fechaBoletaInicio?: string;
+    fechaBoletaFin?: string;
   }
 ) {
   // 1️⃣ Obtener los datos completos de tu servicio
@@ -648,6 +651,8 @@ export async function exportPagosConInversionistasExcel(
     { header: "Cuenta Empresa", key: "cuentaEmpresaNombre", width: 20 },
     { header: "Banco Empresa", key: "cuentaEmpresaBanco", width: 20 },
     { header: "Número Cuenta Empresa", key: "cuentaEmpresaNumero", width: 20 },
+    { header: "¿Tiene Factura?", key: "tieneFactura", width: 15 },
+    { header: "Números Factura", key: "numerosFactura", width: 30 },
   ];
 
   const totalCols = columns.length;
@@ -712,6 +717,12 @@ export async function exportPagosConInversionistasExcel(
     const inversionistas = item.inversionistas ?? [];
     const txFirstInvRow = sheet.rowCount + 1;
 
+    const facturas = item.facturas ?? [];
+    const tieneFactura = facturas.length > 0 ? "Sí" : "No";
+    const numerosFactura = facturas
+      .map((f: any) => `[${f.serie}-${f.numero}]`)
+      .join("");
+
     // Campos comunes del pago
     const commonPayFields = {
       categoriaCredito: item.usuario?.categoria ?? "",
@@ -723,6 +734,8 @@ export async function exportPagosConInversionistasExcel(
       cuentaEmpresaNombre: item.cuentaEmpresaNombre ?? "",
       cuentaEmpresaBanco: item.cuentaEmpresaBanco ?? "",
       cuentaEmpresaNumero: item.cuentaEmpresaNumero ?? "",
+      tieneFactura,
+      numerosFactura,
     };
 
     if (inversionistas.length === 0) {
@@ -887,6 +900,9 @@ export async function exportPagosAdvisorExcel(
     formatoCredito?: string;
     soloAplicados?: boolean;
     fechaAplicado?: string;
+    fechaBoleta?: string;
+    fechaBoletaInicio?: string;
+    fechaBoletaFin?: string;
   }
 ) {
   const result = await getPagosConInversionistas({
@@ -971,6 +987,8 @@ export async function exportPagosAdvisorExcel(
     { header: "Reserva", key: "reserva", width: 15 },
     { header: "Registrado Por (Email)", key: "registerBy", width: 30 },
     { header: "Pago ID", key: "pagoId", width: 12 },
+    { header: "¿Tiene Factura?", key: "tieneFactura", width: 15 },
+    { header: "Números Factura", key: "numerosFactura", width: 30 },
   );
 
   // Setear solo key + width (sin header, para no escribir en row 1 automáticamente)
@@ -1035,6 +1053,10 @@ export async function exportPagosAdvisorExcel(
       reserva: item.reserva,
       registerBy: item.registerBy,
       pagoId: item.pagoId,
+      tieneFactura: (item.facturas ?? []).length > 0 ? "Sí" : "No",
+      numerosFactura: (item.facturas ?? [])
+        .map((f: any) => `[${f.serie}-${f.numero}]`)
+        .join(""),
     };
 
     // Boletas dinámicas

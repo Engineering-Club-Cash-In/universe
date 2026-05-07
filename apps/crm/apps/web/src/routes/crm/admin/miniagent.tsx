@@ -12,6 +12,7 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { authClient } from "@/lib/auth-client";
+import { shouldRedirectToLogin } from "@/lib/auth-session";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/crm/admin/miniagent")({
@@ -19,7 +20,11 @@ export const Route = createFileRoute("/crm/admin/miniagent")({
 });
 
 function RouteComponent() {
-	const { data: session, isPending: sessionPending } = authClient.useSession();
+	const {
+		data: session,
+		error: sessionError,
+		isPending: sessionPending,
+	} = authClient.useSession();
 	const navigate = Route.useNavigate();
 
 	const userProfile = useQuery({
@@ -35,13 +40,19 @@ function RouteComponent() {
 	const userRole = userProfile.data?.role;
 
 	useEffect(() => {
-		if (!session && !sessionPending) {
+		if (
+			shouldRedirectToLogin({
+				error: sessionError,
+				isPending: sessionPending,
+				session,
+			})
+		) {
 			navigate({ to: "/login" });
 		} else if (session && userRole && userRole !== "admin") {
 			navigate({ to: "/dashboard" });
 			toast.error("Acceso denegado: esta sección es solo para administradores");
 		}
-	}, [session, sessionPending, userRole, navigate]);
+	}, [session, sessionError, sessionPending, userRole, navigate]);
 
 	const handleRefetch = () => {
 		usersWithCredentials.refetch();

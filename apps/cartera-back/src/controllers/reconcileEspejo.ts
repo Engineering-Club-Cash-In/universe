@@ -333,6 +333,7 @@ export const reconcileEspejo = async ({ body, set }: any) => {
 
         let posterioresActualizados = 0;
         for (const otro of otrosRegistros) {
+          if (otro.pago_id === null) continue;
 
           // Buscar la cuota de este pago
           const [pagoOtro] = await tx

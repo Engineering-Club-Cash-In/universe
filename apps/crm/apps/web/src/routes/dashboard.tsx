@@ -43,6 +43,7 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { authClient } from "@/lib/auth-client";
+import { shouldRedirectToLogin } from "@/lib/auth-session";
 import { getRoleLabel, PERMISSIONS, ROLES } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
@@ -66,7 +67,11 @@ const MONTH_NAMES = [
 ];
 
 function RouteComponent() {
-	const { data: session, isPending } = authClient.useSession();
+	const {
+		data: session,
+		error: sessionError,
+		isPending,
+	} = authClient.useSession();
 
 	const navigate = Route.useNavigate();
 
@@ -143,17 +148,21 @@ function RouteComponent() {
 	});
 
 	useEffect(() => {
-		if (!session && !isPending) {
+		if (shouldRedirectToLogin({ error: sessionError, isPending, session })) {
 			navigate({ to: "/login" });
 		}
-	}, [session, isPending, navigate]);
+	}, [session, sessionError, isPending, navigate]);
 
 	if (isPending || userProfile.isPending) {
 		return <div>Cargando...</div>;
 	}
 
 	if (!session) {
-		return null;
+		return (
+			<div>
+				No se pudo verificar tu sesión. Revisa tu conexión y recarga la página.
+			</div>
+		);
 	}
 
 	const userRole = userProfile.data?.role;
@@ -258,7 +267,11 @@ function RouteComponent() {
 							</CardHeader>
 							<CardContent>
 								<div className="font-bold text-2xl text-green-700">
-									Q{(crmStats.data.placedAmount || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+									Q
+									{(crmStats.data.placedAmount || 0).toLocaleString("es-GT", {
+										minimumFractionDigits: 2,
+										maximumFractionDigits: 2,
+									})}
 								</div>
 							</CardContent>
 						</Card>
@@ -340,7 +353,11 @@ function RouteComponent() {
 							</CardHeader>
 							<CardContent>
 								<div className="font-bold text-2xl text-green-700">
-									Q{(crmStats.data.placedAmount || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+									Q
+									{(crmStats.data.placedAmount || 0).toLocaleString("es-GT", {
+										minimumFractionDigits: 2,
+										maximumFractionDigits: 2,
+									})}
 								</div>
 							</CardContent>
 						</Card>
@@ -425,7 +442,11 @@ function RouteComponent() {
 							</CardHeader>
 							<CardContent>
 								<div className="font-bold text-2xl text-green-700">
-									Q{(crmStats.data.placedAmount || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+									Q
+									{(crmStats.data.placedAmount || 0).toLocaleString("es-GT", {
+										minimumFractionDigits: 2,
+										maximumFractionDigits: 2,
+									})}
 								</div>
 							</CardContent>
 						</Card>

@@ -9,50 +9,7 @@ import {
   moras_credito,
 } from "../database/db/schema";
 import { eq, and } from "drizzle-orm";
-
-type ClosureInfo =
-  | { kind: "CANCELACION"; id: number; motivo: string; observaciones: string | null; fecha: Date | string | null; monto: string; traspaso: string; garantia_mobiliaria: string; otros: string }
-  | { kind: "INCOBRABLE"; id: number; motivo: string; observaciones: string | null; fecha: Date | string | null; monto: string }
-  | null;
-
-type CuotaExcelRow = {
-  no: number;
-  mes: string;
-  interes: string;
-  servicios: string;
-  mora: string;
-  otros: string;
-  capital_pendiente: string;
-  total_cancelar: string;
-  fecha_vencimiento: string;
-  seguro: string;
-  membresias: string;
-};
-
-type GetCreditDTO = {
-  header: {
-    usuario: string;
-    numero_credito_sifco: string;
-    moneda: "Quetzal";
-    saldo_total: string;
-    extras_total: string;
-    saldo_total_con_extras: string;
-  };
-  closure: ClosureInfo;
-  cuotas_atrasadas: {
-    total: number;
-    items: CuotaExcelRow[];
-  };
-  extras: {
-    total_items: number;
-    items: Array<{
-      id: number;
-      concepto: string;
-      monto: string;
-      fecha_registro: Date | string | null;
-    }>;
-  };
-};
+import type { ClosureInfo, CuotaExcelRow, GetCreditDTO } from "../utils/interface";
 
 export async function getCreditWithCancellationDetails(
   numero_credito_sifco: string
@@ -71,6 +28,8 @@ export async function getCreditWithCancellationDetails(
           iva: creditos.iva_12,
           gps: creditos.gps,
           status: creditos.statusCredit,
+          tipo_credito: creditos.tipoCredito,
+          observaciones: creditos.observaciones,
         },
         user: {
           name: usuarios.nombre,
@@ -179,6 +138,7 @@ export async function getCreditWithCancellationDetails(
         total_cancelar: total.toFixed(2),
         fecha_vencimiento: "",
         seguro: seguro_unitario.toFixed(2),
+        gps: gps_unitario.toFixed(2),
         membresias: membresias_unitario.toFixed(2),
       };
     });
@@ -212,6 +172,8 @@ export async function getCreditWithCancellationDetails(
         saldo_total: saldo_total.toFixed(2),
         extras_total: extras_total.toFixed(2),
         saldo_total_con_extras: saldo_total.plus(extras_total).toFixed(2),
+        tipo_credito: r.credit.tipo_credito,
+        observaciones: r.credit.observaciones ?? null,
       },
       closure,
       totales,

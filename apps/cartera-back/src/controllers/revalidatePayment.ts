@@ -76,15 +76,17 @@ export const revalidatePayment = async ({ body, set }: any) => {
 
       // 4️⃣ CALCULAR NUEVO CAPITAL (restar el abono_capital del pago)
       const capital_actual = new Big(credito.capital ?? 0);
-      const todosPagosCuota = await tx
-        .select({ abono_capital: pagos_credito.abono_capital })
-        .from(pagos_credito)
-        .where(
-          and(
-            eq(pagos_credito.cuota_id, pago.cuota_id),
-            eq(pagos_credito.validationStatus, "validated")
-          )
-        );
+      const todosPagosCuota = pago.cuota_id === null
+        ? []
+        : await tx
+            .select({ abono_capital: pagos_credito.abono_capital })
+            .from(pagos_credito)
+            .where(
+              and(
+                eq(pagos_credito.cuota_id, pago.cuota_id),
+                eq(pagos_credito.validationStatus, "validated")
+              )
+            );
 
       let abono_capital_total = new Big(0);
       for (const p of todosPagosCuota) {

@@ -39,6 +39,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { authClient } from "@/lib/auth-client";
 import { type ContratoCobranza, columns } from "@/lib/cobros/columns";
+import { getPaymentDateRangeFilter } from "@/lib/cobros/payment-date-range-filter";
 import { parseFechaLocal } from "@/lib/date-utils";
 import { PERMISSIONS, ROLES } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
@@ -1077,29 +1078,14 @@ function RouteComponent() {
 										<DateRangeFilter
 											dateRange={dateRange}
 											onDateRangeChange={(range) => {
-												if (!range) {
-													setDateRange(undefined);
-													setFechaDesde(undefined);
-													setFechaHasta(undefined);
-													setFechaError(null);
-													setPage(1);
-													return;
+												const filtro = getPaymentDateRangeFilter(range);
+												setDateRange(filtro.dateRange);
+												setFechaDesde(filtro.fechaDesde);
+												setFechaHasta(filtro.fechaHasta);
+												setFechaError(filtro.fechaError);
+												if (filtro.fechaDesde && filtro.fechaHasta) {
+													setFiltroTemporal("todos");
 												}
-												const hoy = new Date();
-												hoy.setHours(0, 0, 0, 0);
-												if (range.from && range.from < hoy) {
-													setFechaError(
-														"La fecha no puede ser menor al día de hoy",
-													);
-													setDateRange(range);
-													return;
-												}
-												setFechaError(null);
-												setDateRange(range);
-												if (!range.from || !range.to) return;
-												setFechaDesde(range.from.toISOString().slice(0, 10));
-												setFechaHasta(range.to.toISOString().slice(0, 10));
-												setFiltroTemporal("todos");
 												setPage(1);
 											}}
 										/>

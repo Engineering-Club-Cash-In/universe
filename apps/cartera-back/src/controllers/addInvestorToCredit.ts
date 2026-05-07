@@ -64,6 +64,8 @@ const addInvestorToCreditSchema = z.object({
     .enum(["reinversion_capital", "reinversion_interes", "reinversion_total"])
     .optional(),
   fecha_inicio_participacion: z.string().optional(),
+  // Nuevos campos para el buscador de capital
+  minimo: z.number().int().positive().optional(),
 });
 
 // ========================================
@@ -136,9 +138,9 @@ function recalcularInversionistas(
     // ── 5a. Porcentaje de participación ──
     // Fórmula: (montoAportado / capitalTotal) * 100
     // Ejemplo: Q30,000 / Q100,000 * 100 = 30%
-    const porcentajeParticipacion = inv.monto_aportado
-      .div(capitalTotal)
-      .times(100);
+    const porcentajeParticipacion = capitalTotal.eq(0)
+      ? new Big(0)
+      : inv.monto_aportado.div(capitalTotal).times(100);
 
     // ── 5b. Cuota base ──
     // Fórmula: cuotaSinCargos * (porcentajeParticipacion / 100)
@@ -262,6 +264,7 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
       tipo_operacion,
       tipo_reinversion,
       fecha_inicio_participacion,
+      minimo,
     } = parseResult.data;
 
     // ================================================================
@@ -294,7 +297,20 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
     //   - Los ordena por score DESC (mejores primero)
     //   - Incluye credito_completo con toda la data relacional
     // ================================================================
-    const candidatos = await getCreditCandidates(monto_aportado);
+    console.log("================================================================");
+    console.log("[addInvestorToCredit] Llamando a getCreditCandidates con:");
+    console.log(` - monto: ${monto_aportado}`);
+    console.log(` - limit (minimo): ${minimo ?? "Sin límite"}`);
+    console.log(` - inversionista_id: ${inversionista_id}`);
+    console.log("================================================================");
+
+    let candidatos = await getCreditCandidates(monto_aportado, minimo, inversionista_id);
+
+    console.log(`[addInvestorToCredit] Candidatos encontrados: ${candidatos.length}`);
+    candidatos.forEach((c, i) => {
+      console.log(` [${i}] Credito: ${c.numero_credito_sifco}, Score: ${c.score}, Capital Activo: ${c.capital_activo}`);
+    });
+    console.log("================================================================");
 
     if (candidatos.length === 0) {
       set.status = 404;

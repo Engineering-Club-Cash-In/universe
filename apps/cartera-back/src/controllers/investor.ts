@@ -27,6 +27,7 @@ import {
   documentos_inversionista,
   abonos_capital,
   formatoCuentaBanco,
+  cuentas_extra_inversionista,
 } from "../database/db/schema";
 import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
 import { eq, and, or, sql, inArray, ilike, like, desc, count, SQL, isNull, isNotNull, ne } from "drizzle-orm";
@@ -5234,6 +5235,16 @@ interface BoletaPendiente {
   fecha_subida: Date;
 }
 
+interface CuentaExtraInfo {
+  cuenta_extra_id: number;
+  banco_id: number;
+  banco_nombre: string | null;
+  tipo_cuenta: string;
+  numero_cuenta: string;
+  moneda: "quetzales" | "dolares";
+  motivo_cuenta: string;
+}
+
 interface InversionistaResumen {
   inversionista_id: number;
   nombre: string;
@@ -5250,6 +5261,7 @@ interface InversionistaResumen {
   banco: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;
+  cuentas_extra: CuentaExtraInfo[];
   total_abono_capital: number;
   total_abono_interes: number;
   total_abono_iva: number;
@@ -5380,6 +5392,45 @@ async function getBoletasMap(
   );
 
   return mapBoletasPendientes(boletasFiltradas);
+}
+
+async function getCuentasExtraMap(
+  inversionistaIds: number[]
+): Promise<Map<number, CuentaExtraInfo[]>> {
+  const map = new Map<number, CuentaExtraInfo[]>();
+  if (inversionistaIds.length === 0) return map;
+
+  const rows = await db
+    .select({
+      cuenta_extra_id: cuentas_extra_inversionista.cuenta_extra_id,
+      inversionista_id: cuentas_extra_inversionista.inversionista_id,
+      banco_id: cuentas_extra_inversionista.banco_id,
+      banco_nombre: bancos.nombre,
+      tipo_cuenta: cuentas_extra_inversionista.tipo_cuenta,
+      numero_cuenta: cuentas_extra_inversionista.numero_cuenta,
+      moneda: cuentas_extra_inversionista.moneda,
+      motivo_cuenta: cuentas_extra_inversionista.motivo_cuenta,
+    })
+    .from(cuentas_extra_inversionista)
+    .leftJoin(bancos, eq(cuentas_extra_inversionista.banco_id, bancos.banco_id))
+    .where(inArray(cuentas_extra_inversionista.inversionista_id, inversionistaIds))
+    .orderBy(cuentas_extra_inversionista.cuenta_extra_id);
+
+  for (const r of rows) {
+    const item: CuentaExtraInfo = {
+      cuenta_extra_id: r.cuenta_extra_id,
+      banco_id: r.banco_id,
+      banco_nombre: r.banco_nombre,
+      tipo_cuenta: r.tipo_cuenta,
+      numero_cuenta: r.numero_cuenta,
+      moneda: r.moneda as "quetzales" | "dolares",
+      motivo_cuenta: r.motivo_cuenta,
+    };
+    const existing = map.get(r.inversionista_id);
+    if (existing) existing.push(item);
+    else map.set(r.inversionista_id, [item]);
+  }
+  return map;
 }
 
 async function getBoletasLiquidacionMap(
@@ -5793,7 +5844,8 @@ async function consultarResumenGlobalDesdeLiquidaciones(
 function mapResumenRow(
   inv: InversionistaResumenRow,
   boleta_pendiente: BoletaPendiente | null,
-  boleta_liquidacion: BoletaPendiente | null = null
+  boleta_liquidacion: BoletaPendiente | null = null,
+  cuentas_extra: CuentaExtraInfo[] = []
 ): InversionistaResumen {
   const isUSD = inv.moneda === "dolares";
   const currencySymbol = isUSD ? "$" : "Q";
@@ -5814,6 +5866,7 @@ function mapResumenRow(
     banco: inv.banco_nombre,
     tipo_cuenta: inv.tipo_cuenta,
     numero_cuenta: inv.numero_cuenta,
+    cuentas_extra,
     total_abono_capital: convert(inv.total_abono_capital),
     total_abono_interes: convert(inv.total_abono_interes),
     total_abono_iva: convert(inv.total_abono_iva),
@@ -6242,10 +6295,11 @@ export async function resumenGlobalLiquidaciones(
       ...liquidados.map((inv) => inv.inversionista_id),
     ])
   );
-  const [boletaPendienteMap, boletaSubidaMap, boletaLiquidacionMap] = await Promise.all([
+  const [boletaPendienteMap, boletaSubidaMap, boletaLiquidacionMap, cuentasExtraMap] = await Promise.all([
     getBoletasPendientesMap(inversionistaIds, mes, anio),
     getBoletasMap(inversionistaIds, ["PENDIENTE", "PROCESADO"], mes, anio),
     getBoletasLiquidacionMap(inversionistaIds, mes, anio),
+    getCuentasExtraMap(inversionistaIds),
   ]);
 
   const result: InversionistaResumenConEstado[] = [];
@@ -6267,7 +6321,8 @@ export async function resumenGlobalLiquidaciones(
       ...mapResumenRow(
         inv,
         boletaPendienteMap.get(inv.inversionista_id) ?? null,
-        boletaLiquidacionMap.get(inv.inversionista_id) ?? null
+        boletaLiquidacionMap.get(inv.inversionista_id) ?? null,
+        cuentasExtraMap.get(inv.inversionista_id) ?? []
       ),
       estado_liquidacion_resumen: estadoResumen,
     });
@@ -6289,7 +6344,8 @@ export async function resumenGlobalLiquidaciones(
       ...mapResumenRow(
         inv,
         null,
-        boletaLiquidacionMap.get(inv.inversionista_id) ?? null
+        boletaLiquidacionMap.get(inv.inversionista_id) ?? null,
+        cuentasExtraMap.get(inv.inversionista_id) ?? []
       ),
       estado_liquidacion_resumen: estadoResumen,
     });
@@ -6317,6 +6373,11 @@ export async function resumenGlobalLiquidaciones(
       .from(inversionistas)
       .leftJoin(bancos, eq(inversionistas.banco_id, bancos.banco_id))
       .where(and(...filtros));
+
+    const idsSinMovimiento = todos
+      .filter((inv) => !idsConMovimiento.has(inv.inversionista_id))
+      .map((inv) => inv.inversionista_id);
+    const cuentasExtraSinMovMap = await getCuentasExtraMap(idsSinMovimiento);
 
     for (const inv of todos) {
       if (idsConMovimiento.has(inv.inversionista_id)) continue;
@@ -6346,7 +6407,12 @@ export async function resumenGlobalLiquidaciones(
       };
 
       result.push({
-        ...mapResumenRow(stub, null, null),
+        ...mapResumenRow(
+          stub,
+          null,
+          null,
+          cuentasExtraSinMovMap.get(inv.inversionista_id) ?? []
+        ),
         estado_liquidacion_resumen: "sin_movimiento",
       });
     }

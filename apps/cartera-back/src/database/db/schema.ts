@@ -644,6 +644,31 @@
     status: statusInversionistaEnum("status").notNull().default("activo"),
   });
 
+  export const cuentas_extra_inversionista = customSchema.table(
+    "cuentas_extra_inversionista",
+    {
+      cuenta_extra_id: serial("cuenta_extra_id").primaryKey(),
+      inversionista_id: integer("inversionista_id")
+        .notNull()
+        .references(() => inversionistas.inversionista_id, { onDelete: "cascade" }),
+      banco_id: integer("banco_id")
+        .notNull()
+        .references(() => bancos.banco_id),
+      tipo_cuenta: tipoCuentaEnum("tipo_cuenta").notNull(),
+      numero_cuenta: varchar("numero_cuenta", { length: 100 }).notNull(),
+      moneda: tipoMonedaEnum("moneda").notNull().default("quetzales"),
+      motivo_cuenta: varchar("motivo_cuenta", { length: 255 }).notNull(),
+    },
+    (t) => ({
+      inversionistaIdx: index("idx_cuentas_extra_inv_inversionista").on(t.inversionista_id),
+      uxCuentaExtra: uniqueIndex("ux_cuentas_extra_inv_numero").on(
+        t.inversionista_id,
+        t.banco_id,
+        t.numero_cuenta
+      ),
+    })
+  );
+
   export const reinversiones = customSchema.table("reinversiones", {
     reinversion_id: serial("reinversion_id").primaryKey(),
     inversionista_id: integer("inversionista_id")

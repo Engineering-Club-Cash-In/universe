@@ -27,6 +27,7 @@ import { completeEspejoRouter } from "./completeEspejo";
 import { replaceInvestorCreditRouter } from "./replaceInvestorCredit";
 import { compraCarteraAceptadaRouter } from "./compraCarteraAceptada";
 import { creditosNuevosConAbonosRouter } from "./creditosNuevosConAbonos";
+import { cuentasExtraInversionistaRouter } from "./cuentasExtraInversionista";
 export {
-    defaultRouter,inversionistasRouter,advisorRouter,usersRouter,creditRouter,paymentRouter,uploadRouter,sifcoRouter,authRouter,morasRouter,bancosRouter,cuentasRoutes,paymentAgreementsRouter,dteController,recalculateFromJsonRouter,mirrorInvestorRouter,notificationsRouter,reconcileEspejoRouter,investorDocumentsRouter,abonosCapitalRouter,recibosGenericosRouter,fallenCreditsRouter,sifcoSyncRouter,assignCapitalRouter,addInvestorToCreditRouter,completeEspejoRouter,replaceInvestorCreditRouter,compraCarteraAceptadaRouter,creditosNuevosConAbonosRouter
+    defaultRouter,inversionistasRouter,advisorRouter,usersRouter,creditRouter,paymentRouter,uploadRouter,sifcoRouter,authRouter,morasRouter,bancosRouter,cuentasRoutes,paymentAgreementsRouter,dteController,recalculateFromJsonRouter,mirrorInvestorRouter,notificationsRouter,reconcileEspejoRouter,investorDocumentsRouter,abonosCapitalRouter,recibosGenericosRouter,fallenCreditsRouter,sifcoSyncRouter,assignCapitalRouter,addInvestorToCreditRouter,completeEspejoRouter,replaceInvestorCreditRouter,compraCarteraAceptadaRouter,creditosNuevosConAbonosRouter,cuentasExtraInversionistaRouter
 }

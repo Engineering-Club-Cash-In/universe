@@ -41,7 +41,8 @@ const app = new Elysia()
   .use(routers.replaceInvestorCreditRouter)
   .use(routers.compraCarteraAceptadaRouter)
   .use(routers.devolucionRouter)
-  .use(routers.creditosNuevosConAbonosRouter);
+  .use(routers.creditosNuevosConAbonosRouter)
+  .use(routers.cuentasExtraInversionistaRouter);
 
 // 🚀 Iniciar tareas programadas ANTES de levantar el servidor
 iniciarTareasProgramadas();

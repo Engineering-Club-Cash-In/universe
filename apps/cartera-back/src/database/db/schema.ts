@@ -573,6 +573,23 @@
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   });
+
+  export const formatoCuentaBanco = customSchema.table(
+    'formato_cuenta_banco',
+    {
+      formato_id: serial('formato_id').primaryKey(),
+      banco_id: integer('banco_id')
+        .notNull()
+        .references(() => bancos.banco_id),
+      tipo_cuenta: varchar('tipo_cuenta', { length: 20 }).notNull(),
+      moneda: varchar('moneda', { length: 20 }).notNull(),
+      longitud: integer('longitud').notNull(),
+      patron: varchar('patron', { length: 200 }),
+      observaciones: text('observaciones'),
+      createdAt: timestamp('created_at').defaultNow().notNull(),
+      updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    },
+  );
   export const bancoEnum = pgEnum("banco_enum", [
     "GyT",
     "BAM",

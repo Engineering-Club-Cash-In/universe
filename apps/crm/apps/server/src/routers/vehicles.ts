@@ -1134,6 +1134,7 @@ export const vehiclesRouter = {
 					iscvCode: z.string().nullable().optional(),
 					trim: z.string().optional(),
 					traction: z.string().optional(),
+					isOwned: z.boolean().optional(),
 				}),
 				// Inspection data
 				inspection: z.object({

@@ -1,9 +1,20 @@
 /**
- * Plantillas de mensajes de cobros (WhatsApp / Email).
+ * Plantillas de mensajes de cobros — versión SERVER usada por el envío masivo
+ * de WhatsApp (cobros.ts → enviarWhatsappMasivoCobros).
  *
- * Mantener en sincronía con `apps/crm/apps/web/src/lib/cobros/plantillas-mensajes.ts`.
- * Eventualmente ambas versiones deberían leer desde una tabla `plantillas_mensaje`
- * en la BD (ver RFC en el archivo del front).
+ * Cada `cuerpo` tiene que coincidir EXACTAMENTE con la plantilla aprobada en
+ * Meta (WhatsApp Business). En particular, los párrafos separados por línea
+ * en blanco (`\n\n`) son lo que `splitTemplateParams` (simpletech.ts) usa
+ * para decidir cuántos parámetros tiene el template — ese conteo determina
+ * qué plantilla se selecciona vía `resolveTemplateNameByParamCount`.
+ *
+ * Por eso esta versión coincide con el `cuerpoWhastapp` del archivo del front
+ * (`apps/web/src/lib/cobros/plantillas-mensajes.ts`), no con el `cuerpo`
+ * largo orientado a email. Si tocás los párrafos, podés romper el match con
+ * la plantilla aprobada y SimpleTech rechazará el envío.
+ *
+ * Eventualmente ambas versiones deberían leer desde una tabla
+ * `plantillas_mensaje` en la BD (ver RFC en el archivo del front).
  */
 
 export interface VariablesPlantilla {
@@ -65,102 +76,71 @@ export const PLANTILLAS_MENSAJES: PlantillaMensaje[] = [
 		nombre: "Bienvenida",
 		etapa: "al_dia",
 		asunto: "Bienvenido/a a su plan de financiamiento",
-		cuerpo: `Estimado/a {clienteNombre},
+		// 4 bloques separados por línea en blanco → template `mensaje4parametros`.
+		cuerpo: `Hola {clienteNombre}, Le saludamos cordialmente de Clubcashin.com para recordarle sobre el pago de su crédito, el cual debe realizarse el {fechaPago}. Sus cuotas son por un monto de Q{cuotaMensual}.
 
-Le damos la bienvenida a su plan de financiamiento para su vehículo {marcaLineaModelo} ({placa}).
+A continuación, le compartimos los números de cuenta para realizar su depósito o transferencia: - CUBE INVESTMENTS, S.A. (monetaria) No. 5520029876 BANCO INDUSTRIAL (BI) / CUBE INVESTMENTS, S.A. (monetaria) No. 3020123033 BANCO AGROMERCANTIL (BAM) / CUBE INVESTMENTS, S.A. (monetaria) No. 01300039945 BANCO GyT CONTINENTAL / CUBE INVESTMENTS, S.A. (monetaria) No. 3394002346 BANRURAL
 
-Su cuota mensual es de Q{cuotaMensual}, con fecha de pago el día {fechaPago} de cada mes.
+Por favor, envíe su boleta o comprobante de pago por este medio para aplicarlo a su cuenta. Si tiene alguna duda o consulta, estamos a su disposición.
 
-Cualquier consulta no dude en comunicarse con nosotros.
-
-Atentamente,
-{nombreAsesor}
-Tel: {telefonoAsesor}`,
+Agradecemos confirme la recepción de este mensaje. Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
 	},
 	{
 		id: "al_dia",
 		nombre: "Recordatorio de pago",
 		etapa: "al_dia",
 		asunto: "Recordatorio de pago - Vehículo {placa}",
-		cuerpo: `Estimado/a {clienteNombre},
+		// 2 bloques → template `mensaje2parametros`.
+		cuerpo: `Estimado(a) {clienteNombre}, buen día, cordialmente le saludamos de Clubcashin para recordarle sobre el pago de su crédito el día de hoy, quedamos a la espera de su comprobante de pago.
 
-Le recordamos que su próxima cuota de Q{cuotaMensual} vence el día {fechaPago}.
-
-Vehículo: {marcaLineaModelo} ({placa})
-
-Agradecemos su puntualidad. Si ya realizó el pago, por favor haga caso omiso de este mensaje.
-
-Saludos cordiales,
-{nombreAsesor}
-Tel: {telefonoAsesor}`,
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
 	},
 	{
 		id: "pre_mora",
 		nombre: "Aviso de atraso",
 		etapa: "pre_mora",
 		asunto: "Aviso de atraso en pago - Vehículo {placa}",
-		cuerpo: `Estimado/a {clienteNombre},
+		// 4 bloques → template `mensaje4parametros`.
+		cuerpo: `Hola {clienteNombre}, le saludamos de Clubcashin recordándole que su cuota esta próxima a vencer. Su día de pago es el {fechaPago}. Ponemos a su disposición nuestros medios de pago en Banco Industrial, BANRURAL, Banco Agromercantil (BAM) y GyT.
 
-Hemos notado que su pago correspondiente al día {fechaPago} aún no ha sido registrado.
+Si tiene alguna duda por favor comunicarse por este medio.
 
-Vehículo: {marcaLineaModelo} ({placa})
-Monto pendiente: Q{montoAdeudado}
+SI YA REALIZO SU PAGO POR FAVOR HACER CASO OMISO A ESTE MENSAJE.
 
-Le solicitamos ponerse al día a la brevedad para evitar recargos adicionales. Si ya realizó el pago, por favor envíenos el comprobante.
-
-Quedo a sus órdenes,
-{nombreAsesor}
-Tel: {telefonoAsesor}`,
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
 	},
 	{
 		id: "mora_30",
 		nombre: "Mora 30 días",
 		etapa: "mora_30",
 		asunto: "URGENTE: Mora de 30 días - Vehículo {placa}",
-		cuerpo: `Estimado/a {clienteNombre},
+		// 2 bloques → template `mensaje2parametros`.
+		cuerpo: `Estimado(a) {clienteNombre}, buen día, el motivo de la notificación es porque tenemos 1 cuota en atraso, se solicita que su pago sea lo antes posible para poder solventar su situación, quedaremos a la espera de su boleta el día {fechaPago}.
 
-Su cuenta presenta un atraso de {cuotasAtraso} cuota(s) por un monto total de Q{montoAdeudado}.
-
-Vehículo: {marcaLineaModelo} ({placa})
-
-Es importante que regularice su situación a la brevedad posible para evitar acciones adicionales de cobro. Le invitamos a comunicarse con nosotros para buscar una solución.
-
-Atentamente,
-{nombreAsesor}
-Tel: {telefonoAsesor}`,
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}.`,
 	},
 	{
 		id: "mora_60",
 		nombre: "Mora 60 días",
 		etapa: "mora_60",
 		asunto: "AVISO IMPORTANTE: Mora de 60 días - Vehículo {placa}",
-		cuerpo: `Estimado/a {clienteNombre},
+		// 3 bloques → template `mensaje3parametros`.
+		cuerpo: `Estimado/a {clienteNombre}, Buen día. El motivo de la notificación es porque tenemos {cuotasAtraso} cuota(s) en atraso. Se solicita que su pago sea lo antes posible para poder solventar su situación. Quedaremos a la espera de su boleta el día {fechaPago}.
 
-Su cuenta presenta un atraso significativo de {cuotasAtraso} cuota(s) con un saldo vencido de Q{montoAdeudado}.
+Si no recibimos el pago dentro del plazo establecido, nos veremos obligados a tomar medidas adicionales para recuperar la deuda, incluida la posible ejecución del vehículo y el apagado de la unidad en movimiento o estacionado.
 
-Vehículo: {marcaLineaModelo} ({placa})
-
-De no recibir respuesta o pago en los próximos días, nos veremos en la necesidad de escalar su caso a la siguiente fase de recuperación. Le urgimos comunicarse con nosotros para llegar a un acuerdo.
-
-Atentamente,
-{nombreAsesor}
-Tel: {telefonoAsesor}`,
+Atentamente, {nombreAsesor} Tel: {telefonoAsesor}`,
 	},
 	{
 		id: "aviso_juridico",
 		nombre: "Aviso jurídico",
 		etapa: "mora_90",
 		asunto: "ÚLTIMO AVISO: Proceso jurídico - Vehículo {placa}",
-		cuerpo: `Estimado/a {clienteNombre},
+		// 3 bloques → template `mensaje3parametros`.
+		cuerpo: `Señor(a) {clienteNombre}, por este medio hacemos de su conocimiento que su obligación adquirida por medio de la plataforma de inversión CLUB CASH IN por la compra del vehículo ({placa}) {marcaLineaModelo}, se encuentra con {cuotasAtraso} cuota(s) de atraso, por un monto de {montoAdeudado} incluyendo moras.
 
-Por medio de la presente le notificamos que debido al incumplimiento reiterado en sus pagos ({cuotasAtraso} cuotas vencidas por Q{montoAdeudado}), su caso será trasladado al departamento jurídico para iniciar las acciones legales correspondientes.
+Por lo que le solicitamos ponerse en contacto con nosotros para entregar la unidad en un plazo no mayor de 24 horas para solventar su situación. De no obtener respuesta en el plazo establecido, procederemos a presentar DEMANDA en su contra por denuncia de robo.
 
-Vehículo: {marcaLineaModelo} ({placa})
-
-Tiene un plazo de 48 horas para comunicarse con nosotros y regularizar su situación antes de que se proceda con las acciones legales.
-
-Atentamente,
-{nombreAsesor}
-Tel: {telefonoAsesor}`,
+Favor de comunicarse a los siguientes números: {telefonoAsesor} y 2234-1333. Nuestro horario de atención es de lunes a viernes en horario de 8:00 a 17:00 hrs.`,
 	},
 ];

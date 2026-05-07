@@ -245,7 +245,11 @@ export function ContactoModal({
 
 	const whatsappApiMutation = useMutation({
 		mutationFn: (vars: { telefono: string; mensaje: string }) =>
-			client.enviarWhatsappCobros({ ...vars, casoCobroId }),
+			client.enviarWhatsappCobros({
+				...vars,
+				casoCobroId,
+				plantillaId: plantillaId || undefined,
+			}),
 		onSuccess: (res) => {
 			if (res.success) toast.success("WhatsApp enviado correctamente");
 		},
@@ -258,7 +262,12 @@ export function ContactoModal({
 			destinatario: string;
 			asunto: string;
 			mensaje: string;
-		}) => client.enviarEmailCobros({ ...vars, casoCobroId }),
+		}) =>
+			client.enviarEmailCobros({
+				...vars,
+				casoCobroId,
+				plantillaId: plantillaId || undefined,
+			}),
 		onSuccess: (res) => {
 			if (res.success) toast.success("Email enviado correctamente");
 		},
@@ -268,7 +277,11 @@ export function ContactoModal({
 
 	const smsApiMutation = useMutation({
 		mutationFn: (vars: { telefono: string; mensaje: string }) =>
-			client.enviarSmsCobros({ ...vars, casoCobroId }),
+			client.enviarSmsCobros({
+				...vars,
+				casoCobroId,
+				plantillaId: plantillaId || undefined,
+			}),
 		onSuccess: (res) => {
 			if (res.success) toast.success("SMS enviado correctamente");
 		},

@@ -3034,6 +3034,7 @@ export const cobrosRouter = {
 				telefono: z.string().min(8, "Teléfono inválido"),
 				mensaje: z.string().min(1, "Mensaje requerido"),
 				casoCobroId: z.string().optional(),
+				plantillaId: z.string().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -3052,10 +3053,13 @@ export const cobrosRouter = {
 				canal: "whatsapp",
 				telefono: telefonoDestino,
 				mensaje: input.mensaje,
+				plantillaId: input.plantillaId ?? null,
+				providerRequest: result.providerRequest ?? null,
 				result: result.success
 					? {
 							success: true,
 							providerResponse: {
+								...(result.providerResponse ?? {}),
 								templateMessageId: result.templateMessageId,
 								testMode,
 								realTarget: testMode ? input.telefono : undefined,
@@ -3064,9 +3068,10 @@ export const cobrosRouter = {
 					: {
 							success: false,
 							errorMessage: result.error,
-							providerResponse: testMode
-								? { testMode, realTarget: input.telefono }
-								: undefined,
+							providerResponse: {
+								...(result.providerResponse ?? {}),
+								...(testMode ? { testMode, realTarget: input.telefono } : {}),
+							},
 						},
 				createdBy: context.userId,
 			});
@@ -3088,6 +3093,12 @@ export const cobrosRouter = {
 		.input(
 			z.object({
 				plantillaId: z.string(),
+				// Texto del cuerpo editado por el usuario en la modal. Si viene,
+				// se usa este en lugar de `plantilla.cuerpo` para interpolar las
+				// variables por crédito. Las variables ({clienteNombre}, etc.)
+				// que no se reconozcan quedan literales — comportamiento esperado.
+				// Sin este campo, se cae al cuerpo definido en cobros-plantillas.ts.
+				cuerpoEditado: z.string().optional(),
 				// Mismos filtros que getTodosLosCreditos (salvo emailCobrador, que
 				// se deriva del context para evitar que un cobrador mande fuera de
 				// su cartera).
@@ -3096,6 +3107,8 @@ export const cobrosRouter = {
 				numeroSifco: z.string().optional(),
 				time: z.enum(["WEEK", "MONTH", "DUEMONTH", "TODAY"]).optional(),
 				etiquetas: z.array(z.string()).optional(),
+				fechaDesde: z.string().optional(),
+				fechaHasta: z.string().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -3245,7 +3258,11 @@ export const cobrosRouter = {
 				elegibles: 0,
 				enviados: 0,
 				fallidos: 0,
-				descartados: [] as Array<{ numeroSifco: string | null; motivo: string }>,
+				descartados: [] as Array<{
+					numeroSifco: string | null;
+					clienteNombre: string | null;
+					motivo: string;
+				}>,
 				detalle: [] as Array<{
 					numeroSifco: string;
 					telefono: string;
@@ -3300,11 +3317,16 @@ export const cobrosRouter = {
 						anio: new Date().getFullYear(),
 						estado: estadoCartera,
 						cuotasAtrasadas,
-						time: input.time,
+						// Mismo criterio que getTodosLosCreditos: si hay rango de fechas
+						// custom, ignoramos el preset `time` para que no se pisen.
+						time:
+							input.fechaDesde || input.fechaHasta ? undefined : input.time,
 						email_cobrador: emailCobrador,
 						nombre_usuario: isNameSearch ? searchTerm : undefined,
 						numero_credito_sifco: numeroSifcoFiltro,
 						numeros_credito_sifco: sifcosPorEtiquetas,
+						fecha_desde: input.fechaDesde,
+						fecha_hasta: input.fechaHasta,
 						page,
 						perPage,
 					});
@@ -3395,6 +3417,7 @@ export const cobrosRouter = {
 			const candidatos: Candidato[] = [];
 			const descartados: Array<{
 				numeroSifco: string | null;
+				clienteNombre: string | null;
 				motivo: string;
 			}> = [];
 
@@ -3404,17 +3427,18 @@ export const cobrosRouter = {
 				const asesor = credito.asesores;
 				const info = sifco ? locales.get(sifco) : undefined;
 				const telefono = info?.telefono ?? null;
+				const clienteNombre = credito.usuarios.nombre ?? null;
 
 				if (!cuota || Number(cuota) === 0) {
-					descartados.push({ numeroSifco: sifco, motivo: "sin cuota" });
+					descartados.push({ numeroSifco: sifco, clienteNombre, motivo: "sin cuota" });
 					continue;
 				}
 				if (!telefono) {
-					descartados.push({ numeroSifco: sifco, motivo: "sin teléfono" });
+					descartados.push({ numeroSifco: sifco, clienteNombre, motivo: "sin teléfono" });
 					continue;
 				}
 				if (!asesor) {
-					descartados.push({ numeroSifco: sifco, motivo: "sin asesor" });
+					descartados.push({ numeroSifco: sifco, clienteNombre, motivo: "sin asesor" });
 					continue;
 				}
 
@@ -3433,7 +3457,11 @@ export const cobrosRouter = {
 				const totalACobrar =
 					montoMora > 0 ? montoMora + Number(cuota) : 0;
 
-				const mensaje = interpolarPlantilla(plantilla.cuerpo, {
+				const cuerpoBase = input.cuerpoEditado?.trim()
+					? input.cuerpoEditado
+					: plantilla.cuerpo;
+
+				const mensaje = interpolarPlantilla(cuerpoBase, {
 					clienteNombre: credito.usuarios.nombre ?? "",
 					fechaPago: "",
 					cuotaMensual: String(cuota),
@@ -3461,7 +3489,10 @@ export const cobrosRouter = {
 			}
 
 			// 5. Enviar en chunks de 100 y loguear cada resultado.
+			// batchId agrupa todas las filas de cobros_send_logs de este envío
+			// masivo para poder consultarlas como una unidad.
 			const CHUNK_SIZE = 100;
+			const batchId = crypto.randomUUID();
 			let enviados = 0;
 			let fallidos = 0;
 			const detalle: Array<{
@@ -3515,11 +3546,15 @@ export const cobrosRouter = {
 						canal: "whatsapp",
 						telefono: c.telefono,
 						mensaje: c.mensaje,
+						plantillaId: input.plantillaId,
+						batchId,
+						providerRequest: batch.providerRequest ?? null,
 						createdBy: context.userId,
 						result: ok
 							? {
 									success: true,
 									providerResponse: {
+										...(batch.providerResponse ?? {}),
 										templateMessageId: res?.templateMessageId,
 										testMode,
 										realTarget: testMode ? c.telefonoReal : undefined,
@@ -3531,9 +3566,12 @@ export const cobrosRouter = {
 										res?.error ??
 										batch.transportError ??
 										"Error desconocido",
-									providerResponse: testMode
-										? { testMode, realTarget: c.telefonoReal }
-										: undefined,
+									providerResponse: {
+										...(batch.providerResponse ?? {}),
+										...(testMode
+											? { testMode, realTarget: c.telefonoReal }
+											: {}),
+									},
 								},
 					});
 
@@ -3571,6 +3609,7 @@ export const cobrosRouter = {
 
 			return {
 				plantillaId: input.plantillaId,
+				batchId,
 				totalCreditos: creditosFiltrados.length,
 				elegibles: candidatos.length,
 				enviados,
@@ -3589,6 +3628,7 @@ export const cobrosRouter = {
 				asunto: z.string().min(1, "Asunto requerido").max(200),
 				mensaje: z.string().min(1, "Mensaje requerido"),
 				casoCobroId: z.string().optional(),
+				plantillaId: z.string().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -3636,6 +3676,7 @@ export const cobrosRouter = {
 				email: emailDestino,
 				asunto: input.asunto,
 				mensaje: input.mensaje,
+				plantillaId: input.plantillaId ?? null,
 				result: sendError
 					? {
 							success: false,
@@ -3677,6 +3718,7 @@ export const cobrosRouter = {
 					.transform((v) => v.replace(/[^0-9]/g, "")),
 				mensaje: z.string().min(1, "Mensaje requerido"),
 				casoCobroId: z.string().optional(),
+				plantillaId: z.string().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -3736,6 +3778,7 @@ export const cobrosRouter = {
 				canal: "sms",
 				telefono: telefonoDestino,
 				mensaje: input.mensaje,
+				plantillaId: input.plantillaId ?? null,
 				result: sendError
 					? {
 							success: false,
@@ -3795,6 +3838,9 @@ async function persistCobrosSendLog(params: {
 	email?: string;
 	asunto?: string;
 	mensaje: string;
+	plantillaId?: string | null;
+	batchId?: string | null;
+	providerRequest?: Record<string, unknown> | null;
 	createdBy: string;
 	result:
 		| { success: true; providerResponse?: Record<string, unknown> }
@@ -3808,6 +3854,9 @@ async function persistCobrosSendLog(params: {
 			email: params.email,
 			asunto: params.asunto,
 			mensaje: params.mensaje,
+			plantillaId: params.plantillaId ?? null,
+			batchId: params.batchId ?? null,
+			providerRequest: params.providerRequest ?? null,
 			status: params.result.success ? "sent" : "failed",
 			errorMessage: params.result.success ? null : params.result.errorMessage,
 			providerResponse: params.result.providerResponse,

@@ -1003,9 +1003,11 @@ function RouteComponent() {
 									estadoMora: filtroEtapa || undefined,
 									searchTerm: debouncedFilterValue || undefined,
 									numeroSifco: debouncedSifcoFilterValue || undefined,
-									time: timeParam,
+									time: fechaDesde || fechaHasta ? undefined : timeParam,
 									etiquetas:
 										filtroEtiquetas.length > 0 ? filtroEtiquetas : undefined,
+									fechaDesde,
+									fechaHasta,
 								}}
 								etiquetaLabels={ETIQUETA_LABELS_FILTRO}
 								totalDestinatarios={totalCreditos}

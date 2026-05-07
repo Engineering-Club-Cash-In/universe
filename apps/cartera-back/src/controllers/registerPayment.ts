@@ -2034,21 +2034,7 @@ export async function calcularDistribucionCredito(credito_id: number) {
   console.log("\n💰 ========== DISTRIBUCIÓN DEL CRÉDITO ==========");
   console.log(`📋 Crédito ID: ${credito_id}`);
 
-  // 1️⃣ Obtener el crédito
-  const [credito] = await db
-    .select()
-    .from(creditos)
-    .where(eq(creditos.credito_id, credito_id))
-    .limit(1);
-
-  if (!credito) {
-    throw new Error("Crédito no encontrado");
-  }
-
-  const capitalTotal = new Big(credito.capital ?? 0);
-  console.log(`💰 Capital Total: ${capitalTotal.toString()}`);
-
-  // 2️⃣ Obtener inversionistas
+  // 1️⃣ Obtener inversionistas
   const creditoInversionistas = await db
     .select({
       ci: creditos_inversionistas,
@@ -2068,6 +2054,14 @@ export async function calcularDistribucionCredito(credito_id: number) {
     throw new Error("No hay inversionistas en este crédito");
   }
 
+  // El capital total para repartir % es la SUMA de los monto_aportado.
+  // No usar credito.capital: ese baja con cada cuota/abono y se desincroniza
+  // del monto_aportado, inflando los % cuando se calcula después de un UPDATE.
+  const capitalTotal = creditoInversionistas.reduce(
+    (acc, { ci }) => acc.plus(ci.monto_aportado ?? 0),
+    new Big(0)
+  );
+  console.log(`💰 Capital Total (suma monto_aportado): ${capitalTotal.toString()}`);
   console.log(`👥 Total inversionistas: ${creditoInversionistas.length}\n`);
 
   // 3️⃣ Calcular distribución por inversionista

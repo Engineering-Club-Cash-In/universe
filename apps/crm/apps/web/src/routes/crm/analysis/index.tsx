@@ -316,6 +316,7 @@ function AnalysisPage() {
 						licensePlate: opportunity.vehicle.licensePlate,
 						color: opportunity.vehicle.color,
 						isNew: opportunity.vehicle.isNew,
+						isOwned: opportunity.vehicle.isOwned,
 					}
 				: null,
 		});
@@ -820,6 +821,7 @@ function DisbursementSection({
 						licensePlate: opp.vehicle.licensePlate,
 						color: opp.vehicle.color,
 						isNew: opp.vehicle.isNew,
+						isOwned: opp.vehicle.isOwned,
 					}
 				: null,
 		});

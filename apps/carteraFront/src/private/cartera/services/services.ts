@@ -84,7 +84,7 @@ export interface CreditFormValues {
   observaciones: string;
   no_poliza: string;
   como_se_entero: string;
-  asesor: string;
+  asesor_id: number;
   plazo: number;
   porcentaje_royalti: number;
   royalti: number;

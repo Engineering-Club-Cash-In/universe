@@ -1492,7 +1492,11 @@ export async function getPagosByVencimiento({
     if (nameCond) filters.push(nameCond);
   }
   if (asesor) {
-    filters.push(sql`a.nombre ILIKE ${"%" + asesor + "%"}`);
+    const asesorNames = asesor.split(",").map((n) => n.trim()).filter((n) => n.length > 0);
+    if (asesorNames.length > 0) {
+      const orConditions = asesorNames.map((name) => sql`a.nombre ILIKE ${"%" + name + "%"}`);
+      filters.push(sql.join(orConditions, sql` OR `));
+    }
   }
   if (rango_mora) {
     if (rango_mora === "0-30") filters.push(sql`m.cuotas_atrasadas = 1 AND m.activa = true AND p.pagado = false`);

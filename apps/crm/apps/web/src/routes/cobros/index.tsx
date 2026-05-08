@@ -15,6 +15,8 @@ import {
 	TrendingUp,
 	Users,
 } from "lucide-react";
+import { usePersistedDateRange } from "@/hooks/usePersistedDateRange";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { useEffect, useMemo, useState } from "react";
 import type { DateRange } from "react-day-picker";
 import { MassWhatsappModal } from "@/components/cobros/mass-whatsapp-modal";
@@ -290,23 +292,24 @@ const ETIQUETA_LABELS_FILTRO: Record<string, string> = {
 function RouteComponent() {
 	const { data: session } = authClient.useSession();
 	const navigate = useNavigate();
-	const [filtroTemporal, setFiltroTemporal] = useState<FiltroTemporal>("hoy");
+	const [filtroTemporal, setFiltroTemporal] = usePersistedState<FiltroTemporal>("cobros/filtroTemporal", "hoy");
 	const [mostrarCompletadosIncobrables, setMostrarCompletadosIncobrables] =
 		useState(false);
-	const [filtroEtapa, setFiltroEtapa] = useState<string | null>(null);
-	const [filtroEtiquetas, setFiltroEtiquetas] = useState<string[]>([]);
-	const [page, setPage] = useState(1);
-	const [filterValue, setFilterValue] = useState("");
-	const [debouncedFilterValue, setDebouncedFilterValue] = useState("");
-	const [sifcoFilterValue, setSifcoFilterValue] = useState("");
-	const [debouncedSifcoFilterValue, setDebouncedSifcoFilterValue] = useState("");
-	const [pageSize, setPageSize] = useState(25);
-	const [fechaDesde, setFechaDesde] = useState<string | undefined>(undefined);
-	const [fechaHasta, setFechaHasta] = useState<string | undefined>(undefined);
-	const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
+	const [filtroEtapa, setFiltroEtapa] = usePersistedState<string | null>("cobros/filtroEtapa", null);
+	const [filtroEtiquetas, setFiltroEtiquetas] = usePersistedState<string[]>("cobros/filtroEtiquetas", []);
+	const [page, setPage] = usePersistedState<number>("cobros/page", 1);
+	const [filterValue, setFilterValue] = usePersistedState<string>("cobros/filterValue", "");
+	const [debouncedFilterValue, setDebouncedFilterValue] = useState(filterValue);
+	const [sifcoFilterValue, setSifcoFilterValue] = usePersistedState<string>("cobros/sifcoFilterValue", "");
+	const [debouncedSifcoFilterValue, setDebouncedSifcoFilterValue] = useState(sifcoFilterValue);
+	const [pageSize, setPageSize] = usePersistedState<number>("cobros/pageSize", 25);
+	const [dateRange, setDateRange] = usePersistedDateRange("cobros/dateRange");
+	const [pickerRange, setPickerRange] = useState<DateRange | undefined>(dateRange);
+	const fechaDesde = dateRange?.from && dateRange?.to ? dateRange.from.toISOString().slice(0, 10) : undefined;
+	const fechaHasta = dateRange?.from && dateRange?.to ? dateRange.to.toISOString().slice(0, 10) : undefined;
 	const [fechaError, setFechaError] = useState<string | null>(null);
-	const [capitalMin, setCapitalMin] = useState<number | undefined>(undefined);
-	const [capitalMax, setCapitalMax] = useState<number | undefined>(undefined);
+	const [capitalMin, setCapitalMin] = usePersistedState<number | undefined>("cobros/capitalMin", undefined);
+	const [capitalMax, setCapitalMax] = usePersistedState<number | undefined>("cobros/capitalMax", undefined);
 
 	// Debounce para el filtro de búsqueda (1 segundos)
 	useEffect(() => {
@@ -1078,16 +1081,29 @@ function RouteComponent() {
 										})}
 										<Separator orientation="vertical" className="mx-1 h-6" />
 										<DateRangeFilter
-											dateRange={dateRange}
+											dateRange={pickerRange}
 											onDateRangeChange={(range) => {
-												const filtro = getPaymentDateRangeFilter(range);
-												setDateRange(filtro.dateRange);
-												setFechaDesde(filtro.fechaDesde);
-												setFechaHasta(filtro.fechaHasta);
-												setFechaError(filtro.fechaError);
-												if (filtro.fechaDesde && filtro.fechaHasta) {
-													setFiltroTemporal("todos");
+												if (!range) {
+													setDateRange(undefined);
+													setPickerRange(undefined);
+													setFechaError(null);
+													setPage(1);
+													return;
 												}
+												const hoy = new Date();
+												hoy.setHours(0, 0, 0, 0);
+												if (range.from && range.from < hoy) {
+													setFechaError(
+														"La fecha no puede ser menor al día de hoy",
+													);
+													setPickerRange(range); // muestra selección en UI sin afectar la query
+													return;
+												}
+												setFechaError(null);
+												setDateRange(range);    // persiste y afecta la query
+												setPickerRange(range);  // actualiza display
+												if (!range.from || !range.to) return;
+												setFiltroTemporal("todos");
 												setPage(1);
 											}}
 										/>

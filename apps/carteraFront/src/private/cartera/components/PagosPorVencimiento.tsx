@@ -326,6 +326,7 @@ export function PagosPorVencimiento() {
                   <TableHead className="font-bold text-blue-800 text-right">Membresías</TableHead>
                   <TableHead className="font-bold text-blue-800 text-right">Int. CUBE</TableHead>
                   <TableHead className="font-bold text-blue-800 text-right">IVA CUBE</TableHead>
+                  <TableHead className="font-bold text-blue-800 text-right">Royalty</TableHead>
                   <TableHead className="font-bold text-green-800 text-right">Total Pagos Mes</TableHead>
                 </TableRow>
               </TableHeader>
@@ -360,6 +361,9 @@ export function PagosPorVencimiento() {
                     <TableCell className="text-right text-black">{formatQ(item.membresias)}</TableCell>
                     <TableCell className="text-right text-black">{formatQ(item.interes_cube)}</TableCell>
                     <TableCell className="text-right text-black">{formatQ(item.iva_cube)}</TableCell>
+                    <TableCell className="text-right text-black">
+                      {item.cuota_min === 0 ? formatQ(item.royalti) : "--"}
+                    </TableCell>
                     <TableCell className="text-right text-green-700 font-bold bg-green-50/50">
                       {formatQ(item.total_pagos_del_mes)}
                     </TableCell>

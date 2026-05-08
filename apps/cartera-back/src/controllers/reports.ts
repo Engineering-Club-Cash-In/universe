@@ -1492,7 +1492,11 @@ export async function getPagosByVencimiento({
     if (nameCond) filters.push(nameCond);
   }
   if (asesor) {
-    filters.push(sql`a.nombre ILIKE ${"%" + asesor + "%"}`);
+    const asesorNames = asesor.split(",").map((n) => n.trim()).filter((n) => n.length > 0);
+    if (asesorNames.length > 0) {
+      const orConditions = asesorNames.map((name) => sql`a.nombre ILIKE ${"%" + name + "%"}`);
+      filters.push(sql.join(orConditions, sql` OR `));
+    }
   }
   if (rango_mora) {
     if (rango_mora === "0-30") filters.push(sql`m.cuotas_atrasadas = 1 AND m.activa = true AND p.pagado = false`);
@@ -1575,6 +1579,7 @@ export async function getPagosByVencimiento({
       c.numero_credito_sifco,
       u.nombre AS nombre_usuario,
       a.nombre AS asesor,
+      c.royalti,
       MIN(q.numero_cuota) AS cuota_min,
       MAX(q.numero_cuota) AS cuota_max,
       COALESCE(SUM(p.capital_restante::numeric + COALESCE(p.abono_capital, 0)::numeric), 0) AS capital_restante,
@@ -1602,7 +1607,7 @@ export async function getPagosByVencimiento({
     LEFT JOIN cartera.moras_credito m ON c.credito_id = m.credito_id AND m.activa = true
     ${cubeSubquery}
     WHERE ${whereClause}
-    GROUP BY c.credito_id, c.numero_credito_sifco, u.nombre, a.nombre
+    GROUP BY c.credito_id, c.numero_credito_sifco, u.nombre, a.nombre, c.royalti
     HAVING SUM(${totalFilaSql}) <> 0
     ORDER BY c.numero_credito_sifco
     LIMIT ${pageSize} OFFSET ${offset}

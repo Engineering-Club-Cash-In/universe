@@ -176,6 +176,7 @@ const creditSchema = z.object({
   nit: z.string().max(1000),
   otros: z.number().min(0),
   reserva: z.number().min(0),
+  asesor_id: z.number().int().positive().optional(),
   is_vehiculo_propio: z.boolean().optional().default(false),
   
   // Campos opcionales de dirección
@@ -299,8 +300,8 @@ const insertCreditAndRelated = async (creditData: CreditData): Promise<{
   );
 
   console.log("🎯 Aplicando load balancing de asesores...");
-  const asesor_id = await getAsesorConMenorCarga();
-  console.log(`✅ Asesor asignado automáticamente: ${asesor_id}`);
+  const asesor_id = creditData.asesor_id || await getAsesorConMenorCarga();
+  console.log(`✅ Asesor asignado: ${asesor_id}`);
 
   const formatCredit = creditData.inversionistas.length > 1 &&
     creditData.inversionistas.some(

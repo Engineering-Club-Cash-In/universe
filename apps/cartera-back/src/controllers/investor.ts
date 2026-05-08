@@ -6452,6 +6452,39 @@ export async function resumenGlobalLiquidaciones(
     }
   }
 
+  const idsInactivosResultado = result
+    .filter((r) => r.status === "inactivo")
+    .map((r) => r.inversionista_id);
+
+  if (idsInactivosResultado.length > 0) {
+    const aportadosRows = await db
+      .select({
+        inversionista_id: creditos_inversionistas.inversionista_id,
+        total: sql<string>`COALESCE(SUM(${creditos_inversionistas.monto_aportado}), 0)`,
+      })
+      .from(creditos_inversionistas)
+      .where(inArray(creditos_inversionistas.inversionista_id, idsInactivosResultado))
+      .groupBy(creditos_inversionistas.inversionista_id);
+
+    const montoAportadoPorInversionista = new Map(
+      aportadosRows.map((row) => [row.inversionista_id, Number(row.total)])
+    );
+
+    const idsADescartar = new Set(
+      idsInactivosResultado.filter(
+        (id) => (montoAportadoPorInversionista.get(id) ?? 0) <= 0
+      )
+    );
+
+    if (idsADescartar.size > 0) {
+      for (let i = result.length - 1; i >= 0; i--) {
+        if (idsADescartar.has(result[i].inversionista_id)) {
+          result.splice(i, 1);
+        }
+      }
+    }
+  }
+
   console.log("resumen-global-liquidaciones estado:", estado);
   console.log(
     "resumen-global-liquidaciones total:",

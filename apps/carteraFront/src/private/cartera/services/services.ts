@@ -84,7 +84,7 @@ export interface CreditFormValues {
   observaciones: string;
   no_poliza: string;
   como_se_entero: string;
-  asesor: string;
+  asesor_id: number;
   plazo: number;
   porcentaje_royalti: number;
   royalti: number;
@@ -3573,6 +3573,7 @@ export interface PagoPorVencimientoItem {
   iva_cube: string;
   total_pagos_del_mes: string;
   dias_mora: string;
+  royalti: string;
 }
 
 export interface PagoPorVencimientoTotales {

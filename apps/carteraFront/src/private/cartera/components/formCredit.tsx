@@ -16,6 +16,7 @@ import {
   ListChecks,
 } from "lucide-react";
 import { useCatalogs } from "../hooks/catalogs";
+import { User as UserIcon } from "lucide-react";
 import { OtrosField } from "./rubros";
 import React from "react";
 
@@ -99,6 +100,12 @@ const fields = [
     label: "Categoría",
     type: "text",
     icon: <BookUser className="text-blue-500 mr-2 w-5 h-5" />,
+  },
+  {
+    name: "asesor_id",
+    label: "Asesor",
+    type: "text",
+    icon: <UserIcon className="text-blue-500 mr-2 w-5 h-5" />,
   },
   {
     name: "plazo",
@@ -192,8 +199,9 @@ export function CreditForm() {
   // Define the type for an investor
   type Investor = { inversionista_id: number; nombre: string };
 
-  const { investors } = useCatalogs() as {
+  const { investors, advisors } = useCatalogs() as {
     investors: Investor[];
+    advisors: any[];
     loading: boolean;
   };
   const reservaEditadoPorUsuario = React.useRef(false);
@@ -247,7 +255,7 @@ export function CreditForm() {
                           "w-full border rounded-lg px-3 py-2 bg-white text-gray-900",
                           formik.errors.categoria && formik.touched.categoria
                             ? "border-red-500 focus:ring-red-500"
-                            : "border-gray-300",
+                    : "border-gray-300",
                         ].join(" ")}
                       >
                         <option value="">Seleccione una categoría</option>
@@ -258,13 +266,51 @@ export function CreditForm() {
                         ))}
                       </select>
                       {formik.errors.categoria && formik.touched.categoria && (
-                        <div className="text-red-500 text-xs">
-                          {formik.errors.categoria}
-                        </div>
+                        <span className="text-red-500 text-xs">
+                          {formik.errors.categoria as string}
+                        </span>
                       )}
                     </div>
                   );
                 }
+                if (field.name === "asesor_id") {
+                  return (
+                    <div key={field.name} className="grid gap-1 w-full">
+                      <Label className="text-gray-900 font-medium mb-1 flex items-center">
+                        {field.icon}
+                        Asesor
+                      </Label>
+                      <select
+                        id="asesor_id"
+                        name="asesor_id"
+                        value={formik.values.asesor_id}
+                        onChange={(e) => {
+                          formik.setFieldValue("asesor_id", Number(e.target.value));
+                        }}
+                        onBlur={formik.handleBlur}
+                        className={[
+                          "w-full border rounded-lg px-3 py-2 bg-white text-gray-900",
+                          formik.errors.asesor_id && formik.touched.asesor_id
+                            ? "border-red-500 focus:ring-red-500"
+                            : "border-gray-300",
+                        ].join(" ")}
+                      >
+                        <option value="">Seleccione un asesor</option>
+                        {advisors.map((adv: any) => (
+                          <option key={adv.asesor_id} value={adv.asesor_id}>
+                            {adv.nombre}
+                          </option>
+                        ))}
+                      </select>
+                      {formik.errors.asesor_id && formik.touched.asesor_id && (
+                        <span className="text-red-500 text-xs">
+                          {formik.errors.asesor_id as string}
+                        </span>
+                      )}
+                    </div>
+                  );
+                }
+
                 if (field.name === "reserva") {
                   return (
                     <div key={field.name} className="grid gap-1 w-full">
@@ -315,7 +361,7 @@ export function CreditForm() {
                       id={field.name}
                       name={field.name}
                       type={field.type}
-                      value={value}
+                      value={value as any}
                       onChange={formik.handleChange}
                       onBlur={formik.handleBlur}
                       className="w-full border rounded-lg px-3 py-2 bg-white text-gray-900"

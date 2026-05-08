@@ -51,6 +51,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from "@/components/ui/popover";
+import {
 	Select,
 	SelectContent,
 	SelectItem,
@@ -78,6 +83,16 @@ interface BoletaPendiente {
 	fecha_subida: string;
 }
 
+interface CuentaExtra {
+	cuenta_extra_id: number;
+	banco_id: number;
+	banco_nombre: string | null;
+	tipo_cuenta: string;
+	numero_cuenta: string;
+	moneda: "quetzales" | "dolares";
+	motivo_cuenta: string;
+}
+
 interface ResumenInversionista {
 	inversionista_id: number;
 	nombre: string;
@@ -88,6 +103,7 @@ interface ResumenInversionista {
 	banco: string | null;
 	tipo_cuenta: string | null;
 	numero_cuenta: string | null;
+	cuentas_extra?: CuentaExtra[] | null;
 	total_abono_capital: string;
 	total_abono_interes: string;
 	total_abono_iva: string;
@@ -580,6 +596,60 @@ function DetailItem({ label, value }: { label: string; value: string }) {
 	);
 }
 
+function CuentasExtraIndicator({ cuentas }: { cuentas: CuentaExtra[] }) {
+	const count = cuentas.length;
+	const label = count === 1 ? "1 cuenta adicional" : `${count} cuentas adicionales`;
+
+	return (
+		<Popover>
+			<PopoverTrigger asChild>
+				<button
+					type="button"
+					className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 font-medium text-[11px] text-sky-700 transition-colors hover:bg-sky-100 dark:border-sky-900/60 dark:bg-sky-950/50 dark:text-sky-300 dark:hover:bg-sky-900/40"
+				>
+					<Eye className="h-3.5 w-3.5" />
+					{label}
+				</button>
+			</PopoverTrigger>
+			<PopoverContent align="start" className="w-80 p-0">
+				<div className="border-b px-3.5 py-2.5">
+					<p className="font-semibold text-sm">Cuentas adicionales</p>
+					<p className="text-[11px] text-muted-foreground">
+						Cuentas extra registradas para este inversionista
+					</p>
+				</div>
+				<ul className="max-h-72 divide-y overflow-y-auto">
+					{cuentas.map((c) => (
+						<li key={c.cuenta_extra_id} className="px-3.5 py-2.5">
+							<div className="flex items-baseline justify-between gap-2">
+								<p className="truncate font-semibold text-[13px]">
+									{c.banco_nombre ?? "Sin banco"}
+								</p>
+								<span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground uppercase">
+									{c.moneda === "dolares" ? "USD" : "GTQ"}
+								</span>
+							</div>
+							<div className="mt-0.5 flex items-baseline justify-between gap-2">
+								<p className="font-mono text-[12px] text-foreground/80 tabular-nums tracking-wider">
+									{c.numero_cuenta}
+								</p>
+								<p className="shrink-0 text-[10px] text-muted-foreground">
+									{c.tipo_cuenta}
+								</p>
+							</div>
+							{c.motivo_cuenta && (
+								<p className="mt-1.5 rounded-md bg-muted/60 px-2 py-1 text-[11px] text-foreground/70 leading-snug">
+									{c.motivo_cuenta}
+								</p>
+							)}
+						</li>
+					))}
+				</ul>
+			</PopoverContent>
+		</Popover>
+	);
+}
+
 function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 	const [dialogOpen, setDialogOpen] = useState(false);
 	const [confirmLiquidarSinBoletaOpen, setConfirmLiquidarSinBoletaOpen] =
@@ -672,6 +742,12 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 					)}
 				</div>
 
+				{inv.cuentas_extra && inv.cuentas_extra.length > 0 && (
+					<div className="px-3 pt-2">
+						<CuentasExtraIndicator cuentas={inv.cuentas_extra} />
+					</div>
+				)}
+
 				{/* Detalle financiero + tags */}
 				<div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-5 pt-3 pb-1.5">
 					<DetailItem label="Cap" value={formatCurrency(inv.total_abono_capital, inv.currencySymbol)} />
@@ -693,13 +769,13 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 				</div>
 
 				{/* Acción */}
-				<div className="flex gap-2 px-4 pt-1 pb-4">
+				<div className="px-4 pt-1 pb-4">
 					{estadoResumen === "liquidated" ? (
 						tieneBoletaLiquidacion ? (
 							<Button
 								variant="ghost"
 								size="sm"
-								className="h-8 flex-1 gap-1.5 text-xs"
+								className="h-8 w-full gap-1.5 text-xs"
 								onClick={() =>
 									window.open(inv.boleta_liquidacion!.boleta_url, "_blank")
 								}
@@ -708,58 +784,66 @@ function InversionistaCard({ inv }: { inv: ResumenInversionista }) {
 								Ver boleta
 							</Button>
 						) : (
-							<div className="flex h-8 flex-1 items-center justify-center rounded-md bg-muted font-medium text-muted-foreground text-xs">
+							<div className="flex h-8 w-full items-center justify-center rounded-md bg-muted font-medium text-muted-foreground text-xs">
 								Completada
 							</div>
 						)
 					) : tieneBoleta ? (
-						<Button
-							variant="ghost"
-							size="sm"
-							className="h-8 flex-1 gap-1.5 text-xs"
-							onClick={() =>
-								window.open(inv.boleta_pendiente!.boleta_url, "_blank")
-							}
-						>
-							<Eye className="h-3.5 w-3.5" />
-							Ver
-						</Button>
-					) : (
-						<Button
-							variant="outline"
-							size="sm"
-							className="h-8 flex-1 gap-1.5 text-xs"
-							onClick={() => setDialogOpen(true)}
-						>
-							<Upload className="h-3.5 w-3.5" />
-							Subir
-						</Button>
-					)}
-
-					{estadoResumen !== "liquidated" && (
-						<Button
-							variant="default"
-							size="sm"
-							className="h-8 flex-1 gap-1.5 bg-emerald-600 text-xs hover:bg-emerald-700"
-							disabled={liquidateMutation.isPending}
-							onClick={() => {
-								if (!tieneBoleta) {
-									setConfirmLiquidarSinBoletaOpen(true);
-									return;
+						<div className="flex gap-2">
+							<Button
+								variant="ghost"
+								size="sm"
+								className="h-8 flex-1 gap-1.5 text-xs"
+								onClick={() =>
+									window.open(inv.boleta_pendiente!.boleta_url, "_blank")
 								}
-
-								liquidateMutation.mutate({
-									inversionista_id: inv.inversionista_id,
-								});
-							}}
-						>
-							{liquidateMutation.isPending ? (
-								<Loader2 className="h-3.5 w-3.5 animate-spin" />
-							) : (
-								<Banknote className="h-3.5 w-3.5" />
-							)}
-							Liquidar
-						</Button>
+							>
+								<Eye className="h-3.5 w-3.5" />
+								Ver
+							</Button>
+							<Button
+								size="sm"
+								className="h-8 flex-1 gap-1.5 bg-emerald-600 text-xs text-white shadow-sm hover:bg-emerald-700"
+								disabled={liquidateMutation.isPending}
+								onClick={() =>
+									liquidateMutation.mutate({
+										inversionista_id: inv.inversionista_id,
+									})
+								}
+							>
+								{liquidateMutation.isPending ? (
+									<Loader2 className="h-3.5 w-3.5 animate-spin" />
+								) : (
+									<Banknote className="h-3.5 w-3.5" />
+								)}
+								Liquidar
+							</Button>
+						</div>
+					) : (
+						<div className="flex flex-col gap-2">
+							<Button
+								size="sm"
+								className="h-9 w-full gap-1.5 bg-emerald-600 text-xs text-white shadow-sm hover:bg-emerald-700"
+								disabled={liquidateMutation.isPending}
+								onClick={() => setDialogOpen(true)}
+							>
+								<Upload className="h-3.5 w-3.5" />
+								Subir y liquidar
+							</Button>
+							<Button
+								size="sm"
+								className="h-9 w-full gap-1.5 bg-amber-600 text-xs text-white shadow-sm hover:bg-amber-700"
+								disabled={liquidateMutation.isPending}
+								onClick={() => setConfirmLiquidarSinBoletaOpen(true)}
+							>
+								{liquidateMutation.isPending ? (
+									<Loader2 className="h-3.5 w-3.5 animate-spin" />
+								) : (
+									<Banknote className="h-3.5 w-3.5" />
+								)}
+								Liquidar sin boleta
+							</Button>
+						</div>
 					)}
 				</div>
 			</Card>

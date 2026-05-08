@@ -1841,7 +1841,7 @@ export async function obtenerCreditosConPagosPendientes(
       .where(
         and(
           eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId),
-          inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "PENDIENTE_CANCELACION", "EN_CONVENIO"]),
+          inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "PENDIENTE_CANCELACION", "EN_CONVENIO","INCOBRABLE"]),
           eq(creditos_inversionistas_espejo.status, "completado"),
           lt(creditos_inversionistas_espejo.fecha_inicio_participacion, rangoMesActual.inicio)
         )

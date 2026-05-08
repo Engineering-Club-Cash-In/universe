@@ -304,6 +304,7 @@ function RouteComponent() {
 	const [debouncedSifcoFilterValue, setDebouncedSifcoFilterValue] = useState(sifcoFilterValue);
 	const [pageSize, setPageSize] = usePersistedState<number>("cobros/pageSize", 25);
 	const [dateRange, setDateRange] = usePersistedDateRange("cobros/dateRange");
+	const [pickerRange, setPickerRange] = useState<DateRange | undefined>(dateRange);
 	const fechaDesde = dateRange?.from && dateRange?.to ? dateRange.from.toISOString().slice(0, 10) : undefined;
 	const fechaHasta = dateRange?.from && dateRange?.to ? dateRange.to.toISOString().slice(0, 10) : undefined;
 	const [fechaError, setFechaError] = useState<string | null>(null);
@@ -1080,10 +1081,11 @@ function RouteComponent() {
 										})}
 										<Separator orientation="vertical" className="mx-1 h-6" />
 										<DateRangeFilter
-											dateRange={dateRange}
+											dateRange={pickerRange}
 											onDateRangeChange={(range) => {
 												if (!range) {
 													setDateRange(undefined);
+													setPickerRange(undefined);
 													setFechaError(null);
 													setPage(1);
 													return;
@@ -1094,11 +1096,12 @@ function RouteComponent() {
 													setFechaError(
 														"La fecha no puede ser menor al día de hoy",
 													);
-													setDateRange(range);
+													setPickerRange(range); // muestra selección en UI sin afectar la query
 													return;
 												}
 												setFechaError(null);
-												setDateRange(range);
+												setDateRange(range);    // persiste y afecta la query
+												setPickerRange(range);  // actualiza display
 												if (!range.from || !range.to) return;
 												setFiltroTemporal("todos");
 												setPage(1);

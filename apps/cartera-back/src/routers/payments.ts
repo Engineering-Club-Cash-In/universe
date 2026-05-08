@@ -400,6 +400,7 @@ export const paymentRouter = new Elysia()
         tipo_fecha: query.tipo_fecha as "vencimiento" | "creacion",
         asesor: query.asesor,
         rango_mora: query.rango_mora,
+        excel: query.excel,
       });
       set.status = 200;
       return { success: true, ...result };
@@ -425,6 +426,7 @@ export const paymentRouter = new Elysia()
       tipo_fecha: t.Optional(t.String({ default: "vencimiento" })),
       asesor: t.Optional(t.String()),
       rango_mora: t.Optional(t.String()),
+      excel: t.Optional(t.Boolean({ default: false })),
     }),
   }
 )

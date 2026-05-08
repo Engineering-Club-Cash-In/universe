@@ -3597,6 +3597,7 @@ export interface PagosPorVencimientoResponse {
     totalPages: number;
   };
   totales: PagoPorVencimientoTotales;
+  excelUrl?: string;
 }
 
 export interface PagosPorVencimientoParams {
@@ -3609,6 +3610,7 @@ export interface PagosPorVencimientoParams {
   tipo_fecha?: "vencimiento" | "creacion";
   asesor?: string;
   rango_mora?: string;
+  excel?: boolean;
 }
 
 export async function getPagosPorVencimiento(
@@ -3635,6 +3637,7 @@ export async function getPagosPorVencimiento(
         ...(params.rango_mora && {
           rango_mora: params.rango_mora,
         }),
+        excel: params.excel,
       },
     }
   );

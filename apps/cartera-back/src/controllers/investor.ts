@@ -2,10 +2,10 @@
 import { z } from "zod";
 import { formatToUSD } from "../utils/functions/currencyConverter";
 import { USD_EXCHANGE_RATE } from "../utils/functions/const";
-import { 
-  generarYSubirPDFInversionista, 
-  generarPDFBuffer, 
-  generarYSubirExcelInversionista 
+import {
+  generarYSubirPDFInversionista,
+  generarPDFBuffer,
+  generarYSubirExcelInversionista
 } from "../utils/functions/generalFunctions";
 import { db } from "../database/index";
 import {
@@ -26,7 +26,7 @@ import {
   liquidacion_locks,
   documentos_inversionista,
   abonos_capital,
-  formatoCuentaBanco,
+  cuentas_extra_inversionista,
 } from "../database/db/schema";
 import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
 import { eq, and, or, sql, inArray, ilike, like, desc, count, SQL, isNull, isNotNull, ne } from "drizzle-orm";
@@ -57,12 +57,12 @@ type OrigenDatos = "original" | "espejo";
 export type TipoConsulta = "originales" | "espejos" | "ambas";
 
 // 🔥 MEJORADO: Usar tipos genéricos de Drizzle para type-safety completo
-type CreditosInversionistasTable = 
-  | typeof creditos_inversionistas 
+type CreditosInversionistasTable =
+  | typeof creditos_inversionistas
   | typeof creditos_inversionistas_espejo;
 
-type PagosCreditoInversionistasTable = 
-  | typeof pagos_credito_inversionistas 
+type PagosCreditoInversionistasTable =
+  | typeof pagos_credito_inversionistas
   | typeof pagos_credito_inversionistas_espejo;
 
 // Configuración de tablas según tipo
@@ -99,7 +99,7 @@ async function consultarCreditosInversionista(
 ) {
   // 🔥 Type assertion segura: sabemos que ambas tablas tienen la misma estructura
   const tabla = config.creditosInversionistas as typeof creditos_inversionistas;
-  
+
   return await db
     .select({
       credito_id: tabla.credito_id,
@@ -1008,12 +1008,10 @@ export async function processAndReplaceCreditInvestorsReverse(
   }
 
   // 4. Obtener TODOS los pagos de esa cuota
-  const pagosDeEsaCuota = pago.cuota_id === null
-    ? []
-    : await db
-        .select({ pago_id: pagos_credito.pago_id })
-        .from(pagos_credito)
-        .where(eq(pagos_credito.cuota_id, pago.cuota_id));
+  const pagosDeEsaCuota = await db
+    .select({ pago_id: pagos_credito.pago_id })
+    .from(pagos_credito)
+    .where(eq(pagos_credito.cuota_id, pago.cuota_id));
 
   const pagoIds = pagosDeEsaCuota.map((p) => p.pago_id);
 
@@ -1141,13 +1139,7 @@ export async function reversePagosEspejoPorInversionista(
   }
 
   // 5. Obtener cuotas asociadas a los pagos y marcarlas como NO liquidadas
-  const pagoIds = [
-    ...new Set(
-      pagosEspejo
-        .map((p) => p.pago_id)
-        .filter((id): id is number => id !== null)
-    ),
-  ];
+  const pagoIds = [...new Set(pagosEspejo.map((p) => p.pago_id))];
   console.log(`\n📅 Revirtiendo liquidación de cuotas (${pagoIds.length} pago_ids únicos)...`);
 
   if (pagoIds.length > 0) {
@@ -1263,8 +1255,8 @@ export async function resumeInvestor(
       email: inversionistas.email,
    tiene_boleta_pendiente: sql<boolean>`
       EXISTS (
-        SELECT 1 
-        FROM cartera.boletas_pago_inversionista 
+        SELECT 1
+        FROM cartera.boletas_pago_inversionista
         WHERE cartera.boletas_pago_inversionista.inversionista_id = ${inversionistas.inversionista_id}
         AND cartera.boletas_pago_inversionista.estado = 'PENDIENTE'
       )
@@ -1562,7 +1554,7 @@ export async function resumeInvestor(
               const isrReinv = inv.emite_factura ? new Big(0) : reinvInteres.times(0.07);
               const totalReinvNeta = reinvCapital.plus(reinvInteres).minus(isrReinv);
               const netReinvInt = reinvInteres.minus(isrReinv);
-              
+
               total_reinversion_neta_global = total_reinversion_neta_global.plus(totalReinvNeta);
               total_reinversion_capital = total_reinversion_capital.plus(reinvCapital);
               total_reinversion_interes = total_reinversion_interes.plus(netReinvInt);
@@ -2001,7 +1993,7 @@ export async function getInvestorTotalsGlobales(
       }
       subtotal.total_cuota = subtotal.total_cuota.plus(cuota_inversor);
       subtotal.totalAbonoGeneralInteres = subtotal.totalAbonoGeneralInteres.plus(abonoGeneralInteres);
-      
+
       // 🔑 ACUMULADOR NETO INDEPENDIENTE
       const pagoNetoGlobal = abono_capital.plus(interesTotal);
       subtotal.total_cuota_sin_reinversion = subtotal.total_cuota_sin_reinversion.plus(pagoNetoGlobal);
@@ -2249,13 +2241,7 @@ export async function revertirLiquidacion(liquidacion_id: number) {
     // PASO 5: Revertir cuotas del crédito
     //   Marcamos liquidado_inversionistas = false y limpiamos fecha
     // ──────────────────────────────────────────────
-    const allPagoIds = [
-      ...new Set(
-        pagosLiquidados
-          .map((p) => p.pago_id)
-          .filter((id): id is number => id !== null)
-      ),
-    ];
+    const allPagoIds = [...new Set(pagosLiquidados.map((p) => p.pago_id))];
     if (allPagoIds.length > 0) {
       const cuotasDeLosPagos = await tx
         .select({ cuota_id: pagos_credito.cuota_id })
@@ -2669,7 +2655,7 @@ export async function getInvestorMirrorSummary(
       sg.total_isr                = sg.total_isr.plus(isr);
       sg.total_cuota              = sg.total_cuota.plus(cuota_inversor);
       sg.total_abono_general_interes = sg.total_abono_general_interes.plus(abonoGeneralInteres);
-      
+
       // 🔑 ACUMULADOR NETO INDEPENDIENTE
       const pagoNetoEspejo = abono_capital.plus(interesTotal);
       sg.total_cuota_sin_reinversion = sg.total_cuota_sin_reinversion.plus(pagoNetoEspejo);
@@ -2805,8 +2791,8 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
   let totalPagosLiquidados = 0;
   let totalLiquidaciones = 0;
   let inversionistasSaltados = 0;
-  const reportesGenerados: Array<{ 
-    inversionista_id: number; 
+  const reportesGenerados: Array<{
+    inversionista_id: number;
     url: string;
     boleta_id: number;
     boleta_url: string;
@@ -2990,26 +2976,14 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
         }
 
         // Marcar cuotas como liquidado_inversionistas
-        const allPagoIds = [
-          ...new Set(
-            pagosNoLiquidados
-              .map((p) => p.pago_id)
-              .filter((id): id is number => id !== null)
-          ),
-        ];
+        const allPagoIds = [...new Set(pagosNoLiquidados.map((p) => p.pago_id))];
         if (allPagoIds.length > 0) {
           const cuotasDeLosPagos = await tx
             .select({ cuota_id: pagos_credito.cuota_id })
             .from(pagos_credito)
             .where(inArray(pagos_credito.pago_id, allPagoIds));
 
-          const uniqueCuotaIds = [
-            ...new Set(
-              cuotasDeLosPagos
-                .map((c) => c.cuota_id)
-                .filter((id): id is number => id !== null)
-            ),
-          ];
+          const uniqueCuotaIds = [...new Set(cuotasDeLosPagos.map((c) => c.cuota_id))];
           if (uniqueCuotaIds.length > 0) {
             const fechaGuatemala = new Date(
               new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" })
@@ -3087,7 +3061,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
             try {
               // Validar que subtotal existe para evitar crash
               const subtotalStr = inversionista.subtotal?.total_cuota_con_reinversion?.toString() || "0";
-              
+
               const emailResult = await sendLiquidationEmail({
                 to: inversionista.email,
                 investorName: inversionista.nombre_inversionista,
@@ -3101,7 +3075,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
                   content: excelBuffer,
                 }
               });
-              
+
               if (emailResult.success) {
                 console.log(`  ✅ Correo enviado exitosamente a ${inversionista.email}`);
               } else {
@@ -3187,6 +3161,49 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
         // forzamos el status a `inactivo` después.
         // ========================================
         try {
+          // 5A) Salida automática por créditos con devolucion_cube=true
+          //     (independiente del status del inversionista)
+          const creditoIdsConPagos = [
+            ...new Set(pagosNoLiquidados.map((p) => p.credito_id)),
+          ];
+
+          if (creditoIdsConPagos.length > 0) {
+            const creditosConDevolucion = await db
+              .select({ credito_id: creditos.credito_id })
+              .from(creditos)
+              .where(
+                and(
+                  inArray(creditos.credito_id, creditoIdsConPagos),
+                  eq(creditos.estado_devolucion, 'VERIFICADO')
+                )
+              );
+
+            const creditoIdsDevolucion = creditosConDevolucion.map((c) => c.credito_id);
+
+            if (creditoIdsDevolucion.length > 0) {
+              console.log(
+                `  🚪 Inversionista ${inv_id} → exitInvestor por estado_devolucion=VERIFICADO en ${creditoIdsDevolucion.length} crédito(s)`
+              );
+
+              const exitResultDevolucion = await exitInvestor({
+                body: {
+                  inversionista_id: inv_id,
+                  creditos: creditoIdsDevolucion,
+                },
+                set: { status: 200 },
+                request: {} as any,
+              });
+
+              // Después de separar en exitInvestor, dejar estado_devolucion en NO_APLICA
+              await db
+                .update(creditos)
+                .set({ estado_devolucion: "NO_APLICA" })
+                .where(inArray(creditos.credito_id, creditoIdsDevolucion));
+
+              console.log(`  ✅ Salida por estado_devolucion=VERIFICADO ejecutada y créditos reseteados a NO_APLICA:`, exitResultDevolucion);
+            }
+          }
+
           const [invRow] = await db
             .select({ status: inversionistas.status })
             .from(inversionistas)
@@ -3226,6 +3243,24 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
               );
             }
           }
+
+          // 5C) Regla de cierre: tras liquidar, cualquier estado de devolución
+          // del/los crédito(s) procesado(s) vuelve a NO_APLICA.
+          if (creditoIdsConPagos.length > 0) {
+            await db
+              .update(creditos)
+              .set({ estado_devolucion: "NO_APLICA" })
+              .where(
+                and(
+                  inArray(creditos.credito_id, creditoIdsConPagos),
+                  ne(creditos.estado_devolucion, "NO_APLICA")
+                )
+              );
+
+            console.log(
+              `  ✅ Estado devolución reseteado a NO_APLICA en ${creditoIdsConPagos.length} crédito(s) procesado(s) en liquidación`
+            );
+          }
         } catch (exitError) {
           console.error(
             `  ❌ Error en salida automática (liquidación ya guardada):`,
@@ -3250,7 +3285,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
 
   // 📝 PASO 8: Mensaje final
   const mensaje = inversionista_id
-    ? totalLiquidaciones > 0 
+    ? totalLiquidaciones > 0
       ? `Inversionista ${inversionista_id} liquidado correctamente`
       : `No se pudo liquidar al inversionista ${inversionista_id}`
     : `${totalLiquidaciones} inversionistas liquidados correctamente (${inversionistasSaltados} saltados)`;
@@ -3261,7 +3296,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
   console.log(`   - Excels generados: ${reportesGenerados.length}`);
   console.log(`   - Boletas procesadas: ${reportesGenerados.length}`);
   console.log(`   - Inversionistas saltados: ${inversionistasSaltados}`);
-  
+
   if (errores.length > 0) {
     console.log(`\n⚠️ INVERSIONISTAS NO PROCESADOS:`);
     errores.forEach(e => {
@@ -3712,11 +3747,11 @@ export const findOrCreateInvestor = async (
   emite_factura: boolean = true
 ) => {
   console.log(`🔍 Buscando/creando inversionista: "${nombre}"`);
-  
+
   // 🧹 NORMALIZAR nombre
   const nombreNormalizado = nombre.trim();
   const nombreLower = nombreNormalizado.toLowerCase();
-  
+
   // 1️⃣ BÚSQUEDA EXACTA (case insensitive)
   console.log(`   🎯 Estrategia 1: Búsqueda exacta...`);
   const exactMatch = await db
@@ -3736,7 +3771,7 @@ export const findOrCreateInvestor = async (
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
-  
+
   const withoutAccents = await db
     .select()
     .from(inversionistas)
@@ -3744,8 +3779,8 @@ export const findOrCreateInvestor = async (
       sql`LOWER(
         TRIM(
           translate(
-            ${inversionistas.nombre}, 
-            'áéíóúÁÉÍÓÚñÑ', 
+            ${inversionistas.nombre},
+            'áéíóúÁÉÍÓÚñÑ',
             'aeiouAEIOUnN'
           )
         )
@@ -3760,20 +3795,20 @@ export const findOrCreateInvestor = async (
 
   // 3️⃣ BÚSQUEDA "COMIENZA CON" - Para nombres con apellidos extras
   console.log(`   🎯 Estrategia 3: Búsqueda "comienza con"...`);
-  
+
   // 🔥 BUSCAR SI ALGÚN NOMBRE EN BD ESTÁ CONTENIDO EN EL NOMBRE DEL EXCEL
   // Ejemplo: Si en BD hay "Ana Lucia Salvatierra" y en Excel "Ana Lucia Salvatierra Mayen"
   //          debería encontrar el de BD porque "Ana Lucia Salvatierra" está contenido
-  
+
   const allInvestors = await db
     .select()
     .from(inversionistas);
-  
+
   // Buscar si el nombre del Excel COMIENZA con algún nombre de BD
   const startsWithMatch = allInvestors.find(inv => {
     const invNombreLower = inv.nombre.toLowerCase().trim();
     const nombreLowerTrim = nombreLower.trim();
-    
+
     // Si el nombre de BD está contenido al inicio del nombre del Excel
     return nombreLowerTrim.startsWith(invNombreLower) && nombreLowerTrim.length > invNombreLower.length;
   });
@@ -3786,11 +3821,11 @@ export const findOrCreateInvestor = async (
 
   // 4️⃣ BÚSQUEDA INVERSA - Si en BD hay un nombre más largo
   console.log(`   🎯 Estrategia 4: Búsqueda inversa (nombre más largo en BD)...`);
-  
+
   const containsMatch = allInvestors.find(inv => {
     const invNombreLower = inv.nombre.toLowerCase().trim();
     const nombreLowerTrim = nombreLower.trim();
-    
+
     // Si el nombre del Excel está contenido al inicio del nombre de BD
     return invNombreLower.startsWith(nombreLowerTrim) && invNombreLower.length > nombreLowerTrim.length;
   });
@@ -3803,18 +3838,18 @@ export const findOrCreateInvestor = async (
 
   // 5️⃣ BÚSQUEDA POR PALABRAS CLAVE (más restrictiva)
   console.log(`   🎯 Estrategia 5: Búsqueda por palabras clave...`);
-  
+
   // Dividir en palabras (ignorar palabras muy cortas como "de", "la", etc.)
   const palabras = nombreNormalizado
     .split(/\s+/)
     .filter(p => p.length > 2 && !['del', 'de', 'la', 'los', 'las'].includes(p.toLowerCase()));
-  
+
   if (palabras.length >= 2) { // Solo si tiene al menos 2 palabras significativas
     // Buscar inversionistas que tengan TODAS las palabras importantes
     const wordMatches = allInvestors.filter(inv => {
       const invWords = inv.nombre.toLowerCase().split(/\s+/);
       // Verificar que TODAS las palabras del Excel estén en el nombre de BD
-      return palabras.every(palabra => 
+      return palabras.every(palabra =>
         invWords.some(w => w.includes(palabra.toLowerCase()))
       );
     });
@@ -3827,12 +3862,12 @@ export const findOrCreateInvestor = async (
       wordMatches.forEach((inv, idx) => {
         console.log(`      ${idx + 1}. ${inv.nombre} (ID: ${inv.inversionista_id})`);
       });
-      
+
       // 🔥 Usar el que tenga el nombre más corto (más probable que sea el base)
-      const shortest = wordMatches.reduce((prev, curr) => 
+      const shortest = wordMatches.reduce((prev, curr) =>
         prev.nombre.length < curr.nombre.length ? prev : curr
       );
-      
+
       console.log(`   ✅ Usando el más corto: ${shortest.nombre} (ID: ${shortest.inversionista_id})`);
       return shortest;
     }
@@ -3840,7 +3875,7 @@ export const findOrCreateInvestor = async (
 
   // 6️⃣ NO EXISTE → CREAR NUEVO
   console.log(`   ➕ Inversionista no encontrado, creando nuevo...`);
-  
+
   const [newInvestor] = await db
     .insert(inversionistas)
     .values({
@@ -4130,29 +4165,44 @@ const CUBE_INVESTMENT_ID = 86;
 //      Si no está → se salta y se reporta en `errores` (no aborta todo).
 //   2. Ver si CUBE ya tiene row en ese crédito:
 //      - Caso A (SWAP): CUBE NO está → UPDATE set inversionista_id=CUBE
-//        en el row del inversionista. Mismo monto, misma cuota, mismos
-//        campos. CUBE "toma la posición" tal cual.
-//      - Caso B (MERGE): CUBE YA está → sumar al row de CUBE los campos
-//        numéricos del inversionista (monto_aportado, porcentaje, cuota,
-//        intereses, IVA) y DELETE el row del inversionista.
+//        en el row del inversionista. Conserva monto_aportado y
+//        cuota_inversionista del saliente; fuerza CUBE-puro (cash_in=100,
+//        participacion=0) y recalcula los 4 derivados (monto_inversionista,
+//        iva_inversionista, monto_cash_in, iva_cash_in) consistentes con
+//        esos porcentajes — todo el rendimiento va a Cash-In.
+//      - Caso B (MERGE): CUBE YA está → suma capital y cuota_inversionista
+//        del saliente al row de CUBE, fuerza CUBE-puro (cash_in=100,
+//        participacion=0) y recalcula los 4 derivados a partir de la cuota
+//        total (NO se suman los del saliente, porque con participacion=0
+//        no hay parte para "inversionista"). Borra el row del saliente.
 //   3. Mismo tratamiento en `creditos_inversionistas_espejo`, dejando
-//      `status = "completado"` (se cierra cualquier pendiente).
-//   4. `creditos.bandera_reinversion = false` (ya no hay pendientes en
+//      `status = "completado"` (se cierra cualquier pendiente). En espejo
+//      además `monto_aportado` se sincroniza con el del padre.
+//   4. Recalcular cuota_inversionista + 4 derivados de TODOS los rows del
+//      pool (padre y espejo, independientemente). Usa la fórmula
+//      proporcional de `calculateInvestorQuotas`: cada row recibe una
+//      tajada de la cuota del crédito según su `monto_aportado /
+//      capital_total`, y el inversionista MAYOR absorbe seguro+gps+
+//      membresía. Garantiza que la suma de cuotas ≈ cuota del crédito,
+//      incluso si el saliente era el mayor.
+//   5. `creditos.bandera_reinversion = false` (ya no hay pendientes en
 //      este crédito asociados al inversionista).
 // Al terminar el loop, si se procesó al menos un crédito:
-//   5. `inversionistas.status = "inactivo"`.
+//   6. `inversionistas.status = "inactivo"`.
 // Fuera de la transacción:
-//   6. Mandar correo a los destinatarios fijos con el detalle: créditos
+//   7. Mandar correo a los destinatarios fijos con el detalle: créditos
 //      afectados, monto devuelto a CUBE por cada uno, total, ejecutor.
 //
 // NOTAS DE DISEÑO
-// - No se recalcula la distribución del resto del pool (a diferencia de
-//   `addInvestorToCredit` / `manualReassignInvestor`). La premisa del
-//   negocio es: "el row pasa a ser de CUBE tal cual"; por simetría, en
-//   el merge simplemente se suman los absolutos al row de CUBE existente.
-// - `porcentaje_cash_in` de CUBE se preserva en el caso B (no se suma).
-//   Es el único campo "configuración" que se mantiene; el resto son
-//   montos/porcentajes/cuotas que son agregables.
+// - El `monto_aportado` de los OTROS inversionistas no se toca (su capital
+//   no cambió). La `cuota_inversionista` y los 4 derivados sí se recalculan
+//   en el paso 4 para que la suma del pool cuadre con la cuota del crédito.
+// - CUBE-puro: en padre y espejo, el row resultante de CUBE siempre queda
+//   con porcentaje_cash_in=100 y porcentaje_participacion_inversionista=0.
+//   Por eso monto_inversionista=0, iva_inversionista=0, monto_cash_in=cuota
+//   y iva_cash_in=cuota*0.12. No tiene sentido sumar los derivados del
+//   saliente porque tenía sus propios porcentajes; los del CUBE final
+//   dependen únicamente de la cuota total.
 // - Los `.returning()` sirven para loggear cuántos rows tocó cada
 //   operación; si un UPDATE/DELETE no afecta rows, el log lo evidencia.
 // - `runId` identifica los logs de una misma ejecución para poder
@@ -4268,12 +4318,19 @@ export const exitInvestor = async ({ body, set, request }: any) => {
 
         // ────────────────────────────────────────────────────────────────────
         // 4.1 — Verificar que el crédito exista.
-        // Solo se trae SIFCO porque lo necesitamos para el log y el correo.
+        // Trae SIFCO (log + correo), porcentaje_interes (cuota inicial del
+        // row CUBE en SWAP/MERGE) y los campos para el recálculo del pool
+        // estilo `calculateInvestorQuotas` (cuota total + cargos del mayor).
         // ────────────────────────────────────────────────────────────────────
         const [creditoData] = await tx
           .select({
             credito_id: creditos.credito_id,
             numero_credito_sifco: creditos.numero_credito_sifco,
+            porcentaje_interes: creditos.porcentaje_interes,
+            cuota: creditos.cuota,
+            seguro_10_cuotas: creditos.seguro_10_cuotas,
+            gps: creditos.gps,
+            membresias_pago: creditos.membresias_pago,
           })
           .from(creditos)
           .where(eq(creditos.credito_id, credito_id))
@@ -4347,21 +4404,52 @@ export const exitInvestor = async ({ body, set, request }: any) => {
           log(`   🟢 CUBE NO existe en el crédito (padre)`);
         }
 
+        // Helper canónico: deriva cuota + montos + IVAs para un row CUBE-puro
+        // (porcentaje_cash_in=100, porcentaje_participacion_inversionista=0)
+        // a partir del monto_aportado final y la tasa del crédito. Replica la
+        // fórmula de `processAndReplaceCreditInvestors` para mantener
+        // consistencia con el resto del sistema.
+        const calcDerivadosCubePuro = (montoAportadoNuevo: Big) => {
+          const porcentajeCashIn = new Big("100");
+          const porcentajeInversion = new Big("0");
+          const cuota = montoAportadoNuevo
+            .times(creditoData.porcentaje_interes)
+            .div(100)
+            .round(2);
+          const montoInversionista = cuota.times(porcentajeInversion).div(100).round(2);
+          const montoCashIn = cuota.times(porcentajeCashIn).div(100).round(2);
+          const ivaInversionista = montoInversionista.gt(0)
+            ? montoInversionista.times(0.12).round(2)
+            : new Big(0);
+          const ivaCashIn = montoCashIn.gt(0)
+            ? montoCashIn.times(0.12).round(2)
+            : new Big(0);
+          return {
+            cuota_inversionista: cuota.toFixed(2),
+            monto_inversionista: montoInversionista.toFixed(2),
+            monto_cash_in: montoCashIn.toFixed(2),
+            iva_inversionista: ivaInversionista.toFixed(2),
+            iva_cash_in: ivaCashIn.toFixed(2),
+          };
+        };
+
         if (!cubeEnPadre) {
           // ──────────────────────────────────────────────────────────────────
           // 4.4A — CASO A: SWAP en PADRE
-          // CUBE no está en el crédito → cambiamos el `inversionista_id` del
-          // row del inversionista a CUBE. El row conserva monto, cuota, etc.,
-          // pero forzamos los porcentajes de CUBE (100/100): CUBE siempre
-          // tiene participación total y cash-in total en el row que ocupa.
+          // CUBE no está en el crédito → el row pasa a ser de CUBE conservando
+          // monto_aportado del saliente. CUBE-puro: participacion=0,
+          // cash_in=100 (todo el rendimiento es Cash-In). Cuota e IVAs se
+          // recalculan con la fórmula canónica desde la tasa del crédito.
           // ──────────────────────────────────────────────────────────────────
-          log(`   🔄 [PADRE] Caso A (SWAP): cambiando inversionista_id ${inversionista_id} → ${CUBE_INVESTMENT_ID} (porcentajes forzados a 100/100)`);
+          const derivadosSwapPadre = calcDerivadosCubePuro(new Big(invEnPadre.monto_aportado));
+          log(`   🔄 [PADRE] Caso A (SWAP): inversionista_id ${inversionista_id} → ${CUBE_INVESTMENT_ID}, CUBE puro 0/100 →`, derivadosSwapPadre);
           const resA = await tx
             .update(creditos_inversionistas)
             .set({
               inversionista_id: CUBE_INVESTMENT_ID,
               porcentaje_cash_in: "100",
-              porcentaje_participacion_inversionista: "100",
+              porcentaje_participacion_inversionista: "0",
+              ...derivadosSwapPadre,
             })
             .where(
               and(
@@ -4376,26 +4464,21 @@ export const exitInvestor = async ({ body, set, request }: any) => {
           // 4.4B — CASO B: MERGE en PADRE
           // CUBE ya está en el crédito → no podemos tener dos rows de CUBE
           // (uniqueIndex ux_credito_inversionista). Entonces:
-          //   1. Sumar los campos de monto/cuota/intereses/IVA del
-          //      inversionista al row de CUBE.
-          //   2. Forzar porcentaje_cash_in=100 y
-          //      porcentaje_participacion_inversionista=100 (no se suman —
-          //      CUBE siempre queda al 100/100 en su row).
-          //   3. Borrar el row del inversionista.
+          //   1. Sumar el monto_aportado del saliente al row de CUBE.
+          //   2. Forzar porcentajes a CUBE-puro: cash_in=100, participacion=0.
+          //   3. Recalcular cuota + 4 derivados con la fórmula canónica
+          //      desde la tasa del crédito (NO sumar los del saliente).
+          //   4. Borrar el row del inversionista.
           // No se tocan otros inversionistas del pool.
           // ──────────────────────────────────────────────────────────────────
-          const suma = (a: string | number, b: string | number) => new Big(a).plus(new Big(b)).toString();
+          const derivadosMergePadre = calcDerivadosCubePuro(nuevoMontoCubePadre);
           const payload = {
-            monto_aportado: suma(cubeEnPadre.monto_aportado, invEnPadre.monto_aportado),
-            porcentaje_participacion_inversionista: "100",
+            monto_aportado: nuevoMontoCubePadre.toFixed(2),
+            porcentaje_participacion_inversionista: "0",
             porcentaje_cash_in: "100",
-            monto_inversionista: suma(cubeEnPadre.monto_inversionista, invEnPadre.monto_inversionista),
-            monto_cash_in: suma(cubeEnPadre.monto_cash_in, invEnPadre.monto_cash_in),
-            iva_inversionista: suma(cubeEnPadre.iva_inversionista, invEnPadre.iva_inversionista),
-            iva_cash_in: suma(cubeEnPadre.iva_cash_in, invEnPadre.iva_cash_in),
-            cuota_inversionista: suma(cubeEnPadre.cuota_inversionista, invEnPadre.cuota_inversionista),
+            ...derivadosMergePadre,
           };
-          log(`   🔀 [PADRE] Caso B (MERGE): sumando en CUBE + porcentajes 100/100 →`, payload);
+          log(`   🔀 [PADRE] Caso B (MERGE): suma monto_aportado, CUBE puro 0/100 →`, payload);
 
           const resB1 = await tx
             .update(creditos_inversionistas)
@@ -4462,17 +4545,20 @@ export const exitInvestor = async ({ body, set, request }: any) => {
 
           if (!cubeEnEspejo) {
             // 4.5A — ESPEJO SWAP: cambia id, fuerza status=completado,
-            // fija porcentajes de CUBE a 100/100 y sincroniza monto_aportado
-            // con el valor del PADRE (para que CUBE quede con el capital
-            // "original", sin descuentos por pagos previos).
-            log(`   🔄 [ESPEJO] Caso A (SWAP): cambiando inversionista_id ${inversionista_id} → ${CUBE_INVESTMENT_ID}, status→completado, porcentajes 100/100, monto_aportado=${nuevoMontoCubePadre.toString()} (sincronizado con padre)`);
+            // CUBE-puro: cash_in=100, participacion=0. Sincroniza
+            // monto_aportado con el valor del PADRE (capital original, sin
+            // descuentos por pagos previos). Cuota + 4 derivados se recalculan
+            // con la fórmula canónica desde ese mismo monto_aportado.
+            const derivadosSwapEspejo = calcDerivadosCubePuro(nuevoMontoCubePadre);
+            log(`   🔄 [ESPEJO] Caso A (SWAP): inversionista_id ${inversionista_id} → ${CUBE_INVESTMENT_ID}, status→completado, CUBE puro 0/100, monto_aportado=${nuevoMontoCubePadre.toFixed(2)} (sincronizado con padre) →`, derivadosSwapEspejo);
             const resEA = await tx
               .update(creditos_inversionistas_espejo)
               .set({
                 inversionista_id: CUBE_INVESTMENT_ID,
                 porcentaje_cash_in: "100",
                 porcentaje_participacion_inversionista: "0",
-                monto_aportado: nuevoMontoCubePadre.toString(),
+                monto_aportado: nuevoMontoCubePadre.toFixed(2),
+                ...derivadosSwapEspejo,
                 status: "completado",
                 updated_at: new Date(),
               })
@@ -4485,27 +4571,22 @@ export const exitInvestor = async ({ body, set, request }: any) => {
               .returning({ id: creditos_inversionistas_espejo.id });
             log(`   ✅ [ESPEJO] SWAP aplicado (${resEA.length})`);
           } else {
-            // 4.5B — ESPEJO MERGE: sumar intereses/IVA del investor al row
-            // CUBE, forzar porcentajes a 100/100 y fijar monto_aportado al
-            // valor del PADRE (sincroniza capital, ignora cuánto había en
-            // espejo para ese campo).
+            // 4.5B — ESPEJO MERGE: forzar CUBE-puro (cash_in=100,
+            // participacion=0) en el row CUBE de espejo, fijar
+            // monto_aportado al valor del PADRE (sincroniza capital) y
+            // recalcular cuota + 4 derivados con la fórmula canónica.
             log(`   🟡 [ESPEJO] CUBE YA existe en espejo: monto_aportado=${cubeEnEspejo.monto_aportado}, status=${cubeEnEspejo.status}`);
-            const suma = (a: string | number, b: string | number) =>
-              new Big(a).plus(new Big(b)).toString();
+            const derivadosMergeEspejo = calcDerivadosCubePuro(nuevoMontoCubePadre);
 
             const payloadE = {
-              monto_aportado: nuevoMontoCubePadre.toString(),
+              monto_aportado: nuevoMontoCubePadre.toFixed(2),
               porcentaje_participacion_inversionista: "0",
               porcentaje_cash_in: "100",
-              monto_inversionista: suma(cubeEnEspejo.monto_inversionista, invEnEspejo.monto_inversionista),
-              monto_cash_in: suma(cubeEnEspejo.monto_cash_in, invEnEspejo.monto_cash_in),
-              iva_inversionista: suma(cubeEnEspejo.iva_inversionista, invEnEspejo.iva_inversionista),
-              iva_cash_in: suma(cubeEnEspejo.iva_cash_in, invEnEspejo.iva_cash_in),
-              cuota_inversionista: suma(cubeEnEspejo.cuota_inversionista, invEnEspejo.cuota_inversionista),
+              ...derivadosMergeEspejo,
               status: "completado" as const,
               updated_at: new Date(),
             };
-            log(`   🔀 [ESPEJO] Caso B (MERGE): porcentajes 100, monto_aportado=${nuevoMontoCubePadre.toString()} (sincronizado con padre) →`, payloadE);
+            log(`   🔀 [ESPEJO] Caso B (MERGE): CUBE puro 0/100, monto_aportado=${nuevoMontoCubePadre.toFixed(2)} (sincronizado con padre) →`, payloadE);
 
             const resEB1 = await tx
               .update(creditos_inversionistas_espejo)
@@ -4533,7 +4614,102 @@ export const exitInvestor = async ({ body, set, request }: any) => {
         }
 
         // ────────────────────────────────────────────────────────────────────
-        // 4.6 — Apagar bandera_reinversion del crédito.
+        // 4.6 — Recalcular cuota_inversionista de TODOS los rows del crédito.
+        //
+        // Después del SWAP/MERGE el capital del pool quedó reasignado, así
+        // que las cuotas guardadas pueden no sumar la `cuota` real del
+        // crédito (sobre todo si el saliente era el mayor y cargaba
+        // seguro/GPS/membresía).
+        //
+        // Replicamos la fórmula de `calculateInvestorQuotas`:
+        //   capital_total = Σ monto_aportado del pool (en esa tabla)
+        //   %_part        = monto_aportado / capital_total
+        //   cuota_base    = (cuota_credito − seguro − gps − membresia) × %_part
+        //   cuota_final   = cuota_base   + cargos completos si es el MAYOR
+        //
+        // Y de paso recalculamos los 4 derivados de cada row a partir de
+        // la nueva cuota y los porcentajes ACTUALES del row (CUBE-puro
+        // o los del inversionista) para que queden consistentes.
+        //
+        // Padre y espejo se recalculan INDEPENDIENTEMENTE: el espejo puede
+        // tener montos amortizados distintos al padre, así que el "mayor"
+        // y el reparto pueden diferir — cada tabla refleja su propio
+        // estado operativo.
+        // ────────────────────────────────────────────────────────────────────
+        const recalcularCuotasPool = async (
+          tabla: typeof creditos_inversionistas | typeof creditos_inversionistas_espejo,
+          etiqueta: "PADRE" | "ESPEJO",
+        ) => {
+          const rows = await tx
+            .select()
+            .from(tabla)
+            .where(eq(tabla.credito_id, credito_id));
+
+          if (rows.length === 0) {
+            log(`   ℹ️  [${etiqueta}] Pool vacío tras exit — nada que recalcular`);
+            return;
+          }
+
+          const capitalTotal = rows.reduce(
+            (acc, r) => acc.plus(new Big(r.monto_aportado)),
+            new Big(0),
+          );
+
+          if (capitalTotal.lte(0)) {
+            warn(`   ⚠️  [${etiqueta}] capital_total=0 tras exit — se omite recálculo de cuotas`);
+            return;
+          }
+
+          // Mayor = row con mayor monto_aportado (desempate: el primero).
+          const mayor = rows.reduce((m, r) =>
+            new Big(r.monto_aportado).gt(new Big(m.monto_aportado)) ? r : m,
+          );
+
+          const cuotaCredito = new Big(creditoData.cuota);
+          const seguroBig = new Big(creditoData.seguro_10_cuotas ?? 0);
+          const gpsBig = new Big(creditoData.gps ?? 0);
+          const membresiaBig = new Big(creditoData.membresias_pago ?? 0);
+          const cargosBig = seguroBig.plus(gpsBig).plus(membresiaBig);
+          const cuotaSinCargos = cuotaCredito.minus(cargosBig);
+
+          log(`   📐 [${etiqueta}] Recalc pool: rows=${rows.length}, capital_total=${capitalTotal.toFixed(2)}, cuota=${cuotaCredito.toFixed(2)}, cargos=${cargosBig.toFixed(2)}, mayor_id=${mayor.id} (inv=${mayor.inversionista_id}, monto=${mayor.monto_aportado})`);
+
+          for (const row of rows) {
+            const monto = new Big(row.monto_aportado);
+            const porcParticipacion = capitalTotal.gt(0) ? monto.div(capitalTotal) : new Big(0);
+            const cuotaBase = cuotaSinCargos.times(porcParticipacion);
+            const cuotaFinal = row.id === mayor.id ? cuotaBase.plus(cargosBig) : cuotaBase;
+            const cuotaFinalRound = cuotaFinal.round(2);
+
+            // Derivados con los porcentajes actuales del row (CUBE-puro
+            // tras exit: 0/100; otros inversionistas: lo que tengan).
+            const pCashIn = new Big(row.porcentaje_cash_in);
+            const pInv = new Big(row.porcentaje_participacion_inversionista);
+            const montoInv = cuotaFinalRound.times(pInv).div(100).round(2);
+            const montoCash = cuotaFinalRound.times(pCashIn).div(100).round(2);
+            const ivaInv = montoInv.gt(0) ? montoInv.times(0.12).round(2) : new Big(0);
+            const ivaCash = montoCash.gt(0) ? montoCash.times(0.12).round(2) : new Big(0);
+
+            await tx
+              .update(tabla)
+              .set({
+                cuota_inversionista: cuotaFinalRound.toFixed(2),
+                monto_inversionista: montoInv.toFixed(2),
+                monto_cash_in: montoCash.toFixed(2),
+                iva_inversionista: ivaInv.toFixed(2),
+                iva_cash_in: ivaCash.toFixed(2),
+                ...(etiqueta === "ESPEJO" ? { updated_at: new Date() } : {}),
+              })
+              .where(eq(tabla.id, row.id));
+          }
+          log(`   ✅ [${etiqueta}] Pool recalculado (${rows.length} row(s))`);
+        };
+
+        await recalcularCuotasPool(creditos_inversionistas, "PADRE");
+        await recalcularCuotasPool(creditos_inversionistas_espejo, "ESPEJO");
+
+        // ────────────────────────────────────────────────────────────────────
+        // 4.7 — Apagar bandera_reinversion del crédito.
         // Esta bandera, cuando está en true, redirige los intereses del
         // inversionista "pendiente" hacia CUBE. Como ya no hay ningún
         // inversionista en ese estado (lo acabamos de sacar o fusionar con
@@ -4787,7 +4963,7 @@ export const fixCubeInvestment = async ({ set }: any) => {
     // 3. Procesar originales
     for (const oc of originalCredits) {
       // Verificar si ya tiene los porcentajes correctos para evitar updates innecesarios
-      const isCorrect = Number(oc.porcentaje_participacion_inversionista) === 0 && 
+      const isCorrect = Number(oc.porcentaje_participacion_inversionista) === 0 &&
                         Number(oc.porcentaje_cash_in) === 100;
 
       if (!isCorrect) {
@@ -4827,7 +5003,7 @@ export const fixCubeInvestment = async ({ set }: any) => {
 
     // 4. Procesar espejos existentes (para asegurar que todos tengan 0/100)
     for (const mc of mirrorCredits) {
-      const isCorrect = Number(mc.porcentaje_participacion_inversionista) === 0 && 
+      const isCorrect = Number(mc.porcentaje_participacion_inversionista) === 0 &&
                         Number(mc.porcentaje_cash_in) === 100;
 
       if (!isCorrect) {
@@ -4906,12 +5082,12 @@ export const reconcileMirrorPercentages = async ({ set }: any) => {
       if (mc) {
         const pInvOriginal = Number(oc.p_inversor);
         const pCashOriginal = Number(oc.p_cashin);
-        
+
         const pInvMirror = Number(mc.porcentaje_participacion_inversionista);
         const pCashMirror = Number(mc.porcentaje_cash_in);
 
         if (pInvOriginal !== pInvMirror || pCashOriginal !== pCashMirror) {
-          
+
           const isSwapped = pInvOriginal === pCashMirror && pCashOriginal === pInvMirror;
 
           const data = {
@@ -4935,7 +5111,7 @@ export const reconcileMirrorPercentages = async ({ set }: any) => {
                 porcentaje_cash_in: oc.p_cashin,
               })
               .where(eq(creditos_inversionistas_espejo.id, mc.id));
-            
+
             results.updatedSwappedCount++;
             results.updatedSwapped.push(data);
           } else {
@@ -5021,7 +5197,7 @@ export const auditMirrorPercentages = async ({ set }: any) => {
       if (mc) {
         const pInvOriginal = Number(oc.p_inversor);
         const pCashOriginal = Number(oc.p_cashin);
-        
+
         const pInvMirror = Number(mc.porcentaje_participacion_inversionista);
         const pCashMirror = Number(mc.porcentaje_cash_in);
 
@@ -5029,7 +5205,7 @@ export const auditMirrorPercentages = async ({ set }: any) => {
           results.discrepanciesCount++;
 
           const isSwapped = pInvOriginal === pCashMirror && pCashOriginal === pInvMirror;
-          
+
           const discrepancyData = {
             inversionista_id: oc.inversionista_id,
             inversionista_nombre: oc.inversionista_nombre,
@@ -5093,6 +5269,16 @@ interface BoletaPendiente {
   fecha_subida: Date;
 }
 
+interface CuentaExtraInfo {
+  cuenta_extra_id: number;
+  banco_id: number;
+  banco_nombre: string | null;
+  tipo_cuenta: string;
+  numero_cuenta: string;
+  moneda: "quetzales" | "dolares";
+  motivo_cuenta: string;
+}
+
 interface InversionistaResumen {
   inversionista_id: number;
   nombre: string;
@@ -5109,6 +5295,7 @@ interface InversionistaResumen {
   banco: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;
+  cuentas_extra: CuentaExtraInfo[];
   total_abono_capital: number;
   total_abono_interes: number;
   total_abono_iva: number;
@@ -5239,6 +5426,45 @@ async function getBoletasMap(
   );
 
   return mapBoletasPendientes(boletasFiltradas);
+}
+
+async function getCuentasExtraMap(
+  inversionistaIds: number[]
+): Promise<Map<number, CuentaExtraInfo[]>> {
+  const map = new Map<number, CuentaExtraInfo[]>();
+  if (inversionistaIds.length === 0) return map;
+
+  const rows = await db
+    .select({
+      cuenta_extra_id: cuentas_extra_inversionista.cuenta_extra_id,
+      inversionista_id: cuentas_extra_inversionista.inversionista_id,
+      banco_id: cuentas_extra_inversionista.banco_id,
+      banco_nombre: bancos.nombre,
+      tipo_cuenta: cuentas_extra_inversionista.tipo_cuenta,
+      numero_cuenta: cuentas_extra_inversionista.numero_cuenta,
+      moneda: cuentas_extra_inversionista.moneda,
+      motivo_cuenta: cuentas_extra_inversionista.motivo_cuenta,
+    })
+    .from(cuentas_extra_inversionista)
+    .leftJoin(bancos, eq(cuentas_extra_inversionista.banco_id, bancos.banco_id))
+    .where(inArray(cuentas_extra_inversionista.inversionista_id, inversionistaIds))
+    .orderBy(cuentas_extra_inversionista.cuenta_extra_id);
+
+  for (const r of rows) {
+    const item: CuentaExtraInfo = {
+      cuenta_extra_id: r.cuenta_extra_id,
+      banco_id: r.banco_id,
+      banco_nombre: r.banco_nombre,
+      tipo_cuenta: r.tipo_cuenta,
+      numero_cuenta: r.numero_cuenta,
+      moneda: r.moneda as "quetzales" | "dolares",
+      motivo_cuenta: r.motivo_cuenta,
+    };
+    const existing = map.get(r.inversionista_id);
+    if (existing) existing.push(item);
+    else map.set(r.inversionista_id, [item]);
+  }
+  return map;
 }
 
 async function getBoletasLiquidacionMap(
@@ -5652,7 +5878,8 @@ async function consultarResumenGlobalDesdeLiquidaciones(
 function mapResumenRow(
   inv: InversionistaResumenRow,
   boleta_pendiente: BoletaPendiente | null,
-  boleta_liquidacion: BoletaPendiente | null = null
+  boleta_liquidacion: BoletaPendiente | null = null,
+  cuentas_extra: CuentaExtraInfo[] = []
 ): InversionistaResumen {
   const isUSD = inv.moneda === "dolares";
   const currencySymbol = isUSD ? "$" : "Q";
@@ -5673,6 +5900,7 @@ function mapResumenRow(
     banco: inv.banco_nombre,
     tipo_cuenta: inv.tipo_cuenta,
     numero_cuenta: inv.numero_cuenta,
+    cuentas_extra,
     total_abono_capital: convert(inv.total_abono_capital),
     total_abono_interes: convert(inv.total_abono_interes),
     total_abono_iva: convert(inv.total_abono_iva),
@@ -6101,10 +6329,11 @@ export async function resumenGlobalLiquidaciones(
       ...liquidados.map((inv) => inv.inversionista_id),
     ])
   );
-  const [boletaPendienteMap, boletaSubidaMap, boletaLiquidacionMap] = await Promise.all([
+  const [boletaPendienteMap, boletaSubidaMap, boletaLiquidacionMap, cuentasExtraMap] = await Promise.all([
     getBoletasPendientesMap(inversionistaIds, mes, anio),
     getBoletasMap(inversionistaIds, ["PENDIENTE", "PROCESADO"], mes, anio),
     getBoletasLiquidacionMap(inversionistaIds, mes, anio),
+    getCuentasExtraMap(inversionistaIds),
   ]);
 
   const result: InversionistaResumenConEstado[] = [];
@@ -6126,7 +6355,8 @@ export async function resumenGlobalLiquidaciones(
       ...mapResumenRow(
         inv,
         boletaPendienteMap.get(inv.inversionista_id) ?? null,
-        boletaLiquidacionMap.get(inv.inversionista_id) ?? null
+        boletaLiquidacionMap.get(inv.inversionista_id) ?? null,
+        cuentasExtraMap.get(inv.inversionista_id) ?? []
       ),
       estado_liquidacion_resumen: estadoResumen,
     });
@@ -6148,7 +6378,8 @@ export async function resumenGlobalLiquidaciones(
       ...mapResumenRow(
         inv,
         null,
-        boletaLiquidacionMap.get(inv.inversionista_id) ?? null
+        boletaLiquidacionMap.get(inv.inversionista_id) ?? null,
+        cuentasExtraMap.get(inv.inversionista_id) ?? []
       ),
       estado_liquidacion_resumen: estadoResumen,
     });
@@ -6176,6 +6407,11 @@ export async function resumenGlobalLiquidaciones(
       .from(inversionistas)
       .leftJoin(bancos, eq(inversionistas.banco_id, bancos.banco_id))
       .where(and(...filtros));
+
+    const idsSinMovimiento = todos
+      .filter((inv) => !idsConMovimiento.has(inv.inversionista_id))
+      .map((inv) => inv.inversionista_id);
+    const cuentasExtraSinMovMap = await getCuentasExtraMap(idsSinMovimiento);
 
     for (const inv of todos) {
       if (idsConMovimiento.has(inv.inversionista_id)) continue;
@@ -6205,7 +6441,12 @@ export async function resumenGlobalLiquidaciones(
       };
 
       result.push({
-        ...mapResumenRow(stub, null, null),
+        ...mapResumenRow(
+          stub,
+          null,
+          null,
+          cuentasExtraSinMovMap.get(inv.inversionista_id) ?? []
+        ),
         estado_liquidacion_resumen: "sin_movimiento",
       });
     }
@@ -6242,87 +6483,33 @@ const NOMBRES_MES_ES = [
   "Diciembre",
 ];
 
-type FormatoCuenta = {
-  banco_id: number;
-  tipo_cuenta: string;
-  moneda: string;
-  longitud: number;
-  patron: string | null;
-};
+const CUENTA_MONETARIA_LARGO = 11;
 
-function normalizarTipoCuenta(tipo: string | null | undefined): "MONETARIA" | "AHORRO" | null {
-  if (!tipo) return null;
-  const upper = tipo.toUpperCase();
-  if (upper.includes("MONETARIA")) return "MONETARIA";
-  if (upper.includes("AHORRO")) return "AHORRO";
-  return null;
+function parseCuentaMonetaria(numeroCuenta: string | null | undefined): {
+  agencia: string;
+  correlativo: string;
+  digito: string;
+  valido: boolean;
+} {
+  const limpia = (numeroCuenta ?? "").replace(/\D/g, "");
+  const valido = limpia.length === CUENTA_MONETARIA_LARGO;
+  return {
+    agencia: limpia.slice(0, 3),
+    correlativo: limpia.slice(3, -1),
+    digito: limpia.slice(-1),
+    valido,
+  };
 }
 
 function mapTipoCuentaCodigo(tipo: string | null | undefined): {
   codigo: number | "";
   valido: boolean;
 } {
-  const normalizado = normalizarTipoCuenta(tipo);
-  if (normalizado === "MONETARIA") return { codigo: 1, valido: true };
-  if (normalizado === "AHORRO") return { codigo: 2, valido: true };
+  if (!tipo) return { codigo: "", valido: false };
+  const upper = tipo.toUpperCase();
+  if (upper.includes("MONETARIA")) return { codigo: 1, valido: true };
+  if (upper.includes("AHORRO")) return { codigo: 2, valido: true };
   return { codigo: "", valido: false };
-}
-
-function validarCuentaContraFormatos(args: {
-  cuentaLimpia: string;
-  bancoId: number | null;
-  tipoCuenta: string | null | undefined;
-  moneda: string | null | undefined;
-  formatosPorClave: Map<string, FormatoCuenta[]>;
-  bancosConFormatos: Set<number>;
-}): boolean {
-  const { cuentaLimpia, bancoId, tipoCuenta, moneda, formatosPorClave, bancosConFormatos } = args;
-  if (bancoId == null) return false;
-  if (!bancosConFormatos.has(bancoId)) return true;
-  const tipoNorm = normalizarTipoCuenta(tipoCuenta);
-  if (!tipoNorm || !moneda) return false;
-  const key = `${bancoId}|${tipoNorm}|${moneda}`;
-  const formatos = formatosPorClave.get(key);
-  if (!formatos || formatos.length === 0) return false;
-  return formatos.some((f) => {
-    if (cuentaLimpia.length !== f.longitud) return false;
-    if (!f.patron) return true;
-    try {
-      return new RegExp(f.patron).test(cuentaLimpia);
-    } catch {
-      return false;
-    }
-  });
-}
-
-async function cargarFormatosCuenta(bancoIds: number[]): Promise<{
-  formatosPorClave: Map<string, FormatoCuenta[]>;
-  bancosConFormatos: Set<number>;
-}> {
-  const formatosPorClave = new Map<string, FormatoCuenta[]>();
-  const bancosConFormatos = new Set<number>();
-  if (bancoIds.length === 0) return { formatosPorClave, bancosConFormatos };
-
-  const filas = await db
-    .select({
-      banco_id: formatoCuentaBanco.banco_id,
-      tipo_cuenta: formatoCuentaBanco.tipo_cuenta,
-      moneda: formatoCuentaBanco.moneda,
-      longitud: formatoCuentaBanco.longitud,
-      patron: formatoCuentaBanco.patron,
-    })
-    .from(formatoCuentaBanco)
-    .where(inArray(formatoCuentaBanco.banco_id, bancoIds));
-
-  for (const f of filas) {
-    bancosConFormatos.add(f.banco_id);
-    const key = `${f.banco_id}|${f.tipo_cuenta}|${f.moneda}`;
-    const arr = formatosPorClave.get(key) ?? [];
-    arr.push(f as FormatoCuenta);
-    formatosPorClave.set(key, arr);
-  }
-
-  return { formatosPorClave, bancosConFormatos };
 }
 
 function mapMonedaCodigo(moneda: string | null | undefined): 1 | 2 {
@@ -6353,7 +6540,6 @@ export async function resumenTransferencias(
   const inversionistasFiltro = await db
     .select({
       inversionista_id: inversionistas.inversionista_id,
-      banco_id: inversionistas.banco_id,
       id_banco_transferencia: bancos.id_banco_transferencia,
     })
     .from(inversionistas)
@@ -6363,23 +6549,11 @@ export async function resumenTransferencias(
   const bancoTransfMap = new Map(
     inversionistasFiltro.map((i) => [i.inversionista_id, i.id_banco_transferencia ?? ""])
   );
-  const bancoIdPorInversionista = new Map<number, number | null>(
-    inversionistasFiltro.map((i) => [i.inversionista_id, i.banco_id ?? null])
-  );
-
-  const bancoIdsRelevantes = Array.from(
-    new Set(
-      inversionistasFiltro
-        .map((i) => i.banco_id)
-        .filter((id): id is number => id != null)
-    )
-  );
-  const { formatosPorClave, bancosConFormatos } = await cargarFormatosCuenta(bancoIdsRelevantes);
 
   if (bancoTransfMap.size === 0) {
     return ach
-      ? generateAchTransferenciasWorkbook([], mes, anio, bancoTransfMap, bancoIdPorInversionista, formatosPorClave, bancosConFormatos)
-      : generateTransferenciasWorkbook([], mes, anio, bancoIdPorInversionista, formatosPorClave, bancosConFormatos);
+      ? generateAchTransferenciasWorkbook([], mes, anio, bancoTransfMap)
+      : generateTransferenciasWorkbook([], mes, anio);
   }
 
   const resumen = await consultarResumenGlobalPorEstadoPago(
@@ -6402,18 +6576,15 @@ export async function resumenTransferencias(
   const filas = filtrados.map((inv) => mapResumenRow(inv, null, null));
 
   return ach
-    ? generateAchTransferenciasWorkbook(filas, mes, anio, bancoTransfMap, bancoIdPorInversionista, formatosPorClave, bancosConFormatos)
-    : generateTransferenciasWorkbook(filas, mes, anio, bancoIdPorInversionista, formatosPorClave, bancosConFormatos);
+    ? generateAchTransferenciasWorkbook(filas, mes, anio, bancoTransfMap)
+    : generateTransferenciasWorkbook(filas, mes, anio);
 }
 
 async function generateAchTransferenciasWorkbook(
   rows: InversionistaResumen[],
   mes: number,
   anio: number,
-  bancoTransfMap: Map<number, string>,
-  bancoIdPorInversionista: Map<number, number | null>,
-  formatosPorClave: Map<string, FormatoCuenta[]>,
-  bancosConFormatos: Set<number>
+  bancoTransfMap: Map<number, string>
 ): Promise<{ success: boolean; url: string; filename: string }> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Club Cashin";
@@ -6434,17 +6605,17 @@ async function generateAchTransferenciasWorkbook(
     "Banco",
     "Descripcion Corta",
     "Adenda",
-    "Valor",
+    "Valor Q.",
   ];
   sheet.columns = [
-    { width: 40 }, // Nombre
+    { width: 28 }, // Nombre
     { width: 18 }, // Id Participante
     { width: 24 }, // Cuenta crédito / débito
     { width: 14 }, // Tipo Cuenta
     { width: 12 }, // Moneda
     { width: 10 }, // Banco
-    { width: 40 }, // Descripción Corta
-    { width: 40 }, // Adenda
+    { width: 24 }, // Descripción Corta
+    { width: 60 }, // Adenda
     { width: 16 }, // Valor Q.
   ];
 
@@ -6476,15 +6647,6 @@ async function generateAchTransferenciasWorkbook(
     const moneda = mapMonedaCodigo(inv.moneda);
     const banco = bancoTransfMap.get(inv.inversionista_id) ?? "";
     const cuentaLimpia = (inv.numero_cuenta ?? "").replace(/\D/g, "");
-    const bancoId = bancoIdPorInversionista.get(inv.inversionista_id) ?? null;
-    const cuentaValida = validarCuentaContraFormatos({
-      cuentaLimpia,
-      bancoId,
-      tipoCuenta: inv.tipo_cuenta,
-      moneda: inv.moneda,
-      formatosPorClave,
-      bancosConFormatos,
-    });
 
     const row = sheet.addRow([
       inv.nombre,
@@ -6499,7 +6661,7 @@ async function generateAchTransferenciasWorkbook(
     ]);
     row.getCell(9).numFmt = "0.00";
 
-    const filaInvalida = !tipoCuenta.valido || !banco || !cuentaValida;
+    const filaInvalida = !tipoCuenta.valido || !banco;
     if (filaInvalida) {
       row.eachCell({ includeEmpty: true }, (cell) => {
         cell.fill = {
@@ -6542,10 +6704,7 @@ async function generateAchTransferenciasWorkbook(
 async function generateTransferenciasWorkbook(
   rows: InversionistaResumen[],
   mes: number,
-  anio: number,
-  bancoIdPorInversionista: Map<number, number | null>,
-  formatosPorClave: Map<string, FormatoCuenta[]>,
-  bancosConFormatos: Set<number>
+  anio: number
 ): Promise<{ success: boolean; url: string; filename: string }> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Club Cashin";
@@ -6588,26 +6747,14 @@ async function generateTransferenciasWorkbook(
     const valor = Number(inv.total_cuota) || 0;
     if (valor === 0) return;
 
-    const cuentaLimpia = (inv.numero_cuenta ?? "").replace(/\D/g, "");
-    const agencia = cuentaLimpia.slice(0, 3);
-    const correlativo = cuentaLimpia.slice(3, -1);
-    const digito = cuentaLimpia.slice(-1);
+    const { agencia, correlativo, digito, valido } = parseCuentaMonetaria(inv.numero_cuenta);
     const concepto = `Liquidación ${nombreMes} ${anio} - ${inv.nombre}, Club CashIn S.A`;
     const moneda = mapMonedaCodigo(inv.moneda);
-    const bancoId = bancoIdPorInversionista.get(inv.inversionista_id) ?? null;
-    const cuentaValida = validarCuentaContraFormatos({
-      cuentaLimpia,
-      bancoId,
-      tipoCuenta: inv.tipo_cuenta,
-      moneda: inv.moneda,
-      formatosPorClave,
-      bancosConFormatos,
-    });
 
     const row = sheet.addRow([agencia, correlativo, digito, moneda, concepto, valor]);
     row.getCell(6).numFmt = "0.00";
 
-    if (!cuentaValida) {
+    if (!valido) {
       row.eachCell({ includeEmpty: true }, (cell) => {
         cell.fill = {
           type: "pattern",
@@ -6698,7 +6845,7 @@ export async function getLiquidaciones({
   } else if (!isNullorEmpty(dpi)) {
     conditions.push(eq(inversionistas.dpi, parseInt(dpi)));
   }
- 
+
 
   // 📊 Query principal con joins
   const query = db
@@ -6756,10 +6903,10 @@ export async function getLiquidaciones({
     liquidacionesData.map(async (liq) => {
       // 📄 Traer boleta asociada a esta liquidación (si existe)
       let boletaData = null;
-      
+
       if (liq.boleta_id) {
         console.log(`🔍 Buscando boleta ID: ${liq.boleta_id} para liquidación ${liq.liquidacion_id}`);
-        
+
         const [boleta] = await db
           .select({
             boleta_id: boletasPagoInversionista.boleta_id,
@@ -6792,7 +6939,7 @@ export async function getLiquidaciones({
             fecha_procesado: boleta.fecha_procesado,
             subido_por: boleta.subido_por_nombre,
           };
-          
+
           console.log(`✅ Boleta encontrada: ${boleta.boleta_url}`);
         } else {
           console.warn(`⚠️ Boleta ID ${liq.boleta_id} no encontrada en BD`);
@@ -7016,7 +7163,7 @@ export async function aplicarPagosEspejo(inversionistaId: number) {
           )
         );
 
-      // Drizzle update devuelve result info dependiendo del driver, 
+      // Drizzle update devuelve result info dependiendo del driver,
       // pero aquí simplemente contamos las iteraciones exitosas.
       totalActualizados++;
     }
@@ -7057,7 +7204,7 @@ export async function deletePagosEspejoNoLiquidados(inversionistaId: number) {
 // ============================================
 export async function testUploadAndEmail(investorId: number, testEmail: string) {
     console.log(`🧪 Iniciando prueba de envío (PDF Adjunto) para inversionista ${investorId}...`);
-    
+
     // 1. Obtener datos
     const result = await resumeInvestor(investorId, 1, 999);
     if (!result.inversionistas.length) {

@@ -64,6 +64,8 @@ const addInvestorToCreditSchema = z.object({
     .enum(["reinversion_capital", "reinversion_interes", "reinversion_total"])
     .optional(),
   fecha_inicio_participacion: z.string().optional(),
+  // Nuevos campos para el buscador de capital
+  minimo: z.number().int().positive().optional(),
 });
 
 // ========================================
@@ -131,16 +133,20 @@ function recalcularInversionistas(
   // Los cargos fijos se suman SOLO al inversionista mayor.
   const cuotaSinCargos = cuotaTotal.minus(seguro).minus(gps).minus(membresias);
 
-  // ── PASO 5: Calcular todo para cada inversionista ──
+  // ── PASO 5: Validar capital total ──
+  // Si el capital es 0, no se puede calcular participación. Abortamos para evitar corrupción.
+  if (capitalTotal.eq(0)) {
+    throw new Error("No se puede recalcular participaciones en un crédito con capital total Q0.00");
+  }
+
+  // ── PASO 6: Calcular todo para cada inversionista ──
   return inversionistasArray.map((inv) => {
-    // ── 5a. Porcentaje de participación ──
+    // ── 6a. Porcentaje de participación ──
     // Fórmula: (montoAportado / capitalTotal) * 100
     // Ejemplo: Q30,000 / Q100,000 * 100 = 30%
-    const porcentajeParticipacion = inv.monto_aportado
-      .div(capitalTotal)
-      .times(100);
+    const porcentajeParticipacion = inv.monto_aportado.div(capitalTotal).times(100);
 
-    // ── 5b. Cuota base ──
+    // ── 6b. Cuota base ──
     // Fórmula: cuotaSinCargos * (porcentajeParticipacion / 100)
     // Es la porción de la cuota mensual que le corresponde a este inversionista
     // SIN incluir los cargos fijos.
@@ -148,7 +154,7 @@ function recalcularInversionistas(
       .times(porcentajeParticipacion.div(100))
       .round(6);
 
-    // ── 5c. Determinar si es el inversionista mayor ──
+    // ── 6c. Determinar si es el inversionista mayor ──
     // Si es el mayor, se le suman seguro + GPS + membresías a su cuota.
     // Si NO es el mayor, su cuota es solo la cuotaBase.
     const esMayor =
@@ -262,6 +268,7 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
       tipo_operacion,
       tipo_reinversion,
       fecha_inicio_participacion,
+      minimo,
     } = parseResult.data;
 
     // ================================================================
@@ -294,7 +301,20 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
     //   - Los ordena por score DESC (mejores primero)
     //   - Incluye credito_completo con toda la data relacional
     // ================================================================
-    const candidatos = await getCreditCandidates(monto_aportado);
+    console.log("================================================================");
+    console.log("[addInvestorToCredit] Llamando a getCreditCandidates con:");
+    console.log(` - monto: ${monto_aportado}`);
+    console.log(` - limit (minimo): ${minimo ?? "Sin límite"}`);
+    console.log(` - inversionista_id: ${inversionista_id}`);
+    console.log("================================================================");
+
+    let candidatos = await getCreditCandidates(monto_aportado, minimo, inversionista_id);
+
+    console.log(`[addInvestorToCredit] Candidatos encontrados: ${candidatos.length}`);
+    candidatos.forEach((c, i) => {
+      console.log(` [${i}] Credito: ${c.numero_credito_sifco}, Score: ${c.score}, Capital Activo: ${c.capital_activo}`);
+    });
+    console.log("================================================================");
 
     if (candidatos.length === 0) {
       set.status = 404;

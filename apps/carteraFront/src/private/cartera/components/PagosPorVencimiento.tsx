@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { usePagosPorVencimiento } from "../hooks/usePagosPorVencimiento";
-import type { PagoPorVencimientoItem } from "../services/services";
+import { useAdminData } from "../hooks/advisor";
+import type { PagoPorVencimientoItem, Advisor } from "../services/services";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -11,7 +12,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Search, X, ChevronLeft, ChevronRight, CheckCircle2, Clock } from "lucide-react";
+import { Search, X, ChevronLeft, ChevronRight, Check, ChevronsUpDown } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Badge } from "@/components/ui/badge";
 
 function formatQ(val: string | null | undefined): string {
   if (!val) return "Q 0.00";
@@ -20,20 +24,6 @@ function formatQ(val: string | null | undefined): string {
   return `Q ${n.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function formatFecha(val: string | null | undefined): string {
-  if (!val) return "--";
-  try {
-    const d = new Date(val);
-    // Usamos los componentes UTC para evitar que el navegador reste horas por la zona horaria local (GTM-6)
-    return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()).toLocaleDateString("es-GT", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
-  } catch {
-    return "--";
-  }
-}
 
 const currentDate = new Date();
 
@@ -48,10 +38,11 @@ export function PagosPorVencimiento() {
   const [sifcoFilter, setSifcoFilter] = useState("");
   const [nombreInput, setNombreInput] = useState("");
   const [nombreFilter, setNombreFilter] = useState("");
-  const [asesorInput, setAsesorInput] = useState("");
-  const [asesorFilter, setAsesorFilter] = useState("");
+  const [selectedAdvisors, setSelectedAdvisors] = useState<string[]>([]);
+  const [advisorPopoverOpen, setAdvisorPopoverOpen] = useState(false);
   const [rangoMoraInput, setRangoMoraInput] = useState("");
   const [rangoMoraFilter, setRangoMoraFilter] = useState("");
+  const { advisors } = useAdminData();
 
   const { data, isLoading, isError } = usePagosPorVencimiento({
     mes,
@@ -61,14 +52,13 @@ export function PagosPorVencimiento() {
     numero_credito_sifco: sifcoFilter || undefined,
     nombre_usuario: nombreFilter || undefined,
     tipo_fecha: tipoFecha,
-    asesor: asesorFilter || undefined,
+    asesor: selectedAdvisors.join(",") || undefined,
     rango_mora: rangoMoraFilter || undefined,
   });
 
   const handleSearch = () => {
     setSifcoFilter(sifcoInput.trim());
     setNombreFilter(nombreInput.trim());
-    setAsesorFilter(asesorInput.trim());
     setRangoMoraFilter(rangoMoraInput);
     setPage(1);
   };
@@ -78,8 +68,7 @@ export function PagosPorVencimiento() {
     setSifcoFilter("");
     setNombreInput("");
     setNombreFilter("");
-    setAsesorInput("");
-    setAsesorFilter("");
+    setSelectedAdvisors([]);
     setRangoMoraInput("");
     setRangoMoraFilter("");
     setPage(1);
@@ -167,15 +156,78 @@ export function PagosPorVencimiento() {
             />
           </div>
 
-          <div className="flex-1 min-w-[180px]">
-            <label className="text-sm font-semibold text-blue-800 mb-1 block">Asesor</label>
-            <Input
-              placeholder="Buscar por asesor..."
-              value={asesorInput}
-              onChange={(e) => setAsesorInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-              className="text-gray-900 border-blue-200 bg-blue-50 focus:ring-blue-400"
-            />
+          <div className="flex-1 min-w-[250px]">
+            <label className="text-sm font-semibold text-blue-800 mb-1 block">Asesores</label>
+            <Popover open={advisorPopoverOpen} onOpenChange={setAdvisorPopoverOpen}>
+              <PopoverTrigger asChild>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  className="w-full flex items-center justify-between border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 text-sm h-10 overflow-hidden cursor-pointer"
+                >
+                  <span className="flex flex-wrap gap-1 flex-1 items-center overflow-hidden">
+                    {selectedAdvisors.length === 0 ? (
+                      <span className="text-gray-400">Todos los asesores</span>
+                    ) : selectedAdvisors.length > 2 ? (
+                      <Badge variant="secondary" className="text-xs font-semibold bg-blue-100 text-blue-700 border-blue-200">
+                        {selectedAdvisors.length} asesores seleccionados
+                      </Badge>
+                    ) : (
+                      selectedAdvisors.map((name) => (
+                        <Badge key={name} variant="secondary" className="text-[10px] sm:text-xs flex items-center gap-1 max-w-[120px] truncate bg-blue-100 text-blue-700 border-blue-200">
+                          <span className="truncate">{name}</span>
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            className="cursor-pointer hover:text-red-500 transition-colors"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setSelectedAdvisors(selectedAdvisors.filter((v) => v !== name));
+                              setPage(1);
+                            }}
+                          >
+                            <X className="w-3 h-3" />
+                          </span>
+                        </Badge>
+                      ))
+                    )}
+                  </span>
+                  <ChevronsUpDown className="w-4 h-4 shrink-0 opacity-50 ml-2" />
+                </div>
+              </PopoverTrigger>
+              <PopoverContent className="w-[--radix-popover-trigger-width] p-0 bg-white border border-blue-200 shadow-lg" align="start">
+                <Command className="bg-white text-gray-900">
+                  <CommandInput placeholder="Buscar asesor..." />
+                  <CommandList className="max-h-[250px]">
+                    <CommandEmpty>No se encontró asesor.</CommandEmpty>
+                    <CommandGroup>
+                      {advisors?.map((adv: Advisor) => {
+                        const isSelected = selectedAdvisors.includes(adv.nombre);
+                        return (
+                          <CommandItem
+                            key={adv.asesor_id}
+                            value={adv.nombre}
+                            onSelect={() => {
+                              if (isSelected) {
+                                setSelectedAdvisors(selectedAdvisors.filter((v) => v !== adv.nombre));
+                              } else {
+                                setSelectedAdvisors([...selectedAdvisors, adv.nombre]);
+                              }
+                              setPage(1);
+                            }}
+                            className="text-gray-800 hover:bg-blue-50 cursor-pointer"
+                          >
+                            <Check className={`w-4 h-4 mr-2 ${isSelected ? "opacity-100 text-blue-600" : "opacity-0"}`} />
+                            {adv.nombre}
+                          </CommandItem>
+                        );
+                      })}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
           </div>
 
           <div className="min-w-[150px]">
@@ -274,6 +326,7 @@ export function PagosPorVencimiento() {
                   <TableHead className="font-bold text-blue-800 text-right">Membresías</TableHead>
                   <TableHead className="font-bold text-blue-800 text-right">Int. CUBE</TableHead>
                   <TableHead className="font-bold text-blue-800 text-right">IVA CUBE</TableHead>
+                  <TableHead className="font-bold text-blue-800 text-right">Royalty</TableHead>
                   <TableHead className="font-bold text-green-800 text-right">Total Pagos Mes</TableHead>
                 </TableRow>
               </TableHeader>
@@ -308,6 +361,9 @@ export function PagosPorVencimiento() {
                     <TableCell className="text-right text-black">{formatQ(item.membresias)}</TableCell>
                     <TableCell className="text-right text-black">{formatQ(item.interes_cube)}</TableCell>
                     <TableCell className="text-right text-black">{formatQ(item.iva_cube)}</TableCell>
+                    <TableCell className="text-right text-black">
+                      {item.cuota_min === 0 ? formatQ(item.royalti) : "--"}
+                    </TableCell>
                     <TableCell className="text-right text-green-700 font-bold bg-green-50/50">
                       {formatQ(item.total_pagos_del_mes)}
                     </TableCell>

@@ -27,6 +27,7 @@ export const addInvestorToCreditRouter = new Elysia()
         ]),
       ),
       fecha_inicio_participacion: t.Optional(t.String()),
+      minimo: t.Optional(t.Number({ minimum: 1 })),
     }),
     detail: {
       summary: "Agregar inversionista a créditos existentes",

@@ -109,6 +109,13 @@ const menuSections: MenuSection[] = [
         path: "/creditos-caidos",
         roles: ["ADMIN"],
       },
+      {
+        key: "devolucion-cube",
+        label: "Devolución Cube",
+        icon: <Briefcase className="h-4 w-4" />,
+        path: "/devolucion-cube",
+        roles: ["ADMIN"],
+      },
     ],
   },
   {
@@ -184,6 +191,13 @@ const menuSections: MenuSection[] = [
         label: "Cuentas de empresa",
         icon: <Wallet className="h-4 w-4" />,
         path: "/cuentas-empresa",
+        roles: ["ADMIN", "CONTA"],
+      },
+      {
+        key: "cuentas-extra-inversionista",
+        label: "Cuentas extra inversionistas",
+        icon: <CreditCard className="h-4 w-4" />,
+        path: "/cuentas-extra-inversionista",
         roles: ["ADMIN", "CONTA"],
       },
     ],

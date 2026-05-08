@@ -2132,6 +2132,7 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number) {
             "PENDIENTE_CANCELACION",
             "EN_CONVENIO",
             "CANCELADO",
+            "INCOBRABLE",
           ])
         )
       );

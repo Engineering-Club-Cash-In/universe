@@ -51,7 +51,6 @@ export function BuscadorUsuarioSifco({ onSelect, reset, onReset }: BuscadorUsuar
         anio: new Date().getFullYear(),
         page,
         perPage: 10,
-        estado: "ACTIVO",
         excel: false,
         ...(hasFilter && esSifco(searchTrimmed)
           ? { numero_credito_sifco: searchTrimmed }

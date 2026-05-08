@@ -3967,3 +3967,177 @@ export async function getHistorialDevolucion(
   );
   return res.data;
 }
+
+// ============================================================
+// CUENTAS EXTRA DE INVERSIONISTA
+// ============================================================
+
+export type TipoCuentaInversionista =
+  | "AHORRO"
+  | "AHORRO Q"
+  | "AHORROS"
+  | "AHORRO $"
+  | "MONETARIA"
+  | "MONETARIA Q"
+  | "MONETARIA $"
+  | "Capital";
+
+export interface CuentaExtraInversionista {
+  cuenta_extra_id: number;
+  inversionista_id: number;
+  banco_id: number;
+  tipo_cuenta: TipoCuentaInversionista;
+  numero_cuenta: string;
+  moneda: MonedaCuenta;
+  motivo_cuenta: string;
+}
+
+export interface CuentasExtraListResponse {
+  success: boolean;
+  message: string;
+  data: CuentaExtraInversionista[];
+}
+
+export interface CuentaExtraResponse {
+  success: boolean;
+  message: string;
+  data: CuentaExtraInversionista | null;
+  error?: string;
+}
+
+export interface ListarCuentasExtraParams {
+  inversionistaId?: number;
+  bancoId?: number;
+  tipoCuenta?: TipoCuentaInversionista;
+  moneda?: MonedaCuenta;
+  numeroCuenta?: string;
+  motivoCuenta?: string;
+}
+
+export interface CrearCuentaExtraPayload {
+  inversionistaId: number;
+  bancoId: number;
+  tipoCuenta: TipoCuentaInversionista;
+  numeroCuenta: string;
+  motivoCuenta: string;
+  moneda?: MonedaCuenta;
+}
+
+export interface ActualizarCuentaExtraPayload {
+  bancoId?: number;
+  tipoCuenta?: TipoCuentaInversionista;
+  numeroCuenta?: string;
+  motivoCuenta?: string;
+  moneda?: MonedaCuenta;
+}
+
+const CUENTAS_EXTRA_PATH = `/api/cuentas-extra-inversionista`;
+
+export async function listarCuentasExtraService(
+  params?: ListarCuentasExtraParams
+): Promise<CuentasExtraListResponse> {
+  try {
+    const { data } = await api.get<CuentasExtraListResponse>(CUENTAS_EXTRA_PATH, {
+      params: {
+        inversionistaId: params?.inversionistaId,
+        bancoId: params?.bancoId,
+        tipoCuenta: params?.tipoCuenta || undefined,
+        moneda: params?.moneda || undefined,
+        numeroCuenta: params?.numeroCuenta || undefined,
+        motivoCuenta: params?.motivoCuenta || undefined,
+      },
+    });
+    return data;
+  } catch (error: any) {
+    console.error("❌ Error en listarCuentasExtraService:", error);
+    return {
+      success: false,
+      message:
+        error.response?.data?.message || "Error al obtener las cuentas extra",
+      data: [],
+    };
+  }
+}
+
+export async function getCuentasExtraByInversionistaService(
+  inversionistaId: number
+): Promise<CuentasExtraListResponse> {
+  try {
+    const { data } = await api.get<CuentasExtraListResponse>(
+      `${CUENTAS_EXTRA_PATH}/inversionista/${inversionistaId}`
+    );
+    return data;
+  } catch (error: any) {
+    console.error("❌ Error en getCuentasExtraByInversionistaService:", error);
+    return {
+      success: false,
+      message:
+        error.response?.data?.message ||
+        "Error al obtener las cuentas extra del inversionista",
+      data: [],
+    };
+  }
+}
+
+export async function crearCuentaExtraService(
+  payload: CrearCuentaExtraPayload
+): Promise<CuentaExtraResponse> {
+  try {
+    const { data } = await api.post<CuentaExtraResponse>(
+      CUENTAS_EXTRA_PATH,
+      payload
+    );
+    return data;
+  } catch (error: any) {
+    console.error("❌ Error en crearCuentaExtraService:", error);
+    return {
+      success: false,
+      message:
+        error.response?.data?.message || "Error al crear la cuenta extra",
+      data: null,
+      error: error.message,
+    };
+  }
+}
+
+export async function actualizarCuentaExtraService(
+  cuentaExtraId: number,
+  payload: ActualizarCuentaExtraPayload
+): Promise<CuentaExtraResponse> {
+  try {
+    const { data } = await api.put<CuentaExtraResponse>(
+      `${CUENTAS_EXTRA_PATH}/${cuentaExtraId}`,
+      payload
+    );
+    return data;
+  } catch (error: any) {
+    console.error("❌ Error en actualizarCuentaExtraService:", error);
+    return {
+      success: false,
+      message:
+        error.response?.data?.message || "Error al actualizar la cuenta extra",
+      data: null,
+      error: error.message,
+    };
+  }
+}
+
+export async function eliminarCuentaExtraService(
+  cuentaExtraId: number
+): Promise<CuentaExtraResponse> {
+  try {
+    const { data } = await api.delete<CuentaExtraResponse>(
+      `${CUENTAS_EXTRA_PATH}/${cuentaExtraId}`
+    );
+    return data;
+  } catch (error: any) {
+    console.error("❌ Error en eliminarCuentaExtraService:", error);
+    return {
+      success: false,
+      message:
+        error.response?.data?.message || "Error al eliminar la cuenta extra",
+      data: null,
+      error: error.message,
+    };
+  }
+}

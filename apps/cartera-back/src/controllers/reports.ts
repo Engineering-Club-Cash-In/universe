@@ -1579,6 +1579,7 @@ export async function getPagosByVencimiento({
       c.numero_credito_sifco,
       u.nombre AS nombre_usuario,
       a.nombre AS asesor,
+      c.royalti,
       MIN(q.numero_cuota) AS cuota_min,
       MAX(q.numero_cuota) AS cuota_max,
       COALESCE(SUM(p.capital_restante::numeric + COALESCE(p.abono_capital, 0)::numeric), 0) AS capital_restante,
@@ -1606,7 +1607,7 @@ export async function getPagosByVencimiento({
     LEFT JOIN cartera.moras_credito m ON c.credito_id = m.credito_id AND m.activa = true
     ${cubeSubquery}
     WHERE ${whereClause}
-    GROUP BY c.credito_id, c.numero_credito_sifco, u.nombre, a.nombre
+    GROUP BY c.credito_id, c.numero_credito_sifco, u.nombre, a.nombre, c.royalti
     HAVING SUM(${totalFilaSql}) <> 0
     ORDER BY c.numero_credito_sifco
     LIMIT ${pageSize} OFFSET ${offset}

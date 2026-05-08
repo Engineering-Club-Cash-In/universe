@@ -3573,6 +3573,7 @@ export interface PagoPorVencimientoItem {
   iva_cube: string;
   total_pagos_del_mes: string;
   dias_mora: string;
+  royalti: string;
 }
 
 export interface PagoPorVencimientoTotales {

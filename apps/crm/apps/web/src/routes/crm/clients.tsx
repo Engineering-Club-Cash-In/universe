@@ -70,6 +70,8 @@ import { authClient } from "@/lib/auth-client";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
 import { formatGuatemalaDate } from "@/lib/crm-formatters";
 import { PERMISSIONS } from "@/lib/roles";
+import { usePersistedDateRange } from "@/hooks/usePersistedDateRange";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/crm/clients")({
@@ -227,10 +229,10 @@ function RouteComponent() {
 	} = authClient.useSession();
 	const navigate = Route.useNavigate();
 	const search = Route.useSearch();
-	const [searchTerm, setSearchTerm] = useState("");
-	const [debouncedSearch, setDebouncedSearch] = useState("");
-	const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
-	const [page, setPage] = useState(0);
+	const [searchTerm, setSearchTerm] = usePersistedState<string>("crm/clients/searchTerm", "");
+	const [debouncedSearch, setDebouncedSearch] = useState(searchTerm);
+	const [dateRange, setDateRange] = usePersistedDateRange("crm/clients/dateRange");
+	const [page, setPage] = usePersistedState<number>("crm/clients/page", 0);
 	const pageSize = 20;
 
 	const queryClient = useQueryClient();

@@ -26,6 +26,7 @@ import {
   liquidacion_locks,
   documentos_inversionista,
   abonos_capital,
+  cuentas_extra_inversionista,
 } from "../database/db/schema";
 import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
 import { eq, and, or, sql, inArray, ilike, like, desc, count, SQL, isNull, isNotNull, ne } from "drizzle-orm";

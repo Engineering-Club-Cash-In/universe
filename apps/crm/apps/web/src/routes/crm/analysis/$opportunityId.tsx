@@ -307,6 +307,8 @@ function OpportunityDocumentsPage() {
 						year: opportunity.vehicle.year,
 						licensePlate: opportunity.vehicle.licensePlate,
 						color: opportunity.vehicle.color,
+						isNew: opportunity.vehicle.isNew,
+						isOwned: opportunity.vehicle.isOwned,
 					}
 				: null,
 		});

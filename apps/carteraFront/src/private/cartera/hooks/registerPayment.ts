@@ -223,6 +223,7 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
   } | null>(null);
   // Función para buscar crédito y setear los campos
     const fetchCredito = async (numero_credito_sifco: string) => {
+    if (!numero_credito_sifco.trim()) return;
     setLoadingCredito(true);
     setErrorCredito(null);
     try {

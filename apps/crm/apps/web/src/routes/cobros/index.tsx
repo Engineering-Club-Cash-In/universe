@@ -19,6 +19,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { DateRange } from "react-day-picker";
 import { MassWhatsappModal } from "@/components/cobros/mass-whatsapp-modal";
 import { DateRangeFilter } from "@/components/reports/date-range-filter";
+import { CapitalRangeFilter } from "@/components/cobros/capital-range-filter";
 import { DataTable } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,6 +39,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { authClient } from "@/lib/auth-client";
 import { type ContratoCobranza, columns } from "@/lib/cobros/columns";
+import { getPaymentDateRangeFilter } from "@/lib/cobros/payment-date-range-filter";
 import { parseFechaLocal } from "@/lib/date-utils";
 import { PERMISSIONS, ROLES } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
@@ -303,6 +305,8 @@ function RouteComponent() {
 	const [fechaHasta, setFechaHasta] = useState<string | undefined>(undefined);
 	const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
 	const [fechaError, setFechaError] = useState<string | null>(null);
+	const [capitalMin, setCapitalMin] = useState<number | undefined>(undefined);
+	const [capitalMax, setCapitalMax] = useState<number | undefined>(undefined);
 
 	// Debounce para el filtro de búsqueda (1 segundos)
 	useEffect(() => {
@@ -428,6 +432,8 @@ function RouteComponent() {
 				fechaDesde,
 				fechaHasta,
 				etiquetas: filtroEtiquetas.length > 0 ? filtroEtiquetas : undefined,
+				capitalMin,
+				capitalMax,
 			},
 		}),
 		enabled: !!session,
@@ -998,9 +1004,11 @@ function RouteComponent() {
 									estadoMora: filtroEtapa || undefined,
 									searchTerm: debouncedFilterValue || undefined,
 									numeroSifco: debouncedSifcoFilterValue || undefined,
-									time: timeParam,
+									time: fechaDesde || fechaHasta ? undefined : timeParam,
 									etiquetas:
 										filtroEtiquetas.length > 0 ? filtroEtiquetas : undefined,
+									fechaDesde,
+									fechaHasta,
 								}}
 								etiquetaLabels={ETIQUETA_LABELS_FILTRO}
 								totalDestinatarios={totalCreditos}
@@ -1072,29 +1080,14 @@ function RouteComponent() {
 										<DateRangeFilter
 											dateRange={dateRange}
 											onDateRangeChange={(range) => {
-												if (!range) {
-													setDateRange(undefined);
-													setFechaDesde(undefined);
-													setFechaHasta(undefined);
-													setFechaError(null);
-													setPage(1);
-													return;
+												const filtro = getPaymentDateRangeFilter(range);
+												setDateRange(filtro.dateRange);
+												setFechaDesde(filtro.fechaDesde);
+												setFechaHasta(filtro.fechaHasta);
+												setFechaError(filtro.fechaError);
+												if (filtro.fechaDesde && filtro.fechaHasta) {
+													setFiltroTemporal("todos");
 												}
-												const hoy = new Date();
-												hoy.setHours(0, 0, 0, 0);
-												if (range.from && range.from < hoy) {
-													setFechaError(
-														"La fecha no puede ser menor al día de hoy",
-													);
-													setDateRange(range);
-													return;
-												}
-												setFechaError(null);
-												setDateRange(range);
-												if (!range.from || !range.to) return;
-												setFechaDesde(range.from.toISOString().slice(0, 10));
-												setFechaHasta(range.to.toISOString().slice(0, 10));
-												setFiltroTemporal("todos");
 												setPage(1);
 											}}
 										/>
@@ -1176,6 +1169,22 @@ function RouteComponent() {
 											),
 										)}
 									</div>
+								</div>
+
+								{/* Capital */}
+								<div className="flex flex-col gap-2">
+									<span className="font-semibold text-muted-foreground text-xs uppercase tracking-wide">
+										Capital
+									</span>
+									<CapitalRangeFilter
+										capitalMin={capitalMin}
+										capitalMax={capitalMax}
+										onCapitalRangeChange={(min, max) => {
+											setCapitalMin(min);
+											setCapitalMax(max);
+											setPage(1);
+										}}
+									/>
 								</div>
 							</div>
 						}

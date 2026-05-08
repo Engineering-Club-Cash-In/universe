@@ -13,6 +13,7 @@ import MorasManager from "./private/cartera/components/Latefee";
 import CreditosPorAsesorManager from "./private/cartera/components/resumeAdvisor";
 import { BancosManager } from "./private/cartera/components/bank";
 import { CuentasEmpresaManager } from "./private/cartera/components/CuentasEmpresaManager";
+import { CuentasExtraInversionistaManager } from "./private/cartera/components/CuentasExtraInversionistaManager";
 import { CreatePaymentAgreementForm } from "./private/cartera/components/paymentAgreement";
 import { FacturasGenericas } from "./private/cartera/components/FacturasGenericas";
 import EfectividadAsesores from "./private/cartera/components/EfectividadAsesores";
@@ -21,6 +22,7 @@ import { SesionesPendientes } from "./private/cartera/components/SesionesPendien
 import { RecibosGenericos } from "./private/recibos-genericos/components/RecibosGenericos";
 import { FallenCredits } from "./private/cartera/components/FallenCredits";
 import { PagosPorVencimiento } from "./private/cartera/components/PagosPorVencimiento";
+import { DevolucionCube } from "./private/cartera/components/DevolucionCube";
 
 // 🔒 Rutas privadas
 function PrivateRoute({ children }: { children: JSX.Element }) {
@@ -152,6 +154,15 @@ function App() {
         />
 
         <Route
+          path="cuentas-extra-inversionista"
+          element={
+            <RoleRoute allowedRoles={["ADMIN", "CONTA"]}>
+              <CuentasExtraInversionistaManager />
+            </RoleRoute>
+          }
+        />
+
+        <Route
           path="mora"
           element={
             <RoleRoute allowedRoles={["ADMIN"]}>
@@ -237,6 +248,15 @@ function App() {
           element={
             <RoleRoute allowedRoles={["ADMIN"]}>
               <PagosPorVencimiento />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="devolucion-cube"
+          element={
+            <RoleRoute allowedRoles={["ADMIN"]}>
+              <DevolucionCube />
             </RoleRoute>
           }
         />

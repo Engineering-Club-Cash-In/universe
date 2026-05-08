@@ -80,6 +80,7 @@ const formSchema = z.object({
 
   vinVerification: z.boolean(),
   vehicleId: z.string().optional(),
+  isCashInOwned: z.boolean(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -142,8 +143,9 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       noTestDriveReason: "",
       vinVerification: false,
       vehicleId: "",
+      isCashInOwned: false,
       ...formData,
-    },
+    } as FormValues,
   });
 
   // Exponer método de validación para el wizard
@@ -322,6 +324,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       kmMileage: vehicle.kmMileage?.toString() || ocr.kmMileage || "",
       milesMileage: vehicle.milesMileage?.toString() || ocr.milesMileage || "",
       vinVerification: false,
+      isCashInOwned: vehicle.isOwned || false,
     });
     
     // Clear search results
@@ -398,6 +401,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       noTestDriveReason: "",
       vinVerification: false,
       vehicleId: "",
+      isCashInOwned: false,
     });
 
     setFormSubmitted(true);
@@ -476,6 +480,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       vehicleId: isDevMode 
         ? "27484f6e-811d-467f-bdae-c2e3054769f3" 
         : "f710e3cc-deae-4320-97d4-6aaff963c410",
+      isCashInOwned: true,
     };
 
     // Use form.reset() to properly update all fields including selects
@@ -804,6 +809,30 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                   )}
                 />
               </div>
+
+              <FormField
+                control={form.control}
+                name="isCashInOwned"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-start space-x-3 space-y-0 p-1">
+                    <FormControl>
+                      <Checkbox
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                        className="mt-1 h-5 w-5 border-gray-400"
+                      />
+                    </FormControl>
+                    <div className="space-y-1 leading-none">
+                      <FormLabel className="text-base font-semibold text-gray-800 cursor-pointer">
+                        ¿El vehículo es propio de Cash In?
+                      </FormLabel>
+                      <p className="text-sm text-gray-600">
+                        Marque esta opción si el vehículo pertenece a Cash In
+                      </p>
+                    </div>
+                  </FormItem>
+                )}
+              />
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
                 <FormField

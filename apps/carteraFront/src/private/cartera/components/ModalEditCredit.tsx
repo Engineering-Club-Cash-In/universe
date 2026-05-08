@@ -36,7 +36,7 @@ interface InvestorOption {
 interface ModalEditCreditProps {
   open: boolean;
   onClose: () => void;
-  initialValues: Omit<UpdateCreditBody, "inversionistas">;
+  initialValues: Omit<UpdateCreditBody, "inversionistas"> | null;
   investorsInitial?: InvestorItem[];
   investorsMirrorInitial?: InvestorItem[]; // 🆕 Nueva prop para datos iniciales espejo
   onSuccess: () => void;
@@ -136,6 +136,9 @@ export function ModalEditCredit({
       cuota_inversionista: Number(inv.cuota_inversionista || 0),
     })) || [];
 
+  const safeInitialValues =
+    (initialValues ?? {}) as Omit<UpdateCreditBody, "inversionistas">;
+
   const parsedInvestors = parseInvestors(investorsInitial);
   // 🔥 Sincronización Real (Por ID de Inversionista)
   // Buscamos explícitamente el espejo que corresponda al mismo ID de inversionista.
@@ -169,7 +172,9 @@ export function ModalEditCredit({
 
   const formik = useFormik({
     initialValues: {
-      ...initialValues,
+      ...safeInitialValues,
+      estado_devolucion: safeInitialValues.estado_devolucion ?? "NO_APLICA",
+      motivo_devolucion: "",
       investors: parsedInvestors,
       investorsMirror: parsedInvestorsMirror, // 🆕 Campo para espejo
     },
@@ -245,6 +250,11 @@ export function ModalEditCredit({
 
         // Abono capital
         permite_abono_capital: !!values.permite_abono_capital,
+        estado_devolucion: values.estado_devolucion,
+        motivo_devolucion:
+          values.estado_devolucion === "PENDIENTE_AUTORIZACION"
+            ? values.motivo_devolucion?.trim() || ""
+            : undefined,
 
         // Lista Principal
         inversionistas: values.investors.map((i: InvestorItem) => ({
@@ -558,7 +568,7 @@ export function ModalEditCredit({
             </div>
 
             {/* Opciones del crédito */}
-            <div className="mt-4 p-4 rounded-xl border border-blue-100 bg-blue-50/50">
+            <div className="mt-4 p-4 rounded-xl border border-blue-100 bg-blue-50/50 space-y-4">
               <div className="flex items-center justify-between">
                 <div>
                   <Label className="text-gray-800 font-bold text-sm">
@@ -593,6 +603,61 @@ export function ModalEditCredit({
                   />
                 </button>
               </div>
+
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <Label className="text-gray-800 font-bold text-sm">
+                    Solicitar devolución de crédito
+                  </Label>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Activar para solicitar devolución del crédito a Cube Investments. Requiere motivo.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={formik.values.estado_devolucion === 'PENDIENTE_AUTORIZACION'}
+                  onClick={() => {
+                    if (formik.values.estado_devolucion === 'PENDIENTE_AUTORIZACION') {
+                      formik.setFieldValue('estado_devolucion', 'NO_APLICA');
+                      formik.setFieldValue('motivo_devolucion', '');
+                    } else {
+                      formik.setFieldValue('estado_devolucion', 'PENDIENTE_AUTORIZACION');
+                    }
+                  }}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                    formik.values.estado_devolucion === 'PENDIENTE_AUTORIZACION'
+                      ? "bg-green-500"
+                      : "bg-gray-300"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      formik.values.estado_devolucion === 'PENDIENTE_AUTORIZACION'
+                        ? "translate-x-5"
+                        : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+              {formik.values.estado_devolucion === 'PENDIENTE_AUTORIZACION' && (
+                <div className="mt-2">
+                  <Label className="text-gray-700 font-medium">Motivo de devolución *</Label>
+                  <Input
+                    type="text"
+                    name="motivo_devolucion"
+                    value={formik.values.motivo_devolucion || ''}
+                    onChange={formik.handleChange}
+                    onBlur={formik.handleBlur}
+                    placeholder="Explique el motivo de la solicitud de devolución"
+                    className={formik.touched.motivo_devolucion && formik.errors.motivo_devolucion ? 'border-red-500' : ''}
+                    required
+                  />
+                  {formik.touched.motivo_devolucion && formik.errors.motivo_devolucion && (
+                    <p className="text-red-500 text-xs mt-1">{formik.errors.motivo_devolucion}</p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Datos del usuario */}

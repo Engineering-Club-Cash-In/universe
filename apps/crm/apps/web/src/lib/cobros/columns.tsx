@@ -23,6 +23,7 @@ export type ContratoCobranza = {
 	etiquetas: string[] | null;
 	isPool?: boolean;
 	responsableCobros: string | null;
+	montoFinanciado: string;
 };
 
 function getEstadoBadge(estado: string) {
@@ -270,12 +271,57 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 		},
 	},
 	{
+		accessorKey: "montoFinanciado",
+		header: ({ column }) => {
+			return (
+				<div className="text-right">
+					<Button
+						variant="ghost"
+						onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+					>
+						Capital
+						<ArrowUpDown className="ml-2 h-4 w-4" />
+					</Button>
+				</div>
+			);
+		},
+		cell: ({ row }) => {
+			const monto = Number.parseFloat(row.getValue("montoFinanciado"));
+			const formatted = new Intl.NumberFormat("es-GT", {
+				style: "currency",
+				currency: "GTQ",
+				minimumFractionDigits: 2,
+				maximumFractionDigits: 2,
+			}).format(monto);
+
+			return (
+				<div className={`font-medium ${monto > 0 ? "text-right" : "text-center"}`}>
+					{monto > 0 ? formatted : "-"}
+				</div>
+			);
+		},
+		sortingFn: (rowA, rowB) => {
+			const a = Number.parseFloat(rowA.getValue("montoFinanciado"));
+			const b = Number.parseFloat(rowB.getValue("montoFinanciado"));
+			return a - b;
+		},
+	},
+	{
 		id: "etiquetas",
 		accessorKey: "etiquetas",
-		header: "Etiquetas",
+		header: ({ column }) => (
+			<Button
+				variant="ghost"
+				onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+			>
+				Etiquetas
+				<ArrowUpDown className="ml-2 h-4 w-4" />
+			</Button>
+		),
 		cell: ({ row }) => {
 			const etiquetas = row.original.etiquetas;
-			if (!etiquetas || etiquetas.length === 0) return null;
+			if (!etiquetas || etiquetas.length === 0)
+				return <span className="text-muted-foreground text-xs">Sin etiquetas</span>;
 			return (
 				<div className="flex flex-wrap gap-1">
 					{etiquetas.map((etiqueta) => (
@@ -288,6 +334,11 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 					))}
 				</div>
 			);
+		},
+		sortingFn: (rowA, rowB) => {
+			const a = rowA.original.etiquetas?.length ?? 0;
+			const b = rowB.original.etiquetas?.length ?? 0;
+			return a - b;
 		},
 	},
 	{

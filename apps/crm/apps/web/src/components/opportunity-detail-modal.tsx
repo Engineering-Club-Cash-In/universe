@@ -99,6 +99,7 @@ export type OpportunityForModal = {
 		licensePlate?: string | null;
 		color?: string | null;
 		isNew?: boolean;
+		isOwned?: boolean;
 	} | null;
 };
 
@@ -466,6 +467,14 @@ export function OpportunityDetailModal({
 												{opportunity.vehicle.isNew && (
 													<Badge variant="secondary" className="ml-2">
 														Nuevo
+													</Badge>
+												)}
+												{opportunity.vehicle.isOwned && (
+													<Badge
+														variant="outline"
+														className="ml-2 border-sky-300 bg-sky-50 text-[10px] text-sky-700 dark:border-sky-700 dark:bg-sky-950 dark:text-sky-300"
+													>
+														Cash In
 													</Badge>
 												)}
 											</Link>

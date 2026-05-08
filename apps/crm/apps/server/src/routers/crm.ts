@@ -286,7 +286,9 @@ export const crmRouter = {
 					const searchPattern = `%${term}%`;
 					return or(
 						ilike(leads.firstName, searchPattern),
+						ilike(leads.middleName, searchPattern),
 						ilike(leads.lastName, searchPattern),
+						ilike(leads.secondLastName, searchPattern),
 						ilike(leads.email, searchPattern),
 						ilike(companies.name, searchPattern),
 					);

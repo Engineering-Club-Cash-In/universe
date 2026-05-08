@@ -607,11 +607,8 @@ export const paymentRouter = new Elysia()
         await ajustarCuotasConSIFCO({
           numero_credito_sifco: numeroPrestamo,
           cuota_esperada: cuotaEsperada,
-          cuota_encontrada: cuotaEncontrada,
           fecha_cuota: fechaCuota,
           plazo_completo: plazoCompleto,
-          plazo_encontrado: plazoEncontrado,
-          cuotas_por_crear: cuotasPorCrear,
         });
 
         resultados.push({
@@ -655,31 +652,42 @@ export const paymentRouter = new Elysia()
 
   .post(
     "/ajustar-credito",
-    async ({ body }) => {
+    async ({ body, set }) => {
       const {
         numero_credito_sifco,
         cuota_esperada,
-        cuota_encontrada,
         fecha_cuota,
         plazo_completo,
-        plazo_encontrado,
-        cuotas_por_crear,
       } = body;
 
-      await ajustarCuotasConSIFCO({
-        numero_credito_sifco,
-        cuota_esperada,
-        cuota_encontrada,
-        fecha_cuota,
-        plazo_completo,
-        plazo_encontrado,
-        cuotas_por_crear,
-      });
+      if (!fecha_cuota || fecha_cuota.trim() === "") {
+        set.status = 400;
+        return {
+          success: false,
+          mensaje: "fecha_cuota es requerida y no puede estar vacía",
+        };
+      }
 
-      return {
-        success: true,
-        mensaje: `Crédito ${numero_credito_sifco} ajustado correctamente`,
-      };
+      try {
+        await ajustarCuotasConSIFCO({
+          numero_credito_sifco,
+          cuota_esperada,
+          fecha_cuota,
+          plazo_completo,
+        });
+
+        return {
+          success: true,
+          mensaje: `Crédito ${numero_credito_sifco} ajustado correctamente`,
+        };
+      } catch (error) {
+        console.error(`❌ Error ajustando crédito ${numero_credito_sifco}:`, error);
+        set.status = 500;
+        return {
+          success: false,
+          mensaje: error instanceof Error ? error.message : "Error desconocido",
+        };
+      }
     },
     {
       body: t.Object({
@@ -691,6 +699,12 @@ export const paymentRouter = new Elysia()
         plazo_encontrado: t.Number(),
         cuotas_por_crear: t.Number(),
       }),
+      detail: {
+        tags: ["SIFCO Pagos"],
+        summary: "Ajustar fechas y plazo de un crédito",
+        description:
+          "Ajusta fecha_vencimiento de cuotas y crea/borra cuotas según plazo_completo. NO modifica el estado pagado de cuotas existentes ni los abonos.",
+      },
     }
   )  .post("/procesar-desde-archivo", async () => {
     // 👇 Ruta quemada al archivo JSON

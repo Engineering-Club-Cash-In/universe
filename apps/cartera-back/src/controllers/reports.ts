@@ -1495,7 +1495,7 @@ export async function getPagosByVencimiento({
     const asesorNames = asesor.split(",").map((n) => n.trim()).filter((n) => n.length > 0);
     if (asesorNames.length > 0) {
       const orConditions = asesorNames.map((name) => sql`a.nombre ILIKE ${"%" + name + "%"}`);
-      filters.push(sql.join(orConditions, sql` OR `));
+      filters.push(sql`(${sql.join(orConditions, sql` OR `)})`);
     }
   }
   if (rango_mora) {

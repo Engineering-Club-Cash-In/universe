@@ -141,9 +141,9 @@ export const creditRouter = new Elysia()
   } = query as Record<string, string>;
 
   // Validar parámetros requeridos
-  if (!mes || !anio || !estado) {
+  if (!mes || !anio) {
     set.status = 400;
-    return { message: "Faltan parámetros 'mes', 'anio' y/o 'estado'." };
+    return { message: "Faltan parámetros 'mes' y/o 'anio'." };
   }
 
   // Convertir a número (ya que query params vienen como string)
@@ -162,14 +162,16 @@ export const creditRouter = new Elysia()
         .map((s) => s.trim())
         .filter((s) => s.length > 0)
     : undefined;
-  const estadoParam = String(estado) as
-    | "ACTIVO"
-    | "CANCELADO"
-    | "INCOBRABLE"
-    | "PENDIENTE_CANCELACION"
-    | "EN_CONVENIO"
-    | "MOROSO"
-    | "CAIDO";
+  const estadoParam = estado
+    ? (String(estado) as
+        | "ACTIVO"
+        | "CANCELADO"
+        | "INCOBRABLE"
+        | "PENDIENTE_CANCELACION"
+        | "EN_CONVENIO"
+        | "MOROSO"
+        | "CAIDO")
+    : undefined;
   
   // Convertir asesor_id a número si existe
   const asesorIdNum = asesor_id ? Number(asesor_id) : undefined;

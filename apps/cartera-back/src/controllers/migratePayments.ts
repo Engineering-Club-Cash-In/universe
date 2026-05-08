@@ -2,53 +2,34 @@ import Big from "big.js";
 import { eq, and, gt, asc, inArray, lte } from "drizzle-orm";
 import { db } from "../database";
 import { creditos, cuotas_credito, pagos_credito } from "../database/db";
-import fs from "fs/promises";
 import { consultarEstadoCuentaPrestamo } from "../services/sifcoIntegrations";
 import { updateInstallments } from "./updateCredit";
 
 interface AjustarCuotasConSIFCOParams {
   numero_credito_sifco: string;
-  cuota_esperada: number; // 20
-  cuota_encontrada: number; // 11
-  fecha_cuota: string; // "2025-12-28"
-  plazo_completo: number; // 60
-  plazo_encontrado: number; // 51
-  cuotas_por_crear: number; // 9
+  cuota_esperada: number; // 20  → cuota cuya fecha conocemos
+  fecha_cuota: string;    // "2025-12-28" → fecha de esa cuota
+  plazo_completo: number; // 60  → plazo total objetivo
 }
  
 export const ajustarCuotasConSIFCO = async ({
   numero_credito_sifco,
   cuota_esperada,
-  cuota_encontrada,
   fecha_cuota,
   plazo_completo,
-  plazo_encontrado,
-  cuotas_por_crear,
-
 }: AjustarCuotasConSIFCOParams): Promise<void> => {
-  console.log(`\n🔧 Ajustando crédito ${numero_credito_sifco} - MIGRANDO A TU SISTEMA`);
-  console.log(`   📊 Cuota esperada (JSON discrepancias): ${cuota_esperada} (fecha: ${fecha_cuota})`);
-  console.log(`   📋 Cuota encontrada en BD: ${cuota_encontrada}`);
-  console.log(`   📐 Plazo SIFCO (referencia): ${plazo_encontrado}`);
-  console.log(`   📐 Plazo COMPLETO (TU sistema): ${plazo_completo} 👈 ESTE MANDA`);
-  console.log(`   ➕ Cuotas por crear (del JSON): ${cuotas_por_crear}`);
-  
- if (fecha_cuota.trim() === "" ||  !fecha_cuota) return; // ❌ Sin fecha, no se puede procesar
+  console.log(`\n🔧 Ajustando crédito ${numero_credito_sifco} - SOLO FECHAS Y PLAZO`);
+  console.log(`   📊 Cuota esperada: ${cuota_esperada} (fecha: ${fecha_cuota})`);
+  console.log(`   📐 Plazo completo (TU sistema): ${plazo_completo}`);
+
+  if (!fecha_cuota || fecha_cuota.trim() === "") return;
 
   // 1️⃣ Obtener crédito local
   const creditoResult = await db
     .select({
       credito_id: creditos.credito_id,
-      capital: creditos.capital,
-      deudatotal: creditos.deudatotal,
-      plazo: creditos.plazo,
-      fecha_desembolso: creditos.fecha_creacion,
       cuota: creditos.cuota,
-      porcentaje_interes: creditos.porcentaje_interes,
       cuota_interes: creditos.cuota_interes,
-      seguro_10_cuotas: creditos.seguro_10_cuotas,
-      gps: creditos.gps,
-      membresias_pago: creditos.membresias_pago,
     })
     .from(creditos)
     .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
@@ -57,72 +38,6 @@ export const ajustarCuotasConSIFCO = async ({
   const credito = creditoResult[0];
   if (!credito) throw new Error("Crédito no encontrado");
 
-  // 🔥 CONSULTAR A SIFCO PARA OBTENER EL CAPITAL INICIAL (LIQUIDO A DESEMBOLSAR)
-  console.log(`\n🌐 Consultando estado de cuenta en SIFCO...`);
-  
-  let capitalInicial = new Big(credito.capital || credito.deudatotal); // Default: usar BD
-  
-  try {
-    const infoPagos = await consultarEstadoCuentaPrestamo(numero_credito_sifco);
-    
-    // 🔥 Agarrar la PRIMERA transacción (el desembolso)
-    const transaccionDesembolso = infoPagos?.ConsultaResultado?.EstadoCuenta_Transacciones?.[0];
-    
-    if (transaccionDesembolso && transaccionDesembolso.EstadoCuenta_Detalles) {
-      // Buscar el detalle "LIQUIDO A DESEMBOLSAR" (CrMoDeSalCod: 59)
-      const liquidoDesembolsar = transaccionDesembolso.EstadoCuenta_Detalles.find(
-        (d: any) => d.CrMoDeSalCod === 59
-      );
-      
-      if (liquidoDesembolsar && liquidoDesembolsar.CrMoDeValor) {
-        capitalInicial = new Big(liquidoDesembolsar.CrMoDeValor);
-        console.log(`   ✅ Capital inicial desde SIFCO: Q${capitalInicial.toString()}`);
-      } else {
-        console.log(`   ⚠️ No se encontró LIQUIDO A DESEMBOLSAR en SIFCO, usando BD`);
-      }
-    } else {
-      console.log(`   ⚠️ No se encontró transacción de desembolso en SIFCO, usando BD`);
-    }
-  } catch (error) {
-    console.error(`   ❌ Error consultando SIFCO:`, error);
-    console.log(`   ⚠️ Usando capital de BD: Q${capitalInicial.toString()}`);
-  }
-
-  const capitalActualCredito = new Big(credito.capital); // 👈 Para capital_restante (SIEMPRE)
-  const deudaTotal = new Big(credito.deudatotal); // 👈 Para total_restante (SIEMPRE)
-
-  console.log(`💰 Capital inicial (SIFCO): Q${capitalInicial.toString()}`);
-  console.log(`💰 Capital actual del crédito (BD): Q${capitalActualCredito.toString()}`);
-  console.log(`💰 Deuda total del crédito: Q${deudaTotal.toString()}`);
-
-  // 🔥 LEER JSON DE ÚLTIMOS PAGOS para saber hasta qué cuota va REALMENTE pagada
-  const rutaArchivoPagos = "C:\\Users\\Kelvin Palacios\\Documents\\analis de datos\\resultado_ultimos_pagos.json";
-  
-  console.log(`\n📂 Leyendo archivo de últimos pagos: ${rutaArchivoPagos}`);
-  
-  let cuotaRealmentePagada = cuota_esperada; // Default: usar la del JSON de discrepancias
-  
-  try {
-    const contenidoPagos = await fs.readFile(rutaArchivoPagos, "utf-8");
-    const jsonPagos = JSON.parse(contenidoPagos);
-    
-    // Buscar el crédito en el JSON de pagos
-    const creditoPagos = jsonPagos.find((c: any) => c.numeroCredito === numero_credito_sifco);
-    
-    if (creditoPagos && creditoPagos.creditos && creditoPagos.creditos.length > 0) {
-      // 🎯 Agarrar el PRIMER elemento del array para saber hasta qué cuota va
-      const primerPago = creditoPagos.creditos[0];
-      cuotaRealmentePagada = parseInt(primerPago.numeroCuota);
-      
-      console.log(`   ✅ JSON de pagos encontrado: Cuota realmente pagada = ${cuotaRealmentePagada}`);
-    } else {
-      console.log(`   ⚠️ Crédito no encontrado en JSON de pagos, usando cuota_esperada = ${cuota_esperada}`);
-    }
-  } catch (error) {
-    console.error(`   ❌ Error leyendo JSON de pagos:`, error);
-    console.log(`   ⚠️ Usando cuota_esperada del JSON de discrepancias = ${cuota_esperada}`);
-  }
-
   // 2️⃣ Obtener TODAS las cuotas (incluyendo la 0)
   const todasLasCuotas = await db
     .select()
@@ -130,75 +45,49 @@ export const ajustarCuotasConSIFCO = async ({
     .where(eq(cuotas_credito.credito_id, credito.credito_id))
     .orderBy(asc(cuotas_credito.numero_cuota));
 
-  // 🔥 OPTIMIZACIÓN: Separar cuota 0 y cuotas normales
   const cuota0 = todasLasCuotas.find(c => c.numero_cuota === 0);
   const cuotasExistentes = todasLasCuotas.filter(c => c.numero_cuota > 0);
 
   console.log(`📦 Cuotas existentes en BD (sin la 0): ${cuotasExistentes.length}`);
 
-  // 3️⃣ 🔥 CALCULAR FECHAS BASADAS EN LA FECHA DE LA CUOTA ESPERADA
-  console.log(`\n📅 Calculando fechas basadas en cuota esperada desde SIFCO...`);
-  console.log(`   🎯 Cuota esperada: #${cuota_esperada}`);
-  console.log(`   📆 Fecha de cuota esperada: ${fecha_cuota}`);
-
-  const fechaEsperada = new Date(fecha_cuota);
+  // 3️⃣ Calcular fechas basadas en la cuota esperada
+  // Parseo manual de "YYYY-MM-DD" para evitar shift por timezone (America/Guatemala UTC-6)
+  const [yyyy, mm, dd] = fecha_cuota.split("-").map(Number);
+  const fechaEsperada = new Date(yyyy, mm - 1, dd);
   const diaEsperado = fechaEsperada.getDate();
 
-  // 🔥 FIX: Detectar si la fecha es día 1 (indica vencimiento del mes anterior)
   let diaVencimiento: number;
-  let fechaBase = new Date(fechaEsperada); // 👈 NUEVA VARIABLE para corregir el mes
+  const fechaBase = new Date(fechaEsperada);
 
-if (diaEsperado === 1) {
-  // Día 1 = SIFCO manda el mes correcto, solo el día está corrido
-  diaVencimiento = 30;
+  if (diaEsperado === 1) {
+    // Día 1 = SIFCO manda el mes correcto, día 30 del mismo mes
+    diaVencimiento = 30;
+    const ultimoDia = new Date(fechaBase.getFullYear(), fechaBase.getMonth() + 1, 0).getDate();
+    fechaBase.setDate(Math.min(30, ultimoDia));
+    console.log(`   ⚠️ Fecha en día 1 detectada, vencimiento día 30 mismo mes`);
+  } else {
+    diaVencimiento = diaEsperado;
+    const ultimoDia = new Date(fechaBase.getFullYear(), fechaBase.getMonth() + 1, 0).getDate();
+    fechaBase.setDate(Math.min(diaVencimiento, ultimoDia));
+  }
 
-  console.log(
-    `   ⚠️ Fecha en día 1 detectada, usando vencimiento día 30 DEL MISMO MES`
-  );
-
-  // 🔒 NO tocar el mes
-  const ultimoDia = new Date(fechaBase.getFullYear(), fechaBase.getMonth() + 1, 0).getDate();
-  fechaBase.setDate(Math.min(30, ultimoDia));
-} else {
-  // Usar el día exacto de la fecha recibida
-  diaVencimiento = diaEsperado;
-  const ultimoDia = new Date(fechaBase.getFullYear(), fechaBase.getMonth() + 1, 0).getDate();
-  fechaBase.setDate(Math.min(diaVencimiento, ultimoDia));
-}
-
-  console.log(`   📌 Día de la fecha esperada: ${diaEsperado}`);
-  console.log(`   📌 Día de vencimiento determinado: ${diaVencimiento}`);
-  console.log(`   📌 Fecha base ajustada: ${fechaBase.toISOString().split("T")[0]}`); // 👈 NUEVO LOG
-
-  // 🔥 HELPER para ajustar día según el mes
   const ajustarDiaVencimiento = (fecha: Date, dia: number): void => {
     const ultimoDiaMes = new Date(fecha.getFullYear(), fecha.getMonth() + 1, 0).getDate();
     fecha.setDate(Math.min(dia, ultimoDiaMes));
   };
 
-  // 🔥 CALCULAR LA FECHA DE LA CUOTA ESPERADA ajustada (usando fechaBase)
   const fechaCuotaEsperadaAjustada = new Date(fechaBase.getFullYear(), fechaBase.getMonth(), 1);
   ajustarDiaVencimiento(fechaCuotaEsperadaAjustada, diaVencimiento);
 
-  console.log(`   ✅ Cuota ${cuota_esperada} ajustada a: ${fechaCuotaEsperadaAjustada.toISOString().split("T")[0]}`);
-
-  // 🔥 RETROCEDER desde la cuota esperada hasta la cuota 1
-  // Usar día 1 antes de setMonth para evitar overflow (feb 30 → mar 2)
+  // Retroceder desde la cuota esperada hasta la cuota 1 (día 1 antes de setMonth para evitar overflow)
   const fechaPrimeraCuota = new Date(fechaCuotaEsperadaAjustada.getFullYear(), fechaCuotaEsperadaAjustada.getMonth(), 1);
   fechaPrimeraCuota.setMonth(fechaPrimeraCuota.getMonth() - (cuota_esperada - 1));
   ajustarDiaVencimiento(fechaPrimeraCuota, diaVencimiento);
 
-  console.log(`   ✅ Fecha calculada para cuota 1: ${fechaPrimeraCuota.toISOString().split("T")[0]}`);
-
-  // 🔥 CALCULAR FECHA DE LA CUOTA 0 (un mes antes que la cuota 1)
   const fechaCuota0 = new Date(fechaPrimeraCuota.getFullYear(), fechaPrimeraCuota.getMonth(), 1);
   fechaCuota0.setMonth(fechaCuota0.getMonth() - 1);
   ajustarDiaVencimiento(fechaCuota0, diaVencimiento);
 
-  console.log(`   ✅ Fecha calculada para cuota 0: ${fechaCuota0.toISOString().split("T")[0]}`);
-
-  // 🔥 HELPER: Calcular fecha de vencimiento
-  // Usar día 1 antes de setMonth para evitar overflow en febrero
   const calcularFechaVencimiento = (numeroCuota: number): string => {
     const fecha = new Date(fechaPrimeraCuota.getFullYear(), fechaPrimeraCuota.getMonth(), 1);
     fecha.setMonth(fecha.getMonth() + (numeroCuota - 1));
@@ -206,23 +95,9 @@ if (diaEsperado === 1) {
     return fecha.toISOString().split("T")[0];
   };
 
-  // 🔥 OPTIMIZACIÓN: Helper para calcular interés e IVA
-  const calcularInteresEIva = (capital: Big) => {
-    const interes = capital.times(porcentajeInteres).round(2);
-    const iva = interes.times(0.12).round(2);
-    return { interes, iva };
-  };
-
-  // 7️⃣ Constantes financieras (MOVIDAS AQUÍ ARRIBA)
-  const seguroFijoPorMes = new Big(credito.seguro_10_cuotas ?? 0);
-  const gpsFijoPorMes = new Big(credito.gps ?? 0);
-  const membresiasFijoPorMes = new Big(credito.membresias_pago ?? 0);
-  const porcentajeInteres = new Big(credito.porcentaje_interes ?? 0).div(100);
-  const cuotaMensual = new Big(credito.cuota);
-  const cuotaInteresCredito = credito.cuota_interes;
-
-  // 🔥 PRE-CALCULAR interés e IVA para cuotas pendientes (se usa para TODAS)
-  const { interes: interesPendienteBase, iva: ivaPendienteBase } = calcularInteresEIva(capitalActualCredito);
+  console.log(`   ✅ Cuota 1 vence: ${calcularFechaVencimiento(1)}`);
+  console.log(`   ✅ Cuota ${cuota_esperada} vence: ${fechaCuotaEsperadaAjustada.toISOString().split("T")[0]}`);
+  console.log(`   ✅ Cuota 0 vence: ${fechaCuota0.toISOString().split("T")[0]}`);
 
   await db.transaction(async (tx) => {
     // 4️⃣ 🗑️ LIMPIAR CUOTAS QUE EXCEDEN EL PLAZO COMPLETO
@@ -318,29 +193,24 @@ if (diaEsperado === 1) {
       console.log(`   ✅ Ya existen todas las cuotas del plazo completo`);
     }
 
-    // 🔥 ACTUALIZAR LA CUOTA 0 - SOLO FECHAS (usando la variable que ya tenemos)
+    // 🔥 ACTUALIZAR LA CUOTA 0 - SOLO fecha_vencimiento (respetar pagado)
     if (cuota0) {
       const fechaCuota0Str = fechaCuota0.toISOString().split("T")[0];
-      
+
       await tx
         .update(cuotas_credito)
-        .set({
-          fecha_vencimiento: fechaCuota0Str,
-        })
+        .set({ fecha_vencimiento: fechaCuota0Str })
         .where(eq(cuotas_credito.cuota_id, cuota0.cuota_id));
-      
+
       await tx
         .update(pagos_credito)
-        .set({
-          fecha_vencimiento: fechaCuota0Str,
-          fecha_pago: new Date(fechaCuota0Str),
-        })
+        .set({ fecha_vencimiento: fechaCuota0Str })
         .where(eq(pagos_credito.cuota_id, cuota0.cuota_id));
-      
-      console.log(`   🔧 Cuota 0 actualizada - fecha_vencimiento Y fecha_pago: ${fechaCuota0Str}`);
+
+      console.log(`   🔧 Cuota 0 fecha_vencimiento: ${fechaCuota0Str}`);
     }
 
-    // 6️⃣ Recargar cuotas y pagos
+    // 6️⃣ Recargar cuotas válidas y actualizar SOLO fecha_vencimiento
     const cuotasConPagos = await tx
       .select({
         cuota_id: cuotas_credito.cuota_id,
@@ -359,277 +229,35 @@ if (diaEsperado === 1) {
       .orderBy(asc(cuotas_credito.numero_cuota));
 
     console.log(`\n📦 Total de cuotas válidas: ${cuotasConPagos.length}`);
+    console.log(`🔄 Actualizando fecha_vencimiento de ${cuotasConPagos.length} cuotas...`);
 
-    console.log(
-      `\n🔄 Reprocesando ${cuotasConPagos.length} cuotas (cuota 1 hasta ${plazo_completo})...`
-    );
-    console.log(`   🎯 Cuotas que se marcarán como PAGADAS: 1-${cuotaRealmentePagada}`);
-
-    // 8️⃣ Preparar BATCH UPDATES con cálculo DINÁMICO de abonos
-    const cuotasParaActualizar: Array<{
-      cuota_id: number;
-      data: any;
-    }> = [];
-
-    const pagosParaActualizar: Array<{
-      pago_id: number;
-      data: any;
-    }> = [];
-
-    const pagosParaCrear: Array<any> = [];
-
-    // 🔥 Capital en memoria para ir reduciendo (DESDE SIFCO)
-    let capitalEnMemoria = capitalInicial;
-
-    for (const row of cuotasConPagos) {
-      const numeroCuota = row.numero_cuota;
-      const fechaVencimientoCuota = calcularFechaVencimiento(numeroCuota);
-      const esCuotaPagada = numeroCuota <= cuotaRealmentePagada;
-
-      if (esCuotaPagada) {
-        // ✅ CUOTAS PAGADAS - CÁLCULOS DINÁMICOS
-        const { interes: interesMes, iva: ivaMes } = calcularInteresEIva(capitalEnMemoria);
-
-        // 🔥 Montos extras
-        const montosExtras = interesMes
-          .plus(ivaMes)
-          .plus(seguroFijoPorMes)
-          .plus(gpsFijoPorMes)
-          .plus(membresiasFijoPorMes);
-
-        // 🔥 Abono a capital = Cuota - montos extras
-        const abonoCapital = cuotaMensual.minus(montosExtras).round(2);
-
-        // 🔥 Reducir capital para la siguiente cuota
-        const capitalDespues = capitalEnMemoria.minus(abonoCapital);
-        if (capitalDespues.lt(0)) {
-          capitalEnMemoria = new Big(0);
-        } else {
-          capitalEnMemoria = capitalDespues;
-        }
-
-        console.log(
-          `   ✅ Cuota #${numeroCuota} PAGADA - Vence: ${fechaVencimientoCuota} - Abono capital: Q${abonoCapital} - Capital después: Q${capitalEnMemoria}`
-        );
-
-        const montoBoleta = cuotaMensual.round(2);
-
-        cuotasParaActualizar.push({
-          cuota_id: row.cuota_id,
-          data: {
-            fecha_vencimiento: fechaVencimientoCuota,
-            pagado: true,
-            liquidado_inversionistas: true,
-            fecha_liquidacion_inversionistas: new Date(),
-          },
-        });
-
-        if (row.pago_id) {
-          pagosParaActualizar.push({
-            pago_id: row.pago_id,
-            data: {
-              cuota: cuotaMensual.toString(),
-              cuota_interes: cuotaInteresCredito,
-              pago_del_mes: cuotaMensual.toString(),
-
-              // 🔥 ABONOS (lo que SE PAGÓ en esta cuota)
-              abono_capital: abonoCapital.toString(),
-              abono_interes: interesMes.toString(),
-              abono_iva_12: ivaMes.toString(),
-              abono_seguro: seguroFijoPorMes.toString(),
-              abono_gps: gpsFijoPorMes.toString(),
-
-              // 🔥 RESTANTES = 0 (porque ya se pagó esta cuota)
-              capital_restante: "0",
-              interes_restante: "0",
-              iva_12_restante: "0",
-              seguro_restante: "0",
-              gps_restante: "0",
-              total_restante: deudaTotal.toString(),
-
-              membresias: membresiasFijoPorMes.toString(),
-              membresias_pago: membresiasFijoPorMes.toString(),
-              membresias_mes: membresiasFijoPorMes.toString(),
-
-              monto_boleta: montoBoleta.toString(),
-              fecha_vencimiento: fechaVencimientoCuota,
-              fecha_pago: new Date(fechaVencimientoCuota),
-              pagado: true,
-              validationStatus: "no_required" as const,
-              registerBy: "SIFCO_IMPORT",
-            },
-          });
-        } else {
-          console.log(`   ⚠️ Cuota #${numeroCuota} sin pago, creando registro...`);
-          pagosParaCrear.push({
-            credito_id: credito.credito_id,
-            cuota_id: row.cuota_id,
-            cuota: cuotaMensual.toString(),
-            cuota_interes: cuotaInteresCredito,
-            pago_del_mes: cuotaMensual.toString(),
-            abono_capital: abonoCapital.toString(),
-            abono_interes: interesMes.toString(),
-            abono_iva_12: ivaMes.toString(),
-            abono_seguro: seguroFijoPorMes.toString(),
-            abono_gps: gpsFijoPorMes.toString(),
-            capital_restante: "0",
-            interes_restante: "0",
-            iva_12_restante: "0",
-            seguro_restante: "0",
-            gps_restante: "0",
-            total_restante: deudaTotal.toString(),
-            membresias: membresiasFijoPorMes.toString(),
-            membresias_pago: membresiasFijoPorMes.toString(),
-            membresias_mes: membresiasFijoPorMes.toString(),
-            monto_boleta: montoBoleta.toString(),
-            fecha_vencimiento: fechaVencimientoCuota,
-            fecha_pago: new Date(fechaVencimientoCuota),
-            pagado: true,
-            validationStatus: "no_required" as const,
-            registerBy: "SIFCO_IMPORT",
-            pagoConvenio: "0",
-            monto_aplicado: "0",
-            fecha_boleta: null,
-          });
-        }
-      } else {
-        // 📋 CUOTAS PENDIENTES - USAR VARIABLES PRE-CALCULADAS
-        console.log(
-          `   📋 Cuota #${numeroCuota} PENDIENTE - Vence: ${fechaVencimientoCuota}`
-        );
-
-        const montosExtrasPendiente = interesPendienteBase
-          .plus(ivaPendienteBase)
-          .plus(seguroFijoPorMes)
-          .plus(gpsFijoPorMes)
-          .plus(membresiasFijoPorMes);
-
-        const abonoCapitalPendiente = cuotaMensual.minus(montosExtrasPendiente).round(2);
-
-        cuotasParaActualizar.push({
-          cuota_id: row.cuota_id,
-          data: {
-            fecha_vencimiento: fechaVencimientoCuota,
-            pagado: false,
-            liquidado_inversionistas: false,
-          },
-        });
-
-        if (row.pago_id) {
-          pagosParaActualizar.push({
-            pago_id: row.pago_id,
-            data: {
-              cuota: cuotaMensual.toString(),
-              cuota_interes: cuotaInteresCredito,
-              pago_del_mes: "0",
-
-              // 🔥 ABONOS = 0 (porque no se ha pagado)
-              abono_capital: "0",
-              abono_interes: "0",
-              abono_iva_12: "0",
-              abono_seguro: "0",
-              abono_gps: "0",
-
-              // 🔥 RESTANTES - Calculados sobre el capital ACTUAL del crédito
-              capital_restante: capitalActualCredito.toString(),
-              interes_restante: interesPendienteBase.toString(),
-              iva_12_restante: ivaPendienteBase.toString(),
-              seguro_restante: seguroFijoPorMes.toString(),
-              gps_restante: gpsFijoPorMes.toString(),
-              total_restante: deudaTotal.toString(),
-
-              membresias: membresiasFijoPorMes.toString(),
-              membresias_pago: membresiasFijoPorMes.toString(),
-              membresias_mes: membresiasFijoPorMes.toString(),
-
-              monto_boleta: null,
-              monto_boleta_cuota: null,
-
-              fecha_vencimiento: fechaVencimientoCuota,
-              fecha_pago: null,
-              pagado: false,
-              validationStatus: "no_required" as const,
-              registerBy: "SIFCO_IMPORT",
-            },
-          });
-        } else {
-          console.log(`   ⚠️ Cuota #${numeroCuota} sin pago, creando registro...`);
-          pagosParaCrear.push({
-            credito_id: credito.credito_id,
-            cuota_id: row.cuota_id,
-            cuota: cuotaMensual.toString(),
-            cuota_interes: cuotaInteresCredito,
-            pago_del_mes: "0",
-            abono_capital: "0",
-            abono_interes: "0",
-            abono_iva_12: "0",
-            abono_seguro: "0",
-            abono_gps: "0",
-            capital_restante: capitalActualCredito.toString(),
-            interes_restante: interesPendienteBase.toString(),
-            iva_12_restante: ivaPendienteBase.toString(),
-            seguro_restante: seguroFijoPorMes.toString(),
-            gps_restante: gpsFijoPorMes.toString(),
-            total_restante: deudaTotal.toString(),
-            membresias: membresiasFijoPorMes.toString(),
-            membresias_pago: "0",
-            membresias_mes: "0",
-            monto_boleta: null,
-            monto_boleta_cuota: null,
-            fecha_vencimiento: fechaVencimientoCuota,
-            fecha_pago: null,
-            pagado: false,
-            validationStatus: "no_required" as const,
-            registerBy: "SIFCO_IMPORT",
-            pagoConvenio: "0",
-            monto_aplicado: "0",
-            fecha_boleta: null,
-          });
-        }
-      }
-    }
-
-    console.log(`\n🚀 Ejecutando batch updates...`);
-    
-    // 🔥 OPTIMIZACIÓN: Separar en dos Promise.all más claros
-    const [, ] = await Promise.all([
-      Promise.all(
-        cuotasParaActualizar.map(({ cuota_id, data }) =>
+    await Promise.all(
+      cuotasConPagos.map((row) => {
+        const fechaVencimientoCuota = calcularFechaVencimiento(row.numero_cuota);
+        const ops: Promise<unknown>[] = [
           tx
             .update(cuotas_credito)
-            .set(data)
-            .where(eq(cuotas_credito.cuota_id, cuota_id))
-        )
-      ),
-      Promise.all(
-        pagosParaActualizar.map(({ pago_id, data }) =>
-          tx
-            .update(pagos_credito)
-            .set(data)
-            .where(eq(pagos_credito.pago_id, pago_id))
-        )
-      ),
-    ]);
+            .set({ fecha_vencimiento: fechaVencimientoCuota })
+            .where(eq(cuotas_credito.cuota_id, row.cuota_id)),
+        ];
+        if (row.pago_id) {
+          ops.push(
+            tx
+              .update(pagos_credito)
+              .set({ fecha_vencimiento: fechaVencimientoCuota })
+              .where(eq(pagos_credito.pago_id, row.pago_id))
+          );
+        }
+        return Promise.all(ops);
+      })
+    );
 
-    // Crear pagos faltantes (cuotas que no tenían registro en pagos_credito)
-    if (pagosParaCrear.length > 0) {
-      await tx.insert(pagos_credito).values(pagosParaCrear);
-      console.log(`   ✅ ${pagosParaCrear.length} pagos CREADOS (cuotas sin registro)`);
-    }
-
-    console.log(`   ✅ ${cuotasParaActualizar.length} cuotas actualizadas`);
-    console.log(`   ✅ ${pagosParaActualizar.length} pagos actualizados`);
+    console.log(`   ✅ ${cuotasConPagos.length} cuotas con fecha_vencimiento actualizada`);
   });
 
-  console.log(`\n🎉 AJUSTE COMPLETADO - MIGRACIÓN A TU SISTEMA`);
-  console.log(`📊 Resumen final:`);
-  console.log(`   💰 Capital inicial (SIFCO): Q${capitalInicial.toString()}`); 
-  console.log(`   💰 Capital actual del crédito (BD): Q${capitalActualCredito.toString()}`);
-  console.log(`   💰 Deuda total: Q${deudaTotal.toString()}`);
-  console.log(`   📐 Plazo completo (TU sistema): ${plazo_completo} cuotas`);
-  console.log(`   ✅ Cuotas pagadas (JSON pagos): ${cuotaRealmentePagada}`);
-  console.log(`   📋 Cuotas pendientes: ${plazo_completo - cuotaRealmentePagada}`);
-  console.log(`   🎯 Vencimientos: día ${diaVencimiento === 30 ? "30 (28 en febrero)" : "15"} de cada mes`);
+  console.log(`\n🎉 AJUSTE COMPLETADO`);
+  console.log(`   📐 Plazo completo: ${plazo_completo} cuotas`);
+  console.log(`   📅 Día de vencimiento: ${diaVencimiento}`);
 };
 interface CreditoPagoSIFCO {
   numeroCredito: string;

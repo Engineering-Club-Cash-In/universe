@@ -6459,12 +6459,20 @@ export async function resumenGlobalLiquidaciones(
   if (idsInactivosResultado.length > 0) {
     const aportadosRows = await db
       .select({
-        inversionista_id: creditos_inversionistas.inversionista_id,
-        total: sql<string>`COALESCE(SUM(${creditos_inversionistas.monto_aportado}), 0)`,
+        inversionista_id: creditos_inversionistas_espejo.inversionista_id,
+        total: sql<string>`COALESCE(SUM(${creditos_inversionistas_espejo.monto_aportado}), 0)`,
       })
-      .from(creditos_inversionistas)
-      .where(inArray(creditos_inversionistas.inversionista_id, idsInactivosResultado))
-      .groupBy(creditos_inversionistas.inversionista_id);
+      .from(creditos_inversionistas_espejo)
+      .where(
+        and(
+          inArray(
+            creditos_inversionistas_espejo.inversionista_id,
+            idsInactivosResultado
+          ),
+          eq(creditos_inversionistas_espejo.status, "completado")
+        )
+      )
+      .groupBy(creditos_inversionistas_espejo.inversionista_id);
 
     const montoAportadoPorInversionista = new Map(
       aportadosRows.map((row) => [row.inversionista_id, Number(row.total)])

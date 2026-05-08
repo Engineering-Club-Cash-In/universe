@@ -92,6 +92,7 @@ export function PagoForm() {
 
   // 🎯 Estado para el modal de confirmación
   const [modalConfirmacionOpen, setModalConfirmacionOpen] = useState(false);
+  const [creditoVisible, setCreditoVisible] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [bancoQuery, setBancoQuery] = useState("");
 
@@ -493,7 +494,10 @@ export function PagoForm() {
         <CardContent className="flex-1 flex flex-col items-center justify-center">
           <div className="mb-4 flex gap-2 items-center">
             <BuscadorUsuarioSifco
-              onSelect={(sifco) => fetchCredito(sifco)}
+              onSelect={(sifco) => {
+                if (sifco) { setCreditoVisible(true); fetchCredito(sifco); }
+                else setCreditoVisible(false);
+              }}
               reset={resetBuscador}
               onReset={() => setResetBuscador(false)}
             />
@@ -550,6 +554,7 @@ export function PagoForm() {
               </div>
             </div>
           ) : (
+            creditoVisible &&
             dataCredito?.credito &&
             dataCredito?.usuario && (
               <MiniCardCredito

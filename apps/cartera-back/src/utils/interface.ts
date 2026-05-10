@@ -15,6 +15,7 @@ export interface PagoDetalle {
   abonoGeneralInteres: number;
   tasaInteresInvesor: number;
   cuota: number;
+  estado_liquidacion?: "LIQUIDADO" | "NO_LIQUIDADO";
 }
 
 export interface CreditoData {

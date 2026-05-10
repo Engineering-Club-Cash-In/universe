@@ -823,7 +823,18 @@ export async function buildInversionistaWorkbook(
         hasData = true;
         const rr = ws.getRow(row);
 
-        const capital = toN(cr.monto_aportado) + toN(pago.abono_capital);
+        // Para pagos NO_LIQUIDADO el monto_aportado del espejo todavía no
+        // tiene el abono restado, así que Capital = monto_aportado y
+        // Capital restante = monto_aportado - abono. Para pagos LIQUIDADO
+        // el monto_aportado ya viene post-abono, así que se suma para
+        // reconstruir el capital inicial y el restante es el aportado tal cual.
+        const esNoLiquidado = pago.estado_liquidacion === "NO_LIQUIDADO";
+        const capital = esNoLiquidado
+          ? toN(cr.monto_aportado)
+          : toN(cr.monto_aportado) + toN(pago.abono_capital);
+        const capitalRestante = esNoLiquidado
+          ? toN(cr.monto_aportado) - toN(pago.abono_capital)
+          : toN(cr.monto_aportado);
         const tasaFmt = toN(pago.tasaInteresInvesor) / 100;
         const cuotaMes = `${pago.mes || "-"}${pago.cuota ? ` (Cuota #${pago.cuota})` : ""}`;
 
@@ -840,7 +851,7 @@ export async function buildInversionistaWorkbook(
           toN(pago.isr),
           toN(pago.abono_capital),
           toN(pago.abonoGeneralInteres),
-          toN(cr.monto_aportado),
+          capitalRestante,
           cuotaMes,
           cr.plazo ?? "",
           cr.nit_usuario ?? "",

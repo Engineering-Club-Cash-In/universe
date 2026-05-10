@@ -662,9 +662,11 @@ export async function insertPagosCreditoInversionistas(
       } else {
         let montoAbono = new Big(0);
         for (const abono of abonosNoLiquidados) {
-          // Solo sumar si es tipo CAPITAL; CANCELACION ya fue sumado previamente
           if (abono.tipo === "CAPITAL") {
             montoAbono = montoAbono.plus(abono.monto);
+          } else if (abono.tipo === "CANCELACION") {
+            // colocar el monto aportado del espejo como abono a capital, para que se liquide aunque el abono sea de cancelación
+            abono_capital = new Big(inv.monto_aportado || 0);
           }
         }
         if (!montoAbono.eq(0)) {

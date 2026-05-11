@@ -12,10 +12,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Search, X, ChevronLeft, ChevronRight, Check, ChevronsUpDown } from "lucide-react";
+import { Search, X, ChevronLeft, ChevronRight, Check, ChevronsUpDown, FileDown, Loader2, AlertCircle } from "lucide-react";
+import { getPagosPorVencimiento } from "../services/services";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 function formatQ(val: string | null | undefined): string {
   if (!val) return "Q 0.00";
@@ -42,6 +51,9 @@ export function PagosPorVencimiento() {
   const [advisorPopoverOpen, setAdvisorPopoverOpen] = useState(false);
   const [rangoMoraInput, setRangoMoraInput] = useState("");
   const [rangoMoraFilter, setRangoMoraFilter] = useState("");
+  const [isExporting, setIsExporting] = useState(false);
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
   const { advisors } = useAdminData();
 
   const { data, isLoading, isError } = usePagosPorVencimiento({
@@ -61,6 +73,35 @@ export function PagosPorVencimiento() {
     setNombreFilter(nombreInput.trim());
     setRangoMoraFilter(rangoMoraInput);
     setPage(1);
+  };
+
+  const handleDownloadExcel = async () => {
+    try {
+      setIsExporting(true);
+      const response = await getPagosPorVencimiento({
+        mes,
+        anio,
+        numero_credito_sifco: sifcoFilter,
+        nombre_usuario: nombreFilter,
+        tipo_fecha: tipoFecha,
+        asesor: selectedAdvisors.join(","),
+        rango_mora: rangoMoraFilter,
+        excel: true,
+      });
+
+      if (response.success && response.excelUrl) {
+        window.open(response.excelUrl, "_blank");
+      } else {
+        setErrorMessage("No se pudo generar el archivo Excel. Por favor, intenta de nuevo o contacta a soporte.");
+        setShowErrorModal(true);
+      }
+    } catch (error) {
+      console.error("Error al descargar Excel:", error);
+      setErrorMessage("Ocurrió un error inesperado al generar el archivo. Verifica tu conexión e intenta de nuevo.");
+      setShowErrorModal(true);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const clearFilters = () => {
@@ -84,7 +125,8 @@ export function PagosPorVencimiento() {
   ];
 
   return (
-    <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-4 sm:px-6 lg:px-8 overflow-auto pt-8 pb-8">
+    <>
+      <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-4 sm:px-6 lg:px-8 overflow-auto pt-8 pb-8">
     <div className="w-full max-w-[1400px]">
       <div className="flex flex-col items-center mb-6">
         <h1 className="text-3xl font-extrabold text-blue-700 text-center">
@@ -259,6 +301,21 @@ export function PagosPorVencimiento() {
           </Button>
 
           <Button
+            variant="default"
+            size="sm"
+            onClick={handleDownloadExcel}
+            disabled={isExporting}
+            className="bg-green-600 hover:bg-green-700 text-white border-none"
+          >
+            {isExporting ? (
+              <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+            ) : (
+              <FileDown className="w-4 h-4 mr-1" />
+            )}
+            {isExporting ? "Generando..." : "Exportar Excel"}
+          </Button>
+
+          <Button
             variant="outline"
             size="sm"
             onClick={clearFilters}
@@ -411,6 +468,34 @@ export function PagosPorVencimiento() {
         </>
       )}
     </div>
-    </div>
+  </div>
+
+  {/* Modal de Error */}
+  <Dialog open={showErrorModal} onOpenChange={setShowErrorModal}>
+    <DialogContent className="bg-white rounded-2xl border-red-100 shadow-2xl max-w-sm">
+      <DialogHeader className="flex flex-col items-center gap-4 py-4">
+        <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center">
+          <AlertCircle className="w-10 h-10 text-red-500" />
+        </div>
+        <div className="text-center space-y-2">
+          <DialogTitle className="text-xl font-bold text-gray-900">¡Ups! Algo salió mal</DialogTitle>
+          <DialogDescription className="text-gray-500 text-sm leading-relaxed">
+            {errorMessage}
+          </DialogDescription>
+        </div>
+      </DialogHeader>
+      <DialogFooter className="sm:justify-center mt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowErrorModal(false)}
+              className="w-full sm:w-32 border-gray-200 hover:bg-gray-50 text-gray-700 font-semibold rounded-xl"
+            >
+              Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

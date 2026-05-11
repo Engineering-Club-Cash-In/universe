@@ -405,6 +405,38 @@
     })
   );
 
+  // ====================================================================
+  // compras_credito_inversionista
+  // ====================================================================
+  // Registro de cada operación (compra_cartera o reinversion) que entra
+  // sobre un crédito para un inversionista. Guarda SOLO el monto nuevo
+  // aportado en esa operación (no la suma acumulada en el padre/espejo).
+  //
+  // Se usa para que el correo de aceptación de compra/reinversión pueda
+  // reportar el monto real ingresado en la operación, en vez de leer el
+  // monto_aportado del espejo (que ya incluye lo que el inversionista
+  // tenía antes en el crédito).
+  // ====================================================================
+  export const compras_credito_inversionista = customSchema.table(
+    "compras_credito_inversionista",
+    {
+      id: serial("id").primaryKey(),
+      credito_id: integer("credito_id").notNull().references(() => creditos.credito_id),
+      inversionista_id: integer("inversionista_id").notNull().references(() => inversionistas.inversionista_id),
+      monto_aportado: numeric("monto_aportado", { precision: 18, scale: 8 }).notNull(),
+      tipo_operacion: varchar("tipo_operacion", { length: 30 }).notNull(),
+      tipo_reinversion: tipoReinversionEnum("tipo_reinversion"),
+      status: statusCreditoInversionistaEspejoEnum("status").notNull(),
+      fecha: timestamp("fecha", { withTimezone: true }).notNull().$default(() => new Date()),
+      created_at: timestamp("created_at", { withTimezone: true }).notNull().$default(() => new Date()),
+      updated_at: timestamp("updated_at", { withTimezone: true }),
+    },
+    (t) => ({
+      ixStatus: index("ix_compras_credito_inv_status").on(t.status),
+      ixCreditoInv: index("ix_compras_credito_inv_credito_inv").on(t.credito_id, t.inversionista_id),
+    })
+  );
+
   export const liquidacion_locks = customSchema.table("liquidacion_locks", {
     id: serial("id").primaryKey(),
     inversionista_id: integer("inversionista_id"),

@@ -5,6 +5,7 @@ import { db } from "../database";
 import {
   admins,
   asesores,
+  compras_credito_inversionista,
   creditos,
   creditos_inversionistas,
   creditos_inversionistas_espejo,
@@ -694,6 +695,26 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
             .insert(creditos_inversionistas_espejo)
             .values(dataEspejoConStatus);
         }
+
+        // ================================================================
+        // PASO 3i.2: REGISTRAR LA OPERACIÓN EN compras_credito_inversionista
+        // Guardamos SOLO el monto nuevo que entró a este crédito en esta
+        // operación (montoParaEsteCredito), NO la suma acumulada que ya
+        // queda en el padre/espejo. Esto permite que, cuando se acepte la
+        // compra/reinversión, el correo reporte el monto real ingresado
+        // en esta operación (buscando los registros por status pendiente).
+        // ================================================================
+        await tx.insert(compras_credito_inversionista).values({
+          credito_id,
+          inversionista_id,
+          monto_aportado: montoParaEsteCredito.toString(),
+          tipo_operacion,
+          tipo_reinversion:
+            tipo_operacion === "compra_cartera"
+              ? tipo_reinversion ?? null
+              : null,
+          status: statusEspejo,
+        });
 
         // ================================================================
         // Activar bandera_reinversion en el crédito cuando sea compra_cartera

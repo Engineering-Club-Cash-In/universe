@@ -5,6 +5,7 @@ import { db } from "../database";
 import {
   admins,
   asesores,
+  compras_credito_inversionista,
   creditos,
   creditos_inversionistas,
   creditos_inversionistas_espejo,
@@ -166,6 +167,40 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
     }
 
 
+    // ── 4.4. Leer los montos NUEVOS de la operación pendiente ──
+    // compras_credito_inversionista guarda el delta de cada operación
+    // (no la posición acumulada del inversionista en el crédito). Para
+    // el correo necesitamos el monto que entró en ESTA compra, no la
+    // suma con lo que el inversionista ya tenía antes.
+    // Si el mismo (credito_id, inversionista_id) tiene varios registros
+    // en pendiente (porque hubo varias operaciones sin aceptar todavía),
+    // los sumamos: ese es el monto total que falta por aceptar.
+    const comprasPendientes = await db
+      .select({
+        credito_id: compras_credito_inversionista.credito_id,
+        inversionista_id: compras_credito_inversionista.inversionista_id,
+        monto_aportado: compras_credito_inversionista.monto_aportado,
+      })
+      .from(compras_credito_inversionista)
+      .where(
+        and(
+          inArray(compras_credito_inversionista.credito_id, creditoIds),
+          eq(
+            compras_credito_inversionista.status,
+            "pendiente_compra_cartera",
+          ),
+        ),
+      );
+
+    // Map (credito_id-inversionista_id) → monto nuevo (Big), sumado si
+    // hay varios registros pendientes para el mismo par.
+    const montoNuevoPorPar = new Map<string, Big>();
+    for (const row of comprasPendientes) {
+      const key = `${row.credito_id}-${row.inversionista_id}`;
+      const prev = montoNuevoPorPar.get(key) ?? new Big(0);
+      montoNuevoPorPar.set(key, prev.plus(new Big(row.monto_aportado)));
+    }
+
     // ── 4.5. Marcar el espejo como aceptado ──
     // Pasamos a "pendiente_revision" todos los rows de los créditos que estén
     // actualmente en "pendiente_compra_cartera". Registramos cuándo y quién.
@@ -189,6 +224,23 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
         inversionista_id: creditos_inversionistas_espejo.inversionista_id,
         tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion,
       });
+
+    // ── 4.5.bis. Marcar las compras pendientes como aceptadas ──
+    // Mismo cambio que el espejo, sobre compras_credito_inversionista.
+    // Así los próximos accept/queries ya no traen estos registros (el
+    // correo ya se mandó con esos montos).
+    await db
+      .update(compras_credito_inversionista)
+      .set({ status: "pendiente_revision", updated_at: ahora })
+      .where(
+        and(
+          inArray(compras_credito_inversionista.credito_id, creditoIds),
+          eq(
+            compras_credito_inversionista.status,
+            "pendiente_compra_cartera",
+          ),
+        ),
+      );
 
     // ── Mapa credito_id → tipo_reinversion del target ──
     // El update filtró por status "pendiente_compra_cartera", y esa es la
@@ -275,14 +327,23 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
 
       // Sumamos el monto total del target entre todos los créditos
       // y calculamos su % de inversión ponderado por monto.
+      //
+      // OJO: usamos el monto NUEVO (delta de la operación) que viene de
+      // compras_credito_inversionista, NO el acumulado del espejo/padre.
+      // El acumulado incluiría lo que el inversionista ya tenía antes en
+      // el crédito, inflando el "Monto" del header del correo.
+      // Fallback al monto acumulado solo si no hay registro de compra
+      // (operaciones viejas previas a esta tabla).
       let targetMontoTotal = new Big(0);
       let targetInversionPonderada = new Big(0);
-      for (const rows of rowsPorCredito.values()) {
+      for (const [creditoId, rows] of rowsPorCredito.entries()) {
         for (const r of rows) {
           if (r.inversionista_id === targetId) {
-            targetMontoTotal = targetMontoTotal.plus(r.monto);
+            const montoNuevo =
+              montoNuevoPorPar.get(`${creditoId}-${targetId}`) ?? r.monto;
+            targetMontoTotal = targetMontoTotal.plus(montoNuevo);
             targetInversionPonderada = targetInversionPonderada.plus(
-              r.porcentajeInversion.times(r.monto),
+              r.porcentajeInversion.times(montoNuevo),
             );
           }
         }

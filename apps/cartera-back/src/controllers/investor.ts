@@ -7354,10 +7354,13 @@ export async function getCreditosEspejoPendientes(
   // 1.b. Obtener montos delta por operación desde compras_credito_inversionista
   // (status no completado). Si hay varios pendientes para el mismo par
   // (credito_id, inversionista_id), se suman porque así se enviarán juntos al aceptar.
-  const parKeys = pendientes.map((r) => ({
-    credito_id: r.credito_id,
-    inversionista_id: r.inversionista_id,
-  }));
+  const parKeysSet = new Set(
+    pendientes.map((r) => `${r.credito_id}-${r.inversionista_id}`),
+  );
+  const parKeys = Array.from(parKeysSet).map((k) => {
+    const [c, i] = k.split("-").map(Number);
+    return { credito_id: c, inversionista_id: i };
+  });
   const comprasRows = parKeys.length > 0
     ? await db
         .select({
@@ -7368,13 +7371,16 @@ export async function getCreditosEspejoPendientes(
         .from(compras_credito_inversionista)
         .where(
           and(
-            inArray(
-              compras_credito_inversionista.credito_id,
-              parKeys.map((k) => k.credito_id),
-            ),
-            inArray(
-              compras_credito_inversionista.inversionista_id,
-              parKeys.map((k) => k.inversionista_id),
+            or(
+              ...parKeys.map((k) =>
+                and(
+                  eq(compras_credito_inversionista.credito_id, k.credito_id),
+                  eq(
+                    compras_credito_inversionista.inversionista_id,
+                    k.inversionista_id,
+                  ),
+                ),
+              ),
             ),
             ne(compras_credito_inversionista.status, "completado"),
           ),

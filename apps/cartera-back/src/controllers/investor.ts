@@ -27,6 +27,7 @@ import {
   documentos_inversionista,
   abonos_capital,
   cuentas_extra_inversionista,
+  compras_credito_inversionista,
 } from "../database/db/schema";
 import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
 import { eq, and, or, sql, inArray, ilike, like, desc, count, SQL, isNull, isNotNull, ne } from "drizzle-orm";
@@ -7350,9 +7351,53 @@ export async function getCreditosEspejoPendientes(
     return { data: [], total: 0, page, pageSize };
   }
 
+  // 1.b. Obtener montos delta por operación desde compras_credito_inversionista
+  // (status no completado). Si hay varios pendientes para el mismo par
+  // (credito_id, inversionista_id), se suman porque así se enviarán juntos al aceptar.
+  const parKeysSet = new Set(
+    pendientes.map((r) => `${r.credito_id}-${r.inversionista_id}`),
+  );
+  const parKeys = Array.from(parKeysSet).map((k) => {
+    const [c, i] = k.split("-").map(Number);
+    return { credito_id: c, inversionista_id: i };
+  });
+  const comprasRows = parKeys.length > 0
+    ? await db
+        .select({
+          credito_id: compras_credito_inversionista.credito_id,
+          inversionista_id: compras_credito_inversionista.inversionista_id,
+          monto_aportado: compras_credito_inversionista.monto_aportado,
+        })
+        .from(compras_credito_inversionista)
+        .where(
+          and(
+            or(
+              ...parKeys.map((k) =>
+                and(
+                  eq(compras_credito_inversionista.credito_id, k.credito_id),
+                  eq(
+                    compras_credito_inversionista.inversionista_id,
+                    k.inversionista_id,
+                  ),
+                ),
+              ),
+            ),
+            ne(compras_credito_inversionista.status, "completado"),
+          ),
+        )
+    : [];
+
+  const montoNuevoPorPar = new Map<string, Big>();
+  for (const row of comprasRows) {
+    const key = `${row.credito_id}-${row.inversionista_id}`;
+    const prev = montoNuevoPorPar.get(key) ?? new Big(0);
+    montoNuevoPorPar.set(key, prev.plus(new Big(row.monto_aportado)));
+  }
+
   // 2. Agrupar por inversionista
   type CreditoSinInversionista = Omit<typeof pendientes[number], '_nombre_inversionista' | '_dpi' | '_email' | '_moneda'> & {
     otrosInversionistas: { nombre: string; monto_aportado: string }[];
+    monto_aportado_nuevo: string | null;
   };
 
   const agrupado = new Map<number, {
@@ -7417,12 +7462,16 @@ export async function getCreditosEspejoPendientes(
     const otrosEnEsteCredito = (otrosPorCredito.get(row.credito_id) || [])
       .filter((o) => o.inversionista_id !== row.inversionista_id);
 
+    const montoNuevoKey = `${row.credito_id}-${row.inversionista_id}`;
+    const montoNuevo = montoNuevoPorPar.get(montoNuevoKey);
+
     grupo.creditosPendientes.push({
       ...creditoData,
       otrosInversionistas: otrosEnEsteCredito.map((o) => ({
         nombre: o.nombre,
         monto_aportado: o.monto_aportado,
       })),
+      monto_aportado_nuevo: montoNuevo ? montoNuevo.toString() : null,
     });
   }
 

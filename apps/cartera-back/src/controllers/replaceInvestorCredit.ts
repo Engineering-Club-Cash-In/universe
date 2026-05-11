@@ -168,10 +168,13 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
   try {
     // ================================================================
     // PASO 0: IDENTIFICACIÓN DEL USUARIO (JWT)
+    // request puede ser undefined cuando esta función se llama
+    // internamente (ej: job expirarCompraCarteraVencidas), por eso
+    // todo el bloque es opcional.
     // ================================================================
-    const authHeader = request.headers.get("authorization");
+    const authHeader = request?.headers?.get?.("authorization") ?? null;
     const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-    let adminName = "Sistema";
+    let adminName = "Job Automatico";
     let adminEmail = "";
 
     if (token) {

@@ -1,12 +1,13 @@
 import { db } from "../database";
 import {
+  compras_credito_inversionista,
   creditos_inversionistas_espejo,
   creditos_inversionistas,
   creditos,
   inversionistas,
   usuarios,
 } from "../database/db";
-import { eq, inArray, and } from "drizzle-orm";
+import { eq, inArray, and, ne } from "drizzle-orm";
 import z from "zod";
 import jwt from "jsonwebtoken";
 import { sendPlainEmail } from "@cci/email";
@@ -103,6 +104,33 @@ export const completeEspejo = async ({ body, set, request }: any) => {
             fecha_inicio_participacion: new Date().toISOString().split('T')[0],
           })
           .where(whereConditionsPadre);
+
+        // ────────────────────────────────────────────────────────────────
+        // Cerrar también el registro de compras_credito_inversionista.
+        // Pasamos a "completado" cualquier registro pendiente
+        // (pendiente_compra_cartera / pendiente_revision / pendiente_reinversion)
+        // que coincida con el (credito_id, inversionista_id?) del request.
+        // Filtramos por status != "completado" para no resellar registros
+        // ya cerrados de operaciones anteriores.
+        // ────────────────────────────────────────────────────────────────
+        const whereConditionsCompras = inversionista_id
+          ? and(
+              eq(compras_credito_inversionista.credito_id, credito_id),
+              eq(
+                compras_credito_inversionista.inversionista_id,
+                inversionista_id,
+              ),
+              ne(compras_credito_inversionista.status, "completado"),
+            )
+          : and(
+              eq(compras_credito_inversionista.credito_id, credito_id),
+              ne(compras_credito_inversionista.status, "completado"),
+            );
+
+        await tx
+          .update(compras_credito_inversionista)
+          .set({ status: "completado", updated_at: new Date() })
+          .where(whereConditionsCompras);
 
         resultados.push({
           credito_id,

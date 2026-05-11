@@ -1318,22 +1318,33 @@ export const updateCredit = async ({ body, set }: any) => {
 
 interface RepararTotalRestanteParams {
   numero_credito_sifco: string;
-  capital_inicial?: number | string; // Opcional: si se pasa, se usa como base de arranque; si no, usa credito.capital
+  capital_inicial?: number | string; // Prioridad: param > total_restante de cuota 0 > SIFCO desembolso
+  dry_run?: boolean; // Si true, no escribe nada y devuelve la previsualización de cambios
 }
+
+type RepararPreviewItem = {
+  pago_id: number;
+  numero_cuota: number;
+  cambios: { campo: string; antes: string; despues: string }[];
+};
 
 export const repararTotalRestante = async ({
   numero_credito_sifco,
   capital_inicial,
+  dry_run = false,
 }: RepararTotalRestanteParams): Promise<{
   credito_id: number;
   capital_arranque: string;
   ultima_cuota_pagada: number | null;
   pagos_actualizados: number;
+  dry_run: boolean;
+  preview?: RepararPreviewItem[];
 }> => {
-  console.log("\n🔧 ========== REPARAR total_restante ==========");
+  console.log("\n🔧 ========== REPARAR pagos históricos ==========");
   console.log(`📋 Crédito SIFCO: ${numero_credito_sifco}`);
+  console.log(`🧪 dry_run: ${dry_run}`);
   console.log(
-    `💰 capital_inicial recibido: ${capital_inicial ?? "(no se pasó, se consultará SIFCO)"}`,
+    `💰 capital_inicial recibido: ${capital_inicial ?? "(no se pasó, se resolverá)"}`,
   );
 
   // 1️⃣ Obtener crédito
@@ -1342,6 +1353,7 @@ export const repararTotalRestante = async ({
       credito_id: creditos.credito_id,
       capital: creditos.capital,
       porcentaje_interes: creditos.porcentaje_interes,
+      cuota_interes: creditos.cuota_interes,
       seguro_10_cuotas: creditos.seguro_10_cuotas,
       gps: creditos.gps,
       membresias_pago: creditos.membresias_pago,
@@ -1358,7 +1370,7 @@ export const repararTotalRestante = async ({
     `✅ Crédito encontrado: id=${credito.credito_id}, capital_actual=Q${credito.capital}, cuota=Q${credito.cuota}, %interes=${credito.porcentaje_interes}`,
   );
 
-  // 2️⃣ Traer todos los pagos con su cuota (ordenados por numero_cuota)
+  // 2️⃣ Traer todos los pagos con su cuota (ordenados por numero_cuota, fecha_pago, pago_id)
   const rows = await db
     .select()
     .from(pagos_credito)
@@ -1379,6 +1391,7 @@ export const repararTotalRestante = async ({
       capital_arranque: "0",
       ultima_cuota_pagada: null,
       pagos_actualizados: 0,
+      dry_run,
     };
   }
 
@@ -1396,6 +1409,7 @@ export const repararTotalRestante = async ({
       capital_arranque: new Big(capital_inicial ?? credito.capital).toString(),
       ultima_cuota_pagada: null,
       pagos_actualizados: 0,
+      dry_run,
     };
   }
   const ultimaCuotaPagada = Math.max(...cuotasPagadas);
@@ -1403,7 +1417,8 @@ export const repararTotalRestante = async ({
     `🎯 Última cuota pagada: ${ultimaCuotaPagada} (total cuotas pagadas: ${cuotasPagadas.length})`,
   );
 
-  // 4️⃣ Agrupar pagos por numero_cuota (una cuota puede tener varios pagos)
+  // 4️⃣ Agrupar pagos por numero_cuota (un numero_cuota puede tener varios cuota_id
+  // por ajustes históricos; los tratamos como una sola cuota lógica)
   const pagosPorNumeroCuota = new Map<
     number,
     (typeof rows)[0]["pagos_credito"][]
@@ -1414,28 +1429,46 @@ export const repararTotalRestante = async ({
     pagosPorNumeroCuota.get(nc)!.push(row.pagos_credito);
   }
 
-  // 5️⃣ Determinar capital_inicial
-  // Prioridad: param > SIFCO desembolso (siempre cae a SIFCO si no hay param)
+  // 5️⃣ Determinar capital_inicial: param > total_restante de cuota 0 > SIFCO
   let capitalArranque: Big;
   if (capital_inicial !== undefined) {
     capitalArranque = new Big(capital_inicial);
     console.log(`🏁 capital_arranque (param): Q${capitalArranque.toString()}`);
   } else {
-    console.log("🌐 Consultando desembolso en SIFCO...");
-    const estadoCuenta = (await consultarEstadoCuentaPrestamo(
-      numero_credito_sifco,
-    )) as WSCrEstadoCuentaResponse;
-    const transacciones =
-      estadoCuenta?.ConsultaResultado?.EstadoCuenta_Transacciones ?? [];
-    const desembolso = transacciones.find((t) => t.CrMoTrxCod === 2001);
-    if (!desembolso?.CapitalDesembolsado) {
-      throw new Error(
-        `No se pudo obtener el desembolso de SIFCO para ${numero_credito_sifco}`,
+    const cuota0Row = rows.find((r) => r.cuotas_credito.numero_cuota === 0);
+    const totalRestanteCuota0 = cuota0Row?.pagos_credito.total_restante;
+    if (
+      totalRestanteCuota0 &&
+      new Big(totalRestanteCuota0).gt(0)
+    ) {
+      capitalArranque = new Big(totalRestanteCuota0);
+      console.log(
+        `🏁 capital_arranque (total_restante de cuota 0): Q${capitalArranque.toString()}`,
+      );
+    } else {
+      console.log("🌐 Consultando desembolso en SIFCO...");
+      const estadoCuenta = (await consultarEstadoCuentaPrestamo(
+        numero_credito_sifco,
+      )) as WSCrEstadoCuentaResponse;
+      const transacciones =
+        estadoCuenta?.ConsultaResultado?.EstadoCuenta_Transacciones ?? [];
+      const desembolso = transacciones.find((t) => t.CrMoTrxCod === 2001);
+      if (!desembolso?.CapitalDesembolsado) {
+        throw new Error(
+          `No se pudo obtener el desembolso de SIFCO para ${numero_credito_sifco}`,
+        );
+      }
+      capitalArranque = new Big(desembolso.CapitalDesembolsado);
+      console.log(
+        `🏁 capital_arranque (SIFCO desembolso trx 2001): Q${capitalArranque.toString()}`,
       );
     }
-    capitalArranque = new Big(desembolso.CapitalDesembolsado);
-    console.log(
-      `🏁 capital_arranque (SIFCO desembolso trx 2001): Q${capitalArranque.toString()}`,
+  }
+
+  const capitalActual = new Big(credito.capital);
+  if (capitalArranque.lt(capitalActual)) {
+    throw new Error(
+      `capital_inicial (${capitalArranque.toString()}) < credito.capital (${capitalActual.toString()}): inconsistente, no se puede reparar.`,
     );
   }
 
@@ -1444,131 +1477,271 @@ export const repararTotalRestante = async ({
   const gpsFijo = new Big(credito.gps ?? 0);
   const membresiasFijo = new Big(credito.membresias_pago ?? 0);
   const cuotaMensual = new Big(credito.cuota);
-  const capitalActual = new Big(credito.capital);
 
-  // 6️⃣ PRIMERA PASADA: calcular abonos teóricos de cada cuota pagada
-  // para luego escalarlos y que la última cuota pagada termine exactamente en credito.capital
-  const numerosCuotaOrdenados = [...pagosPorNumeroCuota.keys()]
-    .filter((nc) => nc <= ultimaCuotaPagada)
-    .sort((a, b) => a - b);
+  // 6️⃣ Procesar cuotas en orden: cuota 0 → última pagada
+  const cuotasOrdenadas = [...pagosPorNumeroCuota.entries()]
+    .filter(([nc]) => nc <= ultimaCuotaPagada)
+    .sort((a, b) => a[0] - b[0]);
 
-  let capitalSim = capitalArranque;
-  const abonosTeoricos: { numCuota: number; abono: Big }[] = [];
-  for (const numCuota of numerosCuotaOrdenados) {
-    if (numCuota === 0) continue;
-    const interesMes = capitalSim.times(porcentajeInteres).round(2);
+  let capitalEnMemoria = capitalArranque;
+  const actualizaciones: {
+    pago_id: number;
+    datos: Record<string, unknown>;
+  }[] = [];
+  const preview: RepararPreviewItem[] = [];
+  // Mapa pago_id → pago original (para diffs)
+  const pagoOriginalPorId = new Map<
+    number,
+    (typeof rows)[0]["pagos_credito"]
+  >();
+  for (const row of rows) pagoOriginalPorId.set(row.pagos_credito.pago_id, row.pagos_credito);
+
+  console.log(
+    `🔁 Recorriendo cuotas 0 → ${ultimaCuotaPagada} (${cuotasOrdenadas.length} cuotas a procesar)\n`,
+  );
+
+  for (const [numCuota, pagos] of cuotasOrdenadas) {
+    // 6.a Cuota 0 (desembolso): solo total_restante = capital_arranque
+    if (numCuota === 0) {
+      const totalRestanteStr = capitalArranque.round(2).toString();
+      for (const p of pagos) {
+        actualizaciones.push({
+          pago_id: p.pago_id,
+          datos: { total_restante: totalRestanteStr },
+        });
+      }
+      console.log(
+        `📌 Cuota 0 (desembolso) → total_restante=Q${totalRestanteStr} | pagos afectados=${pagos.length}`,
+      );
+      continue;
+    }
+
+    // 6.b Cuota pagada: aplicar lógica recalcularPagosCredito desde capitalEnMemoria
+    const interesMes = capitalEnMemoria.times(porcentajeInteres).round(2);
     const ivaMes = interesMes.times(0.12).round(2);
-    const abono = cuotaMensual
+    const abonoCapitalTeorico = cuotaMensual
       .minus(interesMes)
       .minus(ivaMes)
       .minus(seguroFijo)
       .minus(gpsFijo)
       .minus(membresiasFijo);
-    abonosTeoricos.push({ numCuota, abono });
-    capitalSim = capitalSim.minus(abono);
-    if (capitalSim.lt(0)) capitalSim = new Big(0);
-  }
-
-  const sumaAbonosTeoricos = abonosTeoricos.reduce(
-    (acc, { abono }) => acc.plus(abono),
-    new Big(0),
-  );
-  const reduccionReal = capitalArranque.minus(capitalActual);
-
-  console.log(
-    `📐 Σ abonos teóricos: Q${sumaAbonosTeoricos.round(2).toString()} | reducción real (capital_inicial − credito.capital): Q${reduccionReal.round(2).toString()}`,
-  );
-
-  if (reduccionReal.lt(0)) {
-    throw new Error(
-      `capital_inicial (${capitalArranque.toString()}) < credito.capital (${capitalActual.toString()}): inconsistente, no se puede reparar.`,
-    );
-  }
-
-  // Factor de escala: ajusta los abonos teóricos para que la reducción total coincida con la real
-  const factor = sumaAbonosTeoricos.gt(0)
-    ? reduccionReal.div(sumaAbonosTeoricos)
-    : new Big(1);
-  console.log(`🧮 Factor de escala aplicado a los abonos: ${factor.toFixed(8)}`);
-
-  // 7️⃣ SEGUNDA PASADA: escribir total_restante usando abonos escalados
-  let capitalEnMemoria = capitalArranque;
-  const actualizaciones: { pago_id: number; total_restante: string }[] = [];
-
-  console.log(
-    `🔁 Recorriendo cuotas 0 → ${ultimaCuotaPagada} (${numerosCuotaOrdenados.length} cuotas a procesar)\n`,
-  );
-
-  for (const numCuota of numerosCuotaOrdenados) {
-    const pagosDeCuota = pagosPorNumeroCuota.get(numCuota)!;
-
-    if (numCuota === 0) {
-      // Cuota 0 (desembolso): total_restante = capital de arranque (sin amortizar)
-      for (const p of pagosDeCuota) {
-        actualizaciones.push({
-          pago_id: p.pago_id,
-          total_restante: capitalArranque.round(2).toString(),
-        });
-      }
-      console.log(
-        `📌 Cuota 0 (desembolso) → total_restante=Q${capitalArranque.round(2).toString()} | pagos afectados=${pagosDeCuota.length}`,
-      );
-      continue;
-    }
-
-    // Abono teórico × factor de escala
-    const teorico = abonosTeoricos.find((a) => a.numCuota === numCuota)!;
-    const abonoEscalado = teorico.abono.times(factor);
 
     const capitalAntes = capitalEnMemoria;
+    capitalEnMemoria = capitalEnMemoria.minus(abonoCapitalTeorico);
+    if (capitalEnMemoria.lt(0)) capitalEnMemoria = new Big(0);
 
-    // Si es la última cuota pagada, forzamos el ancla exacta a credito.capital
-    // para eliminar drift por redondeos acumulados
-    if (numCuota === ultimaCuotaPagada) {
-      capitalEnMemoria = capitalActual;
-    } else {
-      capitalEnMemoria = capitalEnMemoria.minus(abonoEscalado);
-      if (capitalEnMemoria.lt(0)) capitalEnMemoria = new Big(0);
+    // Saldo base a distribuir entre los pagos de la cuota
+    let rem = {
+      interes: interesMes,
+      iva: ivaMes,
+      seguro: seguroFijo,
+      gps: gpsFijo,
+      membresias: membresiasFijo,
+      capital: abonoCapitalTeorico,
+    };
+
+    // Procesar cada pago en orden cronológico por fecha_pago (fallback pago_id)
+    const pagosOrdenados = [...pagos].sort((a, b) => {
+      const fechaA = a.fecha_pago ? new Date(a.fecha_pago).getTime() : 0;
+      const fechaB = b.fecha_pago ? new Date(b.fecha_pago).getTime() : 0;
+      if (fechaA !== fechaB) return fechaA - fechaB;
+      return a.pago_id - b.pago_id;
+    });
+
+    const abonosPorPago: {
+      pago_id: number;
+      abonos: Record<string, string>;
+      restantes: Record<string, string>;
+      pagado: boolean;
+    }[] = [];
+
+    // Snapshot de `rem` DESPUÉS de aplicar cada pago: preserva el rastro histórico
+    // (qué quedaba debiendo la cuota tras cada pago) en lugar de pisar todos los pagos
+    // con el estado final.
+    const snapshotRestantes = () => ({
+      interes_restante: rem.interes.round(2).toString(),
+      iva_12_restante: rem.iva.round(2).toString(),
+      seguro_restante: rem.seguro.round(2).toString(),
+      gps_restante: rem.gps.round(2).toString(),
+      capital_restante: rem.capital.round(2).toString(),
+      membresias: rem.membresias.round(2).toString(),
+    });
+    const cuotaCerradaAhora = () =>
+      rem.interes.eq(0) &&
+      rem.iva.eq(0) &&
+      rem.seguro.eq(0) &&
+      rem.gps.eq(0) &&
+      rem.membresias.eq(0) &&
+      rem.capital.eq(0);
+
+    for (const pago of pagosOrdenados) {
+      const montoAplicado = new Big(pago.monto_aplicado ?? 0);
+
+      if (montoAplicado.gt(0)) {
+        let disponible = montoAplicado;
+
+        const abono_interes = disponible.gte(rem.interes) ? rem.interes : disponible;
+        disponible = disponible.minus(abono_interes);
+        rem.interes = rem.interes.minus(abono_interes);
+
+        const abono_iva = disponible.gte(rem.iva) ? rem.iva : disponible;
+        disponible = disponible.minus(abono_iva);
+        rem.iva = rem.iva.minus(abono_iva);
+
+        const abono_seguro = disponible.gte(rem.seguro) ? rem.seguro : disponible;
+        disponible = disponible.minus(abono_seguro);
+        rem.seguro = rem.seguro.minus(abono_seguro);
+
+        const abono_gps = disponible.gte(rem.gps) ? rem.gps : disponible;
+        disponible = disponible.minus(abono_gps);
+        rem.gps = rem.gps.minus(abono_gps);
+
+        const abono_membresias = disponible.gte(rem.membresias) ? rem.membresias : disponible;
+        disponible = disponible.minus(abono_membresias);
+        rem.membresias = rem.membresias.minus(abono_membresias);
+
+        const abono_capital = disponible.gte(rem.capital) ? rem.capital : disponible;
+        rem.capital = rem.capital.minus(abono_capital);
+
+        const totalPagado = abono_interes
+          .plus(abono_iva)
+          .plus(abono_seguro)
+          .plus(abono_gps)
+          .plus(abono_membresias)
+          .plus(abono_capital);
+
+        abonosPorPago.push({
+          pago_id: pago.pago_id,
+          abonos: {
+            abono_interes: abono_interes.round(2).toString(),
+            abono_iva_12: abono_iva.round(2).toString(),
+            abono_seguro: abono_seguro.round(2).toString(),
+            abono_gps: abono_gps.round(2).toString(),
+            abono_capital: abono_capital.round(2).toString(),
+            membresias_pago: abono_membresias.round(2).toString(),
+            membresias_mes: abono_membresias.round(2).toString(),
+            pago_del_mes: totalPagado.round(2).toString(),
+          },
+          restantes: snapshotRestantes(),
+          pagado: cuotaCerradaAhora(),
+        });
+      } else {
+        abonosPorPago.push({
+          pago_id: pago.pago_id,
+          abonos: {
+            abono_interes: "0",
+            abono_iva_12: "0",
+            abono_seguro: "0",
+            abono_gps: "0",
+            abono_capital: "0",
+            membresias_pago: pago.membresias_pago ?? "0",
+            membresias_mes: pago.membresias_mes ?? "0",
+            pago_del_mes: "0",
+          },
+          restantes: snapshotRestantes(),
+          pagado: cuotaCerradaAhora(),
+        });
+      }
     }
 
-    // Actualizar total_restante en TODOS los pagos de esta cuota
-    for (const p of pagosDeCuota) {
+    const cuotaPagada = cuotaCerradaAhora();
+
+    for (const { pago_id, abonos, restantes, pagado } of abonosPorPago) {
       actualizaciones.push({
-        pago_id: p.pago_id,
-        total_restante: capitalEnMemoria.round(2).toString(),
+        pago_id,
+        datos: {
+          // No tocamos `cuota` ni `cuota_interes`: se preservan valores históricos
+          ...abonos,
+          ...restantes,
+          total_restante: capitalEnMemoria.round(2).toString(),
+          pagado,
+        },
       });
     }
 
     console.log(
-      `📌 Cuota ${numCuota.toString().padStart(3, " ")} | capital_antes=Q${capitalAntes.round(2).toString()} | abono_teorico=Q${teorico.abono.round(2).toString()} | abono_escalado=Q${abonoEscalado.round(2).toString()} | capital_despues=Q${capitalEnMemoria.round(2).toString()} | pagos=${pagosDeCuota.length}`,
+      `📌 Cuota ${numCuota.toString().padStart(3, " ")} | cap_antes=Q${capitalAntes.round(2).toString()} | int=Q${interesMes.toString()} | iva=Q${ivaMes.toString()} | abono_cap_teorico=Q${abonoCapitalTeorico.round(2).toString()} | cap_despues=Q${capitalEnMemoria.round(2).toString()} | pagos=${pagos.length} | cuotaPagada=${cuotaPagada}`,
     );
   }
 
-  // 7️⃣ Ejecutar updates en una sola transacción (solo toca total_restante)
+  // 7️⃣ Construir preview (diffs por pago, sólo campos que cambian)
+  for (const { pago_id, datos } of actualizaciones) {
+    const original = pagoOriginalPorId.get(pago_id);
+    if (!original) continue;
+    const cambios: { campo: string; antes: string; despues: string }[] = [];
+    for (const [campo, nuevo] of Object.entries(datos)) {
+      const antes = (original as Record<string, unknown>)[campo];
+      const antesStr = antes === null || antes === undefined ? "null" : String(antes);
+      const despuesStr = nuevo === null || nuevo === undefined ? "null" : String(nuevo);
+      // Comparar numéricamente cuando ambos son números
+      const antesBig = (() => {
+        try {
+          return new Big(antesStr);
+        } catch {
+          return null;
+        }
+      })();
+      const despuesBig = (() => {
+        try {
+          return new Big(despuesStr);
+        } catch {
+          return null;
+        }
+      })();
+      const igual =
+        antesBig && despuesBig ? antesBig.eq(despuesBig) : antesStr === despuesStr;
+      if (!igual) cambios.push({ campo, antes: antesStr, despues: despuesStr });
+    }
+    if (cambios.length > 0) {
+      const numero_cuota =
+        cuotasOrdenadas.find(([, pagos]) =>
+          pagos.some((p) => p.pago_id === pago_id),
+        )?.[0] ?? -1;
+      preview.push({ pago_id, numero_cuota, cambios });
+    }
+  }
+
+  if (dry_run) {
+    console.log(
+      `\n🧪 DRY-RUN: ${preview.length}/${actualizaciones.length} pagos tendrían cambios. NO se escribió nada.`,
+    );
+    console.log("🔧 ========== FIN REPARAR (dry-run) ==========\n");
+    return {
+      credito_id: credito.credito_id,
+      capital_arranque: capitalArranque.toString(),
+      ultima_cuota_pagada: ultimaCuotaPagada,
+      pagos_actualizados: 0,
+      dry_run: true,
+      preview,
+    };
+  }
+
+  // 8️⃣ Ejecutar updates en una sola transacción
   console.log(
     `\n💾 Ejecutando ${actualizaciones.length} updates en transacción...`,
   );
   await db.transaction(async (tx) => {
     await Promise.all(
-      actualizaciones.map(({ pago_id, total_restante }) =>
+      actualizaciones.map(({ pago_id, datos }) =>
         tx
           .update(pagos_credito)
-          .set({ total_restante })
+          .set(datos)
           .where(eq(pagos_credito.pago_id, pago_id)),
       ),
     );
   });
 
   console.log(
-    `✅ ${actualizaciones.length} pagos reparados (total_restante) en crédito ${numero_credito_sifco} hasta cuota ${ultimaCuotaPagada}`,
+    `✅ ${actualizaciones.length} pagos reparados en crédito ${numero_credito_sifco} hasta cuota ${ultimaCuotaPagada}`,
   );
-  console.log("🔧 ========== FIN REPARAR total_restante ==========\n");
+  console.log("🔧 ========== FIN REPARAR ==========\n");
 
   return {
     credito_id: credito.credito_id,
     capital_arranque: capitalArranque.toString(),
     ultima_cuota_pagada: ultimaCuotaPagada,
     pagos_actualizados: actualizaciones.length,
+    dry_run: false,
   };
 };
 
@@ -1801,7 +1974,31 @@ export const recalcularPagosCredito = async ({
       if (fechaA !== fechaB) return fechaA - fechaB;
       return a.pago_id - b.pago_id; // fallback por pago_id si misma fecha
     });
-    const abonosPorPago: { pago_id: number; abonos: Record<string, string> }[] = [];
+    const abonosPorPago: {
+      pago_id: number;
+      abonos: Record<string, string>;
+      restantes: Record<string, string>;
+      pagado: boolean;
+    }[] = [];
+
+    // Snapshot por-pago del saldo restante de la cuota: evita que un pago parcial
+    // anterior quede reescrito con el estado final cuando un pago posterior cierra
+    // la cuota.
+    const snapshotRestantes = () => ({
+      interes_restante: rem.interes.round(2).toString(),
+      iva_12_restante: rem.iva.round(2).toString(),
+      seguro_restante: rem.seguro.round(2).toString(),
+      gps_restante: rem.gps.round(2).toString(),
+      capital_restante: rem.capital.round(2).toString(),
+      membresias: rem.membresias.round(2).toString(),
+    });
+    const cuotaCerradaAhora = () =>
+      rem.interes.eq(0) &&
+      rem.iva.eq(0) &&
+      rem.seguro.eq(0) &&
+      rem.gps.eq(0) &&
+      rem.membresias.eq(0) &&
+      rem.capital.eq(0);
 
     for (const pago of pagosOrdenados) {
       const montoAplicado = new Big(pago.monto_aplicado ?? 0);
@@ -1852,6 +2049,8 @@ export const recalcularPagosCredito = async ({
             membresias_mes: abono_membresias.round(2).toString(),
             pago_del_mes: totalPagado.round(2).toString(),
           },
+          restantes: snapshotRestantes(),
+          pagado: cuotaCerradaAhora(),
         });
       } else {
         // Sin monto aplicado: abonos en 0
@@ -1867,34 +2066,22 @@ export const recalcularPagosCredito = async ({
             membresias_mes: pago.membresias_mes ?? "0",
             pago_del_mes: "0",
           },
+          restantes: snapshotRestantes(),
+          pagado: cuotaCerradaAhora(),
         });
       }
     }
 
-    // Restantes finales (iguales para todos los pagos de la cuota)
-    const cuotaPagada =
-      rem.interes.eq(0) &&
-      rem.iva.eq(0) &&
-      rem.seguro.eq(0) &&
-      rem.gps.eq(0) &&
-      rem.membresias.eq(0) &&
-      rem.capital.eq(0);
-
-    for (const { pago_id, abonos } of abonosPorPago) {
+    for (const { pago_id, abonos, restantes, pagado } of abonosPorPago) {
       actualizaciones.push({
         pago_id,
         datos: {
           cuota: cuotaMensual.toString(),
           cuota_interes: credito.cuota_interes,
           ...abonos,
-          interes_restante: rem.interes.round(2).toString(),
-          iva_12_restante: rem.iva.round(2).toString(),
-          seguro_restante: rem.seguro.round(2).toString(),
-          gps_restante: rem.gps.round(2).toString(),
-          capital_restante: rem.capital.round(2).toString(),
+          ...restantes,
           total_restante: capitalEnMemoria.round(2).toString(),
-          membresias: rem.membresias.round(2).toString(),
-          pagado: cuotaPagada,
+          pagado,
         },
       });
     }

@@ -11,7 +11,7 @@ import {
 import z from "zod";
 import jwt from "jsonwebtoken";
 import { sendSessionCancelledNotification } from "@cci/email";
-import { INVESTOR_STATUS_CHANGE_RECIPIENTS } from "../utils/functions/investorStatusRecipients";
+import { COMPRA_CARTERA_RECIPIENTS } from "../utils/functions/compraCarteraRecipients";
 
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
 
@@ -449,7 +449,8 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
       });
 
       await sendSessionCancelledNotification({
-        to: INVESTOR_STATUS_CHANGE_RECIPIENTS,
+        to: COMPRA_CARTERA_RECIPIENTS.to,
+        cc: COMPRA_CARTERA_RECIPIENTS.cc,
         affectedInvestorNames,
         adminName,
         adminEmail,

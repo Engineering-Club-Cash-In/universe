@@ -2,6 +2,7 @@ import Big from "big.js";
 import { eq, and, inArray, ne } from "drizzle-orm";
 import { db } from "../database";
 import {
+  compras_credito_inversionista,
   creditos,
   creditos_inversionistas,
   creditos_inversionistas_espejo,
@@ -369,6 +370,30 @@ export const returnPendingInvestorsToCube = async ({ body, set }: any) => {
 
         if (dataEspejo.length > 0) {
           await tx.insert(creditos_inversionistas_espejo).values(dataEspejo);
+        }
+
+        // ── Limpiar compras_credito_inversionista pendientes ──
+        // Como la operación de los inversionistas que salen NUNCA llegó
+        // a completarse (cancelación / expiración), borramos sus filas
+        // pendientes en compras_credito_inversionista. Si no, quedarían
+        // como deltas "huérfanos" y una próxima aceptación de otra
+        // compra sobre el mismo crédito los sumaría, inflando el monto
+        // del correo y el % ponderado.
+        // Conservamos los registros con status "completado" (audit
+        // trail de operaciones que sí cerraron en el pasado).
+        if (inversionistas_a_sacar.size > 0) {
+          await tx
+            .delete(compras_credito_inversionista)
+            .where(
+              and(
+                eq(compras_credito_inversionista.credito_id, creditoId),
+                inArray(
+                  compras_credito_inversionista.inversionista_id,
+                  Array.from(inversionistas_a_sacar),
+                ),
+                ne(compras_credito_inversionista.status, "completado"),
+              ),
+            );
         }
 
         // ── Apagar bandera_reinversion del crédito ──
@@ -784,6 +809,19 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
             .values(dataEspejoDestinoFinal);
         }
 
+        // ── Registrar el delta de esta reasignación en compras_credito_inversionista ──
+        // Mismo patrón que addInvestorToCredit: guardamos SOLO el monto
+        // nuevo asignado a este destino (montoAsignar), no el acumulado.
+        // El correo de aceptación/expiración después lo lee desde aquí.
+        await tx.insert(compras_credito_inversionista).values({
+          credito_id: credito_destino_id,
+          inversionista_id,
+          monto_aportado: montoAsignar.toString(),
+          tipo_operacion,
+          tipo_reinversion: null,
+          status: statusEspejo,
+        });
+
         // ── Activar bandera_reinversion en el destino si es compra_cartera ──
         // Mientras el espejo esté en pendiente_compra_cartera, cofidi redirige
         // los intereses del inversionista nuevo a CUBE. Se apaga al aceptar
@@ -949,6 +987,28 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
           .insert(creditos_inversionistas_espejo)
           .values(dataEspejoOrigenConStatus);
       }
+
+      // ── Limpiar compras_credito_inversionista pendientes del origen ──
+      // El inversionista salió del crédito origen (su monto volvió a CUBE
+      // y/o se reasignó a los destinos). Cualquier delta pendiente que
+      // hubiera quedado para ese par (origen, inversionista) ya no es
+      // válido: si lo dejamos, una próxima aceptación lo sumaría como
+      // monto fantasma. Conservamos los "completado" (audit trail).
+      await tx
+        .delete(compras_credito_inversionista)
+        .where(
+          and(
+            eq(
+              compras_credito_inversionista.credito_id,
+              credito_espejo_removido_id,
+            ),
+            eq(
+              compras_credito_inversionista.inversionista_id,
+              inversionista_id,
+            ),
+            ne(compras_credito_inversionista.status, "completado"),
+          ),
+        );
 
       // ── Apagar bandera_reinversion del crédito origen ──
       // El espejo del origen quedó todo en "completado": ya no hay

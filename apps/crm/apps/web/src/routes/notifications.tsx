@@ -39,6 +39,7 @@ import {
 import { authClient } from "@/lib/auth-client";
 import { getRoleLabel, ROLES } from "@/lib/roles";
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { client, orpc, queryClient } from "@/utils/orpc";
 
 export const Route = createFileRoute("/notifications")({
@@ -171,7 +172,7 @@ const PAGE_SIZE = 20;
 const SUPERVISOR_ROLES = ["sales_supervisor", "analyst", "juridico"] as const;
 
 function usePagination(totalItems: number) {
-	const [page, setPage] = useState(1);
+	const [page, setPage] = usePersistedState<number>("notifications/page", 1);
 	const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
 	const safePage = Math.min(page, totalPages);
 
@@ -244,7 +245,7 @@ function NotificationsPage() {
 	const isAdmin = userRole === ROLES.ADMIN;
 	const isSalesSupervisor = userRole === ROLES.SALES_SUPERVISOR;
 
-	const [statusFilter, setStatusFilter] = useState<string>("all");
+	const [statusFilter, setStatusFilter] = usePersistedState<string>("notifications/statusFilter", "all");
 
 	// Admin: todas las notificaciones
 	const allNotifications = useQuery({

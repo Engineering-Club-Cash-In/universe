@@ -58,6 +58,7 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/crm/vendors")({
@@ -82,8 +83,8 @@ const vendorSchema = z.object({
 type VendorFormData = z.infer<typeof vendorSchema>;
 
 function VendorsPage() {
-	const [searchTerm, setSearchTerm] = useState("");
-	const [vendorTypeFilter, setVendorTypeFilter] = useState("all");
+	const [searchTerm, setSearchTerm] = usePersistedState<string>("crm/vendors/searchTerm", "");
+	const [vendorTypeFilter, setVendorTypeFilter] = usePersistedState<string>("crm/vendors/vendorTypeFilter", "all");
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 	const [isEditOpen, setIsEditOpen] = useState(false);
 	const [selectedVendor, setSelectedVendor] = useState<any>(null);

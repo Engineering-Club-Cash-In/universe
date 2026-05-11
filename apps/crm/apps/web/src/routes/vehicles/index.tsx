@@ -86,6 +86,7 @@ import {
 	renderInspectionStatusBadge,
 	renderNewVehicleBadges,
 } from "@/lib/vehicle-utils";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { client, orpc } from "@/utils/orpc";
 
 // Helper para renderizar el badge del estado del vehículo
@@ -138,14 +139,14 @@ function VehiclesDashboard() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const search = useSearch({ from: "/vehicles/" });
-	const [searchTerm, setSearchTerm] = useState("");
-	const [debouncedSearch, setDebouncedSearch] = useState("");
-	const [filterStatus, setFilterStatus] = useState("all");
-	const [filterOwnership, setFilterOwnership] = useState("all");
+	const [searchTerm, setSearchTerm] = usePersistedState<string>("vehicles/searchTerm", "");
+	const [debouncedSearch, setDebouncedSearch] = useState(searchTerm);
+	const [filterStatus, setFilterStatus] = usePersistedState<string>("vehicles/filterStatus", "all");
+	const [filterOwnership, setFilterOwnership] = usePersistedState<string>("vehicles/filterOwnership", "all");
 	const [selectedVehicle, setSelectedVehicle] = useState<any>(null);
 	const [isDetailsOpen, setIsDetailsOpen] = useState(false);
-	const [activeTab, setActiveTab] = useState("general");
-	const [page, setPage] = useState(0);
+	const [activeTab, setActiveTab] = usePersistedState<string>("vehicles/activeTab", "general");
+	const [page, setPage] = usePersistedState<number>("vehicles/page", 0);
 	const pageSize = 20;
 
 	// Refs to track processed URL params
@@ -318,7 +319,7 @@ function VehiclesDashboard() {
 	const [selectedEvidence, setSelectedEvidence] = useState<any[]>([]);
 	const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
 	const [evidenceItemName, setEvidenceItemName] = useState("");
-	const [photoCategoryFilter, setPhotoCategoryFilter] = useState("all");
+	const [photoCategoryFilter, setPhotoCategoryFilter] = usePersistedState<string>("vehicles/photoCategoryFilter", "all");
 	const [selectedPhoto, setSelectedPhoto] = useState<{
 		id: string;
 		url: string;

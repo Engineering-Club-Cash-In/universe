@@ -773,6 +773,15 @@ export const sendSessionCancelledNotification = async ({
       }
     });
 
+    const validCcEmails = cc.filter((email) => {
+      try {
+        emailSchema.parse(email);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+
     if (validEmails.length === 0) {
       console.warn("[sendSessionCancelledNotification] No valid emails found");
       return { success: false, error: "No valid emails" };
@@ -839,7 +848,7 @@ export const sendSessionCancelledNotification = async ({
     `;
 
     const subject = `Sesión CANCELADA — ${affectedInvestorNames}`;
-    return await sendPlainEmail(validEmails, subject, html, cc);
+    return await sendPlainEmail(validEmails, subject, html, validCcEmails);
   } catch (err) {
     console.error("[sendSessionCancelledNotification] Unexpected Error:", err);
     return { success: false, error: err };

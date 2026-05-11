@@ -434,30 +434,32 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
     });
 
     // ================================================================
-    // PASO 5: NOTIFICACIÓN POR CORREO
+    // PASO 5: NOTIFICACIÓN POR CORREO (Solo si es acción manual/HTTP)
     // ================================================================
-    try {
-      const affectedInvestorNames = Array.from(new Set(pendientes.map(p => investorMap.get(p.inversionista_id)))).join(", ");
-      
-      const emailCredits = Array.from(porCredito.entries()).map(([creditoId, info]) => {
-        const details = creditMap.get(creditoId);
-        return {
-          sifco: details?.sifco || "N/A",
-          cliente: details?.cliente || "Desconocido",
-          monto: info.monto_total_a_cube.toFixed(2)
-        };
-      });
+    if (request) {
+      try {
+        const affectedInvestorNames = Array.from(new Set(pendientes.map(p => investorMap.get(p.inversionista_id)))).join(", ");
+        
+        const emailCredits = Array.from(porCredito.entries()).map(([creditoId, info]) => {
+          const details = creditMap.get(creditoId);
+          return {
+            sifco: details?.sifco || "N/A",
+            cliente: details?.cliente || "Desconocido",
+            monto: info.monto_total_a_cube.toFixed(2)
+          };
+        });
 
-      await sendSessionCancelledNotification({
-        to: COMPRA_CARTERA_RECIPIENTS.to,
-        cc: COMPRA_CARTERA_RECIPIENTS.cc,
-        affectedInvestorNames,
-        adminName,
-        adminEmail,
-        credits: emailCredits
-      });
-    } catch (mailErr) {
-      console.error("[returnPendingInvestorsToCube] Falló envío de correo:", mailErr);
+        await sendSessionCancelledNotification({
+          to: COMPRA_CARTERA_RECIPIENTS.to,
+          cc: COMPRA_CARTERA_RECIPIENTS.cc,
+          affectedInvestorNames,
+          adminName,
+          adminEmail,
+          credits: emailCredits
+        });
+      } catch (mailErr) {
+        console.error("[returnPendingInvestorsToCube] Falló envío de correo:", mailErr);
+      }
     }
 
     // ================================================================

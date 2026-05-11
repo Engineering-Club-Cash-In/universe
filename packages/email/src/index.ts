@@ -742,6 +742,7 @@ export const sendCompraCarteraExpiradaNotification = async ({
 
 export interface SendSessionCancelledNotificationParams {
   to: string[];
+  cc?: string[];
   affectedInvestorNames: string;
   adminName: string;
   adminEmail?: string;
@@ -755,6 +756,7 @@ export interface SendSessionCancelledNotificationParams {
 
 export const sendSessionCancelledNotification = async ({
   to,
+  cc = [],
   affectedInvestorNames,
   adminName,
   adminEmail,
@@ -837,8 +839,7 @@ export const sendSessionCancelledNotification = async ({
     `;
 
     const subject = `Sesión CANCELADA — ${affectedInvestorNames}`;
-
-    return await sendPlainEmail(validEmails, subject, html);
+    return await sendPlainEmail(validEmails, subject, html, cc);
   } catch (err) {
     console.error("[sendSessionCancelledNotification] Unexpected Error:", err);
     return { success: false, error: err };
@@ -853,6 +854,7 @@ export const sendPlainEmail = async (
   to: string | string[],
   subject: string,
   html: string,
+  cc?: string | string[],
 ) => {
   const recipients = Array.isArray(to) ? to : [to];
   recipients.forEach(email => emailSchema.parse(email));
@@ -861,6 +863,7 @@ export const sendPlainEmail = async (
     const { data, error } = await resend.emails.send({
       from: `Club Cash In <no-reply@${domain}>`,
       to: recipients,
+      cc: cc,
       subject,
       html,
     });

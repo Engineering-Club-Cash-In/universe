@@ -13,7 +13,7 @@ import jwt from "jsonwebtoken";
 import { sendSessionCancelledNotification } from "@cci/email";
 import { INVESTOR_STATUS_CHANGE_RECIPIENTS } from "../utils/functions/investorStatusRecipients";
 
-const JWT_SECRET = process.env.JWT_SECRET || "6b7a1d9e4f27b4c8d91e5f03a7aa9378db7e2b5c8f3c83de7a9e5f16f5b2a6df";
+const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
 
 // ========================================
 // ID fijo de CUBE INVESTMENTS S.A.

@@ -7352,44 +7352,56 @@ export async function getCreditosEspejoPendientes(
   }
 
   // 1.b. Obtener montos delta por operación desde compras_credito_inversionista
-  // (status no completado). Si hay varios pendientes para el mismo par
-  // (credito_id, inversionista_id), se suman porque así se enviarán juntos al aceptar.
-  const parKeysSet = new Set(
-    pendientes.map((r) => `${r.credito_id}-${r.inversionista_id}`),
-  );
-  const parKeys = Array.from(parKeysSet).map((k) => {
-    const [c, i] = k.split("-").map(Number);
-    return { credito_id: c, inversionista_id: i };
-  });
-  const comprasRows = parKeys.length > 0
+  // matcheando el status del espejo, para que cada fila pendiente solo agregue
+  // las compras del MISMO status (no inflar con operaciones anteriores aún en
+  // pendiente_revision si ya hay una nueva en pendiente_compra_cartera).
+  const tripleMap = new Map<
+    string,
+    {
+      credito_id: number;
+      inversionista_id: number;
+      status: typeof pendientes[number]["status"];
+    }
+  >();
+  for (const r of pendientes) {
+    const k = `${r.credito_id}|${r.inversionista_id}|${r.status}`;
+    if (!tripleMap.has(k)) {
+      tripleMap.set(k, {
+        credito_id: r.credito_id,
+        inversionista_id: r.inversionista_id,
+        status: r.status,
+      });
+    }
+  }
+  const tripleKeys = Array.from(tripleMap.values());
+  const comprasRows = tripleKeys.length > 0
     ? await db
         .select({
           credito_id: compras_credito_inversionista.credito_id,
           inversionista_id: compras_credito_inversionista.inversionista_id,
+          status: compras_credito_inversionista.status,
           monto_aportado: compras_credito_inversionista.monto_aportado,
         })
         .from(compras_credito_inversionista)
         .where(
-          and(
-            or(
-              ...parKeys.map((k) =>
-                and(
-                  eq(compras_credito_inversionista.credito_id, k.credito_id),
-                  eq(
-                    compras_credito_inversionista.inversionista_id,
-                    k.inversionista_id,
-                  ),
+          or(
+            ...tripleKeys.map((k) =>
+              and(
+                eq(compras_credito_inversionista.credito_id, k.credito_id),
+                eq(
+                  compras_credito_inversionista.inversionista_id,
+                  k.inversionista_id,
                 ),
+                eq(compras_credito_inversionista.status, k.status),
               ),
             ),
-            ne(compras_credito_inversionista.status, "completado"),
           ),
         )
     : [];
 
   const montoNuevoPorPar = new Map<string, Big>();
   for (const row of comprasRows) {
-    const key = `${row.credito_id}-${row.inversionista_id}`;
+    const key = `${row.credito_id}|${row.inversionista_id}|${row.status}`;
     const prev = montoNuevoPorPar.get(key) ?? new Big(0);
     montoNuevoPorPar.set(key, prev.plus(new Big(row.monto_aportado)));
   }
@@ -7462,7 +7474,7 @@ export async function getCreditosEspejoPendientes(
     const otrosEnEsteCredito = (otrosPorCredito.get(row.credito_id) || [])
       .filter((o) => o.inversionista_id !== row.inversionista_id);
 
-    const montoNuevoKey = `${row.credito_id}-${row.inversionista_id}`;
+    const montoNuevoKey = `${row.credito_id}|${row.inversionista_id}|${row.status}`;
     const montoNuevo = montoNuevoPorPar.get(montoNuevoKey);
 
     grupo.creditosPendientes.push({

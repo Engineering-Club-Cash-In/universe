@@ -64,6 +64,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
 import { shouldRedirectToLogin } from "@/lib/auth-session";
 import { PERMISSIONS } from "@/lib/roles";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/crm/companies")({
@@ -82,9 +83,9 @@ function RouteComponent() {
 	const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
 	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 	const [selectedCompany, setSelectedCompany] = useState<any>(null);
-	const [searchTerm, setSearchTerm] = useState("");
-	const [industryFilter, setIndustryFilter] = useState<string>("all");
-	const [sizeFilter, setSizeFilter] = useState<string>("all");
+	const [searchTerm, setSearchTerm] = usePersistedState<string>("crm/companies/searchTerm", "");
+	const [industryFilter, setIndustryFilter] = usePersistedState<string>("crm/companies/industryFilter", "all");
+	const [sizeFilter, setSizeFilter] = usePersistedState<string>("crm/companies/sizeFilter", "all");
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 	const companiesQuery = useQuery({

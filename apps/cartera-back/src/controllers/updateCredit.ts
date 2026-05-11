@@ -1555,7 +1555,28 @@ export const repararTotalRestante = async ({
     const abonosPorPago: {
       pago_id: number;
       abonos: Record<string, string>;
+      restantes: Record<string, string>;
+      pagado: boolean;
     }[] = [];
+
+    // Snapshot de `rem` DESPUÉS de aplicar cada pago: preserva el rastro histórico
+    // (qué quedaba debiendo la cuota tras cada pago) en lugar de pisar todos los pagos
+    // con el estado final.
+    const snapshotRestantes = () => ({
+      interes_restante: rem.interes.round(2).toString(),
+      iva_12_restante: rem.iva.round(2).toString(),
+      seguro_restante: rem.seguro.round(2).toString(),
+      gps_restante: rem.gps.round(2).toString(),
+      capital_restante: rem.capital.round(2).toString(),
+      membresias: rem.membresias.round(2).toString(),
+    });
+    const cuotaCerradaAhora = () =>
+      rem.interes.eq(0) &&
+      rem.iva.eq(0) &&
+      rem.seguro.eq(0) &&
+      rem.gps.eq(0) &&
+      rem.membresias.eq(0) &&
+      rem.capital.eq(0);
 
     for (const pago of pagosOrdenados) {
       const montoAplicado = new Big(pago.monto_aplicado ?? 0);
@@ -1605,6 +1626,8 @@ export const repararTotalRestante = async ({
             membresias_mes: abono_membresias.round(2).toString(),
             pago_del_mes: totalPagado.round(2).toString(),
           },
+          restantes: snapshotRestantes(),
+          pagado: cuotaCerradaAhora(),
         });
       } else {
         abonosPorPago.push({
@@ -1619,32 +1642,23 @@ export const repararTotalRestante = async ({
             membresias_mes: pago.membresias_mes ?? "0",
             pago_del_mes: "0",
           },
+          restantes: snapshotRestantes(),
+          pagado: cuotaCerradaAhora(),
         });
       }
     }
 
-    const cuotaPagada =
-      rem.interes.eq(0) &&
-      rem.iva.eq(0) &&
-      rem.seguro.eq(0) &&
-      rem.gps.eq(0) &&
-      rem.membresias.eq(0) &&
-      rem.capital.eq(0);
+    const cuotaPagada = cuotaCerradaAhora();
 
-    for (const { pago_id, abonos } of abonosPorPago) {
+    for (const { pago_id, abonos, restantes, pagado } of abonosPorPago) {
       actualizaciones.push({
         pago_id,
         datos: {
           // No tocamos `cuota` ni `cuota_interes`: se preservan valores históricos
           ...abonos,
-          interes_restante: rem.interes.round(2).toString(),
-          iva_12_restante: rem.iva.round(2).toString(),
-          seguro_restante: rem.seguro.round(2).toString(),
-          gps_restante: rem.gps.round(2).toString(),
-          capital_restante: rem.capital.round(2).toString(),
+          ...restantes,
           total_restante: capitalEnMemoria.round(2).toString(),
-          membresias: rem.membresias.round(2).toString(),
-          pagado: cuotaPagada,
+          pagado,
         },
       });
     }
@@ -1964,7 +1978,31 @@ export const recalcularPagosCredito = async ({
       if (fechaA !== fechaB) return fechaA - fechaB;
       return a.pago_id - b.pago_id; // fallback por pago_id si misma fecha
     });
-    const abonosPorPago: { pago_id: number; abonos: Record<string, string> }[] = [];
+    const abonosPorPago: {
+      pago_id: number;
+      abonos: Record<string, string>;
+      restantes: Record<string, string>;
+      pagado: boolean;
+    }[] = [];
+
+    // Snapshot por-pago del saldo restante de la cuota: evita que un pago parcial
+    // anterior quede reescrito con el estado final cuando un pago posterior cierra
+    // la cuota.
+    const snapshotRestantes = () => ({
+      interes_restante: rem.interes.round(2).toString(),
+      iva_12_restante: rem.iva.round(2).toString(),
+      seguro_restante: rem.seguro.round(2).toString(),
+      gps_restante: rem.gps.round(2).toString(),
+      capital_restante: rem.capital.round(2).toString(),
+      membresias: rem.membresias.round(2).toString(),
+    });
+    const cuotaCerradaAhora = () =>
+      rem.interes.eq(0) &&
+      rem.iva.eq(0) &&
+      rem.seguro.eq(0) &&
+      rem.gps.eq(0) &&
+      rem.membresias.eq(0) &&
+      rem.capital.eq(0);
 
     for (const pago of pagosOrdenados) {
       const montoAplicado = new Big(pago.monto_aplicado ?? 0);
@@ -2015,6 +2053,8 @@ export const recalcularPagosCredito = async ({
             membresias_mes: abono_membresias.round(2).toString(),
             pago_del_mes: totalPagado.round(2).toString(),
           },
+          restantes: snapshotRestantes(),
+          pagado: cuotaCerradaAhora(),
         });
       } else {
         // Sin monto aplicado: abonos en 0
@@ -2030,34 +2070,22 @@ export const recalcularPagosCredito = async ({
             membresias_mes: pago.membresias_mes ?? "0",
             pago_del_mes: "0",
           },
+          restantes: snapshotRestantes(),
+          pagado: cuotaCerradaAhora(),
         });
       }
     }
 
-    // Restantes finales (iguales para todos los pagos de la cuota)
-    const cuotaPagada =
-      rem.interes.eq(0) &&
-      rem.iva.eq(0) &&
-      rem.seguro.eq(0) &&
-      rem.gps.eq(0) &&
-      rem.membresias.eq(0) &&
-      rem.capital.eq(0);
-
-    for (const { pago_id, abonos } of abonosPorPago) {
+    for (const { pago_id, abonos, restantes, pagado } of abonosPorPago) {
       actualizaciones.push({
         pago_id,
         datos: {
           cuota: cuotaMensual.toString(),
           cuota_interes: credito.cuota_interes,
           ...abonos,
-          interes_restante: rem.interes.round(2).toString(),
-          iva_12_restante: rem.iva.round(2).toString(),
-          seguro_restante: rem.seguro.round(2).toString(),
-          gps_restante: rem.gps.round(2).toString(),
-          capital_restante: rem.capital.round(2).toString(),
+          ...restantes,
           total_restante: capitalEnMemoria.round(2).toString(),
-          membresias: rem.membresias.round(2).toString(),
-          pagado: cuotaPagada,
+          pagado,
         },
       });
     }

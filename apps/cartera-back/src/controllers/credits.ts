@@ -1895,16 +1895,6 @@ export async function resetCredit({
         )
       );
 
-    // 12. Eliminar SOLO las cuotas no pagadas (las pagadas se conservan como histórico)
-    await db
-      .delete(cuotas_credito)
-      .where(
-        and(
-          eq(cuotas_credito.credito_id, credito.credito_id),
-          eq(cuotas_credito.pagado, false)
-        )
-      );
-
     // 12.1 Crear cuota correlativa (MAX(numero_cuota) + 1) para enlazar el pago de cierre
     const [maxCuotaRow] = await db
       .select({ max: sql<number>`COALESCE(MAX(${cuotas_credito.numero_cuota}), 0)` })
@@ -1923,13 +1913,25 @@ export async function resetCredit({
       })
       .returning();
 
-    // 12.2 Enlazar el pago de cierre a la cuota recién creada
+    // 12.2 Enlazar el pago de cierre a la cuota recién creada ANTES de borrar cuotas no pagadas,
+    // de lo contrario el DELETE viola el FK pagos_credito.cuota_id cuando `cuotaId` apuntaba a
+    // una cuota no pagada (escenario reset/cancelación contra cuota vigente).
     if (nuevoPago?.pago_id && cuotaCierre?.cuota_id) {
       await db
         .update(pagos_credito)
         .set({ cuota_id: cuotaCierre.cuota_id })
         .where(eq(pagos_credito.pago_id, nuevoPago.pago_id));
     }
+
+    // 12. Eliminar SOLO las cuotas no pagadas (las pagadas se conservan como histórico)
+    await db
+      .delete(cuotas_credito)
+      .where(
+        and(
+          eq(cuotas_credito.credito_id, credito.credito_id),
+          eq(cuotas_credito.pagado, false)
+        )
+      );
 
     // 12.5 Distribuir abono a capital en tabla espejo (CANCELACION)
     try {

@@ -1266,21 +1266,17 @@ export const updateCredit = async ({ body, set }: any) => {
     // 10. Actualizar inversionistas (Espejo)
     console.log(`🪞 [ESPEJO] inversionistas_espejo recibidos: ${JSON.stringify(inversionistas_espejo?.length ?? 'undefined')}`);
     if (inversionistas_espejo && inversionistas_espejo.length > 0) {
-      // 🔒 Sincronización forzada: el espejo siempre usa el monto_aportado Y cuota_inversionista del padre.
-      // Esto es la fuente de verdad, independiente de lo que envíe el frontend.
-      const principalMontos = new Map(
-        (inversionistas || []).map((inv) => [inv.inversionista_id, inv.monto_aportado])
-      );
-
-      // 🔥 NUEVO: Sincronizar cuotas capturadas del padre
+      // 🔒 Sincronización forzada solo de cuota_inversionista desde el padre.
+      // El monto_aportado del espejo se respeta tal como viene del frontend
+      // porque representa el saldo vivo del inversionista (capital - abonos)
+      // y puede divergir del padre cuando ya hubo abonos a capital.
       const principalCuotas = new Map(
         (inversionistas || []).map((inv) => [inv.inversionista_id, inv.cuota_inversionista ?? 0])
       );
 
       const espejoSincronizado = inversionistas_espejo.map((inv) => ({
         ...inv,
-        monto_aportado: principalMontos.get(inv.inversionista_id) ?? inv.monto_aportado,
-        cuota_inversionista: principalCuotas.get(inv.inversionista_id) ?? inv.cuota_inversionista, // 🔥 NUEVO
+        cuota_inversionista: principalCuotas.get(inv.inversionista_id) ?? inv.cuota_inversionista,
       }));
 
       console.log(`🪞 [ESPEJO] Iniciando updateInvestors para credito_id=${credito_id} con ${espejoSincronizado.length} inversionistas`);

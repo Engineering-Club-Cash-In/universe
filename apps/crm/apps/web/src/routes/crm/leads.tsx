@@ -142,6 +142,17 @@ function RouteComponent() {
 	const [statusFilter, setStatusFilter] = usePersistedState<string>("crm/leads/statusFilter", "all");
 	const [sourceFilter, setSourceFilter] = usePersistedState<string>("crm/leads/sourceFilter", "all");
 	const [page, setPage] = usePersistedState<number>("crm/leads/page", 0);
+
+	const hasActiveFilters = searchTerm !== "" || dateRange !== undefined || statusFilter !== "all" || sourceFilter !== "all";
+	const resetFilters = () => {
+		setSearchTerm("");
+		setDebouncedSearch("");
+		setDateRange(undefined);
+		setStatusFilter("all");
+		setSourceFilter("all");
+		setPage(0);
+	};
+
 	const [isEditingCreditAnalysis, setIsEditingCreditAnalysis] = useState(false);
 	const [isConvertDialogOpen, setIsConvertDialogOpen] = useState(false);
 	const [leadToConvert, setLeadToConvert] = useState<Lead | null>(null);
@@ -2021,6 +2032,15 @@ function RouteComponent() {
 								))}
 							</SelectContent>
 						</Select>
+						{hasActiveFilters && (
+							<Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 text-muted-foreground">
+								<X className="mr-1 h-3 w-3" />
+								Limpiar filtros
+								<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
+									{[searchTerm !== "", dateRange !== undefined, statusFilter !== "all", sourceFilter !== "all"].filter(Boolean).length}
+								</Badge>
+							</Button>
+						)}
 					</div>
 
 					{leadsQuery.isPending ? (

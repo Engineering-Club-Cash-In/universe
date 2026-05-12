@@ -36,6 +36,7 @@ import {
 	Trophy,
 	Upload,
 	Users,
+	X,
 	XCircle,
 } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
@@ -435,6 +436,22 @@ function RouteComponent() {
 	// Month/year filter for placed amounts alignment with dashboard
 	const [month, setMonth] = usePersistedState<number>("crm/opportunities/month", new Date().getMonth() + 1);
 	const [year, setYear] = usePersistedState<number>("crm/opportunities/year", new Date().getFullYear());
+
+	const hasActiveFilters =
+		stageFilter !== "all" ||
+		showLostOpportunities ||
+		boardSearch !== "" ||
+		salespersonFilter !== "all" ||
+		sourceFilter !== "all" ||
+		stageIdFilter !== "all";
+	const resetFilters = () => {
+		setStageFilter("all");
+		setShowLostOpportunities(false);
+		setBoardSearch("");
+		setSalespersonFilter("all");
+		setSourceFilter("all");
+		setStageIdFilter("all");
+	};
 
 	const goToPreviousMonth = () => {
 		if (month === 1) {
@@ -1730,6 +1747,15 @@ function RouteComponent() {
 						/>
 						{showLostOpportunities ? "Ocultando perdidas" : "Mostrar perdidas"}
 					</Button>
+					{hasActiveFilters && (
+						<Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 text-muted-foreground">
+							<X className="mr-1 h-3 w-3" />
+							Limpiar filtros
+							<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
+								{[stageFilter !== "all", showLostOpportunities, boardSearch !== "", salespersonFilter !== "all", sourceFilter !== "all", stageIdFilter !== "all"].filter(Boolean).length}
+							</Badge>
+						</Button>
+					)}
 				</div>
 			</div>
 

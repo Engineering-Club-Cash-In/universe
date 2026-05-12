@@ -1,7 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Building2, Edit, Plus, Search, Trash2, User } from "lucide-react";
+import { Building2, Edit, Plus, Search, Trash2, User, X } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -85,6 +85,12 @@ type VendorFormData = z.infer<typeof vendorSchema>;
 function VendorsPage() {
 	const [searchTerm, setSearchTerm] = usePersistedState<string>("crm/vendors/searchTerm", "");
 	const [vendorTypeFilter, setVendorTypeFilter] = usePersistedState<string>("crm/vendors/vendorTypeFilter", "all");
+
+	const hasActiveFilters = searchTerm !== "" || vendorTypeFilter !== "all";
+	const resetFilters = () => {
+		setSearchTerm("");
+		setVendorTypeFilter("all");
+	};
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 	const [isEditOpen, setIsEditOpen] = useState(false);
 	const [selectedVendor, setSelectedVendor] = useState<any>(null);
@@ -374,7 +380,7 @@ function VendorsPage() {
 			{/* Filters */}
 			<Card>
 				<CardContent className="pt-6">
-					<div className="flex gap-4">
+					<div className="flex items-center gap-4">
 						<div className="relative flex-1">
 							<Search className="absolute top-2.5 left-2.5 h-4 w-4 text-muted-foreground" />
 							<Input
@@ -397,6 +403,15 @@ function VendorsPage() {
 								<SelectItem value="empresa">Empresa</SelectItem>
 							</SelectContent>
 						</Select>
+						{hasActiveFilters && (
+							<Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 text-muted-foreground">
+								<X className="mr-1 h-3 w-3" />
+								Limpiar filtros
+								<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
+									{[searchTerm !== "", vendorTypeFilter !== "all"].filter(Boolean).length}
+								</Badge>
+							</Button>
+						)}
 					</div>
 				</CardContent>
 			</Card>

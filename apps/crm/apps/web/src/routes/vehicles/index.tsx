@@ -28,6 +28,7 @@ import {
 	Search,
 	Sparkles,
 	Wrench,
+	X,
 	XCircle,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -320,6 +321,15 @@ function VehiclesDashboard() {
 	const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
 	const [evidenceItemName, setEvidenceItemName] = useState("");
 	const [photoCategoryFilter, setPhotoCategoryFilter] = usePersistedState<string>("vehicles/photoCategoryFilter", "all");
+
+	const hasActiveFilters = searchTerm !== "" || filterStatus !== "all" || filterOwnership !== "all" || photoCategoryFilter !== "all";
+	const resetFilters = () => {
+		setSearchTerm("");
+		setFilterStatus("all");
+		setFilterOwnership("all");
+		setPhotoCategoryFilter("all");
+		setPage(0);
+	};
 	const [selectedPhoto, setSelectedPhoto] = useState<{
 		id: string;
 		url: string;
@@ -622,6 +632,15 @@ function VehiclesDashboard() {
 											Externos
 										</Button>
 									</div>
+									{hasActiveFilters && (
+										<Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 text-muted-foreground">
+											<X className="mr-1 h-3 w-3" />
+											Limpiar filtros
+											<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
+												{[searchTerm !== "", filterStatus !== "all", filterOwnership !== "all", photoCategoryFilter !== "all"].filter(Boolean).length}
+											</Badge>
+										</Button>
+									)}
 								</div>
 							</div>
 

@@ -14,6 +14,7 @@ import {
 	TrendingDown,
 	TrendingUp,
 	Users,
+	X,
 } from "lucide-react";
 import { usePersistedDateRange } from "@/hooks/usePersistedDateRange";
 import { usePersistedState } from "@/hooks/usePersistedState";
@@ -310,6 +311,29 @@ function RouteComponent() {
 	const [fechaError, setFechaError] = useState<string | null>(null);
 	const [capitalMin, setCapitalMin] = usePersistedState<number | undefined>("cobros/capitalMin", undefined);
 	const [capitalMax, setCapitalMax] = usePersistedState<number | undefined>("cobros/capitalMax", undefined);
+
+	const hasActiveFilters =
+		filtroTemporal !== "hoy" ||
+		filtroEtapa !== null ||
+		filtroEtiquetas.length > 0 ||
+		filterValue !== "" ||
+		sifcoFilterValue !== "" ||
+		capitalMin !== undefined ||
+		capitalMax !== undefined ||
+		dateRange !== undefined;
+	const resetFilters = () => {
+		setFiltroTemporal("hoy");
+		setFiltroEtapa(null);
+		setFiltroEtiquetas([]);
+		setFilterValue("");
+		setSifcoFilterValue("");
+		setCapitalMin(undefined);
+		setCapitalMax(undefined);
+		setDateRange(undefined);
+		setPickerRange(undefined);
+		setFechaError(null);
+		setPage(1);
+	};
 
 	// Debounce para el filtro de búsqueda (1 segundos)
 	useEffect(() => {
@@ -1202,6 +1226,17 @@ function RouteComponent() {
 										}}
 									/>
 								</div>
+								{hasActiveFilters && (
+									<div className="border-t pt-2">
+										<Button variant="ghost" size="sm" onClick={resetFilters} className="w-full text-muted-foreground">
+											<X className="mr-1 h-3 w-3" />
+											Limpiar filtros
+											<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
+												{[filtroTemporal !== "hoy", filtroEtapa !== null, filtroEtiquetas.length > 0, filterValue !== "", sifcoFilterValue !== "", capitalMin !== undefined, capitalMax !== undefined, dateRange !== undefined].filter(Boolean).length}
+											</Badge>
+										</Button>
+									</div>
+								)}
 							</div>
 						}
 						tableContainerClass="max-h-[600px] overflow-y-auto"

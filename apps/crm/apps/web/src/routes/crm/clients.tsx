@@ -235,6 +235,14 @@ function RouteComponent() {
 	const [page, setPage] = usePersistedState<number>("crm/clients/page", 0);
 	const pageSize = 20;
 
+	const hasActiveFilters = searchTerm !== "" || dateRange !== undefined;
+	const resetFilters = () => {
+		setSearchTerm("");
+		setDebouncedSearch("");
+		setDateRange(undefined);
+		setPage(0);
+	};
+
 	const queryClient = useQueryClient();
 
 	// Modal state
@@ -599,6 +607,15 @@ function RouteComponent() {
 								setPage(0);
 							}}
 						/>
+						{hasActiveFilters && (
+							<Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 text-muted-foreground">
+								<X className="mr-1 h-3 w-3" />
+								Limpiar filtros
+								<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
+									{[searchTerm !== "", dateRange !== undefined].filter(Boolean).length}
+								</Badge>
+							</Button>
+						)}
 					</div>
 
 					{clientsQuery.isPending ? (

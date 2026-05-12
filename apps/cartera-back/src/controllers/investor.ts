@@ -7116,7 +7116,10 @@ export async function getInvestorPerformance(dpi?: string, email?: string) {
     throw new Error(`No se encontró inversionista con ${dpi ? 'DPI: ' + dpi : 'email: ' + email}`);
   }
 
-  // 2️⃣ Obtener totales de inversiones de forma agregada (solo créditos completados)
+  // 2️⃣ Obtener totales de inversiones de forma agregada
+  // Se incluyen todos los status EXCEPTO "pendiente_compra_cartera"
+  // (esa operación todavía no ha sido aceptada, así que no debe sumar capital).
+  // Quedan dentro: "completado", "pendiente_reinversion" y cualquier otro.
   const [totalesInversion] = await db
     .select({
       capital_total: sql<string>`coalesce(sum(${creditos_inversionistas_espejo.monto_aportado}), 0)`,
@@ -7126,7 +7129,7 @@ export async function getInvestorPerformance(dpi?: string, email?: string) {
     .where(
       and(
         eq(creditos_inversionistas_espejo.inversionista_id, inversionista.inversionista_id),
-        eq(creditos_inversionistas_espejo.status, "completado"),
+        ne(creditos_inversionistas_espejo.status, "pendiente_compra_cartera"),
       ),
     );
 

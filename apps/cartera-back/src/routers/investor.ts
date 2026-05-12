@@ -704,13 +704,13 @@ export const inversionistasRouter = new Elysia()
       const filename = `reporte_liquidados_${liquidacionId}_${Date.now()}.xlsx`;
       const { url } = await generarYSubirExcelInversionista(inversionista as any, filename, logoUrl);
 
-      // const liquidacionActualizada = await updateLiquidacionReporteUrl(Number(liquidacionId), url);
+      const liquidacionActualizada = await updateLiquidacionReporteUrl(Number(liquidacionId), url);
 
       return {
         success: true,
         url,
         filename,
-        liquidacion:  null,
+        liquidacion:  liquidacionActualizada || null,
       };
     } catch (error) {
       console.error("[investor/pdf-liquidados] Error:", error);

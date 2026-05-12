@@ -14,6 +14,7 @@ import {
 	Loader2,
 	Send,
 	Upload,
+	X,
 	XCircle,
 } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -39,6 +40,7 @@ import {
 import { authClient } from "@/lib/auth-client";
 import { getRoleLabel, ROLES } from "@/lib/roles";
 import { uploadFileToR2WithRetry } from "@/lib/upload-to-r2";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { client, orpc, queryClient } from "@/utils/orpc";
 
 export const Route = createFileRoute("/notifications")({
@@ -171,7 +173,7 @@ const PAGE_SIZE = 20;
 const SUPERVISOR_ROLES = ["sales_supervisor", "analyst", "juridico"] as const;
 
 function usePagination(totalItems: number) {
-	const [page, setPage] = useState(1);
+	const [page, setPage] = usePersistedState<number>("notifications/page", 1);
 	const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
 	const safePage = Math.min(page, totalPages);
 
@@ -244,7 +246,12 @@ function NotificationsPage() {
 	const isAdmin = userRole === ROLES.ADMIN;
 	const isSalesSupervisor = userRole === ROLES.SALES_SUPERVISOR;
 
-	const [statusFilter, setStatusFilter] = useState<string>("all");
+	const [statusFilter, setStatusFilter] = usePersistedState<string>("notifications/statusFilter", "all");
+
+	const hasActiveFilters = statusFilter !== "all";
+	const resetFilters = () => {
+		setStatusFilter("all");
+	};
 
 	// Admin: todas las notificaciones
 	const allNotifications = useQuery({
@@ -561,6 +568,15 @@ function NotificationsPage() {
 						<SelectItem value="dismissed">Descartadas</SelectItem>
 					</SelectContent>
 				</Select>
+				{hasActiveFilters && (
+					<Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 text-muted-foreground">
+						<X className="mr-1 h-3 w-3" />
+						Limpiar filtros
+						<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
+							{[statusFilter !== "all"].filter(Boolean).length}
+						</Badge>
+					</Button>
+				)}
 			</div>
 
 			{/* Sección: Mis notificaciones (o única sección para no-admins) */}

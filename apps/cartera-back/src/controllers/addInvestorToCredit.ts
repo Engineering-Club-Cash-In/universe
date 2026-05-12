@@ -104,19 +104,7 @@ function recalcularInversionistas(
   },
   credito_id: number,
   numero_credito_sifco: string,
-  tipo_operacion: "reinversion" | "compra_cartera",
 ) {
-  // Fallback de fecha de inicio cuando un inversionista llega sin fecha:
-  // - reinversion → un mes antes (la operación se ejecuta sobre rendimientos
-  //   del período previo, así que la participación arranca ese mes)
-  // - compra_cartera → fecha de hoy
-  const hoy = new Date();
-  const fechaInicioFallback =
-    tipo_operacion === "reinversion"
-      ? new Date(hoy.getFullYear(), hoy.getMonth() - 2, hoy.getDate())
-          .toISOString()
-          .split("T")[0]
-      : hoy.toISOString().split("T")[0];
   // ── PASO 1: Sumar el capital total de todos los inversionistas ──
   // Esto es la base para calcular el porcentaje de participación de cada uno.
   // Ejemplo: si CUBE tiene Q70,000 y el nuevo tiene Q30,000 → capitalTotal = Q100,000
@@ -222,7 +210,7 @@ function recalcularInversionistas(
       iva_cash_in: ivaCashIn.toString(),
       fecha_creacion: new Date(),
       fecha_inicio_participacion:
-        inv.fecha_inicio_participacion || fechaInicioFallback,
+        inv.fecha_inicio_participacion || "2025-12-01",
       cuota_inversionista: cuotaInversionista.toString(),
       numero_credito_sifco: numero_credito_sifco ?? undefined,
     };
@@ -654,7 +642,6 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           creditoData,
           credito_id,
           numero_credito_sifco,
-          tipo_operacion,
         );
 
         // ================================================================

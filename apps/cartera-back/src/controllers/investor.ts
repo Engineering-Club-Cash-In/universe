@@ -5350,6 +5350,7 @@ interface InversionistaResumenRow {
   reporte_liquidacion_url?: string | null;
   mes_liquidacion?: number | null;
   anio_liquidacion?: number | null;
+  boleta_id?: number | null;
 }
 
 function mapBoletasPendientes(
@@ -5468,60 +5469,31 @@ async function getCuentasExtraMap(
   return map;
 }
 
-async function getBoletasLiquidacionMap(
-  inversionistaIds: number[],
-  mes?: number,
-  anio?: number
-) {
-  if (inversionistaIds.length === 0) {
-    return new Map<number, BoletaPendiente>();
-  }
+async function getBoletasLiquidacionMap(boletaIds: number[]) {
+  const boletaMap = new Map<number, BoletaPendiente>();
+  if (boletaIds.length === 0) return boletaMap;
 
-  const liquidacionesConBoleta = await db
+  const rows = await db
     .select({
-      inversionista_id: liquidaciones.inversionista_id,
       boleta_id: boletasPagoInversionista.boleta_id,
       boleta_url: boletasPagoInversionista.boleta_url,
       estado: boletasPagoInversionista.estado,
       notas: boletasPagoInversionista.notas,
       monto_boleta: boletasPagoInversionista.monto_boleta,
       fecha_subida: boletasPagoInversionista.fecha_subida,
-      fecha_liquidacion: liquidaciones.fecha_liquidacion,
     })
-    .from(liquidaciones)
-    .innerJoin(
-      boletasPagoInversionista,
-      eq(liquidaciones.boleta_id, boletasPagoInversionista.boleta_id)
-    )
-    .where(
-      and(
-        inArray(liquidaciones.inversionista_id, inversionistaIds),
-        ...(mes
-          ? [sql`EXTRACT(MONTH FROM ${liquidaciones.fecha_liquidacion}) = ${mes}`]
-          : []),
-        ...(anio
-          ? [sql`EXTRACT(YEAR FROM ${liquidaciones.fecha_liquidacion}) = ${anio}`]
-          : [])
-      )
-    )
-    .orderBy(
-      desc(liquidaciones.fecha_liquidacion),
-      desc(boletasPagoInversionista.fecha_subida)
-    );
+    .from(boletasPagoInversionista)
+    .where(inArray(boletasPagoInversionista.boleta_id, boletaIds));
 
-  const boletaMap = new Map<number, BoletaPendiente>();
-
-  for (const row of liquidacionesConBoleta) {
-    if (!boletaMap.has(row.inversionista_id)) {
-      boletaMap.set(row.inversionista_id, {
-        boleta_id: row.boleta_id,
-        boleta_url: row.boleta_url,
-        estado: row.estado,
-        notas: row.notas,
-        monto_boleta: row.monto_boleta,
-        fecha_subida: row.fecha_subida,
-      });
-    }
+  for (const r of rows) {
+    boletaMap.set(r.boleta_id, {
+      boleta_id: r.boleta_id,
+      boleta_url: r.boleta_url,
+      estado: r.estado,
+      notas: r.notas,
+      monto_boleta: r.monto_boleta,
+      fecha_subida: r.fecha_subida,
+    });
   }
 
   return boletaMap;
@@ -5836,6 +5808,7 @@ async function consultarResumenGlobalDesdeLiquidaciones(
     total_a_recibir_con_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0)`,
     total_a_recibir_sin_reinversion: sql<number>`COALESCE(SUM(${liquidaciones.total_cuota}), 0) + COALESCE(SUM(${liquidaciones.reinversion_total}), 0)`,
     reporte_liquidacion_url: sql<string | null>`MAX(${liquidaciones.reporte_liquidacion_url})`,
+    boleta_id: liquidaciones.boleta_id,
   };
 
   if (agruparPorMes) {
@@ -5853,6 +5826,7 @@ async function consultarResumenGlobalDesdeLiquidaciones(
     bancos.nombre,
     inversionistas.tipo_cuenta,
     inversionistas.numero_cuenta,
+    liquidaciones.boleta_id,
   ];
 
   if (agruparPorMes) {
@@ -6330,10 +6304,17 @@ export async function resumenGlobalLiquidaciones(
       ...liquidados.map((inv) => inv.inversionista_id),
     ])
   );
+  const boletaIdsLiquidacion = Array.from(
+    new Set(
+      liquidados
+        .map((inv) => inv.boleta_id)
+        .filter((id): id is number => id != null)
+    )
+  );
   const [boletaPendienteMap, boletaSubidaMap, boletaLiquidacionMap, cuentasExtraMap] = await Promise.all([
     getBoletasPendientesMap(inversionistaIds, mes, anio),
     getBoletasMap(inversionistaIds, ["PENDIENTE", "PROCESADO"], mes, anio),
-    getBoletasLiquidacionMap(inversionistaIds, mes, anio),
+    getBoletasLiquidacionMap(boletaIdsLiquidacion),
     getCuentasExtraMap(inversionistaIds),
   ]);
 
@@ -6356,7 +6337,7 @@ export async function resumenGlobalLiquidaciones(
       ...mapResumenRow(
         inv,
         boletaPendienteMap.get(inv.inversionista_id) ?? null,
-        boletaLiquidacionMap.get(inv.inversionista_id) ?? null,
+        null,
         cuentasExtraMap.get(inv.inversionista_id) ?? []
       ),
       estado_liquidacion_resumen: estadoResumen,
@@ -6375,11 +6356,16 @@ export async function resumenGlobalLiquidaciones(
       continue;
     }
 
+    const boletaLiquidacion =
+      inv.boleta_id == null
+        ? null
+        : boletaLiquidacionMap.get(inv.boleta_id) ?? null;
+
     result.push({
       ...mapResumenRow(
         inv,
         null,
-        boletaLiquidacionMap.get(inv.inversionista_id) ?? null,
+        boletaLiquidacion,
         cuentasExtraMap.get(inv.inversionista_id) ?? []
       ),
       estado_liquidacion_resumen: estadoResumen,

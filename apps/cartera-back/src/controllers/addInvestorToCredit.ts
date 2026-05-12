@@ -608,25 +608,14 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           (inv) => inv.inversionista_id === inversionista_id,
         );
         if (!yaExiste) {
-          // Para reinversión, la participación arranca un mes antes (la
-          // reinversión se ejecuta sobre rendimientos del período previo,
-          // así que la fecha de inicio refleja ese mes anterior).
-          // Para compra_cartera, usamos la fecha del día.
-          const hoy = new Date();
-          const fechaPorDefecto =
-            tipo_operacion === "reinversion"
-              ? new Date(hoy.getFullYear(), hoy.getMonth() - 2, hoy.getDate())
-                  .toISOString()
-                  .split("T")[0]
-              : hoy.toISOString().split("T")[0];
-
           nuevoArray.push({
             inversionista_id,
             monto_aportado: montoParaEsteCredito,
             porcentaje_cash_in: porcCashIn,
             porcentaje_inversion: porcInversion,
             fecha_inicio_participacion:
-              fecha_inicio_participacion ?? fechaPorDefecto,
+              fecha_inicio_participacion ??
+              new Date().toISOString().split("T")[0],
           });
         }
 

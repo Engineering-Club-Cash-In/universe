@@ -14,6 +14,7 @@ import {
 	Loader2,
 	Send,
 	Upload,
+	X,
 	XCircle,
 } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -246,6 +247,11 @@ function NotificationsPage() {
 	const isSalesSupervisor = userRole === ROLES.SALES_SUPERVISOR;
 
 	const [statusFilter, setStatusFilter] = usePersistedState<string>("notifications/statusFilter", "all");
+
+	const hasActiveFilters = statusFilter !== "all";
+	const resetFilters = () => {
+		setStatusFilter("all");
+	};
 
 	// Admin: todas las notificaciones
 	const allNotifications = useQuery({
@@ -562,6 +568,15 @@ function NotificationsPage() {
 						<SelectItem value="dismissed">Descartadas</SelectItem>
 					</SelectContent>
 				</Select>
+				{hasActiveFilters && (
+					<Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 text-muted-foreground">
+						<X className="mr-1 h-3 w-3" />
+						Limpiar filtros
+						<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
+							{[statusFilter !== "all"].filter(Boolean).length}
+						</Badge>
+					</Button>
+				)}
 			</div>
 
 			{/* Sección: Mis notificaciones (o única sección para no-admins) */}

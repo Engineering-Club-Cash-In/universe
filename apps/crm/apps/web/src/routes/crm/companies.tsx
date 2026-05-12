@@ -14,6 +14,7 @@ import {
 	Search,
 	Target,
 	Users,
+	X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -86,6 +87,13 @@ function RouteComponent() {
 	const [searchTerm, setSearchTerm] = usePersistedState<string>("crm/companies/searchTerm", "");
 	const [industryFilter, setIndustryFilter] = usePersistedState<string>("crm/companies/industryFilter", "all");
 	const [sizeFilter, setSizeFilter] = usePersistedState<string>("crm/companies/sizeFilter", "all");
+
+	const hasActiveFilters = searchTerm !== "" || industryFilter !== "all" || sizeFilter !== "all";
+	const resetFilters = () => {
+		setSearchTerm("");
+		setIndustryFilter("all");
+		setSizeFilter("all");
+	};
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 	const companiesQuery = useQuery({
@@ -738,7 +746,7 @@ function RouteComponent() {
 				</CardHeader>
 				<CardContent>
 					{/* Filters */}
-					<div className="mb-6 flex gap-4">
+					<div className="mb-6 flex items-center gap-4">
 						<div className="flex-1">
 							<div className="relative">
 								<Search className="absolute top-2.5 left-2 h-4 w-4 text-muted-foreground" />
@@ -781,6 +789,15 @@ function RouteComponent() {
 								<SelectItem value="enterprise">Corporativa</SelectItem>
 							</SelectContent>
 						</Select>
+						{hasActiveFilters && (
+							<Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 text-muted-foreground">
+								<X className="mr-1 h-3 w-3" />
+								Limpiar filtros
+								<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
+									{[searchTerm !== "", industryFilter !== "all", sizeFilter !== "all"].filter(Boolean).length}
+								</Badge>
+							</Button>
+						)}
 					</div>
 
 					{companiesQuery.isPending ? (

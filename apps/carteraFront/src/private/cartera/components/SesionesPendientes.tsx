@@ -465,6 +465,7 @@ function InvestorCard({
   const [expanded, setExpanded] = useState(true);
   const [editingCreditId, setEditingCreditId] = useState<number | null>(null);
   const [selectedDestinoIds, setSelectedDestinoIds] = useState<Set<number>>(new Set());
+  const [idsToCancel, setIdsToCancel] = useState<number[] | null>(null);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const reemplazar = useReemplazarInversionistaCredito();
   const completarEspejo = useCompletarEspejo();
@@ -601,27 +602,27 @@ function InvestorCard({
   );
   const cancelLabel = tieneCompraCartera ? "Cancelar Compra Cartera" : "Cancelar Sesión";
   const handleCancelSesion = useCallback(() => {
-
-    const creditoIds = investor.creditosPendientes.map((c) => c.credito_id);
+    const creditoIds = idsToCancel || investor.creditosPendientes.map((c) => c.credito_id);
     if (creditoIds.length === 0) return;
 
     devolverPendientes.mutate(
       {
-        creditos: creditoIds.length === 1 ? creditoIds[0] : creditoIds,
+        creditos: Array.isArray(creditoIds) && creditoIds.length === 1 ? creditoIds[0] : (creditoIds as number[]),
         inversionista_id: investor.inversionista_id,
       },
       {
         onSuccess: (res) => {
-          const count = res.creditos_limpiados?.length ?? creditoIds.length;
+          const count = res.creditos_limpiados?.length ?? (Array.isArray(creditoIds) ? (creditoIds as number[]).length : 1);
           toast.success(res.message || `${count} crédito(s) devueltos a cube.`);
           setConfirmingCancel(false);
+          setIdsToCancel(null);
         },
         onError: (err) => {
           toast.error(err?.message || "Error al cancelar la sesión");
         },
       }
     );
-  }, [devolverPendientes, investor]);
+  }, [devolverPendientes, investor, idsToCancel]);
 
 
   const handleAceptarCompraCartera = useCallback(() => {
@@ -743,13 +744,19 @@ function InvestorCard({
                 {/* Botones de acción para Compra de Cartera */}
                 {!isEditing && (
                   <div className="flex justify-end gap-2 pt-1">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setConfirmingCancel(true)}
-                      disabled={completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending}
-                      className="gap-1 text-[11px] h-7 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
-                    >
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          const ids = investor.creditosPendientes
+                            .filter(c => c.status === "pendiente_compra_cartera" || c.status === "pendiente_revision")
+                            .map(c => c.credito_id);
+                          setIdsToCancel(ids);
+                          setConfirmingCancel(true);
+                        }}
+                        disabled={completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending}
+                        className="gap-1 text-[11px] h-7 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                      >
                       <Ban className="w-3 h-3" aria-hidden="true" />
                       Cancelar Compra
                     </Button>
@@ -828,19 +835,22 @@ function InvestorCard({
                 {/* Botones de acción para Reinversión */}
                 {!isEditing && (
                   <div className="flex justify-end gap-2 pt-1">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        // Personalizamos el label antes de abrir el modal si fuera necesario
-                        setConfirmingCancel(true);
-                      }}
-                      disabled={completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending}
-                      className="gap-1 text-[11px] h-7 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
-                    >
-                      <Ban className="w-3 h-3" aria-hidden="true" />
-                      Cancelar Reinversión
-                    </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          const ids = investor.creditosPendientes
+                            .filter(c => c.status === "pendiente_reinversion")
+                            .map(c => c.credito_id);
+                          setIdsToCancel(ids);
+                          setConfirmingCancel(true);
+                        }}
+                        disabled={completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending}
+                        className="gap-1 text-[11px] h-7 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                      >
+                        <Ban className="w-3 h-3" aria-hidden="true" />
+                        Cancelar Reinversión
+                      </Button>
                     <Button
                       size="sm"
                       onClick={handleConfirmReinversion}
@@ -878,7 +888,10 @@ function InvestorCard({
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => setConfirmingCancel(false)}
+                    onClick={() => {
+                      setConfirmingCancel(false);
+                      setIdsToCancel(null);
+                    }}
                     disabled={devolverPendientes.isPending}
                     className="gap-1 text-[11px] h-7 border-gray-300"
                   >

@@ -7457,14 +7457,22 @@ export async function getCreditosEspejoPendientes(
       });
     }
     const grupo = agrupado.get(row.inversionista_id)!;
-    grupo.monto_reinversion += parseFloat(creditoData.monto_aportado);
+    
+    const montoNuevoKey = `${row.credito_id}|${row.inversionista_id}|${row.status}`;
+    const montoNuevo = montoNuevoPorPar.get(montoNuevoKey);
+
+    // Lógica solicitada: Priorizar monto_aportado_nuevo (de compras_credito_inversionista),
+    // si no existe (no es una compra/reinversión nueva), usar monto_aportado (el completo).
+    const montoAReinvertir = montoNuevo 
+      ? montoNuevo.toNumber()
+      : parseFloat(creditoData.monto_aportado);
+      
+    grupo.monto_reinversion += montoAReinvertir;
 
     // Filtrar al inversionista actual y adjuntar los demás
     const otrosEnEsteCredito = (otrosPorCredito.get(row.credito_id) || [])
       .filter((o) => o.inversionista_id !== row.inversionista_id);
 
-    const montoNuevoKey = `${row.credito_id}|${row.inversionista_id}|${row.status}`;
-    const montoNuevo = montoNuevoPorPar.get(montoNuevoKey);
 
     grupo.creditosPendientes.push({
       ...creditoData,

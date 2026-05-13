@@ -575,7 +575,7 @@ function InvestorCard({
 
   const handleConfirmCompraCartera = useCallback(() => {
     const ids = investor.creditosPendientes
-      .filter((c) => c.status === "pendiente_compra_cartera" || c.status === "pendiente_revision")
+      .filter((c) => c.status === "pendiente_revision")
       .map((c) => c.credito_id);
     if (ids.length === 0) return;
 

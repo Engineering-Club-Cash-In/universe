@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { usePersistedState } from "../hooks/usePersistedState";
 import { usePagosPorVencimiento } from "../hooks/usePagosPorVencimiento";
 import { useAdminData } from "../hooks/advisor";
 import type { PagoPorVencimientoItem, Advisor } from "../services/services";
@@ -37,23 +38,29 @@ function formatQ(val: string | null | undefined): string {
 const currentDate = new Date();
 
 export function PagosPorVencimiento() {
-  const [mes, setMes] = useState(currentDate.getMonth() + 1);
-  const [anio, setAnio] = useState(currentDate.getFullYear());
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
-  const [tipoFecha, setTipoFecha] = useState<"vencimiento" | "creacion">("vencimiento");
-
-  const [sifcoInput, setSifcoInput] = useState("");
-  const [sifcoFilter, setSifcoFilter] = useState("");
-  const [nombreInput, setNombreInput] = useState("");
-  const [nombreFilter, setNombreFilter] = useState("");
-  const [selectedAdvisors, setSelectedAdvisors] = useState<string[]>([]);
+  const [mes, setMes] = usePersistedState<number>("cartera/pagosPorVencimiento/mes", currentDate.getMonth() + 1);
+  const [anio, setAnio] = usePersistedState<number>("cartera/pagosPorVencimiento/anio", currentDate.getFullYear());
+  const [page, setPage] = usePersistedState<number>("cartera/pagosPorVencimiento/page", 1);
+  const [pageSize, setPageSize] = usePersistedState<number>("cartera/pagosPorVencimiento/pageSize", 20);
+  const [tipoFecha, setTipoFecha] = usePersistedState<"vencimiento" | "creacion">("cartera/pagosPorVencimiento/tipoFecha", "vencimiento");
+  const [sifcoInput, setSifcoInput] = usePersistedState<string>("cartera/pagosPorVencimiento/sifcoInput", "");
+  const [sifcoFilter, setSifcoFilter] = usePersistedState<string>("cartera/pagosPorVencimiento/sifcoFilter", "");
+  const [nombreInput, setNombreInput] = usePersistedState<string>("cartera/pagosPorVencimiento/nombreInput", "");
+  const [nombreFilter, setNombreFilter] = usePersistedState<string>("cartera/pagosPorVencimiento/nombreFilter", "");
+  const [selectedAdvisors, setSelectedAdvisors] = usePersistedState<string[]>("cartera/pagosPorVencimiento/selectedAdvisors", []);
+  const [rangoMoraInput, setRangoMoraInput] = usePersistedState<string>("cartera/pagosPorVencimiento/rangoMoraInput", "");
+  const [rangoMoraFilter, setRangoMoraFilter] = usePersistedState<string>("cartera/pagosPorVencimiento/rangoMoraFilter", "");
   const [advisorPopoverOpen, setAdvisorPopoverOpen] = useState(false);
-  const [rangoMoraInput, setRangoMoraInput] = useState("");
-  const [rangoMoraFilter, setRangoMoraFilter] = useState("");
   const [isExporting, setIsExporting] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+
+  const hasActiveFilters =
+    sifcoInput !== "" ||
+    nombreInput !== "" ||
+    selectedAdvisors.length > 0 ||
+    rangoMoraFilter !== "" ||
+    tipoFecha !== "vencimiento";
   const { advisors } = useAdminData();
 
   const { data, isLoading, isError } = usePagosPorVencimiento({
@@ -315,14 +322,19 @@ export function PagosPorVencimiento() {
             {isExporting ? "Generando..." : "Exportar Excel"}
           </Button>
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={clearFilters}
-            className="text-gray-600 border-gray-300 hover:bg-gray-100"
-          >
-            <X className="w-4 h-4 mr-1" /> Limpiar
-          </Button>
+          {hasActiveFilters && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={clearFilters}
+              className="text-gray-600 border-gray-300 hover:bg-gray-100"
+            >
+              <X className="w-4 h-4 mr-1" /> Limpiar filtros
+              <Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
+                {[sifcoInput !== "", nombreInput !== "", selectedAdvisors.length > 0, rangoMoraFilter !== "", tipoFecha !== "vencimiento"].filter(Boolean).length}
+              </Badge>
+            </Button>
+          )}
         </div>
       </div>
 

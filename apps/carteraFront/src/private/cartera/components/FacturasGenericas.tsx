@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState } from "react";
+import { usePersistedState } from "../hooks/usePersistedState";
 import { useFormik, FieldArray, FormikProvider } from "formik";
 import * as Yup from "yup";
 import { toast } from "sonner";
@@ -25,6 +26,7 @@ import {
 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/Provider/authProvider";
 import { useFacturarGenerico, useFacturasGenericas, useAnularFactura, useExportFacturasExcel } from "../hooks/cofidi";
 import { DatePickerMUI } from "./calendar";
@@ -105,16 +107,16 @@ const validationSchema = Yup.object({
 export function FacturasGenericas() {
   const { user } = useAuth();
   const [modalOpen, setModalOpen] = useState(false);
-  const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(10);
-  const [nitBusqueda, setNitBusqueda] = useState("");
-  const [nitFiltro, setNitFiltro] = useState("");
-  const [fechaInicio, setFechaInicio] = useState("");
-  const [fechaFin, setFechaFin] = useState("");
-  const [fechaInicioFiltro, setFechaInicioFiltro] = useState("");
-  const [fechaFinFiltro, setFechaFinFiltro] = useState("");
-  const [tipoFactura, setTipoFactura] = useState<TipoFacturaGenerica | "">("");
-  const [tipoFacturaFiltro, setTipoFacturaFiltro] = useState<TipoFacturaGenerica | "">("");
+  const [page, setPage] = usePersistedState<number>("cartera/facturasGenericas/page", 1);
+  const [limit, setLimit] = usePersistedState<number>("cartera/facturasGenericas/limit", 10);
+  const [nitBusqueda, setNitBusqueda] = usePersistedState<string>("cartera/facturasGenericas/nitBusqueda", "");
+  const [nitFiltro, setNitFiltro] = usePersistedState<string>("cartera/facturasGenericas/nitFiltro", "");
+  const [fechaInicio, setFechaInicio] = usePersistedState<string>("cartera/facturasGenericas/fechaInicio", "");
+  const [fechaFin, setFechaFin] = usePersistedState<string>("cartera/facturasGenericas/fechaFin", "");
+  const [fechaInicioFiltro, setFechaInicioFiltro] = usePersistedState<string>("cartera/facturasGenericas/fechaInicioFiltro", "");
+  const [fechaFinFiltro, setFechaFinFiltro] = usePersistedState<string>("cartera/facturasGenericas/fechaFinFiltro", "");
+  const [tipoFactura, setTipoFactura] = usePersistedState<TipoFacturaGenerica | "">("cartera/facturasGenericas/tipoFactura", "");
+  const [tipoFacturaFiltro, setTipoFacturaFiltro] = usePersistedState<TipoFacturaGenerica | "">("cartera/facturasGenericas/tipoFacturaFiltro", "");
 
   // Estados para anulación
   const [facturaParaAnular, setFacturaParaAnular] = useState<string | null>(null);
@@ -260,9 +262,13 @@ export function FacturasGenericas() {
                     setTipoFacturaFiltro("");
                     setPage(1);
                   }}
-                  className="text-xs font-semibold text-purple-600 hover:text-purple-800 hover:underline transition"
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-purple-600 hover:text-purple-800 hover:underline transition"
                 >
+                  <X className="w-3 h-3" />
                   Limpiar filtros
+                  <Badge variant="secondary" className="ml-0.5 h-4 px-1 text-xs">
+                    {[nitFiltro !== "", fechaInicioFiltro !== "", fechaFinFiltro !== "", tipoFacturaFiltro !== ""].filter(Boolean).length}
+                  </Badge>
                 </button>
               )}
             </div>

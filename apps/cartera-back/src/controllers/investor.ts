@@ -3139,7 +3139,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
             const reinversionResult = await addInvestorToCredit({
               body: {
                 inversionista_id: inv_id,
-                monto_aportado: montoReinvertido.toNumber(),
+                monto_aportado: Number(liquidacion.reinversion_total ?? 0),
                 porcentaje_inversion: modaInversion,
                 porcentaje_cash_in: modaCashIn,
                 tipo_operacion: "reinversion",

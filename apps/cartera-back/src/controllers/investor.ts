@@ -7313,8 +7313,18 @@ export async function getCreditosEspejoPendientes(
       _dpi: inversionistas.dpi,
       _email: inversionistas.email,
       _moneda: inversionistas.moneda,
+      // Nuevo: Monto de la operación específica (compra_cartera o reinversion)
+      monto_aportado_nuevo: compras_credito_inversionista.monto_aportado,
     })
     .from(creditos_inversionistas_espejo)
+    .leftJoin(
+      compras_credito_inversionista,
+      and(
+        eq(creditos_inversionistas_espejo.credito_id, compras_credito_inversionista.credito_id),
+        eq(creditos_inversionistas_espejo.inversionista_id, compras_credito_inversionista.inversionista_id),
+        eq(creditos_inversionistas_espejo.status, compras_credito_inversionista.status)
+      )
+    )
     .innerJoin(
       inversionistas,
       eq(creditos_inversionistas_espejo.inversionista_id, inversionistas.inversionista_id)
@@ -7457,7 +7467,14 @@ export async function getCreditosEspejoPendientes(
       });
     }
     const grupo = agrupado.get(row.inversionista_id)!;
-    grupo.monto_reinversion += parseFloat(creditoData.monto_aportado);
+    
+    // Lógica solicitada: Priorizar monto_aportado_nuevo (de compras_credito_inversionista),
+    // si no existe (no es una compra/reinversión nueva), usar monto_aportado (el completo).
+    const montoAReinvertir = row.monto_aportado_nuevo 
+      ? parseFloat(row.monto_aportado_nuevo) 
+      : parseFloat(creditoData.monto_aportado);
+      
+    grupo.monto_reinversion += montoAReinvertir;
 
     // Filtrar al inversionista actual y adjuntar los demás
     const otrosEnEsteCredito = (otrosPorCredito.get(row.credito_id) || [])

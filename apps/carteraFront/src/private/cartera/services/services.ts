@@ -3661,7 +3661,7 @@ export interface CreditoEspejoPendiente {
   iva_cash_in: string;
   fecha_creacion: string;
   fecha_inicio_participacion: string;
-  status: "pendiente_reinversion" | "pendiente_compra_cartera";
+  status: "pendiente_reinversion" | "pendiente_compra_cartera" | "pendiente_revision" | string;
   tipo_reinversion: string | null;
   numero_credito_sifco: string;
   nombre_usuario: string;

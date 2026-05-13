@@ -183,11 +183,16 @@ async function consultarPagosInversionista(
       origen: sql<OrigenDatos>`${config.origen}`.as('origen'),
     })
     .from(tabla)
-    .innerJoin(
+    // LEFT JOIN: conservar filas del espejo aunque su `pago_id` sea NULL o
+    // apunte a un pago que ya no existe. Los campos de pagos_credito /
+    // cuotas_credito quedarán NULL en esas filas, pero el monto del espejo
+    // (abono_capital / abono_interes / abono_iva_12) se preserva para que
+    // entre al cálculo de totales y al reporte.
+    .leftJoin(
       pagos_credito,
       eq(tabla.pago_id, pagos_credito.pago_id)
     )
-    .innerJoin(
+    .leftJoin(
       cuotas_credito,
       eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
     )
@@ -276,8 +281,11 @@ async function consultarPagosBulk(
       abono_iva_12: tabla.abono_iva_12,
     })
     .from(tabla)
-    .innerJoin(pagos_credito, eq(tabla.pago_id, pagos_credito.pago_id))
-    .innerJoin(cuotas_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
+    // LEFT JOIN: conservar filas del espejo aunque su `pago_id` sea NULL o
+    // apunte a un pago que ya no existe (mismo criterio que en
+    // `consultarPagosInversionista`).
+    .leftJoin(pagos_credito, eq(tabla.pago_id, pagos_credito.pago_id))
+    .leftJoin(cuotas_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
     .where(and(...pagosConditions));
 }
 
@@ -2099,6 +2107,79 @@ export async function updateLiquidacionReporteUrl(liquidacion_id: number, url: s
   }
 
   return null;
+}
+
+/**
+ * Sustituye los totales monetarios de una liquidación con los recalculados
+ * por `getInvestorTotalsGlobales` (o estructura equivalente).
+ *
+ * Útil cuando los datos subyacentes (pagos espejo, reinversiones, abonos)
+ * cambiaron después de creada la liquidación y el `reinversion_total` /
+ * `total_capital` / etc. ya no coinciden con el reporte recalculado.
+ */
+export async function updateLiquidacionTotales(
+  liquidacion_id: number,
+  totales: {
+    total_abono_capital?: string | number;
+    total_abono_interes?: string | number;
+    total_abono_iva?: string | number;
+    total_isr?: string | number;
+    total_cuota_con_reinversion?: string | number;
+    total_reinversion_capital?: string | number;
+    total_reinversion_interes?: string | number;
+    total_reinversion?: string | number;
+  },
+  total_pagos_liquidados?: number,
+) {
+  const [prev] = await db
+    .select()
+    .from(liquidaciones)
+    .where(eq(liquidaciones.liquidacion_id, liquidacion_id))
+    .limit(1);
+
+  if (!prev) return null;
+
+  const toStr = (v: unknown) =>
+    v === undefined || v === null ? undefined : String(v);
+
+  const patch: Record<string, unknown> = {
+    total_capital:       toStr(totales.total_abono_capital),
+    total_interes:       toStr(totales.total_abono_interes),
+    total_iva:           toStr(totales.total_abono_iva),
+    total_isr:           toStr(totales.total_isr),
+    total_cuota:         toStr(totales.total_cuota_con_reinversion),
+    reinversion_capital: toStr(totales.total_reinversion_capital),
+    reinversion_interes: toStr(totales.total_reinversion_interes),
+    reinversion_total:   toStr(totales.total_reinversion),
+  };
+  if (typeof total_pagos_liquidados === "number") {
+    patch.total_pagos_liquidados = total_pagos_liquidados;
+  }
+  // Quitar undefined para no resetear columnas no provistas
+  for (const k of Object.keys(patch)) {
+    if (patch[k] === undefined) delete patch[k];
+  }
+
+  await db
+    .update(liquidaciones)
+    .set(patch as any)
+    .where(eq(liquidaciones.liquidacion_id, liquidacion_id));
+
+  return {
+    liquidacion_id,
+    anterior: {
+      total_capital:       prev.total_capital,
+      total_interes:       prev.total_interes,
+      total_iva:           prev.total_iva,
+      total_isr:           prev.total_isr,
+      total_cuota:         prev.total_cuota,
+      reinversion_capital: prev.reinversion_capital,
+      reinversion_interes: prev.reinversion_interes,
+      reinversion_total:   prev.reinversion_total,
+      total_pagos_liquidados: prev.total_pagos_liquidados,
+    },
+    nuevo: patch,
+  };
 }
 
 /**

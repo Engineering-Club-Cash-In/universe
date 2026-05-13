@@ -30,7 +30,7 @@ import {
   compras_credito_inversionista,
 } from "../database/db/schema";
 import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
-import { eq, and, or, sql, inArray, ilike, like, desc, count, SQL, isNull, isNotNull, ne, gte, lte } from "drizzle-orm";
+import { eq, and, or, sql, inArray, ilike, like, desc, count, SQL, isNull, isNotNull, ne } from "drizzle-orm";
 import { promises as fsPromises } from "node:fs";
 import path from "node:path";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
@@ -2273,14 +2273,17 @@ export async function revertirLiquidacion(liquidacion_id: number) {
     }
 
     // ──────────────────────────────────────────────
-    // PASO 6: Eliminar boleta asociada (si existe)
+    // PASO 6: Pasar boleta asociada a PENDIENTE (si existe)
+    //   No la borramos; solo la regresamos al estado pendiente para que
+    //   pueda re-procesarse después.
     // ──────────────────────────────────────────────
     if (liquidacion.boleta_id) {
       await tx
-        .delete(boletasPagoInversionista)
+        .update(boletasPagoInversionista)
+        .set({ estado: "PENDIENTE", fecha_procesado: null })
         .where(eq(boletasPagoInversionista.boleta_id, liquidacion.boleta_id));
 
-      console.log(`  ✅ Boleta ${liquidacion.boleta_id} eliminada`);
+      console.log(`  ✅ Boleta ${liquidacion.boleta_id} → PENDIENTE`);
     }
 
     // ──────────────────────────────────────────────
@@ -2313,6 +2316,8 @@ export async function revertirLiquidacion(liquidacion_id: number) {
 
     // ──────────────────────────────────────────────
     // PASO 8: Eliminar la liquidación
+    //   La boleta asociada (si existe) se dejó en estado PENDIENTE en el
+    //   paso 6 — no se borra.
     // ──────────────────────────────────────────────
     await tx
       .delete(liquidaciones)
@@ -2502,13 +2507,9 @@ export async function revertirComprasUltimaLiquidacion(
         continue;
       }
 
-      // Ventana de tiempo apretada: las compras tienen que estar casi
-      // pegadas a la liquidación (la liq las crea en el mismo flujo).
-      // Aceptamos 1 seg antes y 5 min después para tolerar latencia.
-      const ventanaInicio = new Date(ultLiq.fecha_liquidacion.getTime() - 1000);
-      const ventanaFin = new Date(
-        ultLiq.fecha_liquidacion.getTime() + 5 * 60 * 1000,
-      );
+      // Filtramos por status='pendiente_reinversion' — son las compras
+      // que se acaban de crear y todavía no fueron aceptadas. Las viejas
+      // (ya aceptadas o revertidas) quedan en 'completado' y no se tocan.
       const compras = await tx
         .select()
         .from(compras_credito_inversionista)
@@ -2516,8 +2517,7 @@ export async function revertirComprasUltimaLiquidacion(
           and(
             eq(compras_credito_inversionista.inversionista_id, inv_id),
             eq(compras_credito_inversionista.tipo_operacion, "reinversion"),
-            gte(compras_credito_inversionista.created_at, ventanaInicio),
-            lte(compras_credito_inversionista.created_at, ventanaFin),
+            eq(compras_credito_inversionista.status, "pendiente_reinversion"),
           ),
         );
 
@@ -2528,8 +2528,7 @@ export async function revertirComprasUltimaLiquidacion(
           liquidacion_id: ultLiq.liquidacion_id,
           reinv_liquidacion: new Big(ultLiq.reinversion_total ?? 0).toFixed(2),
           skipped: true,
-          reason:
-            "Sin compras dentro de la ventana de la última liquidación (±5min)",
+          reason: "Sin compras pendiente_reinversion para este inversionista",
         });
         continue;
       }

@@ -24,6 +24,9 @@ import {
   updateLiquidacionReporteUrl,
   getLiquidacionesPorFecha,
   revertirLiquidacion,
+  revertirComprasUltimaLiquidacion,
+  ejecutarReinversionAutomatica,
+  reinvertirDesdeLiquidacionId,
   fixCubeInvestment,
   reconcileMirrorPercentages,
   auditMirrorPercentages,
@@ -656,7 +659,11 @@ export const inversionistasRouter = new Elysia()
     }
   })
   .post("/investor/reporte-liquidados", async ({ body, set }) => {
-    const { investor_id, liquidacion_id } = body as { investor_id?: number, liquidacion_id?: number };
+    const { investor_id, liquidacion_id, reinvertir } = body as {
+      investor_id?: number;
+      liquidacion_id?: number;
+      reinvertir?: boolean;
+    };
 
     if (!investor_id || isNaN(Number(investor_id))) {
       set.status = 400;
@@ -706,11 +713,30 @@ export const inversionistasRouter = new Elysia()
 
       const liquidacionActualizada = await updateLiquidacionReporteUrl(Number(liquidacionId), url);
 
+      // Si `reinvertir=true`, ejecuta la reinversión automática usando el
+      // `reinversion_total` de esa liquidación (misma lógica que el flujo
+      // post-liquidación de liquidateByInvestorId).
+      let reinversion: unknown = null;
+      if (reinvertir && liquidacionId) {
+        try {
+          reinversion = await reinvertirDesdeLiquidacionId(Number(liquidacionId));
+        } catch (reinvErr) {
+          console.error(
+            "[investor/reporte-liquidados] Error en reinversión automática:",
+            reinvErr,
+          );
+          reinversion = {
+            error: reinvErr instanceof Error ? reinvErr.message : String(reinvErr),
+          };
+        }
+      }
+
       return {
         success: true,
         url,
         filename,
-        liquidacion:  liquidacionActualizada || null,
+        liquidacion: liquidacionActualizada || null,
+        reinversion,
       };
     } catch (error) {
       console.error("[investor/pdf-liquidados] Error:", error);
@@ -746,6 +772,50 @@ export const inversionistasRouter = new Elysia()
       };
     }
   })
+  // ──────────────────────────────────────────────
+  // Revierte las compras (tipo_operacion='reinversion') generadas por la
+  // última liquidación de cada inversionista listado. Devuelve el monto a
+  // CUBE en padre + espejo del mismo crédito, recalcula porcentajes y
+  // cuotas, marca las compras como 'completado' y escribe un archivo de
+  // log con los compra_ids afectados para borrarlos después si se decide.
+  // Body: { "inversionista_ids": number[] }
+  // ──────────────────────────────────────────────
+  .post(
+    "/investor/revertir-compras-ultima-liquidacion",
+    async ({ body, set }) => {
+      const { inversionista_ids } = body as {
+        inversionista_ids?: unknown;
+      };
+
+      if (
+        !Array.isArray(inversionista_ids) ||
+        inversionista_ids.length === 0 ||
+        !inversionista_ids.every((id) => Number.isFinite(Number(id)))
+      ) {
+        set.status = 400;
+        return {
+          message:
+            "El parámetro 'inversionista_ids' es obligatorio y debe ser un array de números no vacío.",
+        };
+      }
+
+      try {
+        const ids = inversionista_ids.map((id) => Number(id));
+        const result = await revertirComprasUltimaLiquidacion(ids);
+        return result;
+      } catch (error) {
+        console.error(
+          "[investor/revertir-compras-ultima-liquidacion] Error:",
+          error,
+        );
+        set.status = 500;
+        return {
+          message: "Error al revertir las compras de la última liquidación",
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+  )
   .get(
     "/resumen-transferencias",
     async ({ query, set }) => {

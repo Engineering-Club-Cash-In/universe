@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePersistedState } from "../hooks/usePersistedState";
 import {
   getPendingDevolucion,
   aceptarDevolucion,
@@ -12,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { RefreshCw, Search } from "lucide-react";
+import { RefreshCw, Search, X } from "lucide-react";
 
 const PAGE_SIZE = 10;
 
@@ -21,11 +22,13 @@ export function DevolucionCube() {
   const [actingId, setActingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<DevolucionCreditoItem[]>([]);
-  const [page, setPage] = useState(1);
+  const [page, setPage] = usePersistedState<number>("cartera/devolucionCube/page", 1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
-  const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = usePersistedState<string>("cartera/devolucionCube/searchInput", "");
+  const [search, setSearch] = usePersistedState<string>("cartera/devolucionCube/search", "");
+
+  const hasActiveFilters = searchInput !== "" || search !== "";
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectCredit, setRejectCredit] = useState<DevolucionCreditoItem | null>(null);
   const [rejectReason, setRejectReason] = useState("");
@@ -70,6 +73,12 @@ export function DevolucionCube() {
   const onBuscar = () => {
     setPage(1);
     setSearch(searchInput.trim());
+  };
+
+  const clearFilters = () => {
+    setSearchInput("");
+    setSearch("");
+    setPage(1);
   };
 
   const onAceptar = async (creditoId: number) => {
@@ -181,6 +190,12 @@ export function DevolucionCube() {
           <Button size="sm" className="h-8 text-xs" onClick={onBuscar}>
             Buscar
           </Button>
+          {hasActiveFilters && (
+            <Button variant="outline" size="sm" onClick={clearFilters} className="h-8 text-xs text-gray-600 border-gray-300 hover:bg-gray-100 gap-1">
+              <X className="w-3.5 h-3.5" /> Limpiar
+              <Badge variant="secondary" className="ml-0.5 h-4 px-1 text-xs">1</Badge>
+            </Button>
+          )}
           <Badge variant="outline" className="text-[11px] border-blue-200 text-blue-700 bg-blue-50 tabular-nums">
             {total} créditos
           </Badge>

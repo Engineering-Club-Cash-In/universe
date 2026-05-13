@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState } from "react";
+import { usePersistedState } from "@/private/cartera/hooks/usePersistedState";
 import { useFormik } from "formik";
 import { toast } from "sonner";
 import {
@@ -19,6 +20,7 @@ import {
 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { DatePickerMUI } from "@/private/cartera/components/calendar";
 import {
   useRecibosGenericos,
@@ -57,10 +59,10 @@ export function RecibosGenericos() {
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
 
   // Filtros de fecha
-  const [fechaDesde, setFechaDesde] = useState("");
-  const [fechaHasta, setFechaHasta] = useState("");
-  const [fechaDesdeFiltro, setFechaDesdeFiltro] = useState("");
-  const [fechaHastaFiltro, setFechaHastaFiltro] = useState("");
+  const [fechaDesde, setFechaDesde] = usePersistedState<string>("cartera/recibosGenericos/fechaDesde", "");
+  const [fechaHasta, setFechaHasta] = usePersistedState<string>("cartera/recibosGenericos/fechaHasta", "");
+  const [fechaDesdeFiltro, setFechaDesdeFiltro] = usePersistedState<string>("cartera/recibosGenericos/fechaDesdeFiltro", "");
+  const [fechaHastaFiltro, setFechaHastaFiltro] = usePersistedState<string>("cartera/recibosGenericos/fechaHastaFiltro", "");
 
   // Hooks
   const { data: recibos, isLoading, refetch } = useRecibosGenericos({
@@ -253,7 +255,10 @@ export function RecibosGenericos() {
               }}
               className="text-gray-600 gap-2"
             >
-              <X className="h-4 w-4" /> Limpiar
+              <X className="h-4 w-4" /> Limpiar filtros
+              <Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
+                {[fechaDesdeFiltro !== "", fechaHastaFiltro !== ""].filter(Boolean).length}
+              </Badge>
             </Button>
           )}
         </div>

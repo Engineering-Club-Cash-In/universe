@@ -1,6 +1,7 @@
 /* eslint-disable react-hooks/rules-of-hooks */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, Fragment } from "react";
+import { usePersistedState } from "../hooks/usePersistedState";
 
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -254,39 +255,50 @@ export function PaymentsTable() {
   const facturarPago = useFacturarPagoCompleto(); // 🆕 NUEVO HOOK
 
   // Filtros de fecha - modo "simple" (año/mes/día), "rango" (fechaInicio/fechaFin) o "aplicado" (fechaAplicado)
-  const [modoFecha, setModoFecha] = React.useState<"simple" | "rango" | "aplicado" | "boleta">("simple");
-  const [mes, setMes] = React.useState(new Date().getMonth() + 1);
-  const [anio, setAnio] = React.useState(new Date().getFullYear());
-  const [dia, setDia] = React.useState<number | undefined>(
-    new Date().getDate(),
-  );
-  const [fechaInicio, setFechaInicio] = React.useState("");
-  const [fechaFin, setFechaFin] = React.useState("");
-  const [fechaAplicado, setFechaAplicado] = React.useState("");
-  const [fechaBoleta, setFechaBoleta] = React.useState("");
-  const [fechaBoletaInicio, setFechaBoletaInicio] = React.useState("");
-  const [fechaBoletaFin, setFechaBoletaFin] = React.useState("");
+  const [modoFecha, setModoFecha] = usePersistedState<"simple" | "rango" | "aplicado" | "boleta">("cartera/pagos/modoFecha", "simple");
+  const [mes, setMes] = usePersistedState<number>("cartera/pagos/mes", new Date().getMonth() + 1);
+  const [anio, setAnio] = usePersistedState<number>("cartera/pagos/anio", new Date().getFullYear());
+  const [dia, setDia] = usePersistedState<number | undefined>("cartera/pagos/dia", new Date().getDate());
+  const [fechaInicio, setFechaInicio] = usePersistedState<string>("cartera/pagos/fechaInicio", "");
+  const [fechaFin, setFechaFin] = usePersistedState<string>("cartera/pagos/fechaFin", "");
+  const [fechaAplicado, setFechaAplicado] = usePersistedState<string>("cartera/pagos/fechaAplicado", "");
+  const [fechaBoleta, setFechaBoleta] = usePersistedState<string>("cartera/pagos/fechaBoleta", "");
+  const [fechaBoletaInicio, setFechaBoletaInicio] = usePersistedState<string>("cartera/pagos/fechaBoletaInicio", "");
+  const [fechaBoletaFin, setFechaBoletaFin] = usePersistedState<string>("cartera/pagos/fechaBoletaFin", "");
 
   // Filtros de crédito
-  const [sifco, setSifco] = React.useState("");
-  const [categoriaCredito, setCategoriaCredito] = React.useState("");
-  const [formatoCredito, setFormatoCredito] = React.useState("");
+  const [sifco, setSifco] = usePersistedState<string>("cartera/pagos/sifco", "");
+  const [categoriaCredito, setCategoriaCredito] = usePersistedState<string>("cartera/pagos/categoriaCredito", "");
+  const [formatoCredito, setFormatoCredito] = usePersistedState<string>("cartera/pagos/formatoCredito", "");
 
   // Filtros generales
-  const [usuarioNombre, setUsuarioNombre] = React.useState("");
-  const [inversionistaId, setInversionistaId] = React.useState<
-    number | undefined
-  >();
-  const [soloAplicados, setSoloAplicados] = React.useState<boolean | undefined>(undefined);
-  const [validationStatusFilter, setValidationStatusFilter] = React.useState<string>("");
-  const [queryInv, setQueryInv] = React.useState("");
+  const [usuarioNombre, setUsuarioNombre] = usePersistedState<string>("cartera/pagos/usuarioNombre", "");
+  const [inversionistaId, setInversionistaId] = usePersistedState<number | undefined>("cartera/pagos/inversionistaId", undefined);
+  const [soloAplicados, setSoloAplicados] = usePersistedState<boolean | undefined>("cartera/pagos/soloAplicados", undefined);
+  const [validationStatusFilter, setValidationStatusFilter] = usePersistedState<string>("cartera/pagos/validationStatusFilter", "");
+  const [queryInv, setQueryInv] = usePersistedState<string>("cartera/pagos/queryInv", "");
   const filteredInvestors = queryInv === ""
     ? investors
     : investors.filter((inv) => inv.nombre.toLowerCase().includes(queryInv.toLowerCase()));
 
+  const [page, setPage] = usePersistedState<number>("cartera/pagos/page", 1);
+  const [pageSize, setPageSize] = usePersistedState<number>("cartera/pagos/pageSize", 10);
 
-  const [page, setPage] = React.useState(1);
-  const [pageSize, setPageSize] = React.useState(10);
+  const hasActiveFilters =
+    sifco !== "" ||
+    usuarioNombre !== "" ||
+    inversionistaId !== undefined ||
+    soloAplicados !== undefined ||
+    validationStatusFilter !== "" ||
+    categoriaCredito !== "" ||
+    formatoCredito !== "" ||
+    modoFecha !== "simple" ||
+    fechaInicio !== "" ||
+    fechaFin !== "" ||
+    fechaAplicado !== "" ||
+    fechaBoleta !== "" ||
+    fechaBoletaInicio !== "" ||
+    fechaBoletaFin !== "";
   const { data: cuentas, isLoading: cargandoCuentas } = useCuentasEmpresa();
   const { mutate: actualizarCuenta, isPending: actualizandoCuenta } =
     useActualizarCuentaPago();
@@ -598,33 +610,50 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
               <ListFilter className="w-4 h-4 text-blue-600" />
               <span className="font-bold text-blue-900 text-sm">Filtros</span>
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                setModoFecha("simple");
-                setSifco("");
-                setUsuarioNombre("");
-                setMes(new Date().getMonth() + 1);
-                setAnio(new Date().getFullYear());
-                setDia(new Date().getDate());
-                setFechaInicio("");
-                setFechaFin("");
-                setFechaAplicado("");
-                setFechaBoleta("");
-                setFechaBoletaInicio("");
-                setFechaBoletaFin("");
-                setCategoriaCredito("");
-                setFormatoCredito("");
-                setSoloAplicados(undefined);
-                setInversionistaId(undefined);
-                setQueryInv("");
-                setPage(1);
-              }}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-500 hover:text-red-600 hover:bg-red-50 transition-all flex items-center gap-1.5"
-            >
-              <RotateCcw className="w-3 h-3" />
-              Limpiar
-            </button>
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={() => {
+                  setModoFecha("simple");
+                  setSifco("");
+                  setUsuarioNombre("");
+                  setMes(new Date().getMonth() + 1);
+                  setAnio(new Date().getFullYear());
+                  setDia(new Date().getDate());
+                  setFechaInicio("");
+                  setFechaFin("");
+                  setFechaAplicado("");
+                  setFechaBoleta("");
+                  setFechaBoletaInicio("");
+                  setFechaBoletaFin("");
+                  setCategoriaCredito("");
+                  setFormatoCredito("");
+                  setSoloAplicados(undefined);
+                  setInversionistaId(undefined);
+                  setQueryInv("");
+                  setPage(1);
+                }}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-500 hover:text-red-600 hover:bg-red-50 transition-all flex items-center gap-1.5"
+              >
+                <RotateCcw className="w-3 h-3" />
+                Limpiar filtros
+                <Badge variant="secondary" className="ml-0.5 h-4 px-1 text-xs">
+                  {[
+                    sifco !== "",
+                    usuarioNombre !== "",
+                    inversionistaId !== undefined,
+                    soloAplicados !== undefined,
+                    validationStatusFilter !== "",
+                    categoriaCredito !== "",
+                    formatoCredito !== "",
+                    modoFecha !== "simple",
+                    fechaInicio !== "" || fechaFin !== "",
+                    fechaAplicado !== "",
+                    fechaBoleta !== "" || fechaBoletaInicio !== "" || fechaBoletaFin !== "",
+                  ].filter(Boolean).length}
+                </Badge>
+              </button>
+            )}
           </div>
 
           {/* Grid principal de filtros */}

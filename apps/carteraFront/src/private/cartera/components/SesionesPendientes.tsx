@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useMemo, useCallback, useEffect } from "react";
+import { usePersistedState } from "../hooks/usePersistedState";
 import { useSesionesPendientes, useCompletarEspejo, useReemplazarInversionistaCredito, useCreditCandidates, useDevolverPendientesACube, useCompraCarteraAceptada } from "../hooks/useSesionesPendientes";
 import type { InversionistaSesionPendiente, OtroCreditoDisponible } from "../services/services";
 import {
@@ -79,10 +80,12 @@ function distribuirMonto(
 const PAGE_SIZE = 10;
 
 export function SesionesPendientes() {
-  const [page, setPage] = useState(1);
-  const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [page, setPage] = usePersistedState<number>("cartera/sesionesPendientes/page", 1);
+  const [search, setSearch] = usePersistedState<string>("cartera/sesionesPendientes/search", "");
+  const [debouncedSearch, setDebouncedSearch] = usePersistedState<string>("cartera/sesionesPendientes/debouncedSearch", "");
   const { data: response, isLoading, isError, error, refetch, isFetching } = useSesionesPendientes(page, PAGE_SIZE, debouncedSearch);
+
+  const hasActiveFilters = search !== "";
 
   // Debounce search to avoid firing on every keystroke
   useEffect(() => {
@@ -106,6 +109,12 @@ export function SesionesPendientes() {
     },
     [],
   );
+
+  const clearSearch = useCallback(() => {
+    setSearch("");
+    setDebouncedSearch("");
+    setPage(1);
+  }, []);
 
   if (isLoading) {
     return (
@@ -160,6 +169,12 @@ export function SesionesPendientes() {
               aria-label="Buscar inversionistas"
             />
           </div>
+          {hasActiveFilters && (
+            <Button variant="outline" size="sm" onClick={clearSearch} className="h-8 text-xs text-gray-600 border-gray-300 hover:bg-gray-100 gap-1">
+              <X className="w-3.5 h-3.5" /> Limpiar
+              <Badge variant="secondary" className="ml-0.5 h-4 px-1 text-xs">1</Badge>
+            </Button>
+          )}
           <Badge variant="outline" className="text-[11px] border-blue-200 text-blue-700 bg-blue-50 tabular-nums">
             {total} inversionistas
           </Badge>

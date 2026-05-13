@@ -93,6 +93,8 @@ export function ListaCreditosPagos() {
     setIsVehiculoPropio,
     inversionistaIds,
     setInversionistaIds,
+    clearAllFilters,
+    hasActiveFilters,
   } = useCreditosPaginadosWithFilters({
     initialAsesorId: !isAdmin && userAsesorId ? userAsesorId : undefined,
   });
@@ -582,6 +584,20 @@ export function ListaCreditosPagos() {
             />
             <span className="text-sm">Solo Vehículo Cash-In</span>
           </label>
+          {hasActiveFilters && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={clearAllFilters}
+              className="flex items-center gap-2 rounded-lg border-gray-300 px-4 py-2 font-semibold text-gray-600 hover:bg-gray-100"
+            >
+              <X className="w-4 h-4" />
+              Limpiar filtros
+              <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-xs">
+                {[creditoSifco !== "", nombreUsuarioInput !== "", isAdmin && asesorId !== undefined, estado !== "ACTIVO", isVehiculoPropio !== undefined, inversionistaIds.length > 0].filter(Boolean).length}
+              </Badge>
+            </Button>
+          )}
           <button
             type="button"
             disabled={isDownloadingExcel}

@@ -31,6 +31,8 @@ import {
 } from "../database/db/schema";
 import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
 import { eq, and, or, sql, inArray, ilike, like, desc, count, SQL, isNull, isNotNull, ne } from "drizzle-orm";
+import { promises as fsPromises } from "node:fs";
+import path from "node:path";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import Big from "big.js";
 import { sendLiquidationEmail, sendPlainEmail, sendSimpleEmail } from "@cci/email";
@@ -181,11 +183,16 @@ async function consultarPagosInversionista(
       origen: sql<OrigenDatos>`${config.origen}`.as('origen'),
     })
     .from(tabla)
-    .innerJoin(
+    // LEFT JOIN: conservar filas del espejo aunque su `pago_id` sea NULL o
+    // apunte a un pago que ya no existe. Los campos de pagos_credito /
+    // cuotas_credito quedarán NULL en esas filas, pero el monto del espejo
+    // (abono_capital / abono_interes / abono_iva_12) se preserva para que
+    // entre al cálculo de totales y al reporte.
+    .leftJoin(
       pagos_credito,
       eq(tabla.pago_id, pagos_credito.pago_id)
     )
-    .innerJoin(
+    .leftJoin(
       cuotas_credito,
       eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
     )
@@ -274,8 +281,11 @@ async function consultarPagosBulk(
       abono_iva_12: tabla.abono_iva_12,
     })
     .from(tabla)
-    .innerJoin(pagos_credito, eq(tabla.pago_id, pagos_credito.pago_id))
-    .innerJoin(cuotas_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
+    // LEFT JOIN: conservar filas del espejo aunque su `pago_id` sea NULL o
+    // apunte a un pago que ya no existe (mismo criterio que en
+    // `consultarPagosInversionista`).
+    .leftJoin(pagos_credito, eq(tabla.pago_id, pagos_credito.pago_id))
+    .leftJoin(cuotas_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
     .where(and(...pagosConditions));
 }
 
@@ -2100,6 +2110,79 @@ export async function updateLiquidacionReporteUrl(liquidacion_id: number, url: s
 }
 
 /**
+ * Sustituye los totales monetarios de una liquidación con los recalculados
+ * por `getInvestorTotalsGlobales` (o estructura equivalente).
+ *
+ * Útil cuando los datos subyacentes (pagos espejo, reinversiones, abonos)
+ * cambiaron después de creada la liquidación y el `reinversion_total` /
+ * `total_capital` / etc. ya no coinciden con el reporte recalculado.
+ */
+export async function updateLiquidacionTotales(
+  liquidacion_id: number,
+  totales: {
+    total_abono_capital?: string | number;
+    total_abono_interes?: string | number;
+    total_abono_iva?: string | number;
+    total_isr?: string | number;
+    total_cuota_con_reinversion?: string | number;
+    total_reinversion_capital?: string | number;
+    total_reinversion_interes?: string | number;
+    total_reinversion?: string | number;
+  },
+  total_pagos_liquidados?: number,
+) {
+  const [prev] = await db
+    .select()
+    .from(liquidaciones)
+    .where(eq(liquidaciones.liquidacion_id, liquidacion_id))
+    .limit(1);
+
+  if (!prev) return null;
+
+  const toStr = (v: unknown) =>
+    v === undefined || v === null ? undefined : String(v);
+
+  const patch: Record<string, unknown> = {
+    total_capital:       toStr(totales.total_abono_capital),
+    total_interes:       toStr(totales.total_abono_interes),
+    total_iva:           toStr(totales.total_abono_iva),
+    total_isr:           toStr(totales.total_isr),
+    total_cuota:         toStr(totales.total_cuota_con_reinversion),
+    reinversion_capital: toStr(totales.total_reinversion_capital),
+    reinversion_interes: toStr(totales.total_reinversion_interes),
+    reinversion_total:   toStr(totales.total_reinversion),
+  };
+  if (typeof total_pagos_liquidados === "number") {
+    patch.total_pagos_liquidados = total_pagos_liquidados;
+  }
+  // Quitar undefined para no resetear columnas no provistas
+  for (const k of Object.keys(patch)) {
+    if (patch[k] === undefined) delete patch[k];
+  }
+
+  await db
+    .update(liquidaciones)
+    .set(patch as any)
+    .where(eq(liquidaciones.liquidacion_id, liquidacion_id));
+
+  return {
+    liquidacion_id,
+    anterior: {
+      total_capital:       prev.total_capital,
+      total_interes:       prev.total_interes,
+      total_iva:           prev.total_iva,
+      total_isr:           prev.total_isr,
+      total_cuota:         prev.total_cuota,
+      reinversion_capital: prev.reinversion_capital,
+      reinversion_interes: prev.reinversion_interes,
+      reinversion_total:   prev.reinversion_total,
+      total_pagos_liquidados: prev.total_pagos_liquidados,
+    },
+    nuevo: patch,
+  };
+}
+
+/**
  * Obtiene las liquidaciones (con inversionista_id y liquidacion_id) de una fecha dada.
  */
 export async function getLiquidacionesPorFecha(fecha: string) {
@@ -2271,14 +2354,17 @@ export async function revertirLiquidacion(liquidacion_id: number) {
     }
 
     // ──────────────────────────────────────────────
-    // PASO 6: Eliminar boleta asociada (si existe)
+    // PASO 6: Pasar boleta asociada a PENDIENTE (si existe)
+    //   No la borramos; solo la regresamos al estado pendiente para que
+    //   pueda re-procesarse después.
     // ──────────────────────────────────────────────
     if (liquidacion.boleta_id) {
       await tx
-        .delete(boletasPagoInversionista)
+        .update(boletasPagoInversionista)
+        .set({ estado: "PENDIENTE", fecha_procesado: null })
         .where(eq(boletasPagoInversionista.boleta_id, liquidacion.boleta_id));
 
-      console.log(`  ✅ Boleta ${liquidacion.boleta_id} eliminada`);
+      console.log(`  ✅ Boleta ${liquidacion.boleta_id} → PENDIENTE`);
     }
 
     // ──────────────────────────────────────────────
@@ -2311,6 +2397,8 @@ export async function revertirLiquidacion(liquidacion_id: number) {
 
     // ──────────────────────────────────────────────
     // PASO 8: Eliminar la liquidación
+    //   La boleta asociada (si existe) se dejó en estado PENDIENTE en el
+    //   paso 6 — no se borra.
     // ──────────────────────────────────────────────
     await tx
       .delete(liquidaciones)
@@ -2327,6 +2415,627 @@ export async function revertirLiquidacion(liquidacion_id: number) {
       creditos_afectados: pagosPorCredito.size,
     };
   });
+}
+
+// ============================================
+// revertirComprasUltimaLiquidacion
+// ============================================
+// Revierte las compras (tipo_operacion = 'reinversion') asociadas a la
+// última liquidación de cada inversionista listado, devolviendo el monto
+// al CUBE (inversionista_id = 86) sobre los mismos créditos.
+//
+// Lógica:
+//   1. Para cada inv:
+//      a. Buscar su última liquidación (max fecha_liquidacion).
+//      b. Traer todas las compras 'reinversion' con created_at >= fecha_liq
+//         (1 segundo de buffer porque la liq y las compras se crean en el
+//         mismo flujo).
+//      c. Si solo hay 1 crédito afectado, usar el reinversion_total de la
+//         liquidación (manda la liq sobre la compra). Si hay varios, usar
+//         el monto de cada compra.
+//      d. Por cada (credito_id, monto):
+//         - Restarle el monto al inv en padre y espejo del crédito.
+//         - Sumarlo a CUBE en padre y espejo (crear su row si no existe).
+//         - Si el inv queda en 0, se elimina su row del crédito.
+//         - Recalcular porcentajes, cuotas, intereses, IVA de TODOS los
+//           inversionistas del crédito (nuke & rebuild padre + espejo).
+//      e. Marcar las compras revertidas como status='completado' (no se
+//         borran, queda audit trail).
+//   2. Escribir un archivo JSON con las compras afectadas para borrarlas
+//      después si se decide hacerlo.
+//
+// Devuelve el resumen por inversionista.
+// ============================================
+
+const CUBE_ID = 86;
+
+function recalcularInvsCredito(
+  inversionistasArray: {
+    inversionista_id: number;
+    monto_aportado: Big;
+    porcentaje_cash_in: Big;
+    porcentaje_inversion: Big;
+    fecha_inicio_participacion: string;
+  }[],
+  creditoData: {
+    cuota: string;
+    porcentaje_interes: string;
+    seguro_10_cuotas: string | null;
+    gps: string | null;
+    membresias_pago: string | null;
+  },
+  credito_id: number,
+) {
+  const capitalTotal = inversionistasArray.reduce(
+    (acc, inv) => acc.plus(inv.monto_aportado),
+    new Big(0),
+  );
+
+  if (capitalTotal.eq(0)) {
+    throw new Error(
+      `No se puede recalcular: crédito ${credito_id} quedaría con capital total Q0.00`,
+    );
+  }
+
+  const cuotaTotal = new Big(creditoData.cuota);
+  const seguro = new Big(creditoData.seguro_10_cuotas ?? 0);
+  const gps = new Big(creditoData.gps ?? 0);
+  const membresias = new Big(creditoData.membresias_pago ?? 0);
+  const tasaInteres = new Big(creditoData.porcentaje_interes ?? 0);
+
+  const inversionistaMayor = inversionistasArray.reduce((max, current) =>
+    current.monto_aportado.gt(max.monto_aportado) ? current : max,
+  );
+
+  const cuotaSinCargos = cuotaTotal.minus(seguro).minus(gps).minus(membresias);
+
+  return inversionistasArray.map((inv) => {
+    const porcentajeParticipacion = inv.monto_aportado
+      .div(capitalTotal)
+      .times(100);
+
+    const cuotaBase = cuotaSinCargos
+      .times(porcentajeParticipacion.div(100))
+      .round(6);
+
+    const esMayor = inv.inversionista_id === inversionistaMayor.inversionista_id;
+    const cuotaInversionista = esMayor
+      ? cuotaBase.plus(seguro).plus(gps).plus(membresias).round(6)
+      : cuotaBase;
+
+    const cuotaInteres = inv.monto_aportado
+      .times(tasaInteres.div(100))
+      .round(2);
+
+    const montoInversionista = cuotaInteres
+      .times(inv.porcentaje_inversion)
+      .div(100)
+      .round(2);
+
+    const montoCashIn = cuotaInteres
+      .times(inv.porcentaje_cash_in)
+      .div(100)
+      .round(2);
+
+    const ivaInversionista = montoInversionista.gt(0)
+      ? montoInversionista.times(0.12).round(2)
+      : new Big(0);
+
+    const ivaCashIn = montoCashIn.gt(0)
+      ? montoCashIn.times(0.12).round(2)
+      : new Big(0);
+
+    return {
+      credito_id,
+      inversionista_id: inv.inversionista_id,
+      monto_aportado: inv.monto_aportado.toFixed(8),
+      porcentaje_cash_in: inv.porcentaje_cash_in.toString(),
+      // El campo guarda el split del interés (no el % de capital).
+      // Mantenemos el valor del input (lo que tenía la fila), igual que
+      // los demás flujos del repo (addInvestorToCredit, replaceInvestorCredit).
+      porcentaje_participacion_inversionista: inv.porcentaje_inversion.toString(),
+      monto_inversionista: montoInversionista.toFixed(2),
+      monto_cash_in: montoCashIn.toFixed(2),
+      iva_inversionista: ivaInversionista.toFixed(2),
+      iva_cash_in: ivaCashIn.toFixed(2),
+      fecha_inicio_participacion: inv.fecha_inicio_participacion,
+      cuota_inversionista: cuotaInversionista.toFixed(2),
+    };
+  });
+}
+
+export async function revertirComprasUltimaLiquidacion(
+  inversionistaIds: number[],
+) {
+  if (!Array.isArray(inversionistaIds) || inversionistaIds.length === 0) {
+    throw new Error("inversionista_ids debe ser un array no vacío");
+  }
+
+  const resultados: Array<Record<string, unknown>> = [];
+  const comprasAfectadasLog: Array<Record<string, unknown>> = [];
+
+  // Traemos los nombres una sola vez para mostrarlos en el resumen final.
+  const invsInfo = await db
+    .select({
+      inversionista_id: inversionistas.inversionista_id,
+      nombre: inversionistas.nombre,
+    })
+    .from(inversionistas)
+    .where(inArray(inversionistas.inversionista_id, inversionistaIds));
+  const nombrePorInv = new Map(
+    invsInfo.map((i) => [i.inversionista_id, i.nombre]),
+  );
+
+  await db.transaction(async (tx) => {
+    for (const inv_id of inversionistaIds) {
+      const nombre = nombrePorInv.get(inv_id) ?? null;
+      console.log(`\n🔄 Revirtiendo compras del inv ${inv_id} (${nombre})`);
+
+      const [ultLiq] = await tx
+        .select()
+        .from(liquidaciones)
+        .where(eq(liquidaciones.inversionista_id, inv_id))
+        .orderBy(desc(liquidaciones.fecha_liquidacion))
+        .limit(1);
+
+      if (!ultLiq) {
+        resultados.push({
+          inversionista_id: inv_id,
+          nombre,
+          skipped: true,
+          reason: "Sin liquidaciones",
+        });
+        continue;
+      }
+
+      // Filtramos por status='pendiente_reinversion' — son las compras
+      // que se acaban de crear y todavía no fueron aceptadas. Las viejas
+      // (ya aceptadas o revertidas) quedan en 'completado' y no se tocan.
+      const compras = await tx
+        .select()
+        .from(compras_credito_inversionista)
+        .where(
+          and(
+            eq(compras_credito_inversionista.inversionista_id, inv_id),
+            eq(compras_credito_inversionista.tipo_operacion, "reinversion"),
+            eq(compras_credito_inversionista.status, "pendiente_reinversion"),
+          ),
+        );
+
+      if (compras.length === 0) {
+        resultados.push({
+          inversionista_id: inv_id,
+          nombre,
+          liquidacion_id: ultLiq.liquidacion_id,
+          reinv_liquidacion: new Big(ultLiq.reinversion_total ?? 0).toFixed(2),
+          skipped: true,
+          reason: "Sin compras pendiente_reinversion para este inversionista",
+        });
+        continue;
+      }
+
+      const sumaCompras = compras.reduce(
+        (acc, c) => acc.plus(new Big(c.monto_aportado)),
+        new Big(0),
+      );
+      const reinvLiq = new Big(ultLiq.reinversion_total ?? 0);
+      const cuadrado = sumaCompras.minus(reinvLiq).abs().lt(0.02);
+
+      // Agrupar por credito_id.
+      const porCredito = new Map<number, Big>();
+      for (const c of compras) {
+        const key = c.credito_id;
+        porCredito.set(
+          key,
+          (porCredito.get(key) ?? new Big(0)).plus(new Big(c.monto_aportado)),
+        );
+      }
+
+      // Validación: si suma compras ≠ reinversion_total y hay >1 crédito,
+      // skip — no queremos tocar nada si no estamos seguros de qué agarramos.
+      // Excepción: 1 solo crédito → pasa aunque no cuadre, y mandamos el
+      // monto de la liquidación (no el de la compra).
+      if (!cuadrado && porCredito.size > 1) {
+        resultados.push({
+          inversionista_id: inv_id,
+          nombre,
+          liquidacion_id: ultLiq.liquidacion_id,
+          skipped: true,
+          reason: "Suma de compras ≠ reinversion_total con múltiples créditos",
+          reinv_liquidacion: reinvLiq.toFixed(2),
+          suma_compras: sumaCompras.toFixed(2),
+          creditos_detectados: Array.from(porCredito.keys()),
+        });
+        continue;
+      }
+
+      if (porCredito.size === 1) {
+        const [unicoCredito] = porCredito.keys();
+        porCredito.set(unicoCredito, reinvLiq);
+      }
+
+      const creditosAfectados: Array<Record<string, unknown>> = [];
+
+      for (const [creditoId, monto] of porCredito) {
+        const [creditoData] = await tx
+          .select({
+            credito_id: creditos.credito_id,
+            cuota: creditos.cuota,
+            porcentaje_interes: creditos.porcentaje_interes,
+            seguro_10_cuotas: creditos.seguro_10_cuotas,
+            gps: creditos.gps,
+            membresias_pago: creditos.membresias_pago,
+            numero_credito_sifco: creditos.numero_credito_sifco,
+          })
+          .from(creditos)
+          .where(eq(creditos.credito_id, creditoId))
+          .limit(1);
+
+        if (!creditoData) {
+          creditosAfectados.push({
+            credito_id: creditoId,
+            skipped: true,
+            reason: "Crédito no encontrado",
+          });
+          continue;
+        }
+
+        const invActuales = await tx
+          .select({
+            inversionista_id: creditos_inversionistas.inversionista_id,
+            monto_aportado: creditos_inversionistas.monto_aportado,
+            porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
+            porcentaje_participacion_inversionista:
+              creditos_inversionistas.porcentaje_participacion_inversionista,
+            fecha_inicio_participacion:
+              creditos_inversionistas.fecha_inicio_participacion,
+          })
+          .from(creditos_inversionistas)
+          .where(eq(creditos_inversionistas.credito_id, creditoId));
+
+        const arrayNuevo: {
+          inversionista_id: number;
+          monto_aportado: Big;
+          porcentaje_cash_in: Big;
+          porcentaje_inversion: Big;
+          fecha_inicio_participacion: string;
+        }[] = [];
+
+        let cubeFound = false;
+        let invFound = false;
+
+        for (const inv of invActuales) {
+          if (inv.inversionista_id === inv_id) {
+            invFound = true;
+            const nuevoMonto = new Big(inv.monto_aportado).minus(monto);
+            if (nuevoMonto.gt(0.001)) {
+              arrayNuevo.push({
+                inversionista_id: inv.inversionista_id,
+                monto_aportado: nuevoMonto,
+                porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
+                porcentaje_inversion: new Big(
+                  inv.porcentaje_participacion_inversionista,
+                ),
+                fecha_inicio_participacion: inv.fecha_inicio_participacion,
+              });
+            }
+            // Si el monto queda <= 0, lo sacamos del crédito.
+          } else if (inv.inversionista_id === CUBE_ID) {
+            cubeFound = true;
+            arrayNuevo.push({
+              inversionista_id: inv.inversionista_id,
+              monto_aportado: new Big(inv.monto_aportado).plus(monto),
+              porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
+              porcentaje_inversion: new Big(
+                inv.porcentaje_participacion_inversionista,
+              ),
+              fecha_inicio_participacion: inv.fecha_inicio_participacion,
+            });
+          } else {
+            arrayNuevo.push({
+              inversionista_id: inv.inversionista_id,
+              monto_aportado: new Big(inv.monto_aportado),
+              porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
+              porcentaje_inversion: new Big(
+                inv.porcentaje_participacion_inversionista,
+              ),
+              fecha_inicio_participacion: inv.fecha_inicio_participacion,
+            });
+          }
+        }
+
+        if (!invFound) {
+          creditosAfectados.push({
+            credito_id: creditoId,
+            skipped: true,
+            reason: "Inv no tiene participación en el crédito",
+          });
+          continue;
+        }
+
+        if (!cubeFound) {
+          // CUBE como inversionista de la empresa: el 100% del interés va a
+          // Cash-In (cash_in=100, participacion_inversionista=0).
+          arrayNuevo.push({
+            inversionista_id: CUBE_ID,
+            monto_aportado: monto,
+            porcentaje_cash_in: new Big(100),
+            porcentaje_inversion: new Big(0),
+            fecha_inicio_participacion: new Date()
+              .toISOString()
+              .split("T")[0],
+          });
+        }
+
+        const dataPadre = recalcularInvsCredito(
+          arrayNuevo,
+          creditoData,
+          creditoId,
+        );
+
+        await tx
+          .delete(creditos_inversionistas)
+          .where(eq(creditos_inversionistas.credito_id, creditoId));
+
+        if (dataPadre.length > 0) {
+          await tx.insert(creditos_inversionistas).values(dataPadre);
+        }
+
+        const dataEspejo = dataPadre.map((r) => ({
+          ...r,
+          status: "completado" as const,
+          updated_at: new Date(),
+        }));
+
+        await tx
+          .delete(creditos_inversionistas_espejo)
+          .where(eq(creditos_inversionistas_espejo.credito_id, creditoId));
+
+        if (dataEspejo.length > 0) {
+          await tx.insert(creditos_inversionistas_espejo).values(dataEspejo);
+        }
+
+        creditosAfectados.push({
+          credito_id: creditoId,
+          numero_credito_sifco: creditoData.numero_credito_sifco,
+          monto_revertido: monto.toFixed(2),
+          inv_eliminado_del_credito: !arrayNuevo.some(
+            (i) => i.inversionista_id === inv_id,
+          ),
+          cube_recreado: !cubeFound,
+        });
+
+        console.log(
+          `  ✅ Crédito ${creditoData.numero_credito_sifco} (${creditoId}): -${monto.toFixed(2)} a inv ${inv_id} → CUBE`,
+        );
+      }
+
+      // Marcamos las compras como completado para que no aparezcan como
+      // pendientes; quedan en el log para borrarlas después si se decide.
+      const compraIds = compras.map((c) => c.id);
+      if (compraIds.length > 0) {
+        await tx
+          .update(compras_credito_inversionista)
+          .set({ status: "completado", updated_at: new Date() })
+          .where(inArray(compras_credito_inversionista.id, compraIds));
+      }
+
+      for (const c of compras) {
+        comprasAfectadasLog.push({
+          compra_id: c.id,
+          inversionista_id: inv_id,
+          credito_id: c.credito_id,
+          monto_aportado: c.monto_aportado,
+          tipo_operacion: c.tipo_operacion,
+          status_anterior: c.status,
+          fecha_compra: c.created_at,
+          liquidacion_id_referencia: ultLiq.liquidacion_id,
+        });
+      }
+
+      // Monto efectivamente revertido (lo que se devolvió a CUBE).
+      const montoRevertido = Array.from(porCredito.values()).reduce(
+        (acc, m) => acc.plus(m),
+        new Big(0),
+      );
+
+      resultados.push({
+        inversionista_id: inv_id,
+        nombre,
+        liquidacion_id: ultLiq.liquidacion_id,
+        fecha_liquidacion: ultLiq.fecha_liquidacion,
+        reinv_liquidacion: reinvLiq.toFixed(2),
+        suma_compras: sumaCompras.toFixed(2),
+        monto_revertido: montoRevertido.toFixed(2),
+        cuadrado,
+        compras_revertidas: compras.length,
+        creditos_afectados: creditosAfectados,
+      });
+    }
+  });
+
+  // Log file fuera de la transacción (no afecta DB si falla la escritura).
+  let logFile: string | null = null;
+  if (comprasAfectadasLog.length > 0) {
+    try {
+      const logDir = path.join(process.cwd(), "logs");
+      await fsPromises.mkdir(logDir, { recursive: true });
+      const ts = new Date().toISOString().replace(/[:.]/g, "-");
+      logFile = path.join(logDir, `compras_revertidas_${ts}.json`);
+      await fsPromises.writeFile(
+        logFile,
+        JSON.stringify(comprasAfectadasLog, null, 2),
+      );
+      console.log(`📝 Log de compras revertidas: ${logFile}`);
+    } catch (err) {
+      console.error("[revertirComprasUltimaLiquidacion] No se pudo escribir el log:", err);
+    }
+  }
+
+  // ── Resumen final compacto ──────────────────────────────────────────────
+  // - revertidos: los que efectivamente devolvieron monto al CUBE.
+  // - no_pasaron: los que se saltaron (sin liq, sin compras en la ventana,
+  //   o suma compras ≠ reinversion_total con >1 crédito).
+  const revertidos = resultados
+    .filter((r) => !r.skipped)
+    .map((r) => ({
+      inversionista_id: r.inversionista_id,
+      nombre: r.nombre,
+      liquidacion_id: r.liquidacion_id,
+      reinv_liquidacion: r.reinv_liquidacion,
+      monto_revertido: r.monto_revertido,
+      compras_revertidas: r.compras_revertidas,
+      cuadrado: r.cuadrado,
+    }));
+
+  const noPasaron = resultados
+    .filter((r) => r.skipped)
+    .map((r) => ({
+      inversionista_id: r.inversionista_id,
+      nombre: r.nombre,
+      liquidacion_id: r.liquidacion_id ?? null,
+      reinv_liquidacion: r.reinv_liquidacion ?? null,
+      suma_compras: r.suma_compras ?? null,
+      reason: r.reason,
+    }));
+
+  const totalRevertido = revertidos.reduce(
+    (acc, r) => acc.plus(new Big((r.monto_revertido as string) ?? "0")),
+    new Big(0),
+  );
+
+  return {
+    success: true,
+    log_file: logFile,
+    resumen: {
+      total_solicitados: inversionistaIds.length,
+      total_revertidos: revertidos.length,
+      total_no_pasaron: noPasaron.length,
+      monto_total_revertido: totalRevertido.toFixed(2),
+      revertidos,
+      no_pasaron: noPasaron,
+    },
+    resultados,
+  };
+}
+
+// ============================================
+// ejecutarReinversionAutomatica
+// ============================================
+// Helper compartido: reproduce el "FASE 4 - REINVERSIÓN AUTOMÁTICA" de
+// liquidateByInvestorId. Calcula la moda de porcentajes desde los créditos
+// actuales del inversionista y llama addInvestorToCredit con el monto de
+// la liquidación.
+//
+// Se usa desde el flujo de liquidación y desde /investor/reporte-liquidados
+// (para re-disparar la compra cuando se vuelven a generar reportes después
+// de revertir compras).
+// ============================================
+export async function ejecutarReinversionAutomatica(
+  inv_id: number,
+  montoReinvertido: number,
+) {
+  if (!Number.isFinite(montoReinvertido) || montoReinvertido <= 0) {
+    return { skipped: true, reason: "Monto a reinvertir = 0" };
+  }
+
+  console.log(
+    `  🔄 Ejecutando reinversión automática inv ${inv_id} por Q${montoReinvertido.toFixed(2)}...`,
+  );
+
+  const creditosInv = await db
+    .select({
+      porcentaje_participacion_inversionista:
+        creditos_inversionistas.porcentaje_participacion_inversionista,
+      porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
+    })
+    .from(creditos_inversionistas)
+    .where(eq(creditos_inversionistas.inversionista_id, inv_id));
+
+  const moda = (arr: number[]) => {
+    if (arr.length === 0) return 0;
+    const freq = new Map<number, number>();
+    for (const v of arr) freq.set(v, (freq.get(v) ?? 0) + 1);
+    let maxFreq = 0;
+    let result = arr[0];
+    for (const [val, ct] of freq) {
+      if (ct > maxFreq) {
+        maxFreq = ct;
+        result = val;
+      }
+    }
+    return result;
+  };
+
+  const modaInversion = moda(
+    creditosInv.map((c) => Number(c.porcentaje_participacion_inversionista)),
+  );
+  const modaCashIn = moda(
+    creditosInv.map((c) => Number(c.porcentaje_cash_in)),
+  );
+
+  console.log(
+    `  📊 Moda porcentaje inversión: ${modaInversion}%, cash in: ${modaCashIn}%`,
+  );
+
+  const reinversionResult = await addInvestorToCredit({
+    body: {
+      inversionista_id: inv_id,
+      monto_aportado: montoReinvertido,
+      porcentaje_inversion: modaInversion,
+      porcentaje_cash_in: modaCashIn,
+      tipo_operacion: "reinversion",
+    },
+    set: { status: 200 },
+  });
+
+  console.log(`  ✅ Reinversión automática completada inv ${inv_id}.`);
+  return {
+    skipped: false,
+    moda_inversion: modaInversion,
+    moda_cash_in: modaCashIn,
+    monto: montoReinvertido,
+    result: reinversionResult,
+  };
+}
+
+// ============================================
+// reinvertirDesdeLiquidacionId
+// ============================================
+// Toma una liquidacion_id, busca la liquidación, extrae inversionista_id +
+// reinversion_total y dispara la reinversión automática con esos valores.
+// ============================================
+export async function reinvertirDesdeLiquidacionId(liquidacion_id: number) {
+  const [liq] = await db
+    .select({
+      liquidacion_id: liquidaciones.liquidacion_id,
+      inversionista_id: liquidaciones.inversionista_id,
+      reinversion_total: liquidaciones.reinversion_total,
+    })
+    .from(liquidaciones)
+    .where(eq(liquidaciones.liquidacion_id, liquidacion_id));
+
+  if (!liq) {
+    return { skipped: true, reason: `Liquidación ${liquidacion_id} no encontrada` };
+  }
+
+  const monto = Number(liq.reinversion_total ?? 0);
+  if (!monto || monto <= 0) {
+    return {
+      skipped: true,
+      reason: "reinversion_total = 0",
+      liquidacion_id,
+      inversionista_id: liq.inversionista_id,
+    };
+  }
+
+  const r = await ejecutarReinversionAutomatica(liq.inversionista_id, monto);
+  return {
+    liquidacion_id,
+    inversionista_id: liq.inversionista_id,
+    reinversion_total: monto,
+    ...r,
+  };
 }
 
 // ============================================

@@ -22,6 +22,7 @@ import {
   deletePagosEspejoNoLiquidados,
   updateSaldoReinversion,
   updateLiquidacionReporteUrl,
+  updateLiquidacionTotales,
   getLiquidacionesPorFecha,
   revertirLiquidacion,
   revertirComprasUltimaLiquidacion,
@@ -659,10 +660,12 @@ export const inversionistasRouter = new Elysia()
     }
   })
   .post("/investor/reporte-liquidados", async ({ body, set }) => {
-    const { investor_id, liquidacion_id, reinvertir } = body as {
+    const { investor_id, liquidacion_id, reinvertir, solo_reporte, sustituir_totales } = body as {
       investor_id?: number;
       liquidacion_id?: number;
       reinvertir?: boolean;
+      solo_reporte?: boolean;
+      sustituir_totales?: boolean;
     };
 
     if (!investor_id || isNaN(Number(investor_id))) {
@@ -695,6 +698,7 @@ export const inversionistasRouter = new Elysia()
 
       const inversionista = result.inversionistas[0];
 
+      // Totales formateados (USD para inv en dolares) — los que se ven en el Excel.
       const totales = await getInvestorTotalsGlobales(
         Number(investor_id),
         undefined,
@@ -707,27 +711,98 @@ export const inversionistasRouter = new Elysia()
       );
       inversionista.subtotal = totales.totales as any;
 
+      // Totales en bruto (siempre en Quetzales). Se usan para:
+      //   • `sustituir_totales` → la tabla `liquidaciones` guarda en Q
+      //   • la compra (`ejecutarReinversionAutomatica`) → addInvestorToCredit espera Q
+      // Esto evita que para inversionistas en dólares (ej. Flujocapital 84)
+      // se pase un valor USD donde se espera Q.
+      const totalesRaw = await getInvestorTotalsGlobales(
+        Number(investor_id),
+        undefined,
+        "espejos",
+        false,
+        undefined,
+        true,
+        liquidacionId,
+        undefined,
+        true, // rawValues
+      );
+
       const logoUrl = import.meta.env.LOGO_URL || "";
       const filename = `reporte_liquidados_${liquidacionId}_${Date.now()}.xlsx`;
       const { url } = await generarYSubirExcelInversionista(inversionista as any, filename, logoUrl);
 
+      // Si `solo_reporte=true`, devolvemos solo el Excel: no se actualiza la
+      // `reporte_liquidacion_url` en la liquidación ni se ejecuta la
+      // reinversión automática, sin importar el valor de `reinvertir`.
+      if (solo_reporte) {
+        return {
+          success: true,
+          url,
+          filename,
+          liquidacion: null,
+          reinversion: null,
+          solo_reporte: true,
+        };
+      }
+
       const liquidacionActualizada = await updateLiquidacionReporteUrl(Number(liquidacionId), url);
 
-      // Si `reinvertir=true`, ejecuta la reinversión automática usando el
-      // `reinversion_total` de esa liquidación (misma lógica que el flujo
-      // post-liquidación de liquidateByInvestorId).
-      let reinversion: unknown = null;
-      if (reinvertir && liquidacionId) {
+      // Si `sustituir_totales=true`, actualiza los totales monetarios de la
+      // liquidación con los recalculados en vivo (en Q, igual que el INSERT
+      // original de `liquidateByInvestorId`).
+      let totalesActualizados: unknown = null;
+      if (sustituir_totales && liquidacionId) {
+        const pagosCount = (inversionista as any).creditos?.reduce(
+          (acc: number, c: any) => acc + (c.pagos?.length ?? 0),
+          0,
+        ) ?? 0;
         try {
-          reinversion = await reinvertirDesdeLiquidacionId(Number(liquidacionId));
-        } catch (reinvErr) {
-          console.error(
-            "[investor/reporte-liquidados] Error en reinversión automática:",
-            reinvErr,
+          totalesActualizados = await updateLiquidacionTotales(
+            Number(liquidacionId),
+            totalesRaw.totales as any,
+            pagosCount,
           );
-          reinversion = {
-            error: reinvErr instanceof Error ? reinvErr.message : String(reinvErr),
+        } catch (totErr) {
+          console.error(
+            "[investor/reporte-liquidados] Error actualizando totales liquidación:",
+            totErr,
+          );
+          totalesActualizados = {
+            error: totErr instanceof Error ? totErr.message : String(totErr),
           };
+        }
+      }
+
+      // Si `reinvertir=true`, ejecuta la reinversión automática usando el
+      // total recalculado en Quetzales (`totalesRaw`), NO el `reinversion_total`
+      // guardado en la liquidación — así la compra siempre refleja el estado
+      // actual de los pagos/abonos. Importante: usamos `totalesRaw` (Q) y no
+      // `totales` (que para inv en dólares ya viene convertido a USD).
+      let reinversion: unknown = null;
+      if (reinvertir) {
+        const monto = Number((totalesRaw.totales as any).total_reinversion ?? 0);
+        if (!monto || monto <= 0) {
+          reinversion = { skipped: true, reason: "total_reinversion recalculado = 0", monto };
+        } else {
+          try {
+            const r = await ejecutarReinversionAutomatica(Number(investor_id), monto);
+            reinversion = {
+              liquidacion_id: liquidacionId,
+              inversionista_id: Number(investor_id),
+              reinversion_total: monto,
+              fuente_monto: "excel_recalculado",
+              ...r,
+            };
+          } catch (reinvErr) {
+            console.error(
+              "[investor/reporte-liquidados] Error en reinversión automática:",
+              reinvErr,
+            );
+            reinversion = {
+              error: reinvErr instanceof Error ? reinvErr.message : String(reinvErr),
+            };
+          }
         }
       }
 
@@ -736,6 +811,7 @@ export const inversionistasRouter = new Elysia()
         url,
         filename,
         liquidacion: liquidacionActualizada || null,
+        totales_actualizados: totalesActualizados,
         reinversion,
       };
     } catch (error) {

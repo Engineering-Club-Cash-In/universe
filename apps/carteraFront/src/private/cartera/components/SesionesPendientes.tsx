@@ -466,6 +466,7 @@ function InvestorCard({
   const [editingCreditId, setEditingCreditId] = useState<number | null>(null);
   const [selectedDestinoIds, setSelectedDestinoIds] = useState<Set<number>>(new Set());
   const [idsToCancel, setIdsToCancel] = useState<number[] | null>(null);
+  const [cancelLabelOverride, setCancelLabelOverride] = useState<string>("");
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const reemplazar = useReemplazarInversionistaCredito();
   const completarEspejo = useCompletarEspejo();
@@ -600,7 +601,7 @@ function InvestorCard({
   const tieneReinversion = investor.creditosPendientes.some(
     (c) => c.status === "pendiente_reinversion"
   );
-  const cancelLabel = tieneCompraCartera ? "Cancelar Compra Cartera" : "Cancelar Sesión";
+  const cancelLabel = cancelLabelOverride || (tieneCompraCartera ? "Cancelar Compra Cartera" : "Cancelar Sesión");
   const handleCancelSesion = useCallback(() => {
     const creditoIds = idsToCancel || investor.creditosPendientes.map((c) => c.credito_id);
     if (creditoIds.length === 0) return;
@@ -752,6 +753,7 @@ function InvestorCard({
                             .filter(c => c.status === "pendiente_compra_cartera" || c.status === "pendiente_revision")
                             .map(c => c.credito_id);
                           setIdsToCancel(ids);
+                          setCancelLabelOverride("Cancelar Compra");
                           setConfirmingCancel(true);
                         }}
                         disabled={completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending}
@@ -843,6 +845,7 @@ function InvestorCard({
                             .filter(c => c.status === "pendiente_reinversion")
                             .map(c => c.credito_id);
                           setIdsToCancel(ids);
+                          setCancelLabelOverride("Cancelar Reinversión");
                           setConfirmingCancel(true);
                         }}
                         disabled={completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending}
@@ -891,11 +894,12 @@ function InvestorCard({
                     onClick={() => {
                       setConfirmingCancel(false);
                       setIdsToCancel(null);
+                      setCancelLabelOverride("");
                     }}
                     disabled={devolverPendientes.isPending}
-                    className="gap-1 text-[11px] h-7 border-gray-300"
+                    className="gap-1 text-[11px] h-7 border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
                   >
-                    <Undo2 className="w-3 h-3" aria-hidden="true" />
+                    <Undo2 className="w-3 h-3 text-gray-500" aria-hidden="true" />
                     No
                   </Button>
                   <Button

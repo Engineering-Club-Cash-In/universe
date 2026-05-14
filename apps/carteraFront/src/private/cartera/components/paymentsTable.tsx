@@ -284,6 +284,7 @@ export function PaymentsTable() {
   const [page, setPage] = usePersistedState<number>("cartera/pagos/page", 1);
   const [pageSize, setPageSize] = usePersistedState<number>("cartera/pagos/pageSize", 10);
 
+  const today = new Date();
   const hasActiveFilters =
     sifco !== "" ||
     usuarioNombre !== "" ||
@@ -293,6 +294,11 @@ export function PaymentsTable() {
     categoriaCredito !== "" ||
     formatoCredito !== "" ||
     modoFecha !== "simple" ||
+    (modoFecha === "simple" && (
+      mes !== today.getMonth() + 1 ||
+      anio !== today.getFullYear() ||
+      dia !== today.getDate()
+    )) ||
     fechaInicio !== "" ||
     fechaFin !== "" ||
     fechaAplicado !== "" ||
@@ -646,7 +652,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                     validationStatusFilter !== "",
                     categoriaCredito !== "",
                     formatoCredito !== "",
-                    modoFecha !== "simple",
+                    modoFecha !== "simple" || (modoFecha === "simple" && (mes !== today.getMonth() + 1 || anio !== today.getFullYear() || dia !== today.getDate())),
                     fechaInicio !== "" || fechaFin !== "",
                     fechaAplicado !== "",
                     fechaBoleta !== "" || fechaBoletaInicio !== "" || fechaBoletaFin !== "",

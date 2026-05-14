@@ -31,7 +31,8 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
   const [estado, setEstado] = usePersistedState<
     "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO" | "EN_CONVENIO" | "CAIDO"
   >("cartera/credits/estado", "ACTIVO");
-  const [asesorId, setAsesorId] = usePersistedState<number | undefined>("cartera/credits/asesorId", options?.initialAsesorId);
+  const [asesorIdStored, setAsesorId] = usePersistedState<number | undefined>("cartera/credits/asesorId", options?.initialAsesorId);
+  const asesorId = options?.initialAsesorId !== undefined ? options.initialAsesorId : asesorIdStored;
 
   // 🆕 Filtro vehículo propio
   const [isVehiculoPropio, setIsVehiculoPropio] = usePersistedState<boolean | undefined>("cartera/credits/isVehiculoPropio", undefined);

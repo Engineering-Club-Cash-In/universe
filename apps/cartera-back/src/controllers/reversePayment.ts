@@ -778,6 +778,9 @@ export async function reverseConvenioPayment(
     console.log("📊 Monto pendiente nuevo:", nuevoMontoPendienteBig.toString());
 
     // 5. Recalcular cuántas cuotas completas se han pagado
+    if (cuotaMensualBig.eq(0)) {
+      throw new Error("La cuota mensual del convenio es 0, no se puede recalcular");
+    }
     const cuotasCompletasPagadas = nuevoMontoPagadoBig
       .div(cuotaMensualBig)
       .round(0, Big.roundDown);

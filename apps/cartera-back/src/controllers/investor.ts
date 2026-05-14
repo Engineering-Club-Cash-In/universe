@@ -28,6 +28,7 @@ import {
   abonos_capital,
   cuentas_extra_inversionista,
   compras_credito_inversionista,
+  statusCreditoInversionistaEspejoEnum,
 } from "../database/db/schema";
 import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
 import { eq, and, or, sql, inArray, ilike, like, desc, count, SQL, isNull, isNotNull, ne } from "drizzle-orm";
@@ -8039,9 +8040,20 @@ export async function getCreditosEspejoPendientes(
     )
     .where(
       and(
-        statuses 
-          ? inArray(creditos_inversionistas_espejo.status, statuses.split(',') as any[])
-          : sql`${creditos_inversionistas_espejo.status} IN ('pendiente_reinversion', 'pendiente_compra_cartera', 'pendiente_revision')`,
+        (() => {
+          // Usamos los valores oficiales del esquema, pero excluimos 'completado' 
+          // porque este endpoint es solo para sesiones PENDIENTES.
+          const allowed = statusCreditoInversionistaEspejoEnum.enumValues.filter(
+            s => s !== "completado"
+          );
+          
+          if (!statuses) return inArray(creditos_inversionistas_espejo.status, allowed);
+          
+          const requested = statuses.split(',') as typeof allowed;
+          const filtered = requested.filter(s => allowed.includes(s));
+          
+          return inArray(creditos_inversionistas_espejo.status, filtered.length > 0 ? filtered : allowed);
+        })(),
         inversionistaId !== undefined
           ? eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId)
           : undefined,

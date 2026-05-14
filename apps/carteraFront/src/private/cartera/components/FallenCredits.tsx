@@ -44,7 +44,7 @@ export function FallenCredits() {
   const [fechaDesde, setFechaDesde] = usePersistedState<string>("cartera/fallenCredits/fechaDesde", "");
   const [fechaHasta, setFechaHasta] = usePersistedState<string>("cartera/fallenCredits/fechaHasta", "");
 
-  const hasActiveFilters = sifcoInput !== "" || fechaDesde !== "" || fechaHasta !== "";
+  const hasActiveFilters = sifcoFilter !== "" || fechaDesde !== "" || fechaHasta !== "";
 
   const { data, isLoading, isError } = useQuery<GetFallenCreditsResponse>({
     queryKey: ["fallen-credits", page, perPage, sifcoFilter, fechaDesde, fechaHasta],
@@ -151,7 +151,7 @@ export function FallenCredits() {
             >
               <X className="w-4 h-4 mr-1" /> Limpiar filtros
               <Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
-                {[sifcoInput !== "", fechaDesde !== "", fechaHasta !== ""].filter(Boolean).length}
+                {[sifcoFilter !== "", fechaDesde !== "", fechaHasta !== ""].filter(Boolean).length}
               </Badge>
             </Button>
           )}

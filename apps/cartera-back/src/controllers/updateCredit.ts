@@ -696,7 +696,9 @@ const updateInvestors = async (
     console.log(`💵 Capital Total del Crédito: Q${capitalTotal.toFixed(2)}`);
 
     // 🔥 CALCULAR PORCENTAJE DE PARTICIPACIÓN
-    const porcentajeParticipacion = montoAportado.div(capitalTotal).times(100);
+    const porcentajeParticipacion = capitalTotal.gt(0)
+      ? montoAportado.div(capitalTotal).times(100)
+      : new Big(0);
 
     console.log(`\n📐 CÁLCULO DE PARTICIPACIÓN:`);
     console.log(

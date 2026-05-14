@@ -20,5 +20,8 @@ export const COMPRA_CARTERA_RECIPIENTS = {
     "diego.l@clubcashin.com",
     "guillermo.v@sepresta.com",
     "pablo.z@clubcashin.com",
+    "jalvarado@clubcashin.com",
+    "daniel.r@clubcashin.com",
+    "jalvarez@clubcashin.com"
   ],
 };

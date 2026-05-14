@@ -56,8 +56,8 @@ export function PagosPorVencimiento() {
   const [errorMessage, setErrorMessage] = useState("");
 
   const hasActiveFilters =
-    sifcoInput !== "" ||
-    nombreInput !== "" ||
+    sifcoFilter !== "" ||
+    nombreFilter !== "" ||
     selectedAdvisors.length > 0 ||
     rangoMoraFilter !== "" ||
     tipoFecha !== "vencimiento";
@@ -331,7 +331,7 @@ export function PagosPorVencimiento() {
             >
               <X className="w-4 h-4 mr-1" /> Limpiar filtros
               <Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
-                {[sifcoInput !== "", nombreInput !== "", selectedAdvisors.length > 0, rangoMoraFilter !== "", tipoFecha !== "vencimiento"].filter(Boolean).length}
+                {[sifcoFilter !== "", nombreFilter !== "", selectedAdvisors.length > 0, rangoMoraFilter !== "", tipoFecha !== "vencimiento"].filter(Boolean).length}
               </Badge>
             </Button>
           )}

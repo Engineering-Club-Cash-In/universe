@@ -1,5 +1,4 @@
 /* eslint-disable @typescript-eslint/no-unused-expressions */
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { usePersistedState } from "./usePersistedState";
 import { getCreditosPaginados, type GetCreditosResponse } from "../services/services";
@@ -32,8 +31,7 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
   const [estado, setEstado] = usePersistedState<
     "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO" | "EN_CONVENIO" | "CAIDO"
   >("cartera/credits/estado", "ACTIVO");
-  // Asesor no se persiste (depende del rol del usuario autenticado)
-  const [asesorId, setAsesorId] = useState<number | undefined>(options?.initialAsesorId);
+  const [asesorId, setAsesorId] = usePersistedState<number | undefined>("cartera/credits/asesorId", options?.initialAsesorId);
 
   // 🆕 Filtro vehículo propio
   const [isVehiculoPropio, setIsVehiculoPropio] = usePersistedState<boolean | undefined>("cartera/credits/isVehiculoPropio", undefined);
@@ -148,7 +146,8 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
     nombreUsuarioInput !== "" ||
     estado !== "ACTIVO" ||
     isVehiculoPropio !== undefined ||
-    inversionistaIds.length > 0;
+    inversionistaIds.length > 0 ||
+    asesorId !== options?.initialAsesorId;
 
   const estados = [
     { value: "ACTIVO", label: "Activo", color: "bg-green-200 text-green-800" },

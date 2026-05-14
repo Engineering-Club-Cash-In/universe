@@ -28,6 +28,7 @@ import {
   abonos_capital,
   cuentas_extra_inversionista,
   compras_credito_inversionista,
+  statusCreditoInversionistaEspejoEnum,
 } from "../database/db/schema";
 import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
 import { eq, and, or, sql, inArray, ilike, like, desc, count, SQL, isNull, isNotNull, ne } from "drizzle-orm";
@@ -7995,7 +7996,25 @@ export async function getCreditosEspejoPendientes(
   pageSize: number = 10,
   search?: string,
   inversionistaId?: number,
+  statuses?: string,
 ) {
+  // 0. Validación de estados (Early Return)
+  const allowed = statusCreditoInversionistaEspejoEnum.enumValues.filter(
+    s => s !== "completado"
+  );
+
+  let targetStatuses = allowed;
+
+  if (statuses) {
+    const requested = statuses.split(',') as any[];
+    targetStatuses = requested.filter(s => allowed.includes(s));
+
+    // Si el usuario filtró pero nada es válido, retornamos vacío de inmediato
+    if (targetStatuses.length === 0) {
+      return { data: [], total: 0, page, pageSize };
+    }
+  }
+
   // 1. Créditos espejo pendientes con info del inversionista + crédito + usuario
   const pendientes = await db
     .select({
@@ -8038,9 +8057,12 @@ export async function getCreditosEspejoPendientes(
     )
     .where(
       and(
-        sql`${creditos_inversionistas_espejo.status} IN ('pendiente_reinversion', 'pendiente_compra_cartera', 'pendiente_revision')`,
+        inArray(creditos_inversionistas_espejo.status, targetStatuses as any[]),
         inversionistaId !== undefined
           ? eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId)
+          : undefined,
+        search
+          ? ilike(inversionistas.nombre, `%${search}%`)
           : undefined,
       ),
     );

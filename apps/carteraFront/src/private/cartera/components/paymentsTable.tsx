@@ -636,6 +636,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                   setFormatoCredito("");
                   setSoloAplicados(undefined);
                   setInversionistaId(undefined);
+                  setValidationStatusFilter("");
                   setQueryInv("");
                   setPage(1);
                 }}

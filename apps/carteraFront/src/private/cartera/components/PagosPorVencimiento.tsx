@@ -119,6 +119,7 @@ export function PagosPorVencimiento() {
     setSelectedAdvisors([]);
     setRangoMoraInput("");
     setRangoMoraFilter("");
+    setTipoFecha("vencimiento");
     setPage(1);
   };
 

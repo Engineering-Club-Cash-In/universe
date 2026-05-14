@@ -3720,10 +3720,18 @@ export async function getCreditosEspejoPendientesService(params: {
   page: number;
   pageSize: number;
   search?: string;
+  statuses?: string;
 }): Promise<SesionesPendientesPaginatedResponse> {
   const res = await api.get<SesionesPendientesPaginatedResponse>(
     `${API_URL}/creditos-espejo-pendientes`,
-    { params: { page: params.page, pageSize: params.pageSize, search: params.search || undefined } }
+    { 
+      params: { 
+        page: params.page, 
+        pageSize: params.pageSize, 
+        search: params.search || undefined,
+        statuses: params.statuses || undefined
+      } 
+    }
   );
   return res.data;
 }

@@ -20,17 +20,18 @@ import {
 
 export const sesionesPendientesKeys = {
   all: ["sesiones-pendientes"] as const,
-  list: (page: number, pageSize: number, search: string) => [...sesionesPendientesKeys.all, "list", page, pageSize, search] as const,
+  list: (page: number, pageSize: number, search: string, statuses?: string) => 
+    [...sesionesPendientesKeys.all, "list", page, pageSize, search, statuses] as const,
 };
 
 export const creditCandidatesKeys = {
   all: ["credit-candidates"] as const,
 };
 
-export function useSesionesPendientes(page: number, pageSize: number, search: string) {
+export function useSesionesPendientes(page: number, pageSize: number, search: string, statuses?: string) {
   return useQuery<SesionesPendientesPaginatedResponse>({
-    queryKey: sesionesPendientesKeys.list(page, pageSize, search),
-    queryFn: () => getCreditosEspejoPendientesService({ page, pageSize, search }),
+    queryKey: sesionesPendientesKeys.list(page, pageSize, search, statuses),
+    queryFn: () => getCreditosEspejoPendientesService({ page, pageSize, search, statuses }),
     staleTime: 1000 * 60 * 2,
     gcTime: 1000 * 60 * 5,
     refetchOnWindowFocus: false,

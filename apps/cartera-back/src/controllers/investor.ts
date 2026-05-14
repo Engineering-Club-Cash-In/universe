@@ -7995,6 +7995,7 @@ export async function getCreditosEspejoPendientes(
   pageSize: number = 10,
   search?: string,
   inversionistaId?: number,
+  statuses?: string,
 ) {
   // 1. Créditos espejo pendientes con info del inversionista + crédito + usuario
   const pendientes = await db
@@ -8038,9 +8039,14 @@ export async function getCreditosEspejoPendientes(
     )
     .where(
       and(
-        sql`${creditos_inversionistas_espejo.status} IN ('pendiente_reinversion', 'pendiente_compra_cartera', 'pendiente_revision')`,
+        statuses 
+          ? inArray(creditos_inversionistas_espejo.status, statuses.split(',') as any[])
+          : sql`${creditos_inversionistas_espejo.status} IN ('pendiente_reinversion', 'pendiente_compra_cartera', 'pendiente_revision')`,
         inversionistaId !== undefined
           ? eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId)
+          : undefined,
+        search
+          ? ilike(inversionistas.nombre, `%${search}%`)
           : undefined,
       ),
     );

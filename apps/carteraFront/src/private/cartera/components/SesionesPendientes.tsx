@@ -87,7 +87,18 @@ export function SesionesPendientes() {
     "pendiente_compra_cartera",
     "pendiente_revision"
   ]);
-  const { data: response, isLoading, isError, error, refetch, isFetching } = useSesionesPendientes(page, PAGE_SIZE, debouncedSearch);
+
+  const statusesParam = useMemo(() => {
+    if (selectedStatuses.length === 3) return undefined;
+    return selectedStatuses.join(",");
+  }, [selectedStatuses]);
+
+  const { data: response, isLoading, isError, error, refetch, isFetching } = useSesionesPendientes(
+    page, 
+    PAGE_SIZE, 
+    debouncedSearch,
+    statusesParam
+  );
 
   // Debounce search to avoid firing on every keystroke
   useEffect(() => {
@@ -97,21 +108,39 @@ export function SesionesPendientes() {
 
   const investors = useMemo(() => response?.data ?? [], [response]);
   
-  // Filtrar inversionistas según estados seleccionados
-  const filteredInvestors = useMemo(() => {
-    if (selectedStatuses.length === 3) return investors;
-    return investors.map(inv => ({
-      ...inv,
-      creditosPendientes: inv.creditosPendientes.filter(c => selectedStatuses.includes(c.status))
-    })).filter(inv => inv.creditosPendientes.length > 0);
-  }, [investors, selectedStatuses]);
+  // Lógica de selección de filtros
+  const toggleStatus = (status: string | "all") => {
+    setPage(1);
+    if (status === "all") {
+      setSelectedStatuses(["pendiente_reinversion", "pendiente_compra_cartera", "pendiente_revision"]);
+      return;
+    }
+    
+    setSelectedStatuses(prev => {
+      // Si estaba en "Todos", al seleccionar uno individual, solo queda ese
+      if (prev.length === 3) return [status];
+      
+      const isSelected = prev.includes(status);
+      if (isSelected) {
+        const next = prev.filter(s => s !== status);
+        // Si no queda ninguno, volver a "Todos"
+        return next.length === 0 ? ["pendiente_reinversion", "pendiente_compra_cartera", "pendiente_revision"] : next;
+      } else {
+        const next = [...prev, status];
+        // Si seleccioné todos manualmente, es "Todos"
+        return next.length === 3 ? ["pendiente_reinversion", "pendiente_compra_cartera", "pendiente_revision"] : next;
+      }
+    });
+  };
+
+  const isAllSelected = selectedStatuses.length === 3;
 
   const total = response?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const totalCreditos = useMemo(
-    () => filteredInvestors.reduce((a, inv) => a + inv.creditosPendientes.length, 0),
-    [filteredInvestors]
+    () => investors.reduce((a, inv) => a + inv.creditosPendientes.length, 0),
+    [investors]
   );
 
   const handleSearchChange = useCallback(
@@ -189,9 +218,9 @@ export function SesionesPendientes() {
         {/* Status Filters (Chips) */}
         <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
           <button
-            onClick={() => setSelectedStatuses(["pendiente_reinversion", "pendiente_compra_cartera", "pendiente_revision"])}
+            onClick={() => toggleStatus("all")}
             className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all border ${
-              selectedStatuses.length === 3 
+              isAllSelected 
                 ? "bg-gray-900 text-white border-gray-900 shadow-sm" 
                 : "bg-white text-gray-500 border-gray-200 hover:border-gray-300"
             }`}
@@ -200,68 +229,53 @@ export function SesionesPendientes() {
           </button>
           
           <button
-            onClick={() => {
-              const status = "pendiente_compra_cartera";
-              setSelectedStatuses(prev => 
-                prev.includes(status) ? prev.filter(s => s !== status) : [...prev, status]
-              );
-            }}
+            onClick={() => toggleStatus("pendiente_compra_cartera")}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all border ${
-              selectedStatuses.includes("pendiente_compra_cartera")
+              !isAllSelected && selectedStatuses.includes("pendiente_compra_cartera")
                 ? "bg-amber-100 text-amber-800 border-amber-300 shadow-sm"
                 : "bg-white text-gray-400 border-gray-100 hover:border-gray-200"
             }`}
           >
-            <div className={`w-1.5 h-1.5 rounded-full ${selectedStatuses.includes("pendiente_compra_cartera") ? "bg-amber-500" : "bg-gray-300"}`} />
+            <div className={`w-1.5 h-1.5 rounded-full ${(!isAllSelected && selectedStatuses.includes("pendiente_compra_cartera")) ? "bg-amber-500" : "bg-gray-300"}`} />
             Compra Cartera
           </button>
 
           <button
-            onClick={() => {
-              const status = "pendiente_reinversion";
-              setSelectedStatuses(prev => 
-                prev.includes(status) ? prev.filter(s => s !== status) : [...prev, status]
-              );
-            }}
+            onClick={() => toggleStatus("pendiente_reinversion")}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all border ${
-              selectedStatuses.includes("pendiente_reinversion")
+              !isAllSelected && selectedStatuses.includes("pendiente_reinversion")
                 ? "bg-purple-100 text-purple-800 border-purple-300 shadow-sm"
                 : "bg-white text-gray-400 border-gray-100 hover:border-gray-200"
             }`}
           >
-            <div className={`w-1.5 h-1.5 rounded-full ${selectedStatuses.includes("pendiente_reinversion") ? "bg-purple-500" : "bg-gray-300"}`} />
+            <div className={`w-1.5 h-1.5 rounded-full ${(!isAllSelected && selectedStatuses.includes("pendiente_reinversion")) ? "bg-purple-500" : "bg-gray-300"}`} />
             Reinversiones
           </button>
 
           <button
-            onClick={() => {
-              const status = "pendiente_revision";
-              setSelectedStatuses(prev => 
-                prev.includes(status) ? prev.filter(s => s !== status) : [...prev, status]
-              );
-            }}
+            onClick={() => toggleStatus("pendiente_revision")}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all border ${
-              selectedStatuses.includes("pendiente_revision")
+              !isAllSelected && selectedStatuses.includes("pendiente_revision")
                 ? "bg-emerald-100 text-emerald-800 border-emerald-300 shadow-sm"
                 : "bg-white text-gray-400 border-gray-100 hover:border-gray-200"
             }`}
           >
-            <div className={`w-1.5 h-1.5 rounded-full ${selectedStatuses.includes("pendiente_revision") ? "bg-emerald-500" : "bg-gray-300"}`} />
+            <div className={`w-1.5 h-1.5 rounded-full ${(!isAllSelected && selectedStatuses.includes("pendiente_revision")) ? "bg-emerald-500" : "bg-gray-300"}`} />
             Por Autorizar
           </button>
         </div>
 
         {/* Cards */}
-        {filteredInvestors.length === 0 ? (
+        {investors.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-gray-400 gap-2">
             <CreditCard className="w-8 h-8 text-gray-300" aria-hidden="true" />
             <p className="text-xs">
-              {search || selectedStatuses.length < 3 ? "Sin resultados para los filtros aplicados" : "No hay sesiones pendientes"}
+              {search || !isAllSelected ? "Sin resultados para los filtros aplicados" : "No hay sesiones pendientes"}
             </p>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-6">
-            {filteredInvestors.map((investor) => (
+            {investors.map((investor) => (
               <InvestorCard 
                 key={investor.inversionista_id} 
                 investor={investor} 

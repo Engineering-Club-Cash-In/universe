@@ -272,10 +272,19 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
           if (b.inversionista_id === CUBE_INVESTMENT_ID) return 1;
           return 0;
         })
-        .map((r) => ({
-          inversionista_nombre: r.inversionista_nombre,
-          capital: r.monto.toFixed(2),
-        })),
+        .map((r) => {
+          // Para el inversionista nuevo de la cesión mostramos el delta
+          // (monto que entró en ESTA operación, desde compras_credito_inversionista).
+          // Para inversionistas que no participaron en la cesión (ej. CUBE que
+          // ya estaba) caemos al acumulado del espejo/padre.
+          const montoCesion =
+            montoNuevoPorPar.get(`${c.credito_id}-${r.inversionista_id}`) ??
+            r.monto;
+          return {
+            inversionista_nombre: r.inversionista_nombre,
+            capital: montoCesion.toFixed(2),
+          };
+        }),
     }));
 
     // ── 4.5.1 Apagar bandera_reinversion de los créditos aceptados ──

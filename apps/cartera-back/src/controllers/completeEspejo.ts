@@ -69,41 +69,123 @@ export const completeEspejo = async ({ body, set, request }: any) => {
           : eq(creditos_inversionistas_espejo.credito_id, credito_id);
 
         // Capturar status PREVIOS antes de hacer el update.
-        // Lo usamos abajo para decidir el asunto/encabezado del correo
-        // (reinversion vs compra de cartera).
+        // Lo usamos abajo para:
+        //   1) decidir la fecha_inicio_participacion por inversionista
+        //      (pendiente_reinversion → hoy - 2 meses, resto → hoy)
+        //   2) decidir el asunto/encabezado del correo
         const previos = await tx
-          .select({ status: creditos_inversionistas_espejo.status })
+          .select({
+            inversionista_id: creditos_inversionistas_espejo.inversionista_id,
+            status: creditos_inversionistas_espejo.status,
+          })
           .from(creditos_inversionistas_espejo)
           .where(whereConditions);
 
-        const updated = await tx
-          .update(creditos_inversionistas_espejo)
-          .set({
-            status: "completado",
-            fecha_inicio_participacion: new Date().toISOString().split('T')[0],
-            updated_at: new Date(),
-          })
-          .where(whereConditions)
-          .returning({
-            id: creditos_inversionistas_espejo.id,
-            credito_id: creditos_inversionistas_espejo.credito_id,
-            inversionista_id: creditos_inversionistas_espejo.inversionista_id,
-            status: creditos_inversionistas_espejo.status,
-          });
+        // ── Calcular las dos fechas posibles ──
+        // Para reinversión, la participación arranca 2 meses atrás (la operación
+        // se cierra hoy pero refleja capital que ya venía produciendo).
+        const hoy = new Date();
+        const fechaHoy = hoy.toISOString().split("T")[0];
+        const fechaDosMesesAtras = new Date(
+          hoy.getFullYear(),
+          hoy.getMonth() - 2,
+          hoy.getDate(),
+        )
+          .toISOString()
+          .split("T")[0];
 
-        const whereConditionsPadre = inversionista_id
-          ? and(
-              eq(creditos_inversionistas.credito_id, credito_id),
-              eq(creditos_inversionistas.inversionista_id, inversionista_id),
-            )
-          : eq(creditos_inversionistas.credito_id, credito_id);
+        // ── Particionar inversionistas por status previo ──
+        const idsReinversion = previos
+          .filter((p) => p.status === "pendiente_reinversion")
+          .map((p) => p.inversionista_id);
+        const idsOtros = previos
+          .filter((p) => p.status !== "pendiente_reinversion")
+          .map((p) => p.inversionista_id);
 
-        await tx
-          .update(creditos_inversionistas)
-          .set({
-            fecha_inicio_participacion: new Date().toISOString().split('T')[0],
-          })
-          .where(whereConditionsPadre);
+        // ── Update espejo: split por status previo, fecha distinta cada uno ──
+        const updatedReinversion =
+          idsReinversion.length > 0
+            ? await tx
+                .update(creditos_inversionistas_espejo)
+                .set({
+                  status: "completado",
+                  fecha_inicio_participacion: fechaDosMesesAtras,
+                  updated_at: new Date(),
+                })
+                .where(
+                  and(
+                    eq(creditos_inversionistas_espejo.credito_id, credito_id),
+                    inArray(
+                      creditos_inversionistas_espejo.inversionista_id,
+                      idsReinversion,
+                    ),
+                  ),
+                )
+                .returning({
+                  id: creditos_inversionistas_espejo.id,
+                  credito_id: creditos_inversionistas_espejo.credito_id,
+                  inversionista_id:
+                    creditos_inversionistas_espejo.inversionista_id,
+                  status: creditos_inversionistas_espejo.status,
+                })
+            : [];
+
+        const updatedOtros =
+          idsOtros.length > 0
+            ? await tx
+                .update(creditos_inversionistas_espejo)
+                .set({
+                  status: "completado",
+                  fecha_inicio_participacion: fechaHoy,
+                  updated_at: new Date(),
+                })
+                .where(
+                  and(
+                    eq(creditos_inversionistas_espejo.credito_id, credito_id),
+                    inArray(
+                      creditos_inversionistas_espejo.inversionista_id,
+                      idsOtros,
+                    ),
+                  ),
+                )
+                .returning({
+                  id: creditos_inversionistas_espejo.id,
+                  credito_id: creditos_inversionistas_espejo.credito_id,
+                  inversionista_id:
+                    creditos_inversionistas_espejo.inversionista_id,
+                  status: creditos_inversionistas_espejo.status,
+                })
+            : [];
+
+        const updated = [...updatedReinversion, ...updatedOtros];
+
+        // ── Update padre: misma partición para mantener consistencia ──
+        if (idsReinversion.length > 0) {
+          await tx
+            .update(creditos_inversionistas)
+            .set({ fecha_inicio_participacion: fechaDosMesesAtras })
+            .where(
+              and(
+                eq(creditos_inversionistas.credito_id, credito_id),
+                inArray(
+                  creditos_inversionistas.inversionista_id,
+                  idsReinversion,
+                ),
+              ),
+            );
+        }
+
+        if (idsOtros.length > 0) {
+          await tx
+            .update(creditos_inversionistas)
+            .set({ fecha_inicio_participacion: fechaHoy })
+            .where(
+              and(
+                eq(creditos_inversionistas.credito_id, credito_id),
+                inArray(creditos_inversionistas.inversionista_id, idsOtros),
+              ),
+            );
+        }
 
         // ────────────────────────────────────────────────────────────────
         // Cerrar también el registro de compras_credito_inversionista.

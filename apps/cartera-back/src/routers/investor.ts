@@ -22,8 +22,12 @@ import {
   deletePagosEspejoNoLiquidados,
   updateSaldoReinversion,
   updateLiquidacionReporteUrl,
+  updateLiquidacionTotales,
   getLiquidacionesPorFecha,
   revertirLiquidacion,
+  revertirComprasUltimaLiquidacion,
+  ejecutarReinversionAutomatica,
+  reinvertirDesdeLiquidacionId,
   fixCubeInvestment,
   reconcileMirrorPercentages,
   auditMirrorPercentages,
@@ -656,7 +660,13 @@ export const inversionistasRouter = new Elysia()
     }
   })
   .post("/investor/reporte-liquidados", async ({ body, set }) => {
-    const { investor_id, liquidacion_id } = body as { investor_id?: number, liquidacion_id?: number };
+    const { investor_id, liquidacion_id, reinvertir, solo_reporte, sustituir_totales } = body as {
+      investor_id?: number;
+      liquidacion_id?: number;
+      reinvertir?: boolean;
+      solo_reporte?: boolean;
+      sustituir_totales?: boolean;
+    };
 
     if (!investor_id || isNaN(Number(investor_id))) {
       set.status = 400;
@@ -688,6 +698,7 @@ export const inversionistasRouter = new Elysia()
 
       const inversionista = result.inversionistas[0];
 
+      // Totales formateados (USD para inv en dolares) — los que se ven en el Excel.
       const totales = await getInvestorTotalsGlobales(
         Number(investor_id),
         undefined,
@@ -700,17 +711,108 @@ export const inversionistasRouter = new Elysia()
       );
       inversionista.subtotal = totales.totales as any;
 
+      // Totales en bruto (siempre en Quetzales). Se usan para:
+      //   • `sustituir_totales` → la tabla `liquidaciones` guarda en Q
+      //   • la compra (`ejecutarReinversionAutomatica`) → addInvestorToCredit espera Q
+      // Esto evita que para inversionistas en dólares (ej. Flujocapital 84)
+      // se pase un valor USD donde se espera Q.
+      const totalesRaw = await getInvestorTotalsGlobales(
+        Number(investor_id),
+        undefined,
+        "espejos",
+        false,
+        undefined,
+        true,
+        liquidacionId,
+        undefined,
+        true, // rawValues
+      );
+
       const logoUrl = import.meta.env.LOGO_URL || "";
       const filename = `reporte_liquidados_${liquidacionId}_${Date.now()}.xlsx`;
       const { url } = await generarYSubirExcelInversionista(inversionista as any, filename, logoUrl);
 
-      // const liquidacionActualizada = await updateLiquidacionReporteUrl(Number(liquidacionId), url);
+      // Si `solo_reporte=true`, devolvemos solo el Excel: no se actualiza la
+      // `reporte_liquidacion_url` en la liquidación ni se ejecuta la
+      // reinversión automática, sin importar el valor de `reinvertir`.
+      if (solo_reporte) {
+        return {
+          success: true,
+          url,
+          filename,
+          liquidacion: null,
+          reinversion: null,
+          solo_reporte: true,
+        };
+      }
+
+      const liquidacionActualizada = await updateLiquidacionReporteUrl(Number(liquidacionId), url);
+
+      // Si `sustituir_totales=true`, actualiza los totales monetarios de la
+      // liquidación con los recalculados en vivo (en Q, igual que el INSERT
+      // original de `liquidateByInvestorId`).
+      let totalesActualizados: unknown = null;
+      if (sustituir_totales && liquidacionId) {
+        const pagosCount = (inversionista as any).creditos?.reduce(
+          (acc: number, c: any) => acc + (c.pagos?.length ?? 0),
+          0,
+        ) ?? 0;
+        try {
+          totalesActualizados = await updateLiquidacionTotales(
+            Number(liquidacionId),
+            totalesRaw.totales as any,
+            pagosCount,
+          );
+        } catch (totErr) {
+          console.error(
+            "[investor/reporte-liquidados] Error actualizando totales liquidación:",
+            totErr,
+          );
+          totalesActualizados = {
+            error: totErr instanceof Error ? totErr.message : String(totErr),
+          };
+        }
+      }
+
+      // Si `reinvertir=true`, ejecuta la reinversión automática usando el
+      // total recalculado en Quetzales (`totalesRaw`), NO el `reinversion_total`
+      // guardado en la liquidación — así la compra siempre refleja el estado
+      // actual de los pagos/abonos. Importante: usamos `totalesRaw` (Q) y no
+      // `totales` (que para inv en dólares ya viene convertido a USD).
+      let reinversion: unknown = null;
+      if (reinvertir) {
+        const monto = Number((totalesRaw.totales as any).total_reinversion ?? 0);
+        if (!monto || monto <= 0) {
+          reinversion = { skipped: true, reason: "total_reinversion recalculado = 0", monto };
+        } else {
+          try {
+            const r = await ejecutarReinversionAutomatica(Number(investor_id), monto);
+            reinversion = {
+              liquidacion_id: liquidacionId,
+              inversionista_id: Number(investor_id),
+              reinversion_total: monto,
+              fuente_monto: "excel_recalculado",
+              ...r,
+            };
+          } catch (reinvErr) {
+            console.error(
+              "[investor/reporte-liquidados] Error en reinversión automática:",
+              reinvErr,
+            );
+            reinversion = {
+              error: reinvErr instanceof Error ? reinvErr.message : String(reinvErr),
+            };
+          }
+        }
+      }
 
       return {
         success: true,
         url,
         filename,
-        liquidacion:  null,
+        liquidacion: liquidacionActualizada || null,
+        totales_actualizados: totalesActualizados,
+        reinversion,
       };
     } catch (error) {
       console.error("[investor/pdf-liquidados] Error:", error);
@@ -746,6 +848,50 @@ export const inversionistasRouter = new Elysia()
       };
     }
   })
+  // ──────────────────────────────────────────────
+  // Revierte las compras (tipo_operacion='reinversion') generadas por la
+  // última liquidación de cada inversionista listado. Devuelve el monto a
+  // CUBE en padre + espejo del mismo crédito, recalcula porcentajes y
+  // cuotas, marca las compras como 'completado' y escribe un archivo de
+  // log con los compra_ids afectados para borrarlos después si se decide.
+  // Body: { "inversionista_ids": number[] }
+  // ──────────────────────────────────────────────
+  .post(
+    "/investor/revertir-compras-ultima-liquidacion",
+    async ({ body, set }) => {
+      const { inversionista_ids } = body as {
+        inversionista_ids?: unknown;
+      };
+
+      if (
+        !Array.isArray(inversionista_ids) ||
+        inversionista_ids.length === 0 ||
+        !inversionista_ids.every((id) => Number.isFinite(Number(id)))
+      ) {
+        set.status = 400;
+        return {
+          message:
+            "El parámetro 'inversionista_ids' es obligatorio y debe ser un array de números no vacío.",
+        };
+      }
+
+      try {
+        const ids = inversionista_ids.map((id) => Number(id));
+        const result = await revertirComprasUltimaLiquidacion(ids);
+        return result;
+      } catch (error) {
+        console.error(
+          "[investor/revertir-compras-ultima-liquidacion] Error:",
+          error,
+        );
+        set.status = 500;
+        return {
+          message: "Error al revertir las compras de la última liquidación",
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+  )
   .get(
     "/resumen-transferencias",
     async ({ query, set }) => {
@@ -1581,11 +1727,14 @@ export const inversionistasRouter = new Elysia()
         const inversionistaId = query.inversionista_id
           ? Number(query.inversionista_id)
           : undefined;
+        const statuses = query.statuses || undefined;
+
         const result = await getCreditosEspejoPendientes(
           page,
           pageSize,
           search,
           inversionistaId,
+          statuses
         );
         return result;
       } catch (error: any) {
@@ -1600,13 +1749,14 @@ export const inversionistasRouter = new Elysia()
         pageSize: t.Optional(t.String()),
         search: t.Optional(t.String()),
         inversionista_id: t.Optional(t.String()),
+        statuses: t.Optional(t.String()),
       }),
       detail: {
         summary: "Créditos espejo pendientes agrupados por inversionista (paginado)",
         description:
           "Devuelve los créditos espejo con status pendiente_reinversion, pendiente_compra_cartera " +
           "o pendiente_revision, agrupados por inversionista. Soporta paginación (page, pageSize), " +
-          "búsqueda por nombre (search) y filtro por inversionista_id.",
+          "búsqueda por nombre (search), filtro por inversionista_id y filtro por statuses (coma separada).",
         tags: ["Inversionistas", "Espejos"],
       },
     }

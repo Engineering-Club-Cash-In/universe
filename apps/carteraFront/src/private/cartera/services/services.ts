@@ -3661,7 +3661,7 @@ export interface CreditoEspejoPendiente {
   iva_cash_in: string;
   fecha_creacion: string;
   fecha_inicio_participacion: string;
-  status: "pendiente_reinversion" | "pendiente_compra_cartera";
+  status: "pendiente_reinversion" | "pendiente_compra_cartera" | "pendiente_revision" | string;
   tipo_reinversion: string | null;
   numero_credito_sifco: string;
   nombre_usuario: string;
@@ -3720,10 +3720,18 @@ export async function getCreditosEspejoPendientesService(params: {
   page: number;
   pageSize: number;
   search?: string;
+  statuses?: string;
 }): Promise<SesionesPendientesPaginatedResponse> {
   const res = await api.get<SesionesPendientesPaginatedResponse>(
     `${API_URL}/creditos-espejo-pendientes`,
-    { params: { page: params.page, pageSize: params.pageSize, search: params.search || undefined } }
+    { 
+      params: { 
+        page: params.page, 
+        pageSize: params.pageSize, 
+        search: params.search || undefined,
+        statuses: params.statuses || undefined
+      } 
+    }
   );
   return res.data;
 }

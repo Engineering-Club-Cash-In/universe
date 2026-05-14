@@ -390,7 +390,7 @@ const creditUpdateSchema = z.object({
     .array(
       z.object({
         inversionista_id: z.number().int().positive(),
-        monto_aportado: z.number().positive(),
+        monto_aportado: z.number().nonnegative(),
         porcentaje_cash_in: z.number().min(0).max(100),
         porcentaje_inversion: z.number().min(0).max(100),
         fecha_inicio_participacion: z.string().optional(),
@@ -696,7 +696,9 @@ const updateInvestors = async (
     console.log(`💵 Capital Total del Crédito: Q${capitalTotal.toFixed(2)}`);
 
     // 🔥 CALCULAR PORCENTAJE DE PARTICIPACIÓN
-    const porcentajeParticipacion = montoAportado.div(capitalTotal).times(100);
+    const porcentajeParticipacion = capitalTotal.gt(0)
+      ? montoAportado.div(capitalTotal).times(100)
+      : new Big(0);
 
     console.log(`\n📐 CÁLCULO DE PARTICIPACIÓN:`);
     console.log(

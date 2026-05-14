@@ -82,6 +82,11 @@ export function SesionesPendientes() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [selectedStatuses, setSelectedStatuses] = useState<string[]>([
+    "pendiente_reinversion",
+    "pendiente_compra_cartera",
+    "pendiente_revision"
+  ]);
   const { data: response, isLoading, isError, error, refetch, isFetching } = useSesionesPendientes(page, PAGE_SIZE, debouncedSearch);
 
   // Debounce search to avoid firing on every keystroke
@@ -91,12 +96,22 @@ export function SesionesPendientes() {
   }, [search]);
 
   const investors = useMemo(() => response?.data ?? [], [response]);
+  
+  // Filtrar inversionistas según estados seleccionados
+  const filteredInvestors = useMemo(() => {
+    if (selectedStatuses.length === 3) return investors;
+    return investors.map(inv => ({
+      ...inv,
+      creditosPendientes: inv.creditosPendientes.filter(c => selectedStatuses.includes(c.status))
+    })).filter(inv => inv.creditosPendientes.length > 0);
+  }, [investors, selectedStatuses]);
+
   const total = response?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const totalCreditos = useMemo(
-    () => investors.reduce((a, inv) => a + inv.creditosPendientes.length, 0),
-    [investors]
+    () => filteredInvestors.reduce((a, inv) => a + inv.creditosPendientes.length, 0),
+    [filteredInvestors]
   );
 
   const handleSearchChange = useCallback(
@@ -171,18 +186,87 @@ export function SesionesPendientes() {
           </span>
         </div>
 
+        {/* Status Filters (Chips) */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+          <button
+            onClick={() => setSelectedStatuses(["pendiente_reinversion", "pendiente_compra_cartera", "pendiente_revision"])}
+            className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all border ${
+              selectedStatuses.length === 3 
+                ? "bg-gray-900 text-white border-gray-900 shadow-sm" 
+                : "bg-white text-gray-500 border-gray-200 hover:border-gray-300"
+            }`}
+          >
+            Todos
+          </button>
+          
+          <button
+            onClick={() => {
+              const status = "pendiente_compra_cartera";
+              setSelectedStatuses(prev => 
+                prev.includes(status) ? prev.filter(s => s !== status) : [...prev, status]
+              );
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all border ${
+              selectedStatuses.includes("pendiente_compra_cartera")
+                ? "bg-amber-100 text-amber-800 border-amber-300 shadow-sm"
+                : "bg-white text-gray-400 border-gray-100 hover:border-gray-200"
+            }`}
+          >
+            <div className={`w-1.5 h-1.5 rounded-full ${selectedStatuses.includes("pendiente_compra_cartera") ? "bg-amber-500" : "bg-gray-300"}`} />
+            Compra Cartera
+          </button>
+
+          <button
+            onClick={() => {
+              const status = "pendiente_reinversion";
+              setSelectedStatuses(prev => 
+                prev.includes(status) ? prev.filter(s => s !== status) : [...prev, status]
+              );
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all border ${
+              selectedStatuses.includes("pendiente_reinversion")
+                ? "bg-purple-100 text-purple-800 border-purple-300 shadow-sm"
+                : "bg-white text-gray-400 border-gray-100 hover:border-gray-200"
+            }`}
+          >
+            <div className={`w-1.5 h-1.5 rounded-full ${selectedStatuses.includes("pendiente_reinversion") ? "bg-purple-500" : "bg-gray-300"}`} />
+            Reinversiones
+          </button>
+
+          <button
+            onClick={() => {
+              const status = "pendiente_revision";
+              setSelectedStatuses(prev => 
+                prev.includes(status) ? prev.filter(s => s !== status) : [...prev, status]
+              );
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all border ${
+              selectedStatuses.includes("pendiente_revision")
+                ? "bg-emerald-100 text-emerald-800 border-emerald-300 shadow-sm"
+                : "bg-white text-gray-400 border-gray-100 hover:border-gray-200"
+            }`}
+          >
+            <div className={`w-1.5 h-1.5 rounded-full ${selectedStatuses.includes("pendiente_revision") ? "bg-emerald-500" : "bg-gray-300"}`} />
+            Por Autorizar
+          </button>
+        </div>
+
         {/* Cards */}
-        {investors.length === 0 ? (
+        {filteredInvestors.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-gray-400 gap-2">
             <CreditCard className="w-8 h-8 text-gray-300" aria-hidden="true" />
             <p className="text-xs">
-              {search ? "Sin resultados para tu búsqueda" : "No hay sesiones pendientes"}
+              {search || selectedStatuses.length < 3 ? "Sin resultados para los filtros aplicados" : "No hay sesiones pendientes"}
             </p>
           </div>
         ) : (
-          <div className="space-y-4">
-            {investors.map((inv) => (
-              <InvestorCard key={inv.inversionista_id} investor={inv} />
+          <div className="grid grid-cols-1 gap-6">
+            {filteredInvestors.map((investor) => (
+              <InvestorCard 
+                key={investor.inversionista_id} 
+                investor={investor} 
+                recalculateSession={refetch}
+              />
             ))}
           </div>
         )}
@@ -459,8 +543,10 @@ function buildDestinos(
 // ============================================
 function InvestorCard({
   investor,
+  recalculateSession
 }: {
   investor: InversionistaSesionPendiente;
+  recalculateSession: () => any;
 }) {
   const [expanded, setExpanded] = useState(true);
   const [editingCreditId, setEditingCreditId] = useState<number | null>(null);
@@ -543,13 +629,14 @@ function InvestorCard({
           toast.success("Reasignación guardada correctamente.");
           setEditingCreditId(null);
           setSelectedDestinoIds(new Set());
+          recalculateSession();
         },
         onError: (err) => {
           toast.error(err?.message || "Error al guardar la reasignación");
         },
       }
     );
-  }, [editingCreditId, isBalanced, editingCredit, distribucion, investor, reemplazar]);
+  }, [editingCreditId, isBalanced, editingCredit, distribucion, investor, reemplazar, recalculateSession]);
 
   const handleConfirmReinversion = useCallback(() => {
     const ids = investor.creditosPendientes
@@ -565,13 +652,14 @@ function InvestorCard({
       {
         onSuccess: () => {
           toast.success("Reinversión confirmada correctamente.");
+          recalculateSession();
         },
         onError: (err) => {
           toast.error(err?.message || "Error al confirmar la reinversión");
         },
       }
     );
-  }, [completarEspejo, investor]);
+  }, [completarEspejo, investor, recalculateSession]);
 
   const handleConfirmCompraCartera = useCallback(() => {
     const ids = investor.creditosPendientes
@@ -587,13 +675,14 @@ function InvestorCard({
       {
         onSuccess: () => {
           toast.success("Compra de cartera confirmada correctamente.");
+          recalculateSession();
         },
         onError: (err) => {
           toast.error(err?.message || "Error al confirmar la compra de cartera");
         },
       }
     );
-  }, [completarEspejo, investor]);
+  }, [completarEspejo, investor, recalculateSession]);
 
   const tieneCompraCartera = investor.creditosPendientes.some(
     (c) => c.status === "pendiente_compra_cartera" || c.status === "pendiente_revision"
@@ -617,13 +706,14 @@ function InvestorCard({
           toast.success(res.message || `${count} crédito(s) devueltos a cube.`);
           setConfirmingCancel(false);
           setIdsToCancel(null);
+          recalculateSession();
         },
         onError: (err) => {
           toast.error(err?.message || "Error al cancelar la sesión");
         },
       }
     );
-  }, [devolverPendientes, investor, idsToCancel]);
+  }, [devolverPendientes, investor, idsToCancel, recalculateSession]);
 
 
   const handleAceptarCompraCartera = useCallback(() => {
@@ -638,13 +728,14 @@ function InvestorCard({
       {
         onSuccess: (res) => {
           toast.success(res.message || "Compra de cartera aceptada y notificada.");
+          recalculateSession();
         },
         onError: (err) => {
           toast.error(err?.message || "Error al aceptar la compra de cartera");
         },
       }
     );
-  }, [aceptarCompra, investor]);
+  }, [aceptarCompra, investor, recalculateSession]);
 
   const totalCompra = useMemo(() => {
     return investor.creditosPendientes

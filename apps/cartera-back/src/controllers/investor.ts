@@ -7998,6 +7998,23 @@ export async function getCreditosEspejoPendientes(
   inversionistaId?: number,
   statuses?: string,
 ) {
+  // 0. Validación de estados (Early Return)
+  const allowed = statusCreditoInversionistaEspejoEnum.enumValues.filter(
+    s => s !== "completado"
+  );
+
+  let targetStatuses = allowed;
+
+  if (statuses) {
+    const requested = statuses.split(',') as any[];
+    targetStatuses = requested.filter(s => allowed.includes(s));
+
+    // Si el usuario filtró pero nada es válido, retornamos vacío de inmediato
+    if (targetStatuses.length === 0) {
+      return { data: [], total: 0, page, pageSize };
+    }
+  }
+
   // 1. Créditos espejo pendientes con info del inversionista + crédito + usuario
   const pendientes = await db
     .select({
@@ -8040,20 +8057,7 @@ export async function getCreditosEspejoPendientes(
     )
     .where(
       and(
-        (() => {
-          // Usamos los valores oficiales del esquema, pero excluimos 'completado' 
-          // porque este endpoint es solo para sesiones PENDIENTES.
-          const allowed = statusCreditoInversionistaEspejoEnum.enumValues.filter(
-            s => s !== "completado"
-          );
-          
-          if (!statuses) return inArray(creditos_inversionistas_espejo.status, allowed);
-          
-          const requested = statuses.split(',') as typeof allowed;
-          const filtered = requested.filter(s => allowed.includes(s));
-          
-          return inArray(creditos_inversionistas_espejo.status, filtered.length > 0 ? filtered : allowed);
-        })(),
+        inArray(creditos_inversionistas_espejo.status, targetStatuses as any[]),
         inversionistaId !== undefined
           ? eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId)
           : undefined,

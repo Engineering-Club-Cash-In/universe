@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useMemo, useCallback } from "react";
+import { usePersistedState } from "../hooks/usePersistedState";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
@@ -24,6 +25,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   XCircle,
+  X,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -310,13 +312,21 @@ function LiquidacionCard({ item, onGenerarPagos, onVerPagos, generandoId, navega
 
 export function HistorialLiquidaciones() {
   const ahoraGT = useMemo(() => getMesAnioActualGT(), []);
-  const [mes, setMes] = useState(ahoraGT.mes);
-  const [anio, setAnio] = useState(ahoraGT.anio);
+  const [mes, setMes] = usePersistedState<number>("cartera/historialLiquidaciones/mes", ahoraGT.mes);
+  const [anio, setAnio] = usePersistedState<number>("cartera/historialLiquidaciones/anio", ahoraGT.anio);
   const esMesActual = mes === ahoraGT.mes && anio === ahoraGT.anio;
-  const [search, setSearch] = useState("");
-  const [page, setPage] = useState(1);
-  const [estadoFiltro, setEstadoFiltro] = useState<EstadoFiltro>("all");
+  const [search, setSearch] = usePersistedState<string>("cartera/historialLiquidaciones/search", "");
+  const [page, setPage] = usePersistedState<number>("cartera/historialLiquidaciones/page", 1);
+  const [estadoFiltro, setEstadoFiltro] = usePersistedState<EstadoFiltro>("cartera/historialLiquidaciones/estadoFiltro", "all");
   const [descargandoExcel, setDescargandoExcel] = useState(false);
+
+  const hasActiveFilters = search !== "" || estadoFiltro !== "all";
+
+  const clearFilters = useCallback(() => {
+    setSearch("");
+    setEstadoFiltro("all");
+    setPage(1);
+  }, []);
   const [generandoId, setGenerandoId] = useState<number | null>(null);
   const [navegandoId, setNavegandoId] = useState<number | null>(null);
   const [resultadoModal, setResultadoModal] = useState<{
@@ -599,12 +609,22 @@ export function HistorialLiquidaciones() {
 
         {/* Info bar */}
         <div className="flex items-center justify-between mt-3">
-          <span className="text-sm text-gray-500">
-            {filtered.length} resultado{filtered.length !== 1 ? "s" : ""}
-            {search && ` para "${search}"`}
-            {" — "}
-            <span className="font-medium text-gray-700">{getMesLabel(mes)} {anio}</span>
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-500">
+              {filtered.length} resultado{filtered.length !== 1 ? "s" : ""}
+              {search && ` para "${search}"`}
+              {" — "}
+              <span className="font-medium text-gray-700">{getMesLabel(mes)} {anio}</span>
+            </span>
+            {hasActiveFilters && (
+              <Button variant="outline" size="sm" onClick={clearFilters} className="h-7 text-xs text-gray-600 border-gray-300 hover:bg-gray-100 gap-1">
+                <X className="w-3 h-3" /> Limpiar filtros
+                <Badge variant="secondary" className="ml-0.5 h-4 px-1 text-xs">
+                  {[search !== "", estadoFiltro !== "all"].filter(Boolean).length}
+                </Badge>
+              </Button>
+            )}
+          </div>
           <span className="text-sm text-gray-500">
             Página {page} de {totalPages}
           </span>

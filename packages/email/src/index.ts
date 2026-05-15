@@ -740,21 +740,139 @@ export const sendCompraCarteraExpiradaNotification = async ({
   }
 };
 
+export interface SendSessionCancelledNotificationParams {
+  to: string[];
+  cc?: string[];
+  affectedInvestorNames: string;
+  adminName: string;
+  adminEmail?: string;
+  credits: Array<{
+    sifco: string;
+    cliente: string;
+    monto: string;
+  }>;
+  currencySymbol?: string;
+}
+
+export const sendSessionCancelledNotification = async ({
+  to,
+  cc = [],
+  affectedInvestorNames,
+  adminName,
+  adminEmail,
+  credits,
+  currencySymbol = "Q",
+}: SendSessionCancelledNotificationParams) => {
+  try {
+    const validEmails = to.filter((email) => {
+      try {
+        emailSchema.parse(email);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+
+    const validCcEmails = cc.filter((email) => {
+      try {
+        emailSchema.parse(email);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+
+    if (validEmails.length === 0) {
+      console.warn("[sendSessionCancelledNotification] No valid emails found");
+      return { success: false, error: "No valid emails" };
+    }
+
+    const nowGT = new Date().toLocaleString("es-GT", {
+      timeZone: "America/Guatemala",
+    });
+
+    const rowsHtml = credits
+      .map(
+        (c) => `
+      <tr>
+        <td style="padding:10px;border:1px solid #e5e7eb;">${c.sifco}</td>
+        <td style="padding:10px;border:1px solid #e5e7eb;">${c.cliente}</td>
+        <td style="padding:10px;border:1px solid #e5e7eb;text-align:right;">${currencySymbol}${c.monto}</td>
+      </tr>
+    `,
+      )
+      .join("");
+
+    const html = `
+      <div style="font-family:Arial,sans-serif;color:#111827;max-width:640px;margin:0 auto;">
+        <h2 style="color:#111827;margin-bottom:16px;">Sesión <span style="color:#dc2626;">CANCELADA</span> (Devuelta a Cube)</h2>
+        <p style="color:#374151;line-height:1.5;">Los siguientes créditos tenían inversionistas pendientes que han sido <strong>removidos</strong> y su participación devuelta a Cube Investments S.A.</p>
+        
+        <table style="width:100%;margin-bottom:24px;font-size:14px;">
+          <tr>
+            <td style="padding:4px 0;width:180px;"><strong>Inversionista(s) afectados:</strong></td>
+            <td style="padding:4px 0;">${affectedInvestorNames}</td>
+          </tr>
+          <tr>
+            <td style="padding:4px 0;"><strong>Créditos afectados:</strong></td>
+            <td style="padding:4px 0;">${credits.length}</td>
+          </tr>
+          <tr>
+            <td style="padding:4px 0;"><strong>Fecha (GT):</strong></td>
+            <td style="padding:4px 0;">${nowGT}</td>
+          </tr>
+          <tr>
+            <td style="padding:4px 0;"><strong>Cancelada por:</strong></td>
+            <td style="padding:4px 0;">${adminName}${adminEmail ? ` &lt;${adminEmail}&gt;` : ""}</td>
+          </tr>
+        </table>
+
+        <h3 style="margin-bottom:12px;font-size:16px;">Detalle de montos devueltos a Cube</h3>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead>
+            <tr style="background:#f9fafb;">
+              <th style="padding:10px;border:1px solid #e5e7eb;text-align:left;">SIFCO</th>
+              <th style="padding:10px;border:1px solid #e5e7eb;text-align:left;">Cliente</th>
+              <th style="padding:10px;border:1px solid #e5e7eb;text-align:right;">Monto a Cube</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table>
+
+        <p style="margin-top:24px;color:#6b7280;font-size:11px;border-top:1px solid #eee;padding-top:12px;">
+          Correo automático — Club Cash In / Cartera.
+        </p>
+      </div>
+    `;
+
+    const subject = `Sesión CANCELADA — ${affectedInvestorNames}`;
+    return await sendPlainEmail(validEmails, subject, html, validCcEmails);
+  } catch (err) {
+    console.error("[sendSessionCancelledNotification] Unexpected Error:", err);
+    return { success: false, error: err };
+  }
+};
+
 /**
  * Envía un correo con HTML arbitrario (sin envolver en <strong>).
  * Útil para mensajes editados por el usuario, donde el caller arma el HTML.
  */
 export const sendPlainEmail = async (
-  to: string,
+  to: string | string[],
   subject: string,
   html: string,
+  cc?: string | string[],
 ) => {
-  emailSchema.parse(to);
+  const recipients = Array.isArray(to) ? to : [to];
+  recipients.forEach(email => emailSchema.parse(email));
 
   try {
     const { data, error } = await resend.emails.send({
       from: `Club Cash In <no-reply@${domain}>`,
-      to: [to],
+      to: recipients,
+      cc: cc,
       subject,
       html,
     });
@@ -764,7 +882,7 @@ export const sendPlainEmail = async (
       return { success: false, error };
     }
 
-    console.log(`[sendPlainEmail] Email sent to ${to}. ID: ${data?.id}`);
+    console.log(`[sendPlainEmail] Email sent to ${recipients.length} recipients. ID: ${data?.id}`);
     return { success: true, data };
   } catch (err) {
     console.error("[sendPlainEmail] Unexpected Error:", err);

@@ -1340,14 +1340,15 @@ export const creditRouter = new Elysia()
     },
   })
   // ========================================
-  // ENDPOINT: REPARAR total_restante DE LOS PAGOS
+  // ENDPOINT: REPARAR pagos históricos de un crédito
   // ========================================
   .post("/reparar-total-restante", async ({ body, set }: any) => {
     try {
-      const { numero_credito_sifco, capital_inicial } = body;
+      const { numero_credito_sifco, capital_inicial, dry_run } = body;
       const result = await repararTotalRestante({
         numero_credito_sifco,
         capital_inicial,
+        dry_run,
       });
       set.status = 200;
       return { success: true, ...result };
@@ -1360,11 +1361,12 @@ export const creditRouter = new Elysia()
     body: t.Object({
       numero_credito_sifco: t.String({ minLength: 1 }),
       capital_inicial: t.Optional(t.Union([t.Number(), t.String()])),
+      dry_run: t.Optional(t.Boolean()),
     }),
     detail: {
-      summary: "Reparar total_restante de los pagos de un crédito",
+      summary: "Reparar pagos históricos de un crédito (abonos + restantes)",
       description:
-        "Recalcula y reescribe SOLO el campo total_restante de los pagos desde la cuota 0 hasta la última cuota pagada, amortizando teóricamente. Si no se pasa capital_inicial, se usa el total_restante del pago de la cuota 0 (desembolso) como ancla. No toca abonos, capital_restante, pagado ni ningún otro campo.",
+        "Recalcula y reescribe los pagos desde la cuota 0 hasta la última cuota pagada, amortizando desde capital_inicial y distribuyendo monto_aplicado en orden: interés → IVA → seguro → GPS → membresías → capital. Para la cuota 0 solo escribe total_restante = capital_inicial. Capital_inicial: param > total_restante de cuota 0 en DB > SIFCO (trx 2001). Si dry_run=true, devuelve la previsualización de cambios sin escribir nada.",
       tags: ["Créditos", "Cuotas"],
     },
   })

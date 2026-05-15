@@ -36,6 +36,7 @@ import {
 	Trophy,
 	Upload,
 	Users,
+	X,
 	XCircle,
 } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
@@ -104,6 +105,7 @@ import {
 	renderNewVehicleBadges,
 } from "@/lib/vehicle-utils";
 import { isVehicleAvailable } from "@/utils/constants";
+import { usePersistedState } from "@/hooks/usePersistedState";
 import { client, orpc } from "@/utils/orpc";
 
 function formatLeadFullName(lead: {
@@ -393,7 +395,7 @@ function RouteComponent() {
 	const [selectedOpportunity, setSelectedOpportunity] =
 		useState<Opportunity | null>(null);
 	const [selectedStage, setSelectedStage] = useState<string>("");
-	const [stageFilter, setStageFilter] = useState<string>("all");
+	const [stageFilter, setStageFilter] = usePersistedState<string>("crm/opportunities/stageFilter", "all");
 	const [opportunityHistory, setOpportunityHistory] = useState<any[]>([]);
 	const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 	const [stageChangeReason, setStageChangeReason] = useState<string>("");
@@ -401,10 +403,10 @@ function RouteComponent() {
 	const [debouncedLeadsSearch, setDebouncedLeadsSearch] = useState("");
 	const [vehiclesSearch, setVehiclesSearch] = useState("");
 	const [debouncedVehiclesSearch, setDebouncedVehiclesSearch] = useState("");
-	const [showLostOpportunities, setShowLostOpportunities] = useState(false);
-	const [boardSearch, setBoardSearch] = useState("");
-	const [salespersonFilter, setSalespersonFilter] = useState<string>("all");
-	const [sourceFilter, setSourceFilter] = useState<string>("all");
+	const [showLostOpportunities, setShowLostOpportunities] = usePersistedState<boolean>("crm/opportunities/showLostOpportunities", false);
+	const [boardSearch, setBoardSearch] = usePersistedState<string>("crm/opportunities/boardSearch", "");
+	const [salespersonFilter, setSalespersonFilter] = usePersistedState<string>("crm/opportunities/salespersonFilter", "all");
+	const [sourceFilter, setSourceFilter] = usePersistedState<string>("crm/opportunities/sourceFilter", "all");
 	const debouncedBoardSearch = useDeferredValue(boardSearch);
 	// View toggle: "kanban" or "table" - persist in localStorage
 	const [viewMode, setViewMode] = useState<"kanban" | "table">(() => {
@@ -415,7 +417,7 @@ function RouteComponent() {
 		return "kanban";
 	});
 	// Filtro por etapa (stage ID) para vista tabla
-	const [stageIdFilter, setStageIdFilter] = useState<string>("all");
+	const [stageIdFilter, setStageIdFilter] = usePersistedState<string>("crm/opportunities/stageIdFilter", "all");
 	const processedCompanyIdRef = useRef<string | null>(null);
 	const processedOpportunityIdRef = useRef<string | null>(null);
 	const prevOpenRef = useRef(isCreateDialogOpen);
@@ -432,8 +434,24 @@ function RouteComponent() {
 	});
 
 	// Month/year filter for placed amounts alignment with dashboard
-	const [month, setMonth] = useState(() => new Date().getMonth() + 1);
-	const [year, setYear] = useState(() => new Date().getFullYear());
+	const [month, setMonth] = usePersistedState<number>("crm/opportunities/month", new Date().getMonth() + 1);
+	const [year, setYear] = usePersistedState<number>("crm/opportunities/year", new Date().getFullYear());
+
+	const hasActiveFilters =
+		stageFilter !== "all" ||
+		showLostOpportunities ||
+		boardSearch !== "" ||
+		salespersonFilter !== "all" ||
+		sourceFilter !== "all" ||
+		stageIdFilter !== "all";
+	const resetFilters = () => {
+		setStageFilter("all");
+		setShowLostOpportunities(false);
+		setBoardSearch("");
+		setSalespersonFilter("all");
+		setSourceFilter("all");
+		setStageIdFilter("all");
+	};
 
 	const goToPreviousMonth = () => {
 		if (month === 1) {
@@ -1729,6 +1747,15 @@ function RouteComponent() {
 						/>
 						{showLostOpportunities ? "Ocultando perdidas" : "Mostrar perdidas"}
 					</Button>
+					{hasActiveFilters && (
+						<Button variant="ghost" size="sm" onClick={resetFilters} className="shrink-0 text-muted-foreground">
+							<X className="mr-1 h-3 w-3" />
+							Limpiar filtros
+							<Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
+								{[stageFilter !== "all", showLostOpportunities, boardSearch !== "", salespersonFilter !== "all", sourceFilter !== "all", stageIdFilter !== "all"].filter(Boolean).length}
+							</Badge>
+						</Button>
+					)}
 				</div>
 			</div>
 

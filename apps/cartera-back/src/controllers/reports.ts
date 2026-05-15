@@ -1458,6 +1458,7 @@ export async function getPagosByVencimiento({
   tipo_fecha = "vencimiento",
   asesor,
   rango_mora,
+  excel = false,
 }: {
   mes: number;
   anio: number;
@@ -1468,6 +1469,7 @@ export async function getPagosByVencimiento({
   tipo_fecha?: "vencimiento" | "creacion";
   asesor?: string;
   rango_mora?: string;
+  excel?: boolean;
 }) {
   const fechaInicio = `${anio}-${String(mes).padStart(2, "0")}-01`;
   const fechaFinDate = new Date(anio, mes, 0);
@@ -1610,10 +1612,116 @@ export async function getPagosByVencimiento({
     GROUP BY c.credito_id, c.numero_credito_sifco, u.nombre, a.nombre, c.royalti
     HAVING SUM(${totalFilaSql}) <> 0
     ORDER BY c.numero_credito_sifco
-    LIMIT ${pageSize} OFFSET ${offset}
+    ${excel ? sql`` : sql`LIMIT ${pageSize} OFFSET ${offset}`}
   `);
 
   const pagos = pagosResult.rows;
+
+  if (excel) {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Pagos por Vencimiento");
+
+    const columns = [
+      { header: "No. SIFCO", key: "numero_credito_sifco", width: 15 },
+      { header: "Cliente", key: "nombre_usuario", width: 35 },
+      { header: "Asesor", key: "asesor", width: 25 },
+      { header: "Cuotas", key: "cuotas", width: 12 },
+      { header: "Etapa Mora", key: "dias_mora", width: 15 },
+      { header: "Capital", key: "capital_restante", width: 15 },
+      { header: "Interés", key: "interes_restante", width: 15 },
+      { header: "IVA 12%", key: "iva_12_restante", width: 15 },
+      { header: "Seguro", key: "seguro_restante", width: 15 },
+      { header: "GPS", key: "gps_restante", width: 15 },
+      { header: "Membresías", key: "membresias", width: 15 },
+      { header: "Int. CUBE", key: "interes_cube", width: 15 },
+      { header: "IVA CUBE", key: "iva_cube", width: 15 },
+      { header: "Royalty", key: "royalti", width: 15 },
+      { header: "Total Mes", key: "total_pagos_del_mes", width: 18 },
+    ];
+
+    sheet.columns = columns.map((c) => ({ key: c.key, width: c.width }));
+
+    // Logo
+    const logo = await fetchImageBase64(LOGO_URL);
+    if (logo) {
+      const imgId = workbook.addImage({ base64: logo.data, extension: logo.ext });
+      sheet.addImage(imgId, "A1:B2");
+      sheet.addRow([]);
+      sheet.addRow([]);
+    }
+
+    // Header row
+    const headerLabels = columns.map((c) => c.header);
+    const headerRow = sheet.addRow(headerLabels);
+    headerRow.font = { bold: true, color: { argb: "FFFFFF" }, size: 10 };
+    headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "1F4E79" } };
+    headerRow.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    headerRow.height = 35;
+
+    const thinBorder = {
+      top: { style: "thin" as const, color: { argb: "D9D9D9" } },
+      bottom: { style: "thin" as const, color: { argb: "D9D9D9" } },
+      left: { style: "thin" as const, color: { argb: "D9D9D9" } },
+      right: { style: "thin" as const, color: { argb: "D9D9D9" } },
+    };
+
+    pagos.forEach((item: any, idx: number) => {
+      const rowData = {
+        ...item,
+        cuotas: item.cuota_min === item.cuota_max ? item.cuota_min : `${item.cuota_min}-${item.cuota_max}`,
+        royalti: item.cuota_min === 0 ? Number(item.royalti) : "--",
+        capital_restante: Number(item.capital_restante),
+        interes_restante: Number(item.interes_restante),
+        iva_12_restante: Number(item.iva_12_restante),
+        seguro_restante: Number(item.seguro_restante),
+        gps_restante: Number(item.gps_restante),
+        membresias: Number(item.membresias),
+        interes_cube: Number(item.interes_cube),
+        iva_cube: Number(item.iva_cube),
+        total_pagos_del_mes: Number(item.total_pagos_del_mes),
+      };
+
+      const r = sheet.addRow(rowData);
+      const isEven = idx % 2 === 0;
+      r.eachCell({ includeEmpty: true }, (cell) => {
+        cell.border = thinBorder;
+        cell.alignment = { vertical: "middle", horizontal: "right" };
+        if (!isEven) {
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "F5F9FF" } };
+        }
+      });
+      // Alinear texto a la izquierda para las primeras columnas
+      r.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
+      r.getCell(2).alignment = { horizontal: "left", vertical: "middle" };
+      r.getCell(3).alignment = { horizontal: "left", vertical: "middle" };
+      r.getCell(4).alignment = { horizontal: "center", vertical: "middle" };
+      r.getCell(5).alignment = { horizontal: "center", vertical: "middle" };
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const filename = `reportes/pagos_vencimiento_${mes}_${anio}_${Date.now()}.xlsx`;
+
+    const s3 = new S3Client({
+      endpoint: process.env.BUCKET_REPORTS_URL,
+      region: "auto",
+      credentials: {
+        accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
+        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
+      },
+    });
+
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: process.env.BUCKET_REPORTS as string,
+        Key: filename,
+        Body: buffer as unknown as Uint8Array,
+        ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      })
+    );
+
+    const url = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
+    return { success: true, excelUrl: url };
+  }
 
   return {
     data: pagos,

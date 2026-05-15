@@ -60,7 +60,7 @@ export function ConsolidatedCreditSummary({
 	} = data;
 
 	return (
-		<div className="space-y-4 rounded-lg border bg-gradient-to-br from-blue-50 to-green-50 p-4">
+		<div className="space-y-4 rounded-lg border bg-gradient-to-br from-blue-50 to-green-50 p-4 dark:from-blue-950/40 dark:to-green-950/40">
 			<div className="flex items-center justify-between">
 				<div className="flex items-center gap-2">
 					<Calculator className="h-5 w-5 text-primary" />
@@ -80,13 +80,13 @@ export function ConsolidatedCreditSummary({
 
 			{/* Resumen principal */}
 			<div className="grid grid-cols-2 gap-3">
-				<div className="rounded-md bg-white/80 p-3 text-center">
+				<div className="rounded-md bg-white/80 p-3 text-center dark:bg-white/5">
 					<p className="text-muted-foreground text-xs">Total Ingresos</p>
 					<p className="font-bold text-green-600">
 						{formatCurrency(consolidated.totalIncome)}
 					</p>
 				</div>
-				<div className="rounded-md bg-white/80 p-3 text-center">
+				<div className="rounded-md bg-white/80 p-3 text-center dark:bg-white/5">
 					<p className="text-muted-foreground text-xs">Total Gastos</p>
 					<p className="font-bold text-red-600">
 						{formatCurrency(consolidated.totalExpenses)}
@@ -96,13 +96,13 @@ export function ConsolidatedCreditSummary({
 
 			{/* Disponibilidad y Capacidad */}
 			<div className="grid grid-cols-3 gap-2">
-				<div className="rounded-md bg-white/80 p-2 text-center">
+				<div className="rounded-md bg-white/80 p-2 text-center dark:bg-white/5">
 					<p className="text-muted-foreground text-xs">Disponibilidad</p>
 					<p className="font-semibold text-blue-600 text-sm">
 						{formatCurrency(consolidated.economicAvailability)}
 					</p>
 				</div>
-				<div className="rounded-md bg-white/80 p-2 text-center">
+				<div className="rounded-md bg-white/80 p-2 text-center dark:bg-white/5">
 					<p className="text-muted-foreground text-xs">Pago Máx.</p>
 					<p className="font-semibold text-green-600 text-sm">
 						{formatCurrency(consolidated.maxPayment)}

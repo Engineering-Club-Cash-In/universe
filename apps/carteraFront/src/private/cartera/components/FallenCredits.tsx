@@ -1,7 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getFallenCredits, type GetFallenCreditsResponse } from "../services/services";
+import { usePersistedState } from "../hooks/usePersistedState";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -36,12 +37,14 @@ function formatFecha(val: any): string {
 }
 
 export function FallenCredits() {
-  const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
-  const [sifcoInput, setSifcoInput] = useState("");
-  const [sifcoFilter, setSifcoFilter] = useState("");
-  const [fechaDesde, setFechaDesde] = useState("");
-  const [fechaHasta, setFechaHasta] = useState("");
+  const [page, setPage] = usePersistedState<number>("cartera/fallenCredits/page", 1);
+  const [perPage, setPerPage] = usePersistedState<number>("cartera/fallenCredits/perPage", 10);
+  const [sifcoInput, setSifcoInput] = usePersistedState<string>("cartera/fallenCredits/sifcoInput", "");
+  const [sifcoFilter, setSifcoFilter] = usePersistedState<string>("cartera/fallenCredits/sifcoFilter", "");
+  const [fechaDesde, setFechaDesde] = usePersistedState<string>("cartera/fallenCredits/fechaDesde", "");
+  const [fechaHasta, setFechaHasta] = usePersistedState<string>("cartera/fallenCredits/fechaHasta", "");
+
+  const hasActiveFilters = sifcoFilter !== "" || fechaDesde !== "" || fechaHasta !== "";
 
   const { data, isLoading, isError } = useQuery<GetFallenCreditsResponse>({
     queryKey: ["fallen-credits", page, perPage, sifcoFilter, fechaDesde, fechaHasta],
@@ -139,14 +142,19 @@ export function FallenCredits() {
             />
           </div>
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={clearFilters}
-            className="text-gray-600 border-gray-300 hover:bg-gray-100"
-          >
-            <X className="w-4 h-4 mr-1" /> Limpiar
-          </Button>
+          {hasActiveFilters && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={clearFilters}
+              className="text-gray-600 border-gray-300 hover:bg-gray-100"
+            >
+              <X className="w-4 h-4 mr-1" /> Limpiar filtros
+              <Badge variant="secondary" className="ml-1 h-4 px-1 text-xs">
+                {[sifcoFilter !== "", fechaDesde !== "", fechaHasta !== ""].filter(Boolean).length}
+              </Badge>
+            </Button>
+          )}
         </div>
       </div>
 

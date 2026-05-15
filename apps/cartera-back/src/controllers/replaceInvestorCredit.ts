@@ -6,8 +6,15 @@ import {
   creditos,
   creditos_inversionistas,
   creditos_inversionistas_espejo,
+  inversionistas,
+  usuarios,
 } from "../database/db";
 import z from "zod";
+import jwt from "jsonwebtoken";
+import { sendSessionCancelledNotification } from "@cci/email";
+import { COMPRA_CARTERA_RECIPIENTS } from "../utils/functions/compraCarteraRecipients";
+
+const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
 
 // ========================================
 // ID fijo de CUBE INVESTMENTS S.A.
@@ -158,8 +165,29 @@ function recalcularInversionistas(
 //    e. Nuke & rebuild en padre y espejo (todos "completado")
 // ========================================
 
-export const returnPendingInvestorsToCube = async ({ body, set }: any) => {
+export const returnPendingInvestorsToCube = async ({ body, set, request }: any) => {
   try {
+    // ================================================================
+    // PASO 0: IDENTIFICACIÓN DEL USUARIO (JWT)
+    // request puede ser undefined cuando esta función se llama
+    // internamente (ej: job expirarCompraCarteraVencidas), por eso
+    // todo el bloque es opcional.
+    // ================================================================
+    const authHeader = request?.headers?.get?.("authorization") ?? null;
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    let adminName = "Job Automatico";
+    let adminEmail = "";
+
+    if (token) {
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET) as any;
+        adminName = decoded.nombre || decoded.email || "Administrador";
+        adminEmail = decoded.email || "";
+      } catch (err) {
+        console.warn("[returnPendingInvestorsToCube] Token inválido o expirado");
+      }
+    }
+
     // ================================================================
     // PASO 1: VALIDAR SCHEMA
     // Acepta un solo credito_id o un arreglo de credito_ids.
@@ -220,9 +248,7 @@ export const returnPendingInvestorsToCube = async ({ body, set }: any) => {
     }
 
     // ================================================================
-    // PASO 3: AGRUPAR POR CRÉDITO
-    // Por cada crédito: qué inversionistas hay que sacar y cuánto
-    // monto total se devuelve a CUBE.
+    // PASO 3: AGRUPAR POR CRÉDITO Y RECOPILAR DATA PARA CORREO
     // ================================================================
     const porCredito = new Map<
       number,
@@ -244,6 +270,25 @@ export const returnPendingInvestorsToCube = async ({ body, set }: any) => {
       entry.inversionistas_a_sacar.add(p.inversionista_id);
     }
 
+    // ── Data adicional para el reporte (Inversionistas y Clientes) ──
+    const uniqueInvestorIds = Array.from(new Set(pendientes.map(p => p.inversionista_id)));
+    const invData = await db
+      .select({ id: inversionistas.inversionista_id, nombre: inversionistas.nombre })
+      .from(inversionistas)
+      .where(inArray(inversionistas.inversionista_id, uniqueInvestorIds));
+    const investorMap = new Map(invData.map(i => [i.id, i.nombre]));
+
+    const creditDetails = await db
+      .select({
+        id: creditos.credito_id,
+        sifco: creditos.numero_credito_sifco,
+        cliente: usuarios.nombre
+      })
+      .from(creditos)
+      .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+      .where(inArray(creditos.credito_id, Array.from(porCredito.keys())));
+    const creditMap = new Map(creditDetails.map(c => [c.id, c]));
+
     console.log(
       `🧹 ${porCredito.size} crédito(s) a limpiar`,
     );
@@ -251,10 +296,7 @@ export const returnPendingInvestorsToCube = async ({ body, set }: any) => {
     const resultados: any[] = [];
 
     // ================================================================
-    // PASO 4: LIMPIAR CADA CRÉDITO
-    // - Sacar a los inversionistas pendientes
-    // - Devolver el monto total a CUBE (crear CUBE si no existía)
-    // - Recalcular cuotas y nuke & rebuild en padre y espejo
+    // PASO 4: TRANSACCIÓN DE LIMPIEZA
     // ================================================================
     await db.transaction(async (tx) => {
       for (const [creditoId, info] of porCredito) {
@@ -397,7 +439,6 @@ export const returnPendingInvestorsToCube = async ({ body, set }: any) => {
         }
 
         // ── Apagar bandera_reinversion del crédito ──
-        // Ya no hay pendientes: el espejo quedó todo en "completado".
         await tx
           .update(creditos)
           .set({ bandera_reinversion: false })
@@ -418,7 +459,36 @@ export const returnPendingInvestorsToCube = async ({ body, set }: any) => {
     });
 
     // ================================================================
-    // PASO 5: RESPUESTA
+    // PASO 5: NOTIFICACIÓN POR CORREO (Solo si es acción manual/HTTP)
+    // ================================================================
+    if (request) {
+      try {
+        const affectedInvestorNames = Array.from(new Set(pendientes.map(p => investorMap.get(p.inversionista_id)))).join(", ");
+        
+        const emailCredits = Array.from(porCredito.entries()).map(([creditoId, info]) => {
+          const details = creditMap.get(creditoId);
+          return {
+            sifco: details?.sifco || "N/A",
+            cliente: details?.cliente || "Desconocido",
+            monto: info.monto_total_a_cube.toFixed(2)
+          };
+        });
+
+        await sendSessionCancelledNotification({
+          to: COMPRA_CARTERA_RECIPIENTS.to,
+          cc: COMPRA_CARTERA_RECIPIENTS.cc,
+          affectedInvestorNames,
+          adminName,
+          adminEmail,
+          credits: emailCredits
+        });
+      } catch (mailErr) {
+        console.error("[returnPendingInvestorsToCube] Falló envío de correo:", mailErr);
+      }
+    }
+
+    // ================================================================
+    // PASO 6: RESPUESTA
     // ================================================================
     set.status = 200;
     return {

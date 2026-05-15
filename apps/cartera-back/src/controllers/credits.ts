@@ -1513,23 +1513,33 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
         console.log(`🗑️ Eliminados ${pagoIds.length} pagos no pagados del crédito #${creditId}`);
       }
 
-      // d) Desvincular cuota_id de pagos restantes para poder borrar cuotas
-      await tx
-        .update(pagos_credito)
-        .set({ cuota_id: null })
-        .where(eq(pagos_credito.credito_id, creditId));
-
-      // Borrar todas las cuotas y dejar solo 1
+      // d) Borrar SOLO cuotas no pagadas (las pagadas se conservan como histórico)
       await tx
         .delete(cuotas_credito)
-        .where(eq(cuotas_credito.credito_id, creditId));
+        .where(
+          and(
+            eq(cuotas_credito.credito_id, creditId),
+            eq(cuotas_credito.pagado, false)
+          )
+        );
 
-      await tx.insert(cuotas_credito).values({
-        credito_id: creditId,
-        numero_cuota: 1,
-        fecha_vencimiento: new Date().toLocaleDateString("sv-SE", { timeZone: "America/Guatemala" }),
-        pagado: false,
-      });
+      // Crear cuota correlativa para el saldo incobrable
+      const [maxCuotaRowDirect] = await tx
+        .select({ max: sql<number>`COALESCE(MAX(${cuotas_credito.numero_cuota}), 0)` })
+        .from(cuotas_credito)
+        .where(eq(cuotas_credito.credito_id, creditId));
+      const nextNumeroCuotaIncobrable = Number(maxCuotaRowDirect?.max ?? 0) + 1;
+
+      const [cuotaIncobrableInsertada] = await tx
+        .insert(cuotas_credito)
+        .values({
+          credito_id: creditId,
+          numero_cuota: nextNumeroCuotaIncobrable,
+          fecha_vencimiento: new Date().toLocaleDateString("sv-SE", { timeZone: "America/Guatemala" }),
+          pagado: false,
+          liquidado_inversionistas: false,
+        })
+        .returning({ cuota_id: cuotas_credito.cuota_id });
 
       // e) Actualizar crédito: INCOBRABLE, plazo 1, cuota = capital completo
       await tx
@@ -1538,7 +1548,6 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
           statusCredit: "INCOBRABLE",
           capital: capitalIncobrable.toString(),
           plazo: 1,
-          porcentaje_interes: "0",
           cuota_interes: "0",
           iva_12: "0",
           membresias_pago: "0",
@@ -1553,18 +1562,12 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
         })
         .where(eq(creditos.credito_id, creditId));
 
-      // f) Obtener la cuota recién creada para el pago base
-      const [cuotaCreada] = await tx
-        .select({ cuota_id: cuotas_credito.cuota_id })
-        .from(cuotas_credito)
-        .where(eq(cuotas_credito.credito_id, creditId));
-
-      // g) Crear pago base con capital_restante = capital
+      // f) Crear pago base con capital_restante = capital, enlazado a la cuota recién creada
       await tx.insert(pagos_credito).values({
         credito_id: creditId,
         cuota: capitalIncobrable.toString(),
         cuota_interes: "0",
-        cuota_id: cuotaCreada.cuota_id,
+        cuota_id: cuotaIncobrableInsertada.cuota_id,
         abono_capital: "0",
         abono_interes: "0",
         abono_iva_12: "0",
@@ -1699,7 +1702,6 @@ export async function reiniciarCredito(
     .update(creditos)
     .set({
       capital: "0",
-      porcentaje_interes: "0",
       deudatotal: montoIncobrable !== undefined ? String(montoIncobrable) : "0",
       cuota_interes: "0",
       cuota: "0",
@@ -1883,7 +1885,7 @@ export async function resetCredit({
       })
       .returning();
 
-    // 11. Eliminar pagos no pagados
+    // 11. Eliminar pagos no pagados (los pagados se conservan como histórico)
     await db
       .delete(pagos_credito)
       .where(
@@ -1893,36 +1895,43 @@ export async function resetCredit({
         )
       );
 
-    // 11.5 Desvincular cuota_id de pagos restantes para poder borrar cuotas
-    await db
-      .update(pagos_credito)
-      .set({ cuota_id: null })
-      .where(eq(pagos_credito.credito_id, credito.credito_id));
-
-    // 12. Eliminar cuotas del crédito
-    await db
-      .delete(cuotas_credito)
+    // 12.1 Crear cuota correlativa (MAX(numero_cuota) + 1) para enlazar el pago de cierre
+    const [maxCuotaRow] = await db
+      .select({ max: sql<number>`COALESCE(MAX(${cuotas_credito.numero_cuota}), 0)` })
+      .from(cuotas_credito)
       .where(eq(cuotas_credito.credito_id, credito.credito_id));
+    const nextNumeroCuotaCierre = Number(maxCuotaRow?.max ?? 0) + 1;
 
-    // 12.1 Crear cuota 1 para que el pago de cierre quede enlazado
     const [cuotaCierre] = await db
       .insert(cuotas_credito)
       .values({
         credito_id: credito.credito_id,
-        numero_cuota: 1,
+        numero_cuota: nextNumeroCuotaCierre,
         fecha_vencimiento: new Date().toLocaleDateString("sv-SE", { timeZone: "America/Guatemala" }),
         liquidado_inversionistas: false,
         pagado: true,
       })
       .returning();
 
-    // 12.2 Enlazar el pago de cierre a la cuota recién creada
+    // 12.2 Enlazar el pago de cierre a la cuota recién creada ANTES de borrar cuotas no pagadas,
+    // de lo contrario el DELETE viola el FK pagos_credito.cuota_id cuando `cuotaId` apuntaba a
+    // una cuota no pagada (escenario reset/cancelación contra cuota vigente).
     if (nuevoPago?.pago_id && cuotaCierre?.cuota_id) {
       await db
         .update(pagos_credito)
         .set({ cuota_id: cuotaCierre.cuota_id })
         .where(eq(pagos_credito.pago_id, nuevoPago.pago_id));
     }
+
+    // 12. Eliminar SOLO las cuotas no pagadas (las pagadas se conservan como histórico)
+    await db
+      .delete(cuotas_credito)
+      .where(
+        and(
+          eq(cuotas_credito.credito_id, credito.credito_id),
+          eq(cuotas_credito.pagado, false)
+        )
+      );
 
     // 12.5 Distribuir abono a capital en tabla espejo (CANCELACION)
     try {
@@ -1973,12 +1982,11 @@ export async function resetCredit({
     if (statusCredit === "INCOBRABLE") {
       const capitalIncobrable = new Big(montoIncobrable!);
 
-      // 16a. Actualizar crédito: capital = incobrable, lo demás en 0
+      // 16a. Actualizar crédito: capital = incobrable, lo demás en 0 (preservamos porcentaje_interes)
       await db
         .update(creditos)
         .set({
           capital: capitalIncobrable.toString(),
-          porcentaje_interes: "0",
           deudatotal: capitalIncobrable.toString(),
           cuota_interes: "0",
           cuota: capitalIncobrable.toString(),
@@ -1995,14 +2003,21 @@ export async function resetCredit({
         })
         .where(eq(creditos.credito_id, creditId));
 
-      // 16b. Crear cuota pendiente para el monto incobrable
+      // 16b. Crear cuota pendiente para el monto incobrable (correlativa)
+      const [maxCuotaRowInc] = await db
+        .select({ max: sql<number>`COALESCE(MAX(${cuotas_credito.numero_cuota}), 0)` })
+        .from(cuotas_credito)
+        .where(eq(cuotas_credito.credito_id, credito.credito_id));
+      const nextNumeroCuotaPendiente = Number(maxCuotaRowInc?.max ?? 0) + 1;
+
       const [cuotaPendiente] = await db
         .insert(cuotas_credito)
         .values({
           credito_id: credito.credito_id,
-          numero_cuota: 1,
+          numero_cuota: nextNumeroCuotaPendiente,
           fecha_vencimiento: fechaHoyGT,
           pagado: false,
+          liquidado_inversionistas: false,
         })
         .returning();
 
@@ -2048,12 +2063,11 @@ export async function resetCredit({
         monto_incobrable: capitalIncobrable.toString(),
       });
     } else {
-      // CANCELADO: zerear todo
+      // CANCELADO: zerear todo (preservamos porcentaje_interes)
       await db
         .update(creditos)
         .set({
           capital: "0",
-          porcentaje_interes: "0",
           deudatotal: "0",
           cuota_interes: "0",
           cuota: "0",

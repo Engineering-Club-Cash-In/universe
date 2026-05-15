@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unused-expressions */
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { usePersistedState } from "./usePersistedState";
 import { getCreditosPaginados, type GetCreditosResponse } from "../services/services";
 
 // 🆕 Interfaz para opciones iniciales
@@ -23,27 +23,27 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
   const years = Array.from({ length: 10 }, (_, i) => 2021 + i);
 
   // States
-  const [mes, setMes] = useState(0);
-  const [anio, setAnio] = useState(2025);
-  const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(10);
-  const [creditoSifco, setCreditoSifco] = useState("");
-  const [estado, setEstado] = useState<
+  const [mes, setMes] = usePersistedState<number>("cartera/credits/mes", 0);
+  const [anio, setAnio] = usePersistedState<number>("cartera/credits/anio", 2025);
+  const [page, setPage] = usePersistedState<number>("cartera/credits/page", 1);
+  const [perPage, setPerPage] = usePersistedState<number>("cartera/credits/perPage", 10);
+  const [creditoSifco, setCreditoSifco] = usePersistedState<string>("cartera/credits/creditoSifco", "");
+  const [estado, setEstado] = usePersistedState<
     "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO" | "EN_CONVENIO" | "CAIDO"
-  >("ACTIVO");
-  // 🆕 Nuevos states para filtros con valor inicial
-  const [asesorId, setAsesorId] = useState<number | undefined>(options?.initialAsesorId);
-  
+  >("cartera/credits/estado", "ACTIVO");
+  const [asesorIdStored, setAsesorId] = usePersistedState<number | undefined>("cartera/credits/asesorId", options?.initialAsesorId);
+  const asesorId = options?.initialAsesorId !== undefined ? options.initialAsesorId : asesorIdStored;
+
   // 🆕 Filtro vehículo propio
-  const [isVehiculoPropio, setIsVehiculoPropio] = useState<boolean | undefined>(undefined);
+  const [isVehiculoPropio, setIsVehiculoPropio] = usePersistedState<boolean | undefined>("cartera/credits/isVehiculoPropio", undefined);
 
   // Filtro por inversionistas (multi-select)
-  const [inversionistaIds, setInversionistaIds] = useState<number[]>([]);
+  const [inversionistaIds, setInversionistaIds] = usePersistedState<number[]>("cartera/credits/inversionistaIds", []);
 
-  // 🔥 Estado local del input (lo que escribe el usuario)
-  const [nombreUsuarioInput, setNombreUsuarioInput] = useState("");
-  // 🔥 Estado que realmente dispara la búsqueda
-  const [nombreUsuario, setNombreUsuario] = useState("");
+  // Estado local del input (lo que escribe el usuario)
+  const [nombreUsuarioInput, setNombreUsuarioInput] = usePersistedState<string>("cartera/credits/nombreUsuarioInput", "");
+  // Estado que realmente dispara la búsqueda
+  const [nombreUsuario, setNombreUsuario] = usePersistedState<string>("cartera/credits/nombreUsuario", "");
 
   // React Query consulta con todos los filtros
   const query = useQuery<GetCreditosResponse, Error>({
@@ -129,7 +129,7 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
     setPage(1);
   };
 
-  // 🆕 Limpiar todos los filtros
+  // Limpiar todos los filtros
   const clearAllFilters = () => {
     setCreditoSifco("");
     setNombreUsuarioInput("");
@@ -137,8 +137,18 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
     setAsesorId(options?.initialAsesorId);
     setIsVehiculoPropio(undefined);
     setInversionistaIds([]);
+    setEstado("ACTIVO");
     setPage(1);
   };
+
+  const hasActiveFilters =
+    creditoSifco !== "" ||
+    nombreUsuario !== "" ||
+    nombreUsuarioInput !== "" ||
+    estado !== "ACTIVO" ||
+    isVehiculoPropio !== undefined ||
+    inversionistaIds.length > 0 ||
+    asesorId !== options?.initialAsesorId;
 
   const estados = [
     { value: "ACTIVO", label: "Activo", color: "bg-green-200 text-green-800" },
@@ -192,8 +202,8 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
     setNombreUsuarioInput,     // 👈 Para actualizar el input
     handleSearchNombreUsuario, // 👈 Para ejecutar la búsqueda
     clearNombreUsuario,        // 👈 Para limpiar
-    // 🆕 Limpiar todos
     clearAllFilters,
+    hasActiveFilters,
     // 🆕 Filtro vehículo propio
     isVehiculoPropio,
     setIsVehiculoPropio,

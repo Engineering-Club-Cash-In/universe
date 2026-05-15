@@ -41,7 +41,7 @@ import {
 } from "@/components/ui/collapsible";
 import { Separator } from "@/components/ui/separator";
 import { authClient } from "@/lib/auth-client";
-import { type ContratoCobranza, columns } from "@/lib/cobros/columns";
+import { getCobrosColumns } from "@/lib/cobros/columns";
 import { getPaymentDateRangeFilter } from "@/lib/cobros/payment-date-range-filter";
 import { parseFechaLocal } from "@/lib/date-utils";
 import { PERMISSIONS, ROLES } from "@/lib/roles";
@@ -471,6 +471,13 @@ function RouteComponent() {
 	const creditos = creditosData?.data || [];
 	const totalCreditos = creditosData?.total || 0;
 	const totalPages = creditosData?.totalPages || 1;
+
+	// Recalcular columnas cuando cambia el filtro de etapa: el CTA de contacto
+	// rápido sólo aparece para estados de mora activa.
+	const columns = useMemo(
+		() => getCobrosColumns({ filtroEtapa }),
+		[filtroEtapa],
+	);
 
 	// Procesar creditos y calcular días hasta pago
 	const creditosConDias = useMemo(() => {

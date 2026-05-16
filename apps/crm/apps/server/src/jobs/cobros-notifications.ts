@@ -299,8 +299,18 @@ async function _procesarSeguimientosRecurrentes(client: RawClient) {
 	}
 
 	// Query 4: batch update casosCobros via UPDATE FROM VALUES (1 query vs N)
+	// Deduplicar por casoCobroId: si hay múltiples seguimientos para el mismo caso,
+	// PostgreSQL UPDATE FROM con IDs duplicados en VALUES elige fila de forma no determinista.
+	// Quedarse con la proximaFecha más próxima para cada caso.
+	const casoMap = new Map<string, ClaimRow>();
+	for (const r of claimed) {
+		const prev = casoMap.get(r.casoCobroId);
+		if (!prev || r.proximaFecha < prev.proximaFecha) casoMap.set(r.casoCobroId, r);
+	}
+	const uniqueCasoRows = Array.from(casoMap.values());
+
 	const casoParams: unknown[] = [];
-	const casoPh = claimed.map((r, i) => {
+	const casoPh = uniqueCasoRows.map((r, i) => {
 		const b = i * 3;
 		casoParams.push(r.casoCobroId, r.proximaFecha.toISOString(), r.metodoContacto);
 		return `($${b + 1}::uuid, $${b + 2}::timestamptz, $${b + 3}::text)`;

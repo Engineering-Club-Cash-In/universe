@@ -332,8 +332,12 @@ async function _procesarSeguimientosRecurrentes(client: RawClient) {
 
 			await client.query(
 				`UPDATE casos_cobros AS cc
-				 SET proximo_contacto = v.proximo_contacto,
-				     metodo_contacto_proximo = v.metodo::metodo_contacto,
+				 SET proximo_contacto = LEAST(cc.proximo_contacto, v.proximo_contacto),
+				     metodo_contacto_proximo = CASE
+				         WHEN cc.proximo_contacto IS NULL OR v.proximo_contacto <= cc.proximo_contacto
+				         THEN v.metodo::metodo_contacto
+				         ELSE cc.metodo_contacto_proximo
+				     END,
 				     updated_at = NOW()
 				 FROM (VALUES ${casoPh}) AS v(id, proximo_contacto, metodo)
 				 WHERE cc.id = v.id`,

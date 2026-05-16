@@ -9,6 +9,44 @@ import { procesarSeguimientosRecurrentes } from "../jobs/cobros-notifications";
 import { PERMISSIONS } from "../lib/roles";
 import { gtDateStrToDate, toDateStrGT } from "../lib/guatemala-month-window";
 
+async function recomputeProximoContacto(casoCobroId: string) {
+	const remaining = await db
+		.select({
+			fechaInicio: seguimientosProgramados.fechaInicio,
+			intervaloDias: seguimientosProgramados.intervaloDias,
+			ocurrenciasRealizadas: seguimientosProgramados.ocurrenciasRealizadas,
+			metodoContacto: seguimientosProgramados.metodoContacto,
+		})
+		.from(seguimientosProgramados)
+		.where(
+			and(
+				eq(seguimientosProgramados.casoCobroId, casoCobroId),
+				eq(seguimientosProgramados.activo, true),
+			)
+		)
+		.orderBy(asc(seguimientosProgramados.fechaInicio));
+
+	let nextContacto: Date | null = null;
+	let nextMetodo: string | null = null;
+	for (const seg of remaining) {
+		const nextDate = new Date(
+			seg.fechaInicio.getTime() + seg.intervaloDias * seg.ocurrenciasRealizadas * 86_400_000,
+		);
+		if (!nextContacto || nextDate < nextContacto) {
+			nextContacto = nextDate;
+			nextMetodo = seg.metodoContacto;
+		}
+	}
+
+	await db.update(casosCobros)
+		.set({
+			proximoContacto: nextContacto,
+			metodoContactoProximo: nextMetodo as typeof casosCobros.$inferInsert["metodoContactoProximo"],
+			updatedAt: new Date(),
+		})
+		.where(eq(casosCobros.id, casoCobroId));
+}
+
 /** Verifica que el usuario tenga acceso al caso de cobro. Lanza FORBIDDEN si no. */
 async function verifyCaseAccess(casoCobroId: string, userId: string, userRole: string) {
 	const [caso] = await db
@@ -181,6 +219,8 @@ export const seguimientosRouter = {
 				})
 				.where(eq(seguimientosProgramados.id, input.id))
 				.returning();
+
+			await recomputeProximoContacto(seguimiento.casoCobroId);
 			return result[0];
 		}),
 
@@ -208,46 +248,7 @@ export const seguimientosRouter = {
 				.where(eq(seguimientosProgramados.id, input.id))
 				.returning();
 
-			// Recompute proximo_contacto del caso: el seguimiento eliminado podía ser la fuente
-			// del próximo contacto mostrado en la card. Sin actualización, queda una fecha fantasma.
-			const remaining = await db
-				.select({
-					fechaInicio: seguimientosProgramados.fechaInicio,
-					intervaloDias: seguimientosProgramados.intervaloDias,
-					ocurrenciasRealizadas: seguimientosProgramados.ocurrenciasRealizadas,
-					metodoContacto: seguimientosProgramados.metodoContacto,
-				})
-				.from(seguimientosProgramados)
-				.where(
-					and(
-						eq(seguimientosProgramados.casoCobroId, seguimiento.casoCobroId),
-						eq(seguimientosProgramados.activo, true),
-					)
-				)
-				.orderBy(asc(seguimientosProgramados.fechaInicio));
-
-			let nextContacto: Date | null = null;
-			let nextMetodo: string | null = null;
-			for (const seg of remaining) {
-				// Próxima fecha = fechaInicio + intervaloDias * ocurrenciasRealizadas
-				// Cuando ocurrenciasRealizadas=0, nextDate = fechaInicio (podría ser hoy o atrasada).
-				const nextDate = new Date(
-					seg.fechaInicio.getTime() + seg.intervaloDias * seg.ocurrenciasRealizadas * 86_400_000,
-				);
-				if (!nextContacto || nextDate < nextContacto) {
-					nextContacto = nextDate;
-					nextMetodo = seg.metodoContacto;
-				}
-			}
-
-			await db.update(casosCobros)
-				.set({
-					proximoContacto: nextContacto,
-					metodoContactoProximo: nextMetodo as typeof casosCobros.$inferInsert["metodoContactoProximo"],
-					updatedAt: new Date(),
-				})
-				.where(eq(casosCobros.id, seguimiento.casoCobroId));
-
+			await recomputeProximoContacto(seguimiento.casoCobroId);
 			return result[0];
 		}),
 };

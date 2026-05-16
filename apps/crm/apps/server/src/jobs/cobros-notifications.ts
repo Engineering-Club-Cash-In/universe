@@ -237,7 +237,7 @@ async function _procesarSeguimientosRecurrentes(client: RawClient) {
 	for (const seg of seguimientos) {
 		// Datos corruptos — check constraint protege rows nuevos; esto cubre legacy.
 		if (seg.intervaloDias <= 0) { toDeactivateIds.push(seg.id); continue; }
-		if (seg.fechaFin && now > seg.fechaFin) { toDeactivateIds.push(seg.id); continue; }
+		if (seg.fechaFin && toDateStrGT(seg.fechaFin) < hoyStr) { toDeactivateIds.push(seg.id); continue; }
 		if (seg.ocurrenciasMaximas != null && seg.ocurrenciasRealizadas >= seg.ocurrenciasMaximas) {
 			toDeactivateIds.push(seg.id); continue;
 		}

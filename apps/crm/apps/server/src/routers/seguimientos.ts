@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "../db";
 import { casosCobros, seguimientosProgramados } from "../db/schema/cobros";
 import { notifications } from "../db/schema/notifications";
-import { cobrosProcedure } from "../lib/orpc";
+import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
 import { procesarSeguimientosRecurrentes } from "../jobs/cobros-notifications";
 import { PERMISSIONS } from "../lib/roles";
 import { gtDateStrToDate, toDateStrGT } from "../lib/guatemala-month-window";
@@ -29,7 +29,7 @@ async function verifyCaseAccess(casoCobroId: string, userId: string, userRole: s
 }
 
 export const seguimientosRouter = {
-	runSeguimientosJob: cobrosProcedure
+	runSeguimientosJob: cobrosSupervisorProcedure
 		.handler(async () => {
 			await procesarSeguimientosRecurrentes();
 			return { success: true };
@@ -94,19 +94,25 @@ export const seguimientosRouter = {
 				const hoyStr = toDateStrGT(new Date());
 				const inicioStr = toDateStrGT(fechaInicio);
 				if (inicioStr === hoyStr) {
-					await db.insert(notifications).values({
-						titulo: "Seguimiento programado para hoy",
-						descripcion: `Tienes un contacto vía ${input.metodoContacto} pendiente hoy para el crédito ${caso.numeroCreditoSifco || caso.id.slice(0, 8)}`,
-						type: "reminder",
-						status: "pending",
-						createdBy: context.userId,
-						createdByRole: "cobros",
-						assignedToRole: "cobros",
-						assignedTo: caso.responsableCobros,
-						relatedEntityType: "collection_case",
-						relatedEntityId: caso.id,
-						redirectPage: "cobros_detail",
-					});
+					await Promise.all([
+						db.insert(notifications).values({
+							titulo: "Seguimiento programado para hoy",
+							descripcion: `Tienes un contacto vía ${input.metodoContacto} pendiente hoy para el crédito ${caso.numeroCreditoSifco || caso.id.slice(0, 8)}`,
+							type: "reminder",
+							status: "pending",
+							createdBy: context.userId,
+							createdByRole: "cobros",
+							assignedToRole: "cobros",
+							assignedTo: caso.responsableCobros,
+							relatedEntityType: "collection_case",
+							relatedEntityId: caso.id,
+							redirectPage: "cobros_detail",
+						}),
+						// Marcar ocurrencia 0 como realizada para que el job nocturno no duplique.
+						db.update(seguimientosProgramados)
+							.set({ ocurrenciasRealizadas: 1, updatedAt: new Date() })
+							.where(eq(seguimientosProgramados.id, result[0].id)),
+					]);
 				}
 			}
 

@@ -32,6 +32,7 @@ import { otps } from "./db/schema/otp";
 import {
 	checkCasosSinContacto,
 	checkSeguimientosVencidos,
+	procesarSeguimientosRecurrentes,
 } from "./jobs/cobros-notifications";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
@@ -1092,7 +1093,14 @@ setInterval(
 setTimeout(() => {
 	checkSeguimientosVencidos().catch(console.error);
 	checkCasosSinContacto(3).catch(console.error);
+	procesarSeguimientosRecurrentes().catch(console.error);
 }, 10_000);
+
+// ⚠️ TESTING: Ejecutar cada 2 minutos. Revertir a medianoche antes de producción.
+setInterval(async () => {
+	await procesarSeguimientosRecurrentes().catch(console.error);
+}, 2 * 60 * 1000);
+
 
 export default {
 	port: process.env.PORT || 3000,

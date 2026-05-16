@@ -299,32 +299,38 @@ async function _procesarSeguimientosRecurrentes(client: RawClient) {
 	}
 
 	// Query 4: batch update casosCobros via UPDATE FROM VALUES (1 query vs N)
-	// Deduplicar por casoCobroId: si hay múltiples seguimientos para el mismo caso,
-	// PostgreSQL UPDATE FROM con IDs duplicados en VALUES elige fila de forma no determinista.
-	// Quedarse con la proximaFecha más próxima para cada caso.
+	// Excluir seguimientos terminales (la proximaFecha nunca se ejecutará porque el siguiente
+	// job los desactiva antes): ocurrenciasMaximas alcanzadas o proximaFecha más allá de fechaFin.
+	// Deduplicar por casoCobroId para evitar UPDATE no determinista con IDs duplicados en VALUES.
 	const casoMap = new Map<string, ClaimRow>();
 	for (const r of claimed) {
+		const isTerminal =
+			(r.ocurrenciasMaximas != null && r.newOcurrencias >= r.ocurrenciasMaximas) ||
+			(r.fechaFin != null && r.proximaFecha > r.fechaFin);
+		if (isTerminal) continue;
 		const prev = casoMap.get(r.casoCobroId);
 		if (!prev || r.proximaFecha < prev.proximaFecha) casoMap.set(r.casoCobroId, r);
 	}
 	const uniqueCasoRows = Array.from(casoMap.values());
 
-	const casoParams: unknown[] = [];
-	const casoPh = uniqueCasoRows.map((r, i) => {
-		const b = i * 3;
-		casoParams.push(r.casoCobroId, r.proximaFecha.toISOString(), r.metodoContacto);
-		return `($${b + 1}::uuid, $${b + 2}::timestamptz, $${b + 3}::text)`;
-	}).join(", ");
+	if (uniqueCasoRows.length > 0) {
+		const casoParams: unknown[] = [];
+		const casoPh = uniqueCasoRows.map((r, i) => {
+			const b = i * 3;
+			casoParams.push(r.casoCobroId, r.proximaFecha.toISOString(), r.metodoContacto);
+			return `($${b + 1}::uuid, $${b + 2}::timestamptz, $${b + 3}::text)`;
+		}).join(", ");
 
-	await client.query(
-		`UPDATE casos_cobros AS cc
-		 SET proximo_contacto = v.proximo_contacto,
-		     metodo_contacto_proximo = v.metodo::metodo_contacto,
-		     updated_at = NOW()
-		 FROM (VALUES ${casoPh}) AS v(id, proximo_contacto, metodo)
-		 WHERE cc.id = v.id`,
-		casoParams,
-	);
+		await client.query(
+			`UPDATE casos_cobros AS cc
+			 SET proximo_contacto = v.proximo_contacto,
+			     metodo_contacto_proximo = v.metodo::metodo_contacto,
+			     updated_at = NOW()
+			 FROM (VALUES ${casoPh}) AS v(id, proximo_contacto, metodo)
+			 WHERE cc.id = v.id`,
+			casoParams,
+		);
+	}
 
 	// Query 5: batch insert notifications (1 query vs N)
 	await db.insert(notifications).values(

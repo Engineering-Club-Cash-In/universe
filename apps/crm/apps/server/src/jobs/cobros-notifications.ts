@@ -313,23 +313,29 @@ async function _procesarSeguimientosRecurrentes(client: RawClient) {
 		// Los ocurrencias_realizadas ya actualizados por el CAS son visibles dentro de esta transacción.
 		const affectedCasoIds = [...new Set(claimed.map((r) => r.casoCobroId))];
 
+		// LEFT JOIN LATERAL garantiza una fila por caso aunque no queden schedules activos,
+		// forzando proximo_contacto = NULL cuando el último seguimiento llega a terminal.
 		await client.query(
 			`UPDATE casos_cobros AS cc
 			 SET proximo_contacto = sub.min_fecha,
 			     metodo_contacto_proximo = sub.metodo::metodo_contacto,
 			     updated_at = NOW()
 			 FROM (
-			     SELECT DISTINCT ON (sp.caso_cobro_id)
-			         sp.caso_cobro_id,
-			         sp.fecha_inicio + sp.intervalo_dias * sp.ocurrencias_realizadas * INTERVAL '1 day' AS min_fecha,
-			         sp.metodo_contacto AS metodo
-			     FROM seguimientos_programados sp
-			     WHERE sp.caso_cobro_id = ANY($1::uuid[])
-			       AND sp.activo = true
-			       AND (sp.ocurrencias_maximas IS NULL OR sp.ocurrencias_realizadas < sp.ocurrencias_maximas)
-			       AND (sp.fecha_fin IS NULL OR sp.fecha_inicio + sp.intervalo_dias * sp.ocurrencias_realizadas * INTERVAL '1 day' <= sp.fecha_fin)
-			     ORDER BY sp.caso_cobro_id,
-			              sp.fecha_inicio + sp.intervalo_dias * sp.ocurrencias_realizadas * INTERVAL '1 day' ASC
+			     SELECT c.id AS caso_cobro_id,
+			            earliest.min_fecha,
+			            earliest.metodo
+			     FROM unnest($1::uuid[]) AS c(id)
+			     LEFT JOIN LATERAL (
+			         SELECT sp.fecha_inicio + sp.intervalo_dias * sp.ocurrencias_realizadas * INTERVAL '1 day' AS min_fecha,
+			                sp.metodo_contacto AS metodo
+			         FROM seguimientos_programados sp
+			         WHERE sp.caso_cobro_id = c.id
+			           AND sp.activo = true
+			           AND (sp.ocurrencias_maximas IS NULL OR sp.ocurrencias_realizadas < sp.ocurrencias_maximas)
+			           AND (sp.fecha_fin IS NULL OR sp.fecha_inicio + sp.intervalo_dias * sp.ocurrencias_realizadas * INTERVAL '1 day' <= sp.fecha_fin)
+			         ORDER BY sp.fecha_inicio + sp.intervalo_dias * sp.ocurrencias_realizadas * INTERVAL '1 day' ASC
+			         LIMIT 1
+			     ) earliest ON true
 			 ) sub
 			 WHERE cc.id = sub.caso_cobro_id`,
 			[affectedCasoIds],

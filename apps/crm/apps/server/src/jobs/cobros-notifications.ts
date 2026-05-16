@@ -276,8 +276,9 @@ async function _procesarSeguimientosRecurrentes(client: RawClient) {
 		return;
 	}
 
-	// Query 3: batch CAS — UPDATE FROM VALUES con guard por ocurrencias_realizadas.
-	// Rows que ya fueron tomados por un runner concurrente no aparecen en RETURNING.
+	// Queries 3-5 en una sola transacción: CAS + update caso + insert notificaciones.
+	// Sin transacción, un fallo entre el CAS y el insert de notificaciones consumía el contador
+	// permanentemente (el siguiente run lo saltaba) sin generar el recordatorio.
 	const casParams: unknown[] = [];
 	const casPh = claimRows.map((r, i) => {
 		const b = i * 3;
@@ -285,73 +286,88 @@ async function _procesarSeguimientosRecurrentes(client: RawClient) {
 		return `($${b + 1}::uuid, $${b + 2}::int, $${b + 3}::int)`;
 	}).join(", ");
 
-	const casResult = await client.query<{ id: string }>(
-		`UPDATE seguimientos_programados AS sp
-		 SET ocurrencias_realizadas = v.new_occ, updated_at = NOW()
-		 FROM (VALUES ${casPh}) AS v(id, old_occ, new_occ)
-		 WHERE sp.id = v.id AND sp.ocurrencias_realizadas = v.old_occ
-		 RETURNING sp.id`,
-		casParams,
-	);
+	let claimed: ClaimRow[] = [];
 
-	const claimedIds = new Set(casResult.rows.map((r) => r.id));
-	const claimed = claimRows.filter((r) => claimedIds.has(r.id));
+	await client.query("BEGIN");
+	try {
+		// Query 3: batch CAS — rows tomados por runner concurrente no aparecen en RETURNING.
+		const casResult = await client.query<{ id: string }>(
+			`UPDATE seguimientos_programados AS sp
+			 SET ocurrencias_realizadas = v.new_occ, updated_at = NOW()
+			 FROM (VALUES ${casPh}) AS v(id, old_occ, new_occ)
+			 WHERE sp.id = v.id AND sp.ocurrencias_realizadas = v.old_occ
+			 RETURNING sp.id`,
+			casParams,
+		);
 
-	if (claimed.length === 0) {
-		console.log("[SeguimientosRecurrentes] 0 claims ganados (runner concurrente los tomó)");
-		return;
-	}
+		const claimedIds = new Set(casResult.rows.map((r) => r.id));
+		claimed = claimRows.filter((r) => claimedIds.has(r.id));
 
-	// Query 4: batch update casosCobros via UPDATE FROM VALUES (1 query vs N)
-	// Excluir seguimientos terminales (la proximaFecha nunca se ejecutará porque el siguiente
-	// job los desactiva antes): ocurrenciasMaximas alcanzadas o proximaFecha más allá de fechaFin.
-	// Deduplicar por casoCobroId para evitar UPDATE no determinista con IDs duplicados en VALUES.
-	const casoMap = new Map<string, ClaimRow>();
-	for (const r of claimed) {
-		const isTerminal =
-			(r.ocurrenciasMaximas != null && r.newOcurrencias >= r.ocurrenciasMaximas) ||
-			(r.fechaFin != null && r.proximaFecha > r.fechaFin);
-		if (isTerminal) continue;
-		const prev = casoMap.get(r.casoCobroId);
-		if (!prev || r.proximaFecha < prev.proximaFecha) casoMap.set(r.casoCobroId, r);
-	}
-	const uniqueCasoRows = Array.from(casoMap.values());
+		if (claimed.length === 0) {
+			await client.query("COMMIT");
+			console.log("[SeguimientosRecurrentes] 0 claims ganados (runner concurrente los tomó)");
+			return;
+		}
 
-	if (uniqueCasoRows.length > 0) {
-		const casoParams: unknown[] = [];
-		const casoPh = uniqueCasoRows.map((r, i) => {
-			const b = i * 3;
-			casoParams.push(r.casoCobroId, r.proximaFecha.toISOString(), r.metodoContacto);
-			return `($${b + 1}::uuid, $${b + 2}::timestamptz, $${b + 3}::text)`;
+		// Query 4: batch update casosCobros.
+		// Excluir seguimientos terminales y deduplicar por casoCobroId.
+		const casoMap = new Map<string, ClaimRow>();
+		for (const r of claimed) {
+			const isTerminal =
+				(r.ocurrenciasMaximas != null && r.newOcurrencias >= r.ocurrenciasMaximas) ||
+				(r.fechaFin != null && r.proximaFecha > r.fechaFin);
+			if (isTerminal) continue;
+			const prev = casoMap.get(r.casoCobroId);
+			if (!prev || r.proximaFecha < prev.proximaFecha) casoMap.set(r.casoCobroId, r);
+		}
+		const uniqueCasoRows = Array.from(casoMap.values());
+
+		if (uniqueCasoRows.length > 0) {
+			const casoParams: unknown[] = [];
+			const casoPh = uniqueCasoRows.map((r, i) => {
+				const b = i * 3;
+				casoParams.push(r.casoCobroId, r.proximaFecha.toISOString(), r.metodoContacto);
+				return `($${b + 1}::uuid, $${b + 2}::timestamptz, $${b + 3}::text)`;
+			}).join(", ");
+
+			await client.query(
+				`UPDATE casos_cobros AS cc
+				 SET proximo_contacto = v.proximo_contacto,
+				     metodo_contacto_proximo = v.metodo::metodo_contacto,
+				     updated_at = NOW()
+				 FROM (VALUES ${casoPh}) AS v(id, proximo_contacto, metodo)
+				 WHERE cc.id = v.id`,
+				casoParams,
+			);
+		}
+
+		// Query 5: batch insert notificaciones como raw SQL para permanecer en la misma transacción.
+		const notifParams: unknown[] = [];
+		const notifPh = claimed.map((r, i) => {
+			const b = i * 11;
+			notifParams.push(
+				"Nuevo seguimiento programado",
+				`Se ha programado automáticamente un contacto vía ${r.metodoContacto} para el crédito ${r.numeroCreditoSifco ?? r.casoCobroId.slice(0, 8)}`,
+				"reminder", "pending",
+				r.agenteId, "cobros", "cobros",
+				r.responsableCobros,
+				"collection_case", r.casoCobroId,
+				"cobros_detail",
+			);
+			return `($${b + 1}::text, $${b + 2}::text, $${b + 3}::notification_type, $${b + 4}::notification_status, $${b + 5}::text, $${b + 6}::user_role, $${b + 7}::user_role, $${b + 8}::text, $${b + 9}::notification_entity_type, $${b + 10}::uuid, $${b + 11}::notification_redirect_page)`;
 		}).join(", ");
 
 		await client.query(
-			`UPDATE casos_cobros AS cc
-			 SET proximo_contacto = v.proximo_contacto,
-			     metodo_contacto_proximo = v.metodo::metodo_contacto,
-			     updated_at = NOW()
-			 FROM (VALUES ${casoPh}) AS v(id, proximo_contacto, metodo)
-			 WHERE cc.id = v.id`,
-			casoParams,
+			`INSERT INTO notifications (titulo, descripcion, type, status, created_by, created_by_role, assigned_to_role, assigned_to, related_entity_type, related_entity_id, redirect_page)
+			 VALUES ${notifPh}`,
+			notifParams,
 		);
-	}
 
-	// Query 5: batch insert notifications (1 query vs N)
-	await db.insert(notifications).values(
-		claimed.map((r) => ({
-			titulo: "Nuevo seguimiento programado" as const,
-			descripcion: `Se ha programado automáticamente un contacto vía ${r.metodoContacto} para el crédito ${r.numeroCreditoSifco ?? r.casoCobroId.slice(0, 8)}`,
-			type: "reminder" as const,
-			status: "pending" as const,
-			createdBy: r.agenteId,
-			createdByRole: "cobros" as const,
-			assignedToRole: "cobros" as const,
-			assignedTo: r.responsableCobros,
-			relatedEntityType: "collection_case" as const,
-			relatedEntityId: r.casoCobroId,
-			redirectPage: "cobros_detail" as const,
-		})),
-	);
+		await client.query("COMMIT");
+	} catch (e) {
+		await client.query("ROLLBACK");
+		throw e;
+	}
 
 	for (const r of claimed) {
 		console.log(`[CobrosNotifications] ✅ Seguimiento disparado para caso ${r.casoCobroId} | próximo contacto: ${toDateStrGT(r.proximaFecha)}`);

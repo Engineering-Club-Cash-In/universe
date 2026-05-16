@@ -332,7 +332,7 @@ async function _procesarSeguimientosRecurrentes(client: RawClient) {
 
 			await client.query(
 				`UPDATE casos_cobros AS cc
-				 SET proximo_contacto = LEAST(cc.proximo_contacto, v.proximo_contacto),
+				 SET proximo_contacto = LEAST(COALESCE(cc.proximo_contacto, v.proximo_contacto), v.proximo_contacto),
 				     metodo_contacto_proximo = CASE
 				         WHEN cc.proximo_contacto IS NULL OR v.proximo_contacto <= cc.proximo_contacto
 				         THEN v.metodo::metodo_contacto

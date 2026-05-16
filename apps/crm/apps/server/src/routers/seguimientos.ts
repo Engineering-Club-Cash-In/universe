@@ -81,20 +81,32 @@ export const seguimientosRouter = {
 				.limit(1);
 
 			if (caso) {
-				await db.update(casosCobros)
-					.set({
-						proximoContacto: fechaInicio,
-						metodoContactoProximo: input.metodoContacto,
-						updatedAt: new Date(),
-					})
-					.where(eq(casosCobros.id, input.casoCobroId));
-
-				// Si fechaInicio es exactamente hoy, crear notificación inmediata.
-				// Si es un día futuro, el job nocturno la creará cuando llegue la fecha.
 				const hoyStr = toDateStrGT(new Date());
 				const inicioStr = toDateStrGT(fechaInicio);
-				if (inicioStr === hoyStr) {
-					await Promise.all([
+				const isToday = inicioStr === hoyStr;
+
+				// Solo actualizar proximoContacto si no hay uno previo más temprano.
+				const shouldUpdateProximo =
+					!caso.proximoContacto || fechaInicio < caso.proximoContacto;
+
+				const ops: Promise<unknown>[] = [];
+
+				if (shouldUpdateProximo) {
+					ops.push(
+						db.update(casosCobros)
+							.set({
+								proximoContacto: fechaInicio,
+								metodoContactoProximo: input.metodoContacto,
+								updatedAt: new Date(),
+							})
+							.where(eq(casosCobros.id, input.casoCobroId)),
+					);
+				}
+
+				if (isToday) {
+					// Si fechaInicio es hoy, crear notificación inmediata y marcar ocurrencia 0
+					// como realizada para que el job nocturno no duplique la notificación.
+					ops.push(
 						db.insert(notifications).values({
 							titulo: "Seguimiento programado para hoy",
 							descripcion: `Tienes un contacto vía ${input.metodoContacto} pendiente hoy para el crédito ${caso.numeroCreditoSifco || caso.id.slice(0, 8)}`,
@@ -108,12 +120,13 @@ export const seguimientosRouter = {
 							relatedEntityId: caso.id,
 							redirectPage: "cobros_detail",
 						}),
-						// Marcar ocurrencia 0 como realizada para que el job nocturno no duplique.
 						db.update(seguimientosProgramados)
 							.set({ ocurrenciasRealizadas: 1, updatedAt: new Date() })
 							.where(eq(seguimientosProgramados.id, result[0].id)),
-					]);
+					);
 				}
+
+				if (ops.length > 0) await Promise.all(ops);
 			}
 
 			return result[0];

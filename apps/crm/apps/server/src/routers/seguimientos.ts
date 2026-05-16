@@ -13,8 +13,10 @@ async function recomputeProximoContacto(casoCobroId: string) {
 	const remaining = await db
 		.select({
 			fechaInicio: seguimientosProgramados.fechaInicio,
+			fechaFin: seguimientosProgramados.fechaFin,
 			intervaloDias: seguimientosProgramados.intervaloDias,
 			ocurrenciasRealizadas: seguimientosProgramados.ocurrenciasRealizadas,
+			ocurrenciasMaximas: seguimientosProgramados.ocurrenciasMaximas,
 			metodoContacto: seguimientosProgramados.metodoContacto,
 		})
 		.from(seguimientosProgramados)
@@ -32,6 +34,10 @@ async function recomputeProximoContacto(casoCobroId: string) {
 		const nextDate = new Date(
 			seg.fechaInicio.getTime() + seg.intervaloDias * seg.ocurrenciasRealizadas * 86_400_000,
 		);
+		const isTerminal =
+			(seg.ocurrenciasMaximas != null && seg.ocurrenciasRealizadas >= seg.ocurrenciasMaximas) ||
+			(seg.fechaFin != null && nextDate > seg.fechaFin);
+		if (isTerminal) continue;
 		if (!nextContacto || nextDate < nextContacto) {
 			nextContacto = nextDate;
 			nextMetodo = seg.metodoContacto;

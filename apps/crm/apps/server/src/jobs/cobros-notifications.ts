@@ -251,7 +251,11 @@ async function _procesarSeguimientosRecurrentes(client: RawClient) {
 		// Largest k where fechaInicio + k*intervaloDias <= today
 		const ocurrenciasDebidas = Math.floor(diasTranscurridos / seg.intervaloDias);
 		if (ocurrenciasDebidas >= seg.ocurrenciasRealizadas) {
-			const newOcurrencias = ocurrenciasDebidas + 1;
+			// Acotar al límite máximo: si el scheduler estuvo caído varios intervalos,
+			// ocurrenciasDebidas puede superar ocurrenciasMaximas y disparar una notificación extra.
+			const newOcurrencias = seg.ocurrenciasMaximas != null
+				? Math.min(ocurrenciasDebidas + 1, seg.ocurrenciasMaximas)
+				: ocurrenciasDebidas + 1;
 			// Aritmética en ms — Guatemala no tiene DST.
 			const proximaFecha = new Date(
 				seg.fechaInicio.getTime() + seg.intervaloDias * newOcurrencias * 86_400_000,

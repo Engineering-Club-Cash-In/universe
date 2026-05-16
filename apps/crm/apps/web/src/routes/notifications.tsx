@@ -165,6 +165,7 @@ const REDIRECT_CONFIG: Record<
 		getRoute: (id) => ({
 			to: "/cobros/$id",
 			params: { id },
+			search: { tipo: "caso" },
 		}),
 	},
 };

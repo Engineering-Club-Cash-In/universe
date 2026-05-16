@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/server";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { casosCobros, seguimientosProgramados } from "../db/schema/cobros";
@@ -207,6 +207,47 @@ export const seguimientosRouter = {
 				.delete(seguimientosProgramados)
 				.where(eq(seguimientosProgramados.id, input.id))
 				.returning();
+
+			// Recompute proximo_contacto del caso: el seguimiento eliminado podía ser la fuente
+			// del próximo contacto mostrado en la card. Sin actualización, queda una fecha fantasma.
+			const remaining = await db
+				.select({
+					fechaInicio: seguimientosProgramados.fechaInicio,
+					intervaloDias: seguimientosProgramados.intervaloDias,
+					ocurrenciasRealizadas: seguimientosProgramados.ocurrenciasRealizadas,
+					metodoContacto: seguimientosProgramados.metodoContacto,
+				})
+				.from(seguimientosProgramados)
+				.where(
+					and(
+						eq(seguimientosProgramados.casoCobroId, seguimiento.casoCobroId),
+						eq(seguimientosProgramados.activo, true),
+					)
+				)
+				.orderBy(asc(seguimientosProgramados.fechaInicio));
+
+			let nextContacto: Date | null = null;
+			let nextMetodo: string | null = null;
+			for (const seg of remaining) {
+				// Próxima fecha = fechaInicio + intervaloDias * ocurrenciasRealizadas
+				// Cuando ocurrenciasRealizadas=0, nextDate = fechaInicio (podría ser hoy o atrasada).
+				const nextDate = new Date(
+					seg.fechaInicio.getTime() + seg.intervaloDias * seg.ocurrenciasRealizadas * 86_400_000,
+				);
+				if (!nextContacto || nextDate < nextContacto) {
+					nextContacto = nextDate;
+					nextMetodo = seg.metodoContacto;
+				}
+			}
+
+			await db.update(casosCobros)
+				.set({
+					proximoContacto: nextContacto,
+					metodoContactoProximo: nextMetodo as typeof casosCobros.$inferInsert["metodoContactoProximo"],
+					updatedAt: new Date(),
+				})
+				.where(eq(casosCobros.id, seguimiento.casoCobroId));
+
 			return result[0];
 		}),
 };

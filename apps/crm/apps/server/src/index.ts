@@ -1096,10 +1096,18 @@ setTimeout(() => {
 	procesarSeguimientosRecurrentes().catch(console.error);
 }, 10_000);
 
-// ⚠️ TESTING: Ejecutar cada 2 minutos. Revertir a medianoche antes de producción.
-setInterval(async () => {
-	await procesarSeguimientosRecurrentes().catch(console.error);
-}, 2 * 60 * 1000);
+// Ejecutar procesarSeguimientosRecurrentes a medianoche GT (00:00 GT = 06:00 UTC) cada día.
+function scheduleAtMidnightGT() {
+	const now = new Date();
+	const next = new Date();
+	next.setUTCHours(6, 0, 0, 0);
+	if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+	setTimeout(async () => {
+		await procesarSeguimientosRecurrentes().catch(console.error);
+		scheduleAtMidnightGT();
+	}, next.getTime() - now.getTime());
+}
+scheduleAtMidnightGT();
 
 
 export default {

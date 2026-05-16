@@ -309,41 +309,31 @@ async function _procesarSeguimientosRecurrentes(client: RawClient) {
 			return;
 		}
 
-		// Query 4: batch update casosCobros.
-		// Excluir seguimientos terminales y deduplicar por casoCobroId.
-		const casoMap = new Map<string, ClaimRow>();
-		for (const r of claimed) {
-			const isTerminal =
-				(r.ocurrenciasMaximas != null && r.newOcurrencias >= r.ocurrenciasMaximas) ||
-				(r.fechaFin != null && r.proximaFecha > r.fechaFin);
-			if (isTerminal) continue;
-			const prev = casoMap.get(r.casoCobroId);
-			if (!prev || r.proximaFecha < prev.proximaFecha) casoMap.set(r.casoCobroId, r);
-		}
-		const uniqueCasoRows = Array.from(casoMap.values());
+		// Query 4: recompute proximo_contacto desde todos los seguimientos activos no-terminales.
+		// Los ocurrencias_realizadas ya actualizados por el CAS son visibles dentro de esta transacción.
+		const affectedCasoIds = [...new Set(claimed.map((r) => r.casoCobroId))];
 
-		if (uniqueCasoRows.length > 0) {
-			const casoParams: unknown[] = [];
-			const casoPh = uniqueCasoRows.map((r, i) => {
-				const b = i * 3;
-				casoParams.push(r.casoCobroId, r.proximaFecha.toISOString(), r.metodoContacto);
-				return `($${b + 1}::uuid, $${b + 2}::timestamptz, $${b + 3}::text)`;
-			}).join(", ");
-
-			await client.query(
-				`UPDATE casos_cobros AS cc
-				 SET proximo_contacto = LEAST(COALESCE(cc.proximo_contacto, v.proximo_contacto), v.proximo_contacto),
-				     metodo_contacto_proximo = CASE
-				         WHEN cc.proximo_contacto IS NULL OR v.proximo_contacto <= cc.proximo_contacto
-				         THEN v.metodo::metodo_contacto
-				         ELSE cc.metodo_contacto_proximo
-				     END,
-				     updated_at = NOW()
-				 FROM (VALUES ${casoPh}) AS v(id, proximo_contacto, metodo)
-				 WHERE cc.id = v.id`,
-				casoParams,
-			);
-		}
+		await client.query(
+			`UPDATE casos_cobros AS cc
+			 SET proximo_contacto = sub.min_fecha,
+			     metodo_contacto_proximo = sub.metodo::metodo_contacto,
+			     updated_at = NOW()
+			 FROM (
+			     SELECT DISTINCT ON (sp.caso_cobro_id)
+			         sp.caso_cobro_id,
+			         sp.fecha_inicio + sp.intervalo_dias * sp.ocurrencias_realizadas * INTERVAL '1 day' AS min_fecha,
+			         sp.metodo_contacto AS metodo
+			     FROM seguimientos_programados sp
+			     WHERE sp.caso_cobro_id = ANY($1::uuid[])
+			       AND sp.activo = true
+			       AND (sp.ocurrencias_maximas IS NULL OR sp.ocurrencias_realizadas < sp.ocurrencias_maximas)
+			       AND (sp.fecha_fin IS NULL OR sp.fecha_inicio + sp.intervalo_dias * sp.ocurrencias_realizadas * INTERVAL '1 day' <= sp.fecha_fin)
+			     ORDER BY sp.caso_cobro_id,
+			              sp.fecha_inicio + sp.intervalo_dias * sp.ocurrencias_realizadas * INTERVAL '1 day' ASC
+			 ) sub
+			 WHERE cc.id = sub.caso_cobro_id`,
+			[affectedCasoIds],
+		);
 
 		// Query 5: batch insert notificaciones como raw SQL para permanecer en la misma transacción.
 		const notifParams: unknown[] = [];

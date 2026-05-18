@@ -26,6 +26,10 @@ import {
 } from "../db/schema";
 import { user } from "../db/schema/auth";
 import {
+	creditApplications,
+	financialStatements,
+} from "../db/schema/client-forms";
+import {
 	clients,
 	coDebtors,
 	companies,
@@ -46,11 +50,12 @@ import {
 	opportunityDocuments,
 	VEHICLE_DOCUMENT_TYPES,
 } from "../db/schema/documents";
-import { generatedLegalContracts } from "../db/schema/legal-contracts";
+import { hasStaleAnalysisChecklistVehicleState } from "../lib/analysis-checklist";
 import {
 	updateChecklistForClientDocument,
 	updateChecklistForVehicleDocument,
 } from "../lib/checklist";
+import { buildDeletedOpportunitySnapshot } from "../lib/deleted-opportunity-audit";
 import { getGuatemalaMonthWindow } from "../lib/guatemala-month-window";
 import {
 	formatMissingLeadFields,
@@ -70,9 +75,8 @@ import {
 	getMissingFieldsForCompletion,
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
-import { hasStaleAnalysisChecklistVehicleState } from "../lib/analysis-checklist";
-import { validarDpi } from "../utils/cui-validation";
 import { scoreLead } from "../services/lead-scoring";
+import { validarDpi } from "../utils/cui-validation";
 import { createNotification } from "./notifications";
 
 export const getLeadsInputSchema = z.object({
@@ -1286,7 +1290,10 @@ export const crmRouter = {
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
-				reason: z.string().min(1, "El motivo de eliminación es requerido"),
+				reason: z
+					.string()
+					.trim()
+					.min(1, "El motivo de eliminación es requerido"),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -1296,80 +1303,163 @@ export const crmRouter = {
 				});
 			}
 
-			const [opportunity] = await db
-				.select({
-					id: opportunities.id,
-					title: opportunities.title,
-					value: opportunities.value,
-					status: opportunities.status,
-					assignedTo: opportunities.assignedTo,
-					leadId: opportunities.leadId,
-					createdAt: opportunities.createdAt,
-					stage: {
-						name: salesStages.name,
-						closurePercentage: salesStages.closurePercentage,
-					},
-					lead: {
-						firstName: leads.firstName,
-						lastName: leads.lastName,
-					},
-					assignedUser: {
-						name: user.name,
-					},
-				})
-				.from(opportunities)
-				.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
-				.leftJoin(leads, eq(opportunities.leadId, leads.id))
-				.leftJoin(user, eq(opportunities.assignedTo, user.id))
-				.where(eq(opportunities.id, input.opportunityId))
-				.limit(1);
+			await db.transaction(async (tx) => {
+				const [opportunity] = await tx
+					.select({
+						id: opportunities.id,
+						title: opportunities.title,
+						value: opportunities.value,
+						status: opportunities.status,
+						creditType: opportunities.creditType,
+						source: opportunities.source,
+						campaign: opportunities.campaign,
+						loanPurpose: opportunities.loanPurpose,
+						probability: opportunities.probability,
+						expectedCloseDate: opportunities.expectedCloseDate,
+						actualCloseDate: opportunities.actualCloseDate,
+						notes: opportunities.notes,
+						numeroCuotas: opportunities.numeroCuotas,
+						tasaInteres: opportunities.tasaInteres,
+						cuotaMensual: opportunities.cuotaMensual,
+						fechaInicio: opportunities.fechaInicio,
+						diaPagoMensual: opportunities.diaPagoMensual,
+						numeroSifco: opportunities.numeroSifco,
+						nit: opportunities.nit,
+						assignedTo: opportunities.assignedTo,
+						leadId: opportunities.leadId,
+						createdAt: opportunities.createdAt,
+						updatedAt: opportunities.updatedAt,
+						createdBy: opportunities.createdBy,
+						stage: {
+							id: salesStages.id,
+							name: salesStages.name,
+							closurePercentage: salesStages.closurePercentage,
+						},
+						lead: {
+							id: leads.id,
+							firstName: leads.firstName,
+							lastName: leads.lastName,
+							email: leads.email,
+							phone: leads.phone,
+						},
+						company: {
+							id: companies.id,
+							name: companies.name,
+						},
+						vehicle: {
+							id: vehicles.id,
+							make: vehicles.make,
+							model: vehicles.model,
+							year: vehicles.year,
+							licensePlate: vehicles.licensePlate,
+						},
+						assignedUser: {
+							id: user.id,
+							name: user.name,
+							email: user.email,
+						},
+						client: {
+							id: clients.id,
+							contactPerson: clients.contactPerson,
+							status: clients.status,
+						},
+					})
+					.from(opportunities)
+					.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+					.leftJoin(leads, eq(opportunities.leadId, leads.id))
+					.leftJoin(companies, eq(opportunities.companyId, companies.id))
+					.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+					.leftJoin(user, eq(opportunities.assignedTo, user.id))
+					.leftJoin(clients, eq(clients.opportunityId, opportunities.id))
+					.where(eq(opportunities.id, input.opportunityId))
+					.limit(1);
 
-			if (!opportunity) {
-				throw new ORPCError("NOT_FOUND", {
-					message: "Oportunidad no encontrada",
+				if (!opportunity) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "Oportunidad no encontrada",
+					});
+				}
+
+				if (!opportunity.stage || opportunity.stage.closurePercentage >= 30) {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Solo se pueden eliminar oportunidades en etapas menores al 30% de cierre",
+					});
+				}
+
+				const [documentsCount] = await tx
+					.select({ count: count() })
+					.from(opportunityDocuments)
+					.where(eq(opportunityDocuments.opportunityId, input.opportunityId));
+				const [coDebtorsCount] = await tx
+					.select({ count: count() })
+					.from(coDebtors)
+					.where(eq(coDebtors.opportunityId, input.opportunityId));
+				const [creditApplicationsCount] = await tx
+					.select({ count: count() })
+					.from(creditApplications)
+					.where(eq(creditApplications.opportunityId, input.opportunityId));
+				const [financialStatementsCount] = await tx
+					.select({ count: count() })
+					.from(financialStatements)
+					.where(eq(financialStatements.opportunityId, input.opportunityId));
+				const [stageHistoryCount] = await tx
+					.select({ count: count() })
+					.from(opportunityStageHistory)
+					.where(
+						eq(opportunityStageHistory.opportunityId, input.opportunityId),
+					);
+
+				const snapshot = buildDeletedOpportunitySnapshot({
+					opportunity,
+					stage: opportunity.stage,
+					lead: opportunity.lead?.id ? opportunity.lead : null,
+					company: opportunity.company?.id ? opportunity.company : null,
+					vehicle: opportunity.vehicle?.id ? opportunity.vehicle : null,
+					assignedUser: opportunity.assignedUser?.id
+						? opportunity.assignedUser
+						: null,
+					client: opportunity.client?.id ? opportunity.client : null,
+					relatedCounts: {
+						documents: documentsCount?.count ?? 0,
+						coDebtors: coDebtorsCount?.count ?? 0,
+						forms:
+							(creditApplicationsCount?.count ?? 0) +
+							(financialStatementsCount?.count ?? 0),
+						stageHistory: stageHistoryCount?.count ?? 0,
+					},
 				});
-			}
 
-			if (!opportunity.stage || opportunity.stage.closurePercentage >= 30) {
-				throw new ORPCError("BAD_REQUEST", {
-					message:
-						"Solo se pueden eliminar oportunidades en etapas menores al 30% de cierre",
+				const leadName = snapshot.lead?.fullName ?? null;
+
+				await tx.insert(deletedOpportunityLogs).values({
+					opportunityId: opportunity.id,
+					opportunityTitle: opportunity.title,
+					opportunityValue: opportunity.value,
+					opportunityStatus: opportunity.status,
+					opportunityStageName: opportunity.stage?.name ?? null,
+					opportunityStagePercentage:
+						opportunity.stage?.closurePercentage ?? null,
+					opportunityCreatedAt: opportunity.createdAt,
+					assignedUserId: opportunity.assignedTo,
+					assignedUserName: opportunity.assignedUser?.name ?? null,
+					leadId: opportunity.leadId,
+					leadName,
+					deletedBy: context.userId,
+					deletedByName: context.user?.name ?? context.userId,
+					reason: input.reason,
+					snapshot,
 				});
-			}
 
-			const leadName = opportunity.lead?.firstName
-				? [opportunity.lead.firstName, opportunity.lead.lastName]
-						.filter(Boolean)
-						.join(" ")
-				: null;
+				await tx
+					.update(clients)
+					.set({ opportunityId: null })
+					.where(eq(clients.opportunityId, input.opportunityId));
 
-			// Insert audit log before deleting
-			await db.insert(deletedOpportunityLogs).values({
-				opportunityId: opportunity.id,
-				opportunityTitle: opportunity.title,
-				opportunityValue: opportunity.value,
-				opportunityStatus: opportunity.status,
-				opportunityStageName: opportunity.stage?.name ?? null,
-				opportunityStagePercentage: opportunity.stage?.closurePercentage ?? null,
-				opportunityCreatedAt: opportunity.createdAt,
-				assignedUserId: opportunity.assignedTo,
-				assignedUserName: opportunity.assignedUser?.name ?? null,
-				leadId: opportunity.leadId,
-				leadName,
-				deletedBy: context.userId,
-				deletedByName: context.user?.name ?? context.userId,
-				reason: input.reason,
+				await tx
+					.delete(opportunities)
+					.where(eq(opportunities.id, input.opportunityId));
 			});
-
-			// Nullify clients.opportunityId before delete to avoid FK restriction
-			await db
-				.update(clients)
-				.set({ opportunityId: null })
-				.where(eq(clients.opportunityId, input.opportunityId));
-
-			await db
-				.delete(opportunities)
-				.where(eq(opportunities.id, input.opportunityId));
 
 			return { message: "Oportunidad eliminada exitosamente" };
 		}),
@@ -3944,7 +4034,7 @@ export const crmRouter = {
 						.delete(analysisChecklists)
 						.where(eq(analysisChecklists.id, existingChecklist.id));
 				} else {
-				return existingChecklist.checklistData;
+					return existingChecklist.checklistData;
 				}
 			}
 

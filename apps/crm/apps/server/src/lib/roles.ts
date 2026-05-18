@@ -125,6 +125,9 @@ export const PERMISSIONS = {
 	canApproveOpportunities: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.ANALYST,
 
+	canDeleteOpportunities: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.SALES_SUPERVISOR,
+
 	canExportReports: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN ||
 		role === ROLES.ANALYST ||

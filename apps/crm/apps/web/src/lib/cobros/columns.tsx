@@ -100,17 +100,16 @@ function truncarCredito(numero: string): string {
 	return `${numero.slice(0, 8)}…${numero.slice(-5)}`;
 }
 
-// Detecta vehículos placeholder generados por auto-migrate ("N/A N/A 2000" o "- -").
+// Detecta vehículos placeholder generados por auto-migrate ("N/A N/A 2000" o
+// "- -"). Sólo se considera placeholder cuando AMBOS campos (marca y modelo)
+// son vacíos o sentinelas; filas con datos parciales útiles (ej. marca presente
+// y modelo vacío) se preservan tal cual.
 function esVehiculoPlaceholder(marca: string, modelo: string): boolean {
-	const m = marca?.trim();
-	const mo = modelo?.trim();
-	return (
-		(m === "N/A" && mo === "N/A") ||
-		(m === "-" && mo === "-") ||
-		(!m && !mo) ||
-		m === "" ||
-		mo === ""
-	);
+	const esSentinela = (v: string | null | undefined) => {
+		const t = v?.trim() ?? "";
+		return t === "" || t === "N/A" || t === "-";
+	};
+	return esSentinela(marca) && esSentinela(modelo);
 }
 
 interface GetColumnsOptions {

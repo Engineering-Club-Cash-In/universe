@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, Phone } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ContactoModal } from "@/components/contacto-modal";
 import { orpc } from "@/utils/orpc";
@@ -17,7 +18,21 @@ export function ContactoQuickAction({ numeroCredito }: ContactoQuickActionProps)
 			input: { creditoId: numeroCredito },
 		}),
 		enabled: open,
+		retry: 1,
 	});
+
+	// Si el fetch falla, evitar quedar atrapado en el estado de carga: avisar al
+	// usuario y resetear `open` para que el botón vuelva a estar habilitado.
+	useEffect(() => {
+		if (detalles.isError && open) {
+			toast.error(
+				detalles.error instanceof Error
+					? detalles.error.message
+					: "No se pudo cargar el caso. Reintentá.",
+			);
+			setOpen(false);
+		}
+	}, [detalles.isError, detalles.error, open]);
 
 	// Radix Dialog usa un Portal en el DOM, pero React propaga eventos por el
 	// árbol virtual. Sin esto, cualquier click dentro de la modal subiría hasta

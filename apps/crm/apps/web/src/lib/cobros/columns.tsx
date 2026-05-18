@@ -2,7 +2,16 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { ArrowUpDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ContactoQuickAction } from "@/components/cobros/contacto-quick-action";
 import { parseFechaLocal } from "@/lib/date-utils";
+
+const ESTADOS_MORA_CTA = new Set([
+	"mora_30",
+	"mora_60",
+	"mora_90",
+	"mora_120",
+	"mora_120_plus",
+]);
 
 export type ContratoCobranza = {
 	contratoId: string;
@@ -29,7 +38,7 @@ export type ContratoCobranza = {
 function getEstadoBadge(estado: string) {
 	const colors: Record<string, string> = {
 		al_dia: "bg-green-100 text-green-800",
-		pre_mora: "bg-yellow-50 text-yellow-700 border-yellow-200", // Nuevo: próximo a vencer
+		pre_mora: "bg-yellow-50 text-yellow-700 border-yellow-200",
 		mora_30: "bg-yellow-100 text-yellow-800",
 		mora_60: "bg-orange-100 text-orange-800",
 		mora_90: "bg-red-100 text-red-800",
@@ -84,7 +93,40 @@ const ETIQUETA_COLORS: Record<string, string> = {
 	reclamo: "bg-pink-100 text-pink-800",
 };
 
-export const columns: ColumnDef<ContratoCobranza>[] = [
+// Trunca UUIDs largos al medio (ej: "CRM-935cceeb-b88f-449f-..." → "CRM-935c…5c069").
+// Para strings cortos (≤18 chars) devuelve el original.
+function truncarCredito(numero: string): string {
+	if (numero.length <= 18) return numero;
+	return `${numero.slice(0, 8)}…${numero.slice(-5)}`;
+}
+
+// Detecta vehículos placeholder generados por auto-migrate ("N/A N/A 2000" o
+// "- -"). Sólo se considera placeholder cuando AMBOS campos (marca y modelo)
+// son vacíos o sentinelas; filas con datos parciales útiles (ej. marca presente
+// y modelo vacío) se preservan tal cual.
+function esVehiculoPlaceholder(marca: string, modelo: string): boolean {
+	const esSentinela = (v: string | null | undefined) => {
+		const t = v?.trim() ?? "";
+		return t === "" || t === "N/A" || t === "-";
+	};
+	return esSentinela(marca) && esSentinela(modelo);
+}
+
+interface GetColumnsOptions {
+	/**
+	 * Etapa de mora actualmente filtrada en la tabla. Cuando coincide con un
+	 * estado de mora (mora_30/60/90/120+), se muestra el CTA de contacto rápido
+	 * en la primera columna.
+	 */
+	filtroEtapa: string | null;
+}
+
+export function getCobrosColumns({
+	filtroEtapa,
+}: GetColumnsOptions): ColumnDef<ContratoCobranza>[] {
+	const mostrarCtaContacto = !!filtroEtapa && ESTADOS_MORA_CTA.has(filtroEtapa);
+
+	return [
 	{
 		accessorKey: "fechaProximoPago",
 		header: ({ column }) => {
@@ -101,27 +143,21 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 		cell: ({ row }) => {
 			const fecha = row.getValue("fechaProximoPago") as string | null;
 			const dias = row.original.diasHastaPago;
+			const numeroCredito = row.original.numeroCredito;
 
-			if (!fecha) {
-				return (
-					<div className="font-medium text-gray-500">Sin fecha definida</div>
-				);
-			}
-
-			const fechaFormateada = parseFechaLocal(fecha).toLocaleDateString(
-				"es-GT",
-				{
-					day: "2-digit",
-					month: "short",
-					year: "numeric",
-				},
-			);
+			const fechaFormateada = fecha
+				? parseFechaLocal(fecha).toLocaleDateString("es-GT", {
+						day: "2-digit",
+						month: "short",
+						year: "numeric",
+					})
+				: null;
 
 			let diasClassName = "text-xs mt-0.5";
 			let diasText = "";
 
 			if (dias === null) {
-				diasText = "";
+				// sin texto secundario
 			} else if (dias === 0) {
 				diasClassName += " text-red-600 font-semibold";
 				diasText = "¡Hoy!";
@@ -140,9 +176,18 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 			}
 
 			return (
-				<div className="font-medium">
-					<div>{fechaFormateada}</div>
-					{diasText && <div className={diasClassName}>{diasText}</div>}
+				<div className="flex items-center gap-2">
+					<div className="font-medium">
+						{fechaFormateada ? (
+							<div>{fechaFormateada}</div>
+						) : (
+							<div className="text-gray-500">Sin fecha definida</div>
+						)}
+						{diasText && <div className={diasClassName}>{diasText}</div>}
+					</div>
+					{mostrarCtaContacto && numeroCredito && (
+						<ContactoQuickAction numeroCredito={numeroCredito} />
+					)}
 				</div>
 			);
 		},
@@ -155,18 +200,34 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 					variant="ghost"
 					onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
 				>
-					Cliente
+					Cliente / Crédito
 					<ArrowUpDown className="ml-2 h-4 w-4" />
 				</Button>
 			);
 		},
 		cell: ({ row }) => {
+			const nombre = row.getValue("clienteNombre") as string;
+			const numero = row.original.numeroCredito;
+			const isPool = row.original.isPool;
 			return (
-				<div
-					className="w-[350px] whitespace-normal font-medium"
-					style={{ wordBreak: "break-word" }}
-				>
-					{row.getValue("clienteNombre")}
+				<div className="flex min-w-0 max-w-[320px] flex-col gap-0.5">
+					<div className="flex items-center gap-2">
+						<span className="truncate font-medium">{nombre}</span>
+						{isPool && (
+							<Badge
+								variant="secondary"
+								className="shrink-0 bg-indigo-100 text-indigo-800 text-xs"
+							>
+								Pool
+							</Badge>
+						)}
+					</div>
+					<span
+						className="truncate font-mono text-muted-foreground text-xs"
+						title={numero || undefined}
+					>
+						{numero ? truncarCredito(numero) : "—"}
+					</span>
 				</div>
 			);
 		},
@@ -184,56 +245,45 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 		),
 		cell: ({ row }) => {
 			const asesor = row.getValue("responsableCobros") as string | null;
-			if (!asesor) return <span className="text-muted-foreground text-xs">Sin asignar</span>;
+			if (!asesor)
+				return (
+					<span className="text-muted-foreground text-xs">Sin asignar</span>
+				);
 			return <span className="font-medium text-sm">{asesor}</span>;
-		},
-	},
-	{
-		accessorKey: "numeroCredito",
-		header: "No. Crédito",
-		cell: ({ row }) => {
-			const numero = row.getValue("numeroCredito") as string | null;
-			const isPool = row.original.isPool;
-			return (
-				<div
-					className="w-[180px] whitespace-normal font-mono text-sm"
-					style={{ wordBreak: "break-all" }}
-				>
-					{numero || "-"}
-					{isPool && (
-						<Badge
-							variant="secondary"
-							className="ml-2 bg-indigo-100 text-indigo-800"
-						>
-							Pool
-						</Badge>
-					)}
-				</div>
-			);
 		},
 	},
 	{
 		id: "vehiculo",
 		accessorFn: (row) =>
-			`${row.vehiculoMarca} ${row.vehiculoModelo} ${row.vehiculoYear}`,
+			`${row.vehiculoMarca} ${row.vehiculoModelo} ${row.vehiculoYear} ${row.vehiculoPlaca}`,
 		header: "Vehículo",
 		cell: ({ row }) => {
-			return (
-				<div className="font-medium">
-					{row.original.vehiculoMarca} {row.original.vehiculoModelo}{" "}
-					{row.original.vehiculoYear}
-				</div>
+			const { vehiculoMarca, vehiculoModelo, vehiculoYear, vehiculoPlaca } =
+				row.original;
+			const esPlaceholder = esVehiculoPlaceholder(
+				vehiculoMarca,
+				vehiculoModelo,
 			);
-		},
-	},
-	{
-		accessorKey: "vehiculoPlaca",
-		header: "Placa",
-		cell: ({ row }) => {
+			const placaLimpia = vehiculoPlaca?.trim();
+			const tienePlaca = placaLimpia && placaLimpia !== "-" && placaLimpia !== "";
+
+			if (esPlaceholder && !tienePlaca) {
+				return <span className="text-muted-foreground">—</span>;
+			}
+
 			return (
-				<Badge variant="outline" className="font-mono">
-					{row.getValue("vehiculoPlaca")}
-				</Badge>
+				<div className="flex min-w-0 max-w-[180px] flex-col gap-0.5">
+					<span className="whitespace-normal break-words font-medium text-sm leading-tight">
+						{esPlaceholder
+							? "Sin datos"
+							: `${vehiculoMarca} ${vehiculoModelo} ${vehiculoYear ?? ""}`.trim()}
+					</span>
+					{tienePlaca && (
+						<span className="font-mono text-muted-foreground text-xs">
+							{placaLimpia}
+						</span>
+					)}
+				</div>
 			);
 		},
 	},
@@ -263,7 +313,7 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 
 			return (
 				<div
-					className={`font-medium ${monto > 0 ? "text-right" : "text-center"}`}
+					className={`font-medium tabular-nums ${monto > 0 ? "text-right" : "text-center"}`}
 				>
 					{monto > 0 ? formatted : "-"}
 				</div>
@@ -295,7 +345,9 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 			}).format(monto);
 
 			return (
-				<div className={`font-medium ${monto > 0 ? "text-right" : "text-center"}`}>
+				<div
+					className={`font-medium tabular-nums ${monto > 0 ? "text-right" : "text-center"}`}
+				>
 					{monto > 0 ? formatted : "-"}
 				</div>
 			);
@@ -321,7 +373,7 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 		cell: ({ row }) => {
 			const etiquetas = row.original.etiquetas;
 			if (!etiquetas || etiquetas.length === 0)
-				return <span className="text-muted-foreground text-xs">Sin etiquetas</span>;
+				return <span className="text-muted-foreground text-xs">—</span>;
 			return (
 				<div className="flex flex-wrap gap-1">
 					{etiquetas.map((etiqueta) => (
@@ -356,4 +408,8 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 			return getEstadoBadge(estadoVisual);
 		},
 	},
-];
+	];
+}
+
+// Mantener export legacy para consumidores existentes que no necesiten el CTA.
+export const columns = getCobrosColumns({ filtroEtapa: null });

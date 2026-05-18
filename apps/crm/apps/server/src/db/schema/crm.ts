@@ -2,6 +2,7 @@ import {
 	boolean,
 	decimal,
 	integer,
+	jsonb,
 	pgEnum,
 	pgTable,
 	text,
@@ -473,6 +474,7 @@ export const deletedOpportunityLogs = pgTable("deleted_opportunity_logs", {
 	deletedByName: text("deleted_by_name").notNull(),
 	deletedAt: timestamp("deleted_at").notNull().defaultNow(),
 	reason: text("reason").notNull(),
+	snapshot: jsonb("snapshot").$type<Record<string, unknown>>().notNull(),
 });
 
 // Referencias de un lead (personas de contacto: familiares, amigos, etc.)

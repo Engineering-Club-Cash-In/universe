@@ -534,8 +534,8 @@
       }).notNull(),
 
       porcentaje_participacion: numeric("porcentaje_participacion", {
-        precision: 5,
-        scale: 2,
+        precision: 18,
+        scale: 10,
       }).notNull(),
 
       fecha_pago: timestamp("fecha_pago", { withTimezone: true })
@@ -589,8 +589,8 @@
       }).notNull(),
 
       porcentaje_participacion: numeric("porcentaje_participacion", {
-        precision: 5,
-        scale: 2,
+        precision: 18,
+        scale: 10,
       }).notNull(),
 
       fecha_pago: timestamp("fecha_pago", { withTimezone: true })

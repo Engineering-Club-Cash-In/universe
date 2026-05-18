@@ -64,7 +64,10 @@ interface ContactoModalProps {
 	telefonoAlternativo?: string;
 	emailCliente?: string;
 	metodoInicial: "llamada" | "whatsapp" | "email";
-	children: React.ReactNode;
+	children?: React.ReactNode;
+	// Modo controlado opcional (cuando el padre maneja el estado open)
+	open?: boolean;
+	onOpenChange?: (open: boolean) => void;
 	// Variables para plantillas de mensaje
 	fechaPago?: string;
 	cuotaMensual?: string;
@@ -86,6 +89,8 @@ export function ContactoModal({
 	emailCliente,
 	metodoInicial,
 	children,
+	open,
+	onOpenChange,
 	fechaPago = "",
 	cuotaMensual = "",
 	placa = "",
@@ -371,8 +376,8 @@ export function ContactoModal({
 		metodoInicial === "whatsapp" || metodoInicial === "email";
 
 	return (
-		<Dialog>
-			<DialogTrigger asChild>{children}</DialogTrigger>
+		<Dialog open={open} onOpenChange={onOpenChange}>
+			{children && <DialogTrigger asChild>{children}</DialogTrigger>}
 			<DialogContent className="max-h-[90vh] min-w-3xl max-w-4xl overflow-y-auto">
 				<DialogHeader>
 					<DialogTitle className="flex items-center gap-2">

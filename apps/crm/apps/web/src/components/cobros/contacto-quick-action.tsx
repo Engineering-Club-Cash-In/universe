@@ -1,16 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, Phone } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ContactoModal } from "@/components/contacto-modal";
 import { orpc } from "@/utils/orpc";
 
 interface ContactoQuickActionProps {
-	numeroCredito: string;
+	readonly numeroCredito: string;
 }
 
-export function ContactoQuickAction({ numeroCredito }: ContactoQuickActionProps) {
+export function ContactoQuickAction({
+	numeroCredito,
+}: ContactoQuickActionProps) {
 	const [open, setOpen] = useState(false);
 
 	const detalles = useQuery({
@@ -21,10 +23,22 @@ export function ContactoQuickAction({ numeroCredito }: ContactoQuickActionProps)
 		retry: 1,
 	});
 
-	// Si el fetch falla, evitar quedar atrapado en el estado de carga: avisar al
-	// usuario y resetear `open` para que el botón vuelva a estar habilitado.
+	// Detectar errores SOLO al cerrar un ciclo de fetch real (transición
+	// fetching → idle). Sin este gate, un error cacheado en react-query haría
+	// disparar el toast + close instantáneamente al reabrir, atrapando al usuario
+	// en un loop sin posibilidad de reintentar.
+	const fetchCycleStartedRef = useRef(false);
 	useEffect(() => {
-		if (detalles.isError && open) {
+		if (!open) {
+			fetchCycleStartedRef.current = false;
+			return;
+		}
+		if (detalles.isFetching) {
+			fetchCycleStartedRef.current = true;
+			return;
+		}
+		if (fetchCycleStartedRef.current && detalles.isError) {
+			fetchCycleStartedRef.current = false;
 			toast.error(
 				detalles.error instanceof Error
 					? detalles.error.message
@@ -32,7 +46,7 @@ export function ContactoQuickAction({ numeroCredito }: ContactoQuickActionProps)
 			);
 			setOpen(false);
 		}
-	}, [detalles.isError, detalles.error, open]);
+	}, [open, detalles.isFetching, detalles.isError, detalles.error]);
 
 	// Radix Dialog usa un Portal en el DOM, pero React propaga eventos por el
 	// árbol virtual. Sin esto, cualquier click dentro de la modal subiría hasta
@@ -65,11 +79,23 @@ export function ContactoQuickAction({ numeroCredito }: ContactoQuickActionProps)
 	);
 
 	if (!open) {
-		return <span onClick={detenerPropagacion}>{renderBoton(false)}</span>;
+		return (
+			// biome-ignore lint/a11y/useKeyWithClickEvents: wrapper sólo intercepta clicks para evitar que el row-click navegue; el Button interno mantiene accesibilidad de teclado.
+			// biome-ignore lint/a11y/noStaticElementInteractions: wrapper presentacional, sin rol interactivo propio.
+			<span role="none" onClick={detenerPropagacion}>
+				{renderBoton(false)}
+			</span>
+		);
 	}
 
 	if (detalles.isLoading || !detalles.data) {
-		return <span onClick={detenerPropagacion}>{renderBoton(true)}</span>;
+		return (
+			// biome-ignore lint/a11y/useKeyWithClickEvents: wrapper sólo intercepta clicks para evitar que el row-click navegue; el Button interno mantiene accesibilidad de teclado.
+			// biome-ignore lint/a11y/noStaticElementInteractions: wrapper presentacional, sin rol interactivo propio.
+			<span role="none" onClick={detenerPropagacion}>
+				{renderBoton(true)}
+			</span>
+		);
 	}
 
 	const d = detalles.data;
@@ -83,7 +109,9 @@ export function ContactoQuickAction({ numeroCredito }: ContactoQuickActionProps)
 	});
 
 	return (
-		<span onClick={detenerPropagacion}>
+		// biome-ignore lint/a11y/useKeyWithClickEvents: wrapper sólo intercepta clicks dentro del portal de Radix para evitar que el row-click navegue.
+		// biome-ignore lint/a11y/noStaticElementInteractions: wrapper presentacional, sin rol interactivo propio.
+		<span role="none" onClick={detenerPropagacion}>
 			{renderBoton(false)}
 			<ContactoModal
 				open={open}

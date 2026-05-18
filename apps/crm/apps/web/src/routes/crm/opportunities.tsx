@@ -496,6 +496,9 @@ function RouteComponent() {
 		localStorage.setItem("opportunities-view-mode", mode);
 	};
 
+	const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+	const [deleteReason, setDeleteReason] = useState("");
+
 	// State for confirm contracts signed modal
 	const [confirmSignedModalOpen, setConfirmSignedModalOpen] = useState(false);
 	const [opportunityToConfirmSigned, setOpportunityToConfirmSigned] = useState<{
@@ -517,6 +520,31 @@ function RouteComponent() {
 		},
 		onError: (error: Error) => {
 			toast.error(error.message || "Error al confirmar firma de contratos");
+		},
+	});
+
+	const deleteOpportunityMutation = useMutation({
+		mutationFn: async ({
+			opportunityId,
+			reason,
+		}: {
+			opportunityId: string;
+			reason: string;
+		}) => {
+			return await client.deleteOpportunity({ opportunityId, reason });
+		},
+		onSuccess: (data) => {
+			toast.success(data.message);
+			setIsDeleteConfirmOpen(false);
+			setDeleteReason("");
+			setIsDetailsDialogOpen(false);
+			setSelectedOpportunity(null);
+			queryClient.invalidateQueries({
+				queryKey: ["getOpportunities"],
+			});
+		},
+		onError: (error: Error) => {
+			toast.error(error.message || "Error al eliminar la oportunidad");
 		},
 	});
 
@@ -2630,6 +2658,23 @@ function RouteComponent() {
 										Cambiar Etapa
 									</Button>
 								</div>
+								{PERMISSIONS.canDeleteOpportunities(
+									userProfile.data?.role ?? "",
+								) &&
+									(selectedOpportunity?.stage?.closurePercentage ?? 100) <
+										30 && (
+										<div className="pt-2">
+											<Button
+												variant="destructive"
+												size="default"
+												className="w-full"
+												onClick={() => setIsDeleteConfirmOpen(true)}
+											>
+												<Trash2 className="mr-2 h-4 w-4" />
+												Eliminar Oportunidad
+											</Button>
+										</div>
+									)}
 							</TabsContent>
 
 							<TabsContent value="forms" className="mt-6 space-y-4">
@@ -3463,6 +3508,71 @@ function RouteComponent() {
 					}
 				/>
 			)}
+
+			{/* Dialog de confirmación para eliminar oportunidad */}
+			<Dialog
+				open={isDeleteConfirmOpen}
+				onOpenChange={(open) => {
+					setIsDeleteConfirmOpen(open);
+					if (!open) setDeleteReason("");
+				}}
+			>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle>¿Eliminar oportunidad?</DialogTitle>
+					</DialogHeader>
+					<p className="text-muted-foreground text-sm">
+						Esta acción es permanente y no se puede deshacer. Se eliminará la
+						oportunidad <strong>{selectedOpportunity?.title}</strong> y todos
+						sus datos asociados.
+					</p>
+					<div className="space-y-2">
+						<Label htmlFor="delete-reason">
+							Motivo de eliminación <span className="text-destructive">*</span>
+						</Label>
+						<Textarea
+							id="delete-reason"
+							placeholder="Describe el motivo por el que se elimina esta oportunidad..."
+							value={deleteReason}
+							onChange={(e) => setDeleteReason(e.target.value)}
+							rows={3}
+						/>
+					</div>
+					<div className="flex gap-3 pt-2">
+						<Button
+							variant="outline"
+							className="flex-1"
+							onClick={() => {
+								setIsDeleteConfirmOpen(false);
+								setDeleteReason("");
+							}}
+						>
+							Cancelar
+						</Button>
+						<Button
+							variant="destructive"
+							className="flex-1"
+							disabled={
+								deleteOpportunityMutation.isPending ||
+								deleteReason.trim().length === 0
+							}
+							onClick={() => {
+								if (selectedOpportunity) {
+									deleteOpportunityMutation.mutate({
+										opportunityId: selectedOpportunity.id,
+										reason: deleteReason.trim(),
+									});
+								}
+							}}
+						>
+							{deleteOpportunityMutation.isPending ? (
+								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+							) : null}
+							Sí, eliminar
+						</Button>
+					</div>
+				</DialogContent>
+			</Dialog>
 
 			{/* Modal para confirmar firma de contratos (85% → 90%) */}
 			<ConfirmContractsSignedModal

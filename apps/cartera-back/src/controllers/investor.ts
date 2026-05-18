@@ -1220,7 +1220,8 @@ export async function resumeInvestor(
   tipo: TipoConsulta = "originales",
   soloLiquidados = false,
   liquidacionId?: number,
-  fechaLiquidacion?: string
+  fechaLiquidacion?: string,
+  forzarQuetzales = false,
 ) {
   console.log(
     "resumeInvestor for",
@@ -1347,6 +1348,8 @@ export async function resumeInvestor(
   // 5️⃣ Armar estructura final
   const inversionistasResumen = await Promise.all(
     listaInversionistas.map(async (inv) => {
+      if (forzarQuetzales) inv.moneda = "quetzales";
+
       // Créditos del inversionista dentro de la página actual
       const creditosDeInv = creditosParticipa.filter(
         (c) =>
@@ -2245,7 +2248,10 @@ export async function detectPagosHuerfanos(
  * Deshace todos los efectos de liquidateByInvestorId en orden inverso,
  * dentro de una transacción para garantizar atomicidad.
  */
-export async function revertirLiquidacion(liquidacion_id: number) {
+export async function revertirLiquidacion(
+  liquidacion_id: number,
+  revertirReinversion = false,
+) {
   return await db.transaction(async (tx) => {
     // ──────────────────────────────────────────────
     // PASO 1: Obtener la liquidación y validar que existe
@@ -2369,12 +2375,15 @@ export async function revertirLiquidacion(liquidacion_id: number) {
     }
 
     // ──────────────────────────────────────────────
-    // PASO 7: Revertir reinversión
-    //   Restamos el monto reinvertido del saldo_reinversion del inversionista
-    //   y restauramos los montos en la tabla reinversiones
+    // PASO 7: Revertir reinversión (opcional)
+    //   Solo se ejecuta si `revertirReinversion=true`. Por defecto se omite
+    //   porque normalmente se revierte por separado antes de llamar acá
+    //   (ver `revertirComprasUltimaLiquidacion`).
+    //   Cuando se ejecuta: resta `reinversion_total` del `saldo_reinversion`
+    //   del inversionista y restaura los montos en la tabla `reinversiones`.
     // ──────────────────────────────────────────────
     const reinvTotal = new Big(liquidacion.reinversion_total ?? 0);
-    if (reinvTotal.gt(0)) {
+    if (revertirReinversion && reinvTotal.gt(0)) {
       // Restar del saldo_reinversion
       await tx
         .update(inversionistas)

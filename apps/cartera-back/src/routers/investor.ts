@@ -688,7 +688,8 @@ export const inversionistasRouter = new Elysia()
         "espejos",
         true, // soloLiquidados
         liquidacionId,
-        undefined
+        undefined,
+        true, // forzarQuetzales: el Excel siempre se emite en Q
       );
 
       if (!result.inversionistas.length) {
@@ -698,24 +699,10 @@ export const inversionistasRouter = new Elysia()
 
       const inversionista = result.inversionistas[0];
 
-      // Totales formateados (USD para inv en dolares) — los que se ven en el Excel.
-      const totales = await getInvestorTotalsGlobales(
-        Number(investor_id),
-        undefined,
-        "espejos",
-        false,
-        undefined,
-        true, // soloLiquidados
-        liquidacionId,
-        undefined
-      );
-      inversionista.subtotal = totales.totales as any;
-
       // Totales en bruto (siempre en Quetzales). Se usan para:
+      //   • el Excel de este endpoint (siempre se emite en Q)
       //   • `sustituir_totales` → la tabla `liquidaciones` guarda en Q
       //   • la compra (`ejecutarReinversionAutomatica`) → addInvestorToCredit espera Q
-      // Esto evita que para inversionistas en dólares (ej. Flujocapital 84)
-      // se pase un valor USD donde se espera Q.
       const totalesRaw = await getInvestorTotalsGlobales(
         Number(investor_id),
         undefined,
@@ -727,6 +714,7 @@ export const inversionistasRouter = new Elysia()
         undefined,
         true, // rawValues
       );
+      inversionista.subtotal = totalesRaw.totales as any;
 
       const logoUrl = import.meta.env.LOGO_URL || "";
       const filename = `reporte_liquidados_${liquidacionId}_${Date.now()}.xlsx`;
@@ -829,7 +817,10 @@ export const inversionistasRouter = new Elysia()
   // Todo dentro de una transacción
   // ──────────────────────────────────────────────
   .post("/investor/revertir-liquidacion", async ({ body, set }) => {
-    const { liquidacion_id } = body as { liquidacion_id?: number };
+    const { liquidacion_id, revertir_reinversion } = body as {
+      liquidacion_id?: number;
+      revertir_reinversion?: boolean;
+    };
 
     if (!liquidacion_id || isNaN(Number(liquidacion_id))) {
       set.status = 400;
@@ -837,7 +828,10 @@ export const inversionistasRouter = new Elysia()
     }
 
     try {
-      const result = await revertirLiquidacion(Number(liquidacion_id));
+      const result = await revertirLiquidacion(
+        Number(liquidacion_id),
+        revertir_reinversion === true,
+      );
       return result;
     } catch (error) {
       console.error("[investor/revertir-liquidacion] Error:", error);

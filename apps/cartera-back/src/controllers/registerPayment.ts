@@ -1783,75 +1783,78 @@ export async function aplicarPagoAlCredito(pago_id: number) {
         message: "Pago validado, crédito cancelado correctamente",
       };
     }
-    // 2. VERIFICAR SI EL PAGO TIENE RESTANTES
-    const interes_restante = new Big(pago.interes_restante ?? 0);
-    const iva_restante = new Big(pago.iva_12_restante ?? 0);
-    const seguro_restante = new Big(pago.seguro_restante ?? 0);
-    const gps_restante = new Big(pago.gps_restante ?? 0);
-    const membresias_restante = new Big(pago.membresias ?? 0);
-    const capital_restante_pago = new Big(pago.capital_restante ?? 0);
 
-    // 🔎 Buscar TODOS los pagos de la misma cuota para validar si hay restantes
-    // en cualquier otro pago (ej: pagos "otros" que dejan restantes en el pago
-    // original de la cuota sin tocarlos). Excluye paymentFalse.
-    const pagosDeLaCuota = pago.cuota_id !== null
-      ? await db
-          .select({
-            pago_id: pagos_credito.pago_id,
-            interes_restante: pagos_credito.interes_restante,
-            iva_12_restante: pagos_credito.iva_12_restante,
-            seguro_restante: pagos_credito.seguro_restante,
-            gps_restante: pagos_credito.gps_restante,
-            membresias: pagos_credito.membresias,
-            capital_restante: pagos_credito.capital_restante,
-          })
-          .from(pagos_credito)
-          .where(
-            and(
-              eq(pagos_credito.cuota_id, pago.cuota_id),
-              eq(pagos_credito.paymentFalse, false)
-            )
+    // 2. CARGAR EL CRÉDITO
+    // (lo necesitamos tanto para evaluar si la cuota cierra como para
+    // actualizar capital/deuda en ambas ramas).
+    if (pago.credito_id === null) {
+      throw new Error("No se puede aplicar el pago: credito_id es null");
+    }
+    const [credito] = await db
+      .select()
+      .from(creditos)
+      .where(eq(creditos.credito_id, pago.credito_id))
+      .limit(1);
+    if (!credito) {
+      throw new Error(`Crédito ${pago.credito_id} no encontrado`);
+    }
+
+    // 3. ¿LA CUOTA QUEDA COMPLETAMENTE PAGADA CON ESTE PAGO?
+    //
+    // El criterio viejo miraba los `*_restante` fila por fila ("¿algún
+    // pago de la cuota tiene restantes?"). Eso falla cuando un pago
+    // "complementario" cubre el faltante de otro pago anterior: el
+    // complementario no decrementa los `*_restante` del pago original,
+    // así que la cuota nunca se cerraba aunque ya estuviera cobrada
+    // completa (bug observable, ej: crédito 01010214116210 cuota 12).
+    //
+    // Criterio nuevo: comparar la SUMA de `monto_aplicado` de los pagos
+    // ya validated de la cuota (más el monto_aplicado de este pago, que
+    // está por validarse) contra el monto total de cuota del crédito.
+    // Si la suma cubre lo esperado, la cuota se cierra. Es robusto
+    // frente a pagos partidos en N rows y no depende de que los
+    // restantes estén sincronizados entre sí.
+    //
+    // Filtros: solo cuentan pagos con validationStatus='validated' y
+    // paymentFalse=false. Se excluye el pago en curso del SELECT y se
+    // suma aparte (porque aún no quedó validated en DB).
+    const cuotaAmount = new Big(credito.cuota ?? 0);
+    let totalAplicadoEnCuota = new Big(pago.monto_aplicado ?? 0);
+    let cuotaCompleta = false;
+
+    if (pago.cuota_id !== null && cuotaAmount.gt(0)) {
+      const otrosPagosValidados = await db
+        .select({ monto_aplicado: pagos_credito.monto_aplicado })
+        .from(pagos_credito)
+        .where(
+          and(
+            eq(pagos_credito.cuota_id, pago.cuota_id),
+            eq(pagos_credito.validationStatus, "validated"),
+            eq(pagos_credito.paymentFalse, false),
+            ne(pagos_credito.pago_id, pago_id)
           )
-      : [];
+        );
 
-    const algunPagoDeLaCuotaTieneRestantes = pagosDeLaCuota.some(
-      (p) =>
-        new Big(p.interes_restante ?? 0).gt(0) ||
-        new Big(p.iva_12_restante ?? 0).gt(0) ||
-        new Big(p.seguro_restante ?? 0).gt(0) ||
-        new Big(p.gps_restante ?? 0).gt(0) ||
-        new Big(p.membresias ?? 0).gt(0) ||
-        new Big(p.capital_restante ?? 0).gt(0)
-    );
+      totalAplicadoEnCuota = otrosPagosValidados.reduce(
+        (acc, p) => acc.plus(new Big(p.monto_aplicado ?? 0)),
+        totalAplicadoEnCuota
+      );
 
-    // ✅ Si CUALQUIER restante > 0 (en este pago o en otro pago de la misma cuota) → NO está completo
-    const tieneRestantes =
-      interes_restante.gt(0) ||
-      iva_restante.gt(0) ||
-      seguro_restante.gt(0) ||
-      gps_restante.gt(0) ||
-      membresias_restante.gt(0) ||
-      capital_restante_pago.gt(0) ||
-      algunPagoDeLaCuotaTieneRestantes;
+      // Tolerancia de 1 centavo por redondeos
+      cuotaCompleta = totalAplicadoEnCuota.gte(cuotaAmount.minus(0.01));
 
-    if (algunPagoDeLaCuotaTieneRestantes) {
       console.log(
-        `⚠️ Otro pago de la cuota ${pago.cuota_id} tiene restantes pendientes → no se marcará la cuota como pagada`
+        `📊 Cuota ${pago.cuota_id}: aplicado ${totalAplicadoEnCuota.toFixed(2)} / esperado ${cuotaAmount.toFixed(2)} (otros validated: ${otrosPagosValidados.length}) → ${cuotaCompleta ? "COMPLETA" : "incompleta"}`
       );
     }
 
-    if (tieneRestantes) {
-      console.log("⚠️ El pago tiene restantes pendientes:");
-      console.log(
-        `   💵 Capital restante: ${capital_restante_pago.toString()}`
-      );
-      console.log(`   💵 Interés restante: ${interes_restante.toString()}`);
-      console.log(`   💵 IVA restante: ${iva_restante.toString()}`);
-      console.log(`   💵 Seguro restante: ${seguro_restante.toString()}`);
-      console.log(`   💵 GPS restante: ${gps_restante.toString()}`);
-      console.log(
-        `   💵 Membresías restante: ${membresias_restante.toString()}`
-      );
+    // ─────────────────────────────────────────────────────────────────
+    // RAMA A: la cuota AÚN no se cierra con este pago
+    //   → valida el pago, aplica abono_capital al crédito si lo hay,
+    //     pero NO marca la cuota como pagada NI distribuye a inversionistas.
+    // ─────────────────────────────────────────────────────────────────
+    if (!cuotaCompleta) {
+      console.log("⚠️ La cuota aún no se cierra con este pago");
 
       // Validar el pago
       await db
@@ -1859,53 +1862,43 @@ export async function aplicarPagoAlCredito(pago_id: number) {
         .set({ validationStatus: "validated", fecha_aplicado: new Date() })
         .where(eq(pagos_credito.pago_id, pago_id));
 
-      // Aunque tenga restantes, si hay abono a capital, aplicarlo al crédito
       const abonoCapitalPago = new Big(pago.abono_capital ?? 0);
-      if (abonoCapitalPago.gt(0) && pago.credito_id !== null) {
-        console.log("💰 Aplicando abono a capital aunque tenga restantes:", abonoCapitalPago.toString());
+      if (abonoCapitalPago.gt(0)) {
+        console.log(
+          "💰 Aplicando abono a capital aunque la cuota no cierre:",
+          abonoCapitalPago.toString()
+        );
 
-        const [creditoParc] = await db
-          .select()
-          .from(creditos)
-          .where(eq(creditos.credito_id, pago.credito_id))
-          .limit(1);
+        const capitalAct = new Big(credito.capital ?? 0);
+        const nuevoCapitalParc = capitalAct.minus(abonoCapitalPago);
+        const cuotaInteresParc = nuevoCapitalParc
+          .times(new Big(credito.porcentaje_interes ?? 0).div(100))
+          .round(2);
+        const iva12Parc = cuotaInteresParc.times(0.12).round(2);
+        const seguroParc = new Big(credito.seguro_10_cuotas ?? 0);
+        const gpsParc = new Big(credito.gps ?? 0);
+        const membresiasParc = new Big(credito.membresias_pago ?? 0);
 
-        if (creditoParc) {
-          const capitalAct = new Big(creditoParc.capital ?? 0);
+        const nuevaDeudaParc = nuevoCapitalParc
+          .plus(cuotaInteresParc)
+          .plus(iva12Parc)
+          .plus(seguroParc)
+          .plus(gpsParc)
+          .plus(membresiasParc)
+          .round(2);
 
-          console.log("💰 Capital actual:", capitalAct.toString());
-          console.log("💰 Abono capital del pago:", abonoCapitalPago.toString());
+        await db
+          .update(creditos)
+          .set({
+            capital: nuevoCapitalParc.toString(),
+            deudatotal: nuevaDeudaParc.toString(),
+            iva_12: iva12Parc.toString(),
+            cuota_interes: cuotaInteresParc.toString(),
+          })
+          .where(eq(creditos.credito_id, pago.credito_id));
 
-          const nuevoCapitalParc = capitalAct.minus(abonoCapitalPago);
-          const cuotaInteresParc = nuevoCapitalParc
-            .times(new Big(creditoParc.porcentaje_interes).div(100))
-            .round(2);
-          const iva12Parc = cuotaInteresParc.times(0.12).round(2);
-          const seguroParc = new Big(creditoParc.seguro_10_cuotas ?? 0);
-          const gpsParc = new Big(creditoParc.gps ?? 0);
-          const membresiasParc = new Big(creditoParc.membresias_pago ?? 0);
-
-          const nuevaDeudaParc = nuevoCapitalParc
-            .plus(cuotaInteresParc)
-            .plus(iva12Parc)
-            .plus(seguroParc)
-            .plus(gpsParc)
-            .plus(membresiasParc)
-            .round(2);
-
-          await db
-            .update(creditos)
-            .set({
-              capital: nuevoCapitalParc.toString(),
-              deudatotal: nuevaDeudaParc.toString(),
-              iva_12: iva12Parc.toString(),
-              cuota_interes: cuotaInteresParc.toString(),
-            })
-            .where(eq(creditos.credito_id, pago.credito_id));
-
-          console.log("💰 Nuevo capital:", nuevoCapitalParc.toString());
-          console.log("✅ Capital aplicado al crédito (con restantes pendientes)");
-        }
+        console.log("💰 Nuevo capital:", nuevoCapitalParc.toString());
+        console.log("✅ Capital aplicado al crédito (cuota aún abierta)");
       }
 
       return {
@@ -1914,33 +1907,29 @@ export async function aplicarPagoAlCredito(pago_id: number) {
         message: abonoCapitalPago.gt(0)
           ? "Pago validado con restantes pendientes, abono a capital aplicado"
           : "Pago validado, pero no aplicado al crédito (tiene restantes pendientes)",
+        // Preservamos el shape `restantes` para compat con el front.
         restantes: {
-          capital: capital_restante_pago.toString(),
-          interes: interes_restante.toString(),
-          iva: iva_restante.toString(),
-          seguro: seguro_restante.toString(),
-          gps: gps_restante.toString(),
-          membresias: membresias_restante.toString(),
+          capital: new Big(pago.capital_restante ?? 0).toString(),
+          interes: new Big(pago.interes_restante ?? 0).toString(),
+          iva: new Big(pago.iva_12_restante ?? 0).toString(),
+          seguro: new Big(pago.seguro_restante ?? 0).toString(),
+          gps: new Big(pago.gps_restante ?? 0).toString(),
+          membresias: new Big(pago.membresias ?? 0).toString(),
+        },
+        cuota: {
+          aplicado: totalAplicadoEnCuota.toString(),
+          esperado: cuotaAmount.toString(),
+          faltante: cuotaAmount.minus(totalAplicadoEnCuota).toString(),
         },
       };
     }
 
-    console.log("✅ Pago está completado, aplicando al crédito");
-
-    // 3. OBTENER EL CRÉDITO ACTUAL
-    if (pago.credito_id === null) {
-      throw new Error("No se puede obtener el crédito: credito_id es null");
-    }
-
-    const [credito] = await db
-      .select()
-      .from(creditos)
-      .where(eq(creditos.credito_id, pago.credito_id))
-      .limit(1);
-
-    if (!credito) {
-      throw new Error(`Crédito ${pago.credito_id} no encontrado`);
-    }
+    // ─────────────────────────────────────────────────────────────────
+    // RAMA B: la cuota queda COMPLETA con este pago
+    //   → recalcula crédito, valida el pago, marca la cuota como pagada,
+    //     limpia restantes huérfanos y distribuye a inversionistas.
+    // ─────────────────────────────────────────────────────────────────
+    console.log("✅ Este pago cierra la cuota, aplicando al crédito");
 
     // 4. CALCULAR NUEVO CAPITAL (restar SOLO el abono_capital de este pago)
     // El capital del crédito ya viene descontado por cada pago previo validated
@@ -1956,7 +1945,7 @@ export async function aplicarPagoAlCredito(pago_id: number) {
 
     // 5. CALCULAR NUEVA DEUDA TOTAL
     const cuota_interes = new Big(nuevo_capital)
-      .times(new Big(credito.porcentaje_interes).div(100))
+      .times(new Big(credito.porcentaje_interes ?? 0).div(100))
       .round(2);
     const iva_12 = cuota_interes.times(0.12).round(2);
     const seguro = new Big(credito.seguro_10_cuotas ?? 0);
@@ -1974,19 +1963,15 @@ export async function aplicarPagoAlCredito(pago_id: number) {
     console.log("📊 Nueva deuda total:", nueva_deuda_total.toString());
 
     // 6. ACTUALIZAR EL CRÉDITO
-    if (pago.credito_id !== null) {
-      await db
-        .update(creditos)
-        .set({
-          capital: nuevo_capital.toString(),
-          deudatotal: nueva_deuda_total.toString(),
-          iva_12: iva_12.toString(),
-          cuota_interes: cuota_interes.toString(),
-        })
-        .where(eq(creditos.credito_id, pago.credito_id));
-    } else {
-      throw new Error("No se puede actualizar el crédito: credito_id es null");
-    }
+    await db
+      .update(creditos)
+      .set({
+        capital: nuevo_capital.toString(),
+        deudatotal: nueva_deuda_total.toString(),
+        iva_12: iva_12.toString(),
+        cuota_interes: cuota_interes.toString(),
+      })
+      .where(eq(creditos.credito_id, pago.credito_id));
 
     // 7. VALIDAR EL PAGO y registrar fecha de aplicación
     await db
@@ -1995,18 +1980,37 @@ export async function aplicarPagoAlCredito(pago_id: number) {
       .where(eq(pagos_credito.pago_id, pago_id));
 
     if (pago.cuota_id !== null) {
+      // Marcar la cuota como pagada
       await db
         .update(cuotas_credito)
         .set({ pagado: true })
         .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
+
+      // Limpiar `*_restante` huérfanos del resto de pagos de la cuota.
+      // Si quedaron descuadrados por bugs históricos (pagos partidos
+      // sin sincronización), ya no van a polucionar lecturas futuras
+      // ni reactivar el camino "tiene restantes" si alguien revalida.
+      await db
+        .update(pagos_credito)
+        .set({
+          capital_restante: "0",
+          interes_restante: "0",
+          iva_12_restante: "0",
+          seguro_restante: "0",
+          gps_restante: "0",
+        })
+        .where(
+          and(
+            eq(pagos_credito.cuota_id, pago.cuota_id),
+            eq(pagos_credito.paymentFalse, false)
+          )
+        );
     }
 
-    console.log("✅ Crédito actualizado y pago validado");
- // 8. Distribuir entre inversionistas
-    if (pago.credito_id) {
-      await insertPagosCreditoInversionistasV2(pago_id, pago.credito_id);
-    }
-  
+    console.log("✅ Crédito actualizado, pago validado y cuota cerrada");
+
+    // 8. Distribuir entre inversionistas
+    await insertPagosCreditoInversionistasV2(pago_id, pago.credito_id);
 
     return {
       success: true,

@@ -30,6 +30,7 @@ import {
 	coDebtors,
 	companies,
 	creditAnalysis,
+	deletedOpportunityLogs,
 	leadSourceEnum,
 	leads,
 	opportunities,
@@ -1279,6 +1280,98 @@ export const crmRouter = {
 			}
 
 			return await baseQuery.orderBy(desc(opportunities.createdAt));
+		}),
+
+	deleteOpportunity: crmProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				reason: z.string().min(1, "El motivo de eliminación es requerido"),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			if (!PERMISSIONS.canDeleteOpportunities(context.userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para eliminar oportunidades",
+				});
+			}
+
+			const [opportunity] = await db
+				.select({
+					id: opportunities.id,
+					title: opportunities.title,
+					value: opportunities.value,
+					status: opportunities.status,
+					assignedTo: opportunities.assignedTo,
+					leadId: opportunities.leadId,
+					createdAt: opportunities.createdAt,
+					stage: {
+						name: salesStages.name,
+						closurePercentage: salesStages.closurePercentage,
+					},
+					lead: {
+						firstName: leads.firstName,
+						lastName: leads.lastName,
+					},
+					assignedUser: {
+						name: user.name,
+					},
+				})
+				.from(opportunities)
+				.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
+				.leftJoin(user, eq(opportunities.assignedTo, user.id))
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
+			}
+
+			if (!opportunity.stage || opportunity.stage.closurePercentage >= 30) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Solo se pueden eliminar oportunidades en etapas menores al 30% de cierre",
+				});
+			}
+
+			const leadName = opportunity.lead?.firstName
+				? [opportunity.lead.firstName, opportunity.lead.lastName]
+						.filter(Boolean)
+						.join(" ")
+				: null;
+
+			// Insert audit log before deleting
+			await db.insert(deletedOpportunityLogs).values({
+				opportunityId: opportunity.id,
+				opportunityTitle: opportunity.title,
+				opportunityValue: opportunity.value,
+				opportunityStatus: opportunity.status,
+				opportunityStageName: opportunity.stage?.name ?? null,
+				opportunityStagePercentage: opportunity.stage?.closurePercentage ?? null,
+				opportunityCreatedAt: opportunity.createdAt,
+				assignedUserId: opportunity.assignedTo,
+				assignedUserName: opportunity.assignedUser?.name ?? null,
+				leadId: opportunity.leadId,
+				leadName,
+				deletedBy: context.userId,
+				deletedByName: context.user?.name ?? context.userId,
+				reason: input.reason,
+			});
+
+			// Nullify clients.opportunityId before delete to avoid FK restriction
+			await db
+				.update(clients)
+				.set({ opportunityId: null })
+				.where(eq(clients.opportunityId, input.opportunityId));
+
+			await db
+				.delete(opportunities)
+				.where(eq(opportunities.id, input.opportunityId));
+
+			return { message: "Oportunidad eliminada exitosamente" };
 		}),
 
 	createOpportunity: crmProcedure

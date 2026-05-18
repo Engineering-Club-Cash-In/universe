@@ -48,6 +48,7 @@ export const crmAppRouter = {
 	getOpportunities: crmRouter.getOpportunities,
 	createOpportunity: crmRouter.createOpportunity,
 	updateOpportunity: crmRouter.updateOpportunity,
+	deleteOpportunity: crmRouter.deleteOpportunity,
 	getOpportunitiesForAnalysis: crmRouter.getOpportunitiesForAnalysis,
 	approveOpportunityAnalysis: crmRouter.approveOpportunityAnalysis,
 	approveCreditDetail: crmRouter.approveCreditDetail,

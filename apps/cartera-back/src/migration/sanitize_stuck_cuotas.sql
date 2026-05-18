@@ -181,6 +181,35 @@ SELECT 'creditos pasados a ACTIVO desde MOROSO',COUNT(*)
  WHERE c."statusCredit" = 'ACTIVO';
 
 -- ---------------------------------------------------------------------------
+-- G.  Pagos validated SIN distribucion a inversionistas (gap conocido)
+--
+-- Bajo el codigo viejo, los pagos parciales (los que caian en "tieneRestantes")
+-- nunca llamaban a insertPagosCreditoInversionistasV2, asi que los
+-- inversionistas no recibieron su parte. Este script NO replica esa logica
+-- (es delicada: porcentajes por inversionista, upsert, descuento de
+-- monto_aportado). Listamos los pago_id que quedaron pendientes para
+-- procesarlos desde el front con el boton "Procesar Inversionistas"
+-- o llamando al endpoint /processInvestors por cada uno.
+-- ---------------------------------------------------------------------------
+SELECT
+  cr.numero_credito_sifco                       AS sifco,
+  p.credito_id,
+  p.cuota_id,
+  p.pago_id,
+  p.monto_aplicado,
+  p.fecha_aplicado::date                        AS fecha_aplicado
+FROM cartera.pagos_credito p
+JOIN cartera.creditos cr ON cr.credito_id = p.credito_id
+WHERE p.cuota_id IN (SELECT cuota_id FROM _cuotas_a_cerrar)
+  AND p.validation_status = 'validated'
+  AND p."paymentFalse" = false
+  AND NOT EXISTS (
+    SELECT 1 FROM cartera.pagos_credito_inversionistas pi
+    WHERE pi.pago_id = p.pago_id
+  )
+ORDER BY p.credito_id, p.pago_id;
+
+-- ---------------------------------------------------------------------------
 -- Si todo OK: COMMIT;     Si algo mal: ROLLBACK;
 -- ---------------------------------------------------------------------------
 -- COMMIT;

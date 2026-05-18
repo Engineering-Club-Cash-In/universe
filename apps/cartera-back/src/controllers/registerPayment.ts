@@ -2009,8 +2009,58 @@ export async function aplicarPagoAlCredito(pago_id: number) {
 
     console.log("✅ Crédito actualizado, pago validado y cuota cerrada");
 
-    // 8. Distribuir entre inversionistas
-    await insertPagosCreditoInversionistasV2(pago_id, pago.credito_id);
+    // 8. Distribuir entre inversionistas — TODOS los pagos validated de la cuota
+    //    que aún no tengan filas en pagos_credito_inversionistas.
+    //
+    //    Por qué: en una cuota partida en N pagos, los primeros (N-1) cayeron
+    //    en la rama "cuota incompleta" (RAMA A), que valida pero NO distribuye.
+    //    Cuando llega el pago que cierra la cuota (este), solo se había
+    //    distribuido este último (los Q0.06 del ejemplo). Los anteriores
+    //    (Q5,410) quedaban sin reflejar en pagos_credito_inversionistas y los
+    //    inversionistas no recibían su parte.
+    //
+    //    Filtramos por "no tiene fila en pagos_credito_inversionistas" para
+    //    no doblar abonos: insertPagosCreditoInversionistasV2 hace
+    //    onConflictDoUpdate (idempotente a nivel de upsert) pero también llama
+    //    a processAndReplaceCreditInvestors, que descuenta del monto_aportado
+    //    de cada inversionista — eso NO es idempotente.
+    const pagosValidadosCuota = pago.cuota_id !== null
+      ? await db
+          .select({ pago_id: pagos_credito.pago_id })
+          .from(pagos_credito)
+          .where(
+            and(
+              eq(pagos_credito.cuota_id, pago.cuota_id),
+              eq(pagos_credito.validationStatus, "validated"),
+              eq(pagos_credito.paymentFalse, false)
+            )
+          )
+      : [{ pago_id }];
+
+    const yaDistribuidos = pagosValidadosCuota.length > 0
+      ? await db
+          .selectDistinct({ pago_id: pagos_credito_inversionistas.pago_id })
+          .from(pagos_credito_inversionistas)
+          .where(
+            inArray(
+              pagos_credito_inversionistas.pago_id,
+              pagosValidadosCuota.map((p) => p.pago_id)
+            )
+          )
+      : [];
+
+    const yaDistribuidosSet = new Set(yaDistribuidos.map((p) => p.pago_id));
+    const pagosADistribuir = pagosValidadosCuota
+      .map((p) => p.pago_id)
+      .filter((id) => !yaDistribuidosSet.has(id));
+
+    console.log(
+      `💼 Distribución a inversionistas: ${pagosADistribuir.length} pago(s) de la cuota pendiente(s) [${pagosADistribuir.join(", ") || "ninguno"}]`
+    );
+
+    for (const distPagoId of pagosADistribuir) {
+      await insertPagosCreditoInversionistasV2(distPagoId, pago.credito_id);
+    }
 
     return {
       success: true,

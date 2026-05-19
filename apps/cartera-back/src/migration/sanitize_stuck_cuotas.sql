@@ -139,11 +139,6 @@ SELECT 'cuotas marcadas pagado=true'   AS check, COUNT(*) AS n
   JOIN _cuotas_a_cerrar ca ON ca.cuota_id = c.cuota_id
  WHERE c.pagado = true
 UNION ALL
-SELECT 'moras desactivadas',                    COUNT(*)
-  FROM cartera.moras_credito m
-  JOIN _moras_a_condonar mc ON mc.mora_id = m.mora_id
- WHERE m.activa = false AND m.monto_mora = 0
-UNION ALL
 SELECT 'condonaciones registradas',             COUNT(*)
   FROM cartera.moras_condonaciones
  WHERE motivo LIKE 'Saneamiento automatico%'

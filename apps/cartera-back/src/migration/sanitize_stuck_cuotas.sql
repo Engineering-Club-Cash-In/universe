@@ -1,5 +1,5 @@
 -- =============================================================================
--- SANEAMIENTO: cuotas atascadas + condonacion de mora
+-- SANEAMIENTO: cuotas atascadas (mora NO se toca)
 -- =============================================================================
 -- Contexto:
 --   El bug en aplicarPagoAlCredito hacia que cuotas con pagos partidos
@@ -10,15 +10,16 @@
 --
 -- Acciones de este script:
 --   1) Marca como pagadas las cuotas cuya suma de monto_aplicado de pagos
---      validated (y paymentFalse=false) cubre creditos.cuota.
+--      validated (y paymentFalse=false) cubre creditos.cuota
+--      (tolerancia de 1 centavo por redondeos).
 --   2) Limpia los *_restante huerfanos en TODOS los pagos de esas cuotas.
---   3) Condona la mora de los creditos afectados que tienen mora activa:
---        a. Inserta registro en moras_condonaciones (con el monto original)
---        b. Cierra la mora (activa=false, monto_mora=0)
---        c. Pone statusCredit='ACTIVO' SOLO si era MOROSO
---           (no toca EN_CONVENIO, CANCELADO, INCOBRABLE)
+--   3) Lista los pagos validated de esas cuotas que aun NO tienen
+--      distribucion en pagos_credito_inversionistas, para que se procesen
+--      manualmente desde el front ("Procesar Inversionistas").
 --
--- Usuario registrado en la condonacion: id=12 (daniel.r@clubcashin.com)
+-- NO toca mora: la condonacion se manejara por separado.
+-- NO toca statusCredit: si un credito quedo MOROSO por la cuota atascada,
+-- el equipo decidira si recalcular mora o condonarla manualmente.
 --
 -- Idempotencia: el filtro de cuotas a cerrar requiere pagado=false, asi
 -- que correr el script dos veces no vuelve a tocar lo ya saneado.
@@ -59,7 +60,8 @@ HAVING COALESCE(
 ) >= (cr.cuota - 0.01);  -- tolerancia de 1 centavo
 
 
--- Lista completa de creditos afectados con sus cuotas y si tienen mora
+-- Lista por credito: cuantas cuotas atascadas tiene y si tiene mora activa
+-- (la mora se muestra solo como referencia, este script NO la toca).
 SELECT
   cr.numero_credito_sifco                                   AS sifco,
   ca.credito_id                                             AS cred_id,
@@ -71,7 +73,7 @@ SELECT
     WHEN m.mora_id IS NOT NULL AND m.activa
       THEN m.monto_mora::text
     ELSE '-'
-  END                                                       AS mora_a_condonar
+  END                                                       AS mora_activa_referencia
 FROM _cuotas_a_cerrar ca
 JOIN cartera.creditos cr ON cr.credito_id = ca.credito_id
 LEFT JOIN cartera.moras_credito m ON m.credito_id = ca.credito_id AND m.activa = true
@@ -81,11 +83,11 @@ ORDER BY num_cuotas_atascadas DESC, ca.credito_id;
 -- ---------------------------------------------------------------------------
 -- B.  Preview de lo que se va a tocar (no muta nada)
 -- ---------------------------------------------------------------------------
-SELECT 'CUOTAS A CERRAR'              AS seccion, COUNT(*)::text AS cantidad FROM _cuotas_a_cerrar
+SELECT 'CUOTAS A CERRAR'                          AS seccion, COUNT(*)::text AS cantidad FROM _cuotas_a_cerrar
 UNION ALL
-SELECT 'CREDITOS A LIMPIAR RESTANTES',           COUNT(DISTINCT credito_id)::text FROM _cuotas_a_cerrar
+SELECT 'CREDITOS A LIMPIAR RESTANTES',                       COUNT(DISTINCT credito_id)::text FROM _cuotas_a_cerrar
 UNION ALL
-SELECT 'MORAS ACTIVAS A CONDONAR',
+SELECT 'CREDITOS AFECTADOS CON MORA ACTIVA (no se tocan)',
        COUNT(DISTINCT ca.credito_id)::text
   FROM _cuotas_a_cerrar ca
   JOIN cartera.moras_credito m ON m.credito_id = ca.credito_id
@@ -97,15 +99,9 @@ SELECT
   ca.numero_cuota                     AS cuota,
   ca.cuota_esperada                   AS esperada,
   ca.total_aplicado                   AS aplicado,
-  cr."statusCredit"                   AS status,
-  CASE
-    WHEN m.mora_id IS NOT NULL AND m.activa
-      THEN m.monto_mora::text
-    ELSE '-'
-  END                                 AS mora_a_condonar
+  cr."statusCredit"                   AS status
 FROM _cuotas_a_cerrar ca
 JOIN cartera.creditos cr ON cr.credito_id = ca.credito_id
-LEFT JOIN cartera.moras_credito m ON m.credito_id = ca.credito_id
 ORDER BY ca.credito_id, ca.numero_cuota;
 
 -- ---------------------------------------------------------------------------
@@ -130,27 +126,26 @@ UPDATE cartera.pagos_credito p
  WHERE p.cuota_id = ca.cuota_id
    AND p."paymentFalse" = false;
 
-
 -- ---------------------------------------------------------------------------
--- F.  Verificacion post-fix
+-- E.  Verificacion post-fix
 -- ---------------------------------------------------------------------------
-SELECT 'cuotas marcadas pagado=true'   AS check, COUNT(*) AS n
+SELECT 'cuotas marcadas pagado=true' AS check, COUNT(*) AS n
   FROM cartera.cuotas_credito c
   JOIN _cuotas_a_cerrar ca ON ca.cuota_id = c.cuota_id
  WHERE c.pagado = true
 UNION ALL
-SELECT 'condonaciones registradas',             COUNT(*)
-  FROM cartera.moras_condonaciones
- WHERE motivo LIKE 'Saneamiento automatico%'
-   AND usuario_id = 12
-UNION ALL
-SELECT 'creditos pasados a ACTIVO desde MOROSO',COUNT(*)
-  FROM cartera.creditos c
-  JOIN _moras_a_condonar mc ON mc.credito_id = c.credito_id
- WHERE c."statusCredit" = 'ACTIVO';
+SELECT 'pagos con restantes limpiados',         COUNT(*)
+  FROM cartera.pagos_credito p
+  JOIN _cuotas_a_cerrar ca ON ca.cuota_id = p.cuota_id
+ WHERE p."paymentFalse" = false
+   AND p.capital_restante = 0
+   AND p.interes_restante = 0
+   AND p.iva_12_restante = 0
+   AND p.seguro_restante = 0
+   AND p.gps_restante = 0;
 
 -- ---------------------------------------------------------------------------
--- G.  Pagos validated SIN distribucion a inversionistas (gap conocido)
+-- F.  Pagos validated SIN distribucion a inversionistas (gap conocido)
 --
 -- Bajo el codigo viejo, los pagos parciales (los que caian en "tieneRestantes")
 -- nunca llamaban a insertPagosCreditoInversionistasV2, asi que los

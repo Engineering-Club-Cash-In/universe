@@ -58,6 +58,26 @@ HAVING COALESCE(
   0
 ) >= (cr.cuota - 0.01);  -- tolerancia de 1 centavo
 
+
+-- Lista completa de creditos afectados con sus cuotas y si tienen mora
+SELECT
+  cr.numero_credito_sifco                                   AS sifco,
+  ca.credito_id                                             AS cred_id,
+  COUNT(*)                                                  AS num_cuotas_atascadas,
+  ARRAY_AGG(ca.numero_cuota ORDER BY ca.numero_cuota)       AS cuotas,
+  SUM(ca.cuota_esperada)                                    AS monto_total_cuotas,
+  cr."statusCredit"                                         AS status_actual,
+  CASE
+    WHEN m.mora_id IS NOT NULL AND m.activa
+      THEN m.monto_mora::text
+    ELSE '-'
+  END                                                       AS mora_a_condonar
+FROM _cuotas_a_cerrar ca
+JOIN cartera.creditos cr ON cr.credito_id = ca.credito_id
+LEFT JOIN cartera.moras_credito m ON m.credito_id = ca.credito_id AND m.activa = true
+GROUP BY cr.numero_credito_sifco, ca.credito_id, cr."statusCredit", m.mora_id, m.activa, m.monto_mora
+ORDER BY num_cuotas_atascadas DESC, ca.credito_id;
+
 -- ---------------------------------------------------------------------------
 -- B.  Preview de lo que se va a tocar (no muta nada)
 -- ---------------------------------------------------------------------------
@@ -110,52 +130,6 @@ UPDATE cartera.pagos_credito p
  WHERE p.cuota_id = ca.cuota_id
    AND p."paymentFalse" = false;
 
--- ---------------------------------------------------------------------------
--- E.  Condonar mora donde aplica
--- ---------------------------------------------------------------------------
--- E.1  Snapshot de las moras activas a condonar (con su monto ORIGINAL,
---      antes de ponerlo a 0). Sirve de fuente para el INSERT y el UPDATE.
-CREATE TEMP TABLE _moras_a_condonar ON COMMIT DROP AS
-SELECT
-  m.mora_id,
-  m.credito_id,
-  m.monto_mora
-FROM cartera.moras_credito m
-WHERE m.activa = true
-  AND m.credito_id IN (SELECT DISTINCT credito_id FROM _cuotas_a_cerrar);
-
--- E.2  Insertar el registro de condonacion ANTES de cerrar la mora
---      (para que monto_condonacion lleve el monto original)
-INSERT INTO cartera.moras_condonaciones (
-  credito_id,
-  mora_id,
-  motivo,
-  usuario_id,
-  monto_condonacion
-)
-SELECT
-  mc.credito_id,
-  mc.mora_id,
-  'Saneamiento automatico: cuota cerrada por bug de pagos partidos (suma de pagos cubria la cuota pero algun *_restante quedo huerfano)',
-  12,  -- daniel.r@clubcashin.com
-  mc.monto_mora
-FROM _moras_a_condonar mc;
-
--- E.3  Cerrar la mora: activa=false, monto_mora=0, updated_at=now
-UPDATE cartera.moras_credito m
-   SET monto_mora = '0',
-       activa     = false,
-       updated_at = NOW()
-  FROM _moras_a_condonar mc
- WHERE m.mora_id = mc.mora_id;
-
--- E.4  Mover statusCredit -> ACTIVO solo si era MOROSO
---      (no tocar EN_CONVENIO, CANCELADO, INCOBRABLE, etc)
-UPDATE cartera.creditos c
-   SET "statusCredit" = 'ACTIVO'
-  FROM _moras_a_condonar mc
- WHERE c.credito_id = mc.credito_id
-   AND c."statusCredit" = 'MOROSO';
 
 -- ---------------------------------------------------------------------------
 -- F.  Verificacion post-fix

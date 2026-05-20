@@ -1106,21 +1106,13 @@ function RouteComponent() {
 										<Separator orientation="vertical" className="mx-1 h-6" />
 										<DateRangeFilter
 											dateRange={pickerRange}
+											required
 											onDateRangeChange={(range) => {
 												if (!range) {
 													setDateRange(undefined);
 													setPickerRange(undefined);
 													setFechaError(null);
 													setPage(1);
-													return;
-												}
-												const hoy = new Date();
-												hoy.setHours(0, 0, 0, 0);
-												if (range.from && range.from < hoy) {
-													setFechaError(
-														"La fecha no puede ser menor al día de hoy",
-													);
-													setPickerRange(range); // muestra selección en UI sin afectar la query
 													return;
 												}
 												setFechaError(null);

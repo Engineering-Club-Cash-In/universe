@@ -145,3 +145,6 @@ dist
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# DB dumps / backups (data sensible de prod, nunca commitear)
+apps/cartera-back/backups/

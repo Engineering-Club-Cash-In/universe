@@ -132,3 +132,6 @@ dist
 
 *.xlsx
 results_json/
+
+
+backups/

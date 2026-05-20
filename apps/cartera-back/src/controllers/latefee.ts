@@ -595,10 +595,16 @@ export async function procesarMoras() {
         })
         .where(eq(moras_credito.mora_id, mora.mora_id));
 
+      // Solo bajar a ACTIVO si seguía MOROSO — preservar EN_CONVENIO, CAIDO, etc.
       await db
         .update(creditos)
         .set({ statusCredit: "ACTIVO" })
-        .where(eq(creditos.credito_id, mora.credito_id));
+        .where(
+          and(
+            eq(creditos.credito_id, mora.credito_id),
+            eq(creditos.statusCredit, "MOROSO")
+          )
+        );
 
       await registrarHistorialMora({
         credito_id: mora.credito_id,

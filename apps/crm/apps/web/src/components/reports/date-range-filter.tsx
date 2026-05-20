@@ -15,12 +15,14 @@ interface DateRangeFilterProps {
 	dateRange: DateRange | undefined;
 	onDateRangeChange: (range: DateRange | undefined) => void;
 	className?: string;
+	required?: boolean;
 }
 
 export function DateRangeFilter({
 	dateRange,
 	onDateRangeChange,
 	className,
+	required,
 }: DateRangeFilterProps) {
 	return (
 		<div className={cn("grid gap-2", className)}>
@@ -65,6 +67,7 @@ export function DateRangeFilter({
 					<Calendar
 						initialFocus
 						mode="range"
+						required={required}
 						defaultMonth={dateRange?.from}
 						selected={dateRange}
 						onSelect={onDateRangeChange}

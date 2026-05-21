@@ -53,6 +53,7 @@ export async function getAllPagosWithCreditAndInversionistas(
         credito_id: pagos_credito.credito_id,
         cuota_id: pagos_credito.cuota_id,
         numero_cuota: cuotas_credito.numero_cuota,
+        cuota_pagada: cuotas_credito.pagado, // estado de la CUOTA (distinto de pagado del pago)
         cuota: pagos_credito.cuota,
         cuota_interes: pagos_credito.cuota_interes,
         abono_capital: pagos_credito.abono_capital,

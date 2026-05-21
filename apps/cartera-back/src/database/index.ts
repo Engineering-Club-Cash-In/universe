@@ -9,7 +9,8 @@ if (!connectionString) {
 
 const client = new Pool({
   connectionString,
-  ssl: { rejectUnauthorized: false }, // Importante si usas Supabase
+  // Por defecto SSL (Supabase/prod). Para Postgres local sin SSL setear PG_SSL=false.
+  ssl: process.env.PG_SSL === "false" ? false : { rejectUnauthorized: false },
 });
 
 console.log('Conexión a la base de datos establecida');

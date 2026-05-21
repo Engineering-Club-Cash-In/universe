@@ -1,0 +1,22 @@
+   {
+    "inversionista_id": 92,
+    "inversionista_nombre": "Inversiones Monaco S.A.",
+    "liquidacion_id": 437,
+    "cambios": [
+      {
+        "credito_id": 930,
+        "abono_capital": 0,
+         "abono_interes": 0,
+        "iva": 0,
+        "monto_aportado": 0.0
+      },
+      {
+        "credito_id": 781,
+        "abono_capital": 44514.87,
+        "monto_aportado": 0,
+        "monto_aportado_forzado": false
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  }

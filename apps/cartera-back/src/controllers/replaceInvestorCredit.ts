@@ -214,12 +214,17 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
     // Todos los registros del espejo con status != "completado"
     // en los créditos indicados. Si viene filtroInversionistaId, se
     // limita a ese inversionista.
+    //
+    // El espejo nos dice QUIÉN tiene operación pendiente. El monto a
+    // devolver a CUBE NO sale de aquí: el monto_aportado del espejo es
+    // el acumulado (lo que el inversionista ya tenía + lo de la compra
+    // pendiente). El delta real de la operación pendiente está en
+    // compras_credito_inversionista (ver PASO 2b).
     // ================================================================
     const pendientes = await db
       .select({
         credito_id: creditos_inversionistas_espejo.credito_id,
         inversionista_id: creditos_inversionistas_espejo.inversionista_id,
-        monto_aportado: creditos_inversionistas_espejo.monto_aportado,
       })
       .from(creditos_inversionistas_espejo)
       .where(
@@ -248,26 +253,100 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
     }
 
     // ================================================================
+    // PASO 2b: LEER DELTAS DESDE compras_credito_inversionista
+    // Cada fila aquí guarda el monto NUEVO de UNA operación (no el
+    // acumulado). Si el mismo (credito_id, inversionista_id) tiene
+    // varias filas pendientes (varias compras sin aceptar), las
+    // sumamos: ese total es lo que vuelve a CUBE para ese par.
+    // ================================================================
+    const comprasPendientes = await db
+      .select({
+        credito_id: compras_credito_inversionista.credito_id,
+        inversionista_id: compras_credito_inversionista.inversionista_id,
+        monto_aportado: compras_credito_inversionista.monto_aportado,
+      })
+      .from(compras_credito_inversionista)
+      .where(
+        and(
+          inArray(compras_credito_inversionista.credito_id, creditoIds),
+          ne(compras_credito_inversionista.status, "completado"),
+          ...(typeof filtroInversionistaId === "number"
+            ? [
+                eq(
+                  compras_credito_inversionista.inversionista_id,
+                  filtroInversionistaId,
+                ),
+              ]
+            : []),
+        ),
+      );
+
+    const deltaPorPar = new Map<string, Big>();
+    for (const c of comprasPendientes) {
+      const key = `${c.credito_id}-${c.inversionista_id}`;
+      const prev = deltaPorPar.get(key) ?? new Big(0);
+      deltaPorPar.set(key, prev.plus(new Big(c.monto_aportado)));
+    }
+
+    // ================================================================
     // PASO 3: AGRUPAR POR CRÉDITO Y RECOPILAR DATA PARA CORREO
+    // monto_total_a_cube = suma de DELTAS de las compras pendientes
+    // (no del monto_aportado acumulado del espejo). Si no hay registro
+    // en compras (data legacy previa a esa tabla), caemos al monto del
+    // espejo como fallback histórico.
     // ================================================================
     const porCredito = new Map<
       number,
       {
         monto_total_a_cube: Big;
-        inversionistas_a_sacar: Set<number>;
+        inversionistas_con_pendiente: Set<number>;
       }
     >();
+
+    // Para el fallback legacy necesitamos el monto del espejo de los
+    // pares que no tengan registro en compras. Lo cargamos solo si hay
+    // pares sin delta para no traer data de más.
+    const paresSinDelta = pendientes.filter(
+      (p) => !deltaPorPar.has(`${p.credito_id}-${p.inversionista_id}`),
+    );
+    const montoEspejoLegacy = new Map<string, Big>();
+    if (paresSinDelta.length > 0) {
+      const legacyRows = await db
+        .select({
+          credito_id: creditos_inversionistas_espejo.credito_id,
+          inversionista_id: creditos_inversionistas_espejo.inversionista_id,
+          monto_aportado: creditos_inversionistas_espejo.monto_aportado,
+        })
+        .from(creditos_inversionistas_espejo)
+        .where(
+          and(
+            inArray(creditos_inversionistas_espejo.credito_id, creditoIds),
+            ne(creditos_inversionistas_espejo.status, "completado"),
+          ),
+        );
+      for (const r of legacyRows) {
+        montoEspejoLegacy.set(
+          `${r.credito_id}-${r.inversionista_id}`,
+          new Big(r.monto_aportado),
+        );
+      }
+    }
 
     for (const p of pendientes) {
       if (!porCredito.has(p.credito_id)) {
         porCredito.set(p.credito_id, {
           monto_total_a_cube: new Big(0),
-          inversionistas_a_sacar: new Set(),
+          inversionistas_con_pendiente: new Set(),
         });
       }
       const entry = porCredito.get(p.credito_id)!;
-      entry.monto_total_a_cube = entry.monto_total_a_cube.plus(p.monto_aportado);
-      entry.inversionistas_a_sacar.add(p.inversionista_id);
+      const key = `${p.credito_id}-${p.inversionista_id}`;
+      const delta =
+        deltaPorPar.get(key) ??
+        montoEspejoLegacy.get(key) ??
+        new Big(0);
+      entry.monto_total_a_cube = entry.monto_total_a_cube.plus(delta);
+      entry.inversionistas_con_pendiente.add(p.inversionista_id);
     }
 
     // ── Data adicional para el reporte (Inversionistas y Clientes) ──
@@ -300,7 +379,7 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
     // ================================================================
     await db.transaction(async (tx) => {
       for (const [creditoId, info] of porCredito) {
-        const { monto_total_a_cube, inversionistas_a_sacar } = info;
+        const { monto_total_a_cube, inversionistas_con_pendiente } = info;
 
         // ── Traer data fresca del crédito ──
         const [creditoData] = await tx
@@ -333,7 +412,11 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
           .from(creditos_inversionistas)
           .where(eq(creditos_inversionistas.credito_id, creditoId));
 
-        // ── Armar array SIN los pendientes y CON CUBE restaurado ──
+        // ── Armar array con CUBE restaurado y las posiciones de los
+        //    inversionistas pendientes RESTADAS solo por su delta. Si el
+        //    inversionista tenía posición previa (espejo acumulado > delta),
+        //    se queda en el crédito con el monto previo; si no la tenía, se
+        //    saca del crédito. ──
         const arrayLimpio: {
           inversionista_id: number;
           monto_aportado: Big;
@@ -342,11 +425,32 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
           fecha_inicio_participacion: string;
         }[] = [];
 
+        // Lista de inversionistas que terminaron saliendo del crédito
+        // (su posición acumulada era igual al delta pendiente).
+        const inversionistas_removidos: number[] = [];
+
         for (const inv of invActuales) {
-          if (inversionistas_a_sacar.has(inv.inversionista_id)) {
-            continue;
-          }
-          if (inv.inversionista_id === CUBE_INVESTMENT_ID) {
+          if (inversionistas_con_pendiente.has(inv.inversionista_id)) {
+            const key = `${creditoId}-${inv.inversionista_id}`;
+            const delta =
+              deltaPorPar.get(key) ??
+              montoEspejoLegacy.get(key) ??
+              new Big(inv.monto_aportado);
+            const nuevoMonto = new Big(inv.monto_aportado).minus(delta);
+            if (nuevoMonto.lte(0)) {
+              inversionistas_removidos.push(inv.inversionista_id);
+              continue;
+            }
+            arrayLimpio.push({
+              inversionista_id: inv.inversionista_id,
+              monto_aportado: nuevoMonto,
+              porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
+              porcentaje_inversion: new Big(
+                inv.porcentaje_participacion_inversionista,
+              ),
+              fecha_inicio_participacion: inv.fecha_inicio_participacion,
+            });
+          } else if (inv.inversionista_id === CUBE_INVESTMENT_ID) {
             arrayLimpio.push({
               inversionista_id: inv.inversionista_id,
               monto_aportado: new Big(inv.monto_aportado).plus(monto_total_a_cube),
@@ -423,7 +527,7 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
         // del correo y el % ponderado.
         // Conservamos los registros con status "completado" (audit
         // trail de operaciones que sí cerraron en el pasado).
-        if (inversionistas_a_sacar.size > 0) {
+        if (inversionistas_con_pendiente.size > 0) {
           await tx
             .delete(compras_credito_inversionista)
             .where(
@@ -431,7 +535,7 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
                 eq(compras_credito_inversionista.credito_id, creditoId),
                 inArray(
                   compras_credito_inversionista.inversionista_id,
-                  Array.from(inversionistas_a_sacar),
+                  Array.from(inversionistas_con_pendiente),
                 ),
                 ne(compras_credito_inversionista.status, "completado"),
               ),
@@ -447,13 +551,14 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
         resultados.push({
           credito_id: creditoId,
           numero_credito_sifco: creditoData.numero_credito_sifco,
-          inversionistas_removidos: Array.from(inversionistas_a_sacar),
+          inversionistas_con_pendiente: Array.from(inversionistas_con_pendiente),
+          inversionistas_removidos,
           monto_devuelto_a_cube: monto_total_a_cube.toString(),
           inversionistas_restantes: dataPadre.length,
         });
 
         console.log(
-          `   🧹 Crédito ${creditoData.numero_credito_sifco} limpio - ${inversionistas_a_sacar.size} removido(s), Q${monto_total_a_cube} a CUBE, ${dataPadre.length} restantes`,
+          `   🧹 Crédito ${creditoData.numero_credito_sifco} limpio - ${inversionistas_con_pendiente.size} pendiente(s) (${inversionistas_removidos.length} salieron del crédito), Q${monto_total_a_cube} a CUBE, ${dataPadre.length} restantes`,
         );
       }
     });
@@ -603,7 +708,12 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
 
     const resultadosAsignacion: any[] = [];
     const errores: any[] = [];
-    let origenInfo: { credito_id: number; numero_credito_sifco: string; monto_devuelto: string } | null = null;
+    let origenInfo: {
+      credito_id: number;
+      numero_credito_sifco: string;
+      monto_devuelto: string;
+      inversionista_salio_del_credito: boolean;
+    } | null = null;
 
     await db.transaction(async (tx) => {
       // ================================================================
@@ -657,13 +767,47 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
         };
       }
 
-      const montoEnOrigen = new Big(invEnOrigen.monto_aportado);
+      // ── Leer el DELTA de la operación pendiente ──
+      // El monto_aportado del padre/espejo es el acumulado (lo que el
+      // inversionista ya tenía + lo de la compra pendiente). Para saber
+      // qué monto vuelve a CUBE necesitamos el delta de la(s) operación(es)
+      // pendiente(s) en compras_credito_inversionista. Si hay varias filas
+      // pendientes para el mismo par, las sumamos. Fallback al monto del
+      // padre solo para data legacy sin registros en compras.
+      const comprasPendientesOrigen = await tx
+        .select({
+          monto_aportado: compras_credito_inversionista.monto_aportado,
+        })
+        .from(compras_credito_inversionista)
+        .where(
+          and(
+            eq(
+              compras_credito_inversionista.credito_id,
+              credito_espejo_removido_id,
+            ),
+            eq(
+              compras_credito_inversionista.inversionista_id,
+              inversionista_id,
+            ),
+            ne(compras_credito_inversionista.status, "completado"),
+          ),
+        );
+
+      const deltaPendienteOrigen = comprasPendientesOrigen.reduce(
+        (acc, r) => acc.plus(new Big(r.monto_aportado)),
+        new Big(0),
+      );
+
+      const montoPadreOrigen = new Big(invEnOrigen.monto_aportado);
+      const montoEnOrigen = deltaPendienteOrigen.gt(0)
+        ? deltaPendienteOrigen
+        : montoPadreOrigen;
 
       console.log(
         `\n🔄 Reasignación manual: inversionista ${inversionista_id}`,
       );
       console.log(
-        `   Origen: crédito ${creditoOrigen.numero_credito_sifco} - Q${montoEnOrigen}`,
+        `   Origen: crédito ${creditoOrigen.numero_credito_sifco} - delta pendiente Q${montoEnOrigen} (padre acumulado Q${montoPadreOrigen})`,
       );
 
       // ================================================================
@@ -950,7 +1094,10 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
         .from(creditos_inversionistas)
         .where(eq(creditos_inversionistas.credito_id, credito_espejo_removido_id));
 
-      // ── Armar array SIN el inversionista y CON CUBE restaurado ──
+      // ── Armar array con CUBE restaurado y al inversionista con su
+      //    posición previa (si tenía). Solo se le resta el delta pendiente
+      //    que se está reasignando. Si el delta es igual al acumulado del
+      //    padre, el inversionista sale del crédito. ──
       const arrayOrigenLimpio: {
         inversionista_id: number;
         monto_aportado: Big;
@@ -959,10 +1106,24 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
         fecha_inicio_participacion: string;
       }[] = [];
 
+      let inversionistaRemovidoDelOrigen = false;
+
       for (const inv of invOrigenFresh) {
         if (inv.inversionista_id === inversionista_id) {
-          // ── Quitar al inversionista: no incluir ──
-          continue;
+          const nuevoMonto = new Big(inv.monto_aportado).minus(montoEnOrigen);
+          if (nuevoMonto.lte(0)) {
+            inversionistaRemovidoDelOrigen = true;
+            continue;
+          }
+          arrayOrigenLimpio.push({
+            inversionista_id: inv.inversionista_id,
+            monto_aportado: nuevoMonto,
+            porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
+            porcentaje_inversion: new Big(
+              inv.porcentaje_participacion_inversionista,
+            ),
+            fecha_inicio_participacion: inv.fecha_inicio_participacion,
+          });
         } else if (inv.inversionista_id === CUBE_INVESTMENT_ID) {
           // ── CUBE: devolverle el monto ──
           arrayOrigenLimpio.push({
@@ -1089,7 +1250,11 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
         .where(eq(creditos.credito_id, credito_espejo_removido_id));
 
       console.log(
-        `   🧹 Crédito origen ${creditoOrigen.numero_credito_sifco} limpio - ${dataPadreOrigenFinal.length} inversionistas restantes`,
+        `   🧹 Crédito origen ${creditoOrigen.numero_credito_sifco} limpio - ${dataPadreOrigenFinal.length} inversionistas restantes${
+          inversionistaRemovidoDelOrigen
+            ? ` (inversionista ${inversionista_id} salió del crédito)`
+            : ` (inversionista ${inversionista_id} se queda con posición previa)`
+        }`,
       );
 
       // Guardar info del origen para la respuesta
@@ -1097,6 +1262,7 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
         credito_id: credito_espejo_removido_id,
         numero_credito_sifco: creditoOrigen.numero_credito_sifco,
         monto_devuelto: montoEnOrigen.toString(),
+        inversionista_salio_del_credito: inversionistaRemovidoDelOrigen,
       };
     });
 
@@ -1112,7 +1278,10 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
         credito_id: origenInfo?.credito_id,
         //@ts-ignore
         numero_credito_sifco: origenInfo?.numero_credito_sifco,
-        inversionista_removido: inversionista_id,
+        inversionista_id,
+        inversionista_salio_del_credito:
+          //@ts-ignore
+          origenInfo?.inversionista_salio_del_credito ?? false,
         //@ts-ignore
         monto_devuelto_a_cube: origenInfo?.monto_devuelto,
       },

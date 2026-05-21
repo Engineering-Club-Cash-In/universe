@@ -1,0 +1,506 @@
+[
+  {
+    "inversionista_id": 2,
+    "inversionista_nombre": "Aida Irene Dubois",
+    "liquidacion_id": 371,
+    "cambios": [
+      {
+        "credito_id": 8683,
+        "abono_capital": 7.47,
+        "monto_aportado": 736.4
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 3,
+    "inversionista_nombre": "Alejandro Mayen Herrera",
+    "liquidacion_id": 384,
+    "cambios": [
+      {
+        "credito_id": 8685,
+        "monto_aportado": 8424.31
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 4,
+    "inversionista_nombre": "Ana Lucia Salvatierra",
+    "liquidacion_id": 382,
+    "cambios": [
+      {
+        "credito_id": 8724,
+        "abono_capital": 18.348752,
+        "abono_interes": 21.92232,
+        "iva": 2.6306784,
+        "monto_aportado": 1808.52
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 7,
+    "inversionista_nombre": "Anna Lisseth Lorenzo Rodas",
+    "liquidacion_id": 432,
+    "cambios": [
+      {
+        "credito_id": 4789,
+        "monto_aportado": 5375.74
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 10,
+    "inversionista_nombre": "Bibiana Moyano",
+    "liquidacion_id": 340,
+    "cambios": [
+      {
+        "credito_id": 330,
+        "abono_capital": 7.79,
+        "abono_interes": 6.21,
+        "iva": 0.7452,
+        "monto_aportado": 509.69
+      },
+      {
+        "credito_id": 691,
+        "abono_capital": 6.7656,
+        "abono_interes": 7.66,
+        "iva": 0.9192,
+        "monto_aportado": 631.5944
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 11,
+    "inversionista_nombre": "Boris Gilberto Lemus Villatoro",
+    "liquidacion_id": 446,
+    "cambios": [
+      {
+        "credito_id": 743,
+        "abono_capital": 28.44,
+        "abono_interes": 58.00044,
+        "iva": 6.9600528,
+        "monto_aportado": 4804.93
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 19,
+    "inversionista_nombre": "Diego Arturo Bracamonte",
+    "liquidacion_id": 351,
+    "cambios": [
+      {
+        "credito_id": 955,
+        "abono_capital": 0.0,
+        "monto_aportado": 0.0
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 26,
+    "inversionista_nombre": "Giancarlo Massis Clubcashin.com",
+    "liquidacion_id": 376,
+    "cambios": [
+      {
+        "credito_id": 8699,
+        "monto_aportado": 9231.394984
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 27,
+    "inversionista_nombre": "Glenda Roxana Godoy Bedoya",
+    "liquidacion_id": 394,
+    "cambios": [
+      {
+        "credito_id": 8736,
+        "monto_aportado": 374.375032
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 30,
+    "inversionista_nombre": "Guillermo Zaid",
+    "liquidacion_id": 354,
+    "cambios": [
+      {
+        "credito_id": 4857,
+        "monto_aportado": 6551.22
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 33,
+    "inversionista_nombre": "Inversiones CASCAI  Sociedad Anonima",
+    "liquidacion_id": 412,
+    "cambios": [
+      {
+        "credito_id": 8705,
+        "monto_aportado": 10762.71
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 34,
+    "inversionista_nombre": "INVERSIONES DELFINA , S.A.",
+    "liquidacion_id": 385,
+    "cambios": [
+      {
+        "credito_id": 8871,
+        "abono_capital": 21.06,
+        "abono_interes": 32.44,
+        "iva": 3.8928,
+        "monto_aportado": 2862.28
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 51,
+    "inversionista_nombre": "Juan Guzman",
+    "liquidacion_id": 383,
+    "cambios": [
+      {
+        "credito_id": 8738,
+        "monto_aportado": 346.29
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 61,
+    "inversionista_nombre": "Maria Ines Rodas",
+    "liquidacion_id": 426,
+    "cambios": [
+      {
+        "credito_id": 600,
+        "monto_aportado": 939.33992
+      },
+      {
+        "credito_id": 8719,
+        "monto_aportado": 1912.455248
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 63,
+    "inversionista_nombre": "Mario Estuardo Samperio Torrebiarte",
+    "liquidacion_id": 390,
+    "cambios": [
+      {
+        "credito_id": 8684,
+        "monto_aportado": 5406.032784
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 67,
+    "inversionista_nombre": "Milton Jose Barascout Ramirez",
+    "liquidacion_id": 392,
+    "cambios": [
+      {
+        "credito_id": 261,
+        "monto_aportado": 22708.691096
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 69,
+    "inversionista_nombre": "NXGN  Investments, S.A.",
+    "liquidacion_id": 352,
+    "cambios": [
+      {
+        "credito_id": 8674,
+        "abono_capital": 5.741912,
+        "monto_aportado": 566.168088
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 71,
+    "inversionista_nombre": "PEDRO PABLO CARRILLO GULARTE",
+    "liquidacion_id": 355,
+    "cambios": [
+      {
+        "credito_id": 8759,
+        "abono_capital": 0.981128,
+        "abono_interes": 2.418045,
+        "iva": 0.2901654,
+        "monto_aportado": 229.308872
+      },
+      {
+        "credito_id": 733,
+        "monto_aportado": 206.771032
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 74,
+    "inversionista_nombre": "Rafael Figueroa",
+    "liquidacion_id": 398,
+    "cambios": [
+      {
+        "credito_id": 8707,
+        "monto_aportado": 11195.1628
+      },
+      {
+        "credito_id": 433,
+        "monto_aportado": 19419.648664
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 77,
+    "inversionista_nombre": "Rodrigo Estrada Osorio",
+    "liquidacion_id": 411,
+    "cambios": [
+      {
+        "credito_id": 8776,
+        "monto_aportado": 5197.69528
+      },
+      {
+        "credito_id": 832,
+        "abono_interes": 9.9857835,
+        "iva": 1.19829402
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 78,
+    "inversionista_nombre": "Rodrigo Mendieta",
+    "liquidacion_id": 419,
+    "cambios": [
+      {
+        "credito_id": 25,
+        "abono_capital": 1342.83,
+        "abono_interes": 759.28,
+        "iva": 91.1136,
+        "monto_aportado": 61930.63
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 80,
+    "inversionista_nombre": "Rut Noemí Toledo Jerez",
+    "liquidacion_id": 408,
+    "cambios": [
+      {
+        "credito_id": 701,
+        "monto_aportado": 140.099208
+      },
+      {
+        "credito_id": 735,
+        "abono_capital": 1.615648,
+        "monto_aportado": 151.024352
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 82,
+    "inversionista_nombre": "Werner Oswaldo Osoy Trejo",
+    "liquidacion_id": 443,
+    "cambios": [
+      {
+        "credito_id": 503,
+        "abono_capital": 62.947144,
+        "abono_interes": 122.70204,
+        "iva": 14.7242448,
+        "monto_aportado": 10162.222856
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 84,
+    "inversionista_nombre": "Flujocapital",
+    "liquidacion_id": 450,
+    "cambios": [
+      {
+        "credito_id": 1092,
+        "abono_capital": 0.0,
+        "monto_aportado": 0.0
+      },
+      {
+        "credito_id": 88,
+        "abono_capital": 55232.35,
+        "monto_aportado": 0.0
+      },
+      {
+        "credito_id": 848,
+        "abono_capital": 193341.57,
+        "monto_aportado": 0.0
+      },
+      {
+        "credito_id": 11,
+        "abono_capital": 14916.26,
+        "monto_aportado": 0.0
+      },
+      {
+        "credito_id": 157,
+        "abono_capital": 23.5,
+        "monto_aportado": 0.0
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 87,
+    "inversionista_nombre": "Avinsa  S.A",
+    "liquidacion_id": 436,
+    "cambios": [
+      {
+        "credito_id": 396,
+        "abono_capital": 192.01,
+        "monto_aportado": 14451.55
+      },
+      {
+        "credito_id": 8708,
+        "abono_capital": 1183.47,
+        "monto_aportado": 82513.38
+      },
+      {
+        "credito_id": 776,
+        "abono_capital": 12810.44,
+        "monto_aportado": 0.0
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 90,
+    "inversionista_nombre": "Felipe Gonzalez",
+    "liquidacion_id": 358,
+    "cambios": [
+      {
+        "credito_id": 8751,
+        "abono_capital": 6.727736,
+        "abono_interes": 2.632665,
+        "iva": 0.3159198,
+        "monto_aportado": 244.002264
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 91,
+    "inversionista_nombre": "Pedro Jose Ramirez Lopez",
+    "liquidacion_id": 365,
+    "cambios": [
+      {
+        "credito_id": 43,
+        "abono_capital": 6.926352,
+        "abono_interes": 3.035925,
+        "iva": 0.364311,
+        "monto_aportado": 262.933648
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+   {
+    "inversionista_id": 92,
+    "inversionista_nombre": "Inversiones Monaco S.A.",
+    "liquidacion_id": 437,
+    "cambios": [
+      {
+        "credito_id": 930,
+        "abono_capital": 0,
+         "abono_interes": 0,
+        "iva": 0,
+        "monto_aportado": 0.0
+      },
+      {
+        "credito_id": 781,
+        "abono_capital": 44514.87,
+        "monto_aportado": 0,
+        "monto_aportado_forzado": false
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 110,
+    "inversionista_nombre": "Carlos Fernando Carrillo Gularte",
+    "liquidacion_id": 393,
+    "cambios": [
+      {
+        "credito_id": 701,
+        "monto_aportado": 208.64
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 118,
+    "inversionista_nombre": "Mario Andres Barrios Ramirez",
+    "liquidacion_id": 361,
+    "cambios": [
+      {
+        "credito_id": 8690,
+        "monto_aportado": 786.771968
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  },
+  {
+    "inversionista_id": 123,
+    "inversionista_nombre": "Esdras Samuel Gamboa Martínez",
+    "liquidacion_id": 364,
+    "cambios": [
+      {
+        "credito_id": 8670,
+        "abono_capital": 220.14,
+        "monto_aportado": 9575.41
+      }
+    ],
+    "force": true,
+    "generar_reporte": true
+  }
+]

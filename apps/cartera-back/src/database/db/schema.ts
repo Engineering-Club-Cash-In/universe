@@ -253,6 +253,50 @@
     fecha: timestamp("fecha").defaultNow().notNull(),
   });
 
+  export const moraEventoTipoEnum = customSchema.enum("mora_evento_tipo", [
+    "CREACION",
+    "RECALCULO",
+    "INCREMENTO",
+    "DECREMENTO",
+    "CONDONACION",
+    "DESACTIVACION",
+  ]);
+
+  export const moraEventoOrigenEnum = customSchema.enum("mora_evento_origen", [
+    "PROCESO_AUTO",
+    "API_MANUAL",
+    "CONDONACION_INDIVIDUAL",
+    "CONDONACION_MASIVA",
+  ]);
+
+  export const moras_historial = customSchema.table("moras_historial", {
+    historial_id: serial("historial_id").primaryKey(),
+    credito_id: integer("credito_id")
+      .notNull()
+      .references(() => creditos.credito_id, { onDelete: "cascade" }),
+    mora_id: integer("mora_id")
+      .references(() => moras_credito.mora_id, { onDelete: "set null" }),
+    tipo_evento: moraEventoTipoEnum("tipo_evento").notNull(),
+    origen: moraEventoOrigenEnum("origen").notNull(),
+    monto_anterior: numeric("monto_anterior", { precision: 18, scale: 2 })
+      .notNull()
+      .default("0"),
+    monto_nuevo: numeric("monto_nuevo", { precision: 18, scale: 2 })
+      .notNull()
+      .default("0"),
+    cuotas_atrasadas_anterior: integer("cuotas_atrasadas_anterior").notNull().default(0),
+    cuotas_atrasadas_nuevas: integer("cuotas_atrasadas_nuevas").notNull().default(0),
+    capital_credito: numeric("capital_credito", { precision: 18, scale: 2 }),
+    porcentaje_mora: numeric("porcentaje_mora", { precision: 5, scale: 4 }),
+    usuario_id: integer("usuario_id")
+      .references(() => platform_users.id, { onDelete: "set null" }),
+    motivo: text("motivo"),
+    fecha: timestamp("fecha").defaultNow().notNull(),
+  }, (table) => [
+    index("moras_historial_credito_idx").on(table.credito_id),
+    index("moras_historial_fecha_idx").on(table.fecha),
+  ]);
+
   export const creditos_rubros_otros = customSchema.table("creditos_rubros_otros", {
     id: serial("id").primaryKey(),
     credito_id: integer("credito_id")

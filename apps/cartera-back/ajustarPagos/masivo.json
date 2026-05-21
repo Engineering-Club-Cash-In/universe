@@ -101,6 +101,8 @@
     "cambios": [
       {
         "credito_id": 955,
+         "abono_interes": 0,
+        "iva": 0,
         "abono_capital": 0.0,
         "monto_aportado": 0.0
       }

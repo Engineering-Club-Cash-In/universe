@@ -2,6 +2,7 @@ import {
 	boolean,
 	decimal,
 	integer,
+	jsonb,
 	pgEnum,
 	pgTable,
 	text,
@@ -450,6 +451,31 @@ export const parentescoReferenciaEnum = pgEnum("parentesco_referencia", [
 
 /** Valores canónicos del enum de parentesco. Úsalo en lugar de duplicar el array. */
 export const PARENTESCO_VALUES = parentescoReferenciaEnum.enumValues;
+
+// Audit log for deleted opportunities
+export const deletedOpportunityLogs = pgTable("deleted_opportunity_logs", {
+	id: uuid("id").primaryKey().defaultRandom(),
+	// Snapshot of opportunity data (no FKs — records may no longer exist)
+	opportunityId: uuid("opportunity_id").notNull(),
+	opportunityTitle: text("opportunity_title").notNull(),
+	opportunityValue: decimal("opportunity_value", { precision: 12, scale: 2 }),
+	opportunityStatus: text("opportunity_status").notNull(),
+	opportunityStageName: text("opportunity_stage_name"),
+	opportunityStagePercentage: integer("opportunity_stage_percentage"),
+	opportunityCreatedAt: timestamp("opportunity_created_at").notNull(),
+	// Assigned salesperson snapshot
+	assignedUserId: text("assigned_user_id"),
+	assignedUserName: text("assigned_user_name"),
+	// Lead snapshot
+	leadId: uuid("lead_id"),
+	leadName: text("lead_name"),
+	// Deletion metadata (all plain text — no FKs to avoid future constraint issues)
+	deletedBy: text("deleted_by").notNull(),
+	deletedByName: text("deleted_by_name").notNull(),
+	deletedAt: timestamp("deleted_at").notNull().defaultNow(),
+	reason: text("reason").notNull(),
+	snapshot: jsonb("snapshot").$type<Record<string, unknown>>().notNull(),
+});
 
 // Referencias de un lead (personas de contacto: familiares, amigos, etc.)
 export const referenciasLead = pgTable("referencias_lead", {

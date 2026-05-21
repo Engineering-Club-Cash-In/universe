@@ -483,6 +483,7 @@ export async function procesarMoras() {
     let recalculadas = 0;
     let sinCambios = 0;
     let desactivadas = 0;
+    let sinCapital = 0;
 
     // 5. Procesar créditos CON cuotas vencidas → crear o recalcular
     for (const [creditoIdStr, cuotasAtrasadas] of Object.entries(moraPorCredito)) {
@@ -499,6 +500,45 @@ export async function procesarMoras() {
       }
 
       const capital = new Big(credito.capital);
+
+      // Sin capital no aplica mora. Si tenía una mora activa, se le quita (desactiva).
+      if (capital.lte(0)) {
+        sinCapital++;
+        const moraPrevia = morasActivasPorCredito.get(creditoId);
+        if (moraPrevia) {
+          await db
+            .update(moras_credito)
+            .set({ monto_mora: "0", cuotas_atrasadas: 0, activa: false, updated_at: new Date() })
+            .where(eq(moras_credito.mora_id, moraPrevia.mora_id));
+
+          // Solo bajar a ACTIVO si seguía MOROSO — preservar EN_CONVENIO, CAIDO, etc.
+          await db
+            .update(creditos)
+            .set({ statusCredit: "ACTIVO" })
+            .where(
+              and(
+                eq(creditos.credito_id, creditoId),
+                eq(creditos.statusCredit, "MOROSO")
+              )
+            );
+
+          await registrarHistorialMora({
+            credito_id: creditoId,
+            mora_id: moraPrevia.mora_id,
+            tipo_evento: "DESACTIVACION",
+            origen: "PROCESO_AUTO",
+            monto_anterior: moraPrevia.monto_mora,
+            monto_nuevo: "0",
+            cuotas_atrasadas_anterior: moraPrevia.cuotas_atrasadas,
+            cuotas_atrasadas_nuevas: 0,
+            porcentaje_mora: moraPrevia.porcentaje_mora,
+            motivo: "Crédito sin capital — no aplica mora",
+          });
+        }
+        console.log(`[SKIP] Credit #${creditoId} sin capital (${credito.capital}) — mora quitada`);
+        continue;
+      }
+
       const porcentaje = new Big("0.0112");
       const moraNueva = capital.times(porcentaje).times(cuotasAtrasadas);
       const moraNuevaStr = moraNueva.toFixed(2);
@@ -539,7 +579,7 @@ export async function procesarMoras() {
         creadas++;
         console.log(`[CREATE] Credit #${creditoId} → mora Q${moraNuevaStr} (${cuotasAtrasadas} cuotas)`);
       } else {
-        const cambioMonto = new Big(moraActual.monto_mora).cmp(moraNueva) !== 0;
+        const cambioMonto = new Big(moraActual.monto_mora).cmp(moraNuevaStr) !== 0;
         const cambioCuotas = moraActual.cuotas_atrasadas !== cuotasAtrasadas;
 
         if (!cambioMonto && !cambioCuotas) {
@@ -629,9 +669,10 @@ export async function procesarMoras() {
     console.log(`║   Recalculadas: ${recalculadas}`);
     console.log(`║   Sin cambios: ${sinCambios}`);
     console.log(`║   Desactivadas: ${desactivadas}`);
+    console.log(`║   Sin capital (omitidas): ${sinCapital}`);
     console.log("╚════════════════════════════════════════════════════════════\n");
 
-    return { creadas, recalculadas, sinCambios, desactivadas };
+    return { creadas, recalculadas, sinCambios, desactivadas, sinCapital };
 
   } catch (error: any) {
     console.error("\n╔════════════════════════════════════════════════════════════");

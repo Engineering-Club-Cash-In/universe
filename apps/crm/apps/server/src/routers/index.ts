@@ -23,6 +23,7 @@ import { notificationsRouter } from "./notifications";
 import { quotationsRouter } from "./quotations";
 import { reportesCarteraRouter } from "./reportes-cartera";
 import * as reportsRouter from "./reports";
+import { seguimientosRouter } from "./seguimientos";
 import { uploadRouter } from "./upload";
 import { vehiclesRouter } from "./vehicles";
 import { vendorsRouter } from "./vendors";
@@ -166,6 +167,13 @@ export const cobrosAppRouter = {
 	getMetasMora: cobrosRouter.getMetasMora,
 	getMetasMoraAnual: cobrosRouter.getMetasMoraAnual,
 	upsertMetasMora: cobrosRouter.upsertMetasMora,
+	
+	// Seguimientos programados
+	createSeguimiento: seguimientosRouter.createSeguimiento,
+	getSeguimientosActivos: seguimientosRouter.getSeguimientosActivos,
+	updateSeguimiento: seguimientosRouter.updateSeguimiento,
+	deleteSeguimiento: seguimientosRouter.deleteSeguimiento,
+	runSeguimientosJob: seguimientosRouter.runSeguimientosJob,
 };
 
 /**

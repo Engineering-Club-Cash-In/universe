@@ -7,6 +7,8 @@ if (!connectionString) {
   throw new Error('DATABASE_URL environment variable not set');
 }
 
+// SSL solo para conexiones remotas (Supabase). El Postgres local no habla SSL.
+const isLocalDb = /@(localhost|127\.0\.0\.1)[:/]/.test(connectionString);
 const client = new Pool({
   connectionString,
   // Por defecto SSL (Supabase/prod). Para Postgres local sin SSL setear PG_SSL=false.

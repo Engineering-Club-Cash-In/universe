@@ -1780,6 +1780,21 @@ export const cobrosRouter = {
 			try {
 				let numeroSifco: string = input.creditoId ?? "";
 
+				// 0. Si el creditoId es un UUID (viene de una notificación), resolverlo
+				//    al numeroCreditoSifco del caso de cobros antes de consultar cartera-back.
+				const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+				if (UUID_REGEX.test(numeroSifco)) {
+					const [casoPorUUID] = await db
+						.select({ numeroCreditoSifco: casosCobros.numeroCreditoSifco })
+						.from(casosCobros)
+						.where(eq(casosCobros.id, numeroSifco))
+						.limit(1);
+					if (!casoPorUUID?.numeroCreditoSifco) {
+						throw new ORPCError("NOT_FOUND", { message: "Caso no encontrado" });
+					}
+					numeroSifco = casoPorUUID.numeroCreditoSifco;
+				}
+
 				// 1. Buscar referencia por sifco número de crédito
 				let reference = await db
 					.select()

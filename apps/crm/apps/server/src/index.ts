@@ -32,6 +32,7 @@ import { otps } from "./db/schema/otp";
 import {
 	checkCasosSinContacto,
 	checkSeguimientosVencidos,
+	procesarSeguimientosRecurrentes,
 } from "./jobs/cobros-notifications";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
@@ -1092,7 +1093,22 @@ setInterval(
 setTimeout(() => {
 	checkSeguimientosVencidos().catch(console.error);
 	checkCasosSinContacto(3).catch(console.error);
+	procesarSeguimientosRecurrentes().catch(console.error);
 }, 10_000);
+
+// Ejecutar procesarSeguimientosRecurrentes a medianoche GT (00:00 GT = 06:00 UTC) cada día.
+function scheduleAtMidnightGT() {
+	const now = new Date();
+	const next = new Date();
+	next.setUTCHours(6, 0, 0, 0);
+	if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+	setTimeout(async () => {
+		await procesarSeguimientosRecurrentes().catch(console.error);
+		scheduleAtMidnightGT();
+	}, next.getTime() - now.getTime());
+}
+scheduleAtMidnightGT();
+
 
 export default {
 	port: process.env.PORT || 3000,

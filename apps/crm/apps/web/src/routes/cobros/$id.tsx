@@ -11,6 +11,7 @@ import {
 	Clock,
 	Eye,
 	FileText,
+	Loader,
 	Mail,
 	MapPin,
 	MessageCircle,
@@ -21,15 +22,28 @@ import {
 	User,
 	Users,
 	X,
+	Play,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { ReferenciasView } from "@/components/cobros/ReferenciasView";
 import { ContactoModal } from "@/components/contacto-modal";
+import { SeguimientoRecurrenteModal } from "@/components/cobros/seguimiento-recurrente-modal";
 import {
 	OpportunityDetailModal,
 	type OpportunityForModal,
 } from "@/components/opportunity-detail-modal";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+	AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -184,6 +198,9 @@ function RouteComponent() {
 		emailContacto: "",
 	});
 
+	// Estado modal seguimiento
+	const [isSeguimientoModalOpen, setIsSeguimientoModalOpen] = useState(false);
+
 	const queryClient = useQueryClient();
 
 	// Obtener detalles del contrato/caso
@@ -198,6 +215,14 @@ function RouteComponent() {
 	// Obtener historial de contactos (solo para casos)
 	const historialContactos = useQuery({
 		...orpc.getHistorialContactos.queryOptions({
+			input: { casoCobroId: casoDetails.data?.id || "" },
+		}),
+		enabled: !!session && !!casoDetails.data?.id,
+	});
+
+	// Obtener seguimientos activos
+	const seguimientosActivos = useQuery({
+		...orpc.getSeguimientosActivos.queryOptions({
 			input: { casoCobroId: casoDetails.data?.id || "" },
 		}),
 		enabled: !!session && !!casoDetails.data?.id,
@@ -353,6 +378,39 @@ function RouteComponent() {
 		},
 		onError: (err: any) => {
 			toast.error(err.message || "Error al actualizar contacto");
+		},
+	});
+
+	const cancelSeguimientoMutation = useMutation({
+		mutationFn: (seguimientoId: string) =>
+			client.deleteSeguimiento({ id: seguimientoId }),
+		onSuccess: () => {
+			toast.success("Seguimiento eliminado");
+			queryClient.invalidateQueries(
+				orpc.getSeguimientosActivos.queryOptions({
+					input: { casoCobroId: casoDetails.data?.id || "" },
+				}),
+			);
+		},
+		onError: (err: any) => {
+			toast.error(err.message || "Error al cancelar seguimiento");
+		},
+	});
+
+	const runJobMutation = useMutation({
+		mutationFn: () => client.runSeguimientosJob(),
+		onSuccess: () => {
+			toast.success("Job de seguimientos ejecutado exitosamente");
+			const casoCobroId = casoDetails.data?.id || "";
+			queryClient.invalidateQueries(
+				orpc.getSeguimientosActivos.queryOptions({ input: { casoCobroId } }),
+			);
+			queryClient.invalidateQueries(
+				orpc.getHistorialContactos.queryOptions({ input: { casoCobroId } }),
+			);
+		},
+		onError: (err: any) => {
+			toast.error(err.message || "Error al ejecutar el job");
 		},
 	});
 
@@ -1044,6 +1102,7 @@ function RouteComponent() {
 											</Button>
 										</ContactoModal>
 									</div>
+
 								</>
 							) : (
 								<div className="rounded-md border border-yellow-200 bg-yellow-50 p-4">
@@ -1056,6 +1115,109 @@ function RouteComponent() {
 							)}
 						</CardContent>
 					</Card>
+
+					{/* Seguimientos Recurrentes */}
+					{caso.id && (
+						<Card className="border-blue-100/40 dark:border-blue-900/10">
+							<CardHeader className="flex flex-row items-center justify-between py-4">
+								<CardTitle className="flex items-center gap-2 text-sm font-semibold text-blue-800 dark:text-blue-400">
+									<CalendarClock className="h-4 w-4" />
+									Seguimiento Programado
+								</CardTitle>
+								<div className="flex items-center gap-2">
+									<Button
+										variant="outline"
+										size="sm"
+										className="h-8 w-8 p-0 text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+										title="Ejecutar Job de Seguimientos Ahora"
+										onClick={() => runJobMutation.mutate()}
+										disabled={runJobMutation.isPending}
+									>
+										<Play className={`h-4 w-4 ${runJobMutation.isPending ? "animate-pulse" : ""}`} />
+									</Button>
+									<Button
+										variant="secondary"
+										size="sm"
+										className="h-8 flex items-center gap-2"
+										onClick={() => setIsSeguimientoModalOpen(true)}
+									>
+										<CalendarClock className="h-4 w-4" />
+										Programar
+									</Button>
+								</div>
+							</CardHeader>
+							<CardContent className="pb-4">
+								{seguimientosActivos.isLoading ? (
+									<div className="flex justify-center py-4">
+										<Loader className="h-4 w-4 animate-spin text-muted-foreground" />
+									</div>
+								) : seguimientosActivos.data?.length === 0 ? (
+									<p className="text-sm text-muted-foreground py-2 italic">
+										No hay seguimientos activos programados.
+									</p>
+								) : (
+									<div className="space-y-2">
+										{seguimientosActivos.data?.map((seg: any) => (
+											<div
+												key={seg.id}
+												className="flex items-center justify-between p-2.5 rounded-md border bg-muted/30 transition-colors hover:bg-muted/50"
+											>
+												<div className="flex items-center gap-3">
+													<div className="p-1.5 rounded-full bg-background border">
+														{getMetodoIcon(seg.metodoContacto)}
+													</div>
+													<div className="flex flex-col">
+														<span className="text-sm font-medium capitalize leading-none">
+															{seg.presetOriginal !== "custom"
+																? seg.presetOriginal
+																: `Cada ${seg.intervaloDias} días`}
+														</span>
+														<span className="text-[10px] text-muted-foreground uppercase mt-1">
+															{seg.metodoContacto.replace("_", " ")}
+														</span>
+													</div>
+												</div>
+												<AlertDialog>
+													<AlertDialogTrigger asChild>
+														<Button
+															variant="ghost"
+															size="sm"
+															className="h-7 w-7 p-0 text-muted-foreground hover:text-red-500"
+														>
+															<X className="h-4 w-4" />
+														</Button>
+													</AlertDialogTrigger>
+													<AlertDialogContent>
+														<AlertDialogHeader>
+															<AlertDialogTitle>¿Eliminar seguimiento?</AlertDialogTitle>
+															<AlertDialogDescription>
+																Esta acción eliminará el seguimiento programado permanentemente. No se generarán más notificaciones para este recordatorio.
+															</AlertDialogDescription>
+														</AlertDialogHeader>
+														<AlertDialogFooter>
+															<AlertDialogCancel>Cancelar</AlertDialogCancel>
+															<AlertDialogAction
+																onClick={() => cancelSeguimientoMutation.mutate(seg.id)}
+																className="bg-red-600 hover:bg-red-700 text-white"
+															>
+																Eliminar
+															</AlertDialogAction>
+														</AlertDialogFooter>
+													</AlertDialogContent>
+												</AlertDialog>
+											</div>
+										))}
+									</div>
+								)}
+							</CardContent>
+						</Card>
+					)}
+
+					<SeguimientoRecurrenteModal
+						isOpen={isSeguimientoModalOpen}
+						onClose={() => setIsSeguimientoModalOpen(false)}
+						casoCobroId={caso.id}
+					/>
 
 					{/* Referencias */}
 					{matchingOpportunity?.lead?.id && (

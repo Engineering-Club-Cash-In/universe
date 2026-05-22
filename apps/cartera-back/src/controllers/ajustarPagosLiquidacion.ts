@@ -34,7 +34,6 @@ import {
   liquidaciones,
   pagos_credito_inversionistas_espejo,
 } from "../database/db/schema";
-import { formatToUSD } from "../utils/functions/currencyConverter";
 import { generarYSubirExcelInversionista } from "../utils/functions/generalFunctions";
 import { resumeInvestor } from "./investor";
 
@@ -829,32 +828,105 @@ export async function ajustarPagosLiquidacion(input: AjustarPagosLiquidacionInpu
       }
       inversionista.creditos = creditosFiltrados;
 
-      // Subtotales consistentes con el filtro. Recomputados en Q y luego
-      // convertidos a USD si el inversionista usa esa moneda (para que el
-      // Excel los muestre correctamente formateados).
-      const esDolares = totalesFiltrados.moneda === "dolares";
-      const fmt = (val: Big): number =>
-        esDolares
-          ? formatToUSD(val.toString(), inversionista_id)
-          : Number(val.round(2).toString());
+      // Subtotales consistentes con el filtro.
+      // Para que header = suma de columna en el Excel, sumamos los VALORES
+      // PER-PAGO ya en su precisión de display (Number, USD si aplica).
+      // resumeInvestor convierte cada pago a USD individualmente, entonces
+      // sumar valores Big en Q y convertir una sola vez al final genera un
+      // desfase de centavos por redondeo de la división por el tipo de
+      // cambio. Sumar per-pago en Number replica el mismo path que Excel.
+      const tipoReinvInv = (inversionista.reinversion ??
+        inversionista.re_inversion) as string | undefined;
+      const emiteFacturaInv = inversionista.emite_factura === true;
 
-      const totalAbonoIvaShown = totalesFiltrados.emite_factura
-        ? totalesFiltrados.total_abono_iva
-        : totalesFiltrados.total_abono_interes.round(2).times(0.12);
+      const sub = {
+        total_abono_capital: 0,
+        total_abono_interes: 0,
+        total_abono_iva: 0,
+        total_isr: 0,
+        total_abono_general_interes: 0,
+        total_cuota: 0,
+        total_monto_aportado: 0,
+        total_reinversion: 0,
+        total_reinversion_capital: 0,
+        total_reinversion_interes: 0,
+      };
+
+      for (const c of inversionista.creditos ?? []) {
+        sub.total_monto_aportado += Number(c.monto_aportado ?? 0);
+        for (const p of c.pagos ?? []) {
+          const ac = Number(p.abono_capital ?? 0);
+          const ai = Number(p.abono_interes ?? 0);
+          const av = Number(p.abono_iva ?? 0);
+          const isr = Number(p.isr ?? 0);
+          const agi = Number(p.abonoGeneralInteres ?? 0);
+          const ci = Number(p.cuota_inversor ?? 0);
+
+          sub.total_abono_capital += ac;
+          sub.total_abono_interes += ai;
+          sub.total_abono_iva += av;
+          sub.total_isr += isr;
+          sub.total_abono_general_interes += agi;
+          sub.total_cuota += ci;
+
+          // Reinversión per-pago: mismo switch que computarTotalesFiltrados
+          // pero en Number (display) para matchear el Excel.
+          let tr = tipoReinvInv;
+          if (tr === "reinversion_combinada") {
+            tr = c.tipo_reinversion || "sin_reinversion";
+          }
+          let reinvCap = 0;
+          let reinvInt = 0;
+          switch (tr) {
+            case "reinversion_capital":
+              reinvCap = ac;
+              break;
+            case "reinversion_interes":
+              reinvInt = agi;
+              break;
+            case "reinversion_total":
+              reinvCap = ac;
+              reinvInt = agi;
+              break;
+            default:
+              break;
+          }
+          sub.total_reinversion_capital += reinvCap;
+          sub.total_reinversion_interes += reinvInt;
+          sub.total_reinversion += reinvCap + reinvInt;
+        }
+      }
+
+      // Ajuste global de reinversion_variable a nivel inversionista
+      if (tipoReinvInv === "reinversion_variable") {
+        const montoReinvCfg = Number(inversionista.monto_reinversion ?? 0);
+        const reinv = montoReinvCfg > sub.total_cuota
+          ? sub.total_cuota
+          : montoReinvCfg;
+        sub.total_reinversion = reinv;
+        sub.total_cuota = sub.total_cuota - reinv;
+      }
+
+      const round2 = (n: number) => Math.round(n * 100) / 100;
+      const totalAbonoIvaShown = emiteFacturaInv
+        ? sub.total_abono_iva
+        : round2(sub.total_abono_interes) * 0.12;
 
       inversionista.subtotal = {
-        total_abono_capital: fmt(totalesFiltrados.total_abono_capital),
-        total_abono_interes: fmt(totalesFiltrados.total_abono_interes),
-        total_abono_iva: fmt(totalAbonoIvaShown),
-        total_isr: fmt(totalesFiltrados.total_isr),
-        total_cuota_sin_reinversion: fmt(totalesFiltrados.total_cuota_sin_reinversion),
-        total_cuota_con_reinversion: fmt(totalesFiltrados.total_cuota),
-        total_cuota: fmt(totalesFiltrados.total_cuota),
-        total_monto_aportado: fmt(totalesFiltrados.total_monto_aportado),
-        total_abono_general_interes: fmt(totalesFiltrados.total_abono_general_interes),
-        total_reinversion: fmt(totalesFiltrados.total_reinversion),
-        total_reinversion_capital: fmt(totalesFiltrados.total_reinversion_capital),
-        total_reinversion_interes: fmt(totalesFiltrados.total_reinversion_interes),
+        total_abono_capital: round2(sub.total_abono_capital),
+        total_abono_interes: round2(sub.total_abono_interes),
+        total_abono_iva: round2(totalAbonoIvaShown),
+        total_isr: round2(sub.total_isr),
+        total_cuota_sin_reinversion: round2(
+          sub.total_abono_capital + sub.total_abono_general_interes,
+        ),
+        total_cuota_con_reinversion: round2(sub.total_cuota),
+        total_cuota: round2(sub.total_cuota),
+        total_monto_aportado: round2(sub.total_monto_aportado),
+        total_abono_general_interes: round2(sub.total_abono_general_interes),
+        total_reinversion: round2(sub.total_reinversion),
+        total_reinversion_capital: round2(sub.total_reinversion_capital),
+        total_reinversion_interes: round2(sub.total_reinversion_interes),
       };
 
       const logoUrl = (import.meta as any).env?.LOGO_URL || "";

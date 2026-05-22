@@ -1,18 +1,32 @@
   {
-    "inversionista_id": 127,
-    "inversionista_nombre": "Selvyn",
-    "liquidacion_id": 447,
+    "inversionista_id": 84,
+    "inversionista_nombre": "Flujocapital",
+    "liquidacion_id": 450,
     "cambios": [
       {
-        "credito_id": 8707,
-        "abono_interes": 8.85,
-        "iva": 1.06,
-        "abono_capital": 4.64,
-        "monto_aportado": 838.39
+        "credito_id": 1092,
+        "abono_capital": 0.0,
+        "monto_aportado": 0.0
       },
-       {
-        "credito_id": 8700,
-        "monto_aportado": 49445.11
+      {
+        "credito_id": 88,
+        "abono_capital": 55232.35,
+        "monto_aportado": 0.0
+      },
+      {
+        "credito_id": 848,
+        "abono_capital": 193341.57,
+        "monto_aportado": 0.0
+      },
+      {
+        "credito_id": 11,
+        "abono_capital": 14916.26,
+        "monto_aportado": 0.0
+      },
+      {
+        "credito_id": 157,
+        "abono_capital": 23.5,
+        "monto_aportado": 0.0
       }
     ],
     "force": true,

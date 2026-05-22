@@ -398,8 +398,14 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
 
         if (!creditoData) continue;
 
-        // ── Traer inversionistas actuales del padre ──
-        const invActuales = await tx
+        // ── Traer inversionistas actuales del PADRE y del ESPEJO ──
+        // Ambas tablas se procesan independientes: pueden tener desfases
+        // históricos en monto_aportado (ej: el espejo puede traer un monto
+        // mayor que el padre por un ajuste viejo). La cancelación resta el
+        // delta de la compra a CADA tabla por separado, y las cuotas se
+        // recalculan también de forma independiente con el monto propio de
+        // cada tabla.
+        const invActualesPadre = await tx
           .select({
             inversionista_id: creditos_inversionistas.inversionista_id,
             monto_aportado: creditos_inversionistas.monto_aportado,
@@ -412,84 +418,173 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
           .from(creditos_inversionistas)
           .where(eq(creditos_inversionistas.credito_id, creditoId));
 
-        // ── Armar array con CUBE restaurado y las posiciones de los
-        //    inversionistas pendientes RESTADAS solo por su delta. Si el
-        //    inversionista tenía posición previa (espejo acumulado > delta),
-        //    se queda en el crédito con el monto previo; si no la tenía, se
-        //    saca del crédito. ──
-        const arrayLimpio: {
+        const invActualesEspejo = await tx
+          .select({
+            inversionista_id: creditos_inversionistas_espejo.inversionista_id,
+            monto_aportado: creditos_inversionistas_espejo.monto_aportado,
+            porcentaje_cash_in: creditos_inversionistas_espejo.porcentaje_cash_in,
+            porcentaje_participacion_inversionista:
+              creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
+            fecha_inicio_participacion:
+              creditos_inversionistas_espejo.fecha_inicio_participacion,
+          })
+          .from(creditos_inversionistas_espejo)
+          .where(eq(creditos_inversionistas_espejo.credito_id, creditoId));
+
+        const espejoPorInv = new Map(
+          invActualesEspejo.map((i) => [i.inversionista_id, i]),
+        );
+
+        // Lista de inversionistas que terminaron saliendo del crédito
+        // (su posición acumulada en el PADRE era igual o menor al delta).
+        const inversionistas_removidos: number[] = [];
+
+        type InvArrayItem = {
           inversionista_id: number;
           monto_aportado: Big;
           porcentaje_cash_in: Big;
           porcentaje_inversion: Big;
           fecha_inicio_participacion: string;
-        }[] = [];
+        };
 
-        // Lista de inversionistas que terminaron saliendo del crédito
-        // (su posición acumulada era igual al delta pendiente).
-        const inversionistas_removidos: number[] = [];
+        const arrayPadre: InvArrayItem[] = [];
+        const arrayEspejo: InvArrayItem[] = [];
 
-        for (const inv of invActuales) {
-          if (inversionistas_con_pendiente.has(inv.inversionista_id)) {
-            const key = `${creditoId}-${inv.inversionista_id}`;
+        for (const invP of invActualesPadre) {
+          const invE = espejoPorInv.get(invP.inversionista_id);
+          const montoPadreActual = new Big(invP.monto_aportado);
+          const montoEspejoActual = invE
+            ? new Big(invE.monto_aportado)
+            : montoPadreActual;
+
+          if (inversionistas_con_pendiente.has(invP.inversionista_id)) {
+            const key = `${creditoId}-${invP.inversionista_id}`;
             const delta =
               deltaPorPar.get(key) ??
               montoEspejoLegacy.get(key) ??
-              new Big(inv.monto_aportado);
-            const nuevoMonto = new Big(inv.monto_aportado).minus(delta);
-            if (nuevoMonto.lte(0)) {
-              inversionistas_removidos.push(inv.inversionista_id);
+              montoPadreActual;
+
+            const nuevoMontoPadre = montoPadreActual.minus(delta);
+            const nuevoMontoEspejo = montoEspejoActual.minus(delta);
+
+            // La regla de remoción se evalúa contra el PADRE (la fuente de
+            // verdad). Si el padre queda en <=0, también se saca del espejo
+            // para no dejar filas zombies.
+            if (nuevoMontoPadre.lte(0)) {
+              inversionistas_removidos.push(invP.inversionista_id);
               continue;
             }
-            arrayLimpio.push({
-              inversionista_id: inv.inversionista_id,
-              monto_aportado: nuevoMonto,
-              porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
+
+            arrayPadre.push({
+              inversionista_id: invP.inversionista_id,
+              monto_aportado: nuevoMontoPadre,
+              porcentaje_cash_in: new Big(invP.porcentaje_cash_in),
               porcentaje_inversion: new Big(
-                inv.porcentaje_participacion_inversionista,
+                invP.porcentaje_participacion_inversionista,
               ),
-              fecha_inicio_participacion: inv.fecha_inicio_participacion,
+              fecha_inicio_participacion: invP.fecha_inicio_participacion,
             });
-          } else if (inv.inversionista_id === CUBE_INVESTMENT_ID) {
-            arrayLimpio.push({
-              inversionista_id: inv.inversionista_id,
-              monto_aportado: new Big(inv.monto_aportado).plus(monto_total_a_cube),
-              porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
-              porcentaje_inversion: new Big(
-                inv.porcentaje_participacion_inversionista,
+            arrayEspejo.push({
+              inversionista_id: invP.inversionista_id,
+              monto_aportado: nuevoMontoEspejo.lte(0)
+                ? nuevoMontoPadre
+                : nuevoMontoEspejo,
+              porcentaje_cash_in: new Big(
+                invE?.porcentaje_cash_in ?? invP.porcentaje_cash_in,
               ),
-              fecha_inicio_participacion: inv.fecha_inicio_participacion,
+              porcentaje_inversion: new Big(
+                invE?.porcentaje_participacion_inversionista ??
+                  invP.porcentaje_participacion_inversionista,
+              ),
+              fecha_inicio_participacion:
+                invE?.fecha_inicio_participacion ??
+                invP.fecha_inicio_participacion,
+            });
+          } else if (invP.inversionista_id === CUBE_INVESTMENT_ID) {
+            arrayPadre.push({
+              inversionista_id: invP.inversionista_id,
+              monto_aportado: montoPadreActual.plus(monto_total_a_cube),
+              porcentaje_cash_in: new Big(invP.porcentaje_cash_in),
+              porcentaje_inversion: new Big(
+                invP.porcentaje_participacion_inversionista,
+              ),
+              fecha_inicio_participacion: invP.fecha_inicio_participacion,
+            });
+            arrayEspejo.push({
+              inversionista_id: invP.inversionista_id,
+              monto_aportado: montoEspejoActual.plus(monto_total_a_cube),
+              porcentaje_cash_in: new Big(
+                invE?.porcentaje_cash_in ?? invP.porcentaje_cash_in,
+              ),
+              porcentaje_inversion: new Big(
+                invE?.porcentaje_participacion_inversionista ??
+                  invP.porcentaje_participacion_inversionista,
+              ),
+              fecha_inicio_participacion:
+                invE?.fecha_inicio_participacion ??
+                invP.fecha_inicio_participacion,
             });
           } else {
-            arrayLimpio.push({
-              inversionista_id: inv.inversionista_id,
-              monto_aportado: new Big(inv.monto_aportado),
-              porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
+            // Otros inversionistas: cada tabla copia su propio valor.
+            arrayPadre.push({
+              inversionista_id: invP.inversionista_id,
+              monto_aportado: montoPadreActual,
+              porcentaje_cash_in: new Big(invP.porcentaje_cash_in),
               porcentaje_inversion: new Big(
-                inv.porcentaje_participacion_inversionista,
+                invP.porcentaje_participacion_inversionista,
               ),
-              fecha_inicio_participacion: inv.fecha_inicio_participacion,
+              fecha_inicio_participacion: invP.fecha_inicio_participacion,
+            });
+            arrayEspejo.push({
+              inversionista_id: invP.inversionista_id,
+              monto_aportado: montoEspejoActual,
+              porcentaje_cash_in: new Big(
+                invE?.porcentaje_cash_in ?? invP.porcentaje_cash_in,
+              ),
+              porcentaje_inversion: new Big(
+                invE?.porcentaje_participacion_inversionista ??
+                  invP.porcentaje_participacion_inversionista,
+              ),
+              fecha_inicio_participacion:
+                invE?.fecha_inicio_participacion ??
+                invP.fecha_inicio_participacion,
             });
           }
         }
 
-        // ── Si CUBE no existía, crearlo con el monto devuelto ──
-        const cubeEnArray = arrayLimpio.some(
-          (inv) => inv.inversionista_id === CUBE_INVESTMENT_ID,
-        );
-        if (!cubeEnArray) {
-          arrayLimpio.push({
+        // ── Si CUBE no existía en alguna tabla, crearlo ──
+        const fechaCubeDefault = new Date().toISOString().split("T")[0];
+        if (!arrayPadre.some((i) => i.inversionista_id === CUBE_INVESTMENT_ID)) {
+          arrayPadre.push({
             inversionista_id: CUBE_INVESTMENT_ID,
             monto_aportado: monto_total_a_cube,
             porcentaje_cash_in: new Big(0),
             porcentaje_inversion: new Big(100),
-            fecha_inicio_participacion: new Date().toISOString().split("T")[0],
+            fecha_inicio_participacion: fechaCubeDefault,
+          });
+        }
+        if (!arrayEspejo.some((i) => i.inversionista_id === CUBE_INVESTMENT_ID)) {
+          arrayEspejo.push({
+            inversionista_id: CUBE_INVESTMENT_ID,
+            monto_aportado: monto_total_a_cube,
+            porcentaje_cash_in: new Big(0),
+            porcentaje_inversion: new Big(100),
+            fecha_inicio_participacion: fechaCubeDefault,
           });
         }
 
-        // ── Recalcular y nuke & rebuild PADRE ──
+        // ── Recalcular cuotas INDEPENDIENTE para padre y espejo ──
+        // Cada tabla usa su propio array (con sus propios monto_aportado),
+        // así las cuotas reflejan el monto real de cada tabla.
         const dataPadre = recalcularInversionistas(
-          arrayLimpio,
+          arrayPadre,
+          creditoData,
+          creditoId,
+          creditoData.numero_credito_sifco,
+        );
+
+        const dataEspejoBase = recalcularInversionistas(
+          arrayEspejo,
           creditoData,
           creditoId,
           creditoData.numero_credito_sifco,
@@ -503,8 +598,8 @@ export const returnPendingInvestorsToCube = async ({ body, set, request }: any) 
           await tx.insert(creditos_inversionistas).values(dataPadre);
         }
 
-        // ── Nuke & rebuild ESPEJO (todo "completado") ──
-        const dataEspejo = dataPadre.map((inv) => ({
+        // ── Espejo: agregar status="completado" + updated_at ──
+        const dataEspejo = dataEspejoBase.map((inv) => ({
           ...inv,
           status: "completado" as const,
           updated_at: new Date(),
@@ -866,7 +961,9 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
           continue;
         }
 
-        // ── Traer inversionistas actuales del destino ──
+        // ── Traer inversionistas actuales del destino (padre + espejo) ──
+        // El destino tambien procesa cada tabla independiente. La regla de
+        // CUBE-suficiente se evalúa sobre el padre (fuente de verdad).
         const invDestinoActuales = await tx
           .select({
             inversionista_id: creditos_inversionistas.inversionista_id,
@@ -880,7 +977,26 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
           .from(creditos_inversionistas)
           .where(eq(creditos_inversionistas.credito_id, credito_destino_id));
 
-        // ── Buscar CUBE en el destino ──
+        const invDestinoEspejoActuales = await tx
+          .select({
+            inversionista_id: creditos_inversionistas_espejo.inversionista_id,
+            monto_aportado: creditos_inversionistas_espejo.monto_aportado,
+            porcentaje_cash_in: creditos_inversionistas_espejo.porcentaje_cash_in,
+            porcentaje_participacion_inversionista:
+              creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
+            fecha_inicio_participacion:
+              creditos_inversionistas_espejo.fecha_inicio_participacion,
+          })
+          .from(creditos_inversionistas_espejo)
+          .where(
+            eq(creditos_inversionistas_espejo.credito_id, credito_destino_id),
+          );
+
+        const espejoPorInvDestino = new Map(
+          invDestinoEspejoActuales.map((i) => [i.inversionista_id, i]),
+        );
+
+        // ── Buscar CUBE en el destino (padre) ──
         const cubeDestino = invDestinoActuales.find(
           (inv) => inv.inversionista_id === CUBE_INVESTMENT_ID,
         );
@@ -895,7 +1011,7 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
 
         const montoCubeDestino = new Big(cubeDestino.monto_aportado);
 
-        // ── Validar que CUBE tenga suficiente ──
+        // ── Validar que CUBE tenga suficiente (en el padre) ──
         if (montoAsignar.gt(montoCubeDestino)) {
           errores.push({
             credito_destino_id,
@@ -904,71 +1020,136 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
           continue;
         }
 
-        // ── Armar nuevo array: restar a CUBE, agregar inversionista ──
-        const nuevoArrayDestino: {
+        type InvArrayItem = {
           inversionista_id: number;
           monto_aportado: Big;
           porcentaje_cash_in: Big;
           porcentaje_inversion: Big;
           fecha_inicio_participacion: string;
-        }[] = [];
+        };
 
-        for (const inv of invDestinoActuales) {
-          if (inv.inversionista_id === CUBE_INVESTMENT_ID) {
-            // ── Restarle a CUBE ──
-            const nuevoMontoCube = montoCubeDestino.minus(montoAsignar);
-            if (nuevoMontoCube.gt(0)) {
-              nuevoArrayDestino.push({
-                inversionista_id: inv.inversionista_id,
-                monto_aportado: nuevoMontoCube,
-                porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
+        const arrayDestinoPadre: InvArrayItem[] = [];
+        const arrayDestinoEspejo: InvArrayItem[] = [];
+
+        for (const invP of invDestinoActuales) {
+          const invE = espejoPorInvDestino.get(invP.inversionista_id);
+          const montoPadreActual = new Big(invP.monto_aportado);
+          const montoEspejoActual = invE
+            ? new Big(invE.monto_aportado)
+            : montoPadreActual;
+
+          if (invP.inversionista_id === CUBE_INVESTMENT_ID) {
+            // Restarle al CUBE el monto asignado (cada tabla con su propio valor).
+            const nuevoMontoCubePadre = montoPadreActual.minus(montoAsignar);
+            const nuevoMontoCubeEspejo = montoEspejoActual.minus(montoAsignar);
+
+            if (nuevoMontoCubePadre.gt(0)) {
+              arrayDestinoPadre.push({
+                inversionista_id: invP.inversionista_id,
+                monto_aportado: nuevoMontoCubePadre,
+                porcentaje_cash_in: new Big(invP.porcentaje_cash_in),
                 porcentaje_inversion: new Big(
-                  inv.porcentaje_participacion_inversionista,
+                  invP.porcentaje_participacion_inversionista,
                 ),
-                fecha_inicio_participacion: inv.fecha_inicio_participacion,
+                fecha_inicio_participacion: invP.fecha_inicio_participacion,
               });
             }
-            // Si queda en 0, CUBE se elimina
-          } else if (inv.inversionista_id === inversionista_id) {
-            // ── Inversionista ya existía: sumarle ──
-            nuevoArrayDestino.push({
-              inversionista_id: inv.inversionista_id,
-              monto_aportado: new Big(inv.monto_aportado).plus(montoAsignar),
+            if (nuevoMontoCubeEspejo.gt(0)) {
+              arrayDestinoEspejo.push({
+                inversionista_id: invP.inversionista_id,
+                monto_aportado: nuevoMontoCubeEspejo,
+                porcentaje_cash_in: new Big(
+                  invE?.porcentaje_cash_in ?? invP.porcentaje_cash_in,
+                ),
+                porcentaje_inversion: new Big(
+                  invE?.porcentaje_participacion_inversionista ??
+                    invP.porcentaje_participacion_inversionista,
+                ),
+                fecha_inicio_participacion:
+                  invE?.fecha_inicio_participacion ??
+                  invP.fecha_inicio_participacion,
+              });
+            }
+          } else if (invP.inversionista_id === inversionista_id) {
+            // Inversionista ya existía: sumarle el delta a cada tabla con
+            // su propio monto base.
+            arrayDestinoPadre.push({
+              inversionista_id: invP.inversionista_id,
+              monto_aportado: montoPadreActual.plus(montoAsignar),
               porcentaje_cash_in: porcCashIn,
               porcentaje_inversion: porcInversion,
-              fecha_inicio_participacion: inv.fecha_inicio_participacion,
+              fecha_inicio_participacion: invP.fecha_inicio_participacion,
+            });
+            arrayDestinoEspejo.push({
+              inversionista_id: invP.inversionista_id,
+              monto_aportado: montoEspejoActual.plus(montoAsignar),
+              porcentaje_cash_in: porcCashIn,
+              porcentaje_inversion: porcInversion,
+              fecha_inicio_participacion:
+                invE?.fecha_inicio_participacion ??
+                invP.fecha_inicio_participacion,
             });
           } else {
-            // ── Otro inversionista: copiar igual ──
-            nuevoArrayDestino.push({
-              inversionista_id: inv.inversionista_id,
-              monto_aportado: new Big(inv.monto_aportado),
-              porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
+            // Otros: copiar cada uno con su propio valor.
+            arrayDestinoPadre.push({
+              inversionista_id: invP.inversionista_id,
+              monto_aportado: montoPadreActual,
+              porcentaje_cash_in: new Big(invP.porcentaje_cash_in),
               porcentaje_inversion: new Big(
-                inv.porcentaje_participacion_inversionista,
+                invP.porcentaje_participacion_inversionista,
               ),
-              fecha_inicio_participacion: inv.fecha_inicio_participacion,
+              fecha_inicio_participacion: invP.fecha_inicio_participacion,
+            });
+            arrayDestinoEspejo.push({
+              inversionista_id: invP.inversionista_id,
+              monto_aportado: montoEspejoActual,
+              porcentaje_cash_in: new Big(
+                invE?.porcentaje_cash_in ?? invP.porcentaje_cash_in,
+              ),
+              porcentaje_inversion: new Big(
+                invE?.porcentaje_participacion_inversionista ??
+                  invP.porcentaje_participacion_inversionista,
+              ),
+              fecha_inicio_participacion:
+                invE?.fecha_inicio_participacion ??
+                invP.fecha_inicio_participacion,
             });
           }
         }
 
-        // ── Si el inversionista no existía en el destino, agregarlo ──
-        const yaExisteDestino = nuevoArrayDestino.some(
-          (inv) => inv.inversionista_id === inversionista_id,
-        );
-        if (!yaExisteDestino) {
-          nuevoArrayDestino.push({
+        // ── Si el inversionista no existía en el destino, agregarlo en
+        //    ambas tablas con el mismo monto (no hay valor histórico previo). ──
+        const hoyStr = new Date().toISOString().split("T")[0];
+        if (
+          !arrayDestinoPadre.some(
+            (inv) => inv.inversionista_id === inversionista_id,
+          )
+        ) {
+          arrayDestinoPadre.push({
             inversionista_id,
             monto_aportado: montoAsignar,
             porcentaje_cash_in: porcCashIn,
             porcentaje_inversion: porcInversion,
-            fecha_inicio_participacion: new Date().toISOString().split("T")[0],
+            fecha_inicio_participacion: hoyStr,
+          });
+        }
+        if (
+          !arrayDestinoEspejo.some(
+            (inv) => inv.inversionista_id === inversionista_id,
+          )
+        ) {
+          arrayDestinoEspejo.push({
+            inversionista_id,
+            monto_aportado: montoAsignar,
+            porcentaje_cash_in: porcCashIn,
+            porcentaje_inversion: porcInversion,
+            fecha_inicio_participacion: hoyStr,
           });
         }
 
-        // ── Recalcular y nuke & rebuild PADRE del destino ──
+        // ── Recalcular cuotas INDEPENDIENTE para padre y espejo ──
         const dataPadreDestino = recalcularInversionistas(
-          nuevoArrayDestino,
+          arrayDestinoPadre,
           creditoDestino,
           credito_destino_id,
           creditoDestino.numero_credito_sifco,
@@ -982,16 +1163,8 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
           await tx.insert(creditos_inversionistas).values(dataPadreDestino);
         }
 
-        // ── Recalcular y nuke & rebuild ESPEJO del destino ──
-        const parentCuotasDestino = new Map(
-          dataPadreDestino.map((p) => [
-            p.inversionista_id,
-            p.cuota_inversionista,
-          ]),
-        );
-
         const dataEspejoDestino = recalcularInversionistas(
-          nuevoArrayDestino,
+          arrayDestinoEspejo,
           creditoDestino,
           credito_destino_id,
           creditoDestino.numero_credito_sifco,
@@ -999,9 +1172,6 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
 
         const dataEspejoDestinoFinal = dataEspejoDestino.map((inv) => ({
           ...inv,
-          cuota_inversionista:
-            parentCuotasDestino.get(inv.inversionista_id) ??
-            inv.cuota_inversionista,
           status: (inv.inversionista_id === inversionista_id
             ? statusEspejo
             : "completado") as
@@ -1081,6 +1251,10 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
 
       // ── Re-traer inversionistas del origen (pueden haber cambiado si el origen
       //    también era un destino en las reasignaciones) ──
+      // ── Leer ambas tablas para el origen (padre + espejo) ──
+      // El cleanup del origen aplica el delta de forma INDEPENDIENTE en padre
+      // y espejo: cada uno arranca con su propio monto y puede terminar en
+      // un valor distinto si arrastraba un desfase histórico.
       const invOrigenFresh = await tx
         .select({
           inversionista_id: creditos_inversionistas.inversionista_id,
@@ -1094,67 +1268,150 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
         .from(creditos_inversionistas)
         .where(eq(creditos_inversionistas.credito_id, credito_espejo_removido_id));
 
-      // ── Armar array con CUBE restaurado y al inversionista con su
-      //    posición previa (si tenía). Solo se le resta el delta pendiente
-      //    que se está reasignando. Si el delta es igual al acumulado del
-      //    padre, el inversionista sale del crédito. ──
-      const arrayOrigenLimpio: {
+      const invOrigenEspejoFresh = await tx
+        .select({
+          inversionista_id: creditos_inversionistas_espejo.inversionista_id,
+          monto_aportado: creditos_inversionistas_espejo.monto_aportado,
+          porcentaje_cash_in: creditos_inversionistas_espejo.porcentaje_cash_in,
+          porcentaje_participacion_inversionista:
+            creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
+          fecha_inicio_participacion:
+            creditos_inversionistas_espejo.fecha_inicio_participacion,
+        })
+        .from(creditos_inversionistas_espejo)
+        .where(
+          eq(
+            creditos_inversionistas_espejo.credito_id,
+            credito_espejo_removido_id,
+          ),
+        );
+
+      const espejoPorInvOrigen = new Map(
+        invOrigenEspejoFresh.map((i) => [i.inversionista_id, i]),
+      );
+
+      type InvArrayItem = {
         inversionista_id: number;
         monto_aportado: Big;
         porcentaje_cash_in: Big;
         porcentaje_inversion: Big;
         fecha_inicio_participacion: string;
-      }[] = [];
+      };
+
+      const arrayOrigenPadre: InvArrayItem[] = [];
+      const arrayOrigenEspejo: InvArrayItem[] = [];
 
       let inversionistaRemovidoDelOrigen = false;
 
-      for (const inv of invOrigenFresh) {
-        if (inv.inversionista_id === inversionista_id) {
-          const nuevoMonto = new Big(inv.monto_aportado).minus(montoEnOrigen);
-          if (nuevoMonto.lte(0)) {
+      for (const invP of invOrigenFresh) {
+        const invE = espejoPorInvOrigen.get(invP.inversionista_id);
+        const montoPadreActual = new Big(invP.monto_aportado);
+        const montoEspejoActual = invE
+          ? new Big(invE.monto_aportado)
+          : montoPadreActual;
+
+        if (invP.inversionista_id === inversionista_id) {
+          const nuevoMontoPadre = montoPadreActual.minus(montoEnOrigen);
+          const nuevoMontoEspejo = montoEspejoActual.minus(montoEnOrigen);
+          // Regla de remoción basada en el padre (fuente de verdad).
+          if (nuevoMontoPadre.lte(0)) {
             inversionistaRemovidoDelOrigen = true;
             continue;
           }
-          arrayOrigenLimpio.push({
-            inversionista_id: inv.inversionista_id,
-            monto_aportado: nuevoMonto,
-            porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
+          arrayOrigenPadre.push({
+            inversionista_id: invP.inversionista_id,
+            monto_aportado: nuevoMontoPadre,
+            porcentaje_cash_in: new Big(invP.porcentaje_cash_in),
             porcentaje_inversion: new Big(
-              inv.porcentaje_participacion_inversionista,
+              invP.porcentaje_participacion_inversionista,
             ),
-            fecha_inicio_participacion: inv.fecha_inicio_participacion,
+            fecha_inicio_participacion: invP.fecha_inicio_participacion,
           });
-        } else if (inv.inversionista_id === CUBE_INVESTMENT_ID) {
-          // ── CUBE: devolverle el monto ──
-          arrayOrigenLimpio.push({
-            inversionista_id: inv.inversionista_id,
-            monto_aportado: new Big(inv.monto_aportado).plus(montoEnOrigen),
-            porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
-            porcentaje_inversion: new Big(
-              inv.porcentaje_participacion_inversionista,
+          arrayOrigenEspejo.push({
+            inversionista_id: invP.inversionista_id,
+            monto_aportado: nuevoMontoEspejo.lte(0)
+              ? nuevoMontoPadre
+              : nuevoMontoEspejo,
+            porcentaje_cash_in: new Big(
+              invE?.porcentaje_cash_in ?? invP.porcentaje_cash_in,
             ),
-            fecha_inicio_participacion: inv.fecha_inicio_participacion,
+            porcentaje_inversion: new Big(
+              invE?.porcentaje_participacion_inversionista ??
+                invP.porcentaje_participacion_inversionista,
+            ),
+            fecha_inicio_participacion:
+              invE?.fecha_inicio_participacion ??
+              invP.fecha_inicio_participacion,
+          });
+        } else if (invP.inversionista_id === CUBE_INVESTMENT_ID) {
+          arrayOrigenPadre.push({
+            inversionista_id: invP.inversionista_id,
+            monto_aportado: montoPadreActual.plus(montoEnOrigen),
+            porcentaje_cash_in: new Big(invP.porcentaje_cash_in),
+            porcentaje_inversion: new Big(
+              invP.porcentaje_participacion_inversionista,
+            ),
+            fecha_inicio_participacion: invP.fecha_inicio_participacion,
+          });
+          arrayOrigenEspejo.push({
+            inversionista_id: invP.inversionista_id,
+            monto_aportado: montoEspejoActual.plus(montoEnOrigen),
+            porcentaje_cash_in: new Big(
+              invE?.porcentaje_cash_in ?? invP.porcentaje_cash_in,
+            ),
+            porcentaje_inversion: new Big(
+              invE?.porcentaje_participacion_inversionista ??
+                invP.porcentaje_participacion_inversionista,
+            ),
+            fecha_inicio_participacion:
+              invE?.fecha_inicio_participacion ??
+              invP.fecha_inicio_participacion,
           });
         } else {
-          // ── Otros: copiar igual ──
-          arrayOrigenLimpio.push({
-            inversionista_id: inv.inversionista_id,
-            monto_aportado: new Big(inv.monto_aportado),
-            porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
+          arrayOrigenPadre.push({
+            inversionista_id: invP.inversionista_id,
+            monto_aportado: montoPadreActual,
+            porcentaje_cash_in: new Big(invP.porcentaje_cash_in),
             porcentaje_inversion: new Big(
-              inv.porcentaje_participacion_inversionista,
+              invP.porcentaje_participacion_inversionista,
             ),
-            fecha_inicio_participacion: inv.fecha_inicio_participacion,
+            fecha_inicio_participacion: invP.fecha_inicio_participacion,
+          });
+          arrayOrigenEspejo.push({
+            inversionista_id: invP.inversionista_id,
+            monto_aportado: montoEspejoActual,
+            porcentaje_cash_in: new Big(
+              invE?.porcentaje_cash_in ?? invP.porcentaje_cash_in,
+            ),
+            porcentaje_inversion: new Big(
+              invE?.porcentaje_participacion_inversionista ??
+                invP.porcentaje_participacion_inversionista,
+            ),
+            fecha_inicio_participacion:
+              invE?.fecha_inicio_participacion ??
+              invP.fecha_inicio_participacion,
           });
         }
       }
 
-      // ── Si CUBE no existía en el origen (raro), crearlo ──
-      const cubeEnOrigen = arrayOrigenLimpio.some(
-        (inv) => inv.inversionista_id === CUBE_INVESTMENT_ID,
-      );
-      if (!cubeEnOrigen) {
-        arrayOrigenLimpio.push({
+      // ── Si CUBE no existía en alguna tabla (raro), crearlo ──
+      if (
+        !arrayOrigenPadre.some((i) => i.inversionista_id === CUBE_INVESTMENT_ID)
+      ) {
+        arrayOrigenPadre.push({
+          inversionista_id: CUBE_INVESTMENT_ID,
+          monto_aportado: montoEnOrigen,
+          porcentaje_cash_in: new Big(0),
+          porcentaje_inversion: new Big(100),
+          fecha_inicio_participacion: "2025-12-01",
+        });
+      }
+      if (
+        !arrayOrigenEspejo.some(
+          (i) => i.inversionista_id === CUBE_INVESTMENT_ID,
+        )
+      ) {
+        arrayOrigenEspejo.push({
           inversionista_id: CUBE_INVESTMENT_ID,
           monto_aportado: montoEnOrigen,
           porcentaje_cash_in: new Big(0),
@@ -1163,9 +1420,9 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
         });
       }
 
-      // ── Recalcular y nuke & rebuild PADRE del origen ──
+      // ── Recalcular cuotas INDEPENDIENTE para padre y espejo ──
       const dataPadreOrigenFinal = recalcularInversionistas(
-        arrayOrigenLimpio,
+        arrayOrigenPadre,
         creditoOrigen,
         credito_espejo_removido_id,
         creditoOrigen.numero_credito_sifco,
@@ -1179,17 +1436,8 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
         await tx.insert(creditos_inversionistas).values(dataPadreOrigenFinal);
       }
 
-      // ── Recalcular y nuke & rebuild ESPEJO del origen ──
-      // Todo queda como "completado" porque el inversionista ya se fue
-      const parentCuotasOrigenFinal = new Map(
-        dataPadreOrigenFinal.map((p) => [
-          p.inversionista_id,
-          p.cuota_inversionista,
-        ]),
-      );
-
       const dataEspejoOrigenFinal = recalcularInversionistas(
-        arrayOrigenLimpio,
+        arrayOrigenEspejo,
         creditoOrigen,
         credito_espejo_removido_id,
         creditoOrigen.numero_credito_sifco,
@@ -1197,9 +1445,6 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
 
       const dataEspejoOrigenConStatus = dataEspejoOrigenFinal.map((inv) => ({
         ...inv,
-        cuota_inversionista:
-          parentCuotasOrigenFinal.get(inv.inversionista_id) ??
-          inv.cuota_inversionista,
         status: "completado" as const,
         updated_at: new Date(),
       }));

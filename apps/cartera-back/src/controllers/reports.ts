@@ -10,6 +10,83 @@ import { sql } from "drizzle-orm";
 
 const LOGO_URL = process.env.LOGO_URL || "https://pub-8081c8d6e5e743f9adfc9e0db92e5a88.r2.dev/reports/logo-cashin.png";
 
+type EstadoCuentaPagoRow = {
+  pago_id?: number | string | null;
+  numero_cuota?: number | string | null;
+  cuota?: number | string | null;
+  abono_capital?: number | string | null;
+  abono_interes?: number | string | null;
+  abono_iva_12?: number | string | null;
+  abono_seguro?: number | string | null;
+  abono_gps?: number | string | null;
+  membresias_pago?: number | string | null;
+  mora?: number | string | null;
+  monto_aplicado?: number | string | null;
+  total_restante?: number | string | null;
+  fecha_vencimiento?: Date | string | null;
+  fecha_aplicado?: Date | string | null;
+};
+
+const formatEstadoCuentaMoney = (n: number) =>
+  `Q${n.toLocaleString("es-GT", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
+const formatEstadoCuentaDate = (fecha?: Date | string | null) => {
+  if (!fecha) return "-";
+
+  return new Date(fecha).toLocaleDateString("es-GT", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+};
+
+export function buildEstadoCuentaTableHeader() {
+  return `<tr>
+          <th>No.</th>
+          <th>Pago ID</th>
+          <th># Cuota</th>
+          <th>Cuota</th>
+          <th>Capital</th>
+          <th>Interés</th>
+          <th>IVA 12%</th>
+          <th>Servicios</th>
+          <th>Mora</th>
+          <th>Monto Aplicado</th>
+          <th>Capital Rest.</th>
+          <th>Fecha Vencimiento Cuota</th>
+          <th>Fecha Aplicación</th>
+        </tr>`;
+}
+
+export function renderEstadoCuentaPaymentRow(
+  pago: EstadoCuentaPagoRow,
+  index: number,
+) {
+  const montoAplicado = Number(pago.monto_aplicado || 0);
+  const capitalPago = Number(pago.abono_capital || 0);
+  const interesPago = Number(pago.abono_interes || 0);
+  const isEven = index % 2 === 0;
+
+  return `<tr class="${isEven ? "even" : ""}">
+      <td>${index + 1}</td>
+      <td>${pago.pago_id}</td>
+      <td>${pago.numero_cuota ?? ""}</td>
+      <td class="money">${formatEstadoCuentaMoney(Number(pago.cuota || 0))}</td>
+      <td class="money">${formatEstadoCuentaMoney(capitalPago)}</td>
+      <td class="money">${formatEstadoCuentaMoney(interesPago)}</td>
+      <td class="money">${formatEstadoCuentaMoney(Number(pago.abono_iva_12 || 0))}</td>
+      <td class="money">${formatEstadoCuentaMoney(Number(pago.abono_seguro || 0) + Number(pago.abono_gps || 0) + Number(pago.membresias_pago || 0))}</td>
+      <td class="money">${formatEstadoCuentaMoney(Number(pago.mora || 0))}</td>
+      <td class="money total">${formatEstadoCuentaMoney(montoAplicado)}</td>
+      <td class="money">${formatEstadoCuentaMoney(Number(pago.total_restante || 0))}</td>
+      <td>${formatEstadoCuentaDate(pago.fecha_vencimiento)}</td>
+      <td>${formatEstadoCuentaDate(pago.fecha_aplicado)}</td>
+    </tr>`;
+}
+
 export async function getCreditosWithUserByMesAnioExcel(
   params: {
     mes: number;
@@ -320,7 +397,7 @@ export async function exportPagosToExcel(credito_sifco: string) {
   const numCredito = primerPago.numero_credito_sifco ?? credito_sifco;
   const fechaGen = new Date().toLocaleDateString("es-GT", { year: "numeric", month: "long", day: "numeric" });
 
-  const formatQ = (n: number) => `Q${n.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const formatQ = formatEstadoCuentaMoney;
 
   // Calcular totales
   let totalMontoAplicado = 0;
@@ -335,25 +412,7 @@ export async function exportPagosToExcel(credito_sifco: string) {
     totalCapital += capitalPago;
     totalInteres += interesPago;
 
-    const fechaPago = pago.fecha_vencimiento
-      ? new Date(pago.fecha_vencimiento).toLocaleDateString("es-GT", { year: "numeric", month: "2-digit", day: "2-digit" })
-      : "";
-
-    const isEven = index % 2 === 0;
-    return `<tr class="${isEven ? "even" : ""}">
-      <td>${index + 1}</td>
-      <td>${pago.pago_id}</td>
-      <td>${pago.numero_cuota ?? ""}</td>
-      <td class="money">${formatQ(Number(pago.cuota || 0))}</td>
-      <td class="money">${formatQ(capitalPago)}</td>
-      <td class="money">${formatQ(interesPago)}</td>
-      <td class="money">${formatQ(Number(pago.abono_iva_12 || 0))}</td>
-      <td class="money">${formatQ(Number(pago.abono_seguro || 0) + Number(pago.abono_gps || 0) + Number(pago.membresias_pago || 0))}</td>
-      <td class="money">${formatQ(Number(pago.mora || 0))}</td>
-      <td class="money total">${formatQ(montoAplicado)}</td>
-      <td class="money">${formatQ(Number(pago.total_restante || 0))}</td>
-      <td>${fechaPago}</td>
-    </tr>`;
+    return renderEstadoCuentaPaymentRow(pago, index);
   }).join("");
 
   // 2️⃣ HTML del reporte
@@ -460,20 +519,7 @@ export async function exportPagosToExcel(credito_sifco: string) {
 
     <table>
       <thead>
-        <tr>
-          <th>No.</th>
-          <th>Pago ID</th>
-          <th># Cuota</th>
-          <th>Cuota</th>
-          <th>Capital</th>
-          <th>Interés</th>
-          <th>IVA 12%</th>
-          <th>Servicios</th>
-          <th>Mora</th>
-          <th>Monto Aplicado</th>
-          <th>Capital Rest.</th>
-          <th>Fecha Vencimiento Cuota</th>
-        </tr>
+        ${buildEstadoCuentaTableHeader()}
       </thead>
       <tbody>
         ${tableRows}
@@ -483,7 +529,7 @@ export async function exportPagosToExcel(credito_sifco: string) {
           <td class="money">${formatQ(totalInteres)}</td>
           <td colspan="3"></td>
           <td class="money">${formatQ(totalMontoAplicado)}</td>
-          <td colspan="2"></td>
+          <td colspan="3"></td>
         </tr>
       </tbody>
     </table>

@@ -107,7 +107,7 @@ function recalcularInversionistas(
   tipo_operacion: "reinversion" | "compra_cartera",
 ) {
   // Fallback de fecha de inicio cuando un inversionista llega sin fecha:
-  // - reinversion → un mes antes (la operación se ejecuta sobre rendimientos
+  // - reinversion → dos meses antes (la operación se ejecuta sobre rendimientos
   //   del período previo, así que la participación arranca ese mes)
   // - compra_cartera → fecha de hoy
   const hoy = new Date();

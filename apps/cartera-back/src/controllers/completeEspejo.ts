@@ -109,7 +109,6 @@ export const completeEspejo = async ({ body, set, request }: any) => {
                 .update(creditos_inversionistas_espejo)
                 .set({
                   status: "completado",
-                  fecha_inicio_participacion: fechaDosMesesAtras,
                   updated_at: new Date(),
                 })
                 .where(
@@ -160,20 +159,8 @@ export const completeEspejo = async ({ body, set, request }: any) => {
         const updated = [...updatedReinversion, ...updatedOtros];
 
         // ── Update padre: misma partición para mantener consistencia ──
-        if (idsReinversion.length > 0) {
-          await tx
-            .update(creditos_inversionistas)
-            .set({ fecha_inicio_participacion: fechaDosMesesAtras })
-            .where(
-              and(
-                eq(creditos_inversionistas.credito_id, credito_id),
-                inArray(
-                  creditos_inversionistas.inversionista_id,
-                  idsReinversion,
-                ),
-              ),
-            );
-        }
+        // Para reinversión NO actualizamos fecha_inicio_participacion:
+        // addInvestorToCredit ya la dejó correcta (existente o 2 meses atrás si es nuevo).
 
         if (idsOtros.length > 0) {
           await tx

@@ -203,6 +203,7 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 											{participant.canGenerateLink && (
 												<Button
 													variant="outline"
+													disabled={isGenerating}
 													onClick={() => {
 														const hasExistingData =
 															participant.creditApplicationExists ||

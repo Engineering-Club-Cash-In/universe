@@ -2063,10 +2063,10 @@ export const cobrosRouter = {
 						: 0;
 
 					let estadoMora: (typeof estadoMoraEnum.enumValues)[number] = "al_dia";
-					if (diasMora > 0 && diasMora <= 30) estadoMora = "mora_30";
-					else if (diasMora > 30 && diasMora <= 60) estadoMora = "mora_60";
-					else if (diasMora > 60 && diasMora <= 90) estadoMora = "mora_90";
-					else if (diasMora > 90) estadoMora = "mora_120";
+					if (cuotasAtrasadas === 1) estadoMora = "mora_30";
+					else if (cuotasAtrasadas === 2) estadoMora = "mora_60";
+					else if (cuotasAtrasadas === 3) estadoMora = "mora_90";
+					else if (cuotasAtrasadas >= 4) estadoMora = "mora_120";
 
 					const nuevosCasos = await db
 						.insert(casosCobros)
@@ -2118,12 +2118,11 @@ export const cobrosRouter = {
 				const montoEnMora =
 					Number(creditoCompleto.moraActual) || cuotaMensual * cuotasAtrasadas;
 
-				let estadoMora: string | null = null;
-				if (diasMora === 0) estadoMora = "al_dia";
-				else if (diasMora <= 30) estadoMora = "mora_30";
-				else if (diasMora <= 60) estadoMora = "mora_60";
-				else if (diasMora <= 90) estadoMora = "mora_90";
-				else estadoMora = "mora_120";
+				let estadoMora: string | null = "al_dia";
+				if (cuotasAtrasadas === 1) estadoMora = "mora_30";
+				else if (cuotasAtrasadas === 2) estadoMora = "mora_60";
+				else if (cuotasAtrasadas === 3) estadoMora = "mora_90";
+				else if (cuotasAtrasadas >= 4) estadoMora = "mora_120";
 
 				const statusCredit = creditoCompleto.credito.statusCredit;
 				let estadoContrato = "activo";

@@ -2124,6 +2124,21 @@ export const cobrosRouter = {
 				else if (cuotasAtrasadas === 3) estadoMora = "mora_90";
 				else if (cuotasAtrasadas >= 4) estadoMora = "mora_120";
 
+				// Día de pago: extraer desde la fecha_vencimiento de una cuota real
+				// de cartera (prioriza pendiente, luego atrasada, luego pagada),
+				// con fallback al diaPago de la oportunidad.
+				const cuotaParaDiaPago =
+					creditoCompleto.cuotasPendientes?.find((c) => c.numero_cuota !== 0) ||
+					creditoCompleto.cuotasAtrasadas?.find((c) => c.numero_cuota !== 0) ||
+					creditoCompleto.cuotasPagadas?.find((c) => c.numero_cuota !== 0) ||
+					null;
+				const diaPagoMensual = cuotaParaDiaPago
+					? Number.parseInt(
+							cuotaParaDiaPago.fecha_vencimiento.substring(8, 10),
+							10,
+						) || oportunidadData?.diaPago || null
+					: oportunidadData?.diaPago || null;
+
 				const statusCredit = creditoCompleto.credito.statusCredit;
 				let estadoContrato = "activo";
 				if (statusCredit === "CANCELADO") estadoContrato = "completado";
@@ -2156,7 +2171,7 @@ export const cobrosRouter = {
 						creditoCompleto.credito.cuota || oportunidadData?.cuotaMensual,
 					numeroCuotas: creditoCompleto.credito.plazo,
 					fechaInicio: creditoCompleto.credito.fecha_creacion,
-					diaPagoMensual: oportunidadData?.diaPago || null,
+					diaPagoMensual,
 					estadoContrato,
 
 					// Datos del cliente (de cartera-back o lead)

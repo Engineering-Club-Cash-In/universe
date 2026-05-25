@@ -479,6 +479,26 @@ export const clientFormsRouter = {
 				input.personId,
 			);
 
+			await db
+				.delete(creditApplications)
+				.where(
+					personWhereClause(
+						input.opportunityId,
+						input.personType,
+						input.personId,
+					),
+				);
+
+			await db
+				.delete(financialStatements)
+				.where(
+					financialPersonWhereClause(
+						input.opportunityId,
+						input.personType,
+						input.personId,
+					),
+				);
+
 			const expiresAt = new Date();
 			expiresAt.setDate(expiresAt.getDate() + 7);
 

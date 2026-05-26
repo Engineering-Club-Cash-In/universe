@@ -426,6 +426,11 @@
         "credito_id": 776,
         "abono_capital": 12810.44,
         "monto_aportado": 0.0
+      }, 
+      {
+        "credito_id": 720,
+        "abono_interes": 161.42,
+        "iva": 19.37
       }
     ],
     "force": true,

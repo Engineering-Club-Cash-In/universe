@@ -56,6 +56,17 @@ describe("reverse payment policy", () => {
     ).toBeFalse();
   });
 
+  it("marca la cuota como no pagada si falta un centavo", () => {
+    expect(
+      shouldInstallmentRemainPaidAfterReversal({
+        cuota: "2445.18",
+        remainingPayments: [
+          { monto_aplicado: "2445.17", validationStatus: "validated", paymentFalse: false },
+        ],
+      }),
+    ).toBeFalse();
+  });
+
   it("marca los pagos restantes igual que el estado recalculado de la cuota", () => {
     expect(getRemainingPaymentPaidStatusAfterReversal(true)).toBeTrue();
     expect(getRemainingPaymentPaidStatusAfterReversal(false)).toBeFalse();

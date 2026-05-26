@@ -37,6 +37,7 @@ interface ScoreBreakdown {
   cuotas: number;
   proximidad: number;
   reinversion: number;
+  vencimiento_dia_30: number;
   total: number;
 }
 
@@ -81,6 +82,7 @@ const SCORE_REINVERSION = 3000;       // Prioridad para inversionistas existente
 const SCORE_NUEVO_INVERSIONISTA_INDIVIDUAL = 1000;
 const SCORE_COMPRA_TOTAL_CUBE_INDIVIDUAL = 2000;   // Bono full si queda solo el inversionista
 const SCORE_COMPRA_TOTAL_CUBE_POOL = 500;         // Bono reducido si sigue siendo un Pool
+const SCORE_VENCIMIENTO_DIA_30 = 1000;            // Crédito cuya última cuota vence el día 30
 
 // ============================================================
 // FUNCIONES DE SCORING
@@ -367,6 +369,30 @@ export async function getCreditCandidates(
   }
 
   // ──────────────────────────────────────────────────────────
+  // 5.2 Día de la última cuota por crédito (para bonus vencimiento día 30)
+  // ──────────────────────────────────────────────────────────
+  const ultimaCuotaRaw = await db
+    .select({
+      credito_id: cuotas_credito.credito_id,
+      dia_max: sql<number>`EXTRACT(DAY FROM MAX(${cuotas_credito.fecha_vencimiento}))::int`,
+    })
+    .from(cuotas_credito)
+    .where(
+      and(
+        inArray(cuotas_credito.credito_id, creditoIds),
+        gt(cuotas_credito.numero_cuota, 0)
+      )
+    )
+    .groupBy(cuotas_credito.credito_id);
+
+  const ultimaCuotaDiaByCredito = new Map<number, number>();
+  for (const row of ultimaCuotaRaw) {
+    if (row.credito_id !== null && row.dia_max !== null) {
+      ultimaCuotaDiaByCredito.set(row.credito_id, row.dia_max);
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────
   // 6. Capital activo por crédito
   //    capital_activo = capital - SUM(abono_capital donde pagado=true)
   // ──────────────────────────────────────────────────────────
@@ -506,10 +532,13 @@ export async function getCreditCandidates(
       }
     }
 
-    const score = SCORE_BASE + crmBonus + nuevoInvBonus + formatoBonus + cuotasBonus + proximityBonus + reinversionBonus + compraTotalBonus;
+    const diaUltimaCuota = ultimaCuotaDiaByCredito.get(credito_id);
+    const vencimientoBonus = diaUltimaCuota === 30 ? SCORE_VENCIMIENTO_DIA_30 : 0;
+
+    const score = SCORE_BASE + crmBonus + nuevoInvBonus + formatoBonus + cuotasBonus + proximityBonus + reinversionBonus + compraTotalBonus + vencimientoBonus;
 
     console.log(
-      `   ✅ [${numero_credito_sifco}] score=${score} (crm=${crmBonus}, nuevo=${nuevoInvBonus}, fmt=${formatoBonus}, cuotas=${cuotasBonus}, prox=${proximityBonus}, reinv=${reinversionBonus}, total=${compraTotalBonus})`
+      `   ✅ [${numero_credito_sifco}] score=${score} (crm=${crmBonus}, nuevo=${nuevoInvBonus}, fmt=${formatoBonus}, cuotas=${cuotasBonus}, prox=${proximityBonus}, reinv=${reinversionBonus}, total=${compraTotalBonus}, venc30=${vencimientoBonus})`
     );
 
     candidates.push({
@@ -528,6 +557,7 @@ export async function getCreditCandidates(
         cuotas: cuotasBonus,
         proximidad: proximityBonus,
         reinversion: reinversionBonus,
+        vencimiento_dia_30: vencimientoBonus,
         total: score,
       },
       capital_evaluado: capitalParaEvaluar,

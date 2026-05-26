@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { hasStaleAnalysisChecklistVehicleState } from "./analysis-checklist";
+import {
+	hasStaleAnalysisChecklistDocumentState,
+	hasStaleAnalysisChecklistVehicleState,
+} from "./analysis-checklist";
 
 describe("analysis checklist helpers", () => {
 	test("detects stale checklist vehicle ids", () => {
@@ -71,5 +74,69 @@ describe("analysis checklist helpers", () => {
 				true,
 			),
 		).toBe(true);
+	});
+
+	test("detects stale client document upload state", () => {
+		expect(
+			hasStaleAnalysisChecklistDocumentState(
+				{
+					sections: {
+						documentos: {
+							items: [
+								{
+									documentType: "estados_cuenta_1",
+									uploaded: true,
+								},
+								{
+									documentType: "estados_cuenta_2",
+									uploaded: false,
+								},
+								{
+									documentType: "estados_cuenta_3",
+									uploaded: false,
+								},
+							],
+						},
+					},
+				},
+				new Set([
+					"estados_cuenta_1",
+					"estados_cuenta_2",
+					"estados_cuenta_3",
+				]),
+				new Set(),
+			),
+		).toBe(true);
+	});
+
+	test("treats matching client and vehicle document states as fresh", () => {
+		expect(
+			hasStaleAnalysisChecklistDocumentState(
+				{
+					sections: {
+						documentos: {
+							items: [
+								{
+									documentType: "dpi",
+									uploaded: true,
+								},
+							],
+						},
+						vehiculo: {
+							documentos: {
+								items: [
+									{
+										documentType: "tarjeta_circulacion",
+										uploaded: true,
+									},
+								],
+							},
+						},
+					},
+				},
+				new Set(["dpi"]),
+				new Set(["tarjeta_circulacion"]),
+			),
+		).toBe(false);
 	});
 });

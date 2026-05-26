@@ -1227,7 +1227,7 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
           monto_asignado: montoAsignar.toString(),
           inversionistas_padre: dataPadreDestino.length,
           inversionistas_espejo: dataEspejoDestinoFinal.length,
-          cube_eliminado: !nuevoArrayDestino.some(
+          cube_eliminado: !arrayDestinoPadre.some(
             (inv) => inv.inversionista_id === CUBE_INVESTMENT_ID,
           ),
         });

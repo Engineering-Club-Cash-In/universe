@@ -1554,26 +1554,34 @@ export async function getPagosByVencimiento({
   }
   const whereClause = sql.join(filters, sql` AND `);
 
-  // Subquery para los porcentajes de Cube por crédito
+  // cash_in_pct = fracción del interés total que corresponde a Cash-In (suma ponderada de porcentaje_cash_in de todos los inversionistas):
+  //   - Cada inv aporta: monto_i * porcentaje_cash_in_i / 100
+  //   - CUBE siempre usa porcentaje_cash_in = 100 (corrige bug replaceInvestorCredit donde queda en 0)
+  //   - Si CUBE fue eliminado de CI, su porción implícita = GREATEST(0, capital - SUM_CI) * 100%
+  //   - Fallback para créditos legacy (capital=0 y montos=0): promedio simple de porcentaje_cash_in
   const cubeSubquery = sql`
     LEFT JOIN LATERAL (
       SELECT
-        CASE
-          WHEN sum_montos.total > 0 THEN
-            (ci_cube.porcentaje_cash_in::numeric / 100.0) * (ci_cube.monto_aportado::numeric / sum_montos.total)
-          ELSE 0
-        END AS cube_pct
-      FROM cartera.creditos_inversionistas ci_cube
-      INNER JOIN cartera.inversionistas inv_cube
-        ON ci_cube.inversionista_id = inv_cube.inversionista_id
-      CROSS JOIN LATERAL (
-        SELECT COALESCE(SUM(ci_all.monto_aportado::numeric), 0) AS total
-        FROM cartera.creditos_inversionistas ci_all
-        WHERE ci_all.credito_id = p.credito_id
-      ) sum_montos
-      WHERE ci_cube.credito_id = p.credito_id
-        AND LOWER(TRIM(inv_cube.nombre)) = 'cube investments s.a.'
-      LIMIT 1
+        COALESCE((
+          SELECT
+            CASE
+              WHEN COALESCE(SUM(ci_all.monto_aportado::numeric), 0) > 0 OR c.capital::numeric > 0 THEN
+                (COALESCE(SUM(
+                  ci_all.monto_aportado::numeric *
+                  CASE WHEN ci_all.inversionista_id = 86 THEN 100::numeric
+                       ELSE ci_all.porcentaje_cash_in::numeric
+                  END
+                ), 0) / 100.0
+                + GREATEST(0, c.capital::numeric - COALESCE(SUM(ci_all.monto_aportado::numeric), 0)))
+                / NULLIF(GREATEST(c.capital::numeric, COALESCE(SUM(ci_all.monto_aportado::numeric), 0)), 0)
+              WHEN COUNT(*) > 0 THEN
+                AVG(CASE WHEN ci_all.inversionista_id = 86 THEN 100::numeric
+                         ELSE ci_all.porcentaje_cash_in::numeric END) / 100.0
+              ELSE 0
+            END
+          FROM cartera.creditos_inversionistas ci_all
+          WHERE ci_all.credito_id = p.credito_id
+        ), 0) AS cash_in_pct
     ) cube_data ON true
   `;
 
@@ -1603,8 +1611,8 @@ export async function getPagosByVencimiento({
       COALESCE(SUM(p.seguro_restante::numeric + COALESCE(p.abono_seguro, 0)::numeric), 0) AS total_seguro_restante,
       COALESCE(SUM(p.gps_restante::numeric + COALESCE(p.abono_gps, 0)::numeric), 0) AS total_gps_restante,
       COALESCE(SUM(p.membresias::numeric + COALESCE(p.membresias_pago, 0)::numeric), 0) AS total_membresias,
-      COALESCE(SUM((p.interes_restante::numeric + COALESCE(p.abono_interes, 0)::numeric) * COALESCE(cube_data.cube_pct, 0)), 0) AS total_interes_cube,
-      COALESCE(SUM((p.iva_12_restante::numeric + COALESCE(p.abono_iva_12, 0)::numeric) * COALESCE(cube_data.cube_pct, 0)), 0) AS total_iva_cube
+      COALESCE(SUM((p.interes_restante::numeric + COALESCE(p.abono_interes, 0)::numeric) * COALESCE(cube_data.cash_in_pct, 0)), 0) AS total_interes_cube,
+      COALESCE(SUM((p.iva_12_restante::numeric + COALESCE(p.abono_iva_12, 0)::numeric) * COALESCE(cube_data.cash_in_pct, 0)), 0) AS total_iva_cube
     FROM cartera.pagos_credito p
     INNER JOIN cartera.creditos c ON p.credito_id = c.credito_id
     INNER JOIN cartera.usuarios u ON c.usuario_id = u.usuario_id
@@ -1637,8 +1645,8 @@ export async function getPagosByVencimiento({
       COALESCE(SUM(p.gps_restante::numeric + COALESCE(p.abono_gps, 0)::numeric), 0) AS gps_restante,
       COALESCE(SUM(p.membresias::numeric + COALESCE(p.membresias_pago, 0)::numeric), 0) AS membresias,
       COALESCE(SUM(p.monto_boleta::numeric), 0) AS monto_boleta,
-      COALESCE(SUM((p.interes_restante::numeric + COALESCE(p.abono_interes, 0)::numeric) * COALESCE(cube_data.cube_pct, 0)), 0) AS interes_cube,
-      COALESCE(SUM((p.iva_12_restante::numeric + COALESCE(p.abono_iva_12, 0)::numeric) * COALESCE(cube_data.cube_pct, 0)), 0) AS iva_cube,
+      COALESCE(SUM((p.interes_restante::numeric + COALESCE(p.abono_interes, 0)::numeric) * COALESCE(cube_data.cash_in_pct, 0)), 0) AS interes_cube,
+      COALESCE(SUM((p.iva_12_restante::numeric + COALESCE(p.abono_iva_12, 0)::numeric) * COALESCE(cube_data.cash_in_pct, 0)), 0) AS iva_cube,
       COALESCE(SUM(${totalFilaSql}), 0) AS total_pagos_del_mes,
       CASE
         WHEN MAX(m.cuotas_atrasadas) = 1 THEN 'Mora 30'

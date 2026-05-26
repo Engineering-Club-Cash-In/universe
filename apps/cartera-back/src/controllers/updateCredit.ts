@@ -1648,7 +1648,9 @@ export const repararTotalRestante = async ({
 
     const cuotaPagada = cuotaCerradaAhora();
 
-    for (const { pago_id, abonos, restantes, pagado } of abonosPorPago) {
+    // Si la cuota cerró, TODOS sus parciales quedan marcados como pagados.
+    // Si no cerró, todos quedan en false (ningún parcial "cerró" nada).
+    for (const { pago_id, abonos, restantes } of abonosPorPago) {
       actualizaciones.push({
         pago_id,
         datos: {
@@ -1656,7 +1658,7 @@ export const repararTotalRestante = async ({
           ...abonos,
           ...restantes,
           total_restante: capitalEnMemoria.round(2).toString(),
-          pagado,
+          pagado: cuotaPagada,
         },
       });
     }

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+	carryForwardAnalysisChecklistVerificationState,
 	hasStaleAnalysisChecklistDocumentState,
 	hasStaleAnalysisChecklistVehicleState,
 } from "./analysis-checklist";
@@ -138,5 +139,70 @@ describe("analysis checklist helpers", () => {
 				new Set(["tarjeta_circulacion"]),
 			),
 		).toBe(false);
+	});
+
+	test("preserves manual verification state when regenerating checklist", () => {
+		const nextChecklistData = {
+			sections: {
+				verificaciones: {
+					items: [
+						{
+							type: "confirmacion_referencias",
+							completed: false,
+						},
+					],
+				},
+				vehiculo: {
+					verificaciones: {
+						items: [
+							{
+								type: "consulta_rgm",
+								completed: false,
+							},
+						],
+					},
+				},
+			},
+		};
+
+		carryForwardAnalysisChecklistVerificationState(nextChecklistData, {
+			sections: {
+				verificaciones: {
+					items: [
+						{
+							type: "confirmacion_referencias",
+							completed: true,
+							verifiedBy: "analyst-1",
+							verifiedAt: "2026-05-26T17:00:00.000Z",
+						},
+					],
+				},
+				vehiculo: {
+					verificaciones: {
+						items: [
+							{
+								type: "consulta_rgm",
+								completed: true,
+								verifiedBy: "analyst-2",
+								verifiedAt: "2026-05-26T17:05:00.000Z",
+							},
+						],
+					},
+				},
+			},
+		});
+
+		expect(nextChecklistData.sections.verificaciones.items[0]).toMatchObject({
+			completed: true,
+			verifiedBy: "analyst-1",
+			verifiedAt: "2026-05-26T17:00:00.000Z",
+		});
+		expect(
+			nextChecklistData.sections.vehiculo.verificaciones.items[0],
+		).toMatchObject({
+			completed: true,
+			verifiedBy: "analyst-2",
+			verifiedAt: "2026-05-26T17:05:00.000Z",
+		});
 	});
 });

@@ -51,6 +51,7 @@ import {
 	VEHICLE_DOCUMENT_TYPES,
 } from "../db/schema/documents";
 import {
+	carryForwardAnalysisChecklistVerificationState,
 	hasStaleAnalysisChecklistDocumentState,
 	hasStaleAnalysisChecklistVehicleState,
 } from "../lib/analysis-checklist";
@@ -4018,6 +4019,8 @@ export const crmRouter = {
 
 			console.log("[getAnalysisChecklist] opportunity:", opportunity);
 
+			let shouldUpdateExistingChecklist = false;
+
 			// Phase 2: Run independent queries in parallel
 			const [requiredDocs, uploadedDocs, vehicleResult, creditAnalysisResult] =
 				await Promise.all([
@@ -4199,9 +4202,7 @@ export const crmRouter = {
 						uploadedVehicleTypes,
 					)
 				) {
-					await db
-						.delete(analysisChecklists)
-						.where(eq(analysisChecklists.id, existingChecklist.id));
+					shouldUpdateExistingChecklist = true;
 				} else {
 					return existingChecklist.checklistData;
 				}
@@ -4355,6 +4356,13 @@ export const crmRouter = {
 				canApprove: false,
 			};
 
+			if (shouldUpdateExistingChecklist) {
+				carryForwardAnalysisChecklistVerificationState(
+					checklistData,
+					existingChecklist?.checklistData,
+				);
+			}
+
 			// Calculate vehicle section completion
 			checklistData.sections.vehiculo.verificaciones.completed =
 				checklistData.sections.vehiculo.verificaciones.items
@@ -4420,11 +4428,21 @@ export const crmRouter = {
 					? checklistData.sections.vehiculo.completed
 					: true); // Only require vehicle section if there's a vehicle
 
-			// Save initial checklist
-			await db.insert(analysisChecklists).values({
-				opportunityId: input.opportunityId,
-				checklistData,
-			});
+			if (shouldUpdateExistingChecklist && existingChecklist) {
+				await db
+					.update(analysisChecklists)
+					.set({
+						checklistData,
+						updatedAt: new Date(),
+					})
+					.where(eq(analysisChecklists.id, existingChecklist.id));
+			} else {
+				// Save initial checklist
+				await db.insert(analysisChecklists).values({
+					opportunityId: input.opportunityId,
+					checklistData,
+				});
+			}
 
 			return checklistData;
 		}),

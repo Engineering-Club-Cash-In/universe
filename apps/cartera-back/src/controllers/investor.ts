@@ -49,7 +49,6 @@ import {
   type EstadoLiquidacionResumenFilter,
 } from "../utils/investorLiquidationSummary";
 import { addInvestorToCredit } from "./addInvestorToCredit";
-import { getPaymentIdsForInvestorReverse } from "./reversePaymentPolicy";
 
 // ============================================
 // 🆕 TIPOS Y CONFIGURACIÓN PARA CONSULTAS ORIGINALES/ESPEJO
@@ -1020,20 +1019,8 @@ export async function processAndReplaceCreditInvestorsReverse(
     throw new Error(`Pago ${pago_id} no encontrado`);
   }
 
-  // 4. Obtener pagos de esa cuota como contexto. La reversa de inversionistas
-  // debe aplicar únicamente al pago seleccionado; otros pagos de la misma cuota
-  // pueden ser boletas legítimas y no se deben revertir parejo.
-  const pagosDeEsaCuota = pago.cuota_id === null
-    ? []
-    : await db
-        .select({ pago_id: pagos_credito.pago_id })
-        .from(pagos_credito)
-        .where(eq(pagos_credito.cuota_id, pago.cuota_id));
-
-  const pagoIds = getPaymentIdsForInvestorReverse(
-    pago_id,
-    pagosDeEsaCuota.map((p) => p.pago_id),
-  );
+  // 4. La reversa de inversionistas aplica únicamente al pago seleccionado.
+  const pagoIds = [pago_id];
 
   // 5. Por cada inversionista, sumar abono_capital solo del pago reversado.
   for (const inv of investors) {

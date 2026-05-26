@@ -50,7 +50,10 @@ import {
 	opportunityDocuments,
 	VEHICLE_DOCUMENT_TYPES,
 } from "../db/schema/documents";
-import { hasStaleAnalysisChecklistVehicleState } from "../lib/analysis-checklist";
+import {
+	hasStaleAnalysisChecklistDocumentState,
+	hasStaleAnalysisChecklistVehicleState,
+} from "../lib/analysis-checklist";
 import {
 	updateChecklistForClientDocument,
 	updateChecklistForVehicleDocument,
@@ -4015,29 +4018,6 @@ export const crmRouter = {
 
 			console.log("[getAnalysisChecklist] opportunity:", opportunity);
 
-			// Early return if checklist already exists and is still aligned
-			if (existingChecklist) {
-				const inspectionResult = opportunity.vehicleId
-					? await getVehicleInspectionStatus(opportunity.vehicleId)
-					: {
-							isInspected: false,
-						};
-
-				if (
-					hasStaleAnalysisChecklistVehicleState(
-						existingChecklist.checklistData as any,
-						opportunity.vehicleId,
-						inspectionResult.isInspected,
-					)
-				) {
-					await db
-						.delete(analysisChecklists)
-						.where(eq(analysisChecklists.id, existingChecklist.id));
-				} else {
-					return existingChecklist.checklistData;
-				}
-			}
-
 			// Phase 2: Run independent queries in parallel
 			const [requiredDocs, uploadedDocs, vehicleResult, creditAnalysisResult] =
 				await Promise.all([
@@ -4204,6 +4184,28 @@ export const crmRouter = {
 			const uploadedVehicleTypes = new Set(
 				uploadedVehicleDocs.map((d) => d.documentType),
 			);
+
+			// Early return if checklist already exists and is still aligned
+			if (existingChecklist) {
+				if (
+					hasStaleAnalysisChecklistVehicleState(
+						existingChecklist.checklistData as any,
+						opportunity.vehicleId,
+						vehicleInspected,
+					) ||
+					hasStaleAnalysisChecklistDocumentState(
+						existingChecklist.checklistData as any,
+						uploadedTypes,
+						uploadedVehicleTypes,
+					)
+				) {
+					await db
+						.delete(analysisChecklists)
+						.where(eq(analysisChecklists.id, existingChecklist.id));
+				} else {
+					return existingChecklist.checklistData;
+				}
+			}
 
 			// Create initial checklist structure
 			const checklistData = {

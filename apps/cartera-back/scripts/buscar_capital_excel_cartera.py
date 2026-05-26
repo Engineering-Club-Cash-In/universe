@@ -209,6 +209,27 @@ def calcular_capital_para_un_sifco(apariciones: list[dict]) -> dict[str, Any] | 
     }
 
 
+def buscar_companions_con_underscore(numero_sifco_base: str) -> list[str]:
+    """
+    Busca todos los SIFCOs que empiezan con `numero_sifco_base + "_"` (créditos partidos).
+    Por ejemplo: para "01010214109340" devuelve ["01010214109340_2", "01010214109340_3", ...]
+    """
+    path = find_excel_path()
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    companions: set[str] = set()
+    prefijo = numero_sifco_base + "_"
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if not row or len(row) < 2 or row[1] is None:
+                continue
+            v = str(row[1]).strip()
+            if v.startswith(prefijo) and v != numero_sifco_base:
+                companions.add(v)
+    wb.close()
+    return sorted(companions)
+
+
 def obtener_capital_inicial(
     numero_sifco: str,
     nombre: str | None = None,
@@ -219,6 +240,27 @@ def obtener_capital_inicial(
         resultado = calcular_capital_para_un_sifco(apariciones)
         if resultado is None:
             raise ValueError(f"Solo una aparición de {numero_sifco}, no se puede inferir cuota fija")
+
+        # 1.b Verificar si hay companions con "_N" (crédito partido)
+        companions = buscar_companions_con_underscore(numero_sifco)
+        if companions:
+            resultados = [resultado]
+            for comp_sifco in companions:
+                aps_comp = buscar_apariciones(numero_sifco=comp_sifco)
+                r_comp = calcular_capital_para_un_sifco(aps_comp)
+                if r_comp is not None:
+                    resultados.append(r_comp)
+            suma = sum(r["capital_inicial"] for r in resultados)
+            return {
+                "numero_sifco": numero_sifco,
+                "estrategia": "sifco_partido",
+                "capital_inicial": suma,
+                "fuente": "suma_creditos_partidos",
+                "nombre_cliente": resultado["nombre"],
+                "creditos_encontrados": resultados,
+                "advertencia": f"Crédito partido: se sumaron {len(resultados)} SIFCOs ({numero_sifco} + {len(companions)} companion(s))",
+            }
+
         return {
             "numero_sifco": numero_sifco,
             "estrategia": "sifco_directo",

@@ -18,6 +18,10 @@ import { updateMora } from "./latefee";
 import { SATClientService } from "../cofidi/satClientService";
 import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
 import { updateInstallments } from "./updateCredit";
+import {
+  shouldInstallmentRemainPaidAfterReversal,
+  shouldRemoveSameInstallmentPaymentOnReverse,
+} from "./reversePaymentPolicy";
 // ============================================================================
 // SCHEMA DE VALIDACIÓN
 // ============================================================================
@@ -281,14 +285,7 @@ export const reversePayment = async ({ body, set }: any) => {
           "📝 Pago estaba PAGADO - Marcando cuota como NO pagada y reseteando pago",
         );
 
-        if (pago.cuota_id !== null) {
-          await tx
-            .update(cuotas_credito)
-            .set({ pagado: false })
-            .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
-        }
-
-        console.log("✅ Cuota marcada como NO pagada");
+        console.log("✅ El estado de la cuota se recalculará con los pagos restantes");
 
         // ======================================================================
         // 1️⃣1️⃣ RESETEAR EL PAGO (devolver a estado inicial)
@@ -559,18 +556,24 @@ export const reversePayment = async ({ body, set }: any) => {
       console.log("✅ Saldo a favor actualizado");
 
       // ======================================================================
-      // 1️⃣5️⃣ LIMPIAR PAGOS DUPLICADOS DE LA MISMA CUOTA
+      // 1️⃣5️⃣ LIMPIAR SOLO PLACEHOLDERS Y RECALCULAR ESTADO DE LA CUOTA
       // ======================================================================
       let pagosDuplicados: { pago_id: number }[] = [];
 
       if (pagoEstabaPagado) {
-        console.log("\n🧹 ========== LIMPIANDO PAGOS DUPLICADOS ==========");
+        console.log("\n🧹 ========== RECALCULANDO PAGOS DE LA CUOTA ==========");
 
-        // Primero obtener los IDs de pagos duplicados
-        const pagosDuplicadosIds = pago.cuota_id === null
+        const pagosMismaCuota = pago.cuota_id === null
           ? []
           : await tx
-              .select({ pago_id: pagos_credito.pago_id })
+              .select({
+                pago_id: pagos_credito.pago_id,
+                monto_aplicado: pagos_credito.monto_aplicado,
+                monto_boleta: pagos_credito.monto_boleta,
+                validationStatus: pagos_credito.validationStatus,
+                paymentFalse: pagos_credito.paymentFalse,
+                pagado: pagos_credito.pagado,
+              })
               .from(pagos_credito)
               .where(
                 and(
@@ -580,7 +583,9 @@ export const reversePayment = async ({ body, set }: any) => {
                 )
               );
 
-        const ids = pagosDuplicadosIds.map((p) => p.pago_id);
+        const ids = pagosMismaCuota
+          .filter((p) => shouldRemoveSameInstallmentPaymentOnReverse(p))
+          .map((p) => p.pago_id);
 
         if (ids.length > 0) {
           // Eliminar registros relacionados primero (evita FK constraint)
@@ -596,7 +601,25 @@ export const reversePayment = async ({ body, set }: any) => {
             .returning({ pago_id: pagos_credito.pago_id });
         }
 
-        console.log(`🗑️ Pagos duplicados eliminados: ${pagosDuplicados.length}`);
+        const pagosRestantesCuota = pagosMismaCuota.filter(
+          (p) => !ids.includes(p.pago_id),
+        );
+        const cuotaPermanecePagada = shouldInstallmentRemainPaidAfterReversal({
+          cuota: creditData.creditos.cuota,
+          remainingPayments: pagosRestantesCuota,
+        });
+
+        if (pago.cuota_id !== null) {
+          await tx
+            .update(cuotas_credito)
+            .set({ pagado: cuotaPermanecePagada })
+            .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
+        }
+
+        console.log(`🗑️ Placeholders eliminados: ${pagosDuplicados.length}`);
+        console.log(
+          `✅ Cuota recalculada como ${cuotaPermanecePagada ? "PAGADA" : "NO pagada"}`,
+        );
       } else {
         console.log("\n⏭️ Pago eliminado - no se limpian duplicados");
       }

@@ -14,6 +14,8 @@ export const LEAD_SOURCE_LABELS = {
 	Whatsapp: "WhatsApp",
 	agency: "Agencia",
 	property: "Predio",
+	recurrent: "Recurrente",
+	recurrent_active: "Recurrente Activo",
 } as const satisfies Record<string, string>;
 
 export type LeadSource = keyof typeof LEAD_SOURCE_LABELS;
@@ -41,6 +43,8 @@ export const LEAD_SOURCE_BADGE_CLASSES = {
 	Whatsapp: "bg-emerald-100 text-emerald-800",
 	agency: "bg-teal-100 text-teal-800",
 	property: "bg-amber-100 text-amber-800",
+	recurrent: "bg-violet-100 text-violet-800",
+	recurrent_active: "bg-cyan-100 text-cyan-800",
 } as const satisfies Record<keyof typeof LEAD_SOURCE_LABELS, string>;
 
 export function getLeadSourceLabel(source: string | null | undefined): string {

@@ -47,12 +47,12 @@ export function shouldInstallmentRemainPaidAfterReversal({
     return total.plus(toBig(payment.monto_aplicado));
   }, new Big(0));
 
+  // Payments can differ by one cent due to prior decimal rounding in cuotas.
   return totalValidated.gte(cuotaAmount.minus(0.01));
 }
 
-export function getPaymentIdsForInvestorReverse(
-  selectedPagoId: number,
-  _sameInstallmentPagoIds: number[],
+export function getRemainingPaymentPaidStatusAfterReversal(
+  installmentRemainsPaid: boolean,
 ) {
-  return [selectedPagoId];
+  return installmentRemainsPaid;
 }

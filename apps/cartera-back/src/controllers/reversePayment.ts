@@ -19,6 +19,7 @@ import { SATClientService } from "../cofidi/satClientService";
 import { CLUB_CASHIN_CONFIG, SAT_CONFIG } from "../utils/functions/const";
 import { updateInstallments } from "./updateCredit";
 import {
+  getRemainingPaymentPaidStatusAfterReversal,
   shouldInstallmentRemainPaidAfterReversal,
   shouldRemoveSameInstallmentPaymentOnReverse,
 } from "./reversePaymentPolicy";
@@ -614,6 +615,21 @@ export const reversePayment = async ({ body, set }: any) => {
             .update(cuotas_credito)
             .set({ pagado: cuotaPermanecePagada })
             .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
+        }
+
+        const pagosPagadosRestantesIds = pagosRestantesCuota
+          .filter((p) => p.pagado === true)
+          .map((p) => p.pago_id);
+
+        if (pagosPagadosRestantesIds.length > 0) {
+          await tx
+            .update(pagos_credito)
+            .set({
+              pagado: getRemainingPaymentPaidStatusAfterReversal(
+                cuotaPermanecePagada,
+              ),
+            })
+            .where(inArray(pagos_credito.pago_id, pagosPagadosRestantesIds));
         }
 
         console.log(`🗑️ Placeholders eliminados: ${pagosDuplicados.length}`);

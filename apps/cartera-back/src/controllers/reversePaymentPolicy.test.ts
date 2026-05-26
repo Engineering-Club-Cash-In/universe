@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
-  getPaymentIdsForInvestorReverse,
+  getRemainingPaymentPaidStatusAfterReversal,
   shouldInstallmentRemainPaidAfterReversal,
   shouldRemoveSameInstallmentPaymentOnReverse,
 } from "./reversePaymentPolicy";
@@ -56,7 +56,8 @@ describe("reverse payment policy", () => {
     ).toBeFalse();
   });
 
-  it("reversa inversionistas solo para el pago seleccionado", () => {
-    expect(getPaymentIdsForInvestorReverse(101, [101, 102, 103])).toEqual([101]);
+  it("marca los pagos restantes igual que el estado recalculado de la cuota", () => {
+    expect(getRemainingPaymentPaidStatusAfterReversal(true)).toBeTrue();
+    expect(getRemainingPaymentPaidStatusAfterReversal(false)).toBeFalse();
   });
 });

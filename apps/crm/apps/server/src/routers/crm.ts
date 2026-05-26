@@ -50,7 +50,11 @@ import {
 	opportunityDocuments,
 	VEHICLE_DOCUMENT_TYPES,
 } from "../db/schema/documents";
-import { hasStaleAnalysisChecklistVehicleState } from "../lib/analysis-checklist";
+import {
+	carryForwardAnalysisChecklistVerificationState,
+	hasStaleAnalysisChecklistDocumentState,
+	hasStaleAnalysisChecklistVehicleState,
+} from "../lib/analysis-checklist";
 import {
 	updateChecklistForClientDocument,
 	updateChecklistForVehicleDocument,
@@ -4015,28 +4019,7 @@ export const crmRouter = {
 
 			console.log("[getAnalysisChecklist] opportunity:", opportunity);
 
-			// Early return if checklist already exists and is still aligned
-			if (existingChecklist) {
-				const inspectionResult = opportunity.vehicleId
-					? await getVehicleInspectionStatus(opportunity.vehicleId)
-					: {
-							isInspected: false,
-						};
-
-				if (
-					hasStaleAnalysisChecklistVehicleState(
-						existingChecklist.checklistData as any,
-						opportunity.vehicleId,
-						inspectionResult.isInspected,
-					)
-				) {
-					await db
-						.delete(analysisChecklists)
-						.where(eq(analysisChecklists.id, existingChecklist.id));
-				} else {
-					return existingChecklist.checklistData;
-				}
-			}
+			let shouldUpdateExistingChecklist = false;
 
 			// Phase 2: Run independent queries in parallel
 			const [requiredDocs, uploadedDocs, vehicleResult, creditAnalysisResult] =
@@ -4205,6 +4188,26 @@ export const crmRouter = {
 				uploadedVehicleDocs.map((d) => d.documentType),
 			);
 
+			// Early return if checklist already exists and is still aligned
+			if (existingChecklist) {
+				if (
+					hasStaleAnalysisChecklistVehicleState(
+						existingChecklist.checklistData as any,
+						opportunity.vehicleId,
+						vehicleInspected,
+					) ||
+					hasStaleAnalysisChecklistDocumentState(
+						existingChecklist.checklistData as any,
+						uploadedTypes,
+						uploadedVehicleTypes,
+					)
+				) {
+					shouldUpdateExistingChecklist = true;
+				} else {
+					return existingChecklist.checklistData;
+				}
+			}
+
 			// Create initial checklist structure
 			const checklistData = {
 				sections: {
@@ -4353,6 +4356,13 @@ export const crmRouter = {
 				canApprove: false,
 			};
 
+			if (shouldUpdateExistingChecklist) {
+				carryForwardAnalysisChecklistVerificationState(
+					checklistData,
+					existingChecklist?.checklistData,
+				);
+			}
+
 			// Calculate vehicle section completion
 			checklistData.sections.vehiculo.verificaciones.completed =
 				checklistData.sections.vehiculo.verificaciones.items
@@ -4418,11 +4428,21 @@ export const crmRouter = {
 					? checklistData.sections.vehiculo.completed
 					: true); // Only require vehicle section if there's a vehicle
 
-			// Save initial checklist
-			await db.insert(analysisChecklists).values({
-				opportunityId: input.opportunityId,
-				checklistData,
-			});
+			if (shouldUpdateExistingChecklist && existingChecklist) {
+				await db
+					.update(analysisChecklists)
+					.set({
+						checklistData,
+						updatedAt: new Date(),
+					})
+					.where(eq(analysisChecklists.id, existingChecklist.id));
+			} else {
+				// Save initial checklist
+				await db.insert(analysisChecklists).values({
+					opportunityId: input.opportunityId,
+					checklistData,
+				});
+			}
 
 			return checklistData;
 		}),

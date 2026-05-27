@@ -49,6 +49,24 @@ def find_excel_path() -> str:
     raise FileNotFoundError(f"No se encontró Excel de cartera en {EXCEL_DIR}")
 
 
+_WB_CACHE: dict[str, Any] = {"wb": None}
+
+
+def get_workbook():
+    """Devuelve un workbook abierto, cacheado por invocación del script."""
+    if _WB_CACHE["wb"] is None:
+        _WB_CACHE["wb"] = openpyxl.load_workbook(
+            find_excel_path(), read_only=True, data_only=True
+        )
+    return _WB_CACHE["wb"]
+
+
+def close_workbook():
+    if _WB_CACHE["wb"] is not None:
+        _WB_CACHE["wb"].close()
+        _WB_CACHE["wb"] = None
+
+
 def normalizar(texto: str) -> str:
     """Normaliza texto para comparación: minúsculas, sin tildes, sin espacios extras."""
     if not texto:
@@ -80,9 +98,7 @@ def buscar_apariciones(
     - Si se pasa numero_sifco: match exacto en columna B.
     - Si se pasa nombre: match (subconjunto normalizado) en columna D.
     """
-    path = find_excel_path()
-    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-
+    wb = get_workbook()
     apariciones = []
 
     for sheet_name in wb.sheetnames:
@@ -116,7 +132,6 @@ def buscar_apariciones(
                 "gps": row[16] if len(row) > 16 else None,
             })
 
-    wb.close()
     return apariciones
 
 
@@ -214,8 +229,7 @@ def buscar_companions_con_underscore(numero_sifco_base: str) -> list[str]:
     Busca todos los SIFCOs que empiezan con `numero_sifco_base + "_"` (créditos partidos).
     Por ejemplo: para "01010214109340" devuelve ["01010214109340_2", "01010214109340_3", ...]
     """
-    path = find_excel_path()
-    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    wb = get_workbook()
     companions: set[str] = set()
     prefijo = numero_sifco_base + "_"
     for sheet_name in wb.sheetnames:
@@ -226,13 +240,27 @@ def buscar_companions_con_underscore(numero_sifco_base: str) -> list[str]:
             v = str(row[1]).strip()
             if v.startswith(prefijo) and v != numero_sifco_base:
                 companions.add(v)
-    wb.close()
     return sorted(companions)
+
+
+def buscar_interes_en_cuota(numero_sifco: str, numero_cuota: int) -> float | None:
+    """
+    Busca en el Excel la fila correspondiente al `numero_sifco` con cuota = `numero_cuota`
+    y devuelve el `interes_mes` (columna G). None si no se encuentra.
+    """
+    apariciones = buscar_apariciones(numero_sifco=numero_sifco)
+    for a in apariciones:
+        if isinstance(a["cuota"], int) and a["cuota"] == numero_cuota:
+            if a["interes_mes"] is not None:
+                return float(a["interes_mes"])
+    return None
 
 
 def obtener_capital_inicial(
     numero_sifco: str,
     nombre: str | None = None,
+    validar_cuota: int | None = None,
+    capital_math: float | None = None,
 ) -> dict[str, Any]:
     # 1. Intentar por número SIFCO
     apariciones = buscar_apariciones(numero_sifco=numero_sifco)
@@ -241,8 +269,16 @@ def obtener_capital_inicial(
         if resultado is None:
             raise ValueError(f"Solo una aparición de {numero_sifco}, no se puede inferir cuota fija")
 
-        # 1.b Verificar si hay companions con "_N" (crédito partido)
-        companions = buscar_companions_con_underscore(numero_sifco)
+        # 1.b Verificar si hay companions con "_N" (crédito partido) SOLO si el
+        # capital del Excel es MENOR que el calculado por matemática (señal de
+        # que faltan partes del crédito por sumar). Esto evita el escaneo
+        # innecesario del Excel para créditos no partidos.
+        capital_excel = resultado["capital_inicial"]
+        debe_buscar_companions = (
+            capital_math is None or capital_excel < capital_math - 1
+        )
+
+        companions = buscar_companions_con_underscore(numero_sifco) if debe_buscar_companions else []
         if companions:
             resultados = [resultado]
             for comp_sifco in companions:
@@ -334,10 +370,35 @@ def main():
     parser.add_argument("numero_sifco")
     parser.add_argument("--nombre", default=None, help="Nombre del cliente (fallback)")
     parser.add_argument("--json", action="store_true", help="Salida en JSON")
+    parser.add_argument(
+        "--validar-cuota",
+        type=int,
+        default=None,
+        dest="validar_cuota",
+        help="Si se pasa, busca también el interes_mes del Excel para esa cuota (para validación post-reparación)",
+    )
+    parser.add_argument(
+        "--capital-math",
+        type=float,
+        default=None,
+        dest="capital_math",
+        help="Hint: capital calculado por matemática. Si se pasa y el Excel devuelve un capital >= este, NO busca companions '_N' (ahorra tiempo).",
+    )
     args = parser.parse_args()
 
     try:
-        resultado = obtener_capital_inicial(args.numero_sifco, args.nombre)
+        resultado = obtener_capital_inicial(
+            args.numero_sifco, args.nombre, capital_math=args.capital_math
+        )
+        # Validación de cuota: busca el interés del Excel para la cuota indicada
+        if args.validar_cuota is not None:
+            sifco_base = resultado.get("numero_sifco", args.numero_sifco)
+            interes_excel = buscar_interes_en_cuota(sifco_base, args.validar_cuota)
+            resultado["validacion"] = {
+                "cuota": args.validar_cuota,
+                "interes_excel": interes_excel,
+                "sifco_consultado": sifco_base,
+            }
     except ValueError as e:
         if args.json:
             print(json.dumps({"error": str(e), "numero_sifco": args.numero_sifco}))
@@ -361,4 +422,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        close_workbook()

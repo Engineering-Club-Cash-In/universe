@@ -243,12 +243,11 @@ def buscar_companions_con_underscore(numero_sifco_base: str) -> list[str]:
     return sorted(companions)
 
 
-def buscar_interes_en_cuota(numero_sifco: str, numero_cuota: int) -> float | None:
+def buscar_interes_en_apariciones(apariciones: list[dict], numero_cuota: int) -> float | None:
     """
-    Busca en el Excel la fila correspondiente al `numero_sifco` con cuota = `numero_cuota`
-    y devuelve el `interes_mes` (columna G). None si no se encuentra.
+    Busca en las apariciones ya cargadas la fila con cuota = `numero_cuota`
+    y devuelve el `interes_mes`. No re-escanea el Excel.
     """
-    apariciones = buscar_apariciones(numero_sifco=numero_sifco)
     for a in apariciones:
         if isinstance(a["cuota"], int) and a["cuota"] == numero_cuota:
             if a["interes_mes"] is not None:
@@ -287,7 +286,7 @@ def obtener_capital_inicial(
                 if r_comp is not None:
                     resultados.append(r_comp)
             suma = sum(r["capital_inicial"] for r in resultados)
-            return {
+            res = {
                 "numero_sifco": numero_sifco,
                 "estrategia": "sifco_partido",
                 "capital_inicial": suma,
@@ -296,8 +295,15 @@ def obtener_capital_inicial(
                 "creditos_encontrados": resultados,
                 "advertencia": f"Crédito partido: se sumaron {len(resultados)} SIFCOs ({numero_sifco} + {len(companions)} companion(s))",
             }
+            if validar_cuota is not None:
+                res["validacion"] = {
+                    "cuota": validar_cuota,
+                    "interes_excel": buscar_interes_en_apariciones(apariciones, validar_cuota),
+                    "sifco_consultado": numero_sifco,
+                }
+            return res
 
-        return {
+        res = {
             "numero_sifco": numero_sifco,
             "estrategia": "sifco_directo",
             "capital_inicial": resultado["capital_inicial"],
@@ -307,6 +313,13 @@ def obtener_capital_inicial(
             "nombre_cliente": resultado["nombre"],
             "creditos_encontrados": [resultado],
         }
+        if validar_cuota is not None:
+            res["validacion"] = {
+                "cuota": validar_cuota,
+                "interes_excel": buscar_interes_en_apariciones(apariciones, validar_cuota),
+                "sifco_consultado": numero_sifco,
+            }
+        return res
 
     # 2. Fallback por nombre
     if not nombre:
@@ -388,17 +401,11 @@ def main():
 
     try:
         resultado = obtener_capital_inicial(
-            args.numero_sifco, args.nombre, capital_math=args.capital_math
+            args.numero_sifco,
+            args.nombre,
+            validar_cuota=args.validar_cuota,
+            capital_math=args.capital_math,
         )
-        # Validación de cuota: busca el interés del Excel para la cuota indicada
-        if args.validar_cuota is not None:
-            sifco_base = resultado.get("numero_sifco", args.numero_sifco)
-            interes_excel = buscar_interes_en_cuota(sifco_base, args.validar_cuota)
-            resultado["validacion"] = {
-                "cuota": args.validar_cuota,
-                "interes_excel": interes_excel,
-                "sifco_consultado": sifco_base,
-            }
     except ValueError as e:
         if args.json:
             print(json.dumps({"error": str(e), "numero_sifco": args.numero_sifco}))

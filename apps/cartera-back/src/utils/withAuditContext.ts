@@ -8,7 +8,7 @@ export async function withAuditContext<T>(
   fn: (tx: DbOrTx) => Promise<T>
 ): Promise<T> {
   return db.transaction(async (tx) => {
-    await tx.execute(sql`SET LOCAL app.current_user_id = ${userId.toString()}`);
+    await tx.execute(sql.raw(`SET LOCAL app.current_user_id = '${Number(userId)}'`));
     return fn(tx as unknown as DbOrTx);
   });
 }

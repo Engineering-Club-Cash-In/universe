@@ -941,7 +941,7 @@ export async function processAndReplaceCreditInvestors(
     return {
       ...inv, // trae el id necesario para el update
       credito_id,
-      monto_aportado: montoAportado.toFixed(2),
+      monto_aportado: montoAportado.toFixed(8),
       porcentaje_cash_in: porcentajeCashIn.toString(),
       porcentaje_participacion_inversionista: porcentajeInversion.toString(),
       monto_inversionista: montoInversionista.toFixed(2),
@@ -5257,7 +5257,7 @@ export const exitInvestor = async ({ body, set, request }: any) => {
           // ──────────────────────────────────────────────────────────────────
           const derivadosMergePadre = calcDerivadosCubePuro(nuevoMontoCubePadre);
           const payload = {
-            monto_aportado: nuevoMontoCubePadre.toFixed(2),
+            monto_aportado: nuevoMontoCubePadre.toFixed(8),
             porcentaje_participacion_inversionista: "0",
             porcentaje_cash_in: "100",
             ...derivadosMergePadre,
@@ -5341,7 +5341,7 @@ export const exitInvestor = async ({ body, set, request }: any) => {
                 inversionista_id: CUBE_INVESTMENT_ID,
                 porcentaje_cash_in: "100",
                 porcentaje_participacion_inversionista: "0",
-                monto_aportado: nuevoMontoCubePadre.toFixed(2),
+                monto_aportado: nuevoMontoCubePadre.toFixed(8),
                 ...derivadosSwapEspejo,
                 status: "completado",
                 updated_at: new Date(),
@@ -5363,7 +5363,7 @@ export const exitInvestor = async ({ body, set, request }: any) => {
             const derivadosMergeEspejo = calcDerivadosCubePuro(nuevoMontoCubePadre);
 
             const payloadE = {
-              monto_aportado: nuevoMontoCubePadre.toFixed(2),
+              monto_aportado: nuevoMontoCubePadre.toFixed(8),
               porcentaje_participacion_inversionista: "0",
               porcentaje_cash_in: "100",
               ...derivadosMergeEspejo,

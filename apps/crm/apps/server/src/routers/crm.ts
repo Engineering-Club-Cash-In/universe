@@ -2027,24 +2027,40 @@ export const crmRouter = {
 				});
 			}
 
+			const [current] = await db
+				.select({
+					leadId: opportunities.leadId,
+					closurePercentage: salesStages.closurePercentage,
+				})
+				.from(opportunities)
+				.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!current) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
+			}
+
+			if (current.closurePercentage > 30) {
+				throw new ORPCError("FORBIDDEN", {
+					message:
+						"No se puede reasignar una oportunidad con etapa mayor al 30%",
+				});
+			}
+
 			await db.transaction(async (tx) => {
-				const [updated] = await tx
+				await tx
 					.update(opportunities)
 					.set({ assignedTo: input.assignedTo, updatedAt: new Date() })
-					.where(eq(opportunities.id, input.opportunityId))
-					.returning({ leadId: opportunities.leadId });
+					.where(eq(opportunities.id, input.opportunityId));
 
-				if (!updated) {
-					throw new ORPCError("NOT_FOUND", {
-						message: "Oportunidad no encontrada",
-					});
-				}
-
-				if (updated.leadId) {
+				if (current.leadId) {
 					await tx
 						.update(leads)
 						.set({ assignedTo: input.assignedTo, updatedAt: new Date() })
-						.where(eq(leads.id, updated.leadId));
+						.where(eq(leads.id, current.leadId));
 				}
 			});
 		}),

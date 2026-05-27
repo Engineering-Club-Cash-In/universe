@@ -455,8 +455,24 @@ export async function insertPagosCreditoInversionistas(
 
     console.log(`   ¿Es Cube? ${isCube ? "SÍ ✅" : "NO ❌"}`);
 
+    // Validation 1: monto_aportado in espejo must match last historico (skip if no record = first period)
+    const [lastHistoricoV1] = await db
+      .select({
+        monto_aportado: historico_liquidaciones_espejo.monto_aportado,
+        fecha: historico_liquidaciones_espejo.fecha,
+      })
+      .from(historico_liquidaciones_espejo)
+      .where(
+        and(
+          eq(historico_liquidaciones_espejo.credito_id, credito_id),
+          eq(historico_liquidaciones_espejo.inversionista_id, inv.inversionista_id)
+        )
+      )
+      .orderBy(desc(historico_liquidaciones_espejo.fecha))
+      .limit(1);
+
     // --- Compras de cartera: tomar solo la más reciente para este crédito+inversionista ---
-    const [compraReciente] = await db
+    const comprasRelevantes = await db
       .select({
         monto_aportado: compras_credito_inversionista.monto_aportado,
         status: compras_credito_inversionista.status,
@@ -469,14 +485,7 @@ export async function insertPagosCreditoInversionistas(
           eq(compras_credito_inversionista.inversionista_id, inv.inversionista_id)
         )
       )
-      .orderBy(desc(compras_credito_inversionista.updated_at))
-      .limit(1);
-
-    const comprasRelevantes = compraReciente ? [compraReciente] : [];
-
-    const ahora = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" }));
-    const mesActual = ahora.getMonth();
-    const anioActual = ahora.getFullYear();
+      .orderBy(desc(compras_credito_inversionista.updated_at));
 
     let montoCompraARestar = new Big(0);
     let usarMontoConCompra = false;
@@ -495,34 +504,29 @@ export async function insertPagosCreditoInversionistas(
         montoCompraARestar = montoCompraARestar.plus(montoCompra);
       } else if (compra.status === "completado" && compra.updated_at) {
         const updatedAt = new Date(compra.updated_at);
-        const esMesActual =
-          updatedAt.getMonth() === mesActual &&
-          updatedAt.getFullYear() === anioActual;
-        const esDentrodePrimeros10 = updatedAt.getDate() <= 10;
 
-        if (esMesActual && esDentrodePrimeros10) {
-          // Caso 3: completado días 1-10 mes actual → restar para validación y cálculo
-          montoCompraARestar = montoCompraARestar.plus(montoCompra);
-        } else {
-          // Caso 1: completado mes anterior → restar para validación, pagos sobre monto completo
+        // Usar fecha_vencimiento del pago para determinar el período que se está liquidando,
+        // independientemente de cuándo se ejecute la generación de pagos.
+        const fechaVencimiento = currentPago?.fecha_vencimiento
+          ? new Date(currentPago.fecha_vencimiento)
+          : new Date();
+        const periodoMes = fechaVencimiento.getMonth();
+        const periodoAnio = fechaVencimiento.getFullYear();
+
+        const compraEsDelPeriodoActualODespues =
+          updatedAt.getFullYear() > periodoAnio ||
+          (updatedAt.getFullYear() === periodoAnio && updatedAt.getMonth() >= periodoMes);
+
+        if (!compraEsDelPeriodoActualODespues) {
+          // Caso 1: compra de mes anterior al período → restar para validación, pagar sobre completo
           montoCompraARestar = montoCompraARestar.plus(montoCompra);
           usarMontoConCompra = true;
+        } else {
+          // Caso 3: compra del mes del período o posterior → restar para todo
+          montoCompraARestar = montoCompraARestar.plus(montoCompra);
         }
       }
     }
-
-    // Validation 1: monto_aportado in espejo must match last historico (skip if no record = first period)
-    const [lastHistoricoV1] = await db
-      .select({ monto_aportado: historico_liquidaciones_espejo.monto_aportado })
-      .from(historico_liquidaciones_espejo)
-      .where(
-        and(
-          eq(historico_liquidaciones_espejo.credito_id, credito_id),
-          eq(historico_liquidaciones_espejo.inversionista_id, inv.inversionista_id)
-        )
-      )
-      .orderBy(desc(historico_liquidaciones_espejo.fecha))
-      .limit(1);
 
     const montoParaValidacion = new Big(inv.monto_aportado).minus(montoCompraARestar);
 

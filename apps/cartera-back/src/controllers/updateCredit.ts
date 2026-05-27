@@ -998,6 +998,7 @@ export const updateCredit = async ({ body, set, request }: any) => {
             "MOROSO",
             "PENDIENTE_CANCELACION",
             "EN_CONVENIO",
+            "INCOBRABLE"
           ]),
         ),
       )

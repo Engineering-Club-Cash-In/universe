@@ -478,6 +478,7 @@ export async function insertPagosCreditoInversionistas(
         monto_aportado: compras_credito_inversionista.monto_aportado,
         status: compras_credito_inversionista.status,
         updated_at: compras_credito_inversionista.updated_at,
+        created_at: compras_credito_inversionista.created_at,
       })
       .from(compras_credito_inversionista)
       .where(
@@ -497,6 +498,7 @@ export async function insertPagosCreditoInversionistas(
     const periodoAnio = fechaDelPeriodo.getFullYear();
 
 
+    let montoRestarValidacion = new Big(0);
     let montoRestarCalculo = new Big(0);
 
     for (const compra of comprasRelevantes) {
@@ -507,6 +509,19 @@ export async function insertPagosCreditoInversionistas(
         compra.status === "pendiente_revision" ||
         compra.status === "pendiente_compra_cartera" ||
         compra.status === "pendiente_reinversion";
+
+      // addInvestorToCredit actualiza el espejo cuando se CREA la compra.
+      // Si esa creación fue después del último historico, el historico no lo refleja
+      // y debemos restarlo para que la validación sea consistente.
+      const compraCreatedAt = compra.created_at ? new Date(compra.created_at) : null;
+      const esDesdeUltimoHistorico =
+        lastHistoricoV1 && compraCreatedAt
+          ? compraCreatedAt > new Date(lastHistoricoV1.fecha)
+          : false;
+
+      if (esDesdeUltimoHistorico) {
+        montoRestarValidacion = montoRestarValidacion.plus(montoCompra);
+      }
 
       if (esPendiente) {
         // Caso 2: pendiente → restar de cálculo
@@ -526,12 +541,14 @@ export async function insertPagosCreditoInversionistas(
       }
     }
 
-    // Validation 1: espejo == histórico — compras no modifican creditos_inversionistas_espejo.monto_aportado,
-    // solo processAndReplaceCreditInvestors (capital) lo hace durante liquidación.
-    if (lastHistoricoV1 && !new Big(inv.monto_aportado).eq(new Big(lastHistoricoV1.monto_aportado))) {
+    // Validation 1: espejo ajustado por compras nuevas == histórico
+    // compras creadas DESPUÉS del último historico ya actualizaron el espejo (vía addInvestorToCredit)
+    // pero el historico no las conoce — restamos su delta para comparar correctamente.
+    const montoParaValidacion = new Big(inv.monto_aportado).minus(montoRestarValidacion);
+    if (lastHistoricoV1 && !montoParaValidacion.eq(new Big(lastHistoricoV1.monto_aportado))) {
       throw new Error(
         `[MONTO_ESPEJO_INCONSISTENTE] Inv ${inv.inversionista_id} Cred ${credito_id}: ` +
-        `espejo (${new Big(inv.monto_aportado).toFixed(8)}) ≠ histórico (${lastHistoricoV1.monto_aportado})`
+        `espejo-compras_nuevas (${montoParaValidacion.toFixed(8)}) ≠ histórico (${lastHistoricoV1.monto_aportado})`
       );
     }
 

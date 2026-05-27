@@ -12,6 +12,7 @@ import {
   cuotas_credito,
   abonos_capital,
   historico_liquidaciones_espejo,
+  compras_credito_inversionista,
 } from "../database/db/schema";
 import { desc, gte } from "drizzle-orm";
 import Big from "big.js";
@@ -454,6 +455,62 @@ export async function insertPagosCreditoInversionistas(
 
     console.log(`   ¿Es Cube? ${isCube ? "SÍ ✅" : "NO ❌"}`);
 
+    // --- Compras de cartera: tomar solo la más reciente para este crédito+inversionista ---
+    const [compraReciente] = await db
+      .select({
+        monto_aportado: compras_credito_inversionista.monto_aportado,
+        status: compras_credito_inversionista.status,
+        updated_at: compras_credito_inversionista.updated_at,
+      })
+      .from(compras_credito_inversionista)
+      .where(
+        and(
+          eq(compras_credito_inversionista.credito_id, credito_id),
+          eq(compras_credito_inversionista.inversionista_id, inv.inversionista_id)
+        )
+      )
+      .orderBy(desc(compras_credito_inversionista.updated_at))
+      .limit(1);
+
+    const comprasRelevantes = compraReciente ? [compraReciente] : [];
+
+    const ahora = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" }));
+    const mesActual = ahora.getMonth();
+    const anioActual = ahora.getFullYear();
+
+    let montoCompraARestar = new Big(0);
+    let usarMontoConCompra = false;
+
+    for (const compra of comprasRelevantes) {
+      const montoCompra = new Big(compra.monto_aportado);
+      if (montoCompra.eq(0)) continue;
+
+      const esPendiente =
+        compra.status === "pendiente_revision" ||
+        compra.status === "pendiente_compra_cartera" ||
+        compra.status === "pendiente_reinversion";
+
+      if (esPendiente) {
+        // Caso 2: pendiente → restar para validación y cálculo
+        montoCompraARestar = montoCompraARestar.plus(montoCompra);
+      } else if (compra.status === "completado" && compra.updated_at) {
+        const updatedAt = new Date(compra.updated_at);
+        const esMesActual =
+          updatedAt.getMonth() === mesActual &&
+          updatedAt.getFullYear() === anioActual;
+        const esDentrodePrimeros10 = updatedAt.getDate() <= 10;
+
+        if (esMesActual && esDentrodePrimeros10) {
+          // Caso 3: completado días 1-10 mes actual → restar para validación y cálculo
+          montoCompraARestar = montoCompraARestar.plus(montoCompra);
+        } else {
+          // Caso 1: completado mes anterior → restar para validación, pagos sobre monto completo
+          montoCompraARestar = montoCompraARestar.plus(montoCompra);
+          usarMontoConCompra = true;
+        }
+      }
+    }
+
     // Validation 1: monto_aportado in espejo must match last historico (skip if no record = first period)
     const [lastHistoricoV1] = await db
       .select({ monto_aportado: historico_liquidaciones_espejo.monto_aportado })
@@ -467,16 +524,24 @@ export async function insertPagosCreditoInversionistas(
       .orderBy(desc(historico_liquidaciones_espejo.fecha))
       .limit(1);
 
-    if (lastHistoricoV1 && !new Big(inv.monto_aportado).eq(new Big(lastHistoricoV1.monto_aportado))) {
+    const montoParaValidacion = new Big(inv.monto_aportado).minus(montoCompraARestar);
+
+    if (lastHistoricoV1 && !montoParaValidacion.eq(new Big(lastHistoricoV1.monto_aportado))) {
       throw new Error(
-        `[MONTO_ESPEJO_INCONSISTENTE] Inv ${inv.inversionista_id} Cred ${credito_id}: espejo (${inv.monto_aportado}) ≠ histórico (${lastHistoricoV1.monto_aportado})`
+        `[MONTO_ESPEJO_INCONSISTENTE] Inv ${inv.inversionista_id} Cred ${credito_id}: ` +
+        `espejo-compra (${montoParaValidacion.toFixed(8)}) ≠ histórico (${lastHistoricoV1.monto_aportado})`
       );
     }
+
+    // Monto base para cálculo: completo en Caso 1, con resta en Casos 2 y 3
+    const montoBaseCalculo = usarMontoConCompra
+      ? new Big(inv.monto_aportado)
+      : new Big(inv.monto_aportado).minus(montoCompraARestar);
 
     // --- Calcular los 4 campos desde monto_aportado (misma lógica que processAndReplaceCreditInvestors) ---
     const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
     const porcentajeInversion = new Big(inv.porcentaje_participacion_inversionista);
-    const cuotaCalc = new Big(inv.monto_aportado)
+    const cuotaCalc = montoBaseCalculo
       .times(currentCredit?.porcentaje_interes ?? 0)
       .div(100)
       .round(2);

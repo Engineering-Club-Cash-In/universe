@@ -1,5 +1,6 @@
 import Big from "big.js";
 import { eq, and, inArray, asc, gt, lte, gte, sql } from "drizzle-orm";
+import jwt from "jsonwebtoken";
 import { db } from "../database";
 import {
   creditos,
@@ -13,6 +14,7 @@ import {
 import z from "zod";
 import type { WSCrEstadoCuentaResponse } from "../services/sifco.interface";
 import { consultarEstadoCuentaPrestamo } from "../services/sifcoIntegrations";
+import { withAuditContext } from "../utils/withAuditContext";
 
 interface UpdateInstallmentsParams {
   numero_credito_sifco: string;
@@ -647,11 +649,12 @@ const updateInvestors = async (
   gps: number,
   targetTable: any = creditos_inversionistas,
   parentCuotas?: Map<number, string>,
+  dbInstance: typeof db = db,
 ): Promise<Map<number, string>> => {
   if (!inversionistas || inversionistas.length === 0) return new Map();
 
   // 🔥 NUEVO: Obtener los datos existentes ANTES de borrar para preservar el estado
-  const existingRecords = await db
+  const existingRecords = await dbInstance
     .select()
     .from(targetTable)
     .where(eq(targetTable.credito_id, credito_id));
@@ -666,7 +669,7 @@ const updateInvestors = async (
   });
 
   // Eliminar inversionistas existentes
-  await db
+  await dbInstance
     .delete(targetTable)
     .where(eq(targetTable.credito_id, credito_id));
   console.log(current.capital, "current values ");
@@ -894,7 +897,7 @@ const updateInvestors = async (
 
   // Insertar nuevos inversionistas
   if (creditosInversionistasData.length > 0) {
-    await db.insert(targetTable).values(creditosInversionistasData);
+    await dbInstance.insert(targetTable).values(creditosInversionistasData);
   }
 
   // 🔥 CAPTURAR Y DEVOLVER MAP DE CUOTAS PARA SINCRONIZACIÓN CON ESPEJO
@@ -935,7 +938,21 @@ const syncScheduleOnTermsChange = async ({
 // FUNCIÓN PRINCIPAL DE ACTUALIZACIÓN
 // ========================================
 
-export const updateCredit = async ({ body, set }: any) => {
+const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
+
+const extractUserId = (request: Request): number | null => {
+  try {
+    const authHeader = request.headers.get("Authorization");
+    if (authHeader?.startsWith("Bearer ")) {
+      const token = authHeader.replace("Bearer ", "").trim();
+      const decoded = jwt.verify(token, JWT_SECRET) as any;
+      return decoded.id ?? decoded.user_id ?? null;
+    }
+  } catch { /* token inválido, continuar sin userId */ }
+  return null;
+};
+
+export const updateCredit = async ({ body, set, request }: any) => {
   try {
     console.log("Updating credit with body:", body);
 
@@ -1283,18 +1300,27 @@ export const updateCredit = async ({ body, set }: any) => {
 
       console.log(`🪞 [ESPEJO] Iniciando updateInvestors para credito_id=${credito_id} con ${espejoSincronizado.length} inversionistas`);
       try {
-        await updateInvestors(
-          credito_id,
-          espejoSincronizado,
-          updateFields,
-          current,
-          numero_credito_sifco ?? current.numero_credito_sifco,
-          Number(updateFields.seguro_10_cuotas ?? current.seguro_10_cuotas),
-          Number(updateFields.membresias_pago ?? current.membresias_pago),
-          Number(updateFields.gps ?? current.gps),
-          creditos_inversionistas_espejo,
-          parentCuotas, // 🔥 NUEVO: Pasar las cuotas capturadas del padre
-        );
+        const espejoUserId = extractUserId(request);
+        const runEspejoUpdate = async (dbInstance: typeof db) =>
+          updateInvestors(
+            credito_id,
+            espejoSincronizado,
+            updateFields,
+            current,
+            numero_credito_sifco ?? current.numero_credito_sifco,
+            Number(updateFields.seguro_10_cuotas ?? current.seguro_10_cuotas),
+            Number(updateFields.membresias_pago ?? current.membresias_pago),
+            Number(updateFields.gps ?? current.gps),
+            creditos_inversionistas_espejo,
+            parentCuotas,
+            dbInstance,
+          );
+
+        if (espejoUserId) {
+          await withAuditContext(espejoUserId, runEspejoUpdate);
+        } else {
+          await runEspejoUpdate(db);
+        }
         console.log(`🪞 [ESPEJO] ✅ updateInvestors completado para espejo`);
       } catch (espejoError) {
         console.error(`🪞 [ESPEJO] ❌ Error en updateInvestors espejo:`, espejoError);

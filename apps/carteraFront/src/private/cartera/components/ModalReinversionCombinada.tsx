@@ -17,8 +17,7 @@ interface ModalReinversionCombinadaProps {
 const TIPOS_REINVERSION: { value: TipoReinversionEspejo; label: string; color: string }[] = [
   { value: "sin_reinversion", label: "Sin Reinversión", color: "bg-gray-100 text-gray-700" },
   { value: "reinversion_capital", label: "Capital", color: "bg-green-100 text-green-700" },
-  { value: "reinversion_interes", label: "Interés", color: "bg-blue-100 text-blue-700" },
-  { value: "reinversion_total", label: "Total", color: "bg-purple-100 text-purple-700" },
+  { value: "reinversion_total", label: "Interés Compuesto", color: "bg-purple-100 text-purple-700" },
 ];
 
 const ALL_CREDITS_PER_PAGE = 500;
@@ -84,7 +83,6 @@ export function ModalReinversionCombinada({
   const resumen = useMemo(() => {
     const counts: Record<string, { cantidad: number; monto: number }> = {
       reinversion_capital: { cantidad: 0, monto: 0 },
-      reinversion_interes: { cantidad: 0, monto: 0 },
       reinversion_total: { cantidad: 0, monto: 0 },
       sin_reinversion: { cantidad: 0, monto: 0 },
     };
@@ -170,7 +168,7 @@ export function ModalReinversionCombinada({
 
         {/* Resumen por tipo */}
         <div className="px-6 py-3 border-b bg-gray-50">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             {TIPOS_REINVERSION.map((tipo) => {
               const data = resumen[tipo.value];
               return (
@@ -259,15 +257,12 @@ export function ModalReinversionCombinada({
                           ? "border-gray-300 bg-gray-50 text-gray-600"
                           : tipoActual === "reinversion_capital"
                           ? "border-green-300 bg-green-50 text-green-700"
-                          : tipoActual === "reinversion_interes"
-                          ? "border-blue-300 bg-blue-50 text-blue-700"
                           : "border-purple-300 bg-purple-50 text-purple-700"
                       }`}
                     >
                       <option value="sin_reinversion">Sin Reinversión</option>
                       <option value="reinversion_capital">Capital</option>
-                      <option value="reinversion_interes">Interés</option>
-                      <option value="reinversion_total">Total</option>
+                      <option value="reinversion_total">Interés Compuesto</option>
                     </select>
                   </div>
                 );

@@ -497,7 +497,6 @@ export async function insertPagosCreditoInversionistas(
     const periodoAnio = fechaDelPeriodo.getFullYear();
 
 
-    let montoRestarValidacion = new Big(0);
     let montoRestarCalculo = new Big(0);
 
     for (const compra of comprasRelevantes) {
@@ -510,9 +509,8 @@ export async function insertPagosCreditoInversionistas(
         compra.status === "pendiente_reinversion";
 
       if (esPendiente) {
-        // Caso 2: pendiente → restar de validación y cálculo
-        montoRestarValidacion = montoRestarValidacion.plus(montoCompra);
-        montoRestarCalculo    = montoRestarCalculo.plus(montoCompra);
+        // Caso 2: pendiente → restar de cálculo
+        montoRestarCalculo = montoRestarCalculo.plus(montoCompra);
       } else if (compra.status === "completado" && compra.updated_at) {
         const updatedAt = new Date(compra.updated_at);
         const compraEsDelPeriodoODespues =
@@ -520,23 +518,20 @@ export async function insertPagosCreditoInversionistas(
           (updatedAt.getFullYear() === periodoAnio && updatedAt.getMonth() >= periodoMes);
 
         if (!compraEsDelPeriodoODespues) {
-          // Caso 1: completada antes del período → restar solo de validación (cálculo usa monto completo)
-          montoRestarValidacion = montoRestarValidacion.plus(montoCompra);
+          // Caso 1: completada antes del período → cálculo usa monto completo (no restar)
         } else {
-          // Caso 3: completada en el período o después → restar de validación y cálculo
-          montoRestarValidacion = montoRestarValidacion.plus(montoCompra);
-          montoRestarCalculo    = montoRestarCalculo.plus(montoCompra);
+          // Caso 3: completada en el período o después → restar de cálculo
+          montoRestarCalculo = montoRestarCalculo.plus(montoCompra);
         }
       }
     }
 
-    // Validation 1: espejo - compras == histórico (skip si no hay histórico = primer período)
-    const montoParaValidacion = new Big(inv.monto_aportado).minus(montoRestarValidacion);
-
-    if (lastHistoricoV1 && !montoParaValidacion.eq(new Big(lastHistoricoV1.monto_aportado))) {
+    // Validation 1: espejo == histórico — compras no modifican creditos_inversionistas_espejo.monto_aportado,
+    // solo processAndReplaceCreditInvestors (capital) lo hace durante liquidación.
+    if (lastHistoricoV1 && !new Big(inv.monto_aportado).eq(new Big(lastHistoricoV1.monto_aportado))) {
       throw new Error(
         `[MONTO_ESPEJO_INCONSISTENTE] Inv ${inv.inversionista_id} Cred ${credito_id}: ` +
-        `espejo-compras (${montoParaValidacion.toFixed(8)}) ≠ histórico (${lastHistoricoV1.monto_aportado})`
+        `espejo (${new Big(inv.monto_aportado).toFixed(8)}) ≠ histórico (${lastHistoricoV1.monto_aportado})`
       );
     }
 

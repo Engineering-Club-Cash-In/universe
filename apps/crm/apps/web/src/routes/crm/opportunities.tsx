@@ -6,6 +6,7 @@ import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
+	AlertTriangle,
 	Banknote,
 	Building,
 	Calculator,
@@ -498,6 +499,8 @@ function RouteComponent() {
 
 	const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 	const [deleteReason, setDeleteReason] = useState("");
+	const [reassignConfirmOpen, setReassignConfirmOpen] = useState(false);
+	const [pendingReassignUserId, setPendingReassignUserId] = useState<string | null>(null);
 
 	// State for confirm contracts signed modal
 	const [confirmSignedModalOpen, setConfirmSignedModalOpen] = useState(false);
@@ -547,6 +550,46 @@ function RouteComponent() {
 			toast.error(error.message || "Error al eliminar la oportunidad");
 		},
 	});
+
+	const reassignOpportunityMutation = useMutation({
+		mutationFn: ({
+			opportunityId,
+			assignedTo,
+		}: {
+			opportunityId: string;
+			assignedTo: string;
+		}) => client.reassignOpportunityAndLead({ opportunityId, assignedTo }),
+		onSuccess: async (_data, variables) => {
+			toast.success("Asesor reasignado exitosamente");
+			setReassignConfirmOpen(false);
+			setPendingReassignUserId(null);
+
+			await queryClient.invalidateQueries({
+				predicate: (q) =>
+					q.queryKey[0] === "getOpportunities" ||
+					q.queryKey[0] === "getLeads",
+			});
+
+			if (selectedOpportunity?.id === variables.opportunityId) {
+				const freshOpportunities = await client.getOpportunities();
+				const updated = freshOpportunities.find(
+					(opp) => opp.id === variables.opportunityId,
+				);
+				if (updated) setSelectedOpportunity(updated);
+			}
+		},
+		onError: (error: any) => {
+			toast.error(error.message || "Error al reasignar el asesor");
+		},
+	});
+
+	const handleConfirmReassign = () => {
+		if (!pendingReassignUserId || !selectedOpportunity) return;
+		reassignOpportunityMutation.mutate({
+			opportunityId: selectedOpportunity.id,
+			assignedTo: pendingReassignUserId,
+		});
+	};
 
 	const handleDropOpportunity = (opportunityId: string, newStageId: string) => {
 		// Find the opportunity and the target stage
@@ -1192,6 +1235,7 @@ function RouteComponent() {
 			asesorId?: number;
 			direccion?: string;
 			loanPurpose?: "personal" | "business";
+			assignedTo?: string;
 		}) => client.updateOpportunity(input),
 		onMutate: async (variables) => {
 			const opportunitiesQueryKey = [
@@ -2329,20 +2373,57 @@ function RouteComponent() {
 									)}
 
 									{/* Assigned To */}
-									{selectedOpportunity.assignedUser && (
-										<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-											<Label className="font-semibold text-muted-foreground text-sm">
-												Asignado a
-											</Label>
-											<div className="flex items-center gap-3">
-												<Users className="h-5 w-5 text-muted-foreground" />
-												<span className="font-medium">
-													{selectedOpportunity.assignedUser.name ||
-														"Usuario sin nombre"}
-												</span>
-											</div>
-										</div>
-									)}
+									{(() => {
+										const canReassign =
+											canFilterBySalesperson &&
+											(selectedOpportunity.stage?.closurePercentage ?? 100) <= 30;
+										if (canReassign) {
+											return (
+												<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+													<Label className="font-semibold text-muted-foreground text-sm">
+														Asignado a
+													</Label>
+													<Combobox
+														options={
+															crmUsersQuery.data?.map((u) => ({
+																value: u.id,
+																label: u.name || u.email,
+															})) ?? []
+														}
+														value={selectedOpportunity.assignedUser?.id ?? null}
+														onChange={(value) => {
+															if (value) {
+																setPendingReassignUserId(value);
+																setReassignConfirmOpen(true);
+															}
+														}}
+														placeholder="Buscar asesor por nombre..."
+														width="full"
+														isInModal
+														isLoading={crmUsersQuery.isPending}
+														maxListHeight="400px"
+													/>
+												</div>
+											);
+										}
+										if (selectedOpportunity.assignedUser) {
+											return (
+												<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+													<Label className="font-semibold text-muted-foreground text-sm">
+														Asignado a
+													</Label>
+													<div className="flex items-center gap-3">
+														<Users className="h-5 w-5 text-muted-foreground" />
+														<span className="font-medium">
+															{selectedOpportunity.assignedUser.name ||
+																"Usuario sin nombre"}
+														</span>
+													</div>
+												</div>
+											);
+										}
+										return null;
+									})()}
 
 									{/* Loan Purpose */}
 									{selectedOpportunity.loanPurpose && (
@@ -3569,6 +3650,78 @@ function RouteComponent() {
 								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
 							) : null}
 							Sí, eliminar
+						</Button>
+					</div>
+				</DialogContent>
+			</Dialog>
+
+			{/* Dialog de confirmación para reasignar asesor */}
+			<Dialog
+				open={reassignConfirmOpen}
+				onOpenChange={(open) => {
+					setReassignConfirmOpen(open);
+					if (!open) setPendingReassignUserId(null);
+				}}
+			>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle>¿Confirmar reasignación?</DialogTitle>
+					</DialogHeader>
+					<div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+						<AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+						<div className="space-y-1 text-sm">
+							<p className="font-medium text-amber-800">
+								Esta acción actualizará opportunidad y Lead asociado
+							</p>
+							<p className="text-amber-700">
+								Se asignará{" "}
+								<strong>
+									{crmUsersQuery.data?.find((u) => u.id === pendingReassignUserId)
+										?.name ?? "el asesor seleccionado"}
+								</strong>{" "}
+								como responsable de la oportunidad{" "}
+								<strong>{selectedOpportunity?.title}</strong>.
+							</p>
+							{selectedOpportunity?.lead && (
+								<p className="text-amber-700">
+									Además, el Lead asociado{" "}
+									<strong>
+										{[
+											selectedOpportunity.lead.firstName,
+											selectedOpportunity.lead.lastName,
+										]
+											.filter(Boolean)
+											.join(" ")}
+									</strong>{" "}
+									también será reasignado automáticamente al mismo asesor{" "}
+									<strong>
+									{crmUsersQuery.data?.find((u) => u.id === pendingReassignUserId)
+										?.name ?? "el asesor seleccionado"}
+									</strong>{" "}
+								</p>
+							)}
+						</div>
+					</div>
+					<div className="flex gap-3 pt-2">
+						<Button
+							variant="outline"
+							className="flex-1"
+							onClick={() => {
+								setReassignConfirmOpen(false);
+								setPendingReassignUserId(null);
+							}}
+						>
+							Cancelar
+						</Button>
+						<Button
+							className="flex-1"
+							disabled={reassignOpportunityMutation.isPending}
+							onClick={handleConfirmReassign}
+						>
+							{reassignOpportunityMutation.isPending ? (
+								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+							) : null}
+							Sí, reasignar
 						</Button>
 					</div>
 				</DialogContent>

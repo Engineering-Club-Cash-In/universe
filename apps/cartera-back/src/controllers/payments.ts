@@ -849,8 +849,10 @@ export async function insertPagosCreditoInversionistasV2(
       .orderBy(desc(historico_liquidaciones_espejo.fecha))
       .limit(1);
 
+    let montoBaseCalculoV2 = new Big(inv.monto_aportado ?? 0);
+
     if (lastHistoricoV2) {
-      const { montoRestarValidacion } = await calcularAjusteCompras(
+      const { montoRestarValidacion, montoRestarCalculo } = await calcularAjusteCompras(
         credito_id,
         inv.inversionista_id,
         new Date(lastHistoricoV2.fecha),
@@ -864,10 +866,11 @@ export async function insertPagosCreditoInversionistasV2(
           `espejo-compras_nuevas (${montoParaValidacion.toFixed(8)}) ≠ histórico (${lastHistoricoV2.monto_aportado})`
         );
       }
+      montoBaseCalculoV2 = montoBaseCalculoV2.minus(montoRestarCalculo);
     }
 
-    // Porcentaje general: monto_aportado / SUM(monto_aportado)
-    const porcentajeGeneral = new Big(inv.monto_aportado ?? 0).div(sumMontosAportados);
+    // Porcentaje general: base_calculo / SUM(monto_aportado)
+    const porcentajeGeneral = montoBaseCalculoV2.div(sumMontosAportados);
 
     // Porcentaje de participación según tipo (dividir entre 100 porque se guarda como %)
     const porcentajeParticipacion = isCube

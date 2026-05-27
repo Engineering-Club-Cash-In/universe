@@ -1226,6 +1226,28 @@
     updated_at: timestamp("updated_at").defaultNow(),
   });
 
+  export const historico_liquidaciones_espejo = customSchema.table(
+    "historico_liquidaciones_espejo",
+    {
+      id: serial("id").primaryKey(),
+      monto_aportado: numeric("monto_aportado", { precision: 18, scale: 8 }).notNull(),
+      fecha: timestamp("fecha", { withTimezone: true }).notNull().defaultNow(),
+      inversionista_id: integer("inversionista_id")
+        .notNull()
+        .references(() => inversionistas.inversionista_id, { onDelete: "cascade" }),
+      credito_id: integer("credito_id")
+        .notNull()
+        .references(() => creditos.credito_id, { onDelete: "cascade" }),
+      liquidacion_id: integer("liquidacion_id")
+        .references(() => liquidaciones.liquidacion_id, { onDelete: "set null" }),
+    },
+    (t) => ({
+      ixInvCred: index("ix_historico_liq_inv_cred").on(t.inversionista_id, t.credito_id),
+      ixFecha: index("ix_historico_liq_fecha").on(t.fecha),
+      ixLiquidacion: index("ix_historico_liq_liquidacion_id").on(t.liquidacion_id),
+    })
+  );
+
   // ── Recibos genéricos (sin FK a créditos) ──
   export const recibos_genericos = customSchema.table("recibos_genericos", {
     id: serial("id").primaryKey(),
@@ -1247,6 +1269,27 @@
     concepto: varchar("concepto", { length: 300 }).notNull(),
     monto: numeric("monto", { precision: 18, scale: 2 }).notNull(),
   });
+
+  // ── Historial de cambios de monto_aportado en creditos_inversionistas_espejo ──
+  export const historico_monto_aportado_espejo = customSchema.table(
+    "historico_monto_aportado_espejo",
+    {
+      id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+      txid: bigint("txid", { mode: "number" }).notNull(),
+      operacion: text("operacion").notNull(),
+      credito_id: integer("credito_id").notNull().references(() => creditos.credito_id, { onDelete: "cascade" }),
+      inversionista_id: integer("inversionista_id").notNull().references(() => inversionistas.inversionista_id, { onDelete: "cascade" }),
+      monto_aportado: numeric("monto_aportado", { precision: 18, scale: 8 }).notNull(),
+      platform_user_id: integer("platform_user_id").references(() => platform_users.id, { onDelete: "set null" }),
+      source: text("source").notNull().default("unknown"),
+      fecha: timestamp("fecha", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (t) => ({
+      ixTxid:   index("ix_hist_mont_txid").on(t.txid),
+      ixCred:   index("ix_hist_mont_cred").on(t.credito_id, t.inversionista_id),
+      ixFecha:  index("ix_hist_mont_fecha").on(t.fecha),
+    })
+  );
 
   // ── Audit logs ──
   export const audit_logs = customSchema.table("audit_logs", {

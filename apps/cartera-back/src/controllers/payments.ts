@@ -11,6 +11,7 @@ import {
   boletas,
   cuotas_credito,
   abonos_capital,
+  historico_liquidaciones_espejo,
 } from "../database/db/schema";
 import { desc, gte } from "drizzle-orm";
 import Big from "big.js";
@@ -453,6 +454,25 @@ export async function insertPagosCreditoInversionistas(
 
     console.log(`   ¿Es Cube? ${isCube ? "SÍ ✅" : "NO ❌"}`);
 
+    // Validation 1: monto_aportado in espejo must match last historico (skip if no record = first period)
+    const [lastHistoricoV1] = await db
+      .select({ monto_aportado: historico_liquidaciones_espejo.monto_aportado })
+      .from(historico_liquidaciones_espejo)
+      .where(
+        and(
+          eq(historico_liquidaciones_espejo.credito_id, credito_id),
+          eq(historico_liquidaciones_espejo.inversionista_id, inv.inversionista_id)
+        )
+      )
+      .orderBy(desc(historico_liquidaciones_espejo.fecha))
+      .limit(1);
+
+    if (lastHistoricoV1 && !new Big(inv.monto_aportado).eq(new Big(lastHistoricoV1.monto_aportado))) {
+      throw new Error(
+        `[MONTO_ESPEJO_INCONSISTENTE] Inv ${inv.inversionista_id} Cred ${credito_id}: espejo (${inv.monto_aportado}) ≠ histórico (${lastHistoricoV1.monto_aportado})`
+      );
+    }
+
     // --- Calcular los 4 campos desde monto_aportado (misma lógica que processAndReplaceCreditInvestors) ---
     const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
     const porcentajeInversion = new Big(inv.porcentaje_participacion_inversionista);
@@ -678,6 +698,13 @@ export async function insertPagosCreditoInversionistas(
         console.log(`   💰 Abono a capital encontrado (id: ${abonoCapitalId}): +${montoAbono.toFixed(6)} (tipo: ${abonosNoLiquidados[0].tipo})`);
         console.log(`      abono_capital con abono sumado: ${abono_capital.toString()}`);
       }
+    }
+
+    // Validation 2: abono_capital must not exceed monto_aportado (prevents negative balance)
+    if (abono_capital.gt(new Big(inv.monto_aportado || 0))) {
+      throw new Error(
+        `[ABONO_SUPERA_MONTO] Inv ${inv.inversionista_id} Cred ${credito_id}: abono_capital (${abono_capital.toString()}) > monto_aportado (${inv.monto_aportado})`
+      );
     }
 
     const resultado = {

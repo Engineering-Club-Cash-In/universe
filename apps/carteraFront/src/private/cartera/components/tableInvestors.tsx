@@ -1143,7 +1143,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 </button>
               </DropdownMenuTrigger>
 
-              <DropdownMenuContent align="end" className="w-56 rounded-xl shadow-lg border border-gray-200 p-1">
+              <DropdownMenuContent align="end" className="w-56 rounded-xl shadow-lg border border-gray-200 p-1 bg-white">
                 {/* Descargar PDF */}
                 <DropdownMenuItem
                   onClick={(e) => {

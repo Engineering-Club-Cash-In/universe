@@ -1019,15 +1019,10 @@ export async function processAndReplaceCreditInvestorsReverse(
     throw new Error(`Pago ${pago_id} no encontrado`);
   }
 
-  // 4. Obtener TODOS los pagos de esa cuota
-  const pagosDeEsaCuota = await db
-    .select({ pago_id: pagos_credito.pago_id })
-    .from(pagos_credito)
-    .where(eq(pagos_credito.cuota_id, pago.cuota_id));
+  // 4. La reversa de inversionistas aplica únicamente al pago seleccionado.
+  const pagoIds = [pago_id];
 
-  const pagoIds = pagosDeEsaCuota.map((p) => p.pago_id);
-
-  // 5. Por cada inversionista, sumar abono_capital de TODOS los pagos de esa cuota
+  // 5. Por cada inversionista, sumar abono_capital solo del pago reversado.
   for (const inv of investors) {
     const abonos = pagoIds.length > 0
       ? await db
@@ -1151,7 +1146,13 @@ export async function reversePagosEspejoPorInversionista(
   }
 
   // 5. Obtener cuotas asociadas a los pagos y marcarlas como NO liquidadas
-  const pagoIds = [...new Set(pagosEspejo.map((p) => p.pago_id))];
+  const pagoIds = [
+    ...new Set(
+      pagosEspejo
+        .map((p) => p.pago_id)
+        .filter((id): id is number => id !== null)
+    ),
+  ];
   console.log(`\n📅 Revirtiendo liquidación de cuotas (${pagoIds.length} pago_ids únicos)...`);
 
   if (pagoIds.length > 0) {
@@ -2326,7 +2327,13 @@ export async function revertirLiquidacion(liquidacion_id: number) {
     // PASO 5: Revertir cuotas del crédito
     //   Marcamos liquidado_inversionistas = false y limpiamos fecha
     // ──────────────────────────────────────────────
-    const allPagoIds = [...new Set(pagosLiquidados.map((p) => p.pago_id))];
+    const allPagoIds = [
+      ...new Set(
+        pagosLiquidados
+          .map((p) => p.pago_id)
+          .filter((id): id is number => id !== null)
+      ),
+    ];
     if (allPagoIds.length > 0) {
       const cuotasDeLosPagos = await tx
         .select({ cuota_id: pagos_credito.cuota_id })
@@ -3687,14 +3694,26 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
         }
 
         // Marcar cuotas como liquidado_inversionistas
-        const allPagoIds = [...new Set(pagosNoLiquidados.map((p) => p.pago_id))];
+        const allPagoIds = [
+          ...new Set(
+            pagosNoLiquidados
+              .map((p) => p.pago_id)
+              .filter((id): id is number => id !== null)
+          ),
+        ];
         if (allPagoIds.length > 0) {
           const cuotasDeLosPagos = await tx
             .select({ cuota_id: pagos_credito.cuota_id })
             .from(pagos_credito)
             .where(inArray(pagos_credito.pago_id, allPagoIds));
 
-          const uniqueCuotaIds = [...new Set(cuotasDeLosPagos.map((c) => c.cuota_id))];
+          const uniqueCuotaIds = [
+            ...new Set(
+              cuotasDeLosPagos
+                .map((c) => c.cuota_id)
+                .filter((id): id is number => id !== null)
+            ),
+          ];
           if (uniqueCuotaIds.length > 0) {
             const fechaGuatemala = new Date(
               new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" })

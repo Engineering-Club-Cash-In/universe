@@ -2010,6 +2010,61 @@ export const crmRouter = {
 			return updatedOpportunity[0];
 		}),
 
+	reassignOpportunityAndLead: crmProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				assignedTo: z.string(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			if (
+				context.userRole !== "admin" &&
+				context.userRole !== "sales_supervisor"
+			) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permisos para reasignar oportunidades",
+				});
+			}
+
+			const [current] = await db
+				.select({
+					leadId: opportunities.leadId,
+					closurePercentage: salesStages.closurePercentage,
+				})
+				.from(opportunities)
+				.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!current) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
+			}
+
+			if (current.closurePercentage > 30) {
+				throw new ORPCError("FORBIDDEN", {
+					message:
+						"No se puede reasignar una oportunidad con etapa mayor al 30%",
+				});
+			}
+
+			await db.transaction(async (tx) => {
+				await tx
+					.update(opportunities)
+					.set({ assignedTo: input.assignedTo, updatedAt: new Date() })
+					.where(eq(opportunities.id, input.opportunityId));
+
+				if (current.leadId) {
+					await tx
+						.update(leads)
+						.set({ assignedTo: input.assignedTo, updatedAt: new Date() })
+						.where(eq(leads.id, current.leadId));
+				}
+			});
+		}),
+
 	// Analyst specific endpoints
 	getOpportunitiesForAnalysis: analystProcedure
 		.input(

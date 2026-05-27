@@ -32,6 +32,7 @@ import {
   statusCreditoInversionistaEspejoEnum,
 } from "../database/db/schema";
 import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
+import { calcularAjusteCompras } from "../utils/comprasAjuste";
 import { eq, and, or, sql, inArray, ilike, like, desc, count, SQL, isNull, isNotNull, ne } from "drizzle-orm";
 import { promises as fsPromises } from "node:fs";
 import path from "node:path";
@@ -3672,9 +3673,12 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
 
           const currentMonto = espejoRow?.monto_aportado ?? "0";
 
-          // Validation 3 (cuadre): current espejo must match last historico if one exists
+          // Validation 3 (cuadre): espejo ajustado por compras nuevas == histórico
           const [lastHistorico] = await tx
-            .select({ monto_aportado: historico_liquidaciones_espejo.monto_aportado })
+            .select({
+              monto_aportado: historico_liquidaciones_espejo.monto_aportado,
+              fecha: historico_liquidaciones_espejo.fecha,
+            })
             .from(historico_liquidaciones_espejo)
             .where(
               and(
@@ -3685,14 +3689,22 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
             .orderBy(desc(historico_liquidaciones_espejo.fecha))
             .limit(1);
 
-          if (lastHistorico && !new Big(currentMonto).eq(new Big(lastHistorico.monto_aportado))) {
-            const capitalRestante = new Big(currentMonto).minus(sumaCapitalBig).toFixed(8);
-            const historicoMonto = new Big(lastHistorico.monto_aportado).toFixed(8);
-            throw new Error(
-              `[CUADRE_CAPITAL] Inv ${inv_id} Cred ${creditoId}: ` +
-              `Capital Restante (${capitalRestante}) + Abono Capital (${sumaCapitalBig.toFixed(8)}) ` +
-              `= ${new Big(currentMonto).toFixed(8)} ≠ histórico (${historicoMonto})`
+          if (lastHistorico) {
+            const { montoRestarValidacion } = await calcularAjusteCompras(
+              creditoId,
+              inv_id,
+              new Date(lastHistorico.fecha),
             );
+            const montoAjustado = new Big(currentMonto).minus(montoRestarValidacion);
+            if (!montoAjustado.eq(new Big(lastHistorico.monto_aportado))) {
+              const capitalRestante = new Big(currentMonto).minus(sumaCapitalBig).toFixed(8);
+              const historicoMonto = new Big(lastHistorico.monto_aportado).toFixed(8);
+              throw new Error(
+                `[CUADRE_CAPITAL] Inv ${inv_id} Cred ${creditoId}: ` +
+                `Capital Restante (${capitalRestante}) + Abono Capital (${sumaCapitalBig.toFixed(8)}) ` +
+                `= ${montoAjustado.toFixed(8)} ≠ histórico (${historicoMonto})`
+              );
+            }
           }
 
           if (sumaCapital > 0) {

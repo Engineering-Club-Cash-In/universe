@@ -3433,9 +3433,10 @@ export async function getInvestorMirrorSummary(
 }
 
 export const liquidateByInvestorSchema = z.object({
-  inversionista_id: z.number().optional(), // 🆕 Ahora es opcional
+  inversionista_id: z.number().optional(),
+  fecha_liquidacion: z.string().datetime().optional(),
 });
-export async function liquidateByInvestorId(inversionista_id?: number) {
+export async function liquidateByInvestorId(inversionista_id?: number, fechaLiquidacion?: Date) {
   // Verificar si ya hay una liquidación en proceso para este inversionista (o masiva)
   const lockExistente = await db
     .select({ id: liquidacion_locks.id, started_at: liquidacion_locks.started_at })
@@ -3606,7 +3607,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
             reinversion_capital: reinvCapital.toString(),
             reinversion_interes: reinvInteres.toString(),
             reinversion_total: reinvTotal.toString(),
-            fecha_liquidacion: new Date(),
+            fecha_liquidacion: fechaLiquidacion ?? new Date(),
           })
           .returning();
 
@@ -3714,6 +3715,7 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
               inversionista_id: inv_id,
               credito_id: creditoId,
               liquidacion_id: liquidacion.liquidacion_id,
+              fecha: fechaLiquidacion ?? new Date(),
             });
         }
 

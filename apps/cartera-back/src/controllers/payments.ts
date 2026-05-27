@@ -321,7 +321,8 @@ export async function insertPagosCreditoInversionistas(
   excludeCube: boolean = false,
   cuotaPagada:boolean = false,
   updateCredito: boolean = true,  // si false, omite el UPDATE a creditos_inversionistas_espejo
-  inversionista_id?: number
+  inversionista_id?: number,
+  fechaPeriodo?: Date
 ) {
   console.log(
     "\n🔍 ========== INICIO insertPagosCreditoInversionistas =========="
@@ -455,7 +456,7 @@ export async function insertPagosCreditoInversionistas(
 
     console.log(`   ¿Es Cube? ${isCube ? "SÍ ✅" : "NO ❌"}`);
 
-    // Validation 1: monto_aportado in espejo must match last historico (skip if no record = first period)
+    // Último snapshot del inversionista — determina período de referencia para compras
     const [lastHistoricoV1] = await db
       .select({
         monto_aportado: historico_liquidaciones_espejo.monto_aportado,
@@ -471,7 +472,7 @@ export async function insertPagosCreditoInversionistas(
       .orderBy(desc(historico_liquidaciones_espejo.fecha))
       .limit(1);
 
-    // --- Compras de cartera: tomar solo la más reciente para este crédito+inversionista ---
+    // --- Compras de cartera: todas las compras del inversionista en este crédito ---
     const comprasRelevantes = await db
       .select({
         monto_aportado: compras_credito_inversionista.monto_aportado,
@@ -487,6 +488,15 @@ export async function insertPagosCreditoInversionistas(
       )
       .orderBy(desc(compras_credito_inversionista.updated_at));
 
+    // fechaPeriodo: viene del front (fecha explícita del período a liquidar).
+    // Fallback: fecha_vencimiento del pago registrado.
+    const fechaDelPeriodo = fechaPeriodo
+      ?? (currentPago?.fecha_vencimiento ? new Date(currentPago.fecha_vencimiento) : new Date());
+
+    const periodoMes = fechaDelPeriodo.getMonth();
+    const periodoAnio = fechaDelPeriodo.getFullYear();
+
+
     let montoCompraARestar = new Big(0);
     let usarMontoConCompra = false;
 
@@ -500,44 +510,36 @@ export async function insertPagosCreditoInversionistas(
         compra.status === "pendiente_reinversion";
 
       if (esPendiente) {
-        // Caso 2: pendiente → restar para validación y cálculo
+        // Caso 2: pendiente (cualquier fecha) → restar para validación y cálculo
         montoCompraARestar = montoCompraARestar.plus(montoCompra);
       } else if (compra.status === "completado" && compra.updated_at) {
         const updatedAt = new Date(compra.updated_at);
-
-        // Usar fecha_vencimiento del pago para determinar el período que se está liquidando,
-        // independientemente de cuándo se ejecute la generación de pagos.
-        const fechaVencimiento = currentPago?.fecha_vencimiento
-          ? new Date(currentPago.fecha_vencimiento)
-          : new Date();
-        const periodoMes = fechaVencimiento.getMonth();
-        const periodoAnio = fechaVencimiento.getFullYear();
-
-        const compraEsDelPeriodoActualODespues =
+        const compraEsDelPeriodoODespues =
           updatedAt.getFullYear() > periodoAnio ||
           (updatedAt.getFullYear() === periodoAnio && updatedAt.getMonth() >= periodoMes);
 
-        if (!compraEsDelPeriodoActualODespues) {
-          // Caso 1: compra de mes anterior al período → restar para validación, pagar sobre completo
+        if (!compraEsDelPeriodoODespues) {
+          // Caso 1: completada en mes anterior al período → restar para validación, pagar sobre completo
           montoCompraARestar = montoCompraARestar.plus(montoCompra);
           usarMontoConCompra = true;
         } else {
-          // Caso 3: compra del mes del período o posterior → restar para todo
+          // Caso 3: completada en el mes del período o después → restar para todo
           montoCompraARestar = montoCompraARestar.plus(montoCompra);
         }
       }
     }
 
+    // Validation 1: espejo - compras == histórico (skip si no hay histórico = primer período)
     const montoParaValidacion = new Big(inv.monto_aportado).minus(montoCompraARestar);
 
     if (lastHistoricoV1 && !montoParaValidacion.eq(new Big(lastHistoricoV1.monto_aportado))) {
       throw new Error(
         `[MONTO_ESPEJO_INCONSISTENTE] Inv ${inv.inversionista_id} Cred ${credito_id}: ` +
-        `espejo-compra (${montoParaValidacion.toFixed(8)}) ≠ histórico (${lastHistoricoV1.monto_aportado})`
+        `espejo-compras (${montoParaValidacion.toFixed(8)}) ≠ histórico (${lastHistoricoV1.monto_aportado})`
       );
     }
 
-    // Monto base para cálculo: completo en Caso 1, con resta en Casos 2 y 3
+    // Base de cálculo: Caso 1 → espejo completo; Casos 2 y 3 → espejo menos compras
     const montoBaseCalculo = usarMontoConCompra
       ? new Big(inv.monto_aportado)
       : new Big(inv.monto_aportado).minus(montoCompraARestar);
@@ -818,6 +820,7 @@ export async function insertPagosCreditoInversionistas(
 export async function insertPagosCreditoInversionistasV2(
   pago_id: number,
   credito_id: number,
+  fechaPeriodo?: Date,
 ) {
   // 1. Obtener el pago
   const currentPago = await db.query.pagos_credito.findFirst({

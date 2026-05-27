@@ -1404,6 +1404,7 @@ interface CreateBoletaInput {
   monto_boleta?: number | string;
   notas?: string;
   subido_por?: string;
+  fecha_liquidacion?: string; // ISO date — período que se está liquidando
 }
 
 interface CreateBoletaResponse {
@@ -1483,7 +1484,8 @@ export async function createBoleta(
     //    liquidateByInvestorId detecta la boleta PENDIENTE y la marca como PROCESADO
     //    Si falla, la boleta queda PENDIENTE para reintentar
     const { liquidateByInvestorId } = await import("./investor");
-    liquidateByInvestorId(data.inversionista_id).catch((err) => {
+    const fechaLiquidacion = data.fecha_liquidacion ? new Date(data.fecha_liquidacion) : undefined;
+    liquidateByInvestorId(data.inversionista_id, fechaLiquidacion).catch((err) => {
       console.error(`❌ [Background] Error liquidando inversionista ${data.inversionista_id} post-boleta:`, err);
     });
 

@@ -497,8 +497,8 @@ export async function insertPagosCreditoInversionistas(
     const periodoAnio = fechaDelPeriodo.getFullYear();
 
 
-    let montoCompraARestar = new Big(0);
-    let usarMontoConCompra = false;
+    let montoRestarValidacion = new Big(0);
+    let montoRestarCalculo = new Big(0);
 
     for (const compra of comprasRelevantes) {
       const montoCompra = new Big(compra.monto_aportado);
@@ -510,8 +510,9 @@ export async function insertPagosCreditoInversionistas(
         compra.status === "pendiente_reinversion";
 
       if (esPendiente) {
-        // Caso 2: pendiente (cualquier fecha) → restar para validación y cálculo
-        montoCompraARestar = montoCompraARestar.plus(montoCompra);
+        // Caso 2: pendiente → restar de validación y cálculo
+        montoRestarValidacion = montoRestarValidacion.plus(montoCompra);
+        montoRestarCalculo    = montoRestarCalculo.plus(montoCompra);
       } else if (compra.status === "completado" && compra.updated_at) {
         const updatedAt = new Date(compra.updated_at);
         const compraEsDelPeriodoODespues =
@@ -519,18 +520,18 @@ export async function insertPagosCreditoInversionistas(
           (updatedAt.getFullYear() === periodoAnio && updatedAt.getMonth() >= periodoMes);
 
         if (!compraEsDelPeriodoODespues) {
-          // Caso 1: completada en mes anterior al período → restar para validación, pagar sobre completo
-          montoCompraARestar = montoCompraARestar.plus(montoCompra);
-          usarMontoConCompra = true;
+          // Caso 1: completada antes del período → restar solo de validación (cálculo usa monto completo)
+          montoRestarValidacion = montoRestarValidacion.plus(montoCompra);
         } else {
-          // Caso 3: completada en el mes del período o después → restar para todo
-          montoCompraARestar = montoCompraARestar.plus(montoCompra);
+          // Caso 3: completada en el período o después → restar de validación y cálculo
+          montoRestarValidacion = montoRestarValidacion.plus(montoCompra);
+          montoRestarCalculo    = montoRestarCalculo.plus(montoCompra);
         }
       }
     }
 
     // Validation 1: espejo - compras == histórico (skip si no hay histórico = primer período)
-    const montoParaValidacion = new Big(inv.monto_aportado).minus(montoCompraARestar);
+    const montoParaValidacion = new Big(inv.monto_aportado).minus(montoRestarValidacion);
 
     if (lastHistoricoV1 && !montoParaValidacion.eq(new Big(lastHistoricoV1.monto_aportado))) {
       throw new Error(
@@ -539,10 +540,7 @@ export async function insertPagosCreditoInversionistas(
       );
     }
 
-    // Base de cálculo: Caso 1 → espejo completo; Casos 2 y 3 → espejo menos compras
-    const montoBaseCalculo = usarMontoConCompra
-      ? new Big(inv.monto_aportado)
-      : new Big(inv.monto_aportado).minus(montoCompraARestar);
+    const montoBaseCalculo = new Big(inv.monto_aportado).minus(montoRestarCalculo);
 
     // --- Calcular los 4 campos desde monto_aportado (misma lógica que processAndReplaceCreditInvestors) ---
     const porcentajeCashIn = new Big(inv.porcentaje_cash_in);

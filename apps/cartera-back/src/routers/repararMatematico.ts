@@ -249,7 +249,7 @@ async function ejecutarConConcurrencia<T>(
 
 interface ExcelLookupResult {
   numero_sifco: string;
-  estrategia: "sifco_directo" | "nombre_unico" | "nombre_partido";
+  estrategia: "sifco_directo" | "sifco_partido" | "nombre_unico" | "nombre_partido";
   capital_inicial: number;
   fuente: string;
   nombre_cliente: string | null;
@@ -257,15 +257,28 @@ interface ExcelLookupResult {
   primera_hoja?: string;
   advertencia?: string;
   creditos_encontrados?: Array<{ sifco: string; capital_inicial: number; fuente: string }>;
+  validacion?: {
+    cuota: number;
+    interes_excel: number | null;
+    sifco_consultado: string;
+  };
 }
 
 async function buscarCapitalEnExcel(
   numero_sifco: string,
   nombre_cliente: string | null,
+  validar_cuota?: number,
+  capital_math?: number,
 ): Promise<{ ok: true; data: ExcelLookupResult } | { ok: false; error: string }> {
   const args = [PYTHON_SCRIPT_PATH, numero_sifco, "--json"];
   if (nombre_cliente) {
     args.push("--nombre", nombre_cliente);
+  }
+  if (validar_cuota !== undefined) {
+    args.push("--validar-cuota", String(validar_cuota));
+  }
+  if (capital_math !== undefined) {
+    args.push("--capital-math", String(capital_math));
   }
 
   try {
@@ -305,20 +318,68 @@ type ResultadoExcel =
       advertencia?: string;
       creditos_encontrados?: any[];
       pagos_actualizados?: number;
+      validacion?: {
+        cuota: number;
+        interes_excel: number;
+        interes_predicho: number;
+        diff: number;
+        ok: boolean;
+      };
     }
   | {
       estado: "no_se_pudo";
       numero_credito_sifco: string;
       razon: string;
       nombre_cliente: string | null;
+    }
+  | {
+      estado: "validacion_fallida";
+      numero_credito_sifco: string;
+      capital_inicial: number;
+      estrategia: string;
+      nombre_cliente: string | null;
+      cuota_validada: number;
+      interes_excel: number;
+      interes_predicho: number;
+      diff: number;
+      razon: string;
     };
+
+const TOLERANCIA_INTERES = new Big("5");
+
+/**
+ * Forward-amortiza el capital P a través de `pasos` cuotas, usando la misma lógica
+ * que repararTotalRestante.
+ */
+function forwardAmortizar(
+  P: Big,
+  cuotaFija: Big,
+  fijos: Big,
+  tasa: Big,
+  pasos: number,
+): Big {
+  const factor = new Big(1).plus(tasa.times("1.12"));
+  let capital = P;
+  for (let k = 0; k < pasos; k++) {
+    capital = capital.times(factor).minus(cuotaFija.minus(fijos));
+    if (capital.lt(0)) capital = new Big(0);
+  }
+  return capital;
+}
 
 async function procesarCreditoConExcel(
   numero_credito_sifco: string,
   opciones: { reparar: boolean } = { reparar: true },
 ): Promise<ResultadoExcel> {
+  // 1. Info del crédito (nombre + params para validación)
   const [info] = await db
     .select({
+      credito_id: creditos.credito_id,
+      cuota: creditos.cuota,
+      porcentaje_interes: creditos.porcentaje_interes,
+      seguro_10_cuotas: creditos.seguro_10_cuotas,
+      gps: creditos.gps,
+      membresias_pago: creditos.membresias_pago,
       nombre: usuarios.nombre,
     })
     .from(creditos)
@@ -328,7 +389,37 @@ async function procesarCreditoConExcel(
 
   const nombre_cliente = info?.nombre ?? null;
 
-  const excel = await buscarCapitalEnExcel(numero_credito_sifco, nombre_cliente);
+  // 2. Última cuota pagada (para validación)
+  let ultimaCuotaPagada: number | null = null;
+  if (info?.credito_id) {
+    const [u] = await db
+      .select({
+        max: sql<number>`COALESCE(MAX(${cuotas_credito.numero_cuota}), 0)`,
+      })
+      .from(cuotas_credito)
+      .where(
+        and(
+          eq(cuotas_credito.credito_id, info.credito_id),
+          eq(cuotas_credito.pagado, true),
+          sql`${cuotas_credito.numero_cuota} > 0`,
+        ),
+      );
+    ultimaCuotaPagada = Number(u?.max ?? 0) || null;
+  }
+
+  // 3. Calcular el capital por matemática (hint para optimizar la búsqueda de companions)
+  const calcMath = await calcularCapitalInicialDesdeBD(numero_credito_sifco);
+  const capitalMathHint = calcMath
+    ? Number(calcMath.capital_inicial.round(2))
+    : undefined;
+
+  // 4. Buscar en Excel (con validacion de cuota + hint matemático)
+  const excel = await buscarCapitalEnExcel(
+    numero_credito_sifco,
+    nombre_cliente,
+    ultimaCuotaPagada ?? undefined,
+    capitalMathHint,
+  );
   if (!excel.ok) {
     return {
       estado: "no_se_pudo",
@@ -338,6 +429,64 @@ async function procesarCreditoConExcel(
     };
   }
 
+  // 4. Sanity check de validación: comparar interés predicho vs interés del Excel
+  // Solo si: tenemos ultima cuota, no es estrategia partida, y el Excel devolvió un interes
+  const esPartido =
+    excel.data.estrategia === "sifco_partido" ||
+    excel.data.estrategia === "nombre_partido";
+
+  let validacion: {
+    cuota: number;
+    interes_excel: number;
+    interes_predicho: number;
+    diff: number;
+    ok: boolean;
+  } | undefined = undefined;
+
+  if (
+    !esPartido &&
+    ultimaCuotaPagada &&
+    excel.data.validacion?.interes_excel != null &&
+    info
+  ) {
+    const P = new Big(excel.data.capital_inicial);
+    const cuotaFija = new Big(info.cuota);
+    const fijos = new Big(info.seguro_10_cuotas ?? 0)
+      .plus(info.gps ?? 0)
+      .plus(info.membresias_pago ?? 0);
+    const tasa = new Big(info.porcentaje_interes ?? 0).div(100);
+
+    // capital ANTES de la cuota N = forward amortizar (N-1) veces
+    const capitalAntes = forwardAmortizar(P, cuotaFija, fijos, tasa, ultimaCuotaPagada - 1);
+    const interesPredicho = capitalAntes.times(tasa);
+    const interesExcel = new Big(excel.data.validacion.interes_excel);
+    const diff = interesPredicho.minus(interesExcel).abs();
+
+    validacion = {
+      cuota: ultimaCuotaPagada,
+      interes_excel: Number(interesExcel.round(4)),
+      interes_predicho: Number(interesPredicho.round(4)),
+      diff: Number(diff.round(4)),
+      ok: diff.lte(TOLERANCIA_INTERES),
+    };
+
+    if (!validacion.ok) {
+      return {
+        estado: "validacion_fallida",
+        numero_credito_sifco,
+        capital_inicial: excel.data.capital_inicial,
+        estrategia: excel.data.estrategia,
+        nombre_cliente,
+        cuota_validada: validacion.cuota,
+        interes_excel: validacion.interes_excel,
+        interes_predicho: validacion.interes_predicho,
+        diff: validacion.diff,
+        razon: `Interés Excel (Q${validacion.interes_excel}) vs predicho (Q${validacion.interes_predicho}) | diff Q${validacion.diff} > Q${TOLERANCIA_INTERES}. Posible abono extra a capital.`,
+      };
+    }
+  }
+
+  // 5. Reparar (si validación pasó o no aplicaba)
   let pagos_actualizados: number | undefined;
   if (opciones.reparar) {
     const r = await repararTotalRestante({
@@ -358,6 +507,7 @@ async function procesarCreditoConExcel(
     advertencia: excel.data.advertencia,
     creditos_encontrados: excel.data.creditos_encontrados,
     pagos_actualizados,
+    validacion,
   };
 }
 
@@ -499,6 +649,7 @@ export const repararMatematicoRouter = new Elysia()
 
       const reparados: any[] = [];
       const no_se_pudo: any[] = [];
+      const validacion_fallida: any[] = [];
       const errores: any[] = [];
       for (const r of resultados) {
         if (r == null) continue;
@@ -509,6 +660,7 @@ export const repararMatematicoRouter = new Elysia()
         const estado = (r as any).estado;
         if (estado === "reparado_excel") reparados.push(r);
         else if (estado === "no_se_pudo") no_se_pudo.push(r);
+        else if (estado === "validacion_fallida") validacion_fallida.push(r);
       }
 
       // Agrupar razones de no_se_pudo
@@ -525,7 +677,7 @@ export const repararMatematicoRouter = new Elysia()
       }
 
       console.log(
-        `✅ Excel bulk en ${elapsed_seg}s: ${reparados.length} reparados, ${no_se_pudo.length} no_se_pudo, ${errores.length} errores`,
+        `✅ Excel bulk en ${elapsed_seg}s: ${reparados.length} reparados, ${validacion_fallida.length} validacion_fallida, ${no_se_pudo.length} no_se_pudo, ${errores.length} errores`,
       );
 
       set.status = 200;
@@ -533,6 +685,7 @@ export const repararMatematicoRouter = new Elysia()
         success: true,
         total_procesados: resultados.length,
         reparados_count: reparados.length,
+        validacion_fallida_count: validacion_fallida.length,
         no_se_pudo_count: no_se_pudo.length,
         errores_count: errores.length,
         estrategias,
@@ -540,6 +693,7 @@ export const repararMatematicoRouter = new Elysia()
         elapsed_seg,
         dry_run,
         reparados,
+        validacion_fallida,
         no_se_pudo,
         errores,
       };

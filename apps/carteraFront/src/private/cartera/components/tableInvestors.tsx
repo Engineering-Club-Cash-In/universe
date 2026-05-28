@@ -31,6 +31,7 @@ import { useCatalogs } from "../hooks/catalogs";
 import {
   inversionistasService,
   notificarContabilidadBoletas,
+  formatMensajeFallido,
   type Investor,
   type InvestorPayload,
 } from "../services/services";
@@ -205,18 +206,27 @@ export function TableInvestors() {
 
   // 🚀 Cálculo directo sin modal (Nuevo flujo)
   const handleCalcularPagosDirecto = (inversionistaId: number) => {
-    console.log("🚀 Calculando pagos espejo para:", inversionistaId);
     setSelectedInversionista(inversionistaId); // Para que el spinner se muestre en el row correcto
 
     calcularPagosEspejo(inversionistaId, {
       onSuccess: (data) => {
         if (data.success) {
-          console.log("✅ Pagos calculados correctamente");
           setIsDraft(true);
-          setDraftInvestorId(inversionistaId); // 📍 Guardamos el ID
+          setDraftInvestorId(inversionistaId);
           refetch();
           refetchTotales();
           setSelectedInversionista(null);
+
+          const fallidos = data.fallidos ?? [];
+          if (fallidos.length > 0) {
+            const lista = fallidos
+              .map((f) => `• ${f.numeroCreditoSifco}: ${formatMensajeFallido(f.mensaje)}`)
+              .join("\n");
+            toast.warning(
+              `${fallidos.length} crédito${fallidos.length !== 1 ? "s" : ""} no se procesaron`,
+              { description: lista, duration: 10000 }
+            );
+          }
         }
       },
       onError: (error) => {
@@ -233,26 +243,44 @@ export function TableInvestors() {
     setSelectedInversionista(null);
   };
 
-  // 🆕 Cancelar liquidación
-  const [showLiquidarTodosModal, setShowLiquidarTodosModal] = useState(false);
-  const handleConfirmarLiquidarTodos = () => {
+  const handleConfirmarLiquidar = () => {
     liquidateMutation.mutate(
-      undefined, // Sin inversionista_id = liquida TODOS
+      {
+        ...(liquidarModalTarget != null ? { inversionista_id: liquidarModalTarget } : {}),
+        fecha_liquidacion: new Date(fechaLiquidacion).toISOString(),
+      },
       {
         onSuccess: (data) => {
-          setShowLiquidarTodosModal(false);
+          if (data.errores && data.errores.length > 0) {
+            const lista = data.errores.map((e) => `• ${e.razon}`).join("\n");
+            if ((data.liquidaciones_creadas ?? 0) > 0) {
+              toast.warning(
+                `Liquidación parcial. ${data.liquidaciones_creadas} liquidado(s). Créditos con inconsistencia:\n${lista}`,
+                { duration: 12000 }
+              );
+            } else {
+              toast.error(
+                `No se pudo liquidar. Créditos con inconsistencia:\n${lista}`,
+                { duration: 12000 }
+              );
+            }
+          } else {
+            toast.success(data.message ?? "Liquidación completada");
+          }
+          setLiquidarModalTarget(undefined);
           refetch();
           refetchTotales();
-          alert(`✅ ${data.message}\n${data.updatedCount} pagos liquidados`);
         },
-        onError: (error) => {
-          alert(`❌ Error: ${error.message}`);
+        onError: (error: any) => {
+          const detalle =
+            error?.response?.data?.error ||
+            error?.response?.data?.message ||
+            error?.message ||
+            "Error desconocido";
+          toast.error(`❌ Error al liquidar: ${detalle}`, { duration: 15000 });
         },
       }
     );
-  };
-  const handleCancelarLiquidarTodos = () => {
-    setShowLiquidarTodosModal(false);
   };
   const [searchParams] = useSearchParams();
   const initialInvestorIdFromUrl = (() => {
@@ -310,6 +338,10 @@ export function TableInvestors() {
 
   const [incluirLiquidados, setIncluirLiquidados] = useState(false);
   const [numeroCuota, setNumeroCuota] = useState<number | undefined>(undefined);
+  const [fechaLiquidacion, setFechaLiquidacion] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  // Modal unificado de liquidación: null = todos, number = inversionista_id específico
+  const [liquidarModalTarget, setLiquidarModalTarget] = useState<number | null | undefined>(undefined);
+  const showLiquidarModal = liquidarModalTarget !== undefined;
   // Consulta con paginación y filtro por id
   // 🔥 NUEVO: Siempre consultar tablas ESPEJO
   const { data, isLoading, isError, isFetching, refetch } = useGetInvestors({
@@ -414,12 +446,6 @@ export function TableInvestors() {
       (inv.creditos ?? []).some((cred) => (cred.pagos ?? []).length > 0)
     ) ?? false;
 
-  console.log(
-    "[DEBUG] ¿Algún inversionista tiene pagos pendientes?:",
-    tienePagosPendientes
-  );
-
-
   // 🆕 Efecto para activar Modo Borrador automático (Optimizado)
   // Se reducen las dependencias para evitar renders infinitos.
   useEffect(() => {
@@ -441,13 +467,11 @@ export function TableInvestors() {
 
     if (algunCreditoConPagos && tienePagoNoLiquidado) {
       if (!isDraft || draftInvestorId !== currentInv.inversionista_id) {
-        console.log("🛠️ Auto-Draft: ON (Al menos un crédito con pagos) para", currentInv.nombre_inversionista);
         setIsDraft(true);
         setDraftInvestorId(currentInv.inversionista_id);
       }
     } else {
       if (isDraft) {
-        console.log("🍃 Auto-Draft: OFF (No hay créditos con pagos o no hay pendientes)");
         setIsDraft(false);
         setDraftInvestorId(null);
       }
@@ -500,7 +524,6 @@ export function TableInvestors() {
 
   const handleEditInvestor = (inv: any) => {
     setModalMode("update");
-    console.log(inv);
     setSelectedInvestorData({
       inversionista_id: inv.inversionista_id,
       nombre: inv.nombre_inversionista,
@@ -1213,10 +1236,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                       toast.error("No se puede liquidar: falta boleta y cuota con reinversión no es 0");
                       return;
                     }
-                    liquidateMutation.mutate(
-                      { inversionista_id: inv.inversionista_id },
-                      { onSuccess: () => { refetch(); refetchTotales(); } }
-                    );
+                    setLiquidarModalTarget(inv.inversionista_id);
                   }}
                   disabled={liquidateMutation.isPending || (!reinversionEnCero && !tieneBoletaPendiente)}
                   className={`cursor-pointer rounded-lg px-3 py-2.5 focus:bg-green-50 ${(!reinversionEnCero && !tieneBoletaPendiente) ? 'opacity-40' : ''}`}
@@ -1887,10 +1907,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
               toast.error("No se puede liquidar: falta boleta y cuota con reinversión no es 0");
               return;
             }
-            liquidateMutation.mutate(
-              { inversionista_id: inv.inversionista_id },
-              { onSuccess: () => { refetch(); refetchTotales(); } }
-            );
+            setLiquidarModalTarget(inv.inversionista_id);
           }}
         >
           {liquidateMutation.isPending ? (
@@ -2314,81 +2331,58 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        {/* Modal unificado de liquidación — individual o todos */}
         <Dialog
-          open={showLiquidarTodosModal}
-          onOpenChange={setShowLiquidarTodosModal}
+          open={showLiquidarModal}
+          onOpenChange={(open) => { if (!open) setLiquidarModalTarget(undefined); }}
         >
           <DialogContent className="bg-white dark:bg-gray-900 max-w-md">
             <DialogHeader>
-              <DialogTitle className="text-red-700 dark:text-red-400 text-xl font-bold flex items-center gap-2">
-                <span className="text-2xl">⚠️</span>
-                ¿Liquidar TODOS los pagos?
+              <DialogTitle className="text-green-700 dark:text-green-400 text-xl font-bold flex items-center gap-2">
+                <CheckCircle className="h-5 w-5" />
+                {liquidarModalTarget != null ? "Confirmar liquidación" : "Liquidar TODOS los pagos"}
               </DialogTitle>
               <DialogDescription className="space-y-4 pt-4">
-                <div className="bg-red-50 dark:bg-red-900/20 border-2 border-red-300 dark:border-red-700 rounded-lg p-4">
-                  <p className="text-red-900 dark:text-red-100 text-base font-bold mb-2">
-                    ⚠️ ACCIÓN MASIVA - USAR CON PRECAUCIÓN
-                  </p>
-                  <p className="text-red-800 dark:text-red-200 text-sm">
-                    Esta acción liquidará{" "}
-                    <strong>TODOS los pagos NO liquidados</strong> de{" "}
-                    <strong>TODOS los inversionistas</strong> en el sistema.
-                  </p>
-                </div>
-
-                <div className="space-y-2 text-sm">
-                  <p className="text-gray-700 dark:text-gray-300">
-                    📋 Se cambiarán todos los estados de "NO_LIQUIDADO" a
-                    "LIQUIDADO"
-                  </p>
-                  <p className="text-gray-700 dark:text-gray-300">
-                    💰 Esto afectará a todos los inversionistas con pagos
-                    pendientes
-                  </p>
-                  <p className="text-gray-700 dark:text-gray-300">
-                    ⏰ Esta acción puede tardar varios segundos dependiendo del
-                    volumen
-                  </p>
-                  <p className="text-red-600 dark:text-red-400 font-bold">
-                    ⚠️ Esta acción NO se puede deshacer
-                  </p>
-                </div>
-
-                {tienePagosPendientes && (
-                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-300 dark:border-blue-700 rounded-lg p-3">
-                    <p className="text-blue-900 dark:text-blue-100 text-sm">
-                      ℹ️ Actualmente hay pagos pendientes en el sistema que
-                      serán liquidados.
+                {liquidarModalTarget == null && (
+                  <div className="bg-red-50 dark:bg-red-900/20 border-2 border-red-300 dark:border-red-700 rounded-lg p-4">
+                    <p className="text-red-900 dark:text-red-100 text-sm font-bold">
+                      ⚠️ ACCIÓN MASIVA — afectará a TODOS los inversionistas con pagos pendientes.
                     </p>
                   </div>
                 )}
+                <div className="space-y-2">
+                  <label className="block text-sm font-bold text-gray-700 dark:text-gray-300">
+                    Fecha del período de liquidación
+                  </label>
+                  <input
+                    type="date"
+                    value={fechaLiquidacion}
+                    onChange={(e) => setFechaLiquidacion(e.target.value)}
+                    className="w-full border border-blue-300 rounded-lg px-3 py-2 bg-blue-50 text-blue-900 focus:ring-2 focus:ring-blue-400 focus:outline-none"
+                  />
+                  <p className="text-xs text-gray-500">
+                    Esta fecha determina el período al que pertenece la liquidación.
+                  </p>
+                </div>
               </DialogDescription>
             </DialogHeader>
-
             <DialogFooter className="gap-2 sm:gap-0 pt-4">
               <button
                 className="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100 font-medium transition-colors disabled:opacity-50"
-                onClick={handleCancelarLiquidarTodos}
+                onClick={() => setLiquidarModalTarget(undefined)}
                 disabled={liquidateMutation.isPending}
               >
                 Cancelar
               </button>
-
               <button
-                className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold transition-colors disabled:opacity-50 inline-flex items-center gap-2"
-                onClick={handleConfirmarLiquidarTodos}
+                className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white font-bold transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+                onClick={handleConfirmarLiquidar}
                 disabled={liquidateMutation.isPending}
               >
                 {liquidateMutation.isPending ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>Liquidando TODOS...</span>
-                  </>
+                  <><Loader2 className="h-4 w-4 animate-spin" /><span>Liquidando...</span></>
                 ) : (
-                  <>
-                    <CheckCircle className="h-4 w-4" />
-                    <span>Sí, liquidar TODOS</span>
-                  </>
+                  <><CheckCircle className="h-4 w-4" /><span>Confirmar</span></>
                 )}
               </button>
             </DialogFooter>
@@ -2404,6 +2398,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
     refetchTotales();
   }}
   inversionistaPredeterminado={inversionistaParaBoleta}
+  fechaLiquidacion={fechaLiquidacion}
 />
 
       <InvestorDocumentsModal

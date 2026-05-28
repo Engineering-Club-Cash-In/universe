@@ -370,7 +370,7 @@ if (facturasExistentes.length > 0) {
       // - Cancelación (validationStatus = "reset"): cuota_inversionista / suma_total_cuotas,
       //   restando seguro + membresía + GPS por cuota al inversionista MAYOR
       //   (ese inversionista trae esos cargos sumados en su cuota_inversionista al crear el crédito)
-      // - Resto: monto_aportado / suma_utotal_aportes
+      // - Resto: monto_aportado / suma_total_aportes
       const esCancelacion = pagoData.validationStatus === "reset";
 
       const totalInteresesConIva = new BigJs(pagoData.abono_interes || "0")
@@ -907,11 +907,20 @@ if (facturasExistentes.length > 0) {
 
       // ============================================
       // 6️⃣ FACTURAS DE INTERESES
-      //    🆕 Branching: si hay operaciones pendientes_facturar en
-      //       compras_credito_inversionista → flujo nuevo (TODO)
-      //       sino → flujo actual (residuo CUBE + reparto por aporte)
+      //    🚪 Guardia: si el pago NO trae intereses → saltamos ambos flujos.
+      //       (No tiene sentido entrar al flujo nuevo NI al viejo si no hay
+      //        nada que repartir. Mora, otros y otros servicios siguen normal
+      //        más arriba — ese bloque está fuera de este switch.)
+      //
+      //    🆕 Branching cuando SÍ hay intereses:
+      //       • Tiene compra/reinversión pendiente_facturar=true → flujo nuevo (prorrateado)
+      //       • No → flujo actual (residuo CUBE + reparto por aporte)
       // ============================================
-      if (tieneOperacionesPendientesFacturar) {
+      const hayInteresEnPago = new Big(pagoData.abono_interes || "0").gt(0);
+
+      if (!hayInteresEnPago) {
+        console.log("\n⏭️  NO hay intereses en este pago - Saltando facturas de intereses (ambos flujos)");
+      } else if (tieneOperacionesPendientesFacturar) {
         // ============================================
         // 🆕 NUEVO FLUJO DE INTERESES — PRORRATEO POR FECHA DE COMPRA/REINVERSIÓN
         //
@@ -1535,16 +1544,15 @@ if (facturasExistentes.length > 0) {
       //              totalCube  = cubePropio + cashInAcumulado
       //      PASO 3: 1 factura para CUBE con totalCube
       // ============================================
+      // 🚪 Entramos aquí solo si hayInteresEnPago=true (garantizado arriba),
+      //    así que el check de `totalInteresesPago > 0` ya no se necesita.
       const totalInteresesPago = new Big(pagoData.abono_interes || "0");
       const totalIvaPago = new Big(pagoData.abono_iva_12 || "0");
       const totalInteresesConIvaPago = totalInteresesPago.plus(totalIvaPago);
 
-      if (totalInteresesPago.lte(0)) {
-        console.log("\n⏭️  NO hay intereses en este pago - Saltando facturas de intereses");
-      } else {
-        console.log(
-          `\n💰 Procesando INTERESES (Total con IVA: Q${totalInteresesConIvaPago.toFixed(2)})`
-        );
+      console.log(
+        `\n💰 Procesando INTERESES (Total con IVA: Q${totalInteresesConIvaPago.toFixed(2)})`
+      );
 
         let cashInAcumulado = new Big(0);
         let totalInteresesNoCube = new Big(0);
@@ -1779,7 +1787,6 @@ if (facturasExistentes.length > 0) {
             });
           }
         }
-      }
       } // 🔚 cierre del else (flujo actual de intereses)
 
       // ============================================

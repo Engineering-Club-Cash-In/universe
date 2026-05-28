@@ -1,6 +1,6 @@
 import { db } from "../database/index";
 import { compras_credito_inversionista } from "../database/db/schema";
-import { and, eq, desc, inArray } from "drizzle-orm";
+import { and, eq, desc, gte, inArray, lt } from "drizzle-orm";
 import Big from "big.js";
 
 export interface AjusteCompras {
@@ -83,4 +83,47 @@ export async function calcularAjusteCompras(
   }
 
   return { montoRestarValidacion, montoRestarCalculo };
+}
+
+/**
+ * Suma los monto_aportado de las compras de cartera (tipo_operacion = 'compra_cartera',
+ * status = 'completado') que el inversionista hizo sobre el crédito durante el
+ * MES ANTERIOR a `fechaPeriodo`, filtradas por `updated_at`.
+ *
+ * Excluye reinversiones y compras pendientes — solo cuentan las compras nuevas
+ * de cartera ya completadas que se sumaron al monto_aportado del espejo durante
+ * ese mes. Sirve para separar la parte "vieja" del monto (interés mensual completo)
+ * de la parte aportada por estas compras (interés proporcional).
+ */
+export async function obtenerSumaComprasMesAnterior(
+  credito_id: number,
+  inversionista_id: number,
+  fechaPeriodo: Date,
+): Promise<Big> {
+  const mes = fechaPeriodo.getMonth();
+  const anio = fechaPeriodo.getFullYear();
+  const mesAnterior = mes === 0 ? 11 : mes - 1;
+  const anioMesAnterior = mes === 0 ? anio - 1 : anio;
+
+  const inicioMesAnterior = new Date(anioMesAnterior, mesAnterior, 1);
+  const inicioMesActual = new Date(anio, mes, 1);
+
+  const compras = await db
+    .select({ monto_aportado: compras_credito_inversionista.monto_aportado })
+    .from(compras_credito_inversionista)
+    .where(
+      and(
+        eq(compras_credito_inversionista.credito_id, credito_id),
+        eq(compras_credito_inversionista.inversionista_id, inversionista_id),
+        eq(compras_credito_inversionista.tipo_operacion, "compra_cartera"),
+        eq(compras_credito_inversionista.status, "completado"),
+        gte(compras_credito_inversionista.updated_at, inicioMesAnterior),
+        lt(compras_credito_inversionista.updated_at, inicioMesActual),
+      ),
+    );
+
+  return compras.reduce(
+    (acc, c) => acc.plus(new Big(c.monto_aportado ?? 0)),
+    new Big(0),
+  );
 }

@@ -7278,10 +7278,29 @@ export async function resumenGlobalLiquidaciones(
     const idsSinMovimiento = todos
       .filter((inv) => !idsConMovimiento.has(inv.inversionista_id))
       .map((inv) => inv.inversionista_id);
-    const cuentasExtraSinMovMap = await getCuentasExtraMap(idsSinMovimiento);
+
+    const [cuentasExtraSinMovMap, creditosRows, creditosEspejoRows] = await Promise.all([
+      getCuentasExtraMap(idsSinMovimiento),
+      idsSinMovimiento.length > 0
+        ? db.select({ inversionista_id: creditos_inversionistas.inversionista_id })
+            .from(creditos_inversionistas)
+            .where(inArray(creditos_inversionistas.inversionista_id, idsSinMovimiento))
+        : Promise.resolve([]),
+      idsSinMovimiento.length > 0
+        ? db.select({ inversionista_id: creditos_inversionistas_espejo.inversionista_id })
+            .from(creditos_inversionistas_espejo)
+            .where(inArray(creditos_inversionistas_espejo.inversionista_id, idsSinMovimiento))
+        : Promise.resolve([]),
+    ]);
+
+    const conCreditosSet = new Set<number>([
+      ...creditosRows.map((r) => r.inversionista_id),
+      ...creditosEspejoRows.map((r) => r.inversionista_id),
+    ]);
 
     for (const inv of todos) {
       if (idsConMovimiento.has(inv.inversionista_id)) continue;
+      if (!conCreditosSet.has(inv.inversionista_id)) continue;
 
       const stub: InversionistaResumenRow = {
         inversionista_id: inv.inversionista_id,

@@ -753,10 +753,11 @@ export async function revalidatePaymentService({ pago_id, credito_id }: { pago_i
 }
 
 // Procesar inversionistas manualmente
-export async function processInvestorsService({ pago_id, credito_id }: { pago_id: number; credito_id: number }) {
+export async function processInvestorsService({ pago_id, credito_id, fecha_periodo }: { pago_id: number; credito_id: number; fecha_periodo?: string }) {
   const res = await api.post(`${API_URL}/processInvestors`, {
     pago_id,
     credito_id,
+    ...(fecha_periodo ? { fecha_periodo } : {}),
   });
   return res.data;
 }
@@ -956,11 +957,17 @@ export interface CalcularPagosEspejoResponse {
   message: string;
   inversionistaId: number;
   totalCreditosProcesados: number;
+  totalCreditosFallidos?: number;
   data: {
     creditoId: number;
     numeroCreditoSifco: string;
     cuotaProcesada: number;
     pagosRegistrados: number;
+  }[];
+  fallidos?: {
+    creditoId: number;
+    numeroCreditoSifco: string;
+    mensaje: string;
   }[];
 }
 
@@ -972,6 +979,25 @@ export async function calcularPagosEspejoService(
     { inversionistaId }
   );
   return res.data;
+}
+
+const ERROR_MESSAGES: Record<string, string> = {
+  MONTO_ESPEJO_INCONSISTENTE:
+    "El monto del crédito espejo no coincide con el histórico registrado. Revisa las compras de cartera o contacta soporte.",
+  CUOTA_NO_ENCONTRADA:
+    "No se encontró la cuota correspondiente para este crédito.",
+  CREDITO_LIQUIDADO:
+    "El crédito ya fue liquidado y no puede recibir nuevos pagos.",
+  CREDITO_INACTIVO:
+    "El crédito está inactivo.",
+};
+
+export function formatMensajeFallido(mensaje: string): string {
+  const match = mensaje.match(/^\[([A-Z_]+)\]/);
+  if (match) {
+    return ERROR_MESSAGES[match[1]] ?? "Error al procesar el crédito. Contacta soporte.";
+  }
+  return mensaje;
 }
 
 // ============================================================
@@ -1118,21 +1144,18 @@ export async function getPagosByMesAnio({
   return data;
 }
 
-// Request body
 export interface LiquidateByInvestorRequest {
-  inversionista_id: number;
-}
-
-// Response body (ajústalo según tu backend, aquí uso lo que mandas arriba)
-export interface LiquidateByInvestorRequest {
-  inversionista_id: number;
+  inversionista_id?: number;
+  fecha_liquidacion?: string;
 }
 
 // Response body (ajústalo según tu backend, aquí uso lo que mandas arriba)
 export interface LiquidateByInvestorResponse {
-  inversionista_id(arg0: string, inversionista_id: any): unknown;
   message: string;
   updatedCount: number;
+  liquidaciones_creadas?: number;
+  inversionistas_saltados?: number;
+  errores?: Array<{ inversionista_id: number; razon: string }>;
 }
 export async function liquidateByInvestorService(
   data: LiquidateByInvestorRequest
@@ -2969,6 +2992,7 @@ export interface CreateBoletaDTO {
   monto_boleta?: string;
   notas?: string;
   subido_por?: number;
+  fecha_liquidacion?: string;
 }
 
 export interface GetBoletasFilters {

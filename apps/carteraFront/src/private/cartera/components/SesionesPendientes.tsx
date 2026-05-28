@@ -80,10 +80,10 @@ function distribuirMonto(
 const PAGE_SIZE = 10;
 
 export function SesionesPendientes() {
-  const [page, setPage] = useState(1);
-  const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [selectedStatuses, setSelectedStatuses] = useState<string[]>([
+  const [page, setPage] = usePersistedState<number>("cartera/sesionesPendientes/page", 1);
+  const [search, setSearch] = usePersistedState<string>("cartera/sesionesPendientes/search", "");
+  const [debouncedSearch, setDebouncedSearch] = usePersistedState<string>("cartera/sesionesPendientes/debouncedSearch", "");
+  const [selectedStatuses, setSelectedStatuses] = usePersistedState<string[]>("cartera/sesionesPendientes/selectedStatuses", [
     "pendiente_reinversion",
     "pendiente_compra_cartera",
     "pendiente_revision"
@@ -101,7 +101,7 @@ export function SesionesPendientes() {
     statusesParam
   );
 
-  const hasActiveFilters = search !== "";
+  const hasActiveFilters = search !== "" || selectedStatuses.length !== 3;
 
   // Debounce search to avoid firing on every keystroke
   useEffect(() => {
@@ -157,6 +157,7 @@ export function SesionesPendientes() {
   const clearSearch = useCallback(() => {
     setSearch("");
     setDebouncedSearch("");
+    setSelectedStatuses(["pendiente_reinversion", "pendiente_compra_cartera", "pendiente_revision"]);
     setPage(1);
   }, []);
 
@@ -216,7 +217,9 @@ export function SesionesPendientes() {
           {hasActiveFilters && (
             <Button variant="outline" size="sm" onClick={clearSearch} className="h-8 text-xs text-gray-600 border-gray-300 hover:bg-gray-100 gap-1">
               <X className="w-3.5 h-3.5" /> Limpiar
-              <Badge variant="secondary" className="ml-0.5 h-4 px-1 text-xs">1</Badge>
+              <Badge variant="secondary" className="ml-0.5 h-4 px-1 text-xs">
+                {[search !== "", selectedStatuses.length !== 3].filter(Boolean).length}
+              </Badge>
             </Button>
           )}
           <Badge variant="outline" className="text-[11px] border-blue-200 text-blue-700 bg-blue-50 tabular-nums">

@@ -134,10 +134,9 @@ interface LiquidacionCardProps {
   onVerPagos: (id: number) => void;
   generandoId: number | null;
   navegandoId: number | null;
-  esMesActual: boolean;
 }
 
-function LiquidacionCard({ item, onGenerarPagos, onVerPagos, generandoId, navegandoId, esMesActual }: LiquidacionCardProps) {
+function LiquidacionCard({ item, onGenerarPagos, onVerPagos, generandoId, navegandoId }: LiquidacionCardProps) {
   const s = item.currencySymbol;
   const boleta = item.boleta_liquidacion;
   const estadoMeta = ESTADO_META[item.estado_liquidacion_resumen];
@@ -145,8 +144,8 @@ function LiquidacionCard({ item, onGenerarPagos, onVerPagos, generandoId, navega
   const reinvInt = Number(item.total_reinversion_interes ?? 0);
   const estado = item.estado_liquidacion_resumen;
 
-  const puedeGenerarPagos = esMesActual && estado === "sin_movimiento";
-  const puedeVerPagos = esMesActual && estado !== "sin_movimiento";
+  const puedeGenerarPagos = estado === "sin_movimiento";
+  const puedeVerPagos = estado !== "sin_movimiento";
   const generandoEste = generandoId === item.inversionista_id;
   const navegandoEste = navegandoId === item.inversionista_id;
 
@@ -323,7 +322,7 @@ export function HistorialLiquidaciones() {
   const ahoraGT = useMemo(() => getMesAnioActualGT(), []);
   const [mes, setMes] = usePersistedState<number>("cartera/historialLiquidaciones/mes", ahoraGT.mes);
   const [anio, setAnio] = usePersistedState<number>("cartera/historialLiquidaciones/anio", ahoraGT.anio);
-  const esMesActual = mes === ahoraGT.mes && anio === ahoraGT.anio;
+
   const [search, setSearch] = usePersistedState<string>("cartera/historialLiquidaciones/search", "");
   const [page, setPage] = usePersistedState<number>("cartera/historialLiquidaciones/page", 1);
   const [estadoFiltro, setEstadoFiltro] = usePersistedState<EstadoFiltro>("cartera/historialLiquidaciones/estadoFiltro", "all");
@@ -448,7 +447,7 @@ export function HistorialLiquidaciones() {
         onSettled: () => setGenerandoId(null),
       });
     },
-    [calcularPagosEspejo, refetch, data],
+    [calcularPagosEspejo, data, anio, mes],
   );
 
   const handleVerPagos = useCallback(
@@ -688,7 +687,7 @@ export function HistorialLiquidaciones() {
                 onVerPagos={handleVerPagos}
                 generandoId={generandoId}
                 navegandoId={navegandoId}
-                esMesActual={esMesActual}
+
               />
             ))}
           </div>

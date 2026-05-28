@@ -236,7 +236,7 @@ export const FormularioInvestor = ({
               setFieldValue("proposedAmount", value);
               setFieldTouched("proposedAmount", true, false);
             }}
-            placeholder="Monto propuesto"
+            placeholder="Monto a Invertir"
             variant="secondary"
           />
           {touched.proposedAmount && errors.proposedAmount && (

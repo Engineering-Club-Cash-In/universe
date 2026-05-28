@@ -6,6 +6,7 @@ import { useNavigate } from "react-router-dom";
 import {
   getResumenGlobalLiquidaciones,
   descargarResumenLiquidacionesExcel,
+  formatMensajeFallido,
   type LiquidacionResumen,
   type CalcularPagosEspejoResponse,
 } from "../services/services";
@@ -310,6 +311,14 @@ function LiquidacionCard({ item, onGenerarPagos, onVerPagos, generandoId, navega
   );
 }
 
+// Persiste el resultado del modal fuera del componente para sobrevivir remounts
+let _pendingModal: {
+  nombre: string;
+  inversionistaId: number;
+  response?: CalcularPagosEspejoResponse;
+  errorMsg?: string;
+} | null = null;
+
 export function HistorialLiquidaciones() {
   const ahoraGT = useMemo(() => getMesAnioActualGT(), []);
   const [mes, setMes] = usePersistedState<number>("cartera/historialLiquidaciones/mes", ahoraGT.mes);
@@ -329,12 +338,17 @@ export function HistorialLiquidaciones() {
   }, []);
   const [generandoId, setGenerandoId] = useState<number | null>(null);
   const [navegandoId, setNavegandoId] = useState<number | null>(null);
-  const [resultadoModal, setResultadoModal] = useState<{
+  const [resultadoModal, _setResultadoModal] = useState<{
     nombre: string;
     inversionistaId: number;
     response?: CalcularPagosEspejoResponse;
     errorMsg?: string;
-  } | null>(null);
+  } | null>(() => _pendingModal);
+
+  const setResultadoModal = useCallback((val: typeof _pendingModal) => {
+    _pendingModal = val;
+    _setResultadoModal(val);
+  }, []);
   const navigate = useNavigate();
   const { mutate: calcularPagosEspejo } = useCalcularPagosEspejo();
 
@@ -347,6 +361,8 @@ export function HistorialLiquidaciones() {
         estado: "all",
         incluirSinMovimiento: true,
       }),
+    staleTime: 1000 * 60 * 2,
+    refetchOnWindowFocus: false,
   });
 
   // Conteos por estado para los chips
@@ -413,7 +429,13 @@ export function HistorialLiquidaciones() {
             inversionistaId,
             response: res as CalcularPagosEspejoResponse,
           });
-          if (res?.success) refetch();
+          const nFallidos = (res?.fallidos ?? []).length;
+          if (nFallidos > 0) {
+            toast.warning(
+              `${nFallidos} crédito${nFallidos !== 1 ? "s" : ""} no se procesaron`,
+              { description: "Ver detalle en el modal." }
+            );
+          }
         },
         onError: (err: any) => {
           setResultadoModal({
@@ -722,7 +744,7 @@ export function HistorialLiquidaciones() {
 
       <ResultadoGeneracionModal
         resultado={resultadoModal}
-        onClose={() => setResultadoModal(null)}
+        onClose={() => { _pendingModal = null; setResultadoModal(null); refetch(); }}
         onVerDetalle={(id) => {
           setResultadoModal(null);
           navigate(`/inversionistas?id=${id}`);
@@ -756,6 +778,7 @@ function ResultadoGeneracionModal({ resultado, onClose, onVerDetalle }: Resultad
   const huboPagos = success && totalPagos > 0;
   const sinPagos = success && totalPagos === 0;
   const fallo = !success;
+  const fallidos = response?.fallidos ?? [];
 
   let HeroIcon: React.ElementType;
   let titulo: string;
@@ -788,7 +811,7 @@ function ResultadoGeneracionModal({ resultado, onClose, onVerDetalle }: Resultad
 
   return (
     <Dialog open={!!resultado} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-w-xl bg-white p-0 overflow-hidden gap-0">
+      <DialogContent className="max-w-xl bg-white p-0 overflow-hidden gap-0 max-h-[90vh] flex flex-col">
         {/* Hero header */}
         <div className="flex flex-col items-center text-center px-6 pt-8 pb-5 bg-gradient-to-b from-gray-50 to-white border-b border-gray-100">
           <div className={`flex items-center justify-center w-16 h-16 rounded-full ${iconBgClass} mb-4 shadow-sm`}>
@@ -803,7 +826,7 @@ function ResultadoGeneracionModal({ resultado, onClose, onVerDetalle }: Resultad
         </div>
 
         {/* Body */}
-        <div className="px-6 py-5 space-y-4">
+        <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
           <p className="text-sm text-gray-700 text-center leading-relaxed">
             {descripcion}
           </p>
@@ -817,6 +840,35 @@ function ResultadoGeneracionModal({ resultado, onClose, onVerDetalle }: Resultad
               <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2.5 text-center">
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Pagos</p>
                 <p className="text-2xl font-bold text-emerald-900">{totalPagos}</p>
+              </div>
+            </div>
+          )}
+
+          {fallidos.length > 0 && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 overflow-hidden">
+              <div className="flex items-center gap-2 px-3 py-2 border-b border-amber-200 bg-amber-100">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span className="text-xs font-semibold uppercase tracking-wide text-amber-800">
+                  {fallidos.length} crédito{fallidos.length !== 1 ? "s" : ""} sin procesar
+                </span>
+              </div>
+              <div className="max-h-40 overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-amber-50 text-[11px] uppercase text-amber-700 sticky top-0">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-semibold">Crédito SIFCO</th>
+                      <th className="px-3 py-2 text-left font-semibold">Razón</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-amber-100 bg-white">
+                    {fallidos.map((row) => (
+                      <tr key={row.creditoId} className="hover:bg-amber-50">
+                        <td className="px-3 py-2 font-medium text-gray-800 whitespace-nowrap">{row.numeroCreditoSifco}</td>
+                        <td className="px-3 py-2 text-gray-600 text-xs">{formatMensajeFallido(row.mensaje)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}

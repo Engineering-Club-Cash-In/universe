@@ -288,16 +288,10 @@ export function useGetInvestorMirrorSummary(
 // 🚀 useCalcularPagosEspejo
 // ============================================================
 export function useCalcularPagosEspejo() {
-  const queryClient = useQueryClient();
-
   return useMutation({
     mutationFn: (inversionistaId: number) =>
       calcularPagosEspejoService(inversionistaId),
 
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: investorsQueryKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: ["investor-mirror-summary"] });
-    },
     onError: (error: Error) => console.error("❌ Error en calcularPagosEspejo:", error),
   });
 }

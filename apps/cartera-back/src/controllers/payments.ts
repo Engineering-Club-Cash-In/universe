@@ -2344,28 +2344,36 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number) {
             cuotaProcesada: numeroCuota,
             pagosRegistrados: pagosDeLaCuota.length,
           };
-        } catch (err) {
+        } catch (err: any) {
           console.error(
             `  ❌ Error procesando crédito ${credito.creditoId}:`,
             err
           );
-          return null;
+          return {
+            error: true as const,
+            creditoId: credito.creditoId,
+            numeroCreditoSifco: credito.numeroCreditoSifco,
+            mensaje: err?.message ?? "Error desconocido",
+          };
         }
       })
     );
 
-    const procesados = resultados.filter((r) => r !== null);
+    const procesados = resultados.filter((r) => r !== null && !("error" in r));
+    const fallidos = resultados.filter((r) => r !== null && "error" in r);
 
     console.log(
-      `\n✅ [calcularYRegistrarPagosEspejo] Completado. Créditos procesados: ${procesados.length}`
+      `\n✅ [calcularYRegistrarPagosEspejo] Completado. Procesados: ${procesados.length}, Fallidos: ${fallidos.length}`
     );
 
     return {
       success: true,
       inversionistaId,
       totalCreditosProcesados: procesados.length,
+      totalCreditosFallidos: fallidos.length,
       pagosGenerados: true,
       data: procesados,
+      fallidos,
     };
   } catch (error: any) {
     console.error("❌ Error en calcularYRegistrarPagosEspejo:", error);

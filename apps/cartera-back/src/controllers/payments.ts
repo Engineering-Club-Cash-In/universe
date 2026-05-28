@@ -23,7 +23,7 @@ import {
   processAndReplaceCreditInvestorsReverse,
 } from "./investor";
 import { updateMora } from "./latefee";
-import { calcularAjusteCompras } from "../utils/comprasAjuste";
+import { calcularAjusteCompras, obtenerSumaComprasMesAnterior } from "../utils/comprasAjuste";
 import { t } from "elysia";
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive(),
@@ -532,15 +532,12 @@ export async function insertPagosCreditoInversionistas(
     const fechaInicio = inv.fecha_inicio_participacion
       ? new Date(inv.fecha_inicio_participacion + "T00:00:00")
       : null;
-    // Usar hora de Guatemala (UTC-6) en lugar de la hora del servidor
-    const fechaPago = new Date(
-      new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" })
-    );
 
-    const mesAnterior = fechaPago.getMonth() === 0 ? 11 : fechaPago.getMonth() - 1;
-    const anioMesAnterior = fechaPago.getMonth() === 0
-      ? fechaPago.getFullYear() - 1
-      : fechaPago.getFullYear();
+    // Comparar contra la fecha del PERÍODO que se está liquidando (no contra "hoy").
+    const mesAnterior = fechaDelPeriodo.getMonth() === 0 ? 11 : fechaDelPeriodo.getMonth() - 1;
+    const anioMesAnterior = fechaDelPeriodo.getMonth() === 0
+      ? fechaDelPeriodo.getFullYear() - 1
+      : fechaDelPeriodo.getFullYear();
 
     const esMesAnterior =
       !isCube &&
@@ -550,6 +547,11 @@ export async function insertPagosCreditoInversionistas(
 
     let bigInteres: Big;
     let bigIVA: Big;
+    // Desglose para auditoría: solo se setea cuando hay compras del mes anterior.
+    let interesSinCompras: Big | null = null;
+    let interesConCompras: Big | null = null;
+    let ivaSinCompras: Big | null = null;
+    let ivaConCompras: Big | null = null;
 
     if (esMesAnterior) {
       // Días totales del mes de la fecha de inicio (ej: enero = 31)
@@ -561,22 +563,86 @@ export async function insertPagosCreditoInversionistas(
       const diaInicio = fechaInicio!.getDate(); // ej: 7
       const diasProporcionales = diasDelMes - diaInicio; // ej: 31 - 7 = 24 días restantes
 
-      // Interés proporcional = (montoInversionistaCalc / diasDelMes) * diasProporcionales
-      bigInteres = montoInversionistaCalc
-        .div(diasDelMes)
-        .times(diasProporcionales)
-        .round(2);
+      // ¿El inversionista ya era partícipe y además hizo compras este mes?
+      // Buscamos compras de tipo 'compra_cartera' completadas en el mes anterior.
+      const sumaCompras = await obtenerSumaComprasMesAnterior(
+        credito_id,
+        inv.inversionista_id,
+        fechaDelPeriodo,
+      );
 
-      // IVA proporcional = interés proporcional * 12%
-      bigIVA = bigInteres.times(0.12).round(2);
+      const montoAportadoBig = new Big(inv.monto_aportado || 0);
+      // monto viejo = lo que ya tenía antes de las compras del mes (cobra mes completo).
+      // Si las compras igualan o superan el espejo, queda 0 → actúa como hoy (todo proporcional).
+      const montoViejo = montoAportadoBig.minus(sumaCompras);
 
-      console.log(`   📅 INTERÉS PROPORCIONAL:`);
-      console.log(`      fecha_inicio: ${inv.fecha_inicio_participacion}`);
-      console.log(`      días del mes: ${diasDelMes}`);
-      console.log(`      día inicio: ${diaInicio}`);
-      console.log(`      días proporcionales: ${diasProporcionales}`);
-      console.log(`      interés proporcional: ${bigInteres.toString()}`);
-      console.log(`      IVA proporcional: ${bigIVA.toString()}`);
+      if (sumaCompras.gt(montoAportadoBig)) {
+        console.warn(
+          `   ⚠️  [COMPRAS_EXCEDEN_MONTO_ESPEJO] Inv ${inv.inversionista_id} Cred ${credito_id}: ` +
+          `suma_compras_mes_anterior (${sumaCompras.toFixed(8)}) > monto_aportado_espejo (${montoAportadoBig.toFixed(8)}). ` +
+          `Se trata como caso proporcional puro (sin desglose sin/con compras).`
+        );
+      }
+
+      const hayMontoViejo = sumaCompras.gt(0) && montoViejo.gt(0);
+
+      const porcentajeInteresBig = new Big(currentCredit?.porcentaje_interes ?? 0);
+
+      if (hayMontoViejo) {
+        // Tarifa mensual completa sobre el monto viejo.
+        interesSinCompras = montoViejo
+          .times(porcentajeInteresBig)
+          .div(100)
+          .times(porcentajeInversion)
+          .div(100)
+          .round(2);
+
+        // Proporcional sobre lo aportado por las compras del mes.
+        interesConCompras = sumaCompras
+          .times(porcentajeInteresBig)
+          .div(100)
+          .times(porcentajeInversion)
+          .div(100)
+          .times(diasProporcionales)
+          .div(diasDelMes)
+          .round(2);
+
+        ivaSinCompras = interesSinCompras.gt(0)
+          ? interesSinCompras.times(0.12).round(2)
+          : new Big(0);
+        ivaConCompras = interesConCompras.gt(0)
+          ? interesConCompras.times(0.12).round(2)
+          : new Big(0);
+
+        bigInteres = interesSinCompras.plus(interesConCompras);
+        bigIVA = ivaSinCompras.plus(ivaConCompras);
+
+        console.log(`   📅 INTERÉS PROPORCIONAL CON COMPRAS DEL MES ANTERIOR:`);
+        console.log(`      fecha_inicio: ${inv.fecha_inicio_participacion}`);
+        console.log(`      días del mes: ${diasDelMes}, días proporcionales: ${diasProporcionales}`);
+        console.log(`      monto_aportado espejo: ${montoAportadoBig.toString()}`);
+        console.log(`      suma compras mes anterior: ${sumaCompras.toString()}`);
+        console.log(`      monto viejo (mes completo): ${montoViejo.toString()}`);
+        console.log(`      interes_sin_compras: ${interesSinCompras.toString()}`);
+        console.log(`      interes_con_compras: ${interesConCompras.toString()}`);
+        console.log(`      iva_sin_compras: ${ivaSinCompras.toString()}`);
+        console.log(`      iva_con_compras: ${ivaConCompras.toString()}`);
+        console.log(`      bigInteres total: ${bigInteres.toString()}`);
+        console.log(`      bigIVA total: ${bigIVA.toString()}`);
+      } else {
+        // Sin compras del mes anterior (o compras ≥ monto aportado): todo proporcional como hoy.
+        bigInteres = montoInversionistaCalc
+          .div(diasDelMes)
+          .times(diasProporcionales)
+          .round(2);
+        bigIVA = bigInteres.times(0.12).round(2);
+
+        console.log(`   📅 INTERÉS PROPORCIONAL (sin compras separables):`);
+        console.log(`      fecha_inicio: ${inv.fecha_inicio_participacion}`);
+        console.log(`      días del mes: ${diasDelMes}, días proporcionales: ${diasProporcionales}`);
+        console.log(`      interés proporcional: ${bigInteres.toString()}`);
+        console.log(`      IVA proporcional: ${bigIVA.toString()}`);
+      }
     } else {
       bigInteres = isCube ? montoCashInCalc : montoInversionistaCalc;
       bigIVA = isCube ? ivaCashInCalc : ivaInversionistaCalc;
@@ -746,6 +812,10 @@ export async function insertPagosCreditoInversionistas(
       abono_capital: abono_capital.toString(),
       abono_interes: bigInteres.toString(),
       abono_iva_12: bigIVA.toString(),
+      abono_interes_sin_compras: interesSinCompras?.toString() ?? null,
+      abono_interes_con_compras: interesConCompras?.toString() ?? null,
+      abono_iva_12_sin_compras: ivaSinCompras?.toString() ?? null,
+      abono_iva_12_con_compras: ivaConCompras?.toString() ?? null,
       porcentaje_participacion: isCube
         ? inv.porcentaje_cash_in
         : inv.porcentaje_participacion_inversionista,

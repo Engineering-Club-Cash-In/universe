@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { usePersistedState } from "../hooks/usePersistedState";
-import { useSesionesPendientes, useCompletarEspejo, useReemplazarInversionistaCredito, useCreditCandidates, useDevolverPendientesACube, useCompraCarteraAceptada } from "../hooks/useSesionesPendientes";
+import { useSesionesPendientes, useCompletarEspejo, useReemplazarInversionistaCredito, useCreditCandidates, useDevolverPendientesACube, useCompraCarteraAceptada, useExtenderCompraCartera } from "../hooks/useSesionesPendientes";
 import type { InversionistaSesionPendiente, OtroCreditoDisponible } from "../services/services";
 import {
   Loader2,
@@ -21,6 +21,8 @@ import {
   X,
   Ban,
   AlertCircle,
+  Clock,
+  Plus,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -107,7 +109,7 @@ export function SesionesPendientes() {
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search), 800);
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [search, setDebouncedSearch]);
 
   const investors = useMemo(() => response?.data ?? [], [response]);
   
@@ -151,7 +153,7 @@ export function SesionesPendientes() {
       setSearch(e.target.value);
       setPage(1);
     },
-    [],
+    [setPage, setSearch],
   );
 
   const clearSearch = useCallback(() => {
@@ -159,7 +161,7 @@ export function SesionesPendientes() {
     setDebouncedSearch("");
     setSelectedStatuses(["pendiente_reinversion", "pendiente_compra_cartera", "pendiente_revision"]);
     setPage(1);
-  }, []);
+  }, [setDebouncedSearch, setPage, setSearch, setSelectedStatuses]);
 
   if (isLoading) {
     return (
@@ -549,6 +551,19 @@ function getCashInMonto(oc: OtroCreditoDisponible): number {
   return cube?.monto_aportado ?? 0;
 }
 
+function formatTiempoRestante(ms: number | null | undefined): string {
+  if (ms == null) return "Sin fecha de vencimiento";
+  if (ms <= 0) return "Vencido";
+
+  const totalHours = Math.ceil(ms / (60 * 60 * 1000));
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+
+  if (days > 0 && hours > 0) return `Vence en ${days}d ${hours}h`;
+  if (days > 0) return `Vence en ${days}d`;
+  return `Vence en ${hours}h`;
+}
+
 // ============================================
 // Construir destinos con capacidad
 // ============================================
@@ -590,6 +605,7 @@ function InvestorCard({
   const completarEspejo = useCompletarEspejo();
   const devolverPendientes = useDevolverPendientesACube();
   const aceptarCompra = useCompraCarteraAceptada();
+  const extenderCompra = useExtenderCompraCartera();
 
   const isEditing = editingCreditId !== null;
   const editingCredit = investor.creditosPendientes.find((c) => c.id === editingCreditId);
@@ -769,6 +785,43 @@ function InvestorCard({
     );
   }, [aceptarCompra, investor, recalculateSession]);
 
+  const compraRevisionCreditos = useMemo(() => {
+    return investor.creditosPendientes.filter((c) => c.status === "pendiente_revision");
+  }, [investor]);
+
+  const compraTiempoRestanteMs = useMemo(() => {
+    const tiempos = compraRevisionCreditos
+      .map((c) => c.tiempo_restante_ms)
+      .filter((v): v is number => typeof v === "number");
+    return tiempos.length > 0 ? Math.min(...tiempos) : null;
+  }, [compraRevisionCreditos]);
+
+  const compraYaExtendida = compraRevisionCreditos.length > 0
+    && compraRevisionCreditos.every((c) => Boolean(c.compra_cartera_extendida_at));
+
+  const handleExtenderCompraCartera = useCallback(() => {
+    const ids = compraRevisionCreditos
+      .filter((c) => !c.compra_cartera_extendida_at)
+      .map((c) => c.credito_id);
+    if (ids.length === 0) return;
+
+    extenderCompra.mutate(
+      {
+        creditos: ids,
+        inversionista_id: investor.inversionista_id,
+      },
+      {
+        onSuccess: (res) => {
+          toast.success(res.message || "Compra de cartera extendida 24 horas.");
+          recalculateSession();
+        },
+        onError: (err) => {
+          toast.error(err?.message || "Error al extender la compra de cartera");
+        },
+      }
+    );
+  }, [compraRevisionCreditos, extenderCompra, investor.inversionista_id, recalculateSession]);
+
   const totalCompra = useMemo(() => {
     return investor.creditosPendientes
       .filter(c => c.status === "pendiente_compra_cartera" || c.status === "pendiente_revision")
@@ -833,6 +886,12 @@ function InvestorCard({
                   <div className="h-px flex-1 bg-amber-100" />
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">Compra de Cartera</span>
+                    {compraRevisionCreditos.length > 0 && (
+                      <Badge variant="outline" className="gap-1 text-[10px] border-blue-200 text-blue-700 bg-blue-50 font-semibold">
+                        <Clock className="w-3 h-3" aria-hidden="true" />
+                        {formatTiempoRestante(compraTiempoRestanteMs)}
+                      </Badge>
+                    )}
                     <Badge variant="outline" className="text-[10px] border-amber-200 text-amber-700 bg-amber-50 font-bold">
                       {formatQ(totalCompra)}
                     </Badge>
@@ -879,7 +938,7 @@ function InvestorCard({
                           setCancelLabelOverride("Cancelar Compra");
                           setConfirmingCancel(true);
                         }}
-                        disabled={completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending}
+                        disabled={completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending || extenderCompra.isPending}
                         className="gap-1 text-[11px] h-7 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
                       >
                       <Ban className="w-3 h-3" aria-hidden="true" />
@@ -889,7 +948,7 @@ function InvestorCard({
                       <Button
                         size="sm"
                         onClick={handleAceptarCompraCartera}
-                        disabled={aceptarCompra.isPending || completarEspejo.isPending || devolverPendientes.isPending}
+                        disabled={aceptarCompra.isPending || completarEspejo.isPending || devolverPendientes.isPending || extenderCompra.isPending}
                         className="gap-1 text-[11px] h-7 bg-amber-500 text-white hover:bg-amber-600 border-none"
                       >
                         {aceptarCompra.isPending
@@ -899,10 +958,25 @@ function InvestorCard({
                         Aceptar Compra
                       </Button>
                     )}
+                    {compraRevisionCreditos.length > 0 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleExtenderCompraCartera}
+                        disabled={compraYaExtendida || extenderCompra.isPending || completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending}
+                        className="gap-1 text-[11px] h-7 border-blue-200 text-blue-700 hover:bg-blue-50 hover:text-blue-800 disabled:opacity-60"
+                      >
+                        {extenderCompra.isPending
+                          ? <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                          : <Plus className="w-3 h-3" aria-hidden="true" />
+                        }
+                        {compraYaExtendida ? "Extendido 24h" : "Extender 24h"}
+                      </Button>
+                    )}
                     <Button
                       size="sm"
                       onClick={handleConfirmCompraCartera}
-                      disabled={completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending}
+                      disabled={completarEspejo.isPending || devolverPendientes.isPending || aceptarCompra.isPending || extenderCompra.isPending}
                       className={`gap-1 text-[11px] h-7 bg-amber-600 text-white hover:bg-amber-700 ${
                         !investor.creditosPendientes.some(c => c.status === "pendiente_revision") ? "hidden" : ""
                       }`}

@@ -2005,13 +2005,14 @@ export const inversionistasRouter = new Elysia()
     "/calcularPagosEspejo",
     async ({ body, set }) => {
       try {
-        const { inversionistaId } = body;
+        const { inversionistaId, fecha_calculo } = body as any;
 
         console.log(
-          `\n🚀 POST /calcularPagosEspejo → inversionistaId: ${inversionistaId}`
+          `\n🚀 POST /calcularPagosEspejo → inversionistaId: ${inversionistaId}, fecha_calculo: ${fecha_calculo ?? "no enviada"}`
         );
 
-        const resultado = await calcularYRegistrarPagosEspejo(inversionistaId);
+        const fechaCalculoDate = fecha_calculo ? new Date(fecha_calculo) : undefined;
+        const resultado = await calcularYRegistrarPagosEspejo(inversionistaId, fechaCalculoDate);
 
         if (!resultado.success) {
           set.status = 500;

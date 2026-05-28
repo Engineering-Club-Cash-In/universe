@@ -103,6 +103,11 @@ export function TableInvestors() {
   const [showSuccessRevertModal, setShowSuccessRevertModal] = useState(false);
   const [inversionistaARevertir, setInversionistaARevertir] = useState<number | null>(null);
 
+  // Modal calcular pagos — igual al de liquidar pero con fecha de cálculo
+  const [calcularModalTarget, setCalcularModalTarget] = useState<number | undefined>(undefined);
+  const showCalcularModal = calcularModalTarget !== undefined;
+  const [fechaCalculo, setFechaCalculo] = useState<string>(() => new Date().toISOString().slice(0, 10));
+
   // 🆕 Hook para calcular pagos espejo
   const { mutate: calcularPagosEspejo, isPending: isCalculando } =
     useCalcularPagosEspejo();
@@ -188,12 +193,12 @@ export function TableInvestors() {
   const handleConfirmarGenerarPagos = async () => {
     if (!selectedInversionista) return;
 
-    calcularPagosEspejo(selectedInversionista, {
+    calcularPagosEspejo({ inversionistaId: selectedInversionista, fecha_calculo: fechaCalculo }, {
       onSuccess: (data) => {
         if (data.success) {
           setShowGenerarPagosModal(false);
           setSelectedInversionista(null);
-          setIsDraft(true);   // ← activar modo borrador
+          setIsDraft(true);
           refetch();
           refetchTotales();
         }
@@ -204,13 +209,21 @@ export function TableInvestors() {
     });
   };
 
-  // 🚀 Cálculo directo sin modal (Nuevo flujo)
+  // Abre modal de confirmación con fecha para calcular pagos
   const handleCalcularPagosDirecto = (inversionistaId: number) => {
-    setSelectedInversionista(inversionistaId); // Para que el spinner se muestre en el row correcto
+    setCalcularModalTarget(inversionistaId);
+  };
 
-    calcularPagosEspejo(inversionistaId, {
+  // Ejecuta el cálculo tras confirmar fecha en el modal
+  const handleConfirmarCalcularPagos = () => {
+    if (calcularModalTarget === undefined) return;
+    const inversionistaId = calcularModalTarget;
+    setSelectedInversionista(inversionistaId);
+
+    calcularPagosEspejo({ inversionistaId, fecha_calculo: fechaCalculo }, {
       onSuccess: (data) => {
         if (data.success) {
+          setCalcularModalTarget(undefined);
           setIsDraft(true);
           setDraftInvestorId(inversionistaId);
           refetch();
@@ -232,6 +245,7 @@ export function TableInvestors() {
       onError: (error) => {
         console.error("❌ Error al calcular pagos:", error);
         alert(`Error al calcular pagos: ${error.message}`);
+        setCalcularModalTarget(undefined);
         setSelectedInversionista(null);
       },
     });
@@ -2331,6 +2345,57 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        {/* Modal confirmar cálculo de pagos */}
+        <Dialog
+          open={showCalcularModal}
+          onOpenChange={(open) => { if (!open) setCalcularModalTarget(undefined); }}
+        >
+          <DialogContent className="bg-white dark:bg-gray-900 max-w-md">
+            <DialogHeader>
+              <DialogTitle className="text-purple-700 dark:text-purple-400 text-xl font-bold flex items-center gap-2">
+                <FileSpreadsheet className="h-5 w-5" />
+                Confirmar cálculo de pagos
+              </DialogTitle>
+              <DialogDescription className="space-y-4 pt-4">
+                <div className="space-y-2">
+                  <label className="block text-sm font-bold text-gray-700 dark:text-gray-300">
+                    Fecha del período de cálculo
+                  </label>
+                  <input
+                    type="date"
+                    value={fechaCalculo}
+                    onChange={(e) => setFechaCalculo(e.target.value)}
+                    className="w-full border border-purple-300 rounded-lg px-3 py-2 bg-purple-50 text-purple-900 focus:ring-2 focus:ring-purple-400 focus:outline-none"
+                  />
+                  <p className="text-xs text-gray-500">
+                    Esta fecha determina el período al que pertenece el cálculo de pagos espejo.
+                  </p>
+                </div>
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0 pt-4">
+              <button
+                className="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100 font-medium transition-colors disabled:opacity-50"
+                onClick={() => setCalcularModalTarget(undefined)}
+                disabled={isCalculando}
+              >
+                Cancelar
+              </button>
+              <button
+                className="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-bold transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+                onClick={handleConfirmarCalcularPagos}
+                disabled={isCalculando}
+              >
+                {isCalculando ? (
+                  <><Loader2 className="h-4 w-4 animate-spin" /><span>Calculando...</span></>
+                ) : (
+                  <><FileSpreadsheet className="h-4 w-4" /><span>Confirmar</span></>
+                )}
+              </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         {/* Modal unificado de liquidación — individual o todos */}
         <Dialog
           open={showLiquidarModal}

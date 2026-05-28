@@ -196,17 +196,41 @@ export const completeEspejo = async ({ body, set, request }: any) => {
               ne(compras_credito_inversionista.status, "completado"),
             );
 
-        // Fecha de completado en hora de Guatemala (UTC - 6h)
-        const fechaCompletadaGT = new Date(Date.now() - 6 * 60 * 60 * 1000);
+        // Instante real (UTC). La columna es timestamptz; la conversión a
+        // hora de Guatemala se hace al mostrar/consultar, no al guardar.
+        const ahora = new Date();
+
+        // Solo las compras de cartera quedan pendientes de facturar al
+        // completarse. Las reinversiones no generan factura, así que
+        // mantienen pendiente_facturar = false.
+        await tx
+          .update(compras_credito_inversionista)
+          .set({
+            status: "completado",
+            fecha_completada: ahora,
+            pendiente_facturar: true,
+            updated_at: ahora,
+          })
+          .where(
+            and(
+              whereConditionsCompras,
+              eq(compras_credito_inversionista.tipo_operacion, "compra_cartera"),
+            ),
+          );
 
         await tx
           .update(compras_credito_inversionista)
           .set({
             status: "completado",
-            fecha_completada: fechaCompletadaGT,
-            updated_at: new Date(),
+            fecha_completada: ahora,
+            updated_at: ahora,
           })
-          .where(whereConditionsCompras);
+          .where(
+            and(
+              whereConditionsCompras,
+              eq(compras_credito_inversionista.tipo_operacion, "reinversion"),
+            ),
+          );
 
         resultados.push({
           credito_id,

@@ -560,7 +560,8 @@ export const inversionistasRouter = new Elysia()
           };
         }
 
-        const { inversionista_id } = parseResult.data;
+        const { inversionista_id, fecha_liquidacion } = parseResult.data;
+        const fechaLiquidacion = fecha_liquidacion ? new Date(fecha_liquidacion) : undefined;
 
         if (!inversionista_id) {
           console.warn("⚠️ ¡ALERTA! Se va a liquidar TODOS los pagos del sistema");
@@ -568,7 +569,7 @@ export const inversionistasRouter = new Elysia()
 
         // Lanzar liquidación en background y responder inmediatamente
         // Si algo falla, los pagos quedan como NO_LIQUIDADO (pendientes)
-        liquidateByInvestorId(inversionista_id).then((result) => {
+        liquidateByInvestorId(inversionista_id, fechaLiquidacion).then((result) => {
           console.log(`[liquidate-inversionista-pagos] Background OK para inversionista ${inversionista_id}:`, result.message);
         }).catch((err) => {
           console.error(`[liquidate-inversionista-pagos] Background ERROR para inversionista ${inversionista_id}:`, err);
@@ -593,6 +594,7 @@ export const inversionistasRouter = new Elysia()
     {
       body: t.Optional(t.Object({
         inversionista_id: t.Optional(t.Number()),
+        fecha_liquidacion: t.Optional(t.String()),
       })),
       detail: {
         summary: "Liquida todos los pagos de un inversionista (async, responde inmediato)",
@@ -1698,6 +1700,7 @@ export const inversionistasRouter = new Elysia()
         monto_boleta: t.Optional(t.String()),
         notas: t.Optional(t.String()),
         subido_por: t.Optional(t.Number()),
+        fecha_liquidacion: t.Optional(t.String()),
       }),
       detail: {
         summary: "Crear nueva boleta de pago",

@@ -9,4 +9,13 @@ describe("shared role permissions", () => {
 		);
 		expect(PERMISSIONS.canDeleteOpportunities(ROLES.SALES)).toBe(false);
 	});
+
+	test("allows admin and cobros supervisor to access closed credits report", () => {
+		expect(PERMISSIONS.canAccessClosedCreditsReport(ROLES.ADMIN)).toBe(true);
+		expect(
+			PERMISSIONS.canAccessClosedCreditsReport(ROLES.COBROS_SUPERVISOR),
+		).toBe(true);
+		expect(PERMISSIONS.canAccessClosedCreditsReport(ROLES.COBROS)).toBe(false);
+		expect(PERMISSIONS.canAccessClosedCreditsReport(ROLES.SALES)).toBe(false);
+	});
 });

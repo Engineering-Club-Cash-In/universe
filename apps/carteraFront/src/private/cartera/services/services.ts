@@ -972,11 +972,12 @@ export interface CalcularPagosEspejoResponse {
 }
 
 export async function calcularPagosEspejoService(
-  inversionistaId: number
+  inversionistaId: number,
+  fecha_calculo?: string
 ): Promise<CalcularPagosEspejoResponse> {
   const res = await api.post<CalcularPagosEspejoResponse>(
     `${import.meta.env.VITE_BACK_URL}/calcularPagosEspejo`,
-    { inversionistaId }
+    { inversionistaId, ...(fecha_calculo ? { fecha_calculo } : {}) }
   );
   return res.data;
 }

@@ -289,8 +289,8 @@ export function useGetInvestorMirrorSummary(
 // ============================================================
 export function useCalcularPagosEspejo() {
   return useMutation({
-    mutationFn: (inversionistaId: number) =>
-      calcularPagosEspejoService(inversionistaId),
+    mutationFn: ({ inversionistaId, fecha_calculo }: { inversionistaId: number; fecha_calculo?: string }) =>
+      calcularPagosEspejoService(inversionistaId, fecha_calculo),
 
     onError: (error: Error) => console.error("❌ Error en calcularPagosEspejo:", error),
   });

@@ -2193,7 +2193,7 @@ export async function obtenerCreditosConPagosPendientes(
  *
  * @param inversionistaId - ID del inversionista a procesar
  */
-export async function calcularYRegistrarPagosEspejo(inversionistaId: number) {
+export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fechaCalculo?: Date) {
   try {
     const rangoMesActual = obtenerRangoMesActual();
     console.log(
@@ -2202,6 +2202,9 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number) {
     console.log(
       `📆 Mes actual: ${rangoMesActual.inicio} - ${rangoMesActual.fin}`
     );
+    if (fechaCalculo) {
+      console.log(`📅 Fecha de cálculo override: ${fechaCalculo.toISOString()}`);
+    }
 
     // ── PASO 1: Obtener créditos espejo del inversionista (ACTIVO/MOROSO/etc.) ──
     const creditosInversionista = await db
@@ -2331,7 +2334,8 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number) {
             false, // excludeCube
             false, // cuotaPagada
             false, // updateCredito ← omite el UPDATE a creditos_inversionistas_espejo
-            inversionistaId
+            inversionistaId,
+            fechaCalculo
           );
 
           console.log(

@@ -39,6 +39,7 @@ export async function calcularAjusteCompras(
       and(
         eq(compras_credito_inversionista.credito_id, credito_id),
         eq(compras_credito_inversionista.inversionista_id, inversionista_id),
+        eq(compras_credito_inversionista.tipo_operacion, "compra_cartera"),
       ),
     )
     .orderBy(desc(compras_credito_inversionista.updated_at));

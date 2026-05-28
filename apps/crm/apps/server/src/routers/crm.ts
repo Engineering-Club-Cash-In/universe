@@ -1891,8 +1891,8 @@ export const crmRouter = {
 				}
 			}
 
-			// If lead is being changed and no explicit source provided, copy source from new lead
-			if (input.leadId && !updateData.source) {
+			// If lead is being changed (not just preserved) and no explicit source provided, copy source from new lead
+			if (input.leadId && input.leadId !== currentOpportunity[0].leadId && !updateData.source) {
 				const newLead = await db
 					.select({ source: leads.source })
 					.from(leads)

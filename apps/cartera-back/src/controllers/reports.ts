@@ -1655,17 +1655,22 @@ export async function getPagosByVencimiento({
     LEFT JOIN LATERAL (
       SELECT pc_a.total_restante::numeric AS total_restante
       FROM cartera.pagos_credito pc_a
+      LEFT JOIN cartera.cuotas_credito qcc_a ON pc_a.cuota_id = qcc_a.cuota_id
       WHERE pc_a.credito_id = c.credito_id
         AND pc_a."paymentFalse" = false
         AND pc_a.total_restante IS NOT NULL
         AND pc_a.total_restante::numeric > 0
-        AND GREATEST(
-              COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date, '1900-01-01'::date),
-              COALESCE(pc_a.fecha_pago::date,   pc_a.fecha_boleta::date, '1900-01-01'::date)
+        AND COALESCE(qcc_a.fecha_vencimiento::date,
+              GREATEST(
+                COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date, '1900-01-01'::date),
+                COALESCE(pc_a.fecha_pago::date,   pc_a.fecha_boleta::date, '1900-01-01'::date)
+              )
             ) < ${fechaInicio}::date
-      ORDER BY GREATEST(
-                 COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date, '1900-01-01'::date),
-                 COALESCE(pc_a.fecha_pago::date,   pc_a.fecha_boleta::date, '1900-01-01'::date)
+      ORDER BY COALESCE(qcc_a.fecha_vencimiento::date,
+                 GREATEST(
+                   COALESCE(pc_a.fecha_boleta::date, pc_a.fecha_pago::date, '1900-01-01'::date),
+                   COALESCE(pc_a.fecha_pago::date,   pc_a.fecha_boleta::date, '1900-01-01'::date)
+                 )
                ) DESC, pc_a.pago_id DESC
       LIMIT 1
     ) cap_anterior ON true

@@ -697,7 +697,7 @@ const handleDownloadExcel = async () => {
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild>
                       <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-50 text-indigo-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
-                        onClick={(e) => { e.stopPropagation(); handleProcessInvestors(item.pago.pago_id, item.pago.credito_id); }}
+                        onClick={(e) => { e.stopPropagation(); handleProcessInvestors(item.pago.pago_id, item.pago.credito_id, item.pago.fecha_vencimiento); }}
                         disabled={processInvestors.isPending}>
                         {processInvestors.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : null} Proc. Inversionistas
                       </button>

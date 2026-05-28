@@ -14,6 +14,7 @@ import {
 import { Label } from "@/components/ui/label";
 import {
 	formatCurrency,
+	formatGuatemalaCalendarDate,
 	formatGuatemalaDate,
 	formatGuatemalaDateTime,
 	getClientTypeLabel,
@@ -295,7 +296,7 @@ export function LeadDetailModal({
 									</Label>
 									<p className="text-sm">
 										{displayLead.birthDate
-											? formatGuatemalaDate(displayLead.birthDate)
+											? formatGuatemalaCalendarDate(displayLead.birthDate)
 											: "No especificado"}
 									</p>
 								</div>

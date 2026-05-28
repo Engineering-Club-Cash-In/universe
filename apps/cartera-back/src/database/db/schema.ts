@@ -443,6 +443,7 @@
       status: statusCreditoInversionistaEspejoEnum("status").notNull().default("completado"),
       aceptada_at: timestamp("aceptada_at", { withTimezone: true }),
       aceptada_por: text("aceptada_por"),
+      compra_cartera_extendida_at: timestamp("compra_cartera_extendida_at", { withTimezone: true }),
     },
     (t) => ({
       uxCreditoInvEspejo: uniqueIndex("ux_credito_inversionista_espejo").on(t.credito_id, t.inversionista_id),

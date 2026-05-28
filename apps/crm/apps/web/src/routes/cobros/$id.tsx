@@ -17,18 +17,18 @@ import {
 	MessageCircle,
 	Pencil,
 	Phone,
+	Play,
 	Shield,
 	Tag,
 	User,
 	Users,
 	X,
-	Play,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { ReferenciasView } from "@/components/cobros/ReferenciasView";
-import { ContactoModal } from "@/components/contacto-modal";
 import { SeguimientoRecurrenteModal } from "@/components/cobros/seguimiento-recurrente-modal";
+import { ContactoModal } from "@/components/contacto-modal";
 import {
 	OpportunityDetailModal,
 	type OpportunityForModal,
@@ -589,7 +589,11 @@ function RouteComponent() {
 										<span className="font-medium">Monto en Mora:</span>
 									</div>
 									<p className="font-bold text-lg text-red-600">
-										Q{Number(caso.montoEnMora).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+										Q
+										{Number(caso.montoEnMora).toLocaleString("es-GT", {
+											minimumFractionDigits: 2,
+											maximumFractionDigits: 2,
+										})}
 									</p>
 								</div>
 								<div className="space-y-2">
@@ -598,7 +602,11 @@ function RouteComponent() {
 										<span className="font-medium">Cuota Mensual:</span>
 									</div>
 									<p className="font-bold text-blue-600 text-lg uppercase tracking-tight">
-										Q{Number(caso.cuotaMensual || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+										Q
+										{Number(caso.cuotaMensual || 0).toLocaleString("es-GT", {
+											minimumFractionDigits: 2,
+											maximumFractionDigits: 2,
+										})}
 									</p>
 								</div>
 								<div className="space-y-2">
@@ -710,14 +718,25 @@ function RouteComponent() {
 												<span>
 													Mora:{" "}
 													<strong>
-														Q{Number(caso.montoEnMora).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+														Q
+														{Number(caso.montoEnMora).toLocaleString("es-GT", {
+															minimumFractionDigits: 2,
+															maximumFractionDigits: 2,
+														})}
 													</strong>
 												</span>
 												<span>+</span>
 												<span>
 													Cuota:{" "}
 													<strong>
-														Q{Number(caso.cuotaMensual || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+														Q
+														{Number(caso.cuotaMensual || 0).toLocaleString(
+															"es-GT",
+															{
+																minimumFractionDigits: 2,
+																maximumFractionDigits: 2,
+															},
+														)}
 													</strong>
 												</span>
 											</div>
@@ -1102,7 +1121,6 @@ function RouteComponent() {
 											</Button>
 										</ContactoModal>
 									</div>
-
 								</>
 							) : (
 								<div className="rounded-md border border-yellow-200 bg-yellow-50 p-4">
@@ -1120,7 +1138,7 @@ function RouteComponent() {
 					{caso.id && (
 						<Card className="border-blue-100/40 dark:border-blue-900/10">
 							<CardHeader className="flex flex-row items-center justify-between py-4">
-								<CardTitle className="flex items-center gap-2 text-sm font-semibold text-blue-800 dark:text-blue-400">
+								<CardTitle className="flex items-center gap-2 font-semibold text-blue-800 text-sm dark:text-blue-400">
 									<CalendarClock className="h-4 w-4" />
 									Seguimiento Programado
 								</CardTitle>
@@ -1128,17 +1146,19 @@ function RouteComponent() {
 									<Button
 										variant="outline"
 										size="sm"
-										className="h-8 w-8 p-0 text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+										className="h-8 w-8 border-blue-200 p-0 text-blue-600 hover:bg-blue-50 hover:text-blue-700"
 										title="Ejecutar Job de Seguimientos Ahora"
 										onClick={() => runJobMutation.mutate()}
 										disabled={runJobMutation.isPending}
 									>
-										<Play className={`h-4 w-4 ${runJobMutation.isPending ? "animate-pulse" : ""}`} />
+										<Play
+											className={`h-4 w-4 ${runJobMutation.isPending ? "animate-pulse" : ""}`}
+										/>
 									</Button>
 									<Button
 										variant="secondary"
 										size="sm"
-										className="h-8 flex items-center gap-2"
+										className="flex h-8 items-center gap-2"
 										onClick={() => setIsSeguimientoModalOpen(true)}
 									>
 										<CalendarClock className="h-4 w-4" />
@@ -1152,7 +1172,7 @@ function RouteComponent() {
 										<Loader className="h-4 w-4 animate-spin text-muted-foreground" />
 									</div>
 								) : seguimientosActivos.data?.length === 0 ? (
-									<p className="text-sm text-muted-foreground py-2 italic">
+									<p className="py-2 text-muted-foreground text-sm italic">
 										No hay seguimientos activos programados.
 									</p>
 								) : (
@@ -1160,19 +1180,19 @@ function RouteComponent() {
 										{seguimientosActivos.data?.map((seg: any) => (
 											<div
 												key={seg.id}
-												className="flex items-center justify-between p-2.5 rounded-md border bg-muted/30 transition-colors hover:bg-muted/50"
+												className="flex items-center justify-between rounded-md border bg-muted/30 p-2.5 transition-colors hover:bg-muted/50"
 											>
 												<div className="flex items-center gap-3">
-													<div className="p-1.5 rounded-full bg-background border">
+													<div className="rounded-full border bg-background p-1.5">
 														{getMetodoIcon(seg.metodoContacto)}
 													</div>
 													<div className="flex flex-col">
-														<span className="text-sm font-medium capitalize leading-none">
+														<span className="font-medium text-sm capitalize leading-none">
 															{seg.presetOriginal !== "custom"
 																? seg.presetOriginal
 																: `Cada ${seg.intervaloDias} días`}
 														</span>
-														<span className="text-[10px] text-muted-foreground uppercase mt-1">
+														<span className="mt-1 text-[10px] text-muted-foreground uppercase">
 															{seg.metodoContacto.replace("_", " ")}
 														</span>
 													</div>
@@ -1189,16 +1209,22 @@ function RouteComponent() {
 													</AlertDialogTrigger>
 													<AlertDialogContent>
 														<AlertDialogHeader>
-															<AlertDialogTitle>¿Eliminar seguimiento?</AlertDialogTitle>
+															<AlertDialogTitle>
+																¿Eliminar seguimiento?
+															</AlertDialogTitle>
 															<AlertDialogDescription>
-																Esta acción eliminará el seguimiento programado permanentemente. No se generarán más notificaciones para este recordatorio.
+																Esta acción eliminará el seguimiento programado
+																permanentemente. No se generarán más
+																notificaciones para este recordatorio.
 															</AlertDialogDescription>
 														</AlertDialogHeader>
 														<AlertDialogFooter>
 															<AlertDialogCancel>Cancelar</AlertDialogCancel>
 															<AlertDialogAction
-																onClick={() => cancelSeguimientoMutation.mutate(seg.id)}
-																className="bg-red-600 hover:bg-red-700 text-white"
+																onClick={() =>
+																	cancelSeguimientoMutation.mutate(seg.id)
+																}
+																className="bg-red-600 text-white hover:bg-red-700"
 															>
 																Eliminar
 															</AlertDialogAction>
@@ -1216,7 +1242,7 @@ function RouteComponent() {
 					<SeguimientoRecurrenteModal
 						isOpen={isSeguimientoModalOpen}
 						onClose={() => setIsSeguimientoModalOpen(false)}
-						casoCobroId={caso.id}
+						casoCobroId={caso.id ?? ""}
 					/>
 
 					{/* Referencias */}
@@ -1399,11 +1425,25 @@ function RouteComponent() {
 															</div>
 															<div className="text-right">
 																<p className="font-medium text-sm">
-																	Q{Number(cuota.montoCuota).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+																	Q
+																	{Number(cuota.montoCuota).toLocaleString(
+																		"es-GT",
+																		{
+																			minimumFractionDigits: 2,
+																			maximumFractionDigits: 2,
+																		},
+																	)}
 																</p>
 																{tieneMora && (
 																	<p className="text-red-600 text-xs">
-																		+Q{Number(cuota.montoMora).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
+																		+Q
+																		{Number(cuota.montoMora).toLocaleString(
+																			"es-GT",
+																			{
+																				minimumFractionDigits: 2,
+																				maximumFractionDigits: 2,
+																			},
+																		)}{" "}
 																		mora
 																	</p>
 																)}
@@ -1658,13 +1698,21 @@ function RouteComponent() {
 							<div>
 								<p className="text-muted-foreground text-sm">Capital Activo</p>
 								<p className="font-medium">
-									Q{Number(caso.montoFinanciado || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+									Q
+									{Number(caso.montoFinanciado || 0).toLocaleString("es-GT", {
+										minimumFractionDigits: 2,
+										maximumFractionDigits: 2,
+									})}
 								</p>
 							</div>
 							<div>
 								<p className="text-muted-foreground text-sm">Cuota Mensual</p>
 								<p className="font-medium">
-									Q{Number(caso.cuotaMensual || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+									Q
+									{Number(caso.cuotaMensual || 0).toLocaleString("es-GT", {
+										minimumFractionDigits: 2,
+										maximumFractionDigits: 2,
+									})}
 								</p>
 							</div>
 							<div>

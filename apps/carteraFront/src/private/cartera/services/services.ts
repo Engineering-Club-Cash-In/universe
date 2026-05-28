@@ -3569,6 +3569,7 @@ export interface PagoPorVencimientoItem {
   gps_restante: string;
   membresias: string;
   monto_boleta: string;
+  monto_aplicado: string;
   interes_cube: string;
   iva_cube: string;
   total_pagos_del_mes: string;

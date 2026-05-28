@@ -1603,6 +1603,7 @@ export async function getPagosByVencimiento({
         MIN(COALESCE(pc.gps_restante::numeric, 0))      + SUM(COALESCE(pc.abono_gps::numeric, 0))       AS gps_restante,
         MIN(COALESCE(pc.membresias::numeric, 0))        + SUM(COALESCE(pc.membresias_pago::numeric, 0)) AS membresias,
         SUM(COALESCE(pc.monto_boleta::numeric, 0)) AS monto_boleta,
+        SUM(COALESCE(pc.monto_aplicado::numeric, 0)) AS monto_aplicado,
         MIN(pc.fecha_vencimiento) AS fecha_vencimiento,
         BOOL_OR(pc.pagado) AS pagado
       FROM cartera.pagos_credito pc
@@ -1627,6 +1628,7 @@ export async function getPagosByVencimiento({
         COALESCE(pc.gps_restante::numeric, 0)      + COALESCE(pc.abono_gps::numeric, 0)       AS gps_restante,
         COALESCE(pc.membresias::numeric, 0)        + COALESCE(pc.membresias_pago::numeric, 0) AS membresias,
         COALESCE(pc.monto_boleta::numeric, 0) AS monto_boleta,
+        COALESCE(pc.monto_aplicado::numeric, 0) AS monto_aplicado,
         pc.fecha_vencimiento,
         pc.pagado
       FROM cartera.pagos_credito pc
@@ -1676,6 +1678,7 @@ export async function getPagosByVencimiento({
       COALESCE(SUM(p.gps_restante::numeric), 0) AS gps_restante_db,
       COALESCE(SUM(p.membresias::numeric), 0) AS membresias_db,
       COALESCE(SUM(p.monto_boleta::numeric), 0) AS monto_boleta,
+      COALESCE(SUM(p.monto_aplicado::numeric), 0) AS monto_aplicado,
       COALESCE(MAX(m.monto_mora::numeric), 0) AS monto_mora,
       CASE
         WHEN MAX(m.cuotas_atrasadas) = 1 THEN 'Mora 30'
@@ -1776,7 +1779,8 @@ export async function getPagosByVencimiento({
       cuota_min: row.cuota_min,
       cuota_max: row.cuota_max,
       dias_mora: row.dias_mora,
-      monto_boleta: Number(row.monto_boleta).toFixed(2), // abonos reales
+      monto_boleta: Number(row.monto_boleta).toFixed(2),
+      monto_aplicado: Number(row.monto_aplicado).toFixed(2),
       
       // Reemplazamos los valores programados con los dinámicos
       capital_restante: abonoCapitalCalculado.toFixed(2), // Se muestra como "Abono Capital"
@@ -1809,6 +1813,8 @@ export async function getPagosByVencimiento({
   let totalInteresCubeRecalc = new Big(0);
   let totalIvaCubeRecalc = new Big(0);
   let totalMoraRecalc = new Big(0);
+  let totalMontoAplicadoRecalc = new Big(0);
+  let totalPagosDelMesRecalc = new Big(0);
 
   allPagosRecalculated.forEach((p: any) => {
     totalCapitalRecalc = totalCapitalRecalc.plus(p.capital_restante);
@@ -1820,6 +1826,8 @@ export async function getPagosByVencimiento({
     totalInteresCubeRecalc = totalInteresCubeRecalc.plus(p.interes_cube);
     totalIvaCubeRecalc = totalIvaCubeRecalc.plus(p.iva_cube);
     totalMoraRecalc = totalMoraRecalc.plus(p.mora);
+    totalMontoAplicadoRecalc = totalMontoAplicadoRecalc.plus(p.monto_aplicado);
+    totalPagosDelMesRecalc = totalPagosDelMesRecalc.plus(p.total_pagos_del_mes);
   });
 
   if (excel) {
@@ -1827,12 +1835,12 @@ export async function getPagosByVencimiento({
     const sheet = workbook.addWorksheet("Pagos por Vencimiento");
 
     const columns = [
-      { header: "No. SIFCO", key: "numero_credito_sifco", width: 15 },
-      { header: "Cliente", key: "nombre_usuario", width: 35 },
+      { header: "No. SIFCO", key: "numero_credito_sifco", width: 18 },
+      { header: "Cliente / Fecha Boleta", key: "nombre_usuario", width: 35 },
       { header: "Asesor", key: "asesor", width: 25 },
       { header: "Cuotas", key: "cuotas", width: 12 },
       { header: "Etapa Mora", key: "dias_mora", width: 15 },
-      { header: "Boletas Totales", key: "monto_boleta", width: 15 },
+      { header: "Boletas Totales", key: "monto_aplicado", width: 16 },
       { header: "Abono Capital", key: "capital_restante", width: 15 },
       { header: "Interés", key: "interes_restante", width: 15 },
       { header: "IVA 12%", key: "iva_12_restante", width: 15 },
@@ -1872,12 +1880,82 @@ export async function getPagosByVencimiento({
       right: { style: "thin" as const, color: { argb: "D9D9D9" } },
     };
 
-    pagos.forEach((item: any, idx: number) => {
+    // Fila de totales
+    const totalesRowData = {
+      numero_credito_sifco: "TOTALES",
+      nombre_usuario: "",
+      asesor: "",
+      cuotas: "",
+      dias_mora: "",
+      monto_aplicado: Number(totalMontoAplicadoRecalc.toFixed(2)),
+      capital_restante: Number(totalCapitalRecalc.toFixed(2)),
+      interes_restante: Number(totalInteresRecalc.toFixed(2)),
+      iva_12_restante: Number(totalIvaRecalc.toFixed(2)),
+      seguro_restante: Number(totalSeguroRecalc.toFixed(2)),
+      gps_restante: Number(totalGpsRecalc.toFixed(2)),
+      membresias: Number(totalMembresiasRecalc.toFixed(2)),
+      interes_cube: Number(totalInteresCubeRecalc.toFixed(2)),
+      iva_cube: Number(totalIvaCubeRecalc.toFixed(2)),
+      royalti: "",
+      mora: Number(totalMoraRecalc.toFixed(2)),
+      total_pagos_del_mes: Number(totalPagosDelMesRecalc.toFixed(2)),
+    };
+    const totalesRow = sheet.addRow(totalesRowData);
+    totalesRow.font = { bold: true, size: 10 };
+    totalesRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "E2EFDA" } };
+    totalesRow.eachCell({ includeEmpty: true }, (cell) => {
+      cell.border = thinBorder;
+      cell.alignment = { vertical: "middle", horizontal: "right" };
+    });
+    totalesRow.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
+
+    // Query bulk: todos los pagos detalle de todos los créditos en una sola llamada
+    const creditoIds = (pagos as any[]).map((p: any) => Number(p.credito_id));
+    const abonosMap = new Map<number, any[]>();
+    if (creditoIds.length > 0) {
+      const abonosBulkResult = await db.execute<any>(sql`
+        SELECT
+          credito_id,
+          pago_id,
+          cuota_id,
+          cuota,
+          COALESCE(abono_capital, 0) AS abono_capital,
+          COALESCE(abono_interes, 0) AS abono_interes,
+          COALESCE(abono_iva_12, 0) AS abono_iva_12,
+          COALESCE(abono_seguro, 0) AS abono_seguro,
+          COALESCE(abono_gps, 0) AS abono_gps,
+          COALESCE(membresias_pago, 0) AS membresias,
+          COALESCE(abono_interes_ci, 0) AS interes_cube,
+          COALESCE(abono_iva_ci, 0) AS iva_cube,
+          COALESCE(mora, 0) AS mora,
+          COALESCE(monto_boleta, 0) AS monto_boleta,
+          COALESCE(monto_aplicado, 0) AS monto_aplicado,
+          TO_CHAR(fecha_boleta, 'YYYY-MM-DD') AS fecha_boleta,
+          TO_CHAR(fecha_pago AT TIME ZONE 'UTC' AT TIME ZONE 'America/Guatemala', 'YYYY-MM-DD HH24:MI:SS') AS fecha_pago,
+          numeroautorizacion AS numero_boleta
+        FROM cartera.pagos_credito
+        WHERE credito_id = ANY(ARRAY[${sql.raw(creditoIds.join(","))}]::int[])
+          AND validation_status = 'validated'
+          AND "paymentFalse" = false
+          AND (
+            (fecha_pago::date >= ${fechaInicio}::date AND fecha_pago::date <= ${fechaFin}::date)
+            OR (fecha_boleta::date >= ${fechaInicio}::date AND fecha_boleta::date <= ${fechaFin}::date)
+          )
+        ORDER BY credito_id ASC, fecha_boleta ASC, fecha_pago ASC
+      `);
+      for (const abono of abonosBulkResult.rows) {
+        const list = abonosMap.get(Number(abono.credito_id)) ?? [];
+        list.push(abono);
+        abonosMap.set(Number(abono.credito_id), list);
+      }
+    }
+
+    for (const [idx, item] of (pagos as any[]).entries()) {
       const rowData = {
         ...item,
         cuotas: item.cuota_min === item.cuota_max ? item.cuota_min : `${item.cuota_min}-${item.cuota_max}`,
         royalti: item.cuota_min === 0 ? Number(item.royalti) : "--",
-        monto_boleta: Number(item.monto_boleta),
+        monto_aplicado: Number(item.monto_aplicado),
         capital_restante: Number(item.capital_restante),
         interes_restante: Number(item.interes_restante),
         iva_12_restante: Number(item.iva_12_restante),
@@ -1892,6 +1970,7 @@ export async function getPagosByVencimiento({
 
       const r = sheet.addRow(rowData);
       const isEven = idx % 2 === 0;
+      r.font = { bold: true, size: 10 };
       r.eachCell({ includeEmpty: true }, (cell) => {
         cell.border = thinBorder;
         cell.alignment = { vertical: "middle", horizontal: "right" };
@@ -1899,13 +1978,47 @@ export async function getPagosByVencimiento({
           cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "F5F9FF" } };
         }
       });
-      // Alinear texto a la izquierda para las primeras columnas
       r.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
       r.getCell(2).alignment = { horizontal: "left", vertical: "middle" };
       r.getCell(3).alignment = { horizontal: "left", vertical: "middle" };
       r.getCell(4).alignment = { horizontal: "center", vertical: "middle" };
       r.getCell(5).alignment = { horizontal: "center", vertical: "middle" };
-    });
+
+      // Filas detalle (pagos individuales del crédito)
+      const abonos = abonosMap.get(Number(item.credito_id)) ?? [];
+      for (const abono of abonos) {
+        const fechaLabel = abono.fecha_boleta
+          ? `  └ ${abono.fecha_boleta}${abono.numero_boleta ? ` (${abono.numero_boleta})` : ""}`
+          : `  └ ${(abono.fecha_pago ?? "").slice(0, 10)}`;
+        const detalleRowData = {
+          numero_credito_sifco: "",
+          nombre_usuario: fechaLabel,
+          asesor: "",
+          cuotas: "",
+          dias_mora: "",
+          monto_aplicado: Number(abono.monto_aplicado || 0),
+          capital_restante: Number(abono.abono_capital || 0),
+          interes_restante: Number(abono.abono_interes || 0),
+          iva_12_restante: Number(abono.abono_iva_12 || 0),
+          seguro_restante: Number(abono.abono_seguro || 0),
+          gps_restante: Number(abono.abono_gps || 0),
+          membresias: Number(abono.membresias || 0),
+          interes_cube: Number(abono.interes_cube || 0),
+          iva_cube: Number(abono.iva_cube || 0),
+          royalti: "--",
+          mora: Number(abono.mora || 0),
+          total_pagos_del_mes: Number(abono.monto_aplicado || 0),
+        };
+        const dr = sheet.addRow(detalleRowData);
+        dr.font = { italic: true, size: 9, color: { argb: "555555" } };
+        dr.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "F8F8F8" } };
+        dr.eachCell({ includeEmpty: true }, (cell) => {
+          cell.border = thinBorder;
+          cell.alignment = { vertical: "middle", horizontal: "right" };
+        });
+        dr.getCell(2).alignment = { horizontal: "left", vertical: "middle" };
+      }
+    }
 
     const buffer = await workbook.xlsx.writeBuffer();
     const filename = `reportes/pagos_vencimiento_${mes}_${anio}_${Date.now()}.xlsx`;

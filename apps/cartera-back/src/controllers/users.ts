@@ -2,6 +2,9 @@ import { z } from "zod";
 import { creditos, usuarios } from "../database/db/schema";
 import { db } from "../database";
 import { eq, inArray, and } from "drizzle-orm"; // Import eq for query conditions
+
+type DbExecutor = Pick<typeof db, "select" | "insert">;
+
 export enum CategoriaUsuario {
   CV_VEHICULO_NUEVO = "CV Vehículo nuevo",
   VEHICULO = "Vehículo",
@@ -61,11 +64,12 @@ export const findOrCreateUserByName = async (
   municipio?: string | null,
   departamento?: string | null,
   codigo_postal?: string | null,
-  pais?: string | null
+  pais?: string | null,
+  executor: DbExecutor = db
 ) => {
   try {
     // Buscar usuario por nombre exacto
-    const existingUser = await db
+    const existingUser = await executor
       .select()
       .from(usuarios)
       .where(eq(usuarios.nombre, nombre))
@@ -76,7 +80,7 @@ export const findOrCreateUserByName = async (
     }
 
     // Si no existe, crear usuario con todos los campos
-    const [newUser] = await db
+    const [newUser] = await executor
       .insert(usuarios)
       .values({
         nombre,

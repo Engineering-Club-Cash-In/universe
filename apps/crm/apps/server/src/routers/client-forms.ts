@@ -482,15 +482,39 @@ export const clientFormsRouter = {
 			const expiresAt = new Date();
 			expiresAt.setDate(expiresAt.getDate() + 7);
 
-			const [tokenRow] = await db
-				.insert(clientFormTokens)
-				.values({
-					opportunityId: input.opportunityId,
-					personType: input.personType,
-					personId: input.personId,
-					expiresAt,
-				})
-				.returning();
+			const tokenRow = await db.transaction(async (tx) => {
+				await tx
+					.delete(creditApplications)
+					.where(
+						personWhereClause(
+							input.opportunityId,
+							input.personType,
+							input.personId,
+						),
+					);
+
+				await tx
+					.delete(financialStatements)
+					.where(
+						financialPersonWhereClause(
+							input.opportunityId,
+							input.personType,
+							input.personId,
+						),
+					);
+
+				const [row] = await tx
+					.insert(clientFormTokens)
+					.values({
+						opportunityId: input.opportunityId,
+						personType: input.personType,
+						personId: input.personId,
+						expiresAt,
+					})
+					.returning();
+
+				return row;
+			});
 
 			return {
 				token: tokenRow.token,

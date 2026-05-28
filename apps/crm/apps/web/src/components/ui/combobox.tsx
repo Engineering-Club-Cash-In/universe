@@ -33,6 +33,7 @@ interface ComboboxDemoProps {
 	onSearchChange?: (search: string) => void;
 	isLoading?: boolean;
 	isInModal?: boolean;
+	maxListHeight?: string;
 }
 
 export function Combobox({
@@ -45,6 +46,7 @@ export function Combobox({
 	onSearchChange,
 	isLoading,
 	isInModal = false,
+	maxListHeight,
 }: ComboboxDemoProps) {
 	const [open, setOpen] = React.useState(false);
 	const [searchValue, setSearchValue] = React.useState("");
@@ -123,7 +125,7 @@ export function Combobox({
 							onSearchChange?.(value);
 						}}
 					/>
-					<CommandList>
+					<CommandList style={maxListHeight ? { maxHeight: maxListHeight, overflowY: "auto" } : undefined}>
 						{isLoading ? (
 							<div className="flex items-center justify-center py-6 text-muted-foreground text-sm">
 								<Loader2 className="mr-2 h-4 w-4 animate-spin" />

@@ -62,7 +62,12 @@ const addInvestorToCreditSchema = z.object({
   porcentaje_inversion: z.number().min(0).max(100).optional(),
   tipo_operacion: z.enum(["reinversion", "compra_cartera"]),
   tipo_reinversion: z
-    .enum(["reinversion_capital", "reinversion_interes", "reinversion_total"])
+    .enum([
+      "sin_reinversion",
+      "reinversion_capital",
+      "reinversion_interes",
+      "reinversion_total",
+    ])
     .optional(),
   fecha_inicio_participacion: z.string().optional(),
   // Nuevos campos para el buscador de capital
@@ -107,15 +112,13 @@ function recalcularInversionistas(
   tipo_operacion: "reinversion" | "compra_cartera",
 ) {
   // Fallback de fecha de inicio cuando un inversionista llega sin fecha:
-  // - reinversion → dos meses antes (la operación se ejecuta sobre rendimientos
-  //   del período previo, así que la participación arranca ese mes)
-  // - compra_cartera → fecha de hoy
+  // - reinversion → 1 de diciembre de 2025 (fecha fija acordada).
+  // - compra_cartera → fecha de hoy (el front debería mandar siempre la que
+  //   el usuario eligió; este fallback solo aplica si no viene).
   const hoy = new Date();
   const fechaInicioFallback =
     tipo_operacion === "reinversion"
-      ? new Date(hoy.getFullYear(), hoy.getMonth() - 2, hoy.getDate())
-          .toISOString()
-          .split("T")[0]
+      ? "2025-12-01"
       : hoy.toISOString().split("T")[0];
   // ── PASO 1: Sumar el capital total de todos los inversionistas ──
   // Esto es la base para calcular el porcentaje de participación de cada uno.
@@ -337,6 +340,68 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
       };
     }
 
+    // ================================================================
+    // FILTRO: créditos compatibles con la modalidad solicitada (Y)
+    // Aplica SIEMPRE que vino un `tipo_reinversion` (Y) en el request.
+    // Vale para compra_cartera y reinversión.
+    //
+    // Acepta créditos cuyo espejo:
+    //   • tiene la MISMA modalidad que Y
+    //   • está en NULL (modalidad no asignada todavía)
+    // Descarta créditos cuyo espejo tiene a algún inversionista con un
+    // tipo_reinversion no-null distinto a Y. Esto incluye "sin_reinversion"
+    // como un valor concreto: si Y ≠ sin_reinversion, los espejos en
+    // sin_reinversion se descartan.
+    // ================================================================
+    const filtradosPorTipoReinversion: {
+      credito_id: number;
+      numero_credito_sifco: string;
+      razon: string;
+      tipo_reinversion_actual: string;
+      tipo_reinversion_solicitado: string;
+    }[] = [];
+
+    if (tipo_reinversion) {
+      candidatos = candidatos.filter((candidato) => {
+        const espejoActual = candidato.credito_completo?.espejo ?? [];
+
+        // Conflicto: algún inv del espejo con tipo no-null distinto a Y.
+        // (Solo NULL no es conflicto; misma modalidad tampoco.)
+        const conflicto = espejoActual.find(
+          (e: any) =>
+            e.tipo_reinversion !== null &&
+            e.tipo_reinversion !== tipo_reinversion,
+        );
+
+        if (conflicto) {
+          filtradosPorTipoReinversion.push({
+            credito_id: candidato.credito_id,
+            numero_credito_sifco: candidato.numero_credito_sifco,
+            razon: `inversionista ${conflicto.inversionista_id} del espejo ya tiene modalidad ${conflicto.tipo_reinversion}`,
+            tipo_reinversion_actual: String(conflicto.tipo_reinversion),
+            tipo_reinversion_solicitado: tipo_reinversion,
+          });
+          return false;
+        }
+
+        return true;
+      });
+
+      console.log(
+        `[addInvestorToCredit] Filtro tipo_reinversion: ${filtradosPorTipoReinversion.length} descartados, ${candidatos.length} compatibles`,
+      );
+
+      if (candidatos.length === 0) {
+        set.status = 404;
+        return {
+          success: false,
+          message:
+            "No se encontraron créditos candidatos compatibles (todos tienen alguna modalidad ya asignada)",
+          descartados: filtradosPorTipoReinversion,
+        };
+      }
+    }
+
     const resultados: any[] = [];
     const errores: any[] = [];
 
@@ -460,9 +525,20 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           membresias_pago: creditoRaw.membresias_pago,
         };
 
-        // ── Mapear inversionistas actuales del crédito ──
-        // Estos también vienen del GET (inversionistas_detalle)
-        const inversionistasActuales = inversionistas_detalle.map((inv: any) => ({
+        // ── Mapear inversionistas del PADRE y del ESPEJO por separado ──
+        // monto_aportado y los montos derivados (monto_inversionista,
+        // monto_cash_in, iva_*) se calculan independientemente por tabla.
+        // cuota_inversionista y los porcentajes se calculan desde el ESPEJO
+        // y se replican al padre.
+        const inversionistasPadre = inversionistas_detalle.map((inv: any) => ({
+          inversionista_id: inv.inversionista_id,
+          monto_aportado: inv.monto_aportado,
+          porcentaje_cash_in: inv.porcentaje_cash_in,
+          porcentaje_participacion_inversionista: inv.porcentaje_participacion_inversionista,
+          fecha_inicio_participacion: inv.fecha_inicio_participacion,
+        }));
+
+        const inversionistasEspejo = (espejoActual ?? []).map((inv: any) => ({
           inversionista_id: inv.inversionista_id,
           monto_aportado: inv.monto_aportado,
           porcentaje_cash_in: inv.porcentaje_cash_in,
@@ -471,40 +547,32 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
         }));
 
         // ================================================================
-        // PASO 3a: BUSCAR CUBE EN LOS INVERSIONISTAS DEL CRÉDITO
-        // CUBE (ID 86) siempre debe estar. Si no está, es un error
-        // y saltamos este crédito.
+        // PASO 3a: BUSCAR CUBE EN EL PADRE (autoridad para montoParaEsteCredito)
+        // CUBE (ID 86) siempre debe estar en el padre. Si no está, es un
+        // error y saltamos este crédito.
         // ================================================================
-        const cubeActual = inversionistasActuales.find(
+        const cubePadre = inversionistasPadre.find(
           (inv: any) => inv.inversionista_id === CUBE_INVESTMENT_ID,
         );
 
-        if (!cubeActual) {
+        if (!cubePadre) {
           errores.push({
             credito_id,
-            razon: "CUBE no encontrado en este crédito",
+            razon: "CUBE no encontrado en el padre del crédito",
           });
           continue;
         }
 
-        const montoCubeActual = new Big(cubeActual.monto_aportado);
+        const montoCubePadre = new Big(cubePadre.monto_aportado);
 
         // ================================================================
         // PASO 3b: DETERMINAR CUÁNTO TOMAR DE ESTE CRÉDITO
-        // Si el monto restante es MAYOR que lo que CUBE tiene:
-        //   → Tomar TODO lo de CUBE (CUBE se elimina)
-        //   → El sobrante se lleva al siguiente crédito
-        // Si el monto restante es MENOR o IGUAL que lo de CUBE:
-        //   → Tomar solo lo que falta (CUBE se queda con el resto)
-        //   → Ya no se procesan más créditos
-        //
-        // Ejemplo:
-        //   montoRestante = Q30,000 | CUBE tiene Q20,000
-        //   → montoParaEsteCredito = Q20,000 (todo lo de CUBE)
-        //   → montoRestante después = Q10,000 (sigue al siguiente crédito)
+        // El monto se basa en el CUBE del PADRE (es la verdad confirmada).
+        // Si el espejo tiene un CUBE con monto distinto, se le aplicará la
+        // misma operación pero con su propio monto inicial.
         // ================================================================
-        const montoParaEsteCredito = montoRestante.gt(montoCubeActual)
-          ? montoCubeActual
+        const montoParaEsteCredito = montoRestante.gt(montoCubePadre)
+          ? montoCubePadre
           : montoRestante;
 
         // ================================================================
@@ -555,33 +623,65 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
         }
 
         // ================================================================
-        // PASO 3d: ARMAR EL NUEVO ARRAY DE INVERSIONISTAS
-        // Recorremos los inversionistas actuales del crédito y:
-        //   - CUBE: le restamos el montoParaEsteCredito. Si queda en 0, NO lo incluimos.
-        //   - Inversionista nuevo (si ya existía): le SUMAMOS el montoParaEsteCredito.
-        //   - Los demás: se copian tal cual (no cambian).
-        // Si el inversionista NO existía en el crédito, lo agregamos al final.
-        //
-        // El resultado es un array NUEVO con la distribución correcta,
-        // listo para recalcular todas las cuotas.
+        // PASO 3d: ARMAR LOS NUEVOS ARRAYS (PADRE y ESPEJO) INDEPENDIENTES
+        // Aplicamos la misma operación (restar a CUBE, sumar/agregar al
+        // inversionista nuevo) a cada fuente con SU propio monto_aportado.
+        // Si CUBE queda en Q0 en una fuente, se elimina de esa fuente
+        // (independencia total entre padre y espejo).
         // ================================================================
-        const nuevoArray: {
-          inversionista_id: number;
-          monto_aportado: Big;
-          porcentaje_cash_in: Big;
-          porcentaje_inversion: Big;
-          fecha_inicio_participacion: string;
-        }[] = [];
 
-        for (const inv of inversionistasActuales) {
-          if (inv.inversionista_id === CUBE_INVESTMENT_ID) {
-            // ── CUBE: restarle el monto asignado a este crédito ──
-            const nuevoMontoCube = montoCubeActual.minus(montoParaEsteCredito);
-            if (nuevoMontoCube.gt(0)) {
-              // CUBE todavía tiene saldo → se queda con el resto
-              nuevoArray.push({
+        // Fecha por defecto para el inversionista nuevo (cuando no existía):
+        // reinversion → 2025-12-01 (fija), compra_cartera → fecha de hoy.
+        const fechaPorDefecto =
+          tipo_operacion === "reinversion"
+            ? "2025-12-01"
+            : new Date().toISOString().split("T")[0];
+
+        // Helper: aplica la operación a una fuente (padre o espejo) y
+        // devuelve el array operado listo para recalcular.
+        const construirArrayOperado = (fuente: any[]) => {
+          const result: {
+            inversionista_id: number;
+            monto_aportado: Big;
+            porcentaje_cash_in: Big;
+            porcentaje_inversion: Big;
+            fecha_inicio_participacion: string;
+          }[] = [];
+
+          for (const inv of fuente) {
+            if (inv.inversionista_id === CUBE_INVESTMENT_ID) {
+              // ── CUBE: restarle el monto operativo. Si queda en 0, se elimina. ──
+              const nuevoMontoCube = new Big(inv.monto_aportado).minus(
+                montoParaEsteCredito,
+              );
+              if (nuevoMontoCube.gt(0)) {
+                result.push({
+                  inversionista_id: inv.inversionista_id,
+                  monto_aportado: nuevoMontoCube,
+                  porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
+                  porcentaje_inversion: new Big(
+                    inv.porcentaje_participacion_inversionista,
+                  ),
+                  fecha_inicio_participacion: inv.fecha_inicio_participacion,
+                });
+              }
+            } else if (inv.inversionista_id === inversionista_id) {
+              // ── Inversionista ya existía en esta fuente: sumarle el monto ──
+              result.push({
                 inversionista_id: inv.inversionista_id,
-                monto_aportado: nuevoMontoCube,
+                monto_aportado: new Big(inv.monto_aportado).plus(
+                  montoParaEsteCredito,
+                ),
+                porcentaje_cash_in: porcCashIn,
+                porcentaje_inversion: porcInversion,
+                fecha_inicio_participacion:
+                  fecha_inicio_participacion ?? inv.fecha_inicio_participacion,
+              });
+            } else {
+              // ── Otro inversionista: se copia igual ──
+              result.push({
+                inversionista_id: inv.inversionista_id,
+                monto_aportado: new Big(inv.monto_aportado),
                 porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
                 porcentaje_inversion: new Big(
                   inv.porcentaje_participacion_inversionista,
@@ -589,68 +689,48 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
                 fecha_inicio_participacion: inv.fecha_inicio_participacion,
               });
             }
-            // Si nuevoMontoCube <= 0, CUBE se elimina (no se incluye en el array)
-          } else if (inv.inversionista_id === inversionista_id) {
-            // ── Inversionista ya existía: sumarle el monto nuevo ──
-            nuevoArray.push({
-              inversionista_id: inv.inversionista_id,
-              monto_aportado: new Big(inv.monto_aportado).plus(montoParaEsteCredito),
+          }
+
+          // Si el inversionista no existía en esta fuente, agregarlo
+          const yaExiste = result.some(
+            (i) => i.inversionista_id === inversionista_id,
+          );
+          if (!yaExiste) {
+            result.push({
+              inversionista_id,
+              monto_aportado: montoParaEsteCredito,
               porcentaje_cash_in: porcCashIn,
               porcentaje_inversion: porcInversion,
               fecha_inicio_participacion:
-                fecha_inicio_participacion ??
-                inv.fecha_inicio_participacion,
-            });
-          } else {
-            // ── Otro inversionista: se copia igual, no cambia ──
-            nuevoArray.push({
-              inversionista_id: inv.inversionista_id,
-              monto_aportado: new Big(inv.monto_aportado),
-              porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
-              porcentaje_inversion: new Big(
-                inv.porcentaje_participacion_inversionista,
-              ),
-              fecha_inicio_participacion: inv.fecha_inicio_participacion,
+                fecha_inicio_participacion ?? fechaPorDefecto,
             });
           }
-        }
 
-        // ── Si el inversionista NO existía en el crédito, agregarlo como nuevo ──
-        const yaExiste = nuevoArray.some(
-          (inv) => inv.inversionista_id === inversionista_id,
+          return result;
+        };
+
+        const nuevoArrayPadre = construirArrayOperado(inversionistasPadre);
+        // Si el espejo está vacío (no había filas), caemos al padre como fuente
+        const nuevoArrayEspejo =
+          inversionistasEspejo.length > 0
+            ? construirArrayOperado(inversionistasEspejo)
+            : nuevoArrayPadre.map((x) => ({ ...x }));
+
+        // ================================================================
+        // PASO 3e: RECALCULAR INDEPENDIENTEMENTE PADRE Y ESPEJO
+        // Cada uno con su propio capital total → cada uno con sus propios
+        // montos derivados (monto_inversionista, monto_cash_in, iva_*).
+        // ================================================================
+        const dataPadreRaw = recalcularInversionistas(
+          nuevoArrayPadre,
+          creditoData,
+          credito_id,
+          numero_credito_sifco,
+          tipo_operacion,
         );
-        if (!yaExiste) {
-          // Para reinversión, la participación arranca un mes antes (la
-          // reinversión se ejecuta sobre rendimientos del período previo,
-          // así que la fecha de inicio refleja ese mes anterior).
-          // Para compra_cartera, usamos la fecha del día.
-          const hoy = new Date();
-          const fechaPorDefecto =
-            tipo_operacion === "reinversion"
-              ? new Date(hoy.getFullYear(), hoy.getMonth() - 2, hoy.getDate())
-                  .toISOString()
-                  .split("T")[0]
-              : hoy.toISOString().split("T")[0];
 
-          nuevoArray.push({
-            inversionista_id,
-            monto_aportado: montoParaEsteCredito,
-            porcentaje_cash_in: porcCashIn,
-            porcentaje_inversion: porcInversion,
-            fecha_inicio_participacion:
-              fecha_inicio_participacion ?? fechaPorDefecto,
-          });
-        }
-
-        // ================================================================
-        // PASO 3e: RECALCULAR CUOTAS PARA TABLA PADRE (creditos_inversionistas)
-        // Con el nuevo array redistribuido, recalculamos:
-        //   - Porcentaje de participación de cada uno
-        //   - Cuota del inversionista (el mayor absorbe cargos fijos)
-        //   - Intereses, distribución cash-in/inversionista, IVA
-        // ================================================================
-        const dataPadre = recalcularInversionistas(
-          nuevoArray,
+        const dataEspejoRaw = recalcularInversionistas(
+          nuevoArrayEspejo,
           creditoData,
           credito_id,
           numero_credito_sifco,
@@ -658,10 +738,34 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
         );
 
         // ================================================================
+        // PASO 3e.1: REPLICAR cuota_inversionista Y porcentajes DEL ESPEJO
+        // AL PADRE. monto_aportado, monto_inversionista, monto_cash_in,
+        // iva_* quedan independientes (cada uno con su cálculo propio).
+        // ================================================================
+        const espejoPorInv = new Map<
+          number,
+          (typeof dataEspejoRaw)[number]
+        >();
+        for (const e of dataEspejoRaw) {
+          espejoPorInv.set(e.inversionista_id, e);
+        }
+
+        const dataPadre = dataPadreRaw.map((inv) => {
+          const e = espejoPorInv.get(inv.inversionista_id);
+          return {
+            ...inv,
+            // Si el inversionista existe en el espejo, replicar su cuota
+            // y porcentajes para que coincidan. Si no, mantener los propios.
+            cuota_inversionista: e?.cuota_inversionista ?? inv.cuota_inversionista,
+            porcentaje_cash_in: e?.porcentaje_cash_in ?? inv.porcentaje_cash_in,
+            porcentaje_participacion_inversionista:
+              e?.porcentaje_participacion_inversionista ??
+              inv.porcentaje_participacion_inversionista,
+          };
+        });
+
+        // ================================================================
         // PASO 3f: NUKE & REBUILD EN creditos_inversionistas
-        // Borramos TODOS los registros del crédito en la tabla padre
-        // y reinsertamos el array recalculado.
-        // Es más limpio que hacer updates parciales y evita inconsistencias.
         // ================================================================
         await tx
           .delete(creditos_inversionistas)
@@ -672,36 +776,32 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
         }
 
         // ================================================================
-        // PASO 3h: ARMAR DATA DEL ESPEJO A PARTIR DEL PADRE
-        // El espejo hereda exactamente la cuota_inversionista del padre,
-        // así que reusamos dataPadre y solo le agregamos status + updated_at.
+        // PASO 3h: ARMAR DATA DEL ESPEJO DESDE dataEspejoRaw (no del padre)
+        // El espejo lleva sus propios montos derivados; solo le agregamos
+        // status + tipo_reinversion + updated_at.
         // ================================================================
-
-        // ── Determinar el status del espejo según tipo_operacion ──
-        // "reinversion" → "pendiente_reinversion"
-        // "compra_cartera" → "pendiente_compra_cartera" (espera aceptación)
-        // Solo el inversionista nuevo recibe este status.
-        // Los demás inversionistas quedan como "completado".
         const statusEspejo =
           tipo_operacion === "reinversion"
             ? "pendiente_reinversion"
             : "pendiente_compra_cartera";
 
-        const dataEspejoConStatus = dataPadre.map((inv) => ({
+        const dataEspejoConStatus = dataEspejoRaw.map((inv) => ({
           ...inv,
           // Solo el inversionista nuevo recibe el status pendiente
           // Los demás se mantienen como "completado"
           status: (inv.inversionista_id === inversionista_id
               ? statusEspejo
               : "completado") as "pendiente_reinversion" | "pendiente_compra_cartera" | "completado",
-          // tipo_reinversion:
-          //   - target (inversionista que entra en esta op): Y (solo en compra_cartera)
-          //   - resto: preservamos el valor existente del espejo (si tenía)
+          // tipo_reinversion (prioridad: lo que viene > viejo del espejo > null):
+          //   - target: si viene Y en el request lo usa; si no, preserva el
+          //     valor previo del espejo. Aplica tanto en compra_cartera como
+          //     en reinversión (no perdemos trazabilidad de la modalidad).
+          //   - resto: preserva el valor existente del espejo.
           tipo_reinversion:
             inv.inversionista_id === inversionista_id
-              ? tipo_operacion === "compra_cartera"
-                ? tipo_reinversion ?? null
-                : null
+              ? tipo_reinversion ??
+                tipoReinvActualPorInv.get(inv.inversionista_id) ??
+                null
               : tipoReinvActualPorInv.get(inv.inversionista_id) ?? null,
           updated_at: new Date(),
         }));
@@ -733,10 +833,12 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           inversionista_id,
           monto_aportado: montoParaEsteCredito.toString(),
           tipo_operacion,
+          // Misma lógica que el espejo: si vino en el request lo usa, sino
+          // preserva el viejo del espejo, sino null. Aplica en ambas operaciones.
           tipo_reinversion:
-            tipo_operacion === "compra_cartera"
-              ? tipo_reinversion ?? null
-              : null,
+            tipo_reinversion ??
+            tipoReinvActualPorInv.get(inversionista_id) ??
+            null,
           status: statusEspejo,
         });
 
@@ -768,7 +870,7 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           monto_asignado: montoParaEsteCredito.toString(),
           inversionistas_padre: dataPadre.length,
           inversionistas_espejo: dataEspejoConStatus.length,
-          cube_eliminado: !nuevoArray.some(
+          cube_eliminado: !nuevoArrayPadre.some(
             (inv) => inv.inversionista_id === CUBE_INVESTMENT_ID,
           ),
         });
@@ -835,7 +937,12 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
             numero_credito_sifco: r.numero_credito_sifco,
             monto_asignado: r.monto_asignado,
             cube_eliminado: r.cube_eliminado,
-            tipo_reinversion: tipo_reinversion ?? null,
+            // El email muestra "Tradicional" cuando tipo_reinversion es null,
+            // así que mapeamos sin_reinversion → null para preservar ese label.
+            tipo_reinversion:
+              tipo_reinversion && tipo_reinversion !== "sin_reinversion"
+                ? tipo_reinversion
+                : null,
           })),
           usuarioNombre,
           usuarioEmail,

@@ -28,6 +28,7 @@ import {
   abonos_capital,
   cuentas_extra_inversionista,
   compras_credito_inversionista,
+  historico_liquidaciones_espejo,
   statusCreditoInversionistaEspejoEnum,
 } from "../database/db/schema";
 import { getSignedDocumentUrl } from "../utils/functions/uploadsFiles";
@@ -3650,7 +3651,49 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
         const pagosIds = pagosNoLiquidados.map((p) => p.id);
 
         for (const [creditoId, pagosCred] of creditosConPagos) {
-          const sumaCapital = pagosCred.reduce((sum, p) => sum + Number(p.abono_capital || 0), 0);
+          const sumaCapitalBig = pagosCred.reduce(
+            (acc, p) => acc.plus(new Big(p.abono_capital || 0)),
+            new Big(0)
+          );
+          const sumaCapital = sumaCapitalBig.toNumber(); // para processAndReplaceCreditInvestors (código preexistente)
+
+          // Snapshot monto_aportado BEFORE reduction
+          const [espejoRow] = await tx
+            .select({ monto_aportado: creditos_inversionistas_espejo.monto_aportado })
+            .from(creditos_inversionistas_espejo)
+            .where(
+              and(
+                eq(creditos_inversionistas_espejo.credito_id, creditoId),
+                eq(creditos_inversionistas_espejo.inversionista_id, inv_id)
+              )
+            )
+            .limit(1);
+
+          const currentMonto = espejoRow?.monto_aportado ?? "0";
+
+          // Validation 3 (cuadre): current espejo must match last historico if one exists
+          const [lastHistorico] = await tx
+            .select({ monto_aportado: historico_liquidaciones_espejo.monto_aportado })
+            .from(historico_liquidaciones_espejo)
+            .where(
+              and(
+                eq(historico_liquidaciones_espejo.credito_id, creditoId),
+                eq(historico_liquidaciones_espejo.inversionista_id, inv_id)
+              )
+            )
+            .orderBy(desc(historico_liquidaciones_espejo.fecha))
+            .limit(1);
+
+          if (lastHistorico && !new Big(currentMonto).eq(new Big(lastHistorico.monto_aportado))) {
+            const capitalRestante = new Big(currentMonto).minus(sumaCapitalBig).toFixed(8);
+            const historicoMonto = new Big(lastHistorico.monto_aportado).toFixed(8);
+            throw new Error(
+              `[CUADRE_CAPITAL] Inv ${inv_id} Cred ${creditoId}: ` +
+              `Capital Restante (${capitalRestante}) + Abono Capital (${sumaCapitalBig.toFixed(8)}) ` +
+              `= ${new Big(currentMonto).toFixed(8)} ≠ histórico (${historicoMonto})`
+            );
+          }
+
           if (sumaCapital > 0) {
             await processAndReplaceCreditInvestors(
               creditoId,
@@ -3661,6 +3704,17 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
               tx
             );
           }
+
+          // Save historico with POST-reduction value — becomes baseline for next liquidation's cuadre check
+          const montoPostReduccion = new Big(currentMonto).minus(sumaCapitalBig).toFixed(8);
+          await tx
+            .insert(historico_liquidaciones_espejo)
+            .values({
+              monto_aportado: montoPostReduccion,
+              inversionista_id: inv_id,
+              credito_id: creditoId,
+              liquidacion_id: liquidacion.liquidacion_id,
+            });
         }
 
         let updateResult: any = { rowCount: 0 };

@@ -56,6 +56,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Combobox, Transition } from "@headlessui/react";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Fragment, useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ConfirmationModal } from "@/components/ui/confirmation-modal";
@@ -288,6 +295,17 @@ export function TableInvestors() {
   const [compraCarteraFecha, setCompraCarteraFecha] = useState("");
   const [compraCarteraPctInv, setCompraCarteraPctInv] = useState("70");
   const [compraCarteraPctCashIn, setCompraCarteraPctCashIn] = useState("30");
+  const [compraCarteraTipoReinversion, setCompraCarteraTipoReinversion] =
+    useState<
+      | "sin_reinversion"
+      | "reinversion_capital"
+      | "reinversion_total"
+    >("sin_reinversion");
+  const [compraCarteraTipoOperacion, setCompraCarteraTipoOperacion] = useState<
+    "compra_cartera" | "reinversion"
+  >("compra_cartera");
+  // Fecha por defecto bloqueada (diciembre 2025).
+  const FECHA_INICIO_DEFAULT = "2025-12-01";
   const agregarInvCredito = useAgregarInversionistaCredito();
 
   const [incluirLiquidados, setIncluirLiquidados] = useState(false);
@@ -1125,7 +1143,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 </button>
               </DropdownMenuTrigger>
 
-              <DropdownMenuContent align="end" className="w-56 rounded-xl shadow-lg border border-gray-200 p-1">
+              <DropdownMenuContent align="end" className="w-56 rounded-xl shadow-lg border border-gray-200 p-1 bg-white">
                 {/* Descargar PDF */}
                 <DropdownMenuItem
                   onClick={(e) => {
@@ -1243,7 +1261,10 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                     e.stopPropagation();
                     setCompraCarteraInvId(inv.inversionista_id);
                     setCompraCarteraMonto("");
+                    // Default compra_cartera → fecha de hoy (editable)
                     setCompraCarteraFecha(new Date().toISOString().split("T")[0]);
+                    setCompraCarteraTipoReinversion("sin_reinversion");
+                    setCompraCarteraTipoOperacion("compra_cartera");
                     // Calcular moda del porcentaje de participación desde créditos existentes
                     const creditos = inv.creditos ?? [];
                     if (creditos.length > 0) {
@@ -2453,16 +2474,78 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
           }
         }}
       >
-        <DialogContent className="!bg-[#1e293b] sm:max-w-md z-[60] border border-slate-600/40 shadow-2xl rounded-2xl">
+        <DialogContent className="!bg-white sm:max-w-md z-[60] border border-gray-200 shadow-2xl rounded-2xl">
           <DialogHeader>
-            <DialogTitle className="text-lg font-bold text-white">Compra de Cartera</DialogTitle>
-            <DialogDescription className="text-slate-400 text-sm">
+            <DialogTitle className="text-lg font-bold text-gray-900">
+              {compraCarteraTipoOperacion === "reinversion"
+                ? "Reinversión"
+                : "Compra de Cartera"}
+            </DialogTitle>
+            <DialogDescription className="text-gray-500 text-sm">
               Ingresa el monto, porcentajes y la fecha de inicio de participación
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-2 p-1 bg-gray-100 rounded-xl">
+              <button
+                type="button"
+                onClick={() => {
+                  setCompraCarteraTipoOperacion("compra_cartera");
+                  setCompraCarteraFecha(new Date().toISOString().split("T")[0]);
+                }}
+                className={`px-3 py-2 text-sm font-medium rounded-lg transition-all ${
+                  compraCarteraTipoOperacion === "compra_cartera"
+                    ? "bg-white text-gray-900 shadow-sm"
+                    : "text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Compra de Cartera
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCompraCarteraTipoOperacion("reinversion");
+                  setCompraCarteraFecha(FECHA_INICIO_DEFAULT);
+                }}
+                className={`px-3 py-2 text-sm font-medium rounded-lg transition-all ${
+                  compraCarteraTipoOperacion === "reinversion"
+                    ? "bg-white text-gray-900 shadow-sm"
+                    : "text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Reinversión
+              </button>
+            </div>
             <div>
-              <label htmlFor="compra-monto" className="text-sm font-medium text-slate-300">
+              <label htmlFor="compra-modalidad" className="text-sm font-medium text-gray-700">
+                Modelo de Inversión
+              </label>
+              <Select
+                value={compraCarteraTipoReinversion}
+                onValueChange={(v) =>
+                  setCompraCarteraTipoReinversion(
+                    v as
+                      | "sin_reinversion"
+                      | "reinversion_capital"
+                      | "reinversion_total",
+                  )
+                }
+              >
+                <SelectTrigger
+                  id="compra-modalidad"
+                  className="mt-1 w-full !bg-white !border-gray-300 !text-gray-900 focus:!border-emerald-500 focus:!ring-emerald-500/30"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="!bg-white !border-gray-200 !text-gray-900 z-[70]">
+                  <SelectItem value="sin_reinversion">Tradicional</SelectItem>
+                  <SelectItem value="reinversion_capital">Reinversión Capital</SelectItem>
+                  <SelectItem value="reinversion_total">Interés Compuesto</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label htmlFor="compra-monto" className="text-sm font-medium text-gray-700">
                 Monto aportado
               </label>
               <Input
@@ -2473,12 +2556,12 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 placeholder="0.00"
                 value={compraCarteraMonto}
                 onChange={(e) => setCompraCarteraMonto(e.target.value)}
-                className="mt-1 !bg-slate-700/50 !border-slate-500/50 !text-white placeholder:text-slate-500 focus:!border-emerald-400 focus:!ring-emerald-400/30"
+                className="mt-1 !bg-white !border-gray-300 !text-gray-900 placeholder:text-gray-400 focus:!border-emerald-500 focus:!ring-emerald-500/30"
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label htmlFor="compra-pct-inv" className="text-sm font-medium text-slate-300">
+                <label htmlFor="compra-pct-inv" className="text-sm font-medium text-gray-700">
                   % Inversionista
                 </label>
                 <Input
@@ -2496,11 +2579,11 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                       setCompraCarteraPctCashIn(String(100 - num));
                     }
                   }}
-                  className="mt-1 !bg-slate-700/50 !border-slate-500/50 !text-white placeholder:text-slate-500 focus:!border-emerald-400 focus:!ring-emerald-400/30"
+                  className="mt-1 !bg-white !border-gray-300 !text-gray-900 placeholder:text-gray-400 focus:!border-emerald-500 focus:!ring-emerald-500/30"
                 />
               </div>
               <div>
-                <label htmlFor="compra-pct-cashin" className="text-sm font-medium text-slate-300">
+                <label htmlFor="compra-pct-cashin" className="text-sm font-medium text-gray-700">
                   % Cash In
                 </label>
                 <Input
@@ -2518,12 +2601,12 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                       setCompraCarteraPctInv(String(100 - num));
                     }
                   }}
-                  className="mt-1 !bg-slate-700/50 !border-slate-500/50 !text-white placeholder:text-slate-500 focus:!border-emerald-400 focus:!ring-emerald-400/30"
+                  className="mt-1 !bg-white !border-gray-300 !text-gray-900 placeholder:text-gray-400 focus:!border-emerald-500 focus:!ring-emerald-500/30"
                 />
               </div>
             </div>
             <div>
-              <label htmlFor="compra-fecha" className="text-sm font-medium text-slate-300">
+              <label htmlFor="compra-fecha" className="text-sm font-medium text-gray-700">
                 Fecha inicio participación
               </label>
               <Input
@@ -2531,7 +2614,13 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 type="date"
                 value={compraCarteraFecha}
                 onChange={(e) => setCompraCarteraFecha(e.target.value)}
-                className="mt-1 !bg-slate-700/50 !border-slate-500/50 !text-white focus:!border-emerald-400 focus:!ring-emerald-400/30 [color-scheme:dark]"
+                disabled={compraCarteraTipoOperacion === "reinversion"}
+                readOnly={compraCarteraTipoOperacion === "reinversion"}
+                className={
+                  compraCarteraTipoOperacion === "reinversion"
+                    ? "mt-1 !bg-gray-100 !border-gray-300 !text-gray-700 cursor-not-allowed focus:!border-gray-300 focus:!ring-0"
+                    : "mt-1 !bg-white !border-gray-300 !text-gray-900 focus:!border-emerald-500 focus:!ring-emerald-500/30"
+                }
               />
             </div>
           </div>
@@ -2542,7 +2631,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 setCompraCarteraOpen(false);
                 setCompraCarteraInvId(null);
               }}
-              className="px-4 py-2 text-sm font-medium text-slate-300 bg-slate-700/60 border border-slate-500/40 rounded-lg hover:bg-slate-600/60 transition-colors"
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
             >
               Cancelar
             </button>
@@ -2551,30 +2640,42 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
               disabled={agregarInvCredito.isPending || !compraCarteraMonto || Number(compraCarteraMonto) <= 0}
               onClick={() => {
                 if (!compraCarteraInvId || !compraCarteraMonto) return;
+                const esReinversion =
+                  compraCarteraTipoOperacion === "reinversion";
                 agregarInvCredito.mutate(
                   {
                     inversionista_id: compraCarteraInvId,
                     monto_aportado: Number(compraCarteraMonto),
-                    tipo_operacion: "compra_cartera",
+                    tipo_operacion: compraCarteraTipoOperacion,
+                    tipo_reinversion: compraCarteraTipoReinversion,
                     porcentaje_inversion: Number(compraCarteraPctInv),
                     porcentaje_cash_in: Number(compraCarteraPctCashIn),
                     fecha_inicio_participacion: compraCarteraFecha || undefined,
                   },
                   {
                     onSuccess: () => {
-                      toast.success("Compra de cartera registrada correctamente");
+                      toast.success(
+                        esReinversion
+                          ? "Reinversión registrada correctamente"
+                          : "Compra de cartera registrada correctamente",
+                      );
                       setCompraCarteraOpen(false);
                       setCompraCarteraInvId(null);
                       refetch();
                       refetchTotales();
                     },
                     onError: (err) => {
-                      toast.error(err?.message || "Error al registrar compra de cartera");
+                      toast.error(
+                        err?.message ||
+                          (esReinversion
+                            ? "Error al registrar reinversión"
+                            : "Error al registrar compra de cartera"),
+                      );
                     },
                   }
                 );
               }}
-              className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-500 disabled:bg-slate-600 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors"
+              className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-500 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed transition-colors"
             >
               {agregarInvCredito.isPending ? "Guardando…" : "Confirmar"}
             </button>

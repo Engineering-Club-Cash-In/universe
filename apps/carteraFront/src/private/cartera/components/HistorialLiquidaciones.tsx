@@ -338,6 +338,8 @@ export function HistorialLiquidaciones() {
   }, []);
   const [generandoId, setGenerandoId] = useState<number | null>(null);
   const [navegandoId, setNavegandoId] = useState<number | null>(null);
+  const [generarPagosModalId, setGenerarPagosModalId] = useState<number | null>(null);
+  const [fechaGenerarPagos, setFechaGenerarPagos] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [resultadoModal, _setResultadoModal] = useState<{
     nombre: string;
     inversionistaId: number;
@@ -419,37 +421,43 @@ export function HistorialLiquidaciones() {
 
   const handleGenerarPagos = useCallback(
     (inversionistaId: number) => {
-      const inv = data?.find((d) => d.inversionista_id === inversionistaId);
-      const nombre = inv?.nombre ?? `Inversionista #${inversionistaId}`;
-      setGenerandoId(inversionistaId);
-      const fecha_calculo = new Date(anio, mes - 1, 1).toISOString().slice(0, 10);
-      calcularPagosEspejo({ inversionistaId, fecha_calculo }, {
-        onSuccess: (res: any) => {
-          setResultadoModal({
-            nombre,
-            inversionistaId,
-            response: res as CalcularPagosEspejoResponse,
-          });
-          const nFallidos = (res?.fallidos ?? []).length;
-          if (nFallidos > 0) {
-            toast.warning(
-              `${nFallidos} crédito${nFallidos !== 1 ? "s" : ""} no se procesaron`,
-              { description: "Ver detalle en el modal." }
-            );
-          }
-        },
-        onError: (err: any) => {
-          setResultadoModal({
-            nombre,
-            inversionistaId,
-            errorMsg: err?.message ?? "Error al generar los pagos",
-          });
-        },
-        onSettled: () => setGenerandoId(null),
-      });
+      setGenerarPagosModalId(inversionistaId);
     },
-    [calcularPagosEspejo, refetch, data],
+    [],
   );
+
+  const handleConfirmarGenerarPagos = useCallback(() => {
+    if (generarPagosModalId == null) return;
+    const inversionistaId = generarPagosModalId;
+    const inv = data?.find((d) => d.inversionista_id === inversionistaId);
+    const nombre = inv?.nombre ?? `Inversionista #${inversionistaId}`;
+    setGenerarPagosModalId(null);
+    setGenerandoId(inversionistaId);
+    calcularPagosEspejo({ inversionistaId, fecha_calculo: fechaGenerarPagos }, {
+      onSuccess: (res: any) => {
+        setResultadoModal({
+          nombre,
+          inversionistaId,
+          response: res as CalcularPagosEspejoResponse,
+        });
+        const nFallidos = (res?.fallidos ?? []).length;
+        if (nFallidos > 0) {
+          toast.warning(
+            `${nFallidos} crédito${nFallidos !== 1 ? "s" : ""} no se procesaron`,
+            { description: "Ver detalle en el modal." }
+          );
+        }
+      },
+      onError: (err: any) => {
+        setResultadoModal({
+          nombre,
+          inversionistaId,
+          errorMsg: err?.message ?? "Error al generar los pagos",
+        });
+      },
+      onSettled: () => setGenerandoId(null),
+    });
+  }, [generarPagosModalId, fechaGenerarPagos, calcularPagosEspejo, data]);
 
   const handleVerPagos = useCallback(
     (inversionistaId: number) => {
@@ -742,6 +750,46 @@ export function HistorialLiquidaciones() {
           </button>
         </div>
       )}
+
+      <Dialog open={generarPagosModalId != null} onOpenChange={(open) => { if (!open) setGenerarPagosModalId(null); }}>
+        <DialogContent className="bg-white dark:bg-gray-900 max-w-md">
+          <DialogTitle className="text-blue-700 dark:text-blue-400 text-xl font-bold flex items-center gap-2">
+            <FileSpreadsheet className="h-5 w-5" />
+            Generar Pagos
+          </DialogTitle>
+          <DialogDescription className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <label className="block text-sm font-bold text-gray-700 dark:text-gray-300">
+                Fecha del período de cálculo
+              </label>
+              <input
+                type="date"
+                value={fechaGenerarPagos}
+                onChange={(e) => setFechaGenerarPagos(e.target.value)}
+                className="w-full border border-blue-300 rounded-lg px-3 py-2 bg-blue-50 text-blue-900 focus:ring-2 focus:ring-blue-400 focus:outline-none"
+              />
+              <p className="text-xs text-gray-500">
+                Esta fecha determina el período al que pertenece el cálculo de pagos.
+              </p>
+            </div>
+          </DialogDescription>
+          <DialogFooter className="gap-2 sm:gap-0 pt-4">
+            <button
+              className="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100 font-medium transition-colors"
+              onClick={() => setGenerarPagosModalId(null)}
+            >
+              Cancelar
+            </button>
+            <button
+              className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold transition-colors inline-flex items-center gap-2"
+              onClick={handleConfirmarGenerarPagos}
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              Confirmar
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ResultadoGeneracionModal
         resultado={resultadoModal}

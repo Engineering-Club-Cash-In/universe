@@ -2295,26 +2295,23 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
           <DialogContent className="bg-white dark:bg-gray-900">
             <DialogHeader>
               <DialogTitle className="text-blue-700 dark:text-blue-400 text-xl font-bold">
-                ¿Generar pagos falsos?
+                ¿Generar pagos?
               </DialogTitle>
               <DialogDescription className="space-y-3 pt-4">
-                <p className="text-gray-900 dark:text-gray-100 text-base">
-                  Esta acción generará los{" "}
-                  <strong className="text-blue-700 dark:text-blue-400">
-                    pagos falsos pendientes
-                  </strong>{" "}
-                  para este inversionista.
-                </p>
-                <p className="text-gray-700 dark:text-gray-300 text-sm">
-                  • Se distribuirán todos los pagos pendientes entre
-                  inversionistas
-                </p>
-                <p className="text-gray-700 dark:text-gray-300 text-sm">
-                  • Los registros se crearán en pagos_credito_inversionistas
-                </p>
-                <p className="text-gray-700 dark:text-gray-300 text-sm">
-                  • Esta acción puede tardar unos segundos
-                </p>
+                <div className="space-y-2">
+                  <label className="block text-sm font-bold text-gray-700 dark:text-gray-300">
+                    Fecha del período de cálculo
+                  </label>
+                  <input
+                    type="date"
+                    value={fechaCalculo}
+                    onChange={(e) => setFechaCalculo(e.target.value)}
+                    className="w-full border border-blue-300 rounded-lg px-3 py-2 bg-blue-50 text-blue-900 focus:ring-2 focus:ring-blue-400 focus:outline-none"
+                  />
+                  <p className="text-xs text-gray-500">
+                    Esta fecha determina el período al que pertenece el cálculo de pagos.
+                  </p>
+                </div>
               </DialogDescription>
             </DialogHeader>
             <DialogFooter className="gap-2 sm:gap-0 pt-4">

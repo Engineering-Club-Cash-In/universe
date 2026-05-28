@@ -1022,12 +1022,19 @@ if (facturasExistentes.length > 0) {
           const fechaCorte = new Date(fechaCorteRaw as unknown as string);
 
           // `diaCorte` = qué día del mes fue la compra. Ej: 15 para el 15 de junio.
-          const diaCorte = fechaCorte.getDate();
+          //   Usamos UTC porque la columna `fecha_inicio_participacion` es `date`
+          //   en Postgres (sin hora) y JS lo parsea como UTC midnight. Si usáramos
+          //   getDate() en local-tz (ej. GMT-6), "2026-06-01" se vuelve "2026-05-31"
+          //   y el día/mes saldrían mal.
+          const diaCorte = fechaCorte.getUTCDate();
 
           // `ultimoDiaMes` = cuántos días tiene el mes de la fecha de corte.
           //   Truco JS: día 0 del mes siguiente = último día del mes actual.
-          //   Ej: new Date(2026, 6, 0).getDate() → 30 (último día de junio).
-          const ultimoDiaMes = new Date(fechaCorte.getFullYear(), fechaCorte.getMonth() + 1, 0).getDate();
+          //   Construimos con Date.UTC para no recaer en local-tz.
+          //   Ej: Date.UTC(2026, 6, 0) → último día de junio (30).
+          const ultimoDiaMes = new Date(
+            Date.UTC(fechaCorte.getUTCFullYear(), fechaCorte.getUTCMonth() + 1, 0)
+          ).getUTCDate();
 
           // Fracción de mes ANTES del corte: días vigentes con la vieja distribución.
           //   Ej: corte día 15 de 30 → fraccionAntes = 15/30 = 0.5 (50%)
@@ -1516,7 +1523,12 @@ if (facturasExistentes.length > 0) {
             console.log(`\n   ⏸️  Hubo ${erroresFlujoNuevo.length} error(es) en el flujo nuevo → se mantiene pendiente_facturar=true`);
           } else {
             // Caso feliz: cerrar el ciclo. Hacemos UPDATE en BD.
-            const idsParaMarcar = operacionesPendientesFacturar.map((o) => o.id);
+            // 🔒 Solo marcamos la operación que efectivamente prorrateamos
+            //    (operacionPendiente = operacionesPendientesFacturar[0]).
+            //    Si llegaran más filas, las demás quedan en pendiente_facturar=true
+            //    para que las procese el siguiente pago. NO las marcamos como
+            //    facturadas porque NO las incluimos en el cálculo de prorrateo.
+            const idsParaMarcar = [operacionPendiente.id];
             console.log(`\n   ✅ Cuota pagada + sin errores → marcando ${idsParaMarcar.length} fila(s) como pendiente_facturar=false`);
             try {
               await db

@@ -474,8 +474,7 @@ export async function insertPagosCreditoInversionistas(
 
     // fechaPeriodo: viene del front (fecha explícita del período a liquidar).
     // Fallback: fecha_vencimiento del pago registrado.
-    const fechaDelPeriodo = fechaPeriodo
-      ?? (currentPago?.fecha_vencimiento ? new Date(currentPago.fecha_vencimiento) : new Date());
+    const fechaDelPeriodo = fechaPeriodo ?? new Date();
 
     const periodoMes = fechaDelPeriodo.getMonth();
     const periodoAnio = fechaDelPeriodo.getFullYear();

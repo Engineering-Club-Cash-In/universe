@@ -86,6 +86,7 @@ export function ListaCreditosPagos() {
     handleAsesorId,
     setAsesorId,
     nombreUsuarioInput,
+    nombreUsuario,
     setNombreUsuarioInput,
     handleSearchNombreUsuario,
     clearNombreUsuario,
@@ -347,6 +348,9 @@ export function ListaCreditosPagos() {
             type="text"
             placeholder="# Crédito SIFCO"
             defaultValue={creditoSifco}
+            onChange={(e) => {
+              if (e.target.value === "") handleSifco("");
+            }}
             onBlur={(e) => {
               if (e.target.value !== creditoSifco) {
                 handleSifco(e.target.value);
@@ -381,7 +385,10 @@ export function ListaCreditosPagos() {
             <button
               type="button"
               className="p-1 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200 transition"
-              onClick={clearSifco}
+              onClick={() => {
+                clearSifco();
+                if (inputRef.current) inputRef.current.value = "";
+              }}
               title="Limpiar filtro"
             >
               <X className="w-4 h-4" />
@@ -398,7 +405,13 @@ export function ListaCreditosPagos() {
                 type="text"
                 placeholder="Buscar por nombre..."
                 value={nombreUsuarioInput}
-                onChange={(e) => setNombreUsuarioInput(e.target.value)}
+                onChange={(e) => {
+                  setNombreUsuarioInput(e.target.value);
+                  if (e.target.value === "") clearNombreUsuario();
+                }}
+                onBlur={() => {
+                  if (nombreUsuarioInput !== nombreUsuario) handleSearchNombreUsuario();
+                }}
                 onKeyDown={handleKeyPress}
                 className="border border-blue-200 rounded-lg px-3 py-2 pr-10 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full"
               />
@@ -588,7 +601,10 @@ export function ListaCreditosPagos() {
             <Button
               type="button"
               variant="outline"
-              onClick={clearAllFilters}
+              onClick={() => {
+                clearAllFilters();
+                if (inputRef.current) inputRef.current.value = "";
+              }}
               className="flex items-center gap-2 rounded-lg border-gray-300 px-4 py-2 font-semibold text-gray-600 hover:bg-gray-100"
             >
               <X className="w-4 h-4" />

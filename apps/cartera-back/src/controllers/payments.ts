@@ -479,24 +479,31 @@ export async function insertPagosCreditoInversionistas(
     const periodoMes = fechaDelPeriodo.getMonth();
     const periodoAnio = fechaDelPeriodo.getFullYear();
 
-    const { montoRestarValidacion, montoRestarCalculo } = await calcularAjusteCompras(
-      credito_id,
-      inv.inversionista_id,
-      lastHistoricoV1 ? new Date(lastHistoricoV1.fecha) : null,
-      periodoMes,
-      periodoAnio,
-    );
+    let montoBaseCalculo = new Big(inv.monto_aportado);
 
-    // Validation 1: espejo ajustado por compras nuevas == histórico
-    const montoParaValidacion = new Big(inv.monto_aportado).minus(montoRestarValidacion);
-    if (lastHistoricoV1 && !montoParaValidacion.eq(new Big(lastHistoricoV1.monto_aportado))) {
-      throw new Error(
-        `[MONTO_ESPEJO_INCONSISTENTE] Inv ${inv.inversionista_id} Cred ${credito_id}: ` +
-        `espejo-compras_nuevas (${montoParaValidacion.toFixed(8)}) ≠ histórico (${lastHistoricoV1.monto_aportado})`
+    const espejoIgualHistoricoV1 =
+      lastHistoricoV1 && new Big(inv.monto_aportado).eq(new Big(lastHistoricoV1.monto_aportado));
+
+    if (!espejoIgualHistoricoV1) {
+      const { montoRestarValidacion, montoRestarCalculo } = await calcularAjusteCompras(
+        credito_id,
+        inv.inversionista_id,
+        lastHistoricoV1 ? new Date(lastHistoricoV1.fecha) : null,
+        periodoMes,
+        periodoAnio,
       );
-    }
 
-    const montoBaseCalculo = new Big(inv.monto_aportado).minus(montoRestarCalculo);
+      // Validation 1: espejo ajustado por compras nuevas == histórico
+      const montoParaValidacion = new Big(inv.monto_aportado).minus(montoRestarValidacion);
+      if (lastHistoricoV1 && !montoParaValidacion.eq(new Big(lastHistoricoV1.monto_aportado))) {
+        throw new Error(
+          `[MONTO_ESPEJO_INCONSISTENTE] Inv ${inv.inversionista_id} Cred ${credito_id}: ` +
+          `espejo-compras_nuevas (${montoParaValidacion.toFixed(8)}) ≠ histórico (${lastHistoricoV1.monto_aportado})`
+        );
+      }
+
+      montoBaseCalculo = new Big(inv.monto_aportado).minus(montoRestarCalculo);
+    }
 
     // --- Calcular los 4 campos desde monto_aportado (misma lógica que processAndReplaceCreditInvestors) ---
     const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
@@ -852,21 +859,25 @@ export async function insertPagosCreditoInversionistasV2(
     let montoBaseCalculoV2 = new Big(inv.monto_aportado ?? 0);
 
     if (lastHistoricoV2) {
-      const { montoRestarValidacion, montoRestarCalculo } = await calcularAjusteCompras(
-        credito_id,
-        inv.inversionista_id,
-        new Date(lastHistoricoV2.fecha),
-        periodoMesV2,
-        periodoAnioV2,
-      );
-      const montoParaValidacion = new Big(inv.monto_aportado ?? 0).minus(montoRestarValidacion);
-      if (!montoParaValidacion.eq(new Big(lastHistoricoV2.monto_aportado))) {
-        throw new Error(
-          `[MONTO_ESPEJO_INCONSISTENTE_V2] Inv ${inv.inversionista_id} Cred ${credito_id}: ` +
-          `espejo-compras_nuevas (${montoParaValidacion.toFixed(8)}) ≠ histórico (${lastHistoricoV2.monto_aportado})`
+      const espejoIgualHistoricoV2 = montoBaseCalculoV2.eq(new Big(lastHistoricoV2.monto_aportado));
+
+      if (!espejoIgualHistoricoV2) {
+        const { montoRestarValidacion, montoRestarCalculo } = await calcularAjusteCompras(
+          credito_id,
+          inv.inversionista_id,
+          new Date(lastHistoricoV2.fecha),
+          periodoMesV2,
+          periodoAnioV2,
         );
+        const montoParaValidacion = new Big(inv.monto_aportado ?? 0).minus(montoRestarValidacion);
+        if (!montoParaValidacion.eq(new Big(lastHistoricoV2.monto_aportado))) {
+          throw new Error(
+            `[MONTO_ESPEJO_INCONSISTENTE_V2] Inv ${inv.inversionista_id} Cred ${credito_id}: ` +
+            `espejo-compras_nuevas (${montoParaValidacion.toFixed(8)}) ≠ histórico (${lastHistoricoV2.monto_aportado})`
+          );
+        }
+        montoBaseCalculoV2 = montoBaseCalculoV2.minus(montoRestarCalculo);
       }
-      montoBaseCalculoV2 = montoBaseCalculoV2.minus(montoRestarCalculo);
     }
 
     // Porcentaje general: base_calculo / SUM(monto_aportado)
@@ -2194,6 +2205,9 @@ export async function obtenerCreditosConPagosPendientes(
  * @param inversionistaId - ID del inversionista a procesar
  */
 export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fechaCalculo?: Date) {
+  // Este proceso genera los pagos que le corresponden al inversionista por cada
+  // crédito en el que participa, sin todavía descontar capital ni marcar nada como liquidado.
+  // Es el primer paso antes de la liquidación formal.
   try {
     const rangoMesActual = obtenerRangoMesActual();
     console.log(
@@ -2206,7 +2220,8 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
       console.log(`📅 Fecha de cálculo override: ${fechaCalculo.toISOString()}`);
     }
 
-    // ── PASO 1: Obtener créditos espejo del inversionista (ACTIVO/MOROSO/etc.) ──
+    // Paso 1: Se buscan todos los créditos en los que este inversionista participa
+    // y que aún están activos (pueden estar al día, en mora, en proceso de cancelación, etc.).
     const creditosInversionista = await db
       .select({
         creditoId: creditos_inversionistas_espejo.credito_id,
@@ -2243,14 +2258,17 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
       `📊 Créditos encontrados: ${creditosInversionista.length}`
     );
 
-    // ── PASO 2: Por cada crédito, buscar la primera cuota NO liquidada ──────────
+    // Paso 2: Por cada crédito encontrado, se busca la primera cuota que aún no
+    // le ha sido pagada al inversionista. Se procesa una cuota a la vez para evitar
+    // registrar pagos duplicados o fuera de orden.
     const resultados = await Promise.all(
       creditosInversionista.map(async (credito) => {
         console.log(
           `\n🔍 Verificando crédito ${credito.creditoId}...`
         );
 
-        // Saltar si ya tiene pagos NO_LIQUIDADO en la tabla espejo
+        // Si ya existe un pago generado y pendiente de liquidar para este crédito,
+        // se omite para no duplicarlo. Hay que liquidar primero antes de generar otro.
         const pagosPendientes = await db
           .select()
           .from(pagos_credito_inversionistas_espejo)
@@ -2324,9 +2342,12 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
           `✅ Crédito ${credito.creditoId}, Cuota ${numeroCuota}: ${pagosDeLaCuota.length} pago(s) → procesando...`
         );
 
-        // ── PASO 3: Upsert en pagos_credito_inversionistas_espejo ──────────────
-        // updateCredito = false → NO toca creditos_inversionistas_espejo
-        // NO se toca cuotas_credito → endpoint de solo escritura en pagos
+        // Paso 3: Se calcula el monto proporcional que le corresponde al inversionista
+        // según su porcentaje de participación en este crédito, y se registra en la
+        // tabla de pagos espejo. En este punto aún no se toca el balance del crédito
+        // ni se marca la cuota como liquidada — eso ocurre en la liquidación formal.
+        // También se valida que el monto aportado coincida con el histórico registrado
+        // para detectar inconsistencias antes de confirmar el registro.
         try {
           await insertPagosCreditoInversionistas(
             pagosDeLaCuota[0].pagoId,

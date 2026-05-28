@@ -1,6 +1,6 @@
 import { db } from "../database/index";
 import { compras_credito_inversionista } from "../database/db/schema";
-import { and, eq, desc } from "drizzle-orm";
+import { and, eq, desc, inArray } from "drizzle-orm";
 import Big from "big.js";
 
 export interface AjusteCompras {
@@ -39,7 +39,7 @@ export async function calcularAjusteCompras(
       and(
         eq(compras_credito_inversionista.credito_id, credito_id),
         eq(compras_credito_inversionista.inversionista_id, inversionista_id),
-        eq(compras_credito_inversionista.tipo_operacion, "compra_cartera"),
+        inArray(compras_credito_inversionista.tipo_operacion, ["compra_cartera", "reinversion"]),
       ),
     )
     .orderBy(desc(compras_credito_inversionista.updated_at));

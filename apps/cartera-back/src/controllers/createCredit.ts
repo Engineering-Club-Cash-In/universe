@@ -81,6 +81,8 @@ interface NewCredit {
   [key: string]: unknown;
 }
 
+type DbExecutor = Pick<typeof db, "insert" | "select">;
+
 interface User {
   usuario_id: number;
 }
@@ -265,7 +267,7 @@ const validateCreditData = (creditData: CreditData, set: SetContext): Validation
 // 2. INSERCIÓN DE CRÉDITO Y RELACIONADOS
 // ========================================
 
-const insertCreditAndRelated = async (creditData: CreditData): Promise<{
+const insertCreditAndRelated = async (creditData: CreditData, executor: DbExecutor = db): Promise<{
   newCredit: NewCredit;
   creditDataForInsert: CreditDataForInsert;
   total_monto_cash_in: Big;
@@ -296,7 +298,8 @@ const insertCreditAndRelated = async (creditData: CreditData): Promise<{
     creditData.municipio ?? null,
     creditData.departamento ?? null,
     creditData.codigo_postal ?? null,
-    creditData.pais ?? null
+    creditData.pais ?? null,
+    executor
   );
 
   console.log("🎯 Aplicando load balancing de asesores...");
@@ -338,7 +341,7 @@ const insertCreditAndRelated = async (creditData: CreditData): Promise<{
   console.log("Credit data to insert:", creditDataForInsert);
 
   // Insertar crédito principal
-  const [newCredit] = await db
+  const [newCredit] = await executor
     .insert(creditos)
     .values(creditDataForInsert)
     .returning();
@@ -353,7 +356,7 @@ const insertCreditAndRelated = async (creditData: CreditData): Promise<{
       monto: r.monto.toString(),
     }));
 
-    await db.insert(creditos_rubros_otros).values(rubrosToInsert);
+    await executor.insert(creditos_rubros_otros).values(rubrosToInsert);
     console.log("Inserted rubros:", rubrosToInsert);
   }
 
@@ -552,8 +555,8 @@ creditosInversionistasData.forEach(({ monto_cash_in, iva_cash_in }: Inversionist
 });
 
 if (creditosInversionistasData.length > 0) {
-  await db.insert(creditos_inversionistas).values(creditosInversionistasData);
-  await db.insert(creditos_inversionistas_espejo).values(creditosInversionistasData);
+  await executor.insert(creditos_inversionistas).values(creditosInversionistasData);
+  await executor.insert(creditos_inversionistas_espejo).values(creditosInversionistasData);
 }
   return {
     newCredit,
@@ -603,10 +606,11 @@ const generatePaymentDates = (plazo: number, diaPagoMensual: 15 | 30): string[] 
 const insertInstallments = async (
   creditId: number,
   plazo: number,
-  fechas: string[]
+  fechas: string[],
+  executor: DbExecutor = db
 ): Promise<{ cuotaInicial: number | undefined; cuotasInsertadas: CuotaInsertada[] }> => {
   // Insertar cuota inicial (cuota 0)
-  const cuotaInicialArr = await db
+  const cuotaInicialArr = await executor
     .insert(cuotas_credito)
     .values({
       credito_id: creditId,
@@ -631,7 +635,7 @@ const insertInstallments = async (
     });
   }
 
-  const cuotasInsertadas: CuotaInsertada[] = await db
+  const cuotasInsertadas: CuotaInsertada[] = await executor
     .insert(cuotas_credito)
     .values(cuotas)
     .returning({
@@ -654,7 +658,8 @@ const insertPayments = async (
   total_iva_cash_in: Big,
   cuotaInicial: number | undefined,
   cuotasInsertadas: CuotaInsertada[],
-  fechas: string[]
+  fechas: string[],
+  executor: DbExecutor = db
 ): Promise<void> => {
   const pagos: PagoData[] = [];
 
@@ -797,7 +802,7 @@ const insertPayments = async (
     registerBy: "system",
   }));
 
-  await db.insert(pagos_credito).values(pagosValidosSinUndefined);
+  await executor.insert(pagos_credito).values(pagosValidosSinUndefined);
 };
 
 // ========================================
@@ -838,40 +843,46 @@ export const insertCredit = async ({ body, set }: { body: unknown; set: SetConte
     }
     console.log("[INSERT CREDIT] Business validation PASSED");
 
-    // 3. Insertar crédito y datos relacionados
-    console.log("[INSERT CREDIT] Step 3: Inserting credit and related data...");
-    const { newCredit, creditDataForInsert, total_monto_cash_in, total_iva_cash_in } =
-      await insertCreditAndRelated(creditData);
-    console.log("[INSERT CREDIT] Credit inserted, credito_id:", newCredit.credito_id);
-    console.log("[INSERT CREDIT] creditDataForInsert:", JSON.stringify(creditDataForInsert, null, 2));
+    const { newCredit, creditDataForInsert } = await db.transaction(async (tx) => {
+      // 3. Insertar crédito y datos relacionados
+      console.log("[INSERT CREDIT] Step 3: Inserting credit and related data...");
+      const { newCredit, creditDataForInsert, total_monto_cash_in, total_iva_cash_in } =
+        await insertCreditAndRelated(creditData, tx);
+      console.log("[INSERT CREDIT] Credit inserted, credito_id:", newCredit.credito_id);
+      console.log("[INSERT CREDIT] creditDataForInsert:", JSON.stringify(creditDataForInsert, null, 2));
 
-    // 4. Generar fechas de pago (día <= 20 → pago el 15, día > 20 → pago el 30)
-    const diaPago: 15 | 30 = creditData.dia_pago_mensual <= 20 ? 15 : 30;
-    const fechas = generatePaymentDates(creditData.plazo, diaPago);
-    console.log("[INSERT CREDIT] Generated", fechas.length, "payment dates");
+      // 4. Generar fechas de pago (día <= 20 → pago el 15, día > 20 → pago el 30)
+      const diaPago: 15 | 30 = creditData.dia_pago_mensual <= 20 ? 15 : 30;
+      const fechas = generatePaymentDates(creditData.plazo, diaPago);
+      console.log("[INSERT CREDIT] Generated", fechas.length, "payment dates");
 
-    // 5. Insertar cuotas
-    console.log("[INSERT CREDIT] Step 5: Inserting installments...");
-    const { cuotaInicial, cuotasInsertadas } = await insertInstallments(
-      newCredit.credito_id,
-      creditData.plazo,
-      fechas
-    );
-    console.log("[INSERT CREDIT] Installments inserted, cuotaInicial:", cuotaInicial, "total cuotas:", cuotasInsertadas.length);
+      // 5. Insertar cuotas
+      console.log("[INSERT CREDIT] Step 5: Inserting installments...");
+      const { cuotaInicial, cuotasInsertadas } = await insertInstallments(
+        newCredit.credito_id,
+        creditData.plazo,
+        fechas,
+        tx
+      );
+      console.log("[INSERT CREDIT] Installments inserted, cuotaInicial:", cuotaInicial, "total cuotas:", cuotasInsertadas.length);
 
-    // 6. Insertar pagos
-    console.log("[INSERT CREDIT] Step 6: Inserting payments...");
-    await insertPayments(
-      creditData,
-      newCredit,
-      creditDataForInsert,
-      total_monto_cash_in,
-      total_iva_cash_in,
-      cuotaInicial,
-      cuotasInsertadas,
-      fechas
-    );
-    console.log("[INSERT CREDIT] Payments inserted successfully");
+      // 6. Insertar pagos
+      console.log("[INSERT CREDIT] Step 6: Inserting payments...");
+      await insertPayments(
+        creditData,
+        newCredit,
+        creditDataForInsert,
+        total_monto_cash_in,
+        total_iva_cash_in,
+        cuotaInicial,
+        cuotasInsertadas,
+        fechas,
+        tx
+      );
+      console.log("[INSERT CREDIT] Payments inserted successfully");
+
+      return { newCredit, creditDataForInsert };
+    });
 
     // 7. Notificar a todos los admins por email
     console.log("[INSERT CREDIT] Step 7: Sending email notifications...");

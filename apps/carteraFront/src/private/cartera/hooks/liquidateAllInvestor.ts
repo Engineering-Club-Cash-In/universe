@@ -10,10 +10,10 @@ import { liquidateByInvestorService, type LiquidateByInvestorRequest, type Liqui
  */
 export function useLiquidateByInvestor() {
   return useMutation<
-    LiquidateByInvestorResponse, 
-    Error, 
-    LiquidateByInvestorRequest | void // 🆕 void = sin parámetros
+    LiquidateByInvestorResponse,
+    Error,
+    LiquidateByInvestorRequest
   >({
-    mutationFn: (data) => liquidateByInvestorService(data!),
+    mutationFn: (data) => liquidateByInvestorService(data),
   });
 }

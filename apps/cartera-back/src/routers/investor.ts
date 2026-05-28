@@ -567,21 +567,20 @@ export const inversionistasRouter = new Elysia()
           console.warn("⚠️ ¡ALERTA! Se va a liquidar TODOS los pagos del sistema");
         }
 
-        // Lanzar liquidación en background y responder inmediatamente
-        // Si algo falla, los pagos quedan como NO_LIQUIDADO (pendientes)
-        liquidateByInvestorId(inversionista_id, fechaLiquidacion).then((result) => {
-          console.log(`[liquidate-inversionista-pagos] Background OK para inversionista ${inversionista_id}:`, result.message);
-        }).catch((err) => {
-          console.error(`[liquidate-inversionista-pagos] Background ERROR para inversionista ${inversionista_id}:`, err);
-        });
+        const result = await liquidateByInvestorId(inversionista_id, fechaLiquidacion);
 
-        set.status = 202;
-        return {
-          message: inversionista_id
-            ? `Liquidación iniciada para inversionista ${inversionista_id}. Se procesará en segundo plano.`
-            : "Liquidación masiva iniciada. Se procesará en segundo plano.",
-          inversionista_id: inversionista_id ?? "TODOS",
-        };
+        const hayErrores = result.errores && result.errores.length > 0;
+        const hayLiquidaciones = (result.liquidaciones_creadas ?? 0) > 0;
+
+        if (hayErrores && !hayLiquidaciones) {
+          set.status = 422;
+        } else if (hayErrores && hayLiquidaciones) {
+          set.status = 207;
+        } else {
+          set.status = 200;
+        }
+
+        return result;
       } catch (error) {
         console.error("[liquidate-inversionista-pagos] Error:", error);
         set.status = 500;
@@ -2028,7 +2027,9 @@ export const inversionistasRouter = new Elysia()
           message: `✅ Pagos espejo calculados y registrados correctamente`,
           inversionistaId: resultado.inversionistaId ?? inversionistaId,
           totalCreditosProcesados: resultado.totalCreditosProcesados ?? 0,
+          totalCreditosFallidos: (resultado as any).totalCreditosFallidos ?? 0,
           data: resultado.data,
+          fallidos: (resultado as any).fallidos ?? [],
         };
       } catch (error: any) {
         console.error("❌ Error en POST /calcularPagosEspejo:", error);
@@ -2059,7 +2060,13 @@ export const inversionistasRouter = new Elysia()
           message: t.String(),
           inversionistaId: t.Number(),
           totalCreditosProcesados: t.Number(),
+          totalCreditosFallidos: t.Number(),
           data: t.Array(t.Any()),
+          fallidos: t.Array(t.Object({
+            creditoId: t.Number(),
+            numeroCreditoSifco: t.String(),
+            mensaje: t.String(),
+          })),
         }),
         500: t.Object({
           success: t.Literal(false),

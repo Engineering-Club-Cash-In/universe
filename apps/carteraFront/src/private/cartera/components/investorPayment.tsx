@@ -34,6 +34,7 @@ interface CrearBoletaInversionistaProps {
     nombre: string;
     dpi: string;
   };
+  fechaLiquidacion?: string;
 }
 
 const inputBase =
@@ -43,6 +44,7 @@ export function CrearBoletaInversionista({
   open,
   onClose,
   inversionistaPredeterminado,
+  fechaLiquidacion,
 }: CrearBoletaInversionistaProps) {
   const [inversionistaId, setInversionistaId] = useState<number>(0);
   const [montoBoleta, setMontoBoleta] = useState("");
@@ -51,6 +53,9 @@ export function CrearBoletaInversionista({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [subiendo, setSubiendo] = useState(false);
   const [query, setQuery] = useState("");
+  const [fechaSeleccionada, setFechaSeleccionada] = useState<string>(
+    fechaLiquidacion ?? new Date().toISOString().slice(0, 10)
+  );
 
   const createBoleta = useCreateBoleta();
   const { investors = [] } = useCatalogs() as { investors: Investor[] };
@@ -66,6 +71,10 @@ export function CrearBoletaInversionista({
     }
   }, [inversionistaPredeterminado]);
 
+  useEffect(() => {
+    if (fechaLiquidacion) setFechaSeleccionada(fechaLiquidacion);
+  }, [fechaLiquidacion]);
+
   const filtered =
     query === ""
       ? investors
@@ -80,6 +89,7 @@ export function CrearBoletaInversionista({
     setArchivos([]);
     setPreviewUrl(null);
     setQuery("");
+    setFechaSeleccionada(fechaLiquidacion ?? new Date().toISOString().slice(0, 10));
     onClose();
   };
 
@@ -105,6 +115,7 @@ export function CrearBoletaInversionista({
         boleta_url: filename,
         monto_boleta: montoBoleta || undefined,
         notas: notas || undefined,
+        fecha_liquidacion: fechaSeleccionada ? new Date(fechaSeleccionada).toISOString() : undefined,
       });
 
       handleClose();
@@ -263,6 +274,18 @@ export function CrearBoletaInversionista({
               placeholder="1000.00"
               value={montoBoleta}
               onChange={(e) => setMontoBoleta(e.target.value)}
+              disabled={tienePendientes}
+            />
+          </div>
+
+          {/* FECHA LIQUIDACIÓN */}
+          <div>
+            <Label className="text-blue-900 font-semibold">Fecha de Liquidación *</Label>
+            <input
+              type="date"
+              className={`${inputBase} mt-1`}
+              value={fechaSeleccionada}
+              onChange={(e) => setFechaSeleccionada(e.target.value)}
               disabled={tienePendientes}
             />
           </div>

@@ -3727,10 +3727,16 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
             if (!montoAjustado.eq(new Big(lastHistorico.monto_aportado))) {
               const capitalRestante = new Big(currentMonto).minus(sumaCapitalBig).toFixed(8);
               const historicoMonto = new Big(lastHistorico.monto_aportado).toFixed(8);
+              const [creditoRow] = await tx
+                .select({ sifco: creditos.numero_credito_sifco })
+                .from(creditos)
+                .where(eq(creditos.credito_id, creditoId))
+                .limit(1);
+              const sifco = creditoRow?.sifco ?? `ID:${creditoId}`;
               throw new Error(
-                `[CUADRE_CAPITAL] Inv ${inv_id} Cred ${creditoId}: ` +
-                `Capital Restante (${capitalRestante}) + Abono Capital (${sumaCapitalBig.toFixed(8)}) ` +
-                `= ${montoAjustado.toFixed(8)} ≠ histórico (${historicoMonto})`
+                `[CUADRE_CAPITAL] Crédito SIFCO ${sifco} (Inv ${inv_id}): ` +
+                `Ajustado (${montoAjustado.toFixed(2)}) ≠ histórico (${historicoMonto}). ` +
+                `Espejo: ${new Big(currentMonto).toFixed(2)}, Abono capital: ${sumaCapitalBig.toFixed(2)}`
               );
             }
           }
@@ -3893,11 +3899,11 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
                 investorName: inversionista.nombre_inversionista,
                 amount: subtotalStr,
                 creditNumber: "Múltiples",
-                date: dayjs().format("MMMM YYYY"),
+                date: dayjs(fechaLiquidacion ?? new Date()).format("MMMM YYYY"),
                 currencySymbol: inversionista.moneda === "dolares" ? "$" : "Q.",
                 reportUrl: url,
                 attachment: {
-                  filename: `Liquidacion_${inversionista.nombre_inversionista.replace(/\s+/g, '_')}_${dayjs().format('YYYYMMDD')}.xlsx`,
+                  filename: `Liquidacion_${inversionista.nombre_inversionista.replace(/\s+/g, '_')}_${dayjs(fechaLiquidacion ?? new Date()).format('YYYYMMDD')}.xlsx`,
                   content: excelBuffer,
                 }
               });
@@ -4141,10 +4147,12 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
       totalLiquidaciones++;
     } catch (error) {
       console.error(`  ❌ Error procesando inversionista ${inv_id}:`, error);
-      errores.push({
-        inversionista_id: inv_id,
-        razon: error instanceof Error ? error.message : "Error desconocido",
-      });
+      const msg = error instanceof Error ? error.message : "Error desconocido";
+      const esValidacion =
+        msg.includes("CUADRE_CAPITAL") ||
+        msg.includes("MONTO_ESPEJO_INCONSISTENTE");
+      if (esValidacion) throw error;
+      errores.push({ inversionista_id: inv_id, razon: msg });
       inversionistasSaltados++;
     }
   }

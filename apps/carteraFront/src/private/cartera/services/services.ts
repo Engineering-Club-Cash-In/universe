@@ -3728,6 +3728,11 @@ export interface CreditoEspejoPendiente {
   iva_cash_in: string;
   fecha_creacion: string;
   fecha_inicio_participacion: string;
+  aceptada_at: string | null;
+  compra_cartera_extendida_at: string | null;
+  expira_at: string | null;
+  dia_baja_at: string | null;
+  tiempo_restante_ms: number | null;
   status: "pendiente_reinversion" | "pendiente_compra_cartera" | "pendiente_revision" | string;
   tipo_reinversion: string | null;
   numero_credito_sifco: string;
@@ -3950,6 +3955,28 @@ export async function compraCarteraAceptadaService(
 ): Promise<CompraCarteraAceptadaResponse> {
   const res = await api.post<CompraCarteraAceptadaResponse>(
     `${API_URL}/compra-cartera-aceptada`,
+    payload
+  );
+  return res.data;
+}
+
+export interface ExtenderCompraCarteraPayload {
+  creditos: number[];
+  inversionista_id: number;
+}
+
+export interface ExtenderCompraCarteraResponse {
+  success: boolean;
+  message: string;
+  creditos_extendidos: number;
+  compra_cartera_extendida_at: string;
+}
+
+export async function extenderCompraCarteraService(
+  payload: ExtenderCompraCarteraPayload
+): Promise<ExtenderCompraCarteraResponse> {
+  const res = await api.post<ExtenderCompraCarteraResponse>(
+    `${API_URL}/compra-cartera-extender`,
     payload
   );
   return res.data;

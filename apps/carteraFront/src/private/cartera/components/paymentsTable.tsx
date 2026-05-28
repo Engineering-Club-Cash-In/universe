@@ -838,6 +838,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
               <div>
                 <label className="text-[10px] text-gray-500 font-medium mb-0.5 block">Buscar</label>
                 <Combobox
+                  key={inversionistaId ?? "none"}
                   value={inversionistaId as unknown as number}
                   onChange={(value: any) => {
                     setInversionistaId(value === "" ? undefined : value);

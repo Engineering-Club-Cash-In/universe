@@ -648,6 +648,27 @@
         .default("NO_LIQUIDADO"),
       cuota: numeric("cuota", { precision: 18, scale: 2 }).notNull(),
 
+      // Desglose del interés/IVA cuando hay compras en el mes anterior.
+      // _sin_compras: parte que el inversionista ya tenía → interés mensual completo.
+      // _con_compras: parte aportada por compras del mes → interés proporcional.
+      // abono_interes / abono_iva_12 siguen siendo la suma de ambos.
+      abono_interes_sin_compras: numeric("abono_interes_sin_compras", {
+        precision: 18,
+        scale: 10,
+      }),
+      abono_interes_con_compras: numeric("abono_interes_con_compras", {
+        precision: 18,
+        scale: 10,
+      }),
+      abono_iva_12_sin_compras: numeric("abono_iva_12_sin_compras", {
+        precision: 18,
+        scale: 2,
+      }),
+      abono_iva_12_con_compras: numeric("abono_iva_12_con_compras", {
+        precision: 18,
+        scale: 2,
+      }),
+
       // FK al abono a capital asociado (nullable)
       abono_capital_id: integer("abono_capital_id").references(
         () => abonos_capital.abono_id,

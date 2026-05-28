@@ -471,7 +471,7 @@
       tipo_operacion: varchar("tipo_operacion", { length: 30 }).notNull(),
       tipo_reinversion: tipoReinversionEnum("tipo_reinversion"),
       status: statusCreditoInversionistaEspejoEnum("status").notNull(),
-      pendiente_facturar: boolean("pendiente_facturar").notNull().default(true),
+      pendiente_facturar: boolean("pendiente_facturar").notNull().default(false),
       fecha_completada: timestamp("fecha_completada", { withTimezone: true }),
       fecha: timestamp("fecha", { withTimezone: true }).notNull().$default(() => new Date()),
       created_at: timestamp("created_at", { withTimezone: true }).notNull().$default(() => new Date()),

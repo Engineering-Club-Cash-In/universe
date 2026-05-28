@@ -168,7 +168,7 @@ export const cobrosAppRouter = {
 	getMetasMora: cobrosRouter.getMetasMora,
 	getMetasMoraAnual: cobrosRouter.getMetasMoraAnual,
 	upsertMetasMora: cobrosRouter.upsertMetasMora,
-	
+
 	// Seguimientos programados
 	createSeguimiento: seguimientosRouter.createSeguimiento,
 	getSeguimientosActivos: seguimientosRouter.getSeguimientosActivos,
@@ -324,6 +324,7 @@ export const reportsAppRouter = {
 	getDashboardExecutivo: reportsRouter.getDashboardExecutivo,
 	getReporteCobranza: reportsRouter.getReporteCobranza,
 	getReporteCartera: reportsRouter.getReporteCartera,
+	getReporteCreditosCerrados: reportsRouter.getReporteCreditosCerrados,
 	getReporteInventario: reportsRouter.getReporteInventario,
 	getReporteSubastas: reportsRouter.getReporteSubastas,
 	// Reportes unificados (cartera-back + CRM)
@@ -359,7 +360,6 @@ export const reportsAppRouter = {
 		accountingRouter.getResumenGlobalInversionistas,
 	createBoleta: accountingRouter.createBoleta,
 	liquidateInversionista: accountingRouter.liquidateInversionista,
-
 };
 
 const healthRouter = {

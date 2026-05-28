@@ -363,53 +363,63 @@ export default function Header() {
 							)}
 
 						{/* Admin Dropdown */}
-						{session && userRole && PERMISSIONS.canAccessAdmin(userRole) && (
-							<DropdownMenu>
-								<DropdownMenuTrigger asChild>
-									<Button
-										variant={isActive("/admin") ? "secondary" : "ghost"}
-										size="sm"
-										className="gap-1"
-									>
-										<Settings className="h-4 w-4" />
-										Admin
-										<ChevronDown className="h-3 w-3 opacity-50" />
-									</Button>
-								</DropdownMenuTrigger>
-								<DropdownMenuContent align="start" className="w-48">
-									<DropdownMenuItem asChild>
-										<Link to="/admin/users" className="cursor-pointer">
-											<Users className="mr-2 h-4 w-4" />
-											Usuarios
-										</Link>
-									</DropdownMenuItem>
-									<DropdownMenuItem asChild>
-										<Link to="/admin/import" className="cursor-pointer">
-											<Database className="mr-2 h-4 w-4" />
-											Importación
-										</Link>
-									</DropdownMenuItem>
-									<DropdownMenuItem asChild>
-										<Link to="/crm/admin/miniagent" className="cursor-pointer">
-											<Key className="mr-2 h-4 w-4" />
-											MiniAgent
-										</Link>
-									</DropdownMenuItem>
-									<DropdownMenuItem asChild>
-										<Link to="/admin/settings" className="cursor-pointer">
-											<Settings className="mr-2 h-4 w-4" />
-											Configuración
-										</Link>
-									</DropdownMenuItem>
-									<DropdownMenuItem asChild>
-										<Link to="/admin/reports" className="cursor-pointer">
-											<FileText className="mr-2 h-4 w-4" />
-											Reportes
-										</Link>
-									</DropdownMenuItem>
-								</DropdownMenuContent>
-							</DropdownMenu>
-						)}
+						{session &&
+							userRole &&
+							(PERMISSIONS.canAccessAdmin(userRole) ||
+								PERMISSIONS.canAccessClosedCreditsReport(userRole)) && (
+								<DropdownMenu>
+									<DropdownMenuTrigger asChild>
+										<Button
+											variant={isActive("/admin") ? "secondary" : "ghost"}
+											size="sm"
+											className="gap-1"
+										>
+											<Settings className="h-4 w-4" />
+											Admin
+											<ChevronDown className="h-3 w-3 opacity-50" />
+										</Button>
+									</DropdownMenuTrigger>
+									<DropdownMenuContent align="start" className="w-48">
+										{PERMISSIONS.canAccessAdmin(userRole) && (
+											<>
+												<DropdownMenuItem asChild>
+													<Link to="/admin/users" className="cursor-pointer">
+														<Users className="mr-2 h-4 w-4" />
+														Usuarios
+													</Link>
+												</DropdownMenuItem>
+												<DropdownMenuItem asChild>
+													<Link to="/admin/import" className="cursor-pointer">
+														<Database className="mr-2 h-4 w-4" />
+														Importación
+													</Link>
+												</DropdownMenuItem>
+												<DropdownMenuItem asChild>
+													<Link
+														to="/crm/admin/miniagent"
+														className="cursor-pointer"
+													>
+														<Key className="mr-2 h-4 w-4" />
+														MiniAgent
+													</Link>
+												</DropdownMenuItem>
+												<DropdownMenuItem asChild>
+													<Link to="/admin/settings" className="cursor-pointer">
+														<Settings className="mr-2 h-4 w-4" />
+														Configuración
+													</Link>
+												</DropdownMenuItem>
+											</>
+										)}
+										<DropdownMenuItem asChild>
+											<Link to="/admin/reports" className="cursor-pointer">
+												<FileText className="mr-2 h-4 w-4" />
+												Reportes
+											</Link>
+										</DropdownMenuItem>
+									</DropdownMenuContent>
+								</DropdownMenu>
+							)}
 					</nav>
 				</div>
 

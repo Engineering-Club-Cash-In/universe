@@ -3,18 +3,15 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import {
 	AlertCircle,
 	Banknote,
-	Building,
 	CheckCircle,
 	ChevronLeft,
 	ChevronRight,
 	ClipboardList,
 	DollarSign,
 	FileText,
-	Gavel,
 	HandshakeIcon,
 	Scale,
 	Target,
-	TrendingUp,
 	Trophy,
 	Users,
 } from "lucide-react";
@@ -97,7 +94,7 @@ function RouteComponent() {
 	};
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
-	const adminData = useQuery({
+	const _adminData = useQuery({
 		...orpc.adminOnlyData.queryOptions(),
 		enabled: userProfile.data?.role === ROLES.ADMIN,
 	});
@@ -686,7 +683,10 @@ function RouteComponent() {
 					<div className="grid gap-2 md:grid-cols-2 lg:grid-cols-4">
 						{userRole && PERMISSIONS.canAccessCRM(userRole) && (
 							<Link to="/crm/leads">
-								<button className="flex w-full items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent">
+								<button
+									type="button"
+									className="flex w-full items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent"
+								>
 									<Users className="h-4 w-4" />
 									<span className="text-sm">Ver Prospectos</span>
 								</button>
@@ -694,7 +694,10 @@ function RouteComponent() {
 						)}
 						{userRole && PERMISSIONS.canAccessCRM(userRole) && (
 							<Link to="/crm/opportunities">
-								<button className="flex w-full items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent">
+								<button
+									type="button"
+									className="flex w-full items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent"
+								>
 									<Target className="h-4 w-4" />
 									<span className="text-sm">Ver Oportunidades</span>
 								</button>
@@ -702,7 +705,10 @@ function RouteComponent() {
 						)}
 						{userRole && PERMISSIONS.canAccessAnalysis(userRole) && (
 							<Link to="/crm/analysis">
-								<button className="flex w-full items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent">
+								<button
+									type="button"
+									className="flex w-full items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent"
+								>
 									<ClipboardList className="h-4 w-4" />
 									<span className="text-sm">Análisis de Crédito</span>
 								</button>
@@ -710,7 +716,10 @@ function RouteComponent() {
 						)}
 						{userRole && PERMISSIONS.canAccessCobros(userRole) && (
 							<Link to="/cobros">
-								<button className="flex w-full items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent">
+								<button
+									type="button"
+									className="flex w-full items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent"
+								>
 									<DollarSign className="h-4 w-4" />
 									<span className="text-sm">Módulo de Cobros</span>
 								</button>
@@ -718,20 +727,28 @@ function RouteComponent() {
 						)}
 						{userRole && PERMISSIONS.canAccessJuridico(userRole) && (
 							<Link to="/juridico">
-								<button className="flex w-full items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent">
+								<button
+									type="button"
+									className="flex w-full items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent"
+								>
 									<Scale className="h-4 w-4" />
 									<span className="text-sm">Módulo Jurídico</span>
 								</button>
 							</Link>
 						)}
-						{userRole && PERMISSIONS.canAccessAdmin(userRole) && (
-							<Link to="/admin/reports">
-								<button className="flex w-full items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent">
-									<Banknote className="h-4 w-4" />
-									<span className="text-sm">Ver Reportes</span>
-								</button>
-							</Link>
-						)}
+						{userRole &&
+							(PERMISSIONS.canAccessAdmin(userRole) ||
+								PERMISSIONS.canAccessClosedCreditsReport(userRole)) && (
+								<Link to="/admin/reports">
+									<button
+										type="button"
+										className="flex w-full items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent"
+									>
+										<Banknote className="h-4 w-4" />
+										<span className="text-sm">Ver Reportes</span>
+									</button>
+								</Link>
+							)}
 					</div>
 				</CardContent>
 			</Card>

@@ -1,8 +1,6 @@
 // Shared role definitions - this is the single source of truth
 // These are imported by both server and client code
 
-import { role } from "better-auth/plugins";
-
 export const ROLES = {
 	ADMIN: "admin",
 	SALES: "sales",
@@ -132,6 +130,9 @@ export const PERMISSIONS = {
 		role === ROLES.ADMIN ||
 		role === ROLES.ANALYST ||
 		role === ROLES.SALES_SUPERVISOR,
+
+	canAccessClosedCreditsReport: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.COBROS_SUPERVISOR,
 
 	// Credit Detail Approval (40% → 50%)
 	canApproveCreditDetail: (role: UserRole | string): boolean =>

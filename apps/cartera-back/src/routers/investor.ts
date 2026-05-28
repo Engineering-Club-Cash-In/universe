@@ -2005,13 +2005,14 @@ export const inversionistasRouter = new Elysia()
     "/calcularPagosEspejo",
     async ({ body, set }) => {
       try {
-        const { inversionistaId } = body;
+        const { inversionistaId, fecha_calculo } = body;
 
         console.log(
-          `\n🚀 POST /calcularPagosEspejo → inversionistaId: ${inversionistaId}`
+          `\n🚀 POST /calcularPagosEspejo → inversionistaId: ${inversionistaId}, fecha_calculo: ${fecha_calculo ?? "no enviada"}`
         );
 
-        const resultado = await calcularYRegistrarPagosEspejo(inversionistaId);
+        const fechaCalculoDate = fecha_calculo ? new Date(fecha_calculo) : undefined;
+        const resultado = await calcularYRegistrarPagosEspejo(inversionistaId, fechaCalculoDate);
 
         if (!resultado.success) {
           set.status = 500;
@@ -2053,6 +2054,9 @@ export const inversionistasRouter = new Elysia()
           description: "ID del inversionista a procesar",
           minimum: 1,
         }),
+        fecha_calculo: t.Optional(t.String({
+          description: "Fecha ISO del período de cálculo (YYYY-MM-DD). Determina periodoMes/periodoAnio para la validación del histórico.",
+        })),
       }),
       response: {
         200: t.Object({

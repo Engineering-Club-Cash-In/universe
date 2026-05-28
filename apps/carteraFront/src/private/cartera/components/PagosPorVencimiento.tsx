@@ -58,16 +58,17 @@ export function PagosPorVencimiento() {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const [abonosDetail, setAbonosDetail] = useState<AbonoDetalleItem[]>([]);
   const [loadingDetails, setLoadingDetails] = useState(false);
-  const pendingCreditoRef = useRef<number | null>(null);
+  const pendingRequestRef = useRef<{ creditoId: number; mes: number; anio: number } | null>(null);
 
   const handleToggleRow = async (creditoId: number) => {
     if (expandedRow === creditoId) {
       setExpandedRow(null);
       setAbonosDetail([]);
-      pendingCreditoRef.current = null;
+      pendingRequestRef.current = null;
     } else {
+      const token = { creditoId, mes, anio };
       setExpandedRow(creditoId);
-      pendingCreditoRef.current = creditoId;
+      pendingRequestRef.current = token;
       setLoadingDetails(true);
       setAbonosDetail([]);
       try {
@@ -76,13 +77,15 @@ export function PagosPorVencimiento() {
           mes,
           anio,
         });
-        if (response.success && pendingCreditoRef.current === creditoId) {
+        const current = pendingRequestRef.current;
+        if (response.success && current?.creditoId === creditoId && current?.mes === mes && current?.anio === anio) {
           setAbonosDetail(response.data);
         }
       } catch (error) {
         console.error("Error al obtener detalle de abonos:", error);
       } finally {
-        if (pendingCreditoRef.current === creditoId) {
+        const current = pendingRequestRef.current;
+        if (current?.creditoId === creditoId && current?.mes === mes && current?.anio === anio) {
           setLoadingDetails(false);
         }
       }

@@ -51,6 +51,8 @@ export async function expirarCompraCarteraVencidas(): Promise<{
       inversionista_id: creditos_inversionistas_espejo.inversionista_id,
       inversionista_nombre: inversionistas.nombre,
       aceptada_at: creditos_inversionistas_espejo.aceptada_at,
+      compra_cartera_extendida_at:
+        creditos_inversionistas_espejo.compra_cartera_extendida_at,
       monto_aportado: creditos_inversionistas_espejo.monto_aportado,
       numero_credito_sifco: creditos.numero_credito_sifco,
       cliente_nombre: usuarios.nombre,
@@ -78,7 +80,10 @@ export async function expirarCompraCarteraVencidas(): Promise<{
   // 2) Filtrar a los que ya cumplieron diaBaja.
   const vencidos = candidatos.filter((row) => {
     if (!row.aceptada_at) return false;
-    const { diaBaja } = calcularExpiracionCompraCartera(row.aceptada_at);
+    const { diaBaja } = calcularExpiracionCompraCartera(
+      row.aceptada_at,
+      Boolean(row.compra_cartera_extendida_at),
+    );
     return gtDateKey(diaBaja) <= hoyKey;
   });
 

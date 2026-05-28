@@ -51,6 +51,7 @@ import {
   type EstadoLiquidacionResumenFilter,
 } from "../utils/investorLiquidationSummary";
 import { addInvestorToCredit } from "./addInvestorToCredit";
+import { calcularExpiracionCompraCartera } from "../utils/functions/businessDays";
 
 // ============================================
 // 🆕 TIPOS Y CONFIGURACIÓN PARA CONSULTAS ORIGINALES/ESPEJO
@@ -8191,6 +8192,9 @@ export async function getCreditosEspejoPendientes(
       fecha_creacion: creditos_inversionistas_espejo.fecha_creacion,
       fecha_inicio_participacion: creditos_inversionistas_espejo.fecha_inicio_participacion,
       status: creditos_inversionistas_espejo.status,
+      aceptada_at: creditos_inversionistas_espejo.aceptada_at,
+      compra_cartera_extendida_at:
+        creditos_inversionistas_espejo.compra_cartera_extendida_at,
       tipo_reinversion: creditos_inversionistas_espejo.tipo_reinversion,
       // Info del crédito
       numero_credito_sifco: creditos.numero_credito_sifco,
@@ -8289,6 +8293,9 @@ export async function getCreditosEspejoPendientes(
   type CreditoSinInversionista = Omit<typeof pendientes[number], '_nombre_inversionista' | '_dpi' | '_email' | '_moneda'> & {
     otrosInversionistas: { nombre: string; monto_aportado: string }[];
     monto_aportado_nuevo: string | null;
+    expira_at: Date | null;
+    dia_baja_at: Date | null;
+    tiempo_restante_ms: number | null;
   };
 
   const agrupado = new Map<number, {
@@ -8364,6 +8371,13 @@ export async function getCreditosEspejoPendientes(
       .filter((o) => o.inversionista_id !== row.inversionista_id);
 
 
+    const expiracion = creditoData.aceptada_at
+      ? calcularExpiracionCompraCartera(
+          creditoData.aceptada_at,
+          Boolean(creditoData.compra_cartera_extendida_at),
+        )
+      : null;
+
     grupo.creditosPendientes.push({
       ...creditoData,
       otrosInversionistas: otrosEnEsteCredito.map((o) => ({
@@ -8371,6 +8385,11 @@ export async function getCreditosEspejoPendientes(
         monto_aportado: o.monto_aportado,
       })),
       monto_aportado_nuevo: montoNuevo ? montoNuevo.toString() : null,
+      expira_at: expiracion?.expira ?? null,
+      dia_baja_at: expiracion?.diaBaja ?? null,
+      tiempo_restante_ms: expiracion
+        ? Math.max(0, expiracion.diaBaja.getTime() - Date.now())
+        : null,
     });
   }
 

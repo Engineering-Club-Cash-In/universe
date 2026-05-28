@@ -57,9 +57,26 @@ export function addBusinessDaysGT(from: Date, days: number): Date {
 export function calcularExpiracionCompraCartera(fromDate: Date): {
 	expira: Date;
 	diaBaja: Date;
+};
+export function calcularExpiracionCompraCartera(
+	fromDate: Date,
+	extendida: boolean,
+): {
+	expira: Date;
+	diaBaja: Date;
+};
+export function calcularExpiracionCompraCartera(
+	fromDate: Date,
+	extendida = false,
+): {
+	expira: Date;
+	diaBaja: Date;
 } {
 	const expira = addBusinessDaysGT(fromDate, 3);
-	const diaBaja = addBusinessDaysGT(expira, 1);
+	const diaBajaBase = addBusinessDaysGT(expira, 1);
+	const diaBaja = extendida
+		? new Date(diaBajaBase.getTime() + 24 * 60 * 60 * 1000)
+		: diaBajaBase;
 	return { expira, diaBaja };
 }
 

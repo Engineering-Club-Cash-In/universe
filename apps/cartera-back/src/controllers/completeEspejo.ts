@@ -196,9 +196,16 @@ export const completeEspejo = async ({ body, set, request }: any) => {
               ne(compras_credito_inversionista.status, "completado"),
             );
 
+        // Fecha de completado en hora de Guatemala (UTC - 6h)
+        const fechaCompletadaGT = new Date(Date.now() - 6 * 60 * 60 * 1000);
+
         await tx
           .update(compras_credito_inversionista)
-          .set({ status: "completado", updated_at: new Date() })
+          .set({
+            status: "completado",
+            fecha_completada: fechaCompletadaGT,
+            updated_at: new Date(),
+          })
           .where(whereConditionsCompras);
 
         resultados.push({

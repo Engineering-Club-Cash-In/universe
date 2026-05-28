@@ -3505,7 +3505,8 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
     console.log("⚠️ LIQUIDANDO TODOS LOS INVERSIONISTAS ⚠️");
   }
 
-  // 🔍 PASO 1: Determinar qué inversionistas liquidar
+  // Paso 1: Se determina a quién liquidar. Si se recibe un ID específico, solo se
+  // procesa ese inversionista. Si no, se buscan todos los que tengan pagos pendientes.
   let inversionistasALiquidar: number[] = [];
 
   if (inversionista_id) {
@@ -3536,7 +3537,8 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
     `📋 Se liquidarán ${inversionistasALiquidar.length} inversionista(s)`
   );
 
-  // 📊 PASO 2: Procesar cada inversionista
+  // Paso 2: Se procesa cada inversionista uno por uno. Si alguno falla,
+  // se registra el error y se continúa con los demás sin detener el proceso completo.
   let totalPagosLiquidados = 0;
   let totalLiquidaciones = 0;
   let inversionistasSaltados = 0;
@@ -3555,9 +3557,9 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
     try {
       console.log(`\n💰 Procesando inversionista ${inv_id}...`);
 
-      // ========================================
-      // FASE 1: VALIDACIONES PRE-TRANSACCION
-      // ========================================
+      // Paso 3: Se verifica que el inversionista tenga una boleta de pago pendiente
+      // y que existan pagos generados listos para liquidar. Si no hay nada que
+      // liquidar, se omite y se registra como saltado.
 
       // Buscar boleta PENDIENTE del inversionista
       console.log(`  🔍 Buscando boleta PENDIENTE...`);
@@ -3615,13 +3617,13 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
       const reinvInteres = totales.total_reinversion_interes ?? 0;
       const reinvTotal = totales.total_reinversion ?? 0;
 
-      // ========================================
-      // FASE 2: TRANSACCION (datos financieros)
-      // Si algo falla, se hace rollback de TODO
-      // ========================================
+      // Paso 4: Se abre una transacción de base de datos. Todo lo que ocurra aquí
+      // es atómico: si algo falla en el medio, se revierten todos los cambios y
+      // el estado queda exactamente como estaba antes de empezar.
       const { liquidacion, updateResult, debeReinvertir, montoReinvertido } = await db.transaction(async (tx) => {
 
-        // Crear registro de liquidación
+        // Paso 4a: Se crea el registro formal de liquidación con los totales calculados
+        // (capital, interés, IVA, reinversión). Este registro es el comprobante oficial.
         const [liquidacion] = await tx
           .insert(liquidaciones)
           .values({
@@ -3642,7 +3644,8 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
 
         console.log(`  ✅ Liquidación creada: liquidacion_id=${liquidacion.liquidacion_id}`);
 
-        // Marcar boleta como PROCESADO (solo si existe)
+        // Paso 4b: Si había una boleta de pago vinculada, se marca como procesada
+        // para que no vuelva a usarse en una liquidación futura.
         if (boletaPendiente) {
           await tx
             .update(boletasPagoInversionista)
@@ -3651,7 +3654,9 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
           console.log(`  ✅ Boleta ${boletaPendiente.boleta_id} marcada como PROCESADO`);
         }
 
-        // Reinversiones
+        // Paso 4c: Si el inversionista tiene monto de reinversión acumulado, se
+        // suma a su saldo disponible para reinvertir en nuevos créditos y se
+        // resetean los campos internos de reinversión a cero.
         const montoReinvertido = new Big(reinvTotal);
         let debeReinvertir = false;
         if (montoReinvertido.gt(0)) {
@@ -3669,7 +3674,11 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
           console.log(`  ✅ Saldo reinversión actualizado (+${montoReinvertido.toFixed(2)})`);
         }
 
-        // Descontar capital por crédito y marcar pagos como LIQUIDADO
+        // Paso 4d: Por cada crédito, se valida que el balance en el espejo coincida
+        // con el histórico registrado (control de integridad). Luego se descuenta
+        // el capital abonado del monto que el inversionista tiene en ese crédito,
+        // y se guarda una foto del nuevo balance como punto de referencia para la
+        // próxima liquidación.
         const creditosConPagos = new Map<number, typeof pagosNoLiquidados>();
         for (const pago of pagosNoLiquidados) {
           if (!creditosConPagos.has(pago.credito_id)) {
@@ -3717,7 +3726,7 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
             .orderBy(desc(historico_liquidaciones_espejo.fecha))
             .limit(1);
 
-          if (lastHistorico) {
+          if (lastHistorico && !new Big(currentMonto).eq(new Big(lastHistorico.monto_aportado))) {
             const { montoRestarValidacion } = await calcularAjusteCompras(
               creditoId,
               inv_id,
@@ -3779,7 +3788,10 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
 
         console.log(`  ✅ ${updateResult.rowCount ?? 0} pagos espejo actualizados`);
 
-        // Marcar abonos a capital como liquidados
+        // Paso 4e: Se marcan los pagos espejo como LIQUIDADO y se vinculan al registro
+        // de liquidación creado. También se cierran los abonos a capital asociados
+        // y se marca cada cuota como pagada al inversionista para que no vuelva a
+        // procesarse en futuras ejecuciones.
         const abonoIdsALiquidar = [
           ...new Set(
             pagosNoLiquidados
@@ -3834,10 +3846,10 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
         return { liquidacion, updateResult, debeReinvertir, montoReinvertido };
       });
 
-      // ========================================
-      // FASE 3: POST-TRANSACCION (PDF + email, best-effort)
-      // Los datos financieros ya están committed
-      // ========================================
+      // Paso 5: Con la liquidación ya guardada, se genera el reporte Excel con el
+      // detalle de lo liquidado y se envía por correo al inversionista. Si este
+      // paso falla (por ejemplo, error de correo), no afecta los datos financieros
+      // ya guardados — la liquidación sigue siendo válida.
       try {
         const resumen = await resumeInvestor(
           inv_id,
@@ -3933,11 +3945,9 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
           });
         }
 
-        // ========================================
-        // FASE 4: REINVERSIÓN AUTOMÁTICA (post-reporte)
-        // Si hubo monto de reinversión, se llama addInvestorToCredit
-        // para distribuir el saldo en créditos candidatos.
-        // ========================================
+        // Paso 6: Si el inversionista tiene saldo de reinversión, se ejecuta
+        // automáticamente la reinversión en nuevos créditos usando los mismos
+        // porcentajes de participación que tiene actualmente.
         if (debeReinvertir) {
           try {
             console.log(`  🔄 Ejecutando reinversión automática por Q${montoReinvertido.toFixed(2)}...`);

@@ -4148,10 +4148,6 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
     } catch (error) {
       console.error(`  ❌ Error procesando inversionista ${inv_id}:`, error);
       const msg = error instanceof Error ? error.message : "Error desconocido";
-      const esValidacion =
-        msg.includes("CUADRE_CAPITAL") ||
-        msg.includes("MONTO_ESPEJO_INCONSISTENTE");
-      if (esValidacion) throw error;
       errores.push({ inversionista_id: inv_id, razon: msg });
       inversionistasSaltados++;
     }

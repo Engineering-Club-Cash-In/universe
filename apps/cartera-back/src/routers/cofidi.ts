@@ -8,17 +8,19 @@ import { DTEService } from "../cofidi/dteService";
 import { generarHTMLFacturaPro } from "../cofidi/functions";
 import { db } from "../database";
 import {
+  compras_credito_inversionista,
   credit_cancelations,
   creditos,
   creditos_inversionistas,
   creditos_inversionistas_espejo,
+  cuotas_credito,
   facturas_electronicas,
   inversionistas,
   pagos_credito,
   pagos_credito_inversionistas,
   usuarios,
 } from "../database/db";
-import { eq, desc, and, sql, gte, lte } from "drizzle-orm";
+import { eq, desc, and, sql, gte, lte, inArray } from "drizzle-orm";
 import ExcelJS from "exceljs";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { NITSoapClient } from "../cofidi/nitGenerator";
@@ -148,6 +150,7 @@ if (facturasExistentes.length > 0) {
         .select({
           pago_id: pagos_credito.pago_id,
           credito_id: pagos_credito.credito_id,
+          cuota_id: pagos_credito.cuota_id,
           monto_boleta: pagos_credito.monto_boleta,
           fecha_pago: pagos_credito.fecha_pago,
           fecha_vencimiento: pagos_credito.fecha_vencimiento,
@@ -241,6 +244,8 @@ if (facturasExistentes.length > 0) {
           monto_inversionista: creditos_inversionistas.monto_inversionista,
           iva_inversionista: creditos_inversionistas.iva_inversionista,
           status_espejo: creditos_inversionistas_espejo.status,
+          monto_aportado_espejo: creditos_inversionistas_espejo.monto_aportado,
+          fecha_inicio_participacion_espejo: creditos_inversionistas_espejo.fecha_inicio_participacion,
         })
         .from(creditos_inversionistas)
         .innerJoin(
@@ -265,11 +270,107 @@ if (facturasExistentes.length > 0) {
         )
         .where(eq(creditos_inversionistas.credito_id, pagoData.credito_id!));
 
+      // ============================================
+      // 🆕 NUEVO FLUJO: Detectar operaciones pendientes de facturar
+      //
+      // ¿Qué busca este query?
+      //   Filas en `compras_credito_inversionista` (operaciones de compra de
+      //   cartera o reinversión) que pertenezcan a este crédito y que tengan
+      //   `pendiente_facturar = true`.
+      //
+      //   Esa flag se marca en `true` cuando se acepta una compra/reinversión
+      //   y todavía NO se ha facturado el primer pago bajo la nueva
+      //   distribución de inversionistas. Mientras la flag siga en `true`,
+      //   este endpoint usa el FLUJO PRORRATEADO para repartir el interés
+      //   entre "antes" (vieja distribución) y "después" (nueva distribución).
+      //
+      // Ejemplo:
+      //   El 15 de mayo Juan compró el 50% del crédito que era 100% de CUBE.
+      //   Se crea la fila:
+      //     compras_credito_inversionista {
+      //       credito_id: 123, inversionista_id: Juan,
+      //       monto_aportado: 5000, tipo_operacion: "compra_cartera",
+      //       pendiente_facturar: true
+      //     }
+      //   El próximo pago del crédito (ej. cuota de mayo) entra a este nuevo
+      //   flujo y se reparte el interés prorrateado por día del mes:
+      //     • Días 1-15  → CUBE tenía 100% del crédito
+      //     • Días 16-30 → CUBE 50% + Juan 50%
+      //   Si la cuota queda PAGADA al final → la flag pasa a `false` y los
+      //   siguientes pagos ya usan el flujo normal (sin prorrateo).
+      // ============================================
+      const operacionesPendientesFacturar = await db
+        .select({
+          id: compras_credito_inversionista.id,
+          credito_id: compras_credito_inversionista.credito_id,
+          inversionista_id: compras_credito_inversionista.inversionista_id,
+          monto_aportado: compras_credito_inversionista.monto_aportado,
+          tipo_operacion: compras_credito_inversionista.tipo_operacion,
+          tipo_reinversion: compras_credito_inversionista.tipo_reinversion,
+          status: compras_credito_inversionista.status,
+          fecha: compras_credito_inversionista.fecha,
+          fecha_completada: compras_credito_inversionista.fecha_completada,
+        })
+        .from(compras_credito_inversionista)
+        .where(
+          and(
+            eq(compras_credito_inversionista.credito_id, pagoData.credito_id!),
+            eq(compras_credito_inversionista.pendiente_facturar, true)
+          )
+        );
+
+      const tieneOperacionesPendientesFacturar = operacionesPendientesFacturar.length > 0;
+
+      if (tieneOperacionesPendientesFacturar) {
+        console.log(
+          `\n🆕 NUEVO FLUJO DETECTADO: crédito ${pagoData.credito_id} tiene ${operacionesPendientesFacturar.length} operación(es) pendiente(s) de facturar`
+        );
+        for (const op of operacionesPendientesFacturar) {
+          console.log(
+            `   📋 op id=${op.id} | inv=${op.inversionista_id} | tipo=${op.tipo_operacion}${op.tipo_reinversion ? `/${op.tipo_reinversion}` : ""} | monto=Q${op.monto_aportado} | status=${op.status}`
+          );
+        }
+      }
+
+      // 🔥 VALIDACIÓN: porcentaje_participacion + porcentaje_cash_in debe sumar 100% por inversionista.
+      //    Si no suma 100, el remanente NO se factura a nadie (cashInAcumulado solo captura pct_cash_in,
+      //    y totalInteresesNoCube resta el interes_proporcional completo del residuo CUBE).
+      //    Tolerancia de 0.01% por redondeos al crear el crédito.
+      const inversionistasMalConfigurados = inversionistasDelCredito
+        .map((inv) => {
+          const pctInv = new BigJs(inv.porcentaje_participacion || "0");
+          const pctCashIn = new BigJs(inv.porcentaje_cash_in || "0");
+          const suma = pctInv.plus(pctCashIn);
+          return { inv, pctInv, pctCashIn, suma };
+        })
+        .filter(({ suma }) => suma.minus(100).abs().gt("0.01"));
+
+      if (inversionistasMalConfigurados.length > 0) {
+        set.status = 400;
+        const detalle = inversionistasMalConfigurados.map(({ inv, pctInv, pctCashIn, suma }) => ({
+          inversionista_id: inv.inversionista_id,
+          inversionista: inv.nombre,
+          pct_participacion: pctInv.toString(),
+          pct_cash_in: pctCashIn.toString(),
+          suma: suma.toString(),
+          diferencia_vs_100: suma.minus(100).toString(),
+        }));
+        console.error(`❌ Inversionistas con porcentajes que no suman 100%:`, detalle);
+        return {
+          success: false,
+          error: "Configuración inválida: porcentaje_participacion + porcentaje_cash_in debe sumar 100% por inversionista",
+          detalle,
+          sugerencia: "Revise creditos_inversionistas para este crédito y ajuste los porcentajes antes de facturar",
+          pago_id,
+          credito_id: pagoData.credito_id,
+        };
+      }
+
       // 🔥 Calcular participación real
       // - Cancelación (validationStatus = "reset"): cuota_inversionista / suma_total_cuotas,
       //   restando seguro + membresía + GPS por cuota al inversionista MAYOR
       //   (ese inversionista trae esos cargos sumados en su cuota_inversionista al crear el crédito)
-      // - Resto: monto_aportado / suma_total_aportes
+      // - Resto: monto_aportado / suma_utotal_aportes
       const esCancelacion = pagoData.validationStatus === "reset";
 
       const totalInteresesConIva = new BigJs(pagoData.abono_interes || "0")
@@ -301,9 +402,16 @@ if (facturasExistentes.length > 0) {
       const getBaseInv = (inv: typeof inversionistasDelCredito[number]) => {
         if (!esCancelacion) return new BigJs(inv.monto_aportado || "0");
         const cuota = new BigJs(inv.cuota_inversionista || "0");
-        return inv.inversionista_id === mayorInversionistaId
-          ? cuota.minus(cargosPorCuota)
-          : cuota;
+        if (inv.inversionista_id !== mayorInversionistaId) return cuota;
+
+        // 🔥 VALIDACIÓN: si cargosPorCuota > cuota, la base saldría negativa
+        // (participación negativa rompe el reparto). Se ajusta a 0 y se avisa.
+        const base = cuota.minus(cargosPorCuota);
+        if (base.lt(0)) {
+          console.warn(`⚠️  Base negativa para inversionista mayor "${inv.nombre}" (id ${inv.inversionista_id}): cuota Q${cuota.toFixed(2)} - cargosPorCuota Q${cargosPorCuota.toFixed(2)} = Q${base.toFixed(2)}. Se ajusta a 0 — revise cuotas_atrasadas vs cuota_inversionista del crédito ${pagoData.credito_id}.`);
+          return new BigJs(0);
+        }
+        return base;
       };
 
       const totalBase = inversionistasDelCredito.reduce(
@@ -798,7 +906,623 @@ if (facturasExistentes.length > 0) {
       }
 
       // ============================================
-      // 6️⃣ FACTURAS DE INTERESES (1 por inversionista + 1 para CUBE)
+      // 6️⃣ FACTURAS DE INTERESES
+      //    🆕 Branching: si hay operaciones pendientes_facturar en
+      //       compras_credito_inversionista → flujo nuevo (TODO)
+      //       sino → flujo actual (residuo CUBE + reparto por aporte)
+      // ============================================
+      if (tieneOperacionesPendientesFacturar) {
+        // ============================================
+        // 🆕 NUEVO FLUJO DE INTERESES — PRORRATEO POR FECHA DE COMPRA/REINVERSIÓN
+        //
+        //    Divide el interés del pago en DOS ventanas dentro del mes:
+        //      • parte1: cómo estaba el crédito ANTES de la(s) compra(s)
+        //                fracción = día_corte / días_del_mes
+        //      • parte2: cómo está el crédito AHORA (después de la(s) compra(s))
+        //                fracción = (días_del_mes − día_corte) / días_del_mes
+        //
+        //    En cada ventana se aplica el MISMO algoritmo del flujo actual:
+        //      reparto por monto_aportado → split parteInv/parteCashIn → CUBE por residuo.
+        //
+        //    Al final se suman las dos ventanas por inversionista y se emite
+        //    UNA factura por cada inv (más una para CUBE con residuo+cashIn de ambas).
+        //
+        //    Reconstrucción del "antes" por inversionista:
+        //      • Inv comprador (entró/reinvirtió): monto_antes = monto_espejo − monto_aportado_en_compra
+        //        (si era nuevo y antes tenía 0, el clamp lo deja en 0)
+        //      • CUBE: monto_antes = monto_espejo + suma_total_comprado
+        //        (CUBE soltó esas porciones al vender/redirigir)
+        //      • Resto: monto_antes = monto_espejo (no cambió)
+        // ============================================
+        console.log("\n🆕 ========== NUEVO FLUJO DE INTERESES (PRORRATEO) ==========");
+
+        // ============================================
+        // 🗓️ DETERMINAR FECHA DE CORTE
+        //
+        // ¿Qué es la "fecha de corte"?
+        //   Es el día del mes en que la compra/reinversión fue aceptada.
+        //   Marca el punto donde la distribución de inversionistas cambió:
+        //     • Antes de esa fecha → vieja distribución (más CUBE)
+        //     • Desde esa fecha    → nueva distribución (con el comprador)
+        //
+        // Regla de negocio:
+        //   Por crédito siempre habrá EXACTAMENTE 1 fila pendiente_facturar
+        //   (1 sola compra/reinversión pendiente de cerrar el ciclo).
+        //   Por eso usamos `operacionesPendientesFacturar[0]` directo.
+        //
+        // Defensa contra estado inconsistente:
+        //   Si por error llegaran >1 → procesamos la primera y avisamos en consola.
+        //   No abortamos para no bloquear la facturación del pago.
+        // ============================================
+        if (operacionesPendientesFacturar.length > 1) {
+          // Caso anómalo: avisar y seguir con la primera.
+          console.warn(`⚠️ Se esperaba 1 fila pendiente_facturar pero llegaron ${operacionesPendientesFacturar.length}. Procesando la primera.`);
+        }
+
+        // La operación pendiente que vamos a procesar (la única, salvo anomalía).
+        const operacionPendiente = operacionesPendientesFacturar[0];
+
+        // Buscamos al inversionista comprador dentro de la lista de inversionistas
+        // del crédito para sacar su `fecha_inicio_participacion` del espejo.
+        // (Esa columna vive en creditos_inversionistas_espejo y se llenó al
+        //  aceptar la compra/reinversión.)
+        const invCompradorEspejo = inversionistasDelPago.find(
+          (i) => i.inversionista_id === operacionPendiente.inversionista_id
+        );
+
+        // La fecha que vamos a usar como punto de corte del mes.
+        // Tipo: string ISO "YYYY-MM-DD" (porque la columna en BD es `date`).
+        const fechaCorteRaw = invCompradorEspejo?.fecha_inicio_participacion_espejo;
+
+        // ─────────────────────────────────────────────────────────────────
+        // GUARDIA: ¿Qué pasa si NO encontramos fecha de inicio en el espejo?
+        // ─────────────────────────────────────────────────────────────────
+        // Casos posibles que pueden dejar `fechaCorteRaw` en null/undefined:
+        //   1. El espejo nunca se creó para ese inversionista (bug histórico).
+        //   2. El LEFT JOIN del SELECT inicial no encontró fila (inv huérfano).
+        //   3. La columna está NULL por una migración mal hecha.
+        //
+        // Como SIN fecha NO podemos calcular el prorrateo (no sabemos cuándo
+        // cortar el mes), abortamos el flujo nuevo de intereses para ESTE pago
+        // y registramos el error en facturasGeneradas para que aparezca en el
+        // response. La cuota se podrá facturar manualmente después.
+        //
+        // OJO: mora, otros servicios y otros SÍ se siguen emitiendo aunque
+        // este bloque falle, porque están fuera de este if.
+        if (!fechaCorteRaw) {
+          console.error(`❌ Nuevo flujo: inv ${operacionPendiente.inversionista_id} no tiene fecha_inicio_participacion en el espejo`);
+          facturasGeneradas.push({
+            tipo: "ERROR",
+            concepto: "INTERESES_NUEVO_FLUJO",
+            error: `Inversionista ${operacionPendiente.inversionista_id} no tiene fecha_inicio_participacion en el espejo`,
+          });
+        } else {
+          // ─────────────────────────────────────────────────────────────────
+          // CÁLCULO DE FRACCIONES TEMPORALES
+          // ─────────────────────────────────────────────────────────────────
+          // Convertimos la fecha (string "2026-06-15") a Date para sacar el día.
+          const fechaCorte = new Date(fechaCorteRaw as unknown as string);
+
+          // `diaCorte` = qué día del mes fue la compra. Ej: 15 para el 15 de junio.
+          const diaCorte = fechaCorte.getDate();
+
+          // `ultimoDiaMes` = cuántos días tiene el mes de la fecha de corte.
+          //   Truco JS: día 0 del mes siguiente = último día del mes actual.
+          //   Ej: new Date(2026, 6, 0).getDate() → 30 (último día de junio).
+          const ultimoDiaMes = new Date(fechaCorte.getFullYear(), fechaCorte.getMonth() + 1, 0).getDate();
+
+          // Fracción de mes ANTES del corte: días vigentes con la vieja distribución.
+          //   Ej: corte día 15 de 30 → fraccionAntes = 15/30 = 0.5 (50%)
+          const fraccionAntes = new Big(diaCorte).div(ultimoDiaMes);
+
+          // Fracción de mes DESPUÉS del corte: el resto del mes con la nueva.
+          //   Ej: 1 − 0.5 = 0.5 (50%)
+          const fraccionDespues = new Big(1).minus(fraccionAntes);
+
+          console.log(`   🗓️  Fecha corte: ${fechaCorte.toISOString().split("T")[0]} | día ${diaCorte}/${ultimoDiaMes}`);
+          console.log(`   📊 Fracción ANTES: ${fraccionAntes.times(100).toFixed(2)}% | Fracción DESPUÉS: ${fraccionDespues.times(100).toFixed(2)}%`);
+
+          // ─────────────────────────────────────────────────────────────────
+          // 💰 COMPRADOR Y MONTO APORTADO
+          // ─────────────────────────────────────────────────────────────────
+          // ID del inversionista que entró/aumentó su posición en el crédito.
+          const idComprador = operacionPendiente.inversionista_id;
+
+          // Monto que el comprador aportó en ESTA operación de compra/reinversión.
+          //   Ej: si Juan compró Q5,000 de cartera → montoComprado = Q5,000.
+          //   OJO: NO es el monto total que Juan tiene ahora en el crédito.
+          //        Eso lo vamos a leer del espejo más adelante (monto_aportado_espejo).
+          const montoComprado = new Big(operacionPendiente.monto_aportado);
+          console.log(`   🛒 Comprador: inv ${idComprador} | monto Q${montoComprado.toFixed(2)}`);
+
+          // ─────────────────────────────────────────────────────────────────
+          // 🆔 DETECTAR A CUBE EN LA LISTA DE INVERSIONISTAS
+          // ─────────────────────────────────────────────────────────────────
+          // CUBE es especial: se trata por RESIDUO (se le da lo que sobra después
+          // de repartir entre los demás, más las comisiones de cash-in).
+          // Lo identificamos por nombre — heurística que conviene reemplazar
+          // por un flag o ID fijo más adelante (deuda técnica documentada).
+          const invCube = inversionistasDelPago.find((i) =>
+            i.nombre.trim().toUpperCase().includes("CUBE INVESTMENTS")
+          );
+
+          // ID de CUBE para comparar después (puede ser null si CUBE no participa).
+          const cubeId = invCube?.inversionista_id ?? null;
+
+          // ─────────────────────────────────────────────────────────────────
+          // 🔍 RECONSTRUIR LAS BASES "ANTES" Y "DESPUÉS" DEL CRÉDITO
+          // ─────────────────────────────────────────────────────────────────
+          // "Base" = el monto que cada inversionista aportó al crédito.
+          // Esta base es la que usamos para repartir el interés proporcionalmente.
+          //
+          // "DESPUÉS" es la foto ACTUAL del espejo (cómo está hoy el crédito).
+          // "ANTES" es la foto que tenía el crédito ANTES de la compra/reinversión.
+          //
+          // Para reconstruir el "antes" hay 3 casos por inversionista:
+          //   1. Es CUBE → antes tenía MÁS (lo que el comprador le quitó al
+          //      comprar). Fórmula: monto_espejo + montoComprado.
+          //   2. Es el comprador → antes tenía MENOS (le restamos lo que aportó
+          //      en esta compra). Fórmula: monto_espejo − montoComprado.
+          //      Si era inv NUEVO (no estaba antes) → su monto era 0,
+          //      por eso hacemos clamp en 0 si la resta da negativo.
+          //   3. Cualquier otro → su monto no cambió, queda igual al espejo.
+          //
+          // Ejemplo numérico:
+          //   Espejo actual: CUBE Q5,000 | Juan Q5,000 (Juan compró el 50%)
+          //   montoComprado = Q5,000
+          //   construirBaseAntes(CUBE) = 5000 + 5000 = 10000 (todo era de CUBE)
+          //   construirBaseAntes(Juan) = 5000 - 5000 =     0 (Juan era nuevo)
+          //   construirBaseDespues(CUBE) = 5000
+          //   construirBaseDespues(Juan) = 5000
+
+          const construirBaseAntes = (inv: typeof inversionistasDelPago[number]) => {
+            // Monto actual del inversionista según el espejo (foto del crédito hoy).
+            // Si el espejo está vacío para este inv, asumimos 0.
+            const montoEspejo = new Big(inv.monto_aportado_espejo || "0");
+
+            // CASO 1: CUBE recupera lo que le compraron (antes era suyo).
+            if (inv.inversionista_id === cubeId) {
+              return montoEspejo.plus(montoComprado);
+            }
+
+            // CASO 2: El comprador — antes tenía espejo menos lo que aportó.
+            if (inv.inversionista_id === idComprador) {
+              const antes = montoEspejo.minus(montoComprado);
+              // Si la resta da negativo significa que era un inv totalmente nuevo
+              // (no tenía nada antes) → su monto antes era 0.
+              return antes.lt(0) ? new Big(0) : antes;
+            }
+
+            // CASO 3: Inversionista que no se vio afectado → su monto no cambia.
+            return montoEspejo;
+          };
+
+          // El "después" es directo: lo que dice el espejo hoy. No hay magia.
+          const construirBaseDespues = (inv: typeof inversionistasDelPago[number]) =>
+            new Big(inv.monto_aportado_espejo || "0");
+
+          // ─────────────────────────────────────────────────────────────────
+          // 🧮 HELPER `calcularReparto`
+          //
+          // Replica EXACTAMENTE el algoritmo del flujo actual de intereses,
+          // pero parametrizado por `fraccion` (porción del mes que aplica).
+          //
+          // Inputs:
+          //   • getBase(inv) → función que devuelve el monto del inv en la
+          //     foto correspondiente (antes o después).
+          //   • fraccion → Big con la porción del mes (ej. 0.5 = medio mes).
+          //   • etiqueta → solo para logs, "ANTES" o "DESPUÉS".
+          //
+          // Output:
+          //   • parteInvPorId: Map<id_inv, Big> con la plata a facturar a cada
+          //     inversionista (no incluye CUBE).
+          //   • totalCubeParcial: Big con la plata que CUBE se lleva en esta
+          //     ventana (residuo + cash_in acumulado de los demás).
+          //
+          // El interés total se reparte así:
+          //   1. interesParcial = totalInteresesConIva × fraccion
+          //   2. Por cada inv (no-CUBE):
+          //        participacion = base_inv / suma_bases
+          //        interesProporcional = interesParcial × participacion
+          //        parteInv  = interesProporcional × pct_participacion
+          //        parteCashIn = interesProporcional × pct_cash_in
+          //   3. CUBE recibe lo que sobra (residuo) + todas las parteCashIn.
+          // ─────────────────────────────────────────────────────────────────
+          const calcularReparto = (
+            getBase: (inv: typeof inversionistasDelPago[number]) => any,
+            fraccion: any,
+            etiqueta: string
+          ) => {
+            console.log(`\n   🧮 Reparto [${etiqueta}] (fracción ${fraccion.times(100).toFixed(2)}%)`);
+
+            // Porción del interés total que aplica a esta ventana temporal.
+            //   Ej: si fraccion=0.5 y interés total=Q1000 → interesParcial=Q500
+            const interesParcial = totalInteresesConIva.times(fraccion);
+
+            // Construimos array de {inv, base} para no recalcular getBase varias veces.
+            const bases = inversionistasDelPago.map((inv) => ({ inv, base: getBase(inv) }));
+
+            // Suma de todas las bases — denominador para las participaciones.
+            const sumaBases = bases.reduce((s, b) => s.plus(b.base), new Big(0));
+
+            console.log(`      💰 Interés parcial: Q${interesParcial.toFixed(2)} | Suma bases: Q${sumaBases.toFixed(2)}`);
+
+            // Resultado parcial: cuánto se factura a cada inv (sin contar CUBE).
+            const parteInvPorId = new Map<number, any>();
+
+            // Acumulador: comisiones cash_in que se le sumarán a CUBE al final.
+            let cashInAcumLocal = new Big(0);
+
+            // Acumulador: lo que les tocó a los no-CUBE. Sirve para calcular el
+            // residuo de CUBE como: interesParcial − totalNoCubeLocal.
+            let totalNoCubeLocal = new Big(0);
+
+            // Loop por cada inversionista del crédito.
+            for (const { inv, base } of bases) {
+              // CUBE se trata aparte (por residuo) al final del bloque.
+              if (inv.inversionista_id === cubeId) continue;
+
+              // % de participación de este inv en el reparto (0 si no hay bases).
+              const participacion = sumaBases.gt(0) ? base.div(sumaBases) : new Big(0);
+
+              // Plata bruta que le tocaría a este inv en esta ventana.
+              const interesProporcional = interesParcial.times(participacion);
+
+              // ─────────────────────────────────────────────────────────
+              // ¿Hay que REDIRIGIR este interés a CUBE en vez de pagarle al inv?
+              // ─────────────────────────────────────────────────────────
+              // Esto pasa cuando el crédito tiene bandera_reinversion=true Y
+              // el inv tiene status "pendiente_reinversion" o "pendiente_compra_cartera"
+              // en el espejo. Significa que su plata está retenida para una próxima
+              // operación, así que CUBE absorbe el interés en su lugar.
+              //
+              // OJO: al hacer `continue`, este interesProporcional NO suma a
+              // totalNoCubeLocal, por lo que CUBE lo recibe AUTOMÁTICAMENTE
+              // como parte del residuo (interesParcial − totalNoCubeLocal).
+              const redirigirACube =
+                pagoData.bandera_reinversion === true &&
+                (inv.status_espejo === "pendiente_reinversion" ||
+                  inv.status_espejo === "pendiente_compra_cartera");
+
+              if (redirigirACube) {
+                console.log(`      🔁 ${inv.nombre} → REDIRIGIDO A CUBE (Q${interesProporcional.toFixed(2)})`);
+                continue;
+              }
+
+              // El inv sí recibe su interés → contamos hacia el total no-CUBE.
+              totalNoCubeLocal = totalNoCubeLocal.plus(interesProporcional);
+
+              // El interesProporcional se divide en 2 partes:
+              //   • parteInversionista = lo que se le factura DIRECTO al inv.
+              //   • parteCashIn        = comisión que va a CUBE (cash-in).
+              const pctInversion = new Big(inv.porcentaje_participacion || "0").div(100);
+              const pctCashIn = new Big(inv.porcentaje_cash_in || "0").div(100);
+              const parteInversionista = interesProporcional.times(pctInversion);
+              const parteCashIn = interesProporcional.times(pctCashIn);
+
+              // Sumar la comisión cash_in al acumulador (se va a CUBE al final).
+              cashInAcumLocal = cashInAcumLocal.plus(parteCashIn);
+
+              // Guardar/acumular la parte del inv en el Map de resultados.
+              // (Usamos plus para soportar inv que aparezcan más de una vez,
+              //  aunque normalmente no debería pasar.)
+              parteInvPorId.set(
+                inv.inversionista_id,
+                (parteInvPorId.get(inv.inversionista_id) ?? new Big(0)).plus(parteInversionista)
+              );
+
+              console.log(`      📊 ${inv.nombre}: base Q${base.toFixed(2)} (${participacion.times(100).toFixed(2)}%) → inv Q${parteInversionista.toFixed(2)} | cashIn Q${parteCashIn.toFixed(2)}`);
+            }
+
+            // CUBE por RESIDUO: todo lo que NO se repartió a los demás.
+            // Esto asegura que la suma SIEMPRE cuadre con el total (no se pierde plata).
+            const cubePropio = interesParcial.minus(totalNoCubeLocal);
+
+            // Total para CUBE = su residuo propio + comisiones cash_in acumuladas.
+            const totalCubeParcial = cubePropio.plus(cashInAcumLocal);
+
+            console.log(`      💵 CUBE [${etiqueta}]: residuo Q${cubePropio.toFixed(2)} + cashIn Q${cashInAcumLocal.toFixed(2)} = Q${totalCubeParcial.toFixed(2)}`);
+
+            return { parteInvPorId, totalCubeParcial };
+          };
+
+          // Llamamos al helper DOS veces:
+          //   • Una con la foto del crédito "antes" de la compra.
+          //   • Otra con la foto "después" (actual).
+          // Cada llamada devuelve sus propios montos por inversionista y para CUBE.
+          const repartoAntes = calcularReparto(construirBaseAntes, fraccionAntes, "ANTES");
+          const repartoDespues = calcularReparto(construirBaseDespues, fraccionDespues, "DESPUÉS");
+
+          // ─────────────────────────────────────────────────────────────────
+          // 🧾 SUMAR PARTE_ANTES + PARTE_DESPUÉS Y FACTURAR
+          //
+          // Por cada inversionista emitimos UNA factura con:
+          //   total = parteAntes + parteDespues
+          //
+          // Ejemplo: Juan
+          //   parteAntes   = Q0    (era nuevo, no tenía base antes)
+          //   parteDespues = Q175  (50% del crédito × 50% del mes × 70% pct_part)
+          //   total        = Q175  → se factura Q175 a Juan
+          // ─────────────────────────────────────────────────────────────────
+          console.log("\n   🧾 Sumando parte1 + parte2 y emitiendo facturas...");
+
+          // Total que va a CUBE = lo de las DOS ventanas sumado.
+          const totalCubeFinal = repartoAntes.totalCubeParcial.plus(repartoDespues.totalCubeParcial);
+
+          // Set con todos los IDs de inversionistas que aparecieron en cualquier
+          // ventana (algunos podrían tener parte solo en una de las dos).
+          const idsInv = new Set<number>([
+            ...repartoAntes.parteInvPorId.keys(),
+            ...repartoDespues.parteInvPorId.keys(),
+          ]);
+
+          // Fecha de vencimiento para el complemento cambiario de la factura.
+          // Cascada: usa fecha_vencimiento del pago, sino fecha_pago, sino HOY.
+          const fechaVencimientoNF = pagoData.fecha_vencimiento
+            ? new Date(pagoData.fecha_vencimiento).toISOString().split("T")[0]
+            : pagoData.fecha_pago
+              ? new Date(pagoData.fecha_pago).toISOString().split("T")[0]
+              : new Date().toISOString().split("T")[0];
+
+          // Loop por cada inversionista que tiene plata para facturar.
+          for (const invId of idsInv) {
+            // Buscar los datos completos del inv en la lista del pago
+            // (nombre, emite_factura, etc.).
+            const inv = inversionistasDelPago.find((i) => i.inversionista_id === invId);
+            if (!inv) continue; // Defensa: no debería pasar, pero por si acaso.
+
+            // Las dos partes que se SUMAN para obtener el monto a facturar.
+            const parteAntes = repartoAntes.parteInvPorId.get(invId) ?? new Big(0);
+            const parteDespues = repartoDespues.parteInvPorId.get(invId) ?? new Big(0);
+
+            // Total a facturar al inversionista, redondeado a 2 decimales.
+            const totalInv = parteAntes.plus(parteDespues).round(2);
+
+            // Si por redondeo o porque no le tocaba nada da Q0 → no facturamos.
+            if (totalInv.lte(0)) {
+              console.log(`      ⏭️  ${inv.nombre}: total Q0`);
+              continue;
+            }
+
+            // ¿Este inversionista tiene config para facturar bajo su propia razón social?
+            //   Ej: SE_PRESTA, AMJK, AUTOCASH, etc. tienen su propio NIT facturador.
+            const inversionistaConfig = getInversionistaFacturadorConfig(inv.nombre);
+
+            // Si el inv emite SU PROPIA factura (fuera del sistema) Y no tenemos
+            // config local para emitírsela nosotros → lo saltamos.
+            // (Él se factura solo. Su parte queda como deuda informativa.)
+            if (inv.emite_factura && !inversionistaConfig) {
+              console.log(`      ⏭️  ${inv.nombre}: emite su propia factura`);
+              continue;
+            }
+
+            const calc = calcularIvaExacto(parseFloat(totalInv.toFixed(2)));
+            console.log(`      💼 Factura ${inv.nombre}: Q${totalInv.toFixed(2)} (antes Q${parteAntes.toFixed(2)} + después Q${parteDespues.toFixed(2)})`);
+
+            const itemsInv = [
+              {
+                numeroLinea: 1,
+                bienOServicio: "B",
+                cantidad: 1,
+                unidadMedida: "UND",
+                descripcion: "CARGO POR SERVICIOS",
+                precioUnitario: calc.precioUnitario,
+                precio: calc.precio,
+                descuento: 0,
+                impuestos: [
+                  {
+                    nombreCorto: "IVA",
+                    codigoUnidadGravable: 1,
+                    montoGravable: calc.montoGravable,
+                    montoImpuesto: calc.montoImpuesto,
+                  },
+                ],
+                total: calc.total,
+              },
+            ];
+
+            const complementosInv = [
+              {
+                tipo: "cambiario",
+                abonos: [
+                  { numeroAbono: 1, fechaVencimiento: fechaVencimientoNF, montoAbono: calc.total },
+                ],
+              },
+            ];
+
+            try {
+              const facturaInv = await certificarFacturaHelper({
+                pago_id,
+                receptor,
+                items: itemsInv,
+                complementos: complementosInv,
+                created_by,
+                customConfig: inversionistaConfig?.config,
+                customSatConfig: inversionistaConfig?.satConfig,
+                nitsFallback: nitsDisponibles.slice(1),
+              });
+
+              facturasGeneradas.push({
+                tipo: "INTERESES",
+                inversionista: inv.nombre,
+                inversionista_id: inv.inversionista_id,
+                emisor: inversionistaConfig?.config.emisor.nombreEmisor || "CUBE INVESTMENTS",
+                flujo: "NUEVO_PRORRATEADO",
+                parte_antes: parteAntes.toFixed(2),
+                parte_despues: parteDespues.toFixed(2),
+                ...facturaInv,
+              });
+
+              console.log(`      ✅ ${facturaInv.serie}-${facturaInv.numero}`);
+            } catch (error: any) {
+              console.error(`      ❌ Error: ${error.message}`);
+              facturasGeneradas.push({
+                tipo: "ERROR",
+                inversionista: inv.nombre,
+                flujo: "NUEVO_PRORRATEADO",
+                error: error.message,
+              });
+            }
+          }
+
+          // ─────────────────────────────────────────────────────────────────
+          // 🧾 FACTURA CUBE — UNA SOLA factura con la suma de las 2 ventanas
+          //
+          // CUBE total = residuoAntes + cashInAntes + residuoDespues + cashInDespues
+          //
+          // Ejemplo (continuando el caso de Juan):
+          //   CUBE antes = Q500 (todo el "antes" era de CUBE)
+          //   CUBE después = Q250 (su 50%) + Q75 (cashIn de Juan) = Q325
+          //   CUBE total = 500 + 325 = Q825
+          //
+          // Si totalCubeFinal es 0 o negativo no facturamos (caso raro pero defensivo).
+          // ─────────────────────────────────────────────────────────────────
+          if (totalCubeFinal.gt(0)) {
+            // Redondeo a 2 decimales antes de calcular IVA.
+            const totalCubeRounded = totalCubeFinal.round(2);
+            console.log(`\n      💼 Factura CUBE: Q${totalCubeRounded.toFixed(2)} (antes Q${repartoAntes.totalCubeParcial.toFixed(2)} + después Q${repartoDespues.totalCubeParcial.toFixed(2)})`);
+            const calcCube = calcularIvaExacto(parseFloat(totalCubeRounded.toFixed(2)));
+
+            const itemsCube = [
+              {
+                numeroLinea: 1,
+                bienOServicio: "B",
+                cantidad: 1,
+                unidadMedida: "UND",
+                descripcion: "CARGO POR SERVICIOS",
+                precioUnitario: calcCube.precioUnitario,
+                precio: calcCube.precio,
+                descuento: 0,
+                impuestos: [
+                  {
+                    nombreCorto: "IVA",
+                    codigoUnidadGravable: 1,
+                    montoGravable: calcCube.montoGravable,
+                    montoImpuesto: calcCube.montoImpuesto,
+                  },
+                ],
+                total: calcCube.total,
+              },
+            ];
+
+            const complementosCube = [
+              {
+                tipo: "cambiario",
+                abonos: [
+                  { numeroAbono: 1, fechaVencimiento: fechaVencimientoNF, montoAbono: calcCube.total },
+                ],
+              },
+            ];
+
+            try {
+              const facturaCube = await certificarFacturaHelper({
+                pago_id,
+                receptor,
+                items: itemsCube,
+                complementos: complementosCube,
+                created_by,
+                nitsFallback: nitsDisponibles.slice(1),
+              });
+
+              facturasGeneradas.push({
+                tipo: "INTERESES_CUBE",
+                descripcion: "CARGO POR SERVICIOS (CUBE + CASH_IN)",
+                flujo: "NUEVO_PRORRATEADO",
+                parte_antes: repartoAntes.totalCubeParcial.toFixed(2),
+                parte_despues: repartoDespues.totalCubeParcial.toFixed(2),
+                ...facturaCube,
+              });
+
+              console.log(`      ✅ ${facturaCube.serie}-${facturaCube.numero} (CUBE)`);
+            } catch (error: any) {
+              console.error(`      ❌ Error factura CUBE: ${error.message}`);
+              facturasGeneradas.push({
+                tipo: "ERROR",
+                inversionista: "CUBE",
+                flujo: "NUEVO_PRORRATEADO",
+                error: error.message,
+              });
+            }
+          }
+
+          // ============================================
+          // 🔚 CIERRE DEL CICLO: marcar pendiente_facturar = false
+          //
+          // ¿Para qué?
+          //   Cuando el pago COMPLETA la cuota (cliente terminó de pagar lo que
+          //   le tocaba ese mes) Y todas las facturas del flujo nuevo salieron
+          //   bien → ya cumplió su propósito el flujo prorrateado para esta
+          //   operación de compra/reinversión. Marcamos la(s) fila(s) como
+          //   `pendiente_facturar=false` para que el SIGUIENTE pago use el
+          //   flujo normal (sin prorrateo, porque ya no hay corte que respetar).
+          //
+          // ¿Cuándo NO marcar?
+          //   • Si la cuota no está pagada → todavía pueden entrar más pagos
+          //     ese mes; conviene esperar a cerrarla.
+          //   • Si HUBO errores en alguna factura del flujo nuevo → no cerramos
+          //     el ciclo hasta que se regularice (manualmente o reintentando).
+          //
+          // Si ambas pasan → UPDATE en compras_credito_inversionista.
+          // El UPDATE va en try/catch para no romper el response si BD falla.
+          // ============================================
+
+          // PASO 1: contar errores del flujo nuevo en lo que ya pusimos en
+          // facturasGeneradas durante esta ejecución. Cualquier error con
+          // flujo "NUEVO_PRORRATEADO" o concepto "INTERESES_NUEVO_FLUJO" cuenta.
+          const erroresFlujoNuevo = facturasGeneradas.filter(
+            (f: any) =>
+              f.tipo === "ERROR" &&
+              (f.flujo === "NUEVO_PRORRATEADO" || f.concepto === "INTERESES_NUEVO_FLUJO")
+          );
+          const huboErroresNuevoFlujo = erroresFlujoNuevo.length > 0;
+
+          // PASO 2: consultar si la cuota está pagada.
+          //   `pagado=true` en cuotas_credito significa que el cliente terminó
+          //   de pagar esa cuota (la suma de pagos cubrió el monto requerido).
+          //   Si no hay cuota_id en el pago (raro), asumimos NO pagada.
+          let cuotaPagada = false;
+          if (pagoData.cuota_id) {
+            const [cuotaInfo] = await db
+              .select({ pagado: cuotas_credito.pagado })
+              .from(cuotas_credito)
+              .where(eq(cuotas_credito.cuota_id, pagoData.cuota_id));
+            cuotaPagada = cuotaInfo?.pagado === true;
+          }
+
+          // PASO 3: decidir qué hacer según las dos condiciones.
+          if (!cuotaPagada) {
+            // Cuota aún no se completa → próximo pago vuelve a entrar al flujo nuevo.
+            console.log(`\n   ⏸️  Cuota ${pagoData.cuota_id ?? "?"} NO está pagada todavía → se mantiene pendiente_facturar=true`);
+          } else if (huboErroresNuevoFlujo) {
+            // Hubo problemas al facturar → NO cerrar el ciclo, alguien debe revisar.
+            console.log(`\n   ⏸️  Hubo ${erroresFlujoNuevo.length} error(es) en el flujo nuevo → se mantiene pendiente_facturar=true`);
+          } else {
+            // Caso feliz: cerrar el ciclo. Hacemos UPDATE en BD.
+            const idsParaMarcar = operacionesPendientesFacturar.map((o) => o.id);
+            console.log(`\n   ✅ Cuota pagada + sin errores → marcando ${idsParaMarcar.length} fila(s) como pendiente_facturar=false`);
+            try {
+              await db
+                .update(compras_credito_inversionista)
+                .set({ pendiente_facturar: false, updated_at: new Date() })
+                .where(inArray(compras_credito_inversionista.id, idsParaMarcar));
+              console.log(`   ✅ Filas actualizadas: ${idsParaMarcar.join(", ")}`);
+            } catch (updateError: any) {
+              // Si el UPDATE falla, la facturación YA pasó (las facturas existen en SAT).
+              // No reventamos el response — solo registramos el error para que sea
+              // visible en la respuesta y se pueda corregir manualmente en BD.
+              console.error(`   ❌ Error marcando pendiente_facturar=false:`, updateError.message);
+              facturasGeneradas.push({
+                tipo: "ERROR",
+                concepto: "MARCAR_PENDIENTE_FACTURAR",
+                flujo: "NUEVO_PRORRATEADO",
+                error: updateError.message,
+              });
+            }
+          }
+        }
+      } else {
+      // ============================================
+      // 6️⃣ FLUJO ACTUAL — FACTURAS DE INTERESES (1 por inversionista + 1 para CUBE)
       //    Estrategia:
       //      PASO 1: loop por cada inversionista (saltando CUBE)
       //              - Si bandera_reinversion=true y status_espejo pendiente → redirigir a CUBE
@@ -1056,6 +1780,7 @@ if (facturasExistentes.length > 0) {
           }
         }
       }
+      } // 🔚 cierre del else (flujo actual de intereses)
 
       // ============================================
       // 7️⃣ RESPUESTA FINAL

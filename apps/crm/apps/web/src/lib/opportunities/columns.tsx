@@ -7,6 +7,8 @@ import {
 	formatDate,
 	formatGuatemalaDate,
 	formatGuatemalaDateTime,
+	getLeadSourceBadgeClass,
+	getSourceLabel,
 	getStatusLabel,
 } from "@/lib/crm-formatters";
 import type { client } from "@/utils/orpc";
@@ -144,6 +146,37 @@ export const opportunitiesColumns: ColumnDef<Opportunity>[] = [
 			const a = rowA.original.stage?.closurePercentage ?? 0;
 			const b = rowB.original.stage?.closurePercentage ?? 0;
 			return a - b;
+		},
+	},
+	{
+		accessorKey: "source",
+		header: "Canal",
+		cell: ({ row }) => {
+			const source = row.original.source;
+			if (!source) return <span className="text-muted-foreground">—</span>;
+			return (
+				<Badge className={getLeadSourceBadgeClass(source)} variant="outline">
+					{getSourceLabel(source)}
+				</Badge>
+			);
+		},
+	},
+	{
+		accessorKey: "creditType",
+		header: "Tipo de Crédito",
+		cell: ({ row }) => {
+			const creditType = row.original.creditType;
+			const label =
+				creditType === "sobre_vehiculo" ? "Sobre Vehículo" : "Autocompra";
+			const className =
+				creditType === "sobre_vehiculo"
+					? "bg-purple-100 text-purple-800"
+					: "bg-sky-100 text-sky-800";
+			return (
+				<Badge className={className} variant="outline">
+					{label}
+				</Badge>
+			);
 		},
 	},
 	{

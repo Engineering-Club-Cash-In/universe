@@ -1891,6 +1891,18 @@ export const crmRouter = {
 				}
 			}
 
+			// If lead is being changed and no explicit source provided, copy source from new lead
+			if (input.leadId && !updateData.source) {
+				const newLead = await db
+					.select({ source: leads.source })
+					.from(leads)
+					.where(eq(leads.id, input.leadId))
+					.limit(1);
+				if (newLead[0]?.source) {
+					updateData.source = newLead[0].source;
+				}
+			}
+
 			const updatedOpportunity = await db
 				.update(opportunities)
 				.set({

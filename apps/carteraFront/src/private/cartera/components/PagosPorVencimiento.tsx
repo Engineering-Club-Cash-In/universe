@@ -461,7 +461,7 @@ export function PagosPorVencimiento() {
                           {item.dias_mora}
                         </span>
                       </TableCell>
-                      <TableCell className="text-right font-medium text-black border-r border-b border-blue-100">{formatQ(item.monto_boleta)}</TableCell>
+                      <TableCell className="text-right font-medium text-black border-r border-b border-blue-100">{formatQ(item.monto_aplicado)}</TableCell>
                       <TableCell className="text-right text-black border-r border-b border-blue-100">{formatQ(item.capital_restante)}</TableCell>
                       <TableCell className="text-right text-black border-r border-b border-blue-100">{formatQ(item.interes_restante)}</TableCell>
                       <TableCell className="text-right text-black border-r border-b border-blue-100">{formatQ(item.iva_12_restante)}</TableCell>
@@ -521,9 +521,9 @@ export function PagosPorVencimiento() {
                         {/* 5. Etapa de Mora -> vacío */}
                         <TableCell className="border-r border-b border-blue-100" />
                         
-                        {/* 6. Boletas Totales -> Monto Boleta */}
+                        {/* 6. Boletas Totales -> Monto Aplicado */}
                         <TableCell className="text-right font-semibold text-blue-900 border-r border-b border-blue-100 bg-blue-50/10">
-                          {formatQ(abono.monto_boleta)}
+                          {formatQ(abono.monto_aplicado)}
                         </TableCell>
                         
                         {/* 7. Abono Capital */}

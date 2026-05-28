@@ -37,6 +37,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+	formatGuatemalaCalendarDate,
 	formatGuatemalaDate,
 	getContractTypeLabel,
 	getDocumentTypeLabel,
@@ -392,7 +393,7 @@ export function OpportunityDetailModal({
 									<div className="flex items-center gap-3">
 										<Calendar className="h-5 w-5 text-muted-foreground" />
 										<span className="font-medium">
-											{formatGuatemalaDate(opportunity.expectedCloseDate)}
+											{formatGuatemalaCalendarDate(opportunity.expectedCloseDate)}
 										</span>
 									</div>
 								</div>

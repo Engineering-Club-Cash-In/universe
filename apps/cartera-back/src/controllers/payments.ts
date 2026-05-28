@@ -23,6 +23,7 @@ import {
   processAndReplaceCreditInvestorsReverse,
 } from "./investor";
 import { updateMora } from "./latefee";
+import { calcularAjusteCompras } from "../utils/comprasAjuste";
 import { t } from "elysia";
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive(),
@@ -320,7 +321,8 @@ export async function insertPagosCreditoInversionistas(
   excludeCube: boolean = false,
   cuotaPagada:boolean = false,
   updateCredito: boolean = true,  // si false, omite el UPDATE a creditos_inversionistas_espejo
-  inversionista_id?: number
+  inversionista_id?: number,
+  fechaPeriodo?: Date
 ) {
   console.log(
     "\n🔍 ========== INICIO insertPagosCreditoInversionistas =========="
@@ -454,9 +456,12 @@ export async function insertPagosCreditoInversionistas(
 
     console.log(`   ¿Es Cube? ${isCube ? "SÍ ✅" : "NO ❌"}`);
 
-    // Validation 1: monto_aportado in espejo must match last historico (skip if no record = first period)
+    // Último snapshot del inversionista — determina período de referencia para compras
     const [lastHistoricoV1] = await db
-      .select({ monto_aportado: historico_liquidaciones_espejo.monto_aportado })
+      .select({
+        monto_aportado: historico_liquidaciones_espejo.monto_aportado,
+        fecha: historico_liquidaciones_espejo.fecha,
+      })
       .from(historico_liquidaciones_espejo)
       .where(
         and(
@@ -467,16 +472,37 @@ export async function insertPagosCreditoInversionistas(
       .orderBy(desc(historico_liquidaciones_espejo.fecha))
       .limit(1);
 
-    if (lastHistoricoV1 && !new Big(inv.monto_aportado).eq(new Big(lastHistoricoV1.monto_aportado))) {
+    // fechaPeriodo: viene del front (fecha explícita del período a liquidar).
+    // Fallback: fecha_vencimiento del pago registrado.
+    const fechaDelPeriodo = fechaPeriodo
+      ?? (currentPago?.fecha_vencimiento ? new Date(currentPago.fecha_vencimiento) : new Date());
+
+    const periodoMes = fechaDelPeriodo.getMonth();
+    const periodoAnio = fechaDelPeriodo.getFullYear();
+
+    const { montoRestarValidacion, montoRestarCalculo } = await calcularAjusteCompras(
+      credito_id,
+      inv.inversionista_id,
+      lastHistoricoV1 ? new Date(lastHistoricoV1.fecha) : null,
+      periodoMes,
+      periodoAnio,
+    );
+
+    // Validation 1: espejo ajustado por compras nuevas == histórico
+    const montoParaValidacion = new Big(inv.monto_aportado).minus(montoRestarValidacion);
+    if (lastHistoricoV1 && !montoParaValidacion.eq(new Big(lastHistoricoV1.monto_aportado))) {
       throw new Error(
-        `[MONTO_ESPEJO_INCONSISTENTE] Inv ${inv.inversionista_id} Cred ${credito_id}: espejo (${inv.monto_aportado}) ≠ histórico (${lastHistoricoV1.monto_aportado})`
+        `[MONTO_ESPEJO_INCONSISTENTE] Inv ${inv.inversionista_id} Cred ${credito_id}: ` +
+        `espejo-compras_nuevas (${montoParaValidacion.toFixed(8)}) ≠ histórico (${lastHistoricoV1.monto_aportado})`
       );
     }
+
+    const montoBaseCalculo = new Big(inv.monto_aportado).minus(montoRestarCalculo);
 
     // --- Calcular los 4 campos desde monto_aportado (misma lógica que processAndReplaceCreditInvestors) ---
     const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
     const porcentajeInversion = new Big(inv.porcentaje_participacion_inversionista);
-    const cuotaCalc = new Big(inv.monto_aportado)
+    const cuotaCalc = montoBaseCalculo
       .times(currentCredit?.porcentaje_interes ?? 0)
       .div(100)
       .round(2);
@@ -749,6 +775,7 @@ export async function insertPagosCreditoInversionistas(
 export async function insertPagosCreditoInversionistasV2(
   pago_id: number,
   credito_id: number,
+  fechaPeriodo?: Date,
 ) {
   // 1. Obtener el pago
   const currentPago = await db.query.pagos_credito.findFirst({
@@ -794,14 +821,56 @@ export async function insertPagosCreditoInversionistasV2(
   const pagoAbonoInteres = new Big(currentPago.abono_interes ?? 0);
   const pagoAbonoIva = new Big(currentPago.abono_iva_12 ?? 0);
 
+  // fechaPeriodo para clasificación Caso 1/2/3 en V2
+  const fechaDelPeriodoV2 = fechaPeriodo
+    ?? (currentPago?.fecha_vencimiento ? new Date(currentPago.fecha_vencimiento) : new Date());
+  const periodoMesV2 = fechaDelPeriodoV2.getMonth();
+  const periodoAnioV2 = fechaDelPeriodoV2.getFullYear();
+
   // 6. Calcular distribución por inversionista
   const inserts = [];
   for (const inv of inversionistasWithName) {
     const isCube =
       inv.nombre.trim().toLowerCase() === "cube investments s.a.".toLowerCase();
 
-    // Porcentaje general: monto_aportado / SUM(monto_aportado)
-    const porcentajeGeneral = new Big(inv.monto_aportado ?? 0).div(sumMontosAportados);
+    // Validación: espejo ajustado por compras nuevas == histórico
+    const [lastHistoricoV2] = await db
+      .select({
+        monto_aportado: historico_liquidaciones_espejo.monto_aportado,
+        fecha: historico_liquidaciones_espejo.fecha,
+      })
+      .from(historico_liquidaciones_espejo)
+      .where(
+        and(
+          eq(historico_liquidaciones_espejo.credito_id, credito_id),
+          eq(historico_liquidaciones_espejo.inversionista_id, inv.inversionista_id),
+        )
+      )
+      .orderBy(desc(historico_liquidaciones_espejo.fecha))
+      .limit(1);
+
+    let montoBaseCalculoV2 = new Big(inv.monto_aportado ?? 0);
+
+    if (lastHistoricoV2) {
+      const { montoRestarValidacion, montoRestarCalculo } = await calcularAjusteCompras(
+        credito_id,
+        inv.inversionista_id,
+        new Date(lastHistoricoV2.fecha),
+        periodoMesV2,
+        periodoAnioV2,
+      );
+      const montoParaValidacion = new Big(inv.monto_aportado ?? 0).minus(montoRestarValidacion);
+      if (!montoParaValidacion.eq(new Big(lastHistoricoV2.monto_aportado))) {
+        throw new Error(
+          `[MONTO_ESPEJO_INCONSISTENTE_V2] Inv ${inv.inversionista_id} Cred ${credito_id}: ` +
+          `espejo-compras_nuevas (${montoParaValidacion.toFixed(8)}) ≠ histórico (${lastHistoricoV2.monto_aportado})`
+        );
+      }
+      montoBaseCalculoV2 = montoBaseCalculoV2.minus(montoRestarCalculo);
+    }
+
+    // Porcentaje general: base_calculo / SUM(monto_aportado)
+    const porcentajeGeneral = montoBaseCalculoV2.div(sumMontosAportados);
 
     // Porcentaje de participación según tipo (dividir entre 100 porque se guarda como %)
     const porcentajeParticipacion = isCube
@@ -2275,28 +2344,36 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number) {
             cuotaProcesada: numeroCuota,
             pagosRegistrados: pagosDeLaCuota.length,
           };
-        } catch (err) {
+        } catch (err: any) {
           console.error(
             `  ❌ Error procesando crédito ${credito.creditoId}:`,
             err
           );
-          return null;
+          return {
+            error: true as const,
+            creditoId: credito.creditoId,
+            numeroCreditoSifco: credito.numeroCreditoSifco,
+            mensaje: err?.message ?? "Error desconocido",
+          };
         }
       })
     );
 
-    const procesados = resultados.filter((r) => r !== null);
+    const procesados = resultados.filter((r) => r !== null && !("error" in r));
+    const fallidos = resultados.filter((r) => r !== null && "error" in r);
 
     console.log(
-      `\n✅ [calcularYRegistrarPagosEspejo] Completado. Créditos procesados: ${procesados.length}`
+      `\n✅ [calcularYRegistrarPagosEspejo] Completado. Procesados: ${procesados.length}, Fallidos: ${fallidos.length}`
     );
 
     return {
       success: true,
       inversionistaId,
       totalCreditosProcesados: procesados.length,
+      totalCreditosFallidos: fallidos.length,
       pagosGenerados: true,
       data: procesados,
+      fallidos,
     };
   } catch (error: any) {
     console.error("❌ Error en calcularYRegistrarPagosEspejo:", error);

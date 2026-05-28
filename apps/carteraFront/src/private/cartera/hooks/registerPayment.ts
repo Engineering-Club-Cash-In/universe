@@ -712,8 +712,9 @@ const handleAbonoOtros = () => {
   }
 
   // Handler:
-  function handleProcessInvestors(pago_id: number, credito_id: number) {
-    processInvestors.mutate({ pago_id, credito_id }, {});
+  function handleProcessInvestors(pago_id: number, credito_id: number, fechaVencimiento?: string) {
+    const fecha_periodo = fechaVencimiento ? new Date(fechaVencimiento).toISOString() : undefined;
+    processInvestors.mutate({ pago_id, credito_id, fecha_periodo }, {});
   }
 
 async function handleResetCredito() {

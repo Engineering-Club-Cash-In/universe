@@ -1933,6 +1933,9 @@ export async function getInvestorTotalsGlobales(
     total_reinversion_interes: new Big(0),
     total_reinversion: new Big(0),
     total_cuota_sin_reinversion: new Big(0),
+    total_reinv_tipo_capital: new Big(0),
+    total_reinv_tipo_interes: new Big(0),
+    total_reinv_tipo_total: new Big(0),
   };
 
   // 7. Procesar TODOS los créditos del inversionista (sin queries adicionales)
@@ -2015,6 +2018,27 @@ export async function getInvestorTotalsGlobales(
       subtotal.total_reinversion = subtotal.total_reinversion.plus(reinvCapital.plus(reinvInteres));
       subtotal.total_reinversion_capital = subtotal.total_reinversion_capital.plus(reinvCapital);
       subtotal.total_reinversion_interes = subtotal.total_reinversion_interes.plus(reinvInteres);
+
+      // Reinversión separada por modalidad del crédito (relevante cuando el inversionista
+      // es reinversion_combinada y cada crédito puede llevar una modalidad distinta).
+      //
+      // `reinvCapital` y `reinvInteres` ya fueron seteados arriba según la modalidad:
+      //   - reinversion_capital → reinvCapital = abono_capital,  reinvInteres = 0
+      //   - reinversion_interes → reinvCapital = 0,              reinvInteres = interesTotal
+      //   - reinversion_total   → reinvCapital = abono_capital,  reinvInteres = interesTotal
+      //
+      // Por eso la suma `reinvCapital + reinvInteres` no es "capital + interés" como tal:
+      // es el monto neto efectivamente reinvertido en este pago bajo la modalidad activa.
+      // Ese monto es el que se va a usar como `monto_aportado` cuando se llame a
+      // addInvestorToCredit para esa modalidad, así que lo acumulamos en su bucket.
+      const montoReinvNetoPago = reinvCapital.plus(reinvInteres);
+      if (reinversionActual === "reinversion_capital") {
+        subtotal.total_reinv_tipo_capital = subtotal.total_reinv_tipo_capital.plus(montoReinvNetoPago);
+      } else if (reinversionActual === "reinversion_interes") {
+        subtotal.total_reinv_tipo_interes = subtotal.total_reinv_tipo_interes.plus(montoReinvNetoPago);
+      } else if (reinversionActual === "reinversion_total") {
+        subtotal.total_reinv_tipo_total = subtotal.total_reinv_tipo_total.plus(montoReinvNetoPago);
+      }
     }
 
     subtotal.total_monto_aportado = subtotal.total_monto_aportado.plus(new Big(c.monto_aportado ?? 0));
@@ -2060,6 +2084,7 @@ export async function getInvestorTotalsGlobales(
     nombre_inversionista: inv.inversionista,
     moneda: inv.moneda,
     currencySymbol: inv.moneda === "dolares" ? "$" : "Q.",
+    reinversion: inv.reinversion,
     totales: {
       total_abono_capital: formatValue(subtotal.total_abono_capital.round(2).toString()),
       total_abono_interes: formatValue(subtotal.total_abono_interes.round(2).toString()),
@@ -2079,6 +2104,9 @@ export async function getInvestorTotalsGlobales(
       total_reinversion_capital: formatValue(subtotal.total_reinversion_capital.round(2).toString()),
       total_reinversion_interes: formatValue(subtotal.total_reinversion_interes.round(2).toString()),
       total_reinversion: formatValue(subtotal.total_reinversion.round(2).toString()),
+      total_reinv_tipo_capital: formatValue(subtotal.total_reinv_tipo_capital.round(2).toString()),
+      total_reinv_tipo_interes: formatValue(subtotal.total_reinv_tipo_interes.round(2).toString()),
+      total_reinv_tipo_total: formatValue(subtotal.total_reinv_tipo_total.round(2).toString()),
     },
   };
 }
@@ -3903,13 +3931,26 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
               .from(creditos_inversionistas)
               .where(eq(creditos_inversionistas.inversionista_id, inv_id));
 
+            // Moda preservando decimales: usamos `String(v)` como clave del Map
+            // para tener igualdad determinística (los floats con `Map<number,...>`
+            // dependen de SameValueZero y pueden fallar con valores recompuestos),
+            // pero guardamos el `value` original sin tocar para no redondear.
+            // Así un porcentaje como 84.94564 entra y sale tal cual y viaja con
+            // todos sus decimales hasta addInvestorToCredit (que lo recibe como
+            // Big y nunca lo trunca).
             const moda = (arr: number[]) => {
               if (arr.length === 0) return 0;
-              const freq = new Map<number, number>();
-              for (const v of arr) freq.set(v, (freq.get(v) ?? 0) + 1);
-              let maxFreq = 0, result = arr[0];
-              for (const [val, count] of freq) {
-                if (count > maxFreq) { maxFreq = count; result = val; }
+              const freq = new Map<string, { value: number; count: number }>();
+              for (const v of arr) {
+                const key = String(v);
+                const entry = freq.get(key);
+                if (entry) entry.count++;
+                else freq.set(key, { value: v, count: 1 });
+              }
+              let maxCount = 0;
+              let result = arr[0];
+              for (const { value, count } of freq.values()) {
+                if (count > maxCount) { maxCount = count; result = value; }
               }
               return result;
             };
@@ -3919,18 +3960,45 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
 
             console.log(`  📊 Moda porcentaje inversión: ${modaInversion}%, cash in: ${modaCashIn}%`);
 
-            const reinversionResult = await addInvestorToCredit({
-              body: {
-                inversionista_id: inv_id,
-                monto_aportado: Number(liquidacion.reinversion_total ?? 0),
-                porcentaje_inversion: modaInversion,
-                porcentaje_cash_in: modaCashIn,
-                tipo_operacion: "reinversion",
-              },
-              set: { status: 200 },
-            });
+            // Cuando la modalidad global es combinada, cada crédito reinvierte bajo su
+            // propia modalidad y el monto se reparte en hasta 3 llamadas (capital /
+            // interés / total). Si una llamada no encuentra candidatos compatibles,
+            // se aborta el resto (las anteriores ya quedaron committed).
+            type Modalidad = "reinversion_capital" | "reinversion_interes" | "reinversion_total";
+            const llamadasReinversion: { monto: number; tipo_reinversion?: Modalidad; etiqueta: string }[] = [];
 
-            console.log(`  ✅ Reinversión automática completada:`, reinversionResult);
+            if (totalesResult.reinversion === "reinversion_combinada") {
+              const montoCapital = Number(totales.total_reinv_tipo_capital ?? 0);
+              const montoInteres = Number(totales.total_reinv_tipo_interes ?? 0);
+              const montoTotal = Number(totales.total_reinv_tipo_total ?? 0);
+              if (montoCapital > 0) llamadasReinversion.push({ monto: montoCapital, tipo_reinversion: "reinversion_capital", etiqueta: "capital" });
+              if (montoInteres > 0) llamadasReinversion.push({ monto: montoInteres, tipo_reinversion: "reinversion_interes", etiqueta: "interés" });
+              if (montoTotal > 0) llamadasReinversion.push({ monto: montoTotal, tipo_reinversion: "reinversion_total", etiqueta: "total" });
+              console.log(`  📊 Modalidad combinada → ${llamadasReinversion.length} reinversión(es): ${llamadasReinversion.map(l => `${l.etiqueta}=Q${l.monto.toFixed(2)}`).join(", ")}`);
+            } else {
+              llamadasReinversion.push({ monto: Number(liquidacion.reinversion_total ?? 0), etiqueta: "global" });
+            }
+
+            for (const r of llamadasReinversion) {
+              const reinversionResult = await addInvestorToCredit({
+                body: {
+                  inversionista_id: inv_id,
+                  monto_aportado: r.monto,
+                  porcentaje_inversion: modaInversion,
+                  porcentaje_cash_in: modaCashIn,
+                  tipo_operacion: "reinversion",
+                  ...(r.tipo_reinversion ? { tipo_reinversion: r.tipo_reinversion } : {}),
+                },
+                set: { status: 200 },
+              });
+
+              if (reinversionResult && (reinversionResult as any).success === false) {
+                console.error(`  ❌ Reinversión [${r.etiqueta}] sin candidatos compatibles. Aborto las siguientes:`, reinversionResult);
+                break;
+              }
+
+              console.log(`  ✅ Reinversión [${r.etiqueta}] completada por Q${r.monto.toFixed(2)}:`, reinversionResult);
+            }
           } catch (reinvError) {
             console.error(`  ❌ Error en reinversión automática (liquidación ya guardada):`, reinvError);
           }

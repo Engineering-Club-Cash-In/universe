@@ -422,7 +422,8 @@ export function HistorialLiquidaciones() {
       const inv = data?.find((d) => d.inversionista_id === inversionistaId);
       const nombre = inv?.nombre ?? `Inversionista #${inversionistaId}`;
       setGenerandoId(inversionistaId);
-      calcularPagosEspejo(inversionistaId, {
+      const fecha_calculo = new Date(anio, mes - 1, 1).toISOString().slice(0, 10);
+      calcularPagosEspejo({ inversionistaId, fecha_calculo }, {
         onSuccess: (res: any) => {
           setResultadoModal({
             nombre,

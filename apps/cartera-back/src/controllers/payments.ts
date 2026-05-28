@@ -474,8 +474,7 @@ export async function insertPagosCreditoInversionistas(
 
     // fechaPeriodo: viene del front (fecha explícita del período a liquidar).
     // Fallback: fecha_vencimiento del pago registrado.
-    const fechaDelPeriodo = fechaPeriodo
-      ?? (currentPago?.fecha_vencimiento ? new Date(currentPago.fecha_vencimiento) : new Date());
+    const fechaDelPeriodo = fechaPeriodo ?? new Date();
 
     const periodoMes = fechaDelPeriodo.getMonth();
     const periodoAnio = fechaDelPeriodo.getFullYear();
@@ -746,6 +745,7 @@ export async function insertPagosCreditoInversionistas(
       cuota: currentPago?.cuota ?? "0",
       estado_liquidacion: "NO_LIQUIDADO" as const,
       abono_capital_id: abonoCapitalId,
+      fecha_pago: fechaPeriodo ?? new Date(),
     };
 
     console.log(`   ✅ Resultado final para ${inv.nombre}:`, {
@@ -2193,7 +2193,7 @@ export async function obtenerCreditosConPagosPendientes(
  *
  * @param inversionistaId - ID del inversionista a procesar
  */
-export async function calcularYRegistrarPagosEspejo(inversionistaId: number) {
+export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fechaCalculo?: Date) {
   try {
     const rangoMesActual = obtenerRangoMesActual();
     console.log(
@@ -2202,6 +2202,9 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number) {
     console.log(
       `📆 Mes actual: ${rangoMesActual.inicio} - ${rangoMesActual.fin}`
     );
+    if (fechaCalculo) {
+      console.log(`📅 Fecha de cálculo override: ${fechaCalculo.toISOString()}`);
+    }
 
     // ── PASO 1: Obtener créditos espejo del inversionista (ACTIVO/MOROSO/etc.) ──
     const creditosInversionista = await db
@@ -2331,7 +2334,8 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number) {
             false, // excludeCube
             false, // cuotaPagada
             false, // updateCredito ← omite el UPDATE a creditos_inversionistas_espejo
-            inversionistaId
+            inversionistaId,
+            fechaCalculo
           );
 
           console.log(

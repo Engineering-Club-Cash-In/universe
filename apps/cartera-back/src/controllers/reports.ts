@@ -1938,8 +1938,14 @@ export async function getPagosByVencimiento({
           AND validation_status = 'validated'
           AND "paymentFalse" = false
           AND (
-            (fecha_pago::date >= ${fechaInicio}::date AND fecha_pago::date <= ${fechaFin}::date)
-            OR (fecha_boleta::date >= ${fechaInicio}::date AND fecha_boleta::date <= ${fechaFin}::date)
+            (cuota_id IS NOT NULL AND cuota_id IN (
+              SELECT cuota_id FROM cartera.cuotas_credito
+              WHERE fecha_vencimiento::date >= ${fechaInicio}::date
+                AND fecha_vencimiento::date <= ${fechaFin}::date
+            ))
+            OR (cuota_id IS NULL
+                AND fecha_vencimiento::date >= ${fechaInicio}::date
+                AND fecha_vencimiento::date <= ${fechaFin}::date)
           )
         ORDER BY credito_id ASC, fecha_boleta ASC, fecha_pago ASC
       `);
@@ -2105,8 +2111,14 @@ export async function getAbonosDelMesPorCredito({
       AND validation_status = 'validated'
       AND "paymentFalse" = false
       AND (
-        (fecha_pago::date >= ${fechaInicio}::date AND fecha_pago::date <= ${fechaFin}::date)
-        OR (fecha_boleta::date >= ${fechaInicio}::date AND fecha_boleta::date <= ${fechaFin}::date)
+        (cuota_id IS NOT NULL AND cuota_id IN (
+          SELECT cuota_id FROM cartera.cuotas_credito
+          WHERE fecha_vencimiento::date >= ${fechaInicio}::date
+            AND fecha_vencimiento::date <= ${fechaFin}::date
+        ))
+        OR (cuota_id IS NULL
+            AND fecha_vencimiento::date >= ${fechaInicio}::date
+            AND fecha_vencimiento::date <= ${fechaFin}::date)
       )
     ORDER BY fecha_boleta ASC, fecha_pago ASC
   `);

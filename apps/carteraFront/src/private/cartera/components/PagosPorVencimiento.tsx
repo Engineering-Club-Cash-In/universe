@@ -1,4 +1,4 @@
-import { useState, Fragment } from "react";
+import { useState, useRef, Fragment } from "react";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { usePagosPorVencimiento } from "../hooks/usePagosPorVencimiento";
 import { useAdminData } from "../hooks/advisor";
@@ -58,13 +58,16 @@ export function PagosPorVencimiento() {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const [abonosDetail, setAbonosDetail] = useState<AbonoDetalleItem[]>([]);
   const [loadingDetails, setLoadingDetails] = useState(false);
+  const pendingCreditoRef = useRef<number | null>(null);
 
   const handleToggleRow = async (creditoId: number) => {
     if (expandedRow === creditoId) {
       setExpandedRow(null);
       setAbonosDetail([]);
+      pendingCreditoRef.current = null;
     } else {
       setExpandedRow(creditoId);
+      pendingCreditoRef.current = creditoId;
       setLoadingDetails(true);
       setAbonosDetail([]);
       try {
@@ -73,13 +76,15 @@ export function PagosPorVencimiento() {
           mes,
           anio,
         });
-        if (response.success) {
+        if (response.success && pendingCreditoRef.current === creditoId) {
           setAbonosDetail(response.data);
         }
       } catch (error) {
         console.error("Error al obtener detalle de abonos:", error);
       } finally {
-        setLoadingDetails(false);
+        if (pendingCreditoRef.current === creditoId) {
+          setLoadingDetails(false);
+        }
       }
     }
   };

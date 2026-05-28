@@ -3594,11 +3594,13 @@ export interface PagoPorVencimientoItem {
   gps_restante: string;
   membresias: string;
   monto_boleta: string;
+  monto_aplicado: string;
   interes_cube: string;
   iva_cube: string;
   total_pagos_del_mes: string;
   dias_mora: string;
   royalti: string;
+  mora: string;
 }
 
 export interface PagoPorVencimientoTotales {
@@ -3610,6 +3612,7 @@ export interface PagoPorVencimientoTotales {
   membresias: string;
   interes_cube: string;
   iva_cube: string;
+  mora: string;
 }
 
 export interface PagosPorVencimientoResponse {
@@ -3663,6 +3666,45 @@ export async function getPagosPorVencimiento(
           rango_mora: params.rango_mora,
         }),
         excel: params.excel,
+      },
+    }
+  );
+  return res.data;
+}
+
+export interface AbonoDetalleItem {
+  pago_id: number;
+  cuota_id: number | null;
+  cuota: string;
+  abono_capital: string;
+  abono_interes: string;
+  abono_iva_12: string;
+  abono_seguro: string;
+  abono_gps: string;
+  membresias: string;
+  interes_cube: string;
+  iva_cube: string;
+  mora: string;
+  otros: string;
+  monto_boleta: string;
+  monto_aplicado: string;
+  fecha_boleta: string;
+  fecha_pago: string;
+  numero_boleta: string | null;
+}
+
+export async function getAbonosPorVencimientoDetalle(params: {
+  credito_id: number;
+  mes: number;
+  anio: number;
+}): Promise<{ success: boolean; data: AbonoDetalleItem[] }> {
+  const res = await api.get<{ success: boolean; data: AbonoDetalleItem[] }>(
+    `${API_URL}/pagos-por-vencimiento/abonos`,
+    {
+      params: {
+        credito_id: params.credito_id.toString(),
+        mes: params.mes,
+        anio: params.anio,
       },
     }
   );

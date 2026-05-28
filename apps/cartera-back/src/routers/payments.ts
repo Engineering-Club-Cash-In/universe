@@ -12,7 +12,7 @@ import { z } from "zod";
 import { promises as fs } from "fs";
 import { mapPagosPorCreditos, mapPagosDesdeJson } from "../migration/migration";
 import { authMiddleware } from "./midleware";
-import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagosToExcel, generateReciboPagoPDF, getPagosByVencimiento } from "../controllers/reports";
+import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagosToExcel, generateReciboPagoPDF, getPagosByVencimiento, getAbonosDelMesPorCredito } from "../controllers/reports";
 import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment, aplicarMontoAPago, editarPago } from "../controllers/registerPayment";
 import { eq } from "drizzle-orm";
 import { db } from "../database";
@@ -427,6 +427,35 @@ export const paymentRouter = new Elysia()
       asesor: t.Optional(t.String()),
       rango_mora: t.Optional(t.String()),
       excel: t.Optional(t.Boolean({ default: false })),
+    }),
+  }
+)
+.get(
+  "/pagos-por-vencimiento/abonos",
+  async ({ query, set }) => {
+    try {
+      const result = await getAbonosDelMesPorCredito({
+        credito_id: Number(query.credito_id),
+        mes: Number(query.mes),
+        anio: Number(query.anio),
+      });
+      set.status = 200;
+      return { success: true, data: result };
+    } catch (error: any) {
+      console.error("Error en /pagos-por-vencimiento/abonos:", error);
+      set.status = 500;
+      return { success: false, error: error.message || "Error obteniendo abonos del mes" };
+    }
+  },
+  {
+    detail: {
+      summary: "Obtiene los abonos reales validados aplicados a un crédito en el mes",
+      tags: ["Pagos", "Reportes"],
+    },
+    query: t.Object({
+      credito_id: t.String(),
+      mes: t.Integer({ minimum: 1, maximum: 12 }),
+      anio: t.Integer({ minimum: 2020 }),
     }),
   }
 )

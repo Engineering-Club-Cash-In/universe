@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, useRef, Fragment } from "react";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { usePagosPorVencimiento } from "../hooks/usePagosPorVencimiento";
 import { useAdminData } from "../hooks/advisor";
-import type { PagoPorVencimientoItem, Advisor } from "../services/services";
+import type { PagoPorVencimientoItem, Advisor, AbonoDetalleItem } from "../services/services";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -14,7 +14,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Search, X, ChevronLeft, ChevronRight, Check, ChevronsUpDown, FileDown, Loader2, AlertCircle } from "lucide-react";
-import { getPagosPorVencimiento } from "../services/services";
+import { getPagosPorVencimiento, getAbonosPorVencimientoDetalle } from "../services/services";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Badge } from "@/components/ui/badge";
@@ -54,6 +54,43 @@ export function PagosPorVencimiento() {
   const [isExporting, setIsExporting] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+
+  const [expandedRow, setExpandedRow] = useState<number | null>(null);
+  const [abonosDetail, setAbonosDetail] = useState<AbonoDetalleItem[]>([]);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  const pendingRequestRef = useRef<{ creditoId: number; mes: number; anio: number } | null>(null);
+
+  const handleToggleRow = async (creditoId: number) => {
+    if (expandedRow === creditoId) {
+      setExpandedRow(null);
+      setAbonosDetail([]);
+      pendingRequestRef.current = null;
+    } else {
+      const token = { creditoId, mes, anio };
+      setExpandedRow(creditoId);
+      pendingRequestRef.current = token;
+      setLoadingDetails(true);
+      setAbonosDetail([]);
+      try {
+        const response = await getAbonosPorVencimientoDetalle({
+          credito_id: creditoId,
+          mes,
+          anio,
+        });
+        const current = pendingRequestRef.current;
+        if (response.success && current?.creditoId === creditoId && current?.mes === mes && current?.anio === anio) {
+          setAbonosDetail(response.data);
+        }
+      } catch (error) {
+        console.error("Error al obtener detalle de abonos:", error);
+      } finally {
+        const current = pendingRequestRef.current;
+        if (current?.creditoId === creditoId && current?.mes === mes && current?.anio === anio) {
+          setLoadingDetails(false);
+        }
+      }
+    }
+  };
 
   const hasActiveFilters =
     sifcoFilter !== "" ||
@@ -345,16 +382,17 @@ export function PagosPorVencimiento() {
           <h2 className="text-sm font-bold text-blue-800 mb-3 uppercase tracking-wide">
             Totales del mes — {meses[mes - 1]} {anio}
           </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
-            {[
-              { label: "Capital", value: totales.capital_restante },
-              { label: "Interés", value: totales.interes_restante },
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-9 gap-3">
+              {[
+                { label: "Abono Capital", value: totales.capital_restante },
+                { label: "Interés", value: totales.interes_restante },
               { label: "IVA 12%", value: totales.iva_12_restante },
               { label: "Seguro", value: totales.seguro_restante },
               { label: "GPS", value: totales.gps_restante },
               { label: "Membresías", value: totales.membresias },
               { label: "Interés CUBE", value: totales.interes_cube },
               { label: "IVA CUBE", value: totales.iva_cube },
+              { label: "Mora", value: totales.mora },
             ].map((t) => (
               <div key={t.label} className="text-center">
                 <p className="text-xs text-gray-500 font-medium">{t.label}</p>
@@ -379,65 +417,180 @@ export function PagosPorVencimiento() {
       ) : (
         <>
           <div className="bg-white rounded-2xl shadow-lg border border-blue-100 overflow-x-auto">
-            <Table className="w-full">
+            <Table className="w-full border-collapse">
               <TableHeader>
                 <TableRow className="bg-gradient-to-r from-blue-50 to-blue-100">
-                  <TableHead className="font-bold text-blue-800">No. SIFCO</TableHead>
-                  <TableHead className="font-bold text-blue-800">Cliente</TableHead>
-                  <TableHead className="font-bold text-blue-800">Asesor</TableHead>
-                  <TableHead className="font-bold text-blue-800 text-center">Cuotas</TableHead>
-                  <TableHead className="font-bold text-blue-800 text-center">Etapa de Mora</TableHead>
-                  <TableHead className="font-bold text-blue-800 text-right">Boletas Totales</TableHead>
-                  <TableHead className="font-bold text-blue-800 text-right">Capital</TableHead>
-                  <TableHead className="font-bold text-blue-800 text-right">Interés</TableHead>
-                  <TableHead className="font-bold text-blue-800 text-right">IVA 12%</TableHead>
-                  <TableHead className="font-bold text-blue-800 text-right">Seguro</TableHead>
-                  <TableHead className="font-bold text-blue-800 text-right">GPS</TableHead>
-                  <TableHead className="font-bold text-blue-800 text-right">Membresías</TableHead>
-                  <TableHead className="font-bold text-blue-800 text-right">Int. CUBE</TableHead>
-                  <TableHead className="font-bold text-blue-800 text-right">IVA CUBE</TableHead>
-                  <TableHead className="font-bold text-blue-800 text-right">Royalty</TableHead>
-                  <TableHead className="font-bold text-green-800 text-right">Total Pagos Mes</TableHead>
+                  <TableHead className="sticky left-0 bg-[#f8fafc] z-20 font-bold text-blue-800 border-r border-b border-blue-200 min-w-[140px] w-[140px]">No. SIFCO</TableHead>
+                  <TableHead className="sticky left-[140px] bg-[#f8fafc] z-20 font-bold text-blue-800 border-r border-b border-blue-300 min-w-[220px] w-[220px] shadow-[3px_0_5px_-2px_rgba(0,0,0,0.05)]">Cliente</TableHead>
+                  <TableHead className="font-bold text-blue-800 border-r border-b border-blue-200">Asesor</TableHead>
+                  <TableHead className="font-bold text-blue-800 text-center border-r border-b border-blue-200">Cuotas</TableHead>
+                  <TableHead className="font-bold text-blue-800 text-center border-r border-b border-blue-200">Etapa de Mora</TableHead>
+                  <TableHead className="font-bold text-blue-800 text-right border-r border-b border-blue-200">Boletas Totales</TableHead>
+                  <TableHead className="font-bold text-blue-800 text-right border-r border-b border-blue-200">Abono Capital</TableHead>
+                  <TableHead className="font-bold text-blue-800 text-right border-r border-b border-blue-200">Interés</TableHead>
+                  <TableHead className="font-bold text-blue-800 text-right border-r border-b border-blue-200">IVA 12%</TableHead>
+                  <TableHead className="font-bold text-blue-800 text-right border-r border-b border-blue-200">Seguro</TableHead>
+                  <TableHead className="font-bold text-blue-800 text-right border-r border-b border-blue-200">GPS</TableHead>
+                  <TableHead className="font-bold text-blue-800 text-right border-r border-b border-blue-200">Membresías</TableHead>
+                  <TableHead className="font-bold text-blue-800 text-right border-r border-b border-blue-200">Int. CUBE</TableHead>
+                   <TableHead className="font-bold text-blue-800 text-right border-r border-b border-blue-200">IVA CUBE</TableHead>
+                  <TableHead className="font-bold text-blue-800 text-right border-r border-b border-blue-200">Royalty</TableHead>
+                  <TableHead className="font-bold text-red-800 text-right border-r border-b border-blue-200">Mora</TableHead>
+                  <TableHead className="font-bold text-green-800 text-right border-b border-blue-200">Total Pagos Mes</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {items.map((item) => (
-                  <TableRow key={item.credito_id} className="hover:bg-blue-50/50 transition">
-                    <TableCell className="font-semibold text-blue-700">
-                      {item.numero_credito_sifco}
-                    </TableCell>
-                    <TableCell className="text-black">{item.nombre_usuario}</TableCell>
-                    <TableCell className="text-black text-xs">{item.asesor || "--"}</TableCell>
-                    <TableCell className="text-black text-center">
-                      {item.cuota_min === item.cuota_max 
-                        ? item.cuota_min 
-                        : `${item.cuota_min} - ${item.cuota_max}`}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        item.dias_mora === 'Al día' 
-                          ? 'bg-green-100 text-green-700' 
-                          : 'bg-red-100 text-red-700'
-                      }`}>
-                        {item.dias_mora}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-right font-medium text-black">{formatQ(item.monto_boleta)}</TableCell>
-                    <TableCell className="text-right text-black">{formatQ(item.capital_restante)}</TableCell>
-                    <TableCell className="text-right text-black">{formatQ(item.interes_restante)}</TableCell>
-                    <TableCell className="text-right text-black">{formatQ(item.iva_12_restante)}</TableCell>
-                    <TableCell className="text-right text-black">{formatQ(item.seguro_restante)}</TableCell>
-                    <TableCell className="text-right text-black">{formatQ(item.gps_restante)}</TableCell>
-                    <TableCell className="text-right text-black">{formatQ(item.membresias)}</TableCell>
-                    <TableCell className="text-right text-black">{formatQ(item.interes_cube)}</TableCell>
-                    <TableCell className="text-right text-black">{formatQ(item.iva_cube)}</TableCell>
-                    <TableCell className="text-right text-black">
-                      {item.cuota_min === 0 ? formatQ(item.royalti) : "--"}
-                    </TableCell>
-                    <TableCell className="text-right text-green-700 font-bold bg-green-50/50">
-                      {formatQ(item.total_pagos_del_mes)}
-                    </TableCell>
-                  </TableRow>
+                  <Fragment key={item.credito_id}>
+                    <TableRow 
+                      className={`hover:bg-[#f3f8ff] transition-colors group cursor-pointer ${
+                        expandedRow === item.credito_id ? "bg-blue-50/40 hover:bg-[#f3f8ff]" : ""
+                      }`}
+                      onClick={() => handleToggleRow(item.credito_id)}
+                    >
+                      <TableCell className="sticky left-0 bg-white group-hover:bg-[#f3f8ff] transition-colors z-10 font-semibold text-blue-700 border-r border-b border-blue-200 min-w-[140px] w-[140px]">
+                        {item.numero_credito_sifco}
+                      </TableCell>
+                      <TableCell className="sticky left-[140px] bg-white group-hover:bg-[#f3f8ff] transition-colors z-10 text-black border-r border-b border-blue-300 min-w-[220px] w-[220px] shadow-[3px_0_5px_-2px_rgba(0,0,0,0.05)]">
+                        {item.nombre_usuario}
+                      </TableCell>
+                      <TableCell className="text-black text-xs border-r border-b border-blue-100">{item.asesor || "--"}</TableCell>
+                      <TableCell className="text-black text-center border-r border-b border-blue-100">
+                        {item.cuota_min === item.cuota_max 
+                          ? item.cuota_min 
+                          : `${item.cuota_min} - ${item.cuota_max}`}
+                      </TableCell>
+                      <TableCell className="text-center border-r border-b border-blue-100">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          item.dias_mora === 'Al día' 
+                            ? 'bg-green-100 text-green-700' 
+                            : 'bg-red-100 text-red-700'
+                        }`}>
+                          {item.dias_mora}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right font-medium text-black border-r border-b border-blue-100">{formatQ(item.monto_aplicado)}</TableCell>
+                      <TableCell className="text-right text-black border-r border-b border-blue-100">{formatQ(item.capital_restante)}</TableCell>
+                      <TableCell className="text-right text-black border-r border-b border-blue-100">{formatQ(item.interes_restante)}</TableCell>
+                      <TableCell className="text-right text-black border-r border-b border-blue-100">{formatQ(item.iva_12_restante)}</TableCell>
+                      <TableCell className="text-right text-black border-r border-b border-blue-100">{formatQ(item.seguro_restante)}</TableCell>
+                      <TableCell className="text-right text-black border-r border-b border-blue-100">{formatQ(item.gps_restante)}</TableCell>
+                      <TableCell className="text-right text-black border-r border-b border-blue-100">{formatQ(item.membresias)}</TableCell>
+                      <TableCell className="text-right text-black border-r border-b border-blue-100">{formatQ(item.interes_cube)}</TableCell>
+                      <TableCell className="text-right text-black border-r border-b border-blue-100">{formatQ(item.iva_cube)}</TableCell>
+                      <TableCell className="text-right text-black border-r border-b border-blue-100">
+                        {item.cuota_min === 0 ? formatQ(item.royalti) : "--"}
+                      </TableCell>
+                      <TableCell className="text-right text-red-700 font-semibold bg-red-50/30 border-r border-b border-blue-100">
+                        {formatQ(item.mora)}
+                      </TableCell>
+                      <TableCell className="text-right text-green-700 font-bold bg-green-50/30 border-b border-blue-100">
+                        {formatQ(item.total_pagos_del_mes)}
+                      </TableCell>
+                    </TableRow>
+
+                    {/* Fila colapsable de detalle de abonos */}
+                    {expandedRow === item.credito_id && loadingDetails && (
+                      <TableRow className="bg-slate-50/50 hover:bg-slate-50/50">
+                        <TableCell colSpan={17} className="p-4 border-b border-blue-200">
+                          <div className="flex items-center justify-center py-6 text-xs text-blue-500 font-semibold gap-2">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Cargando abonos...
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+
+                    {expandedRow === item.credito_id && !loadingDetails && abonosDetail.length === 0 && (
+                      <TableRow className="bg-slate-50/50 hover:bg-slate-50/50">
+                        <TableCell colSpan={17} className="p-4 border-b border-blue-200 text-center text-xs text-gray-500 italic">
+                          No se encontraron abonos registrados y validados en este mes para este crédito.
+                        </TableCell>
+                      </TableRow>
+                    )}
+
+                    {expandedRow === item.credito_id && !loadingDetails && abonosDetail.length > 0 && abonosDetail.map((abono) => (
+                      <TableRow 
+                        key={abono.pago_id} 
+                        className="bg-slate-50/20 hover:bg-blue-50/30 border-b border-blue-100/50 text-[11px] text-gray-600 transition-colors group"
+                      >
+                        {/* 1. SIFCO -> vacío */}
+                        <TableCell className="sticky left-0 bg-slate-50/90 group-hover:bg-[#f3f8ff] border-r border-b border-blue-100 min-w-[140px] w-[140px]" />
+                        
+                        {/* 2. Cliente -> vacío */}
+                        <TableCell className="sticky left-[140px] bg-slate-50/90 group-hover:bg-[#f3f8ff] border-r border-b border-blue-200 min-w-[220px] w-[220px] shadow-[3px_0_5px_-2px_rgba(0,0,0,0.05)]" />
+                        
+                        {/* 3. Asesor -> vacío */}
+                        <TableCell className="border-r border-b border-blue-100" />
+                        
+                        {/* 4. Cuotas -> vacío */}
+                        <TableCell className="border-r border-b border-blue-100" />
+                        
+                        {/* 5. Etapa de Mora -> vacío */}
+                        <TableCell className="border-r border-b border-blue-100" />
+                        
+                        {/* 6. Boletas Totales -> Monto Aplicado */}
+                        <TableCell className="text-right font-semibold text-blue-900 border-r border-b border-blue-100 bg-blue-50/10">
+                          {formatQ(abono.monto_aplicado)}
+                        </TableCell>
+                        
+                        {/* 7. Abono Capital */}
+                        <TableCell className="text-right text-gray-600 border-r border-b border-blue-100">
+                          {formatQ(abono.abono_capital)}
+                        </TableCell>
+                        
+                        {/* 8. Interés */}
+                        <TableCell className="text-right text-gray-600 border-r border-b border-blue-100">
+                          {formatQ(abono.abono_interes)}
+                        </TableCell>
+                        
+                        {/* 9. IVA 12% */}
+                        <TableCell className="text-right text-gray-600 border-r border-b border-blue-100">
+                          {formatQ(abono.abono_iva_12)}
+                        </TableCell>
+                        
+                        {/* 10. Seguro */}
+                        <TableCell className="text-right text-gray-600 border-r border-b border-blue-100">
+                          {formatQ(abono.abono_seguro)}
+                        </TableCell>
+                        
+                        {/* 11. GPS */}
+                        <TableCell className="text-right text-gray-600 border-r border-b border-blue-100">
+                          {formatQ(abono.abono_gps)}
+                        </TableCell>
+                        
+                        {/* 12. Membresías */}
+                        <TableCell className="text-right text-gray-600 border-r border-b border-blue-100">
+                          {formatQ(abono.membresias)}
+                        </TableCell>
+                        
+                        {/* 13. Int. CUBE */}
+                        <TableCell className="text-right text-gray-600 border-r border-b border-blue-100">
+                          {formatQ(abono.interes_cube)}
+                        </TableCell>
+                        
+                        {/* 14. IVA CUBE */}
+                        <TableCell className="text-right text-gray-600 border-r border-b border-blue-100">
+                          {formatQ(abono.iva_cube)}
+                        </TableCell>
+                        
+                        {/* 15. Royalty */}
+                        <TableCell className="text-right text-gray-400 border-r border-b border-blue-100">
+                          --
+                        </TableCell>
+                        
+                        {/* 16. Mora */}
+                        <TableCell className="text-right text-red-600 bg-red-50/10 border-r border-b border-blue-100">
+                          {formatQ(abono.mora)}
+                        </TableCell>
+                        
+                        {/* 17. Total Pagos Mes (Monto Aplicado) */}
+                        <TableCell className="text-right text-green-700 font-bold bg-green-50/10 border-b border-blue-100">
+                          {formatQ(abono.monto_aplicado)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </Fragment>
                 ))}
               </TableBody>
             </Table>

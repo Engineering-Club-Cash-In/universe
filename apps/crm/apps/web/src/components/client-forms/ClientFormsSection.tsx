@@ -9,6 +9,16 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +40,12 @@ type ClientFormParticipant = ClientFormData["participants"][number] & {
 export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 	const queryClient = useQueryClient();
 	const [copiedKey, setCopiedKey] = useState<string | null>(null);
+	const [confirmingKey, setConfirmingKey] = useState<{
+		personType: "lead" | "coDebtor";
+		personId: string;
+		displayName: string;
+	} | null>(null);
+	const [updatedKey, setUpdatedKey] = useState<string | null>(null);
 
 	const { data, isLoading } = useQuery({
 		queryKey: ["clientFormData", opportunityId],
@@ -41,10 +57,13 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 			personType: "lead" | "coDebtor";
 			personId: string;
 		}) => client.generateFormToken({ opportunityId, ...input }),
-		onSuccess: () => {
+		onSuccess: (_data, variables) => {
+			const key = `${variables.personType}:${variables.personId}`;
 			queryClient.invalidateQueries({
 				queryKey: ["clientFormData", opportunityId],
 			});
+			setUpdatedKey(key);
+			setTimeout(() => setUpdatedKey((cur) => (cur === key ? null : cur)), 4000);
 			toast.success("Enlace generado exitosamente");
 		},
 		onError: () => {
@@ -166,7 +185,7 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 											<Input
 												readOnly
 												value={participant.latestToken.url}
-												className="font-mono text-xs"
+												className={`font-mono text-xs transition-colors duration-500 ${updatedKey === key ? "border-green-500 bg-green-50" : ""}`}
 											/>
 											<Button
 												variant="outline"
@@ -181,19 +200,38 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 													<ClipboardCopy className="h-4 w-4" />
 												)}
 											</Button>
-											<Button
-												variant="outline"
-												onClick={() =>
-													generateMutation.mutate({
-														personType: participant.personType,
-														personId: participant.personId,
-													})
-												}
-												disabled={isGenerating || !participant.canGenerateLink}
-											>
-												{isGenerating ? "Regenerando..." : "Nuevo enlace"}
-											</Button>
+											{participant.canGenerateLink && (
+												<Button
+													variant="outline"
+													disabled={isGenerating}
+													onClick={() => {
+														const hasExistingData =
+															participant.creditApplicationExists ||
+															participant.financialStatementExists;
+														if (hasExistingData) {
+															setConfirmingKey({
+																personType: participant.personType,
+																personId: participant.personId,
+																displayName: participant.displayName,
+															});
+														} else {
+															generateMutation.mutate({
+																personType: participant.personType,
+																personId: participant.personId,
+															});
+														}
+													}}
+												>
+													Nuevo enlace
+												</Button>
+											)}
 										</div>
+										{updatedKey === key && (
+											<p className="flex items-center gap-1 text-green-600 text-xs font-medium">
+												<Check className="h-3 w-3" />
+												Enlace actualizado exitosamente
+											</p>
+										)}
 										<div className="flex items-center gap-4 text-muted-foreground text-xs">
 											{(() => {
 												const expiresDate = participant.latestToken?.expiresAt
@@ -309,6 +347,49 @@ export function ClientFormsSection({ opportunityId }: ClientFormsSectionProps) {
 					);
 				})}
 			</div>
-		</div>
+
+		<AlertDialog
+			open={!!confirmingKey}
+			onOpenChange={(open) => { if (!open) setConfirmingKey(null); }}
+		>
+			<AlertDialogContent>
+				<AlertDialogHeader>
+					<AlertDialogTitle>¿Generar nuevo enlace y borrar datos ingresados?</AlertDialogTitle>
+					<AlertDialogDescription asChild>
+						<div className="space-y-3 text-sm text-muted-foreground">
+							<p>
+								El formulario de{" "}
+								<span className="font-medium text-foreground">
+									{confirmingKey?.displayName}
+								</span>{" "}
+								ya tiene información ingresada. Al generar un nuevo enlace
+								se <span className="font-medium text-destructive">eliminarán todos los datos</span> que
+								el cliente había enviado y deberá volver a llenar el
+								formulario completo desde cero.
+							</p>
+							<p>Esta acción no se puede deshacer.</p>
+						</div>
+					</AlertDialogDescription>
+				</AlertDialogHeader>
+				<AlertDialogFooter>
+					<AlertDialogCancel>Cancelar</AlertDialogCancel>
+					<AlertDialogAction
+						className="bg-destructive hover:bg-destructive/90"
+						onClick={() => {
+							if (confirmingKey) {
+								generateMutation.mutate({
+									personType: confirmingKey.personType,
+									personId: confirmingKey.personId,
+								});
+								setConfirmingKey(null);
+							}
+						}}
+					>
+						Sí, borrar datos y generar nuevo enlace
+					</AlertDialogAction>
+				</AlertDialogFooter>
+			</AlertDialogContent>
+		</AlertDialog>
+	</div>
 	);
 }

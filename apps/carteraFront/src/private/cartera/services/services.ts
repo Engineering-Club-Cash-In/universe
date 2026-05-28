@@ -3743,6 +3743,11 @@ export interface AgregarInversionistaCreditoPayload {
   inversionista_id: number;
   monto_aportado: number;
   tipo_operacion: "reinversion" | "compra_cartera";
+  tipo_reinversion?:
+    | "sin_reinversion"
+    | "reinversion_capital"
+    | "reinversion_interes"
+    | "reinversion_total";
   fecha_inicio_participacion?: string;
   porcentaje_cash_in?: number;
   porcentaje_inversion?: number;

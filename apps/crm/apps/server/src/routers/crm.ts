@@ -50,7 +50,11 @@ import {
 	opportunityDocuments,
 	VEHICLE_DOCUMENT_TYPES,
 } from "../db/schema/documents";
-import { hasStaleAnalysisChecklistVehicleState } from "../lib/analysis-checklist";
+import {
+	carryForwardAnalysisChecklistVerificationState,
+	hasStaleAnalysisChecklistDocumentState,
+	hasStaleAnalysisChecklistVehicleState,
+} from "../lib/analysis-checklist";
 import {
 	updateChecklistForClientDocument,
 	updateChecklistForVehicleDocument,
@@ -2004,6 +2008,61 @@ export const crmRouter = {
 			}
 
 			return updatedOpportunity[0];
+		}),
+
+	reassignOpportunityAndLead: crmProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				assignedTo: z.string(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			if (
+				context.userRole !== "admin" &&
+				context.userRole !== "sales_supervisor"
+			) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permisos para reasignar oportunidades",
+				});
+			}
+
+			const [current] = await db
+				.select({
+					leadId: opportunities.leadId,
+					closurePercentage: salesStages.closurePercentage,
+				})
+				.from(opportunities)
+				.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!current) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
+			}
+
+			if (current.closurePercentage > 30) {
+				throw new ORPCError("FORBIDDEN", {
+					message:
+						"No se puede reasignar una oportunidad con etapa mayor al 30%",
+				});
+			}
+
+			await db.transaction(async (tx) => {
+				await tx
+					.update(opportunities)
+					.set({ assignedTo: input.assignedTo, updatedAt: new Date() })
+					.where(eq(opportunities.id, input.opportunityId));
+
+				if (current.leadId) {
+					await tx
+						.update(leads)
+						.set({ assignedTo: input.assignedTo, updatedAt: new Date() })
+						.where(eq(leads.id, current.leadId));
+				}
+			});
 		}),
 
 	// Analyst specific endpoints
@@ -4015,28 +4074,7 @@ export const crmRouter = {
 
 			console.log("[getAnalysisChecklist] opportunity:", opportunity);
 
-			// Early return if checklist already exists and is still aligned
-			if (existingChecklist) {
-				const inspectionResult = opportunity.vehicleId
-					? await getVehicleInspectionStatus(opportunity.vehicleId)
-					: {
-							isInspected: false,
-						};
-
-				if (
-					hasStaleAnalysisChecklistVehicleState(
-						existingChecklist.checklistData as any,
-						opportunity.vehicleId,
-						inspectionResult.isInspected,
-					)
-				) {
-					await db
-						.delete(analysisChecklists)
-						.where(eq(analysisChecklists.id, existingChecklist.id));
-				} else {
-					return existingChecklist.checklistData;
-				}
-			}
+			let shouldUpdateExistingChecklist = false;
 
 			// Phase 2: Run independent queries in parallel
 			const [requiredDocs, uploadedDocs, vehicleResult, creditAnalysisResult] =
@@ -4205,6 +4243,26 @@ export const crmRouter = {
 				uploadedVehicleDocs.map((d) => d.documentType),
 			);
 
+			// Early return if checklist already exists and is still aligned
+			if (existingChecklist) {
+				if (
+					hasStaleAnalysisChecklistVehicleState(
+						existingChecklist.checklistData as any,
+						opportunity.vehicleId,
+						vehicleInspected,
+					) ||
+					hasStaleAnalysisChecklistDocumentState(
+						existingChecklist.checklistData as any,
+						uploadedTypes,
+						uploadedVehicleTypes,
+					)
+				) {
+					shouldUpdateExistingChecklist = true;
+				} else {
+					return existingChecklist.checklistData;
+				}
+			}
+
 			// Create initial checklist structure
 			const checklistData = {
 				sections: {
@@ -4353,6 +4411,13 @@ export const crmRouter = {
 				canApprove: false,
 			};
 
+			if (shouldUpdateExistingChecklist) {
+				carryForwardAnalysisChecklistVerificationState(
+					checklistData,
+					existingChecklist?.checklistData,
+				);
+			}
+
 			// Calculate vehicle section completion
 			checklistData.sections.vehiculo.verificaciones.completed =
 				checklistData.sections.vehiculo.verificaciones.items
@@ -4418,11 +4483,21 @@ export const crmRouter = {
 					? checklistData.sections.vehiculo.completed
 					: true); // Only require vehicle section if there's a vehicle
 
-			// Save initial checklist
-			await db.insert(analysisChecklists).values({
-				opportunityId: input.opportunityId,
-				checklistData,
-			});
+			if (shouldUpdateExistingChecklist && existingChecklist) {
+				await db
+					.update(analysisChecklists)
+					.set({
+						checklistData,
+						updatedAt: new Date(),
+					})
+					.where(eq(analysisChecklists.id, existingChecklist.id));
+			} else {
+				// Save initial checklist
+				await db.insert(analysisChecklists).values({
+					opportunityId: input.opportunityId,
+					checklistData,
+				});
+			}
 
 			return checklistData;
 		}),

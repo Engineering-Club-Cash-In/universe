@@ -1119,11 +1119,7 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
 
         // ── Si el inversionista no existía en el destino, agregarlo en
         //    ambas tablas con el mismo monto (no hay valor histórico previo). ──
-        const hoy = new Date();
-        const hoyStr = hoy.toISOString().split("T")[0];
-        const dosMesesAtras = new Date(hoy.getFullYear(), hoy.getMonth() - 2, hoy.getDate())
-          .toISOString()
-          .split("T")[0];
+        const hoyStr = new Date().toISOString().split("T")[0];
         if (
           !arrayDestinoPadre.some(
             (inv) => inv.inversionista_id === inversionista_id,
@@ -1134,7 +1130,7 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
             monto_aportado: montoAsignar,
             porcentaje_cash_in: porcCashIn,
             porcentaje_inversion: porcInversion,
-            fecha_inicio_participacion: tipo_operacion === "reinversion" ? dosMesesAtras : hoyStr,
+            fecha_inicio_participacion: hoyStr,
           });
         }
         if (
@@ -1147,7 +1143,7 @@ export const manualReassignInvestor = async ({ body, set }: any) => {
             monto_aportado: montoAsignar,
             porcentaje_cash_in: porcCashIn,
             porcentaje_inversion: porcInversion,
-            fecha_inicio_participacion: tipo_operacion === "reinversion" ? dosMesesAtras : hoyStr,
+            fecha_inicio_participacion: hoyStr,
           });
         }
 

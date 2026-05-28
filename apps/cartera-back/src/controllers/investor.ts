@@ -51,7 +51,7 @@ import {
   type EstadoLiquidacionResumenFilter,
 } from "../utils/investorLiquidationSummary";
 import { addInvestorToCredit } from "./addInvestorToCredit";
-import { calcularExpiracionCompraCartera } from "../utils/functions/businessDays";
+import { calcularExpiracionCompraCartera, startOfDayGT } from "../utils/functions/businessDays";
 
 // ============================================
 // 🆕 TIPOS Y CONFIGURACIÓN PARA CONSULTAS ORIGINALES/ESPEJO
@@ -8388,7 +8388,7 @@ export async function getCreditosEspejoPendientes(
       expira_at: expiracion?.expira ?? null,
       dia_baja_at: expiracion?.diaBaja ?? null,
       tiempo_restante_ms: expiracion
-        ? Math.max(0, expiracion.diaBaja.getTime() - Date.now())
+        ? Math.max(0, startOfDayGT(expiracion.diaBaja).getTime() - Date.now())
         : null,
     });
   }

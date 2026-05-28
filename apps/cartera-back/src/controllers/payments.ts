@@ -746,6 +746,7 @@ export async function insertPagosCreditoInversionistas(
       cuota: currentPago?.cuota ?? "0",
       estado_liquidacion: "NO_LIQUIDADO" as const,
       abono_capital_id: abonoCapitalId,
+      fecha_pago: fechaPeriodo ?? new Date(),
     };
 
     console.log(`   ✅ Resultado final para ${inv.nombre}:`, {

@@ -44,6 +44,16 @@ export const getStatusLabel = (status: string) => {
 
 export const formatGuatemalaDate = (date: string | Date) => {
 	return new Date(date).toLocaleDateString("es-GT", {
+		timeZone: "America/Guatemala",
+		day: "2-digit",
+		month: "2-digit",
+		year: "numeric",
+	});
+};
+
+export const formatGuatemalaCalendarDate = (date: string | Date) => {
+	return new Date(date).toLocaleDateString("es-GT", {
+		timeZone: "UTC",
 		day: "2-digit",
 		month: "2-digit",
 		year: "numeric",

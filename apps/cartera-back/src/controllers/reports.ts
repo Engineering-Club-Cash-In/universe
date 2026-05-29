@@ -391,9 +391,50 @@ export async function exportPagosToExcel(credito_sifco: string) {
     throw new Error(`No hay pagos pagados para el crédito ${credito_sifco}`);
   }
 
-  console.log(`📊 Generando PDF con ${pagosFiltrados.length} pagos pagados...`);
+  // Orden determinístico (numero_cuota, fecha_pago, pago_id) para que el
+  // running ledger de capital_restante quede coherente cuando hay varios
+  // pagos por cuota.
+  const pagosOrdenados = [...pagosFiltrados].sort((a, b) => {
+    const ncA = a.pago.numero_cuota ?? 0;
+    const ncB = b.pago.numero_cuota ?? 0;
+    if (ncA !== ncB) return ncA - ncB;
+    const fA = a.pago.fecha_pago ? new Date(a.pago.fecha_pago).getTime() : 0;
+    const fB = b.pago.fecha_pago ? new Date(b.pago.fecha_pago).getTime() : 0;
+    if (fA !== fB) return fA - fB;
+    return (a.pago.pago_id ?? 0) - (b.pago.pago_id ?? 0);
+  });
 
-  const primerPago = pagosFiltrados[0].pago;
+  // Running ledger SOLO PARA VISUAL: arranca con el total_restante del primer
+  // pago (desembolso real) y resta abono_capital en cada paso. El último pago
+  // se ancla en creditos.capital (saldo actual real) para que la columna
+  // "Capital Rest." cierre exactamente; cualquier desfase contra el walk
+  // teórico se absorbe como ajuste visual en esa última fila.
+  // No se escribe en DB; solo se sobreescribe el campo que renderiza la columna.
+  const [creditoRow] = await db
+    .select({ capital: creditos.capital })
+    .from(creditos)
+    .where(eq(creditos.numero_credito_sifco, credito_sifco))
+    .limit(1);
+  const capitalActual = Number(creditoRow?.capital ?? 0);
+
+  let capitalLedger = Number(pagosOrdenados[0]?.pago.total_restante ?? 0);
+  const pagosConLedger = pagosOrdenados.map((row, idx) => {
+    if (idx > 0) {
+      capitalLedger -= Number(row.pago.abono_capital ?? 0);
+    }
+    const esUltimo = idx === pagosOrdenados.length - 1;
+    return {
+      ...row,
+      pago: {
+        ...row.pago,
+        total_restante: (esUltimo ? capitalActual : capitalLedger).toFixed(2),
+      },
+    };
+  });
+
+  console.log(`📊 Generando PDF con ${pagosConLedger.length} pagos pagados...`);
+
+  const primerPago = pagosConLedger[0].pago;
   const nombreDeudor = primerPago.usuario_nombre ?? "";
   const numCredito = primerPago.numero_credito_sifco ?? credito_sifco;
   const fechaGen = new Date().toLocaleDateString("es-GT", { year: "numeric", month: "long", day: "numeric" });
@@ -405,7 +446,7 @@ export async function exportPagosToExcel(credito_sifco: string) {
   let totalCapital = 0;
   let totalInteres = 0;
 
-  const tableRows = pagosFiltrados.map(({ pago }, index) => {
+  const tableRows = pagosConLedger.map(({ pago }, index) => {
     const montoAplicado = Number(pago.monto_aplicado || 0);
     const capitalPago = Number(pago.abono_capital || 0);
     const interesPago = Number(pago.abono_interes || 0);

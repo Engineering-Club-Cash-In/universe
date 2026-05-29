@@ -737,35 +737,46 @@ export async function condonarMora({
       return { success: false, message: "[ERROR] Usuario no encontrado" };
     }
 
-    // 2. Obtener mora ACTIVA actual (la más reciente si hubiera múltiples)
-    const [moraActual] = await db
-      .select({
-        id: moras_credito.mora_id,
-        monto: moras_credito.monto_mora,
-      })
-      .from(moras_credito)
-      .where(and(
-        eq(moras_credito.credito_id, credito_id),
-        eq(moras_credito.activa, true),
-      ))
-      .orderBy(desc(moras_credito.created_at))
-      .limit(1);
-
-    if (!moraActual) {
-      return { success: false, message: "[ERROR] No hay mora activa para este crédito" };
-    }
-
-    const monto = moraActual.monto ?? "0";
-    console.log(`[INFO] Current mora amount for credit #${credito_id}: ${monto}`);
-    console.log(`[INFO] Condonation reason: ${motivo}`);
-
-    // 3-5. Aplicar condonación en una sola transacción
+    // 2-5. Toda la operación en una sola transacción con row lock para evitar
+    //      condonaciones duplicadas si dos requests llegan en paralelo.
     const result = await db.transaction(async (tx) => {
+      const [moraActual] = await tx
+        .select({
+          id: moras_credito.mora_id,
+          monto: moras_credito.monto_mora,
+        })
+        .from(moras_credito)
+        .where(and(
+          eq(moras_credito.credito_id, credito_id),
+          eq(moras_credito.activa, true),
+        ))
+        .orderBy(desc(moras_credito.created_at))
+        .limit(1)
+        .for("update");
+
+      if (!moraActual) {
+        return { kind: "not_found" as const };
+      }
+
+      const monto = moraActual.monto ?? "0";
+      console.log(`[INFO] Current mora amount for credit #${credito_id}: ${monto}`);
+      console.log(`[INFO] Condonation reason: ${motivo}`);
+
+      // Re-check activa=true en el UPDATE como defensa extra: si dos tx
+      // pasaran el SELECT FOR UPDATE en algún edge case raro, solo la primera
+      // afectará filas y la segunda saldrá vacía.
       const [updatedMora] = await tx
         .update(moras_credito)
         .set({ monto_mora: "0", activa: false, updated_at: new Date() })
-        .where(eq(moras_credito.mora_id, moraActual.id))
+        .where(and(
+          eq(moras_credito.mora_id, moraActual.id),
+          eq(moras_credito.activa, true),
+        ))
         .returning();
+
+      if (!updatedMora) {
+        return { kind: "not_found" as const };
+      }
 
       await tx
         .update(creditos)
@@ -783,15 +794,19 @@ export async function condonarMora({
         })
         .returning();
 
-      return { updatedMora, condonacion };
+      return { kind: "ok" as const, moraId: moraActual.id, monto, updatedMora, condonacion };
     });
+
+    if (result.kind === "not_found") {
+      return { success: false, message: "[ERROR] No hay mora activa para este crédito" };
+    }
 
     await registrarHistorialMora({
       credito_id,
-      mora_id: moraActual.id,
+      mora_id: result.moraId,
       tipo_evento: "CONDONACION",
       origen: "CONDONACION_INDIVIDUAL",
-      monto_anterior: monto,
+      monto_anterior: result.monto,
       monto_nuevo: "0",
       usuario_id: user.id,
       motivo,

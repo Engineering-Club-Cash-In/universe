@@ -207,6 +207,39 @@ async function run() {
     check("tipo_evento = INCREMENTO", hist?.tipo_evento === "INCREMENTO");
   }
 
+  console.log("\n=== TEST 12: condonaciones concurrentes sobre el mismo crédito → solo 1 éxito ===");
+  {
+    // Resetear fixture del crédito 16 a estado MOROSO con mora activa fresca
+    await db.update(moras_credito)
+      .set({ activa: false })
+      .where(and(eq(moras_credito.credito_id, 16), eq(moras_credito.activa, true)));
+    await db.insert(moras_credito).values({
+      credito_id: 16,
+      monto_mora: "24976.00",
+      cuotas_atrasadas: 20,
+      activa: true,
+      porcentaje_mora: "1.12",
+    });
+    await db.update(creditos).set({ statusCredit: "MOROSO" }).where(eq(creditos.credito_id, 16));
+    await db.delete(moras_condonaciones).where(eq(moras_condonaciones.credito_id, 16));
+
+    const results = await Promise.allSettled([
+      condonarMora({ credito_id: 16, motivo: "concurrent A", usuario_email: EMAIL_OK }),
+      condonarMora({ credito_id: 16, motivo: "concurrent B", usuario_email: EMAIL_OK }),
+    ]);
+
+    const successes = results.filter((r) => r.status === "fulfilled" && (r.value as any).success === true).length;
+    const failures  = results.filter((r) => r.status === "fulfilled" && (r.value as any).success === false).length;
+    const condAfter = await db.select().from(moras_condonaciones).where(eq(moras_condonaciones.credito_id, 16));
+
+    console.log("  parallel results:", results.map((r) => r.status === "fulfilled" ? (r.value as any) : r.reason));
+    console.log("  successes=", successes, "failures=", failures, "condonaciones en DB=", condAfter.length);
+
+    check("exactamente 1 éxito", successes === 1);
+    check("exactamente 1 fallo (no hay mora activa)", failures === 1);
+    check("exactamente 1 fila en moras_condonaciones", condAfter.length === 1);
+  }
+
   console.log(`\n=== TOTAL: ${pass} pass / ${fail} fail ===\n`);
   process.exit(fail === 0 ? 0 : 1);
 }

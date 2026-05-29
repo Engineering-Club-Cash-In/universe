@@ -898,57 +898,13 @@ export async function insertPagosCreditoInversionistasV2(
   const pagoAbonoInteres = new Big(currentPago.abono_interes ?? 0);
   const pagoAbonoIva = new Big(currentPago.abono_iva_12 ?? 0);
 
-  // fechaPeriodo para clasificación Caso 1/2/3 en V2
-  const fechaDelPeriodoV2 = fechaPeriodo
-    ?? (currentPago?.fecha_vencimiento ? new Date(currentPago.fecha_vencimiento) : new Date());
-  const periodoMesV2 = fechaDelPeriodoV2.getMonth();
-  const periodoAnioV2 = fechaDelPeriodoV2.getFullYear();
-
   // 6. Calcular distribución por inversionista
   const inserts = [];
   for (const inv of inversionistasWithName) {
     const isCube =
       inv.nombre.trim().toLowerCase() === "cube investments s.a.".toLowerCase();
 
-    // Validación: espejo ajustado por compras nuevas == histórico
-    const [lastHistoricoV2] = await db
-      .select({
-        monto_aportado: historico_liquidaciones_espejo.monto_aportado,
-        fecha: historico_liquidaciones_espejo.fecha,
-      })
-      .from(historico_liquidaciones_espejo)
-      .where(
-        and(
-          eq(historico_liquidaciones_espejo.credito_id, credito_id),
-          eq(historico_liquidaciones_espejo.inversionista_id, inv.inversionista_id),
-        )
-      )
-      .orderBy(desc(historico_liquidaciones_espejo.fecha))
-      .limit(1);
-
-    let montoBaseCalculoV2 = new Big(inv.monto_aportado ?? 0);
-
-    if (lastHistoricoV2) {
-      const espejoIgualHistoricoV2 = montoBaseCalculoV2.eq(new Big(lastHistoricoV2.monto_aportado));
-
-      if (!espejoIgualHistoricoV2) {
-        const { montoRestarValidacion, montoRestarCalculo } = await calcularAjusteCompras(
-          credito_id,
-          inv.inversionista_id,
-          new Date(lastHistoricoV2.fecha),
-          periodoMesV2,
-          periodoAnioV2,
-        );
-        const montoParaValidacion = new Big(inv.monto_aportado ?? 0).minus(montoRestarValidacion);
-        if (!montoParaValidacion.eq(new Big(lastHistoricoV2.monto_aportado))) {
-          throw new Error(
-            `[MONTO_ESPEJO_INCONSISTENTE_V2] Inv ${inv.inversionista_id} Cred ${credito_id}: ` +
-            `espejo-compras_nuevas (${montoParaValidacion.toFixed(8)}) ≠ histórico (${lastHistoricoV2.monto_aportado})`
-          );
-        }
-        montoBaseCalculoV2 = montoBaseCalculoV2.minus(montoRestarCalculo);
-      }
-    }
+    const montoBaseCalculoV2 = new Big(inv.monto_aportado ?? 0);
 
     // Porcentaje general: base_calculo / SUM(monto_aportado)
     const porcentajeGeneral = montoBaseCalculoV2.div(sumMontosAportados);

@@ -182,12 +182,16 @@ export const reversePayment = async ({ body, set }: any) => {
       // ======================================================================
       if (pago.mora && Number(pago.mora) > 0) {
         console.log(`⚠️ Reversando mora: ${pago.mora}`);
-        await updateMora({
+        const reverseMoraResult = await updateMora({
           credito_id,
           monto_cambio: Number(pago.mora),
           tipo: "INCREMENTO",
           activa: true,
         });
+
+        if (!reverseMoraResult.success) {
+          throw new Error("Error al reversar mora: " + reverseMoraResult.message);
+        }
       }
 
       // ======================================================================

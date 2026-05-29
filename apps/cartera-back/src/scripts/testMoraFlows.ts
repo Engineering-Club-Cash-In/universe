@@ -10,6 +10,7 @@ import { condonarMora, updateMora } from "../controllers/latefee";
 
 const EMAIL_OK = "jalvarado@clubcashin.com";
 const EMAIL_BAD = "nonexistent_user_999@example.com";
+const LOCAL_DB_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
 type Snapshot = {
   statusCredit: string | null;
@@ -50,7 +51,25 @@ const FIXTURES: Array<{ credito_id: number; monto: string; cuotas: number }> = [
   { credito_id: 16, monto: "24976.00", cuotas: 20 },
 ];
 
+function assertLocalDatabase() {
+  const connectionString = process.env.SUPABASE_DB_URL;
+
+  if (!connectionString) {
+    throw new Error("SUPABASE_DB_URL environment variable not set");
+  }
+
+  const hostname = new URL(connectionString).hostname;
+
+  if (!LOCAL_DB_HOSTS.has(hostname)) {
+    throw new Error(
+      `testMoraFlows mutates fixed fixture credit IDs and only runs against local databases. Refusing SUPABASE_DB_URL host: ${hostname}`,
+    );
+  }
+}
+
 async function resetFixtures() {
+  assertLocalDatabase();
+
   for (const f of FIXTURES) {
     // Desactivar cualquier mora activa que ya exista para este crédito
     await db.update(moras_credito)

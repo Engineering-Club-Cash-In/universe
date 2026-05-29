@@ -472,9 +472,18 @@ export async function insertPagosCreditoInversionistas(
       .orderBy(desc(historico_liquidaciones_espejo.fecha))
       .limit(1);
 
-    // fechaPeriodo: viene del front (fecha explícita del período a liquidar).
-    // Fallback: fecha_vencimiento del pago registrado.
-    const fechaDelPeriodo = fechaPeriodo ?? new Date();
+    // fechaPeriodo viene del front (fecha explícita del período a liquidar).
+    // Normalización: si llega como "2026-06-01" → new Date() lo parsea UTC 00:00,
+    // que en hora local GT (UTC-6) es "2026-05-31 18:00" y getMonth() devuelve mayo.
+    // Reconstruimos a partir del día calendario UTC para anclar el mes correcto
+    // en hora local sin importar el TZ del server.
+    const fechaDelPeriodo = fechaPeriodo
+      ? new Date(
+          fechaPeriodo.getUTCFullYear(),
+          fechaPeriodo.getUTCMonth(),
+          fechaPeriodo.getUTCDate(),
+        )
+      : new Date();
 
     const periodoMes = fechaDelPeriodo.getMonth();
     const periodoAnio = fechaDelPeriodo.getFullYear();
@@ -822,7 +831,7 @@ export async function insertPagosCreditoInversionistas(
       cuota: currentPago?.cuota ?? "0",
       estado_liquidacion: "NO_LIQUIDADO" as const,
       abono_capital_id: abonoCapitalId,
-      fecha_pago: fechaPeriodo ?? new Date(),
+      fecha_pago: fechaDelPeriodo,
     };
 
     console.log(`   ✅ Resultado final para ${inv.nombre}:`, {

@@ -3711,6 +3711,20 @@ export async function liquidateByInvestorId(inversionista_id?: number, fechaLiqu
 
           const currentMonto = espejoRow?.monto_aportado ?? "0";
 
+          // Validation: abono capital no puede superar el capital del inversionista en el crédito
+          if (sumaCapitalBig.gt(new Big(currentMonto))) {
+            const [creditoRowAbono] = await tx
+              .select({ sifco: creditos.numero_credito_sifco })
+              .from(creditos)
+              .where(eq(creditos.credito_id, creditoId))
+              .limit(1);
+            const sifcoAbono = creditoRowAbono?.sifco ?? `ID:${creditoId}`;
+            throw new Error(
+              `[ABONO_SUPERA_CAPITAL] Crédito SIFCO ${sifcoAbono} (Inv ${inv_id}): ` +
+              `abono capital (${sumaCapitalBig.toFixed(2)}) supera capital en espejo (${new Big(currentMonto).toFixed(2)})`
+            );
+          }
+
           // Validation 3 (cuadre): espejo ajustado por compras nuevas == histórico
           const [lastHistorico] = await tx
             .select({

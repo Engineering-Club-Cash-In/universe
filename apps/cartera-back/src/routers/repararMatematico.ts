@@ -711,4 +711,131 @@ export const repararMatematicoRouter = new Elysia()
         tags: ["Créditos"],
       },
     },
+  )
+  // ============================================================
+  // BULK PURO MATEMÁTICO — sin SIFCO, sin Excel
+  // Rebobina desde el estado actual de la DB y repara con ese valor.
+  // ============================================================
+  .post(
+    "/reparar-matematico-puro-bulk",
+    async ({ body, set }: any) => {
+      const { concurrencia = 3, limit, offset = 0, dry_run = false } = body ?? {};
+
+      // 1. Traer todos los créditos SIFCO (excluir CRM- y cancelados con capital=0)
+      const cond = and(
+        notLike(creditos.numero_credito_sifco, "CRM-%"),
+        sql`${creditos.capital}::numeric > 0`,
+      );
+      const credits = await db
+        .select({ numero_credito_sifco: creditos.numero_credito_sifco })
+        .from(creditos)
+        .where(cond)
+        .orderBy(creditos.credito_id)
+        .limit(limit ?? 100000)
+        .offset(offset);
+
+      const numeros = credits.map((c) => c.numero_credito_sifco);
+      console.log(
+        `\n🧮 reparar-matematico-puro-bulk: ${numeros.length} créditos, concurrencia=${concurrencia}, dry_run=${dry_run}`,
+      );
+
+      const t0 = Date.now();
+      const resultados = await ejecutarConConcurrencia(
+        numeros,
+        concurrencia,
+        async (numero_credito_sifco) => {
+          const calc = await calcularCapitalInicialDesdeBD(numero_credito_sifco);
+          if (!calc) {
+            return {
+              estado: "descartado" as const,
+              numero_credito_sifco,
+              razon: "Crédito sin cuotas pagadas o sin datos completos",
+            };
+          }
+
+          const capital_inicial = Number(calc.capital_inicial.round(2));
+
+          if (!dry_run) {
+            try {
+              const r = await repararTotalRestante({
+                numero_credito_sifco,
+                capital_inicial,
+                dry_run: false,
+              });
+              return {
+                estado: "reparado" as const,
+                numero_credito_sifco,
+                capital_inicial,
+                cuotas_pagadas: calc.cuotas_pagadas,
+                pagos_actualizados: r.pagos_actualizados,
+              };
+            } catch (e: any) {
+              return {
+                estado: "error" as const,
+                numero_credito_sifco,
+                capital_inicial,
+                error: e?.message ?? String(e),
+              };
+            }
+          }
+
+          return {
+            estado: "reparado" as const,
+            numero_credito_sifco,
+            capital_inicial,
+            cuotas_pagadas: calc.cuotas_pagadas,
+          };
+        },
+      );
+      const elapsed_seg = Math.round((Date.now() - t0) / 1000);
+
+      const reparados: any[] = [];
+      const descartados: any[] = [];
+      const errores: any[] = [];
+      for (const r of resultados) {
+        if (r == null) continue;
+        if ((r as any).error && !(r as any).estado) {
+          errores.push(r);
+          continue;
+        }
+        const estado = (r as any).estado;
+        if (estado === "reparado") reparados.push(r);
+        else if (estado === "descartado") descartados.push(r);
+        else if (estado === "error") errores.push(r);
+      }
+
+      console.log(
+        `✅ Matemático puro en ${elapsed_seg}s: ${reparados.length} reparados, ${descartados.length} descartados, ${errores.length} errores`,
+      );
+
+      set.status = 200;
+      return {
+        success: true,
+        total_procesados: resultados.length,
+        reparados_count: reparados.length,
+        descartados_count: descartados.length,
+        errores_count: errores.length,
+        elapsed_seg,
+        dry_run,
+        reparados,
+        descartados,
+        errores,
+      };
+    },
+    {
+      body: t.Optional(
+        t.Object({
+          concurrencia: t.Optional(t.Number()),
+          limit: t.Optional(t.Number()),
+          offset: t.Optional(t.Number()),
+          dry_run: t.Optional(t.Boolean()),
+        }),
+      ),
+      detail: {
+        summary: "Bulk: repara TODOS los créditos usando solo matemática (rebobineo de la DB), sin SIFCO ni Excel",
+        description:
+          "Para cada crédito: rebobina desde pagos_credito.total_restante del último pago pagado, y usa ese valor como capital_inicial en repararTotalRestante. Sin validación contra SIFCO ni búsqueda en Excel.",
+        tags: ["Créditos"],
+      },
+    },
   );

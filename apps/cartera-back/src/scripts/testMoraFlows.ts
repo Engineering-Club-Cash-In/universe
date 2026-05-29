@@ -259,6 +259,32 @@ async function run() {
     check("exactamente 1 fila en moras_condonaciones", condAfter.length === 1);
   }
 
+  console.log("\n=== TEST 13: reversar pago de mora completa reactiva mora inactiva ===");
+  {
+    // Simula el estado que deja registerPayment cuando paga toda la mora:
+    // monto 0, activa=false. reversePayment debe poder reactivarla.
+    await db.update(moras_credito)
+      .set({ activa: false })
+      .where(and(eq(moras_credito.credito_id, 5), eq(moras_credito.activa, true)));
+    const [inactiveMora] = await db.insert(moras_credito).values({
+      credito_id: 5,
+      monto_mora: "0",
+      cuotas_atrasadas: 1,
+      activa: false,
+      porcentaje_mora: "1.12",
+    }).returning();
+    await db.update(creditos).set({ statusCredit: "ACTIVO" }).where(eq(creditos.credito_id, 5));
+
+    const res = await updateMora({ credito_id: 5, tipo: "INCREMENTO", monto_cambio: 652.65, activa: true, usuario_email: EMAIL_OK });
+    const after = await snapshot(5);
+
+    console.log("  reactivated mora:", inactiveMora.mora_id, "result.success=", res.success, "after:", after);
+    check("success", res.success === true);
+    check("misma mora reactivada", (res as any).mora?.mora_id === inactiveMora.mora_id);
+    check("monto restaurado", Number(after.mora?.monto_mora).toFixed(2) === "652.65");
+    check("statusCredit=MOROSO", after.statusCredit === "MOROSO");
+  }
+
   console.log(`\n=== TOTAL: ${pass} pass / ${fail} fail ===\n`);
   process.exit(fail === 0 ? 0 : 1);
 }

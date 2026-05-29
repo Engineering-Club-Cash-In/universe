@@ -310,6 +310,14 @@ export async function updateMora({
 
     // Toda la operación dentro de una transacción con row lock para evitar races
     const result = await db.transaction(async (tx) => {
+      const shouldReactivateMora = tipo === "INCREMENTO" && activa === true;
+      const moraWhere = shouldReactivateMora
+        ? eq(moras_credito.credito_id, targetCreditoId)
+        : and(
+          eq(moras_credito.credito_id, targetCreditoId),
+          eq(moras_credito.activa, true),
+        );
+
       const [moraActual] = await tx
         .select({
           id: moras_credito.mora_id,
@@ -319,11 +327,8 @@ export async function updateMora({
           cuotas_atrasadas: moras_credito.cuotas_atrasadas,
         })
         .from(moras_credito)
-        .where(and(
-          eq(moras_credito.credito_id, targetCreditoId),
-          eq(moras_credito.activa, true),
-        ))
-        .orderBy(desc(moras_credito.created_at))
+        .where(moraWhere)
+        .orderBy(desc(moras_credito.activa), desc(moras_credito.created_at))
         .limit(1)
         .for("update");
 

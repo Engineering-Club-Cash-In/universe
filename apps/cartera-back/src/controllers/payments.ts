@@ -322,7 +322,12 @@ export async function insertPagosCreditoInversionistas(
   cuotaPagada:boolean = false,
   updateCredito: boolean = true,  // si false, omite el UPDATE a creditos_inversionistas_espejo
   inversionista_id?: number,
-  fechaPeriodo?: Date
+  fechaPeriodo?: Date,
+  // si true, cuando abono_capital supera al monto_aportado del espejo
+  // se hace clamp al monto_aportado (en vez de tirar [ABONO_SUPERA_MONTO]).
+  // Caso de uso: fallback de calcularYRegistrarPagosEspejo sobre créditos casi
+  // liquidados donde la cuota mensual completa superaría el saldo restante.
+  allowClampAbonoCapital: boolean = false,
 ) {
   console.log(
     "\n🔍 ========== INICIO insertPagosCreditoInversionistas =========="
@@ -809,9 +814,20 @@ export async function insertPagosCreditoInversionistas(
 
     // Validation 2: abono_capital must not exceed monto_aportado (prevents negative balance)
     if (abono_capital.gt(new Big(inv.monto_aportado || 0))) {
-      throw new Error(
-        `[ABONO_SUPERA_MONTO] Inv ${inv.inversionista_id} Cred ${credito_id}: abono_capital (${abono_capital.toString()}) > monto_aportado (${inv.monto_aportado})`
-      );
+      if (allowClampAbonoCapital) {
+        // Crédito casi liquidado: la cuota mensual completa supera el saldo restante.
+        // Devolvemos al inversionista solo lo que le queda → espejo terminará en 0.
+        console.warn(
+          `   ⚠️  [CLAMP_ABONO] Inv ${inv.inversionista_id} Cred ${credito_id}: ` +
+          `abono_capital (${abono_capital.toString()}) > monto_aportado (${inv.monto_aportado}). ` +
+          `Clamp aplicado → abono_capital = monto_aportado.`
+        );
+        abono_capital = new Big(inv.monto_aportado || 0);
+      } else {
+        throw new Error(
+          `[ABONO_SUPERA_MONTO] Inv ${inv.inversionista_id} Cred ${credito_id}: abono_capital (${abono_capital.toString()}) > monto_aportado (${inv.monto_aportado})`
+        );
+      }
     }
 
     const resultado = {
@@ -2331,22 +2347,24 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
           return null;
         }
 
+        const selectCuotaPagos = {
+          cuotaId: cuotas_credito.cuota_id,
+          numeroCuota: cuotas_credito.numero_cuota,
+          fechaVencimiento: cuotas_credito.fecha_vencimiento,
+          pagadoCuota: cuotas_credito.pagado,
+          liquidadoInversionistas: cuotas_credito.liquidado_inversionistas,
+          pagoId: pagos_credito.pago_id,
+          fechaPago: pagos_credito.fecha_pago,
+          montoBoleta: pagos_credito.monto_boleta,
+          abonoCapital: pagos_credito.abono_capital,
+          abonoInteres: pagos_credito.abono_interes,
+          abonoIva: pagos_credito.abono_iva_12,
+          validationStatus: pagos_credito.validationStatus,
+        };
+
         // Buscar la primera cuota NO liquidada con sus pagos
-        const cuotaConPagos = await db
-          .select({
-            cuotaId: cuotas_credito.cuota_id,
-            numeroCuota: cuotas_credito.numero_cuota,
-            fechaVencimiento: cuotas_credito.fecha_vencimiento,
-            pagadoCuota: cuotas_credito.pagado,
-            liquidadoInversionistas: cuotas_credito.liquidado_inversionistas,
-            pagoId: pagos_credito.pago_id,
-            fechaPago: pagos_credito.fecha_pago,
-            montoBoleta: pagos_credito.monto_boleta,
-            abonoCapital: pagos_credito.abono_capital,
-            abonoInteres: pagos_credito.abono_interes,
-            abonoIva: pagos_credito.abono_iva_12,
-            validationStatus: pagos_credito.validationStatus,
-          })
+        let cuotaConPagos = await db
+          .select(selectCuotaPagos)
           .from(cuotas_credito)
           .innerJoin(
             pagos_credito,
@@ -2360,9 +2378,32 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
           )
           .orderBy(cuotas_credito.numero_cuota, pagos_credito.fecha_pago);
 
+        // Fallback: si todas las cuotas ya están liquidadas, tomar la última cuota
+        // con pagos (mayor numero_cuota). Esto permite reflejar pagos nuevos que
+        // entraron a una cuota ya marcada como liquidada para el inversionista.
+        let esFallback = false;
+        if (cuotaConPagos.length === 0) {
+          cuotaConPagos = await db
+            .select(selectCuotaPagos)
+            .from(cuotas_credito)
+            .innerJoin(
+              pagos_credito,
+              eq(cuotas_credito.cuota_id, pagos_credito.cuota_id)
+            )
+            .where(eq(cuotas_credito.credito_id, credito.creditoId))
+            .orderBy(desc(cuotas_credito.numero_cuota), desc(pagos_credito.fecha_pago));
+
+          if (cuotaConPagos.length > 0) {
+            esFallback = true;
+            console.log(
+              `↩️  Crédito ${credito.creditoId}: fallback → usando última cuota ${cuotaConPagos[0].numeroCuota} (todas liquidadas)`
+            );
+          }
+        }
+
         if (cuotaConPagos.length === 0) {
           console.log(
-            `⚠️  Crédito ${credito.creditoId}: sin cuotas pendientes con pagos`
+            `⚠️  Crédito ${credito.creditoId}: sin cuotas con pagos`
           );
           return null;
         }
@@ -2391,7 +2432,8 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
             false, // cuotaPagada
             false, // updateCredito ← omite el UPDATE a creditos_inversionistas_espejo
             inversionistaId,
-            fechaCalculo
+            fechaCalculo,
+            true, // allowClampAbonoCapital ← cualquier crédito casi liquidado cierra a 0
           );
 
           console.log(

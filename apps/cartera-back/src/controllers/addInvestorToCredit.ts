@@ -651,6 +651,9 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
           for (const inv of fuente) {
             if (inv.inversionista_id === CUBE_INVESTMENT_ID) {
               // ── CUBE: restarle el monto operativo. Si queda en 0, se elimina. ──
+              // CUBE siempre es 100% cash_in / 0% inversión — ignoramos los
+              // valores que vengan en la fuente porque pueden estar corruptos
+              // (ver bug histórico de los 19 créditos invertidos).
               const nuevoMontoCube = new Big(inv.monto_aportado).minus(
                 montoParaEsteCredito,
               );
@@ -658,10 +661,8 @@ export const addInvestorToCredit = async ({ body, set, request }: any) => {
                 result.push({
                   inversionista_id: inv.inversionista_id,
                   monto_aportado: nuevoMontoCube,
-                  porcentaje_cash_in: new Big(inv.porcentaje_cash_in),
-                  porcentaje_inversion: new Big(
-                    inv.porcentaje_participacion_inversionista,
-                  ),
+                  porcentaje_cash_in: new Big(100),
+                  porcentaje_inversion: new Big(0),
                   fecha_inicio_participacion: inv.fecha_inicio_participacion,
                 });
               }

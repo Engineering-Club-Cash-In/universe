@@ -16,6 +16,14 @@ type OpcionSifco = {
   sifco: string;
 };
 
+const ESTADOS_SELECCIONABLES = new Set([
+  "ACTIVO",
+  "PENDIENTE_CANCELACION",
+  "MOROSO",
+  "EN_CONVENIO",
+  "INCOBRABLE",
+]);
+
 interface BuscadorUsuarioSifcoProps {
   onSelect: (sifco: string) => void;
   reset?: boolean;
@@ -65,10 +73,12 @@ export function BuscadorUsuarioSifco({ onSelect, reset, onReset }: BuscadorUsuar
 
   const opciones: OpcionSifco[] = useMemo(() => {
     if (!data?.data) return [];
-    return data.data.map((item) => ({
-      nombre: item.usuarios.nombre,
-      sifco: item.creditos.numero_credito_sifco,
-    }));
+    return data.data
+      .filter((item) => ESTADOS_SELECCIONABLES.has(item.creditos.statusCredit))
+      .map((item) => ({
+        nombre: item.usuarios.nombre,
+        sifco: item.creditos.numero_credito_sifco,
+      }));
   }, [data]);
 
   const totalPages = data?.totalPages ?? 1;

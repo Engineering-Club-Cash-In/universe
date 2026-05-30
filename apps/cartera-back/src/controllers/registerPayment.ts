@@ -50,6 +50,14 @@ interface SetContext {
   status: number;
 }
 
+const CENTAVO_TOLERANCE = new Big("0.05");
+
+const montosCercanos = (
+  montoA: Big,
+  montoB: Big,
+  tolerance = CENTAVO_TOLERANCE
+) => montoA.minus(montoB).abs().lte(tolerance);
+
 // ========================================
 // 1. PREPARACIÓN DE DATOS
 // ========================================
@@ -796,6 +804,9 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
             ({ pago }) =>
               pago.validationStatus === "validated" && tieneRestante(pago)
           );
+        const tienePagosValidados = allExistingPagos.some(
+          ({ pago }) => pago.validationStatus === "validated"
+        );
         // El pago original es la fila destino; el último validado parcial
         // trae el saldo vigente cuando ya hubo abonos parciales.
         const existingPago = pagoOriginal ?? allExistingPagos[0];
@@ -968,7 +979,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
 
         // 4. CALCULAR NUEVOS RESTANTES
         console.log("\n🔍 ========== CALCULANDO NUEVOS RESTANTES ==========");
-        const nuevo_interes_restante = interes_restante.minus(abono_interes);
+        let nuevo_interes_restante = interes_restante.minus(abono_interes);
         const nuevo_iva_restante = iva_restante.minus(abono_iva_12);
         const nuevo_seguro_restante = seguro_restante.minus(abono_seguro);
         const nuevo_gps_restante = gps_restante.minus(abono_gps);
@@ -1014,15 +1025,47 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           nuevo_gps_restante.eq(0) &&
           nuevo_membresias_restante.eq(0) &&
           nuevo_capital_restante.eq(0);
-        // Solo marcar como pagada si los restantes están en 0 Y existía un pago previo
-        // (evita marcar como pagada cuando no hay pago existente y los restantes son 0 por default)
-        const cuota_pagada = todosRestantesEnCero && !!existingPago;
-        const totalPagado = abono_capital
+        let totalPagado = abono_capital
           .plus(abono_interes)
           .plus(abono_iva_12)
           .plus(abono_seguro)
           .plus(abono_gps)
           .plus(abono_membresias);
+        const esCuotaSeleccionadaInicial =
+          cuota.cuotas_credito.numero_cuota === cuotaApagar &&
+          cuotas_completas === 0 &&
+          cuotas_parciales === 0;
+        const pagoExactoDeUnaCuota = montosCercanos(
+          montoEfectivo,
+          montoCuota
+        );
+        const faltanteContraCuota = montoCuota.minus(totalPagado);
+
+        if (
+          !!existingPago &&
+          esCuotaSeleccionadaInicial &&
+          pagoExactoDeUnaCuota &&
+          !tienePagosValidados &&
+          todosRestantesEnCero &&
+          faltanteContraCuota.gt(CENTAVO_TOLERANCE) &&
+          disponible_restante.gte(faltanteContraCuota)
+        ) {
+          console.log(
+            "⚠️ Restantes de cuota subestimados; reteniendo pago exacto en la cuota seleccionada:",
+            {
+              cuota: cuota.cuotas_credito.numero_cuota,
+              faltanteContraCuota: faltanteContraCuota.toString(),
+              disponibleRestante: disponible_restante.toString(),
+            }
+          );
+          abono_interes = abono_interes.plus(faltanteContraCuota);
+          totalPagado = totalPagado.plus(faltanteContraCuota);
+          disponible_restante = disponible_restante.minus(faltanteContraCuota);
+          nuevo_interes_restante = new Big(0);
+        }
+        // Solo marcar como pagada si los restantes están en 0 Y existía un pago previo
+        // (evita marcar como pagada cuando no hay pago existente y los restantes son 0 por default)
+        const cuota_pagada = todosRestantesEnCero && !!existingPago;
         // Preparar datos del pago
         const currentDate = new Date();
         const months = [

@@ -205,6 +205,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
             FROM cartera.pagos_credito p_pending
             WHERE p_pending.cuota_id = ${cuotas_credito.cuota_id}
               AND p_pending.validation_status = 'pending'
+              AND p_pending.pagado = true
           )`
         )
       )

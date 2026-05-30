@@ -1180,12 +1180,6 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
                 .where(
                   eq(pagos_credito.cuota_id, cuota.cuotas_credito.cuota_id)
                 );
-              await db
-                .update(cuotas_credito)
-                .set({ pagado: true })
-                .where(
-                  eq(cuotas_credito.cuota_id, cuota.cuotas_credito.cuota_id)
-                );
 
               if (
                 pagoInsertado?.pago_id &&

@@ -1387,15 +1387,6 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
       const monthPaymentsBig = new Big(
         (await getPagosDelMesActual(credito_id)) ?? 0
       ).plus(abonoCapital);
-      const newCuota = await db
-        .insert(cuotas_credito)
-        .values({
-          credito_id: credito_id,
-          numero_cuota: ultimaCuotaPagada?.numero_cuota ?? cuotasPendientes[0]?.cuotas_credito?.numero_cuota ?? 0,
-          fecha_vencimiento: ultimaCuotaPagada?.fecha_vencimiento ?? cuotasPendientes[0]?.cuotas_credito?.fecha_vencimiento ?? new Date().toISOString().slice(0, 10),
-          pagado: true,
-        })
-        .returning();
       const guatemalaTimeString = new Date().toLocaleString("en-US", {
         timeZone: "America/Guatemala",
         year: "numeric",
@@ -1436,7 +1427,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         gps_restante: "0",
         total_restante: "0",
 
-        cuota_id: newCuota[0].cuota_id,
+        cuota_id: null,
         numero_cuota: 0,
         llamada: llamada ?? "",
         fecha_pago: fechaGuatemala,
@@ -1512,7 +1503,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           abono_capital: abonoCapital.toString(),
           fecha_pago,
           pagado: true,
-          validationStatus: "pending",
+          validationStatus: "capital",
         },
       };
     } else {
@@ -1791,7 +1782,7 @@ export async function aplicarPagoAlCredito(pago_id: number) {
       if (pago.credito_id === null) {
         throw new Error("No se puede aplicar el abono: credito_id es null");
       }
-      aplicarAbonoCapitalInversionistas(
+      await aplicarAbonoCapitalInversionistas(
         pago.credito_id,
         pago.abono_capital ?? "0",
         pago_id

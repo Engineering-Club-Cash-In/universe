@@ -310,7 +310,12 @@ const obtenerInfoCompletaCredito = async (
           and(
             eq(cuotas_credito.credito_id, credito_id),
             eq(cuotas_credito.pagado, false),
-            ne(pagos_credito.validationStatus, "pending"),
+            sql`NOT EXISTS (
+              SELECT 1
+              FROM cartera.pagos_credito p_pending
+              WHERE p_pending.cuota_id = ${cuotas_credito.cuota_id}
+                AND p_pending.validation_status = 'pending'
+            )`,
             gte(cuotas_credito.numero_cuota, cuotaApagar)
           )
         )
@@ -535,6 +540,36 @@ export const insertPayment = async ({ body, set }: any) => {
       }
     // 4. Calcular disponible
     const montoBoleta = new Big(monto_boleta);
+
+    const [cuotaSolicitadaPendiente] = await db
+      .select({
+        cuota_id: cuotas_credito.cuota_id,
+        pago_id: pagos_credito.pago_id,
+      })
+      .from(cuotas_credito)
+      .innerJoin(
+        pagos_credito,
+        eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
+      )
+      .where(
+        and(
+          eq(cuotas_credito.credito_id, credito_id),
+          eq(cuotas_credito.numero_cuota, cuotaApagar),
+          eq(pagos_credito.validationStatus, "pending")
+        )
+      )
+      .limit(1);
+
+    if (cuotaSolicitadaPendiente) {
+      set.status = 409;
+      return {
+        success: false,
+        message: `La cuota #${cuotaApagar} ya tiene un pago pendiente de validación`,
+        cuota_id: cuotaSolicitadaPendiente.cuota_id,
+        pago_id: cuotaSolicitadaPendiente.pago_id,
+      };
+    }
+
     // 1. Obtener toda la info del crédito UNA SOLA VEZ
     const creditoData = await obtenerInfoCompletaCredito(
       credito_id,

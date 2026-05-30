@@ -122,9 +122,11 @@ export function MiniCardCredito({
     ...(cuotasPendientesInfo?.cuotas ?? []),
   ]
     // Permitir seleccionar cuotas con pagos pendientes; solo se ocultan las
-    // cuotas ya validadas/cerradas.
+    // cuotas ya validadas/cerradas. Se mantiene limitado a la cuota pagable
+    // más antigua para no saltar deuda anterior.
     .filter((c) => c.validationStatus !== "validated")
-    .sort((a, b) => a.numero_cuota - b.numero_cuota);
+    .sort((a, b) => a.numero_cuota - b.numero_cuota)
+    .slice(0, 1);
 
   return (
     <div className="w-full flex flex-col items-center gap-4">

@@ -1,8 +1,12 @@
 // src/api/axiosInstance.ts
 import axios, { AxiosError, type InternalAxiosRequestConfig } from "axios";
 
+const API_URL =
+  import.meta.env.VITE_BACK_URL ||
+  "https://qk4sw4kc4c088c8csos400wc.s3.devteamatcci.site";
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_BACK_URL,
+  baseURL: API_URL,
 });
 
 const REFRESH_MARGIN_SECONDS = 120; // refrescar si quedan ≤2 min de vida
@@ -55,7 +59,7 @@ async function refreshAccessToken(): Promise<string | null> {
     try {
       // Usamos axios "pelado" (no `api`) para no disparar nuestros propios interceptors.
       const res = await axios.post(
-        `${import.meta.env.VITE_BACK_URL}${AUTH_REFRESH_PATH}`,
+        `${API_URL}${AUTH_REFRESH_PATH}`,
         { refreshToken },
       );
 

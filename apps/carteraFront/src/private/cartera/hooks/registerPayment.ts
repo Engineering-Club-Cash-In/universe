@@ -538,6 +538,7 @@ const handleAbonoCapitalDirecto = () => {
   formik.values.abono_directo_capital = montoBoleta;
   formik.values.cuotaApagar = cuotaSeleccionada;
 
+  setModalExcesoOpen(false);
   formik.handleSubmit();
 };
 const handleAbonoSiguienteCuota = () => {

@@ -611,7 +611,8 @@ export async function getCreditosWithUserByMesAnio(
   fecha_hasta?: string,
   numeros_credito_sifco?: string[],
   capital_min?: number,
-  capital_max?: number
+  capital_max?: number,
+  estados_credito?: string[]
 ): Promise<{
   data: CreditoConInfo[];
   page: number;
@@ -656,7 +657,7 @@ export async function getCreditosWithUserByMesAnio(
       }
     }
 
-  if (estado && estado.length > 0) {
+    if (estado && estado.length > 0) {
       if (estado === "ACTIVO") {
         console.log(`🔎 Filtrando por estado: ACTIVO + MOROSO`);
         if (cuotas_atrasadas == 0 ) {
@@ -668,6 +669,11 @@ export async function getCreditosWithUserByMesAnio(
         console.log(`🔎 Filtrando por estado: ${estado}`);
         conditions.push(eq(creditos.statusCredit, estado));
       }
+    }
+
+    if (estados_credito && estados_credito.length > 0) {
+      console.log(`🔎 Filtrando por estados seleccionables: ${estados_credito.join(", ")}`);
+      conditions.push(inArray(creditos.statusCredit, estados_credito));
     }
 
     if (asesor_id) {

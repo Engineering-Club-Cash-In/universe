@@ -50,14 +50,6 @@ interface SetContext {
   status: number;
 }
 
-const CENTAVO_TOLERANCE = new Big("0.05");
-
-const montosCercanos = (
-  montoA: Big,
-  montoB: Big,
-  tolerance = CENTAVO_TOLERANCE
-) => montoA.minus(montoB).abs().lte(tolerance);
-
 // ========================================
 // 1. PREPARACIÓN DE DATOS
 // ========================================
@@ -1035,10 +1027,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           cuota.cuotas_credito.numero_cuota === cuotaApagar &&
           cuotas_completas === 0 &&
           cuotas_parciales === 0;
-        const pagoExactoDeUnaCuota = montosCercanos(
-          montoEfectivo,
-          montoCuota
-        );
+        const pagoExactoDeUnaCuota = montoEfectivo.eq(montoCuota);
         const faltanteContraCuota = montoCuota.minus(totalPagado);
 
         if (
@@ -1047,7 +1036,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           pagoExactoDeUnaCuota &&
           !tienePagosValidados &&
           todosRestantesEnCero &&
-          faltanteContraCuota.gt(CENTAVO_TOLERANCE) &&
+          faltanteContraCuota.gt(0) &&
           disponible_restante.gte(faltanteContraCuota)
         ) {
           console.log(

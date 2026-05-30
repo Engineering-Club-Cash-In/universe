@@ -18,6 +18,7 @@ type OpcionSifco = {
 
 const ESTADOS_SELECCIONABLES = new Set([
   "ACTIVO",
+  "CANCELADO",
   "PENDIENTE_CANCELACION",
   "MOROSO",
   "EN_CONVENIO",
@@ -60,6 +61,7 @@ export function BuscadorUsuarioSifco({ onSelect, reset, onReset }: BuscadorUsuar
         page,
         perPage: 10,
         excel: false,
+        estados_credito: Array.from(ESTADOS_SELECCIONABLES).join(","),
         ...(hasFilter && esSifco(searchTrimmed)
           ? { numero_credito_sifco: searchTrimmed }
           : hasFilter

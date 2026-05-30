@@ -275,10 +275,9 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
         ...(result.cuotasAtrasadas ?? []),
         ...(result.cuotasPendientes ?? []),
       ]
-        .filter(
-          (c: any) =>
-            c.validationStatus !== "pending" && c.validationStatus !== "validated"
-        )
+        // Los pagos `pending` también son seleccionables para poder reportar
+        // abonos complementarios antes de que contabilidad valide el anterior.
+        .filter((c: any) => c.validationStatus !== "validated")
         .sort((a: any, b: any) => a.numero_cuota - b.numero_cuota)[0];
 
       setCuotaSeleccionada(siguienteCuotaPagable?.numero_cuota ?? cuotaActualNumero ?? 0);

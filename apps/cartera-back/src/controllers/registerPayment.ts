@@ -322,22 +322,27 @@ const obtenerInfoCompletaCredito = async (
         .orderBy(cuotas_credito.numero_cuota),
     ]);
     console.log(cuotaApagar,"cuota a pagar");
-const numerosCuotas = cuotasPendientes.map((item) => item.cuotas_credito.numero_cuota);
-console.log("Números de cuotas pendientes:", numerosCuotas);
+    const cuotasPendientesUnicas = Array.from(
+      new Map(
+        cuotasPendientes.map((item) => [item.cuotas_credito.cuota_id, item])
+      ).values()
+    );
+    const numerosCuotas = cuotasPendientesUnicas.map((item) => item.cuotas_credito.numero_cuota);
+    console.log("Números de cuotas pendientes:", numerosCuotas);
 
-// 🎯 O si quieres más info:
-console.log("Cuotas pendientes:", cuotasPendientes.map(item => ({
-  numero_cuota: item.cuotas_credito.numero_cuota,
-  fecha_vencimiento: item.cuotas_credito.fecha_vencimiento,
-  cuota_id: item.cuotas_credito.cuota_id
-})));
+    // 🎯 O si quieres más info:
+    console.log("Cuotas pendientes:", cuotasPendientesUnicas.map(item => ({
+      numero_cuota: item.cuotas_credito.numero_cuota,
+      fecha_vencimiento: item.cuotas_credito.fecha_vencimiento,
+      cuota_id: item.cuotas_credito.cuota_id
+    })));
     // ✅ Retornar todo estructurado
     return {
       // 📋 Crédito completo
       credito: info.credito,
 
       // 📊 Cuotas pendientes (array ordenado)
-      cuotasPendientes,
+      cuotasPendientes: cuotasPendientesUnicas,
 
       // 👥 Inversionistas (array)
       inversionistas,
@@ -364,7 +369,7 @@ console.log("Cuotas pendientes:", cuotasPendientes.map(item => ({
 
       // 📈 Stats útiles
       stats: {
-        totalCuotasPendientes: cuotasPendientes.length,
+        totalCuotasPendientes: cuotasPendientesUnicas.length,
         totalInversionistas: inversionistas.length,
 
         // 🚨 Indicador de mora
@@ -793,32 +798,49 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           .where(
             and(
               eq(
-                cuotas_credito.numero_cuota,
-                cuota.cuotas_credito.numero_cuota
+                pagos_credito.cuota_id,
+                cuota.cuotas_credito.cuota_id
               ),
-              eq(pagos_credito.pagado, false),
-              eq(pagos_credito.credito_id, credito.credito_id)
+              eq(pagos_credito.credito_id, credito.credito_id),
+              ne(pagos_credito.validationStatus, "pending")
             )
           )
           .orderBy(asc(pagos_credito.pago_id));
 
-        // Priorizar el pago original (no_required) sobre cualquier otro
-        const existingPago = allExistingPagos.find(
+        const pagoOriginal = allExistingPagos.find(
           (p) => p.pago.validationStatus === "no_required"
-        ) ?? allExistingPagos[0];
+        );
+        const tieneRestante = (pago: typeof pagos_credito.$inferSelect) =>
+          new Big(pago.interes_restante ?? 0)
+            .plus(pago.iva_12_restante ?? 0)
+            .plus(pago.seguro_restante ?? 0)
+            .plus(pago.gps_restante ?? 0)
+            .plus(pago.membresias ?? 0)
+            .plus(pago.capital_restante ?? 0)
+            .gt(0);
+        const ultimoPagoValidadoConRestante = [...allExistingPagos]
+          .reverse()
+          .find(
+            ({ pago }) =>
+              pago.validationStatus === "validated" && tieneRestante(pago)
+          );
+        // El pago original es la fila destino; el último validado parcial
+        // trae el saldo vigente cuando ya hubo abonos parciales.
+        const existingPago = pagoOriginal ?? allExistingPagos[0];
+        const pagoSaldoVigente = ultimoPagoValidadoConRestante ?? existingPago;
         // Inicializar variables de abono
         // 2. OBTENER LOS RESTANTES DEL PAGO EXISTENTE (no de la cuota)
         const interes_restante = new Big(
-          existingPago?.pago.interes_restante ?? 0
+          pagoSaldoVigente?.pago.interes_restante ?? 0
         );
-        const iva_restante = new Big(existingPago?.pago.iva_12_restante ?? 0);
+        const iva_restante = new Big(pagoSaldoVigente?.pago.iva_12_restante ?? 0);
         const seguro_restante = new Big(
-          existingPago?.pago.seguro_restante ?? 0
+          pagoSaldoVigente?.pago.seguro_restante ?? 0
         );
-        const gps_restante = new Big(existingPago?.pago.gps_restante ?? 0);
-        const membresias_restante = new Big(existingPago?.pago.membresias ?? 0);
+        const gps_restante = new Big(pagoSaldoVigente?.pago.gps_restante ?? 0);
+        const membresias_restante = new Big(pagoSaldoVigente?.pago.membresias ?? 0);
         const capital_restante_pago = new Big(
-          existingPago?.pago.capital_restante ?? 0
+          pagoSaldoVigente?.pago.capital_restante ?? 0
         );
 
         // Reiniciar todos los abonos
@@ -1144,8 +1166,8 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
                 .where(
                   and(
                     eq(
-                      cuotas_credito.numero_cuota,
-                      cuota.cuotas_credito.numero_cuota
+                      cuotas_credito.cuota_id,
+                      cuota.cuotas_credito.cuota_id
                     ),
                     eq(pagos_credito.pago_id, existingPago.pago.pago_id),
                     eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
@@ -1157,6 +1179,12 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
                 .set({ pagado: true })
                 .where(
                   eq(pagos_credito.cuota_id, cuota.cuotas_credito.cuota_id)
+                );
+              await db
+                .update(cuotas_credito)
+                .set({ pagado: true })
+                .where(
+                  eq(cuotas_credito.cuota_id, cuota.cuotas_credito.cuota_id)
                 );
 
               if (
@@ -1176,28 +1204,6 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
             } else {
               disponible_para_cuotasPosteriores =
                 disponible_para_cuotasPosteriores.plus(disponible);
-              await db
-                .update(pagos_credito)
-                .set({
-                  capital_restante: nuevo_capital_restante.toString(),
-                  interes_restante: nuevo_interes_restante.toString(),
-                  iva_12_restante: nuevo_iva_restante.toString(),
-                  seguro_restante: nuevo_seguro_restante.toString(),
-                  gps_restante: nuevo_gps_restante.toString(),
-                  membresias: nuevo_membresias_restante.toString(),
-                })
-                .from(cuotas_credito)
-                .where(
-                  and(
-                    eq(
-                      cuotas_credito.numero_cuota,
-                      cuota.cuotas_credito.numero_cuota
-                    ),
-                    eq(pagos_credito.pago_id, existingPago.pago.pago_id),
-                    eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
-                  )
-                )
-                .returning();
 
               cuotas_parciales++;
               const guatemalaTimeString = new Date().toLocaleString("en-US", {

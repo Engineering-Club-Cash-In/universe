@@ -452,6 +452,7 @@ export const getCreditosPaginados = async (params: {
   perPage?: number;
   numero_credito_sifco?: string;
   estado?: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO" | "EN_CONVENIO" | "CAIDO";
+  estados_credito?: string;
   excel: boolean;
   asesor_id?: number;
   nombre_usuario?: string;
@@ -466,6 +467,9 @@ export const getCreditosPaginados = async (params: {
       page: params.page ?? 1,
       perPage: params.perPage ?? 10,
       estado: params.estado,
+      ...(params.estados_credito && {
+        estados_credito: params.estados_credito,
+      }),
       excel: params.excel,
       ...(params.numero_credito_sifco && {
         numero_credito_sifco: params.numero_credito_sifco,

@@ -33,7 +33,6 @@ import {
   lt,
   gte,
   gt,
-  ne,
   isNull,
 } from "drizzle-orm";
 import { getPagosDelMesActual, insertPagosCreditoInversionistasV2 } from "./payments";
@@ -248,7 +247,12 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         and(
           eq(cuotas_credito.credito_id, creditoId),
           eq(cuotas_credito.pagado, false),
-          ne(pagos_credito.validationStatus, "pending")
+          sql`NOT EXISTS (
+            SELECT 1
+            FROM cartera.pagos_credito p_pending
+            WHERE p_pending.cuota_id = ${cuotas_credito.cuota_id}
+              AND p_pending.validation_status = 'pending'
+          )`
         )
       )
       .orderBy(cuotas_credito.numero_cuota);

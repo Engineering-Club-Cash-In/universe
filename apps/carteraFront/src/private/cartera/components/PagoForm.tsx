@@ -465,6 +465,7 @@ export function PagoForm() {
         mode={modalMode}
         onClose={() => setModalExcesoOpen(false)}
         onAbonoCapital={permiteAbonoCapital || !(cuotasAtrasadasInfo && cuotasAtrasadasInfo.total > 0) ? handleAbonoCapital : undefined}
+        abonoCapitalLabel="Abonar excedente a capital"
         onAbonoSiguienteCuota={handleAbonoSiguienteCuota}
         excedente={excedente}
         onAbonoOtros={handleAbonoOtros}

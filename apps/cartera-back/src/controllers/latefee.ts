@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { db } from "../database";
 import { asesores, creditos, cuotas_credito, moras_condonaciones, moras_credito, moras_historial, platform_users, usuarios } from "../database/db/schema";
 import Big from "big.js";
@@ -20,6 +20,31 @@ type MoraEventoOrigen =
   | "API_MANUAL"
   | "CONDONACION_INDIVIDUAL"
   | "CONDONACION_MASIVA";
+
+const STATUS_EXCLUIDOS_MORA = ["EN_CONVENIO", "INCOBRABLE", "CANCELADO", "PENDIENTE_CANCELACION", "CAIDO"];
+
+export function isOverdueInstallmentForMora(
+  cuota: {
+    fecha_vencimiento: Date | string;
+    pagado: boolean | null;
+    hasPaidPayment?: boolean | null;
+    statusCredit?: string | null;
+  },
+  hoy: Date,
+) {
+  const zona = "America/Guatemala";
+  const fechaVenc = toZonedTime(cuota.fecha_vencimiento, zona);
+  fechaVenc.setHours(0, 0, 0, 0);
+
+  const fechaHoy = toZonedTime(hoy, zona);
+  fechaHoy.setHours(0, 0, 0, 0);
+
+  const isOverdue = fechaVenc < fechaHoy;
+  const isUnpaid = cuota.pagado === false && cuota.hasPaidPayment !== true;
+  const isEligible = !STATUS_EXCLUIDOS_MORA.includes(cuota.statusCredit ?? "");
+
+  return isOverdue && isUnpaid && isEligible;
+}
 
 /**
  * Inserta un evento en moras_historial. No lanza si falla — el historial
@@ -459,10 +484,19 @@ export async function procesarMoras() {
     // 1. Get all installments WITH PROPER JOIN
     const cuotas = await db
       .select({
+        cuota_id: cuotas_credito.cuota_id,
         credito_id: cuotas_credito.credito_id,
         fecha_vencimiento: cuotas_credito.fecha_vencimiento,
         pagado: cuotas_credito.pagado,
         statusCredit: creditos.statusCredit,
+        hasPaidPayment: sql<boolean>`EXISTS (
+          SELECT 1
+          FROM cartera.pagos_credito pc
+          WHERE pc.cuota_id = ${cuotas_credito.cuota_id}
+            AND pc."paymentFalse" = false
+            AND pc.pagado = true
+            AND pc.validation_status IN ('validated', 'no_required')
+        )`,
       })
       .from(cuotas_credito)
       .innerJoin(creditos, eq(cuotas_credito.credito_id, creditos.credito_id));
@@ -470,17 +504,7 @@ export async function procesarMoras() {
     console.log(`[DEBUG] Total installments fetched: ${cuotas.length}`);
 
     // 2. Filter overdue installments (excluyendo estados que no aplican)
-    const statusExcluidos = ["EN_CONVENIO", "INCOBRABLE", "CANCELADO", "PENDIENTE_CANCELACION", "CAIDO"];
-    const cuotasVencidas = cuotas.filter((c) => {
-      const fechaVenc = toZonedTime(c.fecha_vencimiento, zona);
-      fechaVenc.setHours(0, 0, 0, 0);
-
-      const isOverdue = fechaVenc < hoy;
-      const isUnpaid = c.pagado === false;
-      const isEligible = !statusExcluidos.includes(c.statusCredit ?? "");
-
-      return isOverdue && isUnpaid && isEligible;
-    });
+    const cuotasVencidas = cuotas.filter((c) => isOverdueInstallmentForMora(c, hoy));
 
     console.log(`[DEBUG] Overdue installments found: ${cuotasVencidas.length}`);
 

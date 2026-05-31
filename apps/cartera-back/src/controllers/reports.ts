@@ -2062,7 +2062,10 @@ export async function getPagosByVencimiento({
           COALESCE(c.gps::numeric, 0) AS gps,
           COALESCE(c.membresias_pago::numeric, 0) AS mem,
           AVG(COALESCE(cube_data.cash_in_pct, 0))::numeric AS cash_pct,
-          COALESCE(MAX(m.monto_mora::numeric), 0) AS mora,
+          CASE
+            WHEN MAX(mora_real.cuotas_atrasadas) > 0 THEN COALESCE(MAX(m.monto_mora::numeric), 0)
+            ELSE 0
+          END AS mora,
           COALESCE(SUM(p.monto_aplicado::numeric), 0) AS monto_apl
         ${commonFromJoins}
         ${commonGroupHaving}

@@ -1,20 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import axios  from "axios";
+import api from "@/Provider/interceptor";
 import type { PagoFormValues } from "../hooks/registerPayment";
 import type { ReactNode } from "react";
 
 const API_URL = import.meta.env.VITE_BACK_URL  ||'https://qk4sw4kc4c088c8csos400wc.s3.devteamatcci.site'; ;
-const api = axios.create({
-  baseURL: API_URL,
-});
-api.interceptors.request.use((config) => {
-const token = localStorage.getItem("accessToken");
-
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
 
 // Traer todos los inversionistas
 export const getInvestors = async () => {
@@ -463,6 +452,7 @@ export const getCreditosPaginados = async (params: {
   perPage?: number;
   numero_credito_sifco?: string;
   estado?: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO" | "EN_CONVENIO" | "CAIDO";
+  estados_credito?: string;
   excel: boolean;
   asesor_id?: number;
   nombre_usuario?: string;
@@ -477,6 +467,9 @@ export const getCreditosPaginados = async (params: {
       page: params.page ?? 1,
       perPage: params.perPage ?? 10,
       estado: params.estado,
+      ...(params.estados_credito && {
+        estados_credito: params.estados_credito,
+      }),
       excel: params.excel,
       ...(params.numero_credito_sifco && {
         numero_credito_sifco: params.numero_credito_sifco,
@@ -3020,7 +3013,7 @@ export const createBoleta = async (data: CreateBoletaDTO) => {
   try {
     console.log("📝 Creando boleta:", data);
 
-    const response = await axios.post<{
+    const response = await api.post<{
       success: boolean;
       message: string;
       data: Boleta;
@@ -3057,7 +3050,7 @@ export const getBoletas = async (filters?: GetBoletasFilters) => {
       params.append("offset", filters.offset.toString());
     }
 
-    const response = await axios.get<{
+    const response = await api.get<{
       success: boolean;
       data: BoletaConInversionista[];
       total: number;

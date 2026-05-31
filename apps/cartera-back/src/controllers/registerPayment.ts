@@ -796,6 +796,9 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
             ({ pago }) =>
               pago.validationStatus === "validated" && tieneRestante(pago)
           );
+        const tienePagosValidados = allExistingPagos.some(
+          ({ pago }) => pago.validationStatus === "validated"
+        );
         // El pago original es la fila destino; el último validado parcial
         // trae el saldo vigente cuando ya hubo abonos parciales.
         const existingPago = pagoOriginal ?? allExistingPagos[0];
@@ -1014,15 +1017,42 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           nuevo_gps_restante.eq(0) &&
           nuevo_membresias_restante.eq(0) &&
           nuevo_capital_restante.eq(0);
-        // Solo marcar como pagada si los restantes están en 0 Y existía un pago previo
-        // (evita marcar como pagada cuando no hay pago existente y los restantes son 0 por default)
-        const cuota_pagada = todosRestantesEnCero && !!existingPago;
-        const totalPagado = abono_capital
+        let totalPagado = abono_capital
           .plus(abono_interes)
           .plus(abono_iva_12)
           .plus(abono_seguro)
           .plus(abono_gps)
           .plus(abono_membresias);
+        const esCuotaSeleccionadaInicial =
+          cuota.cuotas_credito.numero_cuota === cuotaApagar &&
+          cuotas_completas === 0 &&
+          cuotas_parciales === 0;
+        const pagoExactoDeUnaCuota = montoEfectivo.eq(montoCuota);
+        const faltanteContraCuota = montoCuota.minus(totalPagado);
+
+        if (
+          !!existingPago &&
+          esCuotaSeleccionadaInicial &&
+          pagoExactoDeUnaCuota &&
+          !tienePagosValidados &&
+          todosRestantesEnCero &&
+          faltanteContraCuota.gt(0) &&
+          disponible_restante.gte(faltanteContraCuota)
+        ) {
+          console.log(
+            "⚠️ Restantes de cuota subestimados; reteniendo ajuste neutro en la cuota seleccionada:",
+            {
+              cuota: cuota.cuotas_credito.numero_cuota,
+              faltanteContraCuota: faltanteContraCuota.toString(),
+              disponibleRestante: disponible_restante.toString(),
+            }
+          );
+          totalPagado = totalPagado.plus(faltanteContraCuota);
+          disponible_restante = disponible_restante.minus(faltanteContraCuota);
+        }
+        // Solo marcar como pagada si los restantes están en 0 Y existía un pago previo
+        // (evita marcar como pagada cuando no hay pago existente y los restantes son 0 por default)
+        const cuota_pagada = todosRestantesEnCero && !!existingPago;
         // Preparar datos del pago
         const currentDate = new Date();
         const months = [

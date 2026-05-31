@@ -774,7 +774,14 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
                 cuota.cuotas_credito.cuota_id
               ),
               eq(pagos_credito.credito_id, credito.credito_id),
-              ne(pagos_credito.validationStatus, "pending")
+              or(
+                ne(pagos_credito.validationStatus, "pending"),
+                and(
+                  eq(pagos_credito.validationStatus, "pending"),
+                  eq(pagos_credito.pagado, false),
+                  eq(pagos_credito.paymentFalse, false)
+                )
+              )
             )
           )
           .orderBy(asc(pagos_credito.pago_id));
@@ -790,19 +797,25 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
             .plus(pago.membresias ?? 0)
             .plus(pago.capital_restante ?? 0)
             .gt(0);
-        const ultimoPagoValidadoConRestante = [...allExistingPagos]
+        const esPagoSaldoElegible = (pago: typeof pagos_credito.$inferSelect) =>
+          pago.validationStatus === "validated" ||
+          (pago.validationStatus === "pending" &&
+            pago.pagado === false &&
+            pago.paymentFalse === false);
+        const ultimoPagoParcialConRestante = [...allExistingPagos]
           .reverse()
           .find(
             ({ pago }) =>
-              pago.validationStatus === "validated" && tieneRestante(pago)
+              esPagoSaldoElegible(pago) &&
+              tieneRestante(pago)
           );
         const tienePagosValidados = allExistingPagos.some(
           ({ pago }) => pago.validationStatus === "validated"
         );
-        // El pago original es la fila destino; el último validado parcial
-        // trae el saldo vigente cuando ya hubo abonos parciales.
+        // El pago original es la fila destino; el último pago parcial elegible
+        // trae el saldo vigente aunque siga pendiente de validación.
         const existingPago = pagoOriginal ?? allExistingPagos[0];
-        const pagoSaldoVigente = ultimoPagoValidadoConRestante ?? existingPago;
+        const pagoSaldoVigente = ultimoPagoParcialConRestante ?? existingPago;
         // Inicializar variables de abono
         // 2. OBTENER LOS RESTANTES DEL PAGO EXISTENTE (no de la cuota)
         const interes_restante = new Big(
@@ -1035,6 +1048,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           esCuotaSeleccionadaInicial &&
           pagoExactoDeUnaCuota &&
           !tienePagosValidados &&
+          !ultimoPagoParcialConRestante &&
           todosRestantesEnCero &&
           faltanteContraCuota.gt(0) &&
           disponible_restante.gte(faltanteContraCuota)

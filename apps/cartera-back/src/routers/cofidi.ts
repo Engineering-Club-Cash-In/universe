@@ -315,7 +315,12 @@ if (facturasExistentes.length > 0) {
         .where(
           and(
             eq(compras_credito_inversionista.credito_id, pagoData.credito_id!),
-            eq(compras_credito_inversionista.pendiente_facturar, true)
+            eq(compras_credito_inversionista.pendiente_facturar, true),
+            // 🔒 Solo COMPRA DE CARTERA activa el prorrateo.
+            //    Las reinversiones no cambian la "foto" del crédito en el sentido
+            //    que importa para el prorrateo (no hay transferencia entre inv),
+            //    así que entran al flujo viejo normal.
+            eq(compras_credito_inversionista.tipo_operacion, "compra_cartera")
           )
         );
 

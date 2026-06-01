@@ -35,7 +35,6 @@ import {
 } from "lucide-react";
 import { usePagoForm } from "../hooks/registerPayment";
 import { Button } from "@/components/ui/button";
-import { useFalsePayment } from "../hooks/falsePayments";
 import { useReciboPago } from "../hooks/useReciboPago";
 import {
   DropdownMenu,
@@ -405,7 +404,6 @@ export function PaymentsCredits() {
   const [collapseInv, setCollapseInv] = useState<{ [key: number]: boolean }>(
     {}
   );
-  const falsePayment = useFalsePayment();
   const reciboPago = useReciboPago();
   const { user } = useAuth(); 
   const { liquidandoId, handleLiquidar, handleReverse, reversePago, handleRevertToPending, revertPaymentToPending, handleRevalidatePayment, revalidatePayment, handleProcessInvestors, processInvestors, recalcularPagos, handleRecalcularPagos } =
@@ -495,9 +493,6 @@ const handleDownloadExcel = async () => {
           .includes(search.toLowerCase())
     )
     : [];
-  const handleFalsePayment = (pago_id: number, credito_id: number) => {
-    falsePayment.mutate({ pago_id, credito_id });
-  };
   return (
     <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
       <div className="w-full max-w-6xl mx-auto">
@@ -707,13 +702,6 @@ const handleDownloadExcel = async () => {
                         onClick={(e) => { e.stopPropagation(); handleRevalidatePayment(item.pago.pago_id, item.pago.credito_id); }}
                         disabled={item.pago.pagado === true || item.pago.paymentFalse === true || revalidatePayment.isPending}>
                         {revalidatePayment.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : null} Revalidar Pago
-                      </button>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem asChild>
-                      <button className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-red-50 text-red-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
-                        onClick={(e) => { e.stopPropagation(); handleFalsePayment(item.pago.pago_id, item.pago.credito_id); refetch(); }}
-                        disabled={falsePayment.isPending || item.pago.pagado === true || item.pago.paymentFalse === true}>
-                        {falsePayment.isPending ? <Loader2 className="animate-spin w-4 h-4" /> : null} Pago Falso
                       </button>
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild>

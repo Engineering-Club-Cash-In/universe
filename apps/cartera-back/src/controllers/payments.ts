@@ -1380,7 +1380,9 @@ export async function falsePayment(pago_id: number, credito_id: number) {
   console.log(
     `Falsificando pago con ID: ${pago_id} para crédito ID: ${credito_id}`
   );
-  insertPagosCreditoInversionistas(pago_id, credito_id, true); // Excluir Cube Investments
+  // updateCredito=false → NO actualiza creditos_inversionistas_espejo (monto_aportado).
+  // Falsear un pago no debe descontar el aporte del crédito/espejo.
+  insertPagosCreditoInversionistas(pago_id, credito_id, true, false, false); // excludeCube=true, cuotaPagada=false, updateCredito=false
   // Actualizar el estado del pago a falso
   const result = await db
     .update(pagos_credito)

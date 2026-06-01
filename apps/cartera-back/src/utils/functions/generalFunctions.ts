@@ -867,7 +867,16 @@ export async function buildInversionistaWorkbook(
               periodoMes,
               periodoAnio,
             );
-            montoBaseCalculo = Number(new Big(cr.monto_aportado).minus(montoRestarCalculo).toFixed(2));
+            
+            // Si el reporte es en dólares, convertimos montoRestarCalculo (que en BD está en quetzales)
+            // a dólares usando formatToUSD para mantener consistencia de monedas.
+            let restaAjustada = Number(montoRestarCalculo);
+            if (esDolares) {
+              const { formatToUSD } = await import("./currencyConverter");
+              restaAjustada = formatToUSD(montoRestarCalculo.toString(), inv.inversionista_id);
+            }
+
+            montoBaseCalculo = Number(new Big(cr.monto_aportado).minus(restaAjustada).toFixed(2));
           }
         } catch (e) {
           console.error("Error calculando ajuste dinámico para el Excel:", e);

@@ -556,6 +556,63 @@ export function TableInvestors() {
     setModalOpen(true);
   };
 
+  // Abre el modal de Compra de Cartera para un inversionista (reutilizable: tarjeta y header)
+  const handleAbrirCompraCartera = (inv: any) => {
+    setCompraCarteraInvId(inv.inversionista_id);
+    setCompraCarteraMonto("");
+    // Default compra_cartera → fecha de hoy (editable)
+    setCompraCarteraFecha(new Date().toISOString().split("T")[0]);
+    setCompraCarteraTipoReinversion("sin_reinversion");
+    setCompraCarteraTipoOperacion("compra_cartera");
+    // Calcular moda del porcentaje de participación desde créditos existentes
+    const creditos = inv.creditos ?? [];
+    if (creditos.length > 0) {
+      const freq = new Map<string, number>();
+      for (const c of creditos) {
+        const pct = String(Math.round(Number(c.porcentaje_inversionista ?? 0)));
+        freq.set(pct, (freq.get(pct) ?? 0) + 1);
+      }
+      let modaPct = "70";
+      let maxCount = 0;
+      for (const [pct, count] of freq) {
+        if (count > maxCount) { modaPct = pct; maxCount = count; }
+      }
+      setCompraCarteraPctInv(modaPct);
+      setCompraCarteraPctCashIn(String(100 - Number(modaPct)));
+    } else {
+      setCompraCarteraPctInv("70");
+      setCompraCarteraPctCashIn("30");
+    }
+    setCompraCarteraOpen(true);
+  };
+
+  // Inversionista objetivo para los botones del header: el de la lista filtrada (currentInv)
+  // o, si no tiene créditos y no aparece en la lista, el del catálogo (para igual permitir editar/comprar)
+  const headerInv = useMemo(() => {
+    if (currentInv) return currentInv;
+    if (selectedInvestor === "" || selectedInvestor === undefined) return null;
+    const cat: any = investors.find(
+      (i: any) => i.inversionista_id === Number(selectedInvestor)
+    );
+    if (!cat) return null;
+    return {
+      inversionista_id: cat.inversionista_id,
+      nombre_inversionista: cat.nombre,
+      emite_factura: cat.emite_factura,
+      reinversion: cat.reinversion,
+      banco_id: cat.banco,
+      tipo_cuenta: cat.tipo_cuenta,
+      numero_cuenta: cat.numero_cuenta,
+      re_inversion: cat.tipo_reinversion,
+      moneda: cat.moneda,
+      dpi: cat.dpi ?? "",
+      tipo_reinversion: cat.tipo_reinversion,
+      monto_reinversion: cat.monto_reinversion ?? 0,
+      email: cat.email,
+      creditos: cat.creditos ?? [],
+    };
+  }, [currentInv, selectedInvestor, investors]);
+
   // Dentro del componente, agregar estados
   const [modalBoletaOpen, setModalBoletaOpen] = useState(false);
 const [inversionistaParaBoleta, setInversionistaParaBoleta] = useState<{
@@ -825,6 +882,32 @@ const handleAbrirModalBoleta = (inversionista?: { id: number; nombre: string; dp
             >
               <RefreshCw className={`w-5 h-5 ${isFetching ? "animate-spin" : ""}`} />
               <span className="hidden sm:inline">Recargar</span>
+            </button>
+          )}
+
+          {/* Editar Inversionista - visible cuando hay inversionista seleccionado (aunque no tenga créditos) */}
+          {selectedInvestor !== "" && headerInv && (
+            <button
+              onClick={() => handleEditInvestor(headerInv)}
+              className="px-4 py-2 rounded-lg bg-amber-500 text-white font-bold hover:bg-amber-600 active:scale-95 transition-all flex items-center gap-2 justify-center shadow-sm"
+              title="Editar el inversionista seleccionado"
+            >
+              <Edit className="w-5 h-5" />
+              <span className="hidden sm:inline">Editar Inversionista</span>
+              <span className="sm:hidden">Editar</span>
+            </button>
+          )}
+
+          {/* Compra de Cartera - visible cuando hay inversionista seleccionado (aunque no tenga créditos) */}
+          {selectedInvestor !== "" && headerInv && (
+            <button
+              onClick={() => handleAbrirCompraCartera(headerInv)}
+              className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-bold hover:bg-emerald-700 active:scale-95 transition-all flex items-center gap-2 justify-center shadow-sm"
+              title="Registrar compra de cartera / reinversión para el inversionista seleccionado"
+            >
+              <ShoppingCart className="w-5 h-5" />
+              <span className="hidden sm:inline">Compra de Cartera</span>
+              <span className="sm:hidden">Compra</span>
             </button>
           )}
 
@@ -1293,32 +1376,7 @@ const tieneBoletaPendiente = inv.tieneBoletaPendiente ?? false;
                 <DropdownMenuItem
                   onClick={(e) => {
                     e.stopPropagation();
-                    setCompraCarteraInvId(inv.inversionista_id);
-                    setCompraCarteraMonto("");
-                    // Default compra_cartera → fecha de hoy (editable)
-                    setCompraCarteraFecha(new Date().toISOString().split("T")[0]);
-                    setCompraCarteraTipoReinversion("sin_reinversion");
-                    setCompraCarteraTipoOperacion("compra_cartera");
-                    // Calcular moda del porcentaje de participación desde créditos existentes
-                    const creditos = inv.creditos ?? [];
-                    if (creditos.length > 0) {
-                      const freq = new Map<string, number>();
-                      for (const c of creditos) {
-                        const pct = String(Math.round(Number(c.porcentaje_inversionista ?? 0)));
-                        freq.set(pct, (freq.get(pct) ?? 0) + 1);
-                      }
-                      let modaPct = "70";
-                      let maxCount = 0;
-                      for (const [pct, count] of freq) {
-                        if (count > maxCount) { modaPct = pct; maxCount = count; }
-                      }
-                      setCompraCarteraPctInv(modaPct);
-                      setCompraCarteraPctCashIn(String(100 - Number(modaPct)));
-                    } else {
-                      setCompraCarteraPctInv("70");
-                      setCompraCarteraPctCashIn("30");
-                    }
-                    setCompraCarteraOpen(true);
+                    handleAbrirCompraCartera(inv);
                   }}
                   className="cursor-pointer rounded-lg px-3 py-2.5 focus:bg-emerald-50"
                 >

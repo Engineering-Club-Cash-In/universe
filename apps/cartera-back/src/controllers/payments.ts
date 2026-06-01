@@ -557,7 +557,10 @@ export async function insertPagosCreditoInversionistas(
       !isCube &&
       fechaInicio !== null &&
       fechaInicio.getMonth() === mesAnterior &&
-      fechaInicio.getFullYear() === anioMesAnterior;
+      fechaInicio.getFullYear() === anioMesAnterior &&
+      // Si inicia el día 1, participó el mes COMPLETO → interés normal (no proporcional).
+      // Prorratear con (diasDelMes - 1) cobraría un día de menos y descuadra por centavos.
+      fechaInicio.getDate() !== 1;
 
     let bigInteres: Big;
     let bigIVA: Big;

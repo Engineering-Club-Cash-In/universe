@@ -817,27 +817,17 @@ export async function buildInversionistaWorkbook(
     let hasData = false;
 
     for (const cr of credGrupo) {
-      for (const pago of cr.pagos ?? []) {
-        row++;
-        rowIdx++;
-        hasData = true;
-        const rr = ws.getRow(row);
-
-        // Para pagos NO_LIQUIDADO el monto_aportado del espejo todavía no
-        // tiene el abono restado, así que Capital = monto_aportado y
-        // Capital restante = monto_aportado - abono. Para pagos LIQUIDADO
-        // el monto_aportado ya viene post-abono, así que se suma para
-        // reconstruir el capital inicial y el restante es el aportado tal cual.
-        const esNoLiquidado = pago.estado_liquidacion === "NO_LIQUIDADO";
-        
-        // Calcular el ajuste de compras dinámicamente en memoria para este crédito/inversionista
-        // para reflejar el monto base correcto en la celda del Excel, sin alterar la BD.
-        const { db } = await import("../../database/index");
-        const { historico_liquidaciones_espejo } = await import("../../database/db/schema");
-        const { and, eq, desc } = await import("drizzle-orm");
-        const { calcularAjusteCompras } = await import("../comprasAjuste");
-        let montoBaseCalculo = toN(cr.monto_aportado);
+      // Calcular el ajuste de compras dinámicamente en memoria para este crédito/inversionista
+      // una sola vez por crédito (evitando N+1 consultas en BD por cada pago)
+      let montoBaseCalculo = toN(cr.monto_aportado);
+      const primerPago = cr.pagos?.[0];
+      if (primerPago) {
         try {
+          const { db } = await import("../../database/index");
+          const { historico_liquidaciones_espejo } = await import("../../database/db/schema");
+          const { and, eq, desc } = await import("drizzle-orm");
+          const { calcularAjusteCompras } = await import("../comprasAjuste");
+
           // Buscamos el último histórico
           const [lastHistorico] = await db
             .select({
@@ -854,7 +844,7 @@ export async function buildInversionistaWorkbook(
             .orderBy(desc(historico_liquidaciones_espejo.fecha))
             .limit(1);
 
-          const fechaParaAjuste = pago.fecha_pago ? new Date(pago.fecha_pago) : new Date();
+          const fechaParaAjuste = primerPago.fecha_pago ? new Date(primerPago.fecha_pago) : new Date();
           const periodoMes = fechaParaAjuste.getMonth();
           const periodoAnio = fechaParaAjuste.getFullYear();
           const espejoIgualHistorico = lastHistorico && new Big(cr.monto_aportado).eq(new Big(lastHistorico.monto_aportado));
@@ -881,6 +871,20 @@ export async function buildInversionistaWorkbook(
         } catch (e) {
           console.error("Error calculando ajuste dinámico para el Excel:", e);
         }
+      }
+
+      for (const pago of cr.pagos ?? []) {
+        row++;
+        rowIdx++;
+        hasData = true;
+        const rr = ws.getRow(row);
+
+        // Para pagos NO_LIQUIDADO el monto_aportado del espejo todavía no
+        // tiene el abono restado, así que Capital = monto_aportado y
+        // Capital restante = monto_aportado - abono. Para pagos LIQUIDADO
+        // el monto_aportado ya viene post-abono, así que se suma para
+        // reconstruir el capital inicial y el restante es el aportado tal cual.
+        const esNoLiquidado = pago.estado_liquidacion === "NO_LIQUIDADO";
 
         // Explicación de la lógica de Capital y Capital Restante:
         // - Si el pago es NO_LIQUIDADO: el abono a capital del mes aún NO se ha restado del espejo en la BD.

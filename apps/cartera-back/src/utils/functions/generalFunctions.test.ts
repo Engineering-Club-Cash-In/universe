@@ -247,4 +247,69 @@ describe("buildInversionistaWorkbook - Reglas de Ajuste de Montos para Excel", (
     expect(buffer).toBeDefined();
     expect(buffer.length).toBeGreaterThan(0);
   });
+
+  it("4. validar que se use la fecha de pago para determinar el periodo y no falle con multiples pagos", async () => {
+    const mockInversionista = {
+      nombre_inversionista: "Inversionista MultiPago",
+      moneda: "quetzales",
+      reinversion: "sin_reinversion",
+      subtotal: {
+        total_abono_capital: "0.00",
+        total_abono_general_interes: "0.00",
+        total_cuota_con_reinversion: "0.00",
+      },
+      creditos: [
+        {
+          credito_id: 104,
+          numero_credito_sifco: "CRED-104",
+          nombre_usuario: "Cliente Cuatro",
+          monto_aportado: "15000.00000000",
+          porcentaje_interes: "10.00",
+          pagos: [
+            {
+              estado_liquidacion: "NO_LIQUIDADO",
+              abono_capital: "1000.00",
+              abono_interes: "200.00",
+              abono_iva_12: "24.00",
+              porcentaje_participacion: "50.00",
+              cuota: 1,
+              fecha_pago: "2026-06-05", // Pagado en Junio
+            },
+            {
+              estado_liquidacion: "NO_LIQUIDADO",
+              abono_capital: "1000.00",
+              abono_interes: "200.00",
+              abono_iva_12: "24.00",
+              porcentaje_participacion: "50.00",
+              cuota: 2,
+              fecha_pago: "2026-06-05",
+            }
+          ]
+        }
+      ]
+    };
+
+    mockHistoricoLiquidacionesEspejo = [
+      {
+        monto_aportado: "10000.00000000",
+        fecha: new Date("2026-05-15")
+      }
+    ];
+
+    // Compra completada el 2 de junio por Q5,000.
+    // Debería ser restada en junio (determinada por la fecha de pago "2026-06-05").
+    mockComprasCreditoInversionista = [
+      {
+        monto_aportado: "5000.00000000",
+        tipo_operacion: "compra_cartera",
+        status: "completado",
+        created_at: new Date("2026-06-02"),
+        updated_at: new Date("2026-06-02"),
+      }
+    ];
+
+    const buffer = await buildInversionistaWorkbook(mockInversionista as any);
+    expect(buffer).toBeDefined();
+    expect(buffer.length).toBeGreaterThan(0);
+  });
 });

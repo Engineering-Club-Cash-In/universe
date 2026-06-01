@@ -829,12 +829,62 @@ export async function buildInversionistaWorkbook(
         // el monto_aportado ya viene post-abono, así que se suma para
         // reconstruir el capital inicial y el restante es el aportado tal cual.
         const esNoLiquidado = pago.estado_liquidacion === "NO_LIQUIDADO";
+        
+        // Calcular el ajuste de compras dinámicamente en memoria para este crédito/inversionista
+        // para reflejar el monto base correcto en la celda del Excel, sin alterar la BD.
+        const { db } = await import("../../database/index");
+        const { historico_liquidaciones_espejo } = await import("../../database/db/schema");
+        const { and, eq, desc } = await import("drizzle-orm");
+        const { calcularAjusteCompras } = await import("../comprasAjuste");
+        let montoBaseCalculo = toN(cr.monto_aportado);
+        try {
+          // Buscamos el último histórico
+          const [lastHistorico] = await db
+            .select({
+              monto_aportado: historico_liquidaciones_espejo.monto_aportado,
+              fecha: historico_liquidaciones_espejo.fecha,
+            })
+            .from(historico_liquidaciones_espejo)
+            .where(
+              and(
+                eq(historico_liquidaciones_espejo.credito_id, cr.credito_id),
+                eq(historico_liquidaciones_espejo.inversionista_id, inv.inversionista_id)
+              )
+            )
+            .orderBy(desc(historico_liquidaciones_espejo.fecha))
+            .limit(1);
+
+          const fechaParaAjuste = pago.fecha_pago ? new Date(pago.fecha_pago) : new Date();
+          const periodoMes = fechaParaAjuste.getMonth();
+          const periodoAnio = fechaParaAjuste.getFullYear();
+          const espejoIgualHistorico = lastHistorico && new Big(cr.monto_aportado).eq(new Big(lastHistorico.monto_aportado));
+
+          if (!espejoIgualHistorico) {
+            const { montoRestarCalculo } = await calcularAjusteCompras(
+              cr.credito_id,
+              inv.inversionista_id,
+              lastHistorico ? new Date(lastHistorico.fecha) : null,
+              periodoMes,
+              periodoAnio,
+            );
+            montoBaseCalculo = Number(new Big(cr.monto_aportado).minus(montoRestarCalculo).toFixed(2));
+          }
+        } catch (e) {
+          console.error("Error calculando ajuste dinámico para el Excel:", e);
+        }
+
+        // Explicación de la lógica de Capital y Capital Restante:
+        // - Si el pago es NO_LIQUIDADO: el abono a capital del mes aún NO se ha restado del espejo en la BD.
+        //   Por lo tanto, 'Capital' (inicial) es el montoBaseCalculo actual, y 'Capital Restante' es el saldo inicial menos el abono que se le pagará.
+        // - Si el pago es LIQUIDADO: el abono a capital ya se restó físicamente en la BD.
+        //   Para mostrar el 'Capital' inicial con el que empezó el mes, se lo sumamos de vuelta (montoBaseCalculo + abono). 
+        //   El 'Capital Restante' actual post-abono ya es exactamente el valor de montoBaseCalculo.
         const capital = esNoLiquidado
-          ? toN(cr.monto_aportado)
-          : toN(cr.monto_aportado) + toN(pago.abono_capital);
+          ? montoBaseCalculo
+          : montoBaseCalculo + toN(pago.abono_capital);
         const capitalRestante = esNoLiquidado
-          ? toN(cr.monto_aportado) - toN(pago.abono_capital)
-          : toN(cr.monto_aportado);
+          ? montoBaseCalculo - toN(pago.abono_capital)
+          : montoBaseCalculo;
         const tasaFmt = toN(pago.tasaInteresInvesor) / 100;
         const cuotaMes = `${pago.mes || "-"}${pago.cuota ? ` (Cuota #${pago.cuota})` : ""}`;
 

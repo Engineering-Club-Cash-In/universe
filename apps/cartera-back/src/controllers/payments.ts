@@ -2271,6 +2271,17 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
       console.log(`📅 Fecha de cálculo override: ${fechaCalculo.toISOString()}`);
     }
 
+    // Inicio del período a procesar: usa el mes de fechaCalculo si viene,
+    // si no el mes actual. Solo participaciones anteriores a este inicio
+    // deben generar pagos en este período (regla: compra del mes → paga desde el mes siguiente).
+    const baseCalculo = fechaCalculo ?? new Date();
+    const inicioPeriodo = new Date(
+      baseCalculo.getUTCFullYear(),
+      baseCalculo.getUTCMonth(),
+      1
+    ).toISOString().slice(0, 10);
+    console.log(`📅 Inicio de período para filtro: ${inicioPeriodo}`);
+
     // Paso 1: Se buscan todos los créditos en los que este inversionista participa
     // y que aún están activos (pueden estar al día, en mora, en proceso de cancelación, etc.).
     const creditosInversionista = await db
@@ -2294,6 +2305,7 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
       .where(
         and(
           eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId),
+          lt(creditos_inversionistas_espejo.fecha_inicio_participacion, inicioPeriodo),
           inArray(creditos.statusCredit, [
             "ACTIVO",
             "MOROSO",

@@ -847,17 +847,16 @@ export async function buildInversionistaWorkbook(
           const fechaParaAjuste = primerPago.fecha_pago ? new Date(primerPago.fecha_pago) : new Date();
           const periodoMes = fechaParaAjuste.getMonth();
           const periodoAnio = fechaParaAjuste.getFullYear();
-          const espejoIgualHistorico = lastHistorico && new Big(cr.monto_aportado).eq(new Big(lastHistorico.monto_aportado));
+          // Siempre calcular ajuste — cubre compras pendientes aunque espejo == historico
+          const { montoRestarCalculo } = await calcularAjusteCompras(
+            cr.credito_id,
+            inv.inversionista_id,
+            lastHistorico ? new Date(lastHistorico.fecha) : null,
+            periodoMes,
+            periodoAnio,
+          );
 
-          if (!espejoIgualHistorico) {
-            const { montoRestarCalculo } = await calcularAjusteCompras(
-              cr.credito_id,
-              inv.inversionista_id,
-              lastHistorico ? new Date(lastHistorico.fecha) : null,
-              periodoMes,
-              periodoAnio,
-            );
-            
+          if (montoRestarCalculo.gt(0)) {
             // Si el reporte es en dólares, convertimos montoRestarCalculo (que en BD está en quetzales)
             // a dólares usando formatToUSD para mantener consistencia de monedas.
             let restaAjustada = Number(montoRestarCalculo);

@@ -39,7 +39,7 @@ export async function calcularAjusteCompras(
       and(
         eq(compras_credito_inversionista.credito_id, credito_id),
         eq(compras_credito_inversionista.inversionista_id, inversionista_id),
-        inArray(compras_credito_inversionista.tipo_operacion, ["compra_cartera", "reinversion"]),
+        inArray(compras_credito_inversionista.tipo_operacion, ["compra_cartera"]), // Hay que volver a ponerlo para que acepte reinversiones
       ),
     )
     .orderBy(desc(compras_credito_inversionista.updated_at));

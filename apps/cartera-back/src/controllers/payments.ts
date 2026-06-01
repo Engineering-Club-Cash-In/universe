@@ -12,6 +12,7 @@ import {
   cuotas_credito,
   abonos_capital,
   historico_liquidaciones_espejo,
+  compras_credito_inversionista,
 } from "../database/db/schema";
 import { desc, gte } from "drizzle-orm";
 import Big from "big.js";
@@ -498,16 +499,17 @@ export async function insertPagosCreditoInversionistas(
     const espejoIgualHistoricoV1 =
       lastHistoricoV1 && new Big(inv.monto_aportado).eq(new Big(lastHistoricoV1.monto_aportado));
 
-    if (!espejoIgualHistoricoV1) {
-      const { montoRestarValidacion, montoRestarCalculo } = await calcularAjusteCompras(
-        credito_id,
-        inv.inversionista_id,
-        lastHistoricoV1 ? new Date(lastHistoricoV1.fecha) : null,
-        periodoMes,
-        periodoAnio,
-      );
+    // Siempre calcular ajuste — cubre compras pendientes aunque espejo == historico
+    const { montoRestarValidacion, montoRestarCalculo } = await calcularAjusteCompras(
+      credito_id,
+      inv.inversionista_id,
+      lastHistoricoV1 ? new Date(lastHistoricoV1.fecha) : null,
+      periodoMes,
+      periodoAnio,
+    );
 
-      // Validation 1: espejo ajustado por compras nuevas == histórico
+    // Validación solo cuando espejo != historico (hay compras que ya actualizaron espejo)
+    if (!espejoIgualHistoricoV1) {
       const montoParaValidacion = new Big(inv.monto_aportado).minus(montoRestarValidacion);
       if (lastHistoricoV1 && !montoParaValidacion.eq(new Big(lastHistoricoV1.monto_aportado))) {
         throw new Error(
@@ -515,8 +517,30 @@ export async function insertPagosCreditoInversionistas(
           `espejo-compras_nuevas (${montoParaValidacion.toFixed(8)}) ≠ histórico (${lastHistoricoV1.monto_aportado})`
         );
       }
+    }
 
+    // Siempre aplicar resta — pendientes reducen base aunque espejo == historico
+    if (montoRestarCalculo.gt(0)) {
       montoBaseCalculo = new Big(inv.monto_aportado).minus(montoRestarCalculo);
+    }
+
+    // Recalcular cuota cuando hay ajuste real
+    let cuotaRecalculada: Big;
+    if (montoRestarCalculo.gt(0)) {
+      const capitalTotalBig  = new Big(currentCredit?.capital ?? 0);
+      const cuotaTotalBig    = new Big(currentCredit?.cuota ?? 0);
+      const seguroBig        = new Big(currentCredit?.seguro_10_cuotas ?? 0);
+      const membresiasBig    = new Big(currentCredit?.membresias_pago ?? 0);
+      const cuotaSinCargos   = cuotaTotalBig.minus(membresiasBig).minus(seguroBig);
+      const pctParticipacion = capitalTotalBig.gt(0)
+        ? montoBaseCalculo.div(capitalTotalBig).times(100)
+        : new Big(0);
+      const cuotaBaseRecalc  = cuotaSinCargos.times(pctParticipacion.div(100)).round(2);
+      cuotaRecalculada = (inv.inversionista_id === mayorCuotaInversionistaId && !excludeCube)
+        ? cuotaBaseRecalc.plus(seguroBig).plus(membresiasBig).round(2)
+        : cuotaBaseRecalc;
+    } else {
+      cuotaRecalculada = new Big(inv.cuota_inversionista ?? 0);
     }
 
     // --- Calcular los 4 campos desde monto_aportado (misma lógica que processAndReplaceCreditInvestors) ---
@@ -675,10 +699,8 @@ export async function insertPagosCreditoInversionistas(
 
     let abono_capital = new Big(inv.monto_aportado || 0).eq(0)
       ? new Big(0)
-      : (isCube
-          ? new Big(inv?.cuota_inversionista ?? 0)
-          : new Big(inv.cuota_inversionista ?? 0));
-    console.log(`   💰 abono_capital inicial: ${abono_capital.toString()}`);
+      : cuotaRecalculada;
+    console.log(`   💰 abono_capital inicial (cuota recalculada desde capital ajustado): ${abono_capital.toString()}`);
 
     const totalMontos = montoCashInCalc.plus(montoInversionistaCalc);
     const totalIVA = ivaCashInCalc.plus(ivaInversionistaCalc);

@@ -20,6 +20,10 @@ import { processAndReplaceCreditInvestors } from "./investor";
 import { processConvenioPayment } from "./paymentAgreement";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import { convertirAHoraGuatemala } from "../utils/functions/generalFunctions";
+import {
+  applyCapitalPaymentAndBuildResponse,
+  getCuotaIdForPaymentInsert,
+} from "./registerPaymentPolicy";
 
 // ========================================
 // TIPOS E INTERFACES
@@ -1721,7 +1725,7 @@ export async function insertarPago({
     .insert(pagos_credito)
     .values({
       credito_id: creditData.credito_id,
-      cuota_id: creditData.cuota_id ?? 0,
+      cuota_id: getCuotaIdForPaymentInsert(creditData.cuota_id),
       cuota: creditData.cuota?.toString() ?? "0",
       cuota_interes: creditData.cuota_interes?.toString() ?? "0",
 
@@ -1804,21 +1808,11 @@ export async function aplicarPagoAlCredito(pago_id: number) {
       throw new Error(`Pago ${pago_id} no encontrado`);
     }
     if (pago.validationStatus === "capital") {
-      if (pago.credito_id === null) {
-        throw new Error("No se puede aplicar el abono: credito_id es null");
-      }
-      aplicarAbonoCapitalInversionistas(
-        pago.credito_id,
-        pago.abono_capital ?? "0",
-        pago_id
+      return applyCapitalPaymentAndBuildResponse(
+        pago,
+        pago_id,
+        aplicarAbonoCapitalInversionistas
       );
-      console.log("⚠️ El pago es un abono directo a capital");
-      return {
-        success: true,
-        applied: false,
-        message:
-          "Pago validado como abono a capital , se abonó a inversionistas correctamente",
-      };
     }
     if (pago.validationStatus === "reset") {
       if (pago.credito_id === null) {

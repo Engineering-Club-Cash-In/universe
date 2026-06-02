@@ -3442,6 +3442,7 @@ export const cobrosRouter = {
 				telefonoReal: string; // destino original (para trazabilidad)
 				mensaje: string;
 				casoCobroId: string | null;
+				clienteNombre: string | null; // para reportar en descartados si falla
 			};
 			const candidatos: Candidato[] = [];
 			const descartados: Array<{
@@ -3514,6 +3515,7 @@ export const cobrosRouter = {
 					telefonoReal: telefono,
 					mensaje,
 					casoCobroId: sifco ? (casoIdPorSifco.get(sifco) ?? null) : null,
+					clienteNombre,
 				});
 			}
 
@@ -3560,8 +3562,22 @@ export const cobrosRouter = {
 				for (const c of chunk) {
 					const res = byRef.get(c.numeroSifco);
 					const ok = res?.success === true;
-					if (ok) enviados += 1;
-					else fallidos += 1;
+					if (ok) {
+						enviados += 1;
+					} else {
+						fallidos += 1;
+						// Los que el proveedor rechazó también se reportan como
+						// descartados para que aparezcan en la tabla/CSV y se les
+						// pueda dar seguimiento manual, igual que los pre-descartes.
+						const motivoFallo = res?.error?.trim()
+							? `Falló el envío: ${res.error.trim()}`
+							: "Falló el envío";
+						descartados.push({
+							numeroSifco: c.numeroSifco || null,
+							clienteNombre: c.clienteNombre,
+							motivo: motivoFallo,
+						});
+					}
 
 					detalle.push({
 						numeroSifco: c.numeroSifco,

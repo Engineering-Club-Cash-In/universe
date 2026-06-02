@@ -189,9 +189,10 @@ export function MassWhatsappModal({
 				fechaHasta: filtros.fechaHasta,
 			}),
 		onSuccess: (res) => {
+			// `descartados` ya incluye los que fallaron en el proveedor, así que
+			// no se listan los `fallidos` aparte para no contarlos dos veces.
 			const partes = [
 				`${res.enviados} enviados`,
-				`${res.fallidos} fallidos`,
 				`${res.descartados.length} descartados`,
 			];
 			if (typeof res.contactosRegistrados === "number") {
@@ -376,9 +377,10 @@ export function MassWhatsappModal({
 						Descartados del envío masivo ({descartadosResult?.length ?? 0})
 					</DialogTitle>
 					<DialogDescription>
-						Estos créditos no recibieron mensaje porque les faltaba algún dato
-						(teléfono, cuota o asesor asignado). Podés exportarlos a CSV para
-						hacer seguimiento manual.
+						Estos créditos no recibieron el mensaje: o les faltaba algún dato
+						(teléfono, cuota o asesor asignado) o el envío falló en el
+						proveedor. El motivo de cada uno se indica en la última columna.
+						Podés exportarlos a CSV para hacer seguimiento manual.
 					</DialogDescription>
 				</DialogHeader>
 

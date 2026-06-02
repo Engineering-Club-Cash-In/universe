@@ -2182,7 +2182,12 @@ export async function getAcumuladoPorCredito({ credito_id }: { credito_id: numbe
       COALESCE(MIN(pc.seguro_restante::numeric),   0) AS seguro_restante,
       COALESCE(MIN(pc.gps_restante::numeric),      0) AS gps_restante,
       COALESCE(MIN(pc.membresias::numeric),        0) AS membresias,
-      COALESCE(MIN(pc.total_restante::numeric),    0) AS total_restante,
+      COALESCE(MIN(pc.capital_restante::numeric),  0)
+        + COALESCE(MIN(pc.interes_restante::numeric),  0)
+        + COALESCE(MIN(pc.iva_12_restante::numeric),   0)
+        + COALESCE(MIN(pc.seguro_restante::numeric),   0)
+        + COALESCE(MIN(pc.gps_restante::numeric),      0)
+        + COALESCE(MIN(pc.membresias::numeric),        0) AS total_restante,
       ROUND(COALESCE(MIN(pc.interes_restante::numeric), 0) * COALESCE(AVG(cube_data.cash_in_pct), 0), 2) AS interes_cube,
       ROUND(ROUND(COALESCE(MIN(pc.interes_restante::numeric), 0) * COALESCE(AVG(cube_data.cash_in_pct), 0), 2) * 0.12, 2) AS iva_cube
     FROM cartera.cuotas_credito q
@@ -2224,8 +2229,15 @@ export async function getAcumuladoPorCredito({ credito_id }: { credito_id: numbe
           AND pc2.validation_status IN ('validated', 'no_required')
       )
     GROUP BY q.cuota_id, q.numero_cuota, q.fecha_vencimiento
-    HAVING COALESCE(MIN(pc.total_restante::numeric), 0) > 0
-        OR COUNT(pc.pago_id) = 0
+    HAVING (
+        COALESCE(MIN(pc.capital_restante::numeric),  0)
+        + COALESCE(MIN(pc.interes_restante::numeric),  0)
+        + COALESCE(MIN(pc.iva_12_restante::numeric),   0)
+        + COALESCE(MIN(pc.seguro_restante::numeric),   0)
+        + COALESCE(MIN(pc.gps_restante::numeric),      0)
+        + COALESCE(MIN(pc.membresias::numeric),        0)
+      ) > 0
+      OR COUNT(pc.pago_id) = 0
     ORDER BY q.fecha_vencimiento ASC
   `);
 

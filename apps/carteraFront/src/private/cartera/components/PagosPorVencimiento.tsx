@@ -2,7 +2,7 @@ import { useState, useRef, Fragment } from "react";
 import { usePersistedState } from "../hooks/usePersistedState";
 import { usePagosPorVencimiento } from "../hooks/usePagosPorVencimiento";
 import { useAdminData } from "../hooks/advisor";
-import type { PagoPorVencimientoItem, Advisor, AbonoDetalleItem } from "../services/services";
+import type { PagoPorVencimientoItem, Advisor, AbonoDetalleItem, AcumuladoCuotaItem, AcumuladoTotales } from "../services/services";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -14,7 +14,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Search, X, ChevronLeft, ChevronRight, Check, ChevronsUpDown, FileDown, Loader2, AlertCircle } from "lucide-react";
-import { getPagosPorVencimiento, getAbonosPorVencimientoDetalle } from "../services/services";
+import { getPagosPorVencimiento, getAbonosPorVencimientoDetalle, getCreditoAcumulado } from "../services/services";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Badge } from "@/components/ui/badge";
@@ -57,6 +57,8 @@ export function PagosPorVencimiento() {
 
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const [abonosDetail, setAbonosDetail] = useState<AbonoDetalleItem[]>([]);
+  const [acumuladoDetail, setAcumuladoDetail] = useState<AcumuladoCuotaItem[]>([]);
+  const [acumuladoTotales, setAcumuladoTotales] = useState<AcumuladoTotales | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const pendingRequestRef = useRef<{ creditoId: number; mes: number; anio: number } | null>(null);
 
@@ -64,6 +66,8 @@ export function PagosPorVencimiento() {
     if (expandedRow === creditoId) {
       setExpandedRow(null);
       setAbonosDetail([]);
+      setAcumuladoDetail([]);
+      setAcumuladoTotales(null);
       pendingRequestRef.current = null;
     } else {
       const token = { creditoId, mes, anio };
@@ -71,18 +75,25 @@ export function PagosPorVencimiento() {
       pendingRequestRef.current = token;
       setLoadingDetails(true);
       setAbonosDetail([]);
+      setAcumuladoDetail([]);
+      setAcumuladoTotales(null);
       try {
-        const response = await getAbonosPorVencimientoDetalle({
-          credito_id: creditoId,
-          mes,
-          anio,
-        });
+        const [acumuladoRes, abonosRes] = await Promise.all([
+          getCreditoAcumulado({ credito_id: creditoId }),
+          getAbonosPorVencimientoDetalle({ credito_id: creditoId, mes, anio }),
+        ]);
         const current = pendingRequestRef.current;
-        if (response.success && current?.creditoId === creditoId && current?.mes === mes && current?.anio === anio) {
-          setAbonosDetail(response.data);
+        if (current?.creditoId === creditoId && current?.mes === mes && current?.anio === anio) {
+          if (acumuladoRes.success) {
+            setAcumuladoDetail(acumuladoRes.cuotas);
+            setAcumuladoTotales(acumuladoRes.totales);
+          }
+          if (abonosRes.success) {
+            setAbonosDetail(abonosRes.data);
+          }
         }
       } catch (error) {
-        console.error("Error al obtener detalle de abonos:", error);
+        console.error("Error al obtener detalle de crédito:", error);
       } finally {
         const current = pendingRequestRef.current;
         if (current?.creditoId === creditoId && current?.mes === mes && current?.anio === anio) {
@@ -495,13 +506,157 @@ export function PagosPorVencimiento() {
                         <TableCell colSpan={17} className="p-4 border-b border-blue-200">
                           <div className="flex items-center justify-center py-6 text-xs text-blue-500 font-semibold gap-2">
                             <Loader2 className="h-4 w-4 animate-spin" />
-                            Cargando abonos...
+                            Cargando detalle...
                           </div>
                         </TableCell>
                       </TableRow>
                     )}
 
-                    {expandedRow === item.credito_id && !loadingDetails && abonosDetail.length === 0 && (
+                    {/* Sección deuda acumulada */}
+                    {expandedRow === item.credito_id && !loadingDetails && acumuladoDetail.length > 0 && (
+                      <>
+                        {/* Header acumulado */}
+                        <TableRow className="bg-red-50/80 hover:bg-red-50/80">
+                          <TableCell
+                            colSpan={17}
+                            className="py-1.5 px-4 border-b border-red-200 text-xs font-bold text-red-700"
+                          >
+                            ⚠ Deuda Acumulada — {acumuladoDetail.length} cuota{acumuladoDetail.length !== 1 ? "s" : ""} vencida{acumuladoDetail.length !== 1 ? "s" : ""}
+                          </TableCell>
+                        </TableRow>
+
+                        {/* Fila por cuota vencida */}
+                        {acumuladoDetail.map((cuota) => (
+                          <TableRow
+                            key={`acum-${cuota.numero_cuota}`}
+                            className="bg-red-50 hover:bg-red-100 border-b border-red-100 text-[11px] text-gray-700 transition-colors group"
+                          >
+                            {/* 1. SIFCO */}
+                            <TableCell className="sticky left-0 bg-red-50 group-hover:bg-red-100 border-r border-b border-red-100 min-w-[140px] w-[140px] text-center font-semibold text-red-700">
+                              #{cuota.numero_cuota}
+                            </TableCell>
+                            {/* 2. Cliente -> fecha vencimiento */}
+                            <TableCell className="sticky left-[140px] bg-red-50 group-hover:bg-red-100 border-r border-b border-red-200 min-w-[220px] w-[220px] shadow-[3px_0_5px_-2px_rgba(0,0,0,0.05)] text-red-700 font-medium px-3">
+                              Vencía {cuota.fecha_vencimiento}
+                            </TableCell>
+                            {/* 3. Asesor -> vacío */}
+                            <TableCell className="border-r border-b border-red-100" />
+                            {/* 4. Cuotas -> vacío */}
+                            <TableCell className="border-r border-b border-red-100" />
+                            {/* 5. Etapa de Mora -> vacío */}
+                            <TableCell className="border-r border-b border-red-100" />
+                            {/* 6. Boletas Totales -> total_restante */}
+                            <TableCell className="text-right font-semibold text-red-800 border-r border-b border-red-100 bg-red-50/20">
+                              {formatQ(cuota.total_restante)}
+                            </TableCell>
+                            {/* 7. Abono Capital */}
+                            <TableCell className="text-right text-gray-700 border-r border-b border-red-100">
+                              {formatQ(cuota.capital_restante)}
+                            </TableCell>
+                            {/* 8. Interés */}
+                            <TableCell className="text-right text-gray-700 border-r border-b border-red-100">
+                              {formatQ(cuota.interes_restante)}
+                            </TableCell>
+                            {/* 9. IVA 12% */}
+                            <TableCell className="text-right text-gray-700 border-r border-b border-red-100">
+                              {formatQ(cuota.iva_12_restante)}
+                            </TableCell>
+                            {/* 10. Seguro */}
+                            <TableCell className="text-right text-gray-700 border-r border-b border-red-100">
+                              {formatQ(cuota.seguro_restante)}
+                            </TableCell>
+                            {/* 11. GPS */}
+                            <TableCell className="text-right text-gray-700 border-r border-b border-red-100">
+                              {formatQ(cuota.gps_restante)}
+                            </TableCell>
+                            {/* 12. Membresías */}
+                            <TableCell className="text-right text-gray-700 border-r border-b border-red-100">
+                              {formatQ(cuota.membresias)}
+                            </TableCell>
+                            {/* 13. Int. CUBE */}
+                            <TableCell className="text-right text-gray-700 border-r border-b border-red-100">
+                              {formatQ(cuota.interes_cube)}
+                            </TableCell>
+                            {/* 14. IVA CUBE */}
+                            <TableCell className="text-right text-gray-700 border-r border-b border-red-100">
+                              {formatQ(cuota.iva_cube)}
+                            </TableCell>
+                            {/* 15. Royalty */}
+                            <TableCell className="text-right text-gray-400 border-r border-b border-red-100">--</TableCell>
+                            {/* 16. Mora -> vacío */}
+                            <TableCell className="border-r border-b border-red-100" />
+                            {/* 17. Total */}
+                            <TableCell className="text-right text-red-700 font-bold bg-red-50/20 border-b border-red-100">
+                              {formatQ(cuota.total_restante)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+
+                        {/* Fila totales acumulado */}
+                        {acumuladoTotales && (
+                          <TableRow className="bg-red-100 hover:bg-red-100">
+                            {/* 1. SIFCO */}
+                            <TableCell className="sticky left-0 bg-red-100 border-r border-b border-red-300 min-w-[140px] w-[140px] text-center font-bold text-red-800 text-[11px]">
+                              TOTAL
+                            </TableCell>
+                            {/* 2. Cliente */}
+                            <TableCell className="sticky left-[140px] bg-red-100 border-r border-b border-red-300 min-w-[220px] w-[220px] shadow-[3px_0_5px_-2px_rgba(0,0,0,0.05)] font-bold text-red-800 text-[11px] px-3">
+                              Deuda acumulada total
+                            </TableCell>
+                            {/* 3-5 vacíos */}
+                            <TableCell className="border-r border-b border-red-300" />
+                            <TableCell className="border-r border-b border-red-300" />
+                            <TableCell className="border-r border-b border-red-300" />
+                            {/* 6. Boletas Totales -> total */}
+                            <TableCell className="text-right font-bold text-red-800 border-r border-b border-red-300 bg-red-100/30 text-[11px]">
+                              {formatQ(String(acumuladoTotales.total.toFixed(2)))}
+                            </TableCell>
+                            {/* 7. Capital */}
+                            <TableCell className="text-right font-bold text-red-800 border-r border-b border-red-300 text-[11px]">
+                              {formatQ(String(acumuladoTotales.capital.toFixed(2)))}
+                            </TableCell>
+                            {/* 8. Interés */}
+                            <TableCell className="text-right font-bold text-red-800 border-r border-b border-red-300 text-[11px]">
+                              {formatQ(String(acumuladoTotales.interes.toFixed(2)))}
+                            </TableCell>
+                            {/* 9. IVA */}
+                            <TableCell className="text-right font-bold text-red-800 border-r border-b border-red-300 text-[11px]">
+                              {formatQ(String(acumuladoTotales.iva.toFixed(2)))}
+                            </TableCell>
+                            {/* 10. Seguro */}
+                            <TableCell className="text-right font-bold text-red-800 border-r border-b border-red-300 text-[11px]">
+                              {formatQ(String(acumuladoTotales.seguro.toFixed(2)))}
+                            </TableCell>
+                            {/* 11. GPS */}
+                            <TableCell className="text-right font-bold text-red-800 border-r border-b border-red-300 text-[11px]">
+                              {formatQ(String(acumuladoTotales.gps.toFixed(2)))}
+                            </TableCell>
+                            {/* 12. Membresías */}
+                            <TableCell className="text-right font-bold text-red-800 border-r border-b border-red-300 text-[11px]">
+                              {formatQ(String(acumuladoTotales.membresias.toFixed(2)))}
+                            </TableCell>
+                            {/* 13. Int. CUBE */}
+                            <TableCell className="text-right font-bold text-red-800 border-r border-b border-red-300 text-[11px]">
+                              {formatQ(String(acumuladoTotales.interes_cube.toFixed(2)))}
+                            </TableCell>
+                            {/* 14. IVA CUBE */}
+                            <TableCell className="text-right font-bold text-red-800 border-r border-b border-red-300 text-[11px]">
+                              {formatQ(String(acumuladoTotales.iva_cube.toFixed(2)))}
+                            </TableCell>
+                            {/* 15. Royalty */}
+                            <TableCell className="text-right text-gray-400 border-r border-b border-red-300 text-[11px]">--</TableCell>
+                            {/* 16. Mora */}
+                            <TableCell className="border-r border-b border-red-300" />
+                            {/* 17. Total */}
+                            <TableCell className="text-right font-bold text-red-800 bg-red-100/30 border-b border-red-300 text-[11px]">
+                              {formatQ(String(acumuladoTotales.total.toFixed(2)))}
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </>
+                    )}
+
+                    {expandedRow === item.credito_id && !loadingDetails && abonosDetail.length === 0 && acumuladoDetail.length === 0 && (
                       <TableRow className="bg-slate-50/50 hover:bg-slate-50/50">
                         <TableCell colSpan={17} className="p-4 border-b border-blue-200 text-center text-xs text-gray-500 italic">
                           No se encontraron abonos registrados y validados en este mes para este crédito.
@@ -509,9 +664,20 @@ export function PagosPorVencimiento() {
                       </TableRow>
                     )}
 
+                    {expandedRow === item.credito_id && !loadingDetails && abonosDetail.length > 0 && (
+                      <TableRow className="bg-blue-50/60 hover:bg-blue-50/60">
+                        <TableCell
+                          colSpan={17}
+                          className="py-1.5 px-4 border-b border-blue-200 text-xs font-bold text-blue-700"
+                        >
+                          Abonos del mes
+                        </TableCell>
+                      </TableRow>
+                    )}
+
                     {expandedRow === item.credito_id && !loadingDetails && abonosDetail.length > 0 && abonosDetail.map((abono) => (
-                      <TableRow 
-                        key={abono.pago_id} 
+                      <TableRow
+                        key={abono.pago_id}
                         className="bg-slate-50/20 hover:bg-blue-50/30 border-b border-blue-100/50 text-[11px] text-gray-600 transition-colors group"
                       >
                         {/* 1. SIFCO -> vacío */}

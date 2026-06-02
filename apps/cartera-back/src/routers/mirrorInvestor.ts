@@ -60,6 +60,7 @@ export const mirrorInvestorRouter = new Elysia()
                       reinversion_interes: "reinversion_interes",
                       reinversion_total: "reinversion_total",
                       reinversion_variable: "reinversion_variable",
+                      reinversion_excedente: "reinversion_excedente",
                       reinversion_combinada: "reinversion_combinada",
                   })
               }),

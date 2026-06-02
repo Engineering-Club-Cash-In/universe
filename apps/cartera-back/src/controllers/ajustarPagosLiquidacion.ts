@@ -217,6 +217,11 @@ async function computarTotalesFiltrados(opts: {
           // El ajuste global se aplica después del loop
           cuota_inversor = abono_capital.plus(interesTotal);
           break;
+        case "reinversion_excedente":
+          // Inverso de variable: el monto fijo es lo que RECIBE el inversionista
+          // y el sobrante se reinvierte. El ajuste global se aplica después del loop.
+          cuota_inversor = abono_capital.plus(interesTotal);
+          break;
         default:
           cuota_inversor = abono_capital.plus(interesTotal);
       }
@@ -259,6 +264,17 @@ async function computarTotalesFiltrados(opts: {
       : montoReinv;
     totales.total_reinversion = reinversion;
     totales.total_cuota = totales.total_cuota.minus(reinversion);
+  }
+
+  // Ajuste global para reinversion_excedente (inverso de variable):
+  // el monto fijo es lo que RECIBE el inversionista; el sobrante se reinvierte.
+  if (inv.reinversion === "reinversion_excedente") {
+    const montoRecibe = new Big(inv.monto_reinversion ?? 0);
+    const recibe = montoRecibe.gt(totales.total_cuota)
+      ? totales.total_cuota
+      : montoRecibe;
+    totales.total_reinversion = totales.total_cuota.minus(recibe);
+    totales.total_cuota = recibe;
   }
 
   return {

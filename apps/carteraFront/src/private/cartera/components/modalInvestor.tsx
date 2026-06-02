@@ -210,7 +210,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
                     onChange: (e) => {
                       const prev = watch("tipo_reinversion") ?? "sin_reinversion";
                       const val = e.target.value;
-                      if (val !== "reinversion_variable") {
+                      if (val !== "reinversion_variable" && val !== "reinversion_excedente") {
                         setValue("monto_reinversion", 0);
                       }
                       if (val === "reinversion_combinada") {
@@ -226,6 +226,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
                   <option value="reinversion_interes">Reinversión Interés</option>
                   <option value="reinversion_total">Reinversión Total</option>
                   <option value="reinversion_variable">Reinversión Variable</option>
+                  <option value="reinversion_excedente">Reinversión Excedente</option>
                   <option value="reinversion_combinada">Reinversión Combinada</option>
                 </select>
                 {watch("tipo_reinversion") === "reinversion_combinada" && mode === "update" && initialData?.inversionista_id && (
@@ -242,20 +243,33 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
 
             {/* Monto Reinversión */}
             <div>
-              <label className="block text-sm text-blue-800 mb-1">Monto Reinversión</label>
+              <label className="block text-sm text-blue-800 mb-1">
+                {watch("tipo_reinversion") === "reinversion_excedente"
+                  ? "Monto a Recibir"
+                  : "Monto Reinversión"}
+              </label>
               <input
                 {...register("monto_reinversion", { valueAsNumber: true })}
                 type="number"
                 step="any"
                 min={0}
-                disabled={watch("tipo_reinversion") !== "reinversion_variable"}
+                disabled={
+                  watch("tipo_reinversion") !== "reinversion_variable" &&
+                  watch("tipo_reinversion") !== "reinversion_excedente"
+                }
                 className={`border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition ${
-                  watch("tipo_reinversion") !== "reinversion_variable"
+                  watch("tipo_reinversion") !== "reinversion_variable" &&
+                  watch("tipo_reinversion") !== "reinversion_excedente"
                     ? "bg-gray-100 text-gray-400 cursor-not-allowed"
                     : "bg-white text-blue-900 placeholder-gray-400"
                 }`}
                 placeholder="0.00"
               />
+              {watch("tipo_reinversion") === "reinversion_excedente" && (
+                <p className="mt-1 text-xs text-blue-600">
+                  El inversionista recibe este monto fijo; el sobrante de su cuota se reinvierte.
+                </p>
+              )}
             </div>
 
             {/* Moneda */}

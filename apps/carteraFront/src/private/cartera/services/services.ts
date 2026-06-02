@@ -3706,6 +3706,44 @@ export async function getAbonosPorVencimientoDetalle(params: {
 }
 
 // ============================================================
+// Deuda acumulada por crédito
+// ============================================================
+export interface AcumuladoCuotaItem {
+  numero_cuota: number;
+  fecha_vencimiento: string;
+  capital_restante: string;
+  interes_restante: string;
+  iva_12_restante: string;
+  seguro_restante: string;
+  gps_restante: string;
+  membresias: string;
+  total_restante: string;
+  interes_cube: string;
+  iva_cube: string;
+}
+
+export interface AcumuladoTotales {
+  capital: number;
+  interes: number;
+  iva: number;
+  seguro: number;
+  gps: number;
+  membresias: number;
+  interes_cube: number;
+  iva_cube: number;
+  total: number;
+}
+
+export async function getCreditoAcumulado(params: {
+  credito_id: number;
+}): Promise<{ success: boolean; cuotas: AcumuladoCuotaItem[]; totales: AcumuladoTotales }> {
+  const res = await api.get(`${API_URL}/pagos-por-vencimiento/acumulado`, {
+    params: { credito_id: params.credito_id.toString() },
+  });
+  return res.data;
+}
+
+// ============================================================
 // Créditos espejo pendientes (sesiones pendientes)
 // ============================================================
 export interface CreditoEspejoPendiente {

@@ -2170,3 +2170,94 @@ export async function getAbonosDelMesPorCredito({
 
   return result.rows;
 }
+
+export async function getAcumuladoPorCredito({ credito_id }: { credito_id: number }) {
+  const result = await db.execute<any>(sql`
+    SELECT
+      q.numero_cuota,
+      TO_CHAR(q.fecha_vencimiento, 'YYYY-MM-DD') AS fecha_vencimiento,
+      COALESCE(MIN(pc.capital_restante::numeric),  0) AS capital_restante,
+      COALESCE(MIN(pc.interes_restante::numeric),  0) AS interes_restante,
+      COALESCE(MIN(pc.iva_12_restante::numeric),   0) AS iva_12_restante,
+      COALESCE(MIN(pc.seguro_restante::numeric),   0) AS seguro_restante,
+      COALESCE(MIN(pc.gps_restante::numeric),      0) AS gps_restante,
+      COALESCE(MIN(pc.membresias::numeric),        0) AS membresias,
+      COALESCE(MIN(pc.capital_restante::numeric),  0)
+        + COALESCE(MIN(pc.interes_restante::numeric),  0)
+        + COALESCE(MIN(pc.iva_12_restante::numeric),   0)
+        + COALESCE(MIN(pc.seguro_restante::numeric),   0)
+        + COALESCE(MIN(pc.gps_restante::numeric),      0)
+        + COALESCE(MIN(pc.membresias::numeric),        0) AS total_restante,
+      ROUND(COALESCE(MIN(pc.interes_restante::numeric), 0) * COALESCE(AVG(cube_data.cash_in_pct), 0), 2) AS interes_cube,
+      ROUND(ROUND(COALESCE(MIN(pc.interes_restante::numeric), 0) * COALESCE(AVG(cube_data.cash_in_pct), 0), 2) * 0.12, 2) AS iva_cube
+    FROM cartera.cuotas_credito q
+    INNER JOIN cartera.creditos c ON c.credito_id = q.credito_id
+    LEFT JOIN cartera.pagos_credito pc
+      ON pc.cuota_id = q.cuota_id
+      AND pc."paymentFalse" = false
+    LEFT JOIN LATERAL (
+      SELECT
+        COALESCE((
+          SELECT
+            CASE
+              WHEN COALESCE(SUM(ci_all.monto_aportado::numeric), 0) > 0 OR c.capital::numeric > 0 THEN
+                (COALESCE(SUM(
+                  ci_all.monto_aportado::numeric *
+                  CASE WHEN ci_all.inversionista_id = 86 THEN 100::numeric
+                       ELSE ci_all.porcentaje_cash_in::numeric
+                  END
+                ), 0) / 100.0
+                + GREATEST(0, c.capital::numeric - COALESCE(SUM(ci_all.monto_aportado::numeric), 0)))
+                / NULLIF(GREATEST(c.capital::numeric, COALESCE(SUM(ci_all.monto_aportado::numeric), 0)), 0)
+              WHEN COUNT(*) > 0 THEN
+                AVG(CASE WHEN ci_all.inversionista_id = 86 THEN 100::numeric
+                         ELSE ci_all.porcentaje_cash_in::numeric END) / 100.0
+              ELSE 0
+            END
+          FROM cartera.creditos_inversionistas ci_all
+          WHERE ci_all.credito_id = q.credito_id
+        ), 0) AS cash_in_pct
+    ) cube_data ON true
+    WHERE q.credito_id = ${credito_id}
+      AND q.fecha_vencimiento::date < (NOW() AT TIME ZONE 'America/Guatemala')::date
+      AND q.pagado = false
+      AND NOT EXISTS (
+        SELECT 1 FROM cartera.pagos_credito pc2
+        WHERE pc2.cuota_id = q.cuota_id
+          AND pc2."paymentFalse" = false
+          AND pc2.pagado = true
+          AND pc2.validation_status IN ('validated', 'no_required')
+      )
+    GROUP BY q.cuota_id, q.numero_cuota, q.fecha_vencimiento
+    HAVING (
+        COALESCE(MIN(pc.capital_restante::numeric),  0)
+        + COALESCE(MIN(pc.interes_restante::numeric),  0)
+        + COALESCE(MIN(pc.iva_12_restante::numeric),   0)
+        + COALESCE(MIN(pc.seguro_restante::numeric),   0)
+        + COALESCE(MIN(pc.gps_restante::numeric),      0)
+        + COALESCE(MIN(pc.membresias::numeric),        0)
+      ) > 0
+      OR COUNT(pc.pago_id) = 0
+      OR MIN(pc.capital_restante) IS NULL
+    ORDER BY q.fecha_vencimiento ASC
+  `);
+
+  const cuotas = result.rows;
+
+  const totales = cuotas.reduce(
+    (acc: any, row: any) => ({
+      capital:      acc.capital      + Number(row.capital_restante),
+      interes:      acc.interes      + Number(row.interes_restante),
+      iva:          acc.iva          + Number(row.iva_12_restante),
+      seguro:       acc.seguro       + Number(row.seguro_restante),
+      gps:          acc.gps          + Number(row.gps_restante),
+      membresias:   acc.membresias   + Number(row.membresias),
+      interes_cube: acc.interes_cube + Number(row.interes_cube),
+      iva_cube:     acc.iva_cube     + Number(row.iva_cube),
+      total:        acc.total        + Number(row.total_restante),
+    }),
+    { capital: 0, interes: 0, iva: 0, seguro: 0, gps: 0, membresias: 0, interes_cube: 0, iva_cube: 0, total: 0 }
+  );
+
+  return { cuotas, totales };
+}

@@ -1548,10 +1548,10 @@ export async function getPagosByVencimiento({
     }
   }
   if (rango_mora) {
-    if (rango_mora === "0-30") filters.push(sql`m.cuotas_atrasadas = 1 AND m.activa = true AND p.pagado = false`);
-    else if (rango_mora === "31-60") filters.push(sql`m.cuotas_atrasadas = 2 AND m.activa = true AND p.pagado = false`);
-    else if (rango_mora === "61-90") filters.push(sql`m.cuotas_atrasadas = 3 AND m.activa = true AND p.pagado = false`);
-    else if (rango_mora === "+90") filters.push(sql`m.cuotas_atrasadas >= 4 AND m.activa = true AND p.pagado = false`);
+    if (rango_mora === "0-30") filters.push(sql`mora_real.cuotas_atrasadas = 1`);
+    else if (rango_mora === "31-60") filters.push(sql`mora_real.cuotas_atrasadas = 2`);
+    else if (rango_mora === "61-90") filters.push(sql`mora_real.cuotas_atrasadas = 3`);
+    else if (rango_mora === "+90") filters.push(sql`mora_real.cuotas_atrasadas >= 4`);
   }
   const whereClause = sql.join(filters, sql` AND `);
 
@@ -1683,6 +1683,21 @@ export async function getPagosByVencimiento({
     INNER JOIN cartera.asesores a ON c.asesor_id = a.asesor_id
     LEFT JOIN cartera.cuotas_credito q ON p.cuota_id = q.cuota_id
     LEFT JOIN cartera.moras_credito m ON c.credito_id = m.credito_id AND m.activa = true
+    LEFT JOIN LATERAL (
+      SELECT COUNT(*)::int AS cuotas_atrasadas
+      FROM cartera.cuotas_credito qc_mora
+      WHERE qc_mora.credito_id = c.credito_id
+        AND qc_mora.fecha_vencimiento::date < (NOW() AT TIME ZONE 'America/Guatemala')::date
+        AND qc_mora.pagado = false
+        AND NOT EXISTS (
+          SELECT 1
+          FROM cartera.pagos_credito pc_mora
+          WHERE pc_mora.cuota_id = qc_mora.cuota_id
+            AND pc_mora."paymentFalse" = false
+            AND pc_mora.pagado = true
+            AND pc_mora.validation_status IN ('validated', 'no_required')
+        )
+    ) mora_real ON true
     ${cubeSubquery}
     ${lateralCapAnterior}
     WHERE ${whereClause}
@@ -1692,7 +1707,7 @@ export async function getPagosByVencimiento({
     GROUP BY
       c.credito_id, c.numero_credito_sifco, u.nombre, a.nombre, c.royalti,
       c.capital, c.porcentaje_interes, c.cuota, c.seguro_10_cuotas, c.gps, c.membresias_pago,
-      cap_anterior.total_restante
+      cap_anterior.total_restante, mora_real.cuotas_atrasadas
     HAVING SUM(${totalFilaSql}) <> 0
   `;
 
@@ -1714,12 +1729,15 @@ export async function getPagosByVencimiento({
       MAX(q.numero_cuota) AS cuota_max,
       COALESCE(SUM(p.monto_boleta::numeric), 0) AS monto_boleta,
       COALESCE(SUM(p.monto_aplicado::numeric), 0) AS monto_aplicado,
-      COALESCE(MAX(m.monto_mora::numeric), 0) AS monto_mora,
       CASE
-        WHEN MAX(m.cuotas_atrasadas) = 1 THEN 'Mora 30'
-        WHEN MAX(m.cuotas_atrasadas) = 2 THEN 'Mora 60'
-        WHEN MAX(m.cuotas_atrasadas) = 3 THEN 'Mora 90'
-        WHEN MAX(m.cuotas_atrasadas) >= 4 THEN 'Mora 120+'
+        WHEN MAX(mora_real.cuotas_atrasadas) > 0 THEN COALESCE(MAX(m.monto_mora::numeric), 0)
+        ELSE 0
+      END AS monto_mora,
+      CASE
+        WHEN MAX(mora_real.cuotas_atrasadas) = 1 THEN 'Mora 30'
+        WHEN MAX(mora_real.cuotas_atrasadas) = 2 THEN 'Mora 60'
+        WHEN MAX(mora_real.cuotas_atrasadas) = 3 THEN 'Mora 90'
+        WHEN MAX(mora_real.cuotas_atrasadas) >= 4 THEN 'Mora 120+'
         ELSE 'Al día'
       END AS dias_mora
   `;
@@ -2044,7 +2062,10 @@ export async function getPagosByVencimiento({
           COALESCE(c.gps::numeric, 0) AS gps,
           COALESCE(c.membresias_pago::numeric, 0) AS mem,
           AVG(COALESCE(cube_data.cash_in_pct, 0))::numeric AS cash_pct,
-          COALESCE(MAX(m.monto_mora::numeric), 0) AS mora,
+          CASE
+            WHEN MAX(mora_real.cuotas_atrasadas) > 0 THEN COALESCE(MAX(m.monto_mora::numeric), 0)
+            ELSE 0
+          END AS mora,
           COALESCE(SUM(p.monto_aplicado::numeric), 0) AS monto_apl
         ${commonFromJoins}
         ${commonGroupHaving}
@@ -2149,4 +2170,3 @@ export async function getAbonosDelMesPorCredito({
 
   return result.rows;
 }
-

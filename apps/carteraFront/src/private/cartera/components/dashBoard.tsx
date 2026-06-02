@@ -17,6 +17,7 @@ import {
   TrendingDown,
   Clock,
   Wallet,
+  PiggyBank,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useState, useRef, useEffect } from "react";
@@ -226,6 +227,13 @@ const menuSections: MenuSection[] = [
         label: "Pagos por Vencimiento",
         icon: <Receipt className="h-4 w-4" />,
         path: "/pagos-por-vencimiento",
+        roles: ["ADMIN"],
+      },
+      {
+        key: "cierre-cartera",
+        label: "Cierre de Cartera",
+        icon: <PiggyBank className="h-4 w-4" />,
+        path: "/cierre-cartera",
         roles: ["ADMIN"],
       },
     ],

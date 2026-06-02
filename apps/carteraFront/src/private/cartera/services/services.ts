@@ -4245,3 +4245,34 @@ export async function eliminarCuentaExtraService(
     };
   }
 }
+
+// ====================== Cierre Mensual de Cartera ======================
+
+export interface CierreMensualItem {
+  id: number;
+  periodo: string; // "YYYY-MM-DD" (primer día del mes cerrado)
+  status_credit: string;
+  cantidad_creditos: number;
+  capital_total: string;
+  creditos_con_mora: number;
+  capital_en_mora: string;
+  created_at: string;
+}
+
+// Trae las filas del cierre. Sin periodo -> todas; con periodo -> solo ese mes.
+export const getCierreMensual = async (
+  periodo?: string
+): Promise<CierreMensualItem[]> => {
+  const res = await api.get(`${API_URL}/cierre-mensual`, {
+    params: periodo ? { periodo } : undefined,
+  });
+  return res.data;
+};
+
+// Genera (o regenera) la foto. Sin periodo -> mes anterior a hoy.
+export const generarCierreMensual = async (
+  periodo?: string
+): Promise<{ ok: boolean; periodo: string; filas: number }> => {
+  const res = await api.post(`${API_URL}/cierre-mensual/generar`, periodo ? { periodo } : {});
+  return res.data;
+};

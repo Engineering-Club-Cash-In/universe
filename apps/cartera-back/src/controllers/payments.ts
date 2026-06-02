@@ -24,7 +24,7 @@ import {
   processAndReplaceCreditInvestorsReverse,
 } from "./investor";
 import { updateMora } from "./latefee";
-import { calcularAjusteCompras, obtenerSumaComprasMesAnterior } from "../utils/comprasAjuste";
+import { calcularAjusteCompras, obtenerSumaComprasMesAnterior, obtenerSumaComprasPendientes } from "../utils/comprasAjuste";
 import { t } from "elysia";
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive(),
@@ -609,7 +609,16 @@ export async function insertPagosCreditoInversionistas(
         fechaDelPeriodo,
       );
 
-      const montoAportadoBig = new Big(inv.monto_aportado || 0);
+      // Las compras PENDIENTES ya ensuciaron el monto_aportado del espejo pero
+      // todavía no son parte real del crédito → se restan para que no generen
+      // interés (ni completo ni proporcional) hasta completarse.
+      const sumaPendientes = await obtenerSumaComprasPendientes(
+        credito_id,
+        inv.inversionista_id,
+      );
+
+      // Base proporcional = espejo SIN las pendientes (que aportan 0).
+      const montoAportadoBig = new Big(inv.monto_aportado || 0).minus(sumaPendientes);
       // monto viejo = lo que ya tenía antes de las compras del mes (cobra mes completo).
       // Si las compras igualan o superan el espejo, queda 0 → actúa como hoy (todo proporcional).
       const montoViejo = montoAportadoBig.minus(sumaCompras);
@@ -622,7 +631,12 @@ export async function insertPagosCreditoInversionistas(
         );
       }
 
-      const hayMontoViejo = sumaCompras.gt(0) && montoViejo.gt(0);
+      // Hay monto viejo (mes completo) cuando queda saldo previo y hubo alguna
+      // compra del mes (completada → proporcional, o pendiente → 0) que contaminó
+      // la fecha_inicio. Sin ninguna compra, es un partícipe genuinamente nuevo
+      // y todo va proporcional (rama else).
+      const hayMontoViejo =
+        montoViejo.gt(0) && (sumaCompras.gt(0) || sumaPendientes.gt(0));
 
       const porcentajeInteresBig = new Big(currentCredit?.porcentaje_interes ?? 0);
 

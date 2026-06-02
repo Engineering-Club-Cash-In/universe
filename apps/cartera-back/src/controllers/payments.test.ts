@@ -168,12 +168,14 @@ mock.module("./latefee", () => ({
 // We can bypass calcularAjusteCompras entirely via mock.module for comprasAjuste
 let mockMontoRestarValidacion = new Big(0);
 let mockMontoRestarCalculo = new Big(0);
+let mockSumaComprasPendientes = new Big(0);
 mock.module("../utils/comprasAjuste", () => ({
   calcularAjusteCompras: mock(() => Promise.resolve({
     montoRestarValidacion: mockMontoRestarValidacion,
     montoRestarCalculo: mockMontoRestarCalculo
   })),
   obtenerSumaComprasMesAnterior: mock(() => Promise.resolve(new Big(0))),
+  obtenerSumaComprasPendientes: mock(() => Promise.resolve(mockSumaComprasPendientes)),
 }));
 
 const { calcularYRegistrarPagosEspejo } = await import("./payments");

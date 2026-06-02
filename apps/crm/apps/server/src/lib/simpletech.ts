@@ -89,7 +89,15 @@ export function getSimpletechClient(): SimpleTechClient | null {
 }
 
 export function normalizePhone(phone: string): string {
-	const digits = phone.replaceAll(/\D/g, "");
+	// Un mismo registro puede traer varios teléfonos separados por coma
+	// (p. ej. "49289881, 25099248, 31123811"). Antes de limpiar no-dígitos
+	// nos quedamos SOLO con el primero; de lo contrario las comas se borran
+	// y los números quedan concatenados en uno inválido.
+	const primero = (phone.split(",")[0] ?? phone).trim();
+	const digits = primero.replaceAll(/\D/g, "");
+	// Si ya viene en formato internacional explícito (+<código>…, p. ej. "+1…"
+	// o "+01…"), respetamos ese código de país tal cual y NO anteponemos el 502.
+	if (primero.startsWith("+")) return `+${digits}`;
 	if (digits.startsWith("502")) return `+${digits}`;
 	return `+502${digits}`;
 }

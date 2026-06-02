@@ -1377,6 +1377,9 @@ if (facturasExistentes.length > 0) {
                 inversionista: inv.nombre,
                 inversionista_id: inv.inversionista_id,
                 emisor: inversionistaConfig?.config.emisor.nombreEmisor || "CUBE INVESTMENTS",
+                // 🆕 Desglose para el modal del front: % participación y cash_in del inv
+                porcentaje_participacion: inv.porcentaje_participacion ?? null,
+                porcentaje_cash_in: inv.porcentaje_cash_in ?? null,
                 flujo: "NUEVO_PRORRATEADO",
                 parte_antes: parteAntes.toFixed(2),
                 parte_despues: parteDespues.toFixed(2),
@@ -1534,6 +1537,11 @@ if (facturasExistentes.length > 0) {
             //    para que las procese el siguiente pago. NO las marcamos como
             //    facturadas porque NO las incluimos en el cálculo de prorrateo.
             const idsParaMarcar = [operacionPendiente.id];
+            // 🎬 En modo demo NO cerramos el ciclo: dejamos pendiente_facturar=true
+            //    para poder repetir la demo del flujo prorrateado varias veces.
+            if (process.env.SIMULAR_FACTURAS === "true") {
+              console.log(`\n   🎬 [SIMULACIÓN] No se marca pendiente_facturar=false (demo repetible). Filas: ${idsParaMarcar.join(", ")}`);
+            } else {
             console.log(`\n   ✅ Cuota pagada + sin errores → marcando ${idsParaMarcar.length} fila(s) como pendiente_facturar=false`);
             try {
               await db
@@ -1552,6 +1560,7 @@ if (facturasExistentes.length > 0) {
                 flujo: "NUEVO_PRORRATEADO",
                 error: updateError.message,
               });
+            }
             }
           }
         }
@@ -1713,6 +1722,9 @@ if (facturasExistentes.length > 0) {
               inversionista: inv.nombre,
               inversionista_id: inv.inversionista_id,
               emisor: inversionistaConfig?.config.emisor.nombreEmisor || "CUBE INVESTMENTS",
+              // 🆕 Desglose para el modal del front: % participación y cash_in del inv
+              porcentaje_participacion: inv.porcentaje_participacion ?? null,
+              porcentaje_cash_in: inv.porcentaje_cash_in ?? null,
               ...facturaIntereses,
             });
 
@@ -3546,6 +3558,54 @@ async function certificarFacturaHelper({
     // 🔥 Usar config personalizada o default (CUBE)
     const emisorConfig = customConfig || CLUB_CASHIN_CONFIG;
     const satConfig = customSatConfig || SAT_CONFIG;
+
+    // ============================================
+    // 🎬 MODO DEMO / SIMULACIÓN
+    //    Si SIMULAR_FACTURAS=true en el .env, NO se certifica en SAT ni se
+    //    guarda en BD: se devuelve el MISMO shape con datos simulados (serie
+    //    DEMO, números/uuid random) calculando total/IVA desde los items.
+    //    Sirve para demos: el flujo completo corre y el modal muestra el
+    //    desglose sin "clavos" de COFIDI. En prod (sin la env) no afecta nada.
+    // ============================================
+    if (process.env.SIMULAR_FACTURAS === "true") {
+      const BigSim = require("big.js");
+      const montoTotalSim = items.reduce(
+        (s: any, it: any) => s.plus(new BigSim(it.total || 0)),
+        new BigSim(0)
+      );
+      const montoIvaSim = items.reduce(
+        (s: any, it: any) =>
+          s.plus(
+            (it.impuestos || []).reduce(
+              (si: any, imp: any) => si.plus(new BigSim(imp.montoImpuesto || 0)),
+              new BigSim(0)
+            )
+          ),
+        new BigSim(0)
+      );
+      const idInternoSim = generarIdInternoRandom();
+      const numeroSim = Math.floor(100000 + Math.random() * 900000);
+      console.log(
+        `🎬 [SIMULACIÓN] Factura NO certificada en SAT — emisor ${emisorConfig.emisor.nombreEmisor} | total Q${montoTotalSim.toFixed(2)} | IVA Q${montoIvaSim.toFixed(2)}`
+      );
+      return {
+        factura_id: 0,
+        idInterno: idInternoSim,
+        serie: "DEMO",
+        numero: numeroSim,
+        uuid: `DEMO-${idInternoSim}`,
+        xmlCertificado: "",
+        fechaEmision: new Date().toISOString().substring(0, 19),
+        pdfUrl: "",
+        pdfFilename: "",
+        monto_total: parseFloat(montoTotalSim.toFixed(2)),
+        monto_iva: parseFloat(montoIvaSim.toFixed(2)),
+        receptor: {
+          nombre: receptor?.nombreReceptor || "",
+          nit: receptor?.idReceptor || "",
+        },
+      };
+    }
 
     // ============================================
     // 1️⃣ AUTO-GENERAR CAMPOS

@@ -12,6 +12,7 @@ import {
   cuotas_credito,
   abonos_capital,
   historico_liquidaciones_espejo,
+  compras_credito_inversionista,
 } from "../database/db/schema";
 import { desc, gte } from "drizzle-orm";
 import Big from "big.js";
@@ -23,7 +24,7 @@ import {
   processAndReplaceCreditInvestorsReverse,
 } from "./investor";
 import { updateMora } from "./latefee";
-import { calcularAjusteCompras, obtenerSumaComprasMesAnterior } from "../utils/comprasAjuste";
+import { calcularAjusteCompras, obtenerSumaComprasMesAnterior, obtenerSumaComprasPendientes } from "../utils/comprasAjuste";
 import { t } from "elysia";
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive(),
@@ -498,16 +499,17 @@ export async function insertPagosCreditoInversionistas(
     const espejoIgualHistoricoV1 =
       lastHistoricoV1 && new Big(inv.monto_aportado).eq(new Big(lastHistoricoV1.monto_aportado));
 
-    if (!espejoIgualHistoricoV1) {
-      const { montoRestarValidacion, montoRestarCalculo } = await calcularAjusteCompras(
-        credito_id,
-        inv.inversionista_id,
-        lastHistoricoV1 ? new Date(lastHistoricoV1.fecha) : null,
-        periodoMes,
-        periodoAnio,
-      );
+    // Siempre calcular ajuste — cubre compras pendientes aunque espejo == historico
+    const { montoRestarValidacion, montoRestarCalculo } = await calcularAjusteCompras(
+      credito_id,
+      inv.inversionista_id,
+      lastHistoricoV1 ? new Date(lastHistoricoV1.fecha) : null,
+      periodoMes,
+      periodoAnio,
+    );
 
-      // Validation 1: espejo ajustado por compras nuevas == histórico
+    // Validación solo cuando espejo != historico (hay compras que ya actualizaron espejo)
+    if (!espejoIgualHistoricoV1) {
       const montoParaValidacion = new Big(inv.monto_aportado).minus(montoRestarValidacion);
       if (lastHistoricoV1 && !montoParaValidacion.eq(new Big(lastHistoricoV1.monto_aportado))) {
         throw new Error(
@@ -515,8 +517,30 @@ export async function insertPagosCreditoInversionistas(
           `espejo-compras_nuevas (${montoParaValidacion.toFixed(8)}) ≠ histórico (${lastHistoricoV1.monto_aportado})`
         );
       }
+    }
 
+    // Siempre aplicar resta — pendientes reducen base aunque espejo == historico
+    if (montoRestarCalculo.gt(0)) {
       montoBaseCalculo = new Big(inv.monto_aportado).minus(montoRestarCalculo);
+    }
+
+    // Recalcular cuota cuando hay ajuste real
+    let cuotaRecalculada: Big;
+    if (montoRestarCalculo.gt(0)) {
+      const capitalTotalBig  = new Big(currentCredit?.capital ?? 0);
+      const cuotaTotalBig    = new Big(currentCredit?.cuota ?? 0);
+      const seguroBig        = new Big(currentCredit?.seguro_10_cuotas ?? 0);
+      const membresiasBig    = new Big(currentCredit?.membresias_pago ?? 0);
+      const cuotaSinCargos   = cuotaTotalBig.minus(membresiasBig).minus(seguroBig);
+      const pctParticipacion = capitalTotalBig.gt(0)
+        ? montoBaseCalculo.div(capitalTotalBig).times(100)
+        : new Big(0);
+      const cuotaBaseRecalc  = cuotaSinCargos.times(pctParticipacion.div(100)).round(2);
+      cuotaRecalculada = (inv.inversionista_id === mayorCuotaInversionistaId && !excludeCube)
+        ? cuotaBaseRecalc.plus(seguroBig).plus(membresiasBig).round(2)
+        : cuotaBaseRecalc;
+    } else {
+      cuotaRecalculada = new Big(inv.cuota_inversionista ?? 0);
     }
 
     // --- Calcular los 4 campos desde monto_aportado (misma lógica que processAndReplaceCreditInvestors) ---
@@ -588,7 +612,16 @@ export async function insertPagosCreditoInversionistas(
         fechaDelPeriodo,
       );
 
-      const montoAportadoBig = new Big(inv.monto_aportado || 0);
+      // Las compras PENDIENTES ya ensuciaron el monto_aportado del espejo pero
+      // todavía no son parte real del crédito → se restan para que no generen
+      // interés (ni completo ni proporcional) hasta completarse.
+      const sumaPendientes = await obtenerSumaComprasPendientes(
+        credito_id,
+        inv.inversionista_id,
+      );
+
+      // Base proporcional = espejo SIN las pendientes (que aportan 0).
+      const montoAportadoBig = new Big(inv.monto_aportado || 0).minus(sumaPendientes);
       // monto viejo = lo que ya tenía antes de las compras del mes (cobra mes completo).
       // Si las compras igualan o superan el espejo, queda 0 → actúa como hoy (todo proporcional).
       const montoViejo = montoAportadoBig.minus(sumaCompras);
@@ -601,7 +634,12 @@ export async function insertPagosCreditoInversionistas(
         );
       }
 
-      const hayMontoViejo = sumaCompras.gt(0) && montoViejo.gt(0);
+      // Hay monto viejo (mes completo) cuando queda saldo previo y hubo alguna
+      // compra del mes (completada → proporcional, o pendiente → 0) que contaminó
+      // la fecha_inicio. Sin ninguna compra, es un partícipe genuinamente nuevo
+      // y todo va proporcional (rama else).
+      const hayMontoViejo =
+        montoViejo.gt(0) && (sumaCompras.gt(0) || sumaPendientes.gt(0));
 
       const porcentajeInteresBig = new Big(currentCredit?.porcentaje_interes ?? 0);
 
@@ -678,10 +716,8 @@ export async function insertPagosCreditoInversionistas(
 
     let abono_capital = new Big(inv.monto_aportado || 0).eq(0)
       ? new Big(0)
-      : (isCube
-          ? new Big(inv?.cuota_inversionista ?? 0)
-          : new Big(inv.cuota_inversionista ?? 0));
-    console.log(`   💰 abono_capital inicial: ${abono_capital.toString()}`);
+      : cuotaRecalculada;
+    console.log(`   💰 abono_capital inicial (cuota recalculada desde capital ajustado): ${abono_capital.toString()}`);
 
     const totalMontos = montoCashInCalc.plus(montoInversionistaCalc);
     const totalIVA = ivaCashInCalc.plus(ivaInversionistaCalc);
@@ -2276,6 +2312,17 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
       console.log(`📅 Fecha de cálculo override: ${fechaCalculo.toISOString()}`);
     }
 
+    // Inicio del período a procesar: usa el mes de fechaCalculo si viene,
+    // si no el mes actual. Solo participaciones anteriores a este inicio
+    // deben generar pagos en este período (regla: compra del mes → paga desde el mes siguiente).
+    const baseCalculo = fechaCalculo ?? new Date();
+    const inicioPeriodo = new Date(
+      baseCalculo.getUTCFullYear(),
+      baseCalculo.getUTCMonth(),
+      1
+    ).toISOString().slice(0, 10);
+    console.log(`📅 Inicio de período para filtro: ${inicioPeriodo}`);
+
     // Paso 1: Se buscan todos los créditos en los que este inversionista participa
     // y que aún están activos (pueden estar al día, en mora, en proceso de cancelación, etc.).
     const creditosInversionista = await db
@@ -2299,6 +2346,7 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
       .where(
         and(
           eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId),
+          lt(creditos_inversionistas_espejo.fecha_inicio_participacion, inicioPeriodo),
           inArray(creditos.statusCredit, [
             "ACTIVO",
             "MOROSO",

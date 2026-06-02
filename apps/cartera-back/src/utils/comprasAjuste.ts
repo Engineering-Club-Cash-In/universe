@@ -39,7 +39,7 @@ export async function calcularAjusteCompras(
       and(
         eq(compras_credito_inversionista.credito_id, credito_id),
         eq(compras_credito_inversionista.inversionista_id, inversionista_id),
-        inArray(compras_credito_inversionista.tipo_operacion, ["compra_cartera", "reinversion"]),
+        inArray(compras_credito_inversionista.tipo_operacion, ["compra_cartera"]), // Hay que volver a ponerlo para que acepte reinversiones
       ),
     )
     .orderBy(desc(compras_credito_inversionista.updated_at));
@@ -119,6 +119,42 @@ export async function obtenerSumaComprasMesAnterior(
         eq(compras_credito_inversionista.status, "completado"),
         gte(compras_credito_inversionista.updated_at, inicioMesAnterior),
         lt(compras_credito_inversionista.updated_at, inicioMesActual),
+      ),
+    );
+
+  return compras.reduce(
+    (acc, c) => acc.plus(new Big(c.monto_aportado ?? 0)),
+    new Big(0),
+  );
+}
+
+/**
+ * Suma los monto_aportado de las compras de cartera que están PENDIENTES
+ * (status pendiente_*) para el inversionista+crédito.
+ *
+ * Una compra pendiente ya ensució el monto_aportado del espejo, pero todavía
+ * no es parte "real" del crédito: no debe generar interés (ni completo ni
+ * proporcional) hasta completarse. Se usa para restarla de la base del
+ * cálculo proporcional, de modo que el monto viejo cobre mes completo y la
+ * pendiente aporte 0.
+ */
+export async function obtenerSumaComprasPendientes(
+  credito_id: number,
+  inversionista_id: number,
+): Promise<Big> {
+  const compras = await db
+    .select({ monto_aportado: compras_credito_inversionista.monto_aportado })
+    .from(compras_credito_inversionista)
+    .where(
+      and(
+        eq(compras_credito_inversionista.credito_id, credito_id),
+        eq(compras_credito_inversionista.inversionista_id, inversionista_id),
+        eq(compras_credito_inversionista.tipo_operacion, "compra_cartera"),
+        inArray(compras_credito_inversionista.status, [
+          "pendiente_revision",
+          "pendiente_compra_cartera",
+          "pendiente_reinversion",
+        ]),
       ),
     );
 

@@ -219,6 +219,36 @@
 
     createdAt: timestamp("createdat").defaultNow(),
   });
+  // 📊 Cierre mensual de cartera — foto del estado por cada statusCredit.
+  //    El job corre el día 5 de cada mes y `periodo` apunta al mes anterior (el que se cierra).
+  //    `capital_total` = suma del campo capital (monto colocado) de los créditos en ese estado.
+  //    Las columnas de mora reflejan el atraso ACTUAL al momento de generar la foto.
+  export const cierre_mensual = customSchema.table(
+    "cierre_mensual",
+    {
+      id: serial("id").primaryKey(),
+      periodo: date("periodo").notNull(), // Primer día del mes cerrado, ej. 2026-05-01 = cierre de mayo
+      status_credit: text("status_credit").notNull(),
+      cantidad_creditos: integer("cantidad_creditos").notNull().default(0),
+      capital_total: numeric("capital_total", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      creditos_con_mora: integer("creditos_con_mora").notNull().default(0),
+      capital_en_mora: numeric("capital_en_mora", { precision: 18, scale: 2 })
+        .notNull()
+        .default("0"),
+      created_at: timestamp("created_at", { withTimezone: true })
+        .notNull()
+        .defaultNow(),
+    },
+    (table) => ({
+      uqPeriodoStatus: uniqueIndex("uq_cierre_mensual_periodo_status").on(
+        table.periodo,
+        table.status_credit
+      ),
+    })
+  );
+
   export const moras_credito = customSchema.table("moras_credito", {
     mora_id: serial("mora_id").primaryKey(),
     credito_id: integer("credito_id")

@@ -790,6 +790,26 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           )
           .orderBy(asc(pagos_credito.pago_id));
 
+        // Último pago PARCIAL aún `pending` de esta cuota (todavía no pasó por
+        // /aplicar-pago). El query de arriba excluye los `pending`, pero para
+        // el SALDO VIGENTE sí los necesitamos: si entran dos pagos a la misma
+        // cuota antes de validar el primero, el segundo debe partir del saldo
+        // que dejó el primero y NO re-aplicar los mismos rubros
+        // (interés/IVA/seguro/membresías). Ref: crédito 197, cuota 6.
+        const [ultimoParcialPendiente] = await db
+          .select({ pago: pagos_credito })
+          .from(pagos_credito)
+          .where(
+            and(
+              eq(pagos_credito.cuota_id, cuota.cuotas_credito.cuota_id),
+              eq(pagos_credito.credito_id, credito.credito_id),
+              eq(pagos_credito.validationStatus, "pending"),
+              eq(pagos_credito.paymentFalse, false)
+            )
+          )
+          .orderBy(desc(pagos_credito.pago_id))
+          .limit(1);
+
         const pagoOriginal = allExistingPagos.find(
           (p) => p.pago.validationStatus === "no_required"
         );
@@ -816,10 +836,22 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         const tienePagosValidados = allExistingPagos.some(
           ({ pago }) => pago.validationStatus === "validated"
         );
-        // El pago original es la fila destino; el último pago parcial elegible
-        // trae el saldo vigente aunque siga pendiente de validación.
+        // El pago original es la fila destino. Para el SALDO VIGENTE tomamos el
+        // abono parcial MÁS RECIENTE con restante —sea `validated` o `pending`—
+        // quedándonos con el de pago_id más alto. Así un 2.º pago a la misma
+        // cuota parte de lo que abonó el 1.º aunque aún no se haya validado, y
+        // no duplica interés/IVA/seguro/membresías.
         const existingPago = pagoOriginal ?? allExistingPagos[0];
-        const pagoSaldoVigente = ultimoPagoParcialConRestante ?? existingPago;
+        const candidatosSaldo = [
+          ultimoPagoValidadoConRestante,
+          ultimoParcialPendiente && tieneRestante(ultimoParcialPendiente.pago)
+            ? ultimoParcialPendiente
+            : undefined,
+        ].filter(Boolean) as { pago: typeof pagos_credito.$inferSelect }[];
+        const saldoMasReciente = candidatosSaldo.sort(
+          (a, b) => b.pago.pago_id - a.pago.pago_id
+        )[0];
+        const pagoSaldoVigente = saldoMasReciente ?? existingPago;
         // Inicializar variables de abono
         // 2. OBTENER LOS RESTANTES DEL PAGO EXISTENTE (no de la cuota)
         const interes_restante = new Big(

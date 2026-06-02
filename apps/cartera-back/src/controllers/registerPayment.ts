@@ -20,6 +20,10 @@ import { processAndReplaceCreditInvestors } from "./investor";
 import { processConvenioPayment } from "./paymentAgreement";
 import { distribuirAbonoCapitalEspejo } from "./abonosCapital";
 import { convertirAHoraGuatemala } from "../utils/functions/generalFunctions";
+import {
+  applyCapitalPaymentAndBuildResponse,
+  getCuotaIdForPaymentInsert,
+} from "./registerPaymentPolicy";
 
 // ========================================
 // TIPOS E INTERFACES
@@ -774,7 +778,14 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
                 cuota.cuotas_credito.cuota_id
               ),
               eq(pagos_credito.credito_id, credito.credito_id),
-              ne(pagos_credito.validationStatus, "pending")
+              or(
+                ne(pagos_credito.validationStatus, "pending"),
+                and(
+                  eq(pagos_credito.validationStatus, "pending"),
+                  eq(pagos_credito.pagado, false),
+                  eq(pagos_credito.paymentFalse, false)
+                )
+              )
             )
           )
           .orderBy(asc(pagos_credito.pago_id));
@@ -790,19 +801,25 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
             .plus(pago.membresias ?? 0)
             .plus(pago.capital_restante ?? 0)
             .gt(0);
-        const ultimoPagoValidadoConRestante = [...allExistingPagos]
+        const esPagoSaldoElegible = (pago: typeof pagos_credito.$inferSelect) =>
+          pago.validationStatus === "validated" ||
+          (pago.validationStatus === "pending" &&
+            pago.pagado === false &&
+            pago.paymentFalse === false);
+        const ultimoPagoParcialConRestante = [...allExistingPagos]
           .reverse()
           .find(
             ({ pago }) =>
-              pago.validationStatus === "validated" && tieneRestante(pago)
+              esPagoSaldoElegible(pago) &&
+              tieneRestante(pago)
           );
         const tienePagosValidados = allExistingPagos.some(
           ({ pago }) => pago.validationStatus === "validated"
         );
-        // El pago original es la fila destino; el último validado parcial
-        // trae el saldo vigente cuando ya hubo abonos parciales.
+        // El pago original es la fila destino; el último pago parcial elegible
+        // trae el saldo vigente aunque siga pendiente de validación.
         const existingPago = pagoOriginal ?? allExistingPagos[0];
-        const pagoSaldoVigente = ultimoPagoValidadoConRestante ?? existingPago;
+        const pagoSaldoVigente = ultimoPagoParcialConRestante ?? existingPago;
         // Inicializar variables de abono
         // 2. OBTENER LOS RESTANTES DEL PAGO EXISTENTE (no de la cuota)
         const interes_restante = new Big(
@@ -1035,6 +1052,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
           esCuotaSeleccionadaInicial &&
           pagoExactoDeUnaCuota &&
           !tienePagosValidados &&
+          !ultimoPagoParcialConRestante &&
           todosRestantesEnCero &&
           faltanteContraCuota.gt(0) &&
           disponible_restante.gte(faltanteContraCuota)
@@ -1707,7 +1725,7 @@ export async function insertarPago({
     .insert(pagos_credito)
     .values({
       credito_id: creditData.credito_id,
-      cuota_id: creditData.cuota_id ?? 0,
+      cuota_id: getCuotaIdForPaymentInsert(creditData.cuota_id),
       cuota: creditData.cuota?.toString() ?? "0",
       cuota_interes: creditData.cuota_interes?.toString() ?? "0",
 
@@ -1790,21 +1808,11 @@ export async function aplicarPagoAlCredito(pago_id: number) {
       throw new Error(`Pago ${pago_id} no encontrado`);
     }
     if (pago.validationStatus === "capital") {
-      if (pago.credito_id === null) {
-        throw new Error("No se puede aplicar el abono: credito_id es null");
-      }
-      aplicarAbonoCapitalInversionistas(
-        pago.credito_id,
-        pago.abono_capital ?? "0",
-        pago_id
+      return applyCapitalPaymentAndBuildResponse(
+        pago,
+        pago_id,
+        aplicarAbonoCapitalInversionistas
       );
-      console.log("⚠️ El pago es un abono directo a capital");
-      return {
-        success: true,
-        applied: false,
-        message:
-          "Pago validado como abono a capital , se abonó a inversionistas correctamente",
-      };
     }
     if (pago.validationStatus === "reset") {
       if (pago.credito_id === null) {

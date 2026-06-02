@@ -271,6 +271,7 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
         | "reinversion_interes"
         | "reinversion_total"
         | "reinversion_variable"
+        | "reinversion_excedente"
         | "reinversion_combinada"
         | null,
       rows: (rowsPorCredito.get(c.credito_id) ?? [])
@@ -375,6 +376,7 @@ export const compraCarteraAceptada = async ({ body, set, request }: any) => {
           reinversion_interes: "Reinversión de Interés",
           reinversion_total: "Reinversión Total",
           reinversion_variable: "Reinversión Variable",
+          reinversion_excedente: "Reinversión Excedente",
           reinversion_combinada: "Reinversión Combinada",
         };
 

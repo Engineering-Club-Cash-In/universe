@@ -373,6 +373,7 @@ export interface SendCompraCarteraAcceptedNotificationParams {
       | "reinversion_interes"
       | "reinversion_total"
       | "reinversion_variable"
+      | "reinversion_excedente"
       | "reinversion_combinada"
       | null;
     rows: Array<{
@@ -434,6 +435,7 @@ export const sendCompraCarteraAcceptedNotification = async ({
       reinversion_interes: "Reinversión de Interés",
       reinversion_total: "Interés Compuesto",
       reinversion_variable: "Reinversión Variable",
+      reinversion_excedente: "Reinversión Excedente",
       reinversion_combinada: "Reinversión Combinada",
     };
 

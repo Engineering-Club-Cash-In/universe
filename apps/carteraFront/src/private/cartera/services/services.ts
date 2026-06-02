@@ -3470,6 +3470,7 @@ export type TipoReinversionEspejo =
   | "reinversion_interes"
   | "reinversion_total"
   | "reinversion_variable"
+  | "reinversion_excedente"
   | "reinversion_combinada";
 
 export interface AsignarReinversionPayload {

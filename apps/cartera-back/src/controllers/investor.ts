@@ -1547,6 +1547,13 @@ export async function resumeInvestor(
                     .plus(inv.emite_factura ? abono_iva : isr.neg());
                   break;
 
+                case "reinversion_excedente":
+                  // Inverso de variable: per-pago se calcula completo; el ajuste global se aplica después
+                  cuota_inversor = abono_capital
+                    .plus(abono_interes)
+                    .plus(inv.emite_factura ? abono_iva : isr.neg());
+                  break;
+
                 case "reinversion_combinada":
                   // 🔑 Lógica combinada: tomamos lo que NO se reinvierte y le aplicamos impuesto
                   const capRestante = abono_capital.minus(reinvCapital);
@@ -1694,6 +1701,14 @@ export async function resumeInvestor(
         const montoReinv = new Big(inv.monto_reinversion ?? 0);
         const reinversion = montoReinv.gt(subtotal.total_cuota) ? subtotal.total_cuota : montoReinv;
         subtotal.total_cuota = subtotal.total_cuota.minus(reinversion);
+      }
+
+      // Excedente (inverso de variable): el monto fijo es lo que RECIBE; el sobrante se reinvierte.
+      if (inv.reinversion === "reinversion_excedente") {
+        const montoRecibe = new Big(inv.monto_reinversion ?? 0);
+        const recibe = montoRecibe.gt(subtotal.total_cuota) ? subtotal.total_cuota : montoRecibe;
+        subtotal.total_reinversion = subtotal.total_cuota.minus(recibe);
+        subtotal.total_cuota = recibe;
       }
 
       // 🔹 Retornar estructura del inversionista
@@ -1998,6 +2013,10 @@ export async function getInvestorTotalsGlobales(
           // Se calcula como sin_reinversion per-pago; el allCandidatese global se aplica después
           cuota_inversor = abono_capital.plus(interesTotal);
           break;
+        case "reinversion_excedente":
+          // Inverso de variable: per-pago se calcula completo; el ajuste global se aplica después
+          cuota_inversor = abono_capital.plus(interesTotal);
+          break;
         default:
           cuota_inversor = abono_capital.plus(interesTotal);
       }
@@ -2054,6 +2073,14 @@ export async function getInvestorTotalsGlobales(
     const reinversion = montoReinv.gt(subtotal.total_cuota) ? subtotal.total_cuota : montoReinv;
     subtotal.total_reinversion = reinversion;
     subtotal.total_cuota = subtotal.total_cuota.minus(reinversion);
+  }
+
+  // Excedente (inverso de variable): el monto fijo es lo que RECIBE; el sobrante se reinvierte.
+  if (inv.reinversion === "reinversion_excedente") {
+    const montoRecibe = new Big(inv.monto_reinversion ?? 0);
+    const recibe = montoRecibe.gt(subtotal.total_cuota) ? subtotal.total_cuota : montoRecibe;
+    subtotal.total_reinversion = subtotal.total_cuota.minus(recibe);
+    subtotal.total_cuota = recibe;
   }
 
   // 7. Upsert en reinversiones
@@ -3393,6 +3420,10 @@ export async function getInvestorMirrorSummary(
           // Se calcula como sin_reinversion per-pago; el allCandidatese global se aplica después
           cuota_inversor = abono_capital.plus(interesTotal);
           break;
+        case "reinversion_excedente":
+          // Inverso de variable: per-pago se calcula completo; el ajuste global se aplica después
+          cuota_inversor = abono_capital.plus(interesTotal);
+          break;
         default:
           cuota_inversor = abono_capital.plus(interesTotal);
       }
@@ -3430,6 +3461,14 @@ export async function getInvestorMirrorSummary(
     const reinversion = montoReinv.gt(sg.total_cuota) ? sg.total_cuota : montoReinv;
     sg.total_reinversion = reinversion;
     sg.total_cuota = sg.total_cuota.minus(reinversion);
+  }
+
+  // Excedente (inverso de variable): el monto fijo es lo que RECIBE; el sobrante se reinvierte.
+  if (inv.reinversion === "reinversion_excedente") {
+    const montoRecibe = new Big(inv.monto_reinversion ?? 0);
+    const recibe = montoRecibe.gt(sg.total_cuota) ? sg.total_cuota : montoRecibe;
+    sg.total_reinversion = sg.total_cuota.minus(recibe);
+    sg.total_cuota = recibe;
   }
 
   // ── PASO 5: Retornar datos del inversionista + subtotales globales ─────────
@@ -6494,6 +6533,19 @@ async function consultarResumenGlobalPorEstadoPago(
               END
           ), 0)
         )
+        WHEN 'reinversion_excedente' THEN GREATEST(
+          COALESCE(SUM(
+            ${pe.abono_capital}
+            + ${pe.abono_interes}
+            + CASE
+                WHEN ${inversionistas.emite_factura}
+                  THEN ${pe.abono_iva_12}
+                ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
+              END
+          ), 0)
+          - COALESCE(${inversionistas.monto_reinversion}, 0)::numeric,
+          0
+        )
         ELSE 0
       END`,
       total_a_recibir_con_reinversion: sql<number>`
@@ -6538,6 +6590,19 @@ async function consultarResumenGlobalPorEstadoPago(
                     ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
                   END
               ), 0)
+            )
+            WHEN 'reinversion_excedente' THEN GREATEST(
+              COALESCE(SUM(
+                ${pe.abono_capital}
+                + ${pe.abono_interes}
+                + CASE
+                    WHEN ${inversionistas.emite_factura}
+                      THEN ${pe.abono_iva_12}
+                    ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
+                  END
+              ), 0)
+              - COALESCE(${inversionistas.monto_reinversion}, 0)::numeric,
+              0
             )
             ELSE 0
           END`,
@@ -6604,6 +6669,19 @@ async function consultarResumenGlobalPorEstadoPago(
                   END
               ), 0)
             )
+        WHEN 'reinversion_excedente' THEN
+          LEAST(
+            COALESCE(${inversionistas.monto_reinversion}, 0)::numeric,
+            COALESCE(SUM(
+              ${pe.abono_capital}
+              + ${pe.abono_interes}
+              + CASE
+                  WHEN ${inversionistas.emite_factura}
+                    THEN ${pe.abono_iva_12}
+                  ELSE -ROUND(${pe.abono_interes} * 0.07, 2)
+                END
+            ), 0)
+          )
         ELSE COALESCE(SUM(
           ${pe.abono_capital}
           + ${pe.abono_interes}

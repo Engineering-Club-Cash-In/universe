@@ -2238,6 +2238,7 @@ export async function getAcumuladoPorCredito({ credito_id }: { credito_id: numbe
         + COALESCE(MIN(pc.membresias::numeric),        0)
       ) > 0
       OR COUNT(pc.pago_id) = 0
+      OR MIN(pc.capital_restante) IS NULL
     ORDER BY q.fecha_vencimiento ASC
   `);
 

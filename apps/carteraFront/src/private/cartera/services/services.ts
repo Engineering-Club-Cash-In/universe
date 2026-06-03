@@ -3619,6 +3619,7 @@ export interface PagosPorVencimientoResponse {
     totalPages: number;
   };
   totales: PagoPorVencimientoTotales;
+  totalesAcumulado?: PagoPorVencimientoTotales;
   excelUrl?: string;
 }
 

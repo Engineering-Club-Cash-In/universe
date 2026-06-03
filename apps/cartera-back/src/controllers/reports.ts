@@ -2055,6 +2055,7 @@ export async function getPagosByVencimiento({
     db.execute<any>(sql`
       WITH per_credito AS (
         SELECT
+          c.credito_id AS credito_id,
           COALESCE(cap_anterior.total_restante, c.capital::numeric) AS cap_ant,
           c.porcentaje_interes::numeric / 100 AS tasa,
           c.cuota::numeric AS cuota_c,
@@ -2062,6 +2063,7 @@ export async function getPagosByVencimiento({
           COALESCE(c.gps::numeric, 0) AS gps,
           COALESCE(c.membresias_pago::numeric, 0) AS mem,
           AVG(COALESCE(cube_data.cash_in_pct, 0))::numeric AS cash_pct,
+          MAX(mora_real.cuotas_atrasadas) AS cuotas_atrasadas,
           CASE
             WHEN MAX(mora_real.cuotas_atrasadas) > 0 THEN COALESCE(MAX(m.monto_mora::numeric), 0)
             ELSE 0
@@ -2075,10 +2077,68 @@ export async function getPagosByVencimiento({
           ROUND(cap_ant * tasa, 2) AS interes,
           ROUND(ROUND(cap_ant * tasa, 2) * 0.12, 2) AS iva
         FROM per_credito
+      ),
+      -- Por cada crédito: valor esperado del mes + deuda acumulada (cuotas vencidas no pagadas).
+      -- La deuda acumulada solo se calcula para créditos en mora (cuotas_atrasadas > 0).
+      calc_acum AS (
+        SELECT
+          calc.*,
+          LEAST(GREATEST(cuota_c - interes - iva - seguro - gps - mem, 0::numeric), cap_ant) AS exp_capital,
+          acum.acum_capital,
+          acum.acum_interes,
+          acum.acum_iva,
+          acum.acum_seguro,
+          acum.acum_gps,
+          acum.acum_mem
+        FROM calc
+        LEFT JOIN LATERAL (
+          SELECT
+            COALESCE(SUM(a.capital_restante), 0) AS acum_capital,
+            COALESCE(SUM(a.interes_restante), 0) AS acum_interes,
+            COALESCE(SUM(a.iva_12_restante), 0)  AS acum_iva,
+            COALESCE(SUM(a.seguro_restante), 0)  AS acum_seguro,
+            COALESCE(SUM(a.gps_restante), 0)     AS acum_gps,
+            COALESCE(SUM(a.membresias), 0)       AS acum_mem
+          FROM (
+            SELECT
+              COALESCE(MIN(pc_a.capital_restante::numeric), 0) AS capital_restante,
+              COALESCE(MIN(pc_a.interes_restante::numeric), 0) AS interes_restante,
+              COALESCE(MIN(pc_a.iva_12_restante::numeric),  0) AS iva_12_restante,
+              COALESCE(MIN(pc_a.seguro_restante::numeric),  0) AS seguro_restante,
+              COALESCE(MIN(pc_a.gps_restante::numeric),     0) AS gps_restante,
+              COALESCE(MIN(pc_a.membresias::numeric),       0) AS membresias
+            FROM cartera.cuotas_credito q_a
+            LEFT JOIN cartera.pagos_credito pc_a
+              ON pc_a.cuota_id = q_a.cuota_id
+              AND pc_a."paymentFalse" = false
+            WHERE q_a.credito_id = calc.credito_id
+              AND q_a.fecha_vencimiento::date < (NOW() AT TIME ZONE 'America/Guatemala')::date
+              AND q_a.pagado = false
+              AND NOT EXISTS (
+                SELECT 1 FROM cartera.pagos_credito pc2
+                WHERE pc2.cuota_id = q_a.cuota_id
+                  AND pc2."paymentFalse" = false
+                  AND pc2.pagado = true
+                  AND pc2.validation_status IN ('validated', 'no_required')
+              )
+            GROUP BY q_a.cuota_id
+            HAVING (
+                COALESCE(MIN(pc_a.capital_restante::numeric), 0)
+              + COALESCE(MIN(pc_a.interes_restante::numeric), 0)
+              + COALESCE(MIN(pc_a.iva_12_restante::numeric),  0)
+              + COALESCE(MIN(pc_a.seguro_restante::numeric),  0)
+              + COALESCE(MIN(pc_a.gps_restante::numeric),     0)
+              + COALESCE(MIN(pc_a.membresias::numeric),       0)
+            ) > 0
+            OR COUNT(pc_a.pago_id) = 0
+            OR MIN(pc_a.capital_restante) IS NULL
+          ) a
+        ) acum ON calc.cuotas_atrasadas > 0
       )
       SELECT
         COUNT(*) AS total_count,
-        COALESCE(SUM(LEAST(GREATEST(cuota_c - interes - iva - seguro - gps - mem, 0::numeric), cap_ant)), 0) AS total_capital,
+        -- Totales esperados del mes (sin cambios)
+        COALESCE(SUM(exp_capital), 0) AS total_capital,
         COALESCE(SUM(interes), 0) AS total_interes,
         COALESCE(SUM(iva), 0) AS total_iva,
         COALESCE(SUM(seguro), 0) AS total_seguro,
@@ -2087,8 +2147,18 @@ export async function getPagosByVencimiento({
         COALESCE(SUM(ROUND(interes * cash_pct, 2)), 0) AS total_interes_cube,
         COALESCE(SUM(ROUND(ROUND(interes * cash_pct, 2) * 0.12, 2)), 0) AS total_iva_cube,
         COALESCE(SUM(mora), 0) AS total_mora,
-        COALESCE(SUM(monto_apl), 0) AS total_monto_aplicado
-      FROM calc
+        COALESCE(SUM(monto_apl), 0) AS total_monto_aplicado,
+        -- Totales acumulados: morosos => deuda acumulada, al día => esperado del mes
+        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_capital, 0) ELSE exp_capital END), 0) AS acum_total_capital,
+        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_interes, 0) ELSE interes END), 0) AS acum_total_interes,
+        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_iva, 0) ELSE iva END), 0) AS acum_total_iva,
+        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_seguro, 0) ELSE seguro END), 0) AS acum_total_seguro,
+        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_gps, 0) ELSE gps END), 0) AS acum_total_gps,
+        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN COALESCE(acum_mem, 0) ELSE mem END), 0) AS acum_total_membresias,
+        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN ROUND(COALESCE(acum_interes, 0) * cash_pct, 2) ELSE ROUND(interes * cash_pct, 2) END), 0) AS acum_total_interes_cube,
+        COALESCE(SUM(CASE WHEN cuotas_atrasadas > 0 THEN ROUND(ROUND(COALESCE(acum_interes, 0) * cash_pct, 2) * 0.12, 2) ELSE ROUND(ROUND(interes * cash_pct, 2) * 0.12, 2) END), 0) AS acum_total_iva_cube,
+        COALESCE(SUM(mora), 0) AS acum_total_mora
+      FROM calc_acum
     `),
   ]);
 
@@ -2114,6 +2184,17 @@ export async function getPagosByVencimiento({
       interes_cube: Number(totRow?.total_interes_cube ?? 0).toFixed(2),
       iva_cube: Number(totRow?.total_iva_cube ?? 0).toFixed(2),
       mora: Number(totRow?.total_mora ?? 0).toFixed(2),
+    },
+    totalesAcumulado: {
+      capital_restante: Number(totRow?.acum_total_capital ?? 0).toFixed(2),
+      interes_restante: Number(totRow?.acum_total_interes ?? 0).toFixed(2),
+      iva_12_restante: Number(totRow?.acum_total_iva ?? 0).toFixed(2),
+      seguro_restante: Number(totRow?.acum_total_seguro ?? 0).toFixed(2),
+      gps_restante: Number(totRow?.acum_total_gps ?? 0).toFixed(2),
+      membresias: Number(totRow?.acum_total_membresias ?? 0).toFixed(2),
+      interes_cube: Number(totRow?.acum_total_interes_cube ?? 0).toFixed(2),
+      iva_cube: Number(totRow?.acum_total_iva_cube ?? 0).toFixed(2),
+      mora: Number(totRow?.acum_total_mora ?? 0).toFixed(2),
     },
   };
 }

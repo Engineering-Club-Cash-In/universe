@@ -1690,6 +1690,18 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         -- 🚩 Bandera top-level: crédito con compra de cartera / reinversión pendiente
         c.bandera_reinversion AS "banderaReinversion",
 
+        -- 🆕 ¿El crédito aplica al flujo de facturación prorrateado?
+        --    true si tiene una compra de cartera pendiente de facturar.
+        --    Mismo criterio que activa el nuevo flujo en /facturar-pago-completo
+        --    (pendiente_facturar=true + tipo_operacion='compra_cartera').
+        EXISTS (
+          SELECT 1
+          FROM cartera.compras_credito_inversionista cci
+          WHERE cci.credito_id = p.credito_id
+            AND cci.pendiente_facturar = true
+            AND cci.tipo_operacion = 'compra_cartera'
+        ) AS "pendienteFacturar",
+
         -- 📅 Info de la cuota
         (
           SELECT json_build_object(
@@ -1822,6 +1834,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       origenPago: r.origenPago,
       credito: r.credito,
       banderaReinversion: r.banderaReinversion ?? false,
+      pendienteFacturar: r.pendienteFacturar ?? false,
       cuota: r.cuota,
       usuario: r.usuario,
       inversionistas: Array.isArray(r.inversionistas)

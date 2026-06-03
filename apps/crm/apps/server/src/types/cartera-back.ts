@@ -12,7 +12,8 @@ export type StatusCreditEnum =
 	| "CANCELADO"
 	| "INCOBRABLE"
 	| "PENDIENTE_CANCELACION"
-	| "MOROSO";
+	| "MOROSO"
+	| "EN_CONVENIO";
 
 export type EstadoLiquidacionEnum =
 	| "NO_LIQUIDADO"
@@ -226,6 +227,27 @@ export interface CarteraAsesorCredito {
  * Estructura real devuelta por el endpoint /credito?numero_credito_sifco=XXX
  * Retorna los datos del crédito con las cuotas separadas por estado
  */
+export interface CarteraConvenio {
+	convenio_id: number;
+	credito_id: number;
+	monto_total_convenio: string;
+	numero_meses: number;
+	cuota_mensual: string;
+	activo: boolean;
+	completado: boolean;
+	created_at?: string | null;
+	updated_at?: string | null;
+	fecha_convenio?: string | null;
+	monto_pagado?: string | null;
+	monto_pendiente?: string | null;
+	pagos_realizados?: number | null;
+	pagos_pendientes?: number | null;
+	motivo?: string | null;
+	observaciones?: string | null;
+	created_by?: number | null;
+	cuotaConvenioAPagar?: string | null;
+}
+
 export interface CreditoDirectoResponse {
 	credito: CarteraCredito;
 	usuario: CarteraUsuario;
@@ -235,6 +257,7 @@ export interface CreditoDirectoResponse {
 	cuotasAtrasadas: CarteraCuotaCredito[];
 	moraActual: string; // decimal viene como string
 	mora?: CarteraMoraCredito | null;
+	convenioActivo?: CarteraConvenio | null;
 }
 
 export interface UpdateCreditoInput {

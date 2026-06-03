@@ -662,6 +662,9 @@ export const cobrosRouter = {
 								// Solo cambiar el estado, sin filtrar por cuotas
 								estadoCartera = "CANCELADO";
 								break;
+							case "en_convenio":
+								estadoCartera = "EN_CONVENIO" as typeof estadoCartera;
+								break;
 							default:
 								// Sin filtro, mantener ACTIVO como predeterminado
 								estadoCartera = "ACTIVO";
@@ -969,9 +972,10 @@ export const cobrosRouter = {
 							// Calcular monto en mora como: cuota mensual * cuotas atrasadas
 							const montoEnMora = cuotaMensual * cuotasAtrasadas;
 
-							// Determinar estado de mora según días de mora
+							// Determinar estado de mora según statusCredit y días de mora
 							let estadoMora: string | null = null;
-							if (diasMora === 0) estadoMora = "al_dia";
+							if (statusCredit === "EN_CONVENIO") estadoMora = "en_convenio";
+							else if (diasMora === 0) estadoMora = "al_dia";
 							else if (diasMora <= 30) estadoMora = "mora_30";
 							else if (diasMora <= 60) estadoMora = "mora_60";
 							else if (diasMora <= 90) estadoMora = "mora_90";
@@ -2115,14 +2119,19 @@ export const cobrosRouter = {
 				const diasMora = calcularDiasMoraExactos(
 					creditoCompleto.cuotasAtrasadas || [],
 				);
-				const montoEnMora =
-					Number(creditoCompleto.moraActual) || cuotaMensual * cuotasAtrasadas;
+				const montoEnMora = Number(creditoCompleto.moraActual ?? 0);
 
+				const tieneMoraActiva = creditoCompleto.mora != null;
+				const tieneConvenioActivo = creditoCompleto.convenioActivo != null;
 				let estadoMora: string | null = "al_dia";
-				if (cuotasAtrasadas === 1) estadoMora = "mora_30";
-				else if (cuotasAtrasadas === 2) estadoMora = "mora_60";
-				else if (cuotasAtrasadas === 3) estadoMora = "mora_90";
-				else if (cuotasAtrasadas >= 4) estadoMora = "mora_120";
+				if (tieneConvenioActivo) {
+					estadoMora = "en_convenio";
+				} else if (tieneMoraActiva) {
+					if (cuotasAtrasadas === 1) estadoMora = "mora_30";
+					else if (cuotasAtrasadas === 2) estadoMora = "mora_60";
+					else if (cuotasAtrasadas === 3) estadoMora = "mora_90";
+					else if (cuotasAtrasadas >= 4) estadoMora = "mora_120";
+				}
 
 				// Día de pago: extraer desde la fecha_vencimiento de una cuota real
 				// de cartera (prioriza pendiente, luego atrasada, luego pagada),
@@ -2149,11 +2158,14 @@ export const cobrosRouter = {
 					id: casoCobro?.id || null,
 					contratoId: contratoId,
 
-					// Datos de mora
+					// Datos de mora / convenio
 					estadoMora,
 					montoEnMora: montoEnMora.toFixed(2),
 					diasMoraMaximo: diasMora,
 					cuotasVencidas: cuotasAtrasadas,
+					cuotaConvenio: tieneConvenioActivo
+						? Number(creditoCompleto.convenioActivo!.cuota_mensual ?? 0).toFixed(2)
+						: null,
 
 					// Datos de contacto (del caso de cobros primero, fallback al lead)
 					telefonoPrincipal:

@@ -255,6 +255,11 @@ export async function reportarFacturasFallidasSat() {
     <div style="font-family:Arial,sans-serif;color:#222;">
       <h2>⚠️ Facturas no encontradas en SAT</h2>
       <p>Se detectaron <strong>${pendientes.length}</strong> factura(s) que están <strong>ACTIVA</strong> en el sistema pero <strong>no aparecen en SAT</strong>.</p>
+      <div style="background:#fff4f4;border:1px solid #f0c2c2;border-radius:6px;padding:12px 16px;margin:12px 0;">
+        <strong>📌 Acción requerida:</strong> para que estas facturas queden registradas correctamente en SAT,
+        hay que <strong>anularlas y volver a facturarlas</strong>. Una vez anuladas en el sistema, dejarán de
+        aparecer en este reporte automáticamente.
+      </div>
       <table style="border-collapse:collapse;border:1px solid #ddd;font-size:13px;">
         <thead>
           <tr style="background:#f4f4f4;">

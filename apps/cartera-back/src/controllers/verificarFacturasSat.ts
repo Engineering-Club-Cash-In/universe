@@ -93,10 +93,29 @@ async function verificarEnSat(
   }
 }
 
+// Marca como RESUELTA toda fallida PENDIENTE cuya factura ya esté ANULADA en
+// la BD (así deja de aparecer en el reporte). Devuelve cuántas resolvió.
+async function resolverFallidasAnuladas(): Promise<number> {
+  const r: any = await db.execute(sql`
+    UPDATE cartera.facturas_fallidas_sat AS ff
+    SET status = 'RESUELTA', resuelta_at = now(), updated_at = now()
+    FROM cartera.facturas_electronicas AS fe
+    WHERE ff.factura_id = fe.factura_id
+      AND ff.status = 'PENDIENTE'
+      AND fe.status = 'ANULADA'
+  `);
+  const n = r?.rowCount ?? 0;
+  if (n > 0) console.log(`🧹 [facturas_fallidas_sat] ${n} resuelta(s) por estar ANULADA en BD`);
+  return n;
+}
+
 // ============================================================
 // JOB 1: verificar facturas nuevas contra SAT
 // ============================================================
 export async function verificarFacturasSat() {
+  // 0) Limpiar fallidas que ya fueron anuladas en la BD
+  await resolverFallidasAnuladas();
+
   // 1) Cursor
   const [chk] = await db
     .select()
@@ -194,6 +213,9 @@ export async function verificarFacturasSat() {
 // JOB 2: reportar por correo las fallidas pendientes
 // ============================================================
 export async function reportarFacturasFallidasSat() {
+  // Quitar del reporte las que ya fueron anuladas en la BD
+  await resolverFallidasAnuladas();
+
   const pendientes = await db
     .select()
     .from(facturas_fallidas_sat)

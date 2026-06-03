@@ -573,6 +573,11 @@ function RouteComponent() {
 	const filtrosEtapa = [
 		{ key: "al_dia", label: "Al Día", color: "bg-green-100 text-green-800" },
 		{
+			key: "en_convenio",
+			label: "En Convenio",
+			color: "bg-green-100 text-green-800",
+		},
+		{
 			key: "mora_30",
 			label: "Mora 30",
 			color: "bg-yellow-100 text-yellow-800",

@@ -35,7 +35,7 @@ const REINTENTO_MS = 2000;
 // Destinatarios del correo (configurable por env, con default).
 const DEFAULT_EMAILS = [
   "diego.l@clubcashin.com",
-  "jalvarado@clubcashin.com",
+  "jalvaradp@clubcashin.com",
   "daniel.r@clubcashin.com",
   "diego.a@sepresta.com",
   "lralda@clubcashin.com",

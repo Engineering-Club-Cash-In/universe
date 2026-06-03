@@ -74,11 +74,17 @@ function getSatClientPorEmisor(emisorNit: string | null | undefined): SATClientS
   );
 }
 
-// Consulta SAT con un reintento corto. Devuelve {encontrado, mensaje}.
+type EstadoSat = "found" | "not_found" | "error";
+
+// Consulta SAT con un reintento corto. Devuelve un estado de 3 valores:
+//  - "found": la factura está en SAT.
+//  - "not_found": SAT respondió que NO existe -> es una fallida real.
+//  - "error": la consulta falló (red/timeout/parse). NO concluye nada: la
+//    factura no se marca fallida y el cursor NO debe avanzar más allá de ella.
 async function verificarEnSat(
   uuid: string,
   emisorNit: string | null | undefined
-): Promise<{ encontrado: boolean; mensaje: string }> {
+): Promise<{ estado: EstadoSat; mensaje: string }> {
   const client = getSatClientPorEmisor(emisorNit);
   try {
     let r = await client.obtenerPorUUID(uuid);
@@ -86,10 +92,10 @@ async function verificarEnSat(
       await new Promise((res) => setTimeout(res, REINTENTO_MS));
       r = await client.obtenerPorUUID(uuid);
     }
-    return { encontrado: !!r.encontrado, mensaje: r.mensaje || "" };
+    return { estado: r.encontrado ? "found" : "not_found", mensaje: r.mensaje || "" };
   } catch (e) {
-    // Un error de red NO debe marcar la factura como fallida.
-    return { encontrado: true, mensaje: `error_consulta: ${(e as Error).message}` };
+    // Error de red: no concluye. No marca fallida ni avanza cursor.
+    return { estado: "error", mensaje: `error_consulta: ${(e as Error).message}` };
   }
 }
 
@@ -124,8 +130,8 @@ async function revalidarPendientes(): Promise<number> {
 
   let resueltas = 0;
   for (const p of pendientes) {
-    const { encontrado, mensaje } = await verificarEnSat(p.uuid, p.emisor_nit);
-    if (encontrado) {
+    const { estado, mensaje } = await verificarEnSat(p.uuid, p.emisor_nit);
+    if (estado === "found") {
       resueltas++;
       await db
         .update(facturas_fallidas_sat)
@@ -190,12 +196,26 @@ export async function verificarFacturasSat() {
   }
 
   let fallidas = 0;
+  let errores = 0;
   let maxId = cursor;
+  // Una vez que una consulta a SAT falla, NO avanzamos el cursor más allá de
+  // esa factura: se reintentará en la próxima corrida. Así una caída de SAT no
+  // hace que se salten facturas para siempre.
+  let congelado = false;
 
   for (const f of candidatos) {
-    const { encontrado, mensaje } = await verificarEnSat(f.uuid, f.emisor_nit);
+    const { estado, mensaje } = await verificarEnSat(f.uuid, f.emisor_nit);
 
-    if (!encontrado) {
+    if (estado === "error") {
+      errores++;
+      congelado = true;
+      console.warn(
+        `⚠️ [verificarFacturasSat] Error consultando SAT: ${f.serie}-${f.numero} (${f.uuid}) - ${mensaje}. Se reintentará.`
+      );
+      continue; // no concluye: no marca fallida ni avanza cursor
+    }
+
+    if (estado === "not_found") {
       fallidas++;
       console.warn(
         `❌ [verificarFacturasSat] NO está en SAT: ${f.serie}-${f.numero} (${f.uuid}) - ${mensaje}`
@@ -227,22 +247,26 @@ export async function verificarFacturasSat() {
         });
     }
 
-    if (f.factura_id > maxId) maxId = f.factura_id;
+    // Solo avanzamos el cursor mientras no haya habido un error antes (para no
+    // saltarnos la factura que falló, que sigue siendo > cursor).
+    if (!congelado && f.factura_id > maxId) maxId = f.factura_id;
   }
 
-  // 4) Avanzar cursor
-  await db
-    .insert(job_checkpoints)
-    .values({ job_name: JOB_NAME, last_factura_id: maxId })
-    .onConflictDoUpdate({
-      target: job_checkpoints.job_name,
-      set: { last_factura_id: maxId, updated_at: sql`now()` },
-    });
+  // 4) Avanzar cursor (hasta la última factura concluyente contigua)
+  if (maxId > cursor) {
+    await db
+      .insert(job_checkpoints)
+      .values({ job_name: JOB_NAME, last_factura_id: maxId })
+      .onConflictDoUpdate({
+        target: job_checkpoints.job_name,
+        set: { last_factura_id: maxId, updated_at: sql`now()` },
+      });
+  }
 
   console.log(
-    `🧾 [verificarFacturasSat] revisadas=${candidatos.length} fallidas=${fallidas} cursor=${cursor}->${maxId}`
+    `🧾 [verificarFacturasSat] revisadas=${candidatos.length} fallidas=${fallidas} errores=${errores} cursor=${cursor}->${maxId}`
   );
-  return { revisadas: candidatos.length, fallidas };
+  return { revisadas: candidatos.length, fallidas, errores };
 }
 
 // ============================================================

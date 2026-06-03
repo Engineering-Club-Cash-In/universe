@@ -24,6 +24,22 @@ interface CertificacionResponse {
   xmlCertificado: string;
 }
 
+function normalizarMensajeCofidi(mensaje: string): string {
+  return mensaje
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function esDocumentoNoEncontrado(mensaje: string | undefined): boolean {
+  if (!mensaje) return false;
+  const normalizado = normalizarMensajeCofidi(mensaje);
+  return (
+    /(documento|dte|uuid).*no (se )?(encontro|encontrado|existe)/.test(normalizado) ||
+    /no (se )?(encontro|existe).*(documento|dte|uuid)/.test(normalizado)
+  );
+}
+
 export class SATClientService {
   private credentials: SATCredentials;
   private endpointUrl: string;
@@ -351,9 +367,14 @@ export class SATClientService {
       const resultSuccess = response?.['Result'] === 'true' || response?.['Result'] === true;
       
       if (!resultSuccess) {
+        const mensaje = response?.['Description'];
+        if (!esDocumentoNoEncontrado(mensaje)) {
+          throw new Error(`GET_DOCUMENT fallo: ${mensaje || 'sin descripcion'}`);
+        }
+
         return {
           encontrado: false,
-          mensaje: response?.['Description'] || 'Documento no encontrado'
+          mensaje
         };
       }
 

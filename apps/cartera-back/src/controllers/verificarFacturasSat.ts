@@ -39,6 +39,7 @@ const DEFAULT_EMAILS = [
   "daniel.r@clubcashin.com",
   "diego.a@sepresta.com",
   "lralda@clubcashin.com",
+  "caja@sepresta.com",
 ];
 
 // ------------------------------------------------------------

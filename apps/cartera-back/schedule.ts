@@ -2,6 +2,7 @@ import schedule from 'node-schedule';
 import { procesarMoras } from './src/controllers/latefee';
 import { upsertEfectividadAsesores } from './src/controllers/paymentsByAdvisor';
 import { expirarCompraCarteraVencidas } from './src/controllers/expirarCompraCartera';
+import { generarCierreMensual } from './src/controllers/cierreMensual';
 
 const TZ_GUATEMALA = 'America/Guatemala';
 
@@ -52,6 +53,19 @@ export function iniciarTareasProgramadas() {
       );
     } catch (error) {
       console.error('❌ Error al ejecutar expirarCompraCarteraVencidas:', error);
+    }
+  });
+
+  // 📊 Cierre mensual de cartera - día 5 de cada mes a las 00:00 hora Guatemala.
+  //    Genera la foto del mes ANTERIOR (el que se cierra): conteo y capital por estado,
+  //    más el detalle de mora actual al momento de correr.
+  schedule.scheduleJob({ rule: '0 0 5 * *', tz: TZ_GUATEMALA }, async () => {
+    console.log('🗓️ Ejecutando generarCierreMensual (día 5, 00:00 Guatemala)...');
+    try {
+      const res = await generarCierreMensual();
+      console.log(`✅ cierreMensual: periodo=${res.periodo}, filas=${res.filas}`);
+    } catch (error) {
+      console.error('❌ Error al ejecutar generarCierreMensual:', error);
     }
   });
 

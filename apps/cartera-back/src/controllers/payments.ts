@@ -2172,6 +2172,14 @@ export async function obtenerCreditosConPagosPendientes(
           console.log(`⏭️  Crédito ${credito.creditoId}: sin fecha_inicio_participacion → se omite`);
           return null;
         }
+        // Participación que empieza DESPUÉS del período (mes futuro) → no corresponde
+        // liquidar este período. El filtro SQL viejo (`< inicio`) también la excluía;
+        // sin este corte, una fecha futura entraría al bloque de monto viejo y, como
+        // no tiene compras del mes en curso, se procesaría por error.
+        if (fechaInicioParticipacion > rangoMesActual.fin) {
+          console.log(`⏭️  Crédito ${credito.creditoId}: participación futura (${fechaInicioParticipacion} > ${rangoMesActual.fin}) → se omite`);
+          return null;
+        }
         if (fechaInicioParticipacion >= rangoMesActual.inicio) {
           const sumaPendientes = await obtenerSumaComprasPendientes(
             credito.creditoId,
@@ -2445,6 +2453,13 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
       baseCalculo.getUTCMonth(),
       baseCalculo.getUTCDate(),
     );
+    // Primer día del mes SIGUIENTE al período: cota superior para descartar
+    // participaciones futuras (fecha_inicio en un mes posterior al que se procesa).
+    const inicioMesSiguiente = new Date(
+      baseCalculo.getUTCFullYear(),
+      baseCalculo.getUTCMonth() + 1,
+      1
+    ).toISOString().slice(0, 10);
     console.log(`📅 Inicio de período: ${inicioPeriodo}`);
 
     // Paso 1: Se buscan todos los créditos en los que este inversionista participa
@@ -2537,6 +2552,16 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
           // Preserva el comportamiento previo: fecha_inicio nula quedaba excluida por el SQL.
           console.log(
             `⏭️  Crédito ${credito.creditoId}: sin fecha_inicio_participacion → se omite`
+          );
+          return null;
+        }
+        // Participación que empieza DESPUÉS del período (mes futuro) → no corresponde
+        // liquidar este período. El filtro SQL viejo (`< inicioPeriodo`) también la
+        // excluía; sin este corte, una fecha futura entraría al bloque de monto viejo y,
+        // como no tiene compras del mes en curso, se procesaría por error.
+        if (fechaInicioParticipacion >= inicioMesSiguiente) {
+          console.log(
+            `⏭️  Crédito ${credito.creditoId}: participación futura (${fechaInicioParticipacion} >= ${inicioMesSiguiente}) → se omite`
           );
           return null;
         }

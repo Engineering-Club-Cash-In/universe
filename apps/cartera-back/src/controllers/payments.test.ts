@@ -418,4 +418,31 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
     expect(result.success).toBeTrue();
     expect(result.totalCreditosProcesados).toBe(1);
   });
+
+  it("6. Participación que empieza en un mes FUTURO al período → sin pagos", async () => {
+    // Comportamiento esperado: se calcula junio (2026-06) pero la fecha_inicio del
+    // crédito es de julio (mes posterior). No corresponde liquidar este período —
+    // el corte por mes futuro debe omitirlo, igual que el filtro SQL viejo (< inicio).
+    // Sin ese corte, al no tener compras del mes en curso, montoViejo daría el monto
+    // completo y lo procesaría por error.
+    mockCreditosInversionistaEspejo = [
+      {
+        creditoId: 101,
+        inversionistaId: 99,
+        montoAportado: "10000.00000000",
+        porcentajeParticipacion: "50.00",
+        fechaInicioParticipacion: "2026-07-15", // mes posterior al período (junio)
+        numeroCreditoSifco: "CRED-101",
+        capital: "20000.00",
+        deudaTotal: "22000.00",
+        statusCredit: "ACTIVO",
+        cuota: "1000.00",
+      }
+    ];
+    mockPagosPendientesEspejo = [];
+
+    const result = await calcularYRegistrarPagosEspejo(99, new Date("2026-06-10T12:00:00.000Z"));
+    expect(result.success).toBeTrue();
+    expect(result.totalCreditosProcesados).toBe(0);
+  });
 });

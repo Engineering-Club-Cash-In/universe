@@ -843,7 +843,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         // no duplica interés/IVA/seguro/membresías.
         const existingPago = pagoOriginal ?? allExistingPagos[0];
         const candidatosSaldo = [
-          ultimoPagoValidadoConRestante,
+          ultimoPagoParcialConRestante,
           ultimoParcialPendiente && tieneRestante(ultimoParcialPendiente.pago)
             ? ultimoParcialPendiente
             : undefined,

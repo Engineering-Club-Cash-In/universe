@@ -51,5 +51,8 @@
 		"drizzle-kit": "^0.31.2",
 		"tsc-alias": "^1.8.11",
 		"typescript": "^5.8.2"
+	},
+	"overrides": {
+		"kysely": "0.28.11"
 	}
 }

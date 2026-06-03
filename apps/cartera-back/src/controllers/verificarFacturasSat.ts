@@ -109,12 +109,48 @@ async function resolverFallidasAnuladas(): Promise<number> {
   return n;
 }
 
+// Re-verifica contra SAT las fallidas que siguen PENDIENTE. Si una ya aparece
+// en SAT (apareció después del grace por propagación lenta), la marca RESUELTA
+// para que no genere alertas falsas para siempre. Devuelve cuántas resolvió.
+async function revalidarPendientes(): Promise<number> {
+  const pendientes = await db
+    .select({
+      factura_id: facturas_fallidas_sat.factura_id,
+      uuid: facturas_fallidas_sat.uuid,
+      emisor_nit: facturas_fallidas_sat.emisor_nit,
+    })
+    .from(facturas_fallidas_sat)
+    .where(eq(facturas_fallidas_sat.status, "PENDIENTE"));
+
+  let resueltas = 0;
+  for (const p of pendientes) {
+    const { encontrado, mensaje } = await verificarEnSat(p.uuid, p.emisor_nit);
+    if (encontrado) {
+      resueltas++;
+      await db
+        .update(facturas_fallidas_sat)
+        .set({
+          status: "RESUELTA",
+          resuelta_at: sql`now()`,
+          updated_at: sql`now()`,
+          mensaje_sat: `Apareció en SAT al revalidar (${mensaje})`,
+        })
+        .where(eq(facturas_fallidas_sat.factura_id, p.factura_id));
+    }
+  }
+  if (resueltas > 0)
+    console.log(`🔁 [facturas_fallidas_sat] ${resueltas} resuelta(s) al reaparecer en SAT`);
+  return resueltas;
+}
+
 // ============================================================
 // JOB 1: verificar facturas nuevas contra SAT
 // ============================================================
 export async function verificarFacturasSat() {
-  // 0) Limpiar fallidas que ya fueron anuladas en la BD
+  // 0) Limpiar fallidas que ya fueron anuladas en la BD y re-validar las que
+  //    ya aparecieron en SAT (evita alertas falsas permanentes).
   await resolverFallidasAnuladas();
+  await revalidarPendientes();
 
   // 1) Cursor
   const [chk] = await db
@@ -213,8 +249,10 @@ export async function verificarFacturasSat() {
 // JOB 2: reportar por correo las fallidas pendientes
 // ============================================================
 export async function reportarFacturasFallidasSat() {
-  // Quitar del reporte las que ya fueron anuladas en la BD
+  // Quitar del reporte las que ya fueron anuladas en la BD y las que ya
+  // reaparecieron en SAT, para que el correo solo liste fallidas reales.
   await resolverFallidasAnuladas();
+  await revalidarPendientes();
 
   const pendientes = await db
     .select()
@@ -278,11 +316,23 @@ export async function reportarFacturasFallidasSat() {
       <p style="color:#888;font-size:12px;margin-top:16px;">Reporte automático — Cartera Cash-In.</p>
     </div>`;
 
-  await sendPlainEmail(
+  const envio = await sendPlainEmail(
     destinatarios,
     `⚠️ ${pendientes.length} factura(s) no certificada(s) en SAT`,
     html
   );
+
+  // sendPlainEmail NO lanza si Resend falla: resuelve { success:false, error }.
+  // Hay que detectarlo para no reportar como enviado algo que no salió.
+  if (!envio?.success) {
+    console.error(
+      `❌ [reportarFacturasFallidasSat] El correo NO se pudo enviar:`,
+      envio?.error
+    );
+    throw new Error(
+      `Falló el envío del reporte de facturas fallidas: ${JSON.stringify(envio?.error)}`
+    );
+  }
 
   console.log(
     `📧 [reportarFacturasFallidasSat] correo enviado a ${destinatarios.length} destinatario(s) con ${pendientes.length} pendiente(s)`

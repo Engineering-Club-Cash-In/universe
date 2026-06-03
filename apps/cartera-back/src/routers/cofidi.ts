@@ -352,6 +352,15 @@ if (facturasExistentes.length > 0) {
         return pais;
       };
 
+      // 🔥 Si la dirección viene con varias separadas por "||", tomar solo la primera.
+      // Siempre limitar a 200 caracteres.
+      const normalizarDireccion = (direccion: string): string => {
+        const primera = direccion.includes("||")
+          ? direccion.split("||")[0]
+          : direccion;
+        return primera.trim().slice(0, 200);
+      };
+
       // 🔥 Extraer todos los NITs disponibles (separados por /)
       const nitsDisponibles = pagoData.nit
         ? pagoData.nit.split('/').map((n: string) => n.trim().replace(/-/g, '')).filter((n: string) => n.length > 0)
@@ -400,7 +409,7 @@ if (facturasExistentes.length > 0) {
         nombreReceptor: nombreReceptor,
         direccion: pagoData.direccion
           ? {
-              direccion: pagoData.direccion,
+              direccion: normalizarDireccion(pagoData.direccion),
               codigoPostal: pagoData.codigo_postal || "01001",
               municipio: pagoData.municipio || "Guatemala",
               departamento: pagoData.departamento || "Guatemala",

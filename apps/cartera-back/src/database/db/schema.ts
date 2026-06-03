@@ -1078,6 +1078,53 @@
     created_by: integer("created_by").references(() => platform_users.id),
   });
 
+  // ============================================
+  // 🆕 TABLA: facturas_fallidas_sat
+  //    Registro de facturas que están ACTIVA en BD pero NO se
+  //    encontraron en SAT al verificarlas con obtenerPorUUID.
+  // ============================================
+  export const facturas_fallidas_sat = customSchema.table("facturas_fallidas_sat", {
+    id: serial("id").primaryKey(),
+
+    // Una fila por factura (UNIQUE para upsert / no duplicar)
+    factura_id: integer("factura_id")
+      .notNull()
+      .unique()
+      .references(() => facturas_electronicas.factura_id),
+
+    // Datos de la factura (copiados para el reporte)
+    uuid: varchar("uuid", { length: 255 }).notNull(),
+    serie: varchar("serie", { length: 50 }).notNull(),
+    numero: varchar("numero", { length: 100 }).notNull(),
+    emisor_nit: varchar("emisor_nit", { length: 30 }),
+    emisor_nombre: varchar("emisor_nombre", { length: 200 }),
+    receptor_nit: varchar("receptor_nit", { length: 30 }),
+    receptor_nombre: varchar("receptor_nombre", { length: 200 }),
+    monto_total: numeric("monto_total", { precision: 18, scale: 2 }),
+    fecha_certificacion: timestamp("fecha_certificacion"),
+
+    // Resultado de la verificación
+    mensaje_sat: text("mensaje_sat"),
+    intentos: integer("intentos").notNull().default(1),
+    status: varchar("status", { length: 20 }).notNull().default("PENDIENTE"), // PENDIENTE | RESUELTA
+
+    // Metadata
+    detectada_at: timestamp("detectada_at").defaultNow().notNull(),
+    resuelta_at: timestamp("resuelta_at"),
+    updated_at: timestamp("updated_at").defaultNow().notNull(),
+  });
+
+  // ============================================
+  // 🆕 TABLA: job_checkpoints
+  //    Cursor genérico para jobs incrementales (arrancar desde
+  //    donde se quedó). Ej: verificar_facturas_sat.
+  // ============================================
+  export const job_checkpoints = customSchema.table("job_checkpoints", {
+    job_name: varchar("job_name", { length: 100 }).primaryKey(),
+    last_factura_id: integer("last_factura_id").notNull().default(0),
+    updated_at: timestamp("updated_at").defaultNow().notNull(),
+  });
+
 
   // 🆕 TABLA: liquidaciones
   // ============================================

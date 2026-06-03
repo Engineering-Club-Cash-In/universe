@@ -445,4 +445,34 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
     expect(result.success).toBeTrue();
     expect(result.totalCreditosProcesados).toBe(0);
   });
+
+  it("7. Participación nueva DIRECTA del mes (sin compra) → sin pagos", async () => {
+    // Comportamiento esperado: el inversionista se agregó directo este mes (fecha_inicio
+    // del período) pero SIN compra_cartera. No hay compra que justifique un monto viejo,
+    // así que es una participación nueva → se omite (paga desde el mes siguiente), igual
+    // que el filtro SQL viejo. Sin este corte, montoViejo daría el monto completo y se
+    // procesaría por error.
+    mockCreditosInversionistaEspejo = [
+      {
+        creditoId: 101,
+        inversionistaId: 99,
+        montoAportado: "8000.00000000",
+        porcentajeParticipacion: "40.00",
+        fechaInicioParticipacion: "2026-06-07", // mes en curso, alta directa
+        numeroCreditoSifco: "CRED-101",
+        capital: "20000.00",
+        deudaTotal: "22000.00",
+        statusCredit: "ACTIVO",
+        cuota: "1000.00",
+      }
+    ];
+    // SIN compras del mes ni pendientes → no hay nada que justifique monto viejo.
+    mockSumaComprasCompletadasMesActual = new Big(0);
+    mockSumaComprasPendientes = new Big(0);
+    mockPagosPendientesEspejo = [];
+
+    const result = await calcularYRegistrarPagosEspejo(99, new Date("2026-06-10T12:00:00.000Z"));
+    expect(result.success).toBeTrue();
+    expect(result.totalCreditosProcesados).toBe(0);
+  });
 });

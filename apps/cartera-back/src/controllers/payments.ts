@@ -2190,15 +2190,17 @@ export async function obtenerCreditosConPagosPendientes(
             inversionistaId,
             new Date(),
           );
-          const montoViejo = new Big(credito.montoAportado || 0)
-            .minus(sumaPendientes)
-            .minus(sumaCompletadasMesActual);
+          const comprasDelMes = sumaPendientes.plus(sumaCompletadasMesActual);
+          const montoViejo = new Big(credito.montoAportado || 0).minus(comprasDelMes);
 
-          if (montoViejo.lte(0)) {
+          // Solo se procesa si hay una compra REAL del mes que justifique el monto viejo.
+          // Sin compra → participación nueva directa → se omite (como el filtro SQL viejo).
+          if (comprasDelMes.lte(0) || montoViejo.lte(0)) {
             console.log(
               `⏭️  Crédito ${credito.creditoId}: participación del período (${fechaInicioParticipacion}) ` +
-              `sin monto viejo [monto_aportado=${credito.montoAportado}, pendientes=${sumaPendientes.toString()}, ` +
-              `compras_mes_actual=${sumaCompletadasMesActual.toString()}] → participación nueva, se omite`
+              `sin monto viejo respaldado por compra [monto_aportado=${credito.montoAportado}, ` +
+              `pendientes=${sumaPendientes.toString()}, compras_mes_actual=${sumaCompletadasMesActual.toString()}] ` +
+              `→ participación nueva, se omite`
             );
             return null;
           }
@@ -2575,15 +2577,19 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
             inversionistaId,
             fechaCalcNormalizada,
           );
-          const montoViejo = new Big(credito.montoAportado || 0)
-            .minus(sumaPendientes)
-            .minus(sumaCompletadasMesActual);
+          const comprasDelMes = sumaPendientes.plus(sumaCompletadasMesActual);
+          const montoViejo = new Big(credito.montoAportado || 0).minus(comprasDelMes);
 
-          if (montoViejo.lte(0)) {
+          // Solo se procesa una participación del mes en curso si hay una compra REAL
+          // del mes (pendiente o completada) que justifique el monto viejo. Sin compra,
+          // es una participación nueva directa → se omite (como el filtro SQL viejo).
+          // Con compra pero sin saldo previo (la compra cubre todo) → también se omite.
+          if (comprasDelMes.lte(0) || montoViejo.lte(0)) {
             console.log(
               `⏭️  Crédito ${credito.creditoId}: participación del período (${fechaInicioParticipacion}) ` +
-              `sin monto viejo [monto_aportado=${credito.montoAportado}, pendientes=${sumaPendientes.toString()}, ` +
-              `compras_mes_actual=${sumaCompletadasMesActual.toString()}] → participación nueva, se omite`
+              `sin monto viejo respaldado por compra [monto_aportado=${credito.montoAportado}, ` +
+              `pendientes=${sumaPendientes.toString()}, compras_mes_actual=${sumaCompletadasMesActual.toString()}] ` +
+              `→ participación nueva, se omite`
             );
             return null;
           }

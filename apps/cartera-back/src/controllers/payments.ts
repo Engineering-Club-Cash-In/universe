@@ -599,14 +599,17 @@ export async function insertPagosCreditoInversionistas(
       const capitalTotalBig  = new Big(currentCredit?.capital ?? 0);
       const cuotaTotalBig    = new Big(currentCredit?.cuota ?? 0);
       const seguroBig        = new Big(currentCredit?.seguro_10_cuotas ?? 0);
+      const gpsBig           = new Big(currentCredit?.gps ?? 0);
       const membresiasBig    = new Big(currentCredit?.membresias_pago ?? 0);
-      const cuotaSinCargos   = cuotaTotalBig.minus(membresiasBig).minus(seguroBig);
+      // Mismo criterio que addInvestorToCredit: la base se reparte SIN los tres cargos
+      // fijos (seguro + gps + membresías) y esos cargos se suman SOLO al mayor.
+      const cuotaSinCargos   = cuotaTotalBig.minus(membresiasBig).minus(seguroBig).minus(gpsBig);
       const pctParticipacion = capitalTotalBig.gt(0)
         ? montoBaseCalculo.div(capitalTotalBig).times(100)
         : new Big(0);
       const cuotaBaseRecalc  = cuotaSinCargos.times(pctParticipacion.div(100)).round(2);
       cuotaRecalculada = (inv.inversionista_id === mayorCuotaInversionistaId && !excludeCube)
-        ? cuotaBaseRecalc.plus(seguroBig).plus(membresiasBig).round(2)
+        ? cuotaBaseRecalc.plus(seguroBig).plus(gpsBig).plus(membresiasBig).round(2)
         : cuotaBaseRecalc;
     } else {
       cuotaRecalculada = new Big(inv.cuota_inversionista ?? 0);

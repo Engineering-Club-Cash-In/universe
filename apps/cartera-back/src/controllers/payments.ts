@@ -24,7 +24,7 @@ import {
   processAndReplaceCreditInvestorsReverse,
 } from "./investor";
 import { updateMora } from "./latefee";
-import { calcularAjusteCompras, obtenerSumaComprasMesAnterior, obtenerSumaComprasPendientes } from "../utils/comprasAjuste";
+import { calcularAjusteCompras, obtenerSumaComprasMesAnterior, obtenerSumaComprasPendientes, obtenerSumaComprasCompletadasMesActual } from "../utils/comprasAjuste";
 import { t } from "elysia";
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive(),
@@ -2025,6 +2025,8 @@ export async function obtenerCreditosConPagosPendientes(
         montoAportado: creditos_inversionistas_espejo.monto_aportado,
         porcentajeParticipacion:
           creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
+        fechaInicioParticipacion:
+          creditos_inversionistas_espejo.fecha_inicio_participacion,
         // Datos del crédito
         numeroCreditoSifco: creditos.numero_credito_sifco,
         capital: creditos.capital,
@@ -2044,8 +2046,10 @@ export async function obtenerCreditosConPagosPendientes(
         and(
           eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId),
           inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "PENDIENTE_CANCELACION", "EN_CONVENIO","INCOBRABLE"]),
-          eq(creditos_inversionistas_espejo.status, "completado"),
-          lt(creditos_inversionistas_espejo.fecha_inicio_participacion, rangoMesActual.inicio)
+          eq(creditos_inversionistas_espejo.status, "completado")
+          // El filtro por fecha_inicio_participacion se reemplazó por la evaluación de
+          // "monto viejo" en el loop (mismo criterio que calcularYRegistrarPagosEspejo):
+          // así un partícipe viejo que compró este mes no se pierde y sólo se excluye la compra.
         )
       );
 
@@ -2085,6 +2089,43 @@ export async function obtenerCreditosConPagosPendientes(
 
         console.log(`✅ El crédito ${credito.creditoId} NO tiene pagos pendientes, continuando...`);
         console.log(`========================================\n`);
+
+        // Monto viejo (mismo criterio que calcularYRegistrarPagosEspejo): el filtro SQL
+        // por fecha_inicio_participacion se quitó para no botar al partícipe viejo que
+        // compró este mes. Sólo evaluamos las participaciones cuya fecha cae en el mes en
+        // curso (las que el filtro botaba): se procesan si queda monto viejo y se omiten
+        // si la compra del mes cubre todo el monto_aportado (participación nueva).
+        const fechaInicioParticipacion = credito.fechaInicioParticipacion;
+        if (!fechaInicioParticipacion) {
+          console.log(`⏭️  Crédito ${credito.creditoId}: sin fecha_inicio_participacion → se omite`);
+          return null;
+        }
+        if (fechaInicioParticipacion >= rangoMesActual.inicio) {
+          const sumaPendientes = await obtenerSumaComprasPendientes(
+            credito.creditoId,
+            inversionistaId,
+          );
+          const sumaCompletadasMesActual = await obtenerSumaComprasCompletadasMesActual(
+            credito.creditoId,
+            inversionistaId,
+            new Date(),
+          );
+          const montoViejo = new Big(credito.montoAportado || 0)
+            .minus(sumaPendientes)
+            .minus(sumaCompletadasMesActual);
+
+          if (montoViejo.lte(0)) {
+            console.log(
+              `⏭️  Crédito ${credito.creditoId}: participación del período (${fechaInicioParticipacion}) ` +
+              `sin monto viejo [monto_aportado=${credito.montoAportado}, pendientes=${sumaPendientes.toString()}, ` +
+              `compras_mes_actual=${sumaCompletadasMesActual.toString()}] → participación nueva, se omite`
+            );
+            return null;
+          }
+          console.log(
+            `✅ Crédito ${credito.creditoId}: participación del período CON monto viejo ${montoViejo.toString()} → se procesa`
+          );
+        }
 
         // 📅 Buscar la PRIMERA cuota NO LIQUIDADA con sus PAGOS
         const cuotaConPagos = await db
@@ -2312,16 +2353,27 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
       console.log(`📅 Fecha de cálculo override: ${fechaCalculo.toISOString()}`);
     }
 
-    // Inicio del período a procesar: usa el mes de fechaCalculo si viene,
-    // si no el mes actual. Solo participaciones anteriores a este inicio
-    // deben generar pagos en este período (regla: compra del mes → paga desde el mes siguiente).
+    // Período a procesar: usa el mes de fechaCalculo si viene, si no el mes actual.
+    // Regla: una compra del mes en curso (pendiente o completada) NO genera interés
+    // este período; empieza el mes siguiente (proporcional). PERO el monto viejo del
+    // inversionista (lo que ya tenía antes de las compras del mes) sí debe liquidarse.
+    // Por eso ya NO filtramos el crédito por fecha_inicio_participacion en el SQL:
+    // la compra la re-sella al mes en curso (completeEspejo) y botaría el crédito
+    // entero, perdiendo el monto viejo. En su lugar, abajo se omite el crédito SÓLO
+    // cuando la participación es del período en curso y no queda monto viejo
+    // (participación genuinamente nueva / la compra cubre todo el monto_aportado).
     const baseCalculo = fechaCalculo ?? new Date();
     const inicioPeriodo = new Date(
       baseCalculo.getUTCFullYear(),
       baseCalculo.getUTCMonth(),
       1
     ).toISOString().slice(0, 10);
-    console.log(`📅 Inicio de período para filtro: ${inicioPeriodo}`);
+    const fechaCalcNormalizada = new Date(
+      baseCalculo.getUTCFullYear(),
+      baseCalculo.getUTCMonth(),
+      baseCalculo.getUTCDate(),
+    );
+    console.log(`📅 Inicio de período: ${inicioPeriodo}`);
 
     // Paso 1: Se buscan todos los créditos en los que este inversionista participa
     // y que aún están activos (pueden estar al día, en mora, en proceso de cancelación, etc.).
@@ -2332,6 +2384,8 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
         montoAportado: creditos_inversionistas_espejo.monto_aportado,
         porcentajeParticipacion:
           creditos_inversionistas_espejo.porcentaje_participacion_inversionista,
+        fechaInicioParticipacion:
+          creditos_inversionistas_espejo.fecha_inicio_participacion,
         numeroCreditoSifco: creditos.numero_credito_sifco,
         capital: creditos.capital,
         deudaTotal: creditos.deudatotal,
@@ -2346,7 +2400,6 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
       .where(
         and(
           eq(creditos_inversionistas_espejo.inversionista_id, inversionistaId),
-          lt(creditos_inversionistas_espejo.fecha_inicio_participacion, inicioPeriodo),
           inArray(creditos.statusCredit, [
             "ACTIVO",
             "MOROSO",
@@ -2398,6 +2451,49 @@ export async function calcularYRegistrarPagosEspejo(inversionistaId: number, fec
             `⚠️  Crédito ${credito.creditoId} tiene ${pagosPendientes.length} pago(s) NO_LIQUIDADO → se omite`
           );
           return null;
+        }
+
+        // Regla "compra del mes → paga el mes siguiente", pero sólo para la parte
+        // comprada este mes; el monto viejo sí se liquida ahora. Antes esto lo hacía
+        // un filtro SQL (fecha_inicio < inicioPeriodo) que botaba el crédito entero
+        // cuando la compra le re-sellaba la fecha al mes en curso, perdiendo el monto
+        // viejo. Ahora sólo evaluamos las participaciones cuya fecha cae en el período
+        // en curso (las que el filtro botaba): se procesan si queda monto viejo y se
+        // omiten si la compra del mes cubre todo el monto_aportado (participación nueva).
+        const fechaInicioParticipacion = credito.fechaInicioParticipacion;
+        if (!fechaInicioParticipacion) {
+          // Preserva el comportamiento previo: fecha_inicio nula quedaba excluida por el SQL.
+          console.log(
+            `⏭️  Crédito ${credito.creditoId}: sin fecha_inicio_participacion → se omite`
+          );
+          return null;
+        }
+        if (fechaInicioParticipacion >= inicioPeriodo) {
+          const sumaPendientes = await obtenerSumaComprasPendientes(
+            credito.creditoId,
+            inversionistaId,
+          );
+          const sumaCompletadasMesActual = await obtenerSumaComprasCompletadasMesActual(
+            credito.creditoId,
+            inversionistaId,
+            fechaCalcNormalizada,
+          );
+          const montoViejo = new Big(credito.montoAportado || 0)
+            .minus(sumaPendientes)
+            .minus(sumaCompletadasMesActual);
+
+          if (montoViejo.lte(0)) {
+            console.log(
+              `⏭️  Crédito ${credito.creditoId}: participación del período (${fechaInicioParticipacion}) ` +
+              `sin monto viejo [monto_aportado=${credito.montoAportado}, pendientes=${sumaPendientes.toString()}, ` +
+              `compras_mes_actual=${sumaCompletadasMesActual.toString()}] → participación nueva, se omite`
+            );
+            return null;
+          }
+          console.log(
+            `✅ Crédito ${credito.creditoId}: participación del período CON monto viejo ${montoViejo.toString()} ` +
+            `→ se procesa (la compra del mes se excluye en el cálculo, el monto viejo cobra mes completo)`
+          );
         }
 
         const selectCuotaPagos = {

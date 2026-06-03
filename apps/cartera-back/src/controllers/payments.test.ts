@@ -169,6 +169,7 @@ mock.module("./latefee", () => ({
 let mockMontoRestarValidacion = new Big(0);
 let mockMontoRestarCalculo = new Big(0);
 let mockSumaComprasPendientes = new Big(0);
+let mockSumaComprasCompletadasMesActual = new Big(0);
 mock.module("../utils/comprasAjuste", () => ({
   calcularAjusteCompras: mock(() => Promise.resolve({
     montoRestarValidacion: mockMontoRestarValidacion,
@@ -176,6 +177,7 @@ mock.module("../utils/comprasAjuste", () => ({
   })),
   obtenerSumaComprasMesAnterior: mock(() => Promise.resolve(new Big(0))),
   obtenerSumaComprasPendientes: mock(() => Promise.resolve(mockSumaComprasPendientes)),
+  obtenerSumaComprasCompletadasMesActual: mock(() => Promise.resolve(mockSumaComprasCompletadasMesActual)),
 }));
 
 const { calcularYRegistrarPagosEspejo } = await import("./payments");
@@ -189,13 +191,31 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
     mockComprasCreditoInversionista = [];
     mockMontoRestarValidacion = new Big(0);
     mockMontoRestarCalculo = new Big(0);
+    mockSumaComprasPendientes = new Big(0);
+    mockSumaComprasCompletadasMesActual = new Big(0);
   });
 
   it("1. Nuevo inversionista con compra de cartera en mes actual → sin pagos", async () => {
-    // Comportamiento esperado: Dado que la participación inicia este mes (junio 2026),
-    // el filtro lt(fecha_inicio_participacion, inicioPeriodo) debe excluir este crédito.
-    // Como resultado, no se procesa ningún crédito y totalCreditosProcesados debe ser 0.
-    mockCreditosInversionistaEspejo = []; 
+    // Comportamiento esperado: la participación inicia este mes (junio 2026) y TODO su
+    // monto_aportado proviene de la compra del mes (no hay monto viejo). El gate de
+    // "monto viejo" debe omitir el crédito → totalCreditosProcesados = 0.
+    mockCreditosInversionistaEspejo = [
+      {
+        creditoId: 101,
+        inversionistaId: 99,
+        montoAportado: "5000.00000000",
+        porcentajeParticipacion: "50.00",
+        fechaInicioParticipacion: "2026-06-07", // mes en curso (compra lo re-selló)
+        numeroCreditoSifco: "CRED-101",
+        capital: "20000.00",
+        deudaTotal: "22000.00",
+        statusCredit: "ACTIVO",
+        cuota: "1000.00",
+      }
+    ];
+    // Toda la participación es compra de cartera completada este mes → monto viejo = 0.
+    mockSumaComprasCompletadasMesActual = new Big(5000);
+    mockPagosPendientesEspejo = [];
 
     const result = await calcularYRegistrarPagosEspejo(99, new Date("2026-06-10T12:00:00.000Z"));
     expect(result.success).toBeTrue();
@@ -212,6 +232,7 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
         inversionistaId: 99,
         montoAportado: "10000.00000000",
         porcentajeParticipacion: "50.00",
+        fechaInicioParticipacion: "2026-05-15", // mes anterior → no entra al gate, procesa normal
         numeroCreditoSifco: "CRED-101",
         capital: "20000.00",
         deudaTotal: "22000.00",
@@ -245,7 +266,7 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
       }
     ];
 
-    mockPagosPendientesEspejo = []; 
+    mockPagosPendientesEspejo = [];
 
     const result = await calcularYRegistrarPagosEspejo(99, new Date("2026-06-10T12:00:00.000Z"));
     expect(result.success).toBeTrue();
@@ -263,6 +284,7 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
         inversionistaId: 99,
         montoAportado: "15000.00000000",
         porcentajeParticipacion: "75.00",
+        fechaInicioParticipacion: "2026-05-15", // pendiente NO re-sella la fecha → mes anterior
         numeroCreditoSifco: "CRED-101",
         capital: "20000.00",
         deudaTotal: "22000.00",
@@ -337,5 +359,63 @@ describe("Pruebas Unitarias - Reglas de Negocio de Pagos Espejo", () => {
     const result = await calcularYRegistrarPagosEspejo(99, new Date("2026-06-10T12:00:00.000Z"));
     expect(result.success).toBeTrue();
     expect(result.totalCreditosProcesados).toBe(0);
+  });
+
+  it("5. Partícipe viejo + compra del mes actual → procesa el monto viejo (no lo pierde)", async () => {
+    // Comportamiento esperado: el inversionista YA participaba con X=10,000 y compró
+    // Y=15,000 el 7-jun; la compra le re-selló fecha_inicio_participacion a junio.
+    // Antes, el filtro SQL botaba el crédito entero y X se perdía. Ahora:
+    //   monto viejo = 25,000 − 15,000 (compra completada del mes) = 10,000 > 0 → procesa.
+    // La compra del mes se excluye en el cálculo (Caso 3) y X cobra mes completo.
+    mockCreditosInversionistaEspejo = [
+      {
+        creditoId: 101,
+        inversionistaId: 99,
+        montoAportado: "25000.00000000",
+        porcentajeParticipacion: "50.00",
+        fechaInicioParticipacion: "2026-06-07", // re-sellada por la compra al mes en curso
+        numeroCreditoSifco: "CRED-101",
+        capital: "20000.00",
+        deudaTotal: "22000.00",
+        statusCredit: "ACTIVO",
+        cuota: "1000.00",
+      }
+    ];
+
+    mockCuotasCreditoWithPagos = [
+      {
+        cuotaId: 501,
+        numeroCuota: 1,
+        fechaVencimiento: "2026-06-15",
+        pagadoCuota: false,
+        liquidadoInversionistas: false,
+        pagoId: 301,
+        fechaPago: new Date("2026-06-05"),
+        montoBoleta: "1000.00",
+        abonoCapital: "800.00",
+        abonoInteres: "200.00",
+        abonoIva: "24.00",
+        validationStatus: "validated",
+        numeroCuotaPrev: 1,
+      }
+    ];
+
+    mockHistoricoLiquidacionesEspejo = [
+      {
+        monto_aportado: "10000.00000000",
+        fecha: new Date("2026-05-15")
+      }
+    ];
+
+    // La compra del mes (15,000): completada del mes actual + se resta del cálculo (Caso 3)
+    // y de la validación (creada después del histórico) para cuadrar contra X=10,000.
+    mockSumaComprasCompletadasMesActual = new Big(15000);
+    mockMontoRestarValidacion = new Big(15000);
+    mockMontoRestarCalculo = new Big(15000);
+    mockPagosPendientesEspejo = [];
+
+    const result = await calcularYRegistrarPagosEspejo(99, new Date("2026-06-10T12:00:00.000Z"));
+    expect(result.success).toBeTrue();
+    expect(result.totalCreditosProcesados).toBe(1);
   });
 });

@@ -129,6 +129,50 @@ export async function obtenerSumaComprasMesAnterior(
 }
 
 /**
+ * Suma los monto_aportado de las compras de cartera (tipo_operacion = 'compra_cartera',
+ * status = 'completado') confirmadas durante el MES ACTUAL de `fechaPeriodo`
+ * (filtradas por `updated_at`).
+ *
+ * El cálculo de pagos corre a mitad de mes (≈ el 10). Toda compra confirmada del
+ * mes en curso —del día 1 hasta el momento del cálculo— todavía NO debe generar
+ * interés este período: igual que las pendientes, se excluye de la base y empieza
+ * a producir (proporcional) el mes siguiente. Sirve para calcular el "monto viejo"
+ * (monto_aportado − pendientes − compras_completadas_mes_actual) y así decidir si
+ * el crédito tiene saldo previo que liquidar este período o es una participación
+ * genuinamente nueva.
+ */
+export async function obtenerSumaComprasCompletadasMesActual(
+  credito_id: number,
+  inversionista_id: number,
+  fechaPeriodo: Date,
+): Promise<Big> {
+  const mes = fechaPeriodo.getMonth();
+  const anio = fechaPeriodo.getFullYear();
+
+  const inicioMesActual = new Date(anio, mes, 1);
+  const inicioMesSiguiente = new Date(anio, mes + 1, 1);
+
+  const compras = await db
+    .select({ monto_aportado: compras_credito_inversionista.monto_aportado })
+    .from(compras_credito_inversionista)
+    .where(
+      and(
+        eq(compras_credito_inversionista.credito_id, credito_id),
+        eq(compras_credito_inversionista.inversionista_id, inversionista_id),
+        eq(compras_credito_inversionista.tipo_operacion, "compra_cartera"),
+        eq(compras_credito_inversionista.status, "completado"),
+        gte(compras_credito_inversionista.updated_at, inicioMesActual),
+        lt(compras_credito_inversionista.updated_at, inicioMesSiguiente),
+      ),
+    );
+
+  return compras.reduce(
+    (acc, c) => acc.plus(new Big(c.monto_aportado ?? 0)),
+    new Big(0),
+  );
+}
+
+/**
  * Suma los monto_aportado de las compras de cartera que están PENDIENTES
  * (status pendiente_*) para el inversionista+crédito.
  *

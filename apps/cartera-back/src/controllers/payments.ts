@@ -26,6 +26,12 @@ import {
 import { updateMora } from "./latefee";
 import { calcularAjusteCompras, obtenerSumaComprasMesAnterior, obtenerSumaComprasPendientes, obtenerSumaComprasCompletadasMesActual } from "../utils/comprasAjuste";
 import { t } from "elysia";
+
+// ID del inversionista Cube. Fuente canónica: assignCapital.ts (export const CUBE_ID = 86).
+// Se redefine local (igual que investor.ts) para no acoplar la carga de este módulo
+// con assignCapital. Toda compra de cartera se le hace a Cube.
+const CUBE_ID = 86;
+
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive(),
   usuario_id: z.number().int().positive(),
@@ -417,15 +423,78 @@ export async function insertPagosCreditoInversionistas(
     return;
   }
 
-  const indexMayorCuota = filteredInversionistas.reduce(
-    (maxIdx, inv, idx, arr) =>
-      new Big(inv.cuota_inversionista || 0).gt(
-        new Big(arr[maxIdx].cuota_inversionista || 0)
+  // Elección del inversionista "mayor" (el que absorbe seguro + gps + membresías).
+  //
+  // Por defecto compara cuota_inversionista (comportamiento histórico, sin cambios).
+  //
+  // PERO toda compra de cartera SIEMPRE se le hace a Cube: cuando entra una compra
+  // del mes en curso, el espejo ya quedó con el comprador inflado (X+Y) y Cube
+  // reducido (−Y). Esa compra todavía NO es efectiva este período (paga el mes
+  // siguiente), así que el "mayor" debe decidirse con el estado PRE-compra:
+  //   - comprador → su monto viejo (monto_aportado − compras del mes − pendientes)
+  //   - Cube      → su monto + lo vendido este mes (se le devuelve)
+  //   - los demás → igual
+  // Sólo se activa si hay compras del mes en el crédito; si no, la comparación
+  // histórica por cuota_inversionista queda intacta.
+  const fechaPeriodoMayor = fechaPeriodo
+    ? new Date(
+        fechaPeriodo.getUTCFullYear(),
+        fechaPeriodo.getUTCMonth(),
+        fechaPeriodo.getUTCDate(),
       )
-        ? idx
-        : maxIdx,
-    0
+    : new Date();
+
+  const comprasMesPorInv = await Promise.all(
+    filteredInversionistas.map(async (inv) => {
+      // A Cube no se le suman compras propias: es el vendedor, recibe el total aparte.
+      if (inv.inversionista_id === CUBE_ID) return new Big(0);
+      const [pend, compMes] = await Promise.all([
+        obtenerSumaComprasPendientes(credito_id, inv.inversionista_id),
+        obtenerSumaComprasCompletadasMesActual(
+          credito_id,
+          inv.inversionista_id,
+          fechaPeriodoMayor,
+        ),
+      ]);
+      return pend.plus(compMes);
+    })
   );
+  const totalComprasMes = comprasMesPorInv.reduce(
+    (acc, m) => acc.plus(m),
+    new Big(0),
+  );
+
+  let indexMayorCuota: number;
+  if (totalComprasMes.gt(0)) {
+    // Estado pre-compra: comprador con monto viejo, Cube con lo vendido devuelto.
+    const montoEfectivo = filteredInversionistas.map((inv, idx) => {
+      const base = new Big(inv.monto_aportado || 0);
+      return inv.inversionista_id === CUBE_ID
+        ? base.plus(totalComprasMes)
+        : base.minus(comprasMesPorInv[idx]);
+    });
+    indexMayorCuota = montoEfectivo.reduce(
+      (maxIdx, val, idx) => (val.gt(montoEfectivo[maxIdx]) ? idx : maxIdx),
+      0
+    );
+    console.log(
+      `   🏆 Mayor por monto efectivo PRE-compra (hay compras del mes: ${totalComprasMes.toString()})`
+    );
+    filteredInversionistas.forEach((inv, idx) => {
+      console.log(`      ${inv.nombre}: efectivo=${montoEfectivo[idx].toString()} (aportado=${inv.monto_aportado}, compras_mes=${comprasMesPorInv[idx].toString()})`);
+    });
+  } else {
+    // Sin compras del mes → lógica histórica intacta (comparar cuota_inversionista).
+    indexMayorCuota = filteredInversionistas.reduce(
+      (maxIdx, inv, idx, arr) =>
+        new Big(inv.cuota_inversionista || 0).gt(
+          new Big(arr[maxIdx].cuota_inversionista || 0)
+        )
+          ? idx
+          : maxIdx,
+      0
+    );
+  }
   const mayorCuotaInversionistaId =
     filteredInversionistas[indexMayorCuota].inversionista_id;
 

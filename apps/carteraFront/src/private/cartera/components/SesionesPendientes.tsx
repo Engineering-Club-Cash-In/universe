@@ -760,8 +760,8 @@ function InvestorCard({
     [selectedCompraIds, investor.creditosPendientes]
   );
 
-  const showAceptar = selectedAceptarIds.length > 0 && selectedConfirmarIds.length === 0;
-  const showConfirmar = selectedConfirmarIds.length > 0 && selectedAceptarIds.length === 0;
+  const showAceptar = selectedAceptarIds.length > 0;
+  const showConfirmar = selectedConfirmarIds.length > 0;
 
   const allCompraIds = useMemo(() =>
     investor.creditosPendientes
